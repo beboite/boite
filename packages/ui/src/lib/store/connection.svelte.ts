@@ -267,7 +267,7 @@ export class Connection {
     this.ctx.composer.composerInsertions.clear();
     s.openThread = null;
     s.draft = null;
-    s.pairing = null;
+    s.closePairing();
     s.sessions = [];
     s.projects = [];
     s.threads = [];

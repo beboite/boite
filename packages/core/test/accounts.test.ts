@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { CoreClient } from '../src/client.ts';
+import { setDriver } from '../src/drivers/index.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -65,6 +66,32 @@ afterEach(async () => {
 });
 
 describe('accounts', () => {
+  test('removing an account stops discovery processes that still use its directory', async () => {
+    const client = await harness.connect();
+    const providerId = await addLoginProvider(harness, client);
+    const account = await client.call('accounts.add', { providerId, label: 'Failed account' });
+    const restore = setDriver('echo', {
+      protocol: 'echo',
+      startTurn: () => { throw new Error('not a turn'); },
+      probe: async ctx => {
+        const child = ctx.spawnChild(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: account.isolationDir! });
+        await new Promise<void>(resolve => child.once('close', () => resolve()));
+        return { models: [], probedAt: Date.now() };
+      },
+    });
+    const probing = client.call('providers.probe', { providerId, accountId: account.id }).then(() => 'completed', () => 'refused');
+    try {
+      await waitFor(() => harness.core.procs.liveCount(`probe:${providerId}:${account.id}`) === 1);
+      await client.call('accounts.remove', { accountId: account.id });
+      expect(harness.core.procs.liveCount(`probe:${providerId}:${account.id}`)).toBe(0);
+      expect(await probing).toBe('refused');
+      expect(existsSync(account.isolationDir!)).toBe(false);
+    } finally {
+      await harness.core.procs.stopAndWait(`probe:${providerId}:${account.id}`);
+      restore();
+    }
+  });
+
   test('piped sign-in links and output contain no terminal control sequences', async () => {
     const client = await harness.connect();
     const providerId = await addLoginProvider(harness, client);
@@ -75,6 +102,29 @@ describe('accounts', () => {
     const line = client.next('account.login', event => event.accountId === account.id && event.url !== null);
     await client.call('accounts.login', { accountId: account.id });
     expect(await line).toMatchObject({ url: 'https://example.invalid/device', output: 'https://example.invalid/device' });
+  });
+
+  test('a refused Claude sign-in releases the account without waiting for an auth check', async () => {
+    const client = await harness.connect();
+    const providerId = await addLoginProvider(harness, client);
+    const descriptor = harness.core.providers.require(providerId);
+    descriptor.protocol = 'claude-sdk';
+    const login = join(harness.dataDir, 'refused-login.ts');
+    const status = join(harness.dataDir, 'waiting-status.ts');
+    writeFileSync(login, "console.error('Sign-in denied'); process.exit(1);");
+    writeFileSync(status, 'setInterval(() => {}, 1000);');
+    descriptor.login = { command: [process.execPath, login] };
+    for (const profile of Object.values(descriptor.profiles)) {
+      if (profile) { profile.executable = [{ kind: 'file', value: process.execPath }]; profile.launch = { args: [status] }; }
+    }
+    const account = await client.call('accounts.add', { providerId, label: 'Refused login' });
+    const finished = client.next('account.login', event => event.accountId === account.id && event.state === 'failed', 5000);
+    await client.call('accounts.login', { accountId: account.id });
+    expect(await finished).toMatchObject({ output: 'Sign-in denied', exitCode: 1 });
+    expect(await client.call('accounts.logins', {})).toEqual([]);
+    await client.call('accounts.remove', { accountId: account.id });
+    expect(existsSync(account.isolationDir!)).toBe(false);
+    expect(harness.core.providers.installs.leaseCount(providerId)).toBe(0);
   });
 
   test('a fresh Claude check reads the CLI login and email instead of trusting a session file', async () => {
@@ -90,6 +140,12 @@ describe('accounts', () => {
     const account = await client.call('accounts.add', { providerId, label: 'Claude check' });
     expect(account.status).toBe('unauthenticated');
     expect(await client.call('accounts.check', { accountId: account.id, refresh: true })).toMatchObject({ status: 'ok', identity: 'work@example.com' });
+    harness.core.accounts.authenticationFailed(account.id);
+    expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('unauthenticated');
+    expect(await client.call('accounts.check', { accountId: account.id, refresh: true })).toMatchObject({ status: 'ok', identity: 'work@example.com' });
+    // The fresh CLI answer also clears the persisted refusal for later passive reads.
+    writeFileSync(join(account.isolationDir!, '.credentials.json'), '{}');
+    expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('ok');
     expect(harness.core.procs.liveCount(`check:${account.id}`)).toBe(0);
     expect(harness.core.providers.installs.leaseCount(providerId)).toBe(0);
   });

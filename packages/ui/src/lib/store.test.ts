@@ -1450,6 +1450,26 @@ test('account lifecycle newer cancellation beats a stale reload snapshot', async
   }
 });
 
+test('closing a pairing link discards a pending replacement from the same core', async () => {
+  const { store, client } = await ready();
+  await store.mintPairing();
+  const call = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const result = await call(method, params);
+    if (method === 'pairing.grant') await gate;
+    return result;
+  });
+  try {
+    const pending = store.mintPairing();
+    store.closePairing();
+    release();
+    await pending;
+    expect(store.pairing).toBeNull();
+  } finally { release(); spy.mockRestore(); }
+});
+
 test('connecting a second account moves the composer to that account, not the first signed in', async () => {
   const store = new Store();
   store.attach(new FakeClient({ delayMs: 0 }));

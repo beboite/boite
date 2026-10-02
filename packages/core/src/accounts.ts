@@ -6,6 +6,7 @@ import type { Core } from './core.ts';
 import { newId } from './ids.ts';
 import { invalidParams, messageOf, notFound, refused } from './errors.ts';
 import { runAcpLogin, type AcpLoginRun } from './drivers/acp/login.ts';
+import { probeThreadId } from './providers/probe.ts';
 import { agentEnv, hostAgentsEnabled, launchPrefix, profileFor, resolveExecutable } from './providers/resolve.ts';
 import { browserNoopPath, browserNoopScript, currentOs, homePath } from './paths.ts';
 import { ISOLATION_DEFAULTS, shareProfile, unshareProfile, type ShareProblem } from './profile-share.ts';
@@ -90,6 +91,7 @@ function refuseUnisolable(provider: ProviderDescriptor): void {
 export class AccountStore {
   private readonly checks = new Map<AccountId, Promise<Account>>();
   private readonly logins = new Map<AccountId, LoginRun>();
+  private readonly removing = new Set<AccountId>();
   /** The share problems last logged per account, so a spawn repeats a warning only when it changed. */
   private readonly shareLog = new Map<AccountId, string>();
 
@@ -102,6 +104,7 @@ export class AccountStore {
   require(accountId: AccountId): Account {
     const account = this.core.journal.getAccount(accountId);
     if (account === null) throw notFound(`unknown account ${accountId}`, { accountId });
+    if (this.removing.has(accountId)) throw refused('this account is being removed', { accountId });
     return account;
   }
 
@@ -152,27 +155,33 @@ export class AccountStore {
       || (existsSync(directory) && lstatSync(directory).isSymbolicLink()))) {
       throw refused('the account isolationDir must be its own directory under accounts', { accountId, field: 'isolationDir' });
     }
-    await this.loginCancel(accountId);
-    await this.checks.get(accountId)?.catch(() => {});
-    checkAgentReferences();
-    // Cancelling yields to RPC work; a new thread may have claimed this account.
-    if (this.core.scheduler.activeAccountIds().includes(accountId) || this.core.journal.listThreads().some((thread) => thread.accountId === accountId)) {
-      throw refused('this account is used by a thread; remove its project before removing the account', { accountId });
-    }
-    if (directory !== null) {
-      unshareProfile(directory);
-      rmSync(directory, { recursive: true, force: true });
-    }
-    this.core.journal.append(
-      { type: 'account.removed', threadId: null, version: 1, payload: { accountId } },
-      () => {
-        this.core.journal.deleteAccount(accountId);
-        // A stale grant would make every later agents.accounts.set refuse the whole list.
-        const grants = this.core.workforce.resident.grants();
-        if (grants.some(g => g.accountId === accountId)) this.core.journal.setSetting('agents:account-grants', grants.filter(g => g.accountId !== accountId));
-      },
-    );
-    this.core.bus.emit('accounts.removed', { accountId });
+    this.removing.add(accountId);
+    try {
+      await this.cancelLoginRun(accountId);
+      await this.core.procs.stopAndWait(`check:${accountId}`);
+      await this.core.procs.stopAndWait(probeThreadId(account.providerId, accountId));
+      await this.checks.get(accountId)?.catch(() => {});
+      checkAgentReferences();
+      // Cancelling yields to RPC work; a new thread may have claimed this account.
+      if (this.core.scheduler.activeAccountIds().includes(accountId) || this.core.journal.listThreads().some((thread) => thread.accountId === accountId)) {
+        throw refused('this account is used by a thread; remove its project before removing the account', { accountId });
+      }
+      if (directory !== null) {
+        unshareProfile(directory);
+        rmSync(directory, { recursive: true, force: true });
+      }
+      this.core.journal.append(
+        { type: 'account.removed', threadId: null, version: 1, payload: { accountId } },
+        () => {
+          this.core.journal.deleteAccount(accountId);
+          this.core.journal.deleteSetting(`account-auth-rejected:${accountId}`);
+          // A stale grant would make every later agents.accounts.set refuse the whole list.
+          const grants = this.core.workforce.resident.grants();
+          if (grants.some(g => g.accountId === accountId)) this.core.journal.setSetting('agents:account-grants', grants.filter(g => g.accountId !== accountId));
+        },
+      );
+      this.core.bus.emit('accounts.removed', { accountId });
+    } finally { this.removing.delete(accountId); }
   }
 
   /**
@@ -185,7 +194,9 @@ export class AccountStore {
   check(accountId: AccountId, announce = false): Account {
     const account = this.require(accountId);
     const provider = this.core.providers.get(account.providerId);
-    const status = provider === undefined ? 'error' : this.sessionStatus(account, provider);
+    let status = provider === undefined ? 'error' : this.sessionStatus(account, provider);
+    // A session file cannot overrule an authentication refusal from the agent.
+    if (status !== 'error' && this.core.journal.getSetting(`account-auth-rejected:${accountId}`) === true) status = 'unauthenticated';
     if (!announce && status === account.status) return account;
     const next: Account = { ...account, status };
     this.core.journal.append({ type: 'account.checked', threadId: null, version: 1, payload: next }, () => {
@@ -229,7 +240,11 @@ export class AccountStore {
         : (await import('./drivers/claude/auth.ts')).readClaudeAccount;
       result = await read({ executable, args: [...launchPrefix(profile), ...(profile?.launch?.args ?? [])],
         cwd: account.isolationDir ?? this.core.dataDir, env: agentEnv(provider, this.accountEnv(account, provider)),
-        spawnChild: (cmd, args, opts) => this.core.procs.spawnChild(threadId, cmd, args, opts), onLine: () => {},
+        spawnChild: (cmd, args, opts) => {
+          this.require(accountId);
+          if (this.logins.get(accountId)?.cancelled) throw refused('Sign-in cancelled', { accountId });
+          return this.core.procs.spawnChild(threadId, cmd, args, opts);
+        }, onLine: () => {},
       });
     } catch (error) {
       this.saveCheck(accountId, { status: 'error', identity: null });
@@ -243,11 +258,19 @@ export class AccountStore {
 
   private saveCheck(accountId: AccountId, result: Pick<Account, 'status' | 'identity'>): Account {
     const current = this.require(accountId);
+    if (result.status === 'ok') this.core.journal.deleteSetting(`account-auth-rejected:${accountId}`);
     if (current.status === result.status && current.identity === result.identity) return current;
     const next = { ...current, ...result };
     this.core.journal.append({ type: 'account.checked', threadId: null, version: 1, payload: next }, () => this.core.journal.putAccount(next));
     this.core.bus.emit('accounts.updated', next);
     return next;
+  }
+
+  /** The native agent rejected this login, including during session preparation. */
+  authenticationFailed(accountId: AccountId): void {
+    if (this.core.journal.isClosed() || this.removing.has(accountId) || !this.core.journal.getAccount(accountId)) return;
+    this.core.journal.setSetting(`account-auth-rejected:${accountId}`, true);
+    this.saveCheck(accountId, { status: 'unauthenticated', identity: this.require(accountId).identity });
   }
 
   /**
@@ -528,12 +551,17 @@ export class AccountStore {
 
   async loginCancel(accountId: AccountId): Promise<{ ok: true }> {
     this.require(accountId);
+    return this.cancelLoginRun(accountId);
+  }
+
+  private async cancelLoginRun(accountId: AccountId): Promise<{ ok: true }> {
     await this.core.terminals.close(loginThreadId(accountId));
     const run = this.logins.get(accountId);
     if (run !== undefined) {
       run.cancelled = true;
       this.core.procs.killTree(loginThreadId(accountId));
       run.acp?.kill();
+      await this.core.procs.stopAndWait(`check:${accountId}`);
       await run.done;
     }
     return { ok: true };
@@ -684,7 +712,7 @@ export class AccountStore {
     let failure = exitCode === 0 ? null : run.lastLine;
     try {
       const provider = this.core.providers.require(this.require(accountId).providerId);
-      if (!run.cancelled && provider.protocol === 'claude-sdk') {
+      if (!run.cancelled && exitCode === 0 && provider.protocol === 'claude-sdk') {
         const checked = await this.verify(accountId);
         if (failure === null && checked.status !== 'ok') failure = 'The sign-in finished but the account is not connected. Retry the connection.';
       } else this.check(accountId, true);

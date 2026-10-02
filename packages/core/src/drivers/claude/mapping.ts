@@ -190,7 +190,7 @@ export function contextWindowOf(result: SDKResultMessage, model: string | null):
 export function errorSentence(error: SDKAssistantMessageError): string {
   switch (error) {
     case 'authentication_failed':
-      return 'Claude refused the login of this account.';
+      return 'Claude could not authenticate this account. Sign in again to reconnect.';
     case 'oauth_org_not_allowed':
       return 'The organisation of this login does not allow Claude Code.';
     case 'account_on_hold':
@@ -212,6 +212,19 @@ export function errorSentence(error: SDKAssistantMessageError): string {
     default:
       return `Claude failed with ${error}.`;
   }
+}
+
+/** Native login failures only; billing, model and tool failures keep the login. */
+export function isAuthenticationFailure(reason: string): boolean {
+  return /\b(?:OAuth (?:session|(?:access )?token) (?:has |is )?(?:expired|revoked)|Signed out of Claude|Invalid API key)\b/i.test(reason);
+}
+
+export function authenticationFailureOf(message: SDKMessage): string | null {
+  if (subagentOf(message) !== null) return null;
+  if (message.type === 'assistant' && message.error === 'authentication_failed') return errorSentence(message.error);
+  if (message.type !== 'result' || (message.subtype === 'success' && !message.is_error)) return null;
+  const reason = message.subtype === 'success' ? message.result : message.errors.join('; ');
+  return isAuthenticationFailure(reason) ? reason : null;
 }
 
 /** The CLI's `task_type` as the kinds the UI draws. */

@@ -9,7 +9,9 @@ without either noticing the other. The code is
 `accounts.logins` restores running login cards after reconnect. `accounts.loginCancel`
 stops the login process and waits for it to exit. Removing an account does the
 same before deleting its isolated directory; default CLI directories stay on
-disk. Removal is refused while any thread still references the account.
+disk. Removal also stops connection checks and model discovery before deleting
+the directory, and blocks new account operations while it runs. Removal is
+refused while any thread still references the account.
 
 ## The isolation directory
 
@@ -108,6 +110,12 @@ Keychain accounts. Both return the signed-in email. Other providers retain their
 session-file check. A failed check displays its reason instead of reporting a
 model count. Passive checks do not launch an agent process.
 
+A native Claude authentication refusal marks the account signed out, including
+when it happens during preparation before the first prompt. Boite remembers
+the refusal across restarts: a session file alone cannot restore the connected
+status. A successful fresh CLI check or completed sign-in clears it. Billing,
+rate limits and failures inside subagents do not invalidate the account.
+
 Changed account statuses and identities reach every client as `accounts.updated`.
 An unchanged passive check writes no journal row and sends no event.
 `accounts.rename` changes the label of any account, including a default CLI
@@ -142,6 +150,11 @@ The user enters the code on the sign-in page, with no code field to send it back
 to Boite. Cancellation closes the process; expired codes show a retryable error.
 Piped login output from other agents has terminal control sequences removed
 before the core extracts links or displays text.
+
+Failed sign-ins have a Close button. Cancelling stops an ongoing post-login
+connection check as well as the login process; a refused login command reports
+its failure immediately without starting that check. The account can then be
+retried or removed from its row.
 
 The other shape is `login.acp`, for an ACP agent whose sign-in is the protocol's
 own `authenticate` call rather than a command. The core starts the agent itself
