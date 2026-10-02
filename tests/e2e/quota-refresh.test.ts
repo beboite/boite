@@ -231,8 +231,14 @@ test('the same popup shares priorities across the app, tray and phone through th
       expect(await browser.evaluate(`document.querySelector('${panel} h2').textContent`)).toBe('Account limits');
       expect(await browser.evaluate(`document.querySelector('${panel} footer button').textContent`)).toBe('Limits page');
       expect(await browser.evaluate(`document.querySelector('[data-account-id="${accounts[1]!.id}"] .paid').textContent`)).toContain('Using credits');
-      expect(await browser.evaluate(`getComputedStyle(document.querySelector('[data-account-id="${accounts[0]!.id}"] .track')).height`)).toBe('10px');
+      expect(await browser.evaluate(`getComputedStyle(document.querySelector('[data-account-id="${accounts[0]!.id}"] .track')).height`)).toBe('7px');
       expect(await browser.evaluate(`document.querySelector('[data-account-id="${accounts[0]!.id}"] .reset').textContent`)).toMatch(/^Wednesday /);
+      // Five profiles fit in the usual popup without scrolling to reach the last one.
+      expect(await browser.evaluate(`(() => {
+        const body = document.querySelector('${panel} .body').getBoundingClientRect();
+        const last = [...document.querySelectorAll('[data-testid="quota-provider"]')].at(-1).getBoundingClientRect();
+        return last.bottom <= body.bottom;
+      })()`)).toBe(true);
     }
     await capture('limits-popup-desktop.png');
     await tray.screenshot(join(process.env.BOITE_CAPTURE_DIR ?? join(import.meta.dir, '.artifacts'), 'limits-popup-tray.png'));
@@ -262,7 +268,9 @@ test('the same popup shares priorities across the app, tray and phone through th
     await page.click('[data-testid="nav-limits"]');
     expect(await orderedNames(page)).toEqual(names);
 
-    // A subscription at the bottom can reach the top without releasing its handle to scroll.
+    // A constrained viewport still allows dragging from the bottom to the top while scrolling.
+    await tray.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 300, deviceScaleFactor: 1, mobile: false });
+    await tray.waitFor(`document.querySelector('${panel} .body').clientHeight < 220`);
     const scrollDrag = await tray.evaluate<{ from: { x: number; y: number }; to: { x: number; y: number } }>(`(() => {
       const body = document.querySelector('${panel} .body');
       body.scrollTop = body.scrollHeight;
@@ -280,6 +288,7 @@ test('the same popup shares priorities across the app, tray and phone through th
     await client.call('settings.set', { quotaOrder: accounts.map((account) => account.id) });
     await page.waitFor(`document.querySelector('[data-testid="quota-provider"]')?.dataset.accountId === '${accounts[0]!.id}'`);
 
+    await tray.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 460, deviceScaleFactor: 1, mobile: false });
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
     // Reload gives the phone's real sheet placement rather than retaining the desktop floating action.

@@ -134,36 +134,40 @@
     <article data-testid="quota-provider" data-provider={row.providerId} data-account-id={row.accountId} class:expanded={expanded === row.accountId} class:dragging={dragging === row.accountId}>
       <div class="account-heading">
         <button class="summary ghost" aria-expanded={expanded === row.accountId} aria-controls={`usage-${row.accountId}`} disabled={row.windows.length === 0} onclick={() => (expanded = expanded === row.accountId ? null : row.accountId)}>
-          <span class="logo" title={row.providerName}><ProviderLogo providerId={row.providerId} size={23} /></span>
-          <span class="name" title={name}>{name}</span>
-          {#if !paid}<span class="amount" class:low={used !== null && used >= 80}>{used === null ? strings.quotas.noReading : `${Math.round(remaining(used))}%`}</span>{/if}
-          {#if row.windows.length}<ChevronDown size={14} />{/if}
+          <span class="logo" title={row.providerName}><ProviderLogo providerId={row.providerId} size={20} /></span>
+          <span class="summary-content">
+            <span class="headline">
+              <span class="name" title={name}>{name}</span>
+              {#if !paid}<span class="amount" class:low={used !== null && used >= 80}>{used === null ? strings.quotas.noReading : `${Math.round(remaining(used))}%`}</span>{/if}
+              {#if row.windows.length}<ChevronDown size={12} />{/if}
+            </span>
+            {#if paid && credits}
+              <span class="paid" data-testid="quota-credits">
+                <span class="paid-label">{credits.enabled === true ? strings.quotas.usingCredits : strings.quotas.creditRemaining}</span>
+                <strong class="paid-amount">{credits.kind === 'balance' ? fill(strings.quotas.creditBalance, { count: creditBalance(credits.remaining!) }) : percent! < 0.1 ? `<${tenth(0.1)}%` : `${tenth(percent!)}%`}</strong>
+                {#if percent !== null}<span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-busy={loading && !completed.includes(row.accountId)} aria-label={strings.quotas.budgetRemaining}><span class="fill" style:width="{percent}%"></span></span>{/if}
+              </span>
+            {:else if row.windows.length && expanded !== row.accountId}
+              <span class="meters" class:stale>
+                {#each row.windows as limit (limit.id)}
+                  <span class="mini-window" title={`${quotaWindowName(limit.label)}: ${left(limit.usedPercent)}`}>
+                    <span class="mini-label">{miniName(limit.label)}</span>
+                    <span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={remaining(limit.usedPercent)} aria-busy={loading && !completed.includes(row.accountId)} class:low={limit.usedPercent >= 80} class:drained={limit.usedPercent >= 100} aria-label={`${name} ${quotaWindowName(limit.label)}: ${left(limit.usedPercent)}`}><span class="fill" style:width="{remaining(limit.usedPercent)}%"></span></span>
+                  </span>
+                {/each}
+              </span>
+            {/if}
+            {#if stale}<span class="caption">{strings.quotas.stale}</span>
+            {:else if resets.length && expanded !== row.accountId}
+              <span class="caption reset" title={fill(strings.quotas.resets, { time: exactTime(Math.min(...resets)) })}><RotateCcw size={12} aria-hidden="true" />{quotaResetTime(Math.min(...resets))}</span>
+            {/if}
+          </span>
         </button>
         {#if onreorder}
           <button type="button" class="ghost reorder" data-testid="quota-reorder" aria-label={fill(strings.quotas.reorder, { name })} title={fill(strings.quotas.reorder, { name })} disabled={saving} aria-pressed={dragging === row.accountId}
             onpointerdown={(event) => start(event, row.accountId)} onkeydown={(event) => keyboard(event, row.accountId)}><GripVertical size={16} /></button>
         {/if}
       </div>
-      {#if paid && credits}
-        <div class="paid" data-testid="quota-credits">
-          <span class="paid-label">{credits.enabled === true ? strings.quotas.usingCredits : strings.quotas.creditRemaining}</span>
-          <strong class="paid-amount">{credits.kind === 'balance' ? fill(strings.quotas.creditBalance, { count: creditBalance(credits.remaining!) }) : percent! < 0.1 ? `<${tenth(0.1)}%` : `${tenth(percent!)}%`}</strong>
-          {#if percent !== null}<span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-busy={loading && !completed.includes(row.accountId)} aria-label={strings.quotas.budgetRemaining}><span class="fill" style:width="{percent}%"></span></span>{/if}
-        </div>
-      {:else if row.windows.length && expanded !== row.accountId}
-        <div class="meters" class:stale>
-          {#each row.windows as limit (limit.id)}
-            <div class="mini-window" title={`${quotaWindowName(limit.label)}: ${left(limit.usedPercent)}`}>
-              <span class="mini-label">{miniName(limit.label)}</span>
-              <span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={remaining(limit.usedPercent)} aria-busy={loading && !completed.includes(row.accountId)} class:low={limit.usedPercent >= 80} class:drained={limit.usedPercent >= 100} aria-label={`${name} ${quotaWindowName(limit.label)}: ${left(limit.usedPercent)}`}><span class="fill" style:width="{remaining(limit.usedPercent)}%"></span></span>
-            </div>
-          {/each}
-        </div>
-      {/if}
-      {#if stale}<p class="caption">{strings.quotas.stale}</p>
-      {:else if resets.length && expanded !== row.accountId}
-        <span class="caption reset" title={fill(strings.quotas.resets, { time: exactTime(Math.min(...resets)) })}><RotateCcw size={13} aria-hidden="true" />{quotaResetTime(Math.min(...resets))}</span>
-      {/if}
       {#if row.source === 'observation' && row.checkedAt !== null}<p class="caption">{fill(strings.quotas.observed, { time: exactTime(row.checkedAt) })}</p>{/if}
       {#if !paid}<div class="extras"><QuotaExtras {row} compact /></div>{/if}
       {#if row.error}<p class="error" role="status">{row.error}</p>{/if}
@@ -185,39 +189,42 @@
 
 <style>
   .overview { display: grid; grid-template-columns: minmax(0, 1fr); }
-  article { min-width: 0; padding: 12px 0; border-radius: var(--radius-md); }
+  article { min-width: 0; padding: 4px 0; }
   article + article { border-top: 1px solid var(--color-border); }
   article.dragging { background: var(--color-accent-soft); outline: 1px solid var(--color-accent); }
-  .account-heading { display: flex; align-items: center; gap: 2px; }
-  .summary { flex: 1; min-width: 0; width: 100%; height: auto; min-height: 36px; padding: 2px 4px; line-height: 1.2; display: flex; gap: 10px; text-align: left; border-radius: var(--radius-md); white-space: normal; }
+  .account-heading { display: flex; align-items: stretch; gap: 2px; }
+  .summary { flex: 1; min-width: 0; width: 100%; height: auto; min-height: 44px; padding: 2px 4px; line-height: 1.2; display: flex; align-items: start; gap: 8px; text-align: left; border-radius: var(--radius-md); white-space: normal; }
   .summary:disabled { opacity: 1; cursor: default; }
-  .logo { flex: none; width: 26px; display: grid; place-items: center; }
-  .name { flex: 1; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; font-size: var(--text-base); font-weight: 600; color: var(--color-foreground); }
-  .amount { flex: none; color: var(--color-foreground); font-size: calc(var(--text-base) * 1.5); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .logo { flex: none; width: 20px; height: 20px; display: grid; place-items: center; }
+  .summary-content { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .headline { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 20px; }
+  .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-base); font-weight: 600; color: var(--color-foreground); }
+  .amount { flex: none; color: var(--color-foreground); font-size: var(--text-md); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .amount.low { color: var(--color-live); }
-  .summary > :global(svg) { flex: none; color: var(--color-subtle); transition: transform var(--dur-2); }
-  .expanded .summary > :global(svg) { transform: rotate(180deg); }
-  .reorder { flex: none; width: 24px; min-width: 24px; padding: 0; height: 36px; color: var(--color-subtle); cursor: grab; touch-action: none; }
+  .headline > :global(svg) { flex: none; color: var(--color-subtle); transition: transform var(--dur-2); }
+  .expanded .headline > :global(svg) { transform: rotate(180deg); }
+  .reorder { flex: none; width: 24px; min-width: 24px; padding: 4px 0 0; height: auto; min-height: 44px; align-items: start; color: var(--color-subtle); cursor: grab; touch-action: none; }
   .reorder:active { cursor: grabbing; }
-  .meters, .details, .paid { margin: 6px 4px 0 40px; display: grid; gap: 8px; }
-  .mini-window { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; align-items: center; }
-  .mini-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 400; }
+  .meters { display: flex; flex-wrap: wrap; gap: 3px 8px; }
+  .mini-window { flex: 1 1 84px; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px; align-items: center; }
+  .mini-label { max-width: 48px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 400; }
   .meters.stale { opacity: 0.45; }
-  .track { display: block; width: 100%; min-width: 0; height: 10px; border-radius: var(--radius-sm); overflow: hidden; background: var(--color-surface-3); filter: saturate(1); transition: filter var(--dur-3) var(--ease-out-quint); }
+  .track { display: block; width: 100%; min-width: 0; height: 7px; border-radius: var(--radius-sm); overflow: hidden; background: var(--color-surface-3); filter: saturate(1); transition: filter var(--dur-3) var(--ease-out-quint); }
   .fill { display: block; height: 100%; background: var(--color-success); border-radius: var(--radius-sm); transition: width var(--dur-3) var(--ease-out-quint), background-color var(--dur-3) var(--ease-out-quint); }
   .track.low .fill { background: var(--color-live); }
   .track.drained { background: color-mix(in srgb, var(--color-danger) 35%, var(--color-surface-3)); }
-  .caption { display: block; margin: 8px 4px 0 40px; font-size: var(--text-xs); color: var(--color-muted-foreground); font-weight: 400; overflow-wrap: anywhere; }
-  .reset { display: flex; align-items: center; gap: 6px; }
+  .caption { display: block; margin: 0; font-size: var(--text-xs); color: var(--color-muted-foreground); font-weight: 400; overflow-wrap: anywhere; }
+  article > .caption { margin: 4px 4px 0 32px; }
+  .reset { display: flex; align-items: center; gap: 5px; }
   .reset :global(svg) { flex: none; }
-  .paid { gap: 5px; }
-  .paid-label { color: var(--color-muted-foreground); font-size: var(--text-sm); }
-  .paid-amount { color: var(--color-success); font-size: calc(var(--text-base) * 1.5); font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-  .paid .track { margin-top: 3px; }
-  .extras { padding: 8px 4px 0 40px; }
+  .paid { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 3px 8px; }
+  .paid-label { color: var(--color-muted-foreground); font-size: var(--text-xs); }
+  .paid-amount { color: var(--color-success); font-size: var(--text-lg); font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .paid .track { grid-column: 1 / -1; }
+  .extras { padding: 4px 4px 0 32px; }
   .extras:not(:has(> :global(*))) { display: none; }
-  .error { margin: 8px 4px 0 40px; color: var(--color-danger); font-size: var(--text-sm); overflow-wrap: anywhere; }
-  .details { margin-top: 12px; gap: 14px; animation: rise var(--dur-2) var(--ease-out-quint); }
+  .error { margin: 4px 4px 0 32px; color: var(--color-danger); font-size: var(--text-sm); overflow-wrap: anywhere; }
+  .details { margin: 6px 4px 0 32px; display: grid; gap: 10px; animation: rise var(--dur-2) var(--ease-out-quint); }
   .window { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 8px; font-size: var(--text-sm); }
   .window .track, .window .caption { grid-column: 1 / -1; }
   .window .caption { margin: 0; }
@@ -227,6 +234,6 @@
   .empty p { margin: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .track[aria-busy='true'] { filter: saturate(0.15); }
   @keyframes rise { from { opacity: 0; transform: translateY(-4px); } }
-  @media (pointer: coarse) { .reorder { width: 36px; min-width: 36px; height: 44px; } }
+  @media (pointer: coarse) { .reorder { width: 44px; min-width: 44px; } }
   @media (prefers-reduced-motion: reduce) { .details { animation: none; } .track, .fill { transition: none; } }
 </style>

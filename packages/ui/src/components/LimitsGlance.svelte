@@ -75,7 +75,7 @@
 
 {#if popover.shown}
   <div class="glance" class:closing={popover.closing} bind:this={content} role="dialog" tabindex="-1" aria-label={strings.quotas.glance} data-testid="limits-glance" {onkeydown}
-    use:popover.attach onanimationend={popover.end} use:floating={{ anchor: () => trigger ?? null, dismiss: close, cap: 560 }}>
+    use:popover.attach onanimationend={popover.end} use:floating={{ anchor: () => trigger ?? null, dismiss: close, cap: 460 }}>
     <QuotaPopup {rows} loading={reader.loading} completed={reader.completed} error={failed} owner={store.owner}
       order={store.settings?.quotaOrder ?? []} reorder={(quotaOrder) => store.saveSettings({ quotaOrder })}
       refresh={() => read(true)} connect={() => page('accounts')} settings={() => page('limits')} {close} testPrefix="limits-glance" />
@@ -83,7 +83,7 @@
 {/if}
 
 <style>
-  .glance { display: flex; flex-direction: column; width: 380px; padding: 0; color: var(--color-foreground); background: var(--color-surface-2); border: 1px solid var(--color-edge); border-radius: var(--radius-lg); box-shadow: var(--shadow-e2); overflow: hidden; animation: pop var(--dur-2) var(--ease-out-quint); }
+  .glance { display: flex; flex-direction: column; width: 360px; padding: 0; color: var(--color-foreground); background: var(--color-surface-2); border: 1px solid var(--color-edge); border-radius: var(--radius-lg); box-shadow: var(--shadow-e2); overflow: hidden; animation: pop var(--dur-2) var(--ease-out-quint); }
   .glance.closing { animation-name: pop-out; pointer-events: none; }
   .glance :global(.quota-popup) { flex: 1; }
 </style>

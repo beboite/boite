@@ -295,7 +295,8 @@ HTTP snapshots.
 The tray popup, sidebar glance and Settings, Limits show each monitored,
 signed-in account separately. Each row or card shows the chosen account label
 beside the provider's logo, including accounts named `Default`. The tray and
-sidebar use the same popup, with larger bars and a reset icon followed by the full weekday and local time. Opening a row
+sidebar use the same compact popup, with window bars side by side and a reset
+icon followed by the full weekday and local time. Opening a row
 shows each window's remaining allowance and reset time. An exhausted account
 puts its available credits or monthly budget first, with "Using credits" only
 when the provider confirms paid usage is enabled.
