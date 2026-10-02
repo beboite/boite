@@ -59,8 +59,11 @@ those controls. See [Claude Code prompt caching](https://code.claude.com/docs/en
 and [Anthropic cache
 lifetime](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
 
-Effort, speed, tool definitions and other prefix changes can affect reuse;
-the timer does not track every invalidation.
+Effort, tool definitions and other prefix changes can affect reuse. The first
+Claude Fast activation adds a request header and can miss the existing cache.
+A warm CLI retains that header across later speed changes; Boite applies them
+in place through the SDK. The timer does not predict every invalidation or
+this first miss.
 
 ### OpenAI
 

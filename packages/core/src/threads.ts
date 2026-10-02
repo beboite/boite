@@ -1,6 +1,5 @@
 import { archiveState, archiveStateKey } from './merged-pr-archive-state.ts';
 import { repositoryOf, type MergedPrProof } from './pull-requests.ts';
-import { createHash } from 'node:crypto';
 import { previewToolOutputs, previewReferencesError, previewPrompt, MESSAGE_PAGE, MESSAGE_PAGE_MAX, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type AgentProfile } from '@boite/contracts';
 import type {
   Account,
@@ -41,7 +40,7 @@ import { AUTO_COMPACT_LABEL, AutoCompaction } from './threads/auto-compact.ts';
 import { DeferredInput } from './threads/deferred.ts';
 import { MOVE_NOTE_PREFIX, pendingMove, ThreadMove } from './threads/move.ts';
 import { ThreadSpawns } from './threads/spawn.ts';
-import { checkAttachmentArray, checkAttachments, checkCwd, draftFolderName, makeDraftFolder, titleOf } from './threads/inputs.ts';
+import { checkAttachmentArray, checkAttachments, checkCwd, checkTurnRequest, draftFolderName, makeDraftFolder, titleOf } from './threads/inputs.ts';
 import { RestartHandoff } from './threads/handoff.ts';
 import { SYSTEM_LABEL, nativeCommandPrompt, systemOperation } from './threads/operations.ts';
 import { saveThread, setThreadStatus, withLoad } from './threads/records.ts';
@@ -670,18 +669,8 @@ export class ThreadStore {
     const referenceError = previewReferencesError(previewReferences, prompt);
     if (referenceError) throw refused(referenceError);
     previewReferences = structuredClone(previewReferences);
-    let fingerprint = '';
-    if (clientRequestId !== undefined) {
-      if (typeof clientRequestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(clientRequestId)) throw refused('clientRequestId must contain 8 to 128 URL-safe characters');
-      fingerprint = createHash('sha256').update(JSON.stringify([prompt, attachments.map(a => [a.kind, a.mimeType, a.data, a.name]), ...(previewReferences.length ? [previewReferences] : [])])).digest('hex');
-      const existing = this.core.journal.turnRequest(threadId, clientRequestId);
-      if (existing) {
-        if (existing.fingerprint === `start:pending:${fingerprint}`) throw refused('delivery of this message is unconfirmed; it will not be submitted again automatically', { reason: 'delivery-uncertain', threadId });
-        if (existing.fingerprint !== fingerprint) throw refused('clientRequestId was already used for different content');
-        const accepted = this.core.journal.getTurn(existing.turn_id);
-        if (accepted) return accepted;
-      }
-    }
+    const { fingerprint, turn: accepted } = checkTurnRequest(this.core.journal, threadId, prompt, attachments, previewReferences, clientRequestId);
+    if (accepted) return accepted;
     this.checkSelection(thread, expectedSelectionVersion);
     if (thread.archived) throw refused('cannot start a turn on an archived thread', { threadId });
     if (['queued', 'running', 'waiting'].includes(thread.status) || this.runner.handles.has(threadId)) {

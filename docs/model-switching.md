@@ -111,8 +111,9 @@ another model's settings.
 The lightning button beside the effort chip cycles through the model's advertised speeds and
 back to standard. Codex uses its per-model `serviceTiers` list, including Fast or
 Ultrafast only when listed, and sends the selected id as `turn/start.serviceTier`.
-Claude uses `supportsFastMode` and session-scoped `settings.fastMode`; changing it
-reopens the CLI on the same native session. Older Codex catalogs use
+Claude uses `supportsFastMode` and session-scoped `settings.fastMode`; a warm
+CLI applies changes through `applyFlagSettings` before the next prompt. If an
+older CLI refuses the setting, that turn resumes on a new process. Older Codex catalogs use
 `additionalSpeedTiers` when `serviceTiers` is absent.
 Native tiers cycle Fast before Ultrafast regardless of catalog order. When no
 native tier is advertised, a listed model and its `-fast`, `_fast` or `:fast`
@@ -151,12 +152,16 @@ Codex, whose resume takes the new folder and keeps its session. The seeded
 prompt says the thread moved during the conversation and that the latest move
 note names the folder it works in now ([moving a thread](development.md#moving-a-thread)).
 
-Keeping the session does not guarantee prompt-cache reuse. Model, effort or
-speed changes can alter the request prefix. Inside one account, the UI asks
-before such a change when the last context reading exceeds 100,000 tokens and
-is less than an hour old. This is a recency rule, not a cache invalidation
-detector; [cache lifetimes](prompt-cache.md) can differ. An account change uses
-the history-transfer warning above instead.
+Keeping the session does not guarantee prompt-cache reuse. Model and effort
+changes can alter the request prefix. Inside one account, the UI asks before
+such a change when the last context reading exceeds 100,000 tokens and is less
+than an hour old. Native Codex speed-only changes and Claude's return to
+standard do not ask. Enabling Claude Fast remains conservative because the
+client cannot know whether the CLI has already sent its Fast header. Unknown
+providers and speed variants that change the model ID retain the warning.
+This is a recency rule, not a cache invalidation detector;
+[cache lifetimes](prompt-cache.md) can differ. An account change uses the
+history-transfer warning above instead.
 
 Historical images use remaining slots within the eight-image turn limit. The
 current prompt's attachments take priority, then the most recent historical

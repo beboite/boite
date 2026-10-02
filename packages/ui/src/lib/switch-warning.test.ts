@@ -21,7 +21,7 @@ describe('switchDropsHistory', () => {
 describe('switchResetsCache', () => {
   const now = 10_000_000;
   const warm = (tokens: number) => ({ context: { tokens, window: 1_000_000, at: now - 60_000 } });
-  const key = { accountId: 'a', model: 'opus', effort: 'high', speed: null };
+  const key = { accountId: 'a', protocol: 'claude-sdk' as const, model: 'opus', effort: 'high', speed: null };
 
   it('asks before a long warm thread changes model, effort or speed', () => {
     expect(switchResetsCache(warm(100_001), key, { ...key, model: 'sonnet' }, now)).toBe(true);
@@ -31,6 +31,23 @@ describe('switchResetsCache', () => {
 
   it('stays quiet when nothing the cache is keyed on changes', () => {
     expect(switchResetsCache(warm(900_000), key, { ...key }, now)).toBe(false);
+  });
+
+  it('does not warn for Codex service tiers, but still warns when a speed variant changes the model', () => {
+    const codex = { ...key, protocol: 'codex-appserver' as const, model: 'gpt-6-astra' };
+    const fast = { ...codex, speed: 'fast' };
+    expect(switchResetsCache(warm(900_000), codex, fast, now)).toBe(false);
+    expect(switchResetsCache(warm(900_000), fast, { ...fast, speed: 'ultrafast' }, now)).toBe(false);
+    expect(switchResetsCache(warm(900_000), fast, codex, now)).toBe(false);
+    expect(switchResetsCache(warm(900_000), codex, { ...fast, model: 'gpt-6-astra-fast' }, now)).toBe(true);
+  });
+
+  it('warns when enabling Claude fast, while returning to standard keeps the cache', () => {
+    const fast = { ...key, speed: 'fast' };
+    expect(switchResetsCache(warm(900_000), key, fast, now)).toBe(true);
+    expect(switchResetsCache(warm(900_000), fast, key, now)).toBe(false);
+    const unknown = { ...key, protocol: null };
+    expect(switchResetsCache(warm(900_000), unknown, { ...unknown, speed: 'fast' }, now)).toBe(true);
   });
 
   it('leaves another account to switchDropsHistory', () => {

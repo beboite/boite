@@ -5,6 +5,20 @@ import { ATTACHMENT_MAX_BYTES, DEFAULT_DELEGATION_CONFIG, MESSAGE_PAGE_MAX_BYTES
 import { FAKE_AUTO_COMPACT_SETTLE_MS } from './fake-client/turns';
 import { FakeContext } from './fake-client/context';
 
+test('banked resets refuse agent and paired transports before changing a supported account', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0, quotaExtras: true });
+  const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'codex' && account.status === 'ok')!;
+  expect(account).toBeDefined();
+  const updated: unknown[] = [];
+  client.on('quotas.updated', event => updated.push(event));
+  for (const principal of ['agent', 'session'] as const) {
+    client.becomes(principal);
+    await expect(client.call('quotas.reset', { accountId: account.id, confirmed: true })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+  }
+  client.becomes('owner');
+  expect(updated).toEqual([]);
+});
+
 test('fake Claude creation discovers its native catalog before refusing an unlisted model', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'claude' && account.status === 'ok');

@@ -7,9 +7,12 @@ import type { Account, AccountQuota, QuotaReading, QuotaWindow } from '@boite/co
 import type { Core } from './core.ts';
 import { homePath } from './paths.ts';
 import { invalidParams } from './errors.ts';
-import { claudeQuotaDetails, codexQuotaDetails } from './quota-details.ts';
+import { claudeQuotaDetails, claudeUsageAgent, codexQuotaDetails } from './quota-details.ts';
+import { consumeClaudeReset, QuotaResetStore, type QuotaResetConsumer } from './quota-resets.ts';
 import { ANTIGRAVITY_QUOTA_ID, readExtraQuota } from './quota-readers.ts';
 import type { ProbeContext } from './drivers/types.ts';
+
+export { claudeUsageAgent } from './quota-details.ts';
 
 const cliAccount: Account = { id: ANTIGRAVITY_QUOTA_ID, providerId: 'antigravity', label: 'Antigravity CLI', isolationDir: null, status: 'unknown', identity: null, createdAt: 0 };
 
@@ -88,16 +91,6 @@ async function readClaude(core: Core, account: Account): Promise<QuotaReading> {
   return reading ?? readClaudeFromCli(core, account);
 }
 
-/**
- * Anthropic reports banked resets only to a CLI recent enough to spend one:
- * any other caller of `cedar_ember=1` is answered `eligible: false` with the
- * reason `cli_version`. So the request names the installed CLI, as the CLI
- * would, once its version is known.
- */
-export function claudeUsageAgent(version: string | null): Record<string, string> {
-  return version !== null && /^[\w.+-]{1,40}$/.test(version) ? { 'User-Agent': `claude-cli/${version} (external, cli)` } : {};
-}
-
 /** The token stays here and is sent only to Anthropic. Null when expired or no quota data was returned. */
 async function readClaudeWithToken(token: string, version: string | null): Promise<QuotaReading | null> {
   let response: Response;
@@ -131,10 +124,10 @@ async function readCodex(core: Core, account: Account): Promise<QuotaReading> {
 }
 
 /** A CLI started for one quota read, in a scratch directory, traced and stopped whatever happens. */
-async function withQuotaProbe(core: Core, account: Account, name: string, read: (ctx: ProbeContext) => Promise<unknown>): Promise<unknown> {
+async function withQuotaProbe<T>(core: Core, account: Account, name: string, read: (ctx: ProbeContext) => Promise<T>, reset = false): Promise<T> {
   const provider = core.providers.require(account.providerId);
   const cwd = mkdtempSync(join(tmpdir(), 'boite-quota-'));
-  const threadId = `quota:${account.id}`;
+  const threadId = `${reset ? 'quota-reset' : 'quota'}:${account.id}`;
   const exits: Promise<void>[] = [];
   try {
     return await read({
@@ -161,6 +154,7 @@ async function withQuotaProbe(core: Core, account: Account, name: string, read: 
 export type QuotaReader = (account: Account) => Promise<QuotaWindow[] | QuotaReading>;
 
 export class QuotaStore {
+  readonly resets: QuotaResetStore;
   /** Backoff and freshness: when the next read may go out. Cleared by every invalidation. */
   private cache = new Map<string, { value: AccountQuota; retryAt: number }>();
   /**
@@ -174,7 +168,19 @@ export class QuotaStore {
   private observations = new Map<string, AccountQuota>();
   /** Bumped when one account's reading is dropped, so a read already in flight cannot restore it. */
   private epochs = new Map<string, number>();
-  constructor(private core: Core, private read: QuotaReader = (account) => account.providerId === 'claude' ? readClaude(core, account) : account.providerId === 'codex' ? readCodex(core, account) : readExtraQuota(core, account)) {
+  constructor(private core: Core, private read: QuotaReader = (account) => account.providerId === 'claude' ? readClaude(core, account) : account.providerId === 'codex' ? readCodex(core, account) : readExtraQuota(core, account), consume?: QuotaResetConsumer) {
+    this.resets = new QuotaResetStore(core, consume ?? (async (account, requestId, selection) => {
+      if (account.providerId === 'claude') return consumeClaudeReset(core, account, requestId, selection);
+      const { consumeCodexReset } = await import('./drivers/codex/models.ts');
+      return withQuotaProbe(core, account, 'codex reset', (ctx) => consumeCodexReset(ctx, requestId, selection), true);
+    }), async (account) => {
+      // A pre-reset read must settle before the new reading can replace it.
+      await this.pending.get(account.id);
+      this.cache.delete(account.id);
+      const quota = await this.one(account, true);
+      this.core.bus.emit('quotas.updated', [...this.core.accounts.list(), cliAccount].map((row) => this.snapshot(row)));
+      return quota;
+    });
     core.bus.onAny((name, payload) => {
       if (name === 'accounts.removed') this.forget((id) => id === (payload as { accountId: string }).accountId);
       if (name === 'accounts.updated') {

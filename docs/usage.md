@@ -93,10 +93,23 @@ schema supplies no paid credit balance or banked resets.
 
 Claude reads banked reset grants through `cedar_ember=1` with the installed CLI
 version in its user agent. Unknown versions or an ineligible response supply no
-usable resets. Counts include only eligible, usable, unpaused, unexpired grants
-when the next grant is available. Codex retains a reported reset-credit count
-even without optional grant details. Only counts and expiration times reach the
-client. Boite never redeems grants or changes paid-usage settings.
+usable resets. Counts include eligible, usable, unpaused, unexpired grants and
+show the earliest expiration. Codex retains a reported reset-credit count even
+without optional grant details. Only counts and expiration times reach the client.
+
+On Limits, an owner can use a banked Claude or Codex reset after confirmation
+names the account and the irreversible consumption of the available reset
+closest to expiration. Cancel is focused; Cancel, Escape and outside clicks
+send nothing. The action is disabled while pending. Paired devices and agents
+cannot call `quotas.reset`.
+
+The core uses the selected account's isolated login and chooses the earliest
+usable grant or credit. Codex refuses consumption when credit details are
+missing or partial. Concurrent requests for one login share an attempt;
+uncertain requests retain their idempotency key and selected credit across
+restart. Limits refresh after a provider outcome. An applied reset followed by
+a failed refresh is reported and leaves a stale reading. Paid-usage settings
+are unaffected.
 
 Once a subscription window is exhausted, Claude's confirmed enabled, positive
 monthly spending budget appears as a percentage of its cap. Codex's positive

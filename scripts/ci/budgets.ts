@@ -3,9 +3,8 @@
  * whole UI without its precompressed copies, the core entry and all emitted
  * core JavaScript. Sizes are deterministic for a commit, unlike timings on a
  * shared runner, so they can
- * fail a pull request. Each limit in budgets.json sits about 10% above the
- * size measured when it was set; raise one in the same change that explains
- * the growth.
+ * fail a pull request. Compare any limit change with a fresh measurement
+ * and explain the growth in the same change.
  *
  * Run: bun scripts/ci/budgets.ts (after build:ui and build:core)
  */

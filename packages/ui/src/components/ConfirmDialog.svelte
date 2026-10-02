@@ -93,13 +93,14 @@
       role="alertdialog"
       aria-modal="true"
       aria-labelledby="confirm-title"
+      aria-describedby={request.body ? 'confirm-body' : undefined}
       tabindex="-1"
       bind:this={card}
       data-testid="confirm-dialog"
     >
       <h2 id="confirm-title">{request.title}</h2>
       {#if request.body}
-        <p class="muted">{request.body}</p>
+        <p id="confirm-body" class="muted">{request.body}</p>
       {/if}
       <div class="actions">
         <button type="button" class="ghost" data-cancel data-testid="confirm-cancel" onclick={() => confirm.answer(false)}>
@@ -157,6 +158,7 @@
   h2 {
     font-size: var(--text-md);
     margin-bottom: 6px;
+    overflow-wrap: anywhere;
   }
 
   p {
