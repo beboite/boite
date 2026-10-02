@@ -955,6 +955,14 @@ export const strings = {
     error: 'Error'
   },
 
+  agentMessages: {
+    heading: 'Messages', hint: 'Messages sent and received between agents.',
+    open: 'Open messages', filter: 'Filter agent messages',
+    all: 'All', sent: 'Sent', received: 'Received', empty: 'No messages here yet.',
+    forwardedOne: 'Forwarded 1 message', forwardedMany: 'Forwarded {count} messages',
+    receivedOne: 'Received 1 message', receivedMany: 'Received {count} messages',
+    issueOne: '1 message needs attention', issueMany: '{count} messages need attention'
+  },
   coordination: {
     options: 'Advanced settings',
     heading: 'Communication between conversations', off: 'Off', on: 'On',

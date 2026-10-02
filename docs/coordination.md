@@ -35,11 +35,19 @@ Pause, or turning communication off, stops a conversation that misbehaves.
 Messages are limited to 4,000 characters, delivered in batches of up to four,
 and expire after 15 minutes if still waiting.
 
-Agent messages appear in the conversation as forwarded bubbles. The arrow,
-thread title, project and machine identify where a message came from. Its text
-is visible without expanding a technical panel. Incoming messages sit on the left with
-"Received from"; outgoing messages sit on the right in the accent color with
-"Your agent sent to" and the recipient's name. Click or tap the header to open
+Consecutive agent exchanges appear in the conversation as compact counts:
+"Forwarded 13 messages" and "Received 20 messages". Ordinary messages and
+activity markers separate bursts. A count opens the Messages tab in the right
+panel, filtered to that direction and scrolled to the selected burst. The tab
+also opens from the panel launcher and offers All, Sent and Received filters.
+It updates with new mail and keeps its filter across reloads. Unconfirmed,
+expired and rejected messages add an attention count to the summary.
+
+The tab retains each message's bubble, text, age and delivery status. The arrow,
+thread title, project and machine identify the other conversation. Received
+messages use the accent color on the right; agent-authored outgoing messages
+sit on the left. User-authored delegation prompts retain the accent color.
+Click or tap a bubble's header to open
 the source thread for incoming mail or the recipient thread for outgoing mail.
 Cross-machine links use the connected machine's core identity; an unconnected
 machine asks the user to connect it in Settings. Two checkmarks indicate receipt,

@@ -12,11 +12,12 @@ import { browserBridge } from './browser-bridge';
 import { work } from './work-prefs.svelte';
 import { ZOOM_STEPS } from './zoom';
 
-export type SurfaceKind = 'agents' | 'trace' | 'browser' | 'changes' | 'files' | 'file' | 'tasks';
+export type SurfaceKind = 'agents' | 'messages' | 'trace' | 'browser' | 'changes' | 'files' | 'file' | 'tasks';
 
 /** Every kind a stored layout may name, and what `parse` checks a blob against. */
 export const SURFACE_KINDS: readonly SurfaceKind[] = [
   'agents',
+  'messages',
   'trace',
   'browser',
   'changes',
@@ -29,7 +30,7 @@ export const SURFACE_KINDS: readonly SurfaceKind[] = [
  * The kinds that get one tab and no more: asking for them again brings the tab
  * that exists forward. A browser page and a file are the two that multiply.
  */
-const SINGLETON_KINDS: readonly SurfaceKind[] = ['agents', 'trace', 'changes', 'files', 'tasks'];
+const SINGLETON_KINDS: readonly SurfaceKind[] = ['agents', 'messages', 'trace', 'changes', 'files', 'tasks'];
 
 export interface Surface {
   id: string;
@@ -49,6 +50,9 @@ export interface Surface {
   line?: number;
   /** The workflow run the subagents tab is on; absent means its list. */
   runId?: string;
+  /** The messages tab's filter and the letter a timeline summary opens on. */
+  mailDirection?: 'incoming' | 'outgoing';
+  letterId?: string;
 }
 
 /** What the tab menu, the close button and the close key ask for. */
@@ -121,7 +125,7 @@ function parse(raw: string): Record<string, PanelState> {
     const surfaces: Surface[] = [];
     for (const surface of raws) {
       if (typeof surface !== 'object' || surface === null) continue;
-      const { title, url, zoom, path, line, runId } = surface as Surface;
+      const { title, url, zoom, path, line, runId, mailDirection, letterId } = surface as Surface;
       // A layout stored while workflows had a tab of their own: that tab is the subagents tab now.
       const merged = (surface as { kind?: unknown }).kind === 'workflow';
       const kind = merged ? 'agents' : (surface as Surface).kind;
@@ -142,7 +146,9 @@ function parse(raw: string): Record<string, PanelState> {
         ...stored,
         ...(typeof path === 'string' ? { path } : {}),
         ...(typeof line === 'number' && Number.isFinite(line) ? { line } : {}),
-        ...(typeof runId === 'string' ? { runId } : {})
+        ...(typeof runId === 'string' ? { runId } : {}),
+        ...(mailDirection === 'incoming' || mailDirection === 'outgoing' ? { mailDirection } : {}),
+        ...(typeof letterId === 'string' ? { letterId } : {})
       });
     }
     const stored = (value as PanelState).activeSurfaceId;
@@ -390,6 +396,13 @@ export class BoundPanel {
 
   openTasks(): Surface {
     return this.open('tasks');
+  }
+
+  /** One messages tab per conversation, opened on the direction and burst clicked. */
+  openMessages(letterId: string, direction: 'incoming' | 'outgoing'): Surface {
+    const opened = this.open('messages');
+    this.update(opened.id, { letterId, mailDirection: direction });
+    return this.active!;
   }
 
   /** The subagents tab, on one workflow run when one is named. */

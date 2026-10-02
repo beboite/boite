@@ -4,8 +4,8 @@
   import { strings } from '../lib/strings';
   import { exactTime, relativeTime } from '../lib/format';
 
-  let { letter, self, projectName, onopen }: {
-    letter: AgentLetter; self: AgentAddress; projectName?: string; onopen?: (address: AgentAddress) => void;
+  let { letter, self, projectName, onopen, compact = false }: {
+    letter: AgentLetter; self: AgentAddress; projectName?: string; onopen?: (address: AgentAddress) => void; compact?: boolean;
   } = $props();
   let outgoing = $derived(letter.from.coreId === self.coreId && letter.from.threadId === self.threadId);
   let userSide = $derived(!outgoing || letter.origin === 'user');
@@ -30,7 +30,7 @@
 </script>
 
 <svelte:document onvisibilitychange={() => hidden = document.hidden} />
-<div class="forwarded" class:user={userSide} data-testid="forwarded-agent-message" data-letter-id={letter.id} data-direction={outgoing ? 'outgoing' : 'incoming'} title={technical}>
+<div class="forwarded" class:user={userSide} class:compact data-testid="forwarded-agent-message" data-letter-id={letter.id} data-direction={outgoing ? 'outgoing' : 'incoming'} title={technical}>
   <div class="forward-top">
     <button type="button" class="forward-head" data-testid="agent-letter-open" title={strings.chat.openLinkedThread} disabled={!onopen} onclick={() => onopen?.(address)}>
       <span class="forward-icon">
@@ -103,6 +103,8 @@
   .foot { margin: 7px 0 0 27px; display: flex; flex-wrap: wrap; gap: 4px 10px; color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .status-details summary { width: fit-content; cursor: pointer; }
   .status-details p { margin-top: 5px; max-width: 48ch; line-height: 1.45; overflow-wrap: anywhere; }
+  .forwarded.compact { max-width: 94%; }
+  .compact .body, .compact .foot { margin-left: 0; }
   @media (max-width: 720px) {
     .forwarded { max-width: 92%; }
     .body, .foot { margin-left: 0; }

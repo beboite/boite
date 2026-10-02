@@ -73,6 +73,7 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 | Files    | one      | the working directory as a tree, `files.list` one directory at a time         |
 | File     | per path | a text editor with save, an image viewer with zoom and pan, a video or audio player |
 | Tasks    | one      | goal and loop, the agent's tasks, the project's todo list                     |
+| Messages | one      | agent exchanges, filtered to all, sent or received; a chat count opens its burst |
 | Subagents | one     | the thread's workflow runs and subagents in one list, a run's graph, a subagent's conversation, see [delegation.md](delegation.md) and [workflows.md](workflows.md) |
 | Trace    | one      | the thread's processes, see [trace.md](trace.md)                              |
 
@@ -190,7 +191,8 @@ The reads (`git.*`, `files.list`, `files.read`, `todos.list`, the tasks) are
 the owner's and the thread's own agent's. `files.write`, `todos.remove` and a
 todo's `done` are the owner's alone, and `todos.updated` goes to the owner and
 to the agents of that project. A paired phone has the Panel button too, and its
-menu offers the Subagents surface, the one it may follow.
+menu offers Subagents and Messages. The Messages tab uses the same coordination
+and delegation reads as the chat and fills the screen on a phone.
 
 ## What the agent can ask
 
@@ -207,7 +209,7 @@ watching keeps the request on its panel for the next open.
 `panel` toggles the panel, `browser`, `changes`, `files`, `tasks` and `trace`
 open their surface, `close-surface` closes the active tab. The defaults are in
 [keybindings.md](keybindings.md). With the launcher showing, a single letter
-opens a surface: B, C, F, K, T, W.
+opens a surface: A, B, C, F, K, M, T. M opens Messages.
 
 ## Experimental PR review
 

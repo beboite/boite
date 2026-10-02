@@ -40,6 +40,18 @@ beforeAll(async () => {
       threadId: 't-trace', to: { coreId: remoteIdentity.coreId, threadId: 't-bench' },
       text: 'Restart postponed until deployment confirms it is clear.', replyTo: incoming.id, requestId: 'outgoing-reply'
     });
+    for (let index = 1; index < 13; index++) await local.call('collaboration.send', {
+      threadId: 't-trace', to: { coreId: remoteIdentity.coreId, threadId: 't-bench' },
+      text: 'Deployment status update ' + index, requestId: 'outgoing-' + index
+    });
+    for (let index = 1; index < 20; index++) await remote.call('collaboration.send', {
+      threadId: 't-bench', to: { coreId: localIdentity.coreId, threadId: 't-trace' },
+      text: 'Received deployment update ' + index, requestId: 'incoming-' + index
+    });
+    workspace.active.openThread.messages.push({
+      id: 'exchange-divider', threadId: 't-trace', turnId: 'exchange-divider', role: 'assistant',
+      state: 'complete', createdAt: incoming.createdAt + 1, parts: [{ type: 'text', text: 'Deployment coordination continues.' }]
+    });
     // An owner-authored delegation prompt stays on the user side even when it is outgoing.
     const delegation = await local.call('delegation.get', { threadId: 't-trace' });
     workspace.active.delegation = { ...delegation, messages: [{
@@ -48,13 +60,39 @@ beforeAll(async () => {
       from: { ...outgoing.from, coreId: 'local' }, to: { ...outgoing.to, coreId: 'local' }
     }] };
   })()`);
-  await page.waitFor(`document.querySelectorAll('[data-testid="forwarded-agent-message"]').length === 3`);
+  await page.waitFor(`document.querySelector('[data-testid="agent-message-summary"][data-direction="incoming"][data-count="20"]')`);
   await page.waitFor(`document.querySelector('[data-testid="thread-menu-trigger"]')`);
 }, 60_000);
 
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
-test('forwarded agent messages sit in the conversation at desktop and phone widths', async () => {
+test('agent bursts open a dedicated messages tab at desktop and phone widths', async () => {
+  const receivedSummary = '[data-testid="agent-message-summary"][data-direction="incoming"][data-count="20"]';
+  const forwardedSummary = '[data-testid="agent-message-summary"][data-direction="outgoing"][data-count="13"]';
+  expect(await page.text(receivedSummary)).toContain('Received 20 messages');
+  expect(await page.text(forwardedSummary)).toContain('Forwarded 13 messages');
+  expect(await page.evaluate(`document.querySelectorAll('[data-testid="timeline"] [data-testid="forwarded-agent-message"]').length`)).toBe(0);
+  expect(await page.text('[data-testid=timeline]')).not.toContain('Wait before restart');
+  await page.evaluate(`document.querySelector(${JSON.stringify(receivedSummary)}).scrollIntoView({ block: 'center' })`);
+  await settled();
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-message-groups-desktop.png'));
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await settled();
+  expect(await page.evaluate(`(() => { const button = document.querySelector(${JSON.stringify(receivedSummary)}).getBoundingClientRect(); return button.height >= 44 && button.left >= 0 && button.right <= innerWidth; })()`)).toBe(true);
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-message-groups-phone.png'));
+  await page.click(receivedSummary);
+  await page.waitFor(`document.querySelector('[data-testid=agent-messages-surface]')`);
+  await page.waitFor(`document.querySelectorAll('[data-testid=forwarded-agent-message]').length === 20`);
+  await settled();
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-messages-received-phone.png'));
+  await page.click('[data-testid=panel-close]');
+  await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.click(forwardedSummary);
+  await page.waitFor(`document.querySelectorAll('[data-testid=forwarded-agent-message]').length === 14`);
+  await page.click('[data-testid=agent-messages-filter][data-direction=all]');
+  await page.waitFor(`document.querySelectorAll('[data-testid=forwarded-agent-message]').length === 34`);
+  expect(await page.evaluate(`document.querySelectorAll('[data-testid=panel-tab][data-kind=messages]').length`)).toBe(1);
   await settled();
   expect(await page.evaluate(`document.querySelector('[data-letter-id="incoming-deployment"]')?.textContent ?? ''`)).toContain('Deployment agent');
   expect(await page.evaluate(`document.querySelector('[data-letter-id="incoming-deployment"]')?.textContent ?? ''`)).toContain('Build PC');
@@ -96,7 +134,7 @@ test('forwarded agent messages sit in the conversation at desktop and phone widt
       return { id: card.dataset.letterId, text: stamp.textContent, date: stamp.dateTime, title: stamp.title,
         top: age.top - bounds.top, right: bounds.right - age.right, gap: age.left - source.right };
     })`);
-    expect(stamps).toHaveLength(3);
+    expect(stamps).toHaveLength(34);
     for (const stamp of stamps) {
       expect(Number.isFinite(Date.parse(stamp.date))).toBe(true);
       expect(stamp.title.length).toBeGreaterThan(0);
@@ -114,7 +152,7 @@ test('forwarded agent messages sit in the conversation at desktop and phone widt
   expect(await page.evaluate(`document.querySelector('[data-testid="coordination-panel"]') === null`)).toBe(true);
   await page.evaluate(`document.querySelector('[data-letter-id="incoming-deployment"]').scrollIntoView({ block: 'center' })`);
   await settled();
-  await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-desktop.png'));
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-messages-desktop.png'));
 
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await page.evaluate(`document.querySelector('[data-letter-id="user-delegation"]').scrollIntoView({ block: 'end' })`);
@@ -122,19 +160,21 @@ test('forwarded agent messages sit in the conversation at desktop and phone widt
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
   await checkDirection();
   await checkTimestamps('2 min. ago');
-  await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-phone.png'));
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-messages-phone.png'));
 
   await page.evaluate(`window.__boiteTest.setTheme('light')`);
   await settled();
   await checkDirection();
-  await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-phone-light.png'));
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-messages-phone-light.png'));
 
   await page.evaluate(`import('/src/lib/i18n.svelte.ts').then(module => module.setLocaleSetting('fr'))`);
   await settled();
   await checkTimestamps('il y a 2 min');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
-  await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-phone-fr.png'));
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-messages-phone-fr.png'));
   await page.evaluate(`import('/src/lib/i18n.svelte.ts').then(module => module.setLocaleSetting('en'))`);
+  await page.click('[data-testid=panel-close]');
+  await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
 
   // The same title menu exposes settings on phones and desktops.
   await page.click('[data-testid="thread-menu-trigger"]');
@@ -171,4 +211,5 @@ test('forwarded agent messages sit in the conversation at desktop and phone widt
   await page.waitFor(`document.querySelector('[data-testid="coordination-dialog"]')?.open`);
   await page.evaluate(`window.__boiteTest.workspace.active.open('t-bench')`);
   await page.waitFor(`document.querySelector('[data-testid="coordination-dialog"]') === null`);
+  expect(page.errors()).toEqual([]);
 }, 30_000);
