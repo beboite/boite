@@ -71,7 +71,8 @@
       <MemoryRow event={run.events[0]!} events={run.events} onconfigure={store.owner ? () => store.showSettings('resources', 'limits') : undefined} />
     {:else if run.kind === 'tools'}
       <div class="part" data-kind="tool">
-        <ToolGroup parts={run.indices.map((at) => message.parts[at]).filter((part): part is ToolPart => part?.type === 'tool')} {isBackground} />
+        <ToolGroup parts={run.indices.map((at) => message.parts[at]).filter((part): part is ToolPart => part?.type === 'tool')} {isBackground}
+          loadOutput={toolId => store.loadToolOutput(threadId, message.id, toolId)} />
       </div>
     {:else if message.parts[run.index]}
     {@const index = run.index}

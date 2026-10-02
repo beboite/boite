@@ -13,11 +13,13 @@
    */
   let {
     parts,
-    isBackground
+    isBackground,
+    loadOutput
   }: {
     parts: ToolPart[];
     /** Whether the work a call started still runs in the background. */
     isBackground: (toolId: string) => boolean;
+    loadOutput?: (toolId: string) => Promise<void>;
   } = $props();
 
   const ICONS = { command: SquareTerminal, read: FileText, edit: FilePen, write: FilePen, search: Search, fetch: Globe, web: Globe, agent: Bot, other: Wrench };
@@ -44,6 +46,8 @@
     input={part.input}
     inputText={part.inputText}
     output={part.output}
+    outputDeferred={part.outputDeferred ?? false}
+    loadOutput={loadOutput ? () => loadOutput!(part.toolId) : undefined}
     status={part.status}
     exitCode={part.exitCode}
     documents={part.documents ?? []}

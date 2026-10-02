@@ -67,8 +67,9 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     await discover(provider.id, params.accountId, params.model ?? defaultModel(provider), params.effort ?? null, params.speed ?? null);
     return params.worktree === undefined ? core.threads.create(params) : core.threads.createInWorktree(params);
   });
-  core.router.register('threads.get', (params) => core.threads.get(params.threadId, params.after));
+  core.router.register('threads.get', (params) => core.threads.get(params.threadId, params.after, params));
   core.router.register('messages.list', (params) => core.threads.messages(params));
+  core.router.register('messages.toolOutput', (params) => core.threads.toolOutput(params));
   core.router.register('threads.update', async (params) => {
     const thread = core.threads.require(params.threadId);
     const version = thread.selectionVersion ?? 0;

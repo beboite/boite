@@ -196,8 +196,21 @@ instead of arriving after it as a second copy.
 
 ## What the UI asks for
 
+- Returning to a recent thread selects its cached history synchronously. The
+  subscription, unread acknowledgement and fresh snapshot run in the background.
+  Unchanged messages and turns keep their identities through revalidation.
+  The cache retains up to 16 visits, at most 4 MiB of text per thread and
+  16 MiB in total, with a 2,000-message bound per thread.
 - `Store.open` writes subscribe, `threads.get`, `permissions.list` and
   `questions.list` in one burst instead of one round trip each.
+- A first visit requests 40 messages, then pages backwards by 120. A cached
+  visit allows up to 200 messages to catch up before falling back to a tail.
+  These limits affect the displayed window; the journal retains the history.
+- Completed tool outputs above 16,384 characters arrive as 1,024-character
+  previews. Opening the tool retrieves its complete output with
+  `messages.toolOutput`. Inputs, diffs, documents and running tools remain
+  complete. Older cores that ignore the preview option still return full output;
+  disclosures fall back to their existing history methods if needed.
 - `threads.get` takes `after`, a message the client already holds. The answer
   then starts at that message and says so in `messagesFrom`; the UI keeps what
   it had before it. A reconnect to a quiet thread costs one message instead of
@@ -214,6 +227,21 @@ instead of arriving after it as a second copy.
 - A project names its icon by version or stack id only. The image, up to
   256 KB, is a `projects.icon` call made once per project and version, when a
   tile first draws it; a list never carries it ([project icons](project-icons.md)).
+
+The timeline renders a window above 24 messages, with four extra messages on
+either side when reading history and two above the live end. It starts at
+the saved message and offset, or the latest message,
+using the previous viewport height and row measurements. Historical messages
+skip entrance animations. File summaries are computed for visible turns only.
+Phone navigation reveals the conversation immediately after selection.
+
+`bun bench/thread-switch.ts --delay 300 --runs 7` measures an optimized fixture
+bundle with 400 messages and delayed thread RPC replies. Use `--phone --cpu 4`
+for a 390 px viewport and slower CPU, or `--ui <checkout>/packages/ui` for a
+baseline checkout. The [2026-10-02 measurements](../bench/results/2026-10-02-thread-switching.md)
+record samples, reading-position drift and the subsequent t3code comparison.
+`tests/e2e/thread-switch.test.ts` separately exercises the production UI with
+a real temporary core, a 750 ms snapshot delay and a large folded tool output.
 
 ## Static files
 

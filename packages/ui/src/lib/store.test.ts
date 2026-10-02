@@ -694,7 +694,9 @@ test.each(['input', 'inputText', 'output', 'documents'])('reading cache excludes
     store.openThread!.messages.unshift({ id: 'cached-only', threadId: 't-bench', turnId: 'old', role: 'assistant', parts: [part], state: 'complete', createdAt: 0 });
     await store.open('t-scheduler');
     await store.open('t-bench');
-    expect(store.openThread!.messages.some(message => message.id === 'cached-only')).toBe(false);
+    const cached = store.openThread!.messages.find(message => message.id === 'cached-only');
+    if (field === 'output') expect(cached?.parts[0]).toMatchObject({ outputDeferred: true, output: large.slice(0, 1024) });
+    else expect(cached).toBeUndefined();
   } finally { store.detach(); client.close(); }
 });
 
@@ -1045,29 +1047,29 @@ describe('Store', () => {
 
     await store.open('t-long');
 
-    // The last page, not the four hundred messages.
-    expect(store.openThread?.messages).toHaveLength(120);
-    expect(store.openThread?.messages.at(0)?.id).toBe('m-long-280');
+    // The first paint uses forty messages; history pages remain 120.
+    expect(store.openThread?.messages).toHaveLength(40);
+    expect(store.openThread?.messages.at(0)?.id).toBe('m-long-360');
     expect(store.openThread?.messages.at(-1)?.id).toBe('m-long-399');
-    expect(store.messagesBefore).toBe('m-long-280');
+    expect(store.messagesBefore).toBe('m-long-360');
 
     expect(await store.loadOlder()).toBe(120);
-    expect(store.openThread?.messages).toHaveLength(240);
-    expect(store.messagesBefore).toBe('m-long-160');
+    expect(store.openThread?.messages).toHaveLength(160);
+    expect(store.messagesBefore).toBe('m-long-240');
 
     expect(await store.loadOlder()).toBe(120);
     const messages = store.openThread?.messages ?? [];
-    expect(messages).toHaveLength(360);
-    expect(messages.at(0)?.id).toBe('m-long-40');
+    expect(messages).toHaveLength(280);
+    expect(messages.at(0)?.id).toBe('m-long-120');
     expect(messages.at(-1)?.id).toBe('m-long-399');
-    expect(store.messagesBefore).toBe('m-long-40');
+    expect(store.messagesBefore).toBe('m-long-120');
     expect(store.loadingOlder).toBe(false);
 
     // In order, no gap, no duplicate.
     const numbers = messages.map((message) => Number(message.id.replace('m-long-', '')));
-    expect(new Set(numbers).size).toBe(360);
+    expect(new Set(numbers).size).toBe(280);
     expect(numbers).toEqual([...numbers].sort((a, b) => a - b));
-    expect(numbers[0]).toBe(40);
+    expect(numbers[0]).toBe(120);
   });
 
   test('loadOlder stops at the first message and does nothing without a cursor', async () => {
@@ -1084,7 +1086,7 @@ describe('Store', () => {
       if (rounds > 10) throw new Error('the cursor never reached the first message');
     }
 
-    // 120 on open, then 120, 120 and the last 40.
+    // 40 on open, then three ordinary pages of 120.
     expect(rounds).toBe(3);
     expect(store.openThread?.messages).toHaveLength(400);
     expect(store.openThread?.messages.at(0)?.id).toBe('m-long-0');
