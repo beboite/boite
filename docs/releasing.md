@@ -36,14 +36,16 @@ and add separate server targets to `latest.json`. Docker images remain separate.
   as its own before-build command, so a shell build never ships a UI older than
   the sources.
 - `build:core` cleans and writes `packages/core/dist`: `main.js`, `jobs-worker.js`,
-  `guard-worker.js`, and hashed chunks for the main module and lazy drivers.
+  `guard-worker.js`, `artifact-retention-worker.js`, and hashed chunks for the main module and lazy drivers.
   Keep every emitted file together when distributing this bundle. Lazy imports
   keep the SDKs off the start path. `bun run core` and the shell both prefer this
   bundle over the sources when it is there.
 - `build:core:exe` compiles `packages/core/dist/boite-core`, with `.exe` on Windows. On x64 it embeds
   Bun's baseline runtime, which needs no AVX2. The two worker
   files are not compiled into it: the core loads them by name from beside its own
-  executable, so they travel with it.
+  executable, so they travel with it. The artifact retention worker is also an
+  explicit compile entry point, embedded in the executable for Linux/macOS and
+  signed server archives; those installations need no additional worker file.
 - On Windows the installed sidecar is not that executable. It is Bun's baseline
   runtime of the version the build ran under, copied as `boite-core.exe`, with every file of the bundle
   but the workers in a `core` directory beside it, and the shell starts it as
@@ -130,6 +132,7 @@ passes, and it is the only place `bundle.externalBin` and the resource map live:
     "resources": {
       "binaries/jobs-worker.js": "jobs-worker.js",
       "binaries/guard-worker.js": "guard-worker.js",
+      "binaries/artifact-retention-worker.js": "artifact-retention-worker.js",
       "binaries/boite": "boite",
       "binaries/boite.cmd": "boite.cmd",
       "../../../packages/ui/dist": "ui"
@@ -252,6 +255,7 @@ name is `Boite`. The install is per user and asks for no elevation.
 - `jobs-worker.js`, beside the core because that is where the core looks for it.
   Without it the trace reports `poll` instead of `events`.
 - `guard-worker.js`, the focus guard and the audio mute.
+- `artifact-retention-worker.js`, the background scan for unused deliverables.
 - `boite` and `boite.cmd`, the CLI shims the core puts on an agent's PATH; each
   runs `boite-core cli` from beside itself ([cli.md](cli.md)).
 - `ui/`, the same build a phone gets over the pairing link.

@@ -25,8 +25,16 @@ Reduced motion disables new throws and stops any visible rope.
 ## Chat files and previews
 
 An agent can run `boite attach "reports/review.pdf"` to deliver a file in its
-conversation. The core snapshots up to 5 MB from the thread's working directory
-and saves the bytes with an assistant message. Relative and absolute paths must
+conversation. The core snapshots up to 512 MB from the thread's working directory.
+Files up to 5 MB remain inline; larger files live in the core's `artifacts`
+directory and the message stores a reference. Downloads support HTTP ranges,
+so videos can seek without loading the entire file. The UI renews download
+tickets while the card is mounted. Unreferenced snapshots and interrupted
+copies older than a day are removed by daily maintenance; forks retain their
+referenced files. The reference scan runs in a worker so large journals do not
+block the core's event loop. A pass that overlaps journal writes skips deletion
+to avoid acting on stale references. User uploads still have their separate 5 MB limit.
+Relative and absolute paths must
 stay inside that directory, including resolved symlinks. A missing file,
 directory, oversized file or archived thread is refused. The thread must have
 at least one turn. Every provider can use this CLI command.
@@ -36,13 +44,22 @@ after a core restart, and with this experiment switched off. Paired phones can
 download the published snapshot. They cannot publish or browse arbitrary host
 files through the file APIs.
 
-With the experiment enabled, answers support Markdown file links, bare web
+Published images, videos and audio appear directly in the conversation without
+enabling this experiment. Media keeps its aspect ratio within a bounded card;
+videos have playback, seeking and fullscreen controls and never autoplay.
+Images open in a keyboard-accessible viewer with zoom, fit and download controls.
+Images larger than 5 MB show their name, size and download first. Click Load image
+or the filename to download and display them; opening a conversation does not
+fetch these images automatically.
+If decoding fails, the card keeps its download and offers a retry.
+
+With the experiment enabled, answers also support Markdown file links, bare web
 URLs, local absolute paths, `file:///` links, and file paths inside inline code.
 Wrap the link destination in angle brackets for paths with spaces, such as
 `<reports/review one.pdf>`. Source references
 can carry `:line` or `#Lline`. Files resolve against the message's thread and
 owning machine. Links outside its working directory are refused. Published
-PDFs, images, audio and video have inline previews. Other files remain downloadable.
+PDFs have an optional inline preview. Other files remain downloadable.
 Remote images are links, so reading an answer does not fetch a tracking image.
 Executable URL schemes and arbitrary HTML are not rendered.
 

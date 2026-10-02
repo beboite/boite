@@ -295,6 +295,7 @@ export async function writeFileText(
 export interface FileTicketTarget {
   path: string;
   mime: string;
+  name?: string;
 }
 
 function fileIdentity(path: string): string | null {
@@ -313,13 +314,21 @@ function fileIdentity(path: string): string | null {
  * names a path to the HTTP server.
  */
 export class FileTickets {
-  private readonly held = new Map<string, { path: string; mime: string; expiresAt: number; identity: string | null }>();
+  private readonly held = new Map<string, FileTicketTarget & { expiresAt: number; identity: string | null }>();
 
-  mint(path: string, mime: string, now = Date.now()): string {
+  mint(path: string, mime: string, now = Date.now(), name?: string): string {
     this.sweep(now);
     const ticket = newToken();
-    this.held.set(ticket, { path, mime, expiresAt: now + FILE_TICKET_TTL_MS, identity: fileIdentity(path) });
+    this.held.set(ticket, { path, mime, ...(name ? { name } : {}), expiresAt: now + FILE_TICKET_TTL_MS, identity: fileIdentity(path) });
     return ticket;
+  }
+
+  /** Only an authenticated artifact read can keep its own URL alive during playback. */
+  renew(ticket: string, path: string, now = Date.now()): boolean {
+    const target = this.resolve(ticket, now);
+    if (!target || target.path !== path) return false;
+    this.held.get(ticket)!.expiresAt = now + FILE_TICKET_TTL_MS;
+    return true;
   }
 
   resolve(ticket: string, now = Date.now()): FileTicketTarget | null {
@@ -330,7 +339,7 @@ export class FileTickets {
       this.held.delete(ticket);
       return null;
     }
-    return { path: entry.path, mime: entry.mime };
+    return { path: entry.path, mime: entry.mime, ...(entry.name ? { name: entry.name } : {}) };
   }
 
   private sweep(now: number): void {

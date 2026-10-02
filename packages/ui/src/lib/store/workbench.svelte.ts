@@ -1,5 +1,6 @@
 import type {
   AgentTask,
+  ArtifactContent,
   MemoryEvent,
   MemoryState,
   MemoryStatus,
@@ -153,6 +154,16 @@ export class Workbench {
     } catch (error) {
       return { ok: false, error: this.ctx.reason(error) };
     }
+  }
+
+  async readArtifact(threadId: ThreadId, messageId: string, artifactId: string, renew?: string): Promise<FileAnswer<ArtifactContent>> {
+    const client = this.ctx.client;
+    if (!client) return { ok: false, error: strings.artifacts.failed };
+    try {
+      const value = await client.call('artifacts.read', { threadId, messageId, artifactId, ...(renew ? { renew } : {}) });
+      const endpoint = this.ctx.store.endpointUrl;
+      return { ok: true, value: { ...value, url: value.url.startsWith('/') && endpoint ? new URL(value.url, endpoint).href : value.url } };
+    } catch (error) { return { ok: false, error: this.ctx.reason(error) }; }
   }
 
   /** The editor's save. The bytes that reached the disk, or why they did not. */

@@ -565,13 +565,14 @@ a UI timeout. The suite now refuses it in milliseconds, naming the sidecar's
 mtime, the newest core source and the fix:
 
 ```bash
-bun run stage:core   # build:core:exe, then copy the exe and both workers into place
+bun run stage:core   # build:core:exe, then copy the exe and workers into place
 ```
 
 That script puts the compiled core in `src-tauri/binaries` for the bundler and
 beside the release shell executable for the end to end run, with `jobs-worker.js`
-and `guard-worker.js` next to each copy. Without the first the trace degrades
-from exact events to polling; without the second the focus guard never starts.
+and `guard-worker.js` next to each copy, plus `artifact-retention-worker.js` for
+the background artifact scan. Windows requires all three files before starting
+the installed core. The compiled core also embeds the artifact worker.
 On Windows the first staging downloads Bun's baseline runtime (a 40 MB archive)
 for the Bun version running it and keeps it under `node_modules/.cache`
 ([releasing](releasing.md)).

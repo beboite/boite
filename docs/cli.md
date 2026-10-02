@@ -63,7 +63,7 @@ boite thread new <project> <brief> [--worktree] [--title <title>]
 boite projects                   the projects added to Boite
 boite projects add <folder> [--name <name>]
                                  add an existing folder as a project
-boite attach <file>               publish a file snapshot in chat, at most 5 MB
+boite attach <file>               publish a file snapshot in chat, at most 512 MB
 boite show <file>[:line]         open the file in the panel, at that line
 boite diff [file]                open the changes surface, or one file's diff
 boite browse <url>               open the url in the panel's browser (http, https)
@@ -198,17 +198,20 @@ own project refuse it. There is no hourly limit. A thread an agent started
 adds none until the user has written in it, and delegated children, workflow steps and persistent agent
 sessions are refused.
 
-`attach` saves a copy in an assistant message, so it remains downloadable from
+`attach` saves a snapshot referenced by an assistant message, so it remains downloadable from
 desktop and paired phones after the original changes or disappears. The thread
-must have a turn and must not be archived. The optional rich preview is under
-the [Chat files and previews experiment](experiments.md#chat-files-and-previews).
+must have a turn and must not be archived. Images, videos and audio appear
+inline by default. PDF and local file previews are under the
+[Chat files and previews experiment](experiments.md#chat-files-and-previews).
 
-In the desktop app, clicking the file's name or icon saves it in the system's
-Downloads folder and opens it. The shell's `save_attachment` command opens only
+Clicking an image opens the zoomable viewer. For other files in the desktop app,
+clicking the name or icon saves it in the system's Downloads folder and opens it.
+The shell's attachment commands open only
 pictures, PDF, text, audio, video and office documents. It shows any other type
 selected in its folder, so an agent cannot run a program through that click.
-The download button saves the file without opening it. A file with the same
-name and the same bytes is reused, not copied again. In a browser the name
+The download button saves the file without opening it. Files above 5 MB stream
+directly into Downloads and receive a numbered name if that name is taken.
+Smaller inline files with the same name and bytes reuse the existing copy. In a browser the name
 opens a picture full size and downloads anything else. A picture's preview also
 opens it full size.
 

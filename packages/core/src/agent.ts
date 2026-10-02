@@ -18,7 +18,7 @@ import { newToken } from './ids.ts';
 import { registerGitMethods } from './git.ts';
 import { registerTodoMethods } from './todos.ts';
 import { existingInside, registerWorkdirMethods, resolveInside } from './workdir.ts';
-import { publishArtifact } from './artifacts.ts';
+import { publishArtifact, readArtifact } from './artifacts.ts';
 
 /** More than a plan, and the tasks surface stops being readable anyway. */
 export const TASKS_MAX = 200;
@@ -196,6 +196,7 @@ export function setTasks(core: Core, params: RpcParams<'threads.tasks.set'>): Th
  */
 export function registerAgentMethods(core: Core): void {
   core.router.register('artifacts.publish', (params) => publishArtifact(core, params));
+  core.router.register('artifacts.read', (params) => readArtifact(core, params));
   core.router.register('agent.where', (params) => whereOf(core, core.threads.require(params.threadId)));
   // The access check already held the call to the token's own thread.
   core.router.register('agent.move', (params) => core.threads.moves.request(params.threadId, params.project));

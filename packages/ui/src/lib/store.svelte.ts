@@ -577,6 +577,7 @@ export class Store {
   gitDiff(...args: Parameters<Workbench['gitDiff']>) { return this.#ctx.workbench.gitDiff(...args); }
   listFiles(...args: Parameters<Workbench['listFiles']>) { return this.#ctx.workbench.listFiles(...args); }
   readFile(...args: Parameters<Workbench['readFile']>) { return this.#ctx.workbench.readFile(...args); }
+  readArtifact(...args: Parameters<Workbench['readArtifact']>) { return this.#ctx.workbench.readArtifact(...args); }
   writeFile(...args: Parameters<Workbench['writeFile']>) { return this.#ctx.workbench.writeFile(...args); }
   setTasks(...args: Parameters<Workbench['setTasks']>) { return this.#ctx.workbench.setTasks(...args); }
   loadTodos(...args: Parameters<Workbench['loadTodos']>) { return this.#ctx.workbench.loadTodos(...args); }

@@ -253,7 +253,7 @@ function ticketedFile(core: Core, ticket: string, range: string | null): Respons
     // picks what the panel opens, so no file of its may run in a window.
     // Neither header touches an <img> or a <video> loading the same address.
     'x-content-type-options': 'nosniff',
-    'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(basename(target.path))}`,
+    'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(target.name ?? basename(target.path))}`,
   };
   const asked = range === null ? null : /^bytes=(\d*)-(\d*)$/.exec(range.trim());
   if (asked === null) return new Response(file, { headers });

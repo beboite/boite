@@ -39,7 +39,7 @@ export const USAGE = `usage: boite <command> [args] [--json]
   projects                       the projects added to Boite
   projects add <folder>          add an existing folder as a project, so thread
                                  new and thread move can name it (--name <name>)
-  attach <file>                  publish a file in chat, up to 5 MB (experimental)
+  attach <file>                  publish a file in chat, up to 512 MB
   show <file>[:line]             open a file in the panel, at a line
   diff [file]                    open the changes, or one file's diff
   browse <url>                   open a url in the panel's browser

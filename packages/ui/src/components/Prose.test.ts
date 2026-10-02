@@ -51,7 +51,9 @@ test('a local file can still open when its preview cannot be read', async () => 
   running = mount(Prose, { target: document.body, props: { text: '[Manual](manual.pdf)', store, threadId: 'game' } });
   flushSync();
   query<HTMLAnchorElement>('a[data-file-path]').click();
-  await vi.waitFor(() => expect(document.querySelector('[role=alert]')?.textContent).toBe('Preview could not be read'));
+  await vi.waitFor(() => expect(document.querySelector('[role=alert] p')?.textContent).toBe('Preview could not be read'));
+  query<HTMLButtonElement>('[role=alert] button').click();
+  await vi.waitFor(() => expect(store.readFile).toHaveBeenCalledTimes(2));
   expect(invoke).not.toHaveBeenCalled();
   expect(document.querySelector('[data-testid=artifact-download]')).toBeNull();
   query<HTMLButtonElement>('[data-testid=artifact-open]').click();

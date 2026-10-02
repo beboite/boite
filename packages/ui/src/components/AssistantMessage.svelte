@@ -83,8 +83,8 @@
           <Prose text={shownText} live={index === caretAt && part.complete !== true} {store} {threadId} />
         {/if}
 
-      {:else if part.type === 'file'}
-        <ChatFile file={part} />
+      {:else if part.type === 'file' || part.type === 'artifact'}
+        <ChatFile file={part} {store} {threadId} messageId={message.id} />
       {:else if part.type === 'tool' && planOf(part.name, part.input) !== null}
         <PlanCard {store} {threadId} plan={planOf(part.name, part.input) ?? ''} />
       {:else if part.type === 'permission'}
