@@ -328,8 +328,18 @@
     let unlisten: (() => void) | undefined;
     let disposed = false;
     let stopTray: (() => void) | undefined;
+    const traySettings = async (tab: 'accounts' | 'limits') => {
+      const local = workspace.machines.find((machine) => machine.store.localCore)?.store;
+      if (!local) return;
+      await workspace.select(local);
+      if (workspace.active === local) local.showSettings(tab);
+    };
     void import('@tauri-apps/api/event').then(async ({ listen }) => {
-      const stop = await listen('tray://providers', () => store.showSettings('accounts'));
+      const stops = await Promise.all([
+        listen('tray://providers', () => void traySettings('accounts')),
+        listen('tray://limits', () => void traySettings('limits')),
+      ]);
+      const stop = () => stops.forEach((off) => off());
       if (disposed) stop(); else stopTray = stop;
     });
     void import('@tauri-apps/api/webview').then(async ({ getCurrentWebview }) => {

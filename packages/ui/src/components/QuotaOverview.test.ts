@@ -18,7 +18,7 @@ test('each subscription has its own name, limits, error and expansion beside the
   flushSync();
   const rows = [...document.querySelectorAll<HTMLElement>('[data-testid="quota-provider"]')];
   expect(rows.map(row => row.querySelector('.name')!.textContent)).toEqual(['Personal', 'Work']);
-  expect(rows.map(row => row.querySelector('.amount')!.textContent)).toEqual(['90% left', '10% left']);
+  expect(rows.map(row => row.querySelector('.amount')!.textContent)).toEqual(['90%', '10%']);
   expect(rows.map(row => row.querySelector('[data-logo]')!.getAttribute('data-logo'))).toEqual(['codex', 'codex']);
   expect(rows[0]!.textContent).not.toContain('unavailable');
   expect(rows[0]!.querySelector('[data-testid=quota-credits]')!.textContent).toContain('42 credits');
@@ -32,8 +32,28 @@ test('each subscription has its own name, limits, error and expansion beside the
   expect(rows[1]!.querySelector('.details')!.textContent).toContain('10% left');
 });
 
-test('a single default account shows the provider name and a custom label stays visible', async () => {
-  for (const [label, name] of [['Default', 'Codex'], ['Personal', 'Personal']]) {
+test('exhausted subscriptions put an available allowance first without claiming unconfirmed automatic spending', () => {
+  const balance = { kind: 'balance' as const, enabled: true, remaining: 42.5, limit: null, unlimited: false };
+  const variants = [
+    { ...quota('paid', 'Personal', 100), credits: balance },
+    { ...quota('unknown', 'Work', 100), credits: { ...balance, enabled: null } },
+    { ...quota('stale', 'Stale', 100), credits: balance, status: 'unavailable' as const },
+    { ...quota('empty', 'Empty', 100), credits: { ...balance, remaining: 0 } },
+    { ...quota('rounded', 'Almost exhausted', 99.99), credits: balance },
+  ];
+  component = mount(QuotaOverview, { target: document.body, props: { rows: variants, connect: () => {} } });
+  flushSync();
+  const paid = document.querySelector('[data-account-id="paid"]')!;
+  expect(paid.querySelector('.paid-label')!.textContent).toBe('Using credits');
+  expect(paid.querySelector('.paid-amount')!.textContent).toBe('42.5 credits');
+  expect(paid.querySelector('.amount')).toBeNull();
+  expect(paid.querySelector('.meters')).toBeNull();
+  expect(document.querySelector('[data-account-id="unknown"] .paid-label')!.textContent).toBe('Credits remaining');
+  for (const id of ['stale', 'empty', 'rounded']) expect(document.querySelector(`[data-account-id="${id}"] .paid`)).toBeNull();
+});
+
+test('profile labels stay visible even for Default; missing labels fall back to the provider', async () => {
+  for (const [label, name] of [['Default', 'Default'], ['Personal', 'Personal'], ['', 'Codex']]) {
     component = mount(QuotaOverview, { target: document.body, props: { rows: [quota('only', label!, 10)], connect: () => {} } });
     flushSync();
     expect(document.querySelector('.name')!.textContent).toBe(name);
