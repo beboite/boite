@@ -281,10 +281,14 @@ no account uses the default location, and the provider's default model and
 effort once it is connected. Default-location accounts keep their
 external login.
 Claude subscription quotas come from its OAuth usage endpoint using the account's
-credentials file. For Keychain logins or expired tokens, its CLI reads usage
+credentials file. For Keychain logins, expired tokens or HTTP responses with no
+usable quota data, its CLI reads usage
 with `skipBehaviors: true`, an empty prompt queue and no tools or hooks. That
 fallback may omit reset grants and paid usage details. Codex quotas come from
 `account/rateLimits/read`, without starting a conversation.
+An empty reading keeps the last known limits marked stale and retries after
+five minutes, just like a failed request. It does not imply that the account
+has no subscription. A disabled paid-usage flag alone does not count as quota data.
 
 These reads also collect banked resets. Claude requests `cedar_ember=1` on
 its GET usage request with the user agent `claude-cli/<version>`, the installed

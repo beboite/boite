@@ -5,7 +5,8 @@ import { claudeQuotaDetails, codexQuotaDetails, museQuotaReading } from '../src/
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { codexQuotaError } from '../src/drivers/codex/models.ts';
-import { startTestCore, type TestCore } from './harness.ts';
+import type { QueryFn } from '../src/drivers/claude/query.ts';
+import { scriptedClaude, startTestCore, type TestCore } from './harness.ts';
 let harness: TestCore | undefined;
 afterEach(async () => { await harness?.stop(); harness = undefined; });
 
@@ -35,9 +36,54 @@ test('Claude collects resets and the budget with one GET against the isolated lo
     expect(row).toMatchObject({ status: 'ready', resetCredits: { availableCount: 1, nextExpiresAt: null },
       credits: { kind: 'budget', enabled: true, remaining: 75, limit: 100 } });
     expect(fetcher).toHaveBeenCalledTimes(1);
+    // A spending budget is usable quota data even when subscription windows are absent.
+    fetcher.mockResolvedValue(Response.json({ extra_usage: { is_enabled: true, monthly_limit: 100, used_credits: 25 } }));
+    harness.core.quotas.invalidate();
+    expect((await harness.core.quotas.list()).find((row) => row.accountId === account.id)).toMatchObject({
+      status: 'ready', windows: [], credits: { remaining: 75, limit: 100 },
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
   } finally { fetcher.mockRestore(); accounts.mockRestore(); version.mockRestore(); }
   expect(claudeUsageAgent(null)).toEqual({});
   expect(claudeUsageAgent('2.1\r\nX: y')).toEqual({});
+});
+
+test('an empty Claude HTTP response falls back to the same account CLI without sending a prompt', async () => {
+  harness = await startTestCore();
+  scriptedClaude(harness);
+  const account = harness.core.accounts.add({ providerId: 'claude', label: 'Fixture' });
+  const directory = harness.core.accounts.accountEnv(account, harness.core.providers.require('claude'))['CLAUDE_CONFIG_DIR']!;
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'fixture-token' } }));
+  const accounts = spyOn(harness.core.accounts, 'list').mockReturnValue([account]);
+  const fetcher = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ five_hour: null, seven_day: null }));
+  const sdk = await import('@anthropic-ai/claude-agent-sdk');
+  const prompts: unknown[] = [];
+  let closed = false;
+  const query = spyOn(sdk, 'query').mockImplementation(({ prompt, options }) => {
+    expect(options?.env?.['CLAUDE_CONFIG_DIR']).toBe(directory);
+    void (async () => { for await (const value of prompt as AsyncIterable<unknown>) prompts.push(value); })();
+    return {
+      usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => ({ rate_limits_available: true,
+        rate_limits: { five_hour: { utilization: 42 }, seven_day: { utilization: 7 } } }),
+      close: () => { closed = true; },
+    } as unknown as ReturnType<QueryFn>;
+  });
+  try {
+    let calls = 0;
+    for (const response of [{ five_hour: null, seven_day: null }, { extra_usage: { is_enabled: false } }]) {
+      fetcher.mockResolvedValue(Response.json(response));
+      harness.core.quotas.invalidate();
+      closed = false;
+      const row = (await harness.core.quotas.list()).find((row) => row.accountId === account.id)!;
+      expect(row.status).toBe('ready');
+      expect(row.windows.map((window) => window.usedPercent)).toEqual([42, 7]);
+      expect(fetcher).toHaveBeenCalledTimes(++calls);
+      expect(query).toHaveBeenCalledTimes(calls);
+      expect(closed).toBe(true);
+      expect(prompts).toEqual([]);
+    }
+  } finally { query.mockRestore(); fetcher.mockRestore(); accounts.mockRestore(); }
 });
 
 test('Codex trusts the total reset count when details are partial and never infers paid activation', () => {
@@ -205,8 +251,10 @@ test('a failed read after an invalidation shows the last good reading as stale u
   harness = await startTestCore();
   const account = harness.core.accounts.add({ providerId: 'claude', label: 'Default' });
   let failure: string | null = null;
+  let empty = false;
   const store = new QuotaStore(harness.core, async () => {
     if (failure) throw new Error(failure);
+    if (empty) return { windows: [] };
     return { windows: [{ id: 'five_hour', label: '5 hours', usedPercent: 40, resetsAt: null }],
       resetCredits: { availableCount: 2, nextExpiresAt: null },
       credits: { kind: 'budget' as const, enabled: true, remaining: 75, limit: 100, unlimited: false } };
@@ -219,6 +267,13 @@ test('a failed read after an invalidation shows the last good reading as stale u
   const stale = (await store.list()).find((q) => q.accountId === account.id)!;
   expect(stale).toMatchObject({ status: 'unavailable', windows: good.windows, checkedAt: good.checkedAt, error: failure,
     resetCredits: good.resetCredits, credits: good.credits });
+  failure = null; empty = true;
+  harness.core.bus.emit('providers.updated', harness.core.providers.list());
+  const missing = (await store.list()).find((q) => q.accountId === account.id)!;
+  expect(missing).toMatchObject({ status: 'unavailable', windows: good.windows, checkedAt: good.checkedAt,
+    resetCredits: good.resetCredits, credits: good.credits,
+    error: 'No subscription usage limits were returned. Retrying in five minutes.' });
+  empty = false; failure = 'fixture offline';
   // Signed in as someone else: the old reading is not theirs.
   const [first, second] = [{ ...account, identity: 'a@example.com' }, { ...account, identity: 'b@example.com' }];
   harness.core.bus.emit('accounts.updated', first);
