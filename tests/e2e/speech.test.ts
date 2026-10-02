@@ -58,7 +58,7 @@ async function type(value: string) {
 async function leaveSettings() {
   if (await page.evaluate(`!!document.querySelector('${id('settings-back')}')`)) await page.click(id('settings-back'));
   else {
-    await page.click(id('mobile-conversations'));
+    await mobileAction(page, 'mobile-conversations');
     await page.click(id('mobile-new'));
   }
   await page.waitFor(`document.querySelector('${id('composer-input')}')`);
@@ -229,7 +229,7 @@ test('device voice settings select and test the microphone, stop capture, and pe
 }, 30_000);
 
 test('Appearance hides Worktree on desktop and phone while preserving the draft choice', async () => {
-  await page.click(id('mobile-new'));
+  await mobileAction(page, 'mobile-menu-new');
   await type('Preserve this worktree draft.');
   await page.click(id('composer-options'));
   if (await page.evaluate(`document.querySelector('${id('composer-options-worktree')}').getAttribute('aria-pressed') === 'false'`)) await page.click(id('composer-options-worktree'));
