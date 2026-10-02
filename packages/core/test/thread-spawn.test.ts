@@ -158,9 +158,10 @@ test('a started thread can get a worktree of its own, and a folder without git r
       expect(await mismatch).toMatchObject({ rpc: { message: 'agent.spawn.requestId was already used for different content', data: { field: 'requestId' } } });
       expect((await owner.call('agent.spawn', params)).thread.id).toBe(one.thread.id);
       expect((await owner.call('agent.spawn', nextParams)).thread.id).toBe(next.thread.id);
+      // Establish the earlier archive before sending the spawn request.
+      expect((await owner.call('threads.archive', { threadId: other.id })).archived).toBe(true);
       const beforeArchive = h.core.journal.listThreads().length;
       const refused = owner.call('agent.spawn', { threadId: other.id, project: caller.projectId!, prompt: 'Do not create after an earlier archive', requestId: 'archive-before-create' }).catch((error: unknown) => error);
-      await owner.call('threads.archive', { threadId: other.id });
       expect(await refused).toMatchObject({ rpc: { message: 'an archived thread cannot start threads' } });
       expect(h.core.journal.listThreads()).toHaveLength(beforeArchive);
     } finally {
