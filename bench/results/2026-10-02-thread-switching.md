@@ -65,16 +65,24 @@ return must paint within 500 ms despite a snapshot delayed by 750 ms.
 
 | Return | Painted content | Position drift after synchronization |
 | --- | ---: | ---: |
-| Desktop, 1280 x 900 | 118.5 ms | 0.0 px |
-| Desktop to phone, 390 x 844 | 262.4 ms | -0.3 px |
-| Phone to phone | 111.6 ms | 0.0 px |
-| Phone to desktop | 159.8 ms | 0.3 px |
+| Desktop, 1280 x 900 | 123.9 ms | 0.0 px |
+| Desktop to phone, 390 x 844 | 223.8 ms | 0.3 px |
+| Phone to phone | 186.5 ms | 0.0 px |
+| Phone to desktop | 251.6 ms | 0.3 px |
 
 Desktop and phone captures were opened and inspected. The broader run of
 thread switching, mobile navigation, scroll following, chat delivery and
 message editing passed 30 scenarios, including paired-phone editing. Native
 desktop shells, physical phones, deployed clients and live providers were not
 tested.
+
+The production check was repeated after the review fixes at 14:14 UTC. It
+also replaces only the suffix of an expanded output, with its length, status
+and preview unchanged, then verifies that same-thread revalidation retrieves
+the revised full text. Three store regressions failed before the fixes:
+terminal NotFound/Refused invalidates cached reading, with or without a previous
+thread, and a compact prefix cannot certify a previously hydrated output.
+The final affected UI run passed 129 scenarios.
 
 ## Combining approaches after the independent pass
 

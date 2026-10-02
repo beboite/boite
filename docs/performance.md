@@ -211,6 +211,8 @@ instead of arriving after it as a second copy.
   `messages.toolOutput`. Inputs, diffs, documents and running tools remain
   complete. Older cores that ignore the preview option still return full output;
   disclosures fall back to their existing history methods if needed.
+  An expanded output refreshes after compact revalidation: matching preview
+  prefixes cannot prove that the omitted text stayed unchanged.
 - `threads.get` takes `after`, a message the client already holds. The answer
   then starts at that message and says so in `messagesFrom`; the UI keeps what
   it had before it. A reconnect to a quiet thread costs one message instead of

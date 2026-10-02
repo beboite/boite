@@ -295,7 +295,13 @@ export class Threads {
       }
     } catch (error) {
       if (newest()) {
-        if (!loaded && previousThread && error instanceof RpcFailure && (error.code === RpcErrorCode.NotFound || error.code === RpcErrorCode.Refused)) this.#show(previousThread, navigate);
+        if (!loaded && error instanceof RpcFailure && (error.code === RpcErrorCode.NotFound || error.code === RpcErrorCode.Refused)) {
+          if (previousThread && previousThread.id !== threadId) this.#show(previousThread, navigate);
+          else this.openThread = null;
+          // Rollback can remember the rejected target: discard it afterwards.
+          this.readingThreads.delete(threadId);
+          this.readingPositions.delete(threadId);
+        }
         this.ctx.fail(error);
       }
     } finally {

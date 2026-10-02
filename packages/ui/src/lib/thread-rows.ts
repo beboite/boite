@@ -119,20 +119,13 @@ function sameValue(a: unknown, b: unknown): boolean {
   return left.every(key => Object.hasOwn(b, key) && sameValue(Reflect.get(a, key), Reflect.get(b, key)));
 }
 
-/** Keep unchanged messages, expanded outputs and turns through background revalidation. */
+/** Keep unchanged messages and turns; a preview cannot certify a previously loaded suffix. */
 export function reconcileThread(held: Thread, fresh: Thread): Thread {
   const messages = new Map(held.messages.map(message => [message.id, message]));
   fresh.messages = fresh.messages.map(message => {
     const previous = messages.get(message.id);
     if (!previous) return message;
     if (previous === message) return previous;
-    message.parts = message.parts.map((part, index) => {
-      const old = previous.parts[index];
-      if (part.type !== 'tool' || !part.outputDeferred || old?.type !== 'tool' || old.outputDeferred || old.toolId !== part.toolId || old.status !== part.status || old.finishedAt !== part.finishedAt || !old.output?.startsWith(part.output ?? '')) return part;
-      const full = { ...part, output: old.output };
-      delete full.outputDeferred;
-      return full;
-    });
     return sameValue(previous, message) ? previous : message;
   });
   const turns = new Map(held.turns.map(turn => [turn.id, turn]));

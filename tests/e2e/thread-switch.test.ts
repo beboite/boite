@@ -16,7 +16,7 @@ test('production desktop and phone restore cached reading before a slow core rep
     const { threadId, accountId } = await echoThread(harness, client, 'Long conversation');
     const projectId = harness.core.threads.require(threadId).projectId!;
     const other = await client.call('threads.create', { projectId, providerId: 'echo', accountId, title: 'Other conversation' });
-    const output = 'Complete command output\n'.repeat(80_000);
+    const output = 'Complete command output\n'.repeat(80_000) + 'before';
     harness.core.journal.append({ type: 'message.started', threadId, version: 1, payload: {} }, () => {
       harness.core.journal.putTurn({ id: 'history-turn', threadId, status: 'done', queuedAt: 1, startedAt: 1, finishedAt: 2, usage: null, error: null });
       for (let index = 0; index < 220; index++) harness.core.journal.putMessage({ id: `reading-${index}`, threadId, turnId: 'history-turn', role: index % 2 ? 'assistant' : 'user', state: 'complete', createdAt: index,
@@ -42,6 +42,14 @@ test('production desktop and phone restore cached reading before a slow core rep
     expect(await page.evaluate('!!document.querySelector("[data-testid=tool-output]")')).toBe(false);
     await page.click('[data-testid="tool-toggle"]');
     await page.waitFor(`document.querySelector('[data-testid="tool-output"]')?.textContent.length === ${output.length}`);
+    // A provider may revise only the unseen suffix after marking its tool done.
+    const revised = harness.core.journal.getMessage('reading-219')!;
+    if (revised.parts[0]?.type !== 'tool') throw new Error('fixture needs a tool');
+    revised.parts[0].output = output.slice(0, -6) + 'after!';
+    harness.core.journal.putMessage(revised);
+    await open(threadId, false);
+    await page.waitFor(`document.querySelector('[data-testid="tool-output"]')?.textContent.endsWith('after!')`);
+    expect(await page.evaluate('document.querySelector("[data-testid=tool-output]")?.textContent.length')).toBe(output.length);
     await page.click('[data-testid="tool-toggle"]');
     await page.evaluate(frames);
     let phoneView = false;

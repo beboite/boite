@@ -229,3 +229,65 @@ test('a cached disclosure can read its output from a core without the new tool m
     expect(spy.mock.calls.some(([method]) => method === 'messages.list' || method === 'threads.get')).toBe(true);
   } finally { spy.mockRestore(); store.detach(); client.close(); }
 });
+
+test.each([
+  { code: RpcErrorCode.NotFound, previous: 't-bench' },
+  { code: RpcErrorCode.Refused, previous: null }
+])('a terminal $code invalidates cached reading with previous thread $previous', async ({ code, previous }) => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store(); store.attach(client); await store.connect();
+  await store.open('t-trace');
+  await store.open('t-bench');
+  if (!previous) store.openThread = null;
+  store.readingPositions.set('t-trace', { top: 120, pinned: false, heights: new Map() });
+  const call = client.call.bind(client);
+  let rejected = true;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'threads.get' && (params as { threadId: string }).threadId === 't-trace') {
+      if (rejected) throw new RpcFailure({ code, message: 'history unavailable' });
+      await gate;
+    }
+    return call(method, params);
+  });
+  let retry: Promise<void> | undefined;
+  try {
+    await store.open('t-trace');
+    expect(store.openThread?.id ?? null).toBe(previous);
+    expect(store.readingPositions.has('t-trace')).toBe(false);
+    rejected = false;
+    retry = store.open('t-trace');
+    expect(store.openThread!.messages).toHaveLength(0);
+    release(); await retry;
+  } finally { release(); await retry; spy.mockRestore(); store.detach(); client.close(); }
+});
+
+test('a compact refresh cannot certify a hydrated output from its matching prefix', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store(); store.attach(client); await store.connect();
+  await store.open('t-trace');
+  const message = store.openThread!.messages.find(message => message.parts.some(part => part.type === 'tool'))!;
+  const part = message.parts.find(part => part.type === 'tool')!;
+  if (part.type !== 'tool') throw new Error('fixture needs a tool');
+  const prefix = 'command output\n'.repeat(2000);
+  part.output = prefix + 'before'; part.status = 'done'; part.finishedAt = 123;
+  const call = client.call.bind(client);
+  const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'messages.toolOutput') return { output: prefix + 'after!' } as never;
+    if (method !== 'threads.get') return call(method, params);
+    const thread = await call('threads.get', { threadId: 't-trace', compactTools: true });
+    const tool = thread.messages.find(row => row.id === message.id)!.parts.find(item => item.type === 'tool' && item.toolId === part.toolId)!;
+    if (tool.type !== 'tool') throw new Error('fixture needs a tool');
+    tool.output = prefix.slice(0, 1024); tool.outputDeferred = true; tool.status = 'done'; tool.finishedAt = 123;
+    return thread;
+  });
+  try {
+    await store.open('t-trace', false);
+    const fresh = store.openThread!.messages.find(row => row.id === message.id)!.parts.find(item => item.type === 'tool' && item.toolId === part.toolId)!;
+    expect(fresh).toMatchObject({ outputDeferred: true });
+    await store.loadToolOutput('t-trace', message.id, part.toolId);
+    expect(fresh).toMatchObject({ output: prefix + 'after!' });
+    expect(fresh).not.toHaveProperty('outputDeferred');
+  } finally { spy.mockRestore(); store.detach(); client.close(); }
+});

@@ -144,6 +144,7 @@
   let loading = $state(false);
   let loadError = $state<string | null>(null);
   $effect(() => {
+    if (!outputDeferred) attempted = false;
     if (shown) built = true;
     if (!shown || !outputDeferred || !loadOutput || attempted) return;
     attempted = true;
