@@ -54,7 +54,11 @@ test('a ticket cannot read a replacement directory outside its project', async (
   writeFileSync(join(outside, 'image.bin'), 'outside file');
   const content = await owner.call('files.read', { threadId, path: 'media/image.bin' });
   if (content.kind === 'text') throw new Error('expected a ticket');
-  expect((await fetch(`${core.url}${content.url}`)).status).toBe(200);
+  const response = await fetch(`${core.url}${content.url}`);
+  expect(response.status).toBe(200);
+  // Finish the transfer before replacing its directory: Windows can keep the
+  // served file open while the response body is still being streamed.
+  expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array([0, 1]));
   renameSync(folder, join(cwd, 'original-media'));
   symlinkSync(outside, folder, 'junction');
   expect((await fetch(`${core.url}${content.url}`)).status).toBe(404);
