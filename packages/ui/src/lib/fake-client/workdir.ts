@@ -128,6 +128,20 @@ function checkSurface(ctx: FakeContext, cwd: string, surface: PanelSurface): Pan
 export function workdirMethods(ctx: FakeContext) {
   const snapshots = new Map<string, ArtifactContent>();
   return {
+    'artifacts.preview': async ({ threadId, path }) => {
+      const thread = ctx.thread(threadId);
+      if (thread.archived) throw refusal('artifacts.preview needs an active thread');
+      const relative = inside(ctx, thread.cwd, path, 'artifacts.preview path', 'file');
+      if (!/\.html?$/i.test(relative)) throw refusal('artifacts.preview path must be an HTML file');
+      const url = `http://preview.invalid/${encodeURIComponent(threadId)}/${encodeURIComponent(relative)}`;
+      ctx.emitToThread(threadId, 'panel.requested', { threadId, surface: { kind: 'browser', url }, at: ctx.now() });
+      return { url, shown: ctx.bus.subscribed.has(threadId) };
+    },
+    'artifacts.previewClose': async ({ threadId, path }) => {
+      const thread = ctx.thread(threadId);
+      inside(ctx, thread.cwd, path, 'artifacts.previewClose path');
+      return { ok: true as const };
+    },
     'artifacts.read': async ({ threadId, messageId, artifactId }) => {
       const message = ctx.thread(threadId).messages.find(m => m.id === messageId);
       const value = snapshots.get(artifactId);

@@ -64,6 +64,8 @@ boite projects                   the projects added to Boite
 boite projects add <folder> [--name <name>]
                                  add an existing folder as a project
 boite attach <file>               publish a file snapshot in chat, at most 512 MB
+boite preview <file.html>          open a local HTML artifact and its neighbouring assets
+boite preview-close <file.html>    stop serving that preview
 boite show <file>[:line]         open the file in the panel, at that line
 boite diff [file]                open the changes surface, or one file's diff
 boite browse <url>               open the url in the panel's browser (http, https)

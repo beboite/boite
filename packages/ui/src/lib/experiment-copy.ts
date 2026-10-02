@@ -12,6 +12,7 @@ export function experimentCopy(): Record<ExperimentId, { title: string; hint: st
     'session-import': strings.experiments.sessionImport,
     'prompt-cache': strings.experiments.promptCache,
     'chat-artifacts': strings.experiments.chatArtifacts,
+    'open-chat-links': strings.experiments.openChatLinks,
     'preview-comments': strings.experiments.previewComments,
     'resident-agents': strings.experiments.residentAgents,
     whip: strings.experiments.whip

@@ -4,6 +4,22 @@ Enable these separately in Settings > Experiments. Switches are off by default
 and belong to this client device. They do not change another machine's settings.
 A phone has its own Experiments row under Settings, This phone.
 
+## Open chat links
+
+`open-chat-links` enables the same rich link parsing as `chat-artifacts`:
+Markdown file links, bare web URLs, absolute paths, `file:///` links and paths
+inside inline code. Either switch enables this parsing; enabling both adds no
+further link types.
+
+On the owning local desktop, this switch also makes an explicit click open a
+file or folder in its associated application, including Windows shortcuts and
+absolute paths outside the checkout. On a remote machine or phone, links still
+use the inline preview and its existing owner and working-directory checks.
+They never open a file on the device displaying the conversation.
+
+Pages in the integrated browser and agent RPCs cannot invoke the native action.
+Network and device paths are refused before and after path resolution.
+
 ## Whip
 
 A small Whip icon sits beside the other controls in the sidebar footer and

@@ -1694,6 +1694,7 @@ export const strings = {
   },
 
   experiments: {
+    openChatLinks: { title: 'Open chat links in their apps', hint: 'On this desktop, clicking a local file or folder opens its default app, including shortcuts and files outside the project. Only links from this computer are opened.' },
     whip: {
       title: 'Whip',
       hint: 'An animated whip follows your pointer or finger. Flick to crack it, click or tap to drop it',

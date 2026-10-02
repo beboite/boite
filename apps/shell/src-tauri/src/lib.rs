@@ -132,6 +132,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             local_core::core_endpoint,
             local_files::open_local_file,
+            local_files::open_chat_file,
             attachments::save_attachment,
             attachment_download::save_attachment_url,
             window::shell_ready,

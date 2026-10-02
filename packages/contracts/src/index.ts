@@ -1698,7 +1698,7 @@ export type PanelSurface =
   | { kind: 'file'; path: string; line?: number }
   | { kind: 'files'; path?: string }
   | { kind: 'diff'; path?: string }
-  | { kind: 'browser'; url: string }
+  | { kind: 'browser'; url: string; artifact?: { path: string; port: number } }
   | { kind: 'trace' }
   | { kind: 'tasks' }
   | { kind: 'workflow'; runId?: string };
@@ -2362,6 +2362,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   /** Explicitly publish a bounded file snapshot from this thread's working directory. */
   'artifacts.publish': { params: { threadId: ThreadId; path: string }; result: Message };
   'artifacts.read': { params: { threadId: ThreadId; messageId: MessageId; artifactId: string; renew?: string }; result: ArtifactContent };
+  'artifacts.preview': { params: { threadId: ThreadId; path: string }; result: { url: string; shown: boolean } };
+  'artifacts.previewClose': { params: { threadId: ThreadId; path: string }; result: { ok: true } };
   /** The agent's task list, whole, as the tasks surface shows it. */
   'threads.tasks.set': { params: { threadId: ThreadId; tasks: AgentTask[] }; result: ThreadActivity };
   'threads.tasks.get': { params: { threadId: ThreadId }; result: AgentTask[] };

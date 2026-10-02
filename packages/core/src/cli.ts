@@ -43,6 +43,8 @@ export const USAGE = `usage: boite <command> [args] [--json]
   show <file>[:line]             open a file in the panel, at a line
   diff [file]                    open the changes, or one file's diff
   browse <url>                   open a url in the panel's browser
+  preview <file.html>             open a local HTML artifact with its assets
+  preview-close <file.html>       stop serving a local HTML preview
   open trace|tasks|changes|files|workflow [dir|run-id]
   status                         git status of the working directory
   server check|update|cancel      check or update this server, or cancel the
@@ -405,7 +407,21 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       return;
     }
     case 'browse': {
-      await opened({ kind: 'browser', url: want(0, 'a url') });
+      const target = want(0, 'a url or an HTML file');
+      if (!/^https?:/i.test(target) && /\.html?$/i.test(target)) {
+        const result = await client.call('artifacts.preview', { threadId, path: absolute(io.cwd, target) });
+        print([`preview: ${result.url}`, `shown: ${result.shown}`], result);
+      } else await opened({ kind: 'browser', url: target });
+      return;
+    }
+    case 'preview': {
+      const result = await client.call('artifacts.preview', { threadId, path: absolute(io.cwd, want(0, 'an HTML file')) });
+      print([`preview: ${result.url}`, `shown: ${result.shown}`], result);
+      return;
+    }
+    case 'preview-close': {
+      const result = await client.call('artifacts.previewClose', { threadId, path: absolute(io.cwd, want(0, 'an HTML file')) });
+      print(['preview closed'], result);
       return;
     }
     case 'open': {

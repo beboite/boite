@@ -15,3 +15,9 @@ export async function openLocalFile(directory: string, path: string): Promise<vo
   const { invoke } = await import('@tauri-apps/api/core');
   await invoke('open_local_file', { directory, path });
 }
+
+/** Explicit clicks with the desktop experiment enabled; absolute paths may leave the checkout. */
+export async function openChatFile(directory: string, path: string): Promise<void> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('open_chat_file', { directory, path });
+}

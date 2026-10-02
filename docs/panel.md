@@ -56,8 +56,32 @@ other than 100% has a reset button.
 `lib/browser-bounds.ts` observes layout changes and follows finite layout
 animations, rather than measuring the page slot on every idle frame.
 
+### Local HTML artifacts
+
+`boite preview reports/index.html` opens a generated page in the integrated
+browser, including relative CSS, JavaScript, images and other public web assets
+under that HTML file's directory. `boite browse reports/index.html` does the
+same. The agent guide includes the command for every provider.
+
+Each entry point has its own HTTP origin and an unguessable URL. Preview scripts
+cannot read the core UI's storage or connect to its authenticated WebSocket.
+Paths outside the artifact directory, dotfiles, non-web file types and escaping
+symlinks are refused. Files are read live, so reload reflects edits.
+
+`boite preview-close reports/index.html` stops its server. Archiving or removing
+the thread and shutting down the core also close previews. Up to 16 can be open
+at once. Opening another evicts the least recently used preview; reopening a
+preview or fetching one of its assets updates its recency. Run `preview` again
+after eviction or a core restart to obtain a new URL. Remote
+desktop clients need a direct connection to the preview's additional HTTP port;
+a proxy that forwards only the core port does not forward artifact previews.
+
+### Editing files
+
 A text file is edited in place and saved with the Save button or the platform's
-save chord through `files.write`. An edit not saved yet stays with its tab
+save chord through `files.write`.
+
+An edit not saved yet stays with its tab
 while another tab, another thread or a hidden panel unmounts the editor, in
 memory only, and closing that tab asks first. An image opens fitted to the panel; the wheel zooms
 around the pointer, a drag pans, the bar has fit, 100% and the zoom steps, and

@@ -81,6 +81,8 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['questions.ask', 'a question card on its own thread that it does not wait on; the answer comes back as a message'],
   ['artifacts.publish', 'explicitly sharing a bounded snapshot from its own working directory in its own conversation'],
   ['artifacts.read', 'reading back only a published snapshot belonging to its own conversation'],
+  ['artifacts.preview', 'showing an HTML artifact and its neighbouring assets inside its own working directory, on an isolated origin'],
+  ['artifacts.previewClose', 'closing only an HTML preview belonging to its own conversation'],
   ['threads.tasks.set', 'the plan the tasks surface draws, from an agent whose protocol carries no todo tool'],
   ['threads.tasks.get', 'the same plan read back, so a new process continues the list it did not write'],
   ['todos.list', 'the project cards, shared with the other threads of the project'],
