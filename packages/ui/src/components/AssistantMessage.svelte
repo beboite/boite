@@ -7,7 +7,6 @@
   import { formatTokens } from '../lib/tokens';
   import { promptText, visibleAnswer } from '../lib/message-display';
   import { isNamedModel } from '../lib/model-order';
-  import type { TurnProgress } from '../lib/turn-progress.svelte';
   import { planOf } from '../lib/plan';
   import PermissionCard from './PermissionCard.svelte';
   import PlanCard from './PlanCard.svelte';
@@ -22,7 +21,7 @@
 
   /**
    * An assistant or system message in the timeline: the model that wrote it,
-   * the turn's thinking where this message hosts it, then every part it carries.
+   * then every part it carries, including each reasoning step in order.
    * `signedOut` is the thread's account when it is signed out, so an error can
    * carry the way back in.
    */
@@ -30,7 +29,6 @@
     store,
     threadId,
     message,
-    progress,
     signedOut,
     showModel,
     memoryEvents = []
@@ -38,7 +36,6 @@
     store: Store;
     threadId: string;
     message: Message;
-    progress: TurnProgress;
     signedOut: Account | null;
     showModel: boolean;
     memoryEvents?: MemoryEvent[];
@@ -50,7 +47,6 @@
 
   const execution = $derived(store.openThread?.turns.find((turn) => turn.id === message.turnId)?.execution);
   const caretAt = $derived(message.state === 'streaming' ? lastTextIndex(message) : -1);
-  const thought = $derived(progress.thought(message.turnId));
   const runs = $derived(memoryPartRuns(message.parts, memoryEvents));
   const isBackground = (toolId: string) => store.openThread?.background?.some((task) => task.toolId === toolId) ?? false;
 </script>
@@ -64,7 +60,6 @@
 {#if message.role === 'system'}
   <div class="system-attribution" data-testid="message-system">{strings.chat.system}</div>
 {/if}
-{#if thought?.host === message.id && (thought.live || thought.text.trim().length > 0)}<ThinkingPart text={thought.text} live={thought.live} />{/if}
 <div class="parts">
   {#each runs as run (run.kind === 'memory' ? run.key : runKey(run))}
     {#if run.kind === 'memory'}
@@ -84,6 +79,8 @@
           <Prose text={shownText} live={index === caretAt && part.complete !== true} {store} {threadId} />
         {/if}
 
+      {:else if part.type === 'thinking' && (part.text.trim().length > 0 || part.startedAt !== undefined || (message.state === 'streaming' && index === message.parts.length - 1))}
+        <ThinkingPart text={part.text} live={message.state === 'streaming' && index === message.parts.length - 1 && part.finishedAt == null} startedAt={part.startedAt ?? null} finishedAt={part.finishedAt ?? null} />
       {:else if part.type === 'file' || part.type === 'artifact'}
         <ChatFile file={part} {store} {threadId} messageId={message.id} />
       {:else if part.type === 'tool' && planOf(part.name, part.input) !== null}

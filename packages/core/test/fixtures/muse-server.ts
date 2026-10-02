@@ -80,8 +80,9 @@ function batchSteerOutput(): void {
   setImmediate(() => {
     const lines = outputBatch ?? [];
     outputBatch = null;
-    process.stdout.write(lines.join(''));
+    // The consumer can finish the turn as soon as the pipe receives this batch.
     log('steer response and output batched');
+    process.stdout.write(lines.join(''));
   });
 }
 

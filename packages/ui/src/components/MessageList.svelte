@@ -786,7 +786,7 @@
           {:else if message.role === 'user'}
             <UserMessage {store} {message} {turn} {progress} {expanded} ontoggle={toggleImage} edit={atRest ? () => editMessage(message) : undefined} />
           {:else}
-            <AssistantMessage {store} {threadId} {message} {progress} {signedOut} showModel={firstAssistantInTurn.get(message.turnId) === message.id} memoryEvents={memoryPlacement.inline.get(message.id) ?? []} />
+            <AssistantMessage {store} {threadId} {message} {signedOut} showModel={firstAssistantInTurn.get(message.turnId) === message.id} memoryEvents={memoryPlacement.inline.get(message.id) ?? []} />
           {/if}
           {#if turn && lastInTurn.get(turn.id) === message.id && filesByTurn.has(turn.id)}
             <TurnFiles {store} {...filesByTurn.get(turn.id)!} />

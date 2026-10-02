@@ -78,9 +78,33 @@ export class TurnContexts {
     const partProgress = new Map<string, { phase: import('@boite/contracts').ThreadProgress['phase']; detail: string | null }>();
     const progress = (phase: import('@boite/contracts').ThreadProgress['phase'], detail: string | null = null): void =>
       this.threads.progress.report(threadId, turn.id, phase, detail);
+    const thinking = new Map<MessageId, { index: number; startedAt: number }>();
+    const publishPart = (messageId: MessageId, partIndex: number, part: MessagePart): void => {
+      this.core.journal.append(
+        { type: 'message.part', threadId, version: 1, payload: { messageId, partIndex, part } },
+        () => this.core.journal.setMessagePart(messageId, partIndex, part),
+      );
+      this.core.bus.emit('message.part', { threadId, messageId, partIndex, part });
+    };
+    const finishThinking = (messageId: MessageId, nextIndex = Infinity): void => {
+      const active = thinking.get(messageId);
+      if (!active || nextIndex <= active.index) return;
+      thinking.delete(messageId);
+      const part = this.core.journal.getMessage(messageId)?.parts[active.index];
+      if (part?.type === 'thinking') publishPart(messageId, active.index, {
+        ...part, startedAt: active.startedAt, finishedAt: Date.now(),
+      });
+    };
     const stamp = (messageId: MessageId, partIndex: number, part: MessagePart): MessagePart => {
       if (part.type === 'question' && part.async === true && (part.answer ?? null) === null && this.threads.cards.questions.has(part.questionId)) {
         this.threads.cards.asyncCards.set(part.questionId, { threadId, messageId, partIndex, part });
+      }
+      if (part.type === 'thinking') {
+        const stored = this.core.journal.getMessage(messageId)?.parts[partIndex];
+        const startedAt = stored?.type === 'thinking' ? stored.startedAt ?? Date.now() : part.startedAt ?? Date.now();
+        const finishedAt = stored?.type === 'thinking' ? stored.finishedAt ?? part.finishedAt ?? null : part.finishedAt ?? null;
+        if (finishedAt === null) thinking.set(messageId, { index: partIndex, startedAt });
+        return { ...part, startedAt, finishedAt };
       }
       if (part.type !== 'tool') return part;
       const key = `${messageId}:${partIndex}`;
@@ -100,6 +124,7 @@ export class TurnContexts {
     interface Answer { role: MessageRole; segments: Segment[]; parts: Map<number, Slot> }
     const answers = new Map<MessageId, Answer>();
     const open = (role: MessageRole, after: number | undefined): MessageId => {
+      if (role === 'assistant') for (const messageId of thinking.keys()) finishThinking(messageId);
       const message: Message = {
         id: newId('msg_'),
         threadId,
@@ -118,6 +143,7 @@ export class TurnContexts {
     };
     const close = (segment: Segment, state: Message['state']): void => {
       if (!segment.open) return;
+      finishThinking(segment.id);
       segment.open = false;
       this.core.journal.append(
         { type: 'message.completed', threadId, version: 1, payload: { messageId: segment.id, state } },
@@ -172,6 +198,7 @@ export class TurnContexts {
         }
         if (slot) slot.length += text.length;
         const { messageId, partIndex } = route(driverId, driverIndex);
+        finishThinking(messageId, partIndex);
         const last = partProgress.get(`${messageId}:${partIndex}`);
         if (text.length) progress(last?.phase ?? 'working', last?.detail ?? null);
         this.core.journal.appendDelta(threadId, messageId, partIndex, text);
@@ -192,6 +219,7 @@ export class TurnContexts {
           slot.length = raw.text.length;
         }
         const { segment, messageId, partIndex } = route(driverId, driverIndex);
+        finishThinking(messageId, partIndex);
         const boundary = raw.type === 'tool' && raw.status !== 'running' && toolTimes.get(`${messageId}:${partIndex}`)?.finishedAt == null;
         const stamped = stamp(messageId, partIndex, raw);
         // The agent calls a compaction it was asked for `manual`; one the core asked for by itself is not the user's.
@@ -200,13 +228,7 @@ export class TurnContexts {
         const detail = part.type === 'tool' && part.status === 'running' ? part.name : null;
         partProgress.set(`${messageId}:${partIndex}`, { phase, detail });
         progress(phase, detail);
-        this.core.journal.append(
-          { type: 'message.part', threadId, version: 1, payload: { messageId, partIndex, part } },
-          () => {
-            this.core.journal.setMessagePart(messageId, partIndex, part);
-          },
-        );
-        this.core.bus.emit('message.part', { threadId, messageId, partIndex, part });
+        publishPart(messageId, partIndex, part);
         if (boundary) this.core.bus.emit('turn.toolCompleted', { threadId, turnId: turn.id, boundary: `${messageId}:${partIndex}` });
         if (segment && answer && segment !== answer.segments.at(-1)) closeIdle(segment);
       },

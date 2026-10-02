@@ -998,7 +998,7 @@ export type MessagePart =
   /** An immutable published file; resolve its bytes with artifacts.read, never as a disk path. */
   | { type: 'artifact'; id: string; mimeType: string; bytes: number; name: string }
   /** The model's reasoning as the provider streams it, folded in the UI. */
-  | { type: 'thinking'; text: string }
+  | { type: 'thinking'; text: string; startedAt?: Timestamp; finishedAt?: Timestamp | null }
   | {
       type: 'tool';
       toolId: string;

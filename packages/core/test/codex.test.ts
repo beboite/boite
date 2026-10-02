@@ -726,7 +726,7 @@ describe('codex driver', () => {
 
     const thread = await client.call('threads.get', { threadId });
     expect(thread.messages[1]?.parts).toEqual([
-      { type: 'thinking', text: 'thinking about it' },
+      { type: 'thinking', text: 'thinking about it', startedAt: expect.any(Number), finishedAt: expect.any(Number) },
       { type: 'text', text: 'the answer' },
     ]);
   });
@@ -932,7 +932,7 @@ describe('codex driver', () => {
     expect((await finished).status).toBe('done');
     const thread = await client.call('threads.get', { threadId });
     expect(thread.messages[1]?.parts).toEqual([
-      { type: 'thinking', text: 'thinking about it\n\n**Reading** the file\n\n**Editing** it' },
+      { type: 'thinking', text: 'thinking about it\n\n**Reading** the file\n\n**Editing** it', startedAt: expect.any(Number), finishedAt: expect.any(Number) },
       { type: 'text', text: 'the answer' },
     ]);
   });

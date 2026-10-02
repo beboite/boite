@@ -62,6 +62,7 @@ test('calls fold into runs that text, a question or a produced document breaks',
     tool('Read', { file_path: 'y' })
   ];
   expect(partRuns(parts)).toEqual([
+    { kind: 'part', index: 0 },
     { kind: 'tools', indices: [1, 3] },
     { kind: 'part', index: 4 },
     { kind: 'tools', indices: [5] },
@@ -82,6 +83,36 @@ test('successful file changes stand alone while failed attempts stay in their ru
     { kind: 'tools', indices: [0] },
     { kind: 'tools', indices: [1] },
     { kind: 'tools', indices: [2, 3, 4] }
+  ]);
+});
+
+test('reasoning between calls breaks their group and keeps both thinking steps visible', () => {
+  expect(partRuns([
+    { type: 'thinking', text: 'Inspecting' },
+    tool('Read', { file_path: 'a.ts' }),
+    { type: 'thinking', text: 'Checking' },
+    tool('Read', { file_path: 'b.ts' })
+  ])).toEqual([
+    { kind: 'part', index: 0 }, { kind: 'tools', indices: [1] },
+    { kind: 'part', index: 2 }, { kind: 'tools', indices: [3] }
+  ]);
+});
+
+test('empty legacy reasoning between calls stays invisible while timed and trailing steps keep their place', () => {
+  expect(partRuns([
+    tool('Read', { file_path: 'a.ts' }),
+    { type: 'thinking', text: '' },
+    { type: 'text', text: ' ' },
+    { type: 'thinking', text: ' ' },
+    tool('Read', { file_path: 'b.ts' }),
+    { type: 'thinking', text: '', startedAt: 1000, finishedAt: 2000 },
+    tool('Read', { file_path: 'c.ts' }),
+    { type: 'thinking', text: '' }
+  ])).toEqual([
+    { kind: 'tools', indices: [0, 4] },
+    { kind: 'part', index: 5 },
+    { kind: 'tools', indices: [6] },
+    { kind: 'part', index: 7 }
   ]);
 });
 

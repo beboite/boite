@@ -138,7 +138,7 @@ async function stream(
     threadId: thread.id,
     turnId: turn.id,
     role: 'assistant',
-    parts: [{ type: 'thinking', text: '' }],
+    parts: [{ type: 'thinking', text: '', startedAt: ctx.now(), finishedAt: null }],
     state: 'streaming',
     createdAt: ctx.now()
   };
@@ -160,6 +160,11 @@ async function stream(
     });
   }
 
+  const thought = message.parts[0];
+  if (thought?.type === 'thinking') {
+    thought.finishedAt = ctx.now();
+    ctx.emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex: 0, part: structuredClone(thought) });
+  }
   const textIndex = message.parts.length;
   message.parts.push({ type: 'text', text: '' });
   ctx.emitToThread(thread.id, 'message.part', {

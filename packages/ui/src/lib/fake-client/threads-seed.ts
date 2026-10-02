@@ -82,6 +82,8 @@ export function seedThreads() {
         parts: [
           {
             type: 'thinking',
+            startedAt: T0,
+            finishedAt: T0 + 4200,
             text: 'The table wants a row per process, so the question is what procs already reports and what the panel would have to ask for on top. Start with trace.get.'
           },
           {

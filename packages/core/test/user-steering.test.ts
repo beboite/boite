@@ -205,11 +205,15 @@ test('continued output follows published files while existing tools keep their o
   const latest = await owner.call('threads.get', { threadId });
   expect(latest.messages.at(-2)?.id).toBe(third.id);
   expect(latest.messages.at(-1)?.parts).toEqual([
-    { type: 'text', text: 'Review resumed' }, { type: 'thinking', text: ' another change' },
+    { type: 'text', text: 'Review resumed' }, { type: 'thinking', text: ' another change', startedAt: expect.any(Number), finishedAt: null },
   ]);
   expect(latest.messages.find(message => message.id === continued.id)?.parts).toEqual([
-    { type: 'text', text: 'Checking the next change', complete: true }, { type: 'thinking', text: 'Reviewing' },
+    { type: 'text', text: 'Checking the next change', complete: true }, { type: 'thinking', text: 'Reviewing', startedAt: expect.any(Number), finishedAt: expect.any(Number) },
   ]);
+  const previousThought = latest.messages.find(message => message.id === continued.id)?.parts[1];
+  const resumedThought = latest.messages.at(-1)?.parts[1];
+  if (previousThought?.type !== 'thinking' || resumedThought?.type !== 'thinking') throw new Error('missing routed reasoning');
+  expect(previousThought.finishedAt).toBeLessThanOrEqual(resumedThought.startedAt!);
   const completed = owner.next('message.completed', message => message.messageId === reply);
   emit.part(reply, 1, { type: 'tool', toolId: 'build', name: 'Bash', input: {}, output: 'ok', status: 'done' });
   expect((await completed).state).toBe('complete');

@@ -540,6 +540,12 @@ The letter's creation time shows its age in the app's language, updates every
 minute while visible and exposes the exact date and time on hover.
 `tests/e2e/collaboration-ui.test.ts` checks desktop and phone in both themes.
 
+Each reasoning block stays folded at its position in the timeline. The core
+records its first appearance and the next part or message completion for every
+driver. Its clock runs while active and retains the final duration after reload.
+Older and imported blocks without timing metadata show no guessed duration.
+`tests/e2e/readability.test.ts` checks these steps and durations at both widths.
+
 ### Theme colours
 
 Appearance stores light and dark palettes separately under
