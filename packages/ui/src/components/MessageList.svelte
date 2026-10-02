@@ -24,7 +24,7 @@
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
   import { glides } from '../lib/motion';
-  import { BottomGlide, PointerHold, typingKey, watchWheel, wheelsUp } from '../lib/timeline-follow';
+  import { BottomGlide, PointerHold, keysUp, typingKey, watchWheel, wheelsUp } from '../lib/timeline-follow';
   import { workspace } from '../lib/workspace.svelte';
 
   let {
@@ -198,12 +198,12 @@
     lifting = false;
   }
   function releaseNavigation(event?: KeyboardEvent) {
-    if (event && !typingKey(event)) pinned = false;
     releaseAnchor(); navigationTarget = null;
     if (promptTarget) pinned = false;
     promptTarget = null;
     stopLift();
     endGlide(false);
+    if (event && !typingKey(event)) { pinned = false; if (keysUp(event, viewport)) leftBottom = true; }
   }
   onDestroy(stopLift);
   const activePrompt = $derived.by(() => {
@@ -517,6 +517,7 @@
     scrolledHeight = height;
     // Pulled up by a finger or the scrollbar thumb, the list leaves the bottom as the wheel does.
     if (hold.held && box.scrollTop < scrollTop - 1) leftBottom = true;
+    const movedDown = box.scrollTop > scrollTop + 1;
     scrollTop = box.scrollTop;
     viewHeight = box.clientHeight;
     if (navigationTarget || promptTarget) return;
@@ -527,8 +528,7 @@
       if (distance > 1) return;
       endGlide(false);
     }
-    // Only the very bottom takes back a list the wheel took up.
-    if (distance <= 1) leftBottom = false;
+    if (distance <= 1 && movedDown) leftBottom = false;
     // A card shrinking can clamp scrollTop before new output grows the list again.
     pinned = !leftBottom && (atBottom(box) || (pinned && resized && !hold.held));
     if (restoringAnchor) pinned = false;
@@ -841,8 +841,8 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    /* Reserve only the space occupied by the activity overlay. Queued prompts
-       already take their own space in the composer below this viewport. */
+    overflow-anchor: none;
+    /* Reserve room for the activity overlay. Queued prompts live in the composer. */
     padding: 20px 20px calc(var(--dock-room, 0px) + 20px) var(--outline-room);
     overscroll-behavior: contain;
   }

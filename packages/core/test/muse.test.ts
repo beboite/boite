@@ -399,7 +399,10 @@ describe('muse driver', () => {
     expect(fakeLog()).toContain(`turn/steer ${JSON.stringify('> Which database?\n\nSQLite')} uuid=true`);
     expect(harness?.core.threads.deferred.deferredAnswers.has(threadId)).toBe(false);
     const thread = await client.call('threads.get', { threadId });
-    expect(textsOf(thread.messages.findLast(message => message.role === 'assistant')?.parts ?? [])).toEqual(['working heard: > Which database?\n\nSQLite']);
+    expect(thread.messages.map(message => [message.role, textsOf(message.parts)])).toEqual([
+      ['user', ['working [steer]']], ['assistant', ['working ']],
+      ['user', ['> Which database?\n\nSQLite']], ['assistant', ['heard: > Which database?\n\nSQLite']],
+    ]);
     const users = thread.messages.filter(message => message.role === 'user');
     expect(users).toHaveLength(2);
     expect(users[1]?.parts).toEqual([{ type: 'text', text: '> Which database?\n\nSQLite' }]);
