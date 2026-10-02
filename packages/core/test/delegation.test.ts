@@ -51,6 +51,7 @@ test('a CLI launched by a shell stays visible until its own exit, even with Boit
   });
   const shell: ProcessRecord = { threadId, pid: 7700, parentPid: process.pid, exe: 'pwsh.exe', commandLine: 'pwsh.exe -File review.ps1', startedAt: 100, exitedAt: null, exitCode: null, cpuMs: null, peakMemoryBytes: null, ioBytes: null };
   const child: ProcessRecord = { ...shell, pid: 7701, parentPid: shell.pid, exe: 'C:\\tools\\claude.exe', commandLine: '"C:\\tools\\claude.exe" --print --model claude-opus-5-5 --effort xhigh "Review the audit"', startedAt: 110 };
+  const live = spyOn(h.core.procs, 'liveOf').mockReturnValue([shell, child]);
   try {
     for (const record of [shell, child]) {
       h.core.journal.putProcess(record);
@@ -64,13 +65,30 @@ test('a CLI launched by a shell stays visible until its own exit, even with Boit
     const shellExit = { ...shell, exitedAt: 120, exitCode: 0 };
     h.core.journal.putProcess(shellExit);
     h.core.bus.emit('process.exited', shellExit);
+    live.mockReturnValue([child]);
     expect(h.core.delegation.get(threadId).nativeAgents[0]?.status).toBe('running');
     const exit = { ...child, exitedAt: 200, exitCode: 0 };
     h.core.journal.putProcess(exit);
     h.core.bus.emit('process.exited', exit);
+    live.mockReturnValue([]);
     expect(changed).toEqual([threadId, threadId]);
     expect((await owner.call('delegation.get', { threadId })).nativeAgents[0]).toMatchObject({ source: 'process', status: 'done', finishedAt: 200 });
-  } finally { off(); }
+  } finally { live.mockRestore(); off(); }
+});
+
+test('an unclosed CLI trace stays in history with unknown status after core restart', async () => {
+  const { h, threadId } = await setup();
+  const shell: ProcessRecord = { threadId, pid: 7800, parentPid: process.pid, exe: 'pwsh.exe', commandLine: 'pwsh.exe review.ps1', startedAt: 100, exitedAt: 120, exitCode: 0, cpuMs: null, peakMemoryBytes: null, ioBytes: null };
+  const child: ProcessRecord = { ...shell, pid: 7801, parentPid: shell.pid, exe: 'claude.exe', commandLine: 'claude.exe --print "Review"', startedAt: 110, exitedAt: null, exitCode: null };
+  for (const record of [shell, child]) h.core.journal.putProcess(record);
+  // The journal contains no exit, as when the previous core stopped abruptly.
+  await h.core.close();
+  const restarted = new Core({ dataDir: h.dataDir, token: h.token });
+  try {
+    expect(restarted.procs.liveOf(threadId)).toEqual([]);
+    expect(restarted.delegation.get(threadId).nativeAgents).toEqual([expect.objectContaining({ source: 'process', status: 'unknown' })]);
+    expect(restarted.journal.listProcesses(threadId, 10).find(record => record.pid === child.pid)?.exitedAt).toBeNull();
+  } finally { await restarted.close(); }
 });
 
 test('load ticks keep team snapshots quiet while semantic changes notify every subscribed member once', async () => {

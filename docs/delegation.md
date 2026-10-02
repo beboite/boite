@@ -52,6 +52,8 @@ the composer. Finishing the launch command or
 the parent turn does not complete the child: its own process exit settles its
 status. Results stay in the command output. Version checks and the conversation's
 own provider process do not appear as children.
+After a core restart, an old trace without an exit stays in history as Status
+unknown unless the current process registry confirms it is still running.
 
 Windows records descendant starts and exits through its process jobs. Linux and
 macOS record only direct processes, so a CLI launched inside another shell can

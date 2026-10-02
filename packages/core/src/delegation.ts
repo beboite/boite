@@ -165,7 +165,7 @@ export class Delegation {
     const letters = (threadId === root.id
       ? this.core.journal.db.query('SELECT data FROM delegation_messages WHERE root_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 100').all(root.id)
       : this.core.journal.db.query('SELECT data FROM delegation_messages WHERE root_id = ? AND (sender_id = ? OR recipient_id = ?) ORDER BY created_at DESC, rowid DESC LIMIT 100').all(root.id, threadId, threadId)) as LetterRow[];
-    return { rootThreadId: root.id, config: this.config(root.id), agents, nativeAgents: nativeAgents(this.core.journal, threadId, this.core.threads.agentState.background.get(threadId)), messages: letters.reverse().map(row => JSON.parse(row.data) as AgentLetter), turnsUsed: this.used(root.id), usage };
+    return { rootThreadId: root.id, config: this.config(root.id), agents, nativeAgents: nativeAgents(this.core.journal, threadId, this.core.threads.agentState.background.get(threadId), this.core.procs.liveOf(threadId)), messages: letters.reverse().map(row => JSON.parse(row.data) as AgentLetter), turnsUsed: this.used(root.id), usage };
   }
   private saveConfig(rootId: string, config: DelegationConfig): void { this.core.journal.setSetting(`delegation:${rootId}`, config); }
   configure(threadId: string, value: DelegationConfig): DelegationView {

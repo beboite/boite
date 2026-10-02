@@ -32,6 +32,8 @@ test('process agents exclude the parent provider, wrapper copies, version probes
   expect(collectProcessAgents([root, processRecord(), shell, child, processRecord({ pid: 5, parentPid: 3, commandLine: 'claude.exe --version' }), processRecord({ pid: 6, parentPid: 3, exe: 'rg', commandLine: 'rg "claude --print"' })])).toEqual([expect.objectContaining({ name: 'Claude Code', id: 'process:thread:4:3' })]);
   expect(collectProcessAgents([shell, child, processRecord({ ...shell, startedAt: 4 })])).toEqual([]);
   expect(collectProcessAgents([processRecord({ ...shell, exitedAt: 2 }), child])).toEqual([]);
+  // A reused live pid must not confirm an older CLI invocation.
+  expect(collectProcessAgents([root, shell, child], [{ ...child, startedAt: 4 }])[0]?.status).toBe('unknown');
 });
 
 test('task-list tools and ordinary tool output do not invent agents', () => {

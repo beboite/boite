@@ -45,8 +45,9 @@ export function processAgentCommand(record: Pick<ProcessRecord, 'exe' | 'command
 }
 
 /** Only traced descendants count; the conversation's own CLI and nested CLI launchers do not. */
-export function collectProcessAgents(records: ProcessRecord[]): NativeAgent[] {
+export function collectProcessAgents(records: ProcessRecord[], live: ProcessRecord[] = records): NativeAgent[] {
   const byPid = new Map(records.map(record => [`${record.threadId}:${record.pid}`, record]));
+  const running = new Set(live.filter(record => record.exitedAt === null).map(record => `process:${record.threadId}:${record.pid}:${record.startedAt}`));
   return records.flatMap(record => {
     const command = processAgentCommand(record);
     if (!command || record.parentPid === null) return [];
@@ -57,7 +58,7 @@ export function collectProcessAgents(records: ProcessRecord[]): NativeAgent[] {
     return [{
       ...command, id, toolId: id, source: 'process', startedAt: record.startedAt,
       ...(record.exitedAt !== null ? { finishedAt: record.exitedAt } : {}),
-      status: record.exitedAt === null ? 'running' : record.exitCode === 0 ? 'done' : record.exitCode === null ? 'unknown' : 'error',
+      status: record.exitedAt === null ? running.has(id) ? 'running' : 'unknown' : record.exitCode === 0 ? 'done' : record.exitCode === null ? 'unknown' : 'error',
     } satisfies NativeAgent];
   });
 }

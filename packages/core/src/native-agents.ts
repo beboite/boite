@@ -1,4 +1,4 @@
-import { collectNativeAgents, collectProcessAgents, type BackgroundTask, type MessagePart, type NativeAgent, type Turn } from '@boite/contracts';
+import { collectNativeAgents, collectProcessAgents, type BackgroundTask, type MessagePart, type NativeAgent, type ProcessRecord, type Turn } from '@boite/contracts';
 import type { Journal } from './journal.ts';
 import { toProcess, type ProcessRow } from './journal/rows.ts';
 
@@ -12,7 +12,7 @@ interface Entry {
 }
 
 /** Read only agent tools across all pages, never the rest of a potentially large transcript. */
-export function nativeAgents(journal: Journal, threadId: string, background: BackgroundTask[] = []): NativeAgent[] {
+export function nativeAgents(journal: Journal, threadId: string, background: BackgroundTask[] = [], live: ProcessRecord[] = []): NativeAgent[] {
   journal.flushDeltas();
   const liveRows = journal.db.query(`SELECT m.id, m.rowid AS messageOrder, m.created_at AS at, m.turn_id AS turnId, t.status AS turnStatus
     FROM messages m JOIN turns t ON t.id = m.turn_id
@@ -48,5 +48,5 @@ export function nativeAgents(journal: Journal, threadId: string, background: Bac
   const parents = journal.db.query(`SELECT * FROM processes WHERE thread_id = ?
     AND pid IN (SELECT value FROM json_each(?))`).all(threadId, JSON.stringify(candidates.map(row => row.parent_pid))) as ProcessRow[];
   const processes = new Map([...parents, ...candidates].map(row => [row.pid, toProcess(row)]));
-  return [...collectNativeAgents(entries, background), ...collectProcessAgents([...processes.values()])];
+  return [...collectNativeAgents(entries, background), ...collectProcessAgents([...processes.values()], live)];
 }
