@@ -45,6 +45,8 @@ export const USAGE = `usage: boite <command> [args] [--json]
   diff [file]                    open the changes, or one file's diff
   browse <url>                   open a url in the panel's browser
   browser help                   inspect, test and capture the built-in browser
+  pr list|refresh                this conversation's linked pull requests
+  pr link|unlink <url>           attach or remove a PR link; does not change GitHub
   preview <file.html>             open a local HTML artifact with its assets
   preview-close <file.html>       stop serving a local HTML preview
   open trace|tasks|changes|files|workflow [dir|run-id]
@@ -268,6 +270,15 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
   };
 
   switch (command) {
+    case 'pr': {
+      const action = rest[0] ?? 'list';
+      if (!['list', 'refresh', 'link', 'unlink'].includes(action) || rest.length > (action === 'link' || action === 'unlink' ? 2 : 1)) throw new Usage('pr expects list, refresh, link <url> or unlink <url>');
+      const result = action === 'link' || action === 'unlink'
+        ? await client.call(action === 'link' ? 'threads.linkPullRequest' : 'threads.unlinkPullRequest', { threadId, url: want(1, 'a pull request URL') })
+        : await client.call('threads.pullRequests', { threadId, refresh: action === 'refresh' });
+      print(result.map(pr => `${pr.state} #${pr.number} ${pr.title} (${pr.head} -> ${pr.base}) ${pr.url}${pr.error ? ` [${pr.error}]` : ''}`), result);
+      break;
+    }
     case 'browser': {
       if (rest[0] === 'help') { print([BROWSER_HELP], { help: BROWSER_HELP }); break; }
       const result = await browserCommand(rest, io, client, threadId);

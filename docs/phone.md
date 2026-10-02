@@ -347,6 +347,34 @@ Revocation deletes the subscription with the pairing. Push services returning
 404 or 410 retire the destination. Other delivery failures leave it subscribed
 and write a generic diagnostic without the provider's credential-bearing body.
 
+## Experimental desktop browser control
+
+Enable **Remote browser** in Settings, Experiments on the Windows desktop and
+on the phone. Open the same conversation on both, leave its browser tab active
+on the desktop, then choose the live-browser button in the phone's header.
+The dialog shows that desktop tab. Tap to click, swipe to scroll, or tap a page
+field and send text from the input below the preview. Navigation keys and
+scroll buttons remain available without a hardware keyboard.
+
+The phone requests JPEG frames while the dialog is open and visible. Pause,
+closing the dialog, switching off the experiment or hiding the app stops those
+requests. This is a periodically refreshed preview, not a video stream with
+audio. The desktop must stay awake, with Boite and that conversation open.
+
+The core permits the paired device's `browser.remoteFrame` and
+`browser.remoteInput` only for a subscribed conversation whose owner desktop
+has opted in. Inputs must refer to a recent frame issued to that connection.
+The desktop refuses an input after the page navigates or its viewport changes.
+Turning off desktop sharing invalidates frames, including captures in flight.
+The phone cannot use `browser.command`, execute JavaScript or register itself
+as the desktop host. It can interact with the visible web page, so pair only
+devices you intend to give that control.
+
+On iPhone, use the HTTPS web app in Safari or install it on the Home Screen.
+The preview uses JPEG and ordinary touch controls. Layout checks at iPhone
+width run in Chromium; they do not establish behavior on a physical iPhone or
+Safari, including keyboard, backgrounding and network handover.
+
 ## The limits
 
 - What a phone gets with the core asleep is the app shell painting from disk, an

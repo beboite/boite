@@ -1,12 +1,13 @@
-import { browserActionError, type BrowserReply } from '@boite/contracts';
+import { browserActionError, remoteBrowserInputError, type RemoteBrowserFrame, type BrowserReply } from '@boite/contracts';
 import { refusal } from './shared';
 import type { FakeContext, FakeMethods } from './context';
 
-export function browserMethods(ctx: FakeContext): Pick<FakeMethods, 'browser.host' | 'browser.command' | 'browser.complete'> {
+export function browserMethods(ctx: FakeContext): Pick<FakeMethods, 'browser.host' | 'browser.command' | 'browser.complete' | 'browser.remoteFrame' | 'browser.remoteInput'> {
   const hosts = new Map<string, number>();
+  const shared = new Set<string>(), frames = new Map<string, RemoteBrowserFrame[]>();
   const pending = new Map<string, { threadId: string; resolve(value: BrowserReply): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
   const release = (threadId?: string) => {
-    if (threadId) hosts.delete(threadId); else hosts.clear();
+    if (threadId) { hosts.delete(threadId); shared.delete(threadId); frames.delete(threadId); } else { hosts.clear(); shared.clear(); frames.clear(); }
     for (const [id, item] of pending) if (!threadId || item.threadId === threadId) {
       clearTimeout(item.timer); pending.delete(id); item.reject(refusal('the browser host left this conversation'));
     }
@@ -14,8 +15,27 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, 'browser.hos
   ctx.bus.onState(state => { if (state !== 'ready') release(); });
   ctx.bus.on('thread.updated', thread => { if (thread.archived) release(thread.id); });
   ctx.bus.on('thread.removed', ({ threadId }) => release(threadId));
-  return {
-    'browser.host': async ({ threadId, enabled, allowAgentControl }) => {
+  const allowed = (threadId: string) => {
+    if (ctx.thread(threadId).archived || !ctx.bus.subscribed.has(threadId)) throw refusal('subscribe to the active conversation before watching its browser');
+    if ((hosts.get(threadId) ?? 0) < Date.now()) throw refusal('Open this conversation in the Boite desktop app to share its browser.');
+    if (!shared.has(threadId)) throw refusal('Enable the remote-browser experiment on the hosting desktop first.');
+  };
+  const methods: ReturnType<typeof browserMethods> = {
+    'browser.remoteFrame': async ({ threadId }) => {
+      allowed(threadId);
+      const reply = await methods['browser.command']({ threadId, action: { kind: 'remote-frame' } }); allowed(threadId);
+      if (!reply.frame) throw refusal('the desktop returned an invalid browser frame');
+      frames.set(threadId, [...(frames.get(threadId) ?? []), reply.frame].slice(-8)); return reply.frame;
+    },
+    'browser.remoteInput': async ({ threadId, frameId, input }) => {
+      allowed(threadId); const problem = remoteBrowserInputError(input); if (problem) throw refusal(problem);
+      const frame = frames.get(threadId)?.find(f => f.id === frameId && Date.now() - f.at < 5000);
+      if (!frame) throw refusal('refresh the live browser before interacting');
+      if (input.kind === 'tap' && (input.width !== frame.width || input.height !== frame.height)) throw refusal('the browser viewport changed; refresh before tapping');
+      await methods['browser.command']({ threadId, tabId: frame.tabId, action: { kind: 'remote-input', frameId, input } }); return { ok: true };
+    },
+    'browser.host': async ({ threadId, enabled, allowAgentControl, remote = false }) => {
+      if (typeof enabled !== 'boolean' || typeof remote !== 'boolean') throw refusal('browser.host enabled and remote must be booleans');
       const thread = ctx.thread(threadId);
       if (enabled && (thread.archived || !ctx.bus.subscribed.has(threadId))) throw refusal('browser.host needs a subscribed, active conversation');
       if (enabled && allowAgentControl !== true) {
@@ -23,6 +43,7 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, 'browser.hos
         throw refusal('browser.host requires explicit consent: enable Agent browser control in Settings > Experiments on the hosting desktop');
       }
       if (enabled) hosts.set(threadId, Date.now() + 35000); else release(threadId);
+      if (enabled && remote) shared.add(threadId); else { shared.delete(threadId); frames.delete(threadId); }
       return { ok: true };
     },
     'browser.command': async params => {
@@ -52,4 +73,5 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, 'browser.hos
       return { ok: true };
     },
   };
+  return methods;
 }
