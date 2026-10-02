@@ -187,6 +187,7 @@ test('quotas expose banked resets, a confirmed budget and Codex credit balances 
   expect(await page.text('[data-testid=limits-glance]')).toContain('Monthly budget');
   expect(await page.text('[data-testid=limits-glance] [data-provider=codex] [data-testid=quota-credits]')).toContain('42 credits');
   expect(await count('[data-testid=limits-glance] [data-testid=quota-banked-resets]')).toBe(0);
+  expect(await count('[data-testid=limits-glance] [data-testid=quota-use-reset]')).toBe(0);
   expect(await page.evaluate<number>(`Math.max(...[...document.querySelectorAll('[data-testid=limits-glance] .summary [role=meter]')].map(el => el.getBoundingClientRect().height))`)).toBeLessThanOrEqual(6);
   expect(await page.evaluate(`(() => { const r = document.querySelector('[data-testid=limits-glance]').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; })()`)).toBe(true);
   expect(await page.text('[data-testid=limits-glance] [data-provider=claude] .mini-label')).toBe('5 hours');
@@ -211,7 +212,9 @@ test('quotas expose banked resets, a confirmed budget and Codex credit balances 
   expect(await page.text(`${claude} [data-testid=quota-credits]`)).toContain('Monthly budget remaining');
   expect(await attribute(`${claude} [data-testid=quota-credits] [role=meter]`, 'aria-valuenow')).toBe('75');
   expect(await page.text(`${codex} [data-testid=quota-credits]`)).toContain('42 credits');
-  expect(await count('[data-testid=quota-extras] button')).toBe(0);
+  expect(await count(`${claude} [data-testid=quota-use-reset]`)).toBe(1);
+  expect(await count(`${codex} [data-testid=quota-use-reset]`)).toBe(1);
+  expect(await count('[data-testid=quota-extras] button:not([data-testid=quota-use-reset])')).toBe(0);
   expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
   await capture('quota-extras-desktop.png');
   await scheme('light');
@@ -219,6 +222,8 @@ test('quotas expose banked resets, a confirmed budget and Codex credit balances 
   await scheme('dark');
   await viewport(390, 844, true);
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-detail] [data-testid=quota-credits]')`);
+  expect(await count(`${claude} [data-testid=quota-use-reset]`)).toBe(1);
+  expect(await count(`${codex} [data-testid=quota-use-reset]`)).toBe(1);
   expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth && [...document.querySelectorAll('[data-testid=quota-extras]')].every(el => el.getBoundingClientRect().right <= innerWidth)`)).toBe(true);
   await capture('quota-extras-phone.png');
   await scheme('light');
@@ -238,6 +243,7 @@ test('quotas expose banked resets, a confirmed budget and Codex credit balances 
   expect(await attribute('[data-testid=quota-popup] [data-provider=claude] [data-testid=quota-credits] [role=meter]', 'aria-valuenow')).toBe('75');
   expect(await page.text('[data-testid=quota-popup] [data-provider=codex] [data-testid=quota-credits]')).toContain('42 credits');
   expect(await count('[data-testid=quota-popup] [data-testid=quota-banked-resets]')).toBe(0);
+  expect(await count('[data-testid=quota-popup] [data-testid=quota-use-reset]')).toBe(0);
   await capture('quota-extras-compact.png');
   await scheme('light');
   await capture('quota-extras-compact-light.png');
