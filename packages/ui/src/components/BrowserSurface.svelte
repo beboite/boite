@@ -14,6 +14,8 @@
   import type { Store } from '../lib/store.svelte';
   import { experimentOn } from '../lib/experiments.svelte';
   import { validPreviewSelection } from '../lib/preview-comments';
+  import BrowserTools from './BrowserTools.svelte';
+  import { runBrowserAction } from '../lib/browser-tools.svelte';
   const previewStrings = $derived(strings.previewComments);
 
   let { surface, panel, store }: { surface: Surface; panel: BoundPanel; store: Store } = $props();
@@ -240,6 +242,9 @@
         <ExternalLink size={13} strokeWidth={1.75} />
       </button>
     </form>
+    {#if browserBridge.protocol && /Windows/.test(navigator.userAgent)}
+      <BrowserTools {id} onerror={message => { problem = message; }} />
+    {/if}
     {#if browserBridge.paints && !rightPanel.floating}
       <button type="button" class="ghost small icon" data-testid="browser-detach"
         title={strings.browser.detach} aria-label={strings.browser.detach}
@@ -249,7 +254,7 @@
     {/if}
     {#if viewport}
       <button type="button" class="ghost small zoom" title={strings.browser.resetViewport} aria-label={strings.browser.resetViewport}
-        onclick={() => void browserBridge.protocol?.(id, 'Emulation.clearDeviceMetricsOverride', {}).catch(error => { problem = String(error); })}>{viewport.width}×{viewport.height}</button>
+        onclick={() => void runBrowserAction(id, { kind: 'reset-viewport' }).catch(error => { problem = String(error); })}>{viewport.width}×{viewport.height}</button>
     {/if}
     {#if zoom !== ZOOM_DEFAULT}
       <button type="button" class="ghost small zoom" data-testid="browser-zoom"

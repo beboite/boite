@@ -55,6 +55,9 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // The threads themselves.
   'threads.list',
   'threads.pullRequest', // Read-only branch metadata shown on the same phone thread cards.
+  'threads.pullRequests', // Read-only conversation links, including dependency order, on phones.
+  'threads.pullRequestReview', 'threads.pullRequestFiles', // Bounded read-only data for PRs the owner already linked.
+  'browser.remoteFrame', 'browser.remoteInput', // Only the subscribed conversation's owner-enabled shared page; no scripts, host paths or navigation RPCs.
   'threads.create',
   'threads.get',
   // A phone can manage continued prompts in the same thread it can already send to.
@@ -112,6 +115,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
 
 /** Push events must not bypass the read permissions enforced on RPC calls. */
 export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
+  'threads.pullRequestsChanged', // Links already readable on the subscribed conversation.
   'agents.changed', // Invalidation only; agents.snapshot applies the device read policy.
   // Team invalidation contains only the subscribed root ID; delegation.get enforces its read scope.
   'delegation.changed',

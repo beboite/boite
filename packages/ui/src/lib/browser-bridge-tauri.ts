@@ -148,6 +148,7 @@ export class TauriBridge implements BrowserBridge {
 
   destroy(id: string): void {
     if (!this.#live.has(id)) return;
+    this.#emit({ type: 'destroyed', id });
     this.#run(id, 'browser_destroy', {});
     this.#live.delete(id);
     this.#loaded.delete(id);

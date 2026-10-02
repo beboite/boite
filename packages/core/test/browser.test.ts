@@ -49,3 +49,53 @@ test('leaving or losing the host settles in-flight work and requires a fresh reg
   await again; owner.close(); expect((await lost as Error).message).toContain('host left');
   await expect(agent.call('browser.command', { threadId, action: { kind: 'status' } })).rejects.toThrow('desktop app');
 });
+
+test('paired viewers require desktop consent and a fresh frame of their own; capture does not block agent input', async () => {
+  const { grant } = await owner.call('pairing.grant', {});
+  const phone = await connect(harness.url, '', { grant, client: { name: 'pwa', version: 'test' } });
+  try {
+    await owner.call('threads.subscribe', { threadId });
+    await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: true });
+    await expect(phone.call('browser.remoteFrame', { threadId })).rejects.toThrow('subscribe');
+    await phone.call('threads.subscribe', { threadId });
+    await expect(phone.call('browser.remoteFrame', { threadId })).rejects.toThrow('experiment');
+    await expect(phone.call('browser.host', { threadId, enabled: true, remote: true })).rejects.toThrow('owner');
+    await expect(phone.call('browser.command', { threadId, action: { kind: 'evaluate', expression: '1' } })).rejects.toThrow('owner');
+    await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: true, remote: true });
+    const waiting = owner.next('browser.requested', r => r.action.kind === 'remote-frame');
+    const image = phone.call('browser.remoteFrame', { threadId });
+    const request = await waiting;
+    const actionWaiting = owner.next('browser.requested', r => r.action.kind === 'click');
+    const action = agent.call('browser.command', { threadId, action: { kind: 'click', selector: '#go' } });
+    const actionRequest = await actionWaiting;
+    await owner.call('browser.complete', { requestId: actionRequest.requestId, result: { value: { ok: true } } });
+    expect((await action).value).toEqual({ ok: true });
+    await owner.call('browser.complete', { requestId: request.requestId, result: { frame: { id: 'frame-1', tabId: 'browser:test', width: 800, height: 600, title: 'Shared', base64: 'aGVsbG8=', at: Date.now() } } });
+    expect((await image).base64).toBe('aGVsbG8=');
+    await expect(phone.call('browser.remoteInput', { threadId, frameId: 'unknown', input: { kind: 'key', key: 'Enter' } })).rejects.toThrow('refresh');
+    await expect(phone.call('browser.remoteInput', { threadId, frameId: 'frame-1', input: { kind: 'tap', x: .5, y: .5, width: 900, height: 600 } })).rejects.toThrow('viewport');
+    const clickWaiting = owner.next('browser.requested', r => r.action.kind === 'remote-input');
+    const click = phone.call('browser.remoteInput', { threadId, frameId: 'frame-1', input: { kind: 'tap', x: .5, y: .5, width: 800, height: 600 } });
+    const clickRequest = await clickWaiting;
+    expect(clickRequest.tabId).toBe('browser:test');
+    await owner.call('browser.complete', { requestId: clickRequest.requestId, result: { value: { ok: true } } });
+    expect(await click).toEqual({ ok: true });
+    await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: true, remote: false });
+    await expect(phone.call('browser.remoteInput', { threadId, frameId: 'frame-1', input: { kind: 'key', key: 'Enter' } })).rejects.toThrow('experiment');
+  } finally { phone.close(); }
+});
+
+test('disabling sharing while a frame is in flight does not deliver it to a paired viewer', async () => {
+  const { grant } = await owner.call('pairing.grant', {});
+  const phone = await connect(harness.url, '', { grant });
+  try {
+    await owner.call('threads.subscribe', { threadId }); await phone.call('threads.subscribe', { threadId });
+    await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: true, remote: true });
+    const waiting = owner.next('browser.requested', r => r.action.kind === 'remote-frame');
+    const image = phone.call('browser.remoteFrame', { threadId }).catch(e => e as Error);
+    const request = await waiting;
+    await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: true, remote: false });
+    await owner.call('browser.complete', { requestId: request.requestId, result: { frame: { id: 'late', tabId: 'browser:test', width: 800, height: 600, title: 'Private', base64: 'aGVsbG8=', at: Date.now() } } });
+    expect((await image as Error).message).toContain('experiment');
+  } finally { phone.close(); }
+});

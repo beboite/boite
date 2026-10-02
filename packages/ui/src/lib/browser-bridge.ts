@@ -24,6 +24,7 @@ export interface SurfaceRect {
 }
 
 export type BrowserEvent =
+  | { type: 'destroyed'; id: string }
   | { type: 'viewport'; id: string; size: { width: number; height: number } | null }
   | { type: 'highlight-result'; id: string; requestId: string; error: string | null }
   | { type: 'selection'; id: string; requestId: string; selection: PreviewSelection | null }

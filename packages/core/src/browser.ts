@@ -1,11 +1,11 @@
-import { browserActionError, type BrowserReply, type RpcParams } from '@boite/contracts';
+import { browserActionError, remoteBrowserInputError, type RemoteBrowserFrame, type BrowserReply, type RpcParams } from '@boite/contracts';
 import type { Core } from './core.ts';
 import type { Connection } from './router.ts';
 import { refused } from './errors.ts';
 
-interface Host { connection: Connection; expires: number }
+interface Host { connection: Connection; expires: number; remote: boolean }
 interface Pending {
-  threadId: string; connectionId: string; timer: ReturnType<typeof setTimeout>;
+  threadId: string; connectionId: string; capture: boolean; timer: ReturnType<typeof setTimeout>;
   resolve(result: BrowserReply): void; reject(error: Error): void;
 }
 
@@ -13,9 +13,11 @@ interface Pending {
 export class BrowserControl {
   private hosts = new Map<string, Host>();
   private pending = new Map<string, Pending>();
+  private remoteFrames = new Map<string, { threadId: string; hostId: string; frames: RemoteBrowserFrame[]; requestedAt: number }>();
   constructor(private core: Core, private timeout = 20000) {}
 
-  host({ threadId, enabled, allowAgentControl }: RpcParams<'browser.host'>, connection: Connection): { ok: true } {
+  host({ threadId, enabled, allowAgentControl, remote = false }: RpcParams<'browser.host'>, connection: Connection): { ok: true } {
+    if (typeof enabled !== 'boolean' || typeof remote !== 'boolean') throw refused('browser.host enabled and remote must be booleans');
     const thread = this.core.threads.require(threadId);
     if (enabled && (thread.archived || !connection.subscriptions.has(threadId))) throw refused('browser.host needs a subscribed, active conversation');
     const previous = this.hosts.get(threadId);
@@ -27,8 +29,47 @@ export class BrowserControl {
       if (previous?.connection.id === connection.id) this.release(threadId);
     } else {
       if (previous && previous.expires > Date.now() && previous.connection.id !== connection.id) throw refused('this conversation already has a browser host on another desktop');
-      this.hosts.set(threadId, { connection, expires: Date.now() + 35000 });
+      this.hosts.set(threadId, { connection, expires: Date.now() + 35000, remote });
+      if (!remote) for (const [id, value] of this.remoteFrames) if (value.threadId === threadId) this.remoteFrames.delete(id);
     }
+    return { ok: true };
+  }
+
+  private shared(threadId: string, connection: Connection): Host {
+    if (this.core.threads.require(threadId).archived || !connection.subscriptions.has(threadId)) throw refused('subscribe to the active conversation before watching its browser');
+    const host = this.hosts.get(threadId);
+    if (!host || host.expires < Date.now() || !host.connection.subscriptions.has(threadId)) throw refused('Open this conversation in the Boite desktop app to share its browser.');
+    if (!host.remote) throw refused('Enable the remote-browser experiment on the hosting desktop first.');
+    return host;
+  }
+
+  async remoteFrame({ threadId }: RpcParams<'browser.remoteFrame'>, connection: Connection): Promise<RemoteBrowserFrame> {
+    const host = this.shared(threadId, connection), key = `${connection.id}:${threadId}`;
+    const previous = this.remoteFrames.get(key);
+    if (previous && Date.now() - previous.requestedAt < 220) throw refused('wait before requesting another browser frame');
+    for (const [id, value] of this.remoteFrames) if (Date.now() - value.requestedAt > 10000) this.remoteFrames.delete(id);
+    if (this.remoteFrames.size >= 32 && !previous) throw refused('too many remote browser viewers');
+    const state = { threadId, hostId: host.connection.id, requestedAt: Date.now(), frames: previous?.frames ?? [] };
+    this.remoteFrames.set(key, state);
+    const reply = await this.command({ threadId, action: { kind: 'remote-frame' } });
+    if (this.shared(threadId, connection).connection.id !== state.hostId || this.remoteFrames.get(key) !== state) throw refused('the shared browser changed');
+    const frame = reply.frame;
+    if (!frame || typeof frame.id !== 'string' || frame.id.length > 80 || !/^browser:[a-zA-Z0-9:-]{1,100}$/.test(frame.tabId) ||
+      typeof frame.base64 !== 'string' || frame.base64.length > 2 * 1024 * 1024 || !/^[A-Za-z0-9+/]+={0,2}$/.test(frame.base64) ||
+      ![frame.width, frame.height].every(n => Number.isInteger(n) && n > 0 && n <= 16384)) throw refused('the desktop returned an invalid browser frame');
+    frame.title = String(frame.title ?? '').slice(0, 200); frame.at = Date.now();
+    state.frames.push({ ...frame, base64: '' }); state.frames = state.frames.filter(f => Date.now() - f.at < 5000).slice(-8);
+    return frame;
+  }
+
+  async remoteInput({ threadId, frameId, input }: RpcParams<'browser.remoteInput'>, connection: Connection): Promise<{ ok: true }> {
+    const host = this.shared(threadId, connection), problem = remoteBrowserInputError(input);
+    if (problem) throw refused(problem);
+    const state = this.remoteFrames.get(`${connection.id}:${threadId}`);
+    const frame = state?.frames.find(f => f.id === frameId && Date.now() - f.at < 5000);
+    if (!frame || state?.hostId !== host.connection.id) throw refused('refresh the live browser before interacting');
+    if (input.kind === 'tap' && (input.width !== frame.width || input.height !== frame.height)) throw refused('the browser viewport changed; refresh before tapping');
+    await this.command({ threadId, tabId: frame.tabId, action: { kind: 'remote-input', frameId, input } });
     return { ok: true };
   }
 
@@ -44,14 +85,15 @@ export class BrowserControl {
       this.release(threadId);
       throw refused('Open this conversation in the Boite desktop app and enable Agent browser control in Settings > Experiments.');
     }
-    if (this.pending.size >= 16 || [...this.pending.values()].some(p => p.threadId === threadId)) throw refused('the browser is busy; wait for the previous command');
+    const capture = action.kind === 'remote-frame';
+    if (this.pending.size >= 16 || [...this.pending.values()].some(p => p.threadId === threadId && p.capture === capture)) throw refused('the browser is busy; wait for the previous command');
     const requestId = crypto.randomUUID();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId);
         reject(refused('the desktop browser did not answer within 20 seconds'));
       }, this.timeout);
-      this.pending.set(requestId, { threadId, connectionId: host.connection.id, timer, resolve, reject });
+      this.pending.set(requestId, { threadId, connectionId: host.connection.id, capture, timer, resolve, reject });
       try { host.connection.sendEvent('browser.requested', { ...params, requestId }); }
       catch { this.release(threadId); }
     });
@@ -69,6 +111,7 @@ export class BrowserControl {
 
   release(threadId: string): void {
     this.hosts.delete(threadId);
+    for (const [id, value] of this.remoteFrames) if (value.threadId === threadId) this.remoteFrames.delete(id);
     for (const [id, pending] of this.pending) {
       if (pending.threadId !== threadId) continue;
       clearTimeout(pending.timer); this.pending.delete(id);
@@ -76,6 +119,7 @@ export class BrowserControl {
     }
   }
   disconnect(connectionId: string): void {
+    for (const id of this.remoteFrames.keys()) if (id.startsWith(`${connectionId}:`)) this.remoteFrames.delete(id);
     for (const [id, host] of this.hosts) if (host.connection.id === connectionId) this.release(id);
   }
   close(): void { for (const id of this.hosts.keys()) this.release(id); }
