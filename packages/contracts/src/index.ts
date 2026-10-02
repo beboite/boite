@@ -992,6 +992,8 @@ export type MessagePart =
       /** The input's JSON as the model streams it, before `input` is complete. Absent or null once `input` is final. */
       inputText?: string | null;
       output: string | null;
+      /** A bounded output preview. Fetch messages.toolOutput when its disclosure opens. Never persisted. */
+      outputDeferred?: true;
       status: ToolStatus;
       /** A command's exit code when the provider reports it. Absent on older rows and other tools. */
       exitCode?: number | null;
@@ -1045,8 +1047,11 @@ export interface Message {
   createdAt: Timestamp;
 }
 
-/** How many messages `threads.get` returns, and what `messages.list` gives when it is asked for no limit. */
+/** The default page size of `threads.get` and `messages.list` when no limit is supplied. */
 export const MESSAGE_PAGE = 120;
+/** The first paint needs a small tail; older history uses the ordinary page size. */
+export const INITIAL_MESSAGE_PAGE = 40;
+export { previewToolOutputs, TOOL_OUTPUT_INLINE_CHARS, TOOL_OUTPUT_PREVIEW_CHARS } from './message-preview';
 /** The most `messages.list` will ever hand back in one call, whatever `limit` says. */
 export const MESSAGE_PAGE_MAX = 200;
 
@@ -1096,7 +1101,7 @@ export interface Thread extends ThreadSummary {
    * keeps every message it held before this one.
    */
   messagesFrom?: MessageId;
-  /** The last `MESSAGE_PAGE` messages of the thread, oldest first. Older ones come from `messages.list`. */
+  /** A bounded tail of the thread, oldest first. Older messages come from `messages.list`. */
   messages: Message[];
   /**
    * What the agent of this thread last said it takes as `/name`. Empty until a
@@ -2623,7 +2628,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * seen finish, or its last one. An `after` the thread does not hold, or one
    * with more than a page behind it, is answered with the full page.
    */
-  'threads.get': { params: { threadId: ThreadId; after?: MessageId }; result: Thread };
+  'threads.get': { params: { threadId: ThreadId; after?: MessageId; limit?: number; compactTools?: boolean }; result: Thread };
   /**
    * One page of older messages, oldest first inside the page: what was written
    * before `before`, at most `limit` (`MESSAGE_PAGE` by default, `MESSAGE_PAGE_MAX`
@@ -2632,8 +2637,13 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * a `before` that is not a message of that thread is refused by name.
    */
   'messages.list': {
-    params: { threadId: ThreadId; before: MessageId; limit?: number };
+    params: { threadId: ThreadId; before: MessageId; limit?: number; compactTools?: boolean };
     result: { messages: Message[]; before: MessageId | null; turns?: Turn[] };
+  };
+  /** The full output of a tool already visible in this conversation. No filesystem path is accepted. */
+  'messages.toolOutput': {
+    params: { threadId: ThreadId; messageId: MessageId; toolId: string };
+    result: { output: string | null };
   };
   'threads.update': {
     params: {

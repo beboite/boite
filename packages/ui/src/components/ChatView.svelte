@@ -89,7 +89,11 @@
            already played the rise belong to that thread alone, and kept across
            a switch they grew for every message the page had ever shown. -->
       {#key thread.id}
-        <MessageList {store} threadId={thread.id} messages={thread.messages} />
+        {#if store.loadingThreadId === thread.id && thread.messages.length === 0}
+          <div class="draft-body" data-testid="thread-loading"><p class="muted">{strings.app.loading}</p></div>
+        {:else}
+          <MessageList {store} threadId={thread.id} messages={thread.messages} />
+        {/if}
       {/key}
     {:else}
       <div class="draft-body" data-testid="draft-empty">

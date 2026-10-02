@@ -108,3 +108,30 @@ export function mergeResumed(held: Thread, fetched: Thread): void {
   fetched.messagesBefore = held.messagesBefore;
   delete fetched.messagesFrom;
 }
+
+/** JSON wire values compared without allocating another copy of a large tool payload. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const left = Object.keys(a), right = Object.keys(b);
+  if (left.length !== right.length) return false;
+  return left.every(key => Object.hasOwn(b, key) && sameValue(Reflect.get(a, key), Reflect.get(b, key)));
+}
+
+/** Keep unchanged messages and turns; a preview cannot certify a previously loaded suffix. */
+export function reconcileThread(held: Thread, fresh: Thread): Thread {
+  const messages = new Map(held.messages.map(message => [message.id, message]));
+  fresh.messages = fresh.messages.map(message => {
+    const previous = messages.get(message.id);
+    if (!previous) return message;
+    if (previous === message) return previous;
+    return sameValue(previous, message) ? previous : message;
+  });
+  const turns = new Map(held.turns.map(turn => [turn.id, turn]));
+  fresh.turns = fresh.turns.map(turn => sameValue(turns.get(turn.id), turn) ? turns.get(turn.id)! : turn);
+  if (fresh.messages.length === held.messages.length && fresh.messages.every((message, index) => message === held.messages[index])) fresh.messages = held.messages;
+  if (fresh.turns.length === held.turns.length && fresh.turns.every((turn, index) => turn === held.turns[index])) fresh.turns = held.turns;
+  Object.assign(held, fresh);
+  return held;
+}

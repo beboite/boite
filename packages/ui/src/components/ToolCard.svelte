@@ -22,6 +22,8 @@
     input,
     inputText = null,
     output,
+    outputDeferred = false,
+    loadOutput,
     status,
     exitCode = null,
     documents = [],
@@ -34,6 +36,8 @@
     input: unknown;
     inputText?: string | null;
     output: string | null;
+    outputDeferred?: boolean;
+    loadOutput?: () => Promise<void>;
     status: ToolStatus;
     exitCode?: number | null;
     documents?: ToolDocument[];
@@ -136,8 +140,16 @@
   // The body is built on the first open and folds from then on, so a timeline of
   // closed cards costs nothing and an open one animates its height both ways.
   let built = $state(false);
+  let attempted = false;
+  let loading = $state(false);
+  let loadError = $state<string | null>(null);
   $effect(() => {
+    if (!outputDeferred) attempted = false;
     if (shown) built = true;
+    if (!shown || !outputDeferred || !loadOutput || attempted) return;
+    attempted = true;
+    loading = true;
+    void loadOutput().catch(reason => { loadError = reason instanceof Error ? reason.message : String(reason); }).finally(() => { loading = false; });
   });
 </script>
 
@@ -149,7 +161,7 @@
     data-testid="tool-toggle"
     aria-expanded={shown}
     aria-label={failed ? `${line.text}, ${strings.chat.toolStatus[status]}` : undefined}
-    onclick={() => (toggled = !shown)}
+    onclick={() => { if (!shown) { attempted = false; loadError = null; } toggled = !shown; }}
   >
     <span class="glyph"><Glyph size={15} strokeWidth={1.75} /></span>
     <span class="line" class:mono={!compact && line.mono} class:live={status === 'running'} title={diffs[0]?.path ?? line.title}>{label}</span>
@@ -183,13 +195,15 @@
     <div class="clip">
       {#if built}
         <div class="body">
+          {#if loading}<p data-testid="tool-output-loading">{strings.app.loading}</p>{/if}
+          {#if loadError}<p class="error-preview" role="alert">{loadError}</p>{/if}
           {#if failed && errorPreview}
             <p class="error-preview" data-testid="tool-error-preview">{errorPreview}</p>
           {/if}
           {#if diffs.length > 0}
             <!-- A file change reads as its diff: the input only restates it. -->
             {#if failed}
-              <pre class="mono" data-testid="tool-output">{output ?? strings.chat.noOutput}</pre>
+              {#if !outputDeferred}<pre class="mono" data-testid="tool-output">{output ?? strings.chat.noOutput}</pre>{/if}
             {/if}
             <div class="diffs">
               {#each diffs as doc, index (index)}
@@ -223,7 +237,7 @@
               {/if}
             {/if}
             <div class="section-label">{strings.chat.toolOutput}</div>
-            <pre class="mono" data-testid="tool-output">{output ?? strings.chat.noOutput}</pre>
+            {#if !outputDeferred}<pre class="mono" data-testid="tool-output">{output ?? strings.chat.noOutput}</pre>{/if}
             {#if documents.length > 0}
               <div class="section-label">{strings.chat.toolDocuments}</div>
               <div class="documents">

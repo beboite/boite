@@ -127,7 +127,11 @@ test('header and project layout', async () => {
   await pointerClick(id('outline-group'));
   await page.waitFor(`document.querySelector('${id('outline-group-menu')}')`);
   await capture('message-groups.png');
-  const target = await page.evaluate<string>(`document.querySelectorAll('[data-group-message]')[12].dataset.groupMessage`);
+  const target = await page.evaluate<string | null>(`(() => {
+    const outside = Array.from(document.querySelectorAll('[data-group-message]')).filter(node => !document.querySelector('[data-mid="' + node.dataset.groupMessage + '"]'));
+    return outside[Math.floor(outside.length / 2)]?.dataset.groupMessage ?? null;
+  })()`);
+  expect(target).not.toBeNull();
   await page.click(`[data-group-message="${target}"]`);
   await page.waitFor(`!document.querySelector('${id('outline-group-menu')}')`);
   try {

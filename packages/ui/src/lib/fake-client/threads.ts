@@ -11,6 +11,7 @@ import { modelsOf, checkSpeed, discoverSelection } from './provider-catalog';
 import { delegationConfig, stopDelegation } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
 import { registerFakeWorktree, requireFakeCwd } from './worktrees';
+import { previewToolOutputs } from '@boite/contracts';
 import { dropWaitingMove, fakeMoveNote } from './thread-move';
 
 const sideRequests = new WeakMap<FakeContext, Map<string, { requestId: string; timer: ReturnType<typeof setTimeout> }>>();
@@ -238,17 +239,21 @@ export function threadMethods(ctx: FakeContext) {
     },
     'threads.get': async (params) => {
       const thread = ctx.thread(params.threadId);
+      const asked = params.limit ?? MESSAGE_PAGE;
+      if (!Number.isFinite(asked)) throw refusal('threads.get limit must be a finite number');
+      const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
       // The core's rule: from the named message on, unless it is unknown or
       // the tail is longer than a page, and then the whole page as before.
       const from = params.after === undefined ? -1 : thread.messages.findIndex((message) => message.id === params.after);
-      if (from !== -1 && thread.messages.length - from <= MESSAGE_PAGE) {
-        const messages = thread.messages.slice(from);
+      if (from !== -1 && thread.messages.length - from <= limit) {
+        const messages = params.compactTools ? previewToolOutputs(thread.messages.slice(from)) : thread.messages.slice(from);
         // As the core's `listTurnsFor`: the turns of the messages sent, and whatever is still queued or running.
         const sent = new Set(messages.map((message) => message.turnId));
         const turns = thread.turns.filter((turn) => turn.status === 'queued' || turn.status === 'running' || sent.has(turn.id));
         return structuredClone({ ...thread, messages, turns, messagesBefore: null, messagesFrom: params.after });
       }
-      const page = pageOf(thread.messages, thread.messages.length, MESSAGE_PAGE);
+      const page = pageOf(thread.messages, thread.messages.length, limit);
+      if (params.compactTools) page.messages = previewToolOutputs(page.messages);
       return structuredClone({ ...thread, messages: page.messages, messagesBefore: page.before });
     },
     'messages.list': async (params) => {
@@ -264,8 +269,16 @@ export function threadMethods(ctx: FakeContext) {
       const asked = params.limit ?? MESSAGE_PAGE;
       const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
       const page = pageOf(thread.messages, at, limit);
+      if (params.compactTools) page.messages = previewToolOutputs(page.messages);
       const turns = new Set(page.messages.map((message) => message.turnId));
       return structuredClone({ ...page, turns: thread.turns.filter((turn) => turns.has(turn.id)) });
+    },
+    'messages.toolOutput': async (params) => {
+      const message = ctx.thread(params.threadId).messages.find(message => message.id === params.messageId);
+      if (!message) throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `message ${params.messageId} is not a message of thread ${params.threadId}` });
+      const part = message.parts.find(part => part.type === 'tool' && part.toolId === params.toolId);
+      if (!part || part.type !== 'tool') throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `tool ${params.toolId} is not a tool of message ${params.messageId}` });
+      return { output: part.output };
     },
     'threads.update': async (params) => {
       const thread = ctx.thread(params.threadId);
