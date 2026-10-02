@@ -8,6 +8,7 @@ import {
   normalizeCoreLogText,
   normalizeCoreLogOutput,
   RpcErrorCode,
+  processAgentCommand,
   type Attachment,
   type Account,
   type BackgroundTask,
@@ -349,6 +350,10 @@ export class FakeContext {
       finishActivityTurn(this, turn);
     }
     this.bus.deliver(event, payload);
+    if (event === 'process.started' || event === 'process.exited') {
+      const record = payload as ProcessRecord;
+      if (processAgentCommand(record)) this.emit('delegation.changed', { threadId: record.threadId });
+    }
   }
 
   emitToThread<E extends RpcEventName>(threadId: ThreadId, event: E, payload: RpcEvents[E]): void {

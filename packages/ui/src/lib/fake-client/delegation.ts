@@ -1,5 +1,5 @@
 /** Delegation: a parent thread's team of child threads, their usage and letters. */
-import { collectNativeAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, RpcErrorCode, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationProfile, type DelegationView, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { collectNativeAgents, collectProcessAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, RpcErrorCode, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationProfile, type DelegationView, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { addUsage, emptyUsage, toSummary } from './shared';
 import type { FakeContext, FakeMethods } from './context';
@@ -33,7 +33,7 @@ function delegationView(ctx: FakeContext, rootId: ThreadId, callerId = rootId): 
     rootThreadId: rootId,
     config: delegationConfig(ctx, rootId),
     agents: rows.map(row => delegatedAgent(ctx, row)),
-    nativeAgents: collectNativeAgents(ctx.thread(callerId).messages.flatMap(message => message.role === 'assistant' ? message.parts.map(part => ({ part, at: message.createdAt, turnId: message.turnId, turnStatus: ctx.thread(callerId).turns.find(turn => turn.id === message.turnId)?.status })) : []), ctx.thread(callerId).background),
+    nativeAgents: [...collectNativeAgents(ctx.thread(callerId).messages.flatMap(message => message.role === 'assistant' ? message.parts.map(part => ({ part, at: message.createdAt, turnId: message.turnId, turnStatus: ctx.thread(callerId).turns.find(turn => turn.id === message.turnId)?.status })) : []), ctx.thread(callerId).background), ...collectProcessAgents(ctx.processes.filter(record => record.threadId === callerId), ctx.processes.filter(record => record.threadId === callerId && record.exitedAt === null))],
     messages: structuredClone((ctx.delegationLetters.get(rootId) ?? []).filter(letter => callerId === rootId || letter.from.threadId === callerId || letter.to.threadId === callerId)),
     turnsUsed: ctx.delegationTurns.get(rootId) ?? 0,
     usage
@@ -73,6 +73,10 @@ export function seedDelegationDemo(ctx: FakeContext): void {
     { type: 'tool', toolId: 'native-research', name: 'Agent', input: { action: 'spawnAgent' }, output: null, status: 'done', nativeAgents: [{ id: 'native-research', name: 'Research compatibility', status: 'unknown' }] },
   ] };
   ctx.threads.set(nativeId, { ...root, id: nativeId, title: 'Review parser boundaries', providerId: 'codex', accountId: 'a-codex', model: 'gpt-6-astra', status: 'idle', turns: [nativeTurn], messages: [nativeMessage], activity: undefined, background: [], memoryEvents: [], pullRequest: null, load: null, context: null, messagesBefore: null, parentThreadId: null });
+  const cliId = 't-cli';
+  ctx.threads.set(cliId, { ...ctx.thread(nativeId), id: cliId, title: 'Review the gameplay audit', turns: [], messages: [], background: [] });
+  const shell = { threadId: cliId, pid: 6400, parentPid: 1, exe: 'pwsh.exe', commandLine: 'pwsh.exe review.ps1', startedAt: demoAt, exitedAt: demoAt + 2000, exitCode: 0, cpuMs: null, peakMemoryBytes: null, ioBytes: null };
+  ctx.processes.push(shell, { ...shell, pid: 6401, parentPid: shell.pid, exe: 'claude.exe', commandLine: 'claude.exe --print --model claude-opus-5-5 --effort xhigh "Review the gameplay audit"', startedAt: demoAt + 1000, exitedAt: null, exitCode: null });
   const reviewer: DelegationProfile = { id: 'reviewer', name: 'Reviewer', providerId: 'claude', accountId: 'a-claude-main', model: 'claude-sonnet-5', effort: 'high' };
   const implementer: DelegationProfile = { id: 'implementer', name: 'Implementer', providerId: 'codex', accountId: 'a-codex', model: 'gpt-5.6-sol', effort: 'medium' };
   ctx.delegationConfigs.set(root.id, { enabled: true, paused: false, profiles: [reviewer, implementer] });

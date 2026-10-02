@@ -2101,7 +2101,7 @@ export interface DelegationView {
   rootThreadId: ThreadId;
   config: DelegationConfig;
   agents: DelegatedAgent[];
-  /** Native children reported by this conversation's provider, including earlier message pages. */
+  /** Provider children and traced CLI agents, including earlier message pages and process history. */
   nativeAgents: NativeAgent[];
   messages: AgentLetter[];
   turnsUsed: number;
@@ -2119,8 +2119,13 @@ export interface NativeAgentUpdate {
 export interface NativeAgent extends NativeAgentUpdate {
   toolId: string;
   startedAt: Timestamp;
+  /** Absent on provider reports. Process-backed agents follow their own exit, not the launch tool. */
+  source?: 'process';
+  effort?: string;
+  finishedAt?: Timestamp;
 }
 export { nativeAgentsOfTool, collectNativeAgents } from './native-agents.ts';
+export { collectProcessAgents, processAgentCommand } from './process-agents.ts';
 
 /** A brain lives on the core's machine. Detected plugins are not installed by Boite. */
 export interface BrainConfig {

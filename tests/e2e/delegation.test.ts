@@ -28,7 +28,7 @@ test('inspect and stop a real delegated thread from the panel, which launches no
   // An empty conversation shows the title and nothing to fill in.
   expect(await page.evaluate('document.querySelectorAll("[data-testid=delegation-surface] :is(textarea, input, details, p)").length')).toBe(0);
   await owner.call('delegation.spawn', { threadId, profileId: 'review', task: 'Review parser boundaries [sleep:20000]', requestId: 'first-agent' });
-  await page.waitFor('document.querySelectorAll("[data-testid=agent-dock-member]").length === 1');
+  await page.waitFor('document.querySelector("[data-testid=active-subagents]")?.textContent.includes("1 active subagent")');
   await page.waitFor('document.querySelectorAll("[data-testid=delegation-member]").length === 1');
   const view = await owner.call('delegation.get', { threadId });
   expect(view.agents).toHaveLength(1);
@@ -88,3 +88,29 @@ test('completed counts and frozen duration survive reopening the conversation', 
   expect(await page.text('[data-testid="delegation-activity"] [data-testid="agent-elapsed"]')).toBe(elapsed);
   expect(page.errors()).toEqual([]);
 }, 15_000);
+
+test('a newly started workflow appears above the composer without reopening the conversation', async () => {
+  if (await page.evaluate('!!document.querySelector("[data-testid=panel-close]")')) await page.click('[data-testid=panel-close]');
+  const run = await owner.call('workflows.start', { threadId, requestId: 'visible-workflow', plan: {
+    name: 'Check the workflow indicator', steps: [{ id: 'review', profile: 'review', task: 'Review the workflow indicator [sleep:20000]' }]
+  } });
+  await page.waitFor('document.querySelector("[data-testid=active-subagents]")?.textContent.includes("1 workflow")');
+  expect(await page.text('[data-testid="active-subagents"]')).not.toContain('active subagent');
+  expect(await page.evaluate('document.querySelectorAll("[data-testid=agent-dock] button").length')).toBe(1);
+  await page.waitFor('document.getAnimations().every(a => a.playState !== "running" || a.effect?.getTiming().iterations === Infinity)');
+  await page.screenshot(join(import.meta.dir, '.artifacts/workflow-dock-desktop.png'));
+  await page.click('[data-testid="active-subagents"]');
+  await page.waitFor(`document.querySelector('[data-testid=delegation-run][data-run-id="${run.id}"]')`);
+  expect(await page.text('[data-testid="delegation-run"]')).toContain('Check the workflow indicator');
+  await page.click('[data-testid="panel-close"]');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.waitFor('innerWidth === 390');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await page.waitFor('document.getAnimations().every(a => a.playState !== "running" || a.effect?.getTiming().iterations === Infinity)');
+  await page.screenshot(join(import.meta.dir, '.artifacts/workflow-dock-phone.png'));
+  await page.click('[data-testid="active-subagents"]');
+  await page.waitFor(`document.querySelector('[data-testid=delegation-run][data-run-id="${run.id}"]')`);
+  await owner.call('workflows.control', { threadId, runId: run.id, action: 'stop' });
+  await page.waitFor('!document.querySelector("[data-testid=agent-dock]")');
+  expect(page.errors()).toEqual([]);
+}, 25_000);

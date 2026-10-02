@@ -31,7 +31,7 @@ disable provider-native subagents.
 ## Native provider subagents
 
 Subagents shows native agents' reported names, tasks, models, status and bounded
-results. Running agents also appear below the chat. Ask the main agent to steer
+results. Active agents contribute to the count above the composer. Ask the main agent to steer
 or stop them: these records are not Boite conversations. Explicit provider IDs
 join updates across turns; inferred tool IDs are scoped to a turn so repeated
 tool IDs keep separate invocations. No token
@@ -45,6 +45,20 @@ calls and background agent lists, Muse subagent items, and named agent tools
 from ACP and pi feed the same view. Other drivers, including agy's ordinary
 tool stream, retain agent tools if the provider reports their name and brief.
 A provider that sends only text or shell output exposes no native agent list.
+
+Agent CLIs launched through a shell also appear under "Started from a command"
+when the process trace records them. They contribute to the active count above
+the composer. Finishing the launch command or
+the parent turn does not complete the child: its own process exit settles its
+status. Results stay in the command output. Version checks and the conversation's
+own provider process do not appear as children.
+After a core restart, an old trace without an exit stays in history as Status
+unknown unless the current process registry confirms it is still running.
+
+Windows records descendant starts and exits through its process jobs. Linux and
+macOS record only direct processes, so a CLI launched inside another shell can
+remain outside this view. Provider-native agents and Boite-managed children use
+their existing lifecycle on every platform.
 
 A successful spawn call is not a completed child. Missing individual states,
 background launch acknowledgements, and unfinished children after a parent
@@ -61,10 +75,12 @@ elapsed time. Click it to open every agent's model, task, status and result in
 the right panel. The timer runs locally while work is active and freezes when
 all agents settle. Sending a follow-up to a child resumes its status and timer.
 
-The bottom strip stays visible while children are running, queued or waiting
-for an answer. Select an agent to inspect it in the right panel or stop it.
-Open its conversation to send a message or answer permission and question cards.
-The panel keeps completed results after the active strip disappears.
+One button above the composer shows the number of active subagents and running
+workflows, with elapsed time since the oldest active start. It appears for a
+running workflow even before a child starts. Click it to open the team overview,
+then select an agent or workflow to inspect its progress. The panel keeps
+completed results after the button disappears. Open a child's conversation to
+answer permission and question cards.
 
 Messages carry the authenticated sender and appear as forwarded messages.
 Claude receives them at a tool boundary; Codex, Muse, pi and Grok can accept
