@@ -3,7 +3,7 @@
   import { isThisPC, workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
 
-  let { store }: { store: Store } = $props();
+  let { store, fallback = strings.quotas.glance }: { store: Store; fallback?: string } = $props();
   let machine = $derived(workspace.machines.find((machine) => machine.store === store)
     ?? (store.core?.hostname || store.endpointUrl ? {
       id: store.endpointUrl ?? '', label: store.core?.hostname ?? store.endpointUrl!, store,
@@ -13,12 +13,14 @@
 </script>
 
 {#if machine}
-  <p class="scope" data-testid="quota-machine-scope" data-remote={remote}>
+  <span class="scope" data-testid="quota-machine-scope" data-remote={remote}>
     {label[0]}<span class="name">{machine.label}</span>{label[1] ?? ''}
-  </p>
+  </span>
+{:else}
+  {fallback}
 {/if}
 
 <style>
-  .scope { max-width: var(--settings-width); margin: 8px 0 12px; font-size: var(--text-sm); color: var(--color-muted-foreground); overflow-wrap: anywhere; }
-  .name { color: var(--color-accent); font-weight: 600; }
+  .scope { overflow-wrap: anywhere; }
+  .name { color: var(--color-accent); }
 </style>

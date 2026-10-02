@@ -9,6 +9,7 @@
   import AppearancePage from './AppearancePage.svelte';
   import ExperimentsPage from './ExperimentsPage.svelte';
   import LimitsPage from './LimitsPage.svelte';
+  import QuotaMachineScope from './QuotaMachineScope.svelte';
   import ResourcesPage from './ResourcesPage.svelte';
   import MachinesPage from './MachinesPage.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
@@ -115,9 +116,9 @@
       </section>
     </div>
   {:else}
-    <header>
+    <header class:limits={page === 'limits'}>
       <button class="ghost icon" data-testid="mobile-settings-back" aria-label={strings.mobile.settingsBack} onclick={back}><ArrowLeft size={20} /></button>
-      <h1>{title}{#if info}<InfoTip topic={title} text={info} testid="mobile-settings-info" />{/if}</h1>
+      <h1>{#if page === 'limits'}<QuotaMachineScope {store} fallback={title} />{:else}{title}{/if}{#if info}<InfoTip topic={title} text={info} testid="mobile-settings-info" />{/if}</h1>
     </header>
     <div class="detail" data-testid="mobile-settings-detail">
       {#if page === 'brain' && store.owner}
@@ -138,7 +139,7 @@
       {:else if page === 'usage'}
         <UsagePage {store} />
       {:else if page === 'limits'}
-        <LimitsPage {store} />
+        <LimitsPage {store} showTitle={false} />
       {:else if page === 'resources' && store.owner}
         <ResourcesPage {store} />
       {:else if page === 'experiments'}
@@ -176,6 +177,7 @@
   header { flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--color-border); }
   header .icon { width: 44px; min-height: 44px; }
   header h1 { font-size: var(--text-md); }
+  header.limits h1 { flex: 1; min-width: 0; margin-right: 54px; }
   .phone-page { padding: 16px; }
   .scope { overflow-wrap: anywhere; margin-top: 0; }
   .phone-page :global(.card) { padding: 18px; }
