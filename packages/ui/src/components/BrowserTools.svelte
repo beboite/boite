@@ -32,6 +32,7 @@
     finally { busy = false; }
   }
   async function diagnostics(clear = false): Promise<void> {
+    if (busy) return;
     busy = true;
     try {
       if (clear) await runBrowserAction(id, { kind: 'diagnostics', clear: true });

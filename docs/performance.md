@@ -333,10 +333,10 @@ preview changes. Totals exclude precompressed `.br` and `.gz` copies, as
 | Build | UI entry | Complete UI |
 | --- | ---: | ---: |
 | `83ae9b4` | 407,290 bytes | 3,751,358 bytes |
-| Browser tools and remote review | 477,796 bytes | 3,835,187 bytes |
+| Browser tools and remote review | 477,796 bytes | 3,835,198 bytes |
 
 The added dialogs, browser controls, recording encoder support and translations
-add 83,829 bytes (2.23%) to the complete UI. The WebM duration parser loads only
+add 83,840 bytes (2.23%) to the complete UI. The WebM duration parser loads only
 when finalizing a recording. The total UI budget increases by 84,000 bytes to
 3,880,000, retaining the previous headroom; entry and core budgets are unchanged.
 

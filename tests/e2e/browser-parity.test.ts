@@ -59,7 +59,28 @@ test.skipIf(process.platform !== 'win32' || !executable)('native presets, appear
     const bytes = readFileSync(recorded.path); expect(bytes.subarray(0, 4)).toEqual(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
     writeFileSync(join(captures, 'browser-parity-native.webm'), bytes);
     // A browser decodes the produced container, not just its EBML magic bytes.
-    const decoded = await page.evaluate<{ width: number; height: number; duration: number; seeked: number }>(`new Promise((resolve,reject)=>{const bytes=Uint8Array.from(atob(${JSON.stringify(bytes.toString('base64'))}),c=>c.charCodeAt(0)),v=document.createElement('video'),url=URL.createObjectURL(new Blob([bytes],{type:'video/webm'}));v.onloadeddata=()=>{v.onseeked=()=>{resolve({width:v.videoWidth,height:v.videoHeight,duration:v.duration,seeked:v.currentTime});v.remove();URL.revokeObjectURL(url)};v.currentTime=v.duration/2};v.onerror=()=>reject(new Error('recording cannot play'));v.src=url;v.load();})`).catch(error => { throw new Error(String(error).split('expression:')[0]); });
+    const global = await page.send('Runtime.evaluate', { expression: 'globalThis' }) as { result: { objectId: string } };
+    let decoded: { width: number; height: number; duration: number; seeked: number };
+    try {
+      const playback = await page.send('Runtime.callFunctionOn', {
+        objectId: global.result.objectId,
+        functionDeclaration: `function(base64) { return new Promise((resolve, reject) => {
+          const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+          const video = document.createElement('video'), url = URL.createObjectURL(new Blob([bytes], { type: 'video/webm' }));
+          const cleanup = () => { video.remove(); URL.revokeObjectURL(url); };
+          video.onloadeddata = () => {
+            video.onseeked = () => { resolve({ width: video.videoWidth, height: video.videoHeight, duration: video.duration, seeked: video.currentTime }); cleanup(); };
+            video.currentTime = video.duration / 2;
+          };
+          video.onerror = () => { cleanup(); reject(new Error('recording cannot play')); };
+          video.src = url; video.load();
+        }); }`,
+        arguments: [{ value: bytes.toString('base64') }],
+        awaitPromise: true, returnByValue: true,
+      }) as { result: { value: typeof decoded }; exceptionDetails?: unknown };
+      expect(playback.exceptionDetails).toBeUndefined();
+      decoded = playback.result.value;
+    } finally { await page.send('Runtime.releaseObject', { objectId: global.result.objectId }); }
     expect(decoded.width).toBeGreaterThan(200); expect(decoded.height).toBeGreaterThan(200);
     expect(Number.isFinite(decoded.duration)).toBe(true); expect(decoded.seeked).toBeGreaterThan(0);
     console.log(`Native recording decoded: ${recorded.bytes} bytes, ${decoded.width}x${decoded.height}`);

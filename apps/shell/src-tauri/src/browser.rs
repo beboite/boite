@@ -552,7 +552,11 @@ pub async fn browser_create(
         if let Err(error) = crate::platform::browser_diagnostics::attach(view.clone(), id.clone()).await {
             crate::platform::browser_diagnostics::remove(&id); let _ = view.close(); return Err(error);
         }
-        view.navigate(start).map_err(|error| error.to_string())?;
+        if let Err(error) = view.navigate(start) {
+            crate::platform::browser_diagnostics::remove(&id);
+            let _ = view.close();
+            return Err(error.to_string());
+        }
     }
     Ok(())
 }

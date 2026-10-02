@@ -42,8 +42,13 @@ pub fn remove(id: &str) { if let Ok(mut logs) = LOGS.lock() { logs.remove(id); }
 
 pub async fn attach(view: tauri::Webview, id: String) -> Result<(), String> {
     LOGS.lock().map_err(|_| "browser diagnostics are unavailable")?.insert(id.clone(), Log::default());
+    let result = attach_events(view, id.clone()).await;
+    if result.is_err() { remove(&id); }
+    result
+}
+
+async fn attach_events(view: tauri::Webview, id: String) -> Result<(), String> {
     let (sender, receiver) = mpsc::channel();
-    let failed_id = id.clone();
     let native = view.clone();
     native.with_webview(move |platform| {
         let register = || -> windows::core::Result<()> { unsafe {
@@ -79,7 +84,6 @@ pub async fn attach(view: tauri::Webview, id: String) -> Result<(), String> {
     }).map_err(|error| error.to_string())?;
     let result = tauri::async_runtime::spawn_blocking(move || receiver.recv_timeout(Duration::from_secs(10)).map_err(|_| "browser diagnostics timed out".to_owned())?)
         .await.map_err(|error| error.to_string())?;
-    if result.is_err() { remove(&failed_id); }
     result?;
     super::browser_control::call(view.clone(), "Runtime.enable".into(), json!({})).await?;
     super::browser_control::call(view, "Network.enable".into(), json!({ "maxTotalBufferSize": 0, "maxResourceBufferSize": 0 })).await?;

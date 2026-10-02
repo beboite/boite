@@ -17,7 +17,13 @@ test.skipIf(process.platform !== 'win32' || !executable)('a paired phone sees an
     const first = await phone.call('browser.remoteFrame', { threadId });
     expect(first.title).toContain('iPhone'); expect(Buffer.from(first.base64, 'base64').subarray(0, 2)).toEqual(Buffer.from([255, 216]));
     writeFileSync(join(captures, 'remote-live.jpg'), Buffer.from(first.base64, 'base64'));
-    const point = async (selector: string) => (await command({ kind: 'evaluate', expression: `(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:(r.x+r.width/2)/innerWidth,y:(r.y+r.height/2)/innerHeight}})()` })).value as { x: number; y: number };
+    const point = async (selector: '#action' | '#message') => {
+      const points = (await command({ kind: 'evaluate', expression: `Object.fromEntries(['#action', '#message'].map(selector => {
+        const r = document.querySelector(selector).getBoundingClientRect();
+        return [selector, { x: (r.x + r.width / 2) / innerWidth, y: (r.y + r.height / 2) / innerHeight }];
+      }))` })).value as Record<typeof selector, { x: number; y: number }>;
+      return points[selector];
+    };
     await phone.call('browser.remoteInput', { threadId, frameId: first.id, input: { kind: 'tap', ...await point('#action'), width: first.width, height: first.height } });
     expect((await command({ kind: 'evaluate', expression: "document.querySelector('#result').textContent" })).value).toBe('Le téléphone a cliqué !');
     await phone.call('browser.remoteInput', { threadId, frameId: first.id, input: { kind: 'tap', ...await point('#message'), width: first.width, height: first.height } });
@@ -25,6 +31,10 @@ test.skipIf(process.platform !== 'win32' || !executable)('a paired phone sees an
     expect((await command({ kind: 'evaluate', expression: "document.querySelector('#message').value" })).value).toBe('Bonjour depuis le téléphone');
     await command({ kind: 'resize', width: 800, height: 600 });
     await expect(phone.call('browser.remoteInput', { threadId, frameId: first.id, input: { kind: 'key', key: 'Enter' } })).rejects.toThrow('page changed');
+    // The pixel assertion below compares a dark badge with the light fixture.
+    // Select the host theme explicitly instead of inheriting the runner's OS theme.
+    await page.evaluate("localStorage.setItem('boite.theme', 'dark'); window.dispatchEvent(new StorageEvent('storage', { key: 'boite.theme' })); true");
+    await page.waitFor("document.documentElement.dataset.theme !== 'light'");
     await command({ kind: 'recording-start', indicators: true });
     await command({ kind: 'click', selector: '#action' }); await Bun.sleep(220);
     await command({ kind: 'press', key: 'Tab' }); await Bun.sleep(220);
