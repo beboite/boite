@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { bytes, clockTime, elapsed, levelName, millis, quotaWindowName } from './format';
+import { bytes, clockTime, elapsed, levelName, millis, quotaResetTime, quotaWindowName, relativeTime } from './format';
 import { setLocaleSetting } from './i18n.svelte';
 
 test('elapsed reads like a stopwatch', () => {
@@ -9,6 +9,20 @@ test('elapsed reads like a stopwatch', () => {
   expect(elapsed(65_000)).toBe('1m 05s');
   expect(elapsed(3_720_000)).toBe('1h 02m');
   expect(elapsed(-5)).toBe('0s');
+});
+
+test('mail ages stay relative across days and clamp clock skew to now', async () => {
+  const now = Date.parse('2026-10-02T12:00:00Z');
+  expect(relativeTime(now + 60_000, now)).toBe('now');
+  expect(relativeTime(now - 59_999, now)).toBe('now');
+  expect(relativeTime(now - 120_000, now)).toBe('2 min. ago');
+  expect(relativeTime(now - 7_200_000, now)).toBe('2 hr. ago');
+  expect(relativeTime(now - 172_800_000, now)).toBe('2 days ago');
+  await setLocaleSetting('fr');
+  try {
+    expect(relativeTime(now - 120_000, now).replace(/\s/g, ' ')).toBe('il y a 2 min');
+    expect(relativeTime(now, now)).toBe("à l'instant");
+  } finally { await setLocaleSetting('en'); }
 });
 
 test('clockTime gives the hour today, a weekday this week and a date beyond', () => {
@@ -23,6 +37,8 @@ test('clockTime gives the hour today, a weekday this week and a date beyond', ()
 });
 
 test('durations, sizes, effort levels and quota windows follow the language the app speaks', async () => {
+  const friday = new Date(2026, 8, 25, 20, 55).getTime();
+  expect(quotaResetTime(friday)).toMatch(/^Friday /);
   expect(millis(38_000)).toBe('38.0 s');
   // Xhigh reads as the providers spell it, whatever label the core sends.
   expect(levelName({ id: 'xhigh', label: 'Extra high' })).toBe('Xhigh');
@@ -42,6 +58,7 @@ test('durations, sizes, effort levels and quota windows follow the language the 
     expect(quotaWindowName('Weekly · Opus')).toBe('Hebdomadaire · Opus');
     expect(quotaWindowName('Gemini Pro · 5 hours')).toBe('Gemini Pro · 5 heures');
     expect(quotaWindowName('Credits')).toBe('Crédits');
+    expect(quotaResetTime(friday)).toBe('vendredi 20:55');
     expect(levelName({ id: 'none', label: 'None' })).toBe('Aucun');
   } finally { await setLocaleSetting('en'); }
 });

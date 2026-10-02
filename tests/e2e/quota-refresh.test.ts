@@ -2,6 +2,8 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 import { startDevUi } from './lib/ui.ts';
+import { startTestCore } from '../../packages/core/test/harness.ts';
+import type { AccountQuota } from '../../packages/contracts/src/index.ts';
 
 let server: { close(): Promise<void> };
 let page: BrowserPage;
@@ -109,7 +111,7 @@ for (const width of [1280, 390]) {
     await page.click('[data-testid="nav-settings"]');
     await page.click('[data-testid="settings-tab-limits"]');
     await page.waitFor(`document.querySelector('[data-testid="limits-refresh"]')?.getAttribute('aria-busy') === 'false'`);
-    expect(await page.evaluate(`document.querySelector('[data-testid="usage-limit-provider"][data-account-id="a-codex"] strong').textContent`)).toBe('Codex');
+    expect(await page.evaluate(`document.querySelector('[data-testid="usage-limit-provider"][data-account-id="a-codex"] strong').textContent`)).toBe('Default');
     const tracked = '[data-testid="tracked-account"][data-account-id="a-codex"]';
     await page.click(`${tracked} [data-testid="account-rename"]`);
     await page.waitFor(`document.activeElement?.getAttribute('data-testid') === 'account-name'`);
@@ -148,8 +150,8 @@ test('the tray follows account renames immediately and keeps subscriptions separ
   await page.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 650, deviceScaleFactor: 1, mobile: false });
   await page.evaluate(`localStorage.removeItem('boite.quotas')`);
   await page.navigate(`${origin}/?fake=1&view=quotas&quotaExtras=1`);
-  await page.waitFor(`document.querySelector('[data-testid="quota-refresh"]')?.getAttribute('aria-busy') === 'false' && document.querySelector('[data-testid="quota-provider"][data-account-id="a-codex"] .name')?.textContent === 'Codex'`);
-  expect(await page.evaluate(`document.querySelector('[data-testid="quota-provider"][data-account-id="a-codex"] .name').textContent`)).toBe('Codex');
+  await page.waitFor(`document.querySelector('[data-testid="quota-refresh"]')?.getAttribute('aria-busy') === 'false' && document.querySelector('[data-testid="quota-provider"][data-account-id="a-codex"] .name')?.textContent === 'Default'`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="quota-provider"][data-account-id="a-codex"] .name').textContent`)).toBe('Default');
   await page.evaluate(`(async () => {
     const { FakeClient } = await import('/src/lib/fake-client.ts');
     const call = FakeClient.prototype.call;
@@ -190,4 +192,127 @@ test('the tray follows account renames immediately and keeps subscriptions separ
   await capture('subscription-tray-expanded.png');
   expect(await page.evaluate(`document.querySelectorAll('${personal} .details [role="meter"]').length`)).toBe(2);
   expect(await page.evaluate(`document.querySelectorAll('[data-testid="quota-provider"][data-provider="codex"]')[1].querySelector('.details')`)).toBeNull();
+}, 60_000);
+
+
+test('the same popup shares priorities across the app, tray and phone through the owning core', async () => {
+  const harness = await startTestCore({ settings: { browserOrigins: [origin] } });
+  const client = await harness.connect();
+  let tray: BrowserPage | undefined;
+  try {
+    const names = ['Personal', 'Work', 'Research', 'Studio', 'Travel'];
+    const accounts = [];
+    for (const label of names) accounts.push(await client.call('accounts.add', { providerId: 'echo', label, useDefaultLocation: false }));
+    const rows: AccountQuota[] = accounts.map((account, index) => ({
+      accountId: account.id, providerId: index === 1 ? 'codex' : 'claude', providerName: index === 1 ? 'Codex' : 'Claude', label: 'Cached profile',
+      enabled: true, status: 'ready', checkedAt: Date.now(), error: null,
+      windows: [{ id: 'week', label: 'Weekly', usedPercent: index === 1 ? 100 : 25, resetsAt: new Date(2026, 9, 7, 20, 55).getTime() }],
+      ...(index === 1 ? { credits: { kind: 'balance' as const, enabled: true, remaining: 42.5, limit: null, unlimited: false } } : {}),
+    }));
+    // Keep real accounts, persistence, events and transports. Only provider readings are scripted, without live logins.
+    harness.core.quotas.list = async () => structuredClone(rows);
+    const endpoint = `core=${encodeURIComponent(harness.url)}&token=${encodeURIComponent(harness.token)}`;
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+    await page.navigate(`${origin}/?${endpoint}`);
+    await page.click('[data-testid="confirm-ok"]');
+    await page.click('[data-testid="nav-limits"]');
+    await page.waitFor(`document.querySelectorAll('[data-testid="quota-provider"]').length === 5`);
+    tray = await BrowserPage.launch({ url: `${origin}/?fake=1&view=quotas`, windowSize: { width: 380, height: 460 } });
+    // A native tray reads the shell's endpoint. Give this separate browser profile that same established endpoint.
+    await tray.waitFor(`document.querySelector('[data-testid="quota-popup"]')`);
+    await tray.evaluate(`localStorage.setItem('boite.core', ${JSON.stringify(JSON.stringify({ url: harness.url, token: harness.token }))})`);
+    await tray.navigate(`${origin}/?view=quotas`);
+    await tray.waitFor(`document.querySelectorAll('[data-testid="quota-provider"]').length === 5`);
+    const orderedNames = (browser: BrowserPage) => browser.evaluate<string[]>(`[...document.querySelectorAll('[data-testid="quota-provider"] .name')].map(row => row.textContent)`);
+    expect(await orderedNames(page)).toEqual(names);
+    expect(await orderedNames(tray)).toEqual(names);
+    const panel = '[data-testid="quota-panel"]';
+    for (const browser of [page, tray]) {
+      expect(await browser.evaluate(`document.querySelector('${panel} h2').textContent`)).toBe('Account limits');
+      expect(await browser.evaluate(`document.querySelector('${panel} footer button').textContent`)).toBe('Limits page');
+      expect(await browser.evaluate(`document.querySelector('[data-account-id="${accounts[1]!.id}"] .paid').textContent`)).toContain('Using credits');
+      expect(await browser.evaluate(`getComputedStyle(document.querySelector('[data-account-id="${accounts[0]!.id}"] .track')).height`)).toBe('7px');
+      expect(await browser.evaluate(`document.querySelector('[data-account-id="${accounts[0]!.id}"] .reset').textContent`)).toMatch(/^Wednesday /);
+      // Five profiles fit in the usual popup without scrolling to reach the last one.
+      expect(await browser.evaluate(`(() => {
+        const body = document.querySelector('${panel} .body').getBoundingClientRect();
+        const last = [...document.querySelectorAll('[data-testid="quota-provider"]')].at(-1).getBoundingClientRect();
+        return last.bottom <= body.bottom;
+      })()`)).toBe(true);
+    }
+    await capture('limits-popup-desktop.png');
+    await tray.screenshot(join(process.env.BOITE_CAPTURE_DIR ?? join(import.meta.dir, '.artifacts'), 'limits-popup-tray.png'));
+
+    const bounds = await page.evaluate<{ from: { x: number; y: number }; to: { x: number; y: number } }>(`(() => {
+      const handle = document.querySelector('[data-account-id="${accounts[1]!.id}"] [data-testid="quota-reorder"]').getBoundingClientRect();
+      const target = document.querySelector('[data-account-id="${accounts[0]!.id}"]').getBoundingClientRect();
+      return { from: { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 }, to: { x: handle.x + handle.width / 2, y: target.top + 16 } };
+    })()`);
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...bounds.from });
+    await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...bounds.from, button: 'left', buttons: 1, clickCount: 1 });
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...bounds.to, buttons: 1 });
+    await page.waitFor(`document.querySelector('[data-testid="quota-provider"]')?.dataset.accountId === '${accounts[1]!.id}'`);
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...bounds.to, button: 'left', clickCount: 1 });
+    await tray.waitFor(`document.querySelector('[data-testid="quota-provider"]')?.dataset.accountId === '${accounts[1]!.id}'`);
+    expect((await client.call('settings.get', {})).quotaOrder?.[0]).toBe(accounts[1]!.id);
+    await capture('limits-popup-dragged.png');
+
+    // Keyboard reversal in the tray reaches the app too.
+    const handle = `[data-account-id="${accounts[1]!.id}"] [data-testid="quota-reorder"]`;
+    await tray.evaluate(`document.querySelector('${handle}').focus()`);
+    await tray.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 });
+    await tray.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 });
+    await page.waitFor(`document.querySelector('[data-testid="quota-provider"]')?.dataset.accountId === '${accounts[0]!.id}'`);
+    expect(await orderedNames(tray)).toEqual(names);
+    await page.click('[data-testid="nav-limits"]');
+    await page.click('[data-testid="nav-limits"]');
+    expect(await orderedNames(page)).toEqual(names);
+
+    // A constrained viewport still allows dragging from the bottom to the top while scrolling.
+    await tray.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 300, deviceScaleFactor: 1, mobile: false });
+    await tray.waitFor(`document.querySelector('${panel} .body').clientHeight < 220`);
+    const scrollDrag = await tray.evaluate<{ from: { x: number; y: number }; to: { x: number; y: number } }>(`(() => {
+      const body = document.querySelector('${panel} .body');
+      body.scrollTop = body.scrollHeight;
+      const grip = document.querySelector('[data-account-id="${accounts[4]!.id}"] [data-testid="quota-reorder"]').getBoundingClientRect();
+      const box = body.getBoundingClientRect();
+      return { from: { x: grip.x + grip.width / 2, y: grip.y + grip.height / 2 }, to: { x: grip.x + grip.width / 2, y: box.top + 12 } };
+    })()`);
+    await tray.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...scrollDrag.from });
+    await tray.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...scrollDrag.from, button: 'left', buttons: 1, clickCount: 1 });
+    await tray.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...scrollDrag.to, buttons: 1 });
+    await tray.waitFor(`document.querySelector('${panel} .body').scrollTop === 0 && document.querySelector('[data-testid="quota-provider"]')?.dataset.accountId === '${accounts[4]!.id}'`);
+    await tray.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...scrollDrag.to, button: 'left', clickCount: 1 });
+    await page.waitFor(`document.querySelector('[data-testid="quota-provider"]')?.dataset.accountId === '${accounts[4]!.id}'`);
+    expect((await client.call('settings.get', {})).quotaOrder?.[0]).toBe(accounts[4]!.id);
+    await client.call('settings.set', { quotaOrder: accounts.map((account) => account.id) });
+    await page.waitFor(`document.querySelector('[data-testid="quota-provider"]')?.dataset.accountId === '${accounts[0]!.id}'`);
+
+    await tray.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 460, deviceScaleFactor: 1, mobile: false });
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+    // Reload gives the phone's real sheet placement rather than retaining the desktop floating action.
+    await page.navigate(`${origin}/?${endpoint}`);
+    await page.click('[data-testid="sidebar-toggle"]');
+    await page.click('[data-testid="nav-limits"]');
+    await page.waitFor(`document.querySelectorAll('[data-testid="quota-provider"]').length === 5`);
+    const touch = await page.evaluate<{ from: { x: number; y: number }; to: { x: number; y: number } }>(`(() => {
+      const grip = document.querySelector('[data-account-id="${accounts[1]!.id}"] [data-testid="quota-reorder"]').getBoundingClientRect();
+      const first = document.querySelector('[data-testid="quota-provider"]').getBoundingClientRect();
+      return { from: { x: grip.x + grip.width / 2, y: grip.y + grip.height / 2 }, to: { x: grip.x + grip.width / 2, y: first.y + 16 } };
+    })()`);
+    await page.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...touch.from, id: 1 }] });
+    await page.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...touch.to, id: 1 }] });
+    await page.waitFor(`document.querySelector('[data-testid="quota-provider"]')?.dataset.accountId === '${accounts[1]!.id}'`);
+    await page.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await tray.waitFor(`document.querySelector('[data-testid="quota-provider"]')?.dataset.accountId === '${accounts[1]!.id}'`);
+    await capture('limits-popup-phone.png');
+    expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth && document.querySelector('${panel} .body').scrollWidth <= document.querySelector('${panel} .body').clientWidth`)).toBe(true);
+    await client.call('accounts.rename', { accountId: accounts[1]!.id, label: 'Work subscription' });
+    for (const browser of [page, tray]) await browser.waitFor(`document.querySelector('[data-testid="quota-provider"] .name')?.textContent === 'Work subscription'`);
+    // A fresh webview starts from the saved core order.
+    await tray.navigate(`${origin}/?view=quotas`);
+    await tray.waitFor(`document.querySelector('[data-testid="quota-provider"] .name')?.textContent === 'Work subscription'`);
+    expect((await client.call('settings.get', {})).quotaOrder?.[0]).toBe(accounts[1]!.id);
+  } finally { await tray?.close(); client.close(); await harness.stop(); }
 }, 60_000);

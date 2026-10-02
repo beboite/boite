@@ -38,17 +38,19 @@ export class DeferredInput {
     if (handle?.steer && !this.threads.runner.steering.has(threadId)) {
       const turnId = this.core.journal.listTurns(threadId).findLast(turn => turn.status === 'running')?.id;
       this.threads.runner.steering.add(threadId);
-      void handle.steer(text)
-        .then(submitted => {
-          if (this.core.stopping) return;
-          if (!submitted) return;
-          if (turnId) this.threads.runner.answerAfter.set(turnId, this.recordAnswer(threadId, turnId, text));
-          const held = this.deferredAnswers.get(threadId) ?? [];
-          const index = held.indexOf(text);
-          if (index >= 0) held.splice(index, 1);
-          if (!held.length) this.deferredAnswers.delete(threadId);
-          this.changed(threadId);
-        })
+      let recorded = false;
+      const accepted = () => {
+        if (recorded || this.core.stopping) return;
+        if (turnId) this.threads.runner.answerAfter.set(turnId, this.recordAnswer(threadId, turnId, text));
+        const held = this.deferredAnswers.get(threadId) ?? [];
+        const index = held.indexOf(text);
+        if (index >= 0) held.splice(index, 1);
+        if (!held.length) this.deferredAnswers.delete(threadId);
+        recorded = true;
+        this.changed(threadId);
+      };
+      void handle.steer(text, undefined, accepted)
+        .then(submitted => { if (submitted) accepted(); })
         .catch(error => {
           if (this.core.stopping) return;
           this.core.log('warn', `thread ${threadId}: steering an async answer failed, it waits for the next turn: ${messageOf(error)}`);
