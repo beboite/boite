@@ -186,6 +186,9 @@ and broadcasts `project.updated`, so all connected clients use the same default.
 New drafts use the project's default. Moving a draft uses the target's default
 unless the composer switch was chosen explicitly. Restored drafts keep their
 choice. The composer switch only changes that draft. Enabling the preference requires a Git repository other than Drafts.
+Settings > Appearance > Buttons can hide the Worktree switch on desktop and
+in the phone's options sheet. This device preference leaves the draft's choice
+and the project's default unchanged.
 On, the first send passes
 `worktree: {}` to `threads.create` and the core runs `git worktree add -b`
 before writing the thread: the branch is a short temporary `boite/wt-<id>`
