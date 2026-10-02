@@ -118,6 +118,7 @@ export class AcpTurn {
 
   private status: TurnResult['status'] = 'done';
   private error: string | null = null;
+  private diagnosticError: string | undefined;
   private usage: Usage | null = null;
   private resolve: (result: TurnResult) => void = () => undefined;
   private wake: () => void = () => undefined;
@@ -198,6 +199,7 @@ export class AcpTurn {
       sessionId: this.sessionId,
       usage: this.usage,
       error: this.error ?? undefined,
+      ...(this.diagnosticError === undefined ? {} : { diagnosticError: this.diagnosticError }),
       promptCache: acpCacheLife(this.ctx.provider.id, this.ctx.thread.model),
       ...(this.sessionLost ? { sessionLost: true } : {}),
     });
@@ -225,10 +227,11 @@ export class AcpTurn {
     }
   }
 
-  fail(reason: string): void {
+  fail(reason: string, diagnostic?: string): void {
     if (this.status === 'error') return;
     this.status = 'error';
     this.error = reason;
+    this.diagnosticError = diagnostic;
     this.part(this.takeIndex(), { type: 'error', message: reason });
   }
 

@@ -3,7 +3,7 @@ import { untrack } from 'svelte';
 import type { Attachment, Message, MessageId, ThreadSummary, TurnInFlightData } from '@boite/contracts';
 import { drainQueue, sentPrompt } from '../composer-queue';
 import { restorePreviewMentions } from '../preview-mentions';
-import { activityCommand } from '../activity-command';
+import { activityCommand, isActivityCommand } from '../activity-command';
 import { RpcFailure, readyAgain, wasDropped } from '../client';
 import { titleFrom } from '../format';
 import { DRAFT_STASH_KEY } from '../prefs';
@@ -11,6 +11,7 @@ import { editPreviewMentions, insertPreviewMention } from '../preview-mentions';
 import { showPreviewReference } from '../preview-navigation';
 import { strings } from '../strings';
 import { unresolvedAssetId } from '../draft-attachments';
+import { secureId } from '../secure-id';
 import type { Choice } from '../store.svelte';
 import type { StoreContext } from './context';
 
@@ -47,7 +48,7 @@ export class Composer {
   inputBoundaries = $state<Record<string, { turnId: string; boundary: string }>>({});
   /** Only this client's accepted input asks the timeline to reveal a prompt. */
   promptFocus = $state<{ threadId: string; turnId: string; after: string | null } | null>(null);
-  private steerRequests = new Map<string, { content: string; id: string }>();
+  private steerRequests = new Map<string, { content: string; id: string; generation: number }>();
 
   previewUndo = new Map<string, { text: string; references: PreviewReference[] }[]>();
   composerInsertions = new Map<string, (start: number, end: number, text: string) => void>();
@@ -67,7 +68,7 @@ export class Composer {
           if (!thread || thread.archived || ['queued', 'waiting'].includes(thread.status)) continue;
           if (thread.status === 'running') {
             const boundary = this.inputBoundaries[threadId];
-            if (!boundary || state.queued[0]?.afterBoundary === boundary.boundary || this.blocked(threadId) || state.queued.some(entry => activityCommand(entry.text))) continue;
+            if (!boundary || state.queued[0]?.afterBoundary === boundary.boundary || this.blocked(threadId) || isActivityCommand(state.queued[0]!.text)) continue;
             untrack(() => {
               for (const entry of state.queued) entry.afterBoundary = boundary.boundary;
               void drainQueue(s, threadId, state, boundary.turnId);
@@ -94,37 +95,43 @@ export class Composer {
     state.paused = false;
     if (thread.status !== 'running') { await drainQueue(s, threadId, state); return; }
     const turnId = s.openThread?.id === threadId ? s.openThread.turns.findLast(turn => turn.status === 'running')?.id : this.inputBoundaries[threadId]?.turnId;
-    if (!turnId || state.queued.some(entry => activityCommand(entry.text))) return;
+    if (isActivityCommand(state.queued[0]!.text)) { s.error = strings.composer.queueWaitForEnd; return; }
+    if (!turnId) { s.error = strings.composer.queueTurnNotReady; return; }
+    const client = this.ctx.client, generation = this.ctx.clientGeneration;
+    const first = state.queued[0];
     for (const entry of state.queued) entry.afterBoundary = this.inputBoundaries[threadId]?.boundary;
     await drainQueue(s, threadId, state, turnId);
+    if (client && this.ctx.currentClient(client, generation) && this.composerStates[threadId] === state && state.queued[0] === first && !state.paused) s.error = strings.composer.queueNotAccepted;
   }
 
   /** True is provider acceptance, false is safely held input, null is a failed or uncertain send. */
   async steer(prompt: string, threadId: string, turnId: string, attachments: Attachment[], previewReferences: PreviewReference[]): Promise<boolean | null> {
     const s = this.ctx.store;
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client || s.connection !== 'ready' || this.blocked(threadId)) return false;
     if (attachments.some(unresolvedAssetId)) { s.error = strings.errors.draftAttachment; return null; }
     const selectionVersion = (s.openThread?.id === threadId ? s.openThread : s.threads.find(row => row.id === threadId))?.selectionVersion ?? 0;
     const content = JSON.stringify([turnId, prompt, attachments, previewReferences, selectionVersion]);
     let request = this.steerRequests.get(threadId);
-    if (!request || request.content !== content) {
-      request = { content, id: crypto.randomUUID() };
-      this.steerRequests.set(threadId, request);
-    }
     try {
-      await this.ctx.connection.reloading?.promise;
-      if (this.ctx.client !== client || s.connection !== 'ready') return null;
+      if (!request || request.generation !== clientGeneration || request.content !== content) {
+        request = { content, id: secureId(), generation: clientGeneration };
+        this.steerRequests.set(threadId, request);
+      }
+      await this.ctx.connection.reloading?.essential;
+      if (!this.ctx.currentClient(client, clientGeneration) || s.connection !== 'ready') return null;
       const after = s.openThread?.id === threadId ? s.openThread.messages.findLast(message => message.role === 'user')?.id ?? null : null;
       const result = await client.call('turns.steer', { threadId, turnId, prompt, attachments, previewReferences,
         clientRequestId: request.id, expectedSelectionVersion: selectionVersion });
-      if (this.ctx.client === client && result.accepted) {
+      if (!result.accepted && !this.ctx.currentClient(client, clientGeneration)) return null;
+      if (this.ctx.currentClient(client, clientGeneration) && result.accepted) {
         this.steerRequests.delete(threadId);
         this.promptFocus = { threadId, turnId, after };
       }
       return result.accepted;
     } catch (error) {
-      if (this.ctx.client !== client) return null;
+      if (!this.ctx.currentClient(client, clientGeneration)) return null;
       // An older core keeps the original end-of-turn queue. An uncertain submission stays paused.
       if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) return false;
       this.ctx.fail(error);
@@ -142,7 +149,7 @@ export class Composer {
     const draft = this.composerStates[key]!;
     const historyKey = this.ctx.store.threadKey(key);
     const previous = this.previewUndo.get(historyKey);
-    if (!previous && !draft.previewReferences?.length) { draft.text = value; this.ctx.drafts.persist(); return; }
+    if (!previous && !draft.previewReferences?.length) { draft.text = value; this.ctx.drafts.persist(key); return; }
     const history = previous ?? [];
     const restored = undo ? history.findLast(entry => entry.text === value) : undefined;
     history.push({ text: draft.text, references: draft.previewReferences ?? [] });
@@ -150,7 +157,7 @@ export class Composer {
     this.previewUndo.set(historyKey, history);
     draft.previewReferences = restored?.references ?? editPreviewMentions(draft.text, value, draft.previewReferences ?? [], edit);
     draft.text = value;
-    this.ctx.drafts.persist();
+    this.ctx.drafts.persist(key);
   }
 
   /**
@@ -210,8 +217,9 @@ export class Composer {
   }
 
   async revealPreviewReference(threadId: string, reference: PreviewReference): Promise<void> {
+    const client = this.ctx.client, generation = this.ctx.clientGeneration;
     try { await showPreviewReference(this.ctx.store, threadId, reference); }
-    catch (error) { this.ctx.fail(error); }
+    catch (error) { if (client && this.ctx.currentClient(client, generation)) this.ctx.fail(error); }
   }
 
   /** Add reviewed context to this machine's unsent draft without queuing a turn. */
@@ -225,28 +233,40 @@ export class Composer {
   }
 
   async submit(prompt: string, choice: Choice, attachments: Attachment[] = [], previewReferences: PreviewReference[] = []): Promise<boolean> {
+    return (await this.submitOwned(prompt, choice, attachments, previewReferences)) !== null;
+  }
+
+  private async submitOwned(prompt: string, choice: Choice, attachments: Attachment[], previewReferences: PreviewReference[]): Promise<{ navigation: number | null } | null> {
     const s = this.ctx.store;
-    if (attachments.some(unresolvedAssetId)) { s.error = strings.errors.draftAttachment; return false; }
-    if ((prompt.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0) || s.connection !== 'ready') return false;
+    const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
+    const navigation = s.navigationGeneration;
+    const owner = () => this.ctx.client === client && this.ctx.clientGeneration === clientGeneration;
+    const current = () => owner() && s.navigationGeneration === navigation;
+    if (attachments.some(unresolvedAssetId)) { s.error = strings.errors.draftAttachment; return null; }
+    if (!client || (prompt.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0) || s.connection !== 'ready') return null;
+    attachments = attachments.map(item => ({ ...item }));
+    previewReferences = $state.snapshot(previewReferences);
+    choice = { ...choice };
     try {
       if (activityCommand(prompt) && previewReferences.length) throw new Error(strings.previewComments.activityUnsupported);
       if (activityCommand(prompt) && attachments.length) throw new Error(strings.activity.noAttachments);
-    } catch (error) { this.ctx.fail(error); return false; }
+    } catch (error) { this.ctx.fail(error); return null; }
     if (s.draft && !s.openThread) {
       const draft = s.draft;
       const selection = s.draftChoice;
       const prepared = await s.prepareDraftChoice(choice);
-      if (!prepared || s.draft !== draft || s.draftChoice !== selection || s.openThread) return false;
+      if (!prepared || !current() || s.draft !== draft || s.draftChoice !== selection || s.openThread) return null;
       choice = prepared;
     }
     s.remember(choice);
     if (s.openThread) {
-      return s.send(prompt, s.openThread.id, attachments, previewReferences);
+      return await s.send(prompt, s.openThread.id, attachments, previewReferences) ? { navigation } : null;
     }
     const draft = s.draft;
-    if (!draft) return false;
+    if (!draft) return null;
     const projectId = draft.projectId ?? (await this.ctx.projects.ensureDrafts());
-    if (projectId === null || s.draft !== draft) return false;
+    if (projectId === null || !current() || s.draft !== draft) return null;
     const composer = this.composerStates[DRAFT_STASH_KEY];
     const created = await s.createThread({
       projectId,
@@ -258,14 +278,23 @@ export class Composer {
       speed: choice.speed ?? null,
       ...(choice.model ? { model: choice.model } : {}),
       ...(draft.worktree ? { worktree: {} } : {})
-    });
-    if (!created) return false;
-    this.ctx.drafts.forget(draft.projectId);
+    }, { navigate: false });
+    if (!created || !owner()) return null;
+    const originalDraft = current() && s.draft === draft && !s.openThread;
+    if (!s.draft || s.draft.projectId !== draft.projectId || originalDraft) this.ctx.drafts.forget(draft.projectId);
     if (composer) {
       this.composerStates[created.id] = composer;
-      delete this.composerStates[DRAFT_STASH_KEY];
+      if (this.composerStates[DRAFT_STASH_KEY] === composer && (!s.draft || originalDraft)) delete this.composerStates[DRAFT_STASH_KEY];
     }
-    return s.send(prompt, created.id, attachments, previewReferences);
+    let followupNavigation: number | null = null;
+    if (originalDraft) {
+      const opening = s.open(created.id);
+      const openingGeneration = s.navigationGeneration;
+      await opening;
+      if (owner() && s.navigationGeneration === openingGeneration && this.ctx.threads.openThread?.id === created.id) followupNavigation = openingGeneration;
+    }
+    if (!owner()) return null;
+    return await s.send(prompt, created.id, attachments, previewReferences) ? { navigation: followupNavigation } : null;
   }
 
   /**
@@ -283,9 +312,11 @@ export class Composer {
   ): Promise<boolean> {
     const s = this.ctx.store;
     const projectId = s.openThread?.projectId ?? s.draft?.projectId;
-    const threadId = s.openThread?.id;
-    if (!(await s.submit(prompt, choice, attachments, previewReferences))) return false;
-    if (projectId !== undefined && (threadId === undefined || s.openThread?.id === threadId)) {
+    const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
+    const sent = await this.submitOwned(prompt, choice, attachments, previewReferences);
+    if (!sent) return false;
+    if (projectId !== undefined && client === this.ctx.client && clientGeneration === this.ctx.clientGeneration && sent.navigation === s.navigationGeneration) {
       // Null names the drafts, which the send has made by now.
       s.startDraft(projectId);
       s.draftChoice = { ...choice };
@@ -303,12 +334,13 @@ export class Composer {
     const connection = this.ctx.connection;
     if (attachments.some(unresolvedAssetId)) { s.error = strings.errors.draftAttachment; return false; }
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client || !threadId || s.connection !== 'ready') return false;
     if (prompt.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0) return false;
     try {
       // Reconnect snapshots must land before a new stream starts mutating the thread.
-      await connection.reloading?.promise;
-      if (this.ctx.client !== client || s.connection !== 'ready') return false;
+      await connection.reloading?.essential;
+      if (!this.ctx.currentClient(client, clientGeneration) || s.connection !== 'ready') return false;
       const activity = activityCommand(prompt);
       if (activity) {
         if (previewReferences.length) throw new Error(strings.previewComments.activityUnsupported);
@@ -319,7 +351,7 @@ export class Composer {
           }
           throw error;
         });
-        if (this.ctx.client === client && s.openThread?.id === threadId) s.openThread.activity = accepted;
+        if (this.ctx.currentClient(client, clientGeneration) && s.openThread?.id === threadId) s.openThread.activity = accepted;
         return true;
       }
       const thread = s.openThread?.id === threadId ? s.openThread : s.threads.find(thread => thread.id === threadId);
@@ -330,9 +362,10 @@ export class Composer {
         if (target.model !== current.model) {
           const revision = thread.selectionVersion ?? 0;
           const prepared = await s.prepareDraftChoice(target);
-          if (!prepared || client !== this.ctx.client) return false;
+          if (!prepared || !this.ctx.currentClient(client, clientGeneration)) return false;
           if (!(await s.update(threadId, { model: prepared.model, effort: prepared.effort, speed: prepared.speed ?? null,
             expectedSelectionVersion: revision }))) return false;
+          if (!this.ctx.currentClient(client, clientGeneration)) return false;
         }
       }
       // The key is left out when there is nothing to carry: a turn with no
@@ -349,19 +382,19 @@ export class Composer {
         ...(attachments.length > 0 ? { attachments } : {}), ...(previewReferences.length > 0 ? { previewReferences } : {}) });
       // A socket lost under the call loses its answer, maybe not the turn: the same request id asks once more, and the core answers with the turn it took.
       const accepted = await start().catch(async (error: unknown) => {
-        if (!wasDropped(error) || !(await readyAgain(client))) throw error;
-        await connection.reloading?.promise;
-        if (this.ctx.client !== client || this.pendingSends.get(threadId) !== sent) throw error;
+        if (!wasDropped(error) || !this.ctx.currentClient(client, clientGeneration) || !(await readyAgain(client)) || !this.ctx.currentClient(client, clientGeneration)) throw error;
+        await connection.reloading?.essential;
+        if (!this.ctx.currentClient(client, clientGeneration) || this.pendingSends.get(threadId) !== sent) throw error;
         return start();
       });
-      if (this.ctx.client === client) {
+      if (this.ctx.currentClient(client, clientGeneration)) {
         this.pendingSends.delete(threadId);
         this.promptFocus = { threadId, turnId: accepted.id, after: null };
       }
       return true;
     } catch (error) {
       // A detached client's answer must not restore input or thread rows into its replacement.
-      if (this.ctx.client !== client) return false;
+      if (!this.ctx.currentClient(client, clientGeneration)) return false;
       const early = turnInFlight(error);
       if (early) {
         this.holdBehind(early, { text: prompt, attachments, ...(previewReferences.length ? { previewReferences } : {}) });
@@ -392,12 +425,13 @@ export class Composer {
 
   async stop(): Promise<void> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     const open = this.ctx.store.openThread;
     if (!client || !open) return;
     try {
       await client.call('turns.stop', { threadId: open.id });
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     }
   }
 }

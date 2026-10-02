@@ -18,7 +18,7 @@ Include desktop and phone captures for visual changes.
 Tick what this change touches and was checked on. Leave the rest empty.
 
 - [ ] Desktop and phone
-- [ ] Each affected driver: Claude, ACP, Codex, pi, echo
+- [ ] Each affected driver: Claude, ACP, Codex, Muse, pi, agy, echo
 - [ ] Both transports: the real core and `lib/fake-client.ts`
 - [ ] Reverse actions: archive, uninstall, unsubscribe, shutdown
 - [ ] Windows and Linux

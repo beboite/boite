@@ -167,7 +167,7 @@ function seedWorkflowDemo(ctx: FakeContext, rootId: ThreadId): void {
 
 export function pumpDelegation(ctx: FakeContext, rootId: ThreadId): void {
   const config = delegationConfig(ctx, rootId);
-  if (!config.enabled || config.paused) return;
+  if (ctx.thread(rootId).archived || !config.enabled || config.paused) return;
   const rows = ctx.delegationAgents.get(rootId) ?? [];
   for (const row of rows) {
     const thread = ctx.thread(row.threadId);
@@ -223,6 +223,7 @@ export function delegationMethods(ctx: FakeContext) {
         return delegatedAgent(ctx, row);
       }
       const config = delegationConfig(ctx, parent.id);
+      if (parent.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start delegation on an archived parent' });
       if (!config.enabled || config.paused) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation is disabled or paused' });
       const rows = ctx.delegationAgents.get(parent.id) ?? [];
       const profile: ChildRoute | undefined = config.profiles.find(entry => entry.id === params.profileId)
@@ -274,6 +275,7 @@ export function delegationMethods(ctx: FakeContext) {
         return structuredClone(prior.letter);
       }
       const config = delegationConfig(ctx, root);
+      if (ctx.thread(root).archived || sender.archived || recipient.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation messages require an unarchived parent and threads' });
       if (!config.enabled || config.paused) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation is disabled or paused' });
       const letter: AgentLetter = {
         id: `letter-${++ctx.seq}`,

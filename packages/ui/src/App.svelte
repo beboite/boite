@@ -466,7 +466,12 @@
 
 <svelte:window {onkeydown} {onkeyup} {onblur} />
 
-<ThreadPreparation {store} visible={documentVisible && (inShell || mobileScreen === 'chat')} />
+{#each workspace.machines as machine (machine.id)}
+  <ThreadPreparation store={machine.store} visible={machine.store === store && documentVisible && (inShell || mobileScreen === 'chat')} />
+{/each}
+{#if !workspace.machines.some(machine => machine.store === store)}
+  <ThreadPreparation {store} visible={documentVisible && (inShell || mobileScreen === 'chat')} />
+{/if}
 
 <div class="app" class:shell={inShell} class:ready={store.booted} class:phone-chat={!inShell && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting bind:this={appRoot}>
   {#if !inShell && store.booted}<MobileNavigation {store} bind:screen={mobileScreen} />{/if}

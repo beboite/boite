@@ -1,8 +1,10 @@
+import { logMessageOf } from '../../log-errors.ts';
 import { mkdirSync } from 'node:fs';
 import { messageOf, unavailable } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
 import { launchPrefix, profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import type { TurnContext } from '../types.ts';
+import { exitWithin } from '../exit.ts';
 import {
   agentEnv,
   commandsOf,
@@ -28,12 +30,18 @@ type Timer = ReturnType<typeof setTimeout>;
  */
 const STOP_DEADLINE_MS = 15_000;
 let stopDeadlineMs = STOP_DEADLINE_MS;
-/** How long the context read after a turn waits for `get_session_stats`. */
-const STATS_TIMEOUT_MS = 5_000;
+/** Control reads are bounded; the prompt and actual model run are not. */
+const READ_DEADLINE_MS = 5_000;
+let readDeadlineMs = READ_DEADLINE_MS;
 
 /** Tests shorten the stop deadline; `null` puts the default back. */
 export function setPiStopDeadlineForTests(ms: number | null): void {
   stopDeadlineMs = ms ?? STOP_DEADLINE_MS;
+}
+
+/** Tests shorten control reads without putting a deadline on model prompts. */
+export function setPiReadDeadlineForTests(ms: number | null): void {
+  readDeadlineMs = ms ?? READ_DEADLINE_MS;
 }
 
 /**
@@ -53,6 +61,7 @@ export class PiSession {
   private lastStderr = '';
   private exitCode: number | null = null;
   private exited: Promise<number | null> | null = null;
+  private processClosed: Promise<void> = Promise.resolve();
   private idle: Timer | null = null;
   /** The turn whose `prompt` is in flight; events outside one are dropped. */
   private current: PiTurn | null = null;
@@ -243,8 +252,8 @@ export class PiSession {
       turn.awaitingPi = false;
       // A child that died takes the pipe with it, and its exit says more than
       // "the command failed": give it a moment to be reported.
-      const code = await this.exitWithin(EXIT_GRACE_MS);
-      turn.fail(code === undefined ? messageOf(error) : this.exitSentence(code));
+      const code = await exitWithin(this.exited, EXIT_GRACE_MS, this.processClosed);
+      turn.fail(code === undefined ? messageOf(error) : this.exitSentence(code), code === undefined ? logMessageOf(error) : this.exitSentence(code, true));
       this.current = null;
       this.endTurn(turn, true);
       return;
@@ -290,17 +299,38 @@ export class PiSession {
    * `agent_settled`. pi marks a run active in the same tick it answers the
    * prompt and writes in order, so `get_state` sent now says `isStreaming` for
    * a run that started, and a run that already ended has settled before the
-   * answer. A refused `get_state` leaves the turn to `agent_settled`.
+   * answer. A refused `get_state` leaves the turn to `agent_settled` within
+   * the control-read deadline, while a reported active run has no time limit.
    */
   private async settleIfIdle(turn: PiTurn, peer: PiPeer): Promise<void> {
-    let state: Record<string, unknown>;
+    if (turn.decided) return;
+    const controller = new AbortController();
+    let timer: Timer | undefined;
+    const expired = new Promise<boolean>(resolve => {
+      timer = setTimeout(() => resolve(true), readDeadlineMs);
+      timer.unref?.();
+    });
     try {
-      state = dataOf(await peer.command('get_state'));
+      const response = await Promise.race([
+        peer.command('get_state', {}, { signal: controller.signal, timeoutMs: readDeadlineMs }),
+        turn.finished.then(() => null),
+      ]);
+      if (response !== null && !turn.decided && dataOf(response)['isStreaming'] !== true) turn.settleRun();
     } catch (error) {
+      if (turn.decided) return;
       turn.ctx.log('warn', `pi: get_state after the prompt failed: ${messageOf(error)}`);
-      return;
+      // A refused state read may precede a valid terminal event. Give that
+      // event the same bounded window, then retire an unobservable command.
+      if (await Promise.race([turn.finished.then(() => false), expired])) {
+        if (turn.decided) return;
+        if (turn.isStopped) turn.settleRun();
+        else turn.fail(`pi did not report its state after accepting the prompt within ${readDeadlineMs / 1000} s`);
+        this.drop();
+      }
+    } finally {
+      controller.abort();
+      clearTimeout(timer);
     }
-    if (!turn.decided && state['isStreaming'] !== true) turn.settleRun();
   }
 
   /**
@@ -310,22 +340,13 @@ export class PiSession {
    */
   private async readContext(turn: PiTurn, peer: PiPeer): Promise<void> {
     if (this.peer !== peer) return;
-    let timer: Timer | undefined;
     try {
-      const expired = new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => {
-          reject(new Error(`no answer in ${STATS_TIMEOUT_MS / 1000} s`));
-        }, STATS_TIMEOUT_MS);
-        timer.unref?.();
-      });
-      const stats = dataOf(await Promise.race([peer.command('get_session_stats'), expired]));
+      const stats = dataOf(await peer.command('get_session_stats', {}, { timeoutMs: readDeadlineMs }));
       const usage = (stats['contextUsage'] ?? {}) as { tokens?: unknown; contextWindow?: unknown };
       const tokens = numberOf(usage.tokens);
       if (tokens !== null) turn.ctx.context({ tokens, window: numberOf(usage.contextWindow) });
     } catch (error) {
       turn.ctx.log('warn', `pi: get_session_stats failed: ${messageOf(error)}`);
-    } finally {
-      clearTimeout(timer);
     }
   }
 
@@ -384,11 +405,14 @@ export class PiSession {
     this.effort = ctx.thread.effort;
     const peer = new PiPeer(child, {
       event: (message) => {
+        if (this.child !== child) return;
         this.onEvent(ctx, message);
       },
-      log: (level, message) => {
-        ctx.log(level, message);
+      log: (level, message, context) => {
+        if (this.child !== child) return;
+        ctx.log(level, message, context);
       },
+      fault: (reason) => { void this.transportFault(child, reason); },
     });
     this.peer = peer;
     this.sessionId = sessionId;
@@ -415,56 +439,63 @@ export class PiSession {
   }
 
   private watch(child: SpawnedChild, ctx: TurnContext, peer: PiPeer): void {
+    let closed = (): void => undefined;
+    this.processClosed = new Promise<void>(resolve => { closed = resolve; });
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => {
+      if (this.child !== child) return;
       for (const line of chunk.split(/\r?\n/)) {
         const text = line.trim();
         if (text.length === 0) continue;
         this.lastStderr = text.slice(0, STDERR_MAX);
-        ctx.log('warn', `pi agent: ${this.lastStderr}`);
+        ctx.log('warn', `pi agent: ${this.lastStderr}`, { kind: 'provider-output', event: 'provider.output' });
       }
     });
     this.exited = new Promise<number | null>((resolve) => {
       child.once('exit', (code) => {
-        this.exitCode = code;
+        if (this.child === child) this.exitCode = code;
         resolve(code);
       });
       // `close` and not `exit`: stderr is flushed by then, so the sentence the
       // turn fails with carries the line the agent printed on its way out.
       child.once('close', () => {
+        closed();
+        if (this.child !== child) return;
         const sentence = this.exitSentence(this.exitCode);
-        peer.fail(sentence);
-        this.current?.fail(sentence);
+        peer.fail(sentence, this.exitSentence(this.exitCode, true));
+        this.failCurrent(sentence, this.exitSentence(this.exitCode, true));
         if (!this.closing) this.drop();
       });
       child.once('error', (error) => {
         resolve(null);
+        closed();
+        if (this.child !== child) return;
         const sentence = `the pi agent did not start: ${messageOf(error)}`;
         peer.fail(sentence);
-        this.current?.fail(sentence);
+        this.failCurrent(sentence, logMessageOf(error));
         if (!this.closing) this.drop();
       });
     });
   }
 
-  private exitWithin(ms: number): Promise<number | null | undefined> {
-    const exited = this.exited;
-    if (exited === null) return Promise.resolve(undefined);
-    return new Promise<number | null | undefined>((resolve) => {
-      const timer = setTimeout(() => {
-        resolve(undefined);
-      }, ms);
-      timer.unref?.();
-      void exited.then((code) => {
-        clearTimeout(timer);
-        resolve(code);
-      });
-    });
+  private async transportFault(child: SpawnedChild, reason: string): Promise<void> {
+    if (this.child !== child) return;
+    this.closing = true;
+    const code = await exitWithin(this.exited, EXIT_GRACE_MS, this.processClosed);
+    if (this.child !== child) return;
+    this.failCurrent(code === undefined ? reason : this.exitSentence(code), code === undefined ? reason : this.exitSentence(code, true));
+    this.drop();
   }
 
-  private exitSentence(code: number | null): string {
+  private failCurrent(reason: string, diagnostic: string): void {
+    const turn = this.current;
+    if (turn?.isStopped) turn.settleRun();
+    else turn?.fail(reason, diagnostic);
+  }
+
+  private exitSentence(code: number | null, diagnostic = false): string {
     const head = `the pi agent exited with code ${code === null ? 'unknown' : code}`;
-    return this.lastStderr.length === 0 ? head : `${head}: ${this.lastStderr}`;
+    return diagnostic || this.lastStderr.length === 0 ? head : `${head}: ${this.lastStderr}`;
   }
 
   /**
@@ -708,7 +739,7 @@ export class PiSession {
     if (text.length === 0) return;
     const turn = this.current;
     if (turn === null) {
-      ctx.log('info', `pi extension: ${text}`);
+      ctx.log('info', `pi extension: ${text}`, { kind: 'provider-output', event: 'provider.output' });
       return;
     }
     turn.part(

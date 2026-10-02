@@ -89,6 +89,49 @@ export function repositoryOf(root: string): string {
   return process.platform === 'win32' ? key.toLowerCase() : key;
 }
 
+/** The action proof is deliberately separate from the sidebar's three display fields. */
+export interface MergedPrProof {
+  repository: string;
+  checkoutRepository: string;
+  branch: string;
+  sha: string;
+  number: number;
+  url: string;
+  mergedAt: string;
+}
+
+export function githubRepository(remotes: string, host = process.env.GH_HOST ?? 'github.com'): string | null {
+  const identities = new Set<string>();
+  for (const line of remotes.split('\n')) {
+    const raw = line.trim().split(/\s+/)[1];
+    if (!raw) continue;
+    let hostname = '', path = '';
+    try { const url = new URL(raw); hostname = url.hostname; path = url.pathname; }
+    catch { const match = /^(?:[^@/\s]+@)?([^:/\s]+):(.+)$/.exec(raw); if (match) { hostname = match[1]!; path = match[2]!; } }
+    if (hostname.toLowerCase() !== host.toLowerCase()) continue;
+    path = path.replace(/^\//, '').replace(/\.git$/, '').replace(/\/$/, '');
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(path)) return null;
+    identities.add(`${hostname.toLowerCase()}/${path.toLowerCase()}`);
+  }
+  return identities.size === 1 ? [...identities][0]! : null;
+}
+
+export function parseMergedPrProof(text: string, expected: Omit<MergedPrProof, 'number' | 'url' | 'mergedAt'>): MergedPrProof | null {
+  const values = pullRequestArray(text);
+  // Reusing a branch, or finding a fork, never selects an arbitrary newest PR.
+  if (values.length !== 1) return null;
+  const item = values[0] as Record<string, unknown>;
+  const pr = toPullRequest(item);
+  if (pr.state !== 'MERGED' || item.isCrossRepository !== false || item.headRefName !== expected.branch || item.headRefOid !== expected.sha || typeof item.mergedAt !== 'string' || !Number.isFinite(Date.parse(item.mergedAt))) return null;
+  const [host, owner, name] = expected.repository.split('/');
+  const repository = item.headRepository as { name?: unknown } | null;
+  const repositoryOwner = item.headRepositoryOwner as { login?: unknown } | null;
+  const url = new URL(pr.url);
+  if (url.search || url.hash) return null;
+  if (repository?.name?.toString().toLowerCase() !== name || repositoryOwner?.login?.toString().toLowerCase() !== owner || url.hostname.toLowerCase() !== host || url.pathname.toLowerCase() !== `/${owner}/${name}/pull/${pr.number}`) return null;
+  return { ...expected, number: pr.number, url: pr.url, mergedAt: item.mergedAt };
+}
+
 /** Pull requests one `gh pr list` call brings back for a repository. */
 export const LIST_LIMIT = 200;
 const LIST_TTL_MS = 60_000;
@@ -97,6 +140,15 @@ const REMOTES_TTL_MS = 5 * 60_000;
 const TIMEOUT_MS = 10_000;
 
 type Cached<T> = { until: number; value: Promise<T> };
+type SharedProof = Cached<MergedPrProof | null> & { controller: AbortController; consumers: number; settled: boolean };
+interface WaitingLookup { admit(): void; cancel(): void }
+
+export interface PullRequestOptions {
+  /** Tests shorten the existing ten-second process deadline. */
+  timeoutMs?: number;
+  /** Exceeding this bound rejects evidence, never parses a truncated response. */
+  maxOutputBytes?: number;
+}
 
 /** gh is not installed, or not signed in: nothing a background lookup can fix. */
 function unavailable(error: unknown): boolean {
@@ -114,20 +166,63 @@ function unavailable(error: unknown): boolean {
  * reports why gh cannot answer.
  */
 export class PullRequests {
+  #proofs = new Map<string, SharedProof>();
   #remotes = new Map<string, Cached<boolean>>();
   #lists = new Map<string, Cached<PullRequestList>>();
   #branches = new Map<string, Cached<PullRequest>>();
   /** Why gh cannot answer, once it said so; automatic lookups then spawn nothing. */
   #ghUnavailable: string | null = null;
   #running = 0;
-  #queue: (() => void)[] = [];
-  constructor(private core: Core) {}
+  #queue: WaitingLookup[] = [];
+  #sequence = 0;
+  readonly #timeoutMs: number;
+  readonly #maxOutputBytes: number;
+  constructor(private core: Core, options: PullRequestOptions = {}) {
+    this.#timeoutMs = options.timeoutMs ?? TIMEOUT_MS;
+    this.#maxOutputBytes = options.maxOutputBytes ?? 8 * 1024 * 1024;
+  }
 
   read(threadId: string, refresh = false): Promise<PullRequest> {
     const thread = this.core.threads.require(threadId);
     return this.#read(thread, refresh).catch((error: unknown) => {
       throw refused(`pull request for ${thread.cwd}: ${messageOf(error)}`);
     });
+  }
+
+  /** Fresh checkout checks use the same bounded process queue as display lookups. */
+  async cleanCheckout(thread: ThreadSummary, sha?: string, signal?: AbortSignal): Promise<string | null> {
+    if (!thread.branch || thread.branch === 'HEAD') return null;
+    const status = await this.#run(thread, thread.cwd, 'git', ['status', '--porcelain=v2', '--branch', '-z'], signal);
+    const records = status.split('\0').filter(Boolean);
+    const branch = records.find(record => record.startsWith('# branch.head '))?.slice(14);
+    const tip = records.find(record => record.startsWith('# branch.oid '))?.slice(13);
+    return branch === thread.branch && tip && /^[a-f0-9]{40,64}$/.test(tip) && (!sha || tip === sha) && records.every(record => record.startsWith('# ')) ? tip : null;
+  }
+
+  async validateMergedCheckout(thread: ThreadSummary, proof: MergedPrProof, signal?: AbortSignal): Promise<boolean> {
+    signal?.throwIfAborted();
+    if (repositoryOf(thread.cwd) !== proof.checkoutRepository || githubRepository(await this.#run(thread, thread.cwd, 'git', ['remote', '-v'], signal)) !== proof.repository) return false;
+    return await this.cleanCheckout(thread, proof.sha, signal) !== null;
+  }
+
+  async proveMerged(thread: ThreadSummary, signal?: AbortSignal): Promise<MergedPrProof | null> {
+    signal?.throwIfAborted();
+    const project = thread.projectId === null ? null : this.core.journal.getProject(thread.projectId);
+    if (!project || resolve(thread.cwd) === resolve(project.path) || !thread.branch || thread.branch === 'HEAD') return null;
+    // An alias of the project's shared checkout still has a shared HEAD.
+    if (realpathSync.native(thread.cwd) === realpathSync.native(project.path) || !statSync(join(thread.cwd, '.git')).isFile()) return null;
+    if (!await hasGitMarker(thread.cwd) || !await hasGitMarker(project.path)) return null;
+    signal?.throwIfAborted();
+    const checkoutRepository = repositoryOf(thread.cwd);
+    if (checkoutRepository !== repositoryOf(project.path)) return null;
+    const sha = await this.cleanCheckout(thread, undefined, signal);
+    if (!sha || this.#ghUnavailable !== null) return null;
+    const repository = githubRepository(await this.#run(thread, thread.cwd, 'git', ['remote', '-v'], signal));
+    if (!repository) return null;
+    return this.#gh(false, () => this.#sharedProof(`${checkoutRepository}\n${repository}\n${thread.branch}\n${sha}`, async ownerSignal => parseMergedPrProof(
+      await this.#run(thread, thread.cwd, 'gh', ['pr', 'list', '--repo', repository, '--head', thread.branch!, '--state', 'all', '--limit', '2', '--json', 'number,url,state,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergedAt'], ownerSignal),
+      { repository, checkoutRepository, branch: thread.branch!, sha },
+    ), signal));
   }
 
   async #read(thread: ThreadSummary, refresh: boolean): Promise<PullRequest> {
@@ -195,36 +290,136 @@ export class PullRequests {
     return value;
   }
 
-  async #run(thread: ThreadSummary, cwd: string, command: string, args: string[]): Promise<string> {
-    if (this.#running >= 2) await new Promise<void>((resolve) => this.#queue.push(resolve));
-    else this.#running++;
-    const scope = `pull-request:${thread.id}`;
+  #sharedProof(key: string, load: (signal: AbortSignal) => Promise<MergedPrProof | null>, signal?: AbortSignal): Promise<MergedPrProof | null> {
+    signal?.throwIfAborted();
+    let entry = this.#proofs.get(key);
+    if (!entry || entry.until <= Date.now()) {
+      const controller = new AbortController();
+      entry = { until: Date.now() + LIST_TTL_MS, controller, consumers: 0, settled: false, value: load(controller.signal) };
+      const held = entry;
+      void held.value.then(() => { held.settled = true; }, () => { held.settled = true; });
+      this.#proofs.set(key, held);
+      if (this.#proofs.size > 500) this.#proofs.delete(this.#proofs.keys().next().value!);
+    }
+    const held = entry;
+    held.consumers++;
+    return new Promise((resolve, reject) => {
+      let finished = false;
+      const finish = (): boolean => {
+        if (finished) return false;
+        finished = true;
+        signal?.removeEventListener('abort', canceled);
+        held.consumers--;
+        return true;
+      };
+      const canceled = (): void => {
+        if (!finish()) return;
+        if (!held.consumers && !held.settled) {
+          held.controller.abort();
+          if (this.#proofs.get(key) === held) this.#proofs.delete(key);
+        }
+        reject(new Error('pull request lookup canceled'));
+      };
+      signal?.addEventListener('abort', canceled, { once: true });
+      held.value.then(value => { if (finish()) resolve(value); }, error => { if (finish()) reject(error); });
+      if (signal?.aborted) canceled();
+    });
+  }
+
+  async #acquire(signal?: AbortSignal): Promise<() => void> {
+    signal?.throwIfAborted();
+    if (this.#running < 2) this.#running++;
+    else await new Promise<void>((resolve, reject) => {
+      const waiting: WaitingLookup = {
+        admit: () => { signal?.removeEventListener('abort', waiting.cancel); resolve(); },
+        cancel: () => {
+          const index = this.#queue.indexOf(waiting);
+          if (index < 0) return;
+          this.#queue.splice(index, 1);
+          signal?.removeEventListener('abort', waiting.cancel);
+          reject(new Error('pull request lookup canceled'));
+        },
+      };
+      this.#queue.push(waiting);
+      signal?.addEventListener('abort', waiting.cancel, { once: true });
+    });
+    return () => {
+      const next = this.#queue.shift();
+      if (next) next.admit();
+      else this.#running--;
+    };
+  }
+
+  async #run(thread: ThreadSummary, cwd: string, command: string, args: string[], signal?: AbortSignal): Promise<string> {
+    const release = await this.#acquire(signal);
+    const scope = `pull-request:${thread.id}:${++this.#sequence}`;
     try {
+      signal?.throwIfAborted();
       const spawned = this.core.procs.spawn(scope, command, args, {
         cwd,
         env: { GH_PROMPT_DISABLED: '1', GIT_TERMINAL_PROMPT: '0' }
       });
-      let expired = false;
-      const timeout = setTimeout(() => {
-        expired = true;
-        this.core.procs.killTree(scope);
-      }, TIMEOUT_MS);
+      const controller = new AbortController();
+      const canceled = (): void => { controller.abort(new Error('pull request lookup canceled')); };
+      signal?.addEventListener('abort', canceled, { once: true });
+      const timeout = setTimeout(() => controller.abort(new Error(`${command} pull request lookup timed out after ${this.#timeoutMs / 1000} seconds`)), this.#timeoutMs);
+      let stop!: () => void;
+      const aborted = new Promise<never>((_resolve, reject) => {
+        stop = () => {
+          try { this.core.procs.killTree(scope); } catch { /* Settlement does not depend on native cleanup succeeding. */ }
+          reject(controller.signal.reason);
+        };
+        controller.signal.addEventListener('abort', stop, { once: true });
+      });
+      if (signal?.aborted) canceled();
       try {
-        const [stdout, stderr, code] = await Promise.all([
-          new Response(spawned.proc.stdout).text(),
-          new Response(spawned.proc.stderr).text(),
-          spawned.exited
-        ]);
-        if (expired) throw new Error(`${command} pull request lookup timed out after 10 seconds`);
+        const [stdout, stderr, code] = await Promise.race([Promise.all([
+          readOutput(spawned.proc.stdout, this.#maxOutputBytes, `${command} stdout`, controller.signal),
+          readOutput(spawned.proc.stderr, this.#maxOutputBytes, `${command} stderr`, controller.signal),
+          spawned.exited,
+        ]), aborted]);
         if (code !== 0) throw new Error(stderr.trim() || `${command} exited with ${code}`);
         return stdout;
+      } catch (error) {
+        controller.abort(error);
+        throw error;
       } finally {
         clearTimeout(timeout);
+        signal?.removeEventListener('abort', canceled);
+        controller.signal.removeEventListener('abort', stop);
       }
     } finally {
-      const next = this.#queue.shift();
-      if (next) next();
-      else this.#running--;
+      release();
     }
+  }
+}
+
+async function readOutput(stream: ReadableStream<Uint8Array>, limit: number, field: string, signal: AbortSignal): Promise<string> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  let complete = false;
+  const canceled = (): void => {
+    // Cancel only this lookup's read end. Its source's cleanup may itself be
+    // delayed, so neither cancellation nor release waits on that promise.
+    void reader.cancel(signal.reason).catch(() => undefined);
+    reader.releaseLock();
+  };
+  signal.addEventListener('abort', canceled, { once: true });
+  try {
+    if (signal.aborted) canceled();
+    signal.throwIfAborted();
+    for (;;) {
+      const { value, done } = await reader.read();
+      signal.throwIfAborted();
+      if (done) { complete = true; return Buffer.concat(chunks, bytes).toString('utf8'); }
+      bytes += value.byteLength;
+      if (bytes > limit) throw new Error(`${field} exceeded ${limit} bytes; expected bounded pull request evidence`);
+      chunks.push(value);
+    }
+  } finally {
+    signal.removeEventListener('abort', canceled);
+    if (!complete) void reader.cancel(signal.reason).catch(() => undefined);
+    reader.releaseLock();
   }
 }

@@ -25,6 +25,7 @@ import { registerWorktreeMethods } from './worktree-sweep.ts';
 
 /** Adding a module is one file plus one line here. `hello` is the server's own. */
 export function registerModules(core: Core): void {
+  core.router.register('core.logs', params => core.logs.query(params));
   core.router.register('core.updateStatus', params => core.serverUpdates.status(params.refresh));
   core.router.register('core.updateInstall', params => core.serverUpdates.install(params.version));
   core.router.register('core.updateCancel', () => core.serverUpdates.cancel());

@@ -1,28 +1,19 @@
 # The right panel
 
-The panel opens to the right of the chat, per thread, from the header's Panel
-button, the `panel` chord or one of the surface chords. It keeps its own tabs
-and width for each thread in the browser's storage, so a thread comes back the
-way it was left. Under 720 px the panel is a sheet over the whole chat, so a
-reload there opens on the chat with the panel shut and its tabs kept for the
-next open, and Back shuts it. That reload-time shut is held in memory beside
-the stored layout, so a wider window of the same browser still finds its panels
-open after the phone has used its own. `packages/ui/src/lib/right-panel.svelte.ts` is the store,
-`RightPanel.svelte` the frame, one component per surface. The frame's launcher,
-resize handle and tab icon are `SurfaceLauncher.svelte`, `PanelResizeHandle.svelte`
-and `SurfaceIcon.svelte`; `lib/surface-labels.ts` names each surface and says where
-it is available.
+The Panel button or [surface shortcuts](keybindings.md) open a thread's tabs
+beside the chat. Tabs are stored per machine/thread; width is shared on this device.
+Below 720 px it covers the chat; Back closes it. A mobile reload keeps tabs but
+starts with the panel closed, without changing the stored desktop layout.
+`lib/right-panel.svelte.ts` owns layout and `RightPanel.svelte` renders it;
+`lib/surface-labels.ts` defines labels and availability.
 
-A thread that is archived, here or from another client, or removed with its
-project, takes its layout with it, and its browser views are destroyed rather
-than parked: a thread restored from Archived threads comes back with a fresh
-panel, never with what it had open. The one
-exception is the thread on screen when another client archives it: it stays
-open with its tabs and unsaved file edits, reconnects included, and its layout
-goes when this client opens another thread or a draft. Each machine's
-`threads.list` also drops that machine's layouts for threads it no longer
-lists, which covers archives made while this client was away, except the open
-thread's. A machine that has not connected yet keeps its layouts.
+Manual archive or project removal clears that thread's panel and destroys its
+browser views. A thread manually archived from another client stays open with
+tabs and unsaved edits until this client navigates away. Reconnecting prunes
+layouts absent from that machine's thread list, except the open thread and
+layouts with unsaved file drafts. Unconnected machines keep their layouts.
+[Automatic merged-PR archive](machines.md#merged-pr-conversations) preserves
+unsent composer input and unsaved file drafts for restoration.
 
 A panel with no tab yet opens on the surface the device starts with, Files or
 Changes, or on its launcher. The tour's first question sets it and Settings,
@@ -35,18 +26,19 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 
 | Surface  | Tab      | What it shows                                                                 |
 | -------- | -------- | ----------------------------------------------------------------------------- |
-| Browser  | many     | a page in a child webview of the shell (persistent cookies), an iframe in a browser |
+| Browser  | many     | a shell child webview with persistent cookies; test fixtures use an iframe |
 | Changes  | one      | `git.status` of the working directory, a file's diff on click                 |
 | Files    | one      | the working directory as a tree, `files.list` one directory at a time         |
 | File     | per path | a text editor with save, an image viewer with zoom and pan, a video or audio player |
 | Tasks    | one      | goal and loop, the agent's tasks, the project's todo list                     |
+| Agents   | one      | delegated and native agents, see [delegation](delegation.md) |
 | Workflows | one     | the thread's workflow runs as a graph, a step's detail, saved plans, see [workflows.md](workflows.md) |
 | Trace    | one      | the thread's processes, see [trace.md](trace.md)                              |
 
-The Browser is the shell's child webview and shares the main webview's profile
-directory, which is why a login survives a restart. A plain browser gets an
-iframe with the sites that allow it. [machines.md](machines.md) has the origins
-and the bridge.
+Browser tabs share the shell's webview profile, so logins survive restart.
+The iframe bridge belongs to browser test fixtures; ordinary web clients have
+no native Browser surface. [Portability](portability.md#remaining-gaps) records
+the Linux shell's system-browser fallback.
 
 The address field accepts public hosts, local development addresses such as
 `localhost:5173` or a private IPv4 server, and search terms. Loopback, private
@@ -150,4 +142,4 @@ watching keeps the request on its panel for the next open.
 `panel` toggles the panel, `browser`, `changes`, `files`, `tasks` and `trace`
 open their surface, `close-surface` closes the active tab. The defaults are in
 [keybindings.md](keybindings.md). With the launcher showing, a single letter
-opens a surface: B, C, F, K, T, W.
+opens a surface: A, W, B, C, F, K, T.

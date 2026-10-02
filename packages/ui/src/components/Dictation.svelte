@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { secureId } from '../lib/secure-id';
   import { Check, Mic, X, LoaderCircle, RotateCcw, Settings2 } from '@lucide/svelte';
   import { onDestroy } from 'svelte';
   import type { Store } from '../lib/store.svelte';
@@ -93,8 +94,8 @@
     const run = generation;
     phase = 'transcribing'; onbusy(true);
     onpreview(previewText, strings.speech.transcribing, false);
-    requestId = crypto.randomUUID();
     try {
+      requestId = secureId();
       const result = await client.call('speech.transcribe', { requestId, revision, audio: audioBase64(audio), ...(heard ? { language: heard } : {}) });
       if (run !== generation || disposed) return;
       if (!result.text.trim()) throw new Error(strings.speech.silence);

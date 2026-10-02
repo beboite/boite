@@ -21,20 +21,31 @@ xterm.js. xterm loads the first time a terminal opens, never at startup.
   The first output after a quiet moment goes out at once, so a typed key echoes
   without delay; output that keeps coming is sent every 16 ms as one event.
   The 256 KiB snapshot is exactly what those events carried so far.
-- `terminals.close` kills the shell with everything it started and waits for
-  it to exit. `terminal.exited` follows, and the drawer closes.
+- `terminals.close` stops the shell and waits for it to exit.
+  `terminal.exited` follows, and the drawer closes. Descendant termination
+  follows the platform limits below.
 - Archiving the thread and stopping the core close its shell too.
 
 The shell runs under the trace id `terminal:<threadId>`, apart from the
 thread's own processes. Stopping a turn ends what the agent started and leaves
-the user's shell alone. Like every process, it goes through `procs` into a Job
-Object and the trace ([trace.md](trace.md)).
+the user's shell alone. It launches through `procs`: Windows Job Objects track
+descendants exactly, while Linux and macOS register direct children and signal
+their process groups. A descendant that leaves its group can survive. See
+[trace](trace.md) for tracking and shutdown limits.
 
 The shell is PowerShell 7 when `pwsh.exe` is on the `PATH`, else Windows
 PowerShell, else `cmd.exe`. On Linux and macOS it is `$SHELL`, then `/bin/bash`,
 then `/bin/sh`. `BOITE_TERMINAL_SHELL`, set in the core's environment, names
 another one; the core tests set it to `cmd.exe` or `/bin/sh`, so nothing they
 type lands in the user's PowerShell or bash history.
+
+## Reattachment and focus
+
+Output can arrive before the opening or reattachment response. The client
+buffers it and uses the snapshot's sequence number to append only newer events.
+Older cores without sequences retain buffered output but can show overlap.
+Refused keystrokes display their error. Reloading the same conversation preserves
+terminal focus; switching conversation or draft focuses the composer.
 
 ## Who may open one
 

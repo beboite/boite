@@ -161,6 +161,8 @@ async function mountOnFake(delayMs?: number): Promise<void> {
   document.body.appendChild(target);
   // The store is a singleton: the previous test's thread and its draft would
   // otherwise stand, and a boot that already has one opens nothing.
+  store.page = 'chat';
+  store.visible = true;
   store.booted = false;
   store.composerStates = {};
   store.openThread = null;

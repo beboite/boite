@@ -5,6 +5,10 @@ export interface NativeProcessInfo {
   exe: string;
   commandLine: string | null;
   parentPid: number | null;
+  /** Creation identity read from this event's held handle, never a later open by pid. */
+  startedAt?: number | null;
+  /** Exact native creation time; Windows uses the decimal FILETIME, including sub-ms precision. */
+  incarnation?: string | null;
 }
 
 export interface NativeProcessExit {
@@ -12,6 +16,9 @@ export interface NativeProcessExit {
   cpuMs: number | null;
   peakMemoryBytes: number | null;
   ioBytes: number | null;
+  /** The same captured creation identity as the corresponding start. */
+  startedAt?: number | null;
+  incarnation?: string | null;
 }
 
 export interface ProcessSample {

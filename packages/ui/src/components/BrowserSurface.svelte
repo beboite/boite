@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { secureId } from '../lib/secure-id';
   import { untrack } from 'svelte';
   import { ArrowLeft, ArrowRight, ExternalLink, RotateCw, MousePointer2 } from '@lucide/svelte';
   import { browserBridge, normalizeUrl } from '../lib/browser-bridge';
@@ -49,8 +50,10 @@
     if (!enabled || !threadId) return;
     selectionOwner = { store, threadId, client: store.client, machineId: store.machineId };
     notice = '';
-    request = crypto.randomUUID();
-    browserBridge.annotate(id, request);
+    try {
+      request = secureId();
+      browserBridge.annotate(id, request);
+    } catch { request = null; notice = previewStrings.failed; }
   }
 
   $effect(() => {
@@ -66,11 +69,13 @@
           return;
         }
         if (event.selection && selectionOwner && selectionOwner.store.client === selectionOwner.client && selectionOwner.store.machineId === selectionOwner.machineId) {
-          const added = selectionOwner.store.addPreviewReference(selectionOwner.threadId, {
-            ...event.selection, id: crypto.randomUUID(), surfaceId
-          });
-          notice = added ? previewStrings.added : '';
-          if (added && window.innerWidth <= 980) panel.toggle();
+          try {
+            const added = selectionOwner.store.addPreviewReference(selectionOwner.threadId, {
+              ...event.selection, id: secureId(), surfaceId
+            });
+            notice = added ? previewStrings.added : '';
+            if (added && window.innerWidth <= 980) panel.toggle();
+          } catch { notice = previewStrings.failed; }
         }
       } else if (event.type === 'selection-failed' && event.requestId === request) {
         request = null;

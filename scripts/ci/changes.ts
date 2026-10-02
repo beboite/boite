@@ -3,7 +3,7 @@ import { appendFileSync } from 'node:fs';
 // Unknown files run the complete suite. Documentation-only PRs still get the
 // required job, so branch protection never waits for a filtered-out workflow.
 export function affectedChecks(files: string[]) {
-  const checks = { core: false, web: false, desktop: false, server: false, android: false };
+  const checks = { core: false, web: false, desktop: false, server: false, android: false, telemetry: false, e2eTypes: false, stress: false };
   for (const file of files) {
     if (
       /^(docs\/.*\.md|README\.md|AGENTS\.md|CONTRIBUTING\.md|SECURITY\.md|CODE_OF_CONDUCT\.md|LICENSE)$/.test(file) ||
@@ -13,19 +13,26 @@ export function affectedChecks(files: string[]) {
     if (file.startsWith('apps/android/') || file === '.github/workflows/android.yml' || file === 'scripts/ci/android-apk.ts') {
       // The wrapper loads the UI from the core, so nothing else goes into the APK.
       checks.android = true;
-    } else if (/^(apps\/shell\/|tests\/e2e\/)/.test(file)) {
+    } else if (file.startsWith('apps/shell/')) {
       checks.desktop = true;
+    } else if (file.startsWith('tests/e2e/')) {
+      checks.desktop = checks.e2eTypes = true;
+      // Stress fixtures use the same isolated core and browser harness.
+      if (file.startsWith('tests/e2e/lib/')) checks.stress = true;
     } else if (/^(Dockerfile$|\.dockerignore$|docker\/)/.test(file)) {
       checks.server = true;
     } else if (file.startsWith('packages/ui/')) {
-      checks.web = checks.desktop = checks.server = true;
-    } else if (/^(bench\/|telemetry\/|scripts\/architecture\/)/.test(file)) {
-      // Nothing ships or runs them in CI: the web job's `bun run check` type-checks
-      // them, and the changes job already runs the architecture check and its tests.
+      checks.web = checks.desktop = checks.server = checks.stress = true;
+    } else if (file.startsWith('telemetry/')) {
+      checks.web = checks.telemetry = true;
+    } else if (/^(tests\/stress\/|bench\/agent-stress\.ts$|bench\/lib\/)/.test(file)) {
+      checks.web = checks.stress = true;
+    } else if (/^(bench\/|scripts\/architecture\/)/.test(file)) {
+      // The web job type-checks these; the changes job tests architecture scripts.
       checks.web = true;
     } else {
       // Core and contracts are used by both clients; unknown inputs stay safe.
-      checks.core = checks.web = checks.desktop = checks.server = checks.android = true;
+      checks.core = checks.web = checks.desktop = checks.server = checks.android = checks.telemetry = checks.e2eTypes = checks.stress = true;
     }
   }
   return checks;
@@ -45,9 +52,9 @@ const PORTABLE_PR = ['ubuntu-22.04', 'macos-15'];
 const PORTABLE_ALL = ['ubuntu-22.04', 'ubuntu-22.04-arm', 'macos-15', 'macos-15-intel'];
 
 // `pr` gates a merge, `warm` follows it on main, `full` is a release, a nightly
-// or a manual run. A pull request skips the slow extra architectures; the main
-// push that follows runs them, refreshes the caches every pull request restores
-// and skips the suites the pull request already passed.
+// or a manual run. Main runs the extra portable architectures and refreshes
+// caches. A push event alone provides no proof that its tree passed PR tests,
+// so every mode runs the affected suites.
 export type Mode = 'pr' | 'warm' | 'full';
 
 export function ciMode(event: string, force: boolean): Mode {
@@ -60,8 +67,10 @@ export function ciMode(event: string, force: boolean): Mode {
 export function plan(checks: ReturnType<typeof affectedChecks>, mode: Mode) {
   return {
     ...checks,
-    core: checks.core && mode !== 'warm',
-    e2e: mode !== 'warm',
+    // Full suites already cover these focused checks.
+    telemetry: checks.telemetry && !checks.core,
+    e2eTypes: checks.e2eTypes && !checks.web,
+    e2e: checks.desktop,
     portable: JSON.stringify(mode === 'pr' ? PORTABLE_PR : PORTABLE_ALL),
   };
 }

@@ -1,6 +1,7 @@
 import type {
   Account,
   AccountId,
+  CoreLogContext,
   AgentCommand,
   ImageAttachment,
   Message,
@@ -113,7 +114,7 @@ export interface TurnContext {
    */
   warmProcessMinutes: number;
   emit: EmitSink;
-  log(level: 'info' | 'warn' | 'error', message: string): void;
+  log(level: 'info' | 'warn' | 'error', message: string, context?: CoreLogContext): void;
   /** Actual provider progress, not a timer heartbeat; the core stamps receipt time. */
   reportProgress?(phase: import('@boite/contracts').ThreadProgress['phase'], detail?: string | null): void;
   /** A provider signal that need not mean execution advanced. */
@@ -183,6 +184,8 @@ export interface TurnResult {
   sessionId: string | null;
   usage: Usage | null;
   error?: string;
+  /** Safe technical failure for diagnostics when error includes raw provider output. */
+  diagnosticError?: string;
   /**
    * The lifetime of the prompt cache this turn left, when the driver knows it.
    * The core stamps the time, the model and the account; see `PromptCache`.
@@ -234,7 +237,7 @@ export interface ProbeContext {
   spawnChild(cmd: string, args: string[], opts?: SpawnOptions): SpawnedChild;
   /** Terminates whatever that synthetic thread launched. Called on every path. */
   killTree(): void;
-  log(level: 'info' | 'warn' | 'error', message: string): void;
+  log(level: 'info' | 'warn' | 'error', message: string, context?: CoreLogContext): void;
 }
 
 export interface ProbeResult {
@@ -273,7 +276,7 @@ export interface TitleContext {
   model: string | null;
   /** Traced under the thread the title is for, like a turn's process. */
   spawnChild(cmd: string, args: string[], opts?: SpawnOptions): SpawnedChild;
-  log(level: 'info' | 'warn' | 'error', message: string): void;
+  log(level: 'info' | 'warn' | 'error', message: string, context?: CoreLogContext): void;
 }
 
 /** Which cached probes to drop. An empty filter drops them all. */

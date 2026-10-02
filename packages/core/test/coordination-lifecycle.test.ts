@@ -146,6 +146,50 @@ test('shutdown stops a driver before waiting for an in-flight coordination steer
   ]);
 }, 12000);
 
+for (const outcome of ['shutdown', 'late-resolution', 'late-rejection'] as const) test(`shutdown releases a completed warm turn with ${outcome} steering acknowledgement`, async () => {
+  const h = await startTestCore(); cores.push(h);
+  const owner = await h.connect();
+  const from = (await echoThread(h, owner, 'Sender')).threadId;
+  const to = (await echoThread(h, owner, 'Recipient')).threadId;
+  h.core.coordination.configure(from, brief); h.core.coordination.configure(to, brief);
+  let finish!: () => void;
+  let acknowledge!: (submitted: boolean) => void;
+  let rejectSteer!: (error: Error) => void;
+  let shutdowns = 0;
+  restores.push(setDriver('echo', { protocol: 'echo', startTurn() {
+    const done = new Promise<{ status: 'done'; sessionId: null; usage: null }>(resolve => { finish = () => resolve({ status: 'done', sessionId: null, usage: null }); });
+    const steering = new Promise<boolean>((resolve, reject) => { acknowledge = resolve; rejectSteer = reject; });
+    return { done, stop() {}, steer: () => steering };
+  }, shutdown() { shutdowns += 1; if (outcome === 'shutdown') acknowledge(true); } }));
+  let closing: Promise<void> | undefined;
+  try {
+    h.core.threads.startTurn(to, 'Warm running work');
+    await waitFor(() => h.core.threads.canSteer(to));
+    const letter = await h.core.coordination.send({ threadId: from, to: h.core.coordination.get(to).self, text: 'Missing acknowledgement', requestId: 'completed-warm' });
+    await waitFor(() => h.core.coordination.get(to).messages.find(message => message.id === letter.id)?.status === 'uncertain');
+    finish();
+    await waitFor(() => h.core.threads.require(to).status === 'idle');
+    await h.server.stop();
+    closing = h.core.close();
+    const settled = await Promise.race([closing.then(() => true), Bun.sleep(500).then(() => false)]);
+    expect(settled).toBe(true);
+    expect(shutdowns).toBe(1);
+    expect(h.core.journal.isClosed()).toBe(true);
+    if (outcome === 'late-resolution') acknowledge(true);
+    else if (outcome === 'late-rejection') rejectSteer(new Error('synthetic acknowledgement failure after journal close'));
+    await Bun.sleep(0);
+    const reopened = new Core({ dataDir: h.dataDir, token: h.token });
+    try {
+      expect(reopened.coordination.get(to).messages.find(message => message.id === letter.id)).toMatchObject({ status: 'uncertain', error: 'Awaiting provider acknowledgement' });
+      expect(reopened.scheduler.state().queued).toHaveLength(0);
+    } finally { await reopened.close(); }
+  } finally {
+    acknowledge?.(false);
+    finish?.();
+    await closing;
+  }
+}, 10000);
+
 test('a graceful restart leaves a never-submitted queued message received and paused', async () => {
   const { h, to, letter } = await setupQueued();
   await h.server.stop();

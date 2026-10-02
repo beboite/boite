@@ -27,19 +27,12 @@ each package directory counts as one.
 
 ## Isolated accounts
 
-An isolated account moves the agent's whole configuration directory into
-`<dataDir>/accounts/<id>/`. Before this change that left the user's hooks,
-settings, skills and instructions behind: a second Claude seat ran with no hooks
-at all. The descriptor's `shared` block now names what an isolated account takes
-from the user's own directory, at every spawn. Directories are linked, files are
-copied, and a login file is never shared
-([accounts.md](accounts.md#what-an-isolated-account-shares)).
-
-Codex keeps the trust of each hook in `config.toml`, keyed by the absolute path
-of `hooks.json`. The copy of `config.toml` an account gets has that path
-rewritten to the account's own `hooks.json`, so a hook the user reviewed stays
-reviewed there. A hook reviewed nowhere yet has to be reviewed in Codex, on the
-user's own login; the next spawn copies the new trust to every account.
+The descriptor's `shared` paths bring user configuration into isolated accounts
+before spawn: linked directories, copied files and no login/session files.
+[Accounts](accounts.md#what-an-isolated-account-shares) owns that layout and its
+failure rules. Codex's copied `config.toml` retargets reviewed `hooks.json`
+paths to the isolated directory. New hook trust must be reviewed in the user's
+own Codex profile; a later spawn copies it.
 
 ## What Boite reports
 
@@ -62,10 +55,8 @@ and says there is no report.
 
 ## Where it shows
 
-In a thread, only a hook that ended the turn shows: a prompt a
-`UserPromptSubmit` hook refused, or a turn a hook stopped. It is one quiet line
-with the event and the reason, where the reply would have been. Without it a
-blocked prompt read as an empty reply.
+A hook that refuses the prompt or stops the turn appears in the thread with
+its event and reason. Other runs contribute to the Settings ledger.
 
 Everything else goes to Settings > Brain > Hooks, a card that shows with or
 without a brain folder. Each agent that runs hooks has one row: what it found
@@ -78,23 +69,23 @@ five open, the rest of the last 50 folded.
 
 `hooks.status` returns that view and `hooks.changed` tells the clients a run was
 recorded. Reading it lays out each isolated account's share again, the way a
-spawn does, so the problems it lists are the ones the next turn would meet. Both are owner-only: a hook's reason can quote a path or a command.
+spawn does, so the problems it lists are the ones the next turn would meet. Both are
+owner-only: a hook's reason can quote a path or a command.
 The ledger lives in memory and starts again with the core; a run that passed
 only adds to its count.
 
 ## The models probe
 
-The Claude probe sets `settings.disableAllHooks`, so listing models fires no
-`SessionStart` hook. Before, every probe ran the user's session hooks as if a
-conversation had started.
+The Claude model probe sets `settings.disableAllHooks`, so discovery does not
+fire `SessionStart`. [Providers](providers.md#the-models-probe) owns the other
+protocol-specific probe restrictions. YOLO also disables configured hooks where
+the driver supports it; ACP has no standard hook-disable operation.
 
 ## Limits
 
-- A shared file goes to every account whole. An API key the user put in the
-  `env` block of `~/.claude/settings.json`, or in a provider block of a shared
-  `config.toml`, applies to every account of that agent, the same way it applies
-  to their own CLI.
-- Grok, pi and OpenCode hooks run on every account but leave no trace in Boite.
+- Shared settings are copied whole. Embedded API configuration applies to the
+  isolated account too; see [account sharing](accounts.md#what-an-isolated-account-shares).
+- Grok, pi and OpenCode can run hooks but supply no per-run events to Boite.
 - A hook blocking a tool call does not end the turn, so it shows in Settings
   only; the agent's own reply usually says it was refused.
 - A test core (`BOITE_HOST_AGENTS=0`) never shares or reads the developer's own
@@ -112,5 +103,6 @@ conversation had started.
   `codex.test.ts`: a blocked prompt draws the line in the thread and counts in
   `hooks.status`, on a fake SDK and a fake app-server.
 
-These do not run a live agent. The message shapes were read from Claude Code
-2.1.267 and Codex 0.157.1 with a real hook that exits 2.
+These use fake SDK/app-server fixtures. Native hook-report compatibility still
+depends on the installed CLI and SDK versions; fixture coverage does not prove
+every later version's behavior.

@@ -183,6 +183,17 @@ describe('usage', () => {
     const missing = await boite(['where', '--request-id', '--json']);
     expect(missing.code).toBe(2);
     expect(missing.err).toContain('--request-id needs a value');
+    for (const command of ['unknown', 'constructor', 'toString', '__proto__']) {
+      const unknown = await boite([command]);
+      expect(unknown.code).toBe(2);
+      expect(unknown.err).toContain(`unknown command ${command}`);
+      expect(unknown.out).toBe('');
+    }
+    for (const flag of ['--timeout', '--last', '--before']) {
+      const invalid = await boite(['where', flag, '-1']);
+      expect(invalid.code).toBe(2);
+      expect(invalid.err).toContain(`${flag} needs a number, got -1`);
+    }
     const help = await boite(['help']);
     expect(help.code).toBe(0);
     expect(help.err).toContain('usage: boite');
@@ -211,6 +222,9 @@ describe('where', () => {
     const run = await boite(['where', '--json']);
     expect(run.code).toBe(0);
     expect(JSON.parse(run.out)).toMatchObject({ threadId, cwd });
+    const flags = await boite(['where', '--json', '--multiple', '--worktree', '--wait', '--timeout', '12', '--last', '4', '--before', '3']);
+    expect(flags.code).toBe(0);
+    expect(JSON.parse(flags.out)).toMatchObject({ threadId, cwd });
   });
 });
 

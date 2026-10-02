@@ -110,11 +110,16 @@ export function cpuMsOf(api: ProcessReads, handle: number): number | null {
 
 /** When the process was created, in ms since the Unix epoch. */
 export function createdAtOf(api: ProcessReads, handle: number): number | null {
+  return creationIdentityOf(api, handle)?.startedAt ?? null;
+}
+
+/** Capture both the trace timestamp and the exact identity from the same held handle. */
+export function creationIdentityOf(api: ProcessReads, handle: number): { startedAt: number; incarnation: string } | null {
   const times = new Uint8Array(32);
   if (!api.processTimes(handle, times)) return null;
   const created = new DataView(times.buffer).getBigUint64(OFF_CREATION_TIME, true);
   if (created <= FILETIME_UNIX_EPOCH) return null;
-  return Number((created - FILETIME_UNIX_EPOCH) / 10_000n);
+  return { startedAt: Number((created - FILETIME_UNIX_EPOCH) / 10_000n), incarnation: created.toString() };
 }
 
 /** Bytes the process read and wrote, files, pipes and devices alike. */

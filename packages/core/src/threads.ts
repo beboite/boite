@@ -1,3 +1,5 @@
+import { archiveState, archiveStateKey } from './merged-pr-archive-state.ts';
+import { repositoryOf, type MergedPrProof } from './pull-requests.ts';
 import type { AgentProfile } from '@boite/contracts';
 import { createHash } from 'node:crypto';
 import { previewReferencesError, previewPrompt, MESSAGE_PAGE, MESSAGE_PAGE_MAX, DEFAULT_THREAD_DELETION_RETENTION_DAYS } from '@boite/contracts';
@@ -454,6 +456,23 @@ export class ThreadStore {
     }
   }
 
+  isRemoving(threadId: ThreadId): boolean { return this.removing.has(threadId); }
+
+  /** A quiescent automatic archive changes visibility only, retaining the checkout and execution state. */
+  archiveMergedPr(expected: ThreadSummary, proof: MergedPrProof, generation: number): ThreadSummary | null {
+    const thread = this.core.journal.getThread(expected.id);
+    const state = archiveState(this.core.journal, expected.id);
+    const project = thread?.projectId ? this.core.journal.getProject(thread.projectId) : null;
+    if (!thread || !project || repositoryOf(thread.cwd) !== proof.checkoutRepository || repositoryOf(project.path) !== proof.checkoutRepository) return null;
+    if (!thread || thread.updatedAt !== expected.updatedAt || thread.cwd !== expected.cwd || thread.branch !== proof.branch || thread.projectId !== expected.projectId || state.generation !== generation || state.dismissed?.includes(proof.url) || !this.core.mergedPrArchive.eligible(thread)) return null;
+    return this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
+      this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, binding: proof, reason: { type: 'pr-merged', number: proof.number, url: proof.url, archivedAt: Date.now() } });
+      const saved = this.save({ ...thread, archived: true }, 'thread.archived');
+      if (thread.projectId !== null) this.core.projects.announce(thread.projectId);
+      return saved;
+    })());
+  }
+
   archive(threadId: ThreadId, archived: boolean): ThreadSummary {
     this.require(threadId);
     if (!archived && this.removing.has(threadId)) throw refused('threadId: this conversation is being deleted', { threadId, field: 'threadId', expected: 'a conversation not being deleted' });
@@ -473,10 +492,16 @@ export class ThreadStore {
       void this.core.terminals.close(threadTerminalId(threadId));
     }
     const thread = this.require(threadId);
-    const saved = this.save({ ...thread, archived }, 'thread.archived');
-    // The sidebar counts a project's archived threads; a sub-thread is not one of them.
-    if (thread.archived !== archived && !thread.parentThreadId && thread.projectId !== null) this.core.projects.announce(thread.projectId);
-    return saved;
+    return this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
+      if (!archived) {
+        const state = archiveState(this.core.journal, threadId);
+        const dismissed = [...new Set([...(state.dismissed ?? []), ...(state.binding ? [state.binding.url] : [])])];
+        this.core.journal.setSetting(archiveStateKey(threadId), { ...state, reason: undefined, generation: state.generation + 1, dismissed, restoredCheckout: { projectId: thread.projectId, cwd: thread.cwd, branch: thread.branch } });
+      }
+      const saved = this.save({ ...thread, archived }, 'thread.archived');
+      if (thread.archived !== archived && !thread.parentThreadId && thread.projectId !== null) this.core.projects.announce(thread.projectId);
+      return saved;
+    })());
   }
 
   markRead(threadId: ThreadId): void {

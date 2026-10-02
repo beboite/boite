@@ -18,9 +18,6 @@ Plugins are administration of the machine that hosts the core, so every
 `plugins.*` method is owner only and the phone settings leave the page to the
 desktop app ([phone](phone.md)).
 
-This page is the authoring guide. It covers the manifest, what Boite does with
-it, what it refuses, how to test a plugin and how one gets recommended.
-
 ## The manifest
 
 Put `boite-plugin.json` at the root of the repository:
@@ -66,9 +63,8 @@ The platform key is `process.platform` and `process.arch` of the machine that
 runs the core, joined by a hyphen. A core on a Linux server downloads the
 `linux-x64` artifact even when the owner clicks from Windows.
 
-Nothing is optional and nothing extra is ignored. A field Boite does not know,
-at any depth, is refused like a wrong value. A refusal names the file, the
-field and what was expected:
+All fields are required; unknown fields at any depth are refused. Errors name
+the file, field and expected value:
 
 ```
 boite-plugin.json: artifacts.win32-x64.sha256 must be 64 lowercase hexadecimal characters, found "ABC123"
@@ -118,8 +114,9 @@ Each run:
 
 - starts through the core's process launcher, traced as `plugin:<id>:<n>`, in
   the plugin's directory with the core's environment;
-- is stopped after 60 seconds, and anything it started is killed with it when
-  it exits;
+- has a 60-second deadline and registry cleanup on exit. Windows Job Objects
+  track its descendants; POSIX cleanup signals its process group and cannot
+  catch descendants that leave it ([trace](trace.md#platform-boundary));
 - may write at most 4 MB on stdout and on stderr.
 
 A nonzero exit is reported as `seat-pool switch -opencode failed with exit code 1.`
@@ -129,8 +126,8 @@ login tool may print tokens. Write your diagnostics to your own log.
 Readings are cached for a minute, and a refresh runs the program again only
 when the last reading is older than ten seconds.
 
-The pools belong to the agent CLIs, not to Boite's isolated accounts
-([accounts](accounts.md)). Before `add`, `switch` or `remove`, Boite refuses
+Pools change the CLI's default login. [Isolated Boite accounts](accounts.md)
+keep their own credentials. Before `add`, `switch` or `remove`, Boite refuses
 while a turn on that provider's default login is running, queued or waiting,
 releases any warm agent on that login, and holds new turns on it until the
 command exits. One login change runs at a time across all plugins.
@@ -208,15 +205,10 @@ Uninstall.
 
 ## Security model
 
-A plugin runs with the permissions of the user running the core, on the
-machine that hosts it. The manifest check and the SHA-256 prove that the bytes
-are the ones the manifest names. They say nothing about what those bytes do.
-The preview says so, and the owner decides whom to trust.
-
-Access:
-
-- Every `plugins.*` method is owner only. A paired phone gets
-  `plugins.list is for the owner only`.
+Plugins run with the core user's permissions. Manifest validation and SHA-256
+checks establish which bytes run; they do not sandbox the executable. The
+preview states this before installation. Every `plugins.*` method is owner-only;
+a paired device receives `plugins.list is for the owner only`.
 
 Reading the repository:
 

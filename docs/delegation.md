@@ -64,8 +64,9 @@ or stop it. Open its conversation to answer permission and question cards.
 The panel keeps completed results after the active strip disappears.
 
 Messages carry the authenticated sender and appear as forwarded messages.
-Claude receives them at a tool boundary; Codex and pi can accept live steering.
-Other drivers receive a new turn after their current turn finishes. A waiting
+Claude receives them at a tool boundary; Codex, Muse, pi and Grok can accept
+live steering. Drivers without steering receive a later turn.
+[Coordination](coordination.md#what-the-agent-receives) owns the protocol mapping. A waiting
 permission or question is never answered by a forwarded message. A delivery
 receipt means provider acceptance, not agreement or task completion. An
 uncertain submission is not retried automatically.
@@ -77,11 +78,12 @@ existing child to reuse its session.
 
 ## Controls and usage
 
-Delegation starts enabled, on the `conversation` profile alone. The agent is
+Delegation starts enabled on the built-in `conversation` profile. The agent is
 told about it when the request is about handing work out (delegation,
 subagents, parallel work, a workflow), and on every turn once the owner added a
 profile. Persistent agents keep their own setting, which starts off. Only the
-owner can configure profiles, turn delegation off or resume a paused team. A paired phone can inspect, message and stop an enabled team.
+owner can configure profiles, turn delegation off or resume a paused team. A paired
+phone can inspect, message and stop an enabled team.
 
 Boite imposes no quota on the number of children, their concurrent turns, total
 turns or turn duration. Previously saved quotas are ignored. Each conversation
@@ -109,13 +111,11 @@ short. Resume is an owner action. An unsuccessful child is not retried by Boite.
 
 ## Workflows
 
-A [workflow](workflows.md) is a plan of delegated steps the core runs by
-itself: dependencies, one step per item of an earlier step's output, and steps
-that run only when a condition holds. Its steps are ordinary children on the
-conversation's model, or on one of this team's profiles when a step names it,
-so a workflow needs neither a profile nor an enabled team. The plan controls
-step concurrency. Workflow steps are not
-listed among the team's agents.
+[Workflows](workflows.md) run checked plans over ordinary child threads, with
+explicit dependencies, fan-out, conditions and plan concurrency. They do not
+require an enabled team or custom profile; pause still holds launches. Workflow
+steps remain separate from the team's agent list. That guide owns plan syntax,
+structured output, commands and recovery.
 
 ## Agent commands
 

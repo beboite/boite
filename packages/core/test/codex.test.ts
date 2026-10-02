@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
@@ -10,6 +10,7 @@ import { codexQuotaDetails } from '../src/quota-details.ts';
 import { memoryLimitOfJob, cpuRateOfGlobalJob } from '../src/platform/windows/jobs.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { countLogLines, countProcesses, readScriptedLog, writeScriptedProvider } from './scripted-provider.ts';
 
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
@@ -107,58 +108,45 @@ async function stopCore(): Promise<void> {
 }
 
 function fakeLog(): string {
-  return existsSync(logFile) ? readFileSync(logFile, 'utf8') : '';
+  return readScriptedLog(logFile);
 }
 
 /** A user descriptor for the fake server: `protocol: "codex-appserver"`, launched as `bun <fixture>`. */
 function writeDescriptor(dataDir: string): void {
-  const dir = join(dataDir, 'providers');
-  mkdirSync(dir, { recursive: true });
-  const profile = {
-    detect: {},
-    executable: [{ kind: 'path', value: 'bun' }],
-    launch: { args: [FAKE_SERVER] },
-    isolation: {},
-  };
-  writeFileSync(
-    join(dir, 'codex-fake.json'),
-    JSON.stringify({
-      id: 'codex-fake',
-      schemaVersion: 1,
-      name: 'Fake Codex app-server',
-      shortName: 'CodexFake',
-      protocol: 'codex-appserver',
-      roots: ['{isolationDir}'],
-      profiles: { windows: profile, linux: profile, macos: profile },
-      auth: { kind: 'none' },
-      models: [
-        {
-          id: 'fake-codex',
-          name: 'Fake Codex',
-          default: true,
-          effort: {
-            levels: [
-              { id: 'low', label: 'Low' },
-              { id: 'high', label: 'High' },
-            ],
-            default: 'low',
-          },
+  writeScriptedProvider(dataDir, FAKE_SERVER, {
+    id: 'codex-fake',
+    schemaVersion: 1,
+    name: 'Fake Codex app-server',
+    shortName: 'CodexFake',
+    protocol: 'codex-appserver',
+    roots: ['{isolationDir}'],
+    auth: { kind: 'none' },
+    models: [
+      {
+        id: 'fake-codex',
+        name: 'Fake Codex',
+        default: true,
+        effort: {
+          levels: [
+            { id: 'low', label: 'Low' },
+            { id: 'high', label: 'High' },
+          ],
+          default: 'low',
         },
-        // The shipped descriptor's one model: "the agent keeps its own". A probe
-        // keeps it first, and the driver never puts it on the wire.
-        { id: 'default', name: 'Agent default' },
-      ],
-      capabilities: {
-        approvals: true,
-        hooks: false,
-        checkpoint: false,
-        images: true,
-        planMode: true,
-        resume: true,
       },
-    }),
-    'utf8',
-  );
+      // The shipped descriptor's one model: "the agent keeps its own". A probe
+      // keeps it first, and the driver never puts it on the wire.
+      { id: 'default', name: 'Agent default' },
+    ],
+    capabilities: {
+      approvals: true,
+      hooks: false,
+      checkpoint: false,
+      images: true,
+      planMode: true,
+      resume: true,
+    },
+  });
 }
 
 async function codexAccount(client: CoreClient): Promise<{ dataDir: string; projectId: string; accountId: string }> {
@@ -1392,24 +1380,7 @@ describe('codex driver', () => {
 
   /** How many lines of the fake log are exactly this one. */
   function countLines(line: string): number {
-    return fakeLog()
-      .split('\n')
-      .filter((entry) => entry === line).length;
-  }
-
-  function countProcesses(
-    client: CoreClient,
-    threadId: string,
-  ): { started: RpcEvents['process.started'][]; exited: RpcEvents['process.exited'][] } {
-    const started: RpcEvents['process.started'][] = [];
-    const exited: RpcEvents['process.exited'][] = [];
-    client.on('process.started', (record) => {
-      if (record.threadId === threadId) started.push(record);
-    });
-    client.on('process.exited', (record) => {
-      if (record.threadId === threadId) exited.push(record);
-    });
-    return { started, exited };
+    return countLogLines(fakeLog(), line);
   }
 
   async function runTurn(client: CoreClient, threadId: string, prompt: string): Promise<void> {

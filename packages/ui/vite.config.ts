@@ -4,10 +4,10 @@ import { join, resolve } from 'node:path';
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
 import { defineConfig, type Plugin } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
-import { stampWorkerCache } from './src/lib/worker-stamp';
-import { tooNewForFloor } from './src/lib/browser-floor';
-import { localePreloadScript } from './src/lib/locale-preload';
-import { colorsBootScript } from './src/lib/theme-colors';
+import { stampWorkerCache } from './src/lib/worker-stamp.ts';
+import { tooNewForFloor } from './src/lib/browser-floor.ts';
+import { localePreloadScript } from './src/lib/locale-preload.ts';
+import { colorsBootScript } from './src/lib/theme-colors.ts';
 import { lucideGlyph } from './icon-plugin.ts';
 
 const COMPRESSIBLE = /\.(?:html|js|css|svg|json|webmanifest)$/;

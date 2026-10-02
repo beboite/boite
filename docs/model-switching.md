@@ -10,6 +10,14 @@ model-switch path. Changing accounts clears the native session. The next turn
 starts a fresh session with context from the journal. Returning to an earlier
 account also starts fresh, so it receives the intervening work.
 
+## Provider defaults
+
+Settings > Providers stores a default model and effort per provider on this
+device. New threads use those defaults; Ctrl+Enter preserves an explicit choice.
+Existing threads keep their selection. A first send probes when needed and
+refuses a preset unavailable on that account by name. Presets live in client
+configuration; descriptor lists and native probes own availability.
+
 ## Picker and favorites
 
 The picker hides unnamed `default` and `auto` entries while retaining them in
@@ -34,7 +42,8 @@ asks for the deepest thinking on that turn, and `ultracode` opts the turn into
 the Workflow tool when the account has workflows. When Claude Code runs a Claude
 model, the composer and the sent message draw them apart, `ultrathink` in the
 spectrum and `ultracode` in the accent. Another harness, or Claude Code routed
-to another model, reads them as plain words, and they stay plain there. `ultraplan` and `ultrareview` run on claude.ai and are not
+to another model, reads them as plain words, and they stay plain there. `ultraplan` and
+`ultrareview` run on claude.ai and are not
 available through the SDK.
 
 Model catalogs persist in client storage, scoped to the core endpoint and data
@@ -92,25 +101,8 @@ id with no service tier and preserves an effort both models support.
 Other model/account changes clear speed and effort. Schema 10 stores `threads.speed`,
 and each accepted turn freezes it with the other execution settings.
 
-Appearance offers accent swatches and a hue slider. The colour persists per
-client as `boite.accent-hue` and colours reasoning, primary buttons, links and
-focus indicators. The file attachment button sits beside Send; keyboard help
-stays out of the chatbar.
-
-On Windows, Appearance also picks the window material from what the Windows
-build draws without lag: acrylic from build 22523, where DWM draws it as a
-system backdrop, mica from 22000, and solid always. Windows 10 offers solid
-alone, so the row is hidden there and the window opens opaque. A stored choice
-the build does not offer is shown and applied as solid. The shell refuses a
-material its build does not offer, because DWM accepts a value it cannot draw
-and the page would turn transparent over nothing.
-
-The shell sets every material, solid included, as one value of the DWM system
-backdrop and reads it back, so changes work in any order. It does not use
-Tauri's `set_effects`, whose clear (our solid) also sets the window's accent
-policy to disabled. That call is the only one the broken path made: a material
-picked after solid was stored by DWM, yet the window showed no backdrop and
-turned see-through.
+Device appearance and WebView material rules are documented in
+[development](development.md#ui-spacing-and-motion).
 
 ## Context transfer
 
@@ -138,17 +130,12 @@ Codex, whose resume takes the new folder and keeps its session. The seeded
 prompt says the thread moved during the conversation and that the latest move
 note names the folder it works in now ([moving a thread](development.md#moving-a-thread)).
 
-Keeping the session does not keep the provider's prompt cache. Measured on
-2026-09-22 with a four-turn probe per provider: a model change on Claude sent
-the conversation again uncached; on Codex every effort change missed (`high`,
-`low`, `low`, `medium`, `high` cached 9k, 13k, 39k, 8k and 31k of 31k to
-47k input tokens); on Claude Sonnet 5 an effort change kept the system prompt
-and tools but rewrote every message, while Claude Opus 5.5 kept its cache. Fast
-mode was not measured. So a change of model, effort or speed inside one account
-asks first when the last context reading is over 100,000 tokens and less than
-an hour old, the longest a provider keeps a cache. An older reading asks
-nothing: that cache is already gone. A change of account is the case above and
-asks only that question.
+Keeping the session does not guarantee prompt-cache reuse. Model, effort or
+speed changes can alter the request prefix. Inside one account, the UI asks
+before such a change when the last context reading exceeds 100,000 tokens and
+is less than an hour old. This is a recency rule, not a cache invalidation
+detector; [cache lifetimes](prompt-cache.md) can differ. An account change uses
+the history-transfer warning above instead.
 
 Historical images use remaining slots within the eight-image turn limit. The
 current prompt's attachments take priority, then the most recent historical
@@ -159,8 +146,9 @@ continuation of an image-bearing history explicitly.
 ## Storage and concurrent changes
 
 The composer resolves an old `default` or `auto` model alias to the configured
-provider preset for the next prompt when one is configured. A named model stays selected. Before sending
-on an old thread, the UI verifies the preset against the account's model catalog
+provider preset for the next prompt when one is configured. A named model stays
+selected. Before sending on an old thread, the UI verifies the preset against the
+account's model catalog
 and saves it with the thread's selection revision. An unavailable preset or a
 concurrent selection change refuses the send; it never silently runs the alias.
 The picker also ignores saved presets containing these aliases.

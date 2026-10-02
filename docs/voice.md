@@ -13,11 +13,9 @@ every 2.5 seconds, subject to engine latency. It transcribes at most the latest
 12 seconds, replaces the provisional text, and never edits the typed draft.
 Only one preview request runs at a time. Silence skips uploads; a failed
 preview pauses further previews and shows the error. Finish cancels and drains
-the preview before transcribing the full recording for the draft. These are
-bounded repeated transcription requests, not a provider token stream; API mode
-therefore sends additional requests while recording. whisper.cpp's server
-answers a request with the whole text, so a word-by-word stream would need a
-different engine; the preview is the closest it gets.
+the preview before transcribing the full recording for the draft. Each preview
+is a separate transcription request returning complete text. API mode sends
+these additional requests while recording.
 
 Once a local preview has heard the language, the next previews and the final
 request pass it back, which skips whisper's language detection. A language set
@@ -145,9 +143,8 @@ sent over authenticated RPC. The UI and server both enforce the size limit.
 The microphone is never played through speakers. No browser speech-recognition
 service is used.
 
-Browsers require a secure context for microphone access. On a phone, open the
-core through the trusted HTTPS origin described in [phone.md](phone.md). A LAN
-HTTP address does not qualify; localhost does for development. Permission is
+Browser microphone access requires the [secure origin](phone.md#https-and-installation)
+used for phone setup; localhost qualifies for development. Permission is
 requested only after pressing Dictate. A denial explains how to retry. Silent
 or very short recordings are refused before uploading.
 

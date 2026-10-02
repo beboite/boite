@@ -11,6 +11,8 @@ export class FakeBus {
   /** `WsClient.#subscribed`'s mirror: the ids the client itself puts back after a reconnect. */
   readonly clientSubscribed = new Set<ThreadId>();
   focusedThreadId: ThreadId | null = null;
+  protectedThreadIds = new Set<ThreadId>();
+  protectAllThreads = false;
   /** The calls the socket is holding, so `drop()` can reject them from underneath. */
   readonly pending = new Set<{ reject: (error: RpcFailure) => void }>();
 
@@ -35,7 +37,11 @@ export class FakeBus {
   }
 
   setState(state: ClientState): void {
-    if (state !== 'ready') this.focusedThreadId = null;
+    if (state !== 'ready') {
+      this.focusedThreadId = null;
+      this.protectedThreadIds.clear();
+      this.protectAllThreads = false;
+    }
     if (this.state === state) return;
     this.state = state;
     for (const handler of this.stateHandlers) handler(state);
@@ -46,6 +52,8 @@ export class FakeBus {
     // A socket that is down carries nothing. Everything the core emitted
     // during the gap is lost, which is what `reload()` exists to repair.
     if (this.state !== 'ready') return;
+    // Provider output and other live diagnostics belong only to the owner.
+    if (event === 'core.log' && this.principal !== 'owner') return;
     // The core's `mayReceiveEvent`: a paired device hears only the device events.
     if (this.principal === 'session' && !DEVICE_EVENTS.has(event)) return;
     const set = this.handlers.get(event);

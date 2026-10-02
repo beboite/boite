@@ -6,7 +6,7 @@
   import { archivedThreads, restoreThread } from '../lib/archive';
   import { canDeleteThread, deleteThread } from '../lib/thread-removal';
   import { ago, exactTime, projectName } from '../lib/format';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
 
@@ -21,11 +21,17 @@
   let threads = $state<ThreadSummary[] | null>(null);
   let loading = $state(false);
   let restoring = $state<ThreadId | null>(null);
-  /** Once per mount: a read that fails leaves the button, not a retry loop. */
+  /** One automatic ask per connection: a failed read leaves the button for another user ask. */
   let asked = false;
   const removed = new Set<ThreadId>();
   $effect(() => {
+    void store.connection;
     const client = store.client;
+    threads = null;
+    restored = [];
+    restoring = null;
+    asked = false;
+    removed.clear();
     const offRemove = client?.on('thread.removed', ({ threadId }) => {
       removed.add(threadId);
       threads = threads?.filter(t => t.id !== threadId) ?? null;
@@ -48,11 +54,14 @@
   }
 
   async function load() {
+    const client = store.client;
+    const generation = store.clientGeneration;
     loading = true;
     try {
-      threads = (await archivedThreads(store)).filter(t => !removed.has(t.id));
+      const answer = await archivedThreads(store);
+      if (store.client === client && store.clientGeneration === generation) threads = answer.filter(t => !removed.has(t.id));
     } catch (error) {
-      fail(error);
+      if (store.client === client && store.clientGeneration === generation) fail(error);
     } finally {
       loading = false;
     }
@@ -62,12 +71,16 @@
   let restored = $state<ThreadId[]>([]);
 
   async function restore(thread: ThreadSummary) {
+    const client = store.client;
+    const generation = store.clientGeneration;
     restoring = thread.id;
     try {
-      await restoreThread(store, thread.id);
+      const summary = await restoreThread(store, thread.id);
+      if (store.client !== client || store.clientGeneration !== generation) return;
+      threads = threads?.map(row => row.id === summary.id ? summary : row) ?? null;
       restored = [...restored, thread.id];
     } catch (error) {
-      fail(error);
+      if (store.client === client && store.clientGeneration === generation) fail(error);
     } finally {
       restoring = null;
     }
@@ -101,6 +114,12 @@
       {#each threads as thread (thread.id)}
         <li data-thread-id={thread.id}>
           <span class="title" title={thread.title}>{thread.title}</span>
+          {#if thread.archiveReason?.type === 'pr-merged'}
+            <span class="archive-reason" data-testid="archive-merged-reason">
+              <a href={thread.archiveReason.url} target="_blank" rel="noopener noreferrer">{fill(strings.settings.archived.mergedReason, { number: String(thread.archiveReason.number) })}</a>
+              <time datetime={new Date(thread.archiveReason.archivedAt).toISOString()} title={exactTime(thread.archiveReason.archivedAt)}>{ago(thread.archiveReason.archivedAt)}</time>
+            </span>
+          {/if}
           <span class="subtle meta" title={exactTime(thread.updatedAt)}>{projectOf(thread)} · {ago(thread.updatedAt)}</span>
           {#if restored.includes(thread.id)}
             <button type="button" class="small" data-testid="archived-open" onclick={() => void workspace.select(store, thread.id)}>
@@ -156,6 +175,17 @@
     overflow-wrap: anywhere;
     font-size: var(--text-sm);
   }
+  .archive-reason {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-size: var(--text-sm);
+  }
+  .archive-reason a { color: inherit; text-underline-offset: 2px; }
+  .archive-reason time { color: var(--color-subtle); }
 
   .archived button {
     gap: 4px;

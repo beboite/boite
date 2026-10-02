@@ -1,3 +1,4 @@
+import { logMessageOf } from '../../log-errors.ts';
 /** One ACP agent process for a thread, from `initialize` to its last turn. */
 import { Readable, Writable } from 'node:stream';
 import type {
@@ -15,6 +16,7 @@ import type { SpawnedChild } from '../../procs.ts';
 import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import { grokLaunchArgs } from '../grok.ts';
 import { stderrLines } from '../lines.ts';
+import { exitWithin } from '../exit.ts';
 import type { TurnContext } from '../types.ts';
 import { SessionControls } from './controls.ts';
 import { loadRefusal, LoadRefused, rpcReason, rpcRefusal } from './load.ts';
@@ -231,8 +233,8 @@ export class AcpSession {
       } else {
         // An agent that exits while it starts takes the connection with it,
         // and its exit code and last stderr line say more than that.
-        const code = await this.exitWithin(EXIT_GRACE_MS);
-        turn.fail(code === undefined ? messageOf(error) : this.exitSentence(code));
+        const code = await exitWithin(this.exited, EXIT_GRACE_MS);
+        turn.fail(code === undefined ? messageOf(error) : this.exitSentence(code), code === undefined ? logMessageOf(error) : this.exitSentence(code, true));
       }
       this.endTurn(turn, true);
       return;
@@ -298,8 +300,8 @@ export class AcpSession {
       } else {
         // A child that died takes the connection with it, and its exit says more
         // than "the connection closed": give it a moment to be reported.
-        const code = await this.exitWithin(EXIT_GRACE_MS);
-        turn.fail(code === undefined ? messageOf(error) : this.exitSentence(code));
+        const code = await exitWithin(this.exited, EXIT_GRACE_MS);
+        turn.fail(code === undefined ? messageOf(error) : this.exitSentence(code), code === undefined ? logMessageOf(error) : this.exitSentence(code, true));
       }
       this.endTurn(turn, true);
       return;
@@ -379,7 +381,7 @@ export class AcpSession {
     const stream = sdk.ndJsonStream(
       Writable.toWeb(child.stdin) as unknown as WritableStream<Uint8Array>,
       jsonLinesOnly(Readable.toWeb(child.stdout) as unknown as ReadableStream<Uint8Array>, (line) => {
-        ctx.log('warn', `acp agent: ${line.slice(0, STDERR_MAX)}`);
+        ctx.log('warn', `acp agent: ${line.slice(0, STDERR_MAX)}`, { kind: 'provider-output', event: 'provider.output' });
       }),
     );
     const connection = sdk
@@ -477,7 +479,7 @@ export class AcpSession {
       // Antigravity writes every protocol frame to stderr as a glog info line,
       // three hundred a turn: only what the agent itself calls a warning is one.
       if (GLOG_INFO.test(text)) return;
-      ctx.log('warn', `acp agent: ${this.lastStderr}`);
+      ctx.log('warn', `acp agent: ${this.lastStderr}`, { kind: 'provider-output', event: 'provider.output' });
     });
     this.exited = new Promise<number | null>((resolve) => {
       child.once('exit', (code) => {
@@ -493,24 +495,9 @@ export class AcpSession {
     });
   }
 
-  private exitWithin(ms: number): Promise<number | null | undefined> {
-    const exited = this.exited;
-    if (exited === null) return Promise.resolve(undefined);
-    return new Promise<number | null | undefined>((resolve) => {
-      const timer = setTimeout(() => {
-        resolve(undefined);
-      }, ms);
-      timer.unref?.();
-      void exited.then((code) => {
-        clearTimeout(timer);
-        resolve(code);
-      });
-    });
-  }
-
-  private exitSentence(code: number | null): string {
+  private exitSentence(code: number | null, diagnostic = false): string {
     const head = `the acp agent exited with code ${code === null ? 'unknown' : code}`;
-    return this.lastStderr.length === 0 ? head : `${head}: ${this.lastStderr}`;
+    return diagnostic || this.lastStderr.length === 0 ? head : `${head}: ${this.lastStderr}`;
   }
 
   /** The one teardown: the connection goes, then the child, through the registry. */

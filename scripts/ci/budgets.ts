@@ -1,7 +1,8 @@
 /**
  * Size budgets for what the desktop job just built: the UI's entry chunk, the
- * whole UI without its precompressed copies, and the core bundle. Sizes are
- * deterministic for a commit, unlike timings on a shared runner, so they can
+ * whole UI without its precompressed copies, the core entry and all emitted
+ * core JavaScript. Sizes are deterministic for a commit, unlike timings on a
+ * shared runner, so they can
  * fail a pull request. Each limit in budgets.json sits about 10% above the
  * size measured when it was set; raise one in the same change that explains
  * the growth.
@@ -16,6 +17,8 @@ export interface Budgets {
   uiEntryChunk: number;
   uiDist: number;
   coreBundle: number;
+  /** Includes worker entries and lazy chunks; excludes native binaries and maps. */
+  coreJavaScript: number;
 }
 
 const ROOT = join(import.meta.dir, '..', '..');
@@ -45,6 +48,9 @@ export function measure(root = ROOT): Budgets {
     uiEntryChunk: statSync(join(ui, chunk)).size,
     uiDist: files(ui).filter((file) => !/\.(?:br|gz)$/.test(file)).reduce((sum, file) => sum + statSync(file).size, 0),
     coreBundle: statSync(core).size,
+    coreJavaScript: files(join(root, 'packages', 'core', 'dist'))
+      .filter((file) => /\.(?:js|mjs|cjs)$/.test(file))
+      .reduce((sum, file) => sum + statSync(file).size, 0),
   };
 }
 

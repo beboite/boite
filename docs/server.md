@@ -1,10 +1,8 @@
 # A core on a server
 
-The core is a Bun program with no window, so it runs as well on a Linux machine
-nobody sits at as it does beside the desktop shell. The agents it starts run on
-that machine too, under the account that runs the core, with that account's
-logins and that machine's files. The desktop app on another computer drives it
-through a pairing key; the phone reaches it the same way it reaches any core.
+A headless core runs agents under its own user account, with that account's
+logins and files. Desktop and phone clients connect through
+[pairing](phone.md#pairing); they do not execute agents locally.
 
 ## Docker
 
@@ -72,10 +70,10 @@ docker image inspect ghcr.io/beboite/boite/boite-server:latest --format '{{index
 docker compose stop -t 60
 ```
 
-The stop is a [restart handoff](restart-handoff.md): agents at work finish the
-tool call they are in, 30 seconds at most, and their threads resume when the
-container is back within the hour. Without `-t 60` Docker kills the container
-after 10 seconds; the threads resume all the same.
+The [restart handoff](restart-handoff.md) allows up to 30 seconds for active
+tool calls and retains resumable threads for an hour. `-t 60` accommodates it;
+Docker's default ten-second stop can interrupt that wait. Threads can still
+resume after forced shutdown.
 
 Back up all three volumes, including the complete SQLite data directory. Then:
 
@@ -113,18 +111,12 @@ Set `BOITE_PUBLIC_URL` or `--public-url` to that exact HTTPS origin so pairing
 links and the WebSocket origin check use it. [Phone setup](phone.md) includes
 a Caddy example, installation steps and Web Push configuration.
 
-Before connecting through the proxy, add its exact browser origin, such as
-`https://boite.example.com`, to the core's `browserOrigins` setting. Connect the
-desktop shell directly as an owner, select that machine, open Machines > Allowed
-browser origins, and configure the origins there. Keep any existing origins that are
-still needed. Origins contain a scheme, hostname and optional port; the core
-stores a pasted address without its trailing slash or path. See
-[machine connections](machines.md).
-
-Preserving the proxy headers alone is not enough: an HTTPS origin on port 443
-differs from the core listening on port 7337. An origin that is not allowed gets
-HTTP 403 on `/rpc`, even when the pairing token is valid. Keep the allowlist
-explicit; do not strip the `Origin` header to bypass this check.
+`publicUrl` permits that exact HTTPS origin. A browser connecting to additional
+cores needs its page's origin in each core's Machines > Allowed browser origins
+([machines](machines.md#browser-and-phone-connections)). The origin includes
+scheme, host and optional port. Preserve existing entries still in use.
+An unapproved origin receives HTTP 403 on `/rpc`, even with a valid credential;
+do not strip `Origin` to bypass the check.
 
 ### Image verification
 
@@ -304,16 +296,11 @@ says which role it carries and until when it works. Without `--owner` the link
 is a phone's. `--data-dir` and `--channel` name another core, as they do at
 start.
 
-On the desktop, open Settings, Machines, and paste the link under Add machine.
-The grant is spent on the first hello and the resulting key is stored in that
-app. The server's projects join those of the local core and any other connected
-machines. Disconnect forgets that host locally; Revoke on its paired-device list
-invalidates the key. [machines.md](machines.md) covers the two thread views,
-reconnection and the origins needed by a browser or phone.
-
-A key paired with `--owner` says hello as the owner, so it reaches every method:
-accounts, projects, settings, minting more links. The server lists it among the
-paired devices tagged full control, and revokes it like any other.
+Paste the link into Settings, Machines, Add machine. Full control permits
+accounts, projects, settings and further pairing. Removing the local connection
+forgets its key; revoking it on the server invalidates it. [Machines](machines.md)
+owns routing/reconnection and [phone pairing](phone.md#pairing) owns grant
+exchange, roles, hashing and revocation.
 
 ## What changes when the core is elsewhere
 
@@ -324,5 +311,7 @@ paired devices tagged full control, and revokes it like any other.
   that opens a browser needs a way to reach that browser, which a headless
   machine does not have; the device-code flows in [accounts.md](accounts.md)
   work.
-- The trace, the CPU and memory caps, the focus guard and the audio mute are
-  Windows work today. [trace.md](trace.md) says what Linux gets.
+- Windows Job Objects provide exact descendant tracking and the CPU cap, focus
+  guard and audio mute. Linux/macOS register direct children and signal process
+  groups, which descendants can leave. Memory protection is cross-platform;
+  its eligible-child and sampling limits are in [trace](trace.md).

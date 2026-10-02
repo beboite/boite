@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite';
+import { MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES } from '@boite/contracts';
 import type {
   Account,
   DeletedThreadSummary,
@@ -18,6 +19,7 @@ import type { AccountRow, MessageRow, ProcessRow, ProjectIconRow, ProjectRow, Th
 import type { DetectedIcon as StoredProjectIcon } from './project-icons.ts';
 import { messageOfError, StreamBuffer } from './journal/stream-buffer.ts';
 import { usageByBucket, usageByThread, type UsageSumRow, type UsageThreadRow } from './journal/usage-sums.ts';
+import { refused } from './errors.ts';
 
 export interface JournalOptions {
   /** Where a write that fails on a timer, with no caller to throw to, is reported. */
@@ -173,6 +175,7 @@ export class Journal {
   }
 
   deleteProject(projectId: string): void {
+    this.deleteSetting(`project-auto-archive-merged-pr:${projectId}`);
     this.db.query('DELETE FROM projects WHERE id = ?').run(projectId);
     this.db.query('DELETE FROM project_icons WHERE project_id = ?').run(projectId);
   }
@@ -335,7 +338,7 @@ export class Journal {
         this.db.query('DELETE FROM workflow_steps WHERE thread_id = ? OR run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id, id);
         this.db.query('DELETE FROM workflow_requests WHERE run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id);
         this.db.query('DELETE FROM workflow_runs WHERE root_id = ?').run(id);
-        for (const prefix of ['activity:', 'move-note:', 'memory-notices:', 'coordination:', 'coordination-autopause:', 'delegation:', 'delegation-turns:', 'delegation-episode:']) this.deleteSetting(`${prefix}${id}`);
+        for (const prefix of ['merged-pr-archive:', 'activity:', 'move-note:', 'memory-notices:', 'coordination:', 'coordination-autopause:', 'delegation:', 'delegation-turns:', 'delegation-episode:']) this.deleteSetting(`${prefix}${id}`);
         this.db.query('DELETE FROM threads WHERE id = ?').run(id);
         this.db.query('DELETE FROM thread_deletions WHERE thread_id = ?').run(id);
       }
@@ -555,7 +558,8 @@ export class Journal {
 
   /**
    * One page of a thread's messages, oldest first: the last `limit` of them, or
-   * the last `limit` written before `beforeRowid`. `before` names the oldest one
+   * the last `limit` written before `beforeRowid`, within the serialized byte
+   * budget except for one complete transportable message. `before` names the oldest one
    * returned while the thread still holds older ones, and is null once the page
    * reaches the first message.
    *
@@ -568,30 +572,51 @@ export class Journal {
     // those messages with an older projection while the next delta is streaming.
     this.flushDeltas();
     const limit = Math.max(1, Math.trunc(options.limit));
-    // One row past the page is what says whether anything is left behind it.
-    const rows =
-      options.beforeRowid === undefined
-        ? (this.db
-            .query('SELECT * FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT ?')
-            .all(threadId, limit + 1) as MessageRow[])
-        : (this.db
-            .query('SELECT * FROM messages WHERE thread_id = ? AND rowid < ? ORDER BY rowid DESC LIMIT ?')
-            .all(threadId, options.beforeRowid, limit + 1) as MessageRow[]);
-    const older = rows.length > limit;
-    const page = (older ? rows.slice(0, limit) : rows).reverse();
-    return {
-      messages: page.map((row) => this.currentMessage(row)),
-      before: older ? (page[0]?.id ?? null) : null,
-    };
+    const statement = this.db.prepare(options.beforeRowid === undefined
+      ? 'SELECT * FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT ?'
+      : 'SELECT * FROM messages WHERE thread_id = ? AND rowid < ? ORDER BY rowid DESC LIMIT ?');
+    const rows = options.beforeRowid === undefined
+      ? statement.iterate(threadId, limit + 1)
+      : statement.iterate(threadId, options.beforeRowid, limit + 1);
+    const messages: Message[] = [];
+    let bytes = 2, older = false;
+    try {
+      for (const row of rows) {
+        if (messages.length >= limit || bytes >= MESSAGE_PAGE_MAX_BYTES) { older = true; break; }
+        const message = this.currentMessage(row as MessageRow);
+        const size = Buffer.byteLength(JSON.stringify(message));
+        const next = bytes + size + (messages.length ? 1 : 0);
+        if (messages.length && next > MESSAGE_PAGE_MAX_BYTES) { older = true; break; }
+        // One complete attachment-sized message can exceed the page budget.
+        // Never pretend a message too large for any RPC frame was sent.
+        if (size >= RPC_MAX_FRAME_BYTES) {
+          throw refused(`message ${message.id} is ${size} serialized UTF-8 bytes; expected a complete message below ${RPC_MAX_FRAME_BYTES} bytes`,
+            { threadId, messageId: message.id, field: 'messages', bytes: size, max: RPC_MAX_FRAME_BYTES, expected: `a complete message below ${RPC_MAX_FRAME_BYTES} serialized UTF-8 bytes` });
+        }
+        messages.push(message);
+        bytes = next;
+      }
+    } finally { statement.finalize(); }
+    messages.reverse();
+    return { messages, before: older ? (messages[0]?.id ?? null) : null };
   }
 
-  /** That message and what was written after it, oldest first, or null when that is more than `limit`. */
+  /** The complete reconnect tail, or null when its count or serialized bytes exceed a page. */
   listMessagesFrom(threadId: string, fromRowid: number, limit: number): Message[] | null {
     this.flushDeltas();
-    const rows = this.db
-      .query('SELECT * FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?')
-      .all(threadId, fromRowid, limit + 1) as MessageRow[];
-    return rows.length > limit ? null : rows.map((row) => this.currentMessage(row));
+    const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?');
+    const messages: Message[] = [];
+    let bytes = 2;
+    try {
+      for (const row of statement.iterate(threadId, fromRowid, limit + 1)) {
+        if (messages.length >= limit) return null;
+        const message = this.currentMessage(row as MessageRow);
+        bytes += Buffer.byteLength(JSON.stringify(message)) + (messages.length ? 1 : 0);
+        if (bytes > MESSAGE_PAGE_MAX_BYTES) return null;
+        messages.push(message);
+      }
+      return messages;
+    } finally { statement.finalize(); }
   }
 
   /**

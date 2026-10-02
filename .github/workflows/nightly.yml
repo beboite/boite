@@ -66,7 +66,6 @@ jobs:
       version: ${{ needs.revision.outputs.version }}
     permissions:
       contents: read
-      packages: write
 
   # The tag is taken once the checks pass: the release tags ruleset keeps a tag
   # from being deleted, so one taken before them outlived every failed build.
@@ -117,6 +116,8 @@ jobs:
       contents: read
       packages: write
     with:
+      # The SHA tag is a compatibility alias shared with stable publication;
+      # channel/version changes can replace it. Pin the version tag or digest.
       tags: |
         nightly
         ${{ needs.revision.outputs.tag }}

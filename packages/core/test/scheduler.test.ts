@@ -158,7 +158,7 @@ describe('scheduler', () => {
     }
   });
 
-  test('a synchronous burst publishes one current scheduler snapshot to the client', async () => {
+  test('a synchronous burst constructs and publishes one current scheduler snapshot', async () => {
     const client = await harness.connect();
     const project = harness.core.projects.add(harness.dataDir, 'scheduler burst');
     const account = harness.core.accounts.list().find(entry => entry.providerId === 'echo')!;
@@ -166,12 +166,24 @@ describe('scheduler', () => {
       projectId: project.id, providerId: 'echo', accountId: account.id, title: `burst ${i}`,
     }));
     const states: SchedulerState[] = [];
+    const internal: SchedulerState[] = [];
+    harness.core.bus.onCommitted((name, payload) => { if (name === 'scheduler.updated') internal.push(payload as SchedulerState); });
     client.on('scheduler.updated', state => states.push(state));
     holdAccountTurns(harness);
     for (const thread of threads) harness.core.threads.startTurn(thread.id, '[sleep:60000]');
+    const current = harness.core.scheduler.state();
+    expect(current.queued.map(entry => entry.threadId)).toEqual(threads.map(thread => thread.id));
+    expect(current.queued.map(entry => entry.position)).toEqual(threads.map((_, index) => index));
     await waitFor(() => states.some(state => state.queued.length === threads.length));
     expect(states).toHaveLength(1);
+    expect(internal).toHaveLength(1);
     expect(states[0]).toEqual(harness.core.scheduler.state());
+    const logs = await harness.core.logs.query({ limit: 200 });
+    expect(logs.filter(record => record.event === 'turn.queued').map(record => record.threadId).reverse()).toEqual(threads.map(thread => thread.id));
+    await harness.core.scheduler.drain();
+    await waitFor(() => states.some(state => state.queued.length === 0));
+    expect(states.at(-1)).toEqual({ running: [], queued: [] });
+    expect(states[0]?.queued).toHaveLength(threads.length);
   });
 
   test('a turn queued during an account login runs when the hold ends', async () => {
@@ -205,6 +217,28 @@ describe('scheduler', () => {
     const settled = await client.call('scheduler.get', {});
     expect(settled.running).toHaveLength(0);
     expect(settled.queued).toHaveLength(0);
+  });
+
+  test('turns leaving a burst keep one queued diagnostic before their lifecycle', async () => {
+    const client = await harness.connect();
+    const [running = '', stopped = '', archived = '', released = ''] = await threeThreads(client, 4);
+    const immediate = harness.core.threads.startTurn(running, '[sleep:60000]');
+    const release = holdAccountTurns(harness);
+    const toStop = harness.core.threads.startTurn(stopped, 'stop before publication');
+    const toArchive = harness.core.threads.startTurn(archived, 'archive before publication');
+    const toRelease = harness.core.threads.startTurn(released, '[sleep:60000]');
+    harness.core.scheduler.stop(stopped);
+    harness.core.threads.archive(archived, true);
+    release();
+    expect(harness.core.scheduler.state().queued).toEqual([]);
+    expect(harness.core.scheduler.state().running.map(entry => entry.turnId)).toEqual([immediate.id, toRelease.id]);
+    const records = (await harness.core.logs.query({ limit: 200 })).reverse();
+    for (const turn of [immediate, toStop, toArchive, toRelease]) {
+      const lifecycle = records.filter(record => record.turnId === turn.id);
+      expect(lifecycle.filter(record => record.event === 'turn.queued')).toHaveLength(1);
+      expect(lifecycle[0]).toMatchObject({ event: 'turn.queued', at: turn.queuedAt });
+      expect(lifecycle[1]?.event).toBe(turn === toStop || turn === toArchive ? 'turn.finished' : 'turn.started');
+    }
   });
 
   test('turns.stop removes a queued turn', async () => {
@@ -257,5 +291,36 @@ describe('scheduler', () => {
     release();
     expect(harness.core.scheduler.state().running).toHaveLength(3);
     expect(harness.core.scheduler.state().queued).toHaveLength(0);
+  });
+
+  test('a reentrant start keeps newly eligible earlier turns, cancellations and new admissions in order', async () => {
+    const client = await harness.connect();
+    const [held = '', trigger = '', cancelled = '', added = ''] = await threeThreads(client, 4);
+    const canRun = harness.core.delegation.canRun.bind(harness.core.delegation);
+    let heldBack = true;
+    harness.core.delegation.canRun = threadId => threadId === held && heldBack ? false : canRun(threadId);
+    const started: string[] = [];
+    const states: SchedulerState[] = [];
+    client.on('scheduler.updated', state => states.push(state));
+    harness.core.bus.onCommitted((name, payload) => {
+      if (name !== 'turn.started') return;
+      const threadId = (payload as { threadId: string }).threadId;
+      started.push(threadId);
+      if (threadId !== trigger) return;
+      harness.core.scheduler.stop(cancelled);
+      heldBack = false;
+      harness.core.scheduler.onSettingsChanged();
+      harness.core.threads.startTurn(added, '[sleep:60000]');
+    });
+    const release = holdAccountTurns(harness);
+    for (const threadId of [held, trigger, cancelled]) harness.core.threads.startTurn(threadId, '[sleep:60000]');
+    expect(harness.core.scheduler.state().queued.map(entry => entry.threadId)).toEqual([held, trigger, cancelled]);
+    release();
+    expect(started).toEqual([trigger, held, added]);
+    expect(harness.core.scheduler.state().running.map(entry => entry.threadId)).toEqual([held, added, trigger]);
+    expect(harness.core.scheduler.state().queued).toEqual([]);
+    expect(harness.core.threads.get(cancelled).turns[0]?.status).toBe('stopped');
+    await waitFor(() => states.length > 0);
+    expect(states).toEqual([harness.core.scheduler.state()]);
   });
 });

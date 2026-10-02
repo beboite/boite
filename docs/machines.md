@@ -11,8 +11,10 @@ mint a full-control pairing link in General, or run `boite-core pair --owner`.
 Paste the link into Add machine, optionally name it, then connect. A manual URL
 and token form is available under the pairing form.
 
-Each successful pairing saves its session key locally. The one-time grant is
-discarded. Existing remembered cores are loaded on startup. The desktop restores its selected connection and connects remembered machines beside it. A fresh local core with no threads yields to a remembered core on the same computer that already holds threads.
+The client saves the exchanged session key and discards the grant
+([pairing](phone.md#pairing)). Startup restores the selected connection and
+connects remembered machines. A fresh local core without threads yields to a
+remembered core on the same computer that already has them.
 
 Machine names and icons can be changed in Settings. These preferences are saved on this client and follow the core across address changes. Connections to the same host, data directory and channel appear once.
 
@@ -34,9 +36,8 @@ handshake does not finish within twelve seconds can be retried from Machines.
 Once the machine has said hello, loading its lists is waited for however long
 it takes on a slow link; the connection is never dropped for it.
 
-A link can die without closing the socket: a phone's NAT mapping expires, the
-core's host sleeps, a tunnel changes path. The client notices by itself
-(`packages/ui/src/lib/client.ts`). On a remote host, 25 seconds without any
+The client detects silent remote sockets (`packages/ui/src/lib/client.ts`).
+On a remote host, 25 seconds without any
 frame while no call waits for its answer sends a `hello`, which the core
 answers on an open connection with its info and nothing else. If no frame of
 any kind arrives within 15 seconds, the socket is replaced and the calls it
@@ -122,15 +123,9 @@ and the next source change or reconnect tries again.
 
 ## Remote terminals
 
-The terminal in a conversation runs on the machine that owns that conversation,
-in its working directory. Reloading the same conversation preserves the keyboard
-focus in the terminal; only opening a different conversation or draft moves it
-to the composer. Refused keystrokes report their error rather than being
-silently discarded. Its output events can arrive while the opening or
-reattachment response is still in flight. The client buffers those events and
-uses the snapshot's output sequence to append only events the snapshot has not
-already included. Older cores without sequence numbers keep the buffered output
-but cannot remove overlap with the snapshot.
+The [thread terminal](terminal.md) runs on the conversation's owning machine
+and working directory. Its owner-only access, output reattachment and focus
+behavior are documented there.
 
 ## Browser and phone connections
 
@@ -145,8 +140,9 @@ Removing an origin blocks new connections from it; existing authenticated
 connections must be revoked separately if they should lose access immediately.
 
 The origin permission does not replace authentication. Every socket still needs
-its own valid token or one-time grant. HTTPS pages need secure WebSocket endpoints;
-network reachability and TLS configuration belong to the host deployment.
+its own valid token or one-time grant. HTTPS pages need secure WebSocket
+endpoints. [Phone setup](phone.md#https-and-installation)
+owns HTTPS/pairing setup; [server deployment](server.md) owns host reachability.
 
 ## Two views
 
@@ -180,18 +176,14 @@ a green underlined number. A card that has that row also names the thread's
 worktree branch there; a branch alone does not add the row. The phone list
 always has a second line and appends the branch to it. Connecting another machine leaves cards without project or PR metadata
 at their single-machine height. No placeholder appears when there is no PR. PR
-metadata comes from the execution machine's `gh pr list`, using the worktree
-branch or the current branch of the working directory. Non-repositories and
-detached checkouts have no PR. The core asks once per repository, not per
-thread: one `git remote -v` kept five minutes, and one `gh pr list` of the 200
-latest pull requests with their head branches, kept one minute with its errors,
-which every thread of that repository reads its branch from. The worktrees of
-one repository count as that repository: the core finds it from the common git
-directory each checkout's `.git` file points to. Only when gh returned a full
-page of 200 and a branch is missing from it does the core ask for that branch
-alone, even if two of those 200 came from one branch. At most two commands run at once. Each has a ten-second deadline and
-runs through the process registry under `pull-request:<threadId>`. Cards in a
-folded project wait for the unfold before they ask.
+metadata comes from the execution machine's `gh pr list`, using the branch
+associated with the thread. A shared checkout's current branch alone does not
+identify a thread's PR. Non-repositories and detached checkouts have no PR.
+Lookups share the common Git directory across worktrees: `git remote -v` is
+cached for five minutes and the newest 200 PRs for one minute, errors included.
+A missing branch gets its own lookup only when that list was full. At most two
+commands run at once, each with a ten-second deadline through `procs` as
+`pull-request:<threadId>`. Folded projects defer lookups until opened.
 
 When a machine drops, its cards stay listed, greyed, and still open. The client
 asks nothing of the core then: it shows the timeline it last read for that
@@ -214,6 +206,32 @@ Older cores that do not implement PR lookup are probed once per connection.
 Their cards omit the PR link. A manual refresh explains that the hosting
 machine needs an update; other RPC errors still appear in a notification.
 Reconnecting clears the capability check so an updated core is detected.
+
+## Merged PR conversations
+
+Git projects default to Archive merged PR conversations. An owner can change
+this per project in its menu under Manage project, from desktop or phone.
+Older cores without the setting omit the toggle. The change is sent through
+that project's owning Store, even when another machine has the same project ID.
+
+Automatic archive hides an eligible idle worktree conversation after its exact
+branch tip is proved merged. It preserves the worktree, branch, commits, files,
+history and provider session. Archived conversations show the PR reason/link
+and archive time; Restore makes them visible and protects that restored checkout
+from automatic archiving again.
+
+The core leaves viewed, pinned, unread, busy or dirty conversations visible.
+Drafts, shared checkouts, child/resident-agent conversations, ambiguous/fork PRs,
+pending cards/input, active goals/loops/workflows and undelivered results are
+protected too. A root can archive with completed retained children only after
+every child is idle, read and free of protected input or remaining work, and all
+family results have been delivered. Child histories and archive flags stay
+intact; new child work requires restoring the parent. Connected clients report
+parked input; older or disconnected clients cannot report it. Missing
+authentication, unavailable repositories or failed checks leave the conversation
+visible. The [lifecycle reference](development.md#merged-pull-request-archives)
+details proof validation and protection checks. Turning the toggle off stops
+future automatic archives; it does not restore conversations already archived.
 
 ## Isolation and tests
 

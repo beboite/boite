@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +10,7 @@ import { choiceFor, mintUuidV7, museExecutable } from '../src/drivers/muse.ts';
 import { setMuseStartupDeadlineForTests } from '../src/drivers/muse/session.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { countLogLines, countProcesses, readScriptedLog, writeScriptedProvider } from './scripted-provider.ts';
 
 /** The fake `muse serve`: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/muse-server.ts', import.meta.url));
@@ -79,55 +80,40 @@ async function stopCore(): Promise<void> {
 }
 
 function fakeLog(): string {
-  return existsSync(logFile) ? readFileSync(logFile, 'utf8') : '';
+  return readScriptedLog(logFile);
 }
 
 function countLines(line: string): number {
-  return fakeLog()
-    .split('\n')
-    .filter((entry) => entry === line).length;
+  return countLogLines(fakeLog(), line);
 }
 
 /** A user descriptor for the fake host: `protocol: "muse"`, launched as `bun <fixture>`. */
 function writeDescriptor(dataDir: string): void {
-  const dir = join(dataDir, 'providers');
-  mkdirSync(dir, { recursive: true });
-  const profile = {
-    detect: {},
-    executable: [{ kind: 'path', value: 'bun' }],
-    launch: { args: [FAKE_SERVER] },
-    isolation: {},
-  };
-  writeFileSync(
-    join(dir, `${PROVIDER}.json`),
-    JSON.stringify({
-      id: PROVIDER,
-      schemaVersion: 1,
-      name: 'Fake Muse host',
-      shortName: 'MuseFake',
-      protocol: 'muse',
-      roots: ['{isolationDir}'],
-      profiles: { windows: profile, linux: profile, macos: profile },
-      auth: { kind: 'none' },
-      models: [
-        { id: 'default', name: 'Muse default' },
-        {
-          id: 'muse-spark-1.3',
-          name: 'Muse Spark 1.3',
-          default: true,
-          effort: {
-            levels: [
-              { id: 'low', label: 'Low' },
-              { id: 'high', label: 'High' },
-            ],
-            default: 'high',
-          },
+  writeScriptedProvider(dataDir, FAKE_SERVER, {
+    id: PROVIDER,
+    schemaVersion: 1,
+    name: 'Fake Muse host',
+    shortName: 'MuseFake',
+    protocol: 'muse',
+    roots: ['{isolationDir}'],
+    auth: { kind: 'none' },
+    models: [
+      { id: 'default', name: 'Muse default' },
+      {
+        id: 'muse-spark-1.3',
+        name: 'Muse Spark 1.3',
+        default: true,
+        effort: {
+          levels: [
+            { id: 'low', label: 'Low' },
+            { id: 'high', label: 'High' },
+          ],
+          default: 'high',
         },
-      ],
-      capabilities: { approvals: true, hooks: false, checkpoint: false, images: true, planMode: true, resume: true },
-    }),
-    'utf8',
-  );
+      },
+    ],
+    capabilities: { approvals: true, hooks: false, checkpoint: false, images: true, planMode: true, resume: true },
+  });
 }
 
 async function museAccount(client: CoreClient): Promise<{ dataDir: string; projectId: string; accountId: string }> {
@@ -172,21 +158,6 @@ async function lastParts(client: CoreClient, threadId: string): Promise<MessageP
 
 function textsOf(parts: MessagePart[]): string[] {
   return parts.flatMap((part) => (part.type === 'text' ? [part.text] : []));
-}
-
-function countProcesses(
-  client: CoreClient,
-  threadId: string,
-): { started: RpcEvents['process.started'][]; exited: RpcEvents['process.exited'][] } {
-  const started: RpcEvents['process.started'][] = [];
-  const exited: RpcEvents['process.exited'][] = [];
-  client.on('process.started', (record) => {
-    if (record.threadId === threadId) started.push(record);
-  });
-  client.on('process.exited', (record) => {
-    if (record.threadId === threadId) exited.push(record);
-  });
-  return { started, exited };
 }
 
 describe('muse driver', () => {

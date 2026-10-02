@@ -1,6 +1,8 @@
+import { sweepMergedPrFixtures, type MergedPrFixture } from './fake-client/merged-pr-archive';
 import {
   RpcErrorCode,
   type CoreInfo,
+  type CoreLogContext,
   type HookRun,
   type MemoryEvent,
   type Principal,
@@ -17,6 +19,7 @@ import { activityMethods, pauseActivity } from './fake-client/activity';
 import { brainMethods } from './fake-client/brain';
 import { FakeContext, type FakeClientOptions, type FakeMethods } from './fake-client/context';
 import { hookMethods, recordHookRun } from './fake-client/hooks';
+import { logMethods } from './fake-client/logs';
 import { coordinationMethods, registerCore, unregisterCore } from './fake-client/coordination';
 import { delegationMethods, seedDelegationDemo } from './fake-client/delegation';
 import { pairingMethods } from './fake-client/pairing';
@@ -51,6 +54,7 @@ export type { FakeClientOptions } from './fake-client/context';
 export class FakeClient implements ObservableClient {
   readonly #ctx: FakeContext;
   readonly #methods: FakeMethods;
+  #mergedPrSweep: Promise<number> | null = null;
 
   constructor(options: FakeClientOptions = {}) {
     const ctx = new FakeContext(options);
@@ -117,6 +121,16 @@ export class FakeClient implements ObservableClient {
    */
   loseFolder(path: string): void {
     this.#ctx.goneFolders.add(pathKey(path));
+  }
+
+  setMergedPrFixture(threadId: ThreadId, fixture: MergedPrFixture): void {
+    this.#ctx.mergedPrFixtures.set(threadId, fixture);
+  }
+
+  sweepMergedPrArchives(): Promise<number> {
+    if (this.#mergedPrSweep) return this.#mergedPrSweep;
+    this.#mergedPrSweep = sweepMergedPrFixtures(this.#ctx).finally(() => { this.#mergedPrSweep = null; });
+    return this.#mergedPrSweep;
   }
 
   onState(handler: (state: ClientState) => void): () => void {
@@ -187,6 +201,7 @@ export class FakeClient implements ObservableClient {
       throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'not connected' });
     }
     await this.#ctx.tick();
+    if (bus.principal === 'agent' && (method === 'core.logs' || method === 'projects.setAutoArchiveMergedPr')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is not one of the agent's methods` });
     // The router's gate, word for word: deny by default, `hello` before it.
     if (bus.principal === 'session' && method !== 'hello' && !DEVICE_METHODS.has(method)) {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is for the owner only` });
@@ -215,8 +230,8 @@ export class FakeClient implements ObservableClient {
   }
 
   /** A line of the core's own log, as `core.log` carries it: a failed scheduler, a guard at work. */
-  emitCoreLog(level: RpcEvents['core.log']['level'], message: string): void {
-    this.#ctx.emit('core.log', { level, message, at: this.#ctx.now() });
+  emitCoreLog(level: RpcEvents['core.log']['level'], message: string, context: CoreLogContext = {}): void {
+    this.#ctx.emit('core.log', { level, message, at: this.#ctx.now(), ...context });
   }
 
   emitMemory(event: MemoryEvent): void {
@@ -294,6 +309,7 @@ export class FakeClient implements ObservableClient {
         return { core: ctx.core, principal: ctx.bus.principal };
       },
       ...brainMethods(ctx),
+      ...logMethods(ctx),
       ...serverUpdateMethods(ctx),
       ...hookMethods(ctx),
       ...pairingMethods(ctx),

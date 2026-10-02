@@ -2,21 +2,21 @@
 
 ## Reporting a vulnerability
 
-Report vulnerabilities privately through
+Use
 [GitHub's private vulnerability reporting](https://github.com/beboite/boite/security/advisories/new).
-Do not open a public issue, pull request or discussion for them.
+Do not report vulnerabilities in public issues, pull requests or discussions.
 
-Include the affected version or commit, the platform, the steps to reproduce and
-what an attacker gains. Remove real tokens, pairing links, session identifiers
-and conversation content from the report; describe them instead.
+Include the affected version or commit, platform, reproduction steps and what
+an attacker gains. Describe tokens, pairing links, session identifiers and
+conversation content without including their real values.
 
-The maintainers answer in the advisory, and a fix is published with the advisory
-once a release carries it.
+Maintainers respond in the advisory. They publish it with the fix once a release
+includes that fix.
 
 ## Supported versions
 
 boite is in beta. Only the latest release and the `main` branch receive security
-fixes. Nightly builds get the fix from the next nightly.
+fixes. The next nightly build includes those fixes.
 
 ## Scope
 

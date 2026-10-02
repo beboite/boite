@@ -1,12 +1,15 @@
 # Providers
 
-A provider is an agent Boite can run, described by JSON rather than by code, so
-adding one is a file instead of a release. Shipped descriptors live in
+A provider descriptor configures an agent for an existing driver. Adding an ACP
+provider can use JSON alone; adding a new protocol requires runtime code. Shipped
+descriptors live in
 `packages/core/src/providers/shipped/` and are read-only; a user drops their own
 under `<dataDir>/providers/*.json`. The types are in the contract, the loader in
 `packages/core/src/providers/loader.ts`, the field checks in `validate.ts`, the
 load-time tokens in `expand.ts` and executable resolution in `resolve.ts`, all
-beside it.
+beside it. Runtime behavior belongs to the corresponding modules under
+`packages/core/src/drivers/`; this page describes their supported behavior.
+Shipped descriptors and dependency manifests own version pins.
 
 A descriptor loads or is refused with the file, the field and what was expected.
 An unknown field is a refusal, a user file may not take a shipped id, and `roots`
@@ -51,8 +54,8 @@ OpenCode's descriptor, with the `linux` and `macos` profiles, `shared` and
 - `protocol` picks the driver: `claude-sdk`, `acp`, `codex-appserver`, `muse`,
   `pi`, `agy` or `echo`. OpenCode uses `acp`. A protocol with no driver behind it has nothing to run,
   so it is the one field that cannot be invented.
-- `roots` lists every directory the engine may read or write for this provider. A
-  path outside them is refused, and a `..` segment is refused at load.
+- `roots` bounds core-owned provider file access. Paths outside them and `..`
+  segments are refused. It is not an OS filesystem sandbox for the agent.
 - `profiles` holds one `OsProfile` per operating system, keyed `windows`, `linux`,
   `macos`. A provider with no profile for the running OS is not offered.
 - `auth.kind` is `oauth-cli`, `api-key` or `none`, and `auth.session` names the
@@ -65,7 +68,7 @@ OpenCode's descriptor, with the `linux` and `macos` profiles, `shared` and
   in a real shell the user answers, for a login drawn as a menu
   ([accounts.md](accounts.md#signing-in-from-a-terminal)); it is refused on an
   `acp` login. A provider without one cannot be logged in
-  from Boite, and the Accounts page says so instead of pretending.
+  from Boite; its account controls show the refusal.
 - `models` is a `ModelInfo` list: `id`, `name`, an optional `default`, `legacy`
   (still accepted, folded away in the picker), `badge: "new"`, and an `effort`
   block of named levels with a default. An agent that owns its own list gets the
@@ -75,8 +78,7 @@ OpenCode's descriptor, with the `linux` and `macos` profiles, `shared` and
   never reaches that agent, and the UI stops promising a gate that does not exist.
   `hooks: true` says the agent runs hooks of its own, which is what lets the
   descriptor name `hookSources` and puts the agent in Settings > Brain > Hooks.
-  `images: false` refuses a turn's image attachments before anything is sent, so a
-  driver whose protocol carries no image at all never has to. Where `images` is
+  `images: false` refuses a turn's image attachments before anything is sent, so an unsupported image cannot reach the provider. Where `images` is
   true, each protocol hands an attachment over in its own shape: the Claude
   driver turns the prompt into a content-block array, one text block plus one
   `{ type: 'image', source: { type: 'base64', media_type, data } }` block per
@@ -194,13 +196,9 @@ homes are the same directory, lists `opencode/opencode.json` and its siblings
 one by one and never `opencode`, which holds `opencode/auth.json`.
 `hookSources` also needs `capabilities.hooks`.
 
-| Provider | Shared from the user's own directory | Hook sources |
-|---|---|---|
-| Claude | `settings.json`, `CLAUDE.md`, `skills`, `plugins`, `agents`, `commands`, `hooks`, `output-styles` | `settings.json` |
-| Codex | `config.toml`, `hooks.json`, `AGENTS.md`, `skills`, `rules`, `prompts`, `plugins` | `hooks.json` |
-| Grok | `config.toml`, `hooks`, `AGENTS.md`, `AGENT.md`, `skills`, `trusted_folders.toml`, `installed-plugins` | `hooks`, `~/.claude/settings.json` |
-| pi | `settings.json`, `AGENTS.md`, `extensions`, `skills`, `prompts`, `themes` | `extensions` |
-| OpenCode | under `opencode/`: `opencode.json`, `opencode.jsonc`, `AGENTS.md`, `package.json`, `plugins`, `plugin`, `agents`, `agent`, `commands`, `command`, `skills`, `node_modules` | `opencode/plugins` |
+The [account sharing guide](accounts.md#what-an-isolated-account-shares)
+lists shipped configuration paths and link/copy behavior. [Hooks](hooks.md)
+lists hook sources, reporting and probe exclusions.
 
 ## The tokens
 
@@ -212,11 +210,11 @@ in `launch.args` and in a profile's `env`. `{home}` is the home directory,
 such a provider read as absent), and `{browserNoop}` is the launcher that does
 nothing, for a `BROWSER` variable. A fifth, `{shippedDir}`, points at the shipped
 descriptor folder, so a shipped login command can name a script beside it.
-`{isolationDir}` is deliberately none of them: it is per account and substituted
+`{isolationDir}` is separate: it is per account and substituted
 at spawn, in the `isolation` map and in a login command's `env`.
 
-There is no token for the thread's model, effort or permission mode: a descriptor
-declares one launch line and the driver is what changes it. The `agy` driver
+The driver adds model, effort and permission arguments; they are not descriptor
+tokens. The `agy` driver
 builds the whole print-mode line itself (below). Grok needs it for the permission
 mode alone: the `grok` quirk splices
 `--permission-mode <mode>` before the `agent` subcommand, or `--always-approve`
@@ -257,18 +255,12 @@ saying to install Muse Code from Providers.
 Grok and pi have no archive Boite can pin, so their row links to the agent's own
 install guide.
 
-The Providers page draws one row per provider with one next step
-(`packages/ui/src/lib/provider-setup.ts`): Install when Boite can download the
-agent, the install guide when it cannot, Sign in when the agent is there and no
-account is logged in, and nothing once one is. Install goes on to the sign-in by
-itself, unless the install brought a logged-in account: the core creates the
-provider's default account before it emits `providers.updated`, so an existing
-command-line login reads as ready and no sign-in starts. Cancelling the download
-or leaving the page drops that continuation. Returning to the window looks for
-missing agents again, so installing one outside Boite needs no button.
-Rows with a signed-in agent come first; the others follow under `Add a
-provider`. Antigravity and the Antigravity CLI share one row
-(`packages/ui/src/lib/provider-family.ts`), and opening it shows both.
+Settings > Providers offers the next install or sign-in step. Install adopts
+an existing CLI login before `providers.updated`; otherwise it continues to
+sign-in. Cancellation or leaving the page cancels that continuation. Returning
+to the window checks for external installs. Provider families can group multiple
+descriptors in one row. [Accounts](accounts.md#the-guided-connection) describes
+the guided connection and account controls.
 
 `providers.install` streams the archive to
 `<dataDir>/agents/<id>/downloads/<version>.zip.part`, hashing as it writes, and
@@ -312,31 +304,27 @@ Nine descriptors ship, and only the first eight are ever visible to a user: `ech
 is the deterministic fake the tests and the bench run on, loaded only under
 `BOITE_ECHO=1`.
 
-| Provider | Protocol | Launched as | Isolated by | Session file | Login |
-|---|---|---|---|---|---|
-| Claude | `claude-sdk` | the SDK drives the CLI | `CLAUDE_CONFIG_DIR` | `.credentials.json` | `claude auth login` |
-| OpenCode | `acp` | `opencode acp --port 0` | `XDG_DATA_HOME`, `XDG_CONFIG_HOME` | `opencode/auth.json` | `opencode auth login` in a terminal |
-| Antigravity | `acp` | `agy_acp_server.exe` from the managed install | `GEMINI_HOME`, every account | `antigravity-acp/acp_token.json` | the protocol's `authenticate` |
-| Antigravity CLI | `agy` | `agy --input-format stream-json --output-format stream-json [--conversation <id>] [--model <id>] [--mode <mode> or --dangerously-skip-permissions] -p=` | nothing, the default account only | none, the token is in the system keyring | none, `agy` signs in in its own terminal |
-| Grok | `acp` | `grok [--permission-mode <mode>] agent [--always-approve] stdio` | `GROK_HOME` | `auth.json` | `grok login --device-auth` in a terminal |
-| Codex | `codex-appserver` | `codex app-server` | `CODEX_HOME` | `auth.json` | `codex login --device-auth` |
-| Muse Code | `muse` | `muse serve --trust-workspace [mode flags]` | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` | `muse/auth.json` | `muse login` |
-| pi | `pi` | `node <the package's bin> --mode rpc`, or `pi --mode rpc` from PATH off Windows | `PI_CODING_AGENT_DIR` | `auth.json` | none |
-| Echo | `echo` | nothing | nothing | none | a script beside the descriptor |
+| Provider | Protocol | Launch |
+| --- | --- | --- |
+| Claude | `claude-sdk` | SDK-driven CLI |
+| OpenCode | `acp` | `opencode acp --port 0` |
+| Antigravity | `acp` | Managed `agy_acp_server` for the host OS |
+| Antigravity CLI | `agy` | `agy --input-format stream-json --output-format stream-json -p=` |
+| Grok | `acp` | `grok [permission flags] agent [approval flag] stdio` |
+| Codex | `codex-appserver` | `codex app-server` |
+| Muse Code | `muse` | `muse serve --trust-workspace [mode flags]` |
+| pi | `pi` | Package bin through Node or `pi --mode rpc` |
+| Echo | `echo` | In-process fixture |
 
-Claude is the one whose model list is entirely in the descriptor, current and
-legacy, each with its own effort scale; the other seven carry `default` alone and
-let the probe fill the rest. On Windows, Codex and pi are both reached around an
-npm shim Bun cannot spawn, one through a vendored executable and the other
-through an `npm` candidate under either package scope pi has shipped from
-(`@earendil-works` and `@mariozechner`); Grok is reached through the binary its own installer puts under
-`{home}/.grok/bin`, with PATH behind it.
+[Accounts](accounts.md#the-isolation-directory) owns isolation variables,
+session-file locations and login behavior. Descriptor model lists are fallbacks;
+native probes supply account-specific models and capabilities. Windows npm
+shims require a vendored binary or supported `npm` candidate. Managed desktop
+versions are pinned in `packages/core/src/providers/shipped/*.json`; server image
+CLI versions are separate pins in `docker/agents/package.json`.
 
-Antigravity is the one that only exists as a managed install: its binary is nowhere until
-`providers.install` downloads Google's release, so its row on the Providers
-page offers Install first and the model picker links to the Providers page. It is also the one whose accounts are all isolated, the descriptor says
-`isolation.alwaysIsolated`, because the user's own IDE login is never what it
-runs on. Four descriptor fields exist for it and are open to any provider:
+Antigravity requires a managed install and always-isolated accounts. Its
+descriptor uses additional fields available to other providers:
 
 - `env`, on an OS profile, is environment every process of the provider gets,
   whatever its account, unlike `isolation`. Antigravity uses it for the harness
@@ -368,7 +356,7 @@ runs on. Four descriptor fields exist for it and are open to any provider:
 `quirks: ["antigravity"]` folds a tool call's command, working directory and
 output under one spelling and draws an `interaction_` permission request as the
 agent's own question; its modes are `default`, `auto_edit` and `yolo`, with no
-plan mode. `quirks: ["grok"]` says four things
+plan mode. `quirks: ["grok"]` selects Grok behavior
 (`packages/core/src/drivers/grok.ts`). Text sent while a prompt runs, an
 asynchronous answer or a coordination message, goes out as Grok's
 `_x.ai/interject { sessionId, text }`, which joins the running turn at its next
@@ -419,59 +407,33 @@ pass that size is drawn as a sentence giving its size.
 
 ## The Antigravity CLI
 
-Two descriptors carry Antigravity, and they are two different programs, drawn
-as one row on the Providers page.
-`antigravity` is Google's ACP server, `agy_acp_server.exe`, which Boite
-downloads (468 MB) and runs on accounts of its own, each signed in through
-the protocol. `antigravity-cli` is the `agy` command the user installed and
-signed in to already, found on PATH and then at
-`{home}/AppData/Local/agy/bin/agy.exe` on Windows, and run on that sign-in. The
-first costs a download and a sign-in per account; the second costs nothing
-when `agy` is already there, but it only ever has the one login.
+`antigravity` is the managed ACP server with isolated logins.
+`antigravity-cli` runs an already installed and signed-in `agy` from PATH or its
+Windows installation path. Both appear in one provider family. agy's system
+keyring token and `~/.gemini/antigravity-cli` settings cannot be relocated, so it
+supports only the default account. A signed-out model probe asks the user to
+sign in through agy's terminal.
 
-That is because nothing moves agy's login. Its token sits in the system
-keyring and its settings under `~/.gemini/antigravity-cli`, and no variable
-points either elsewhere. So the descriptor declares an empty `isolation` map
-and no `login` block, `auth.kind` is `none`, and `accounts.add` refuses an
-account of its own ([accounts.md](accounts.md)). A signed-out agy is found by
-the probe instead: `agy models` answers "Please sign in", and the probe says to
-run `agy` in a terminal and sign in there.
+Turns, probes and usage reads set `AGY_CLI_DISABLE_AUTO_UPDATE=true` to prevent
+a detached updater from opening a console. The explicit updater leaves it unset.
+`BROWSER={browserNoop}` also prevents automatic browser windows.
 
-Every agy Boite starts (turns, `agy models`, the usage read) runs with
-`AGY_CLI_DISABLE_AUTO_UPDATE=true`, and only that exact value works: `1` does
-not. Left on, agy spawns `agy --bg-updater` at most every 15 minutes, and that
-detached process runs `agy --version` in a console of its own. No hidden-window
-flag on Boite's side reaches it, so on Windows the user got a terminal window
-over whatever they were doing. agy is updated from its row on the Providers page
-instead ([agent-updates.md](agent-updates.md)), whose `agy update` run keeps
-the variable unset.
+The driver and `drivers/agy/` modules use
+`--input-format stream-json --output-format stream-json -p=`. The empty value
+is required; bare `-p` consumes the next argument. Each prompt is one stdin JSON
+line with `event: 'user'` and a user message. `init` supplies `conversation_id`,
+`step_update` streams text or tools by `step_index`, and `result` completes the
+turn. `result.status: 'ERROR'` fails with its message. Usage sums that turn's
+steps, counting thinking as output; the last answer feeds the context count
+without a reported window.
 
-The `agy` driver (`packages/core/src/drivers/agy.ts`) speaks the CLI's
-headless mode, `--input-format stream-json --output-format stream-json -p=`.
-`-p=` needs its empty value, since a bare `-p` takes the next argument as the
-prompt. Each turn is one line on stdin,
-`{"event":"user","message":{"role":"user","content":"<prompt>"}}`, and stdout
-answers with `init` (the `conversation_id`), one `step_update` per change of a
-step, and `result`. An `agent_response` step streams `text_delta` into one text
-part and carries its usage when it is done; a `tool` step is one tool part,
-running then done or failed, keyed by its `step_index`. A turn's usage is the
-sum of its own steps, thinking counted as output, and the context meter gets
-one reading at the end, the last answer's input, cache and output. The CLI reports
-no window, so the meter shows the tokens alone. A `result` whose status is
-`ERROR` fails the turn with its message.
-
-The conversation id is the thread's session: a later process resumes it with
-`--conversation <id>`. The model, the effort and the permission mode are launch
-flags with no call to change them, so they are part of the session key and a
-change starts a new process on the same conversation. With
-`warmProcessMinutes` above zero the process stays up between turns; otherwise
-stdin closes when the turn ends, the process gets eight seconds to leave, and
-the next one of the thread waits for it. Stop kills the whole tree, since agy
-starts the MCP servers from its own settings as children. A stop that lands
-while the models are still being listed, before the launch, ends the turn at
-once and starts no process. `BROWSER` points at
-`{browserNoop}` for every process, so nothing agy does opens a window.
-`/compact` is refused: print mode rejects the CLI's interactive-only commands.
+A new process resumes through `--conversation <id>`. Model, effort and mode are
+launch flags in the process key; changing them reopens the same conversation.
+A positive `warmProcessMinutes` keeps the process between turns. Otherwise stdin
+closes and exit has eight seconds; a following turn waits. Stop ends the
+registered process tree or POSIX group, subject to [trace limits](trace.md#linux-and-macos).
+Stop during model discovery sends no prompt. Print mode refuses `/compact` and
+other interactive-only commands.
 
 ## The models probe
 
@@ -514,12 +476,12 @@ question:
   `reasoning_effort_variants`); a model the catalog does not describe gets
   `low` to `max` with `high` preselected, which is Muse's own default. A host
   that is not signed in lists nothing, and the descriptor's models stand.
-- agy: `agy models`, one `id<TAB>label` line per model. agy lists every
-  reasoning variant as a model of its own, `gemini-3.8-flash-low` beside
-  `gemini-3.8-flash-high`, so two or more variants of one base become one model
+- agy: `agy models`, one `id<TAB>label` line per model. agy lists
+  reasoning variants as separate IDs, so two or more variants of one base become
+  one model
   whose effort scale is those variants, `medium` preselected when it is there.
   The thread's model and effort then go out as the one id agy knows,
-  `--model gemini-3.8-flash-low`. A variant alone, and an id without a level
+  `--model <base>-<level>`. A variant alone, and an id without a level
   suffix, stays as listed.
 - pi: `get_state`, `get_available_models` and `get_available_thinking_levels`.
   Each model id carries its provider prefix, because that is what pi's `--model`
@@ -548,7 +510,7 @@ that is known.
 ## Permission modes
 
 Boite has six: `default`, `acceptEdits`, `plan`, `bypassPermissions`, `yolo`, `dontAsk`.
-Each protocol takes them differently, and the difference is not cosmetic.
+Drivers translate them according to their protocol capabilities.
 
 YOLO is separate from Auto (`bypassPermissions`). It selects the agent's most
 permissive execution mode and automatically accepts tool approval requests that
@@ -605,7 +567,7 @@ answers; YOLO does not invent form values or complete a device sign-in.
 - pi has no approval call anywhere in its RPC mode, so `capabilities.approvals` is
   false, the thread's permission mode never reaches the agent, and each session
   says so once in the log. A driver that waited for a permission question there
-  would wait forever.
+  cannot enforce a permission gate.
 
 The composer offers four of the six and names each by what the agent may do
 without asking (`lib/permission-modes.ts`): Ask, Edit freely, Auto and YOLO.
@@ -623,6 +585,27 @@ Codex's `item/tool/requestUserInput` and Muse's `userInput/requested` are the tw
 that do today. A question is
 not a permission mode and is never gated by one: an agent whose approvals are
 off can still ask.
+
+## Stdio transport failures
+
+Codex, Muse and pi use `drivers/stdio.ts` for request lifetime and newline
+framing; their `rpc.ts` modules retain protocol-specific envelopes. Stdout lines
+are bounded to 16 * 1024 * 1024 UTF-16 code units. A final line without a newline
+is processed before EOF. Non-JSON or invalid object records produce a fixed
+protocol diagnostic without copying their raw output into diagnostic logs.
+
+Oversized stdout, failed reads/writes, closed pipes or a throwing message handler
+close the transport and reject all pending requests once. The session marks
+that captured child non-reusable, gives its exit diagnostic a 500 ms grace and
+settles any active notification-driven turn even if the prompt response already
+arrived. User Stop wins over a subsequent fault or exit. Callbacks from a retired
+child cannot mutate a replacement; unrelated sessions continue running.
+
+Request cancellation and explicit expiry remove the pending request, so late
+responses cannot update its result. Prompts and reported active model runs have
+no default control-read timeout. Raw provider output is classified separately
+and omitted from [structured diagnostics](trace.md#structured-diagnostics);
+visible provider errors retain their existing user-facing behavior.
 
 ### Codex startup
 
@@ -695,10 +678,13 @@ pi's RPC mode: JSON lines over the stdio of `pi --mode rpc`.
   the outcome of the last assistant message counts. A 529 that pi recovered
   from ends the turn done; one it gave up on fails the turn with pi's final
   error.
-- An extension command, or an input handler that consumes the prompt, answers
-  `prompt` without starting a run and never sends `agent_settled`. The driver
-  sends `get_state` after each accepted prompt and ends the turn when
-  `isStreaming` is false.
+- An extension command or input handler can answer `prompt` without starting
+  a run or sending `agent_settled`. The driver reads `get_state` after prompt
+  acceptance unless the turn already settled. It ends an idle run when
+  `isStreaming` is false and races the read against the terminal event. The
+  read expires after five seconds; a refused read gets the same bounded window
+  for a terminal event. Missing both fails and retires the session. A reported
+  active model run has no default duration deadline.
 - Stop sends `abort`, after `clear_queue` when coordination steered the run. A
   pi that has not settled 15 s later is closed and the turn ends stopped. The
   same holds for a pi still in its prompt preflight, which answers `abort` and
@@ -716,4 +702,6 @@ pi's RPC mode: JSON lines over the stdio of `pi --mode rpc`.
 - A warm process follows a change of model or level with `set_model` and
   `set_thinking_level`. There is no call that goes back to pi's own model or to
   no level, so either change starts a new process.
-- After each turn `get_session_stats` feeds the context meter.
+- After each turn `get_session_stats` feeds the context meter with a five-second
+  control-read expiry. A timed-out response is removed and cannot update a later
+  turn's context.

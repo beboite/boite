@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from 'bun:test';
@@ -8,6 +8,7 @@ import { getDriver } from '../src/drivers/index.ts';
 import { setPiStopDeadlineForTests } from '../src/drivers/pi/session.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { countLogLines, countProcesses, readScriptedLog, writeScriptedProvider } from './scripted-provider.ts';
 
 /** The fake pi in RPC mode: a real JSON-lines process over stdio, run by bun. */
 const FAKE_AGENT = fileURLToPath(new URL('./fixtures/pi-agent.ts', import.meta.url));
@@ -77,7 +78,7 @@ async function stopCore(): Promise<void> {
 }
 
 function fakeLog(): string {
-  return existsSync(logFile) ? readFileSync(logFile, 'utf8') : '';
+  return readScriptedLog(logFile);
 }
 
 /** Every `argv ...` line the fake wrote, one per agent process it started. */
@@ -89,9 +90,7 @@ function argvLines(): string[] {
 
 /** How many times the fake was sent one command, so a cached probe is provable. */
 function countLines(line: string): number {
-  return fakeLog()
-    .split('\n')
-    .filter((entry) => entry === line).length;
+  return countLogLines(fakeLog(), line);
 }
 
 /**
@@ -174,52 +173,39 @@ function writeLateDialogAgent(dataDir: string): string {
 
 /** A user descriptor for the fake agent: `protocol: "pi"`, launched as `bun <fixture>`. */
 function writeDescriptor(dataDir: string, agent: string = FAKE_AGENT): void {
-  const dir = join(dataDir, 'providers');
-  mkdirSync(dir, { recursive: true });
-  const profile = {
-    detect: {},
-    executable: [{ kind: 'path', value: 'bun' }],
-    launch: { args: [agent] },
-    isolation: {},
-  };
-  writeFileSync(
-    join(dir, 'pi-fake.json'),
-    JSON.stringify({
-      id: 'pi-fake',
-      schemaVersion: 1,
-      name: 'Fake pi',
-      shortName: 'PiFake',
-      protocol: 'pi',
-      roots: ['{isolationDir}'],
-      profiles: { windows: profile, linux: profile, macos: profile },
-      auth: { kind: 'none' },
-      models: [
-        // Like the shipped descriptor: "the agent keeps its own", plus one entry
-        // written down, so a thread can pick a model before anything is probed.
-        { id: 'default', name: 'pi default', default: true },
-        {
-          id: 'anthropic/claude-sonnet-5',
-          name: 'Fake pi model',
-          effort: {
-            levels: [
-              { id: 'low', label: 'Low' },
-              { id: 'high', label: 'High' },
-            ],
-            default: 'low',
-          },
+  writeScriptedProvider(dataDir, agent, {
+    id: 'pi-fake',
+    schemaVersion: 1,
+    name: 'Fake pi',
+    shortName: 'PiFake',
+    protocol: 'pi',
+    roots: ['{isolationDir}'],
+    auth: { kind: 'none' },
+    models: [
+      // Like the shipped descriptor: "the agent keeps its own", plus one entry
+      // written down, so a thread can pick a model before anything is probed.
+      { id: 'default', name: 'pi default', default: true },
+      {
+        id: 'anthropic/claude-sonnet-5',
+        name: 'Fake pi model',
+        effort: {
+          levels: [
+            { id: 'low', label: 'Low' },
+            { id: 'high', label: 'High' },
+          ],
+          default: 'low',
         },
-      ],
-      capabilities: {
-        approvals: false,
-        hooks: false,
-        checkpoint: false,
-        images: true,
-        planMode: false,
-        resume: true,
       },
-    }),
-    'utf8',
-  );
+    ],
+    capabilities: {
+      approvals: false,
+      hooks: false,
+      checkpoint: false,
+      images: true,
+      planMode: false,
+      resume: true,
+    },
+  });
 }
 
 async function piAccount(
@@ -925,21 +911,6 @@ describe('pi driver', () => {
     await stopCore();
     expect(statuses).toEqual(['stopped']);
   }, 20000);
-
-  function countProcesses(
-    client: CoreClient,
-    threadId: string,
-  ): { started: RpcEvents['process.started'][]; exited: RpcEvents['process.exited'][] } {
-    const started: RpcEvents['process.started'][] = [];
-    const exited: RpcEvents['process.exited'][] = [];
-    client.on('process.started', (record) => {
-      if (record.threadId === threadId) started.push(record);
-    });
-    client.on('process.exited', (record) => {
-      if (record.threadId === threadId) exited.push(record);
-    });
-    return { started, exited };
-  }
 
   async function runTurn(client: CoreClient, threadId: string, prompt: string): Promise<void> {
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);

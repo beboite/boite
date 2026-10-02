@@ -2,7 +2,6 @@ import { stat } from 'node:fs/promises';
 import type { ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
-import { PullRequests } from '../pull-requests.ts';
 import { steerUser } from './user-steering.ts';
 
 /**
@@ -26,7 +25,7 @@ async function requireCwd(core: Core, threadId: ThreadId): Promise<void> {
 }
 
 export function registerThreadMethods(core: Core): void {
-  const pullRequests = new PullRequests(core);
+  const pullRequests = core.pullRequests;
   core.router.register('threads.pullRequest', params => pullRequests.read(params.threadId, params.refresh === true));
   core.router.register('threads.compact', async (params) => {
     await requireCwd(core, params.threadId);
@@ -70,7 +69,7 @@ export function registerThreadMethods(core: Core): void {
     return { ok: true } as const;
   });
   core.router.register('threads.focus', (params, ctx) => {
-    core.threads.focus.set(ctx.connection.id, params.threadId);
+    core.threads.focus.set(ctx.connection.id, params.threadId, params.protectedThreadIds, params.protectAllThreads);
     return { ok: true } as const;
   });
   core.router.register('turns.start', async (params) => {

@@ -2,7 +2,8 @@
 
 A thread's summary carries `context`, what the agent's last request held and
 how much room the model gives it. The message bar draws a ring beside its send
-controls; the percentage appears in the detail panel. When the agent compacts its conversation mid-turn, the
+controls; the percentage appears in the detail panel. When the agent compacts its
+conversation mid-turn, the
 timeline gets a divider saying how many tokens went. Both come from the agent
 itself: the core never estimates a context size, and a provider whose protocol
 says nothing shows an unfilled ring. Hovering, focusing or tapping the ring
@@ -66,16 +67,19 @@ The existing Stop action cancels the maintenance turn. Paired devices may call i
 |---|---|
 | Claude | `/compact` through the SDK prompt, without prompt-only reasoning suffixes |
 | Codex | `thread/compact/start`, completed by normal turn notifications |
+| Muse | `session/compact`; a `noop` fails with the host's reason |
 | pi | `compact` RPC, completed by its response, whose `estimatedTokensAfter` is pi's own estimate of what is left; Stop closes the process because prompt abort does not cancel this RPC |
 | ACP | `/compact` only when the session advertised that command |
 | agy | none: print mode refuses the CLI's interactive-only commands, so the core refuses the call and the control stays disabled |
 | echo | `[compact]`, a deterministic test operation; the divider it draws says `manual`, while `[compact]` inside a prompt draws an `auto` one |
 
 The control is disabled while a turn runs, before a native session exists, or
-when an ACP agent has not advertised support. Compaction can make a provider
+when the driver cannot compact. ACP must advertise the command. Compaction can make a provider
 call and incur usage. The driver does not invent a post-compaction token count.
-The protocol operations follow the [Codex app-server documentation](https://learn.chatgpt.com/docs/app-server#trigger-thread-compaction)
-and [pi RPC documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md#compact).
+The protocol operations follow the [Codex app-server
+documentation](https://learn.chatgpt.com/docs/app-server#trigger-thread-compaction)
+and [pi RPC
+documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md#compact).
 
 ## Automatic compaction
 
@@ -98,11 +102,9 @@ the core cannot cut into a running one:
 | `background` | 2 s after an answer that left a command or a monitor running | nothing: the agent was waiting anyway, and its wake opens right after |
 | `cache-expiry` | 60 s before the thread's [prompt cache](prompt-cache.md) lapses, if the thread is still idle | nothing while the user answers within the cache lifetime |
 
-`cache-expiry` is the cheapest one to leave on. The compaction reads the
-conversation at the cached price, and the message that follows a long pause
-starts from the short version, where it would have paid for the whole context
-again. It needs a thread whose cache lifetime is known, on the model and
-account that wrote it.
+`cache-expiry` tries to compact before the mapped lifetime ends, using the
+current model and account. It can reduce the context a later prompt sends;
+the timer does not guarantee a cache hit or a lower provider bill.
 
 A finished turn arms one timer for its thread, at the first chosen moment that
 applies. Any turn that opens before it fires disarms it, and the 2 s leave a
@@ -125,6 +127,99 @@ A threshold below what the agent keeps after compacting makes every turn end
 compact again. The timers live in memory: a core restart drops them, and the
 next finished turn arms a new one. The in-memory client implements `turn-end`
 and the threshold only; it has no background work and no cache to wait on.
+
+## Pending prompts, goals and loops
+
+Enter during a running turn queues the message and its attachments. Each pending
+message shows above the composer as a user bubble with a dashed outline. Arrow Up in
+an empty composer takes the newest pending message out of the queue for editing;
+clicking a pending message does the same. When the core reports a completed
+tool boundary, the queue tries the driver's native steering operation, even
+when another conversation is open. A driver that declines it retains input
+for the next turn. Enter again in the emptied composer, or Send now under the bubbles,
+submits it immediately without stopping the agent when the driver accepts it.
+Permissions and blocking questions hold it until answered.
+Messages already queued go together in their original order, with their
+attachments and preview references. Messages added during that send wait for
+the next delivery. A changed model or account keeps input for its next turn.
+Escape stops the current turn. An Escape that closes something first (a popover, a menu, a
+confirmation, the command palette, a rename field) only closes it, and the focus
+goes back to where it was, or to the composer when that is gone, so a second
+Escape is needed to stop. A failed send preserves the input for an explicit retry.
+An unconfirmed provider submission is never retried automatically.
+Edits and forks with live follow-ups use the fresh-session transfer rules below.
+
+The core can open a turn by itself as the previous one ends: answers to an
+asynchronous question that could not be steered in, or an agent resuming on its
+own. A prompt that reaches the core in that moment, sent from the box or from
+the queue, is refused with `reason: 'turn-in-flight'` and the thread's row
+(`TurnInFlightData`). That is not a failure: the composer applies the row, puts
+the prompt back at the head of the queue without pausing it or showing an error,
+and sends it once that turn is over.
+
+`/goal <objective>` starts work toward an objective. `/loop 2 <prompt>` runs two
+consecutive iterations and stops. Counts range from 1 to 1000. A count written
+as "2 iterations" or "2 itérations" in the prompt is also recognized.
+`/loop 5m <prompt>` explicitly schedules repetition, with the delay counted
+after each finished turn. Intervals use `s`, `m` or `h`, from one second to
+24 hours. A loop without a count or interval is refused; there is no default timer.
+Both commands belong to Boite and work with every driver. Goals and loops can
+coexist with the agent's task list above the composer. The compact overlay shows
+the current task and progress. Only a click expands it; updates and disclosure
+do not resize the timeline. An asynchronous question (`boite ask`, or Codex's
+`delivery: "async"`) waits on top of that overlay with the same answer controls
+as a blocking one. Several stack behind a pager ("2 of 3"), each keeping what
+was picked while another shows, and a new one comes up open. The timeline keeps
+one line where it was asked, and a click on it brings that question up. While
+a question is open there, the timeline's bottom margin grows to the overlay's
+height so the last answer stays above it; `tests/e2e/composer-activity.test.ts`
+checks that at desktop and phone widths. Completed tasks and goals fade out on the next user
+prompt, and newly reported work brings the task list back. Loop details show
+the latest 50 iterations with their outcome and up to 4000 characters of result.
+
+The core owns this work, so switching threads or closing a client does not
+cancel it. A goal continues through scheduled turns until the agent emits
+`[BOITE_GOAL_COMPLETE]` on its own line. The prompt requests that marker only
+after verification. `[BOITE_GOAL_BLOCKED]`, an error or Escape pauses it.
+Escape also pauses a loop between runs. The activity bar has pause, resume,
+remove and manual goal completion controls. A restarted core preserves the
+activity but requires an explicit resume.
+
+Goal instructions are assembled only when invoking a driver. The journal stores
+the visible `/goal` or `/loop` message with its kind and iteration in the text
+part. The UI also cleans up goal prompts saved by older cores and hides standalone
+completion/blocker markers, including partial markers during streaming.
+
+Tasks come from ACP plans, Codex plan notifications or successful task tools
+such as Claude's TodoWrite and TaskCreate/TaskUpdate. An agent that reports no
+tasks gets no invented task list. Pi uses the same successful-tool observation.
+Task tracking is optional, including for goals. The agent guide and goal
+instructions suggest a task list only when laying out steps helps the agent
+and the user follow the work.
+
+## Durable drafts
+
+Unsent input is device-local, scoped to each core and data directory. New
+conversations keep a draft per project; existing conversations keep their own
+reply. IndexedDB uses strict transaction durability, with a synchronous text
+backup in `localStorage` on each keystroke. The journal writes 800 ms after
+typing pauses and at least every five seconds while it continues. Attachments,
+failed backups, explicit flush, page hiding and navigation flush immediately.
+A local core changing port retains the same drafts.
+
+Queued input restores paused. The durable record includes attachments and page
+references. Storage errors keep input in memory and show the reason. Reads and
+writes have a three-second deadline; a failed read cannot overwrite unread
+durable drafts. Once readable, the text backup merges with them. Missing
+attachment bytes keep removable placeholders and their IDs through text edits;
+removed IDs stay removed after recovery. Send waits for unreadable attachments
+to become available or be explicitly removed.
+
+Asynchronous creation and send retain the original core, thread and draft
+identity. Accepted work does not select a thread after newer navigation or
+consume the newer draft. Automatic merged-PR archive preserves local input and
+pauses retained queues; manual archive and deletion clear input as requested.
+See [archive boundaries](development.md#merged-pull-request-archives).
 
 ## Editing a message and forking
 
@@ -175,7 +270,7 @@ ways, and the rewind result's `session` field says which one applied:
 | Driver | Behaviour |
 |---|---|
 | Claude | Exact. Each turn records `checkpoint: { sessionId, entry }`, the uuid of the last transcript entry it wrote. The next turn resumes that session with `resumeSessionAt: entry` and `forkSession: true`, so the CLI keeps the transcript up to the cut under a new session id and the original transcript is never shortened. A rewind closes the warm process first. |
-| Every other driver (Codex, ACP agents, pi, agy, grok, echo and the rest) | Seeded. The thread drops its native session. The next turn starts a fresh one carrying the kept history as bounded excerpts, the same [context transfer](model-switching.md#context-transfer) a change of account uses. |
+| Codex, ACP, Muse, pi, agy and echo | Seeded. The thread drops its native session. The next turn starts a fresh one carrying the kept history as bounded excerpts, the same [context transfer](model-switching.md#context-transfer) a change of account uses. |
 
 Claude falls back to the seeded path in four cases: the kept turn left no
 checkpoint (it ran before checkpoints existed, failed early, or was stopped

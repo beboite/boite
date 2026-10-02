@@ -1,3 +1,4 @@
+import type { CoreLogContext } from '@boite/contracts';
 /**
  * The client half of the Codex app-server protocol: `codex app-server` over the
  * agent's own stdio, JSON-RPC framed as ndjson. Shaped like `acp.ts`, but with
@@ -13,22 +14,17 @@
  */
 import { messageOf } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
-import { LineSplitter } from '../lines.ts';
-import { STDERR_MAX } from './protocol.ts';
+import { isRpcEnvelope, StdioTransport, type StdioRequestOptions } from '../stdio.ts';
 
 // ---------------------------------------------------------------------------
 // The transport: ndjson JSON-RPC over the child's stdio
 // ---------------------------------------------------------------------------
 
-interface Pending {
-  resolve(value: unknown): void;
-  reject(error: Error): void;
-}
-
 interface RpcHandlers {
   notification(method: string, params: unknown): void;
   request(method: string, params: unknown): Promise<unknown>;
-  log(level: 'info' | 'warn' | 'error', message: string): void;
+  log(level: 'info' | 'warn' | 'error', message: string, context?: CoreLogContext): void;
+  fault?(reason: string): void;
 }
 
 /**
@@ -39,73 +35,33 @@ interface RpcHandlers {
  */
 export class CodexRpc {
   private nextId = 1;
-  private readonly pending = new Map<number, Pending>();
-  private readonly lines = new LineSplitter((line) => {
-    this.onLine(line);
-  });
-  private closed = false;
+  private readonly transport: StdioTransport<number>;
 
   constructor(
-    private readonly child: SpawnedChild,
+    child: SpawnedChild,
     private readonly handlers: RpcHandlers,
   ) {
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
-      this.lines.feed(chunk);
-    });
-    child.stdin.on('error', () => undefined);
+    this.transport = new StdioTransport(child, 'codex agent', { message: message => this.dispatch(message), log: handlers.log, fault: handlers.fault });
   }
 
-  request<T>(method: string, params: unknown): Promise<T> {
-    const id = this.nextId;
-    this.nextId += 1;
-    return new Promise<T>((resolve, reject) => {
-      if (this.closed) {
-        reject(new Error(`the codex agent is gone, ${method} was not sent`));
-        return;
-      }
-      this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
-      this.write({ jsonrpc: '2.0', id, method, params });
-    });
+  request<T>(method: string, params: unknown, options?: StdioRequestOptions): Promise<T> {
+    const id = this.nextId++;
+    return this.transport.request(id, method, { jsonrpc: '2.0', id, method, params }, options);
   }
 
   notify(method: string, params: unknown): void {
-    this.write({ jsonrpc: '2.0', method, params });
+    this.transport.write({ jsonrpc: '2.0', method, params });
   }
 
   /** The child is gone: every request still waiting is answered, loudly. */
-  fail(reason: string): void {
-    if (this.closed) return;
-    this.closed = true;
-    const waiting = [...this.pending.values()];
-    this.pending.clear();
-    for (const entry of waiting) entry.reject(new Error(reason));
-  }
-
-  private write(payload: unknown): void {
-    if (this.closed) return;
-    try {
-      this.child.stdin.write(`${JSON.stringify(payload)}\n`);
-    } catch {
-      // the pipe is already gone; the exit path says what happened
-    }
-  }
-
-  private onLine(raw: string): void {
-    const line = raw.trim();
-    let message: Record<string, unknown>;
-    try {
-      message = JSON.parse(line) as Record<string, unknown>;
-    } catch {
-      this.handlers.log('warn', `codex agent: a line that is not json: ${line.slice(0, STDERR_MAX)}`);
-      return;
-    }
-    this.dispatch(message);
+  fail(reason: string, diagnostic?: string): void {
+    this.transport.fail(reason, diagnostic);
   }
 
   private dispatch(message: Record<string, unknown>): void {
     const method = message['method'];
     const id = message['id'];
+    if (!isRpcEnvelope(message)) return this.transport.invalid();
     if (typeof method === 'string' && id !== undefined && id !== null) {
       void this.answer(id as number | string, method, message['params']);
       return;
@@ -115,9 +71,8 @@ export class CodexRpc {
       return;
     }
     if (typeof id !== 'number') return;
-    const entry = this.pending.get(id);
+    const entry = this.transport.take(id);
     if (entry === undefined) return;
-    this.pending.delete(id);
     const error = message['error'];
     if (error !== undefined && error !== null) {
       const text = (error as { message?: unknown }).message;
@@ -130,9 +85,9 @@ export class CodexRpc {
   private async answer(id: number | string, method: string, params: unknown): Promise<void> {
     try {
       const result = await this.handlers.request(method, params);
-      this.write({ jsonrpc: '2.0', id, result });
+      this.transport.write({ jsonrpc: '2.0', id, result });
     } catch (error) {
-      this.write({ jsonrpc: '2.0', id, error: { code: -32603, message: messageOf(error) } });
+      this.transport.write({ jsonrpc: '2.0', id, error: { code: -32603, message: messageOf(error) } });
     }
   }
 }

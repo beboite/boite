@@ -1,3 +1,4 @@
+import { secureId } from '../secure-id';
 import {
   BRANCH_NAME_MAX,
   RpcErrorCode,
@@ -61,7 +62,7 @@ export function fakeWorktree(projectPath: string, _title: string, branch?: strin
       field: 'branch', expected: `at most ${BRANCH_NAME_MAX} characters`, maxLength: BRANCH_NAME_MAX, actualLength: branch.length
     });
   }
-  const slug = `wt-${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
+  const slug = `wt-${secureId().slice(0, 8)}`;
   const root = storage?.mode === 'shared' ? storage.directory : projectPath;
   const separator = root.includes('\\') ? '\\' : '/';
   const repo = projectPath.split(/[\\/]/).filter(Boolean).pop() ?? 'repo';

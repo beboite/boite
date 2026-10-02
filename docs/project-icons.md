@@ -8,7 +8,7 @@ and the first letter of its name otherwise.
 
 The core reads the folder after a project is added, once for any project it
 has never checked or where it found nothing (after the first `projects.list`
-of a run), and when the owner picks **Refresh icon** in the project menu. The
+of a run), and when the owner picks Refresh icon in the project menu. The
 detection is in `packages/core/src/project-icons.ts`.
 
 1. Files named like a logo in a fixed list of folders, each listed once and
@@ -36,7 +36,7 @@ detection is in `packages/core/src/project-icons.ts`.
 An image is at most 256 KB, must be SVG, PNG, WebP, JPEG or ICO with matching
 first bytes, and must be a plain file, not a link. A manifest over 256 KB is
 not parsed, and a folder listing stops at 2,000 names. A detection that takes
-longer than 5 s is dropped; **Refresh icon** then reports the folder and keeps
+longer than 5 s is dropped; Refresh icon then reports the folder and keeps
 the icon it had.
 
 ## How it reaches a client

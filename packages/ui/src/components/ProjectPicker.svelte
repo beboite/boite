@@ -27,6 +27,7 @@
     { id: 'manage', label: strings.connection.manage }
   ]);
   $effect(() => {
+    ++revision;
     if (!store.projectPickerOpen) { overlay.hide(); return; }
     target = store;
     previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -36,16 +37,20 @@
   });
 
   async function browse(target?: string) {
-    const current = ++revision;
+    const request = ++revision;
+    const owner = selected;
+    const client = owner.client;
+    const clientGeneration = owner.clientGeneration;
+    const current = () => request === revision && selected === owner && client === owner.client && clientGeneration === owner.clientGeneration && store.projectPickerOpen;
     busy = true;
     error = '';
     try {
-      const result = await selected.browseProjects(target);
-      if (current !== revision) return;
+      const result = await owner.browseProjects(target);
+      if (!current()) return;
       path = result.path; parent = result.parent; directories = result.directories;
     } catch (failure) {
-      if (current === revision) error = failure instanceof Error ? failure.message : String(failure);
-    } finally { if (current === revision) busy = false; }
+      if (current()) error = failure instanceof Error ? failure.message : String(failure);
+    } finally { if (current()) busy = false; }
   }
   $effect(() => { if (overlay.open) return mobileOverlay(close); });
   function close() {
@@ -61,18 +66,30 @@
     if (next.connection !== 'ready') { busy = false; error = strings.connection.unavailable; return; }
     if (!next.owner) { busy = false; error = strings.firstRun.deviceBody; return; }
     await browse();
-  }  async function open() {
+  }
+  async function open() {
     if (busy || !path.trim()) return;
-    busy = true;
-    const project = await selected.addProject(path.trim());
-    busy = false;
-    if (project) { close(); await workspace.select(selected, undefined, project.id); } else error = selected.error ?? strings.connection.unavailable;
+    await choose(false);
   }
   async function native() {
+    if (busy) return;
+    await choose(true);
+  }
+  async function choose(native: boolean) {
+    const owner = selected;
+    const client = owner.client;
+    const generation = owner.navigationGeneration;
+    const currentRevision = ++revision;
+    const current = () => currentRevision === revision && selected === owner && client === owner.client && generation === owner.navigationGeneration && store.projectPickerOpen;
     busy = true;
-    const project = await selected.pickProject();
-    busy = false;
-    if (project) { close(); await workspace.select(selected, undefined, project.id); }
+    try {
+      const project = native ? await owner.pickProject({ navigate: false, current }) : await owner.addProject(path.trim(), { navigate: false });
+      if (!current()) return;
+      if (project) { close(); await workspace.select(owner, undefined, project.id); }
+      else if (!native) error = owner.error ?? strings.connection.unavailable;
+    } catch (failure) {
+      if (current()) error = failure instanceof Error ? failure.message : String(failure);
+    } finally { if (current()) busy = false; }
   }
   function keydown(event: KeyboardEvent) {
     if (!store.projectPickerOpen) return;

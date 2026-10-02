@@ -1,15 +1,14 @@
 # Importing a session
 
-A conversation started in Claude Code's own terminal can become a Boite
-thread: its history is read from the transcript the CLI kept, and the thread
-carries the CLI's session id, so the next turn resumes it.
+Importing a Claude Code transcript creates a Boite thread with its history and
+CLI session ID. The next turn resumes that session.
 
 ## Where the sessions come from
 
 Claude Code writes one file per session under its config directory:
 `<config dir>/projects/<folder>/<session id>.jsonl`, where `<folder>` is the
 working directory with every character outside `A-Za-z0-9` replaced by `-`
-(`D:\Dev\Collab\boite` becomes `D--Dev-Collab-boite`). The config directory is
+(`C:\projects\sample` becomes `C--projects-sample`). The config directory is
 the account's: its isolation directory for an isolated account, `~/.claude`
 (or `CLAUDE_CONFIG_DIR`) for the default login ([accounts.md](accounts.md)).
 

@@ -903,18 +903,30 @@ test('the trace panel shows the I/O a process moved, and none for a record that 
   query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
   await waitFor(() => store.openThread?.id === 't-trace');
 
-  store.panel.open('trace');
-  await waitFor(() => document.querySelectorAll('[data-testid=trace-row]').length === 3);
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let reads = 0;
+  const requests = vi.spyOn(client, 'call').mockImplementation((method, params) => {
+    // Bound a broken feedback loop so the regression fails instead of freezing its worker.
+    if (method === 'trace.get' && ++reads > 3) return Promise.reject(new Error('Trace snapshot triggered another trace read'));
+    return call(method, params);
+  });
+  try {
+    store.panel.open('trace');
+    await waitFor(() => document.querySelectorAll('[data-testid=trace-row]').length === 3);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(reads).toBe(1);
 
-  expect(query('[data-testid=trace-panel]').textContent).toContain('I/O');
-  const cellOf = (pid: number): string =>
-    query(`[data-testid=trace-row][data-pid="${pid}"] [data-testid=trace-io]`).textContent?.trim() ?? '';
-  // 1_240_000 bytes through the same `bytes()` the memory column uses.
-  expect(cellOf(21_140)).toBe('1 MB');
-  expect(cellOf(21_402)).toBe('80 kB');
-  // Nothing measured reads like an unmeasured peak memory, from the same formatter.
-  expect(cellOf(21_460)).toBe('none');
-  expect(query('[data-testid=trace-row][data-pid="21460"]').textContent).toContain('none');
+    expect(query('[data-testid=trace-panel]').textContent).toContain('I/O');
+    const cellOf = (pid: number): string =>
+      query(`[data-testid=trace-row][data-pid="${pid}"] [data-testid=trace-io]`).textContent?.trim() ?? '';
+    // 1_240_000 bytes through the same `bytes()` the memory column uses.
+    expect(cellOf(21_140)).toBe('1 MB');
+    expect(cellOf(21_402)).toBe('80 kB');
+    // Nothing measured reads like an unmeasured peak memory, from the same formatter.
+    expect(cellOf(21_460)).toBe('none');
+    expect(query('[data-testid=trace-row][data-pid="21460"]').textContent).toContain('none');
+  } finally { requests.mockRestore(); }
 });
 
 test('trace processes disclose the command, PID and measurements without narrow columns', async () => {
@@ -2273,7 +2285,45 @@ test('the desktop still has every one of them', async () => {
   expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=archive-project]') !== null);
-  expect(menuValues()).toEqual(['back', 'worktree-default', 'worktrees', 'refresh-icon', 'archive-project', 'remove']);
+  expect(menuValues()).toEqual(['back', 'worktree-default', 'worktrees', 'auto-archive-merged-pr', 'refresh-icon', 'archive-project', 'remove']);
+  const policyProjectId = query('[data-testid=project-row]').getAttribute('data-project-id')!;
+  const policy = query<HTMLButtonElement>('[data-value=auto-archive-merged-pr]');
+  expect(policy.getAttribute('role')).toBe('menuitemcheckbox');
+  expect(policy.getAttribute('aria-checked')).toBe('true');
+  const ownerClient = store.client!, call = ownerClient.call.bind(ownerClient);
+  let release!: () => void;
+  const held = new Promise<void>(done => { release = done; });
+  const policyCalls = vi.spyOn(ownerClient, 'call').mockImplementation(async (method, params) => {
+    if (method === 'projects.setAutoArchiveMergedPr') { await held; throw new Error('The project policy could not be saved'); }
+    return call(method, params);
+  });
+  policy.click();
+  await waitFor(() => store.projectAutoArchiveMergedPrBusy(policyProjectId));
+  query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await waitFor(() => document.querySelector('[data-value=manage]') !== null);
+  query<HTMLButtonElement>('[data-value=manage]').click();
+  await waitFor(() => document.querySelector('[data-value=auto-archive-merged-pr]') !== null);
+  expect(query<HTMLButtonElement>('[data-value=auto-archive-merged-pr]').disabled).toBe(true);
+  query<HTMLButtonElement>('[data-value=auto-archive-merged-pr]').click();
+  expect(policyCalls.mock.calls.filter(([method]) => method === 'projects.setAutoArchiveMergedPr')).toHaveLength(1);
+  release();
+  await waitFor(() => (document.body.textContent ?? '').includes('The project policy could not be saved'));
+  await waitFor(() => !query<HTMLButtonElement>('[data-value=auto-archive-merged-pr]').disabled);
+  expect(store.projects.find(project => project.id === policyProjectId)?.autoArchiveMergedPr).toBe(true);
+  policyCalls.mockRestore(); store.error = null;
+  press('Escape');
+  query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await waitFor(() => document.querySelector('[data-value=manage]') !== null);
+  query<HTMLButtonElement>('[data-value=manage]').click();
+  await waitFor(() => document.querySelector('[data-value=auto-archive-merged-pr]') !== null);
+  query<HTMLButtonElement>('[data-value=auto-archive-merged-pr]').click();
+  await waitFor(() => store.projects.find(project => project.id === policyProjectId)?.autoArchiveMergedPr === false);
+  expect((await ownerClient.call('projects.list', {})).find(project => project.id === policyProjectId)?.autoArchiveMergedPr).toBe(false);
+  query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await waitFor(() => document.querySelector('[data-value=manage]') !== null);
+  query<HTMLButtonElement>('[data-value=manage]').click();
+  await waitFor(() => document.querySelector('[data-value=auto-archive-merged-pr]') !== null);
+  expect(query('[data-value=auto-archive-merged-pr]').getAttribute('aria-checked')).toBe('false');
   const preference = query<HTMLButtonElement>('[data-value=worktree-default]');
   expect(preference.getAttribute('role')).toBe('menuitemcheckbox');
   expect(preference.getAttribute('aria-checked')).toBe('false');

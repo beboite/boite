@@ -75,6 +75,8 @@ export interface WorkflowInstance {
   model: string | null;
   status: WorkflowStepStatus;
   attempts: number;
+  /** A durable output correction awaiting admission, including while paused. */
+  outputCorrection?: string;
   /** The brief after substitution, once the step started. */
   task: string | null;
   /** Bounded final answer. */

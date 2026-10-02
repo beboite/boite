@@ -1,5 +1,7 @@
+import { dismissMergedPr } from './merged-pr-archive';
+import { protectedThreadIdsError } from '@boite/contracts';
 /** Threads and their messages: create, read, select, archive, and the turn entry points. */
-import { DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
+import { DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
 import { steerUser } from './user-steering';
 import { RpcFailure } from '../client';
 import { checkCwd, checkEffort, checkModel, checkRunnable, defaultModel } from './checks';
@@ -29,18 +31,50 @@ export function createAgentSession(ctx: FakeContext, agent: AgentProfile, sessio
 }
 
 /**
- * The `limit` messages that sit just before `end`, oldest first, with the
- * cursor for what is still behind them. The core reads the same window off
- * rowids; here it is a slice of the array the fake keeps.
+ * Up to `limit` complete messages before `end`, within the serialized byte
+ * budget except for one transportable message, with the cursor above them.
+ * The core iterates rowids; here it is a slice of the array the fake keeps.
  */
 function pageOf(
   messages: Message[],
   end: number,
   limit: number
 ): { messages: Message[]; before: MessageId | null } {
-  const start = Math.max(0, end - limit);
+  let start = end, bytes = 2;
+  while (start > 0 && end - start < limit && bytes < MESSAGE_PAGE_MAX_BYTES) {
+    const message = messages[start - 1]!;
+    const size = new TextEncoder().encode(JSON.stringify(message)).byteLength;
+    const next = bytes + size + (start < end ? 1 : 0);
+    if (start < end && next > MESSAGE_PAGE_MAX_BYTES) break;
+    if (size >= RPC_MAX_FRAME_BYTES) {
+      throw new RpcFailure({ code: RpcErrorCode.Refused,
+        message: `message ${message.id} is ${size} serialized UTF-8 bytes; expected a complete message below ${RPC_MAX_FRAME_BYTES} bytes`,
+        data: { threadId: message.threadId, messageId: message.id, field: 'messages', bytes: size, max: RPC_MAX_FRAME_BYTES, expected: `a complete message below ${RPC_MAX_FRAME_BYTES} serialized UTF-8 bytes` } });
+    }
+    bytes = next;
+    start -= 1;
+  }
   const page = messages.slice(start, end);
   return { messages: page, before: start > 0 ? (page[0]?.id ?? null) : null };
+}
+
+function tailOf(messages: Message[], from: number): Message[] | null {
+  if (messages.length - from > MESSAGE_PAGE) return null;
+  let bytes = 2;
+  for (let at = from; at < messages.length; at += 1) {
+    bytes += new TextEncoder().encode(JSON.stringify(messages[at])).byteLength + (at > from ? 1 : 0);
+    if (bytes > MESSAGE_PAGE_MAX_BYTES) return null;
+  }
+  return messages.slice(from);
+}
+
+/** The fake has no wire; check the same reply envelope before copying a page. */
+function pagingReply<T>(result: T): T {
+  const bytes = new TextEncoder().encode(JSON.stringify({ jsonrpc: '2.0', id: 0, result })).byteLength;
+  if (bytes > RPC_MAX_FRAME_BYTES) throw new RpcFailure({ code: RpcErrorCode.Refused,
+    message: `RPC response exceeds ${RPC_MAX_FRAME_BYTES} serialized UTF-8 bytes; request a smaller result`,
+    data: { field: 'response', bytes, max: RPC_MAX_FRAME_BYTES, expected: `a complete RPC response at most ${RPC_MAX_FRAME_BYTES} serialized UTF-8 bytes` } });
+  return structuredClone(result);
 }
 
 /**
@@ -73,6 +107,8 @@ export function purgeDeletedThreads(ctx: FakeContext): void {
     if (family.deletedAt > before) continue;
     ctx.deletedThreads.delete(id);
     for (const thread of family.threads) {
+      ctx.mergedPrFixtures.delete(thread.id);
+      ctx.mergedPrArchive.delete(thread.id);
       ctx.processes = ctx.processes.filter(p => p.threadId !== thread.id && p.threadId !== `terminal:${thread.id}`);
       ctx.coordination.delete(thread.id);
       ctx.moveNotes.delete(thread.id);
@@ -187,17 +223,17 @@ export function threadMethods(ctx: FakeContext) {
     'threads.get': async (params) => {
       const thread = ctx.thread(params.threadId);
       // The core's rule: from the named message on, unless it is unknown or
-      // the tail is longer than a page, and then the whole page as before.
+      // the tail exceeds a page's count or bytes, and then a full page.
       const from = params.after === undefined ? -1 : thread.messages.findIndex((message) => message.id === params.after);
-      if (from !== -1 && thread.messages.length - from <= MESSAGE_PAGE) {
-        const messages = thread.messages.slice(from);
+      const messages = from === -1 ? null : tailOf(thread.messages, from);
+      if (messages !== null) {
         // As the core's `listTurnsFor`: the turns of the messages sent, and whatever is still queued or running.
         const sent = new Set(messages.map((message) => message.turnId));
         const turns = thread.turns.filter((turn) => turn.status === 'queued' || turn.status === 'running' || sent.has(turn.id));
-        return structuredClone({ ...thread, messages, turns, messagesBefore: null, messagesFrom: params.after });
+        return pagingReply({ ...thread, messages, turns, messagesBefore: null, messagesFrom: params.after });
       }
       const page = pageOf(thread.messages, thread.messages.length, MESSAGE_PAGE);
-      return structuredClone({ ...thread, messages: page.messages, messagesBefore: page.before });
+      return pagingReply({ ...thread, messages: page.messages, messagesBefore: page.before });
     },
     'messages.list': async (params) => {
       const thread = ctx.thread(params.threadId);
@@ -213,7 +249,7 @@ export function threadMethods(ctx: FakeContext) {
       const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
       const page = pageOf(thread.messages, at, limit);
       const turns = new Set(page.messages.map((message) => message.turnId));
-      return structuredClone({ ...page, turns: thread.turns.filter((turn) => turns.has(turn.id)) });
+      return pagingReply({ ...page, turns: thread.turns.filter((turn) => turns.has(turn.id)) });
     },
     'threads.update': async (params) => {
       const thread = ctx.thread(params.threadId);
@@ -259,6 +295,7 @@ export function threadMethods(ctx: FakeContext) {
     'threads.archive': async (params) => {
       const thread = ctx.thread(params.threadId);
       if (params.archived === false && removing.has(thread.id)) throw refusal('threadId: this conversation is being deleted', { threadId: thread.id, field: 'threadId', expected: 'a conversation not being deleted' });
+      if (params.archived === false) dismissMergedPr(ctx, thread.id);
       const was = thread.archived;
       thread.archived = params.archived ?? true;
       if (thread.archived) await putAway(ctx, thread);
@@ -343,7 +380,14 @@ export function threadMethods(ctx: FakeContext) {
       if (params.threadId !== null && (typeof params.threadId !== 'string' || params.threadId.length === 0)) {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'threadId must be a nonempty thread id or null', data: { field: 'threadId' } });
       }
+      const protectionError = protectedThreadIdsError(params.protectedThreadIds);
+      if (protectionError) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: protectionError, data: { field: 'protectedThreadIds', expected: 'at most 256 nonempty thread ids' } });
+      if (params.protectAllThreads !== undefined && typeof params.protectAllThreads !== 'boolean') {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'protectAllThreads must be a boolean', data: { field: 'protectAllThreads', expected: 'boolean' } });
+      }
       if (params.threadId !== null) ctx.thread(params.threadId);
+      if (params.protectedThreadIds !== undefined) ctx.bus.protectedThreadIds = new Set(params.protectedThreadIds);
+      if (params.protectAllThreads !== undefined) ctx.bus.protectAllThreads = params.protectAllThreads;
       ctx.bus.focusedThreadId = params.threadId;
       return { ok: true };
     },
@@ -440,7 +484,7 @@ export function threadMethods(ctx: FakeContext) {
         else if (part.type === 'file') attachments.push({ kind: 'file', mimeType: part.mimeType, data: part.data, name: part.name });
       }
       const page = pageOf(thread.messages, thread.messages.length, MESSAGE_PAGE);
-      return structuredClone({ thread: { ...thread, messages: page.messages, messagesBefore: page.before }, prompt, attachments, previewReferences, session: 'seeded' as const, files: { status: 'unchanged' as const, count: 0 } });
+      return pagingReply({ thread: { ...thread, messages: page.messages, messagesBefore: page.before }, prompt, attachments, previewReferences, session: 'seeded' as const, files: { status: 'unchanged' as const, count: 0 } });
     },
     'threads.fork': async (params) => {
       const source = ctx.thread(params.threadId);

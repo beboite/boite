@@ -2,7 +2,8 @@
 
 A workflow is a JSON plan of steps that the core runs for a conversation. Each
 step is a child agent on the conversation's own harness, account, model and
-effort, or on a [delegation](delegation.md) profile the step names. A step starts once every step it depends on has ended. When the run
+effort, or on a [delegation](delegation.md) profile the step names. A step starts once
+every step it depends on has ended. When the run
 ends, its results come back to the conversation as one message. No model sits
 in the middle deciding what runs next, so the plan behaves the same whichever
 provider wrote it or runs its steps.
@@ -32,7 +33,7 @@ native subagents or plain work when that fits better.
       "task": "Review {{item}} for malformed-input bugs. Do not edit files.",
       "output": { "bugs": [{ "line": "number", "text": "string" }] } },
     { "id": "fix", "when": { "path": "review.bugs", "notEmpty": true },
-      "task": "Fix these bugs, one commit each: {{review.bugs}}" },
+      "task": "Fix confirmed bugs and report the checks run: {{review.bugs}}" },
     { "id": "report", "after": ["fix"],
       "task": "Summarize what was reviewed and fixed: {{review}}" }
   ]
@@ -68,8 +69,13 @@ so an agent can plan the next phase after reading the first one.
 A step with `output` returns it one of two ways. The agent can run
 `boite workflow output '<json>'`, which checks the shape and says what is wrong,
 or it can end its answer with one fenced `json` block. The second way needs no
-tool at all, so it works for any driver. On a mismatch the core sends the step
-one more turn with the error, and then fails it.
+tool at all, so it works for any driver. On a mismatch the core persists one correction
+as a waiting execution with
+the error. After the preceding turn is idle, the normal runner admits that
+correction under the run's current pause, stop and archive state. A pause keeps
+it waiting; stop or archive prevents launch. A second invalid result fails it.
+The correction retains the execution's attempt count and original start time;
+it does not bypass the scheduler with a detached callback.
 
 The step's brief tells it where it sits in the run, that other steps share the
 checkout, and that its answer is collected automatically. Steps share the
@@ -140,39 +146,43 @@ fan-out, and its elapsed time.
 
 Clicking a step opens its detail: dependencies, condition, each execution, its
 structured output and its conversation streaming live in the height left
-below. "Open conversation" jumps to the step's own thread. Saved workflows sit at the bottom of the tab,
+below. "Open conversation" jumps to the step's own thread. Saved workflows sit at the
+bottom of the tab,
 where the owner saves the shown run as a template, starts one or deletes one.
 The palette's "Show the workflows" toggles the tab.
 
-Captures: [the graph on the desktop](images/workflow-desktop.png) · [a step's detail](images/workflow-step.png) · [the graph on a phone](images/workflow-phone.png)
+Captures: [the graph on the desktop](images/workflow-desktop.png) · [a step's
+detail](images/workflow-step.png) · [the graph on a phone](images/workflow-phone.png)
 
 ## Commands
 
 ```sh
-boite workflow help                      the plan format, for an agent that never saw it
-boite workflow check <plan.json|json>    validate and print the columns
-boite workflow run <plan.json|json>      start a run and open it in the panel
+boite workflow help                     # plan format and command help
+boite workflow check <plan.json|json>   # validate and print the columns
+boite workflow run <plan.json|json>     # start a run and open its panel
 boite workflow list
-boite workflow show <run-id>             every execution, its thread and its output
+boite workflow show <run-id>            # executions, threads and output
 boite workflow extend <run-id> <steps>
 boite workflow pause|resume|stop <run-id>
 boite workflow retry <run-id> [step]
-boite workflow output <json>             from inside a step
+boite workflow output <json>            # submit from inside a step
 boite workflow templates
 boite workflow save <name> <plan|run-id>
 boite workflow start <template>
 ```
 
-After `run`, the agent should do other work or end its turn. Polling `show`
-spends turns for nothing, since the results arrive as a message.
+After `run`, the agent should do other work or end its turn. Results arrive as a
+message; polling `show` keeps the parent busy and can
+delay their delivery.
 
 ## Where it lives
 
 The plan checks and the path rules are shared by the core and the UI in
 `packages/contracts/src/workflow-plan.ts`. The core's runner is
-`packages/core/src/workflows.ts`. It keeps one JSON record per run and reloads
-it after every change, because a step's turn can end inside the call that
-started it. Step threads are ordinary child conversations, recorded in
+`packages/core/src/workflows.ts`. It keeps a durable JSON record per run and rereads it
+across synchronous turn
+completion and later admission. Close fences prevent scheduled callbacks from
+launching after teardown begins. Step threads are ordinary child conversations, recorded in
 `workflow_steps`. The CLI is `packages/core/src/workflow-cli.ts`, the panel tab
 is `packages/ui/src/components/WorkflowSurface.svelte`, and the fake client
 runs plans in memory in `packages/ui/src/lib/fake-client/workflows.ts`. A task

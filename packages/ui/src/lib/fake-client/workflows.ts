@@ -118,6 +118,8 @@ export class FakeWorkflows {
   }
   /** The step threads, so the Agents panel does not drop one it is showing. */
   owns(threadId: ThreadId): boolean { return this.#steps.has(threadId); }
+  /** Full retained collection, including paused runs beyond the display page. */
+  active(rootId: ThreadId): boolean { return [...this.#runs.values()].some(run => run.rootThreadId === rootId && (run.status === 'running' || run.status === 'paused' || ((run.status === 'done' || run.status === 'failed') && !run.delivered))); }
 
   private readonly handlers: Handlers = {
     'workflows.list': ({ threadId }) => {

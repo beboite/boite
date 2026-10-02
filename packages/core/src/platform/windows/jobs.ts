@@ -23,6 +23,7 @@ import {
   commandLineOf,
   cpuMsOf,
   createdAtOf,
+  creationIdentityOf,
   exitCodeOf,
   imageNameOf,
   ioBytesOf,
@@ -58,6 +59,7 @@ const PROCESS_QUERY_INFORMATION = 0x400;
 const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 /** What OpenProcess says for a pid no process holds any more. */
 const ERROR_INVALID_PARAMETER = 87;
+const STILL_ACTIVE = 259;
 const KILL_EXIT_CODE = 9;
 
 /** JOBOBJECT_BASIC_ACCOUNTING_INFORMATION.TotalUserTime, in 100 ns units. */
@@ -189,6 +191,7 @@ interface TrackedProcess {
   threadId: string;
   handle: number;
   peakMemoryBytes: number;
+  identity: { startedAt: number; incarnation: string } | null;
 }
 
 interface ThreadJob {
@@ -753,11 +756,13 @@ function onProcessStarted(threadId: string, pid: number, opened = 0): void {
     api.close(handle);
     return;
   }
-  tracked.set(pid, { threadId, handle, peakMemoryBytes: 0 });
+  const identity = creationIdentityOf(api, handle);
+  tracked.set(pid, { threadId, handle, peakMemoryBytes: 0, identity });
   sink?.started(threadId, pid, {
     exe,
     commandLine: commandLineOf(api, handle),
     parentPid: parentPidOf(api, handle),
+    ...identity,
   });
 }
 
@@ -772,16 +777,25 @@ function onProcessExited(threadId: string, pid: number): void {
 }
 
 function reportExit(threadId: string, pid: number): void {
+  const entry = tracked.get(pid);
+  if (entry !== undefined && entry.threadId !== threadId) return;
+  const api = ensureNative();
+  if (entry !== undefined && api !== null) {
+    const code = new Uint32Array(1);
+    // A late pid-only exit/empty-job packet cannot retire a replacement whose
+    // captured handle proves it is still running. Failed reads retain the
+    // notification path, with the already captured creation identity.
+    if (api.exitCode(entry.handle, code) && code[0] === STILL_ACTIVE) return;
+  }
   threadJobs.get(threadId)?.pids.delete(pid);
   if (ignored.delete(pid)) return;
-  const entry = tracked.get(pid);
-  const api = ensureNative();
   if (entry === undefined || api === null) {
     sink?.exited(threadId, pid, { exitCode: null, cpuMs: null, peakMemoryBytes: null, ioBytes: null });
     return;
   }
   tracked.delete(pid);
   const exit: NativeProcessExit = {
+    ...entry.identity,
     exitCode: exitCodeOf(api, entry.handle),
     cpuMs: cpuMsOf(api, entry.handle),
     peakMemoryBytes: peakMemoryOf(api, entry),

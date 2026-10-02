@@ -1,3 +1,4 @@
+import { archiveState } from '../merged-pr-archive-state.ts';
 import type { ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
 
@@ -25,6 +26,7 @@ export function withLoad(core: Core, thread: ThreadSummary): ThreadSummary {
   const tasks = core.threads?.agentState.background.get(thread.id) ?? [];
   return {
     ...thread,
+    archiveReason: thread.archived ? archiveState(core.journal, thread.id).reason : undefined,
     load: core.procs.loadOf(thread.id),
     runningSince: busy ? core.journal.runningSince(thread.id) : null,
     progress: busy ? core.threads?.progress?.get(thread.id) ?? null : null,

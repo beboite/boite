@@ -1,0 +1,39 @@
+name: Verify a native server image
+description: Build and smoke-test the image that a publishing job will push unchanged.
+inputs:
+  arch:
+    description: Native Docker architecture.
+    required: true
+  channel:
+    description: Runtime channel.
+    default: stable
+  version:
+    description: Optional nightly version override.
+    default: ''
+  release-telemetry:
+    description: Set to 1 for release-intended images; smoke disables telemetry networking.
+    default: ''
+runs:
+  using: composite
+  steps:
+    - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+    - name: Build and load native image
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+      with:
+        context: .
+        platforms: linux/${{ inputs.arch }}
+        load: true
+        tags: boite-server:test
+        build-args: |
+          BOITE_CHANNEL=${{ inputs.channel }}
+          BOITE_VERSION=${{ inputs.version }}
+          BOITE_RELEASE_TELEMETRY=${{ inputs.release-telemetry }}
+        cache-from: type=gha,scope=server-${{ inputs.arch }}
+        # Only main writes caches, including when it runs a nightly.
+        cache-to: ${{ github.ref == 'refs/heads/main' && format('type=gha,scope=server-{0},mode=max', inputs.arch) || '' }}
+    - name: Smoke-test the loaded image
+      shell: bash
+      run: bash docker/smoke.sh boite-server:test "$BUILD_CHANNEL" "$BUILD_VERSION"
+      env:
+        BUILD_CHANNEL: ${{ inputs.channel }}
+        BUILD_VERSION: ${{ inputs.version }}

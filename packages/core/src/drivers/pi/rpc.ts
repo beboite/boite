@@ -1,3 +1,4 @@
+import type { CoreLogContext } from '@boite/contracts';
 /**
  * The client half of pi's RPC mode: `pi --mode rpc` over the agent's own stdio,
  * JSON objects one per line. Shaped like `codex.ts`, and like it with no SDK
@@ -16,12 +17,12 @@
  * `extension_ui_request`, drawn as an inline question.
  */
 import type { SpawnedChild } from '../../procs.ts';
-import { LineSplitter } from '../lines.ts';
-import { STDERR_MAX } from './protocol.ts';
+import { isRecord, StdioTransport, type StdioRequestOptions } from '../stdio.ts';
 
 interface PeerHandlers {
   event(message: Record<string, unknown>): void;
-  log(level: 'info' | 'warn' | 'error', message: string): void;
+  log(level: 'info' | 'warn' | 'error', message: string, context?: CoreLogContext): void;
+  fault?(reason: string): void;
 }
 
 /**
@@ -35,81 +36,46 @@ interface PeerHandlers {
  */
 export class PiPeer {
   private nextId = 1;
-  private readonly pending = new Map<string, { resolve(value: Record<string, unknown>): void; reject(error: Error): void }>();
-  private readonly lines = new LineSplitter((line) => {
-    this.onLine(line);
-  });
-  private closed = false;
+  private readonly transport: StdioTransport<string>;
 
   constructor(
-    private readonly child: SpawnedChild,
+    child: SpawnedChild,
     private readonly handlers: PeerHandlers,
   ) {
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
-      this.lines.feed(chunk);
-    });
-    child.stdin.on('error', () => undefined);
+    this.transport = new StdioTransport(child, 'pi agent', { message: message => this.dispatch(message), log: handlers.log, fault: handlers.fault });
   }
 
   /** Sends a command and waits for the `response` that carries the same id. */
-  command(type: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
-    const id = `boite-${this.nextId}`;
-    this.nextId += 1;
-    return new Promise<Record<string, unknown>>((resolve, reject) => {
-      if (this.closed) {
-        reject(new Error(`the pi agent is gone, ${type} was not sent`));
-        return;
-      }
-      this.pending.set(id, { resolve, reject });
-      this.write({ id, type, ...params });
-    });
+  command(type: string, params: Record<string, unknown> = {}, options?: StdioRequestOptions): Promise<Record<string, unknown>> {
+    const id = `boite-${this.nextId++}`;
+    return this.transport.request(id, type, { id, type, ...params }, options);
   }
 
   /** An answer to something pi asked, which carries pi's own id and no response. */
   answer(payload: Record<string, unknown>): void {
-    this.write(payload);
+    this.transport.write(payload);
   }
 
   /** The child is gone: every command still waiting is answered, loudly. */
-  fail(reason: string): void {
-    if (this.closed) return;
-    this.closed = true;
-    const waiting = [...this.pending.values()];
-    this.pending.clear();
-    for (const entry of waiting) entry.reject(new Error(reason));
-  }
-
-  private write(payload: unknown): void {
-    if (this.closed) return;
-    try {
-      this.child.stdin.write(`${JSON.stringify(payload)}\n`);
-    } catch {
-      // the pipe is already gone; the exit path says what happened
-    }
-  }
-
-  private onLine(line: string): void {
-    let message: Record<string, unknown>;
-    try {
-      message = JSON.parse(line) as Record<string, unknown>;
-    } catch {
-      this.handlers.log('warn', `pi agent: a line that is not json: ${line.slice(0, STDERR_MAX)}`);
-      return;
-    }
-    this.dispatch(message);
+  fail(reason: string, diagnostic?: string): void {
+    this.transport.fail(reason, diagnostic);
   }
 
   private dispatch(message: Record<string, unknown>): void {
+    if (typeof message['type'] !== 'string' || (message['id'] !== undefined && typeof message['id'] !== 'string')) return this.transport.invalid();
     if (message['type'] !== 'response') {
       this.handlers.event(message);
       return;
     }
     const id = message['id'];
     if (typeof id !== 'string') return;
-    const entry = this.pending.get(id);
+    const entry = this.transport.take(id);
     if (entry === undefined) return;
-    this.pending.delete(id);
+    if (typeof message['success'] !== 'boolean') {
+      this.transport.invalid();
+      entry.reject(new Error('pi agent: invalid response envelope'));
+      return;
+    }
     if (message['success'] === false) {
       const error = message['error'];
       entry.reject(new Error(typeof error === 'string' ? error : `pi refused ${String(message['command'])}`));
@@ -122,5 +88,5 @@ export class PiPeer {
 /** The `data` block of a `response`, or an empty record when there is none. */
 export function dataOf(answer: Record<string, unknown>): Record<string, unknown> {
   const data = answer['data'];
-  return data === null || typeof data !== 'object' ? {} : (data as Record<string, unknown>);
+  return isRecord(data) ? data : {};
 }

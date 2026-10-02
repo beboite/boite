@@ -18,14 +18,18 @@ import { sameProcess } from './workbench.svelte';
  */
 export function listen(ctx: StoreContext, client: Client): void {
   const s = ctx.store;
+  const generation = ctx.clientGeneration;
+  const current = () => ctx.currentClient(client, generation);
   const { accounts, models, threads, requests, layout } = ctx;
   const on = <E extends RpcEventName>(event: E, handler: EventHandler<E>): void => {
-    ctx.off.push(client.on(event, handler));
+    ctx.off.push(client.on(event, payload => { if (current()) handler(payload); }));
   };
 
   if (observable(client)) {
     ctx.off.push(
       client.onState((state) => {
+        if (!current()) return;
+        if (state !== 'ready') ctx.connection.invalidateReads();
         s.connection = state;
         ctx.connection.watchLocalCore(client, state);
         if (state === 'ready') {
@@ -61,7 +65,7 @@ export function listen(ctx: StoreContext, client: Client): void {
     const open = s.openThread;
     if (open && open.id === summary.id) Object.assign(open, summary);
     // Archived from another client: nothing here can show it again.
-    else if (summary.archived) threads.forgetThread(summary.id);
+    else if (summary.archived) threads.forgetThread(summary.id, summary.archiveReason?.type === 'pr-merged');
     if (s.delegationThread?.id === summary.id) Object.assign(s.delegationThread, summary);
   });
   // The agent's `/name` list is the whole list each time, and it lives on the
@@ -155,7 +159,7 @@ export function listen(ctx: StoreContext, client: Client): void {
     layout.notify('needs-you', request.threadId, null);
   });
   on('permission.resolved', ({ requestId }) => {
-    s.pendingPermissions = s.pendingPermissions.filter((p) => p.id !== requestId);
+    requests.resolvePermission(requestId);
   });
 
   on('question.asked', (request) => {
@@ -163,7 +167,7 @@ export function listen(ctx: StoreContext, client: Client): void {
     layout.notify('needs-you', request.threadId, null);
   });
   on('question.answered', ({ questionId }) => {
-    s.pendingQuestions = s.pendingQuestions.filter((q) => q.id !== questionId);
+    requests.resolveQuestion(questionId);
   });
 
   on('process.started', (record) => {
@@ -176,6 +180,7 @@ export function listen(ctx: StoreContext, client: Client): void {
   });
 
   on('scheduler.updated', (state) => {
+    ctx.metadataRevision.scheduler++;
     s.scheduler = state;
   });
   on('resources.memory', (event) => ctx.workbench.memoryEvent(event));
@@ -202,6 +207,7 @@ export function listen(ctx: StoreContext, client: Client): void {
     };
   });
   on('accounts.updated', (account) => {
+    ctx.accountReads.change(account.id, account);
     s.accounts = s.accounts.some((a) => a.id === account.id)
       ? s.accounts.map((a) => (a.id === account.id ? account : a))
       : [...s.accounts, account];
@@ -212,6 +218,7 @@ export function listen(ctx: StoreContext, client: Client): void {
   // The five below also reach the client that made the call, so every handler
   // has to survive being applied twice.
   on('accounts.removed', ({ accountId }) => {
+    ctx.accountReads.change(accountId, null);
     s.accounts = s.accounts.filter((a) => a.id !== accountId);
     accounts.loginChanges.set(accountId, ++accounts.loginRevision);
     const { [accountId]: _gone, ...rest } = s.logins;
@@ -219,10 +226,12 @@ export function listen(ctx: StoreContext, client: Client): void {
     models.dropProbes(accountId);
   });
   on('settings.updated', (settings) => {
+    ctx.metadataRevision.settings++;
     s.settings = settings;
     void s.refreshMemory();
   });
   on('keybindings.updated', (keybindings) => {
+    ctx.metadataRevision.keybindings++;
     s.keybindings = keybindings;
   });
   on('sessions.updated', () => {
@@ -235,6 +244,7 @@ export function listen(ctx: StoreContext, client: Client): void {
     s.harnessUpdates = updates;
   });
   on('providers.updated', ({ loaded, rejected }) => {
+    ctx.metadataRevision.providers++;
     s.providers = loaded;
     s.rejectedProviders = rejected;
     // A summary that just landed is newer than any progress this client kept.
@@ -255,12 +265,14 @@ export function listen(ctx: StoreContext, client: Client): void {
     models.saveModels();
   });
   on('project.added', (project) => {
+    ctx.projectReads.change(project.id, project);
     if (!s.projects.some((p) => p.id === project.id))
       s.projects = [...s.projects, project];
   });
   // Archived or restored anywhere, or its count of archived threads moved.
-  on('project.updated', (project) => ctx.projects.upsertProject(project));
+  on('project.updated', (project) => { ctx.projectReads.change(project.id, project); ctx.projects.upsertProject(project); });
   on('project.removed', ({ projectId }) => {
+    ctx.projectReads.change(projectId, null);
     void ctx.projects.dropProject(projectId);
   });
   on('core.log', (entry) => {

@@ -1,3 +1,4 @@
+import { secureId } from '../secure-id';
 import type { ThreadId, WorkflowRun, WorkflowTemplate } from '@boite/contracts';
 import type { StoreContext } from './context';
 
@@ -96,7 +97,7 @@ export class Workflows {
     if (!client || !thread || !s.owner) return null;
     this.workflowsError = null;
     try {
-      const run = await client.call('workflows.start', { threadId: thread.parentThreadId ?? thread.id, plan: template.plan, templateId: template.id, requestId: crypto.randomUUID() });
+      const run = await client.call('workflows.start', { threadId: thread.parentThreadId ?? thread.id, plan: template.plan, templateId: template.id, requestId: secureId() });
       if (client === this.ctx.client && s.openThread?.id === thread.id) await s.loadWorkflows(thread.id);
       return run;
     } catch (error) {

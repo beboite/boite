@@ -1,5 +1,5 @@
-import { mkdirSync, statSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { mkdirSync, realpathSync, statSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { attachmentError } from '@boite/contracts';
 import type { Attachment, Project, ProviderDescriptor } from '@boite/contracts';
 import { messageOf, refused } from '../errors.ts';
@@ -54,6 +54,7 @@ export function checkCwd(project: Project, cwd: string): string {
   const inside = relative(resolve(project.path), resolved);
   if (inside.startsWith('..') || resolve(inside) === inside) {
     throw refused('the working directory must be inside the project', {
+      field: 'cwd', expected: 'a directory inside the project',
       cwd: resolved,
       projectPath: project.path,
     });
@@ -62,9 +63,24 @@ export function checkCwd(project: Project, cwd: string): string {
   try {
     stat = statSync(resolved);
   } catch (error) {
-    throw refused(`the working directory cannot be read: ${messageOf(error)}`, { cwd: resolved });
+    throw refused(`the working directory cannot be read: ${messageOf(error)}`, { field: 'cwd', cwd: resolved, expected: 'an existing directory inside the project' });
   }
-  if (!stat.isDirectory()) throw refused('the working directory is not a directory', { cwd: resolved });
+  if (!stat.isDirectory()) throw refused('the working directory is not a directory', { field: 'cwd', cwd: resolved, expected: 'a directory inside the project' });
+  let projectRoot: string, directory: string;
+  try {
+    projectRoot = realpathSync(project.path);
+    directory = realpathSync(resolved);
+  } catch (error) {
+    throw refused(`cwd: the working directory filesystem path cannot be read: ${messageOf(error)}`, {
+      field: 'cwd', cwd: resolved, projectPath: project.path, expected: 'an existing directory inside the project filesystem root',
+    });
+  }
+  const actual = relative(projectRoot, directory);
+  if (actual === '..' || actual.startsWith(`..${sep}`) || isAbsolute(actual)) {
+    throw refused('the working directory must resolve inside the project', {
+      field: 'cwd', cwd: resolved, projectPath: project.path, expected: 'a directory inside the project filesystem root',
+    });
+  }
   return resolved;
 }
 

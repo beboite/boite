@@ -27,14 +27,10 @@ bun run check
 bun run test
 ```
 
-For a desktop or integration change, build and test the complete app:
-
-```sh
-bun run test:shell
-bun run build:shell
-bun run apps/shell/scripts/stage-sidecar.ts
-bun run e2e
-```
+For integration or desktop changes, follow the build, staging and E2E procedure
+in [development](docs/development.md#rebuilding-the-shell-executable). Native
+shell coverage depends on the host platform; see the
+[portability matrix](docs/portability.md).
 
 Tests use temporary data directories and the echo provider. Live-provider tests
 are opt-in because they use real accounts and spend tokens. Never point a test

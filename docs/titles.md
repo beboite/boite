@@ -1,10 +1,8 @@
 # Titles
 
-A thread's title is one of three things, and `titleSource` on its summary says
-which: `prompt`, the first line of what the user typed; `agent`, what the agent
-wrote from the first request; `user`, a name the user gave. The rule
-is that a name the user gave is never overwritten, and a title from the prompt
-is replaced by the agent's while the first turn runs.
+`titleSource` records who named a thread: `prompt` for the first user line,
+`agent` for generated text, or `user` for a manual rename. Automatic naming
+can replace the prompt title during the first turn. It preserves manual names.
 
 ## Where each title comes from
 

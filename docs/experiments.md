@@ -36,13 +36,13 @@ after a core restart, and with this experiment switched off. Paired phones can
 download the published snapshot. They cannot publish or browse arbitrary host
 files through the file APIs.
 
-With the experiment enabled, answers support Markdown file links, bare web
-URLs, local absolute paths, `file:///` links, and file paths inside inline code.
-Wrap the link destination in angle brackets for paths with spaces, such as
-`<reports/review one.pdf>`. Source references
-can carry `:line` or `#Lline`. Files resolve against the message's thread and
-owning machine. Links outside its working directory are refused. Published
-PDFs, images, audio and video have inline previews. Other files remain downloadable.
+Enabled answers recognize Markdown links, bare URLs, absolute paths,
+`file:///` links and inline-code file paths. Use angle brackets for spaces,
+such as `<reports/review one.pdf>`, and `:line` or `#Lline` for source locations.
+Files resolve through the message's owning thread/machine and remain inside its
+working directory. Published PDFs, images, audio and video have inline previews;
+other types download. Mutable file editing/viewing belongs to the
+[right panel](panel.md).
 Remote images are links, so reading an answer does not fetch a tracking image.
 Executable URL schemes and arbitrary HTML are not rendered.
 

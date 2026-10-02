@@ -16,8 +16,9 @@ bun run apps/shell/scripts/stage-sidecar.ts
 bun run e2e
 ```
 
-`build:shell` builds the UI and sidecar. The staging command after it also puts
-that sidecar beside a newly built shell for end-to-end tests.
+`build:shell` builds the UI and stages the core. Follow
+[development](docs/development.md#rebuilding-the-shell-executable) for platform
+prerequisites, adjacent runtime files and shell E2E coverage.
 [CI](docs/ci.md) explains which checks run for each change.
 
 ## Boundaries
@@ -53,7 +54,9 @@ that sidecar beside a newly built shell for end-to-end tests.
 ## Check the affected paths
 
 - Desktop and phone. A right-click-only action is unavailable on a phone.
-- All affected drivers. Claude, ACP, Codex, pi and echo have different limits.
+- All affected protocols: Claude, ACP, Codex, Muse, pi, agy and echo. Their
+  drivers own runtime behavior; [providers](docs/providers.md) documents the
+  current protocol limits.
 - Both transports. The real core and `lib/fake-client.ts` share one contract.
 - Reverse actions. Create/archive, install/uninstall, subscribe/unsubscribe,
   warm session/shutdown.
@@ -121,6 +124,6 @@ and assertions when making the suite faster.
   and the `boite` command an agent uses to reach them.
 - [Releasing](docs/releasing.md): build artifacts, channels and installers.
 
-Keep tracked docs in this worktree. Private working notes under `.claude` are
-not tracked and do not follow a worktree; writing them by an absolute path can
-change another checkout instead of this branch.
+Keep tracked documentation in this worktree and verify source paths before
+describing behavior. Commands, captures and reports must belong to the branch
+being reviewed.

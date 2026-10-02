@@ -439,6 +439,7 @@ export const strings = {
     copyPath: 'Copy path',
     manageProject: 'Manage project',
     worktreeDefault: 'Worktree by default',
+    autoArchiveMergedPr: 'Archive merged PR conversations',
     backToProjectMenu: 'Back',
     viewArchivedThreads: 'View archived threads',
     importSession: 'Import a Claude Code session',
@@ -1055,6 +1056,9 @@ export const strings = {
     /** A refused send held the pending messages until the user sends again. */
     queuedPaused: 'Held after a refused send',
     sendNow: 'Send now',
+    queueWaitForEnd: 'Goals and loops wait for the current turn to finish. Your command remains queued.',
+    queueTurnNotReady: 'The running turn has not reached this client yet. Your message remains queued.',
+    queueNotAccepted: 'This turn did not accept the queued input. It remains queued and will be sent when the turn ends.',
     sendNowHint: 'Sends pending messages to the running agent without stopping it. Enter in the empty composer does the same.',
     retryQueuedHint: 'Sends all pending messages together again. Enter in the empty composer does the same.',
     picker: 'Provider and model',
@@ -1598,6 +1602,7 @@ export const strings = {
     noCore: 'Not connected to a core.',
     archived: {
       heading: 'Archived threads',
+      mergedReason: 'Archived after PR #{number} merged',
       intro: 'The agent of an archived thread stops. It starts again with the first message after a restore.',
       show: 'Show archived threads',
       empty: 'No archived thread on this machine.',

@@ -1,10 +1,8 @@
 # Accounts
 
-An account is a provider descriptor plus a directory. The directory is what makes
-one login blind to the others, so several seats on one agent can run side by side
-without either noticing the other. The code is
-`packages/core/src/accounts.ts`; the descriptor fields it reads are described in
-[providers.md](providers.md).
+An account combines a provider descriptor and a login directory. Isolated
+accounts keep separate configuration and credentials. `packages/core/src/accounts.ts`
+owns their lifecycle; [providers](providers.md) defines descriptor fields.
 
 `accounts.logins` restores running login cards after reconnect. `accounts.loginCancel`
 stops the login process and waits for it to exit. Removing an account does the
@@ -38,8 +36,7 @@ environment variables, with `{isolationDir}` substituted at spawn:
   read, and a signed-out agy shows up in the model probe instead.
 
 The same environment goes to every process of that account: a turn, a probe, a
-login. That is why the map lives on the OS profile rather than in a driver, and
-why a new provider needs no code to get isolation.
+login. The OS profile owns the map; drivers use the resolved account environment.
 
 ## What an isolated account shares
 
@@ -71,11 +68,25 @@ share that would cover one is refused when the descriptor loads. The default
 account needs none of this, since it runs on the user's own directory. A test
 core (`BOITE_HOST_AGENTS=0`) shares nothing.
 
+| Provider | Shared configuration paths |
+| --- | --- |
+| Claude | `settings.json`, `CLAUDE.md`, `skills`, `plugins`, `agents`, `commands`, `hooks`, `output-styles` |
+| Codex | `config.toml`, `hooks.json`, `AGENTS.md`, `skills`, `rules`, `prompts`, `plugins` |
+| Grok | `config.toml`, `hooks`, `AGENTS.md`, `AGENT.md`, `skills`, `trusted_folders.toml`, `installed-plugins` |
+| pi | `settings.json`, `AGENTS.md`, `extensions`, `skills`, `prompts`, `themes` |
+| OpenCode | `opencode/opencode.json`, `opencode/opencode.jsonc`, `opencode/AGENTS.md`, `opencode/package.json`, plugin/agent/command/skill directories and `opencode/node_modules` |
+
+These are whole-file copies or linked directories. An API setting or key inside
+a shared settings file applies to every account using that file, as in the
+user's CLI. Dedicated login/session files remain excluded. The shipped
+descriptors are the authority for each provider's current path list;
+[hooks](hooks.md) owns source discovery and reporting.
+
 ## The default account
 
 An account whose `isolationDir` is null runs on the provider's own default
-location, which is the user's real CLI login. It is not a lesser account: it is
-usually the one with the subscription, and reading it is the point.
+location, which is the user's real CLI login. Boite reads its existing authentication
+without moving the configuration.
 
 Startup, provider reloads and managed installs adopt that account when a CLI
 login exists. If its session files are absent and Boite can run a piped login,
@@ -84,16 +95,13 @@ account named after the provider. No signed-out `Default` account is added
 beside it. Terminal logins retain the default account, and a provider whose
 login can live outside session files retains its account with unknown status.
 
-Reading it correctly needs one thing the descriptor does not say, which is what
-the isolation variable means when nobody sets it. The core carries those
-defaults: the XDG pair resolve under `~/.local/share` and `~/.config`,
+The core resolves unset isolation variables to provider defaults: the XDG pair resolve
+under `~/.local/share` and `~/.config`,
 `CODEX_HOME` to `~/.codex`, `CLAUDE_CONFIG_DIR` to `~/.claude`, `GROK_HOME`
 to `~/.grok`, and `PI_CODING_AGENT_DIR` to `.pi/agent` under the home.
-A variable the core does not know falls back to `~/.<id>`. Without that table a
-default account is looked for in the wrong place, finds no session file, and
-reports `unauthenticated` while the user is perfectly logged in. That failure is
-silent by nature, so a new isolation variable means a new entry in that table, in
-the same change.
+A variable the core does not know falls back to `~/.<id>`. A new isolation variable must
+add its default location to that table in the
+same change, or passive checks can report a signed-in account as unauthenticated.
 
 ## What the core checks
 
@@ -163,15 +171,16 @@ goes to the page and never to a window over the user's work.
 
 ## The guided connection
 
-Nobody should meet "no provider" as a dead end. When the composer has nothing
-to pick, its model chip becomes `Connect an AI` and opens `ConnectFlow.svelte`:
+When the composer has no usable provider, its model chip becomes `Connect an AI` and
+opens `ConnectFlow.svelte`:
 Claude and Codex first, each naming the plan it uses, the other agents below.
 Choosing one walks the same steps as its row on the Providers page
 (`lib/provider-setup.ts`), one at a time: the download when Boite can fetch the
 agent, its own installer page otherwise, then the sign-in with the page to open
 and the field for a code. An agent whose login is a menu (see below) gets the
 same terminal as on the Providers page, inside the dialog. A download asked for
-here goes on to the sign-in by itself. Once the account answers, `Use <provider>` moves the composer to it
+here goes on to the sign-in by itself. Once the account answers, `Use <provider>` moves
+the composer to it
 through `store.useProvider`, the same remembered choice a pick in the model
 picker writes, and the text being typed stays where it was.
 
@@ -237,8 +246,7 @@ and no terminal.
   so `accounts.add` refuses it, names the profile's `isolation` field and says to
   use the default account. The Antigravity CLI is the shipped example.
 
-Every one of those is a loud refusal carrying the reason, never a silent
-no-operation. The Accounts page shows the reason in its error banner.
+The account controls display each refusal with its field and reason.
 
 ## Removing an account
 
@@ -251,105 +259,14 @@ that runs under `node` names nothing there, because the process in the job is
 The shared links are removed before the directory, so deleting the account
 never walks into the user's own `skills` or `plugins`.
 
-## Quotas and account pools
+## Provider controls and account pools
 
-Providers shows one row per provider and its next step. A row's chevron opens
-its accounts: sign in again for an isolated one, Check connection, Rename, Remove, quotas, `Add another account`, which names the account
-after the provider and starts its sign-in, `Use my command-line login` when
-no account uses the default location, and the provider's default model and
-effort once it is connected. Default-location accounts keep their
-external login.
-Claude subscription quotas come from its OAuth usage endpoint using the account's
-credentials file. For Keychain logins or expired tokens, its CLI reads usage
-with `skipBehaviors: true`, an empty prompt queue and no tools or hooks. That
-fallback may omit reset grants and paid usage details. Codex quotas come from
-`account/rateLimits/read`, without starting a conversation.
+Settings > Providers shows installation and sign-in steps, account labels and
+identities, Check connection, Rename, Remove, Add another account and Use my
+command-line login. Default-location accounts keep their external login.
+The provider's default model and effort are device preferences. This page shows
+no usage or quotas; [Usage and Limits](usage.md) owns quota sources, freshness,
+credit balances, monitoring and the tray window.
 
-These reads also collect banked resets. Claude requests `cedar_ember=1` on
-its GET usage request with the user agent `claude-cli/<version>`, the installed
-CLI's version from the update check: Anthropic answers any other caller
-`eligible: false` with the reason `cli_version`, so no reset shows before that
-version is known. It counts eligible, usable, unpaused, unexpired grants
-only when the reported next grant is available. Codex uses the reported count
-of reset credits even when the optional details are absent. Only counts and
-expiration times reach the client. Boite never redeems a reset or changes paid
-usage settings.
-
-Once any subscription window is exhausted, Claude's confirmed enabled, positive
-monthly spending budget appears beneath it as a percentage of its cap.
-Codex's reported positive credit balance appears in the compact panel and
-Limits page even while subscription quota remains. Its automatic spending
-activation state stays unknown: displaying a balance does not confirm that
-paid usage is active. Missing, disabled and zero allowances remain hidden;
-a failed read does not advertise stale resets or credits as available.
-
-Muse Code hosts that support `usage/changed` (1.4.0 or later) contribute their
-last observed subscription windows through an existing conversation. Listing
-or refreshing limits never starts a host or sends a prompt. Before the first
-observation, after disabling monitoring, or with older hosts, Muse remains
-unavailable. Its reported observation time is preserved, including over-quota
-readings. The schema exposes neither paid credit balances nor banked resets.
-Live Muse observations are kept in memory per account, not polled as fresh
-HTTP snapshots.
-
-The tray Usage window and Settings, Limits list only the providers with a
-signed-in account whose limits are monitored. Each tray row shows the lowest
-remaining limit across those accounts and the next reported reset; opening it
-shows each window's own bar and reset time, by account when there are several.
-Monitoring switches live under Tracked accounts on Settings, Limits: one per
-signed-in account with limits to read, the Antigravity CLI source included.
-Settings, Providers shows no usage, and the tray has no switch. With nothing
-signed in, both offer to connect a provider. The last reading stays on screen
-while the next one loads, from this browser's storage after a restart.
-
-The tray popup opens after 100 ms of continuous hover. Leaving the icon cancels
-that opening; a click does not bypass the delay. On Windows it stays inside the
-monitor's work area, above a bottom taskbar. Auto-hidden taskbars reserve their
-full height even while sliding offscreen. The popup keeps its position when the
-taskbar retracts and allows moving from the icon into the popup and back before
-closing. Hovering the icon of an open popup leaves it as it is. While it is open
-the shell reads the pointer every 150 ms and closes it after two readings in a
-row outside the icon, the popup and the gap between them. It does not wait for
-the tray's leave event, which Windows often never sends: the popup then stayed
-up and the next hover could not open it again. For the same reason a move over
-the icon starts a hover as an entry does: without that leave event the tray
-reports no entry again, only moves. The popup is an
-opaque window: Windows 11 rounds its corners and draws its border, Windows 10
-keeps it square.
-
-Grok reads the selected account's `GROK_HOME/auth.json` and requests its credit
-percentage from the Grok CLI billing endpoint. Expired xAI logins renew silently
-when they contain a refresh token, issuer and client ID. Boite saves renewed
-tokens in the same file, preserves other logins and shares concurrent renewals.
-A billing response of 401 triggers one renewal and retry; 403 keeps the access
-error. A rejected refresh token requires `grok login --device-auth`.
-The [billing format](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-shell/src/extensions/billing.rs)
-also carries legacy credit amounts. Boite accepts those amounts when no percentage
-is reported. An omitted proto3 percentage with a dated credits period means zero
-usage; a missing report or malformed percentage stays unavailable. The compact
-quota view shows each account's failure reason beneath its provider, including
-login and network failures.
-OpenCode Go reads the `opencode-go` API login in the account's
-`XDG_DATA_HOME/opencode/auth.json`; a default account can also use
-`OPENCODE_API_KEY`. It requests rolling, weekly and monthly limits from the Go
-usage API. It never substitutes another provider's login or local token totals.
-
-Antigravity uses a separate, opt-in `Antigravity CLI` source. Install `agy` 1.1.11
-or later and sign in once, then turn on `agy command-line login` under Tracked
-accounts in Settings, Limits. Boite reads `agy -p /usage --output-format json` in a temporary directory,
-with a version check, output limit and timeout. It does not send a model prompt.
-The report belongs to the CLI login on the core's computer, not an isolated ACP
-account. Its reserved quota id is `quota:antigravity-cli`; disabling monitoring
-persists like any account preference. No CLI process starts while it is disabled.
-
-The data formats follow the source notes in
-[CodexBar](https://github.com/steipete/CodexBar/tree/main/docs).
-
-Monitoring is configurable per account. Successful reads are cached for one minute,
-manual refreshes are at least ten seconds apart, and failures retry after five
-minutes. A failed refresh preserves the last reading and marks it stale. An
-unknown percentage is unavailable, not zero. Other providers report that quotas
-are unsupported rather than inventing a balance.
-
-[Plugins](plugins.md) such as the recommended kebacc-switcher manage external CLI account pools.
-There is no automatic rotation or relay.
+[Plugins](plugins.md) can manage external CLI account pools. Boite does not
+rotate accounts automatically or relay provider requests.

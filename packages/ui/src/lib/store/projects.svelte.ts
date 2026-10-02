@@ -3,6 +3,7 @@ import { strings } from '../strings';
 import { work } from '../work-prefs.svelte';
 import type { Draft } from '../store.svelte';
 import type { StoreContext } from './context';
+import { retainRows } from './snapshot-reads';
 
 /** The projects in the sidebar, the draft a new thread starts as, and where the app lands. */
 export class Projects {
@@ -84,7 +85,7 @@ export class Projects {
   /** The most recent thread, a draft in the first project, or nothing on a first run. */
   async openWhereLeft(): Promise<void> {
     const s = this.ctx.store;
-    if (!s.visible) return;
+    if (!s.visible || s.page !== 'chat') return;
     if (s.openThread || this.draft) return;
     const live = s.threads.filter((t) => !t.archived && !t.parentThreadId && !this.#inArchivedProject(t.projectId));
     const recent = [...live].sort((a, b) => b.updatedAt - a.updatedAt)[0];
@@ -100,16 +101,20 @@ export class Projects {
   // -------------------------------------------------------------------------
 
   /** The native folder picker in the shell; a browser has no such thing and types a path. */
-  async pickProject(): Promise<Project | null> {
+  async pickProject(options: { navigate?: boolean; current?: () => boolean } = {}): Promise<Project | null> {
     const s = this.ctx.store;
-    if (!s.pickerAvailable) return null;
+    const client = this.ctx.client;
+    if (!client || !s.pickerAvailable) return null;
+    const generation = this.ctx.threads.openGeneration;
+    const current = () => this.ctx.currentNavigation(client, generation) && (options.current?.() ?? true);
     try {
       const { open } = await import('@tauri-apps/plugin-dialog');
+      if (!current()) return null;
       const picked = await open({ directory: true, multiple: false });
-      if (typeof picked !== 'string' || picked.length === 0) return null;
-      return await s.addProject(picked);
+      if (!current() || typeof picked !== 'string' || picked.length === 0) return null;
+      return await s.addProject(picked, options);
     } catch (error) {
-      this.ctx.fail(error);
+      if (current()) this.ctx.fail(error);
       return null;
     }
   }
@@ -119,17 +124,20 @@ export class Projects {
     return this.ctx.client.call('projects.browse', path ? { path } : {});
   }
 
-  async addProject(path: string): Promise<Project | null> {
+  async addProject(path: string, options: { navigate?: boolean } = {}): Promise<Project | null> {
     const client = this.ctx.client;
     if (!client) return null;
+    const generation = this.ctx.threads.openGeneration;
+    const clientGeneration = this.ctx.clientGeneration;
     try {
       const project = await client.call('projects.add', { path });
+      if (this.ctx.client !== client || this.ctx.clientGeneration !== clientGeneration) return null;
       if (!this.projects.some((p) => p.id === project.id))
         this.projects = [...this.projects, project];
-      this.ctx.store.startDraft(project.id);
+      if (options.navigate !== false && this.ctx.currentNavigation(client, generation)) this.ctx.store.startDraft(project.id);
       return project;
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentNavigation(client, generation)) this.ctx.fail(error);
       return null;
     }
   }
@@ -140,27 +148,33 @@ export class Projects {
     // Explorer paths belong to this computer even while a remote core is open.
     if (window.__TAURI_INTERNALS__ && !s.localCore) await s.useLocalCore();
     if (!s.owner || s.connection !== 'ready') return;
+    const client = this.ctx.client;
+    if (!client) return;
+    const clientGeneration = this.ctx.clientGeneration;
+    const navigation = this.ctx.threads.openGeneration;
     let first: Project | null = null;
     for (const path of paths) {
-      const project = await s.addProject(path);
+      if (!this.ctx.currentClient(client, clientGeneration)) return;
+      const project = await s.addProject(path, { navigate: false });
       first ??= project;
     }
-    if (first) s.startDraft(first.id);
+    if (first && this.ctx.currentNavigation(client, navigation)) s.startDraft(first.id);
   }
 
   async refreshProjects(): Promise<void> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     const fresh = this.#landing && Date.now() - this.bootListAt < 5_000;
     if (!client || this.ctx.store.connection !== 'ready' || fresh) return;
+    const read = this.ctx.projectReads.begin();
     try {
-      const fresh = new Map((await client.call('projects.list', {})).map((project) => [project.id, project]));
+      const listed = await client.call('projects.list', {});
       // Another machine took this Store meanwhile: project ids can collide between machines.
-      if (this.ctx.client !== client) return;
-      if (this.projects.every((project) => project.repository === fresh.get(project.id)?.repository && project.missing === fresh.get(project.id)?.missing)) return;
-      this.projects = this.projects.map((project) => fresh.get(project.id) ?? project);
+      if (!this.ctx.currentClient(client, clientGeneration) || !read.active) return;
+      this.projects = retainRows(this.projects, read.apply(listed, this.projects));
     } catch {
       /* the list the app holds stays */
-    }
+    } finally { read.cancel(); }
   }
 
   /**
@@ -171,27 +185,30 @@ export class Projects {
     const known = this.ctx.store.draftsProject;
     if (known) return known.id;
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client) return null;
     try {
       const project = await client.call('projects.drafts', {});
-      if (this.ctx.client !== client) return null;
+      if (!this.ctx.currentClient(client, clientGeneration)) return null;
       if (!this.projects.some((p) => p.id === project.id)) this.projects = [...this.projects, project];
       return project.id;
     } catch (error) {
       // A switched machine closed the old client: its rejection is not this machine's error.
-      if (this.ctx.client === client) this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
       return null;
     }
   }
 
   async removeProject(projectId: ProjectId): Promise<void> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client) return;
     try {
       await client.call('projects.remove', { projectId });
+      if (!this.ctx.currentClient(client, clientGeneration)) return;
       await this.dropProject(projectId);
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     }
   }
 
@@ -201,15 +218,20 @@ export class Projects {
    */
   async archiveProject(projectId: ProjectId, archived: boolean): Promise<boolean> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client) return false;
     try {
-      this.upsertProject(await client.call('projects.archive', { projectId, archived }));
+      const project = await client.call('projects.archive', { projectId, archived });
+      if (!this.ctx.currentClient(client, clientGeneration)) return false;
+      this.upsertProject(project);
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
       return false;
     }
     const s = this.ctx.store;
     if (archived && (s.openThread?.projectId === projectId || this.draft?.projectId === projectId)) {
+      this.ctx.threads.invalidateNavigation();
+      void this.ctx.threads.unsubscribe();
       this.ctx.drafts.park();
       if (s.openThread?.projectId === projectId) s.openThread = null;
       if (this.draft?.projectId === projectId) this.draft = null;
@@ -236,14 +258,16 @@ export class Projects {
   async loadProjectIcon(project: Project): Promise<void> {
     const icon = project.icon;
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (icon?.kind !== 'image' || !client) return;
     const key = `${project.id}:${icon.version}`;
-    if (this.iconUrls[key] !== undefined || this.#iconLoads.has(key)) return;
-    this.#iconLoads.add(key);
+    const loadKey = `${clientGeneration}:${key}`;
+    if (this.iconUrls[key] !== undefined || this.#iconLoads.has(loadKey)) return;
+    this.#iconLoads.add(loadKey);
     try {
       const answer = await client.call('projects.icon', { projectId: project.id });
       // Another machine took this Store meanwhile: project ids can collide between machines.
-      if (this.ctx.client !== client || !answer.dataUrl.startsWith('data:image/')) return;
+      if (!this.ctx.currentClient(client, clientGeneration) || !answer.dataUrl.startsWith('data:image/')) return;
       // The list may name an older version than the core now holds: the current
       // image answers for it too, or the tile would ask again for a key never filled.
       this.iconUrls = { ...this.iconUrls, [key]: answer.dataUrl, [`${project.id}:${answer.version}`]: answer.dataUrl };
@@ -251,35 +275,61 @@ export class Projects {
       /* the initial stands */
     } finally {
       // Never left in flight: a refused or dropped answer is asked again by the next tile.
-      this.#iconLoads.delete(key);
+      this.#iconLoads.delete(loadKey);
     }
   }
 
   /** Asks the core to read the project's folder for its icon again. */
   async refreshProjectIcon(projectId: ProjectId): Promise<void> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client) return;
     try {
       const project = await client.call('projects.refreshIcon', { projectId });
-      if (this.ctx.client === client) this.upsertProject(project);
+      if (this.ctx.currentClient(client, clientGeneration)) this.upsertProject(project);
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     }
   }
 
   async setProjectWorktreeDefault(projectId: ProjectId, enabled: boolean): Promise<void> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client) return;
     try {
       const project = await client.call('projects.setWorktreeDefault', { projectId, enabled });
-      if (this.ctx.client === client) this.upsertProject(project);
+      if (this.ctx.currentClient(client, clientGeneration)) this.upsertProject(project);
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
+    }
+  }
+
+  #archivePolicyWrites = $state<string[]>([]);
+
+  projectAutoArchiveMergedPrBusy(projectId: ProjectId): boolean {
+    return this.#archivePolicyWrites.includes(JSON.stringify([this.ctx.clientGeneration, projectId]));
+  }
+
+  async setProjectAutoArchiveMergedPr(projectId: ProjectId, enabled: boolean): Promise<void> {
+    const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
+    if (!client || !this.ctx.store.owner || this.ctx.store.connection !== 'ready' || this.projects.find(project => project.id === projectId)?.autoArchiveMergedPr === undefined) return;
+    const key = JSON.stringify([clientGeneration, projectId]);
+    if (this.#archivePolicyWrites.includes(key)) return;
+    this.#archivePolicyWrites = [...this.#archivePolicyWrites, key];
+    try {
+      const project = await client.call('projects.setAutoArchiveMergedPr', { projectId, enabled });
+      if (this.ctx.currentClient(client, clientGeneration)) this.upsertProject(project);
+    } catch (error) {
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
+    } finally {
+      this.#archivePolicyWrites = this.#archivePolicyWrites.filter(pending => pending !== key);
     }
   }
 
   /** A project as the core now answers it, from this client's call or another's `project.updated`. */
   upsertProject(project: Project): void {
+    this.ctx.projectReads.change(project.id, project);
     const index = this.projects.findIndex((p) => p.id === project.id);
     if (index >= 0) this.projects[index] = project;
     else this.projects = [...this.projects, project];
@@ -292,13 +342,18 @@ export class Projects {
 
   /** What a project going away costs the UI, whether this client removed it or another did. */
   async dropProject(projectId: ProjectId): Promise<void> {
+    this.ctx.projectReads.change(projectId, null);
     const s = this.ctx.store;
     this.ctx.drafts.forget(projectId);
     for (const thread of s.threads.filter(t => t.projectId === projectId)) delete s.composerStates[thread.id];
     this.projects = this.projects.filter((p) => p.id !== projectId);
     s.threads = s.threads.filter((t) => t.projectId !== projectId);
-    if (s.openThread?.projectId === projectId) s.openThread = null;
-    if (this.draft?.projectId === projectId) this.draft = null;
+    if (s.openThread?.projectId === projectId || this.draft?.projectId === projectId) {
+      this.ctx.threads.invalidateNavigation();
+      void this.ctx.threads.unsubscribe();
+      if (s.openThread?.projectId === projectId) s.openThread = null;
+      if (this.draft?.projectId === projectId) this.draft = null;
+    }
     await s.openWhereLeft();
   }
 

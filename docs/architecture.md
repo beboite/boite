@@ -2,399 +2,264 @@
 
 ## The core is the host, the shell is a client
 
-The core is a normal process in the user's session, never a Windows service:
-DPAPI, the OAuth callback on `127.0.0.1` and the user profile are all
-unreachable from session 0. Execution stays on the machine that owns the folder.
-The shell starts a local core and adopts one that already answers, and it can
-point at a core on another machine instead; the phone only ever points at one.
-Local cores are resident by default: shell exit leaves them running, and an
-owner can stop them explicitly through `core.shutdown`. Tests can set
-`BOITE_CORE_RESIDENT=0`; on Windows that mode retains the shell's
-`KILL_ON_JOB_CLOSE` Job Object. Adopted and remote cores remain independent.
-The shell passes the data directory to the core with `--data-dir` and adopts a
-core only when its pid is alive and `/health` reports the shell's own version;
-split JavaScript bundles must also match the SHA-256 captured at core startup.
-A core of another version or bundle is stopped through `POST /shutdown` and replaced. A
-core that exits while starting is reported at once with the last lines it
-printed. A resident core still starting after 60 seconds is kept, and the next
-request for the endpoint picks it up. When the local core stops answering, the
-UI asks the shell again after four seconds, and the shell starts a new core if
-the old one died.
-[Persistent agents](agents.md) describes the background queue and recovery.
-The shell also carries a channel, read once from its own
-bundle identifier: `Boite` and `Boite Dev` are two installs on one machine, and
-the channel is what keeps their data directories, and so their cores, apart.
-[docs/releasing.md](releasing.md). Boite and Boite Nightly are update tracks
-within the regular install and share its data. The desktop updater belongs to
-the shell, uses main-webview-only IPC and never acts on the selected remote core.
-It verifies signed installers before offering installation. Updates wait for
-the local core to atomically admit an idle stop; active work remains usable
-and the wait can be cancelled. Silent installation requires an idle core;
-accepting the manual installer's Kill prompt also stops its resident core.
-[Updates](updates.md).
+The Bun core owns execution, accounts, scheduling and persistence on the machine
+that owns the project folder. The Tauri shell owns windows, tray integration,
+native dialogs, desktop updates and local core startup. The Svelte UI connects
+to a local or remote core; a phone connects to an existing core.
+
+A desktop core runs in the user's session. Windows session 0 cannot use the
+user's DPAPI state, OAuth loopback callback or profile. Local cores are resident
+by default: quitting the shell leaves work running until an owner calls
+`core.shutdown`. Tests can set `BOITE_CORE_RESIDENT=0`; on Windows that mode
+keeps the shell's `KILL_ON_JOB_CLOSE` Job Object. Adopted and remote cores remain
+independent. [Persistent agents](agents.md) describes background work.
+
+The shell passes `--data-dir` and adopts a local core only when its PID is alive
+and `/health` reports the shell's version. Split JavaScript bundles must also
+match the SHA-256 captured at core startup. A mismatched core is stopped through
+`POST /shutdown` and replaced. Startup failure includes the last output lines.
+A resident core still starting after 60 seconds stays alive for the next endpoint
+request. After four seconds without a local response, the UI asks the shell to
+resolve the core again.
+
+The shell's bundle identifier selects the stable or dev data directory. Stable
+and nightly update tracks share the regular installation's data; Boite Dev is
+separate. Desktop updates use main-webview-only IPC and signed installers on the
+local machine. See [updates](updates.md), [restart handoff](restart-handoff.md)
+and [release layout](releasing.md).
 
 ## One WebSocket, one contract
 
-JSON-RPC 2.0 over a single WebSocket at `/rpc`. Two checks guard it, both from
-the first commit: the `Origin` header must be absent (a native client) or one of
-the shell origins or the core's own, then the first frame must be `hello`
-carrying the core token within five seconds, or the socket closes with `4001`.
-Owners can add exact browser origins in Machines for connections to multiple
-cores. Each socket still requires authentication.
-The token is 32 random bytes generated on first start and kept in
-`<dataDir>/core.json` beside the port and the pid.
+The core serves JSON-RPC 2.0 at `/rpc`. The `Origin` must be absent for a native
+client, a permitted shell origin, the core's own origin or an exact browser
+origin the owner configured in Machines. The first frame must be `hello` with
+an accepted token within five seconds, or the socket closes with `4001`.
+The owner token is 32 random bytes generated on first start and stored in
+`<dataDir>/core.json` with the port and PID.
 
-Broadcast events (`project.*`, `settings.updated`, `providers.*`, `accounts.*`)
-reach every authenticated connection, so a second shell or a phone follows a
-change without a reload. `message.*`, `permission.*`, `question.*`,
-`panel.*` and `process.*` reach only the sockets subscribed to that thread, and
-so does `thread.activity` for owners and phones: it carries the whole activity,
-loop history included, up to about 200 KB, and only the open thread shows it. A
-process record carries a command line of up to 32 KB that only that thread's
-trace panel reads. An agent socket still gets its own thread's. A client that
-connects mid-turn rebuilds the pending permission card from
-`permissions.list`, because `permission.requested` only reached the sockets
-that existed when it fired. A card leaves that list when it is answered, when
-its turn ends, and when the agent stops waiting for it: Claude aborts the
-request's signal when the CLI cancels the call, and the driver withdraws the
-card, which reaches every client as `permission.resolved` with `deny`.
+| Principal | Credential and authority |
+| --- | --- |
+| Owner | Core token or owner pairing; may configure the core |
+| Session | Paired-device token; limited to `DEVICE_METHODS` and `DEVICE_EVENTS` |
+| Agent | In-memory per-thread token supplied to a launched process; limited to `AGENT_METHODS` and its authenticated thread |
 
-Three principals say hello. The owner holds the core token or an owner
-pairing; a session is a paired phone, held to `DEVICE_METHODS`; an agent is a
-process a thread launched, holding the per-thread token the core put in its
-environment, held to `AGENT_METHODS` on that thread alone. The device lists
-(`DEVICE_METHODS`, `DEVICE_EVENTS`) live in `packages/contracts/src/access.ts`,
-where the core's router and the in-memory client both read them; the agent list
-lives in `packages/core/src/access.ts`, each entry with its reason;
-[cli.md](cli.md) says how an agent uses its door.
+Device and agent event lists live in `packages/contracts/src/access.ts`; agent
+method reasons live in `packages/core/src/access.ts`. New methods remain
+owner-only unless the access lists explicitly permit them. The router and
+[in-memory client](development.md#contract-scenarios) enforce the same contract.
+The [CLI](cli.md) uses the agent credential inside a thread.
+
+Project, settings, provider and account changes reach authenticated connections
+allowed to receive them. Message, permission, question, panel, process and
+activity events are scoped to subscribed threads as well as principal access.
+Subscribing does not prepare a provider session. A reconnect reads pending cards
+from `permissions.list`; an answered, ended or withdrawn request leaves the list
+and emits `permission.resolved`. Driver cancellation withdraws the card instead
+of leaving an unanswered request behind.
 
 ## The journal is the truth, the tables are a projection
 
-`bun:sqlite` in WAL mode. `events(id, thread_id, ts, type, version, payload)` is
-append-only, and the projection tables (`projects`, `threads`, `turns`,
-`messages`, `processes`, `accounts`, `settings`) are updated in the same
-transaction as the event that changes them. Every event type carries a version.
-Nothing replays events, so they are a recent trail: a pass a minute after start
-and then daily deletes those older than 30 days, 5,000 per timer tick, keeping
-the newest agents event whose id is the agents revision. Removing a project
-deletes its threads' events with them. Deleting a conversation stops its work
-and hides it and its sub-threads behind persistent deletion markers. The owner
-can restore them from the toast or Settings, including after a restart;
-history and prior archive flags are retained without restarting agents.
-Archive and deletion toasts dismiss automatically after eight seconds; errors
-and update notices wait for the user's action.
-`threadDeletionRetentionDays` defaults to 30 days after deletion. Settings
-accepts an integer from 0 to 3650; 0 disables automatic purge. Changing the
-delay also applies to existing deletions. A pass at startup and every minute
-purges expired families, including delegation and workflow history, in one
-transaction and broadcasts the updated deletion list. Reading that list or
-restoring a thread also checks expiry. Project removal purges that project's
-pending deletions immediately. Project files, worktrees and Git branches stay
-on disk. Delete acts immediately without a confirmation dialog.
+`bun:sqlite` uses WAL mode. An append to
+`events(id, thread_id, ts, type, version, payload)` and its projection changes
+commit in one transaction. Events have versions but are not replayed to rebuild
+the tables. Retention runs one minute after startup and daily, deleting events
+older than 30 days in batches of 5,000 while retaining the latest agents revision.
+Project removal explicitly clears thread-keyed tables; foreign keys are disabled.
+A newer journal schema is refused before writing, with the file and both versions.
 
-Text deltas are coalesced per thread every 16 ms before they reach a socket or
-the message. Streamed text is no event of its own: it is journaled as the
-message it lands in, framed by `message.started`, `message.part` and
-`message.completed`. While a message streams, its parts live in memory and a
-delta or a tool card only changes them there; the row is written at most every
-500 ms (longer when one write is slow, so writing stays under a twentieth of the
-time, capped at 5 s), when the message completes, when its turn ends, on explicit
-persistence, and on close. Reads overlay the current in-memory parts onto the
-selected rows without forcing a write. A delta used to rewrite the whole row,
-every part of the turn, and a 2 MB turn cost 16 ms per 16 ms window. While writes
-succeed, a crash loses at most the text of the last write window. Thread
-activity (goal, loop, tasks) is a `settings` row with no event: its payload held
-the whole loop history and nothing read it back. A project's detected icon is
-a `project_icons` row with
-no event either: it is derived from the folder and detected again on request
-([project icons](project-icons.md)). A journal written by a newer release is refused at open
-with the file and both schema versions, before any write. Foreign keys are off,
-so the `ON DELETE CASCADE` clauses are dead; project removal clears every
-thread-keyed table itself. A write that fails on a timer (a full disk, an I/O
-error) has no caller to throw to: it becomes a `core.log` error. Streaming parts
-stay dirty in memory and retry automatically, even without new deltas or reads;
-each failed background write doubles the wait up to 5 s. A committed write
-restores the normal adaptive interval. Buffered deltas to completed messages
-retry on the next flush and are dropped after three failures, with a line saying
-so. A listener that throws on a bus event is reported the same way and
-the other listeners still get it. An error nothing caught still ends the core,
-as Bun would, after a log line and the usual shutdown that releases the data
-directory lock. The provider transcript is never remodelled. A thread resumes the
-selected account's native `sessionId`; changing accounts starts a fresh session
-with bounded journal excerpts. So does a resume the agent refuses because the
-session is gone (Claude's `No conversation found with session ID`, Codex's
-`no rollout found for thread id`): the core drops the id and runs the same turn
-once more on a fresh session, with no error part. Any other resume failure
-keeps the id. Each accepted turn freezes its execution target,
-so a later picker change cannot redirect queued work.
+Text deltas coalesce per thread every 16 ms. Streaming message parts stay in
+memory and overlay stored rows on reads. Writes normally happen at most every
+500 ms, adapt to slow storage up to 5 seconds, and also happen on completion,
+turn end, explicit persistence and close. While writes succeed, a crash can lose
+the last write window. Failed background writes retain dirty parts and retry
+with exponential backoff up to 5 seconds. Buffered deltas for completed messages
+are dropped after three failed flushes, with a diagnostic. Thread activity is a
+settings row; detected project icons are derived rows that can be rebuilt.
+
+Deletion stops a conversation and its children before hiding them behind durable
+markers. Restore retains history and previous archive flags without restarting
+agents. The default deletion retention is 30 days; `threadDeletionRetentionDays`
+accepts 0 to 3650, with 0 disabling automatic purge. Startup and minute passes
+purge expired families transactionally. Reads and restoration also check expiry.
+Project removal purges its pending deletions. Files, worktrees, branches and
+native provider transcripts stay on disk. See
+[thread lifecycle](development.md#thread-lifecycle).
+
+The journal does not replace a provider's native transcript. A turn resumes the
+selected account's `sessionId`. An account change starts a fresh session seeded
+with bounded journal excerpts. A confirmed missing native session permits one
+retry on a fresh session; other failures retain the ID. Each accepted turn
+freezes its execution target, so later picker changes cannot redirect queued
+work. [Model switching](model-switching.md) owns transfer and revision rules.
 
 ## The scheduler tracks independent turns
 
-Independent conversations start immediately, including those on the same
-account. Boite imposes no global or per-account turn count. Old saved launch
-limits are ignored. A turn can remain `queued` while its account is being
-configured or its team is paused. Each conversation accepts one in-flight turn.
-A visible Claude or Codex conversation prepares its native process and session
-before a prompt is sent. Each owner or paired-device connection names one visible
-conversation through `threads.focus`; event subscriptions alone prepare nothing.
-Hidden pages, phone navigation and switching machines release that focus. The
-last viewer leaving starts a 30-second idle grace, extended by a longer
-`warmProcessMinutes` setting. Viewed sessions stay ready across completed turns,
-including when that setting is zero. Preparation submits no prompt, creates no
-turn or message, and uses the same traced spawns, account isolation and install
-leases as execution. Failures are logged and a later prompt can start normally.
-Other drivers retain their existing post-turn lifecycle. Process CPU and memory
-guards remain independent of turn admission.
+Independent conversations start immediately, including on the same account.
+There is no global or per-account interactive turn ceiling. A conversation has
+one in-flight turn and can stay queued while its account is being configured or
+its team is paused. Process resource guards are separate from admission.
+
+Owner and paired-device connections name one visible conversation through
+`threads.focus`. Claude and Codex can prepare their traced process and native
+session before a prompt, without creating a turn, message or model prompt.
+Viewed sessions stay ready across completed turns even when
+`warmProcessMinutes` is zero. The last viewer leaving starts a 30-second grace,
+extended by a longer configured warm period. Hidden pages and machine or phone
+navigation release focus. Preparation uses the normal account isolation and
+install leases; failure is logged and a later prompt can start normally.
+Other drivers retain their post-turn lifecycle.
 
 ## Delegation shares the scheduler
 
-An owner-enabled team creates ordinary child threads with a persisted parent
-relationship and a separate provider session per child. The owner's named
-profiles select the account, model and effort. The child inherits the parent's
-checkout and permission mode. No additional orchestration model runs.
+Ordinary conversations start with delegation enabled and the built-in
+`conversation` route: the current harness, account, model and effort. Only an
+owner can add named routes or change the setting. Children are ordinary threads
+with separate native sessions, a durable parent relationship and the parent's
+checkout and permission mode. Briefs and bounded results cross the relationship;
+transcripts and tool output stay with the child.
 
-Delegation requires an enabled team and an owner-approved profile. It imposes
-no agent count, concurrency, turn count or duration quota. Compact briefs and
-bounded final answers cross the
-thread boundary; transcripts and tool payloads stay in their own threads.
-The core serializes live steering with ordinary coordination and queues input
-for drivers without steering. Results can also join the next user prompt.
-Restart retains the records but pauses automatic work. [Delegation](delegation.md)
-describes controls, delivery semantics and costs. [Workflows](workflows.md)
-run a checked JSON plan over the same children: the core launches each step
-when its dependencies end, with no orchestrating model.
+[Delegation](delegation.md) owns child lifecycle, delivery and usage limits.
+[Workflows](workflows.md) execute checked plans over the same scheduler. They
+need no enabled delegation team or extra orchestration model, but a paused team
+holds launches. Output corrections remain durable waiting executions until the
+runner can admit them after the preceding turn settles.
 
 ## Process tracking follows the host OS
 
-`procs.ts` calls the platform interface for native tracking and protections.
-The Windows backend and the shared Linux/macOS fallback live under
-`packages/core/src/platform/`; the journal and RPC stay shared.
-[Trace](trace.md#platform-boundary) describes that boundary and its limits.
+Every process starts through `procs.spawn`, `procs.spawnChild` or
+`procs.spawnPiped`. `ProcessPlatform` owns native tracking and protection under
+`packages/core/src/platform/`; drivers and RPC handlers do not import backends.
+The shell has its own native boundary under `apps/shell/src-tauri/src/platform/`.
 
-On Windows `procs` creates the thread's job on first use, nested in a global
-unnamed job, `KILL_ON_JOB_CLOSE` on both and never `BREAKAWAY_OK`, and
-assigns the child right after spawn. A completion port drained in a Worker
-reports every process that enters or leaves, grandchildren included, as
-`process.started` and `process.exited` with pid, executable, command line, CPU
-time, peak memory, bytes moved and exit code. That is exact attribution, per
-thread, of a tree nobody declared. Linux and macOS track direct children only;
-their `TraceCapability` reports the limited fallback. They do not discover
-grandchildren or promise whole-tree termination.
-
-Two Windows-only rules ride the same pid set, both in a second Worker and both
-switchable from Settings, Protection. The focus guard sends a window of a traced pid
-to `HWND_BOTTOM` without activation the moment it takes the foreground, then
-gives the focus back to the window the user was on. The audio mute walks the
-default render endpoint's sessions every second and mutes the ones belonging to
-a traced pid, undoing it when the pid exits, because Windows keeps a session's
-mute across restarts. Both decisions are pure logic classes tested on a fake of
-the Win32 calls, so no test ever creates a window or plays a sound.
-[docs/trace.md](trace.md) has the caps and the settings.
+Windows Job Objects provide tree membership events and resource caps. Linux and
+macOS record direct children; their process-group termination cannot catch a
+child that starts its own session. The capability report exposes those limits.
+[Trace](trace.md#platform-boundary) owns process records, caps, guards and shutdown.
 
 ## Drivers, one interface
 
-`Driver.startTurn(ctx) -> TurnHandle`, and the driver's whole job is mapping one
-protocol onto the contract's parts. What they share: one process and one agent
-session per thread, kept warm across turns where the protocol allows it; a
-permission question drawn as the same inline card whatever asked it; a stop that
-is the protocol's own cancel, with a core deadline behind it (a turn still
-running 10 s after Stop has its processes ended, and 2 s later the core settles
-it as stopped, saying the agent did not stop in time); usage folded onto the turn, with a real price only
-where the wire carries one; and a lazy module, so a driver nobody used costs
-nothing at start.
+`Driver.startTurn(ctx)` returns a `TurnHandle`. A driver maps its protocol to
+contract message parts, questions, approvals, usage and session lifecycle.
+Drivers load lazily. Stop uses the native cancel operation where available; the
+core ends processes after 10 seconds and settles a remaining turn 2 seconds
+later. Protocol-specific deadlines can be shorter.
 
-Questions come in two kinds. A blocking one (Claude's `AskUserQuestion`, one
-card per question) holds the turn in `waiting` until it is answered. An
-asynchronous one (Codex's `delivery: "async"` messages, or `boite ask` from any
-agent) is answered with the same controls without stopping anything: it waits
-in the overlay above the composer, and the timeline keeps a line where it was
-asked. The core answers it by steering the running turn (Claude takes it at
-the main agent's next PostToolUse hook), or by sending `> question` and the
-answer as the next prompt once the thread is idle. The core stamps `startedAt`
-and `finishedAt` on every tool part, so a tool's line shows how long a command
-has run. Skip resolves a question without an answer: a blocking question stops
-waiting, while an asynchronous question leaves the composer dock without a
-steer or another user prompt. Both desktop and paired phones use `questions.skip`.
-A driver writes its whole answer under one message. A message the user sends
-or an asynchronous answer that reaches a running turn cuts it: the next part the
-driver opens starts a new assistant message, so the timeline shows the input
-where it arrived. The earlier message completes once its running tools finish.
-Work a Claude session leaves in the background (a shell, an agent, a monitor)
-is reported as `thread.background`: the CLI stays alive while it runs, the turn
-footer counts it, Stop on the idle thread ends it, and what the CLI writes when
-it finishes opens a turn of its own, marked "Background work finished". The
-thread summary carries it too, as `backgroundWork` (the kind of each task and
-when the oldest started), so a sidebar or phone row whose turn ended reads
-"Monitoring" or "In background" with a running clock instead of "Done". Every
-`thread.updated` the core sends is built by `withLoad`, load ticks included,
-because a client replaces its row with the summary it receives.
+| Protocol | Runtime owner |
+| --- | --- |
+| `claude-sdk` | Claude SDK query, tool gate, hook reports and native session |
+| `acp` | ACP initialization, session modes, updates and cancellation |
+| `codex-appserver` | Codex JSON-RPC peer, process/session key and turn notifications |
+| `muse` | MSP envelope, host sandbox flags and session approval mode |
+| `pi` | JSON-line commands, CLI session ID and `agent_settled` completion |
+| `agy` | Stream-json print mode, conversation resume and launch flags |
+| `echo` | Deterministic in-process fixture with no network calls |
 
-Where they differ is worth knowing before you touch one. `claude-sdk` runs the
-Claude Agent SDK with a `PreToolUse` hook as the single gate that journals and
-decides every tool call. What a subagent (the Agent or Task tool) writes, tagged
-with `parent_tool_use_id`, stays off the main message, as it does in an imported
-transcript: its text, tool calls and usage are its own, the Agent card shows the
-report the main loop reads, and an API error inside the subagent is a log line,
-not a failed turn. `acp` speaks the Agent Client Protocol over the agent's
-stdio and sends the thread's permission mode as `session/set_mode`, matching the
-agent's own spelling out of a candidate list, because ACP standardises the call
-and never the ids. `codex-appserver` carries its own ndjson JSON-RPC peer, since
-OpenAI ships the protocol as generated TypeScript rather than a client, and its
-permission mode is part of the session key: Codex takes the approval policy and
-the sandbox when the thread opens and has no call that changes them later. Its
-Stop is `turn/interrupt`, like Claude's `interrupt()` given three seconds: an
-app-server that has not ended the turn by then loses its process, and the next
-turn resumes the Codex thread on a new one. A Stop that lands while the process
-or the thread is still opening sends no prompt at all.
-`muse` has its own peer too, for Muse Code's session protocol: the approval
-mode is a call on the running host and the sandbox is a host flag, so only the
-flags are in the session key. `pi` takes its session on the command line rather
-than through a call, so the driver mints the id itself. `agy` runs the installed
-Antigravity CLI in its stream-json print mode, one JSON line per prompt and per
-event, with no SDK or protocol library behind it; the model, the effort and the
-permission mode are launch flags, and a later process resumes the conversation
-with `--conversation`. `echo` streams the prompt back, can call a fake tool, ask a
-permission and spawn a child on request, and never touches the network.
+Codex, Muse and pi share `drivers/stdio.ts` for bounded framing and pending
+request lifetime. Each adapter owns its envelopes; each session owns its active
+turn and child. A fatal pipe fault closes the transport and rejects pending
+requests once, then retires only that session. Late output from a retired child
+cannot settle its replacement. User Stop takes precedence over a subsequent
+fault. Long-running model requests do not acquire a default request timeout.
+[Providers](providers.md) owns protocol details and control-read deadlines.
+
+Blocking questions hold a turn in `waiting`. Asynchronous questions leave work
+running and deliver an answer through steering or a later prompt. Skip resolves
+a card without inventing an answer. Incoming user input or an asynchronous answer
+splits the assistant message at its arrival; earlier running tools finish in
+the earlier message. Claude background work can keep a session alive after its
+foreground turn and later open a background-completion turn.
 
 ## Descriptors, tokens, managed installs
 
-A provider is JSON, not code, so adding an ACP agent is a file rather than a
-release. `{home}`, `{appdata}` and `{agentsDir}` expand when the descriptor
-loads, in `roots`, in every executable candidate and in `launch.args`, which is
-what lets a descriptor name a script rather than a program. `{isolationDir}` is
-not a load-time token: it is per account and substituted at spawn. A descriptor
-that names an `install` block is one Boite downloads itself: the zip is streamed
-to disk with its sha256 computed as it writes, a wrong digest or length is
-refused with both values, only the files the descriptor lists are unpacked, and
-`current` is repointed once `.install-complete.json` is beside them. Field by
-field, with an example: [docs/providers.md](providers.md).
+Descriptors declare a supported protocol, executable candidates, OS profiles,
+account isolation and optional managed releases. JSON can add a provider for an
+existing protocol; a new protocol needs a driver. Load-time tokens and
+per-account `{isolationDir}` have different lifetimes. Managed installs check
+archive length, SHA-256 and listed file sizes before switching `current`.
+[Providers](providers.md) is the schema and installation reference.
 
 ## Accounts and isolation
 
-An account is a descriptor plus a directory, and the descriptor's `isolation`
-map is what makes one login blind to the others. An account on the provider's
-own default location is the user's real CLI login: Boite reads it, reports it,
-and refuses to run a login command for it, because that login belongs outside
-Boite. For an isolated account the descriptor's `login` block runs through
-`procs.spawnPiped` under the synthetic thread `login:<accountId>`, so it sits in
-a Job Object and in the trace like any agent process, and its output streams back
-line by line with the first link it prints carried separately.
-[docs/accounts.md](accounts.md).
+An account combines a descriptor and a login directory. Default accounts use
+the user's CLI configuration; isolated accounts receive the descriptor's
+environment on every turn, probe and login. Before spawning, `profile-share.ts`
+links configured directories and copies files while keeping login files private.
+[Accounts](accounts.md) owns login, sharing and removal; [hooks](hooks.md) owns
+hook discovery and reports; [usage](usage.md) owns limits and monitoring.
 
-Isolation moves the agent's whole configuration directory, so before each
-spawn the core links or copies what the descriptor's `shared` block names
-from the user's own directory: settings, hooks, skills, instructions, never a
-login file. Drivers that hear about hook runs (Claude's `hook_response`,
-Codex's `hook/completed`) report them through `TurnContext.hook`, and
-`core.hooks` keeps the counts and the recent failures in memory for
-`hooks.status`. [docs/hooks.md](hooks.md).
+## The models probe
 
-## The probe, because an agent owns its models
-
-A descriptor's model list is a starting point. A Claude, ACP, Codex, pi or agy agent owns the
-real one, so `providers.probe` spawns one short-lived process under the synthetic
-thread `probe:<providerId>:<accountId>`, asks the protocol's own models call,
-kills the child on every path, and caches the answer per provider and account
-until a `providers.reload` that changes a descriptor, a manual refresh or a
-change to that account's status. The UI
-keeps a persistent display cache while it reads models asynchronously. `threads.create` and
-`threads.update` accept what the last probe listed on top of the descriptor's;
-a model nobody probed is refused, saying to open the picker. Two callers at once
-share one process, and `providers.probed` lets a second client see the same
-answer. A probe that finds no executable, whose agent dies, or that passes twenty
-seconds, thirty for pi, throws with the reason and caches nothing. One whose own account changed
-or whose descriptors were reloaded while it ran is refused as stale; another
-account changing does not touch it, and the UI asks again without a toast.
-Background discovery skips accounts known to be signed out or in error. A failed
-background read keeps the cached or descriptor models and logs its reason without
-a toast; an explicit model refresh or sending a prompt still reports failures.
+`providers.probe` uses a short-lived traced process and the agent's own discovery
+operation. Concurrent reads share an operation; caches belong to a provider and
+account. Changed descriptors or account state invalidate them, and a stale
+completion cannot replace a newer cache entry. The process is closed on every
+path. Background failures retain display fallbacks; explicit refreshes report
+their reason. See [provider discovery](providers.md#the-models-probe).
 
 ## The UI streams, and stops streaming
 
-Each machine owns its client and Store. Route actions through the owning Store;
-project and thread IDs can collide across machines. Only the open thread on the
-visible machine streams. The rest of the list lives on `thread.updated`
-summaries. Inside a message, the markdown of a streaming part is rebuilt only
-for the paragraphs that have closed: the block still being typed is left out
-until a blank line ends it, so a token never re-renders the text before it, and
-a tool's line opens on its own while
-the model is still typing its input, then folds back once the parsed input lands.
-Past sixty messages the timeline renders a window: the slice that meets the
-viewport plus eight messages of overscan each way, two spacers carrying the
-summed heights of the rest, every message worth 80 px until a `ResizeObserver`
-measures it, and a height measured above the reading point put back into
-`scrollTop` so the viewport never jumps. Under sixty, the list renders whole.
-The transport sits behind one `Client` interface, so the same UI runs on the real
-core, on a WebSocket to a remote core, and on an in-memory fake.
+Each machine owns its `Client` and Store. IDs can collide across machines.
+Only the open thread on the visible machine streams; other rows use summaries.
+Asynchronous reads and actions capture their client and navigation generation.
+A stale thread read, trace response, page completion or folder dialog cannot
+replace a newer selection or publish an error into another machine's view.
+A thread creation already accepted by its original core still belongs there;
+a later navigation does not redirect its prompt or overwrite the newer draft.
+
+Streaming Markdown renders closed paragraphs. At more than sixty messages, the
+timeline uses a measured window with eight messages of overscan on each side.
+Unmeasured messages start at 80 px; measurements above the reading position
+adjust `scrollTop`. The same UI runs on local RPC, remote RPC and the in-memory
+client. [Machines](machines.md) describes connection and routing behavior.
 
 ## Module boundaries and complexity
 
-The Codex and Muse entry files compose their drivers. Each has a directory with
-`rpc.ts` for framing and requests, `session.ts` for the warm process lifecycle,
-`turn.ts` for message parts, `models.ts` for discovery, `mapping.ts` for protocol
-conversion, and `protocol.ts` for wire types and constants. Internal modules do
-not import their entry file. Public imports remain unchanged.
+Driver entry files compose protocol modules. Framing, sessions, turns, model
+mapping and wire types stay separate; internal modules do not import their entry.
+The server separates handshake, buffering and dispatch under `server/`; Git
+separates parsing, bounded reads and diff assembly under `git/`. Git refs resolve
+to object IDs before reads, and working files are sized and read on one handle.
 
-Both drivers use `drivers/model-probes.ts` to coalesce concurrent model reads.
-Completion checks entry identity, so an invalidated probe cannot overwrite or
-remove its replacement's cached result. Session ownership,
-permissions and shutdown remain specific to each driver.
+`lib/fake-client.ts` is the in-memory socket entry. Domain handlers live under
+`lib/fake-client/`, with state in `context.ts` and shared refusals in `checks.ts`.
+Handlers validate inputs and results against the contract. Common
+[contract scenarios](development.md#contract-scenarios) run against real and fake
+cores; a fixed known divergence must leave its explicit exception list.
 
-The server separates connection buffering, frame dispatch and the initial
-authentication handshake under `server/`. The Git reader separates porcelain
-parsing, bounded file reads and diff assembly under `git/`. A ref resolves to an
-object ID before its size and content are read; a working-tree file is sized and
-read through the same handle.
-
-The in-memory client checks each RPC handler's input and result against the
-shared contract. `lib/fake-client.ts` is its entry and the socket surface;
-`lib/fake-client/context.ts` holds the state of one fake core, and each domain
-(threads, turns, accounts, providers, projects, settings, coordination,
-delegation, the working directory and the rest) answers its methods from its
-own module under `lib/fake-client/`. Its plugin domain owns installation state
-and cancellation; file, conversation and provider fixtures live beside them,
-and `lib/fake-client/checks.ts` holds the core's refusals it repeats. The contract
-scenarios in `tests/contract/scenarios.ts` run against both the core and the
-fake ([development](development.md#contract-scenarios)), so a rule the fake stops
-following fails by name.
-
-`bun run check:architecture` checks runtime imports in production TypeScript
-and JavaScript, including literal dynamic imports. It rejects cycles, core/UI
-cross-imports, contracts importing either runtime, direct native-backend imports
-outside the platform directory, and internal modules importing their entry file.
-Type-only imports, Svelte component scripts and Rust dependencies are outside
-this check. Type checks, UI tests and shell checks still cover those sources.
-New workspace package exports need a source mapping in the check's alias table;
-unmapped workspace imports fail instead of disappearing from the graph.
-It also holds every production TypeScript, JavaScript and Svelte file to 900
-lines, apart from the files listed in `scripts/architecture/size-budget.json`,
-which may only shrink, and the tables it exempts, which grow with every RPC
-method or UI sentence ([development](development.md)).
-
-`bun run audit:complexity` prints an advisory ranking from pinned oxlint 1.82.0.
-It measures TypeScript, JavaScript and Svelte scripts, not Rust, and accepts
-`--json` for comparison. The first run downloads the tool through Bun's cache.
-Complexity is not a CI threshold: a method router and a short validation guard
-can legitimately have many branches. Review state ownership and repeated logic
-before splitting a high-scoring function.
+`bun run check:architecture` checks production runtime imports, including literal
+dynamic imports. It rejects cycles, runtime cross-imports, contracts importing
+runtimes, native backends imported outside their boundary and internal imports
+of entry modules. Type-only imports, Svelte scripts and Rust are outside this
+check. Unmapped workspace exports fail. The same check enforces 900 source lines
+or a shrinking allowance in `scripts/architecture/size-budget.json`.
+`bun run audit:complexity` provides an advisory ranking, not a CI threshold.
+[Development](development.md#architecture-checks) owns the commands and scope.
 
 ## Agent coordination
 
-The core owns opt-in permissions, discovery, durable inboxes and message budgets.
-Agent RPC credentials bind the sender to one thread. Cross-machine messaging uses
-a separate signed HTTPS endpoint with pinned Ed25519 public keys, not owner RPC
-credentials. UI stores remain machine-scoped. Provider adapters deliver attributed
-agent input at supported boundaries; the scheduler handles idle wake turns.
-[Agent coordination](coordination.md) describes delivery states and the trust boundary.
+Ordinary conversations default to communication across projects and linked
+machines, subject to explicit owner restrictions and directional remote read
+grants. The core owns discovery, durable inboxes and attributed delivery.
+Per-thread RPC tokens identify local senders; signed Ed25519 exchanges identify
+trusted remote cores. Read permissions are checked again after asynchronous
+responses before returning data. Pause controls delivery without revoking an
+otherwise authorized lookup. [Coordination](coordination.md) owns trust and
+message semantics.
+
+## Closing and restart
+
+`Core.drain` shares one shutdown promise. It closes new admission and automatic
+launchers before waiting for accepted turns, while sockets still deliver terminal
+events. Coordination waits for owned asynchronous work; workflow callbacks are
+fenced after close. `Core.close` releases drivers, logins, terminals and process
+resources before disposing the bus and journal, then flushes diagnostic logs.
+A restart continuation remains durable until it starts or is explicitly excluded.
+[Restart handoff](restart-handoff.md) owns deadlines and recovery exclusions.
 
 ## The phone keeps the app
 
-`packages/ui/public/sw.js` is plain JavaScript that Vite copies untouched, one
-cache, registered after the first paint and only on the core's own http(s)
-origin. A navigation is network first with the precached shell behind it,
-`/assets/` is cache first, and `/rpc`, any upgrade, the worker and the manifest
-are never cached: the socket is the only thing carrying live state. The core
-serves the shell, the worker and the manifest as `no-cache` and the hashed
-assets as immutable for a year. What a phone gets with the core asleep is the
-shell painting from disk and "Connecting" in the footer until the socket comes
-back. [docs/phone.md](phone.md).
+The service worker registers after first paint on the core's HTTP(S) origin.
+Navigation is network-first with a cached shell fallback; hashed assets are
+cache-first. RPC, upgrades, the worker and the manifest are never cached.
+An offline phone can draw the shell and reconnect when the core returns.
+[Phone](phone.md) owns pairing, secure origins and device limits.

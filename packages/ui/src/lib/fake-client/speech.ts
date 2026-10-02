@@ -1,3 +1,4 @@
+import { secureId } from '../secure-id';
 /** Voice input: its configuration, the local models, their downloads and a transcription. */
 import { RpcErrorCode, SPEECH_CATALOGUE, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechModel, type SpeechStatus } from '@boite/contracts';
 import { RpcFailure } from '../client';
@@ -36,7 +37,7 @@ function settle(ctx: FakeContext): void {
 }
 
 function activate(ctx: FakeContext, id: string): void {
-  if (ctx.speech.model !== id || ctx.speech.modelPath) ctx.speechStatus.revision = crypto.randomUUID();
+  if (ctx.speech.model !== id || ctx.speech.modelPath) ctx.speechStatus.revision = secureId();
   ctx.speech = { ...ctx.speech, model: id, modelPath: '' };
   settle(ctx);
 }
@@ -64,7 +65,7 @@ export function speechMethods(ctx: FakeContext) {
       ctx.speech = { engine: p.engine, language: p.language, apiProvider: p.apiProvider, fallback: p.fallback, executable: p.executable, modelPath: p.modelPath, model };
       if (p.groqKey !== undefined) ctx.speechStatus.groqKeySet = !!p.groqKey;
       if (p.openrouterKey !== undefined) ctx.speechStatus.openrouterKeySet = !!p.openrouterKey;
-      ctx.speechStatus.revision = crypto.randomUUID();
+      ctx.speechStatus.revision = secureId();
       settle(ctx);
       return snapshot(ctx);
     },

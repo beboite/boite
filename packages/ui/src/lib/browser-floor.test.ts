@@ -25,6 +25,7 @@ test('the check names a lookbehind and a copying array method', () => {
 });
 
 test('no UI source uses what Safari 15.4 cannot run', () => {
-  const offenders = sources(SRC).flatMap((file) => tooNewForFloor(readFileSync(file, 'utf8')).map((hit) => `${relative(SRC, file)}: ${hit}`));
+  const shared = resolve('../contracts/src');
+  const offenders = [...sources(SRC), ...sources(shared)].flatMap((file) => tooNewForFloor(readFileSync(file, 'utf8')).map((hit) => `${relative(SRC, file)}: ${hit}`));
   expect(offenders).toEqual([]);
 });

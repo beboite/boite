@@ -184,8 +184,9 @@
     justify-content: space-between;
     gap: 12px;
     width: 100%;
+    height: auto;
     min-height: var(--control);
-    padding: 0 8px;
+    padding: 6px 8px;
     border: none;
     border-radius: var(--radius-sm);
     background: transparent;
@@ -222,6 +223,7 @@
   .label {
     flex: 1;
     min-width: 0;
+    white-space: normal;
     overflow-wrap: anywhere;
   }
 

@@ -6,7 +6,7 @@ export const SWITCH_WARNING_TOKENS = 200_000;
 /** Past this many tokens one uncached turn costs as much quota as a dozen cached ones. */
 export const CACHE_WARNING_TOKENS = 100_000;
 
-/** The longest a provider keeps a prompt cache (Claude's one-hour tier). An older reading has nothing left to lose. */
+/** Ignore cache readings older than one hour when warning about a model switch. */
 export const CACHE_LIFETIME_MS = 60 * 60 * 1000;
 
 /** What a provider keys its prompt cache on, besides the conversation itself. */

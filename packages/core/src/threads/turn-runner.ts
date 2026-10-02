@@ -3,6 +3,7 @@ import type { Core } from '../core.ts';
 import { getDriver, releaseThread } from '../drivers/index.ts';
 import type { TurnHandle, TurnResult } from '../drivers/types.ts';
 import { messageOf } from '../errors.ts';
+import { logMessageOf } from '../log-errors.ts';
 import { promptCacheOf } from '../prompt-cache.ts';
 import type { ThreadStore } from '../threads.ts';
 import { saveThread, setThreadStatus } from './records.ts';
@@ -108,7 +109,7 @@ export class TurnRunner {
         if (running.execution?.operation === 'coordination' && result.status === 'done') this.core.coordination.submitted(threadId, turnId);
       }
     } catch (error) {
-      result = { status: 'error', sessionId: thread.sessionId, usage: null, error: messageOf(error) };
+      result = { status: 'error', sessionId: thread.sessionId, usage: null, error: messageOf(error), diagnosticError: logMessageOf(error) };
     } finally {
       this.handles.delete(threadId);
       const deadline = this.stopDeadlines.get(threadId);
@@ -144,7 +145,7 @@ export class TurnRunner {
       });
       this.core.bus.emit('turn.finished', finished);
       if (result.status === 'error') {
-        this.core.log('error', `turn ${turnId} failed: ${result.error ?? 'unknown error'}`);
+        this.core.log('error', `turn ${turnId} failed: ${result.diagnosticError ?? result.error ?? 'unknown error'}`, { source: thread.providerId, event: 'turn.failed', threadId, turnId });
       }
       const current = this.core.journal.getThread(threadId);
       if (current === null) return null;
@@ -202,7 +203,7 @@ export class TurnRunner {
     if (current === null || current.archived) return null;
     if ((current.sessionGeneration ?? 0) !== (thread.sessionGeneration ?? 0) || current.sessionId !== thread.sessionId) return null;
     const generation = (current.sessionGeneration ?? 0) + 1;
-    this.core.log('info', `thread ${thread.id}: the agent has no session ${thread.sessionId} any more (${result.error ?? 'no reason given'}); starting a fresh one with the thread's history`);
+    this.core.log('info', `thread ${thread.id}: the agent has no session ${thread.sessionId} any more (${result.diagnosticError ?? result.error ?? 'no reason given'}); starting a fresh one with the thread's history`);
     saveThread(this.core, { ...current, sessionId: null, sessionResumeAt: null, sessionGeneration: generation, context: null, promptCache: null }, 'thread.updated');
     return { ...thread, sessionId: null, sessionResumeAt: null, sessionGeneration: generation, context: null, promptCache: null };
   }

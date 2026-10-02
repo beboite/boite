@@ -92,6 +92,8 @@ export class Store {
   get client(): Client | null {
     return this.#ctx.client;
   }
+  get clientGeneration(): number { return this.#ctx.clientGeneration; }
+  get navigationGeneration(): number { return this.#ctx.threads.openGeneration; }
   get serverUpdater() { return this.#ctx.serverUpdater; }
 
   // -------------------------------------------------------------------------
@@ -129,6 +131,9 @@ export class Store {
 
   detach(): void {
     const ctx = this.#ctx;
+    ctx.clientGeneration++;
+    void ctx.threads.unsubscribe();
+    this.retitling = [];
     ctx.serverUpdater.reset();
     ctx.drafts.stop();
     ctx.workbench.resetMemory();
@@ -398,6 +403,8 @@ export class Store {
   projectIconUrl(...args: Parameters<Projects['projectIconUrl']>) { return this.#ctx.projects.projectIconUrl(...args); }
   loadProjectIcon(...args: Parameters<Projects['loadProjectIcon']>) { return this.#ctx.projects.loadProjectIcon(...args); }
   setProjectWorktreeDefault(...args: Parameters<Projects['setProjectWorktreeDefault']>) { return this.#ctx.projects.setProjectWorktreeDefault(...args); }
+  projectAutoArchiveMergedPrBusy(...args: Parameters<Projects['projectAutoArchiveMergedPrBusy']>) { return this.#ctx.projects.projectAutoArchiveMergedPrBusy(...args); }
+  setProjectAutoArchiveMergedPr(...args: Parameters<Projects['setProjectAutoArchiveMergedPr']>) { return this.#ctx.projects.setProjectAutoArchiveMergedPr(...args); }
   refreshProjectIcon(...args: Parameters<Projects['refreshProjectIcon']>) { return this.#ctx.projects.refreshProjectIcon(...args); }
   startDraft(...args: Parameters<Projects['startDraft']>) { return this.#ctx.projects.startDraft(...args); }
   setDraftProject(...args: Parameters<Projects['setDraftProject']>) { return this.#ctx.projects.setDraftProject(...args); }
@@ -449,6 +456,7 @@ export class Store {
 
   get composerStates() { return this.#ctx.composer.composerStates; }
   get draftEntries() { return this.#ctx.drafts.entries; }
+  get draftsReadable() { return this.#ctx.drafts.readable; }
   flushDrafts() { return this.#ctx.drafts.flush(); }
   set composerStates(value) { this.#ctx.composer.composerStates = value; }
 

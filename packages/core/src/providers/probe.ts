@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import type { Core } from '../core.ts';
 import { forgetProbes, probeModels } from '../drivers/index.ts';
 import { invalidParams, refused } from '../errors.ts';
+import { logMessageOf } from '../log-errors.ts';
 
 /** The synthetic thread a probe process runs under, so the trace shows it like a login. */
 export function probeThreadId(providerId: ProviderId, accountId: AccountId): ThreadId {
@@ -67,13 +68,16 @@ async function probeProvider(
       killTree: () => {
         core.procs.killTree(threadId);
       },
-      log: (level, message) => {
-        core.log(level, message);
+      log: (level, message, context) => {
+        core.log(level, message, { ...context, source: provider.id, event: 'provider.probe', threadId });
       },
     });
     if (!isCurrent()) throw refused('the provider or account changed during discovery; refresh models');
     core.bus.emit('providers.probed', { providerId: provider.id, accountId: account.id, models, probedAt });
     return { models, probedAt };
+  } catch (error) {
+    core.logs.record('warn', logMessageOf(error), { source: provider.id, event: 'provider.probeFailed', threadId });
+    throw error;
   } finally {
     await Promise.all(exits);
     // A descendant can hold the directory after the direct child closed. Neither

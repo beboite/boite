@@ -76,6 +76,8 @@ export class Coordination {
   private publicKey = '';
   private coreId = '';
   private closed = false;
+  /** Releases local acknowledgement waits before driver teardown can reject them. */
+  private readonly localWaits = new Set<() => void>();
   private readonly pending = new Set<Promise<unknown>>();
   private readonly delivering = new Set<string>();
   private readonly nonces = new Map<string, number>();
@@ -280,6 +282,16 @@ export class Coordination {
     if (config.remote) for (const contact of this.localDirectory()) if (!local.some(a => same(a, contact))) local.push(contact);
     return local;
   }
+  /** Only access permissions invalidate a pending lookup; pausing delivery does not revoke reads. */
+  private checkLookupAccess(threadId: string, remote: boolean): void {
+    const thread = this.core.threads.require(threadId);
+    const config = this.config(threadId);
+    if (thread.archived || config.mode === 'off' || (remote && !config.remote)) {
+      throw refused('coordination permissions changed; retry the lookup', {
+        field: 'threadId', threadId, expected: remote ? 'an unarchived thread with remote coordination enabled' : 'an unarchived thread with coordination enabled',
+      });
+    }
+  }
   async directory(threadId: string): Promise<{ agents: AgentContact[]; unavailable: string[] }> {
     const thread = this.core.threads.require(threadId);
     const config = this.config(threadId);
@@ -296,13 +308,15 @@ export class Coordination {
         } catch { return { peer, contacts: null }; }
       }));
       for (const result of found) {
-        if (result.contacts === null) unavailable.push(result.peer.name);
+        if (result.contacts === null || !this.peers().some(peer => peer.coreId === result.peer.coreId)) unavailable.push(result.peer.name);
         else agents.push(...result.contacts);
       }
     }
     // Permissions may change while a remote directory is in flight.
-    if (JSON.stringify(this.config(threadId)) !== JSON.stringify(config)) throw refused('coordination permissions changed; refresh the directory');
-    return { agents, unavailable };
+    this.checkLookupAccess(threadId, config.remote);
+    const reachable = new Set(this.localReach(threadId).map(contact => contact.threadId));
+    const localCoreId = this.self('').coreId;
+    return { agents: agents.filter(contact => contact.coreId !== localCoreId || reachable.has(contact.threadId)), unavailable };
   }
   private checkContact(contact: AgentContact, peer: CoordinationPeer): AgentContact {
     if (!contact || contact.coreId !== peer.coreId || !['brief', 'team'].includes(contact.mode) || !['idle', 'queued', 'running', 'waiting', 'error'].includes(contact.status)) throw invalidParams('agent: invalid remote contact');
@@ -327,18 +341,35 @@ export class Coordination {
         return { peer, result: check(answer, peer), failed: null };
       } catch (error) { return { peer, result: null, failed: error instanceof PeerRefusal ? `${peer.name} (${error.message})` : peer.name }; }
     }));
+    this.checkLookupAccess(threadId, true);
+    // A peer that answered early may have been revoked while another one was pending.
+    for (const entry of found) {
+      if (!this.peers().some(peer => peer.coreId === entry.peer.coreId)) {
+        entry.result = null;
+        entry.failed = entry.peer.name;
+      }
+    }
     return { results: found.flatMap(entry => entry.result === null ? [] : [entry.result]), unavailable: found.flatMap(entry => entry.failed === null ? [] : [entry.failed]) };
   }
   /** Contacts here and on trusted machines whose fields or chat contain every word of the query. */
   async search(threadId: string, query: string): Promise<{ matches: AgentMatch[]; unavailable: string[] }> {
     const words = searchWords(query);
+    const config = this.config(threadId);
+    if (this.core.threads.require(threadId).archived || config.mode === 'off') return { matches: [], unavailable: [] };
     const own = this.localReach(threadId).filter(a => a.threadId !== threadId);
     const matches = searchContacts(this.core.journal.db, own, words);
     const remote = await this.remoteAll(threadId, 'search', { words }, (answer, peer) => {
       if (!Array.isArray(answer) || answer.length > 100) throw new Error('invalid remote search');
       return answer.map(match => ({ ...this.checkContact(match, peer), ...checkMatchExtras(match) }));
     });
-    return { matches: [...matches, ...remote.results.flat()], unavailable: remote.unavailable };
+    this.checkLookupAccess(threadId, config.remote);
+    const reachable = new Set(this.localReach(threadId).map(contact => contact.threadId));
+    const trusted = new Set(this.peers().map(peer => peer.coreId));
+    const remoteMatches = remote.results.flat();
+    return {
+      matches: [...matches.filter(match => reachable.has(match.threadId)), ...remoteMatches.filter(match => trusted.has(match.coreId))],
+      unavailable: [...new Set([...remote.unavailable, ...remoteMatches.filter(match => !trusted.has(match.coreId)).map(match => match.machine)])],
+    };
   }
   /** Another reachable contact's conversation, text and tool names only. */
   async read(threadId: string, target: AgentAddress, limit = 30, before?: number): Promise<AgentTranscript> {
@@ -361,6 +392,8 @@ export class Coordination {
       if (contact.threadId !== to.threadId) throw new Error('transcript of another thread');
       return { contact, ...checkTranscript(answer) };
     }, [peer]);
+    this.checkLookupAccess(threadId, true);
+    if (!this.peers().some(current => current.coreId === peer.coreId)) throw refused('target.coreId: machine permission revoked');
     if (!results[0]) throw refused(`${unavailable[0] ?? peer.name} did not answer the read`);
     return results[0];
   }
@@ -539,6 +572,18 @@ export class Coordination {
     for (const letter of letters) this.update(letter, 'uncertain', `Awaiting provider turn ${turnId}`);
     return true;
   }
+  private async steer(threadId: string, prompt: string): Promise<{ submitted: boolean } | null> {
+    if (this.closed) return null;
+    const stopped = Promise.withResolvers<null>();
+    const cancel = () => stopped.resolve(null);
+    this.localWaits.add(cancel);
+    try {
+      return await Promise.race([
+        this.core.threads.steer(threadId, prompt).then(submitted => ({ submitted })),
+        stopped.promise,
+      ]);
+    } finally { this.localWaits.delete(cancel); }
+  }
   private async deliver(threadId: string): Promise<void> {
     if (this.closed || this.delivering.has(threadId)) return;
     const thread = this.core.journal.getThread(threadId);
@@ -553,10 +598,18 @@ export class Coordination {
         if (!this.core.threads.canSteer(threadId)) return;
         for (const letter of letters) this.update(letter, 'uncertain', 'Awaiting provider acknowledgement');
         try {
-          const submitted = await this.core.threads.steer(threadId, prompt);
-          for (const letter of letters) this.update(letter, submitted ? 'delivered' : 'received');
+          const result = await this.steer(threadId, prompt);
+          if (result === null || this.closed || this.core.journal.isClosed()) return;
+          for (const letter of letters) {
+            const current = this.find(letter.id, 'in');
+            if (current?.status === 'uncertain' && current.error === 'Awaiting provider acknowledgement') this.update(current, result.submitted ? 'delivered' : 'received');
+          }
         } catch (error) {
-          for (const letter of letters) this.update(letter, 'uncertain', messageOf(error));
+          if (this.closed || this.core.journal.isClosed()) return;
+          for (const letter of letters) {
+            const current = this.find(letter.id, 'in');
+            if (current?.status === 'uncertain' && current.error === 'Awaiting provider acknowledgement') this.update(current, 'uncertain', messageOf(error));
+          }
         }
       } else {
         // One transaction records the wake, message states and scheduled turn.
@@ -566,7 +619,11 @@ export class Coordination {
           this.core.threads.startTurn(threadId, prompt, [], undefined, 'coordination');
         })();
       }
-    } catch (error) { this.pause(threadId); this.core.log('warn', `coordination ${threadId}: ${messageOf(error)}`); }
+    } catch (error) {
+      if (!this.closed && !this.core.journal.isClosed()) {
+        this.pause(threadId); this.core.log('warn', `coordination ${threadId}: ${messageOf(error)}`);
+      }
+    }
     finally { this.delivering.delete(threadId); }
   }
   /** A scheduled coordination turn reached its driver; no claim that the model read it. */
@@ -735,8 +792,12 @@ export class Coordination {
     return { status: response.status, body: await boundedBody(response.body), signature: response.headers.get('x-boite-signature') ?? '' };
   }
   beginClose(): void {
+    if (this.closed) return;
+    this.closed = true;
+    for (const cancel of this.localWaits) cancel();
+    this.localWaits.clear();
     this.bridge.close();
-    this.closed = true; clearInterval(this.timer); this.off();
+    clearInterval(this.timer); this.off();
     for (const set of [...this.waiters.values()]) for (const waiter of [...set]) waiter.done([]);
   }
   async close(): Promise<void> { this.beginClose(); await Promise.allSettled([...this.pending]); }

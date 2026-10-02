@@ -55,11 +55,23 @@ export interface SpawnedTerminal {
 
 interface Entry {
   record: ProcessRecord;
+  identity: ProcessIdentity;
   root: boolean;
   startup?: boolean;
   /** Off Windows, the group stop that follows: resolved once the group is gone or SIGKILLed. */
   kill(): void | Promise<void>;
   usage(): { cpuMs: number; peakMemoryBytes: number } | null;
+}
+
+interface ProcessIdentity {
+  startedAt: number | null;
+  incarnation: string | null;
+}
+
+interface KnownProcess {
+  identity: ProcessIdentity;
+  incarnations: Set<string>;
+  recordedAt: number;
 }
 
 /** How far a value moves before the load is worth another `thread.updated`. */
@@ -105,8 +117,8 @@ export class ProcRegistry {
   private readonly startups = new Map<ThreadId, { pid: number; timer: ReturnType<typeof setTimeout> }>();
   private readonly exitTimers = new Map<number, ReturnType<typeof setTimeout>>();
   private readonly live = new Map<ThreadId, Map<number, Entry>>();
-  /** Every pid this thread ever registered. A job event for one of them is a repeat, not a grandchild. */
-  private readonly known = new Map<ThreadId, Set<number>>();
+  /** Captured incarnations of each pid, retained to reject delayed native events. */
+  private readonly known = new Map<ThreadId, Map<number, KnownProcess>>();
   /** Forgetting a thread whose last process exited, once a late job event can no longer arrive. */
   private readonly forgetTimers = new Map<ThreadId, ReturnType<typeof setTimeout>>();
   private readonly lastLoad = new Map<ThreadId, ThreadLoad>();
@@ -154,22 +166,23 @@ export class ProcRegistry {
       exited: (threadId, pid, exit) => {
         this.onJobExited(threadId, pid, exit);
       },
-      note: (threadId, message) => {
-        this.bus.emit('core.log', { level: 'warn', message: `thread ${threadId}: ${message}`, at: Date.now() });
+      note: (threadId, _message) => {
+        this.bus.emit('core.log', { level: 'warn', message: 'the process platform reported a warning', source: 'process', event: 'platform.warning', threadId, at: Date.now() });
       },
       memoryLimit: (threadId, kind) => {
         this.memory.memoryLimit(threadId, kind);
         const message = kind === 'thread-cap'
           ? `thread ${threadId}: the thread reached its memory cap`
           : 'the agents reached their memory budget';
-        this.bus.emit('core.log', { level: 'warn', message, at: Date.now() });
+        this.bus.emit('core.log', { level: 'warn', message, source: 'process', event: 'memory.limit', ...(threadId === null ? {} : { threadId }), at: Date.now() });
       },
     }, {
       pushed: (threadId, pid, title, restored) => {
         this.bus.emit('process.focusPushed', { threadId, pid, title, restored, at: Date.now() });
         this.bus.emit('core.log', {
           level: 'info',
-          message: `thread ${threadId}: a window of pid ${pid} (${title}) was pushed back`,
+          message: `a window of pid ${pid} was pushed back; restored=${restored}`,
+          source: 'process', event: 'process.focus-pushed', threadId,
           at: Date.now(),
         });
       },
@@ -177,12 +190,13 @@ export class ProcRegistry {
         this.bus.emit('process.muted', { threadId, pid, at: Date.now() });
         this.bus.emit('core.log', {
           level: 'info',
-          message: `thread ${threadId}: the audio of pid ${pid} is muted`,
+          message: `the audio of pid ${pid} is muted`,
+          source: 'process', event: 'process.muted', threadId,
           at: Date.now(),
         });
       },
-      note: (message) => {
-        this.bus.emit('core.log', { level: 'warn', message, at: Date.now() });
+      note: (_message) => {
+        this.bus.emit('core.log', { level: 'warn', message: 'the process guard reported a warning', source: 'process', event: 'guard.warning', at: Date.now() });
       },
     });
     this.loadTimer = setInterval(() => {
@@ -253,7 +267,7 @@ export class ProcRegistry {
     });
 
     const exited = proc.exited.then((code) => {
-      this.onExit(threadId, record.pid, code);
+      this.onExit(threadId, record.pid, code, undefined, record);
       return code;
     });
 
@@ -290,7 +304,7 @@ export class ProcRegistry {
     });
 
     const exited = proc.exited.then((code) => {
-      this.onExit(threadId, record.pid, code);
+      this.onExit(threadId, record.pid, code, undefined, record);
       return code;
     });
 
@@ -351,7 +365,7 @@ export class ProcRegistry {
     });
 
     const exited = proc.exited.then((code) => {
-      this.onExit(threadId, record.pid, code);
+      this.onExit(threadId, record.pid, code, undefined, record);
       terminal.close();
       return code;
     });
@@ -387,12 +401,12 @@ export class ProcRegistry {
     });
 
     child.once('exit', (code) => {
-      this.onExit(threadId, record.pid, code);
+      this.onExit(threadId, record.pid, code, undefined, record);
     });
     // A child that never starts emits 'error' and no 'exit'; without this it
     // would stay in the live registry for the rest of the session.
     child.once('error', () => {
-      this.onExit(threadId, record.pid, null);
+      this.onExit(threadId, record.pid, null, undefined, record);
     });
 
     return child;
@@ -403,15 +417,16 @@ export class ProcRegistry {
     pid: number,
     cmd: string,
     args: string[],
-    control: Omit<Entry, 'record'>,
+    control: Omit<Entry, 'record' | 'identity'>,
   ): ProcessRecord {
+    const nativeStartedAt = this.platform.startedAt(pid);
     const record: ProcessRecord = {
       pid,
       parentPid: process.pid,
       threadId,
       exe: cmd,
       commandLine: [cmd, ...args].join(' '),
-      startedAt: Date.now(),
+      startedAt: nativeStartedAt ?? Date.now(),
       exitedAt: null,
       exitCode: null,
       cpuMs: null,
@@ -428,11 +443,11 @@ export class ProcRegistry {
       timer.unref();
       this.startups.set(threadId, { pid, timer });
     }
-    this.track(threadId, record, control);
+    this.track(threadId, record, control, { startedAt: nativeStartedAt, incarnation: null });
     return record;
   }
 
-  private track(threadId: ThreadId, record: ProcessRecord, control: Omit<Entry, 'record'>): void {
+  private track(threadId: ThreadId, record: ProcessRecord, control: Omit<Entry, 'record' | 'identity'>, identity: ProcessIdentity): void {
     const forgetting = this.forgetTimers.get(threadId);
     if (forgetting !== undefined) {
       clearTimeout(forgetting);
@@ -443,17 +458,19 @@ export class ProcRegistry {
       byPid = new Map();
       this.live.set(threadId, byPid);
     }
-    byPid.set(record.pid, { record, ...control });
+    byPid.set(record.pid, { record, identity, ...control });
     // Both spawn paths and the job's own grandchild events land here, so this is
     // the one place the guard learns a pid whose windows it has to push back.
     this.platform.pidAdded(threadId, record.pid);
 
     let seen = this.known.get(threadId);
     if (seen === undefined) {
-      seen = new Set();
+      seen = new Map();
       this.known.set(threadId, seen);
     }
-    seen.add(record.pid);
+    const incarnations = seen.get(record.pid)?.incarnations ?? new Set<string>();
+    if (identity.incarnation !== null) incarnations.add(identity.incarnation);
+    seen.set(record.pid, { identity, incarnations, recordedAt: record.startedAt });
 
     // The trace row only: a copy in the event log would be read by nothing.
     this.journal.putProcess(record);
@@ -462,10 +479,26 @@ export class ProcRegistry {
 
   /** A process the job reported that this registry never spawned: a grandchild. */
   private onJobStarted(threadId: ThreadId, pid: number, info: NativeProcessInfo): void {
-    // A short child can be gone from `live` before its job event is handled, so
-    // the guard is on what was ever registered, never on what is still running.
-    if (this.known.get(threadId)?.has(pid) === true) return;
     if (this.journal.isClosed()) return;
+    const identity = { startedAt: info.startedAt ?? null, incarnation: info.incarnation ?? null };
+    const previous = this.known.get(threadId)?.get(pid);
+    if (previous !== undefined && !unseenIdentity(identity, previous)) {
+      // A direct spawn initially knows only its creation timestamp. Enrich its
+      // identity when its corresponding native start arrives, without tracing twice.
+      if (previous.identity.incarnation === null && identity.incarnation !== null
+        && identity.startedAt !== null && identity.startedAt === previous.identity.startedAt) {
+        previous.identity.incarnation = identity.incarnation;
+        previous.incarnations.add(identity.incarnation);
+      }
+      return;
+    }
+    const replaced = this.live.get(threadId)?.get(pid);
+    if (replaced !== undefined) {
+      this.onExit(threadId, pid, null, { exitCode: null, cpuMs: null, peakMemoryBytes: null, ioBytes: null, ...replaced.identity }, replaced.record);
+    }
+    // SQLite's trace key includes startedAt. Exact native identities can differ
+    // within one millisecond, so retain separate rows even when their ms clocks agree.
+    const startedAt = Math.max(identity.startedAt ?? Date.now(), (previous?.recordedAt ?? -Infinity) + 1);
     this.track(
       threadId,
       {
@@ -474,7 +507,7 @@ export class ProcRegistry {
         threadId,
         exe: info.exe,
         commandLine: info.commandLine,
-        startedAt: Date.now(),
+        startedAt,
         exitedAt: null,
         exitCode: null,
         cpuMs: null,
@@ -487,6 +520,7 @@ export class ProcRegistry {
         kill: () => undefined,
         usage: () => null,
       },
+      identity,
     );
   }
 
@@ -618,7 +652,8 @@ export class ProcRegistry {
       stopped.push(record.pid);
       this.bus.emit('core.log', {
         level: 'info',
-        message: `thread ${threadId}: pid ${record.pid} (${baseName(record.exe)}) was left running with no parent and was stopped`,
+        message: `pid ${record.pid} was left running with no parent and was stopped`,
+        source: 'process', event: 'process.orphan-stopped', threadId,
         at: Date.now(),
       });
     }
@@ -654,15 +689,24 @@ export class ProcRegistry {
     this.sweepTimers.delete(threadId);
   }
 
-  private onExit(threadId: ThreadId, pid: number, code: number | null, fromJob?: NativeProcessExit): void {
-    if (this.startups.get(threadId)?.pid === pid) this.finishStartup(threadId);
+  private onExit(threadId: ThreadId, pid: number, code: number | null, fromJob?: NativeProcessExit, expected?: ProcessRecord): void {
     const entry = this.live.get(threadId)?.get(pid);
     if (entry === undefined) return;
+    if (expected !== undefined && entry.record !== expected) return;
+    if (fromJob !== undefined) {
+      if (fromJob.incarnation != null && entry.identity.incarnation !== null
+        && fromJob.incarnation !== entry.identity.incarnation) return;
+      if (fromJob.startedAt != null && entry.identity.startedAt !== null
+        && fromJob.startedAt !== entry.identity.startedAt) return;
+      // A pid-only exit cannot prove it belongs to a captured native incarnation.
+      if (fromJob.incarnation == null && fromJob.startedAt == null && entry.identity.incarnation !== null) return;
+    }
+    if (this.startups.get(threadId)?.pid === pid) this.finishStartup(threadId);
     // Node's exit has no usage. Let the completion-port event carry it, while
     // retaining a bounded fallback if the worker missed a short-lived process.
     if (fromJob === undefined && !this.unassigned.has(pid) && this.capability().mode === 'events'
       && !this.exitTimers.has(pid)) {
-      const timer = setTimeout(() => this.onExit(threadId, pid, code), 1000);
+      const timer = setTimeout(() => this.onExit(threadId, pid, code, undefined, entry.record), 1000);
       timer.unref();
       this.exitTimers.set(pid, timer);
       return;
@@ -772,8 +816,13 @@ function killBunChild(proc: Bun.Subprocess): Promise<void> | undefined {
   return undefined;
 }
 
-function baseName(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path;
+function unseenIdentity(next: ProcessIdentity, previous: KnownProcess): boolean {
+  if (next.incarnation !== null && previous.identity.incarnation !== null) {
+    return !previous.incarnations.has(next.incarnation);
+  }
+  // An unknown event is kept conservative: today's occupant cannot identify
+  // an earlier event for a short-lived process that has already exited.
+  return next.startedAt !== null && previous.identity.startedAt !== null && next.startedAt > previous.identity.startedAt;
 }
 
 function worthPushing(previous: ThreadLoad | undefined, next: ThreadLoad): boolean {
