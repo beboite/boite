@@ -607,6 +607,8 @@ ease-out curve, re-reading the bottom on every frame; reduced motion jumps.
 On the wide layout the conversation keeps its scrollbar's room from the first
 message, so the column does not move when a reply first overflows.
 `tests/e2e/chat-scroll.test.ts` checks the follow, the wheel and the glide.
+Sending a prompt leaves 12% of the timeline height above it, bounded to 48-96 px.
+The response replaces the space reserved below it; resizing keeps both in sync.
 
 In forced colors (Windows high contrast) the browser drops the shadows and
 border tints the UI uses to mark focus. `app.css` then gives every

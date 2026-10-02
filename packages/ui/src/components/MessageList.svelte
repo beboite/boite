@@ -214,6 +214,7 @@
   onDestroy(stopLift);
   const activePrompt = $derived.by(() => {
     void measured;
+    if (!pinned && promptTarget && timeline.some(message => message.id === promptTarget)) return promptTarget;
     const total = totals(timeline);
     const at = pinned ? timeline.length - 1 : atOrBefore(total, timeline.length, scrollTop + 24);
     for (let index = Math.min(at, timeline.length - 1); index >= 0; index--) {
@@ -260,7 +261,13 @@
     return slots.totals(list, timelineOrder);
   }
 
-  // Keep one screen below the sent prompt. Real response height replaces the
+  const promptInset = $derived(Math.min(96, Math.max(48, viewHeight * 0.12)));
+  const promptLead = $derived.by(() => {
+    void measured;
+    const before = reservePrompt ? totals(timeline)[timeline.findIndex(message => message.id === reservePrompt)] ?? 0 : Infinity;
+    return Math.max(0, promptInset - 20 - before);
+  });
+  // Keep the remaining screen below the sent prompt. Real response height replaces the
   // reserved space, including in a virtualized conversation, without moving it.
   const promptRoom = $derived.by(() => {
     void measured;
@@ -269,7 +276,7 @@
     if (at < 0) return 0;
     const total = totals(timeline);
     const content = (total[timeline.length] ?? 0) - (total[at] ?? 0) - GAP;
-    return Math.max(0, viewHeight - 40 - dockRoom.height - content);
+    return Math.max(0, viewHeight - promptInset - 20 - dockRoom.height - content);
   });
 
   function promptTop(id: string): number {
@@ -277,9 +284,10 @@
     const node = [...box.querySelectorAll<HTMLElement>('[data-mid]')].find(node => node.dataset.mid === id);
     if (node) {
       node.style.animation = 'none';
-      return box.scrollTop + node.getBoundingClientRect().top - box.getBoundingClientRect().top - 20;
+      return box.scrollTop + node.getBoundingClientRect().top - box.getBoundingClientRect().top - promptInset;
     }
-    return totals(timeline)[timeline.findIndex(message => message.id === id)] ?? box.scrollTop;
+    const top = totals(timeline)[timeline.findIndex(message => message.id === id)];
+    return top === undefined ? box.scrollTop : top + 20 + promptLead - promptInset;
   }
 
   $effect(() => {
@@ -752,7 +760,7 @@
     hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = 0; pinned = false; pullOlder(viewport); } }} />
   <!-- Input releases restored and navigation anchors; programmatic corrections keep them. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="timeline" bind:this={viewport} use:watchWheel={onwheel} {onscroll} ontouchstart={press} onpointerdown={press} onkeydown={releaseNavigation} style:overflow-anchor={timeline.at(-1)?.state === 'streaming' ? 'none' : undefined} data-testid="timeline">
+  <div class="timeline" bind:this={viewport} use:watchWheel={onwheel} {onscroll} ontouchstart={press} onpointerdown={press} onkeydown={releaseNavigation} style:padding-top="{20 + promptLead}px" style:overflow-anchor={timeline.at(-1)?.state === 'streaming' ? 'none' : undefined} data-testid="timeline">
     <div class="column">
       <!-- paging: the one line the top of the list shows while a page is in flight. -->
       {#if store.loadingOlder}
