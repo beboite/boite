@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { Check, Download, FileText, Image, Film, Music2, Maximize2, RefreshCw, X } from '@lucide/svelte';
-  import { FILE_TICKET_TTL_MS, type MessagePart } from '@boite/contracts';
+  import { ATTACHMENT_MAX_BYTES, FILE_TICKET_TTL_MS, type MessagePart } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { experimentOn } from '../lib/experiments.svelte';
   import { fill, strings } from '../lib/strings';
@@ -23,6 +23,7 @@
   let expanded = $state(false);
   let opening = $state(false);
   let viewing = $state(false);
+  let imageRequested = $state(false);
   /** Where the shell saved the file, shown in place of its size. */
   let saved = $state('');
   let saving = $state(false);
@@ -41,7 +42,8 @@
   const pdf = $derived(mime === 'application/pdf');
   const audio = $derived(mime.startsWith('audio/'));
   const video = $derived(mime.startsWith('video/'));
-  const inlineMedia = $derived(!!file && (image || video || audio));
+  const deferredImage = $derived(image && size > ATTACHMENT_MAX_BYTES && !imageRequested);
+  const inlineMedia = $derived(!!file && ((image && !deferredImage) || video || audio));
   const showPreview = $derived(inlineMedia || (expanded && rich));
   const previewable = $derived(text !== null || image || (pdf && !!file) || audio || video);
 
@@ -75,7 +77,7 @@
   async function launch(): Promise<void> {
     if (directory && !image) return open();
     if (!url) return;
-    if (image) { viewing = true; return; }
+    if (image) { imageRequested = true; viewing = true; return; }
     if (await save(true)) return;
     if (file) {
       if (file.type === 'artifact') await loadArtifact();
@@ -188,7 +190,8 @@
     </button>
     {#if directory}<button class="ghost small" type="button" onclick={open} disabled={opening} data-testid="artifact-open">{strings.artifacts.open}</button>{/if}
     {#if url}
-      {#if rich && previewable && !inlineMedia}<button class="ghost small" type="button" onclick={() => expanded = !expanded} aria-expanded={expanded} data-testid="artifact-preview">{strings.artifacts.preview}</button>{/if}
+      {#if deferredImage}<button class="ghost small" type="button" onclick={() => imageRequested = true} data-testid="artifact-load-image">{strings.artifacts.loadImage}</button>
+      {:else if rich && previewable && !inlineMedia}<button class="ghost small" type="button" onclick={() => expanded = !expanded} aria-expanded={expanded} data-testid="artifact-preview">{strings.artifacts.preview}</button>{/if}
       <a class="ghost small download" href={url} download={name} onclick={download} data-testid="artifact-download" aria-label={strings.artifacts.download} aria-disabled={saving} title={strings.artifacts.download}>{#if saved}<Check size={16} />{:else}<Download size={16} />{/if}</a>
     {/if}
     {#if onclose}<button class="ghost small icon" type="button" onclick={onclose} aria-label={strings.artifacts.close}><X size={16} /></button>{/if}
