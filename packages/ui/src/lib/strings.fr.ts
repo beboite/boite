@@ -770,7 +770,6 @@ export const fr: Translation = {
     providerSignal: 'Signal du fournisseur il y a {time}',
     lastActivity: 'Dernière activité il y a {time}',
     noActivity: 'Aucune nouvelle activité depuis {time}',
-    activityTrace: 'Voir la trace',
     newMessage: '1 nouveau message',
     newMessages: '{count} nouveaux messages',
     findPlaceholder: 'Chercher dans la conversation',

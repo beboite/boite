@@ -69,20 +69,17 @@ test('a running turn shows no finish time and no stop for its background work', 
   expect(document.querySelector('[data-testid=turn-background-stop]')).toBeNull();
 });
 
-test('a silent running phase shows the last real activity age and a usable trace action', () => {
+test('a silent running phase shows the last real activity age without a trace action', () => {
   const now = Date.now();
-  let traced = 0;
   running = mount(TurnSummary, { target: document.body, props: {
     turn: turn({ status: 'running', startedAt: now - 120_000, finishedAt: null, usage: null }),
     progress: { turnId: 'turn-1', phase: 'retrying', detail: '2/5', at: now - 75_000 },
     activeTool: true,
-    trace: () => { traced += 1; }
   } });
   flushSync();
   expect(text('turn-progress')).toBe('Retrying request: 2/5');
   expect(text('turn-last-activity')).toBe('No new activity for 1m 15s');
-  document.querySelector<HTMLButtonElement>('[data-testid=turn-activity-trace]')!.click();
-  expect(traced).toBe(1);
+  expect(document.querySelector('[data-testid=turn-summary] button')).toBeNull();
 });
 
 test.each(['old-turn', null])('an older turn or old core (%s) supplies no inferred activity', id => {
