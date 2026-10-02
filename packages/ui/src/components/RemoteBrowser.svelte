@@ -10,7 +10,10 @@
   import { mobileOverlay } from '../lib/mobile-history';
   let { store, threadId, surface = false }: { store: Store; threadId: string; surface?: boolean } = $props();
   let shown = $state(untrack(() => surface)), paused = $state(false), busy = $state(false), error = $state(''), text = $state('');
-  let frame = $state<RemoteBrowserFrame | null>(null), dialog = $state<HTMLDialogElement>(), picture = $state<HTMLImageElement>();
+  let frame = $state.raw<RemoteBrowserFrame | null>(null), dialog = $state<HTMLDialogElement>(), picture = $state<HTMLImageElement>();
+  // Core timestamps use another device's clock. Retain local age for each frame,
+  // including one held by an in-progress pointer gesture.
+  const receivedAt = new WeakMap<RemoteBrowserFrame, number>();
   let alive = true, generation = 0, timer: ReturnType<typeof setTimeout> | undefined;
   let pending = false, requestedAt = 0;
   let pointer: { x: number; y: number; frame: RemoteBrowserFrame; client: Store['client'] } | undefined;
@@ -33,7 +36,7 @@
       if (!client || client.state !== 'ready') throw new Error(strings.remoteBrowser.reconnecting);
       const next = await client.call('browser.remoteFrame', { threadId });
       if (!alive || run !== generation) return;
-      if (client === store.client) { frameClient = client; frame = next; error = ''; }
+      if (client === store.client) { receivedAt.set(next, performance.now()); frameClient = client; frame = next; error = ''; }
       else { frame = null; frameClient = null; error = strings.remoteBrowser.reconnecting; }
     } catch (cause) {
       if (alive && run === generation) {
@@ -69,7 +72,7 @@
   });
   async function input(value: RemoteBrowserInput, target = frame): Promise<void> {
     const client = store.client;
-    if (!client || frameClient !== client || !target || !usable || Date.now() - target.at > 5000) return;
+    if (!client || frameClient !== client || !target || !usable || performance.now() - (receivedAt.get(target) ?? -Infinity) > 5000) return;
     const resizing = value.kind === 'viewport' || value.kind === 'reset-viewport';
     if (resizing) { stop(); displaySettings = false; pointer = undefined; }
     const run = generation;
