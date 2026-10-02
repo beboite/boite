@@ -156,12 +156,12 @@ export class MuseSession {
    * `turn/steer` names the turn it means: a host whose turn already ended
    * refuses it, and the text waits for the next turn instead of starting one.
    */
-  async steer(turn: MuseTurn, text: string): Promise<boolean> {
+  async steer(turn: MuseTurn, text: string, onAccepted?: () => void): Promise<boolean> {
     const rpc = this.rpc;
     const sessionId = this.sessionId;
     if (rpc === null || sessionId === null || this.current !== turn || turn.turnId === null || turn.isStopped || turn.compacting) return false;
     try {
-      await rpc.command('turn/steer', { sessionId, expectedTurnId: turn.turnId, input: inputOf(text, []) });
+      await rpc.command('turn/steer', { sessionId, expectedTurnId: turn.turnId, input: inputOf(text, []) }, onAccepted);
       return true;
     } catch (error) {
       if (error instanceof MspError) return false;

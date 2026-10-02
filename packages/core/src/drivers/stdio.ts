@@ -6,10 +6,12 @@ import { LineSplitter, STDOUT_LINE_MAX } from './lines.ts';
 export interface StdioRequestOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
+  onAccepted?(): void;
 }
 
 interface Pending {
   method: string;
+  onAccepted?(): void;
   resolve(value: unknown): void;
   reject(error: Error): void;
   cleanup(): void;
@@ -53,7 +55,7 @@ export class StdioTransport<Id extends string | number> {
       let timer: ReturnType<typeof setTimeout> | undefined;
       const cancel = () => this.take(id)?.reject(new Error(`${this.label}: request cancelled`));
       this.pending.set(id, {
-        method, resolve: resolve as (value: unknown) => void, reject,
+        method, onAccepted: options.onAccepted, resolve: resolve as (value: unknown) => void, reject,
         cleanup: () => { clearTimeout(timer); options.signal?.removeEventListener('abort', cancel); },
       });
       options.signal?.addEventListener('abort', cancel, { once: true });

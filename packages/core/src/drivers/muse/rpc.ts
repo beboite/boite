@@ -102,8 +102,8 @@ export class MuseRpc {
   }
 
   /** A command: a request whose params carry a fresh `commandId`. */
-  command<T>(method: string, params: Record<string, unknown>): Promise<T> {
-    return this.request<T>(method, { commandId: mintUuidV7(), ...params });
+  command<T>(method: string, params: Record<string, unknown>, onAccepted?: () => void): Promise<T> {
+    return this.request<T>(method, { commandId: mintUuidV7(), ...params }, { onAccepted });
   }
 
   notify(method: string, params: unknown): void {
@@ -145,7 +145,13 @@ export class MuseRpc {
       entry.reject(mspErrorOf(entry.method, error));
       return;
     }
-    entry.resolve(message['result']);
+    try {
+      // Promise continuations run after every notification in this pipe chunk.
+      entry.onAccepted?.();
+      entry.resolve(message['result']);
+    } catch (error) {
+      entry.reject(error instanceof Error ? error : new Error(String(error)));
+    }
   }
 }
 
