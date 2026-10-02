@@ -21,6 +21,65 @@ async function capture(name: string) {
   await page.screenshot(join(process.env.BOITE_CAPTURE_DIR ?? join(import.meta.dir, '.artifacts'), name));
 }
 
+test('limits identify the owning machine in the desktop glance and desktop and phone pages', async () => {
+  for (const width of [1280, 390]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: width === 390 });
+    await page.navigate(`${origin}/?fake=1&open=recent&machines=1`);
+    await page.waitFor('globalThis.__boiteTest?.workspace.machines.length === 2');
+    await page.evaluate(`(async () => {
+      const workspace = globalThis.__boiteTest.workspace;
+      const local = workspace.machines[0].store;
+      const remote = workspace.machines[1];
+      local.localCore = true;
+      globalThis.quotaScopeCalls = [];
+      for (const machine of workspace.machines) {
+        const call = machine.store.client.call.bind(machine.store.client);
+        machine.store.client.call = (method, params) => {
+          if (method === 'quotas.list') globalThis.quotaScopeCalls.push(machine.id);
+          return call(method, params);
+        };
+      }
+      await workspace.select(remote.store, 't-trace');
+    })()`);
+    const scope = '[data-testid="quota-machine-scope"]';
+    if (width === 1280) await page.click('[data-testid="nav-limits"]');
+    else {
+      await page.click('[data-testid="nav-settings"]');
+      await page.click('[data-testid="settings-tab-limits"]');
+    }
+    await page.waitFor(`document.querySelector('${scope}')?.dataset.remote === 'true'`);
+    expect((await page.text(scope)).trim()).toBe('Account limits for Builder');
+    // Machine context replaces the heading instead of repeating it below.
+    expect(await page.evaluate(`document.querySelectorAll('${scope}').length === 1 && !!document.querySelector('${scope}')?.closest('h1, h2')?.getClientRects().length`)).toBe(true);
+    const refresh = width === 1280 ? 'limits-glance-refresh' : 'limits-refresh';
+    await page.click(`[data-testid="${refresh}"]`);
+    await page.waitFor(`document.querySelector('[data-testid="${refresh}"]')?.getAttribute('aria-busy') === 'false'`);
+    expect(await page.evaluate('globalThis.quotaScopeCalls.every(id => id === "http://builder.test") && globalThis.quotaScopeCalls.length > 0')).toBe(true);
+    if (width === 1280) {
+      await capture(`quota-remote-glance-${width}.png`);
+      await page.click('[data-testid="limits-glance-page"]');
+    }
+    await page.waitFor(`document.querySelector('[data-testid="limits-page"]')`);
+    const heading = width === 1280 ? '[data-testid="limits-page"] h1' : '[data-testid="settings"] > header h1';
+    expect((await page.text(heading)).trim()).toBe('Account limits for Builder');
+    expect(await page.evaluate(`document.querySelector('${heading}')?.getClientRects().length > 0`)).toBe(true);
+    // A renamed machine remains identifiable even on a narrow phone.
+    await page.evaluate(`globalThis.__boiteTest.workspace.customize('http://builder.test', 'Build server for shared development projects')`);
+    await page.waitFor(`document.querySelector('${scope}')?.textContent.includes('Build server for shared development projects')`);
+    expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    await capture(`quota-remote-page-${width}.png`);
+    await page.evaluate(`(async () => {
+      const workspace = globalThis.__boiteTest.workspace;
+      await workspace.select(workspace.machines[0].store);
+      workspace.active.showSettings('limits');
+    })()`);
+    await page.waitFor(`document.querySelector('${scope}')?.dataset.remote === 'false'`);
+    expect(await page.text(scope)).not.toContain('Build server');
+    expect(page.errors()).toEqual([]);
+    await page.evaluate(`localStorage.removeItem('boite.machine-profiles')`);
+  }
+}, 60_000);
+
 for (const view of ['tray', 'desktop', 'phone', 'sidebar']) {
   test(`${view} restores each quota bar as its account answers`, async () => {
     // Windows runners may request reduced motion at the OS level.
@@ -228,7 +287,10 @@ test('the same popup shares priorities across the app, tray and phone through th
     expect(await orderedNames(tray)).toEqual(names);
     const panel = '[data-testid="quota-panel"]';
     for (const browser of [page, tray]) {
-      expect(await browser.evaluate(`document.querySelector('${panel} h2').textContent`)).toBe('Account limits');
+      const heading = (await browser.text(`${panel} h2`)).trim();
+      if (browser === tray) expect(heading).toBe('Account limits');
+      else expect(heading).toMatch(/^Account limits for /);
+      expect(await browser.evaluate(`document.querySelectorAll('[data-testid="quota-machine-scope"]').length`)).toBe(browser === tray ? 0 : 1);
       expect(await browser.evaluate(`document.querySelector('${panel} footer button').textContent`)).toBe('Limits page');
       expect(await browser.evaluate(`document.querySelector('[data-account-id="${accounts[1]!.id}"] .paid').textContent`)).toContain('Using credits');
       expect(await browser.evaluate(`getComputedStyle(document.querySelector('[data-account-id="${accounts[0]!.id}"] .track')).height`)).toBe('7px');
@@ -271,13 +333,18 @@ test('the same popup shares priorities across the app, tray and phone through th
     // A constrained viewport still allows dragging from the bottom to the top while scrolling.
     await tray.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 300, deviceScaleFactor: 1, mobile: false });
     await tray.waitFor(`document.querySelector('${panel} .body').clientHeight < 220`);
-    const scrollDrag = await tray.evaluate<{ from: { x: number; y: number }; to: { x: number; y: number } }>(`(() => {
+    // The settings event can update the order before the previous save enables the grips.
+    await tray.waitFor(`document.querySelector('[data-account-id="${accounts[4]!.id}"] [data-testid="quota-reorder"]')?.disabled === false`);
+    const scrollDrag = await tray.evaluate<{ from: { x: number; y: number }; to: { x: number; y: number } }>(`(async () => {
       const body = document.querySelector('${panel} .body');
       body.scrollTop = body.scrollHeight;
+      // Let the viewport resize and scroll reach paint before CDP hit-tests the pointer.
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const grip = document.querySelector('[data-account-id="${accounts[4]!.id}"] [data-testid="quota-reorder"]').getBoundingClientRect();
       const box = body.getBoundingClientRect();
       return { from: { x: grip.x + grip.width / 2, y: grip.y + grip.height / 2 }, to: { x: grip.x + grip.width / 2, y: box.top + 12 } };
     })()`);
+    expect(await tray.evaluate(`document.elementFromPoint(${scrollDrag.from.x}, ${scrollDrag.from.y})?.closest('[data-testid="quota-reorder"]')?.closest('[data-account-id]')?.dataset.accountId === '${accounts[4]!.id}'`)).toBe(true);
     await tray.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...scrollDrag.from });
     await tray.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...scrollDrag.from, button: 'left', buttons: 1, clickCount: 1 });
     await tray.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...scrollDrag.to, buttons: 1 });

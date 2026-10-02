@@ -534,6 +534,12 @@ output text and stderr do not. Answered questions expand read-only. Turn receipt
 mean core acceptance and first assistant activity, not a protocol read receipt.
 Animations pause when hidden and respect reduced motion.
 
+Received agent mail appears on the right with the user accent; sent agent mail
+appears on the left with a neutral surface. Owner prompts keep the user style.
+The letter's creation time shows its age in the app's language, updates every
+minute while visible and exposes the exact date and time on hover.
+`tests/e2e/collaboration-ui.test.ts` checks desktop and phone in both themes.
+
 ### Theme colours
 
 Appearance stores light and dark palettes separately under

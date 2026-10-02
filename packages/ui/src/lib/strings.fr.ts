@@ -1744,6 +1744,7 @@ export const fr: Translation = {
   },
 
   quotas: {
+    machineAccounts: 'Limites des comptes de {machine}',
     usingCredits: 'Crédits utilisés',
     reorder: 'Réordonner {name}. Glissez ou utilisez les flèches du clavier.',
     bankedReset: '{count} reset en réserve',

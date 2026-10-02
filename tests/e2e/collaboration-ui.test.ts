@@ -36,12 +36,19 @@ beforeAll(async () => {
       threadId: 't-bench', to: { coreId: localIdentity.coreId, threadId: 't-trace' },
       text: 'Wait before restart. The deployment is still using the build machine.', requestId: 'incoming-deployment'
     });
-    await local.call('collaboration.send', {
+    const outgoing = await local.call('collaboration.send', {
       threadId: 't-trace', to: { coreId: remoteIdentity.coreId, threadId: 't-bench' },
       text: 'Restart postponed until deployment confirms it is clear.', replyTo: incoming.id, requestId: 'outgoing-reply'
     });
+    // An owner-authored delegation prompt stays on the user side even when it is outgoing.
+    const delegation = await local.call('delegation.get', { threadId: 't-trace' });
+    workspace.active.delegation = { ...delegation, messages: [{
+      ...outgoing, id: 'user-delegation', origin: 'user', text: 'Please check deployment.',
+      createdAt: Date.now() - 120_000,
+      from: { ...outgoing.from, coreId: 'local' }, to: { ...outgoing.to, coreId: 'local' }
+    }] };
   })()`);
-  await page.waitFor(`document.querySelectorAll('[data-testid="forwarded-agent-message"]').length === 2`);
+  await page.waitFor(`document.querySelectorAll('[data-testid="forwarded-agent-message"]').length === 3`);
   await page.waitFor(`document.querySelector('[data-testid="thread-menu-trigger"]')`);
 }, 60_000);
 
@@ -57,19 +64,52 @@ test('forwarded agent messages sit in the conversation at desktop and phone widt
     const bubbles = await page.evaluate<any>(`(() => {
       const incoming = document.querySelector('[data-letter-id="incoming-deployment"]');
       const outgoing = document.querySelector('[data-letter-id="outgoing-reply"]');
+      const user = document.querySelector('[data-letter-id="user-delegation"]');
+      const prompt = document.querySelector('[data-role="user"] .bubble');
       return { incoming: incoming.textContent, outgoing: outgoing.textContent,
+        user: user.textContent, userDirection: user.dataset.direction,
         incomingLeft: incoming.getBoundingClientRect().left, outgoingLeft: outgoing.getBoundingClientRect().left,
         incomingRight: incoming.getBoundingClientRect().right, outgoingRight: outgoing.getBoundingClientRect().right,
-        incomingColor: getComputedStyle(incoming).backgroundColor, outgoingColor: getComputedStyle(outgoing).backgroundColor };
+        userLeft: user.getBoundingClientRect().left, userRight: user.getBoundingClientRect().right,
+        incomingColor: getComputedStyle(incoming).backgroundColor, outgoingColor: getComputedStyle(outgoing).backgroundColor,
+        userColor: getComputedStyle(user).backgroundColor, promptColor: getComputedStyle(prompt).backgroundColor };
     })()`);
     expect(bubbles.incoming).toContain('Received from');
     expect(bubbles.outgoing).toContain('Your agent sent to');
     expect(bubbles.outgoing).toContain('Deployment agent');
-    expect(bubbles.outgoingLeft).toBeGreaterThan(bubbles.incomingLeft);
-    expect(bubbles.outgoingRight).toBeGreaterThan(bubbles.incomingRight);
+    expect(bubbles.incomingLeft).toBeGreaterThan(bubbles.outgoingLeft);
+    expect(bubbles.incomingRight).toBeGreaterThan(bubbles.outgoingRight);
+    expect(bubbles.incomingColor).toBe(bubbles.promptColor);
     expect(bubbles.outgoingColor).not.toBe(bubbles.incomingColor);
+    expect(bubbles.user).toContain('You sent to');
+    expect(bubbles.userDirection).toBe('outgoing');
+    expect(bubbles.userLeft).toBeGreaterThan(bubbles.outgoingLeft);
+    expect(bubbles.userRight).toBe(bubbles.incomingRight);
+    expect(bubbles.userColor).toBe(bubbles.promptColor);
+  };
+  const checkTimestamps = async (userAge: string) => {
+    const stamps = await page.evaluate<any[]>(`Array.from(document.querySelectorAll('[data-testid="forwarded-agent-message"]'), card => {
+      const stamp = card.querySelector('[data-testid="agent-letter-age"]');
+      const bounds = card.getBoundingClientRect();
+      const age = stamp.getBoundingClientRect();
+      const source = card.querySelector('[data-testid="agent-letter-open"]').getBoundingClientRect();
+      return { id: card.dataset.letterId, text: stamp.textContent, date: stamp.dateTime, title: stamp.title,
+        top: age.top - bounds.top, right: bounds.right - age.right, gap: age.left - source.right };
+    })`);
+    expect(stamps).toHaveLength(3);
+    for (const stamp of stamps) {
+      expect(Number.isFinite(Date.parse(stamp.date))).toBe(true);
+      expect(stamp.title.length).toBeGreaterThan(0);
+      expect(stamp.top).toBeGreaterThan(0);
+      expect(stamp.top).toBeLessThan(20);
+      expect(stamp.right).toBeGreaterThan(0);
+      expect(stamp.right).toBeLessThan(20);
+      expect(stamp.gap).toBeGreaterThanOrEqual(10);
+    }
+    expect(stamps.find(stamp => stamp.id === 'user-delegation')?.text.replace(/\s/g, ' ')).toBe(userAge);
   };
   await checkDirection();
+  await checkTimestamps('2 min. ago');
   expect(await page.evaluate(`document.querySelector('[data-testid="timeline"]')?.textContent ?? ''`)).not.toContain('Boite agent coordination');
   expect(await page.evaluate(`document.querySelector('[data-testid="coordination-panel"]') === null`)).toBe(true);
   await page.evaluate(`document.querySelector('[data-letter-id="incoming-deployment"]').scrollIntoView({ block: 'center' })`);
@@ -77,11 +117,24 @@ test('forwarded agent messages sit in the conversation at desktop and phone widt
   await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-desktop.png'));
 
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  await page.evaluate(`document.querySelector('[data-letter-id="incoming-deployment"]').scrollIntoView({ block: 'center' })`);
+  await page.evaluate(`document.querySelector('[data-letter-id="user-delegation"]').scrollIntoView({ block: 'end' })`);
   await settled();
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
   await checkDirection();
+  await checkTimestamps('2 min. ago');
   await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-phone.png'));
+
+  await page.evaluate(`window.__boiteTest.setTheme('light')`);
+  await settled();
+  await checkDirection();
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-phone-light.png'));
+
+  await page.evaluate(`import('/src/lib/i18n.svelte.ts').then(module => module.setLocaleSetting('fr'))`);
+  await settled();
+  await checkTimestamps('il y a 2 min');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-phone-fr.png'));
+  await page.evaluate(`import('/src/lib/i18n.svelte.ts').then(module => module.setLocaleSetting('en'))`);
 
   // The same title menu exposes settings on phones and desktops.
   await page.click('[data-testid="thread-menu-trigger"]');

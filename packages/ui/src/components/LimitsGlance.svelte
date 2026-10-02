@@ -7,6 +7,7 @@
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
   import QuotaPopup from './QuotaPopup.svelte';
+  import QuotaMachineScope from './QuotaMachineScope.svelte';
 
   /**
    * The sidebar's gauge: the tray's glance at every account's subscription
@@ -78,7 +79,9 @@
     use:popover.attach onanimationend={popover.end} use:floating={{ anchor: () => trigger ?? null, dismiss: close, cap: 460 }}>
     <QuotaPopup {rows} loading={reader.loading} completed={reader.completed} error={failed} owner={store.owner}
       order={store.settings?.quotaOrder ?? []} reorder={(quotaOrder) => store.saveSettings({ quotaOrder })}
-      refresh={() => read(true)} connect={() => page('accounts')} settings={() => page('limits')} {close} testPrefix="limits-glance" />
+      refresh={() => read(true)} connect={() => page('accounts')} settings={() => page('limits')} {close} testPrefix="limits-glance">
+      {#snippet title()}<QuotaMachineScope {store} />{/snippet}
+    </QuotaPopup>
   </div>
 {/if}
 
