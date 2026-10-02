@@ -1,13 +1,14 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { MediaQuery } from 'svelte/reactivity';
   import WindowList from './WindowList.svelte';
-  import WhipButton from './WhipButton.svelte';
-  import { Activity, ArrowLeft, Bot, ChevronDown, Ellipsis, MessageSquare, PencilLine, Pin, Plus, Search, Settings } from '@lucide/svelte';
+  import MobileMenu from './MobileMenu.svelte';
+  import ThreadHeader from './ThreadHeader.svelte';
+  import { Activity, ArrowLeft, ChevronDown, Ellipsis, FolderCog, MessageSquare, Monitor, PencilLine, Pin, Plus, Search, X } from '@lucide/svelte';
+  import { MediaQuery } from 'svelte/reactivity';
+  import MobileConnect from './MobileConnect.svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
-  import { experimentOn } from '../lib/experiments.svelte';
   import { agentLabel, projectName } from '../lib/format';
   import { hasUnsentDraft } from '../lib/composer-queue';
   import { mobileOverlay } from '../lib/mobile-history';
@@ -23,8 +24,11 @@
   import { projectKey, projectView } from '../lib/project-view.svelte';
   import { compareThreads } from '../lib/thread-order';
 
-  let { store, screen = $bindable('chat') }: { store: Store; screen: 'chat' | 'threads' | 'activity' } = $props();
-  const mobile = new MediaQuery('(max-width: 720px)');
+  let { store, recover = false, screen = $bindable('chat') }: { store: Store; recover?: boolean; screen: 'chat' | 'threads' | 'activity' } = $props();
+  const narrow = new MediaQuery('(max-width: 720px)');
+  let search = $state('');
+  const query = $derived(search.trim().toLocaleLowerCase());
+  const chatting = $derived(screen === 'chat' && !recover && store.page === 'chat');
   let scrollRoot = $state<HTMLElement>();
   const scrollPositions = new Map<string, number>();
   const measuredRows = new Map<string, Map<string, number>>();
@@ -33,7 +37,7 @@
     return measuredRows.get(key)!;
   }
   const listKey = $derived(`${screen}:${workspace.view}:${projectView.filter}`);
-  $effect(() => { if (mobile.current && scrollRoot) { const saved = scrollPositions.get(listKey) ?? 0; void tick().then(() => { if (scrollRoot) scrollRoot.scrollTop = saved; }); } });
+  $effect(() => { if (narrow.current && scrollRoot) { const saved = scrollPositions.get(listKey) ?? 0; void tick().then(() => { if (scrollRoot) scrollRoot.scrollTop = saved; }); } });
   /** The clock the rows' times read, a minute's precision is all they show. */
   let now = $state(Date.now());
   $effect(() => {
@@ -42,9 +46,8 @@
   });
   let machines = $derived(workspace.machines.length ? workspace.machines : [{ id: 'local', label: strings.machines.local, store }]);
   let machine = $derived(machines.find(m => m.store === store));
-  /** With one machine its name says nothing, and a working connection needs no word either. */
   let several = $derived(machines.length > 1);
-  let place = $derived([several ? machine?.label : null, store.connection === 'ready' ? null : strings.connection[store.connection]].filter(Boolean).join(' · '));
+  let place = $derived(store.pairingRequired ? strings.mobile.pairingRequired : store.connection === 'ready' ? machine?.label ?? strings.mobile.computer : strings.connection[store.connection]);
   let project = $derived(store.openProject ?? store.projects.find(p => p.archived !== true));
   let actionProject = $derived(store.openProject);
   let groups = $derived(projectView.sorted(machines.flatMap(machine => machine.store.projects.filter(project => !project.archived).map(project => ({ machine, project })))));
@@ -57,6 +60,7 @@
   let waiting = $derived(entries.filter(e => e.thread.status === 'waiting'));
   let active = $derived(entries.filter(e => ['waiting', 'running', 'queued'].includes(e.thread.status)));
   let rows = $derived((screen === 'activity' ? active : entries)
+    .filter(e => !query || [e.thread.title, projectName(e.project), e.thread.branch, e.machine.label].some(value => value?.toLocaleLowerCase().includes(query)))
     .filter(e => screen === 'activity' || (!e.thread.parentThreadId && !e.project?.archived && (workspace.view !== 'recent' || !selected || (e.machine.id === selected.machine.id && e.thread.projectId === selected.project.id))))
     .sort((a, b) => screen === 'activity'
       ? (Number(b.thread.status === 'waiting') - Number(a.thread.status === 'waiting')) || b.thread.updatedAt - a.thread.updatedAt
@@ -123,28 +127,44 @@
   }
 </script>
 
-<header class="mobile-header" class:settings={store.page !== 'chat'} data-testid="mobile-header">
-  {#if screen === 'chat' && store.page === 'chat'}
-    <button class="ghost icon" aria-label={strings.mobile.threads} onclick={() => show('threads')}><ArrowLeft size={20} /></button>
+<header class="mobile-header" class:chatting class:settings={store.page !== 'chat'} data-testid="mobile-header">
+  {#if chatting}
+    <button class="ghost icon" data-testid="mobile-back" aria-label={strings.mobile.threads} onclick={() => show('threads')}><ArrowLeft size={20} /></button>
+  {:else}
+    <img class="brand-icon" src="./icons/icon.svg" alt="" width="30" height="30" />
   {/if}
-  <div class="identity">
-    {#if place}<span class="machine">{place}</span>{/if}
-    <Menu items={projects} onpick={pickProject} label={strings.mobile.project} placement="bottom" variant="text" testid="mobile-project">
-      {store.draftInDrafts && !store.openThread ? strings.drafts.name : project ? projectName(project) : strings.mobile.project}<ChevronDown size={14} />
-    </Menu>
+  {#if chatting && narrow.current}
+    <div class="chat-heading">{#key store}<ThreadHeader {store} />{/key}</div>
+  {:else}
+  <div class="identity brand">
+    {#if screen === 'threads' && store.page === 'chat'}
+      <span class="machine">{place}</span>
+      <Menu items={projects} onpick={pickProject} label={strings.mobile.project} placement="bottom" variant="text" testid="mobile-project">
+        {store.draftInDrafts && !store.openThread ? strings.drafts.name : project ? projectName(project) : strings.mobile.project}<ChevronDown size={14} />
+      </Menu>
+    {:else}
+      <strong>{store.page === 'settings' ? strings.settings.heading : store.page === 'agents' ? strings.agents.heading : 'Boite'}</strong>
+      <button class="ghost connection" data-testid="mobile-connection" onclick={() => store.showSettings('machines')}><span class="dot" class:ready={store.connection === 'ready'}></span><span>{place}</span><ChevronDown size={12} /></button>
+    {/if}
   </div>
-  {#if actionProject}
-    <button class="ghost icon" data-testid="mobile-project-actions" aria-label={strings.sidebar.projectMenu}
-      onclick={openProjectMenu}><Ellipsis size={20} /></button>
   {/if}
-  <button class="ghost icon" data-testid="mobile-new" aria-label={strings.sidebar.newThread} disabled={!groups.length || draftOwner.connection !== 'ready'} onclick={newThread}><Plus size={21} /></button>
+  {#if actionProject && screen === 'threads' && !recover && store.page === 'chat'}
+    <button class="ghost icon" data-testid="mobile-project-actions" aria-label={strings.sidebar.projectMenu}
+      onclick={openProjectMenu}><FolderCog size={20} /></button>
+  {/if}
+  {#if !recover && !chatting}<button class="ghost icon new" data-testid="mobile-new" aria-label={strings.sidebar.newThread} disabled={draftOwner.connection !== 'ready'} onclick={newThread}><Plus size={21} /></button>{/if}
+  <MobileMenu {store} {place} waiting={waiting.length} {screen} navigate={show} create={newThread} {projects} {pickProject} />
 </header>
 
-{#if mobile.current && store.page === 'chat' && screen !== 'chat'}
+{#if narrow.current && store.page === 'chat' && (screen !== 'chat' || recover)}
   <section class="mobile-list" bind:this={scrollRoot} onscroll={() => { if (scrollRoot) scrollPositions.set(listKey, scrollRoot.scrollTop); }} data-testid="mobile-list" aria-label={screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}>
+    {#if recover && narrow.current}
+      <MobileConnect {store} onpaired={() => show('threads')} />
+    {:else}
     <div class="list-heading">
       <div class="heading-row"><h1>{screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}</h1>{#if screen === 'activity'}<button class="ghost icon" aria-label={strings.sidebar.search} onclick={() => store.paletteOpen = true}><Search size={18} /></button>{/if}</div>
       {#if screen === 'threads'}<ProjectViews entries={groups} {store} prefix="mobile-" />{/if}
+      <div class="search"><Search size={17} /><input type="search" bind:value={search} aria-label={strings.mobile.search} placeholder={strings.mobile.search} data-testid="mobile-search" />{#if search}<button class="ghost icon" aria-label={strings.mobile.clearSearch} onclick={() => search = ''}><X size={16} /></button>{/if}</div>
     </div>
     {#snippet threadRow(row: typeof rows[number])}
       <div class="row">
@@ -158,9 +178,10 @@
     {#if screen === 'threads' && workspace.view === 'projects'}
       {#each groups as group (projectKey(group))}
         {@const groupRows = rows.filter(row => row.machine.id === group.machine.id && row.thread.projectId === group.project.id)}
-        <section data-testid="mobile-project-group" data-project-id={group.project.id} data-machine-id={group.machine.id}>
+        {#if !query || groupRows.length > 0}
+        <section class="project-group" data-testid="mobile-project-group" data-project-id={group.project.id} data-machine-id={group.machine.id}>
           <div class="project-heading">
-            <h2>{projectName(group.project)}{#if several}<span>{group.machine.label}</span>{/if}</h2>
+            <Monitor size={14} /><h2>{projectName(group.project)}{#if several}<span>{group.machine.label}</span>{/if}</h2>
             {#if projectView.order === 'manual'}
               <Menu items={[
                 { id: 'up', label: strings.sidebar.moveProjectUp, disabled: projectKey(groups[0]!) === projectKey(group) },
@@ -173,6 +194,7 @@
           </WindowList>
           {#if groupRows.length === 0}<p class="empty">{strings.sidebar.noThreads}</p>{/if}
         </section>
+        {/if}
       {/each}
       <WindowList items={rows.filter(row => row.thread.projectId === null)} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements('unassigned')}>
         {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
@@ -182,43 +204,62 @@
         {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
       </WindowList>
     {/if}
-    {#if rows.length === 0 && (screen === 'activity' || workspace.view === 'recent' || groups.length === 0)}
-      <p class="empty">{screen === 'activity' ? strings.mobile.noActivity : strings.mobile.noThreads}</p>
+    {#if rows.length === 0 && (query || screen === 'activity' || workspace.view === 'recent' || groups.length === 0)}
+      <div class="empty-state">
+        <span class="empty-icon">{#if screen === 'activity'}<Activity size={24} />{:else}<MessageSquare size={24} />{/if}</span>
+        <h2>{screen === 'activity' ? strings.mobile.emptyActivity : entries.length ? strings.mobile.noThreads : strings.mobile.emptyTitle}</h2>
+        <p>{screen === 'activity' ? strings.mobile.noActivity : entries.length ? strings.mobile.search : strings.mobile.emptyBody}</p>
+        {#if screen === 'threads' && !entries.length}<button class="primary" data-testid="mobile-first-thread" disabled={draftOwner.connection !== 'ready'} onclick={newThread}><Plus size={16} />{strings.sidebar.newThread}</button>{/if}
+      </div>
+    {/if}
     {/if}
   </section>
 {/if}
 
-<div class="mobile-navigation">
-  {#if experimentOn('whip')}<WhipButton mobile />{/if}
-  {#if experimentOn('resident-agents')}<button class="ghost icon agents-launcher" aria-label={strings.agents.heading} title={strings.agents.heading} data-testid="mobile-agents" onclick={() => store.showAgents()}><Bot size={20} /></button>{/if}
-  <nav class="mobile-tabs" aria-label={strings.mobile.navigation} data-testid="mobile-tabs">
-  <button class="ghost" class:active={store.page === 'chat' && screen !== 'activity'} aria-current={store.page === 'chat' && screen !== 'activity' ? 'page' : undefined} data-testid="mobile-conversations" onclick={() => show('threads')}><MessageSquare size={20} /><span>{strings.mobile.threads}</span></button>
-  <button class="ghost" class:active={store.page === 'chat' && screen === 'activity'} aria-current={store.page === 'chat' && screen === 'activity' ? 'page' : undefined} data-testid="mobile-activity" onclick={() => show('activity')}><span class="activity-icon"><Activity size={20} />{#if waiting.length}<span class="badge">{waiting.length}</span>{/if}</span><span>{strings.mobile.activity}</span></button>
-  <button class="ghost" class:active={store.page === 'settings'} aria-current={store.page === 'settings' ? 'page' : undefined} data-testid="mobile-settings" onclick={() => store.showSettings()}><Settings size={20} /><span>{strings.settings.heading}</span></button>
-  </nav>
-</div>
-
 <style>
-  .mobile-header, .mobile-list, .mobile-navigation { display: none; }
+  .mobile-header, .mobile-list { display: none; }
   @media (max-width: 720px) {
-    .mobile-header.settings { display: none; }
-    .mobile-header { display: flex; align-items: center; gap: 8px; min-height: 56px; padding: 4px max(12px, env(safe-area-inset-right)) 4px max(12px, env(safe-area-inset-left)); background: var(--color-background); padding-top: max(4px, env(safe-area-inset-top)); }
+
+    .mobile-header { display: flex; align-items: center; gap: 10px; min-height: 60px; padding: 8px max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left)); background: var(--color-background); border-bottom: 1px solid var(--color-border); padding-top: max(8px, env(safe-area-inset-top)); }
+    .chat-heading { flex: 1; min-width: 0; height: 44px; }
+    .mobile-header.chatting { gap: 6px; padding-left: max(8px, env(safe-area-inset-left)); padding-right: max(8px, env(safe-area-inset-right)); }
+    .chat-heading :global(.thread-header) { gap: 2px; }
+    .chat-heading :global(.launcher span) { display: none; }
+    .chat-heading :global(.launcher) { width: 44px; padding: 0; justify-content: center; flex: none; }
+    .search { display: flex; gap: 8px; align-items: center; padding: 0 10px; margin-top: 12px; background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: var(--radius-lg); color: var(--color-muted-foreground); }
+    .search input { flex: 1; min-width: 0; border: 0; background: transparent; min-height: 44px; font-size: 16px; padding: 8px 0; }
+    .search:focus-within { border-color: var(--color-accent); }
+    .search input:focus { outline: none; }
+    .brand-icon { flex: none; border-radius: var(--radius-md); }
+    .brand strong { display: block; font-size: var(--text-md); font-weight: 600; letter-spacing: -0.3px; }
+    .connection { display: flex; gap: 5px; height: auto; min-height: var(--touch-target); max-width: 100%; padding: 0; font-size: var(--text-xs); color: var(--color-muted-foreground); }
+    .connection > span:not(.dot) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--color-muted-foreground); }
+    .dot.ready { background: var(--color-success); }
+    .new { background: var(--color-surface-2); border: 1px solid var(--color-edge); border-radius: var(--radius-lg); }
     .identity { min-width: 0; flex: 1; }
     .machine { display: block; font-size: var(--text-xs); color: var(--color-muted-foreground); padding-left: 4px; }
     .identity :global(.trigger) { max-width: 100%; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
     /* A finger-sized target without growing the header: the padding reaches over the machine line and the header's own padding. */
     .identity :global(.trigger) { min-height: var(--touch-target); margin-block: -13px -6px; }
-    .mobile-list { display: block; position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; background: var(--color-background); padding: 8px max(12px, env(safe-area-inset-right)) 20px max(12px, env(safe-area-inset-left)); }
-    .list-heading { padding: 14px 4px; }
+    .mobile-list { display: block; position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; background: var(--color-background); padding: 8px max(16px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+    .list-heading { padding: 18px 0 12px; }
+    .list-heading :global(.project-views) { border: 0; padding-top: 16px; }
+    .list-heading :global(.toolbar) { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 3px; gap: 4px; }
+    .list-heading :global(.view) { font-size: var(--text-sm); }
+    .list-heading :global(.chosen) { background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-edge); border-radius: var(--radius-md); }
     .heading-row { display: flex; align-items: center; justify-content: space-between; }
-    h1 { font-size: var(--text-lg); margin: 0; }
+    h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.5px; margin: 0; }
     p { font-size: var(--text-sm); }
-    .project-heading { display: flex; align-items: center; padding: 10px 12px 0; gap: 8px; }
+    .project-group { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); margin-bottom: 12px; overflow: hidden; }
+    .project-heading { display: flex; align-items: center; padding: 8px 12px; gap: 8px; background: var(--color-surface-2); color: var(--color-muted-foreground); border-bottom: 1px solid var(--color-border); }
+    .project-heading h2 { margin: 0; }
     .project-heading h2 { flex: 1; min-width: 0; font-size: var(--text-sm); overflow-wrap: anywhere; }
     .project-heading span { display: block; font-size: var(--text-xs); font-weight: 400; color: var(--color-muted-foreground); }
-    .row { display: flex; align-items: center; border-bottom: 1px solid var(--color-border); }
+    .row { display: flex; align-items: center; border-bottom: 1px solid var(--color-border); padding-right: 4px; }
+    .row:last-child { border-bottom: 0; }
     .row :global(.menu) { flex: none; }
-    .thread { display: flex; flex: 1; min-width: 0; gap: 12px; align-items: center; min-height: 76px; height: auto; text-align: left; border-radius: var(--radius-md); padding: 14px 12px; }
+    .thread { display: flex; flex: 1; min-width: 0; gap: 10px; align-items: center; min-height: 68px; height: auto; text-align: left; border-radius: var(--radius-md); padding: 12px; color: var(--color-foreground); }
     .summary { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; }
     .title { font-size: var(--text-base); font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
     .title :global(svg) { margin-right: 4px; color: var(--color-muted-foreground); vertical-align: -1px; }
@@ -228,16 +269,11 @@
     .thread.offline .summary { opacity: 0.55; }
     .title .provider :global(svg) { margin: 0; }
     .detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); color: var(--color-muted-foreground); }
-    .mobile-navigation { display: flex; align-items: center; flex-shrink: 0; padding: 2px max(8px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: var(--color-background); }
-    .agents-launcher { flex: none; width: var(--touch-target); height: var(--touch-target); color: var(--color-muted-foreground); }
-    .mobile-tabs { display: flex; flex: 1; min-width: 0; }
-    .mobile-tabs button { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 4px; height: 52px; color: var(--color-muted-foreground); font-size: var(--text-xs); }
-    .mobile-tabs button.active { color: var(--color-accent); background: transparent; }
-    .activity-icon { position: relative; height: 20px; }
-    .badge { position: absolute; top: -6px; left: 14px; min-width: 16px; border-radius: var(--radius-sm); padding: 0 3px; background: var(--color-live); color: var(--color-background); font-size: var(--text-xs); }
+    .empty-state { display: flex; align-items: center; flex-direction: column; text-align: center; padding: 44px 16px; }
+    .empty-icon { display: grid; place-items: center; width: 52px; height: 52px; border-radius: var(--radius-xl); border: 1px solid var(--color-edge); background: var(--color-surface-2); color: var(--color-muted-foreground); margin-bottom: 18px; }
+    .empty-state h2 { font-size: var(--text-base); font-weight: 600; margin: 0 0 8px; }
+    .empty-state p { color: var(--color-muted-foreground); line-height: 1.6; max-width: 280px; margin: 0 0 20px; }
     .mobile-header { grid-row: 1; grid-column: 1; }
-    .mobile-list { grid-row: 3; grid-column: 1; position: relative; z-index: 1; min-height: 0; }
-    .mobile-navigation { grid-row: 4; grid-column: 1; }
-    :global(html[data-keyboard='open']) .mobile-navigation { display: none; }
+    .mobile-list { grid-row: 2; grid-column: 1; position: relative; z-index: 1; min-height: 0; }
   }
 </style>

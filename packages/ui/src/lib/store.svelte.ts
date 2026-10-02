@@ -183,6 +183,7 @@ export class Store {
   get endpointUrl() { return this.#ctx.connection.endpointUrl; }
   set endpointUrl(value) { this.#ctx.connection.endpointUrl = value; }
   get paired() { return this.#ctx.connection.paired; }
+  get pairingRequired() { return this.#ctx.connection.pairingRequired; }
   set paired(value) { this.#ctx.connection.paired = value; }
   get localCore() { return this.#ctx.connection.localCore; }
   set localCore(value) { this.#ctx.connection.localCore = value; }

@@ -1,3 +1,4 @@
+import { mobileAction } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { basename, join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
@@ -65,7 +66,7 @@ test('project and recent cards show both hosts, PRs and user-message ordering on
     deviceScaleFactor: 1,
     mobile: true
   });
-  await page.click('[data-testid="mobile-conversations"]');
+  await mobileAction(page, 'mobile-conversations');
   await page.waitFor(`document.querySelectorAll('[data-testid="mobile-list"] .thread').length === 8`);
   await capture('recent-machines-phone.png');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
@@ -205,7 +206,8 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     try {
       const session = (await admin.call('sessions.list', {}))[0]!;
       await admin.call('sessions.revoke', { sessionId: session.id });
-      await page.waitFor(`document.querySelector('[data-testid="machine-card"][data-machine-id="${second.url}"] .status')?.textContent === 'Disconnected'`);
+      await page.waitFor(`document.querySelector('[data-testid="machine-card"][data-machine-id="${second.url}"] .status')?.textContent === 'Pair this app'`);
+      expect(await page.evaluate(`!!document.querySelector('[data-testid="machine-card"][data-machine-id="${second.url}"] [data-testid=machine-repair]')`)).toBe(true);
       const replacement = await admin.call('pairing.grant', { role: 'owner' });
       await page.click(id('machine-add-open'));
       await page.type(id('machine-link'), replacement.url);

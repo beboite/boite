@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { PLUGIN_MANIFEST_FILE, type Account } from '@boite/contracts';
@@ -99,6 +99,17 @@ test('plugin RPC refuses unknown IDs and unavailable installs, uninstall keeps a
   const state = await client.call('plugins.uninstall', { id: 'kebacc-switcher' });
   expect(state.status).toBe('not-installed'); expect(existsSync(join(pool, 'keep'))).toBe(true);
 });
+test('plugin state accepts a missing directory but refuses a dangling directory link', async () => {
+  harness = await startTestCore();
+  expect(harness.core.plugins.state('kebacc-switcher').status).toBe('not-installed');
+  const root = join(harness.dataDir, 'plugins');
+  mkdirSync(root, { recursive: true });
+  const dir = join(root, 'kebacc-switcher');
+  symlinkSync(join(harness.dataDir, 'missing-plugin'), dir, 'junction');
+  expect(existsSync(dir)).toBe(false);
+  expect(() => harness!.core.plugins.state('kebacc-switcher')).toThrow('must not be a symbolic link');
+});
+
 test('a truncated manifest is an error on the card, not a Plugins page that will not open', async () => {
   harness = await startTestCore(); const client = await harness.connect();
   const dir = join(harness.dataDir, 'plugins', 'kebacc-switcher'); mkdirSync(dir, { recursive: true });

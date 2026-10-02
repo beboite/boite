@@ -2081,9 +2081,20 @@ async function emptyCore(): Promise<void> {
   await store.openWhereLeft();
 }
 
+async function showMobileThreads(): Promise<void> {
+  // jsdom does not implement dialog methods; the browser suite exercises the modal.
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function(this: HTMLDialogElement) { this.open = true; } });
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function(this: HTMLDialogElement) { this.open = false; } });
+  query<HTMLButtonElement>('[data-testid=mobile-menu]').click();
+  await waitFor(() => document.querySelector('[data-testid=mobile-conversations]') !== null);
+  query<HTMLButtonElement>('[data-testid=mobile-conversations]').click();
+  await waitFor(() => document.querySelector('[data-testid=mobile-project]') !== null);
+}
+
 test('the phone cannot manage an unrelated project from a draft without a folder', async ({ app: _app }) => {
   expect(store.projects.length).toBeGreaterThan(0);
   store.startDraft(null);
+  await showMobileThreads();
   await waitFor(() => query('[data-testid=mobile-project]').textContent?.includes('Drafts') === true);
   expect(store.openProject).toBeNull();
   expect(document.querySelector('[data-testid=mobile-project-actions]')).toBeNull();
@@ -2099,6 +2110,7 @@ test('the phone cannot manage an unrelated project from a draft without a folder
 
 test('the phone cannot archive an already archived project or offer a misleading undo', async ({ app: _app }) => {
   await store.open('t-trace');
+  await showMobileThreads();
   const project = store.openProject!;
   const archive = vi.spyOn(store, 'archiveProject');
   const openManagement = async () => {
@@ -2274,6 +2286,7 @@ test('a paired device is offered none of the affordances the core refuses it', a
   store.paletteOpen = false;
 
   // The phone's project menu: no Remove, and no transcript import behind it.
+  await showMobileThreads();
   query<HTMLButtonElement>('[data-testid=mobile-project-actions]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
   expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);

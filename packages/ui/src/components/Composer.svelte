@@ -114,7 +114,7 @@
     key;
     store.draft;
     recall = null;
-    box?.focus();
+    box?.focus({ preventScroll: true });
   });
 
   /** This thread's own sent prompts, most recent first: what ArrowUp walks. */
@@ -465,7 +465,7 @@
     const state = stateForInput();
     removeImageReferences(store, key, at);
     state.attachments = state.attachments.filter((_, index) => index !== at);
-    box?.focus();
+    box?.focus({ preventScroll: true });
   }
 
   /**
@@ -538,7 +538,7 @@
     state.previewReferences = [];
     recall = null;
     put('');
-    box?.focus();
+    box?.focus({ preventScroll: true });
   }
 
   function restoreQueued(at: number) {
@@ -549,7 +549,7 @@
     state.attachments = entry.attachments;
     recall = null;
     restorePrompt(entry.text, entry.previewReferences ?? []);
-    box?.focus();
+    box?.focus({ preventScroll: true });
   }
 
   /** ArrowDown: one prompt newer, and past the newest the composer is empty again. */
@@ -601,12 +601,12 @@
   function pickSlash(item: PaletteItem) {
     if (item.id === 'goal' || item.id === 'loop' || item.id === 'btw') {
       put(`/${item.id} `);
-      box?.focus();
+      box?.focus({ preventScroll: true });
       return;
     }
     if (isAgentCommand(item)) {
       put(`/${item.id.slice(AGENT_PREFIX.length)} `);
-      box?.focus();
+      box?.focus({ preventScroll: true });
       return;
     }
     put('');
@@ -629,7 +629,7 @@
     if (at < 0) return;
     const written = `${head.slice(0, at)}@${item.id} `;
     put(written + text.slice(caret), written.length);
-    box?.focus();
+    box?.focus({ preventScroll: true });
   }
 
   /**
@@ -718,16 +718,16 @@
       </div>
     {/if}
 
-    {#if side.current && side.current.threadId === store.openThread?.id}<SideAnswer {...side.current} {store} onclose={() => { side.clear(); box?.focus(); }} />{/if}
+    {#if side.current && side.current.threadId === store.openThread?.id}<SideAnswer {...side.current} {store} onclose={() => { side.clear(); box?.focus({ preventScroll: true }); }} />{/if}
     {#if attachments.length > 0}
-      {#key composer}<ComposerAttachments bind:this={attachmentStrip} {attachments} highlighted={highlightedImage} onremove={removeAttachment} onfocus={() => box?.focus()} />{/key}
+      {#key composer}<ComposerAttachments bind:this={attachmentStrip} {attachments} highlighted={highlightedImage} onremove={removeAttachment} onfocus={() => box?.focus({ preventScroll: true })} />{/key}
     {/if}
 
     <div class="input-wrap">
     {#if highlighted}
       <div class="input-highlight" aria-hidden={previewReferences.length || attachments.length ? undefined : true} data-testid="composer-highlight" style:width={`${inputWidth}px`}>
         <div class="input-paint input-mirror" style:transform={`translateY(${-inputScroll}px)`}><PreviewReferences {text} references={previewReferences} {store} threadId={key} editing {keywords} command={commandToken || undefined} onreference={(reference) => {
-          if (box && reference.mention) { box.focus(); box.setSelectionRange(reference.mention.end, reference.mention.end); track(); }
+          if (box && reference.mention) { box.focus({ preventScroll: true }); box.setSelectionRange(reference.mention.end, reference.mention.end); track(); }
         }}>{#snippet paint(parts)}<ComposerImageReferences segments={parts} {attachments} onopen={(attachment) => attachmentStrip?.open(attachment)} onhover={(attachment) => highlightedImage = attachment} />{/snippet}</PreviewReferences>{'\n'}</div>
       </div>
     {/if}
@@ -885,13 +885,10 @@
     .speech-preview { padding: 0 16px 8px; }
     .speech-status { color: var(--color-accent); }
     textarea, .input-mirror { font-size: var(--text-md); }
-    .composer-wrap {
-      padding: 6px 10px 10px;
+    .composer-wrap, .composer-wrap.centered {
+      padding: 8px 12px max(10px, env(safe-area-inset-bottom));
     }
 
-    .composer-wrap.centered {
-      padding: 0 10px;
-    }
-
+    :global(html[data-keyboard='open']) .composer-wrap { padding-bottom: 8px; }
   }
 </style>

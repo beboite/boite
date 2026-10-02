@@ -54,6 +54,8 @@ export class Connection {
   endpointUrl = $state<string | null>(null);
   /** This UI holds the key a pairing link became, not a token read off the machine. */
   paired = $state(false);
+  /** This app needs its own pairing, distinct from a temporary network outage. */
+  pairingRequired = $state(false);
   /** The core is the one the shell started on this computer. */
   localCore = $state(false);
   localEndpointUrl = $state<string | null>(null);
@@ -224,39 +226,48 @@ export class Connection {
 
   attachEndpoint(endpoint: Endpoint, rememberActive = true): void {
     const url = endpoint.url;
+    const repairing = this.pairingRequired && this.endpointUrl === url;
     this.ctx.store.machineId = endpoint.local ? 'local' : url;
     const paired = endpoint.paired === true || endpoint.grant !== undefined;
     this.endpointUrl = url;
     this.paired = paired;
+    // Keep the recovery form mounted during a new handshake with this machine.
+    this.pairingRequired = repairing;
+    this.ctx.store.error = null;
     this.localCore = endpoint.local === true;
     this.#keyless = endpoint.token === '' && endpoint.grant === undefined;
-    this.ctx.store.attach(
-      new WsClient({
-        url,
-        token: endpoint.token,
-        ...(endpoint.grant === undefined ? {} : { grant: endpoint.grant }),
-        paired,
-        // The session a grant became is this device's own credential: kept
-        // where the next load reads it, so the link is opened once, ever.
-        // The core joins the remembered environments with it, so switching
-        // back later needs no new link.
-        onSession: (session) => {
-          if (rememberActive) storeEndpoint({ url, token: session.token, paired: true });
-          this.environments = upsertEnvironment({ url, token: session.token, paired: true });
-        },
-        // Revoked from the desktop: the dead key goes here and in the
-        // remembered cores, and the page says what to do rather than
-        // retrying every ten seconds.
-        onRevoked: () => {
-          if (rememberActive) clearStoredEndpoint();
-          this.environments = removeEnvironment(url);
-          this.connection = 'closed';
-          this.ctx.store.error = strings.errors.revoked;
-        },
-        clientName: window.__TAURI_INTERNALS__ === undefined ? 'pwa' : 'shell',
-        version: UI_VERSION
-      })
-    );
+    const client = new WsClient({
+      url,
+      token: endpoint.token,
+      ...(endpoint.grant === undefined ? {} : { grant: endpoint.grant }),
+      paired,
+      // The session a grant became is this device's own credential: kept
+      // where the next load reads it, so the link is opened once, ever.
+      // The core joins the remembered environments with it, so switching
+      // back later needs no new link.
+      onSession: (session) => {
+        if (this.ctx.client !== client) return;
+        if (rememberActive) storeEndpoint({ url, token: session.token, paired: true });
+        this.environments = upsertEnvironment({ url, token: session.token, paired: true });
+      },
+      onUnauthorized: (error) => {
+        if (this.ctx.client === client && !this.localCore) this.#authenticationFailed(error);
+      },
+      // Revoked from the desktop: the dead key goes here and in the
+      // remembered cores, and the page says what to do rather than
+      // retrying every ten seconds.
+      onRevoked: () => {
+        if (this.ctx.client !== client) return;
+        if (rememberActive) clearStoredEndpoint();
+        this.environments = removeEnvironment(url);
+        this.connection = 'closed';
+        this.pairingRequired = true;
+        this.ctx.store.error = strings.errors.revoked;
+      },
+      clientName: window.__TAURI_INTERNALS__ === undefined ? 'pwa' : 'shell',
+      version: UI_VERSION
+    });
+    this.ctx.store.attach(client);
   }
 
   /** Drops everything the last core said, then connects to the next one. */
@@ -342,16 +353,26 @@ export class Connection {
       this.core = core;
       this.connection = client.state;
       this.principal = client.principal;
+      this.pairingRequired = false;
       void s.reload();
       await Promise.all([this.ctx.drafts.start(), this.reloading?.essential]);
     } catch (error) {
       if (!this.ctx.currentClient(client, generation)) return;
       this.connection = client.state;
-      // No key at all, on a page its core served: this device was never paired
-      // there, or its pairing was forgotten. The page says what opens it.
-      if (this.#keyless && error instanceof RpcFailure && error.code === RpcErrorCode.Unauthorized) s.error = strings.errors.unpaired;
+      if (error instanceof RpcFailure && error.code === RpcErrorCode.Unauthorized && !this.localCore) {
+        this.#authenticationFailed(error);
+      }
       else this.ctx.fail(error);
     }
+  }
+
+  #authenticationFailed(error: RpcFailure): void {
+    this.pairingRequired = true;
+    const s = this.ctx.store;
+    // A first connection catches the rejection after onRevoked has explained it.
+    // A refused grant keeps its own error; attachEndpoint cleared the old notice.
+    if (this.#keyless) s.error = strings.errors.unpaired;
+    else if (s.error !== strings.errors.revoked && s.error !== error.message) this.ctx.fail(error);
   }
 
   /** Point the UI at another core, from the Settings page. It stays remembered. */

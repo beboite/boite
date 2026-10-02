@@ -1,6 +1,10 @@
 /** Every user-facing string of the UI. No literal UI text lives anywhere else. */
 export const strings = {
   remoteBrowser: {
+    display: 'Display', resolution: 'Page resolution', fitPhone: 'Fit this screen', phone: 'Phone', tablet: 'Tablet', rotate: 'Rotate', width: 'Width', height: 'Height', apply: 'Apply', sharedSize: 'Resolution also changes the shared tab on the PC.', restoreSize: 'Use the PC panel size', previewZoom: 'Preview zoom (this device only)', fit: 'Fit', panHint: 'Drag to pan the preview. Use the arrows to scroll the page.',
+    open: 'Open live browser', experimental: 'Experimental browser sharing', enable: 'Enable on this device',
+    hint: 'View and control the browser tab shared by your PC, inside Boite.',
+    hostMissing: 'The PC is not sharing a browser for this conversation yet. Open the same conversation and a browser tab in Boite on the PC, with both browser experiments enabled.',
     title: 'Live desktop browser', waiting: 'Waiting for the desktop', live: 'Live', paused: 'Paused', reconnecting: 'Reconnecting', pause: 'Pause', resume: 'Resume',
     help: 'On your desktop, enable Agent browser control and Live browser on other devices in Experiments, then open this conversation and a browser tab. The PC must stay awake.',
     interact: 'Tap or swipe the shared page', image: 'Live view of the desktop browser', scrollUp: 'Scroll up', scrollDown: 'Scroll down',
@@ -233,6 +237,20 @@ export const strings = {
     subscriptionFailed: 'The browser did not return a complete push subscription.'
   },
   mobile: {
+    clearSearch: 'Clear search', draftTitle: 'What would you like to do?', draftHint: 'Start a task, ask a question, or pick up your work.',
+    pairTitle: 'Your Boite, on your phone',
+    pairBody: 'Connect to your computer to find your projects, conversations and agents here.',
+    pairStep: 'On your computer, open Settings → Machines and devices and create a pairing code.',
+    pairInstalled: 'Just installed Boite? Pair it here too: the iPhone app keeps its connection separately from the browser.',
+    pairPrivacy: 'Scan from this app. The code is single-use and expires after 10 minutes.',
+    pairingRequired: 'Pair this app',
+    offlineTitle: 'Waiting for your computer',
+    offlineBody: 'Keep Boite running on your computer and check your connection. If you use Tailscale, keep it connected on both devices.',
+    emptyTitle: 'Start a conversation',
+    emptyBody: 'Send a task to an agent. Your conversations will appear here.',
+    emptyActivity: 'All caught up',
+    computer: 'Connected computer',
+    pairAgain: 'Pair again',
     settingsDevice: 'This phone',
     settingsPhone: 'App & notifications',
     settingsBack: 'Back to settings',
@@ -774,7 +792,6 @@ export const strings = {
     providerSignal: 'Provider signal {time} ago',
     lastActivity: 'Last activity {time} ago',
     noActivity: 'No new activity for {time}',
-    activityTrace: 'View trace',
     /** The jump button once something arrived below the reader. */
     newMessage: '1 new message',
     newMessages: '{count} new messages',

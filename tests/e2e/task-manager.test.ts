@@ -4,6 +4,7 @@ import { echoThread, startTestCore, waitFor } from '../../packages/core/test/har
 import { BrowserPage } from './lib/cdp.ts';
 import { pairingUrlOf } from './lib/core.ts';
 import { ensureProductionUi } from './lib/prod-ui.ts';
+import { mobileAction } from './lib/mobile.ts';
 
 test('the real task manager reads owned processes on desktop and a paired phone', async () => {
   ensureProductionUi();
@@ -59,9 +60,9 @@ test('the real task manager reads owned processes on desktop and a paired phone'
     phone = await BrowserPage.launch({ url, windowSize: { width: 390, height: 844 } });
     await phone.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`);
     for (const from of ['mobile-conversations', 'mobile-activity']) {
-      await phone.click(`[data-testid=${from}]`);
+      await mobileAction(phone, from);
       await phone.waitFor(`document.querySelector('[data-testid=mobile-list]')`);
-      await phone.click('[data-testid=mobile-settings]');
+      await mobileAction(phone, 'mobile-settings');
       await phone.click('[data-testid=settings-tab-task-manager]');
       await phone.waitFor(`document.querySelector('${selector}')`);
       expect(await phone.evaluate(`document.querySelector('${selector} .actions') === null`)).toBe(true);
@@ -72,7 +73,7 @@ test('the real task manager reads owned processes on desktop and a paired phone'
       await phone.waitFor(`document.querySelector('.app.phone-chat') && !document.querySelector('[data-testid=mobile-list]') && !document.querySelector('[data-testid=task-manager]') && document.querySelector('[data-testid=composer-input]')`);
       expect(await phone.evaluate(`document.querySelector('[data-testid=thread-title]')?.textContent`)).toBe(history.title);
     }
-    await phone.click('[data-testid=mobile-settings]');
+    await mobileAction(phone, 'mobile-settings');
     await phone.click('[data-testid=settings-tab-task-manager]');
     await phone.waitFor(`document.querySelector('${selector}')`);
     await phone.click('[data-testid=mobile-settings-back]');

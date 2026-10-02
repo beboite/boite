@@ -1,3 +1,4 @@
+import { mobileAction } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp';
@@ -84,7 +85,7 @@ test('a failed turn offers a compact link to its thread on desktop and phone', a
   }
   // Selecting a thread must also reveal its chat underneath the phone list.
   for (const tab of ['conversations', 'activity']) {
-    await page.click(`[data-testid="mobile-${tab}"]`);
+    await mobileAction(page, `mobile-${tab}`);
     await page.waitFor(`document.querySelector('[data-testid="mobile-list"]')`);
     await page.evaluate(`(async () => {
       const {workspace} = await import('/src/lib/workspace.svelte.ts');

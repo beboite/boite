@@ -1,3 +1,4 @@
+import { mobileAction } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
@@ -66,8 +67,8 @@ test('a phone scans the pairing code of another machine, which arrives under its
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);
     await page.click(id('confirm-ok'));
-    await page.waitFor(`document.querySelector('${id('mobile-tabs')}')`);
-    await page.click(id('mobile-settings'));
+    await page.waitFor(`document.querySelector('${id('mobile-menu')}')`);
+    await mobileAction(page, 'mobile-settings');
     await page.click(id('settings-tab-machines'));
     await page.waitFor(`document.querySelector('${id('machine-scan')}')`);
     // The form asks for a link and nothing else: the machine names itself.

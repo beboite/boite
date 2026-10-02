@@ -80,6 +80,18 @@ test('paired viewers require desktop consent and a fresh frame of their own; cap
     expect(clickRequest.tabId).toBe('browser:test');
     await owner.call('browser.complete', { requestId: clickRequest.requestId, result: { value: { ok: true } } });
     expect(await click).toEqual({ ok: true });
+    for (const width of [0, 239, 3841, 393.5, NaN]) {
+      await expect(phone.call('browser.remoteInput', { threadId, frameId: 'frame-1', input: { kind: 'viewport', width, height: 700 } })).rejects.toThrow('240 to 3840');
+    }
+    for (const input of [{ kind: 'viewport', width: 393, height: 700 }, { kind: 'reset-viewport' }] as const) {
+      const waiting = owner.next('browser.requested', r => r.action.kind === 'remote-input');
+      const result = phone.call('browser.remoteInput', { threadId, frameId: 'frame-1', input });
+      const request = await waiting;
+      expect(request.tabId).toBe('browser:test');
+      expect(request.action).toEqual({ kind: 'remote-input', frameId: 'frame-1', input });
+      await owner.call('browser.complete', { requestId: request.requestId, result: {} });
+      expect(await result).toEqual({ ok: true });
+    }
     await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: true, remote: false });
     await expect(phone.call('browser.remoteInput', { threadId, frameId: 'frame-1', input: { kind: 'key', key: 'Enter' } })).rejects.toThrow('experiment');
   } finally { phone.close(); }

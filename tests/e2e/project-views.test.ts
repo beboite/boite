@@ -1,3 +1,4 @@
+import { mobileAction } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
@@ -136,7 +137,7 @@ test('phone management scrolls on short screens and reorders the selected projec
   await page.evaluate(`(() => { const [machine, project] = ${before[0]}; const owner = globalThis.__boiteTest.workspace.machines.find(m => m.id === machine).store; return globalThis.__boiteTest.workspace.select(owner, undefined, project); })()`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 240, deviceScaleFactor: 1, mobile: true });
   await page.send('Emulation.setTouchEmulationEnabled', { enabled: true });
-  await page.click(id('mobile-conversations'));
+  await mobileAction(page, 'mobile-conversations');
   await page.waitFor(`document.querySelectorAll('${id('mobile-project-group')}').length === 4`);
   await page.click(id('mobile-project-actions'));
   await page.click(`${id('context-menu')} [data-value=manage]`);
@@ -160,7 +161,7 @@ test('phone management scrolls on short screens and reorders the selected projec
 
 test('phone exposes project filtering and custom-order controls without overflow', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  await page.click(id('mobile-conversations'));
+  await mobileAction(page, 'mobile-conversations');
   await page.waitFor(`document.querySelector('${id('mobile-list')}')`);
   await page.click(id('mobile-view-recent'));
   await page.click(id('mobile-project-filter'));
@@ -174,7 +175,7 @@ test('phone exposes project filtering and custom-order controls without overflow
   await capture('project-order-phone.png');
   await page.evaluate(`localStorage.setItem('boite.locale', 'fr')`);
   await page.navigate(url);
-  await page.click(id('mobile-conversations'));
+  await mobileAction(page, 'mobile-conversations');
   await page.waitFor(`document.querySelector('${id('mobile-view-projects')}')?.textContent.includes('Projets')`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 1, mobile: true });
   await capture('project-order-phone-fr.png');
