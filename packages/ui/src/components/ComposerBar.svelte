@@ -15,6 +15,7 @@
   import ComposerOptions from './ComposerOptions.svelte';
   import ContextControl from './ContextControl.svelte';
   import { work } from '../lib/work-prefs.svelte';
+  import { voice, VOICE_STORAGE_KEY } from '../lib/voice-prefs.svelte';
   import { controlMenu } from '../lib/controls';
   import { contextLevel, contextPercent } from '../lib/tokens';
   import { speedControl } from '../lib/model-speeds';
@@ -82,7 +83,7 @@
   );
   // The worktree switch exists where the core can honour it: a draft on a git repository.
   let draftRepository = $derived(
-    store.draft && !store.draftInDrafts ? store.projects.find((project) => project.id === store.draft?.projectId)?.repository !== false : false
+    work.shows('composer.worktree') && store.draft && !store.draftInDrafts ? store.projects.find((project) => project.id === store.draft?.projectId)?.repository !== false : false
   );
 
   // The reasoning chip belongs to the model the choice is on, and a model that
@@ -184,6 +185,8 @@
   }
 </script>
 
+<svelte:window onstorage={(event) => { if (event.key === VOICE_STORAGE_KEY || event.key === null) voice.load(); }} />
+
 <div class="bar" bind:this={bar}>
   {#key `${key}:${store.draft?.projectId ?? ''}`}
   <ComposerOptions busy={picking} levels={effortLevels} effort={activeEffort} {speeds} speed={speedOptions.speed} {modes} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={store.draft && draftRepository ? store.draft.worktree : null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick(speedOptions.pick(speed))} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} />
@@ -261,11 +264,13 @@
     {/if}
 
 
+  {#if voice.current.enabled}
   {#key store}
     {#key `${key}:${store.draft?.projectId ?? ''}`}
       <Dictation {store} onbusy={(busy) => dictating = busy} {onpreview} ontext={ontranscript} />
     {/key}
   {/key}
+  {/if}
   <button
     type="button"
     class="primary icon send"

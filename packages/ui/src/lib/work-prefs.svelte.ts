@@ -25,6 +25,7 @@ export const CONTROL_IDS = [
   'header.branch',
   'header.context',
   'header.terminal',
+  'composer.worktree',
   'sidebar.limits',
   'sidebar.add-project',
   'panel.agents',

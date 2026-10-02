@@ -101,19 +101,33 @@ and physically inside the project. The core checks resolved symlinks or
 junctions at admission; this is not a filesystem sandbox against later edits.
 Core-created worktrees can live outside the project through the storage setting.
 
-New drafts use `Project.worktreeDefault`, configured by the owner through
-`projects.setWorktreeDefault`. A draft's explicit choice overrides it. Moving a
-draft uses the target's default unless explicitly chosen; restored drafts keep
-their choice. Enabling the default requires a Git repository other than Drafts.
+Owners toggle Worktree by default in Manage project. The core persists
+`Project.worktreeDefault` through `projects.setWorktreeDefault` and broadcasts
+`project.updated` to connected clients. New drafts use this default; an explicit
+composer choice overrides it. Moving a draft uses the target's default unless
+explicitly chosen; restored drafts keep their choice. Enabling the default
+requires a Git repository other than Drafts.
+
+Settings > Appearance > Buttons can hide the Worktree switch on desktop and in
+the phone's options sheet. This device preference preserves the draft's choice
+and the project's default.
 
 With `worktree: {}`, `threads.create` runs `git worktree add -b` before writing
 the thread. The temporary branch is `boite/wt-<id>`, unless explicitly named;
-the directory is `<project>/.boite/worktrees/wt-<id>` by default.
-`settings.worktreeStorage` selects project storage or an absolute shared folder,
-where `<project-name>-<project-id>/wt-<id>` separates repositories with matching
-names. A changed setting affects new worktrees only. Existing threads and
-prepared workspaces retain their recorded path. Nested directories are excluded
-through Git's local `info/exclude`, without changing `.gitignore`.
+the directory is `<project>/.boite/worktrees/wt-<id>` by default. A missing Git
+executable, a non-repository project or an existing branch is refused by name
+without writing a thread. Git calls appear in the thread's trace. The header
+shows the recorded branch.
+
+Settings > General > Worktrees offers project storage or an absolute shared
+folder; phone owners reach it through Settings > Worktrees.
+`settings.worktreeStorage` stores `{ mode: 'project', directory: null }` or
+`{ mode: 'shared', directory: '<absolute path on the core machine>' }`.
+Shared storage uses `<project-name>-<project-id>/wt-<id>` to separate repositories
+with matching names. A changed setting affects new worktrees only. Existing
+threads and prepared workspaces retain their recorded path. Nested directories
+are excluded through Git's local `info/exclude`, without changing `.gitignore`.
+Archiving retains the worktree and branch; `worktrees.remove` owns removal.
 
 The title operation can rename a temporary branch to `boite/<slug>`, adding
 `-2`, `-3` when needed. It preserves the directory, commits and session.
