@@ -218,9 +218,11 @@ finished or removed first. Offline side questions are refused rather than queued
 A fresh Claude SDK query uses the thread's account, model and supported effort,
 with tools, MCP servers, settings loading and session persistence disabled. It
 receives a snapshot of the journal's text and observed tool inputs and outputs,
-including streamed output; private reasoning and image payloads stay out. The
-snapshot retains up to 512 messages and the most recent 120,000 characters and says when earlier
-context was omitted. This is a separate request, so native prompt cache reuse
+including streamed output; private reasoning and image payloads stay out.
+The snapshot also includes a tool's status and its input JSON while that input is
+still streaming, so a request sees the latest observed call before it finishes.
+The snapshot retains up to 512 messages and the most recent 120,000 characters,
+and says when earlier context was omitted. This is a separate request, so native prompt cache reuse
 is not guaranteed. Neither the question nor its answer enters the conversation,
 changes its native session or updates the main context meter.
 

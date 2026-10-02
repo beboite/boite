@@ -7,7 +7,7 @@ export function sideQuestionSnapshot(messages: Iterable<Message>): Message[] {
   for (const message of messages) {
     const text = message.parts.map(part => {
       if (part.type === 'text') return part.text;
-      if (part.type === 'tool') return `[${part.name}] ${JSON.stringify(part.input)}\n${part.output ?? ''}`;
+      if (part.type === 'tool') return `[${part.name}] (${part.status}) ${part.inputText ?? JSON.stringify(part.input)}\n${part.output ?? ''}`;
       return '';
     }).filter(Boolean).join('\n');
     if (!text) continue;
