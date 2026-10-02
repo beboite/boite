@@ -32,7 +32,7 @@
     </nav>
     <div class="project-picker"><Menu items={projects} onpick={id => go(() => pickProject(id))} label={strings.mobile.project} placement="bottom" variant="ghost" testid="mobile-menu-project"><Folder size={18} /><span>{strings.mobile.project}</span><ChevronDown size={15} /></Menu></div>
     <button class="primary create" data-testid="mobile-menu-new" disabled={store.connection !== 'ready'} onclick={() => go(create)}><Plus size={18} />{strings.sidebar.newThread}</button>
-    {#if experimentOn('whip')}<div class="extra"><WhipButton mobile /><span>{strings.experiments.whip.title}</span></div>{/if}
+    {#if experimentOn('whip')}<div class="extra"><WhipButton mobile onthrown={() => { shown = false; }} /><span>{strings.experiments.whip.title}</span></div>{/if}
   </dialog>
 {/if}
 

@@ -1,3 +1,4 @@
+import { mobileAction } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
@@ -28,7 +29,7 @@ for (const width of [1280, 390]) {
         }
       })()`);
       if (width < 720) {
-        await page.click('[data-testid=mobile-settings]');
+        await mobileAction(page, 'mobile-settings');
         await page.waitFor(`document.querySelector('[data-testid=mobile-settings-archived]')`);
         await page.click('[data-testid=mobile-settings-archived]');
         await page.waitFor(`document.querySelectorAll('[data-testid=archived-list] li').length === 7`);
@@ -95,7 +96,7 @@ for (const width of [1280, 390]) {
       await page.screenshot(join(import.meta.dir, '.artifacts', `thread-delete-auto-dismiss-${width}.png`));
       expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
       if (width < 720) {
-        await page.click('[data-testid=mobile-settings]');
+        await mobileAction(page, 'mobile-settings');
         await page.waitFor(`document.querySelector('[data-testid=mobile-settings-archived]')`);
         await page.click('[data-testid=mobile-settings-archived]');
       } else {

@@ -1,3 +1,4 @@
+import { mobileAction } from './lib/mobile.ts';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
@@ -67,7 +68,7 @@ test('opening the production conversation prepares the agent before the first pr
 
 test('a phone navigation round trip reuses the prepared session without sending work', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  await page.click('[data-testid="mobile-conversations"]');
+  await mobileAction(page, 'mobile-conversations');
   await page.waitFor(`document.querySelector('[data-testid="mobile-list"]')`);
   await page.click(`[data-testid="mobile-thread-${threadId}"]`);
   await page.waitFor(`!document.querySelector('.body.mobile-covered')`);

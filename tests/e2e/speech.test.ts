@@ -1,3 +1,4 @@
+import { mobileAction } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -111,7 +112,7 @@ test('phone options change effort and permissions without losing the draft', asy
 }, 15_000);
 
 test('phone draft options preserve worktree choice and close when returning to desktop', async () => {
-  await page.click(id('mobile-new'));
+  await mobileAction(page, 'mobile-menu-new');
   await type('A new task.');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 320, height: 600, deviceScaleFactor: 1, mobile: true });
   await page.click(id('composer-options'));
