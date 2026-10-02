@@ -15,8 +15,10 @@ const cliAccount: Account = { id: ANTIGRAVITY_QUOTA_ID, providerId: 'antigravity
 
 const CACHE_MS = 60_000;
 const RETRY_MS = 300_000;
+/** A disabled spending budget alone does not report subscription usage. */
 function hasQuota(reading: QuotaReading): boolean {
-  return reading.windows.length > 0 || reading.resetCredits !== undefined || reading.credits !== undefined;
+  return reading.windows.length > 0 || reading.resetCredits !== undefined ||
+    reading.credits?.kind === 'balance' || reading.credits?.enabled === true;
 }
 /** An identity not read yet names nobody else: only two known, different identities are two logins. */
 const sameLogin = (a: string | null, b: string | null) => a === null || b === null || a === b;

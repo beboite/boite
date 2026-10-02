@@ -267,7 +267,7 @@ fallback may omit reset grants and paid usage details. Codex quotas come from
 `account/rateLimits/read`, without starting a conversation.
 An empty reading keeps the last known limits marked stale and retries after
 five minutes, just like a failed request. It does not imply that the account
-has no subscription.
+has no subscription. A disabled paid-usage flag alone does not count as quota data.
 
 These reads also collect banked resets. Claude requests `cedar_ember=1` on
 its GET usage request with the user agent `claude-cli/<version>`, the installed

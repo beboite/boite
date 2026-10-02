@@ -70,13 +70,19 @@ test('an empty Claude HTTP response falls back to the same account CLI without s
     } as unknown as ReturnType<QueryFn>;
   });
   try {
-    const row = (await harness.core.quotas.list()).find((row) => row.accountId === account.id)!;
-    expect(row.status).toBe('ready');
-    expect(row.windows.map((window) => window.usedPercent)).toEqual([42, 7]);
-    expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(query).toHaveBeenCalledTimes(1);
-    expect(closed).toBe(true);
-    expect(prompts).toEqual([]);
+    let calls = 0;
+    for (const response of [{ five_hour: null, seven_day: null }, { extra_usage: { is_enabled: false } }]) {
+      fetcher.mockResolvedValue(Response.json(response));
+      harness.core.quotas.invalidate();
+      closed = false;
+      const row = (await harness.core.quotas.list()).find((row) => row.accountId === account.id)!;
+      expect(row.status).toBe('ready');
+      expect(row.windows.map((window) => window.usedPercent)).toEqual([42, 7]);
+      expect(fetcher).toHaveBeenCalledTimes(++calls);
+      expect(query).toHaveBeenCalledTimes(calls);
+      expect(closed).toBe(true);
+      expect(prompts).toEqual([]);
+    }
   } finally { query.mockRestore(); fetcher.mockRestore(); accounts.mockRestore(); }
 });
 
