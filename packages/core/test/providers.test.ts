@@ -296,14 +296,26 @@ describe('providers', () => {
     expect(claude?.capabilities.planMode).toBe(true);
   });
 
-  test('a test core resolves none of the agents installed on the machine', async () => {
-    expect(process.env.BOITE_HOST_AGENTS).toBe('0');
-    const client = await harness.connect();
-    const { loaded } = await client.call('providers.list', {});
-    for (const provider of loaded.filter((entry) => entry.id !== 'echo')) {
-      expect({ id: provider.id, available: provider.available, executable: provider.executable }).toEqual({ id: provider.id, available: false, executable: null });
+  test('a test core resolves no installed agents when ordinary E2E fixture options are enabled', async () => {
+    const options = ['BOITE_E2E_PREBUILT_UI', 'BOITE_E2E_SKIP_SHELL'];
+    const saved = options.map(name => process.env[name]);
+    try {
+      for (const name of options) process.env[name] = '1';
+      await harness.stop();
+      harness = await startTestCore();
+      expect(process.env.BOITE_HOST_AGENTS).toBe('0');
+      const client = await harness.connect();
+      const { loaded } = await client.call('providers.list', {});
+      for (const provider of loaded.filter((entry) => entry.id !== 'echo')) {
+        expect({ id: provider.id, available: provider.available, executable: provider.executable }).toEqual({ id: provider.id, available: false, executable: null });
+      }
+      expect(await client.call('providers.updates', { refresh: true })).toEqual([]);
+    } finally {
+      options.forEach((name, index) => {
+        if (saved[index] === undefined) delete process.env[name];
+        else process.env[name] = saved[index];
+      });
     }
-    expect(await client.call('providers.updates', { refresh: true })).toEqual([]);
   });
 
   test('the shipped opencode descriptor loads, resolves its executable and offers one model', async () => {

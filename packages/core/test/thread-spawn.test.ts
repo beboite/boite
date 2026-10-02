@@ -119,6 +119,57 @@ test('a started thread can get a worktree of its own, and a folder without git r
   expect((await cli(['thread', 'new', 'Notes', 'Fix it', '--worktree'])).err).toContain('not a git repository');
   expect(h.core.threads.require(threadId).status).not.toBe('error');
 
+  {
+    const create = h.core.threads.createInWorktree;
+    let serial: Promise<unknown> = Promise.resolve();
+    let prepared = false;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    h.core.threads.createInWorktree = async params => {
+      const creating = serial.then(() => create.call(h.core.threads, params));
+      serial = creating;
+      const thread = await creating;
+      prepared = true;
+      await gate;
+      return thread;
+    };
+    const caller = h.core.threads.require(threadId);
+    const other = await owner.call('threads.create', { projectId: caller.projectId!, providerId: caller.providerId, accountId: caller.accountId, title: 'Other caller' });
+    const before = h.core.journal.listThreads(spawned.thread.projectId!).length;
+    const params = { threadId, project: 'repo', prompt: 'One accepted worktree brief', worktree: true, requestId: 'concurrent-worktree' };
+    const first = owner.call('agent.spawn', params);
+    const pending: Promise<unknown>[] = [first];
+    try {
+      await waitFor(() => prepared);
+      const duplicate = owner.call('agent.spawn', params);
+      const separate = owner.call('agent.spawn', { ...params, threadId: other.id });
+      const nextParams = { ...params, requestId: 'another-concurrent-worktree' };
+      const different = owner.call('agent.spawn', nextParams);
+      const mismatch = owner.call('agent.spawn', { ...params, prompt: 'Different brief' }).catch((error: unknown) => error);
+      pending.push(duplicate, separate, different, mismatch);
+      await waitFor(() => h.core.router.activeRequests >= 4);
+      release();
+      const [one, repeated, own, next] = await Promise.all([first, duplicate, separate, different]);
+      expect(repeated.thread.id).toBe(one.thread.id);
+      expect(repeated.turnId).toBe(one.turnId);
+      expect(own.thread.id).not.toBe(one.thread.id);
+      expect(h.core.journal.listTurns(one.thread.id)).toHaveLength(1);
+      expect(h.core.journal.listThreads(spawned.thread.projectId!)).toHaveLength(before + 3);
+      expect(await mismatch).toMatchObject({ rpc: { message: 'agent.spawn.requestId was already used for different content', data: { field: 'requestId' } } });
+      expect((await owner.call('agent.spawn', params)).thread.id).toBe(one.thread.id);
+      expect((await owner.call('agent.spawn', nextParams)).thread.id).toBe(next.thread.id);
+      const beforeArchive = h.core.journal.listThreads().length;
+      const refused = owner.call('agent.spawn', { threadId: other.id, project: caller.projectId!, prompt: 'Do not create after an earlier archive', requestId: 'archive-before-create' }).catch((error: unknown) => error);
+      await owner.call('threads.archive', { threadId: other.id });
+      expect(await refused).toMatchObject({ rpc: { message: 'an archived thread cannot start threads' } });
+      expect(h.core.journal.listThreads()).toHaveLength(beforeArchive);
+    } finally {
+      release();
+      await Promise.allSettled(pending);
+      h.core.threads.createInWorktree = create;
+    }
+  }
+
   const create = h.core.threads.createInWorktree;
   let prepared: string | null = null;
   let release!: () => void;

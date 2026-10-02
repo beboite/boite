@@ -252,6 +252,22 @@ test('fake agent.spawn starts a real thread marked at both ends and keeps retrie
   const back = await client.call('threads.get', { threadId: caller.id });
   expect(back.messages.at(-1)?.parts[0]).toMatchObject({ started: { threadId: spawned.thread.id, project: target.name } });
   await expect(client.call('agent.spawn', { ...params, requestId: 'spawn-2', project: 'nowhere' })).rejects.toMatchObject({ code: RpcErrorCode.NotFound, data: { field: 'project' } });
+  await client.call('threads.archive', { threadId: caller.id });
+  await expect.soft(client.call('agent.spawn', { ...params, requestId: 'archived-spawn' })).rejects.toMatchObject({ code: RpcErrorCode.Refused, message: 'an archived thread cannot start threads', data: { field: 'threadId' } });
+  await client.call('threads.archive', { threadId: caller.id, archived: false });
+  const concurrent = { ...params, requestId: 'concurrent-spawn' };
+  const [one, repeated] = await Promise.all([client.call('agent.spawn', concurrent), client.call('agent.spawn', concurrent)]);
+  expect.soft(repeated.thread.id).toBe(one.thread.id);
+  expect.soft(repeated.turnId).toBe(one.turnId);
+  await expect.soft(client.call('agent.spawn', { ...params, prompt: 'Changed retry content' })).rejects.toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'requestId' } });
+  for (let index = 0; index < 4; index++) {
+    await expect.soft(client.call('agent.spawn', { ...params, requestId: `unlimited-${index}`, prompt: `Brief ${index}` })).resolves.toMatchObject({ thread: { projectId: target.id } });
+  }
+  const beforeArchive = (await client.call('threads.list', { includeArchived: true })).length;
+  const refused = client.call('agent.spawn', { ...params, requestId: 'archive-before-create' }).catch((error: unknown) => error);
+  await client.call('threads.archive', { threadId: caller.id });
+  expect(await refused).toMatchObject({ code: RpcErrorCode.Refused, message: 'an archived thread cannot start threads' });
+  expect(await client.call('threads.list', { includeArchived: true })).toHaveLength(beforeArchive);
 });
 
 test('fake agent.addProject registers a folder once, with a line in the caller, and refuses a relative one', async ({ createClient }) => {

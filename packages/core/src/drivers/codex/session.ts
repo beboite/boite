@@ -259,7 +259,8 @@ export class CodexSession {
       // A child that died takes the connection with it, and its exit says more
       // than "the request failed": give it a moment to be reported.
       const code = await exitWithin(this.exited, EXIT_GRACE_MS, this.processClosed);
-      turn.fail(code === undefined ? messageOf(error) : this.exitSentence(code), code === undefined ? logMessageOf(error) : this.exitSentence(code, true));
+      if (turn.isStopped) turn.endStopped();
+      else turn.fail(code === undefined ? messageOf(error) : this.exitSentence(code), code === undefined ? logMessageOf(error) : this.exitSentence(code, true));
       this.current = null;
       this.endTurn(turn, true);
       return;

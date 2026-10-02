@@ -265,7 +265,8 @@ export class MuseSession {
       }
     } catch (error) {
       const code = await exitWithin(this.exited, EXIT_GRACE_MS, this.processClosed);
-      turn.fail(code === undefined ? commandFailure(error) : this.exitSentence(code), code === undefined ? logMessageOf(error) : this.exitSentence(code, true));
+      if (turn.isStopped) turn.finish('cancelled', null);
+      else turn.fail(code === undefined ? commandFailure(error) : this.exitSentence(code), code === undefined ? logMessageOf(error) : this.exitSentence(code, true));
       this.current = null;
       this.endTurn(turn, true);
       return;

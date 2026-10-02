@@ -19,6 +19,7 @@ interface Pending {
 export class StdioTransport<Id extends string | number> {
   private readonly pending = new Map<Id, Pending>();
   private closed = false;
+  private drainingStdout = false;
 
   constructor(
     private readonly child: SpawnedChild,
@@ -34,12 +35,13 @@ export class StdioTransport<Id extends string | number> {
       onOverflow: () => this.break(`stdout line exceeded ${STDOUT_LINE_MAX} code units`),
     });
     child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => { if (!this.closed) lines.feed(chunk); });
+    child.stdout.on('data', (chunk: string) => { if (!this.closed || this.drainingStdout) lines.feed(chunk); });
     child.stdout.on('end', () => { lines.end(); this.break('stdout ended'); });
     child.stdout.on('error', () => this.break('stdout read failed'));
     child.stdout.on('close', () => this.break('stdout closed'));
     child.stdin.on('error', () => this.break('stdin write failed'));
-    child.stdin.on('close', () => this.break('stdin closed'));
+    // Input can close before the accepted turn's last stdout records drain.
+    child.stdin.on('close', () => this.break('stdin closed', true));
   }
 
   request<T>(id: Id, method: string, payload: unknown, options: StdioRequestOptions = {}): Promise<T> {
@@ -93,8 +95,12 @@ export class StdioTransport<Id extends string | number> {
     this.handlers.log('warn', `${this.label}: ${reason}`, { event: 'provider.protocolError' });
   }
 
-  private break(reason: string): void {
-    if (this.closed) return;
+  private break(reason: string, drainStdout = false): void {
+    if (this.closed) {
+      if (!drainStdout) this.drainingStdout = false;
+      return;
+    }
+    this.drainingStdout = drainStdout;
     this.invalid(reason);
     this.fail(`${this.label}: ${reason}`);
     try { this.handlers.fault?.(`${this.label}: ${reason}`); }
@@ -102,7 +108,7 @@ export class StdioTransport<Id extends string | number> {
   }
 
   private onLine(line: string): void {
-    if (this.closed) return;
+    if (this.closed && !this.drainingStdout) return;
     let message: unknown;
     try { message = JSON.parse(line); }
     catch { this.invalid('stdout record is not JSON'); return; }

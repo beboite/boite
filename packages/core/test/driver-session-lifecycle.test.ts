@@ -91,6 +91,77 @@ for (const protocol of ['codex-appserver', 'muse', 'pi'] as const) {
     } finally { restore?.(); intercepted.mockRestore(); }
   }, 10000);
 
+  for (const boundary of ['refusal-after-stop', 'terminal-after-stdin-close'] as const) {
+    test(`${protocol}: ${boundary} preserves the public turn outcome and replacement work`, async () => {
+      harness = await startTestCore({ settings: { warmProcessMinutes: 5 } });
+      const client = await harness.connect();
+      const fixture = protocol === 'codex-appserver' ? 'codex-server' : protocol === 'muse' ? 'muse-server' : 'pi-agent';
+      const threadId = await providerThread(client, protocol, fileURLToPath(new URL(`./fixtures/${fixture}.ts`, import.meta.url)));
+      const spawn = harness.core.procs.spawnChild.bind(harness.core.procs);
+      let child: SpawnedChild | undefined, inject: ((record: unknown) => void) | undefined;
+      let promptId: unknown, nativeTurnId: unknown, buffered = '';
+      const intercepted = spyOn(harness.core.procs, 'spawnChild').mockImplementation((...args) => {
+        const spawned = spawn(...args);
+        if (args[0] !== threadId || child) return spawned;
+        child = spawned;
+        const write = spawned.stdin.write.bind(spawned.stdin), emit = spawned.stdout.emit.bind(spawned.stdout);
+        inject = record => { emit('data', `${JSON.stringify(record)}\n`); };
+        spawned.stdin.write = (...values: unknown[]): boolean => {
+          const record = JSON.parse(String(values[0])) as { method?: string; type?: string; id?: unknown };
+          if (record.method === 'turn/start' || record.type === 'prompt') promptId = record.id;
+          // The host does not receive Stop, so only the injected refusal decides it.
+          if (boundary === 'refusal-after-stop' && (record.method === 'turn/interrupt' || record.type === 'abort')) return true;
+          return Reflect.apply(write, spawned.stdin, values);
+        };
+        spawned.stdout.emit = (name: string | symbol, ...values: unknown[]): boolean => {
+          if (name !== 'data') return emit(name, ...values);
+          const lines = (buffered + String(values[0])).split('\n');
+          buffered = lines.pop()!;
+          const kept = lines.filter(line => {
+            if (!line) return false;
+            const record = JSON.parse(line) as { id?: unknown; method?: string; params?: { turnId?: unknown; turn?: { id?: unknown } } };
+            if (record.method === 'turn/started') nativeTurnId = record.params?.turn?.id ?? record.params?.turnId;
+            return boundary !== 'refusal-after-stop' || record.id !== promptId;
+          });
+          return kept.length ? emit(name, `${kept.join('\n')}\n`) : true;
+        };
+        return spawned;
+      });
+      try {
+        const outcomes: string[] = [];
+        client.on('turn.finished', turn => { if (turn.threadId === threadId) outcomes.push(turn.status); });
+        const finished = client.next('turn.finished', turn => turn.threadId === threadId, 3000);
+        await client.call('turns.start', { threadId, prompt: '[slow] boundary fixture' });
+        await waitFor(() => harness!.core.journal.listMessages(threadId).some(message => message.role === 'assistant'));
+        expect(child!.exitCode).toBeNull();
+        if (boundary === 'refusal-after-stop') {
+          await client.call('turns.stop', { threadId });
+          inject!(protocol === 'pi'
+            ? { type: 'response', id: promptId, command: 'prompt', success: false, error: 'the stopped prompt was refused' }
+            : { id: promptId, error: { code: -32603, message: 'the stopped prompt was refused' } });
+        } else {
+          // Input is closed while the already accepted turn's terminal output is still draining.
+          child!.stdin.emit('close');
+          inject!(protocol === 'pi' ? { type: 'agent_settled' }
+            : protocol === 'muse' ? { method: 'turn/completed', params: { turnId: nativeTurnId, terminal: 'completed' } }
+            : { method: 'turn/completed', params: { turn: { id: nativeTurnId, status: 'completed' } } });
+        }
+        const result = await finished;
+        expect(result.status).toBe(boundary === 'refusal-after-stop' ? 'stopped' : 'done');
+        expect(result.error).toBeNull();
+        const saved = await client.call('threads.get', { threadId });
+        expect(saved.messages.flatMap(message => message.parts).filter(part => part.type === 'error')).toEqual([]);
+        expect(saved.messages.some(message => message.role === 'assistant' && message.state === 'complete')).toBe(true);
+        await waitFor(() => harness!.core.procs.liveCount(threadId) === 0);
+        expect(outcomes).toEqual([result.status]);
+        const next = client.next('turn.finished', turn => turn.threadId === threadId);
+        await client.call('turns.start', { threadId, prompt: 'explicit replacement' });
+        expect((await next).status).toBe('done');
+        expect(outcomes).toEqual([result.status, 'done']);
+      } finally { intercepted.mockRestore(); }
+    }, 10000);
+  }
+
   test(`${protocol}: notification-only transport failure settles the owner and leaves echo and replacement work usable`, async () => {
     harness = await startTestCore({ settings: { warmProcessMinutes: 5 } });
     const client = await harness.connect();

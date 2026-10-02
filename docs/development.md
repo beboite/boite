@@ -244,7 +244,9 @@ image markers, `/shout`, `/whisper` and `[compact]`; its context reading is
 
 `BOITE_HOST_AGENTS=0` disables executable resolution and access to host agent
 profiles, so version checks, quotas and probes cannot use developer logins.
-Fixture harnesses set it. Explicit live-test flags opt back into host agents.
+Fixture harnesses set it. Only the host-agent opt-ins listed below enable
+installed agents; `BOITE_E2E_PREBUILT_UI` and `BOITE_E2E_SKIP_SHELL` only select
+browser fixtures and cannot enable host profiles or probes.
 
 ## Checks and tests
 
@@ -389,6 +391,7 @@ Real-provider tests use CLI logins and spend tokens. Run selected cases from
 | `BOITE_E2E_CLAUDE=1` | `test/claude.live.test.ts`: turn, resume, native import and warm process |
 | `BOITE_E2E_OPENCODE=1` | `test/opencode.live.test.ts`: ACP turn and cold resume |
 | `BOITE_E2E_GROK=1` | `test/grok.live.test.ts`: default login, model/effort and cold resume; empty isolated homes can open sign-in |
+| `BOITE_E2E_GROK_QUOTA=1` | `test/grok-quota.live.test.ts`: quota for the existing default login |
 | `BOITE_E2E_CODEX=1` | `test/codex.live.test.ts`: app-server turn and resume |
 | `BOITE_E2E_PI=1` | `test/pi.live.test.ts`: turn and resume |
 | `BOITE_E2E_AGY=1` | `test/agy.live.test.ts`: model discovery and one cold default-account turn |

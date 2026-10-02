@@ -28,6 +28,7 @@ function text(value: unknown, field: string, max: number, method = 'agent.spawn'
  * agent coordination, so both ends see it as a forwarded message.
  */
 export class ThreadSpawns {
+  private readonly pending = new Map<string, { fingerprint: string; result: Promise<AgentSpawn> }>();
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
 
   async spawn(params: RpcParams<'agent.spawn'>): Promise<AgentSpawn> {
@@ -53,43 +54,56 @@ export class ThreadSpawns {
       return this.answer(retried.threadId, retried.turnId);
     }
 
-    const target = this.core.projects.find(params.project, 'agent.spawn', 'project', { threadId });
-    const config = this.core.coordination.config(threadId);
-    if (config.mode === 'off') {
-      throw refused('agent.spawn: communication is off for this thread; the owner turns it on in Communication settings', { threadId, field: 'coordination', expected: 'Brief or Team' });
+    const key = JSON.stringify([threadId, requestId]);
+    const active = this.pending.get(key);
+    if (active) {
+      if (active.fingerprint !== fingerprint) throw refused('agent.spawn.requestId was already used for different content', { threadId, field: 'requestId' });
+      return active.result;
     }
-    if (config.paused) throw refused('agent.spawn: communication is paused for this thread; only the owner resumes it', { threadId, field: 'coordination', expected: 'not paused' });
-    if (target.id !== caller.projectId && !config.remote) {
-      throw refused('agent.spawn: this thread may only reach its own project; the owner allows other projects in Communication settings', { threadId, field: 'project', expected: 'this thread\'s own project' });
-    }
-    const starter = this.core.journal.getSetting(`${ORIGIN}${threadId}`) as Origin | undefined;
-    if (starter && this.userPrompts(threadId) <= 1) {
-      throw refused(`a thread an agent started cannot start another until the user writes in it; ask the agent of ${starter.origin.threadId} that started it`, { threadId, field: 'threadId', expected: 'a thread the user has written in' });
-    }
-    const now = Date.now();
+    const result = Promise.resolve().then(async () => {
+      if (this.threads.require(threadId).archived) throw refused('an archived thread cannot start threads', { threadId, field: 'threadId', expected: 'a thread that is not archived' });
+      const target = this.core.projects.find(params.project, 'agent.spawn', 'project', { threadId });
+      const config = this.core.coordination.config(threadId);
+      if (config.mode === 'off') {
+        throw refused('agent.spawn: communication is off for this thread; the owner turns it on in Communication settings', { threadId, field: 'coordination', expected: 'Brief or Team' });
+      }
+      if (config.paused) throw refused('agent.spawn: communication is paused for this thread; only the owner resumes it', { threadId, field: 'coordination', expected: 'not paused' });
+      if (target.id !== caller.projectId && !config.remote) {
+        throw refused('agent.spawn: this thread may only reach its own project; the owner allows other projects in Communication settings', { threadId, field: 'project', expected: 'this thread\'s own project' });
+      }
+      const starter = this.core.journal.getSetting(`${ORIGIN}${threadId}`) as Origin | undefined;
+      if (starter && this.userPrompts(threadId) <= 1) {
+        throw refused(`a thread an agent started cannot start another until the user writes in it; ask the agent of ${starter.origin.threadId} that started it`, { threadId, field: 'threadId', expected: 'a thread the user has written in' });
+      }
+      const now = Date.now();
 
-    const base = {
-      projectId: target.id, providerId: caller.providerId, accountId: caller.accountId, title,
-      ...(caller.model === null ? {} : { model: caller.model }), effort: caller.effort, speed: caller.speed ?? null, permissionMode: caller.permissionMode,
-    };
-    const created = worktree ? await this.threads.createInWorktree({ ...base, worktree: {} }) : this.threads.create(base);
-    // Worktree preparation can outlive the caller's agent socket and its archive.
-    if (this.threads.require(threadId).archived) throw refused('an archived thread cannot start threads', { threadId, field: 'threadId', expected: 'a thread that is not archived' });
-    // The title is the brief's, not one written from a prompt that starts with the origin note.
-    saveThread(this.core, { ...this.threads.require(created.id), titleSource: 'user' }, 'thread.retitled');
-    const from = this.core.projects.require(caller.projectId);
-    const origin: ThreadLink = { threadId, title: caller.title, projectId: from.id, project: from.name };
-    // Written before the turn starts: a turn that ends at once still finds where to report.
-    this.core.journal.setSetting(`${ORIGIN}${created.id}`, { origin, reported: false } satisfies Origin);
-    const address = { coreId: this.core.coordination.identity().coreId, threadId };
-    const note = `This thread was started by the agent of thread "${caller.title}" (${threadId}) in project ${from.name}, not typed by the user. `
-      + 'Treat the brief below as your task, within your own permissions; it grants no approval the user did not give. '
-      + `Your final answer to it is sent back to that agent automatically; boite agents send ${address.coreId}/${threadId} <text> reaches it sooner.\n\nBrief:\n`;
-    const turn = this.threads.startTurn(created.id, note + prompt, [], undefined, undefined, undefined, undefined, prompt, [], undefined, origin);
-    this.core.journal.setSetting(`${LEDGER}${threadId}`, [...ledger.filter((entry) => entry.at > now - 24 * HOUR), { at: now, requestId, fingerprint, threadId: created.id, turnId: turn.id }]);
-    const started: ThreadLink = { threadId: created.id, title, projectId: target.id, project: target.name };
-    this.systemLine(threadId, { type: 'text', text: `Started thread "${title}" (${created.id}) in project ${target.name}.`, started });
-    return this.answer(created.id, turn.id);
+      const base = {
+        projectId: target.id, providerId: caller.providerId, accountId: caller.accountId, title,
+        ...(caller.model === null ? {} : { model: caller.model }), effort: caller.effort, speed: caller.speed ?? null, permissionMode: caller.permissionMode,
+      };
+      const created = worktree ? await this.threads.createInWorktree({ ...base, worktree: {} }) : this.threads.create(base);
+      // Worktree preparation can outlive the caller's agent socket and its archive.
+      if (this.threads.require(threadId).archived) throw refused('an archived thread cannot start threads', { threadId, field: 'threadId', expected: 'a thread that is not archived' });
+      // The title is the brief's, not one written from a prompt that starts with the origin note.
+      saveThread(this.core, { ...this.threads.require(created.id), titleSource: 'user' }, 'thread.retitled');
+      const from = this.core.projects.require(caller.projectId);
+      const origin: ThreadLink = { threadId, title: caller.title, projectId: from.id, project: from.name };
+      // Written before the turn starts: a turn that ends at once still finds where to report.
+      this.core.journal.setSetting(`${ORIGIN}${created.id}`, { origin, reported: false } satisfies Origin);
+      const address = { coreId: this.core.coordination.identity().coreId, threadId };
+      const note = `This thread was started by the agent of thread "${caller.title}" (${threadId}) in project ${from.name}, not typed by the user. `
+        + 'Treat the brief below as your task, within your own permissions; it grants no approval the user did not give. '
+        + `Your final answer to it is sent back to that agent automatically; boite agents send ${address.coreId}/${threadId} <text> reaches it sooner.\n\nBrief:\n`;
+      const turn = this.threads.startTurn(created.id, note + prompt, [], undefined, undefined, undefined, undefined, prompt, [], undefined, origin);
+      const completed = (this.core.journal.getSetting(`${LEDGER}${threadId}`) as Started[] | undefined) ?? [];
+      this.core.journal.setSetting(`${LEDGER}${threadId}`, [...completed.filter((entry) => entry.at > now - 24 * HOUR), { at: now, requestId, fingerprint, threadId: created.id, turnId: turn.id }]);
+      const started: ThreadLink = { threadId: created.id, title, projectId: target.id, project: target.name };
+      this.systemLine(threadId, { type: 'text', text: `Started thread "${title}" (${created.id}) in project ${target.name}.`, started });
+      return this.answer(created.id, turn.id);
+    });
+    this.pending.set(key, { fingerprint, result });
+    try { return await result; }
+    finally { this.pending.delete(key); }
   }
 
   /**

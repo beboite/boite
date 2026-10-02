@@ -162,7 +162,13 @@ export class Drafts {
 
   forget(projectId: string | null): void { delete this.saved[projectKey(projectId)]; }
   has(projectId: string | null): boolean { return hasContent(this.saved[projectKey(projectId)]?.input); }
-  async flush(): Promise<boolean> { this.persist(); this.#writeNow(); while (this.#writing) await this.#writing; return this.readable && !this.#writeFailed && !this.#failedEntries.size; }
+  async flush(): Promise<boolean> {
+    this.persist(); this.#writeNow();
+    while (this.#writing) await this.#writing;
+    // Without IndexedDB, every entry must have reached its synchronous backup.
+    return this.readable && !this.#writeFailed && !this.#failedEntries.size
+      && (typeof indexedDB !== 'undefined' || [...this.#entries.values()].every(entry => entry.backedUp));
+  }
 
   get entries(): { projectId: string | null; text: string; active: boolean }[] {
     const s = this.ctx.store;

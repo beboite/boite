@@ -42,13 +42,66 @@ test('a local core moving to another port keeps its drafts', async () => {
 });
 
 test('storage failures keep the text in memory and explain that it could not be saved', async () => {
+  const journal = await vi.importActual<typeof import('./draft-journal')>('./draft-journal');
+  vi.mocked(readDraftJournal).mockImplementation(journal.readDraftJournal);
+  vi.mocked(writeDraftJournal).mockImplementation(journal.writeDraftJournal);
+  vi.stubGlobal('indexedDB', undefined);
   const store = await ready();
   const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Full', 'QuotaExceededError'); });
   try {
     store.editComposerText('t-trace', 'Still here');
     expect(store.composerStates['t-trace']?.text).toBe('Still here');
     expect(store.error).toBe(strings.errors.draftStorage);
+    expect(await store.flushDrafts()).toBe(false);
+    expect(store.composerStates['t-trace']?.text).toBe('Still here');
   } finally { write.mockRestore(); }
+});
+
+test('a real journal checkpoint recovers input when the synchronous backup is denied', async () => {
+  const journal = await vi.importActual<typeof import('./draft-journal')>('./draft-journal');
+  vi.mocked(readDraftJournal).mockImplementation(journal.readDraftJournal);
+  vi.mocked(writeDraftJournal).mockImplementation(journal.writeDraftJournal);
+  const persisted = new Map<string, unknown>();
+  // Only the browser API is synthetic; Store and both journal functions run.
+  const transaction = vi.fn((_name: string, _mode: string, _options?: { durability: string }) => {
+    const tx = {
+      oncomplete: null as (() => void) | null, onabort: null as (() => void) | null, error: null,
+      abort() { tx.onabort?.(); },
+      objectStore() { return {
+        get(key: string) {
+          const request = { result: structuredClone(persisted.get(key)) };
+          queueMicrotask(() => tx.oncomplete?.());
+          return request;
+        },
+        put(value: unknown, key: string) {
+          const snapshot = structuredClone(value);
+          queueMicrotask(() => { persisted.set(key, snapshot); tx.oncomplete?.(); });
+        }
+      }; }
+    };
+    return tx;
+  });
+  const db = { transaction, close: vi.fn() };
+  vi.stubGlobal('indexedDB', { open() {
+    const request = { result: db, onsuccess: null as (() => void) | null };
+    queueMicrotask(() => request.onsuccess?.());
+    return request;
+  } });
+  const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Full', 'QuotaExceededError'); });
+  try {
+    const store = await ready('durable-without-backup');
+    store.editComposerText('t-trace', 'Kept by the durable journal');
+    expect(await store.flushDrafts()).toBe(true);
+    expect(transaction).toHaveBeenCalledWith('drafts', 'readwrite', { durability: 'strict' });
+    expect(persisted.size).toBe(1);
+    expect(localStorage.length).toBe(0);
+    const recovered = await ready('durable-without-backup');
+    expect(recovered.composerStates['t-trace']?.text).toBe('Kept by the durable journal');
+  } finally {
+    for (const store of stores) { store.client?.close(); store.detach(); }
+    window.dispatchEvent(new Event('pagehide'));
+    write.mockRestore();
+  }
 });
 
 test('an empty landing draft during a failed read preserves unread durable text and explicit deletions', async () => {

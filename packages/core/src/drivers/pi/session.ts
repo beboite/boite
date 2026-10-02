@@ -253,7 +253,8 @@ export class PiSession {
       // A child that died takes the pipe with it, and its exit says more than
       // "the command failed": give it a moment to be reported.
       const code = await exitWithin(this.exited, EXIT_GRACE_MS, this.processClosed);
-      turn.fail(code === undefined ? messageOf(error) : this.exitSentence(code), code === undefined ? logMessageOf(error) : this.exitSentence(code, true));
+      if (turn.isStopped) turn.settleRun();
+      else turn.fail(code === undefined ? messageOf(error) : this.exitSentence(code), code === undefined ? logMessageOf(error) : this.exitSentence(code, true));
       this.current = null;
       this.endTurn(turn, true);
       return;

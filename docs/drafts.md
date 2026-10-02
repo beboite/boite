@@ -55,3 +55,6 @@ New text also reaches its synchronous entry backup while a read is still
 pending, so cancelling the connection retains that input. The device waits to
 read older entries before writing a complete durable journal; `flushDrafts`
 reports failure until that read has succeeded.
+If neither IndexedDB nor the synchronous backup can save the input,
+`flushDrafts` returns false and the input remains visible. A completed
+IndexedDB write can succeed even when the synchronous backup is unavailable.
