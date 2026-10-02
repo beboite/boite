@@ -17,7 +17,7 @@ test('the owner app relays signed reads, preserves directional grants on reload,
   let page: BrowserPage | undefined, ui: { close(): Promise<void> } | undefined;
   try {
     const port = await freePort(), origin = `http://127.0.0.1:${port}`;
-    ui = await startUi(port, { development: true });
+    ui = await startUi(port);
     for (let index = 0; index < 2; index++) {
       const core = await startCore(); cores.push(core);
       const client = await connect(core.url, core.token); clients.push(client);
@@ -90,7 +90,8 @@ test('the owner app relays signed reads, preserves directional grants on reload,
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await capture(page, 'agent-activity-phone.png');
     expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
-    await page.click('[data-testid=turn-activity-trace]');
+    expect(await page.evaluate('document.querySelector("[data-testid=turn-summary] button") === null')).toBe(true);
+    await page.evaluate('globalThis.__boiteTest.workspace.active.panel.open("trace")');
     await page.waitFor('document.querySelector("[data-testid=trace-panel]")');
     await pc.call('turns.stop', { threadId: threads[0]!.id });
     await page.close(); page = undefined;

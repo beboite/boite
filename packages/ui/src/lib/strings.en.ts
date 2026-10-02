@@ -753,7 +753,6 @@ export const strings = {
     providerSignal: 'Provider signal {time} ago',
     lastActivity: 'Last activity {time} ago',
     noActivity: 'No new activity for {time}',
-    activityTrace: 'View trace',
     /** The jump button once something arrived below the reader. */
     newMessage: '1 new message',
     newMessages: '{count} new messages',
