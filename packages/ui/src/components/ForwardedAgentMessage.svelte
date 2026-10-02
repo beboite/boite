@@ -2,6 +2,7 @@
   import { CheckCheck, CornerDownLeft, Forward } from '@lucide/svelte';
   import type { AgentAddress, AgentLetter } from '@boite/contracts';
   import { strings } from '../lib/strings';
+  import { exactTime, relativeTime } from '../lib/format';
 
   let { letter, self, projectName, onopen }: {
     letter: AgentLetter; self: AgentAddress; projectName?: string; onopen?: (address: AgentAddress) => void;
@@ -18,24 +19,36 @@
   let sourceLabel = $derived(letter.origin === 'user'
     ? outgoing ? strings.coordination.userSentTo : strings.coordination.userMessageVia
     : outgoing ? strings.coordination.sentTo : strings.coordination.receivedFrom);
+  let now = $state(Date.now());
+  let hidden = $state(document.hidden);
+  $effect(() => {
+    if (hidden) return;
+    now = Date.now();
+    const timer = setInterval(() => { now = Date.now(); }, 60_000);
+    return () => clearInterval(timer);
+  });
 </script>
 
+<svelte:document onvisibilitychange={() => hidden = document.hidden} />
 <div class="forwarded" class:user={userSide} data-testid="forwarded-agent-message" data-letter-id={letter.id} data-direction={outgoing ? 'outgoing' : 'incoming'} title={technical}>
-  <button type="button" class="forward-head" data-testid="agent-letter-open" title={strings.chat.openLinkedThread} disabled={!onopen} onclick={() => onopen?.(address)}>
-    <span class="forward-icon">
-      {#if outgoing}<Forward size={18} strokeWidth={1.75} aria-hidden="true" />
-      {:else}<CornerDownLeft size={18} strokeWidth={1.75} aria-hidden="true" />{/if}
-    </span>
-    <span class="source">
-      <span class="forward-label">{sourceLabel}</span>
-      <strong>{outgoing ? letter.toTitle : letter.from.title}</strong>
-      <span class="source-context">
-        {#if project}<span class="project" data-testid="agent-letter-project">{project}</span>{/if}
-        {#if project && machine}<span aria-hidden="true">·</span>{/if}
-        {#if machine}<span class="machine">{machine}</span>{/if}
+  <div class="forward-top">
+    <button type="button" class="forward-head" data-testid="agent-letter-open" title={strings.chat.openLinkedThread} disabled={!onopen} onclick={() => onopen?.(address)}>
+      <span class="forward-icon">
+        {#if outgoing}<Forward size={18} strokeWidth={1.75} aria-hidden="true" />
+        {:else}<CornerDownLeft size={18} strokeWidth={1.75} aria-hidden="true" />{/if}
       </span>
-    </span>
-  </button>
+      <span class="source">
+        <span class="forward-label">{sourceLabel}</span>
+        <strong>{outgoing ? letter.toTitle : letter.from.title}</strong>
+        <span class="source-context">
+          {#if project}<span class="project" data-testid="agent-letter-project">{project}</span>{/if}
+          {#if project && machine}<span aria-hidden="true">·</span>{/if}
+          {#if machine}<span class="machine">{machine}</span>{/if}
+        </span>
+      </span>
+    </button>
+    <time class="when" data-testid="agent-letter-age" datetime={new Date(letter.createdAt).toISOString()} title={exactTime(letter.createdAt)}>{relativeTime(letter.createdAt, now)}</time>
+  </div>
   <p class="body">{letter.text}</p>
   <div class="foot">
     {#if needsDetails}
@@ -63,7 +76,9 @@
     background: var(--color-surface-2);
     box-shadow: var(--shadow-e1);
   }
-  .forward-head { display: flex; align-items: flex-start; justify-content: flex-start; gap: 9px; width: 100%; height: auto; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; text-align: left; color: var(--color-muted-foreground); }
+  .forward-top { display: flex; align-items: flex-start; gap: 12px; }
+  .forward-head { display: flex; flex: 1; min-width: 0; align-items: flex-start; justify-content: flex-start; gap: 9px; height: auto; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; text-align: left; color: var(--color-muted-foreground); }
+  .when { flex: none; font-size: var(--text-xs); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .forward-head:hover:not(:disabled) strong { text-decoration: underline; }
   .forward-head:disabled { opacity: 1; cursor: default; }
   .forwarded.user {

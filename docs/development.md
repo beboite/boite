@@ -867,7 +867,9 @@ It writes desktop, phone and light-theme captures under `tests/e2e/.artifacts/`.
 and phone in dark and light themes. Received mail is input to the local agent,
 so it appears on the right with the user accent; mail written by that agent
 appears on the left with the neutral surface. Owner-authored prompts keep the
-user style in either direction.
+user style in either direction. The top-right timestamp shows the age of the
+letter's creation time in the app's language, updates every minute while the
+page is visible, and exposes the exact date and time on hover.
 
 A conversation is read and written in one size, the `--text-reading` and
 `--leading-reading` tokens of `app.css`: 15 px on a 24 px line on the wide

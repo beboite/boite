@@ -44,6 +44,7 @@ beforeAll(async () => {
     const delegation = await local.call('delegation.get', { threadId: 't-trace' });
     workspace.active.delegation = { ...delegation, messages: [{
       ...outgoing, id: 'user-delegation', origin: 'user', text: 'Please check deployment.',
+      createdAt: Date.now() - 120_000,
       from: { ...outgoing.from, coreId: 'local' }, to: { ...outgoing.to, coreId: 'local' }
     }] };
   })()`);
@@ -86,7 +87,29 @@ test('forwarded agent messages sit in the conversation at desktop and phone widt
     expect(bubbles.userRight).toBe(bubbles.incomingRight);
     expect(bubbles.userColor).toBe(bubbles.promptColor);
   };
+  const checkTimestamps = async (userAge: string) => {
+    const stamps = await page.evaluate<any[]>(`Array.from(document.querySelectorAll('[data-testid="forwarded-agent-message"]'), card => {
+      const stamp = card.querySelector('[data-testid="agent-letter-age"]');
+      const bounds = card.getBoundingClientRect();
+      const age = stamp.getBoundingClientRect();
+      const source = card.querySelector('[data-testid="agent-letter-open"]').getBoundingClientRect();
+      return { id: card.dataset.letterId, text: stamp.textContent, date: stamp.dateTime, title: stamp.title,
+        top: age.top - bounds.top, right: bounds.right - age.right, gap: age.left - source.right };
+    })`);
+    expect(stamps).toHaveLength(3);
+    for (const stamp of stamps) {
+      expect(Number.isFinite(Date.parse(stamp.date))).toBe(true);
+      expect(stamp.title.length).toBeGreaterThan(0);
+      expect(stamp.top).toBeGreaterThan(0);
+      expect(stamp.top).toBeLessThan(20);
+      expect(stamp.right).toBeGreaterThan(0);
+      expect(stamp.right).toBeLessThan(20);
+      expect(stamp.gap).toBeGreaterThanOrEqual(10);
+    }
+    expect(stamps.find(stamp => stamp.id === 'user-delegation')?.text.replace(/\s/g, ' ')).toBe(userAge);
+  };
   await checkDirection();
+  await checkTimestamps('2 min. ago');
   expect(await page.evaluate(`document.querySelector('[data-testid="timeline"]')?.textContent ?? ''`)).not.toContain('Boite agent coordination');
   expect(await page.evaluate(`document.querySelector('[data-testid="coordination-panel"]') === null`)).toBe(true);
   await page.evaluate(`document.querySelector('[data-letter-id="incoming-deployment"]').scrollIntoView({ block: 'center' })`);
@@ -98,12 +121,20 @@ test('forwarded agent messages sit in the conversation at desktop and phone widt
   await settled();
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
   await checkDirection();
+  await checkTimestamps('2 min. ago');
   await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-phone.png'));
 
   await page.evaluate(`window.__boiteTest.setTheme('light')`);
   await settled();
   await checkDirection();
   await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-phone-light.png'));
+
+  await page.evaluate(`import('/src/lib/i18n.svelte.ts').then(module => module.setLocaleSetting('fr'))`);
+  await settled();
+  await checkTimestamps('il y a 2 min');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-phone-fr.png'));
+  await page.evaluate(`import('/src/lib/i18n.svelte.ts').then(module => module.setLocaleSetting('en'))`);
 
   // The same title menu exposes settings on phones and desktops.
   await page.click('[data-testid="thread-menu-trigger"]');
