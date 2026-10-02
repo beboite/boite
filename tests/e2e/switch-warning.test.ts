@@ -76,6 +76,59 @@ async function lowerEffort(size: { width: number; height: number }, name: string
 
 const effort = (page: BrowserPage) => page.evaluate<boolean>(`(async () => (${STORE}).openThread.effort === window.__effort)()`);
 
+test('native speed switches keep Codex unblocked and warn only when enabling Claude Fast, on desktop and phone', async () => {
+  const url = `http://127.0.0.1:${port}/?fake=1&open=recent`;
+  const page = await BrowserPage.launch({ url });
+  pages.push(page);
+  for (const [width, height, name] of [[1300, 850, 'desktop'], [390, 844, 'phone']] as const) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: name === 'phone' });
+    await page.navigate(url);
+    await page.waitFor(`document.querySelector('[data-testid="composer-picker"]')`);
+    for (const [provider, model, speeds] of [['codex', 'codex-demo', ['fast', 'ultrafast', null]], ['claude', 'claude-opus-5', ['fast', null]]] as const) {
+      await page.evaluate(`(async () => { const store = ${STORE}; store.openThread.context = { tokens: 0, window: 1000000, at: Date.now() }; document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); })()`);
+      await page.click('[data-testid="composer-picker"]');
+      await page.click(`[data-provider="${provider}"]`);
+      await page.waitFor(`document.querySelector('[data-model="${model}"]')`);
+      await page.click(`[data-model="${model}"]`);
+      await page.waitFor(`(async () => (${STORE}).openThread.model === ${JSON.stringify(model)})()`);
+      await page.evaluate(`(async () => { (${STORE}).openThread.context = { tokens: 150000, window: 1000000, at: Date.now() }; })()`);
+      if (name === 'phone') {
+        await page.click('[data-testid="composer-options"]');
+        await page.waitFor(`document.querySelector('[data-testid="composer-options-sheet"] input[name="mobile-speed"]')`);
+      }
+      for (const speed of speeds) {
+        if (name === 'phone') {
+          const position = speed === null ? 1 : speed === 'fast' ? 2 : 3;
+          await page.click(`[data-testid="composer-options-sheet"] label:nth-child(${position}) input[name="mobile-speed"]`);
+        } else {
+          if (!await page.evaluate(`!!document.querySelector('[data-testid="effort-speed"]')`)) {
+            await page.click('[data-testid="composer-effort"]');
+            await page.waitFor(`document.querySelector('[data-testid="effort-speed"]')`);
+          }
+          await page.click('[data-testid="effort-speed"]');
+        }
+        if (provider === 'claude' && speed === 'fast') {
+          await page.waitFor(`document.querySelector('[data-testid="confirm-dialog"]')`);
+          expect(await page.text('[data-testid="confirm-dialog"]')).toContain('enabling Claude Fast mode for the first time');
+          await page.click('[data-testid="confirm-ok"]');
+          await page.waitFor(`!document.querySelector('[data-testid="confirm-dialog"]')`);
+        }
+        await page.waitFor(`(async () => (${STORE}).openThread.speed === ${JSON.stringify(speed)})()`);
+        expect(await page.evaluate(`!!document.querySelector('[data-testid="confirm-dialog"]')`)).toBe(false);
+        if (name === 'phone') await page.waitFor(`!document.querySelector('[data-testid="composer-options-sheet"] input[name="mobile-speed"]').matches(':disabled')`);
+        if (speed === 'fast') {
+          await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
+          await page.screenshot(join(import.meta.dir, '.artifacts', `speed-cache-${provider}-${name}.png`));
+        }
+      }
+      if (name === 'phone') {
+        await page.click('[data-testid="composer-options-sheet"] header button');
+        await page.waitFor(`!document.querySelector('[data-testid="composer-options-sheet"]')`);
+      }
+    }
+  }
+}, 120_000);
+
 test('an effort change on a long warm thread asks first, and Cancel keeps the effort', async () => {
   const page = await lowerEffort({ width: 1300, height: 850 }, 'cache-warning-desktop');
   expect(await page.text('[data-testid="confirm-dialog"]')).toContain('150');

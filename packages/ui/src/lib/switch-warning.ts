@@ -1,4 +1,4 @@
-import type { ThreadSummary } from '@boite/contracts';
+import type { Protocol, ThreadSummary } from '@boite/contracts';
 
 /** Past this many tokens a thread holds far more than a new session is handed. */
 export const SWITCH_WARNING_TOKENS = 200_000;
@@ -12,6 +12,7 @@ export const CACHE_LIFETIME_MS = 60 * 60 * 1000;
 /** What a provider keys its prompt cache on, besides the conversation itself. */
 export interface CacheKey {
   accountId: string;
+  protocol: Protocol | null;
   model: string | null;
   effort: string | null;
   speed: string | null;
@@ -32,10 +33,16 @@ export function switchDropsHistory(thread: Pick<ThreadSummary, 'accountId' | 'co
  * change misses on Claude, and an effort change misses on Codex at every level
  * and on Claude Sonnet 5 (`docs/model-switching.md`). The next turn then sends
  * the whole thread uncached, so a long thread with a warm cache asks first.
+ * Codex service tiers leave the prompt unchanged. Claude keeps its fast-mode
+ * header when returning to standard; enabling it can add that header for the
+ * first time, which the client cannot determine from the current selection.
  */
 export function switchResetsCache(thread: Pick<ThreadSummary, 'context'>, from: CacheKey, to: CacheKey, now = Date.now()): boolean {
   const context = thread.context;
   if (!context || context.tokens <= CACHE_WARNING_TOKENS || now - context.at >= CACHE_LIFETIME_MS) return false;
   if (from.accountId !== to.accountId) return false;
-  return from.model !== to.model || from.effort !== to.effort || from.speed !== to.speed;
+  if (from.model !== to.model || from.effort !== to.effort) return true;
+  if (from.speed === to.speed || from.protocol === 'codex-appserver') return false;
+  if (from.protocol === 'claude-sdk') return to.speed === 'fast';
+  return true;
 }

@@ -1063,7 +1063,7 @@ export const strings = {
     switchConfirm: 'Switch',
     switchCancel: 'Stay on {provider}',
     cacheTitle: 'Rebuild the cache of a {tokens} token thread?',
-    cacheBody: 'The provider caches this thread for the current model, reasoning effort and speed. Changing one can make the next turn send the whole thread again uncached, once, which uses far more quota than a usual turn.',
+    cacheBody: 'This change may make the provider process the whole conversation again uncached on the next turn, using more quota. Changing a model or reasoning effort can affect the cache, as can enabling Claude Fast mode for the first time.',
     cacheConfirm: 'Change',
     cacheCancel: 'Keep as is',
     options: 'Message options',

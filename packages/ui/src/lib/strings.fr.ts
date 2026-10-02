@@ -1016,7 +1016,7 @@ export const fr: Translation = {
     switchConfirm: "Changer d'agent",
     switchCancel: 'Rester avec {provider}',
     cacheTitle: "Reconstruire le cache d'une conversation de {tokens} jetons ?",
-    cacheBody: "Le fournisseur garde cette conversation en cache pour le modèle, l'effort de raisonnement et la vitesse actuels. En changer peut faire renvoyer toute la conversation hors cache au prochain tour, une fois, ce qui consomme bien plus de quota qu'un tour ordinaire.",
+    cacheBody: "Ce changement peut faire retraiter toute la conversation hors cache au prochain tour, ce qui consomme plus de quota. Changer de modèle ou d'effort de raisonnement peut affecter le cache, tout comme activer le mode Fast de Claude pour la première fois.",
     cacheConfirm: 'Changer',
     cacheCancel: 'Garder le réglage',
     options: 'Options du message',

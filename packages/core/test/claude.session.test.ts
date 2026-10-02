@@ -63,16 +63,20 @@ describe('claude driver', () => {
     await waitFor(() => queries[0]!.closes > 0);
   });
 
-  test('a prepared query applies the effort selected before the first prompt', async () => {
+  test('a prepared query applies the effort and speed selected before the first prompt', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);
+    harness.core.providers.require('claude').models.find(model => model.id === 'claude-opus-5')!.speeds = [{ id: 'fast', label: 'Fast' }];
+    await client.call('threads.update', { threadId, model: 'claude-opus-5' });
     scripted(fake => fake.emit(init('sess-prepared')), answerEach('sess-prepared'));
     await client.call('threads.focus', { threadId });
     await waitFor(() => queries.length === 1);
-    await client.call('threads.update', { threadId, effort: 'high' });
+    await client.call('threads.update', { threadId, effort: 'high', speed: 'fast' });
     expect(await runTurn(client, threadId, 'real prompt')).toBe('done');
     expect(queries).toHaveLength(1);
     expect(queries[0]!.setters).toContain('effortLevel high');
+    expect(queries[0]!.setters).toContain('fastMode true');
+    expect(calls[0]!.options.settings).toEqual({ fastMode: false });
     expect(calls[0]!.prompts).toHaveLength(1);
   });
 
@@ -284,7 +288,7 @@ describe('claude driver', () => {
     expect(calls[0]?.prompts).toEqual(['first', 'second ultrathink']);
   });
 
-  test('a setter the CLI refuses starts a fresh query on the new setup, and the turn still runs', async () => {
+  test.each(['setModel', 'fastMode'])('a refused %s setter resumes on the new setup and the turn still runs', async (setter) => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);
     await client.call('settings.set', { warmProcessMinutes: 5 });
@@ -294,17 +298,21 @@ describe('claude driver', () => {
     });
 
     scripted((fake) => {
-      // Only the first query refuses; the second opens on the new model.
-      if (queries.length === 1) fake.refuse = 'setModel';
+      // Only the first query refuses; the second opens on the new setup.
+      if (queries.length === 1) fake.refuse = setter;
     }, answerEach('sess-refused'));
 
     expect(await runTurn(client, threadId, 'first')).toBe('done');
-    await client.call('threads.update', { threadId, model: 'claude-opus-5' });
+    harness.core.providers.require('claude').models.find(model => model.id === 'claude-opus-5')!.speeds = [{ id: 'fast', label: 'Fast' }];
+    await client.call('threads.update', { threadId, model: 'claude-opus-5', ...(setter === 'fastMode' ? { speed: 'fast' } : {}) });
     expect(await runTurn(client, threadId, 'second')).toBe('done');
 
     expect(queries).toHaveLength(2);
     expect(calls[0]?.options.model).toBe('claude-sonnet-5');
     expect(calls[1]?.options.model).toBe('claude-opus-5');
+    expect(calls[1]?.options.settings).toEqual({ fastMode: setter === 'fastMode' });
+    expect(calls[1]?.options.resume).toBe('sess-refused');
+    expect(calls[0]?.prompts).toEqual(['first']);
     expect(calls[1]?.prompts).toEqual(['second']);
     await waitFor(() => logs.some((line) => line.startsWith('warn claude: the warm session refused')));
   });
@@ -359,6 +367,8 @@ describe('claude driver', () => {
 });
 
 test('Claude discovery reports only its model capabilities, caches and refreshes without a prompt', async () => {
+  const settingsAtPrompt: string[][] = [];
+  const reply = answerEach('native-speeds');
   harness.core.providers.require('claude').models = [];
   scripted(fake => { fake.modelsAnswer = [
     { value: 'default', resolvedModel: 'claude-opus-5', displayName: 'Default (recommended)', description: '', supportsFastMode: true },
@@ -370,8 +380,12 @@ test('Claude discovery reports only its model capabilities, caches and refreshes
     { value: 'claude-next', resolvedModel: 'claude-next', displayName: ' ', description: '' },
   ];
     if (calls.length > 1) fake.modelsAnswer.push({ value: 'claude-fable-6', displayName: 'Fable 6', description: '' });
-  }, answerEach('native-speeds'));
+  }, (fake, prompt, index) => {
+    settingsAtPrompt.push([...fake.setters]);
+    reply(fake, prompt, index);
+  });
   const client = await harness.connect();
+  await client.call('settings.set', { warmProcessMinutes: 5 });
   const id = await claudeThread(client);
   const accountId = (await client.call('threads.get', { threadId: id })).accountId;
   const result = await client.call('providers.probe', { providerId: 'claude', accountId });
@@ -400,9 +414,20 @@ test('Claude discovery reports only its model capabilities, caches and refreshes
   await client.call('threads.update', { threadId: id, model: 'claude-opus-5', speed: 'fast' });
   expect(await runTurn(client, id, 'fast turn')).toBe('done');
   expect(calls.at(-1)?.options.settings).toEqual({ fastMode: true });
+  const native = queries.at(-1)!;
+  const queryCount = queries.length;
   await client.call('threads.update', { threadId: id, speed: null });
   expect(await runTurn(client, id, 'standard turn')).toBe('done');
-  expect(calls.at(-1)?.options.settings).toEqual({ fastMode: false });
+  expect(queries).toHaveLength(queryCount);
+  expect(native.closes).toBe(0);
+  await client.call('threads.update', { threadId: id, speed: 'fast' });
+  expect(await runTurn(client, id, 'fast again')).toBe('done');
+  expect(await runTurn(client, id, 'still fast')).toBe('done');
+  expect(queries).toHaveLength(queryCount);
+  expect(native.setters).toEqual(['fastMode false', 'fastMode true']);
+  expect(calls.at(-1)?.prompts).toEqual(['fast turn', 'standard turn', 'fast again', 'still fast']);
+  expect(settingsAtPrompt).toEqual([[], ['fastMode false'], ['fastMode false', 'fastMode true'], ['fastMode false', 'fastMode true']]);
+  expect((await client.call('threads.get', { threadId: id })).sessionId).toBe('native-speeds');
 });
 
 test('a new Claude session learns `boite ask` once, and the setting turns it off', async () => {

@@ -26,16 +26,18 @@ export interface LiveSetup {
    * the drift back to the default is one call like any other.
    */
   effortLevel: EffortLevel | null;
+  fastMode: boolean;
   permissionMode: Exclude<PermissionMode, 'yolo'>;
   disableHooks: boolean;
 }
 
 /** What this turn asks the running query to be, whatever the last one asked for. */
-export function liveSetup(thread: { model: string | null; effort: string | null; permissionMode: PermissionMode }): LiveSetup {
+export function liveSetup(thread: { model: string | null; effort: string | null; permissionMode: PermissionMode; speed?: string | null }): LiveSetup {
   const effort = thread.effort;
   return {
     model: thread.model,
     effortLevel: effort !== null && SDK_EFFORTS.includes(effort) ? (effort as EffortLevel) : null,
+    fastMode: thread.speed === 'fast',
     permissionMode: thread.permissionMode === 'yolo' ? 'bypassPermissions' : thread.permissionMode,
     disableHooks: thread.permissionMode === 'yolo',
   };
@@ -108,7 +110,6 @@ export function sessionKey(ctx: SessionContext): string {
     resumeAt: ctx.resumeAt ?? null,
     accountId: ctx.account.id,
     env: ctx.accountEnv,
-    speed: ctx.thread.speed ?? null,
   });
 }
 
