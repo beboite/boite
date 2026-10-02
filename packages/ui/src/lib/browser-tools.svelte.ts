@@ -34,13 +34,13 @@ browserBridge.on(event => {
 
 export async function trackBrowserAction<T>(id: string, action: BrowserAction, run: () => Promise<T>): Promise<T> {
   if (['snapshot', 'diagnostics', 'recording-read', 'status'].includes(action.kind)) return run();
-  const at = Date.now(); let error: string | undefined;
+  const at = Date.now(); let ok = true;
   try { return await run(); }
-  catch (cause) { error = String(cause).slice(0, 500); throw cause; }
+  catch (cause) { ok = false; throw cause; }
   finally {
     // Keep operation names only: typed values and evaluated code can contain passwords.
     const entries = history.get(id) ?? [];
-    entries.push({ at, action: action.kind, ok: error === undefined, durationMs: Date.now() - at, ...(error ? { error } : {}) });
+    entries.push({ at, action: action.kind, ok, durationMs: Date.now() - at });
     history.set(id, entries.slice(-100));
   }
 }
