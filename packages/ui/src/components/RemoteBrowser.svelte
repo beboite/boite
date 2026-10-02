@@ -10,7 +10,10 @@
   let { store, threadId }: { store: Store; threadId: string } = $props();
   const client = untrack(() => store.client);
   let shown = $state(false), paused = $state(false), busy = $state(false), error = $state(''), text = $state('');
-  let frame = $state<RemoteBrowserFrame | null>(null), dialog = $state<HTMLDialogElement>(), picture = $state<HTMLImageElement>();
+  let frame = $state.raw<RemoteBrowserFrame | null>(null), dialog = $state<HTMLDialogElement>(), picture = $state<HTMLImageElement>();
+  // Core timestamps use another device's clock. Keep each frame's local age,
+  // including a frame retained by an in-progress pointer gesture.
+  const receivedAt = new WeakMap<RemoteBrowserFrame, number>();
   let alive = true, generation = 0, timer: ReturnType<typeof setTimeout> | undefined;
   let pending = false, requestedAt = 0;
   let pointer: { x: number; y: number; frame: RemoteBrowserFrame } | undefined;
@@ -25,6 +28,7 @@
       if (!client || client.state !== 'ready') throw new Error(strings.remoteBrowser.reconnecting);
       const next = await client.call('browser.remoteFrame', { threadId });
       if (!alive || run !== generation) return;
+      receivedAt.set(next, performance.now());
       frame = next; error = '';
     } catch (cause) { if (alive && run === generation) error = String(cause); }
     finally { pending = false; }
@@ -53,7 +57,7 @@
     return () => { release(); node.close(); text = ''; restoreFocus(previous); };
   });
   async function input(value: RemoteBrowserInput, target = frame): Promise<void> {
-    if (!client || !target || !usable || Date.now() - target.at > 5000) return;
+    if (!client || !target || !usable || performance.now() - (receivedAt.get(target) ?? -Infinity) > 5000) return;
     busy = true;
     try { await client.call('browser.remoteInput', { threadId, frameId: target.id, input: value }); if (value.kind === 'text') text = ''; }
     catch (cause) { error = String(cause); }
