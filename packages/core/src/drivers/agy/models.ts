@@ -142,12 +142,25 @@ export async function readModels(ctx: ProbeContext): Promise<ModelInfo[]> {
         reject(unavailable(`agy models did not answer in ${PROBE_TIMEOUT_MS / 1000} s`, detail));
       }, PROBE_TIMEOUT_MS);
       timer.unref?.();
+      // Native exit and drained output also settle the read if close never
+      // arrives. Both streams must end before using that native exit code.
+      let exit: number | null | undefined = child.exitCode === null && child.signalCode === null ? undefined : child.exitCode;
+      const streams = [child.stdout, child.stderr].filter(stream => !stream.readableEnded);
+      let pendingStreams = streams.length;
+      const settle = (): void => {
+        if (exit !== undefined && pendingStreams === 0) resolve(exit);
+      };
+      child.once('exit', code => { exit = code; settle(); });
+      for (const stream of streams) {
+        stream.once('end', () => { pendingStreams--; settle(); });
+      }
       child.once('close', (exit) => {
         resolve(exit);
       });
       child.once('error', (error) => {
         reject(unavailable(`the Antigravity CLI did not start: ${messageOf(error)}`, detail));
       });
+      settle();
     });
     if (SIGNED_OUT.test(stdout) || SIGNED_OUT.test(stderr)) {
       throw unavailable('the Antigravity CLI is not signed in: run agy in a terminal, sign in, then refresh', detail);
