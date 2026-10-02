@@ -903,6 +903,8 @@ export const fr: Translation = {
     heading: 'Sous-agents',
     nativeHeading: 'Lancés par le fournisseur',
     nativeNoResult: 'Aucun résultat reçu.',
+    processHeading: 'Lancés depuis une commande',
+    processResult: 'La progression et le résultat sont dans la sortie de la commande.',
     nativeStatus: { running: 'En cours', done: 'Terminé', error: 'Échec', stopped: 'Arrêté', unknown: 'État inconnu' },
     panelHint: 'Les sous-agents à qui cette conversation confie du travail',
     parent: 'Fil principal',

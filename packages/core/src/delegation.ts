@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, nativeAgentsOfTool, type RpcEvents } from '@boite/contracts';
+import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, nativeAgentsOfTool, processAgentCommand, type RpcEvents } from '@boite/contracts';
 import type { AgentLetter, DelegatedAgent, DelegationConfig, DelegationProfile, DelegationView, RpcParams, ThreadSummary, Turn, Usage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
@@ -58,6 +58,10 @@ export class Delegation {
     this.off = core.bus.onCommitted((name, payload) => {
       if (this.closed) return;
       if (name === 'thread.background') this.core.bus.emit('delegation.changed', { threadId: (payload as RpcEvents['thread.background']).threadId });
+      if (name === 'process.started' || name === 'process.exited') {
+        const record = payload as RpcEvents['process.started'];
+        if (record.parentPid !== process.pid && processAgentCommand(record)) this.core.bus.emit('delegation.changed', { threadId: record.threadId });
+      }
       if (name === 'message.part') {
         const event = payload as RpcEvents['message.part'];
         if (nativeAgentsOfTool(event.part).length) {

@@ -1,8 +1,35 @@
 import { expect, test } from 'bun:test';
-import { collectNativeAgents, nativeAgentsOfTool, type MessagePart } from '@boite/contracts';
+import { collectNativeAgents, collectProcessAgents, nativeAgentsOfTool, type MessagePart, type ProcessRecord } from '@boite/contracts';
 import { toolViewOf } from '../src/drivers/codex/mapping.ts';
 
 const tool = (patch: Partial<Extract<MessagePart, { type: 'tool' }>> = {}): Extract<MessagePart, { type: 'tool' }> => ({ type: 'tool', toolId: 'call-1', name: 'Task', input: { prompt: 'Review parsing' }, output: null, status: 'running', ...patch });
+const processRecord = (patch: Partial<ProcessRecord> = {}): ProcessRecord => ({ threadId: 'thread', pid: 2, parentPid: 1, exe: 'claude.exe', commandLine: 'claude.exe --print --model opus --effort xhigh "Review"', startedAt: 2, exitedAt: null, exitCode: null, cpuMs: null, peakMemoryBytes: null, ioBytes: null, ...patch });
+
+test('traced Windows binaries and Linux Node launchers expose CLI metadata and their own exit status', () => {
+  const shell = processRecord({ pid: 1, parentPid: 0, startedAt: 1, exe: 'bash', commandLine: 'bash review.sh' });
+  const commands = [
+    processRecord(),
+    processRecord({ pid: 3, exe: '/usr/bin/node', commandLine: 'node /opt/node_modules/@openai/codex/bin/codex.js exec --model reviewer -c model_reasoning_effort="high" "Review"' }),
+    processRecord({ pid: 4, exe: '/usr/bin/opencode', commandLine: 'opencode run -m provider/reviewer "Review"', exitedAt: 10, exitCode: 0 }),
+    processRecord({ pid: 5, exe: '/usr/bin/node', commandLine: 'node /opt/node_modules/@earendil-works/pi-coding-agent/dist/cli.js --print --model reviewer --thinking high "Review"', exitedAt: 10, exitCode: 1 }),
+    processRecord({ pid: 6, exe: 'grok.exe', commandLine: 'grok.exe --prompt "Review"', exitedAt: 10, exitCode: null }),
+  ];
+  const agents = collectProcessAgents([shell, ...commands]);
+  expect(agents.map(agent => [agent.name, agent.model, agent.effort, agent.status])).toEqual([
+    ['Claude Code', 'opus', 'xhigh', 'running'], ['Codex', 'reviewer', 'high', 'running'],
+    ['OpenCode', 'provider/reviewer', undefined, 'done'], ['pi', 'reviewer', 'high', 'error'], ['Grok', undefined, undefined, 'unknown'],
+  ]);
+  expect(agents[2]?.finishedAt).toBe(10);
+});
+
+test('process agents exclude the parent provider, wrapper copies, version probes, command mentions and reused parent PIDs', () => {
+  const root = processRecord({ pid: 1, parentPid: 0, startedAt: 1 });
+  const shell = processRecord({ pid: 3, parentPid: 1, exe: 'pwsh.exe', commandLine: 'pwsh.exe review.ps1' });
+  const child = processRecord({ pid: 4, parentPid: 3, startedAt: 3 });
+  expect(collectProcessAgents([root, processRecord(), shell, child, processRecord({ pid: 5, parentPid: 3, commandLine: 'claude.exe --version' }), processRecord({ pid: 6, parentPid: 3, exe: 'rg', commandLine: 'rg "claude --print"' })])).toEqual([expect.objectContaining({ name: 'Claude Code', id: 'process:thread:4:3' })]);
+  expect(collectProcessAgents([shell, child, processRecord({ ...shell, startedAt: 4 })])).toEqual([]);
+  expect(collectProcessAgents([processRecord({ ...shell, exitedAt: 2 }), child])).toEqual([]);
+});
 
 test('task-list tools and ordinary tool output do not invent agents', () => {
   expect(nativeAgentsOfTool(tool({ input: { title: 'Review parsing', status: 'pending' } }))).toEqual([]);

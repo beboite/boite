@@ -3,6 +3,7 @@
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import StatusMark from './StatusMark.svelte';
+  import AgentElapsed from './AgentElapsed.svelte';
 
   let { store, threadId }: { store: Store; threadId: string } = $props();
   let active = $derived((store.delegation?.agents ?? []).filter(agent => ['queued', 'running', 'waiting'].includes(agent.thread.status)));
@@ -28,9 +29,10 @@
         </button>
       {/each}
       {#each native as agent (agent.id)}
-        <button type="button" class="chip agent" data-testid="native-agent-dock-member" onclick={() => { store.panel.open('agents'); void store.selectDelegatedAgent(null); }} title={strings.delegation.nativeHeading}>
+        <button type="button" class="chip agent" data-testid="native-agent-dock-member" onclick={() => { store.panel.open('agents'); void store.selectDelegatedAgent(null); }} title={agent.source === 'process' ? strings.delegation.processHeading : strings.delegation.nativeHeading}>
           <StatusMark status="running" />
-          <span>{agent.name ?? agent.task ?? strings.delegation.nativeHeading}</span>
+          <span class="identity"><span>{agent.name ?? agent.task ?? strings.delegation.nativeHeading}</span>{#if agent.model}<small>{agent.model}{#if agent.effort} · {agent.effort}{/if}</small>{/if}</span>
+          {#if agent.source === 'process'}<AgentElapsed startedAt={agent.startedAt} finishedAt={null} active />{/if}
         </button>
       {/each}
     </div>
@@ -42,8 +44,10 @@
   .label { display: flex; align-items: center; gap: 5px; flex: none; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 600; }
   .agents { display: flex; gap: 5px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
   .agents::-webkit-scrollbar { display: none; }
-  .agent { flex: none; max-width: 190px; cursor: pointer; }
-  .agent span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .agent { flex: none; max-width: 270px; height: auto; min-height: 28px; padding-block: 4px; cursor: pointer; }
+  .identity { min-width: 0; display: grid; text-align: left; }
+  .identity > span, .identity > small, .agent > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .identity > small, .agent :global(.elapsed) { font-size: var(--text-xs); color: var(--color-muted-foreground); }
   @media (max-width: 720px) {
     .dock { width: calc(100% - 20px); }
     .label { font-size: 0; gap: 0; }

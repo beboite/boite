@@ -56,3 +56,35 @@ test('a running native agent has a dock entry without becoming a Boite subagent'
   await page.waitFor('!!document.querySelector("[data-testid=native-agents]")');
   expect(await page.evaluate('document.querySelectorAll("[data-testid=delegation-member]").length')).toBe(0);
 }, 15_000);
+
+test('a detached CLI agent stays visible on desktop and phone, and its own exit removes the active chip', async () => {
+  await page.evaluate('globalThis.__boiteTest.setTheme("dark")');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1310, height: 820, deviceScaleFactor: 1, mobile: false });
+  await page.click('[data-testid="panel-close"]');
+  await onStore('await store.open("t-cli");');
+  await page.waitFor('!!document.querySelector("[data-testid=native-agent-dock-member]")');
+  expect(await page.text('[data-testid="native-agent-dock-member"]')).toContain('Claude Code');
+  expect(await page.text('[data-testid="native-agent-dock-member"]')).toContain('claude-opus-5-5');
+  await page.click('[data-testid="native-agent-dock-member"]');
+  await page.waitFor('!!document.querySelector("[data-testid=process-agents]")');
+  await page.click('[data-testid="process-agent"] > summary');
+  expect(await page.text('[data-testid="process-agents"]')).toContain('Started from a command');
+  expect(await page.text('[data-testid="process-agents"]')).toContain('Working');
+  expect(await page.text('[data-testid="process-agents"]')).toContain('xhigh');
+  expect(await page.evaluate('document.querySelectorAll("[data-testid=native-agent]").length')).toBe(0);
+  expect(await page.evaluate('document.querySelectorAll("[data-testid=delegation-member]").length')).toBe(0);
+  await capture('cli-agent-desktop.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.waitFor('innerWidth === 390');
+  await capture('cli-agent-phone.png');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  expect(await page.evaluate('(e => e.scrollWidth <= e.clientWidth)(document.querySelector("[data-testid=delegation-surface]"))')).toBe(true);
+  await page.click('[data-testid="panel-close"]');
+  await capture('cli-agent-dock-phone.png');
+  await onStore('await store.client.call("resources.killTree", { threadId: "t-cli" });');
+  await page.waitFor('!document.querySelector("[data-testid=native-agent-dock-member]")');
+  await page.click('[data-testid=thread-menu-trigger]');
+  await page.click('[data-testid=thread-menu-trigger-menu] [data-value=agents]');
+  await page.waitFor('document.querySelector("[data-testid=process-agent] [data-status=error]") !== null');
+  expect(page.errors()).toEqual([]);
+}, 25_000);

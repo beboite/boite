@@ -46,6 +46,18 @@ from ACP and pi feed the same view. Other drivers, including agy's ordinary
 tool stream, retain agent tools if the provider reports their name and brief.
 A provider that sends only text or shell output exposes no native agent list.
 
+Agent CLIs launched through a shell also appear under "Started from a command"
+when the process trace records them. Their active chip stays above the composer,
+with the reported model, effort and elapsed time. Finishing the launch command or
+the parent turn does not complete the child: its own process exit settles its
+status. Results stay in the command output. Version checks and the conversation's
+own provider process do not appear as children.
+
+Windows records descendant starts and exits through its process jobs. Linux and
+macOS record only direct processes, so a CLI launched inside another shell can
+remain outside this view. Provider-native agents and Boite-managed children use
+their existing lifecycle on every platform.
+
 A successful spawn call is not a completed child. Missing individual states,
 background launch acknowledgements, and unfinished children after a parent
 turn ends show Status unknown. A live background-agent list can still confirm

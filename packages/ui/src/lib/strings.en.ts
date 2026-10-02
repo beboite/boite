@@ -949,6 +949,8 @@ export const strings = {
     heading: 'Subagents',
     nativeHeading: 'Started by the provider',
     nativeNoResult: 'No result reported yet.',
+    processHeading: 'Started from a command',
+    processResult: 'Progress and results are in the command output.',
     nativeStatus: { running: 'Working', done: 'Completed', error: 'Failed', stopped: 'Stopped', unknown: 'Status unknown' },
     panelHint: 'The subagents this conversation hands work to',
     parent: 'Parent thread',

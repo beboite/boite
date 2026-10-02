@@ -1,5 +1,6 @@
-import { collectNativeAgents, type BackgroundTask, type MessagePart, type NativeAgent, type Turn } from '@boite/contracts';
+import { collectNativeAgents, collectProcessAgents, type BackgroundTask, type MessagePart, type NativeAgent, type Turn } from '@boite/contracts';
 import type { Journal } from './journal.ts';
+import { toProcess, type ProcessRow } from './journal/rows.ts';
 
 interface Entry {
   messageOrder: number;
@@ -38,5 +39,14 @@ export function nativeAgents(journal: Journal, threadId: string, background: Bac
     ORDER BY m.rowid, CAST(p.key AS INTEGER)`).all(threadId, JSON.stringify(heldIds)) as (Omit<Entry, 'part'> & { part: string })[];
   for (const row of rows) entries.push({ ...row, part: JSON.parse(row.part) as MessagePart });
   entries.sort((left, right) => left.messageOrder - right.messageOrder || left.partIndex - right.partIndex);
-  return collectNativeAgents(entries, background);
+  // Read CLI candidates and their parents, rather than every shell, build and
+  // browser command line in a long conversation. Running children have no age limit.
+  const candidates = journal.db.query(`SELECT * FROM processes WHERE thread_id = ?
+    AND (lower(exe) LIKE '%claude%' OR lower(exe) LIKE '%codex%' OR lower(exe) LIKE '%opencode%'
+      OR lower(exe) LIKE '%pi%' OR lower(exe) LIKE '%grok%' OR lower(exe) LIKE '%agy%'
+      OR lower(exe) LIKE '%node%' OR lower(exe) LIKE '%bun%')`).all(threadId) as ProcessRow[];
+  const parents = journal.db.query(`SELECT * FROM processes WHERE thread_id = ?
+    AND pid IN (SELECT value FROM json_each(?))`).all(threadId, JSON.stringify(candidates.map(row => row.parent_pid))) as ProcessRow[];
+  const processes = new Map([...parents, ...candidates].map(row => [row.pid, toProcess(row)]));
+  return [...collectNativeAgents(entries, background), ...collectProcessAgents([...processes.values()])];
 }
