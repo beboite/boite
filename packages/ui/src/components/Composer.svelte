@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { Pencil, X } from '@lucide/svelte';
-  import type { Attachment, PreviewReference } from '@boite/contracts';
+  import { supportsSideQuestions, type Attachment, type PreviewReference } from '@boite/contracts';
   import { restorePreviewMentions } from '../lib/preview-mentions';
   import { AGENT_PREFIX, isAgentCommand, runCommand } from '../lib/commands.svelte';
   import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, mentionRows, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
@@ -24,14 +24,16 @@
   import MentionMenu from './MentionMenu.svelte';
   import SlashMenu from './SlashMenu.svelte';
   import ThreadActivity from './ThreadActivity.svelte';
+  import SideAnswer from './SideAnswer.svelte';
+  import { ComposerSide } from '../lib/composer-side.svelte';
   import PreviewReferences from './PreviewReferences.svelte';
 
   /** A centred draft drops the bottom padding so its heading and input form one block. */
   let { store, centered = false }: { store: Store; centered?: boolean } = $props();
 
-  const MAX_LINES = 8;
-  const sizesItself = selfSizing();
-
+  const MAX_LINES = 8, sizesItself = selfSizing();
+  const side = new ComposerSide();
+  $effect(() => { key; store.client; return () => side.clear(); });
   let key = $derived(store.openThread?.id ?? DRAFT_STASH_KEY);
   let composer = $derived(store.composerStates[key]);
   let hasQueue = $derived(!!(composer?.queued.length || store.openThread?.pendingAnswers?.length));
@@ -231,7 +233,7 @@
   let agentItems = $derived.by((): PaletteItem[] => agentSlashItems(store.openThread?.commands ?? []));
 
   /** Boite's prompt controls follow the agent's own commands. */
-  let boiteItems = $derived.by((): PaletteItem[] => boiteSlashItems(CHIP_COMMANDS));
+  let boiteItems = $derived.by((): PaletteItem[] => boiteSlashItems(CHIP_COMMANDS, !!store.openThread && !!provider && supportsSideQuestions(provider.protocol)));
 
   /** Agent commands first, so a tie goes to the agent's own. */
   let slashItems = $derived(rankItems(slashQuery ?? '', [...agentItems, ...boiteItems]));
@@ -373,6 +375,7 @@
     if (!canSend || !choice) return;
     const inputStore = store, inputKey = key, sendChoice = choice;
     const state = stateForInput();
+    if (side.submit(inputStore, inputKey, prompt)) { requestAnimationFrame(grow); return; }
     const editedThread = state.editing ? inputStore.openThread : null;
     if (state.editing && !await rewindComposerEdit(inputStore, inputKey, state)) return;
     // A queue that still holds something takes this prompt too, whatever the
@@ -597,13 +600,9 @@
     put(stashed);
   }
 
-  /**
-   * An agent command is completed into the box for the user to finish, since
-   * only they know its input; one of Boite's runs on the spot and the `/word`
-   * goes. Either way the text stops matching `/word`, so the menu closes itself.
-   */
+  /** Prompt commands complete the box; other commands execute and close the menu. */
   function pickSlash(item: PaletteItem) {
-    if (item.id === 'goal' || item.id === 'loop') {
+    if (item.id === 'goal' || item.id === 'loop' || item.id === 'btw') {
       put(`/${item.id} `);
       box?.focus();
       return;
@@ -722,6 +721,7 @@
       </div>
     {/if}
 
+    {#if side.current && side.current.threadId === store.openThread?.id}<SideAnswer {...side.current} {store} onclose={() => { side.clear(); box?.focus(); }} />{/if}
     {#if attachments.length > 0}
       {#key composer}<ComposerAttachments bind:this={attachmentStrip} {attachments} highlighted={highlightedImage} onremove={removeAttachment} onfocus={() => box?.focus()} />{/key}
     {/if}

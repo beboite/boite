@@ -5,6 +5,7 @@ import { sessionKey } from './claude/query.ts';
 import type { ClaudeDeps } from './claude/query.ts';
 import { ClaudeSession } from './claude/session.ts';
 import { titleQuery } from './claude/title.ts';
+import { sideQuestion } from './claude/side-question.ts';
 import { ClaudeTurn } from './claude/turn.ts';
 import type { Driver, ProbeContext, ProbeResult, TitleContext, SessionContext, TurnContext, TurnHandle } from './types.ts';
 
@@ -63,6 +64,7 @@ export function createClaudeDriver(deps: ClaudeDeps): Driver {
 
   return {
     protocol: 'claude-sdk',
+    sideQuestion: ctx => sideQuestion(deps, ctx),
     prepare: ctx => acquire(ctx).prepare(),
     setViewed(threadId, active) {
       if (active) viewed.add(threadId);

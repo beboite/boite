@@ -476,6 +476,14 @@ test harness, the end to end suite, `bun run bench` and `bench/idle-rss.ts` set
 it; an opt-in live test (`BOITE_E2E_*=1` or `BOITE_BENCH_*=1`) turns it back
 off.
 
+The side-question path is covered by
+`bun test packages/core/test/side-questions.test.ts packages/core/test/claude.side-question.test.ts`
+and the composer suite. `bun test tests/e2e/side-questions.test.ts` uses a real
+temporary echo core to check desktop and paired-phone `/btw` answers during a
+waiting main turn, dismissal and unchanged history. Its captures land in
+`tests/e2e/.artifacts/btw-desktop.png` and `btw-phone.png`; no provider tokens
+are spent. See [context](context.md#side-questions) for provider support.
+
 ## Checks and tests
 
 ```bash
