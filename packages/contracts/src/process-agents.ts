@@ -2,6 +2,7 @@ import type { NativeAgent, ProcessRecord } from './index.ts';
 
 const names: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'pi', grok: 'Grok', agy: 'agy' };
 const base = (path: string) => path.replaceAll('\\', '/').split('/').at(-1)?.toLowerCase().replace(/\.(exe|cmd|ps1)$/, '') ?? '';
+const optionOperands = new Set(['-r', '--require', '--import', '--loader', '--experimental-loader', '-C', '--conditions', '--preload', '--env-file', '--env-file-if-exists', '--cwd', '-c', '--config']);
 
 /** Read CLI metadata, never a prompt or arbitrary text from the command's output. */
 export function processAgentCommand(record: Pick<ProcessRecord, 'exe' | 'commandLine'>): { name: string; model?: string; effort?: string } | null {
@@ -10,7 +11,14 @@ export function processAgentCommand(record: Pick<ProcessRecord, 'exe' | 'command
   let command = base(record.exe);
   let args = words.slice(1);
   if (command === 'node' || command === 'bun') {
-    const script = args.findIndex(arg => !arg.startsWith('-'));
+    let script = 0;
+    for (; script < args.length; script++) {
+      const arg = args[script]!;
+      if (arg === '--') { script++; break; }
+      if (!arg.startsWith('-')) break;
+      if (['-e', '--eval', '-p', '--print'].includes(arg.split('=')[0]!) || (command === 'node' && ['-c', '--check'].includes(arg))) return null;
+      if (optionOperands.has(arg)) script++;
+    }
     const path = args[script]?.replaceAll('\\', '/').toLowerCase() ?? '';
     const module = /\/(claude-code|codex|pi-coding-agent)\/(?:bin\/|dist\/)?(?:cli|codex)\.[cm]?js$/.exec(path)?.[1];
     if (!module) return null;

@@ -13,11 +13,14 @@ test('traced Windows binaries and Linux Node launchers expose CLI metadata and t
     processRecord({ pid: 4, exe: '/usr/bin/opencode', commandLine: 'opencode run -m provider/reviewer "Review"', exitedAt: 10, exitCode: 0 }),
     processRecord({ pid: 5, exe: '/usr/bin/node', commandLine: 'node /opt/node_modules/@earendil-works/pi-coding-agent/dist/cli.js --print --model reviewer --thinking high "Review"', exitedAt: 10, exitCode: 1 }),
     processRecord({ pid: 6, exe: 'grok.exe', commandLine: 'grok.exe --prompt "Review"', exitedAt: 10, exitCode: null }),
+    processRecord({ pid: 7, exe: '/usr/bin/node', commandLine: 'node --require /tmp/preload.js --import /tmp/init.mjs --conditions development /opt/node_modules/@openai/codex/bin/codex.js exec --model reviewer -c model_reasoning_effort="high" "Review"' }),
+    processRecord({ pid: 8, exe: '/usr/bin/bun', commandLine: 'bun --preload /tmp/preload.js /opt/node_modules/@anthropic-ai/claude-code/cli.js --print --effort high "Review"' }),
   ];
   const agents = collectProcessAgents([shell, ...commands]);
   expect(agents.map(agent => [agent.name, agent.model, agent.effort, agent.status])).toEqual([
     ['Claude Code', 'opus', 'xhigh', 'running'], ['Codex', 'reviewer', 'high', 'running'],
     ['OpenCode', 'provider/reviewer', undefined, 'done'], ['pi', 'reviewer', 'high', 'error'], ['Grok', undefined, undefined, 'unknown'],
+    ['Codex', 'reviewer', 'high', 'running'], ['Claude Code', undefined, 'high', 'running'],
   ]);
   expect(agents[2]?.finishedAt).toBe(10);
 });

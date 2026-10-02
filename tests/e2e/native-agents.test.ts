@@ -85,6 +85,10 @@ test('a detached CLI agent keeps the count and timer visible until its own exit 
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await page.waitFor('innerWidth === 390');
   await capture('cli-agent-phone.png');
+  await onStore('store.delegation.nativeAgents.find(agent => agent.source === "process").model = undefined;');
+  await page.waitFor('!document.querySelector("[data-testid=process-agent] .identity small")?.textContent.includes("claude-opus")');
+  expect(await page.text('[data-testid="process-agent"] .identity small')).toBe('xhigh');
+  await capture('cli-agent-effort-only-phone.png');
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   expect(await page.evaluate('(e => e.scrollWidth <= e.clientWidth)(document.querySelector("[data-testid=delegation-surface]"))')).toBe(true);
   await page.click('[data-testid="panel-close"]');

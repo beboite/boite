@@ -13,7 +13,7 @@
     <details class="agent" data-testid={source === 'process' ? 'process-agent' : 'native-agent'}>
       <summary>
         <ChevronRight size={12} class="chevron" />
-        <span class="identity"><strong>{agent.name ?? agent.task ?? fill(strings.delegation.profileName, { count: String(index + 1) })}</strong>{#if agent.model}<small>{agent.model}{#if agent.effort} · {agent.effort}{/if}</small>{/if}</span>
+        <span class="identity"><strong>{agent.name ?? agent.task ?? fill(strings.delegation.profileName, { count: String(index + 1) })}</strong>{#if agent.model || agent.effort}<small>{agent.model ?? ''}{#if agent.model && agent.effort} · {/if}{agent.effort ?? ''}</small>{/if}</span>
         <span class="status" data-status={agent.status}>
           {#if agent.status === 'running'}<StatusMark status="running" />{/if}
           {strings.delegation.nativeStatus[agent.status]}
