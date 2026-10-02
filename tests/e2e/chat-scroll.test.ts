@@ -181,6 +181,7 @@ for (const phone of [false, true]) {
   }, 30_000);
 
   test(`the return button stays above expanded activity and accepts a pointer on ${name}`, async () => {
+    await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 390 : 1280, height: 844, deviceScaleFactor: 1, mobile: phone });
     await page.navigate(url);
     await page.waitFor(`document.querySelector('${timeline}')`);
     await settled();

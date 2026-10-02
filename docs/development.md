@@ -340,6 +340,10 @@ reports early exit or the CDP deadline and saves the last 16 KiB of stderr.
 Screenshots go to the ignored `tests/e2e/.artifacts/`. Open desktop and phone
 captures before claiming a visual change is verified.
 
+Condition waits pass their remaining deadline to each CDP evaluation. Timeout
+diagnostics get at most 250 ms. A wait after `page.close()` fails immediately.
+`browser-deadlines.test.ts` covers unfulfilled promises and busy renderers.
+
 `page.close()` requests CDP shutdown; POSIX also sends SIGTERM. A stalled browser
 falls back to its captured PID, waits for exit and retries profile removal.
 Cleanup reports retained directories and the test preload removes interrupted
