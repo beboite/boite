@@ -27,15 +27,26 @@ function standsAlone(part: ToolPart): boolean {
 }
 
 /**
- * Splits the parts into runs. A blank text part draws nothing; reasoning and
- * other visible parts break a run so they keep their place in the timeline.
+ * Splits the parts into runs. Blank text and empty untimed reasoning between
+ * calls draw nothing; visible parts break a run to keep their timeline place.
  * A proposed plan is read, not a call to fold: it is a part of its own.
  */
 export function partRuns(parts: readonly MessagePart[]): PartRun[] {
   const runs: PartRun[] = [];
   let open: { kind: 'tools'; indices: number[] } | null = null;
+  let followsTool = false;
+  let nextVisible = 0;
+  const blank = (part: MessagePart | undefined): boolean => part !== undefined
+    && (part.type === 'text' || (part.type === 'thinking' && part.startedAt === undefined)) && part.text.trim() === '';
   parts.forEach((part, index) => {
     if (part.type === 'text' && part.text.trim() === '' && index < parts.length - 1) return;
+    if (part.type === 'thinking' && blank(part) && followsTool) {
+      // Reuse the lookahead across consecutive placeholders instead of rescanning them.
+      nextVisible = Math.max(nextVisible, index + 1);
+      while (blank(parts[nextVisible])) nextVisible++;
+      if (parts[nextVisible]?.type === 'tool') return;
+    }
+    followsTool = part.type === 'tool';
     if (part.type !== 'tool' || planOf(part.name, part.input) !== null) {
       open = null;
       runs.push({ kind: 'part', index });

@@ -176,6 +176,7 @@ test('tool activity folds unsuccessful calls and keeps their details accessible 
       { type:'tool', toolId:'readability-check', name:'exec_command', input:{cmd:'git status --short\\ngit branch -vv\\ngit remote -v'}, output:'warning: progress on stderr\\nerror: quoted documentation', status:'done', exitCode:0 },
       { type:'question', questionId:'readability-question', text:'Which remote should receive the branches?', options:[{id:'private',label:'Private repository'}], allowText:true, multiple:false, async:true, answer:{optionIds:['private'],text:'Create it on GitHub.'} },
       { type:'tool', toolId:'readability-read', name:'Read', input:{file_path:'README.md'}, output:'Project documentation', status:'done' },
+      { type:'thinking', text:'' },
       { type:'tool', toolId:'readability-failed', name:'Bash', input:{command:'git remote get-url origin'}, output:'Earlier successful output\\nerror: No such remote origin', status:'error', exitCode:128 },
       { type:'tool', toolId:'readability-failed-test', name:'Bash', input:{command:'bun test tests/e2e/example.test.ts'}, output:'bun test v1.4.2\\n(pass) first case\\n(fail) reload keeps messages\\n 1 pass\\n 1 fail', status:'error', exitCode:1 },
       { type:'tool', toolId:'readability-failed-rebase', name:'Bash', input:{command:'git rebase origin/main'}, output:'Rebasing (1/1)\\rAuto-merging docs/example.md\\nCONFLICT (content): Merge conflict in docs/example.md', status:'error', exitCode:1 },

@@ -98,6 +98,24 @@ test('reasoning between calls breaks their group and keeps both thinking steps v
   ]);
 });
 
+test('empty legacy reasoning between calls stays invisible while timed and trailing steps keep their place', () => {
+  expect(partRuns([
+    tool('Read', { file_path: 'a.ts' }),
+    { type: 'thinking', text: '' },
+    { type: 'text', text: ' ' },
+    { type: 'thinking', text: ' ' },
+    tool('Read', { file_path: 'b.ts' }),
+    { type: 'thinking', text: '', startedAt: 1000, finishedAt: 2000 },
+    tool('Read', { file_path: 'c.ts' }),
+    { type: 'thinking', text: '' }
+  ])).toEqual([
+    { kind: 'tools', indices: [0, 4] },
+    { kind: 'part', index: 5 },
+    { kind: 'tools', indices: [6] },
+    { kind: 'part', index: 7 }
+  ]);
+});
+
 test('command inputs using cmd keep their family and live program label', () => {
   const part = tool('exec_command', { cmd: 'pwsh -NoProfile -Command "git status --short"' });
   expect(runSummary([part])).toBe('Ran 1 command');
