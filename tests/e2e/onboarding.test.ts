@@ -136,6 +136,8 @@ test('seven screens fit both languages and widths, without leaving the tour', as
 test('light theme and a short phone viewport keep consent and navigation reachable', async () => {
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await page.evaluate(`localStorage.removeItem('boite.onboarding')`);
+  // The seven screens open at a computer's width; a page that boots phone-wide gets the two-screen tour.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.reload();
   await page.waitFor(`document.querySelector('[data-testid=onboarding]')`);
   await page.click('[data-testid=onboarding-dot-welcome]');
@@ -170,8 +172,11 @@ test('light theme and a short phone viewport keep consent and navigation reachab
 test('demo selectors look actionable and animations pause, resume and replay', async () => {
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   await page.evaluate(`localStorage.removeItem('boite.onboarding')`);
+  // The seven screens open at a computer's width; a page that boots phone-wide gets the two-screen tour.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.reload();
   await page.waitFor(`document.querySelector('[data-testid=onboarding]')`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 640, deviceScaleFactor: 1, mobile: true });
   await page.click('[data-testid=onboarding-dot-agents]');
   for (const demo of ['voice', 'panel', 'agents']) {
     await page.click(`[data-testid=onboarding-example-${demo}]`);
@@ -228,3 +233,30 @@ test('an unavailable onboarding chunk does not hide agent update notices or bloc
     await offline.close();
   }
 }, 60_000);
+
+test('a phone gets two screens: the welcome and what the computer does, no host setting', async () => {
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  try {
+    for (const locale of ['en', 'fr']) {
+      await page.evaluate(`localStorage.removeItem('boite.onboarding'); localStorage.setItem('boite.locale', '${locale}')`);
+      await page.reload();
+      await page.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === 'welcome'`);
+      expect(await page.evaluate<string[]>(`[...document.querySelectorAll('[data-testid=onboarding] .dot')].map(dot => dot.dataset.testid)`)).toEqual(['onboarding-dot-welcome', 'onboarding-dot-reach']);
+      await capture(`tour-phone-${locale}-welcome.png`);
+      await page.click('[data-testid=onboarding-next]');
+      await page.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === 'reach'`);
+      expect(await page.evaluate(`document.querySelector('#onboarding-title').textContent`)).toBe(locale === 'en' ? 'Your computer does the work' : 'Votre ordinateur fait le travail');
+      expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+      expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-next]').getBoundingClientRect().bottom <= innerHeight`)).toBe(true);
+      await capture(`tour-phone-${locale}-reach.png`);
+      // The second screen is the last: its button closes the tour, and the device remembers.
+      await page.click('[data-testid=onboarding-next]');
+      await page.waitFor(`!document.querySelector('[data-testid=onboarding]')`);
+      expect(await page.evaluate<number>(`JSON.parse(localStorage.getItem('boite.onboarding')).version`)).toBeGreaterThan(0);
+    }
+  } finally {
+    await page.evaluate(`localStorage.removeItem('boite.locale')`);
+    await page.send('Emulation.clearDeviceMetricsOverride', {});
+  }
+}, 45_000);
