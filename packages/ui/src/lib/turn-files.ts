@@ -1,4 +1,4 @@
-import type { MessagePart, ToolDocument } from '@boite/contracts';
+import type { Message, MessagePart, ToolDocument, Turn } from '@boite/contracts';
 import { describeTool, fileName } from './tool-summary';
 import { diffCounts, diffRows } from './diff';
 
@@ -20,6 +20,25 @@ export interface TurnFile {
   /** The folder it sits in, relative to the thread's directory when inside it. */
   folder: string;
   change: 'created' | 'changed' | 'deleted';
+}
+
+/** Aggregate full turns only for the messages being drawn, without repeatedly copying their parts. */
+export function visibleTurnFiles(messages: readonly Message[], turns: readonly Turn[], visible: ReadonlySet<string>, cwd: string): Map<string, { files: TurnFile[]; diffs: TurnDiff[]; cwd: string }> {
+  const result = new Map<string, { files: TurnFile[]; diffs: TurnDiff[]; cwd: string }>();
+  const parts = new Map<string, MessagePart[]>();
+  for (const message of messages) {
+    if (message.role !== 'assistant' || !visible.has(message.turnId)) continue;
+    const own = parts.get(message.turnId) ?? [];
+    for (const part of message.parts) own.push(part);
+    parts.set(message.turnId, own);
+  }
+  for (const turn of turns) {
+    if (!visible.has(turn.id) || turn.status === 'running' || turn.status === 'queued') continue;
+    const own = parts.get(turn.id) ?? [];
+    const files = turnFiles(own, cwd);
+    if (files.length) result.set(turn.id, { files, diffs: turnDiffs(own), cwd });
+  }
+  return result;
 }
 
 export type TurnFileNode =

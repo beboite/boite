@@ -13,6 +13,7 @@ import { modelsOf, checkSpeed, discoverSelection } from './provider-catalog';
 import { delegationConfig, stopDelegation } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
 import { registerFakeWorktree, requireFakeCwd } from './worktrees';
+import { previewToolOutputs } from '@boite/contracts';
 import { dropWaitingMove, fakeMoveNote } from './thread-move';
 import { cancelFamilySideQuestions, cancelSide, sideQuestionMethods } from './side-questions';
 
@@ -90,8 +91,8 @@ function pageOf(
   return { messages: page, before: start > 0 ? (page[0]?.id ?? null) : null };
 }
 
-function tailOf(messages: Message[], from: number): Message[] | null {
-  if (messages.length - from > MESSAGE_PAGE) return null;
+function tailOf(messages: Message[], from: number, limit = MESSAGE_PAGE): Message[] | null {
+  if (messages.length - from > limit) return null;
   let bytes = 2;
   for (let at = from; at < messages.length; at += 1) {
     bytes += new TextEncoder().encode(JSON.stringify(messages[at])).byteLength + (at > from ? 1 : 0);
@@ -258,17 +259,22 @@ export function threadMethods(ctx: FakeContext) {
     },
     'threads.get': async (params) => {
       const thread = ctx.thread(params.threadId);
+      const asked = params.limit ?? MESSAGE_PAGE;
+      if (!Number.isFinite(asked)) throw refusal('threads.get limit must be a finite number');
+      const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
       // The core's rule: from the named message on, unless it is unknown or
       // the tail exceeds a page's count or bytes, and then a full page.
       const from = params.after === undefined ? -1 : thread.messages.findIndex((message) => message.id === params.after);
-      const messages = from === -1 ? null : tailOf(thread.messages, from);
-      if (messages !== null) {
+      const tail = from === -1 ? null : tailOf(thread.messages, from, limit);
+      if (tail !== null) {
+        const messages = params.compactTools ? previewToolOutputs(tail) : tail;
         // As the core's `listTurnsFor`: the turns of the messages sent, and whatever is still queued or running.
         const sent = new Set(messages.map((message) => message.turnId));
         const turns = thread.turns.filter((turn) => turn.status === 'queued' || turn.status === 'running' || sent.has(turn.id));
         return pagingReply({ ...thread, messages, turns, messagesBefore: null, messagesFrom: params.after });
       }
-      const page = pageOf(thread.messages, thread.messages.length, MESSAGE_PAGE);
+      const page = pageOf(thread.messages, thread.messages.length, limit);
+      if (params.compactTools) page.messages = previewToolOutputs(page.messages);
       return pagingReply({ ...thread, messages: page.messages, messagesBefore: page.before });
     },
     'messages.list': async (params) => {
@@ -284,8 +290,16 @@ export function threadMethods(ctx: FakeContext) {
       const asked = params.limit ?? MESSAGE_PAGE;
       const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
       const page = pageOf(thread.messages, at, limit);
+      if (params.compactTools) page.messages = previewToolOutputs(page.messages);
       const turns = new Set(page.messages.map((message) => message.turnId));
       return pagingReply({ ...page, turns: thread.turns.filter((turn) => turns.has(turn.id)) });
+    },
+    'messages.toolOutput': async (params) => {
+      const message = ctx.thread(params.threadId).messages.find(message => message.id === params.messageId);
+      if (!message) throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `message ${params.messageId} is not a message of thread ${params.threadId}` });
+      const part = message.parts.find(part => part.type === 'tool' && part.toolId === params.toolId);
+      if (!part || part.type !== 'tool') throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `tool ${params.toolId} is not a tool of message ${params.messageId}` });
+      return { output: part.output };
     },
     'threads.update': async (params) => {
       const thread = ctx.thread(params.threadId);

@@ -1,8 +1,7 @@
 import { archiveState, archiveStateKey } from './merged-pr-archive-state.ts';
 import { repositoryOf, type MergedPrProof } from './pull-requests.ts';
-import type { AgentProfile } from '@boite/contracts';
 import { createHash } from 'node:crypto';
-import { previewReferencesError, previewPrompt, MESSAGE_PAGE, MESSAGE_PAGE_MAX, DEFAULT_THREAD_DELETION_RETENTION_DAYS } from '@boite/contracts';
+import { previewToolOutputs, previewReferencesError, previewPrompt, MESSAGE_PAGE, MESSAGE_PAGE_MAX, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type AgentProfile } from '@boite/contracts';
 import type {
   Account,
   AccountId,
@@ -146,7 +145,10 @@ export class ThreadStore {
    * one page here; the rest is walked back through `messages`, whose cursor is
    * `messagesBefore`.
    */
-  get(threadId: ThreadId, after?: MessageId): Thread {
+  get(threadId: ThreadId, after?: MessageId, options: { limit?: number; compactTools?: boolean } = {}): Thread {
+    const asked = options.limit ?? MESSAGE_PAGE;
+    if (!Number.isFinite(asked)) throw refused('threads.get limit must be a finite number', { limit: options.limit });
+    const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
     const thread = this.withLoad(this.require(threadId));
     // A snapshot taken mid-stream holds every delta up to this line, and every
     // one of them has left for the sockets: what arrives after the answer is
@@ -154,14 +156,14 @@ export class ThreadStore {
     this.core.journal.flushDeltas();
     this.core.bus.flush();
     const fromRowid = after === undefined ? null : this.core.journal.messageRowid(threadId, after);
-    const tail = fromRowid === null ? null : this.core.journal.listMessagesFrom(threadId, fromRowid, MESSAGE_PAGE);
+    const tail = fromRowid === null ? null : this.core.journal.listMessagesFrom(threadId, fromRowid, limit);
     const page = tail === null
-      ? this.core.journal.listMessagePage(threadId, { limit: MESSAGE_PAGE })
+      ? this.core.journal.listMessagePage(threadId, { limit })
       : { messages: tail, before: null };
     return {
       ...thread,
       ...(tail === null || after === undefined ? {} : { messagesFrom: after }),
-      messages: page.messages,
+      messages: options.compactTools ? previewToolOutputs(page.messages) : page.messages,
       memoryEvents: readMemoryEvents(this.core.journal, threadId),
       commands: this.agentState.commands.get(threadId) ?? [],
       background: this.agentState.background.get(threadId) ?? [],
@@ -180,7 +182,7 @@ export class ThreadStore {
    * unknown thread is a not-found; a cursor that is not a message of that thread
    * is refused by name rather than answered with an empty page.
    */
-  messages(params: { threadId: ThreadId; before: MessageId; limit?: number }): {
+  messages(params: { threadId: ThreadId; before: MessageId; limit?: number; compactTools?: boolean }): {
     messages: Message[];
     before: MessageId | null;
     turns: Turn[];
@@ -196,7 +198,7 @@ export class ThreadStore {
     const asked = params.limit ?? MESSAGE_PAGE;
     const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
     const page = this.core.journal.listMessagePage(params.threadId, { beforeRowid: rowid, limit });
-    return { ...page, turns: this.core.journal.listTurnsFor(params.threadId, page.messages.map((message) => message.turnId)) };
+    return { ...page, messages: params.compactTools ? previewToolOutputs(page.messages) : page.messages, turns: this.core.journal.listTurnsFor(params.threadId, page.messages.map((message) => message.turnId)) };
   }
 
   // -- writes ---------------------------------------------------------------

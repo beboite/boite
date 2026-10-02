@@ -171,7 +171,8 @@ export class BrowserPage {
         // software GL disabled so Chrome cannot fall back to SwiftShader.
         ...(process.env.CI === 'true'
           ? ['--disable-gpu', '--disable-software-rasterizer']
-          : process.platform === 'win32' ? ['--use-gl=angle', '--use-angle=d3d11'] : []),
+          : process.platform === 'win32' ? ['--use-gl=angle', '--use-angle=d3d11']
+            : process.platform === 'linux' ? ['--enable-gpu', '--use-gl=angle', '--use-angle=gl-egl', '--disable-software-rasterizer'] : []),
         '--mute-audio',
         // The suite's assertions are written in English and its numbers read
         // with the browser's own `toLocaleString`: both follow this, not the

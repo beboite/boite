@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import ToolCard from './ToolCard.svelte';
 
@@ -37,6 +37,22 @@ function openCard(input: unknown): void {
   query<HTMLButtonElement>('[data-testid=tool-toggle]').click();
   flushSync();
 }
+
+test('a folded output fetches on disclosure, reports failure and retries on reopening', async () => {
+  const loadOutput = vi.fn().mockRejectedValueOnce(new Error('output unavailable')).mockResolvedValueOnce(undefined);
+  running = mount(ToolCard, { target: document.body, props: { name: 'Bash', input: { command: 'report' }, output: 'preview', outputDeferred: true, loadOutput, status: 'done' } });
+  flushSync();
+  expect(loadOutput).not.toHaveBeenCalled();
+  query<HTMLButtonElement>('[data-testid=tool-toggle]').click(); flushSync();
+  expect(loadOutput).toHaveBeenCalledTimes(1);
+  expect(document.querySelector('[data-testid=tool-output]')).toBeNull();
+  await vi.waitFor(() => expect(document.querySelector('[role=alert]')?.textContent).toBe('output unavailable'));
+  query<HTMLButtonElement>('[data-testid=tool-toggle]').click(); flushSync();
+  query<HTMLButtonElement>('[data-testid=tool-toggle]').click(); flushSync();
+  expect(loadOutput).toHaveBeenCalledTimes(2);
+  await vi.waitFor(() => expect(document.querySelector('[data-testid=tool-output-loading]')).toBeNull());
+  expect(document.querySelector('[role=alert]')).toBeNull();
+});
 
 test('a command stays a folded, stable line while its arguments stream', () => {
   const props = { name: 'Bash', input: {}, inputText: '{"command":"gi', output: null, status: 'running' as const };

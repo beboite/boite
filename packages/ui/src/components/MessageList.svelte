@@ -6,7 +6,7 @@
   import type { Store } from '../lib/store.svelte';
   import MessageTurnSummary from './MessageTurnSummary.svelte';
   import TurnFiles from './TurnFiles.svelte';
-  import { turnDiffs, turnFiles, type TurnDiff, type TurnFile } from '../lib/turn-files';
+  import { visibleTurnFiles } from '../lib/turn-files';
   import MessageOutline from './MessageOutline.svelte';
   import ForwardedAgentMessage from './ForwardedAgentMessage.svelte';
   import DelegationActivity from './DelegationActivity.svelte';
@@ -140,11 +140,17 @@
   /** Bumped by every measurement that moved a height, so the window recomputes on real numbers. */
   let measured = $state(0);
   /** Ids that already played the rise, so a message re-entering the window stays still. */
-  const risen = new Set<string>(savedReading?.heights.keys());
+  const risen = new Set<string>([...(savedReading?.heights.keys() ?? []), ...untrack(() => messages.map(message => message.id))]);
   /** One observer for the viewport's height and for every rendered message. */
   let boxes: ResizeObserver | undefined;
 
-  let scrollTop = $state(savedReading?.top ?? 0);
+  const slots = new SlotTotals(heights);
+  const savedTop = untrack(() => {
+    const anchor = savedReading?.pinned ? undefined : savedReading?.anchor;
+    const at = anchor ? timeline.findIndex(message => message.id === anchor.id) : -1;
+    return at < 0 ? savedReading?.top ?? 0 : Math.max(0, (slots.totals(timeline, timelineOrder)[at] ?? 0) - anchor!.offset);
+  });
+  let scrollTop = $state(savedTop);
   let readingAnchor = savedReading?.anchor;
   let restoringAnchor = Boolean(savedReading?.anchor && !savedReading.pinned);
   function rememberAnchor() {
@@ -181,10 +187,10 @@
   onDestroy(() => {
     if (!viewport || !store.readingPositions) return;
     store.readingPositions.delete(threadId);
-    store.readingPositions.set(threadId, { top: scrollTop, pinned, heights: new Map(heights), anchor: readingAnchor, reservePrompt, followPrompt: promptTarget });
+    store.readingPositions.set(threadId, { top: scrollTop, pinned, heights: new Map(heights), anchor: readingAnchor, height: viewHeight, reservePrompt, followPrompt: promptTarget });
     while (store.readingPositions.size > 32) store.readingPositions.delete(store.readingPositions.keys().next().value!);
   });
-  let viewHeight = $state(0);
+  let viewHeight = $state(savedReading?.height ?? 0);
   let navigationTarget = $state<string | null>(null);
   let promptTarget = $state<string | null>(savedReading?.followPrompt ?? null);
   let reservePrompt = $state<string | null>(savedReading?.reservePrompt ?? null);
@@ -249,9 +255,6 @@
   });
 
   const windowed = $derived(timeline.length > WINDOW_FROM);
-
-  /** The running totals of the slot heights, which the window bisects. */
-  const slots = new SlotTotals(heights);
 
   function totals(list: Message[]): number[] {
     return slots.totals(list, timelineOrder);
@@ -363,7 +366,9 @@
       last = reaches(total, count, first, scrollTop + viewHeight);
     }
 
-    const start = Math.max(0, first - OVERSCAN);
+    // At the live end, paint fewer offscreen rows. Reading history keeps the
+    // larger buffer in both directions for wheel and touch navigation.
+    const start = Math.max(0, first - (pinned ? 2 : OVERSCAN));
     const end = Math.min(count, last + OVERSCAN);
     return { start, end, first, above: total[start] ?? 0, below: whole - (total[end] ?? 0) };
   });
@@ -464,7 +469,7 @@
     if (!restoredReading) {
       restoredReading = true;
       if (savedReading && !savedReading.pinned) {
-        box.scrollTop = savedReading.top;
+        box.scrollTop = savedTop;
         // What is loaded now is the baseline: the button counts what arrives after.
         untrack(markSeen);
       }
@@ -686,20 +691,8 @@
   /** What each finished turn wrote, shown once at its end; a turn still running is left alone. */
   const filesByTurn = $derived.by(() => {
     const thread = store.openThread;
-    const result = new Map<string, { files: TurnFile[]; diffs: TurnDiff[]; cwd: string }>();
-    if (!thread || thread.id !== threadId) return result;
-    const parts = new Map<string, Message['parts']>();
-    for (const message of messages) {
-      if (message.role !== 'assistant') continue;
-      parts.set(message.turnId, [...(parts.get(message.turnId) ?? []), ...message.parts]);
-    }
-    for (const turn of thread.turns) {
-      if (turn.status === 'running' || turn.status === 'queued') continue;
-      const own = parts.get(turn.id) ?? [];
-      const files = turnFiles(own, thread.cwd);
-      if (files.length > 0) result.set(turn.id, { files, diffs: turnDiffs(own), cwd: thread.cwd });
-    }
-    return result;
+    if (!thread || thread.id !== threadId) return new Map();
+    return visibleTurnFiles(messages, thread.turns, new Set(rendered.map(message => message.turnId)), thread.cwd);
   });
   const lastInTurn = $derived.by(() => {
     const result = new Map<string, string>();

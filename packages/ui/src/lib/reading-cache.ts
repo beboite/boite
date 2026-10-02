@@ -36,11 +36,16 @@ function partChars(part: MessagePart): number {
  * too many messages to be kept anyway.
  */
 export function fitsReadingCache(messages: readonly Message[]): boolean {
-  if (messages.length > READING_CACHE_MESSAGES) return false;
+  return readingCacheBytes(messages) <= READING_CACHE_BYTES;
+}
+
+/** Stops at the per-thread bound; cache accounting never serializes whole messages. */
+export function readingCacheBytes(messages: readonly Message[]): number {
+  if (messages.length > READING_CACHE_MESSAGES) return READING_CACHE_BYTES + 1;
   let chars = 0;
   for (const message of messages) {
     for (const part of message.parts) chars += partChars(part);
-    if (chars * 2 > READING_CACHE_BYTES) return false;
+    if (chars * 2 > READING_CACHE_BYTES) return READING_CACHE_BYTES + 1;
   }
-  return true;
+  return chars * 2;
 }

@@ -9,10 +9,11 @@ import type {
   ThreadRewind,
   ThreadSummary
 } from '@boite/contracts';
-import { fitsReadingCache } from '../reading-cache';
+import { readingCacheBytes, READING_CACHE_BYTES } from '../reading-cache';
+import { INITIAL_MESSAGE_PAGE, MESSAGE_PAGE_MAX, previewToolOutputs } from '@boite/contracts';
 import { forgetArchivedThread } from '../archive-history';
 import { rightPanel } from '../right-panel.svelte';
-import { lastIndexById, mergeResumed, patchRow, resumeRequest, threadsByProject } from '../thread-rows';
+import { lastIndexById, mergeResumed, patchRow, reconcileThread, resumeRequest, threadsByProject } from '../thread-rows';
 import type { StoreContext } from './context';
 import { RpcErrorCode } from '@boite/contracts';
 import { RpcFailure } from '../client';
@@ -37,9 +38,10 @@ export class Threads {
   openThread = $state<Thread | null>(null);
   /** True while a page of older messages is in flight, so the timeline can say so. */
   loadingOlder = $state(false);
+  loadingThreadId = $state<ThreadId | null>(null);
   /** The threads a `threads.retitle` is out for: their menu item waits. */
   retitling = $state<ThreadId[]>([]);
-  readonly readingPositions = new Map<string, { top: number; pinned: boolean; heights: Map<string, number>; anchor?: { id: string; offset: number }; reservePrompt?: string | null; followPrompt?: string | null }>();
+  readonly readingPositions = new Map<string, { top: number; pinned: boolean; heights: Map<string, number>; anchor?: { id: string; offset: number }; height?: number; reservePrompt?: string | null; followPrompt?: string | null }>();
   readingThreads = new Map<string, Thread>();
   subscribedThreadId: ThreadId | null = null;
   /** The newest navigation intent, including drafts, pages and detached clients. */
@@ -47,6 +49,8 @@ export class Threads {
   /** What that newest run is opening, so an older one knows what to give back. */
   #openTarget: ThreadId | null = null;
   #olderGeneration = 0;
+  /** Refreshing this visit keeps disclosures; leaving it invalidates their pending fetches. */
+  #toolOutputVisit = 0;
 
   constructor(private readonly ctx: StoreContext) {}
 
@@ -54,17 +58,26 @@ export class Threads {
     this.#openTarget = null;
     this.#olderGeneration++;
     this.loadingOlder = false;
+    this.loadingThreadId = null;
     return ++this.openGeneration;
   }
 
   rememberReadingThread(): void {
     const thread = this.openThread;
-    if (!thread) return;
-    // Four recent timelines, with at most 4 MB of text/image data each.
-    // The active timeline remains unrestricted; old visits must not retain every image forever.
+    if (!thread || (this.loadingThreadId === thread.id && thread.messages.length === 0)) return;
+    // Keep more small visits within the same 16 MiB budget. An expanded tool
+    // gives its full output back to the core before it enters this cache.
     this.readingThreads.delete(thread.id);
-    if (fitsReadingCache(thread.messages)) this.readingThreads.set(thread.id, thread);
-    while (this.readingThreads.size > 4) this.readingThreads.delete(this.readingThreads.keys().next().value!);
+    const messages = previewToolOutputs(thread.messages);
+    const snapshot = messages.every((message, index) => message === thread.messages[index]) ? thread : { ...thread, messages };
+    const bytes = readingCacheBytes(messages);
+    if (bytes <= READING_CACHE_BYTES) this.readingThreads.set(thread.id, snapshot);
+    let total = [...this.readingThreads.values()].reduce((sum, held) => sum + readingCacheBytes(held.messages), 0);
+    while (this.readingThreads.size > 16 || total > 4 * READING_CACHE_BYTES) {
+      const oldest = this.readingThreads.keys().next().value!;
+      total -= readingCacheBytes(this.readingThreads.get(oldest)!.messages);
+      this.readingThreads.delete(oldest);
+    }
   }
 
   #unreadCount = $derived(this.threads.filter((t) => t.unread).length);
@@ -215,22 +228,29 @@ export class Threads {
    */
   async open(threadId: ThreadId, navigate = true, options: { requests?: boolean } = {}): Promise<void> {
     const s = this.ctx.store;
-    const { delegation, workbench } = this.ctx;
+    const { delegation } = this.ctx;
     const client = this.ctx.client;
     if (!client) return;
     const generation = this.invalidateNavigation();
     this.#openTarget = threadId;
-    if (s.connection !== 'ready') { this.#openOffline(threadId, navigate); return; }
+    if (s.connection !== 'ready') { this.loadingThreadId = null; this.#openOffline(threadId, navigate); return; }
     const newest = (): boolean => this.ctx.currentNavigation(client, generation);
     const retire = async (): Promise<void> => {
       if (client !== this.ctx.client || (this.subscribedThreadId !== threadId && delegation.delegationSubscribedThreadId !== threadId && (this.#openTarget !== threadId || newest()))) {
         await client.call('threads.unsubscribe', { threadId }).catch(() => undefined);
       }
     };
-    if (this.openThread?.id !== threadId && s.delegationSelectedAgentId && s.delegationSelectedAgentId !== threadId) {
-      await s.selectDelegatedAgent(null);
-      if (!newest()) return;
-    }
+    const previousThread = this.openThread;
+    const held = this.openThread?.id === threadId ? this.openThread : this.readingThreads.get(threadId);
+    const deselect = this.openThread?.id !== threadId && s.delegationSelectedAgentId && s.delegationSelectedAgentId !== threadId;
+    // Paint a recent visit in this task. Its revalidation and subscription can
+    // take a whole network round trip without holding the reader's text back.
+    const row = this.threads.find(thread => thread.id === threadId);
+    if (held) this.#show(Object.assign(held, row), navigate);
+    else if (row) this.#show({ ...row, messages: [], turns: [], commands: [], messagesBefore: null }, navigate);
+    this.loadingThreadId = held ? null : threadId;
+    const deselected = deselect ? s.selectDelegatedAgent(null) : Promise.resolve();
+    let loaded = false;
     const summaryRead = this.ctx.threadReads.begin(threadId);
     let permissionRead: ReturnType<StoreContext['requests']['permissionRead']> | undefined;
     let questionRead: ReturnType<StoreContext['requests']['questionRead']> | undefined;
@@ -244,8 +264,7 @@ export class Threads {
       // A thread already in hand, open or among the recent ones, asks only for
       // what it cannot vouch for: a reconnect on a long conversation used to
       // download its last 120 messages again for the two that were new.
-      const held = this.openThread?.id === threadId ? this.openThread : this.readingThreads.get(threadId);
-      const fetched = client.call('threads.get', resumeRequest(threadId, held));
+      const fetched = client.call('threads.get', { ...resumeRequest(threadId, held), limit: held ? MESSAGE_PAGE_MAX : INITIAL_MESSAGE_PAGE, compactTools: true });
       if (options.requests !== false) {
         permissionRead = this.ctx.requests.permissionRead(client, threadId);
         questionRead = this.ctx.requests.questionRead(client, threadId);
@@ -272,47 +291,24 @@ export class Threads {
       const unsubscribed: Promise<unknown> = previous && previous !== threadId && previous !== delegation.delegationSubscribedThreadId
         ? client.call('threads.unsubscribe', { threadId: previous }).catch(() => undefined)
         : Promise.resolve();
-      this.rememberReadingThread();
-      const cached = this.readingThreads.get(threadId);
+      const cached = held ?? this.readingThreads.get(threadId);
       const freshIds = new Set(thread.messages.map(m => m.id));
       if (thread.messagesFrom !== undefined && held) mergeResumed(held, thread);
       else if (cached && cached.messages.some(m => freshIds.has(m.id))) {
-        const merged = new Map(cached.messages.map(m => [m.id, m]));
-        for (const message of thread.messages) merged.set(message.id, message);
-        thread.messages = [...merged.values()].sort((a, b) => a.createdAt - b.createdAt);
+        // The fresh tail is authoritative, including a rewind missed while away.
+        // Keep only the loaded prefix before its first overlapping message.
+        const overlap = cached.messages.findIndex(message => freshIds.has(message.id));
+        thread.messages = [...cached.messages.slice(0, overlap), ...thread.messages];
+        const turnIds = new Set(thread.turns.map(turn => turn.id));
+        thread.turns = [...cached.turns.filter(turn => !turnIds.has(turn.id)), ...thread.turns];
         thread.messagesBefore = cached.messagesBefore;
       } else {
         this.readingThreads.delete(threadId);
         this.readingPositions.delete(threadId);
       }
-      this.ctx.drafts.park();
-      s.draft = null;
-      // The last page, pinned to the bottom; what is above it arrives on scroll.
-      this.loadingOlder = false;
-      if (this.openThread?.id !== threadId) {
-        delegation.delegationEpoch++;
-        delegation.delegationConfigureEpoch++;
-        s.delegation = null;
-        s.delegationLoading = false;
-        s.delegationSaving = false;
-        s.delegationError = null;
-      }
-      this.leaveArchived(threadId);
-      this.openThread = thread;
-      // The thread that was open takes its permission and question cards with it.
-      this.ctx.requests.keepRequestsOf(threadId);
-      if (navigate) {
-        s.page = 'chat';
-        s.sidebarOpen = false;
-        if (thread.projectId) this.ctx.projects.rememberProject(thread.projectId);
-      }
-      // The trace is read by its surface alone, so it is fetched only while
-      // that surface is on screen, and never in the way of the messages.
-      // A new thread empties it and the surface's own effect reads the new
-      // one; the same thread again is a reconnect, which that effect never sees.
-      if (workbench.tracedThreadId !== threadId) s.trace = [];
-      else if (s.traceWatched) void s.refreshTrace();
-      workbench.tracedThreadId = threadId;
+      this.#show(held ? reconcileThread(held, thread) : thread, navigate, true);
+      loaded = true;
+      this.loadingThreadId = null;
       // The thread may already be waiting on a request this page never saw,
       // and may have had one settled where this client could not hear it.
       const permissions = await permissionsAsked;
@@ -328,9 +324,54 @@ export class Threads {
         this.threads = this.threads.map((t) => (t.id === threadId ? { ...t, unread: false } : t));
       }
     } catch (error) {
-      if (newest()) this.ctx.fail(error);
+      if (newest()) {
+        if (!loaded && error instanceof RpcFailure && (error.code === RpcErrorCode.NotFound || error.code === RpcErrorCode.Refused)) {
+          if (previousThread && previousThread.id !== threadId) this.#show(previousThread, navigate);
+          else this.openThread = null;
+          // Rollback can remember the rejected target: discard it afterwards.
+          this.readingThreads.delete(threadId);
+          this.readingPositions.delete(threadId);
+        }
+        this.ctx.fail(error);
+      }
       await retire();
-    } finally { summaryRead.cancel(); permissionRead?.cancel(); questionRead?.cancel(); }
+    } finally {
+      summaryRead.cancel();
+      permissionRead?.cancel();
+      questionRead?.cancel();
+      if (newest()) this.loadingThreadId = null;
+      await deselected;
+    }
+  }
+
+  /** Select the history synchronously; network work never owns navigation. */
+  #show(thread: Thread, navigate: boolean, refreshTrace = false): void {
+    const s = this.ctx.store;
+    const { delegation, workbench } = this.ctx;
+    if (this.openThread?.id !== thread.id) {
+      this.#toolOutputVisit++;
+      this.rememberReadingThread();
+      this.ctx.drafts.park();
+      s.draft = null;
+      this.loadingOlder = false;
+      delegation.delegationEpoch++;
+      delegation.delegationConfigureEpoch++;
+      s.delegation = null;
+      s.delegationLoading = false;
+      s.delegationSaving = false;
+      s.delegationError = null;
+      this.leaveArchived(thread.id);
+      this.ctx.requests.keepRequestsOf(thread.id);
+    }
+    this.openThread = thread;
+    if (navigate) {
+      s.page = 'chat';
+      s.sidebarOpen = false;
+      if (thread.projectId) this.ctx.projects.rememberProject(thread.projectId);
+    }
+    if (workbench.tracedThreadId !== thread.id) s.trace = [];
+    else if (refreshTrace && s.traceWatched) void s.refreshTrace();
+    workbench.tracedThreadId = thread.id;
   }
 
   /**
@@ -345,6 +386,7 @@ export class Threads {
     if (this.openThread?.id !== threadId) {
       const held = this.readingThreads.get(threadId);
       if (!row && !held) return;
+      this.#toolOutputVisit++;
       this.rememberReadingThread();
       this.ctx.drafts.park();
       s.draft = null;
@@ -391,7 +433,7 @@ export class Threads {
     const navigation = this.openGeneration;
     const current = () => generation === this.#olderGeneration && this.ctx.currentNavigation(client, navigation);
     try {
-      const page = await client.call('messages.list', { threadId: open.id, before: cursor });
+      const page = await client.call('messages.list', { threadId: open.id, before: cursor, compactTools: true });
       const still = this.openThread;
       if (!current() || !still || still.id !== open.id || still.messagesBefore !== cursor) return 0;
       const known = new Set(still.messages.map((m) => m.id));
@@ -408,6 +450,51 @@ export class Threads {
     } finally {
       if (current()) this.loadingOlder = false;
     }
+  }
+
+  readonly #toolOutputs = new Map<string, { client: NonNullable<StoreContext['client']>; generation: number; promise: Promise<void> }>();
+  /** Hydrate only a disclosure the reader opened, shared by duplicate requests. */
+  loadToolOutput(threadId: ThreadId, messageId: MessageId, toolId: string): Promise<void> {
+    const key = JSON.stringify([threadId, messageId, toolId]);
+    const client = this.ctx.client;
+    if (!client) return Promise.reject(new Error(strings.connection.unavailable));
+    const generation = this.#toolOutputVisit;
+    const held = this.#toolOutputs.get(key);
+    if (held?.client === client && held.generation === generation) return held.promise;
+    const loading = client.call('messages.toolOutput', { threadId, messageId, toolId }).catch(async error => {
+      if (!(error instanceof RpcFailure) || error.code !== RpcErrorCode.MethodNotFound) throw error;
+      if (this.ctx.client !== client || generation !== this.#toolOutputVisit) return { output: null };
+      // Older connected cores return full parts through their existing history
+      // methods. Prefer one message before its known successor, else walk back
+      // from a resumed tail if new work has overtaken the cached last message.
+      const thread = [...this.threadSnapshots(threadId)].find(held => held.messages.some(message => message.id === messageId));
+      const next = thread?.messages[lastIndexById(thread.messages, messageId) + 1]?.id;
+      const page = next
+        ? await client.call('messages.list', { threadId, before: next, limit: 1 })
+        : await client.call('threads.get', { threadId, after: messageId });
+      let message = page.messages.find(message => message.id === messageId);
+      let before = 'before' in page ? page.before : page.messagesBefore;
+      while (!message && before && this.ctx.client === client && generation === this.#toolOutputVisit) {
+        const older = await client.call('messages.list', { threadId, before, limit: MESSAGE_PAGE_MAX });
+        message = older.messages.find(message => message.id === messageId);
+        if (older.before === before) break;
+        before = older.before;
+      }
+      const part = message?.parts.find(part => part.type === 'tool' && part.toolId === toolId);
+      if (part?.type !== 'tool') throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `tool ${toolId} is not a tool of message ${messageId}` });
+      return { output: part.output };
+    }).then(({ output }) => {
+      if (this.ctx.client !== client || generation !== this.#toolOutputVisit) return;
+      for (const message of this.messages(threadId, messageId)) {
+        for (const part of message.parts) {
+          if (part.type !== 'tool' || part.toolId !== toolId || !part.outputDeferred) continue;
+          part.output = output;
+          delete part.outputDeferred;
+        }
+      }
+    }).finally(() => { if (this.#toolOutputs.get(key)?.promise === loading) this.#toolOutputs.delete(key); });
+    this.#toolOutputs.set(key, { client, generation, promise: loading });
+    return loading;
   }
 
   async createThread(input: {
