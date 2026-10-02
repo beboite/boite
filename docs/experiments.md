@@ -38,7 +38,9 @@ directory and the message stores a reference. Downloads support HTTP ranges,
 so videos can seek without loading the entire file. The UI renews download
 tickets while the card is mounted. Unreferenced snapshots and interrupted
 copies older than a day are removed by daily maintenance; forks retain their
-referenced files. User uploads still have their separate 5 MB limit.
+referenced files. The reference scan runs in a worker so large journals do not
+block the core's event loop. A pass that overlaps journal writes skips deletion
+to avoid acting on stale references. User uploads still have their separate 5 MB limit.
 Relative and absolute paths must
 stay inside that directory, including resolved symlinks. A missing file,
 directory, oversized file or archived thread is refused. The thread must have
@@ -53,6 +55,9 @@ Published images, videos and audio appear directly in the conversation without
 enabling this experiment. Media keeps its aspect ratio within a bounded card;
 videos have playback, seeking and fullscreen controls and never autoplay.
 Images open in a keyboard-accessible viewer with zoom, fit and download controls.
+Images larger than 5 MB show their name, size and download first. Click Load image
+or the filename to download and display them; opening a conversation does not
+fetch these images automatically.
 If decoding fails, the card keeps its download and offers a retry.
 
 With the experiment enabled, answers also support Markdown file links, bare web
