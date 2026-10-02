@@ -1935,6 +1935,8 @@ export function defaultCoordinationConfig(): CoordinationConfig {
   return { mode: 'brief', resources: '', remote: true, paused: false };
 }
 export interface AgentAddress { coreId: string; threadId: ThreadId }
+/** An idle contact that completed work within this window can be followed up without a stale-work warning. */
+export const COORDINATION_RECENT_COMPLETION_MS = 15 * 60_000;
 export interface AgentContact extends AgentAddress {
   title: string;
   machine: string;
@@ -1949,6 +1951,12 @@ export interface AgentContact extends AgentAddress {
   branch?: string | null;
   /** Last activity: a message, a turn or a change of state. Missing on older cores. */
   activeAt?: Timestamp;
+  /** Last successfully completed turn, independent of title/settings edits; null when none. Missing on older cores. */
+  lastCompletedAt?: Timestamp | null;
+  /** Its project is put away; delivering work restores the project. Missing on older cores. */
+  projectArchived?: boolean;
+  /** Automatic delivery is paused, even when the thread remains discoverable. Missing on older cores. */
+  paused?: boolean;
 }
 /** A contact whose title, project, branch, model, resources or chat matched a search. */
 export interface AgentMatch extends AgentContact {

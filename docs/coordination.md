@@ -7,6 +7,19 @@ destination owner permits remote reading, and a
 message can wake an idle agent. There is no hourly budget on messages, wake
 turns or threads an agent starts.
 
+Before sending or replying, agents check the recipient's current status, last
+successful completion, pause and project archive state with `boite agents list`
+or `boite agents read`. Queued, running and waiting threads are working.
+Contacting an inactive thread remains possible, but is discouraged unless it
+completed work within the last 15 minutes. Editing a title or settings does
+not count as completing work. The CLI warns when completion is old or unknown;
+JSON contacts expose `lastCompletedAt`, `paused` and `projectArchived`.
+
+Threads in an archived project remain reachable. When coordination actually
+delivers work, the recipient's core restores that project and announces the
+change to connected clients. A paused or expired message leaves the project
+archived. Archiving a thread still makes that thread unavailable.
+
 Open the conversation title menu and choose Communication between conversations
 to turn communication off or restrict it to the current project. The settings
 open in a dialog and remain available in the Agents panel. Explicit owner

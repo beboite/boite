@@ -417,6 +417,12 @@ export class Journal {
     return rows.map(toTurn);
   }
 
+  /** A coordination contact needs one completion timestamp, without loading its turn history. */
+  lastCompletedAt(threadId: string): number | null {
+    const row = this.db.query("SELECT finished_at AS at FROM turns WHERE thread_id = ? AND status = 'done' AND finished_at IS NOT NULL ORDER BY rowid DESC LIMIT 1").get(threadId) as { at: number } | null;
+    return row?.at ?? null;
+  }
+
   /**
    * The turns a page of messages refers to, plus any turn of the thread still
    * queued or running, in journal order. What `threads.get` hands back instead
