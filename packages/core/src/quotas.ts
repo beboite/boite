@@ -15,6 +15,9 @@ const cliAccount: Account = { id: ANTIGRAVITY_QUOTA_ID, providerId: 'antigravity
 
 const CACHE_MS = 60_000;
 const RETRY_MS = 300_000;
+function hasQuota(reading: QuotaReading): boolean {
+  return reading.windows.length > 0 || reading.resetCredits !== undefined || reading.credits !== undefined;
+}
 /** An identity not read yet names nobody else: only two known, different identities are two logins. */
 const sameLogin = (a: string | null, b: string | null) => a === null || b === null || a === b;
 type ObjectValue = Record<string, unknown>;
@@ -93,7 +96,7 @@ export function claudeUsageAgent(version: string | null): Record<string, string>
   return version !== null && /^[\w.+-]{1,40}$/.test(version) ? { 'User-Agent': `claude-cli/${version} (external, cli)` } : {};
 }
 
-/** The token stays inside this function and is sent only to Anthropic. Null when it has expired. */
+/** The token stays here and is sent only to Anthropic. Null when expired or no quota data was returned. */
 async function readClaudeWithToken(token: string, version: string | null): Promise<QuotaReading | null> {
   let response: Response;
   try {
@@ -105,7 +108,11 @@ async function readClaudeWithToken(token: string, version: string | null): Promi
   if (response.status === 401) return null;
   if (response.status === 429) throw new Error('Claude quota requests are rate limited. Retrying in five minutes.');
   if (!response.ok) throw new Error(`Claude quota request returned HTTP ${response.status}.`);
-  try { const raw: unknown = await response.json(); return { windows: claudeQuotaWindows(raw), ...claudeQuotaDetails(raw) }; }
+  try {
+    const raw: unknown = await response.json();
+    const reading = { windows: claudeQuotaWindows(raw), ...claudeQuotaDetails(raw) };
+    return hasQuota(reading) ? reading : null;
+  }
   catch { throw new Error('Claude returned an invalid quota response.'); }
 }
 
@@ -266,9 +273,9 @@ export class QuotaStore {
       try {
         const raw = await this.read(account);
         const reading = Array.isArray(raw) ? { windows: raw } : raw;
-        const ready = reading.windows.length > 0 || reading.resetCredits !== undefined || reading.credits !== undefined;
-        value = { ...base, ...reading, status: ready ? 'ready' : 'unavailable', checkedAt: Date.now(), error: ready ? null : 'No subscription quota was reported for this account.' };
-        if (ready && epoch === (this.epochs.get(account.id) ?? 0)) this.lastGood.set(account.id, { value, identity: account.identity });
+        if (!hasQuota(reading)) throw new Error('No subscription usage limits were returned. Retrying in five minutes.');
+        value = { ...base, ...reading, status: 'ready', checkedAt: Date.now(), error: null };
+        if (epoch === (this.epochs.get(account.id) ?? 0)) this.lastGood.set(account.id, { value, identity: account.identity });
       } catch (error) {
         const kept = epoch === (this.epochs.get(account.id) ?? 0) ? this.kept(account) : undefined;
         value = { ...(kept ?? base), label: base.label, providerName: base.providerName, status: 'unavailable', checkedAt: kept?.checkedAt ?? null,
