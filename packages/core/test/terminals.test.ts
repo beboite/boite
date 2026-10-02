@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type { RpcEvents } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
-import { HISTORY_CHARS, OutputHistory, commandLine, pickShell, threadTerminalId } from '../src/terminals.ts';
+import { HISTORY_CHARS, OutputHistory, commandLine, pickShell, threadTerminalId, windowsPty } from '../src/terminals.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -254,9 +254,22 @@ describe('output history', () => {
     history.push('xy');
     expect(history.text()).toBe('89ABCDEFxy');
   });
+
+  test('a cut window starts on a whole line, never inside an escape sequence', () => {
+    const history = new OutputHistory(12);
+    history.push('first\x1b[31mred\x1b[0m\nsecond\n');
+    // The last 12 characters start at `1b[0m`: half of the sequence that reset the colour.
+    expect(history.text()).toBe('second\n');
+  });
 });
 
 describe('shells', () => {
+  test('a ConPTY shell tells the emulator its Windows build, and no other shell says anything', () => {
+    expect(windowsPty('win32', '10.0.26100')).toEqual({ windowsPty: { buildNumber: 26100 } });
+    expect(windowsPty('win32', 'unknown')).toEqual({});
+    expect(windowsPty('linux', '6.8.0-45-generic')).toEqual({});
+  });
+
   test('Windows prefers PowerShell 7, then Windows PowerShell, then cmd', () => {
     const env = { SystemRoot: 'C:\\Windows', ComSpec: 'C:\\Windows\\System32\\cmd.exe' };
     expect(pickShell('win32', env, () => 'C:\\pwsh\\pwsh.exe', () => true)).toEqual({ exe: 'C:\\pwsh\\pwsh.exe', args: ['-NoLogo'], kind: 'powershell' });

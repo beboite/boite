@@ -2172,6 +2172,12 @@ export interface TerminalState {
   output: string;
   /** Last output event included in this snapshot; absent on older cores. */
   sequence?: number;
+  /**
+   * Set when the shell runs under ConPTY, with the Windows build number: ConPTY
+   * rewraps lines itself, and the emulator must know which builds do, or a
+   * resize draws lines twice. Absent on Linux, macOS and older cores.
+   */
+  windowsPty?: { buildNumber: number };
 }
 
 /** The server on one machine, independently of the desktop application's updater. */
