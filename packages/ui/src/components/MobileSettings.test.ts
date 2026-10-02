@@ -58,6 +58,9 @@ test('a thread archived on the phone comes back from its own settings list', asy
   await waitFor(() => store.booted && (store.openThread !== null || store.draft !== null));
 
   const managedProjectId = store.openProject!.id;
+  await waitFor(() => document.querySelector('[data-testid=mobile-back]') !== null);
+  query<HTMLButtonElement>('[data-testid=mobile-back]').click();
+  await waitFor(() => document.querySelector('[data-testid=mobile-project-actions]') !== null);
   query<HTMLButtonElement>('[data-testid=mobile-project-actions]').click();
   await waitFor(() => document.querySelector('[data-value=manage]') !== null);
   query<HTMLButtonElement>('[data-value=manage]').click();

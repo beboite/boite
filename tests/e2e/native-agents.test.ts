@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
+import { mobileAction } from './lib/mobile.ts';
 import { startDevUi } from './lib/ui.ts';
 
 let server: { close(): Promise<void> };
@@ -41,7 +42,7 @@ test('native agents remain visible beside Boite subagents on desktop and phone',
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   expect(await page.evaluate('(e => e.scrollWidth <= e.clientWidth)(document.querySelector("[data-testid=delegation-surface]"))')).toBe(true);
   await page.reload();
-  await page.click('[data-testid="mobile-conversations"]');
+  await mobileAction(page, 'mobile-conversations');
   await page.click('[data-testid="mobile-thread-t-native"]');
   await page.click('[data-testid=thread-menu-trigger]');
   await page.click('[data-testid=thread-menu-trigger-menu] [data-value=agents]');

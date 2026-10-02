@@ -110,10 +110,16 @@ async function exercise(revisit: boolean): Promise<void> {
     })()`);
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await page.waitFor('window.innerWidth === 390');
-    await page.waitFor(`document.querySelector('[data-testid=mobile-tabs]')`);
+    await page.waitFor(`document.querySelector('[data-testid=mobile-back]')?.getBoundingClientRect().width > 0`);
     await page.waitFor(`document.querySelector('[data-testid=composer-input]')`);
     await page.type('[data-testid=composer-input]', 'phone draft survives');
     assert.equal(await page.evaluate(`document.querySelector('[data-testid=composer-input]').value`), 'phone draft survives');
+    await page.click('[data-testid=mobile-back]');
+    await page.waitFor(`document.querySelector('[data-testid=mobile-list]')`);
+    assert((await page.evaluate<number>(`document.querySelectorAll('[data-testid^=mobile-thread-]:not([data-testid^=mobile-thread-menu-])').length`)) < 100);
+    await page.type('[data-testid=mobile-search]', 'foreground survives load');
+    await page.click(`[data-testid=mobile-thread-${selected.id}]`);
+    await page.waitFor(`document.querySelector('[data-testid=composer-input]')?.value === 'phone draft survives'`);
     await page.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
     await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getComputedTiming().iterations !== Infinity)
       .map(a => a.finished.catch(() => undefined)))`);

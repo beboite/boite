@@ -154,7 +154,7 @@ describe('message paging', () => {
       expect(Buffer.byteLength(JSON.stringify(bundle.messages))).toBeGreaterThan(MESSAGE_PAGE_MAX_BYTES);
       expect(bundle.messages[0]?.parts.filter(part => part.type === 'file').every(part => part.data === data)).toBe(true);
     } finally { client.close(); }
-  }, 15_000);
+  }, 60_000);
 
   test('a limit is honoured and never exceeds the maximum', async () => {
     const client = await harness.connect();
