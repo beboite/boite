@@ -7,6 +7,7 @@
     letter: AgentLetter; self: AgentAddress; projectName?: string; onopen?: (address: AgentAddress) => void;
   } = $props();
   let outgoing = $derived(letter.from.coreId === self.coreId && letter.from.threadId === self.threadId);
+  let userSide = $derived(!outgoing || letter.origin === 'user');
   let address = $derived(outgoing ? letter.to : letter.from);
   let project = $derived(projectName ?? (outgoing ? letter.toProject : letter.from.project));
   let machine = $derived(outgoing ? letter.toMachine : letter.from.machine);
@@ -19,7 +20,7 @@
     : outgoing ? strings.coordination.sentTo : strings.coordination.receivedFrom);
 </script>
 
-<div class="forwarded" data-testid="forwarded-agent-message" data-letter-id={letter.id} data-direction={outgoing ? 'outgoing' : 'incoming'} title={technical}>
+<div class="forwarded" class:user={userSide} data-testid="forwarded-agent-message" data-letter-id={letter.id} data-direction={outgoing ? 'outgoing' : 'incoming'} title={technical}>
   <button type="button" class="forward-head" data-testid="agent-letter-open" title={strings.chat.openLinkedThread} disabled={!onopen} onclick={() => onopen?.(address)}>
     <span class="forward-icon">
       {#if outgoing}<Forward size={18} strokeWidth={1.75} aria-hidden="true" />
@@ -65,7 +66,7 @@
   .forward-head { display: flex; align-items: flex-start; justify-content: flex-start; gap: 9px; width: 100%; height: auto; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; text-align: left; color: var(--color-muted-foreground); }
   .forward-head:hover:not(:disabled) strong { text-decoration: underline; }
   .forward-head:disabled { opacity: 1; cursor: default; }
-  .forwarded[data-direction="outgoing"] {
+  .forwarded.user {
     margin-left: auto;
     background: var(--color-accent-soft);
     border-color: var(--color-accent);
@@ -74,8 +75,8 @@
     border-bottom-left-radius: var(--radius-lg);
     border-bottom-right-radius: var(--radius-sm);
   }
-  .forwarded[data-direction="outgoing"] .forward-label,
-  .forwarded[data-direction="outgoing"] .forward-icon { color: var(--color-accent); }
+  .forwarded.user .forward-label,
+  .forwarded.user .forward-icon { color: var(--color-accent); }
   .forward-icon { flex: 0 0 auto; display: flex; margin-top: 2px; color: var(--color-foreground); }
   .source { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .source .forward-label { font-size: var(--text-xs); }

@@ -863,6 +863,12 @@ panel, paragraph buffering, reasoning replacement, goal display and command
 highlighting, compact tool calls and answered questions through the fake client.
 It writes desktop, phone and light-theme captures under `tests/e2e/.artifacts/`.
 
+`bun test tests/e2e/collaboration-ui.test.ts` checks forwarded mail on desktop
+and phone in dark and light themes. Received mail is input to the local agent,
+so it appears on the right with the user accent; mail written by that agent
+appears on the left with the neutral surface. Owner-authored prompts keep the
+user style in either direction.
+
 A conversation is read and written in one size, the `--text-reading` and
 `--leading-reading` tokens of `app.css`: 15 px on a 24 px line on the wide
 layout, 16 px on a phone, where a field already types at 16 px. Answers, sent
