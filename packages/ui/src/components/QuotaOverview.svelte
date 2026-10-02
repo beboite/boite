@@ -1,62 +1,175 @@
 <script lang="ts">
-  import QuotaExtras from './QuotaExtras.svelte';
-  import { ChevronDown } from '@lucide/svelte';
+  import { onDestroy } from 'svelte';
+  import { ChevronDown, GripVertical, RotateCcw } from '@lucide/svelte';
   import type { AccountQuota } from '@boite/contracts';
   import ProviderLogo from './ProviderLogo.svelte';
+  import QuotaExtras from './QuotaExtras.svelte';
   import { fill, strings } from '../lib/strings';
-  import { exactTime, quotaWindowName, weekdayTime } from '../lib/format';
-  import { quotaAccountName } from '../lib/quota-reader.svelte';
+  import { creditBalance, exactTime, quotaResetTime, quotaWindowName, tenth } from '../lib/format';
+  import { quotaAccountName, quotaCredits } from '../lib/quota-reader.svelte';
 
-  /**
-   * The tray's glance: one line per signed-in account with its tightest
-   * window, unfolded into each window's own bar and reset time. Nothing to
-   * set here; monitoring and accounts live in Settings.
-   */
-  let { rows, loading = false, completed = [], connect }: { rows: AccountQuota[]; loading?: boolean; completed?: string[]; connect: () => void } = $props();
+  let { rows, loading = false, completed = [], connect, order = [], onreorder }: {
+    rows: AccountQuota[]; loading?: boolean; completed?: string[]; connect: () => void;
+    order?: string[]; onreorder?: (order: string[]) => Promise<boolean>;
+  } = $props();
 
   let expanded = $state<string | null>(null);
+  let overview: HTMLDivElement;
+  let draft = $state<string[] | null>(null);
+  let dragging = $state<string | null>(null);
+  let saving = $state(false);
+  let pointer: number | null = null;
+  let original: string[] = [];
+  let lastPoint = { x: 0, y: 0 };
+  let scrolling = 0;
+  let ordered = $derived.by(() => {
+    const priority = new Map((draft ?? order).map((id, index) => [id, index]));
+    return [...rows].sort((a, b) => (priority.get(a.accountId) ?? Infinity) - (priority.get(b.accountId) ?? Infinity));
+  });
   const left = (used: number) => fill(strings.quotas.remaining, { percent: String(Math.max(0, Math.round(100 - used))) });
-  const reset = (at: number) => fill(strings.quotas.resets, { time: weekdayTime(at) });
   const miniName = (label: string) => label.includes(' · ') ? label.split(' · ').slice(1).join(' · ') :
     label === 'Weekly' ? strings.quotas.windowWeeklyCompact : label === 'Monthly' ? strings.quotas.windowMonthlyCompact : quotaWindowName(label);
+  const remaining = (used: number) => Math.max(0, Math.min(100, 100 - used));
+
+  async function save(ids: string[]) {
+    if (!onreorder) return;
+    saving = true;
+    try { await onreorder([...ids, ...order.filter((id) => !ids.includes(id))]); }
+    finally { saving = false; draft = null; }
+  }
+  function scroll() {
+    if (!dragging) return;
+    const body = overview.closest<HTMLElement>('.body');
+    if (body) {
+      const box = body.getBoundingClientRect();
+      const delta = lastPoint.y < box.top + 32 ? -8 : lastPoint.y > box.bottom - 32 ? 8 : 0;
+      if (delta) { body.scrollTop += delta; place(lastPoint.x, lastPoint.y); }
+    }
+    scrolling = requestAnimationFrame(scroll);
+  }
+  onDestroy(() => cancelAnimationFrame(scrolling));
+  function trackDrag(node: HTMLDivElement) {
+    const end = (event: PointerEvent) => finish(event);
+    const cancel = (event: PointerEvent) => finish(event, true);
+    node.addEventListener('pointermove', move);
+    node.addEventListener('pointerup', end);
+    node.addEventListener('pointercancel', cancel);
+    node.addEventListener('lostpointercapture', cancel);
+    return { destroy() {
+      node.removeEventListener('pointermove', move);
+      node.removeEventListener('pointerup', end);
+      node.removeEventListener('pointercancel', cancel);
+      node.removeEventListener('lostpointercapture', cancel);
+    } };
+  }
+  function start(event: PointerEvent, id: string) {
+    if (event.button !== 0 || !event.isPrimary || saving) return;
+    event.preventDefault();
+    const handle = event.currentTarget as HTMLButtonElement;
+    handle.focus({ preventScroll: true });
+    // The list stays mounted while keyed rows move, so the capture survives reordering and scrolling.
+    overview.setPointerCapture(event.pointerId);
+    pointer = event.pointerId;
+    dragging = id;
+    original = ordered.map((row) => row.accountId);
+    draft = [...original];
+    lastPoint = { x: event.clientX, y: event.clientY };
+    scrolling = requestAnimationFrame(scroll);
+  }
+  function move(event: PointerEvent) {
+    if (event.pointerId !== pointer || !dragging || !draft) return;
+    lastPoint = { x: event.clientX, y: event.clientY };
+    place(event.clientX, event.clientY);
+  }
+  function place(x: number, y: number) {
+    if (!dragging || !draft) return;
+    const target = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-testid="quota-provider"]');
+    if (!target || !overview.contains(target) || target.dataset.accountId === dragging) return;
+    const ids = draft.filter((id) => id !== dragging);
+    const index = ids.indexOf(target.dataset.accountId!);
+    if (index < 0) return;
+    const box = target.getBoundingClientRect();
+    ids.splice(index + (y > box.top + box.height / 2 ? 1 : 0), 0, dragging);
+    draft = ids;
+  }
+  function finish(event: PointerEvent, cancel = false) {
+    if (event.pointerId !== pointer) return;
+    cancelAnimationFrame(scrolling);
+    const ids = draft;
+    pointer = null;
+    dragging = null;
+    if (!cancel && ids && ids.some((id, index) => id !== original[index])) void save(ids);
+    else draft = null;
+  }
+  function keyboard(event: KeyboardEvent, id: string) {
+    const ids = ordered.map((row) => row.accountId);
+    const from = ids.indexOf(id);
+    const to = event.key === 'ArrowUp' ? from - 1 : event.key === 'ArrowDown' ? from + 1 :
+      event.key === 'Home' ? 0 : event.key === 'End' ? ids.length - 1 : -1;
+    if (to < 0 || to >= ids.length || saving) return;
+    event.preventDefault();
+    event.stopPropagation();
+    ids.splice(from, 1);
+    ids.splice(to, 0, id);
+    draft = ids;
+    void save(ids);
+  }
 </script>
 
-<div class="overview" class:loading data-testid="quota-overview">
+<div class="overview" class:loading bind:this={overview} use:trackDrag data-testid="quota-overview">
   {#if rows.length === 0}
     <div class="empty" data-testid="quota-empty">
       <p>{strings.quotas.empty}</p>
       <button class="small" onclick={connect}>{strings.settings.connectProvider}</button>
     </div>
   {/if}
-  {#each rows as row (row.accountId)}
+  {#each ordered as row (row.accountId)}
     {@const name = quotaAccountName(row)}
-    {@const windows = row.windows}
-    {@const used = windows.length ? Math.max(...windows.map((limit) => limit.usedPercent)) : null}
+    {@const used = row.windows.length ? Math.max(...row.windows.map((limit) => limit.usedPercent)) : null}
     {@const stale = row.status === 'unavailable'}
-    {@const resets = windows.flatMap((limit) => (limit.resetsAt === null ? [] : [limit.resetsAt]))}
-    {@const observed = row.source === 'observation' && row.checkedAt !== null ? [row.checkedAt] : []}
-    <article data-testid="quota-provider" data-provider={row.providerId} data-account-id={row.accountId} class:expanded={expanded === row.accountId}>
-      <button class="summary ghost" aria-expanded={expanded === row.accountId} aria-controls={`usage-${row.accountId}`} disabled={windows.length === 0} onclick={() => (expanded = expanded === row.accountId ? null : row.accountId)}>
-        <span class="logo" title={row.providerName}><ProviderLogo providerId={row.providerId} size={19} /></span>
-        <span class="content">
-          <span class="headline"><span class="name" title={name}>{name}</span><span class="amount" class:low={used !== null && used >= 80}>{used !== null ? left(used) : strings.quotas.noReading}</span></span>
-          {#if windows.length}
-            <span class="meters" class:stale>
-              {#each windows as limit (limit.id)}
-                <span class="mini-window" title={`${quotaWindowName(limit.label)}: ${left(limit.usedPercent)}`}>
-                  <span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={100 - limit.usedPercent} aria-busy={loading && !completed.includes(row.accountId)} class:low={limit.usedPercent >= 80} class:drained={limit.usedPercent >= 100} aria-label={`${name} ${quotaWindowName(limit.label)}: ${left(limit.usedPercent)}`}><span class="fill" style:width="{100 - limit.usedPercent}%"></span></span>
-                  <span class="mini-label">{miniName(limit.label)}</span>
-                </span>
-              {/each}
+    {@const resets = row.windows.flatMap((limit) => limit.resetsAt === null ? [] : [limit.resetsAt])}
+    {@const credits = quotaCredits(row)}
+    {@const paid = credits !== null && used !== null && used >= 100}
+    {@const percent = credits?.kind === 'budget' ? Math.max(0, Math.min(100, credits.remaining! / credits.limit! * 100)) : null}
+    <article data-testid="quota-provider" data-provider={row.providerId} data-account-id={row.accountId} class:expanded={expanded === row.accountId} class:dragging={dragging === row.accountId}>
+      <div class="account-heading">
+        <button class="summary ghost" aria-expanded={expanded === row.accountId} aria-controls={`usage-${row.accountId}`} disabled={row.windows.length === 0} onclick={() => (expanded = expanded === row.accountId ? null : row.accountId)}>
+          <span class="logo" title={row.providerName}><ProviderLogo providerId={row.providerId} size={20} /></span>
+          <span class="summary-content">
+            <span class="headline">
+              <span class="name" title={name}>{name}</span>
+              {#if !paid}<span class="amount" class:low={used !== null && used >= 80}>{used === null ? strings.quotas.noReading : `${Math.round(remaining(used))}%`}</span>{/if}
+              {#if row.windows.length}<ChevronDown size={12} />{/if}
             </span>
-            <span class="caption">{observed.length ? `${fill(strings.quotas.observed, { time: exactTime(Math.min(...observed)) })} · ` : ''}{stale ? strings.quotas.stale : resets.length ? reset(Math.min(...resets)) : strings.quotas.noReset}</span>
-          {/if}
-        </span>
-        {#if windows.length}<ChevronDown size={13} />{/if}
-      </button>
-      <div class="extras">
-        <QuotaExtras {row} compact />
+            {#if paid && credits}
+              <span class="paid" data-testid="quota-credits">
+                <span class="paid-label">{credits.enabled === true ? strings.quotas.usingCredits : strings.quotas.creditRemaining}</span>
+                <strong class="paid-amount">{credits.kind === 'balance' ? fill(strings.quotas.creditBalance, { count: creditBalance(credits.remaining!) }) : percent! < 0.1 ? `<${tenth(0.1)}%` : `${tenth(percent!)}%`}</strong>
+                {#if percent !== null}<span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-busy={loading && !completed.includes(row.accountId)} aria-label={strings.quotas.budgetRemaining}><span class="fill" style:width="{percent}%"></span></span>{/if}
+              </span>
+            {:else if row.windows.length && expanded !== row.accountId}
+              <span class="meters" class:stale>
+                {#each row.windows as limit (limit.id)}
+                  <span class="mini-window" title={`${quotaWindowName(limit.label)}: ${left(limit.usedPercent)}`}>
+                    <span class="mini-label">{miniName(limit.label)}</span>
+                    <span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={remaining(limit.usedPercent)} aria-busy={loading && !completed.includes(row.accountId)} class:low={limit.usedPercent >= 80} class:drained={limit.usedPercent >= 100} aria-label={`${name} ${quotaWindowName(limit.label)}: ${left(limit.usedPercent)}`}><span class="fill" style:width="{remaining(limit.usedPercent)}%"></span></span>
+                  </span>
+                {/each}
+              </span>
+            {/if}
+            {#if stale}<span class="caption">{strings.quotas.stale}</span>
+            {:else if resets.length && expanded !== row.accountId}
+              <span class="caption reset" title={fill(strings.quotas.resets, { time: exactTime(Math.min(...resets)) })}><RotateCcw size={12} aria-hidden="true" />{quotaResetTime(Math.min(...resets))}</span>
+            {/if}
+          </span>
+        </button>
+        {#if onreorder}
+          <button type="button" class="ghost reorder" data-testid="quota-reorder" aria-label={fill(strings.quotas.reorder, { name })} title={fill(strings.quotas.reorder, { name })} disabled={saving} aria-pressed={dragging === row.accountId}
+            onpointerdown={(event) => start(event, row.accountId)} onkeydown={(event) => keyboard(event, row.accountId)}><GripVertical size={16} /></button>
+        {/if}
       </div>
+      {#if row.source === 'observation' && row.checkedAt !== null}<p class="caption">{fill(strings.quotas.observed, { time: exactTime(row.checkedAt) })}</p>{/if}
+      {#if !paid}<div class="extras"><QuotaExtras {row} compact /></div>{/if}
       {#if row.error}<p class="error" role="status">{row.error}</p>{/if}
       {#if expanded === row.accountId}
         <div class="details" id={`usage-${row.accountId}`}>
@@ -64,8 +177,8 @@
             <div class="window" class:low={limit.usedPercent >= 80}>
               <span class="window-name">{quotaWindowName(limit.label)}</span>
               <span class="window-left">{left(limit.usedPercent)}</span>
-              <span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={100 - limit.usedPercent} aria-label={`${name} ${quotaWindowName(limit.label)}`} aria-busy={loading && !completed.includes(row.accountId)} class:low={limit.usedPercent >= 80} class:drained={limit.usedPercent >= 100}><span class="fill" style:width="{100 - limit.usedPercent}%"></span></span>
-              {#if limit.resetsAt}<span class="caption">{reset(limit.resetsAt)}</span>{/if}
+              <span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={remaining(limit.usedPercent)} aria-label={`${name} ${quotaWindowName(limit.label)}`} aria-busy={loading && !completed.includes(row.accountId)} class:low={limit.usedPercent >= 80} class:drained={limit.usedPercent >= 100}><span class="fill" style:width="{remaining(limit.usedPercent)}%"></span></span>
+              {#if limit.resetsAt !== null}<span class="caption reset" title={fill(strings.quotas.resets, { time: exactTime(limit.resetsAt) })}><RotateCcw size={13} aria-hidden="true" />{quotaResetTime(limit.resetsAt)}</span>{/if}
             </div>
           {/each}
         </div>
@@ -75,46 +188,52 @@
 </div>
 
 <style>
-  .overview { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
-  article { min-width: 0; padding: 2px 0; }
+  .overview { display: grid; grid-template-columns: minmax(0, 1fr); }
+  article { min-width: 0; padding: 4px 0; }
   article + article { border-top: 1px solid var(--color-border); }
-  .summary { width: 100%; height: auto; min-height: 52px; padding: 3px 4px; line-height: 1.2; display: flex; gap: 10px; text-align: left; border-radius: var(--radius-md); white-space: normal; }
+  article.dragging { background: var(--color-accent-soft); outline: 1px solid var(--color-accent); }
+  .account-heading { display: flex; align-items: stretch; gap: 2px; }
+  .summary { flex: 1; min-width: 0; width: 100%; height: auto; min-height: 44px; padding: 2px 4px; line-height: 1.2; display: flex; align-items: start; gap: 8px; text-align: left; border-radius: var(--radius-md); white-space: normal; }
   .summary:disabled { opacity: 1; cursor: default; }
-  .logo { flex: none; width: 26px; display: grid; place-items: center; }
-  .content { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
-  .headline { min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-  .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-base); font-weight: 550; color: var(--color-foreground); }
-  .amount { flex: none; color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .logo { flex: none; width: 20px; height: 20px; display: grid; place-items: center; }
+  .summary-content { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .headline { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 20px; }
+  .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-base); font-weight: 600; color: var(--color-foreground); }
+  .amount { flex: none; color: var(--color-foreground); font-size: var(--text-md); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .amount.low { color: var(--color-live); }
-  .caption { font-size: var(--text-xs); color: var(--color-muted-foreground); font-weight: 400; }
-  .extras { display: grid; gap: 10px; padding: 2px 4px 10px 40px; }
-  .extras:not(:has(> :global(*))) { display: none; }
-  .error { margin: 0; padding: 0 4px 12px 40px; color: var(--color-danger); font-size: var(--text-xs); overflow-wrap: anywhere; }
-  .meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(60px, 1fr)); gap: 6px; }
-  .mini-window { min-width: 0; display: flex; align-items: center; gap: 3px; }
-  .mini-window .track { flex: 1; }
-  .mini-label { order: -1; max-width: 80%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted-foreground); font-size: calc(var(--text-xs) - 1px); line-height: 1.2; font-weight: 400; }
+  .headline > :global(svg) { flex: none; color: var(--color-subtle); transition: transform var(--dur-2); }
+  .expanded .headline > :global(svg) { transform: rotate(180deg); }
+  .reorder { flex: none; width: 24px; min-width: 24px; padding: 4px 0 0; height: auto; min-height: 44px; align-items: start; color: var(--color-subtle); cursor: grab; touch-action: none; }
+  .reorder:active { cursor: grabbing; }
+  .meters { display: flex; flex-wrap: wrap; gap: 3px 8px; }
+  .mini-window { flex: 1 1 84px; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px; align-items: center; }
+  .mini-label { max-width: 48px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 400; }
   .meters.stale { opacity: 0.45; }
-  .track { flex: 1; width: 0; min-width: 0; height: 4px; border-radius: var(--radius-sm); overflow: hidden; background: var(--color-surface-3); filter: saturate(1); transition: filter var(--dur-3) var(--ease-out-quint); }
+  .track { display: block; width: 100%; min-width: 0; height: 7px; border-radius: var(--radius-sm); overflow: hidden; background: var(--color-surface-3); filter: saturate(1); transition: filter var(--dur-3) var(--ease-out-quint); }
   .fill { display: block; height: 100%; background: var(--color-success); border-radius: var(--radius-sm); transition: width var(--dur-3) var(--ease-out-quint), background-color var(--dur-3) var(--ease-out-quint); }
   .track.low .fill { background: var(--color-live); }
   .track.drained { background: color-mix(in srgb, var(--color-danger) 35%, var(--color-surface-3)); }
-  .summary > :global(svg) { flex: none; color: var(--color-subtle); transition: transform var(--dur-2); }
-  .expanded .summary > :global(svg) { transform: rotate(180deg); }
-  /* Unfolded, each window is a name, what is left, its bar and its reset, lined up under the logo's column. */
-  .details { display: grid; gap: 10px; padding: 2px 4px 12px 40px; animation: rise var(--dur-2) var(--ease-out-quint); }
-  .window { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; font-size: var(--text-sm); }
-  .window .track { grid-column: 1 / -1; width: 100%; }
-  .window .caption { grid-column: 1 / -1; }
+  .caption { display: block; margin: 0; font-size: var(--text-xs); color: var(--color-muted-foreground); font-weight: 400; overflow-wrap: anywhere; }
+  article > .caption { margin: 4px 4px 0 32px; }
+  .reset { display: flex; align-items: center; gap: 5px; }
+  .reset :global(svg) { flex: none; }
+  .paid { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 3px 8px; }
+  .paid-label { color: var(--color-muted-foreground); font-size: var(--text-xs); }
+  .paid-amount { color: var(--color-success); font-size: var(--text-lg); font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .paid .track { grid-column: 1 / -1; }
+  .extras { padding: 4px 4px 0 32px; }
+  .extras:not(:has(> :global(*))) { display: none; }
+  .error { margin: 4px 4px 0 32px; color: var(--color-danger); font-size: var(--text-sm); overflow-wrap: anywhere; }
+  .details { margin: 6px 4px 0 32px; display: grid; gap: 10px; animation: rise var(--dur-2) var(--ease-out-quint); }
+  .window { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 8px; font-size: var(--text-sm); }
+  .window .track, .window .caption { grid-column: 1 / -1; }
+  .window .caption { margin: 0; }
   .window-left { font-variant-numeric: tabular-nums; color: var(--color-muted-foreground); }
   .window.low .window-left { color: var(--color-live); }
   .empty { display: grid; justify-items: start; gap: 10px; padding: 16px 4px; }
   .empty p { margin: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
-  /* The previous reading stays while the next one loads. */
   .track[aria-busy='true'] { filter: saturate(0.15); }
   @keyframes rise { from { opacity: 0; transform: translateY(-4px); } }
-  @media (prefers-reduced-motion: reduce) {
-    .details { animation: none; }
-    .track, .fill { transition: none; }
-  }
+  @media (pointer: coarse) { .reorder { width: 44px; min-width: 44px; } }
+  @media (prefers-reduced-motion: reduce) { .details { animation: none; } .track, .fill { transition: none; } }
 </style>

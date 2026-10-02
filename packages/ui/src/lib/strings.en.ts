@@ -1790,6 +1790,8 @@ export const strings = {
   },
 
   quotas: {
+    usingCredits: 'Using credits',
+    reorder: 'Reorder {name}. Drag or use the arrow keys.',
     bankedReset: '{count} banked reset',
     observed: 'Observed {time}',
     remainingUnder: 'Less than {percent}% left',

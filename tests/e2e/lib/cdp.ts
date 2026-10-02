@@ -339,7 +339,10 @@ export class BrowserPage {
 
   async navigate(url: string): Promise<void> {
     const result = await this.send('Page.navigate', { url }) as { errorText?: string; loaderId?: string };
-    if (result.errorText) throw new Error(`navigation failed: ${result.errorText}`);
+    if (result.errorText) {
+      const state = await this.evaluate(`({ location: location.origin + location.pathname, ready: document.readyState, title: document.title, text: document.body?.innerText.slice(0, 500) })`).catch(() => 'page unresponsive');
+      throw new Error(`navigation failed: ${result.errorText}\nPage: ${JSON.stringify(state)}\nErrors: ${JSON.stringify(this.#pageErrors)}\nFailed requests: ${JSON.stringify(this.#networkFailures)}`);
+    }
     if (result.loaderId) {
       const deadline = Date.now() + CONNECT_TIMEOUT_MS;
       for (;;) {

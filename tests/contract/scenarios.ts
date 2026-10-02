@@ -353,6 +353,8 @@ export const SCENARIOS: Record<string, Scenario> = {
       [{ focusGuard: 'yes' }, 'focusGuard'],
       [{ publicUrl: 'http://example.com' }, 'publicUrl'],
       [{ browserOrigins: ['ftp://example.com'] }, 'browserOrigins'],
+      [{ quotaOrder: 'codex' }, 'quotaOrder'],
+      [{ quotaOrder: [''] }, 'quotaOrder'],
       [{ worktreeStorage: null }, 'worktreeStorage'],
       [{ worktreeStorage: { mode: 'unknown', directory: null } }, 'worktreeStorage'],
       [{ worktreeStorage: { mode: 'shared', directory: '' } }, 'worktreeStorage'],
@@ -377,6 +379,17 @@ export const SCENARIOS: Record<string, Scenario> = {
       same(announced, storage, 'announced storage');
       const project = { mode: 'project' as const, directory: null };
       same((await env.call('settings.set', { worktreeStorage: project })).worktreeStorage, project, 'project storage');
+    } finally { off(); }
+  },
+  'settings.set shares subscription priority and allows restoring the default order': async (env) => {
+    let announced: unknown;
+    const off = env.on('settings.updated', (settings) => { announced = settings.quotaOrder; });
+    try {
+      const order = ['work-codex', 'personal-claude'];
+      same((await env.call('settings.set', { quotaOrder: [...order, order[0]!] })).quotaOrder, order, 'saved priority');
+      same((await env.call('settings.get', {})).quotaOrder, order, 'persistent priority');
+      same(announced, order, 'priority event');
+      same((await env.call('settings.set', { quotaOrder: [] })).quotaOrder, [], 'default order');
     } finally { off(); }
   },
   'settings.set stores a pasted address and browser origins as bare origins': async (env) => {

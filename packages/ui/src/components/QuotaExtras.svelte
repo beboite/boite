@@ -4,17 +4,12 @@
   import type { AccountQuota } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import { creditBalance, exactTime, tenth } from '../lib/format';
+  import { quotaCredits } from '../lib/quota-reader.svelte';
 
   let { row, accountLabel = false, compact = false, resetAction }: { row: AccountQuota; accountLabel?: boolean; compact?: boolean; resetAction?: Snippet } = $props();
   let resets = $derived(row.resetCredits);
-  let credits = $derived(row.credits);
-  let exhausted = $derived(row.windows.some((window) => window.usedPercent >= 100));
-  // A reported wallet balance does not require confirmation of automatic spending.
-  // Monthly spending budgets remain a fallback for an exhausted subscription.
-  let showCredits = $derived(row.enabled && row.status === 'ready' && credits &&
-    credits.remaining !== null && Number.isFinite(credits.remaining) && credits.remaining > 0 &&
-    (credits.kind === 'balance' ? credits.enabled !== false :
-      exhausted && credits.enabled === true && credits.limit !== null && Number.isFinite(credits.limit) && credits.limit > 0));
+  let credits = $derived(quotaCredits(row));
+  let showCredits = $derived(credits !== null);
   let showResets = $derived(!compact && row.enabled && row.status === 'ready' && resets !== undefined && resets.availableCount > 0);
   let percent = $derived(credits?.limit ? Math.max(0, Math.min(100, (credits.remaining ?? 0) / credits.limit * 100)) : null);
   let budgetLabel = $derived(fill(percent !== null && percent > 0 && percent < 0.1 ? strings.quotas.remainingUnder : strings.quotas.remaining,

@@ -1,30 +1,37 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { RefreshCw, Settings2, X, Power } from '@lucide/svelte';
-  import type { Account } from '@boite/contracts';
+  import type { Account, Settings } from '@boite/contracts';
   import { WsClient, type Client } from './lib/client';
   import { resolveEndpoint } from './lib/endpoint';
   import { startTheme } from './lib/theme';
   import { strings } from './lib/strings';
   import { quotaReader, shownQuotas, type QuotaReader } from './lib/quota-reader.svelte';
-  import QuotaOverview from './components/QuotaOverview.svelte';
+  import QuotaPopup from './components/QuotaPopup.svelte';
   // The last reading this computer saw draws the first frame; the fresh one replaces it.
   let reader = $state<QuotaReader>(quotaReader('here'));
   let accounts = $state.raw<Account[] | undefined>(undefined);
   let rows = $derived(shownQuotas(reader.rows ?? [], accounts));
   let error = $state('');
+  let settings = $state<Settings | null>(null);
   let client: Client | null = null;
   // Windows 11 rounds the popup and draws its border: the shell says so in the URL.
   const frame = new URLSearchParams(location.search).get('frame') === 'native' ? 'native' : undefined;
   let visible = true;
   let disposed = false;
   let pendingAccounts: Map<string, Account | null> | null = null;
+  let settingsRevision = 0;
+  async function readSettings() {
+    if (!client) return;
+    const revision = settingsRevision;
+    const value = await client.call('settings.get', {});
+    if (!disposed && revision === settingsRevision) settings = value;
+  }
   async function refresh(force = false) {
     if (reader.loading || pendingAccounts || !client || disposed) return;
     const updates = new Map<string, Account | null>();
     pendingAccounts = updates;
     try {
-      await Promise.all([reader.read(client, force), client.call('accounts.list', {}).then((list) => {
+      await Promise.all([reader.read(client, force), readSettings(), client.call('accounts.list', {}).then((list) => {
         // Events arriving after this request win over the older snapshot.
         for (const [id, account] of updates) {
           list = list.filter((entry) => entry.id !== id);
@@ -36,12 +43,16 @@
     }
     catch (cause) { error = String(cause); }
   }
+  async function reorder(quotaOrder: string[]): Promise<boolean> {
+    if (!client) return false;
+    try { settings = await client.call('settings.set', { quotaOrder }); error = ''; return true; }
+    catch (cause) { error = String(cause); return false; }
+  }
   async function action(action: string) {
     if (!window.__TAURI_INTERNALS__) return;
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      if (action === 'quit') await invoke('quit_shell');
-      else await invoke('quota_window', { action });
+      await invoke('quota_window', { action });
     } catch (cause) { error = String(cause); }
   }
   onMount(() => {
@@ -60,6 +71,8 @@
       }
       if (disposed) { client.close(); return; }
       await client.connect();
+      if (disposed) { client.close(); return; }
+      off.push(client.on('settings.updated', (value) => { settingsRevision++; settings = value; }));
       off.push(client.on('quotas.updated', (value) => reader.accept(value)));
       off.push(client.on('accounts.updated', (account) => {
         pendingAccounts?.set(account.id, account);
@@ -87,30 +100,13 @@
 </script>
 <svelte:window onkeydown={(event) => { if (event.key === 'Escape') void action('hide'); }} />
 <main data-testid="quota-popup" data-frame={frame}>
-  <header><h1>{strings.quotas.trayHeading}</h1><div class="actions">
-    <button class="ghost icon" aria-label={strings.quotas.refresh} aria-busy={reader.loading} data-testid="quota-refresh" onclick={() => void refresh(true)}><RefreshCw size={15} class={reader.loading ? 'spinning' : ''} /></button>
-    <button class="ghost icon" aria-label={strings.common.close} onclick={() => void action('hide')}><X size={15} /></button>
-  </div></header>
-  <section>
-    {#if error}<p class="error" role="alert">{error}</p>{/if}
-    {#if reader.rows === null}<p class="muted" role="status">{strings.quotas.loading}</p>
-    {:else}<QuotaOverview {rows} loading={reader.loading} completed={reader.completed} connect={() => void action('providers')} />{/if}
-  </section>
-  <footer><button class="ghost" onclick={() => void action('providers')}><Settings2 size={15} />{strings.quotas.providers}</button><button class="ghost icon" aria-label={strings.quotas.quit} onclick={() => void action('quit')}><Power size={15} /></button></footer>
+  <QuotaPopup rows={reader.rows === null ? null : rows} loading={reader.loading} completed={reader.completed} {error}
+    order={settings?.quotaOrder ?? []} {reorder} refresh={() => void refresh(true)}
+    connect={() => void action('providers')} settings={() => void action('limits')} close={() => void action('hide')} />
 </main>
 <style>
-  /* The window is opaque and square; Windows 11 rounds and borders it itself. */
-  main { height: 100dvh; display: flex; flex-direction: column; background: var(--color-background); border: 1px solid var(--color-edge); overflow: hidden; }
+  /* Windows 11 draws the native frame; other hosts use the same edge as the in-app popup. */
+  main { height: 100dvh; display: flex; flex-direction: column; background: var(--color-surface-2); border: 1px solid var(--color-edge); overflow: hidden; }
   main[data-frame='native'] { border: none; }
-  header, footer { display: flex; align-items: center; justify-content: space-between; flex: none; padding: 10px 12px; gap: 8px; }
-  header { border-bottom: 1px solid var(--color-border); }
-  footer { border-top: 1px solid var(--color-border); }
-  h1 { font-size: var(--text-md); }
-  .actions :global(.spinning) { animation: spin 900ms linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  @media (prefers-reduced-motion: reduce) { .actions :global(.spinning) { animation: none; } }
-  .actions { display: flex; gap: 2px; }
-  section { flex: 1; min-height: 0; overflow: auto; padding: 4px 12px; }
-  .muted { padding: 16px 4px; margin: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
-  .error { color: var(--color-danger); }
+  main :global(.quota-popup) { flex: 1; }
 </style>

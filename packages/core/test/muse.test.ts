@@ -397,6 +397,7 @@ describe('muse driver', () => {
     harness?.core.threads.deferred.deliverAnswer(threadId, '> Which database?\n\nSQLite');
     expect((await finished).status).toBe('done');
     expect(fakeLog()).toContain(`turn/steer ${JSON.stringify('> Which database?\n\nSQLite')} uuid=true`);
+    expect(fakeLog()).toContain('steer response and output batched');
     expect(harness?.core.threads.deferred.deferredAnswers.has(threadId)).toBe(false);
     const thread = await client.call('threads.get', { threadId });
     expect(thread.messages.map(message => [message.role, textsOf(message.parts)])).toEqual([
@@ -420,7 +421,9 @@ describe('muse driver', () => {
     // `[slow]` waits for an interrupt, never a steer: the host refuses it.
     harness?.core.threads.deferred.deliverAnswer(threadId, 'SQLite');
     await waitFor(() => fakeLog().includes('turn/steer'));
-    await waitFor(() => harness?.core.threads.deferred.deferredAnswers.has(threadId) === true);
+    await waitFor(() => harness?.core.threads.runner.steering.has(threadId) === false);
+    expect(harness?.core.threads.deferred.deferredAnswers.get(threadId)).toEqual(['SQLite']);
+    expect((await client.call('threads.get', { threadId })).messages.filter(message => message.role === 'user')).toHaveLength(1);
     await client.call('turns.stop', { threadId });
   });
 
