@@ -288,6 +288,8 @@ command-line login. Default-location accounts keep their external login.
 The provider's default model and effort are device preferences. This page shows
 no usage or quotas; [Usage and Limits](usage.md) owns quota sources, freshness,
 credit balances, monitoring and the tray window.
+Empty subscription usage keeps the last known limits marked stale and retries
+after five minutes. A disabled paid-usage flag alone does not report quota data.
 
 [Plugins](plugins.md) can manage external CLI account pools. Boite does not
 rotate accounts automatically or relay provider requests.
