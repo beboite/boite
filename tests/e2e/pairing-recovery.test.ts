@@ -1,3 +1,4 @@
+import { mobileAction } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage } from './lib/cdp.ts';
@@ -28,13 +29,14 @@ afterAll(async () => {
 }, 15_000);
 
 test('a phone with no key pairs again from Machines and sees its threads', async () => {
-  await page.waitFor(`document.querySelector('${id('mobile-tabs')}')`);
-  await page.click(id('mobile-settings'));
+  await page.waitFor(`document.querySelector('${id('mobile-menu')}')`);
+  await mobileAction(page, 'mobile-settings');
   await page.waitFor(`document.querySelector('${id('mobile-settings-home')}')`);
   await page.click(id('settings-tab-machines'));
   await page.waitFor(`document.querySelector('${id('machine-card')}')`);
   // Refused, and named by its address: it is not this phone, and it never answered.
-  await page.waitFor(`document.querySelector('${id('machine-card')} .error')?.textContent.includes('holds no key')`);
+  await page.waitFor(`document.querySelector('${id('machine-card')} .status')?.textContent === 'Pair this app'`);
+  expect(await page.evaluate(`!!document.querySelector('${id('machine-repair')}') && !!document.querySelector('${id('machine-card')} .pair-hint')`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('${id('machine-card')} .status.ready') === null`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('${id('machine-rename')}').value`)).toBe(new URL(core.url).host);
   expect(await page.evaluate(`document.querySelector('${id('machine-remove')}') === null`)).toBe(true);
@@ -54,13 +56,13 @@ test('a phone with no key pairs again from Machines and sees its threads', async
   await page.screenshot(join(import.meta.dir, '.artifacts', 'pairing-recovery-paired-phone.png'));
 
   await page.click(id('mobile-settings-back'));
-  await page.click(id('mobile-conversations'));
+  await mobileAction(page, 'mobile-conversations');
   await page.waitFor(`[...document.querySelectorAll('${id('mobile-list')} .thread')].some(row => row.textContent.includes('Seen once paired'))`);
   await page.screenshot(join(import.meta.dir, '.artifacts', 'pairing-recovery-threads-phone.png'));
 
   // The key the link became is this device's own: a reload needs no link.
   await page.reload();
-  await page.waitFor(`document.querySelector('${id('mobile-tabs')}')`);
-  await page.click(id('mobile-conversations'));
+  await page.waitFor(`document.querySelector('${id('mobile-menu')}')`);
+  await mobileAction(page, 'mobile-conversations');
   await page.waitFor(`[...document.querySelectorAll('${id('mobile-list')} .thread')].some(row => row.textContent.includes('Seen once paired'))`);
 }, 60_000);

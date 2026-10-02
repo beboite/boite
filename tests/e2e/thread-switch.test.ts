@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { echoThread, startTestCore, waitFor } from '../../packages/core/test/harness';
 import { BrowserPage } from './lib/cdp';
 import { ensureProductionUi } from './lib/prod-ui';
+import { mobileAction } from './lib/mobile';
 
 const frames = `new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 0))))`;
 const timeline = '[data-testid="timeline"]';
@@ -33,7 +34,7 @@ test('production desktop and phone restore cached reading before a slow core rep
     page = await BrowserPage.launch({ url: `${harness.url}/?token=${harness.token}`, windowSize: { width: 1280, height: 900 } });
     await page.waitFor(`document.querySelector('[data-thread-id="${threadId}"]')`);
     const open = async (id: string, phone: boolean) => {
-      if (phone) await page!.click('[data-testid="mobile-conversations"]');
+      if (phone) await mobileAction(page!, 'mobile-conversations');
       await page!.click(phone ? `[data-testid="mobile-thread-${id}"]` : `[data-thread-id="${id}"]`);
     };
     await open(threadId, false);
@@ -71,7 +72,7 @@ test('production desktop and phone restore cached reading before a slow core rep
       await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 390 : 1280, height: phone ? 844 : 900, deviceScaleFactor: 1, mobile: phone });
       phoneView = phone;
       await page.evaluate(frames);
-      if (phone) await page.click('[data-testid="mobile-conversations"]');
+      if (phone) await mobileAction(page, 'mobile-conversations');
       const completedBefore = getsFinished.get(threadId) ?? 0;
       const painted = await page.evaluate<number>(`(async () => {
         const started = performance.now();

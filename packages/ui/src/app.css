@@ -693,6 +693,7 @@ body {
 /* A tap shows the control's own pressed state, never the browser's grey box. */
 html {
   -webkit-tap-highlight-color: transparent;
+  --safe-area-top: env(safe-area-inset-top, 0px);
 }
 
 body {
@@ -709,6 +710,12 @@ body {
 
 #app {
   height: 100%;
+}
+
+@media (max-width: 720px) {
+  /* Keep the containing blocks as tall as the mobile app. A percentage height
+     can still use WebKit's shorter initial viewport in an installed app. */
+  html, body, #app { height: var(--app-height, 100dvh); }
 }
 
 ::selection {

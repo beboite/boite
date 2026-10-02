@@ -174,7 +174,8 @@ export class PluginStore {
   private directory(id: string): string {
     const root = this.root();
     const dir = resolve(root, id);
-    for (const path of [root, dir]) if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw refused(`plugin path ${path} must not be a symbolic link`);
+    // A cancelled install can remove its directory while state is being polled.
+    for (const path of [root, dir]) if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink()) throw refused(`plugin path ${path} must not be a symbolic link`);
     return dir;
   }
 

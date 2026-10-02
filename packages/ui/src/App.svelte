@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { MediaQuery } from 'svelte/reactivity';
   import { hostBrowser } from './lib/browser-host';
   import TerminalDrawer from './components/TerminalDrawer.svelte';
   import UndoToast from './components/UndoToast.svelte';
@@ -47,8 +48,11 @@
     if (experimentOn('agent-browser-control') && threadId && store.owner && store.client?.state === 'ready') return hostBrowser(store, threadId);
   });
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
+  const narrow = new MediaQuery('(max-width: 720px)');
   let appRoot = $state<HTMLDivElement | undefined>(undefined);
   let mobileScreen = $state<'chat' | 'threads' | 'activity'>('chat');
+  const mobileRecovery = $derived(!inShell && (store.pairingRequired || (!store.core && store.connection !== 'ready'))
+    && !workspace.machines.some(machine => machine.store.connection === 'ready'));
   let documentVisible = $state(!document.hidden);
   // What the first screen does not draw stays out of the first chunk: the right
   // panel and its six surfaces, the palette and the two dialogs were a third of
@@ -238,7 +242,11 @@
 
   $effect(() => {
     const error = store.error;
-    if (!error) {
+    // Missing/revoked phone credentials have a persistent recovery screen.
+    // Keep other errors (including a failed pairing attempt) visible.
+    const pairingNotice = !inShell && narrow.current && store.pairingRequired
+      && (error === strings.errors.unpaired || error === strings.errors.revoked);
+    if (!error || pairingNotice) {
       toast.hide();
       return;
     }
@@ -380,7 +388,7 @@
    * anywhere below restyle the body, right before the list read its layout.
    */
   let sidebarFolded = $derived(store.sidebarCollapsed && store.booted && ((store.connection === 'closed' && !store.core) || !(store.page === 'settings' || (store.page === 'agents' && experimentOn('resident-agents')))));
-  let tour = $derived(store.booted && store.connection !== 'closed' && (tourRequested() || !tourSeen()));
+  let tour = $derived(store.booted && store.connection === 'ready' && (tourRequested() || !tourSeen()));
 
   /**
    * Whether something modal is up, waiting on the user: no app chord fires under
@@ -498,11 +506,11 @@
 
 <ThreadPreparation {store} visible={documentVisible && (inShell || mobileScreen === 'chat')} />
 
-<div class="app" class:shell={inShell} class:ready={store.booted} class:phone-chat={!inShell && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting bind:this={appRoot}>
-  {#if !inShell && store.booted}<MobileNavigation {store} bind:screen={mobileScreen} />{/if}
+<div class="app" class:shell={inShell} class:ready={store.booted} class:phone-chat={!inShell && !mobileRecovery && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting bind:this={appRoot}>
+  {#if !inShell && store.booted}<MobileNavigation {store} recover={mobileRecovery} bind:screen={mobileScreen} />{/if}
   <TitleBar {store} />
 
-  <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && mobileScreen !== 'chat'} class:panel-maximized={rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
+  <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && (mobileScreen !== 'chat' || mobileRecovery)} class:panel-maximized={rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
     {#if !store.booted}
       <p class="empty boot">{strings.app.loading}</p>
     {:else if store.connection === 'closed' && !store.core}
@@ -777,13 +785,13 @@
   }
 
   @media (max-width: 720px) {
-    .app:not(.shell) { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); height: var(--app-height, 100dvh); top: var(--app-top, 0px); }
+    /* Safari scrolls the document to reveal a focused field even with overflow
+       hidden. Anchor the app to the viewport so its header does not leave with it. */
+    .app:not(.shell) { position: fixed; left: 0; right: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); height: var(--app-height, 100dvh); top: var(--app-top, 0px); overflow: hidden; }
     .app:not(.shell) :global(.titlebar) { display: none; grid-row: 2; grid-column: 1; }
-    .app.phone-chat :global(.titlebar) { display: flex; }
-    .app:not(.shell) .body { grid-row: 3; grid-column: 1; }
-    /* Agents and Settings draw no mobile header: the body keeps clear of the
-       status bar and the notch itself. */
-    .app.off-chat .body { padding-top: env(safe-area-inset-top, 0px); box-sizing: border-box; }
+    .app:not(.shell) .body { grid-row: 2; grid-column: 1; }
+    /* The header owns the top safe area; pages keep clear of the home indicator. */
+    .app.off-chat .body { padding-bottom: env(safe-area-inset-bottom, 0px); box-sizing: border-box; }
     .body.mobile-covered { visibility: hidden; pointer-events: none; }
     .scrim {
       display: block;

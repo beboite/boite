@@ -2,13 +2,14 @@
   import { whip } from '../lib/whip.svelte';
   import { strings } from '../lib/strings';
 
-  let { mobile = false }: { mobile?: boolean } = $props();
+  let { mobile = false, onthrown }: { mobile?: boolean; onthrown?: () => void } = $props();
 
   // The click only throws or drops the rope. The window shakes when it cracks.
   function toggle(event: MouseEvent) {
     if (whip.held) { whip.held = false; return; }
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     whip.throw(event.clientX || window.innerWidth / 2, event.clientY || window.innerHeight / 2);
+    onthrown?.();
   }
 </script>
 
