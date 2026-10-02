@@ -1,5 +1,5 @@
 import { secureId } from './secure-id';
-import type { AgentDraft, AgentEntities, AgentEntityKind, AgentRecord, AgentSave, AgentWork, AgentsRpcMethods, AgentsSnapshot, RpcParams, AgentProfile, Turn } from '@boite/contracts';
+import type { AgentDraft, AgentEntities, AgentEntityKind, AgentRecord, AgentSave, AgentWork, AgentsRpcMethods, AgentsSnapshot, RpcParams, RpcResult, AgentProfile, Turn } from '@boite/contracts';
 import { RpcErrorCode, AGENT_HISTORY_PAGE, AGENT_HISTORY_MAX_PAGE } from '@boite/contracts';
 import type { AgentAccountGrant, AgentBrain, AgentRuntimeConfig, AgentSchedule, AgentHistoryCursor, AgentHistoryKind, AgentsHistoryPage, AgentRun, AgentRunSummary, AgentScope } from '@boite/contracts';
 import { RpcFailure } from './client';
@@ -17,6 +17,10 @@ const newestFirst = (a: AgentRecord, b: AgentRecord) => b.updatedAt - a.updatedA
 const byCreation = (a: AgentRecord, b: AgentRecord) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 const summary = ({ context: { instructions: _instructions, ...context }, ...run }: AgentRun): AgentRunSummary => ({ ...run, context });
 const HISTORY_KIND = { message: 'message', work: 'work', memory: 'memory' } as const;
+
+type AgentHandlers = {
+  [M in keyof AgentsRpcMethods]: (params: RpcParams<M>) => RpcResult<M>;
+};
 
 /** In-memory projection for interface journeys. Real process and crash behavior is tested against the core. */
 export class FakeAgents {
@@ -199,171 +203,227 @@ export class FakeAgents {
   call(method: keyof AgentsRpcMethods, raw: unknown): unknown {
     try { return this.dispatch(method, raw); } finally { if (method !== 'agents.snapshot' && method !== 'agents.history') this.kick(); }
   }
+  private readonly handlers: AgentHandlers = {
+    'agents.runtime.get': p => this.runtime(p.agentId),
+    'agents.runtime.configure': p => this.configureRuntime(p),
+    'agents.accounts.set': p => this.setAccounts(p),
+    'agents.brain.get': p => this.getBrain(p),
+    'agents.brain.save': p => this.saveBrain(p),
+    'agents.routine.save': p => this.saveRoutine(p),
+    'agents.routine.run': p => this.runRoutine(p),
+    'agents.context.compact': p => this.compactContext(p),
+    'agents.snapshot': () => this.snapshot(),
+    'agents.history': p => this.history(p),
+    'agents.profile.save': p => this.saveProfile(p),
+    'agents.group.save': p => this.saveGroup(p),
+    'agents.team.save': p => this.saveTeam(p),
+    'agents.mission.save': p => this.saveMission(p),
+    'agents.task.save': p => this.saveTask(p),
+    'agents.resource.save': p => this.save('resource', p),
+    'agents.memory.save': p => this.save('memory', p),
+    'agents.limits.set': p => this.setLimits(p),
+    'agents.message.send': p => this.sendMessage(p),
+    'agents.task.acquire': p => this.acquireTask(p),
+    'agents.task.submit': p => this.submitTask(p),
+    'agents.work.control': p => this.controlWork(p),
+    'agents.decision.answer': p => this.answerDecision(p),
+    'agents.decision.request': p => this.requestDecision(p),
+    'agents.artifact.add': p => this.addArtifact(p),
+  };
+
   private dispatch(method: keyof AgentsRpcMethods, raw: unknown): unknown {
-    switch (method) {
-      case 'agents.runtime.get': return this.runtime((raw as RpcParams<typeof method>).agentId);
-      case 'agents.runtime.configure': {
-        const p = raw as RpcParams<typeof method>, agent = this.get('profile', p.agentId);
-        if (!p.config.defaultRoute.model || !p.config.allowedRoutes.some(r => r.providerId === p.config.defaultRoute.providerId && r.accountId === p.config.defaultRoute.accountId && r.model === p.config.defaultRoute.model)) this.refuse('defaultRoute must be allowed');
-        for (const route of [...p.config.allowedRoutes, ...p.config.subagents.profiles]) { const grant = this.grants.find(g => g.accountId === route.accountId); if (grant?.agentIds && !grant.agentIds.includes(agent.id)) this.refuse('account is not granted to this agent'); }
-        const saved = this.save('profile', { id: agent.id, expectedRevision: p.expectedRevision, value: { ...agent, selection: p.config.defaultRoute } });
-        this.configs.set(agent.id, structuredClone(p.config)); return saved;
-      }
-      case 'agents.accounts.set': { this.grants = structuredClone((raw as RpcParams<typeof method>).grants); this.changed(++this.revision); return structuredClone(this.grants); }
-      case 'agents.brain.get': {
-        const p = raw as RpcParams<typeof method>, agent = this.get('profile', p.agentId);
-        if (!this.brains.has(agent.id)) this.brains.set(agent.id, { path: `/agent-workspaces/${agent.id}/brain`, instructions: agent.instructions, memory: '', revision: '0' });
-        return structuredClone(this.brains.get(agent.id));
-      }
-      case 'agents.brain.save': {
-        const p = raw as RpcParams<typeof method>, brain = this.dispatch('agents.brain.get', p) as AgentBrain;
-        if (brain.revision !== p.expectedRevision) this.refuse('brain revision changed');
-        const saved = { ...brain, instructions: p.instructions, memory: p.memory, revision: String(Number(brain.revision) + 1) }; this.brains.set(p.agentId, saved); return structuredClone(saved);
-      }
-      case 'agents.routine.save': {
-        const p = raw as RpcParams<typeof method>; this.get('profile', p.value.agentId);
-        const previous = p.id ? this.get('routine', p.id) : null, s = p.value.schedule, changed = JSON.stringify(previous?.schedule) !== JSON.stringify(s);
-        const spent = s.kind === 'once' && !changed && previous?.lastScheduledAt != null;
-        // The core's save: run bookkeeping comes from the record, and a new once date clears the run it replaces.
-        const lastScheduledAt = s.kind === 'once' && changed ? null : previous?.lastScheduledAt ?? null;
-        return this.save('routine', { ...p, value: { ...p.value, nextAt: !p.value.enabled || spent ? null : previous?.enabled && !changed ? previous.nextAt : s.kind === 'once' ? s.at : nextOccurrence(s, Date.now()), lastWorkId: previous?.lastWorkId ?? null, lastScheduledAt } });
-      }
-      case 'agents.routine.run': {
-        const p = raw as RpcParams<typeof method>; return this.once(p.requestId, p, () => {
-          const routine = this.get('routine', p.routineId);
-          if (this.get('profile', routine.agentId).status !== 'active') this.refuse('routine: agent is paused or archived');
-          if (routine.lastWorkId && !['done','cancelled'].includes(this.get('work', routine.lastWorkId).status)) this.refuse('previous work is unfinished');
-          const work = this.work({ agentId: routine.agentId, scope: { kind: 'agent', id: routine.agentId }, prompt: routine.prompt, episodeId: secureId() });
-          // The core's run: the next date moves on, and a once routine is done.
-          this.update('routine', { ...routine, lastWorkId: work.id, lastScheduledAt: Date.now(), nextAt: routine.enabled && routine.schedule.kind !== 'once' ? nextOccurrence(routine.schedule, Date.now()) : null, enabled: routine.enabled && routine.schedule.kind !== 'once' });
-          return work;
-        });
-      }
-      case 'agents.context.compact': { const p = raw as RpcParams<typeof method>, session = this.get('session', p.sessionId); return this.once(p.requestId, p, () => this.work({ agentId: session.agentId, scope: session.scope, prompt: 'Compact context', purpose: 'compaction', episodeId: secureId() })); }
-      case 'agents.snapshot': return this.snapshot();
-      case 'agents.history': return this.history(raw as RpcParams<typeof method>);
-      case 'agents.profile.save': {
-        const p = raw as RpcParams<typeof method>;
-        if (!p.value.name.trim()) this.refuse('name: expected nonempty text');
-        if (p.value.accountIntegration === 'kebacc-experiment' && (!this.limits.kebaccExperiment || this.runner?.protocol(p.value.selection.providerId) !== 'agy')) this.refuse('enable the kebacc experiment for an Antigravity CLI agent first');
-        return this.save('profile', p);
-      }
-      case 'agents.group.save': {
-        const p = raw as RpcParams<typeof method>;
-        if (!p.value.name.trim() || !Number.isInteger(p.value.maxTurns) || p.value.maxTurns < 1 || p.value.maxTurns > 100 || p.value.maxTurnsPerAgent < 1 || p.value.maxTurnsPerAgent > 20) this.refuse('group: invalid name or turn limit');
-        for (const id of p.value.memberIds) this.get('profile', id);
-        return this.save('group', p);
-      }
-      case 'agents.team.save': {
-        const p = raw as RpcParams<typeof method>;
-        for (const m of p.value.members) this.get('profile', m.agentId);
-        if (p.value.groupId) this.get('group', p.value.groupId);
-        return this.save('team', p);
-      }
-      case 'agents.mission.save': {
-        const p = raw as RpcParams<typeof method>;
-        for (const id of p.value.agentIds) this.get('profile', id);
-        if (p.value.teamId) {
-          const team = this.get('team', p.value.teamId);
-          if (p.value.agentIds.some(id => !team.members.some(m => m.agentId === id))) this.refuse('agentIds: every agent must belong to the mission team');
-        }
-        if (p.id && p.value.status === 'done' && (this.all('task').some(t => t.missionId === p.id && !['done', 'cancelled'].includes(t.status)) || this.all('work').some(w => w.scope.kind === 'mission' && w.scope.id === p.id && !['done', 'cancelled'].includes(w.status)))) this.refuse('mission: complete or cancel its tasks and executions before finishing it');
-        const saved = this.save('mission', p);
-        if (saved.status === 'cancelled') for (const work of this.all('work').filter(w => w.scope.kind === 'mission' && w.scope.id === saved.id && !['done', 'cancelled'].includes(w.status))) this.dispatch('agents.work.control', { workId: work.id, expectedRevision: work.revision, action: 'cancel' });
-        return saved;
-      }
-      case 'agents.task.save': {
-        const p = raw as RpcParams<typeof method>;
-        this.get('mission', p.value.missionId);
-        const previous = p.id ? this.get('task', p.id) : null;
-        if (previous && this.all('run').some(r => ['accepted', 'running'].includes(r.status) && this.get('work', r.workId).taskId === previous.id)) this.refuse('task: wait for its execution to finish');
-        if (previous && !['open', 'review'].includes(previous.status)) this.refuse('only open or submitted tasks can be edited');
-        for (const id of p.value.dependsOn) if (id === p.id || this.get('task', id).missionId !== p.value.missionId) this.refuse('dependsOn: expected another task in this mission');
-        return this.save('task', { ...p, value: { ...p.value, assigneeId: p.value.status === 'open' ? null : previous?.assigneeId ?? null, generation: previous?.generation ?? 0, workspace: previous?.workspace ?? null, result: previous?.result ?? null, leaseUntil: null } });
-      }
-      case 'agents.resource.save': return this.save('resource', raw as RpcParams<typeof method>);
-      case 'agents.memory.save': return this.save('memory', raw as RpcParams<typeof method>);
-      case 'agents.limits.set': {
-        const p = raw as RpcParams<typeof method>;
-        if (!Number.isInteger(p.backgroundConcurrency) || p.backgroundConcurrency < 1 || p.backgroundConcurrency > 8) this.refuse('backgroundConcurrency: expected an integer from 1 to 8');
-        this.limits = { ...p }; this.changed(++this.revision); return this.limits;
-      }
-      case 'agents.message.send': {
-        const p = raw as RpcParams<typeof method>;
-        if (!p.text.trim() || p.text.length > 32000) this.refuse('text: expected 1 to 32000 characters');
-        const group = p.scope.kind === 'group' ? this.get('group', p.scope.id) : null;
-        if (!group && p.scope.kind !== 'agent') this.refuse('scope: messages belong to a direct conversation or a group');
-        const allowed = group?.memberIds ?? [this.get('profile', p.scope.id).id];
-        if (p.recipientIds.some(id => !allowed.includes(id))) this.refuse('recipientIds: every recipient must belong to this conversation');
-        const parent = p.replyTo ? this.get('message', p.replyTo) : null;
-        if (parent && (parent.scope.id !== p.scope.id || parent.scope.kind !== p.scope.kind)) this.refuse('replyTo: message belongs to another conversation');
-        return this.once(p.requestId, { method, ...p }, () => {
-          const recipientIds = p.recipientIds.length ? p.recipientIds : group?.mode === 'mentions' ? [] : group?.mode === 'autonomous' ? allowed.slice(0, 1) : allowed;
-          const episodeId = parent?.episodeId ?? `fake-episode-${++this.sequence}`;
-          const message = this.save('message', { value: { scope: p.scope, senderId: null, text: p.text, recipientIds, replyTo: p.replyTo ?? null, episodeId, sourceRunId: null } });
-          this.deliver(message);
-          return message;
-        });
-      }
-      case 'agents.task.acquire': {
-        const p = raw as RpcParams<typeof method>;
-        const task = this.get('task', p.taskId); const mission = this.get('mission', task.missionId);
-        if (task.revision !== p.expectedRevision || task.status !== 'open') this.refuse('task is already assigned or its revision changed');
-        if (!['open', 'active'].includes(mission.status)) this.refuse('mission is not open for work');
-        if (!mission.agentIds.includes(p.agentId)) this.refuse('agent is not assigned to this mission');
-        if (task.dependsOn.some(id => this.get('task', id).status !== 'done')) this.refuse('task dependencies are not completed');
-        const next = this.update('task', { ...task, assigneeId: p.agentId, status: 'assigned', generation: task.generation + 1 });
-        this.work({ agentId: p.agentId, scope: { kind: 'mission', id: mission.id }, episodeId: mission.id, prompt: `${mission.objective}\n${task.instructions}`, taskId: task.id, taskGeneration: next.generation });
-        return next;
-      }
-      case 'agents.task.submit': {
-        const p = raw as RpcParams<typeof method>; const task = this.get('task', p.taskId);
-        if (task.generation !== p.generation || !['assigned', 'running'].includes(task.status)) this.refuse('task generation is stale');
-        return this.update('task', { ...task, status: 'review', result: p.result, leaseUntil: null });
-      }
-      case 'agents.work.control': {
-        const p = raw as RpcParams<typeof method>; const work = this.get('work', p.workId);
-        if (work.revision !== p.expectedRevision || ['done', 'cancelled'].includes(work.status)) this.refuse('work is terminal or its revision changed');
-        if (p.action === 'resume' && !['paused', 'error'].includes(work.status)) this.refuse('interrupted work requires reconciliation');
-        if (p.action === 'reconcile' && (work.status !== 'interrupted' || !p.note?.trim())) this.refuse('reconcile: expected interrupted work and an inspection note');
-        if (p.action === 'pause' && work.status === 'waiting') this.refuse('work is waiting for a decision; answer or cancel it');
-        let taskGeneration = work.taskGeneration;
-        if (work.taskId) { const task = this.get('task', work.taskId); taskGeneration = task.generation + 1; this.update('task', { ...task, generation: taskGeneration, leaseUntil: null, status: p.action === 'cancel' ? 'cancelled' : 'assigned' }); }
-        if (p.action === 'cancel') for (const d of this.all('decision').filter(d => d.workId === work.id && d.status === 'pending')) this.update('decision', { ...d, status: 'cancelled' });
-        for (const d of this.all('delivery').filter(d => d.workId === work.id)) this.update('delivery', { ...d, status: p.action === 'cancel' ? 'cancelled' : 'pending' });
-        const updated = this.update('work', { ...work, taskGeneration, status: p.action === 'pause' ? 'paused' : p.action === 'cancel' ? 'cancelled' : 'pending', runId: ['resume', 'reconcile'].includes(p.action) ? null : work.runId, error: null });
-        if (work.runId && ['pause', 'cancel'].includes(p.action)) this.runner?.stop(this.get('run', work.runId).threadId);
-        return updated;
-      }
-      case 'agents.decision.answer': {
-        const p = raw as RpcParams<typeof method>; const d = this.get('decision', p.decisionId);
-        if (d.status !== 'pending' || d.revision !== p.expectedRevision) this.refuse('decision is already answered or its revision changed');
-        const work = this.get('work', d.workId);
-        if (work.status !== 'waiting' || !p.answer.trim()) this.refuse('decision: expected waiting work and an answer');
-        this.update('work', { ...work, status: 'done' });
-        const continuation = this.work({ agentId: d.agentId, scope: d.scope, episodeId: work.episodeId, messageId: work.messageId, prompt: p.answer, taskId: work.taskId, taskGeneration: work.taskGeneration });
-        if (work.taskId) this.update('task', { ...this.get('task', work.taskId), status: 'assigned' });
-        for (const delivery of this.all('delivery').filter(item => item.workId === work.id)) this.update('delivery', { ...delivery, status: 'pending', workId: continuation.id });
-        return this.update('decision', { ...d, status: 'answered', answer: p.answer });
-      }
-      case 'agents.decision.request': {
-        const p = raw as RpcParams<typeof method>;
-        const run = this.all('run').find(r => r.threadId === p.threadId && r.status === 'running');
-        if (!run) this.refuse('threadId: this agent has no running collaboration execution');
-        const work = this.get('work', run.workId);
-        return this.once(p.requestId, { method, ...p }, () => {
-          this.update('work', { ...work, status: 'waiting' });
-          if (work.taskId) this.update('task', { ...this.get('task', work.taskId), status: 'waiting', leaseUntil: null });
-          const decision = this.save('decision', { value: { scope: work.scope, workId: work.id, agentId: work.agentId, prompt: p.prompt, options: p.options, status: 'pending', answer: null } });
-          this.runner?.stop(run.threadId);
-          return decision;
-        });
-      }
-      case 'agents.artifact.add': {
-        const p = raw as RpcParams<typeof method>; const run = this.all('run').find(r => r.threadId === p.threadId && r.status === 'running');
-        if (!run) this.refuse('threadId: this agent has no running collaboration execution');
-        return this.once(p.requestId, { method, ...p }, () => this.save('artifact', { value: { ...p.value, agentId: run.agentId, runId: run.id } }));
-      }
+    // The registry checks each method's params/result; call keeps the transport's unknown input.
+    const handler = Object.hasOwn(this.handlers, method)
+      ? this.handlers[method] as (params: unknown) => unknown
+      : undefined;
+    return handler?.(raw);
+  }
+
+  // Runtime configuration, brain and scheduled work.
+
+  private configureRuntime(p: RpcParams<'agents.runtime.configure'>): RpcResult<'agents.runtime.configure'> {
+    const agent = this.get('profile', p.agentId);
+    if (!p.config.defaultRoute.model || !p.config.allowedRoutes.some(r => r.providerId === p.config.defaultRoute.providerId && r.accountId === p.config.defaultRoute.accountId && r.model === p.config.defaultRoute.model)) this.refuse('defaultRoute must be allowed');
+    for (const route of [...p.config.allowedRoutes, ...p.config.subagents.profiles]) { const grant = this.grants.find(g => g.accountId === route.accountId); if (grant?.agentIds && !grant.agentIds.includes(agent.id)) this.refuse('account is not granted to this agent'); }
+    const saved = this.save('profile', { id: agent.id, expectedRevision: p.expectedRevision, value: { ...agent, selection: p.config.defaultRoute } });
+    this.configs.set(agent.id, structuredClone(p.config));
+    return saved;
+  }
+
+  private setAccounts(p: RpcParams<'agents.accounts.set'>): RpcResult<'agents.accounts.set'> {
+    this.grants = structuredClone(p.grants);
+    this.changed(++this.revision);
+    return structuredClone(this.grants);
+  }
+
+  private getBrain(p: RpcParams<'agents.brain.get'>): RpcResult<'agents.brain.get'> {
+    const agent = this.get('profile', p.agentId);
+    if (!this.brains.has(agent.id)) this.brains.set(agent.id, { path: `/agent-workspaces/${agent.id}/brain`, instructions: agent.instructions, memory: '', revision: '0' });
+    return structuredClone(this.brains.get(agent.id)!);
+  }
+
+  private saveBrain(p: RpcParams<'agents.brain.save'>): RpcResult<'agents.brain.save'> {
+    const brain = this.getBrain(p);
+    if (brain.revision !== p.expectedRevision) this.refuse('brain revision changed');
+    const saved = { ...brain, instructions: p.instructions, memory: p.memory, revision: String(Number(brain.revision) + 1) };
+    this.brains.set(p.agentId, saved);
+    return structuredClone(saved);
+  }
+
+  private saveRoutine(p: RpcParams<'agents.routine.save'>): RpcResult<'agents.routine.save'> {
+    this.get('profile', p.value.agentId);
+    const previous = p.id ? this.get('routine', p.id) : null, s = p.value.schedule, changed = JSON.stringify(previous?.schedule) !== JSON.stringify(s);
+    const spent = s.kind === 'once' && !changed && previous?.lastScheduledAt != null;
+    // The core's save: run bookkeeping comes from the record, and a new once date clears the run it replaces.
+    const lastScheduledAt = s.kind === 'once' && changed ? null : previous?.lastScheduledAt ?? null;
+    return this.save('routine', { ...p, value: { ...p.value, nextAt: !p.value.enabled || spent ? null : previous?.enabled && !changed ? previous.nextAt : s.kind === 'once' ? s.at : nextOccurrence(s, Date.now()), lastWorkId: previous?.lastWorkId ?? null, lastScheduledAt } });
+  }
+
+  private runRoutine(p: RpcParams<'agents.routine.run'>): RpcResult<'agents.routine.run'> {
+    return this.once(p.requestId, p, () => {
+      const routine = this.get('routine', p.routineId);
+      if (this.get('profile', routine.agentId).status !== 'active') this.refuse('routine: agent is paused or archived');
+      if (routine.lastWorkId && !['done','cancelled'].includes(this.get('work', routine.lastWorkId).status)) this.refuse('previous work is unfinished');
+      const work = this.work({ agentId: routine.agentId, scope: { kind: 'agent', id: routine.agentId }, prompt: routine.prompt, episodeId: secureId() });
+      // The core's run: the next date moves on, and a once routine is done.
+      this.update('routine', { ...routine, lastWorkId: work.id, lastScheduledAt: Date.now(), nextAt: routine.enabled && routine.schedule.kind !== 'once' ? nextOccurrence(routine.schedule, Date.now()) : null, enabled: routine.enabled && routine.schedule.kind !== 'once' });
+      return work;
+    });
+  }
+
+  private compactContext(p: RpcParams<'agents.context.compact'>): RpcResult<'agents.context.compact'> {
+    const session = this.get('session', p.sessionId);
+    return this.once(p.requestId, p, () => this.work({ agentId: session.agentId, scope: session.scope, prompt: 'Compact context', purpose: 'compaction', episodeId: secureId() }));
+  }
+
+  // Profiles, collaboration membership and mission tasks.
+
+  private saveProfile(p: RpcParams<'agents.profile.save'>): RpcResult<'agents.profile.save'> {
+    if (!p.value.name.trim()) this.refuse('name: expected nonempty text');
+    if (p.value.accountIntegration === 'kebacc-experiment' && (!this.limits.kebaccExperiment || this.runner?.protocol(p.value.selection.providerId) !== 'agy')) this.refuse('enable the kebacc experiment for an Antigravity CLI agent first');
+    return this.save('profile', p);
+  }
+
+  private saveGroup(p: RpcParams<'agents.group.save'>): RpcResult<'agents.group.save'> {
+    if (!p.value.name.trim() || !Number.isInteger(p.value.maxTurns) || p.value.maxTurns < 1 || p.value.maxTurns > 100 || p.value.maxTurnsPerAgent < 1 || p.value.maxTurnsPerAgent > 20) this.refuse('group: invalid name or turn limit');
+    for (const id of p.value.memberIds) this.get('profile', id);
+    return this.save('group', p);
+  }
+
+  private saveTeam(p: RpcParams<'agents.team.save'>): RpcResult<'agents.team.save'> {
+    for (const m of p.value.members) this.get('profile', m.agentId);
+    if (p.value.groupId) this.get('group', p.value.groupId);
+    return this.save('team', p);
+  }
+
+  private saveMission(p: RpcParams<'agents.mission.save'>): RpcResult<'agents.mission.save'> {
+    for (const id of p.value.agentIds) this.get('profile', id);
+    if (p.value.teamId) {
+      const team = this.get('team', p.value.teamId);
+      if (p.value.agentIds.some(id => !team.members.some(m => m.agentId === id))) this.refuse('agentIds: every agent must belong to the mission team');
     }
+    if (p.id && p.value.status === 'done' && (this.all('task').some(t => t.missionId === p.id && !['done', 'cancelled'].includes(t.status)) || this.all('work').some(w => w.scope.kind === 'mission' && w.scope.id === p.id && !['done', 'cancelled'].includes(w.status)))) this.refuse('mission: complete or cancel its tasks and executions before finishing it');
+    const saved = this.save('mission', p);
+    if (saved.status === 'cancelled') for (const work of this.all('work').filter(w => w.scope.kind === 'mission' && w.scope.id === saved.id && !['done', 'cancelled'].includes(w.status))) this.controlWork({ workId: work.id, expectedRevision: work.revision, action: 'cancel' });
+    return saved;
+  }
+
+  private saveTask(p: RpcParams<'agents.task.save'>): RpcResult<'agents.task.save'> {
+    this.get('mission', p.value.missionId);
+    const previous = p.id ? this.get('task', p.id) : null;
+    if (previous && this.all('run').some(r => ['accepted', 'running'].includes(r.status) && this.get('work', r.workId).taskId === previous.id)) this.refuse('task: wait for its execution to finish');
+    if (previous && !['open', 'review'].includes(previous.status)) this.refuse('only open or submitted tasks can be edited');
+    for (const id of p.value.dependsOn) if (id === p.id || this.get('task', id).missionId !== p.value.missionId) this.refuse('dependsOn: expected another task in this mission');
+    return this.save('task', { ...p, value: { ...p.value, assigneeId: p.value.status === 'open' ? null : previous?.assigneeId ?? null, generation: previous?.generation ?? 0, workspace: previous?.workspace ?? null, result: previous?.result ?? null, leaseUntil: null } });
+  }
+
+  private acquireTask(p: RpcParams<'agents.task.acquire'>): RpcResult<'agents.task.acquire'> {
+    const task = this.get('task', p.taskId);
+    const mission = this.get('mission', task.missionId);
+    if (task.revision !== p.expectedRevision || task.status !== 'open') this.refuse('task is already assigned or its revision changed');
+    if (!['open', 'active'].includes(mission.status)) this.refuse('mission is not open for work');
+    if (!mission.agentIds.includes(p.agentId)) this.refuse('agent is not assigned to this mission');
+    if (task.dependsOn.some(id => this.get('task', id).status !== 'done')) this.refuse('task dependencies are not completed');
+    const next = this.update('task', { ...task, assigneeId: p.agentId, status: 'assigned', generation: task.generation + 1 });
+    this.work({ agentId: p.agentId, scope: { kind: 'mission', id: mission.id }, episodeId: mission.id, prompt: `${mission.objective}\n${task.instructions}`, taskId: task.id, taskGeneration: next.generation });
+    return next;
+  }
+
+  private submitTask(p: RpcParams<'agents.task.submit'>): RpcResult<'agents.task.submit'> {
+    const task = this.get('task', p.taskId);
+    if (task.generation !== p.generation || !['assigned', 'running'].includes(task.status)) this.refuse('task generation is stale');
+    return this.update('task', { ...task, status: 'review', result: p.result, leaseUntil: null });
+  }
+
+  // Runtime limits and collaboration messages, executions and decisions.
+
+  private setLimits(p: RpcParams<'agents.limits.set'>): RpcResult<'agents.limits.set'> {
+    if (!Number.isInteger(p.backgroundConcurrency) || p.backgroundConcurrency < 1 || p.backgroundConcurrency > 8) this.refuse('backgroundConcurrency: expected an integer from 1 to 8');
+    this.limits = { ...p };
+    this.changed(++this.revision);
+    return this.limits;
+  }
+
+  private sendMessage(p: RpcParams<'agents.message.send'>): RpcResult<'agents.message.send'> {
+    if (!p.text.trim() || p.text.length > 32000) this.refuse('text: expected 1 to 32000 characters');
+    const group = p.scope.kind === 'group' ? this.get('group', p.scope.id) : null;
+    if (!group && p.scope.kind !== 'agent') this.refuse('scope: messages belong to a direct conversation or a group');
+    const allowed = group?.memberIds ?? [this.get('profile', p.scope.id).id];
+    if (p.recipientIds.some(id => !allowed.includes(id))) this.refuse('recipientIds: every recipient must belong to this conversation');
+    const parent = p.replyTo ? this.get('message', p.replyTo) : null;
+    if (parent && (parent.scope.id !== p.scope.id || parent.scope.kind !== p.scope.kind)) this.refuse('replyTo: message belongs to another conversation');
+    return this.once(p.requestId, { method: 'agents.message.send', ...p }, () => {
+      const recipientIds = p.recipientIds.length ? p.recipientIds : group?.mode === 'mentions' ? [] : group?.mode === 'autonomous' ? allowed.slice(0, 1) : allowed;
+      const episodeId = parent?.episodeId ?? `fake-episode-${++this.sequence}`;
+      const message = this.save('message', { value: { scope: p.scope, senderId: null, text: p.text, recipientIds, replyTo: p.replyTo ?? null, episodeId, sourceRunId: null } });
+      this.deliver(message);
+      return message;
+    });
+  }
+
+  private controlWork(p: RpcParams<'agents.work.control'>): RpcResult<'agents.work.control'> {
+    const work = this.get('work', p.workId);
+    if (work.revision !== p.expectedRevision || ['done', 'cancelled'].includes(work.status)) this.refuse('work is terminal or its revision changed');
+    if (p.action === 'resume' && !['paused', 'error'].includes(work.status)) this.refuse('interrupted work requires reconciliation');
+    if (p.action === 'reconcile' && (work.status !== 'interrupted' || !p.note?.trim())) this.refuse('reconcile: expected interrupted work and an inspection note');
+    if (p.action === 'pause' && work.status === 'waiting') this.refuse('work is waiting for a decision; answer or cancel it');
+    let taskGeneration = work.taskGeneration;
+    if (work.taskId) { const task = this.get('task', work.taskId); taskGeneration = task.generation + 1; this.update('task', { ...task, generation: taskGeneration, leaseUntil: null, status: p.action === 'cancel' ? 'cancelled' : 'assigned' }); }
+    if (p.action === 'cancel') for (const d of this.all('decision').filter(d => d.workId === work.id && d.status === 'pending')) this.update('decision', { ...d, status: 'cancelled' });
+    for (const d of this.all('delivery').filter(d => d.workId === work.id)) this.update('delivery', { ...d, status: p.action === 'cancel' ? 'cancelled' : 'pending' });
+    const updated = this.update('work', { ...work, taskGeneration, status: p.action === 'pause' ? 'paused' : p.action === 'cancel' ? 'cancelled' : 'pending', runId: ['resume', 'reconcile'].includes(p.action) ? null : work.runId, error: null });
+    if (work.runId && ['pause', 'cancel'].includes(p.action)) this.runner?.stop(this.get('run', work.runId).threadId);
+    return updated;
+  }
+
+  private answerDecision(p: RpcParams<'agents.decision.answer'>): RpcResult<'agents.decision.answer'> {
+    const d = this.get('decision', p.decisionId);
+    if (d.status !== 'pending' || d.revision !== p.expectedRevision) this.refuse('decision is already answered or its revision changed');
+    const work = this.get('work', d.workId);
+    if (work.status !== 'waiting' || !p.answer.trim()) this.refuse('decision: expected waiting work and an answer');
+    this.update('work', { ...work, status: 'done' });
+    const continuation = this.work({ agentId: d.agentId, scope: d.scope, episodeId: work.episodeId, messageId: work.messageId, prompt: p.answer, taskId: work.taskId, taskGeneration: work.taskGeneration });
+    if (work.taskId) this.update('task', { ...this.get('task', work.taskId), status: 'assigned' });
+    for (const delivery of this.all('delivery').filter(item => item.workId === work.id)) this.update('delivery', { ...delivery, status: 'pending', workId: continuation.id });
+    return this.update('decision', { ...d, status: 'answered', answer: p.answer });
+  }
+
+  private requestDecision(p: RpcParams<'agents.decision.request'>): RpcResult<'agents.decision.request'> {
+    const run = this.all('run').find(r => r.threadId === p.threadId && r.status === 'running');
+    if (!run) this.refuse('threadId: this agent has no running collaboration execution');
+    const work = this.get('work', run.workId);
+    return this.once(p.requestId, { method: 'agents.decision.request', ...p }, () => {
+      this.update('work', { ...work, status: 'waiting' });
+      if (work.taskId) this.update('task', { ...this.get('task', work.taskId), status: 'waiting', leaseUntil: null });
+      const decision = this.save('decision', { value: { scope: work.scope, workId: work.id, agentId: work.agentId, prompt: p.prompt, options: p.options, status: 'pending', answer: null } });
+      this.runner?.stop(run.threadId);
+      return decision;
+    });
+  }
+
+  private addArtifact(p: RpcParams<'agents.artifact.add'>): RpcResult<'agents.artifact.add'> {
+    const run = this.all('run').find(r => r.threadId === p.threadId && r.status === 'running');
+    if (!run) this.refuse('threadId: this agent has no running collaboration execution');
+    return this.once(p.requestId, { method: 'agents.artifact.add', ...p }, () => this.save('artifact', { value: { ...p.value, agentId: run.agentId, runId: run.id } }));
   }
 }
