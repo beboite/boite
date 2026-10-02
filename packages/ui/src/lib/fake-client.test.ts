@@ -684,6 +684,20 @@ test('fake keeps forced isolation when a provider forbids default accounts', asy
   client.close();
 });
 
+test('fake does not readopt a removed default on reload and allows an explicit replacement', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    await client.call('accounts.remove', { accountId: 'a-pi' });
+    for (let i = 0; i < 2; i++) await client.call('providers.reload', {});
+    expect((await client.call('accounts.list', {})).filter(account => account.providerId === 'pi')).toEqual([]);
+    expect((await client.call('accounts.list', {})).some(account => account.id === 'a-codex')).toBe(true);
+    const restored = await client.call('accounts.add', { providerId: 'pi', label: 'My CLI', useDefaultLocation: true });
+    await client.call('providers.reload', {});
+    expect((await client.call('accounts.list', {})).filter(account => account.providerId === 'pi')).toEqual([restored]);
+  } finally { client.close(); }
+});
+
 test('fake probes reject invalid provider/account pairs and unavailable agents', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();

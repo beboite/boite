@@ -55,6 +55,7 @@ export class TurnContexts {
       accountEnv: this.core.accounts.accountEnv(account, provider),
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
       log: (level, message) => this.core.log(level, message),
+      authenticationFailed: () => this.core.accounts.authenticationFailed(account.id),
       commands: list => { if (current()) this.threads.agentState.noteCommands(threadId, list); },
       context: use => { if (current()) this.threads.agentState.noteContext(threadId, use); },
       hook: report => this.core.hooks.record({ providerId: provider.id, accountId: account.id, threadId }, report),
@@ -259,6 +260,7 @@ export class TurnContexts {
       emit,
       reportProgress: progress,
       reportProviderEvent: () => this.threads.progress.contact(threadId, turn.id),
+      authenticationFailed: () => this.core.accounts.authenticationFailed(account.id),
       log: (level, message) => {
         this.core.log(level, message);
       },

@@ -79,6 +79,9 @@ other devices", drawn beside a QR code the phone's camera opens:
 http://192.168.1.20:53421/?grant=<32 random bytes, hex>
 ```
 
+Close hides the link and QR code, and New pairing link creates another one.
+Closing leaves an already issued link valid until it is used or expires.
+
 Asking is the only way to get one. The core used to print a live grant on its
 ready line at every start, which put a working session key in every log file and
 every terminal scrollback that had seen the core boot.
