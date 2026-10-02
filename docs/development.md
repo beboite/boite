@@ -905,11 +905,12 @@ it ran, with the pwsh, cmd or bash wrapper taken off
 call that produced a diff stands alone, shows its `+N -M` and opens on the
 diff; when it failed, its output sits above the diff. In `?fake=1`, `[tools]`
 in a prompt plays a burst of six calls, one of them failing, and `[diff]` an
-edit with its diff. Failed and denied calls stay outside groups, with an
-output preview that remains visible when the call is closed.
+edit with its diff. Failed and denied calls remain in their run, with a muted
+count on the folded group. A failed edit never contributes a successful file
+change to the summary. Single calls retain a compact line and a status icon.
 
-Failed commands preview a diagnostic such as the failing test or merge conflict,
-rather than the first output line. Codex command cards retain the provider's exit
+Expanding a failed call shows a diagnostic such as the failing test or merge
+conflict above its full input and output. Codex command cards retain the provider's exit
 code and show it on failures; older messages and providers without that field
 keep their reported status. Output text and stderr never determine that status.
 

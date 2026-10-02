@@ -18,11 +18,11 @@ export type PartRun = { kind: 'part'; index: number } | { kind: 'tools'; indices
 /**
  * A call that produced a diff, a page or an image stands alone: what it made is
  * the point. So does an edit whose input spells out its change, the diff
- * `ToolCard` draws when the driver attaches none. Failures stay visible too.
+ * `ToolCard` draws when the driver attaches none. Failed attempts stay in the run.
  */
 function standsAlone(part: ToolPart): boolean {
-  if ((part.documents?.length ?? 0) > 0 || part.status === 'error' || part.status === 'denied') return true;
-  if (typeof part.inputText === 'string') return false;
+  if ((part.documents?.length ?? 0) > 0) return true;
+  if (typeof part.inputText === 'string' || part.status === 'error' || part.status === 'denied') return false;
   return describeTool(part.name, part.input).change !== null;
 }
 
@@ -197,7 +197,7 @@ export function liveLabel(part: ToolPart): string {
   return subject ? fill(strings.chat.toolLive[family], { subject }) : strings.chat.toolBare[family];
 }
 
-type SummaryKind = Exclude<ToolFamily, 'write'>;
+type SummaryKind = Exclude<ToolFamily, 'write'> | 'attempt';
 
 /**
  * The folded line of a finished run: one clause per kind of call, in the order
@@ -211,7 +211,8 @@ export function runSummary(parts: readonly ToolPart[]): string {
   let pathless = 0;
   for (const part of parts) {
     const { family, subject } = describeTool(part.name, part.input);
-    const kind: SummaryKind = family === 'write' ? 'edit' : family;
+    const kind: SummaryKind = part.status === 'denied' || (part.status === 'error' && (family === 'edit' || family === 'write'))
+      ? 'attempt' : family === 'write' ? 'edit' : family;
     if (!counts.has(kind)) order.push(kind);
     if (kind === 'edit') {
       if (subject) files.add(subject);
