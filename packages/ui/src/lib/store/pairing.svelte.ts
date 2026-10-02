@@ -3,20 +3,29 @@ import type { StoreContext } from './context';
 
 /** Pairing: the owner mints one-time links, sees every paired device, revokes. */
 export class Pairing {
-  /** The last one-time pairing link minted from Settings, until the page changes. */
+  /** The last one-time pairing link, until it is closed or the core changes. */
   pairing = $state<PairingGrant | null>(null);
   sessions = $state<PairedSession[]>([]);
+  private revision = 0;
 
   constructor(private readonly ctx: StoreContext) {}
 
   async mintPairing(role: PairingRole = 'device'): Promise<void> {
     const client = this.ctx.client;
     if (!client) return;
+    const revision = ++this.revision;
     try {
-      this.pairing = await client.call('pairing.grant', { role });
+      const grant = await client.call('pairing.grant', { role });
+      if (revision === this.revision && client === this.ctx.client) this.pairing = grant;
     } catch (error) {
-      this.ctx.fail(error);
+      if (revision === this.revision && client === this.ctx.client) this.ctx.fail(error);
     }
+  }
+
+  /** Hide this grant and ignore pending mint responses; the grant itself keeps its expiry. */
+  closePairing(): void {
+    this.revision++;
+    this.pairing = null;
   }
 
   async loadSessions(): Promise<void> {

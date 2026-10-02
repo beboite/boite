@@ -127,7 +127,7 @@
       <span>{projectName(store.openProject)}</span>
     </div>
   {/if}
-  {#if threadHeader}
+  {#if threadHeader && (inShell || !mobile.current)}
     {#key store}<ThreadHeader {store} />{/key}
   {:else}
     <span class="name">{store.page === 'agents' ? strings.agents.heading : heading}</span>

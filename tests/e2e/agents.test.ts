@@ -146,7 +146,9 @@ test('create, converse, configure the resident engine and follow background work
   await page.click('.agents-main .agent-mobile-back');
   await capture('agents-list-phone.png');
   expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  await page.click('[data-testid=mobile-menu]');
   expect(await page.evaluate(`getComputedStyle(document.querySelector('[data-testid="mobile-agents"]')).display`)).not.toBe('none');
+  await page.click('[data-testid=mobile-agents]');
   await missionJourney();
 }, 60000);
 

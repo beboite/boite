@@ -7,11 +7,13 @@
   /** The empty panel: one card per kind of surface, each with the letter that opens it. */
   let {
     available,
+    remoteBrowser = false,
     onlaunch,
     onmenu,
     oncustomize
   }: {
     available: (kind: SurfaceKind) => boolean;
+    remoteBrowser?: boolean;
     onlaunch: (kind: SurfaceKind) => void;
     /** A card's right click, which offers to put it away. */
     onmenu: (event: MouseEvent, kind: SurfaceKind) => void;
@@ -43,8 +45,8 @@
         oncontextmenu={(event) => onmenu(event, card.kind)}
       >
         <SurfaceIcon kind={card.kind} size={16} />
-        <span class="card-name">{kindName(card.kind)}</span>
-        <span class="card-hint">{available(card.kind) ? kindHint(card.kind) : unavailable(card.kind)}</span>
+        <span class="card-name">{remoteBrowser && card.kind === 'browser' ? strings.remoteBrowser.title : kindName(card.kind)}</span>
+        <span class="card-hint">{available(card.kind) ? remoteBrowser && card.kind === 'browser' ? strings.remoteBrowser.hint : kindHint(card.kind) : unavailable(card.kind)}</span>
         <span class="kbd">{card.key}</span>
       </button>
     {/each}

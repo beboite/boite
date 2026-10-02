@@ -7,6 +7,7 @@
   import { SpeechRecorder, audioBase64, microphoneError } from '../lib/speech-recorder';
   import { SpeechPreview } from '../lib/speech-preview';
   import { strings } from '../lib/strings';
+  import { voice } from '../lib/voice-prefs.svelte';
   let { store, ontext, onbusy, onpreview }: { store: Store; ontext: (text: string) => void; onbusy: (busy: boolean) => void; onpreview: (text: string, status: string, error: boolean) => void } = $props();
   let phase = $state<'idle' | 'opening' | 'recording' | 'transcribing' | 'error'>('idle');
   let seconds = $state(0);
@@ -52,7 +53,7 @@
     const capture = new SpeechRecorder(); recorder = capture;
     try {
       let captureEnded = false;
-      const captureStarted = capture.start((value, elapsed) => { level = value; seconds = elapsed; }, () => { captureEnded = true; if (phase === 'recording') void stop(); });
+      const captureStarted = capture.start((value, elapsed) => { level = value; seconds = elapsed; }, () => { captureEnded = true; if (phase === 'recording') void stop(); }, voice.current.microphoneId);
       // A local engine starts loading its model while the user speaks. A core without it just answers later.
       void client.call('speech.warm', {}).catch(() => {});
       // A core from before dictation has no voice engine: name the machine to update instead of the raw RPC error.

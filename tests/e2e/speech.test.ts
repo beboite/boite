@@ -1,3 +1,4 @@
+import { mobileAction } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -18,18 +19,29 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url: `${url}/?fake=1&open=recent` });
   await page.waitFor(`document.querySelector('${id('dictation-start')}')`);
   // Exercise the real AudioWorklet and resampler without touching a physical microphone.
-  await page.evaluate(`window.__audioFixtures = new Set(); window.__stoppedTracks = 0; navigator.mediaDevices.getUserMedia = async () => {
+  await installMicrophone();
+// This hook builds its own bundle before launching the browser; recording tests keep their own deadlines.
+}, 60_000);
+
+async function installMicrophone() {
+  await page.evaluate(`window.__audioFixtures = new Set(); window.__stoppedTracks = 0; window.__microphoneRequests = [];
+  navigator.mediaDevices.enumerateDevices = async () => [
+    {kind:'audioinput',deviceId:'usb-input',label:'USB microphone'},
+    {kind:'audioinput',deviceId:'headset-input',label:'Headset microphone'}
+  ];
+  navigator.mediaDevices.getUserMedia = async (constraints) => {
+    window.__microphoneRequests.push(constraints);
     const context = new AudioContext({sinkId: {type:'none'}}); await context.resume();
     const oscillator = context.createOscillator(); oscillator.frequency.value = 220;
-    const destination = context.createMediaStreamDestination(); oscillator.connect(destination); oscillator.start();
-    const fixture = {context, oscillator, destination}; window.__audioFixtures.add(fixture);
+    const gain = context.createGain(); gain.gain.value = 0.08;
+    const destination = context.createMediaStreamDestination(); oscillator.connect(gain); gain.connect(destination); oscillator.start();
+    const fixture = {context, oscillator, gain, destination}; window.__audioFixtures.add(fixture);
     for (const track of destination.stream.getTracks()) {
       const stop = track.stop.bind(track); track.stop = () => { window.__stoppedTracks++; stop(); oscillator.stop(); window.__audioFixtures.delete(fixture); if (context.state !== 'closed') void context.close(); };
     }
     return destination.stream;
   }`);
-// This hook builds its own bundle before launching the browser; recording tests keep their own deadlines.
-}, 60_000);
+}
 afterAll(async () => {
   try { await page?.close(); }
   finally { if (server) await new Promise<void>((resolve, reject) => server.httpServer.close((error?: Error) => error ? reject(error) : resolve())); }
@@ -42,6 +54,14 @@ async function capture(name: string) {
 }
 async function type(value: string) {
   await page.evaluate(`(() => { const el = document.querySelector('${id('composer-input')}'); el.value = ${JSON.stringify(value)}; el.dispatchEvent(new Event('input', {bubbles:true})); })()`);
+}
+async function leaveSettings() {
+  if (await page.evaluate(`!!document.querySelector('${id('settings-back')}')`)) await page.click(id('settings-back'));
+  else {
+    await mobileAction(page, 'mobile-conversations');
+    await page.click(id('mobile-new'));
+  }
+  await page.waitFor(`document.querySelector('${id('composer-input')}')`);
 }
 async function record() {
   await page.send('Runtime.evaluate', { expression: `document.querySelector('${id('dictation-start')}').click()`, userGesture: true });
@@ -111,7 +131,7 @@ test('phone options change effort and permissions without losing the draft', asy
 }, 15_000);
 
 test('phone draft options preserve worktree choice and close when returning to desktop', async () => {
-  await page.click(id('mobile-new'));
+  await mobileAction(page, 'mobile-menu-new');
   await type('A new task.');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 320, height: 600, deviceScaleFactor: 1, mobile: true });
   await page.click(id('composer-options'));
@@ -154,8 +174,94 @@ test('voice settings save API selection, hide credentials on reload, and fit pho
   expect(page.errors()).toEqual([]);
 }, 30_000);
 
+test('device voice settings select and test the microphone, stop capture, and persist disabling dictation', async () => {
+  await page.click(id('voice-microphone'));
+  await page.click(`${id('voice-microphone-menu')} [data-value="usb-input"]`);
+  expect(await page.text(id('voice-microphone'))).toContain('USB microphone');
+  await page.send('Runtime.evaluate', { expression: `document.querySelector('${id('voice-microphone-test')}').click()`, userGesture: true });
+  await page.waitFor(`document.querySelector('${id('voice-microphone-level')}').value > 0.1`);
+  expect(await page.evaluate('window.__microphoneRequests.at(-1).audio.deviceId.exact')).toBe('usb-input');
+  await page.evaluate('window.__audioFixtures.forEach(fixture => fixture.gain.gain.value = 0)');
+  await page.waitFor(`document.querySelector('${id('voice-microphone-level')}').value < 0.01`);
+  await page.evaluate('window.__audioFixtures.forEach(fixture => fixture.gain.gain.value = 0.08)');
+  await page.waitFor(`document.querySelector('${id('voice-microphone-level')}').value > 0.1`);
+  await capture('speech-desktop-microphone-test.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.waitFor('window.__audioFixtures.size === 0');
+  await page.send('Runtime.evaluate', { expression: `document.querySelector('${id('voice-microphone-test')}').click()`, userGesture: true });
+  await page.waitFor(`document.querySelector('${id('voice-microphone-level')}').value > 0.1`);
+  await capture('speech-phone-microphone-test.png');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await page.click(id('voice-microphone'));
+  await page.click(`${id('voice-microphone-menu')} [data-value="headset-input"]`);
+  await page.waitFor(`window.__microphoneRequests.at(-1).audio.deviceId.exact === 'headset-input' && document.querySelector('${id('voice-microphone-level')}').value > 0.1`);
+  expect(await page.evaluate('window.__audioFixtures.size')).toBe(1);
+  await page.click(id('voice-microphone-test'));
+  await page.waitFor('window.__audioFixtures.size === 0');
+  expect(await page.evaluate(`document.querySelector('${id('voice-microphone-level')}').value`)).toBe(0);
+  // Paired devices can use their own input controls without editing the core's engine.
+  expect(await page.evaluate(`!!document.querySelector('${id('voice-enabled')}')`)).toBe(true);
+  await leaveSettings();
+  await record();
+  expect(await page.evaluate('window.__microphoneRequests.at(-1).audio.deviceId.exact')).toBe('headset-input');
+  // A change from another window must cancel a running recording as well as hide its button.
+  await page.evaluate(`localStorage.setItem('boite.voice', JSON.stringify({enabled:false,microphoneId:'headset-input'})); window.dispatchEvent(new StorageEvent('storage',{key:'boite.voice'}));`);
+  await page.waitFor(`!document.querySelector('${id('dictation')}') && window.__audioFixtures.size === 0`);
+  expect(await page.evaluate(`!!document.querySelector('${id('dictation-preview')}')`)).toBe(false);
+  await page.navigate(`${url}/?fake=1&open=recent`);
+  await page.waitFor(`document.querySelector('${id('composer-input')}')`);
+  expect(await page.evaluate(`!!document.querySelector('${id('dictation')}')`)).toBe(false);
+  await capture('speech-phone-voice-disabled.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1360, height: 950, deviceScaleFactor: 1, mobile: false });
+  await capture('speech-desktop-voice-disabled.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await installMicrophone();
+  await page.evaluate(`document.querySelector('${id('nav-settings')}').click()`);
+  await page.click(id('settings-tab-voice'));
+  await page.waitFor(`document.querySelector('${id('voice-enabled')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('voice-enabled')}').checked`)).toBe(false);
+  expect(await page.evaluate(`document.querySelector('${id('voice-microphone-test')}').disabled`)).toBe(true);
+  expect(await page.text(id('voice-microphone'))).toContain('Headset microphone');
+  await page.click(id('voice-enabled'));
+  await leaveSettings();
+  await page.waitFor(`document.querySelector('${id('dictation-start')}')`);
+  expect(page.errors()).toEqual([]);
+}, 30_000);
+
+test('Appearance hides Worktree on desktop and phone while preserving the draft choice', async () => {
+  await mobileAction(page, 'mobile-menu-new');
+  await type('Preserve this worktree draft.');
+  await page.click(id('composer-options'));
+  if (await page.evaluate(`document.querySelector('${id('composer-options-worktree')}').getAttribute('aria-pressed') === 'false'`)) await page.click(id('composer-options-worktree'));
+  await page.evaluate('history.back()');
+  await page.waitFor(`!document.querySelector('${id('composer-options-sheet')}')`);
+  await page.evaluate(`document.querySelector('${id('nav-settings')}').click()`);
+  await page.click(id('settings-tab-appearance'));
+  await page.waitFor(`document.querySelector('${id('control-composer.worktree')}')`);
+  await page.click(id('control-composer.worktree'));
+  await page.evaluate(`document.querySelector('${id('control-composer.worktree')}').scrollIntoView({block:'center'})`);
+  await capture('speech-phone-appearance-worktree.png');
+  await leaveSettings();
+  await page.click(id('composer-options'));
+  await page.waitFor(`document.querySelector('${id('composer-options-sheet')}')`);
+  expect(await page.evaluate(`!!document.querySelector('${id('composer-options-worktree')}')`)).toBe(false);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1360, height: 950, deviceScaleFactor: 1, mobile: false });
+  await page.waitFor(`!document.querySelector('${id('composer-options-sheet')}')`);
+  expect(await page.evaluate(`!!document.querySelector('${id('composer-worktree')}')`)).toBe(false);
+  await capture('speech-desktop-disabled-controls.png');
+  await page.evaluate(`document.querySelector('${id('nav-settings')}').click()`);
+  await page.click(id('settings-tab-appearance'));
+  await page.evaluate(`document.querySelector('${id('control-composer.worktree')}').scrollIntoView({block:'center'})`);
+  await capture('speech-desktop-appearance-worktree.png');
+  await page.click(id('control-composer.worktree'));
+  await leaveSettings();
+  await page.waitFor(`document.querySelector('${id('composer-worktree')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('composer-worktree')}').getAttribute('aria-pressed')`)).toBe('true');
+  expect(await page.evaluate(`document.querySelector('${id('composer-input')}').value`)).toBe('Preserve this worktree draft.');
+  expect(page.errors()).toEqual([]);
+}, 30_000);
+
 test('a denied microphone preserves the draft and shows a readable light-theme error', async () => {
-  await page.click(id('settings-back'));
   await page.evaluate(`document.documentElement.dataset.theme = 'light'; navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('denied', 'NotAllowedError'));`);
   await type('Do not lose this.');
   await page.send('Runtime.evaluate', { expression: `document.querySelector('${id('dictation-start')}').click()`, userGesture: true });

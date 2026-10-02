@@ -1,3 +1,4 @@
+import { mobileAction } from './lib/mobile.ts';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp';
@@ -27,7 +28,7 @@ async function openUpdate() {
     // Native updates live in the shell drawer. The browser fixture uses phone
     // navigation, so expose that same drawer before exercising its real control.
     if (await page.evaluate("document.querySelector('.body.mobile-covered') !== null")) {
-      await page.click(id('mobile-new'));
+      await mobileAction(page, 'mobile-menu-new');
       await page.waitFor("document.querySelector('.body.mobile-covered') === null");
     }
     await page.evaluate('window.__boiteTest.workspace.active.sidebarOpen = true');

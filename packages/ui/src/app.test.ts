@@ -1979,6 +1979,35 @@ test('account lifecycle cancel button stops login and restores retry', async () 
   expect(document.querySelector('[data-testid=account-login]')).not.toBeNull();
 });
 
+test('a failed account login can be dismissed and removed without restarting', async () => {
+  await mountOnFake();
+  store.showSettings('accounts');
+  await openProviderDetails('claude');
+  store.logins['a-claude-side'] = { state: 'failed', output: 'Sign-in failed', url: null, exitCode: 1 };
+  await waitFor(() => document.querySelector('[data-testid=account-login-output]')?.textContent === 'Sign-in failed');
+  query<HTMLButtonElement>('[data-testid=account-login-dismiss]').click();
+  await waitFor(() => document.querySelector('[data-testid=account-login-row]') === null);
+  query<HTMLButtonElement>('[data-testid=account-remove][data-account-id=a-claude-side]').click();
+  await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') !== null);
+  query<HTMLButtonElement>('[data-testid=confirm-ok]').click();
+  await waitFor(() => !store.accounts.some(account => account.id === 'a-claude-side'));
+});
+
+test('a pairing link can be closed and a fresh one created', async () => {
+  await mountOnFake();
+  store.showSettings('machines');
+  await waitFor(() => document.querySelector('[data-testid=pairing-mint]') !== null);
+  query<HTMLButtonElement>('[data-testid=pairing-mint]').click();
+  await waitFor(() => document.querySelector('[data-testid=pairing-link]') !== null);
+  const first = store.pairing!.grant;
+  query<HTMLButtonElement>('[data-testid=pairing-close]').click();
+  await waitFor(() => document.querySelector('[data-testid=pairing-link]') === null);
+  expect(store.pairing).toBeNull();
+  query<HTMLButtonElement>('[data-testid=pairing-mint]').click();
+  await waitFor(() => document.querySelector('[data-testid=pairing-link]') !== null);
+  expect(store.pairing!.grant).not.toBe(first);
+});
+
 test('a new isolated account is signed out, and a thread on it offers the sign-in', async () => {
   await mountOnFake();
   const client = store.client!;
@@ -2076,10 +2105,21 @@ async function emptyCore(): Promise<void> {
   await store.openWhereLeft();
 }
 
+async function showMobileThreads(): Promise<void> {
+  // jsdom does not implement dialog methods; the browser suite exercises the modal.
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function(this: HTMLDialogElement) { this.open = true; } });
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function(this: HTMLDialogElement) { this.open = false; } });
+  query<HTMLButtonElement>('[data-testid=mobile-menu]').click();
+  await waitFor(() => document.querySelector('[data-testid=mobile-conversations]') !== null);
+  query<HTMLButtonElement>('[data-testid=mobile-conversations]').click();
+  await waitFor(() => document.querySelector('[data-testid=mobile-project]') !== null);
+}
+
 test('the phone cannot manage an unrelated project from a draft without a folder', async () => {
   await mountOnFake();
   expect(store.projects.length).toBeGreaterThan(0);
   store.startDraft(null);
+  await showMobileThreads();
   await waitFor(() => query('[data-testid=mobile-project]').textContent?.includes('Drafts') === true);
   expect(store.openProject).toBeNull();
   expect(document.querySelector('[data-testid=mobile-project-actions]')).toBeNull();
@@ -2096,6 +2136,7 @@ test('the phone cannot manage an unrelated project from a draft without a folder
 test('the phone cannot archive an already archived project or offer a misleading undo', async () => {
   await mountOnFake();
   await store.open('t-trace');
+  await showMobileThreads();
   const project = store.openProject!;
   const archive = vi.spyOn(store, 'archiveProject');
   const openManagement = async () => {
@@ -2276,6 +2317,7 @@ test('a paired device is offered none of the affordances the core refuses it', a
   store.paletteOpen = false;
 
   // The phone's project menu: no Remove, and no transcript import behind it.
+  await showMobileThreads();
   query<HTMLButtonElement>('[data-testid=mobile-project-actions]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
   expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);

@@ -1,3 +1,4 @@
+import { mobileAction } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp';
@@ -54,7 +55,7 @@ test('connecting another machine keeps thread rows at their single-machine heigh
   expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('thread-row')} .headline')).every(e => e.scrollWidth <= e.clientWidth)`)).toBe(true);
   await page.evaluate(`globalThis.__boiteTest.workspace.active.setSidebarWidth(280)`);
   await page.send('Emulation.setDeviceMetricsOverride', { width:390, height:844, deviceScaleFactor:1, mobile:true });
-  await page.click(id('mobile-conversations'));
+  await mobileAction(page, 'mobile-conversations');
   await page.waitFor(`document.querySelector('${id('mobile-list')} .thread')`);
   await capture('readability-thread-phone');
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
@@ -281,7 +282,7 @@ test('PR links belong to a thread branch and disappear after a move to a plain f
   await capture('pr-links-recent');
   await page.click(id('view-projects'));
   await page.send('Emulation.setDeviceMetricsOverride', { width:390, height:844, deviceScaleFactor:1, mobile:true });
-  await page.click(id('mobile-conversations'));
+  await mobileAction(page, 'mobile-conversations');
   await page.waitFor(`Array.from(document.querySelectorAll('${id('mobile-list')} .thread')).filter(row => row.textContent.includes('shared-folder conversation')).length === 2`);
   expect(await page.evaluate(`document.querySelector('${id('mobile-list')}').textContent.includes('#180')`)).toBe(false);
   expect(await page.evaluate(`document.querySelector('${id('mobile-list')} ${id('thread-pr')}') === null`)).toBe(true);

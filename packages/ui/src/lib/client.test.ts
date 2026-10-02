@@ -589,12 +589,14 @@ describe('WsClient', () => {
   test('a session whose key stops opening the core is revoked: closed for good, and the caller told', async () => {
     const sockets: FakeSocket[] = [];
     let revoked = 0;
+    const unauthorized = vi.fn();
     const client = new WsClient({
       url: 'http://127.0.0.1:8777',
       token: 'minted',
       onRevoked: () => {
         revoked += 1;
       },
+      onUnauthorized: unauthorized,
       backoff: () => 0,
       socketFactory: () => {
         const socket = new FakeSocket();
@@ -617,6 +619,7 @@ describe('WsClient', () => {
     second.receive({ jsonrpc: '2.0', id: second.frame(0).id, error: { code: RpcErrorCode.Unauthorized, message: 'the token is wrong' } });
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect(revoked).toBe(1);
+    expect(unauthorized).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ code: RpcErrorCode.Unauthorized, message: 'the token is wrong' }));
     expect(client.state).toBe('closed');
     expect(sockets).toHaveLength(2);
   });
@@ -686,10 +689,12 @@ describe('WsClient', () => {
 
   test('a grant the core refuses closes the client for good', async () => {
     const sockets: FakeSocket[] = [];
+    const unauthorized = vi.fn();
     const client = new WsClient({
       url: 'http://127.0.0.1:8777',
       token: '',
       grant: 'spent',
+      onUnauthorized: unauthorized,
       backoff: () => 0,
       socketFactory: () => {
         const socket = new FakeSocket();
@@ -710,6 +715,7 @@ describe('WsClient', () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect(client.state).toBe('closed');
     expect(sockets).toHaveLength(1);
+    expect(unauthorized).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ code: RpcErrorCode.Unauthorized, message: 'the pairing link was already used, expired, or never issued' }));
   });
 
   test('a response resolves the matching call', async () => {

@@ -1,3 +1,4 @@
+import { mobileAction } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp';
@@ -74,7 +75,7 @@ test('changes panel and phone conversation list stay within the viewport with an
   for (const width of [390, 320]) {
     await page.send('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: true });
     expect(await fits('[data-testid="panel-toggle"]')).toBe(true);
-    await page.click('[data-testid="mobile-conversations"]');
+    await mobileAction(page, 'mobile-conversations');
     await page.waitFor(`document.querySelector('[data-testid="mobile-list"] .thread')`);
     expect(await page.evaluate(`(() => {
       const list = document.querySelector('[data-testid="mobile-list"]');

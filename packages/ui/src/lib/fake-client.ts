@@ -39,6 +39,7 @@ import { spawnMethods } from './fake-client/spawn';
 import { todoMethods } from './fake-client/todos';
 import { workdirMethods } from './fake-client/workdir';
 import { browserMethods } from './fake-client/browser';
+import { pullRequestMethods } from './fake-client/pull-requests';
 import { worktreeMethods } from './fake-client/worktrees';
 import { serverUpdateMethods } from './fake-client/server-update';
 
@@ -320,6 +321,7 @@ export class FakeClient implements ObservableClient {
       ...todoMethods(ctx),
       ...workdirMethods(ctx),
       ...browserMethods(ctx),
+      ...pullRequestMethods(ctx),
       ...worktreeMethods(ctx),
     };
   }

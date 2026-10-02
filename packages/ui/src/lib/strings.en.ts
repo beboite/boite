@@ -1,5 +1,16 @@
 /** Every user-facing string of the UI. No literal UI text lives anywhere else. */
 export const strings = {
+  remoteBrowser: {
+    display: 'Display', resolution: 'Page resolution', fitPhone: 'Fit this screen', phone: 'Phone', tablet: 'Tablet', rotate: 'Rotate', width: 'Width', height: 'Height', apply: 'Apply', sharedSize: 'Resolution also changes the shared tab on the PC.', restoreSize: 'Use the PC panel size', previewZoom: 'Preview zoom (this device only)', fit: 'Fit', panHint: 'Drag to pan the preview. Use the arrows to scroll the page.',
+    open: 'Open live browser', experimental: 'Experimental browser sharing', enable: 'Enable on this device',
+    hint: 'View and control the browser tab shared by your PC, inside Boite.',
+    hostMissing: 'The PC is not sharing a browser for this conversation yet. Open the same conversation and a browser tab in Boite on the PC, with both browser experiments enabled.',
+    title: 'Live desktop browser', waiting: 'Waiting for the desktop', live: 'Live', paused: 'Paused', reconnecting: 'Reconnecting', pause: 'Pause', resume: 'Resume',
+    help: 'On your desktop, enable Agent browser control and Live browser on other devices in Experiments, then open this conversation and a browser tab. The PC must stay awake.',
+    interact: 'Tap or swipe the shared page', image: 'Live view of the desktop browser', scrollUp: 'Scroll up', scrollDown: 'Scroll down',
+    text: 'Tap a page field, then type here', send: 'Send text to the page', gesture: 'Tap to click. Swipe to scroll. Pause stops the stream.'
+  },
+  prReview: { open: 'Read in Boite', back: 'Linked pull requests', files: 'Files', comments: 'Comments', checks: 'Checks', overview: 'Overview', loading: 'Loading review…', empty: 'Nothing to display.', more: 'Load more files', unavailable: 'GitHub did not provide a text diff for this file.', truncated: 'Some content was shortened. Open GitHub to read it in full.', github: 'Open on GitHub', refresh: 'Refresh review', viewed: 'Viewed', changed: 'Changed', fileCount: '{count} files loaded', readOnly: 'Reading this review does not publish comments or merge the PR.' },
   agents: {
     runtime: "Models and limits",
     brain: "Brain",
@@ -158,6 +169,19 @@ export const strings = {
     export: 'Export analytics data', retry: 'Retry deletion',
   },
   speech: {
+    enabled: 'Voice dictation',
+    enabledHint: 'Enable dictation on this device. Turning it off removes the microphone from the message bar, including when a model is installed.',
+    microphone: 'Microphone',
+    microphoneHint: 'The input used for dictation on this device.',
+    defaultMicrophone: 'System default',
+    microphoneNumber: 'Microphone {number}',
+    microphoneUnavailable: 'The selected microphone is unavailable. Choose another input.',
+    microphoneDisconnected: 'The microphone was disconnected. Choose another input and try again.',
+    testMicrophone: 'Test microphone',
+    stopMicrophoneTest: 'Stop test',
+    inputLevel: 'Microphone input level',
+    microphoneTestHint: 'Speak to check the level. This test stays on your device.',
+    microphoneIdleHint: 'Start a test to check that your microphone picks up sound.',
     heading: 'Voice', description: 'The microphone beside Send, up to two minutes at a time. The text waits in the composer until you send it.',
     start: 'Dictate', stop: 'Finish dictation', listening: 'Listening', opening: 'Waiting for microphone', transcribing: 'Transcribing',
     private: 'On this core only', cloud: 'Transcribed by your API provider', retry: 'Retry transcription',
@@ -213,6 +237,20 @@ export const strings = {
     subscriptionFailed: 'The browser did not return a complete push subscription.'
   },
   mobile: {
+    clearSearch: 'Clear search', draftTitle: 'What would you like to do?', draftHint: 'Start a task, ask a question, or pick up your work.',
+    pairTitle: 'Your Boite, on your phone',
+    pairBody: 'Connect to your computer to find your projects, conversations and agents here.',
+    pairStep: 'On your computer, open Settings → Machines and devices and create a pairing code.',
+    pairInstalled: 'Just installed Boite? Pair it here too: the iPhone app keeps its connection separately from the browser.',
+    pairPrivacy: 'Scan from this app. The code is single-use and expires after 10 minutes.',
+    pairingRequired: 'Pair this app',
+    offlineTitle: 'Waiting for your computer',
+    offlineBody: 'Keep Boite running on your computer and check your connection. If you use Tailscale, keep it connected on both devices.',
+    emptyTitle: 'Start a conversation',
+    emptyBody: 'Send a task to an agent. Your conversations will appear here.',
+    emptyActivity: 'All caught up',
+    computer: 'Connected computer',
+    pairAgain: 'Pair again',
     settingsDevice: 'This phone',
     settingsPhone: 'App & notifications',
     settingsBack: 'Back to settings',
@@ -753,7 +791,6 @@ export const strings = {
     providerSignal: 'Provider signal {time} ago',
     lastActivity: 'Last activity {time} ago',
     noActivity: 'No new activity for {time}',
-    activityTrace: 'View trace',
     /** The jump button once something arrived below the reader. */
     newMessage: '1 new message',
     newMessages: '{count} new messages',
@@ -1215,6 +1252,21 @@ export const strings = {
     binary: 'Nothing here reads as text.'
   },
 
+  pullRequests: {
+    title: 'Conversation pull requests', hint: 'Linked PRs are shown in dependency order. Linking does not change anything on GitHub.',
+    refresh: 'Refresh', empty: 'No pull requests linked yet.', url: 'Pull request URL', link: 'Link PR', unlink: 'Unlink PR #{number}',
+    dependsOn: 'Depends on #{number}', stale: 'Could not refresh. Showing the last known state.',
+    OPEN: 'Open', CLOSED: 'Closed', MERGED: 'Merged', draft: 'Draft',
+  },
+  browserTools: {
+    title: 'Browser testing tools', desktop: 'Desktop', laptop: 'Laptop', portrait: 'Portrait', landscape: 'Landscape',
+    system: 'Follow system appearance', light: 'Light page', dark: 'Dark page', diagnostics: 'Page diagnostics and actions',
+    startRecording: 'Record this browser tab', stopRecording: 'Stop recording', reviewRecording: 'Recorded video',
+    refresh: 'Refresh', clear: 'Clear', pageEvents: 'Page events', actions: 'Actions', noEvents: 'No page events captured.', noActions: 'No actions recorded yet.',
+    omitted: '{count} older or oversized events omitted.', recorded: '{seconds} seconds · {mb} MB · silent WebM',
+    recordingError: 'Recording stopped after an error.', recordingLimit: 'Recording stopped at the duration or size limit.',
+    download: 'Download video', discard: 'Discard video',
+  },
   browser: {
     resetViewport: 'Fit page to window',
     enlarge: 'Enlarge browser',
@@ -1706,6 +1758,9 @@ export const strings = {
   },
 
   experiments: {
+    remoteBrowser: { title: 'Live browser on other devices', hint: 'On the desktop, share the open conversation’s browser with paired devices. On a phone, watch and control that page. Enable this experiment on both devices and Agent browser control on the desktop.' },
+    prReview: { title: 'Review pull requests', hint: 'Read linked GitHub pull requests, file diffs, comments and check results inside Boite, including on phones.' },
+    recordingIndicators: { title: 'Show actions in recordings', hint: 'Add click markers and navigation keys to browser recordings. Typed text and password input are never shown as key labels.' },
     openChatLinks: { title: 'Open chat links in their apps', hint: 'On this desktop, clicking a local file or folder opens its default app, including shortcuts and files outside the project. Only links from this computer are opened.' },
     whip: {
       title: 'Whip',

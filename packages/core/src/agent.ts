@@ -196,6 +196,8 @@ export function setTasks(core: Core, params: RpcParams<'threads.tasks.set'>): Th
  */
 export function registerAgentMethods(core: Core): void {
   core.router.register('browser.host', (params, { connection }) => core.browser.host(params, connection));
+  core.router.register('browser.remoteFrame', (params, { connection }) => core.browser.remoteFrame(params, connection));
+  core.router.register('browser.remoteInput', (params, { connection }) => core.browser.remoteInput(params, connection));
   core.router.register('browser.command', params => core.browser.command(params));
   core.router.register('browser.complete', (params, { connection }) => core.browser.complete(params, connection));
   core.router.register('artifacts.publish', (params) => publishArtifact(core, params));

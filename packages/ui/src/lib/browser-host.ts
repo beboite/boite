@@ -3,7 +3,9 @@ import { tick } from 'svelte';
 import type { Store } from './store.svelte';
 import { rightPanel } from './right-panel.svelte';
 import { browserBridge } from './browser-bridge';
-import { automateBrowser } from './browser-automation';
+import { runBrowserAction, trackBrowserAction } from './browser-tools.svelte';
+import { captureRemoteBrowser, inputRemoteBrowser } from './browser-remote-host';
+import { isExperimentEnabled, subscribeExperiments } from './experiments';
 import { experimentOn } from './experiments.svelte';
 
 /** Captures the owning Store/client; a machine switch cannot redirect a command. */
@@ -13,6 +15,7 @@ export function hostBrowser(store: Store, threadId: string): () => void {
   const machine = store.machineId;
   const panel = rightPanel.for(store.threadKey(threadId));
   let stopped = false;
+  let consentRevision = 0;
   const current = () => !stopped && experimentOn('agent-browser-control') && store.client === client && store.machineId === machine && store.openThread?.id === threadId;
   const off = client.on('browser.requested', request => {
     if (request.threadId !== threadId) return;
@@ -23,7 +26,16 @@ export function hostBrowser(store: Store, threadId: string): () => void {
         const problem = browserActionError(request.action);
         if (problem) throw new Error(problem);
         const { action } = request;
-        if (action.kind === 'status') {
+        if (action.kind === 'remote-frame' || action.kind === 'remote-input') {
+          const surface = panel.active;
+          if (!surface || surface.kind !== 'browser' || (request.tabId && request.tabId !== surface.id)) throw new Error('open a browser tab in this conversation on the desktop first');
+          const revision = consentRevision;
+          const assertCurrent = () => {
+            if (!current() || revision !== consentRevision || panel.active?.id !== surface.id) throw new Error('the shared browser conversation or tab changed');
+          };
+          if (action.kind === 'remote-frame') result = { tabId: surface.id, frame: await captureRemoteBrowser(surface.id, assertCurrent) };
+          else { await inputRemoteBrowser(surface.id, action.frameId, action.input, assertCurrent); result = { tabId: surface.id, value: { ok: true } }; }
+        } else if (action.kind === 'status') {
           result = { value: { available: true, floating: rightPanel.floating, tabs: panel.surfaces.filter(s => s.kind === 'browser').map(s => ({ tabId: s.id, url: s.url ?? '', title: s.title ?? '', active: s.id === panel.active?.id })) } };
         } else {
           if (action.kind === 'open') panel.open('browser', action.url);
@@ -41,13 +53,15 @@ export function hostBrowser(store: Store, threadId: string): () => void {
               browserBridge.navigate(surface.id, action.url); panel.update(surface.id, { url: action.url });
             }
             if (action.kind === 'open' || action.kind === 'navigate') {
-              const deadline = Date.now() + 12000;
-              // Navigation completion is delivered through native page-load events.
-              while (!browserBridge.isReady(surface.id) && current() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50));
-              if (!current()) throw new Error('the browser conversation changed');
-              if (!browserBridge.isReady(surface.id)) throw new Error('page is still loading; use snapshot to inspect its state');
-              result = { tabId: surface.id, url: action.url };
-            } else result = await automateBrowser(surface.id, action);
+              result = await trackBrowserAction(surface.id, action, async () => {
+                const deadline = Date.now() + 12000;
+                // Navigation completion is delivered through native page-load events.
+                while (!browserBridge.isReady(surface.id) && current() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50));
+                if (!current()) throw new Error('the browser conversation changed');
+                if (!browserBridge.isReady(surface.id)) throw new Error('page is still loading; use snapshot to inspect its state');
+                return { tabId: surface.id, url: action.url };
+              });
+            } else result = await runBrowserAction(surface.id, action);
           }
         }
       } catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
@@ -55,12 +69,13 @@ export function hostBrowser(store: Store, threadId: string): () => void {
     })();
   });
   const renew = () => {
-    if (current()) void client.call('browser.host', { threadId, enabled: true, allowAgentControl: true }).catch(() => {});
+    if (current()) void client.call('browser.host', { threadId, enabled: true, allowAgentControl: true, remote: isExperimentEnabled('remote-browser') }).catch(() => {});
   };
   renew();
   const timer = setInterval(renew, 10000);
+  const offExperiments = subscribeExperiments(() => { consentRevision++; renew(); });
   return () => {
-    stopped = true; clearInterval(timer); off();
+    stopped = true; clearInterval(timer); off(); offExperiments();
     void client.call('browser.host', { threadId, enabled: false }).catch(() => {});
   };
 }

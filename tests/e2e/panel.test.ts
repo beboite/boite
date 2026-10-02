@@ -105,8 +105,8 @@ test('the panel opens on its launcher, and the workbench surfaces fit both width
     'launch-tasks',
     'launch-trace'
   ]);
-  // A page needs the shell's webview, so the browser card is the one refused here.
-  expect(await page.evaluate(`document.querySelector('${id('launch-browser')}').disabled`)).toBe(true);
+  // Web clients open the experimental remote viewer hosted by the desktop.
+  expect(await page.evaluate(`document.querySelector('${id('launch-browser')}').disabled`)).toBe(false);
   expect(await page.evaluate(`document.querySelector('${id('launch-changes')}').disabled`)).toBe(false);
   await capture('panel-launcher.png');
 

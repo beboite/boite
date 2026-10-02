@@ -118,6 +118,8 @@ export interface TurnContext {
   reportProgress?(phase: import('@boite/contracts').ThreadProgress['phase'], detail?: string | null): void;
   /** A provider signal that need not mean execution advanced. */
   reportProviderEvent?(): void;
+  /** A native authentication refusal invalidates the account's passive status. */
+  authenticationFailed?(): void;
   /**
    * The `/name` commands the agent takes, whole, whenever the driver learns or
    * relearns them: the core keeps the list per thread and tells the clients
@@ -175,7 +177,7 @@ export interface TurnContext {
 /** Native session setup without a prompt, a turn or a message sink. */
 export type SessionContext = Pick<TurnContext,
   'thread' | 'account' | 'provider' | 'sessionId' | 'resumeAt' | 'sessionBefore' |
-  'accountEnv' | 'warmProcessMinutes' | 'log' | 'commands' | 'context' | 'hook' |
+  'accountEnv' | 'warmProcessMinutes' | 'log' | 'authenticationFailed' | 'commands' | 'context' | 'hook' |
   'background' | 'wake' | 'spawnChild' | 'finishStartup'>;
 
 export interface TurnResult {
