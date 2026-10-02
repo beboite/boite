@@ -167,7 +167,6 @@
   // `/` on an empty box, then the word being typed: nothing else opens it, and a
   // space or a second line closes it, since the input of a command is not a query.
 
-  /** What was typed after the slash, or null while the box is not a bare `/word`. */
   let slashQuery = $derived(slashQueryOf(text));
 
   // -- the mention menu ---------------------------------------------------------
@@ -175,7 +174,6 @@
   // query, and the core ranks the project's files on it. The pick writes the
   // path in as `@path`, plain text every agent reads, its own way.
 
-  /** The word being typed after an `@`, or null while the caret is not on one. */
   let mentionQuery = $derived(mentionQueryOf(text, caret, previewReferences));
 
   /** A mention wins over the slash menu on the odd `/@word`: it is the word under the caret. */
@@ -229,7 +227,6 @@
     return () => clearTimeout(timer);
   });
 
-  /** The agent's own, in the order it reported them. Never on a draft: there is no agent yet. */
   let agentItems = $derived.by((): PaletteItem[] => agentSlashItems(store.openThread?.commands ?? []));
 
   /** Boite's prompt controls follow the agent's own commands. */

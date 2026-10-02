@@ -1,5 +1,4 @@
 import { logMessageOf } from '../../log-errors.ts';
-/** One ACP agent process for a thread, from `initialize` to its last turn. */
 import { Readable, Writable } from 'node:stream';
 import type {
   ClientConnection,
