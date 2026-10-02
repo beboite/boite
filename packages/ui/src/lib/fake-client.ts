@@ -38,6 +38,7 @@ import { threadMoveMethods } from './fake-client/thread-move';
 import { spawnMethods } from './fake-client/spawn';
 import { todoMethods } from './fake-client/todos';
 import { workdirMethods } from './fake-client/workdir';
+import { browserMethods } from './fake-client/browser';
 import { worktreeMethods } from './fake-client/worktrees';
 import { serverUpdateMethods } from './fake-client/server-update';
 
@@ -143,6 +144,8 @@ export class FakeClient implements ObservableClient {
     for (const thread of ctx.threads.values()) pauseActivity(ctx, thread);
     ctx.plugins.close();
     ctx.workflows.close();
+    for (const url of ctx.artifactUrls) URL.revokeObjectURL(url);
+    ctx.artifactUrls.clear();
     ctx.bus.setState('closed');
     this.#dropPending('client closed');
   }
@@ -316,6 +319,7 @@ export class FakeClient implements ObservableClient {
       ...coordinationMethods(ctx),
       ...todoMethods(ctx),
       ...workdirMethods(ctx),
+      ...browserMethods(ctx),
       ...worktreeMethods(ctx),
     };
   }

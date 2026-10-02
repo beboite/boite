@@ -19,6 +19,7 @@ import { CORE_VERSION } from './core.ts';
 import { resolveDataDir } from './paths.ts';
 import { agentCommand } from './agents/cli.ts';
 import { workflowCommand } from './workflow-cli.ts';
+import { browserCommand, BROWSER_HELP } from './browser-cli.ts';
 import { agentsCommand, AgentsUsage, WAIT_MAX_S } from './agents-cli.ts';
 
 export interface CliIo {
@@ -39,10 +40,13 @@ export const USAGE = `usage: boite <command> [args] [--json]
   projects                       the projects added to Boite
   projects add <folder>          add an existing folder as a project, so thread
                                  new and thread move can name it (--name <name>)
-  attach <file>                  publish a file in chat, up to 5 MB (experimental)
+  attach <file>                  publish a file in chat, up to 512 MB
   show <file>[:line]             open a file in the panel, at a line
   diff [file]                    open the changes, or one file's diff
   browse <url>                   open a url in the panel's browser
+  browser help                   inspect, test and capture the built-in browser
+  preview <file.html>             open a local HTML artifact with its assets
+  preview-close <file.html>       stop serving a local HTML preview
   open trace|tasks|changes|files|workflow [dir|run-id]
   status                         git status of the working directory
   server check|update|cancel      check or update this server, or cancel the
@@ -163,6 +167,7 @@ function parse(argv: string[]): Parsed {
       if (channel !== 'stable' && channel !== 'dev') throw new Usage(`unknown channel ${channel}`);
       parsed.channel = channel;
     } else if (arg === '--help' || arg === '-h') throw new Usage('');
+    else if (arg === '--output' && parsed.positional[0] === 'browser' && parsed.positional[1] === 'screenshot') parsed.positional.push(arg, next());
     else if (arg.startsWith('--')) throw new Usage(`unknown flag ${arg}`);
     else parsed.positional.push(arg);
   }
@@ -263,6 +268,12 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
   };
 
   switch (command) {
+    case 'browser': {
+      if (rest[0] === 'help') { print([BROWSER_HELP], { help: BROWSER_HELP }); break; }
+      const result = await browserCommand(rest, io, client, threadId);
+      print([JSON.stringify(result, null, 2)], result);
+      break;
+    }
     case 'server': {
       const action = rest[0] ?? 'check';
       if (!['check', 'update', 'cancel'].includes(action)) throw new Usage('server expects check, update or cancel');
@@ -405,7 +416,21 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       return;
     }
     case 'browse': {
-      await opened({ kind: 'browser', url: want(0, 'a url') });
+      const target = want(0, 'a url or an HTML file');
+      if (!/^https?:/i.test(target) && /\.html?$/i.test(target)) {
+        const result = await client.call('artifacts.preview', { threadId, path: absolute(io.cwd, target) });
+        print([`preview: ${result.url}`, `shown: ${result.shown}`], result);
+      } else await opened({ kind: 'browser', url: target });
+      return;
+    }
+    case 'preview': {
+      const result = await client.call('artifacts.preview', { threadId, path: absolute(io.cwd, want(0, 'an HTML file')) });
+      print([`preview: ${result.url}`, `shown: ${result.shown}`], result);
+      return;
+    }
+    case 'preview-close': {
+      const result = await client.call('artifacts.previewClose', { threadId, path: absolute(io.cwd, want(0, 'an HTML file')) });
+      print(['preview closed'], result);
       return;
     }
     case 'open': {

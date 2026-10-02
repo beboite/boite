@@ -1,5 +1,7 @@
 import type { AgentsRpcMethods, AgentsRpcEvents } from './agents';
 import type { WorkflowsRpcMethods, WorkflowsRpcEvents } from './workflows';
+import type { BrowserRpcMethods, BrowserRpcEvents } from './browser';
+export * from './browser';
 export * from './agents';
 export * from './workflows';
 export * from './workflow-plan';
@@ -969,11 +971,17 @@ export interface PendingMove {
   at: number;
 }
 
+/** Outgoing files live on disk above the inline attachment limit. */
+export const ARTIFACT_MAX_BYTES = 512 * 1024 * 1024;
+export interface ArtifactContent { url: string; bytes: number; mimeType: string; name: string; }
+
 export type MessagePart =
   | { type: 'text'; text: string; complete?: boolean; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number }; moved?: MoveNotice; startedBy?: ThreadLink; started?: ThreadLink }
   /** An image the user sent with the prompt, journalled with the message. */
   | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null }
   | { type: 'file'; mimeType: string; data: string; name: string | null }
+  /** An immutable published file; resolve its bytes with artifacts.read, never as a disk path. */
+  | { type: 'artifact'; id: string; mimeType: string; bytes: number; name: string }
   /** The model's reasoning as the provider streams it, folded in the UI. */
   | { type: 'thinking'; text: string }
   | {
@@ -1692,7 +1700,7 @@ export type PanelSurface =
   | { kind: 'file'; path: string; line?: number }
   | { kind: 'files'; path?: string }
   | { kind: 'diff'; path?: string }
-  | { kind: 'browser'; url: string }
+  | { kind: 'browser'; url: string; artifact?: { path: string; port: number } }
   | { kind: 'trace' }
   | { kind: 'tasks' }
   | { kind: 'workflow'; runId?: string };
@@ -2180,7 +2188,7 @@ export interface ServerUpdateStatus {
   error: string | null;
 }
 
-export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
+export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods {
   'core.shutdown': { params: Record<string, never>; result: { ok: true } };
   'core.updateStatus': { params: { refresh?: boolean }; result: ServerUpdateStatus };
   /** Confirm the version shown to the owner so a stale dialog cannot install another release. */
@@ -2355,6 +2363,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   'panel.open': { params: { threadId: ThreadId; surface: PanelSurface }; result: { shown: boolean } };
   /** Explicitly publish a bounded file snapshot from this thread's working directory. */
   'artifacts.publish': { params: { threadId: ThreadId; path: string }; result: Message };
+  'artifacts.read': { params: { threadId: ThreadId; messageId: MessageId; artifactId: string; renew?: string }; result: ArtifactContent };
+  'artifacts.preview': { params: { threadId: ThreadId; path: string }; result: { url: string; shown: boolean } };
+  'artifacts.previewClose': { params: { threadId: ThreadId; path: string }; result: { ok: true } };
   /** The agent's task list, whole, as the tasks surface shows it. */
   'threads.tasks.set': { params: { threadId: ThreadId; tasks: AgentTask[] }; result: ThreadActivity };
   'threads.tasks.get': { params: { threadId: ThreadId }; result: AgentTask[] };
@@ -2828,7 +2839,7 @@ export type RpcMethodName = keyof RpcMethods;
 export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
 export type RpcResult<M extends RpcMethodName> = RpcMethods[M]['result'];
 
-export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
+export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserRpcEvents {
   'resources.memory': MemoryEvent;
   'thread.memory': MemoryEvent & { threadId: string };
   'delegation.changed': { threadId: ThreadId };

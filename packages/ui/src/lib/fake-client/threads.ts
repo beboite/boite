@@ -7,7 +7,7 @@ import { writeTitle } from './titles';
 import { DATA_DIR, fakeWorktree, fakeDraftFolder, refusal, toSummary } from './shared';
 import { closeTerminal } from './terminals';
 import { announceProject, archiveProject, requireFakeFolder } from './project-archive';
-import { modelsOf, checkSpeed } from './provider-catalog';
+import { modelsOf, checkSpeed, discoverSelection } from './provider-catalog';
 import { delegationConfig, stopDelegation } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
 import { registerFakeWorktree, requireFakeCwd } from './worktrees';
@@ -145,19 +145,20 @@ function checkSelection(ctx: FakeContext, thread: Thread, params: RpcParams<'thr
   const provider = account && ctx.providers.find((entry) => entry.id === account.providerId);
   if (!account || !provider) return;
   const models = modelsOf(ctx, provider.id, account.id);
+  const catalogRead = ctx.modelCatalogs.has(provider.id + '::' + account.id);
   const switched = account.id !== thread.accountId;
   let model = thread.model;
   let effort = thread.effort;
   if (switched) {
-    model = checkModel(provider, account.id, models, params.model === undefined ? defaultModel(provider) : params.model);
+    model = checkModel(provider, account.id, models, params.model === undefined ? defaultModel(provider) : params.model, catalogRead);
     effort = null;
   }
   if (params.model !== undefined && (params.model !== thread.model || switched)) {
-    model = checkModel(provider, account.id, models, params.model);
+    model = checkModel(provider, account.id, models, params.model, catalogRead);
     effort = null;
   }
   if (params.effort !== undefined) effort = params.effort;
-  checkEffort(provider, models, model, effort);
+  if (switched || model !== thread.model || effort !== thread.effort) checkEffort(provider, models, model, effort);
 }
 
 export function threadMethods(ctx: FakeContext) {
@@ -184,8 +185,9 @@ export function threadMethods(ctx: FakeContext) {
       if (account.providerId !== provider.id) {
         throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the account belongs to another provider', data: { accountId: account.id, accountProviderId: account.providerId, providerId: provider.id } });
       }
+      await discoverSelection(ctx, provider.id, account.id, params.model ?? defaultModel(provider), params.effort ?? null, params.speed ?? null);
       const models = modelsOf(ctx, provider.id, account.id);
-      const model = checkModel(provider, account.id, models, params.model ?? defaultModel(provider));
+      const model = checkModel(provider, account.id, models, params.model ?? defaultModel(provider), ctx.modelCatalogs.has(provider.id + '::' + account.id));
       const effort = checkEffort(provider, models, model, params.effort ?? null);
       checkSpeed(ctx, params.providerId, params.accountId, model, params.speed ?? null);
       if (params.cwd !== undefined && params.cwd.length > 0 && params.worktree === undefined) checkCwd(project.path, params.cwd);
@@ -273,7 +275,17 @@ export function threadMethods(ctx: FakeContext) {
       const nextAccountId = params.accountId ?? thread.accountId;
       const nextProviderId = ctx.accounts.find(a => a.id === nextAccountId)?.providerId ?? thread.providerId;
       const changedModel = (params.model !== undefined && params.model !== thread.model) || nextAccountId !== thread.accountId;
-      checkSpeed(ctx, nextProviderId, nextAccountId, params.model !== undefined ? params.model : thread.model, params.speed !== undefined ? params.speed : changedModel ? null : thread.speed ?? null);
+      const provider = ctx.providers.find(p => p.id === nextProviderId);
+      const model = params.model === undefined ? nextAccountId !== thread.accountId && provider ? defaultModel(provider) : thread.model : params.model;
+      const effort = params.effort === undefined ? changedModel ? null : thread.effort : params.effort;
+      const speed = params.speed === undefined ? changedModel ? null : thread.speed ?? null : params.speed;
+      const version = thread.selectionVersion ?? 0;
+      if (changedModel || effort !== thread.effort || speed !== (thread.speed ?? null)) {
+        await discoverSelection(ctx, nextProviderId, nextAccountId, model, effort, speed);
+      }
+      if (ctx.threads.get(thread.id) !== thread) throw ctx.notFound('thread', thread.id);
+      if (version !== (thread.selectionVersion ?? 0)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model selection changed; review the selected model and send again' });
+      if (changedModel || speed !== (thread.speed ?? null)) checkSpeed(ctx, nextProviderId, nextAccountId, model, speed);
       checkSelection(ctx, thread, params);
       const before = [thread.accountId, thread.model, thread.effort, thread.speed, thread.permissionMode].join('\0');
       if (params.accountId !== undefined && params.accountId !== thread.accountId) {

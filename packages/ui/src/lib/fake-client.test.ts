@@ -5,6 +5,29 @@ import { FAKE_AUTO_COMPACT_SETTLE_MS } from './fake-client/turns';
 
 afterEach(() => vi.useRealTimers());
 
+test('fake thread creation discovers a native model without a picker and still refuses an unlisted model', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'codex', accountId: 'a-codex',
+      model: 'codex-demo', effort: 'high', speed: 'fast' });
+    expect(thread).toMatchObject({ model: 'codex-demo', effort: 'high', speed: 'fast' });
+    expect(await client.call('threads.update', { threadId: thread.id, model: 'missing-model' }).catch(error => error))
+      .toMatchObject({ message: 'the provider does not offer this model', data: { model: 'missing-model' } });
+    expect(await client.call('threads.get', { threadId: thread.id })).toMatchObject({ model: 'codex-demo', effort: 'high', speed: 'fast' });
+  } finally { client.close(); }
+});
+
+test('fake thread updates discover native metadata for the selected account', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
+    expect(await client.call('threads.update', { threadId: thread.id, accountId: 'a-codex', model: 'codex-demo', effort: 'high', speed: 'fast' }))
+      .toMatchObject({ providerId: 'codex', accountId: 'a-codex', model: 'codex-demo', effort: 'high', speed: 'fast' });
+  } finally { client.close(); }
+});
+
 test('moving a fake thread drops PR metadata from its previous branch', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();
@@ -133,6 +156,20 @@ test('fake artifacts refuse publication if the thread is archived during the med
     expect((await client.call('threads.get', { threadId: 't-trace' })).messages).toEqual(before.messages);
     expect(messages).toEqual([]);
   } finally { fetchMedia.mockRestore(); read.mockRestore(); client.close(); }
+});
+
+test('fake HTML artifacts open through the same RPC and owner events as real previews', async () => {
+  const client = new FakeClient({ delayMs: 0 }); await client.connect();
+  try {
+    await client.call('threads.subscribe', { threadId: 't-trace' });
+    await client.call('files.write', { threadId: 't-trace', path: 'demo.html', text: '<h1>Preview</h1>' });
+    const seen: unknown[] = []; client.on('panel.requested', value => seen.push(value));
+    const result = await client.call('artifacts.preview', { threadId: 't-trace', path: 'demo.html' });
+    expect(result.shown).toBe(true);
+    expect(seen).toContainEqual(expect.objectContaining({ threadId: 't-trace', surface: { kind: 'browser', url: result.url } }));
+    await expect(client.call('artifacts.preview', { threadId: 't-trace', path: '../outside.html' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    expect(await client.call('artifacts.previewClose', { threadId: 't-trace', path: 'demo.html' })).toEqual({ ok: true });
+  } finally { client.close(); }
 });
 
 test('fake delegation enforces family access and keeps request IDs idempotent', async () => {

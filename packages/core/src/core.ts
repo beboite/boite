@@ -27,6 +27,9 @@ import { SessionStore } from './sessions.ts';
 import { SettingsStore } from './settings.ts';
 import { ThreadStore } from './threads.ts';
 import { scheduleThreadDeletionRetention } from './threads/deletion-retention.ts';
+import { scheduleArtifactRetention } from './artifact-retention.ts';
+import { ArtifactPreviews } from './artifact-preview.ts';
+import { BrowserControl } from './browser.ts';
 import { QuotaStore } from './quotas.ts';
 import { PluginStore } from './plugins.ts';
 import { Worktrees } from './worktree.ts';
@@ -142,6 +145,9 @@ export class Core {
   /** What the user's own hooks did since this core started, for Settings. */
   readonly hooks: HookLedger;
   readonly terminals: TerminalStore;
+  readonly stopArtifactRetention: () => Promise<void>;
+  readonly artifactPreviews = new ArtifactPreviews(this);
+  readonly browser = new BrowserControl(this);
 
   /**
    * The server tells the core what it alone can know. The default answers no
@@ -223,6 +229,7 @@ export class Core {
     this.bus = new Bus();
     this.bus.onError = (message) => this.log('error', message);
     this.journal = new Journal(join(this.dataDir, 'journal.db'), { onError: (message) => this.log('error', message) });
+    this.stopArtifactRetention = scheduleArtifactRetention(this);
     this.#stopRetention = scheduleEventRetention(this.journal, (message) => this.log('error', message));
     this.router = new Router();
     this.settings = new SettingsStore(this);
@@ -341,6 +348,8 @@ export class Core {
   get stopping(): boolean { return this.#stopping; }
 
   async close(): Promise<void> {
+    this.browser.close();
+    this.artifactPreviews.stop();
     this.threads.sideQuestions.close();
     this.threads.titles.close();
     this.threads.autoCompact.close();
@@ -370,6 +379,7 @@ export class Core {
     this.bus.dispose();
     this.#stopRetention();
     this.#stopDeletionRetention();
+    await this.stopArtifactRetention();
     this.journal.close();
   }
 }

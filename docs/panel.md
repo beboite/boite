@@ -13,6 +13,24 @@ resize handle and tab icon are `SurfaceLauncher.svelte`, `PanelResizeHandle.svel
 and `SurfaceIcon.svelte`; `lib/surface-labels.ts` names each surface and says where
 it is available.
 
+## Floating panel and menus
+
+The browser toolbar can float the panel inside the app. Drag anywhere on its
+top bar, including tab labels, to move it; buttons keep their normal actions.
+Resize from any of its four sides or four corners. Both gestures stay within the app. The
+same page remains mounted, preserving forms and history. **Return to panel**
+in the panel's top bar restores the side panel from any tab, including after
+closing the last browser or switching conversations. The top bar also holds
+the single maximize button.
+Maximizing a floating panel fills the app's content
+area; restoring it returns to its previous size. On a phone it fills the screen.
+
+Native browser views paint above HTML menus. While a menu or dialog overlaps
+the page, the UI parks that view and displays its screenshot underneath the
+menu. Closing the overlay restores the same view without reloading the page.
+
+## Thread and tab lifetime
+
 A thread that is archived, here or from another client, or removed with its
 project, takes its layout with it, and its browser views are destroyed rather
 than parked: a thread restored from Archived threads comes back with a fresh
@@ -56,8 +74,32 @@ other than 100% has a reset button.
 `lib/browser-bounds.ts` observes layout changes and follows finite layout
 animations, rather than measuring the page slot on every idle frame.
 
+### Local HTML artifacts
+
+`boite preview reports/index.html` opens a generated page in the integrated
+browser, including relative CSS, JavaScript, images and other public web assets
+under that HTML file's directory. `boite browse reports/index.html` does the
+same. The agent guide includes the command for every provider.
+
+Each entry point has its own HTTP origin and an unguessable URL. Preview scripts
+cannot read the core UI's storage or connect to its authenticated WebSocket.
+Paths outside the artifact directory, dotfiles, non-web file types and escaping
+symlinks are refused. Files are read live, so reload reflects edits.
+
+`boite preview-close reports/index.html` stops its server. Archiving or removing
+the thread and shutting down the core also close previews. Up to 16 can be open
+at once. Opening another evicts the least recently used preview; reopening a
+preview or fetching one of its assets updates its recency. Run `preview` again
+after eviction or a core restart to obtain a new URL. Remote
+desktop clients need a direct connection to the preview's additional HTTP port;
+a proxy that forwards only the core port does not forward artifact previews.
+
+### Editing files
+
 A text file is edited in place and saved with the Save button or the platform's
-save chord through `files.write`. An edit not saved yet stays with its tab
+save chord through `files.write`.
+
+An edit not saved yet stays with its tab
 while another tab, another thread or a hidden panel unmounts the editor, in
 memory only, and closing that tab asks first. An image opens fitted to the panel; the wheel zooms
 around the pointer, a drag pans, the bar has fit, 100% and the zoom steps, and

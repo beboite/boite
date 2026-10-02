@@ -24,6 +24,18 @@ export function checkSpeed(ctx: FakeContext, providerId: string, accountId: stri
   if (!models.find(m => m.id === model)?.speeds?.some(option => option.id === speed)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model does not offer this speed' });
 }
 
+/** Match the core's automatic discovery before a new model, effort or speed is checked. */
+export async function discoverSelection(ctx: FakeContext, providerId: string, accountId: string, model: string | null, effort: string | null, speed: string | null): Promise<void> {
+  const provider = ctx.providers.find(p => p.id === providerId);
+  if (model === null || !provider || !['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'].includes(provider.protocol)) return;
+  const listed = modelsOf(ctx, providerId, accountId).find(entry => entry.id === model);
+  const missingEffort = effort !== null && listed?.effort === undefined;
+  if ((provider.protocol === 'acp' && missingEffort) || (!ctx.modelCatalogs.has(providerId + '::' + accountId) &&
+    (listed === undefined || missingEffort || (speed !== null && listed.speeds === undefined)))) {
+    await probe(ctx, providerId, accountId);
+  }
+}
+
 /**
  * ACP, Codex and pi probe their own catalogs. Demo models are explicitly
  * named as such; only OpenCode uses the large catalog fixture.

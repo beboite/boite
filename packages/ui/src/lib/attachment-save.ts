@@ -20,6 +20,13 @@ export async function saveAttachment(name: string, bytes: Uint8Array<ArrayBuffer
   });
 }
 
+/** Download a ticketed file without copying its entire body through the webview's IPC. */
+export async function saveAttachmentUrl(name: string, url: string, open: boolean): Promise<SavedAttachment | null> {
+  if (window.__TAURI_INTERNALS__ === undefined) return null;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<SavedAttachment>('save_attachment_url', { name, url, open });
+}
+
 /** The browser's own download, from a click the user made. */
 export function browserDownload(url: string, name: string): void {
   const anchor = document.createElement('a');

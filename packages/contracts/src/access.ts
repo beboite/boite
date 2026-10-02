@@ -61,6 +61,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'threads.activity.set',
   'threads.activity.control',
   'messages.list',
+  'artifacts.read', // Download only snapshots already published in a visible conversation, never host paths.
   'threads.update',
   'threads.retitle',
   'threads.compact', // A paired device can request the same session maintenance as the desktop.

@@ -13,6 +13,7 @@ import type { SocketData } from './server/connection.ts';
 import { ServerConnection } from './server/connection.ts';
 import { handleFrame } from './server/frame.ts';
 import { FrameQueue } from './server/frame-queue.ts';
+import { fileResponse } from './server/file-response.ts';
 export { ServerConnection } from './server/connection.ts';
 
 const DEFAULT_HELLO_TIMEOUT_MS = 5000;
@@ -243,7 +244,6 @@ function ticketedFile(core: Core, ticket: string, range: string | null): Respons
   const target = core.fileTickets.resolve(ticket);
   if (target === null || !existsSync(target.path)) return new Response('unknown or expired ticket', { status: 404 });
   const file = Bun.file(target.path);
-  const size = file.size;
   const headers: Record<string, string> = {
     'content-type': target.mime,
     'accept-ranges': 'bytes',
@@ -253,22 +253,9 @@ function ticketedFile(core: Core, ticket: string, range: string | null): Respons
     // picks what the panel opens, so no file of its may run in a window.
     // Neither header touches an <img> or a <video> loading the same address.
     'x-content-type-options': 'nosniff',
-    'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(basename(target.path))}`,
+    'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(target.name ?? basename(target.path))}`,
   };
-  const asked = range === null ? null : /^bytes=(\d*)-(\d*)$/.exec(range.trim());
-  if (asked === null) return new Response(file, { headers });
-
-  const from = asked[1] ?? '';
-  const to = asked[2] ?? '';
-  const start = from.length > 0 ? Number(from) : Math.max(0, size - Number(to));
-  const end = from.length === 0 ? size - 1 : to.length > 0 ? Math.min(Number(to), size - 1) : size - 1;
-  if ((from.length === 0 && to.length === 0) || !Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= size) {
-    return new Response('range not satisfiable', { status: 416, headers: { ...headers, 'content-range': `bytes */${size}` } });
-  }
-  return new Response(file.slice(start, end + 1), {
-    status: 206,
-    headers: { ...headers, 'content-range': `bytes ${start}-${end}/${size}`, 'content-length': String(end - start + 1) },
-  });
+  return fileResponse(file, range, headers);
 }
 
 /**
@@ -448,6 +435,7 @@ export function startServer(options: ServerOptions): RunningServer {
 
       close(socket) {
         core.coordination.bridge.disconnect(socket.data.connection.id);
+        core.browser.disconnect(socket.data.connection.id);
         core.threads.focus.disconnect(socket.data.connection.id);
         incoming.drop(socket.data.connection);
         core.speech.cancel(socket.data.connection.id);

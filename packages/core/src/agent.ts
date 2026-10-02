@@ -18,7 +18,7 @@ import { newToken } from './ids.ts';
 import { registerGitMethods } from './git.ts';
 import { registerTodoMethods } from './todos.ts';
 import { existingInside, registerWorkdirMethods, resolveInside } from './workdir.ts';
-import { publishArtifact } from './artifacts.ts';
+import { publishArtifact, readArtifact } from './artifacts.ts';
 
 /** More than a plan, and the tasks surface stops being readable anyway. */
 export const TASKS_MAX = 200;
@@ -195,7 +195,20 @@ export function setTasks(core: Core, params: RpcParams<'threads.tasks.set'>): Th
  * here keeps the door in one file: `access.ts` says who may knock.
  */
 export function registerAgentMethods(core: Core): void {
+  core.router.register('browser.host', (params, { connection }) => core.browser.host(params, connection));
+  core.router.register('browser.command', params => core.browser.command(params));
+  core.router.register('browser.complete', (params, { connection }) => core.browser.complete(params, connection));
   core.router.register('artifacts.publish', (params) => publishArtifact(core, params));
+  core.router.register('artifacts.read', (params) => readArtifact(core, params));
+  core.router.register('artifacts.preview', ({ threadId, path }) => {
+    const preview = core.artifactPreviews.open(threadId, path);
+    core.bus.emit('panel.requested', { threadId, surface: { kind: 'browser', url: preview.url, artifact: { path: preview.path, port: preview.port } }, at: Date.now() });
+    return { url: preview.url, shown: core.subscribers.hasSubscribers(threadId) };
+  });
+  core.router.register('artifacts.previewClose', ({ threadId, path }) => {
+    core.artifactPreviews.close(threadId, path);
+    return { ok: true };
+  });
   core.router.register('agent.where', (params) => whereOf(core, core.threads.require(params.threadId)));
   // The access check already held the call to the token's own thread.
   core.router.register('agent.move', (params) => core.threads.moves.request(params.threadId, params.project));
@@ -230,6 +243,7 @@ export function registerAgentMethods(core: Core): void {
   // already opened goes too: it used to keep claiming cards and opening
   // panels on a thread the user had put away.
   const shut = (threadId: ThreadId): void => {
+    core.browser.release(threadId);
     core.agents.forget(threadId);
     core.subscribers.closeAgents(threadId);
   };

@@ -24,7 +24,7 @@ export function chatLink(raw: string): ChatLink | null {
     if (/^[a-z][a-z\d+.-]*:/i.test(target) && !/^[a-z]:[\\/]/i.test(target)) return null;
     try { target = decodeURIComponent(target); } catch { return null; }
   }
-  if (/^[\\/]{2}/.test(target)) return null;
+  if (/[\u0000-\u001f]/.test(target) || /^[\\/]{2}/.test(target)) return null;
   // Markdown links can use the same leading slash as a Windows file URI.
   target = target.replaceAll('\\', '/').replace(/^\/([A-Za-z]:\/)/, '$1');
   const line = /(?::(\d+)(?::\d+)?|#L(\d+)(?:C\d+)?(?:-L?\d+)?)$/.exec(target);

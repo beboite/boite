@@ -19,6 +19,7 @@ function textPart(part: MessagePart): string {
     case 'tool': return `Tool ${part.name}: ${part.status}\n${JSON.stringify(part.output ?? '')}`;
     case 'error': return `Error: ${part.message}`;
     case 'image': return `[Image: ${part.alt ?? 'attachment'}]`;
+    case 'artifact': return `[Published file: ${part.name}, ${part.bytes} bytes]`;
     // Reasoning, old permission grants and compaction internals are not portable context.
     default: return '';
   }

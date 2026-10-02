@@ -93,7 +93,7 @@ export const strings = {
   activityUnsupported: 'Element references cannot be used with /goal or /loop. Send a regular message or remove the references.',
   stashUnsupported: 'This draft contains element references and cannot be stashed. Send it or remove the references first.'
 },
-  artifacts: { open: 'Open', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', closeImage: 'Close image', enlarge: 'View full size', saved: 'Saved in Downloads', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
+  artifacts: { loadImage: 'Load image', retry: 'Try again', mediaFailed: 'This media could not be previewed. Try again or download the file to open it.', saving: 'Saving…', zoomIn: 'Zoom in', zoomOut: 'Zoom out', fitImage: 'Fit image', open: 'Open', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', closeImage: 'Close image', enlarge: 'View full size', saved: 'Saved in Downloads', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
 
   brain: {
     heading: 'Brain', description: 'Your agents share the same instructions and skills.',
@@ -1210,6 +1210,12 @@ export const strings = {
   },
 
   browser: {
+    resetViewport: 'Fit page to window',
+    enlarge: 'Enlarge browser',
+    restore: 'Restore panel',
+    detach: 'Float inside the app',
+    dock: 'Return to panel',
+    move: 'Move the floating panel',
     loading: 'Loading page',
     failed: 'The page could not be opened. {reason}',
     invalidUrl: 'Enter a valid HTTP or HTTPS address, or a search query.',
@@ -1694,6 +1700,7 @@ export const strings = {
   },
 
   experiments: {
+    openChatLinks: { title: 'Open chat links in their apps', hint: 'On this desktop, clicking a local file or folder opens its default app, including shortcuts and files outside the project. Only links from this computer are opened.' },
     whip: {
       title: 'Whip',
       hint: 'An animated whip follows your pointer or finger. Flick to crack it, click or tap to drop it',
@@ -1701,6 +1708,7 @@ export const strings = {
       drop: 'Drop the whip'
     },
     chatArtifacts: { title: 'Chat files and previews', hint: 'Open file links and preview files returned by an agent in the conversation' },
+    agentBrowserControl: { title: 'Agent browser control', hint: 'On this Windows desktop, let agents read pages, take screenshots and act in the open conversation’s browser tabs. This includes signed-in sessions and JavaScript execution. Turning this off revokes access; actions already performed are not undone.' },
     previewComments: { title: 'Preview comments', hint: 'Select an element in the integrated browser and add feedback to the conversation draft' },
     themeGrain: {
       title: 'Grain theme',
