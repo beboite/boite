@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, minifySync, type Plugin } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { stampWorkerCache } from './src/lib/worker-stamp.ts';
 import { tooNewForFloor } from './src/lib/browser-floor.ts';
@@ -131,8 +131,37 @@ function localePreload(): Plugin {
   };
 }
 
+/** Compress the two prepaint blocks Vite leaves outside its JS pipeline. */
+function prepaintMinify(): Plugin {
+  const comments = ['<!-- Painted before the stylesheet arrives,', '<!-- The same rule as lib/theme.ts,', '<!-- A browser under the floor (Safari 15.4, Chrome 111: docs/phone.md)'];
+  return {
+    name: 'boite-prepaint-minify',
+    apply: 'build',
+    transformIndexHtml: {
+      order: 'post',
+      handler(html) {
+        // Consume whole script tags first: HTML comments inside code are untouched.
+        return html.replace(/<!--[\s\S]*?-->|<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, (tag) => {
+          if (comments.some((comment) => tag.startsWith(comment))) return '';
+          if (!tag.startsWith('<script>') || !tag.endsWith('</script>')) return tag;
+          const code = tag.slice(8, -9);
+          const font = code.includes("localStorage.getItem('boite.font')") && code.includes("localStorage.getItem('boite.theme')");
+          const colors = code.includes('var colorTools =') && code.includes('boite.theme-colors.v1');
+          // Notice and locale scripts stay ES5, including their original bytes.
+          if (!font && !colors) return tag;
+          const result = minifySync('prepaint.js', code, { module: false, compress: { target: 'es2015' }, mangle: { toplevel: true }, codegen: { legalComments: 'inline' } });
+          if (result.errors.length) throw new Error(`prepaint minification: ${result.errors.map((error) => error.message).join('\n')}`);
+          const hits = tooNewForFloor(result.code);
+          if (hits.length) throw new Error(`prepaint uses what Safari 15.4 cannot run: ${hits.join(', ')}`);
+          return `<script>${result.code}</script>`;
+        });
+      },
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [lucideGlyph(), svelte(), { name: 'boite-colors-prepaint', transformIndexHtml: () => [{ tag: 'script', children: colorsBootScript(), injectTo: 'head' }] }, browserFloor(), dropFakeClient(), localePreload(), precompress()],
+  plugins: [lucideGlyph(), svelte(), { name: 'boite-colors-prepaint', transformIndexHtml: () => [{ tag: 'script', children: colorsBootScript(), injectTo: 'head' }] }, browserFloor(), dropFakeClient(), localePreload(), prepaintMinify(), precompress()],
   base: './',
   // AudioWorklet modules must be same-origin files, never data URLs under the shell CSP.
   build: { outDir: 'dist', emptyOutDir: true, target: 'es2022', assetsInlineLimit: (file) => file.endsWith('speech-worklet.js') ? false : undefined },
