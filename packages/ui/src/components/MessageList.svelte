@@ -759,7 +759,7 @@
     hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = 0; pinned = false; pullOlder(viewport); } }} />
   <!-- Input releases restored and navigation anchors; programmatic corrections keep them. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="timeline" bind:this={viewport} use:watchWheel={onwheel} {onscroll} ontouchstart={press} onpointerdown={press} onkeydown={releaseNavigation} data-testid="timeline">
+  <div class="timeline" bind:this={viewport} use:watchWheel={onwheel} {onscroll} ontouchstart={press} onpointerdown={press} onkeydown={releaseNavigation} style:overflow-anchor={timeline.at(-1)?.state === 'streaming' ? 'none' : undefined} data-testid="timeline">
     <div class="column">
       <!-- paging: the one line the top of the list shows while a page is in flight. -->
       {#if store.loadingOlder}
@@ -841,7 +841,6 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    overflow-anchor: none;
     /* Reserve room for the activity overlay. Queued prompts live in the composer. */
     padding: 20px 20px calc(var(--dock-room, 0px) + 20px) var(--outline-room);
     overscroll-behavior: contain;
