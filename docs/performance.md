@@ -291,6 +291,11 @@ compositing, the case a WebView2 without acceleration meets:
   once the window has rendered: read before that render, or a frame or a timer
   later, a navigation that left the thread right after a scroll brought it
   back on the wrong message.
+- The conversation watches the wheel with a passive listener. It only reads
+  the wheel to leave the bottom and never cancels it; a cancellable listener
+  made the browser ask the main thread before the first notch of each gesture
+  scrolled, which a streaming answer keeps busy. `MessageList.test.ts` fails
+  on a wheel listener that can cancel.
 - What a scroll changes eases only a transform or opacity. The outline rail's
   active bar eased its width, and the active prompt changes every few lines:
   that dirtied layout before every scroll event, and a wheel up the

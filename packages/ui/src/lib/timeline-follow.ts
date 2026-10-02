@@ -1,8 +1,20 @@
+import { on } from 'svelte/events';
+
 /**
  * What the conversation needs from the DOM to stay at its bottom without
  * fighting its reader: who holds the list, what scrolls before it, and the
  * glide that takes it back down. `MessageList.svelte` owns the state these act on.
  */
+
+/**
+ * A Svelte action that watches the wheel without being able to cancel it. The
+ * list only reads the wheel to leave the bottom; a cancellable listener made
+ * the first notch of each gesture wait for the main thread before it scrolled,
+ * and a streaming answer keeps that thread busy.
+ */
+export function watchWheel(node: HTMLElement, handler: (event: WheelEvent) => void): { destroy(): void } {
+  return { destroy: on(node, 'wheel', handler, { passive: true }) };
+}
 
 /** Whether this wheel turns the list itself up: it can scroll, and nothing under the pointer takes the wheel first. */
 export function wheelsUp(event: WheelEvent, box: HTMLElement): boolean {

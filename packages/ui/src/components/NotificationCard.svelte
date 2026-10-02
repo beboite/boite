@@ -1,15 +1,25 @@
 <script lang="ts">
-  import { X } from '@lucide/svelte';
+  import { ArrowRight, X } from '@lucide/svelte';
   import { strings } from '../lib/strings';
 
-  let { title, message, dismiss }: { title: string; message: string; dismiss: () => void } = $props();
+  let { title, message, dismiss, action }: {
+    title: string;
+    message: string;
+    dismiss: () => void;
+    action?: { label: string; run: () => void };
+  } = $props();
 </script>
 
 <div class="notification-card">
   <span class="dot" aria-hidden="true"></span>
   <div class="lines">
     <span class="heading">{title}</span>
-    <p>{message}</p>
+    <p class:thread-title={!!action} title={action ? message : undefined}>{message}</p>
+    {#if action}
+      <button type="button" class="ghost open-thread" onclick={action.run}>
+        {action.label}<ArrowRight size={14} />
+      </button>
+    {/if}
   </div>
   <button type="button" class="ghost icon dismiss" onclick={dismiss} aria-label={strings.common.dismiss} title={strings.common.dismiss}>
     <X size={16} />
@@ -38,6 +48,7 @@
     box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-danger) 12%, transparent);
   }
   .lines { min-width: 0; }
+  .open-thread { margin-top: 8px; }
   .heading { font-size: var(--text-sm); font-weight: 600; }
   p {
     margin: 4px 0 0;
@@ -51,5 +62,6 @@
     user-select: text;
   }
   .dismiss { margin: -6px -6px 0 0; color: var(--color-muted-foreground); }
+  .thread-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .dismiss:hover { color: var(--color-foreground); }
 </style>

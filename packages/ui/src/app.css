@@ -230,6 +230,7 @@
   --color-composer-surface: var(--color-surface-2);
   --color-activity-surface: var(--color-surface);
   --color-composer-focus: var(--color-edge);
+  --color-composer-halo: transparent;
   --composer-glaze: linear-gradient(145deg, rgb(255 255 255 / 0.055), rgb(255 255 255 / 0.012) 48%, transparent);
   --shadow-composer: 0 6px 20px rgb(0 0 0 / 0.24), inset 0 1px 0 rgb(255 255 255 / 0.06);
   --control-glaze: var(--composer-glaze);
@@ -262,6 +263,10 @@
   --text-base: 14px;
   --text-md: 16px;
   --text-lg: 20px;
+  /* What a conversation is read and written in: one step above the chrome, on
+     a 24 px line. A phone reads it at the 16 px its fields already type at. */
+  --text-reading: 15px;
+  --leading-reading: 1.6;
 
   --titlebar: 44px;
   /* A caption button, Windows' own width, the bar's full height. */
@@ -640,7 +645,8 @@ html[data-chat-width='full'] {
   :root {
     --color-composer-surface: color-mix(in oklab, var(--color-surface-2) 82%, transparent);
     --color-activity-surface: color-mix(in oklab, var(--color-surface) 94%, transparent);
-    --color-composer-focus: color-mix(in srgb, var(--color-foreground) 24%, transparent);
+    --color-composer-focus: color-mix(in oklch, var(--color-accent) 55%, transparent);
+    --color-composer-halo: color-mix(in oklch, var(--color-accent) 13%, transparent);
     --color-control-surface: color-mix(in oklab, var(--color-surface-2) 82%, transparent);
     --color-control-hover: color-mix(in oklab, var(--color-surface-3) 90%, transparent);
     --color-control-primary-hover: color-mix(in oklch, var(--color-accent) 88%, var(--color-foreground));
@@ -795,6 +801,7 @@ button {
     background var(--dur-2) var(--ease-out-quint),
     border-color var(--dur-2) var(--ease-out-quint),
     color var(--dur-2) var(--ease-out-quint),
+    opacity var(--dur-2) var(--ease-out-quint),
     transform var(--dur-1) var(--ease-out-quint);
 }
 
@@ -890,6 +897,8 @@ textarea {
   border-radius: var(--radius-md);
   background: var(--color-surface);
   color: var(--color-foreground);
+  /* The caret wears the accent, so the place the next letter lands is the one lit point of a field. */
+  caret-color: var(--color-accent);
   transition: border-color var(--dur-2) var(--ease-out-quint);
 }
 
@@ -1659,7 +1668,7 @@ input[type=checkbox][role=switch]:disabled { opacity: .45; cursor: not-allowed; 
   .mobile-sheet-backdrop { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: var(--color-scrim); animation: fade var(--dur-2) var(--ease-out-quint); }
   .mobile-sheet-backdrop.closing { animation-name: fade-out; pointer-events: none; }
   [data-mobile-sheet='true'] { position: fixed !important; max-width: none !important; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; border-radius: var(--radius-xl) !important; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
-  :root { --settings-padding: 18px; --control: var(--touch-target); --control-sm: var(--touch-target); --control-lg: var(--touch-target); --input: var(--touch-target); --row: var(--touch-target); }
+  :root { --text-reading: var(--text-md); --settings-padding: 18px; --control: var(--touch-target); --control-sm: var(--touch-target); --control-lg: var(--touch-target); --input: var(--touch-target); --row: var(--touch-target); }
   input, textarea { font-size: var(--text-md); }
   button.icon { min-width: var(--touch-target); min-height: var(--touch-target); }
   .composer-wrap { padding-bottom: max(10px, env(safe-area-inset-bottom)); }

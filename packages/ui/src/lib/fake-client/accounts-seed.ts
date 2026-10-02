@@ -1,5 +1,6 @@
 import {
   type Account,
+  type ModelInfo,
   type ProviderSummary
 } from '@boite/contracts';
 import {
@@ -16,6 +17,80 @@ import {
   T0
 } from './shared.ts';
 
+/** Native Claude catalog for tests only; discovery supplies it separately from the descriptor. */
+export const CLAUDE_MODELS: ModelInfo[] = [
+  {
+    id: 'claude-fable-5-1', name: 'Fable 5.1', badge: 'new', effort: {
+      levels: [
+        { id: 'low', label: 'Low' },
+        { id: 'medium', label: 'Medium' },
+        { id: 'high', label: 'High' },
+        { id: 'xhigh', label: 'Extra high' },
+        { id: 'max', label: 'Max' },
+        { id: 'ultrathink', label: 'Ultrathink', description: 'Extended thinking, asked for in the prompt' }
+      ],
+      default: 'high'
+    }
+  },
+  {
+    id: 'claude-opus-5', name: 'Opus 5', speeds: [{ id: 'fast', label: 'Fast' }], effort: {
+      levels: [
+        { id: 'low', label: 'Low' },
+        { id: 'medium', label: 'Medium' },
+        { id: 'high', label: 'High' },
+        { id: 'xhigh', label: 'Extra high' },
+        { id: 'max', label: 'Max' },
+        { id: 'ultrathink', label: 'Ultrathink', description: 'Extended thinking, asked for in the prompt' }
+      ],
+      default: 'high'
+    }
+  },
+  {
+    id: 'claude-sonnet-5', name: 'Sonnet 5', default: true, effort: {
+      levels: [
+        { id: 'low', label: 'Low' },
+        { id: 'medium', label: 'Medium' },
+        { id: 'high', label: 'High' },
+        { id: 'xhigh', label: 'Extra high' },
+        { id: 'max', label: 'Max' },
+        { id: 'ultrathink', label: 'Ultrathink', description: 'Extended thinking, asked for in the prompt' }
+      ],
+      default: 'high'
+    }
+  },
+  {
+    id: 'claude-fable-5', name: 'Fable 5', legacy: true, effort: {
+      levels: [
+        { id: 'low', label: 'Low' },
+        { id: 'medium', label: 'Medium' },
+        { id: 'high', label: 'High' }
+      ],
+      default: 'high'
+    }
+  },
+  {
+    id: 'claude-opus-4-8', name: 'Opus 4.8', legacy: true, effort: {
+      levels: [
+        { id: 'low', label: 'Low' },
+        { id: 'medium', label: 'Medium' },
+        { id: 'high', label: 'High' }
+      ],
+      default: 'high'
+    }
+  },
+  {
+    id: 'claude-sonnet-4-6', name: 'Sonnet 4.6', legacy: true, effort: {
+      levels: [
+        { id: 'low', label: 'Low' },
+        { id: 'medium', label: 'Medium' },
+        { id: 'high', label: 'High' }
+      ],
+      default: 'high'
+    }
+  },
+  { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5', legacy: true }
+];
+
 /** Every call creates independent provider and account records. */
 export function seedAccounts() {
   const providers: ProviderSummary[] = [
@@ -29,78 +104,7 @@ export function seedAccounts() {
       source: 'shipped',
       available: true,
       executable: 'C:\\Users\\you\\.local\\bin\\claude.exe',
-      models: [
-        {
-          id: 'claude-fable-5-1', name: 'Fable 5.1', badge: 'new', effort: {
-            levels: [
-              { id: 'low', label: 'Low' },
-              { id: 'medium', label: 'Medium' },
-              { id: 'high', label: 'High' },
-              { id: 'xhigh', label: 'Extra high' },
-              { id: 'max', label: 'Max' },
-              { id: 'ultrathink', label: 'Ultrathink', description: 'Extended thinking, asked for in the prompt' }
-            ],
-            default: 'high'
-          }
-        },
-        {
-          id: 'claude-opus-5', name: 'Opus 5', speeds: [{ id: 'fast', label: 'Fast' }], effort: {
-            levels: [
-              { id: 'low', label: 'Low' },
-              { id: 'medium', label: 'Medium' },
-              { id: 'high', label: 'High' },
-              { id: 'xhigh', label: 'Extra high' },
-              { id: 'max', label: 'Max' },
-              { id: 'ultrathink', label: 'Ultrathink', description: 'Extended thinking, asked for in the prompt' }
-            ],
-            default: 'high'
-          }
-        },
-        {
-          id: 'claude-sonnet-5', name: 'Sonnet 5', default: true, effort: {
-            levels: [
-              { id: 'low', label: 'Low' },
-              { id: 'medium', label: 'Medium' },
-              { id: 'high', label: 'High' },
-              { id: 'xhigh', label: 'Extra high' },
-              { id: 'max', label: 'Max' },
-              { id: 'ultrathink', label: 'Ultrathink', description: 'Extended thinking, asked for in the prompt' }
-            ],
-            default: 'high'
-          }
-        },
-        {
-          id: 'claude-fable-5', name: 'Fable 5', legacy: true, effort: {
-            levels: [
-              { id: 'low', label: 'Low' },
-              { id: 'medium', label: 'Medium' },
-              { id: 'high', label: 'High' }
-            ],
-            default: 'high'
-          }
-        },
-        {
-          id: 'claude-opus-4-8', name: 'Opus 4.8', legacy: true, effort: {
-            levels: [
-              { id: 'low', label: 'Low' },
-              { id: 'medium', label: 'Medium' },
-              { id: 'high', label: 'High' }
-            ],
-            default: 'high'
-          }
-        },
-        {
-          id: 'claude-sonnet-4-6', name: 'Sonnet 4.6', legacy: true, effort: {
-            levels: [
-              { id: 'low', label: 'Low' },
-              { id: 'medium', label: 'Medium' },
-              { id: 'high', label: 'High' }
-            ],
-            default: 'high'
-          }
-        },
-        { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5', legacy: true }
-      ],
+      models: [],
       install: null,
       capabilities: {
         approvals: true,

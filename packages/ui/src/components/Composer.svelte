@@ -1,14 +1,14 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { Pencil, X } from '@lucide/svelte';
-  import type { Attachment, PreviewReference } from '@boite/contracts';
+  import { supportsSideQuestions, type Attachment, type PreviewReference } from '@boite/contracts';
   import { restorePreviewMentions } from '../lib/preview-mentions';
   import { AGENT_PREFIX, isAgentCommand, runCommand } from '../lib/commands.svelte';
   import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, mentionRows, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
   import { attachFiles } from '../lib/composer-attachments';
   import { rewindComposerEdit } from '../lib/composer-edit';
   import { fitHeight, selfSizing } from '../lib/composer-size';
-  import { insertImageReference, removeImageReferences, trackImageSend } from '../lib/composer-images';
+  import { editComposerInput, insertImageReference, removeImageReferences, trackImageSend } from '../lib/composer-images';
   import { unresolvedAssetId } from '../lib/draft-attachments';
   import { sentPrompts, type SentPrompt } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
@@ -24,14 +24,16 @@
   import MentionMenu from './MentionMenu.svelte';
   import SlashMenu from './SlashMenu.svelte';
   import ThreadActivity from './ThreadActivity.svelte';
+  import SideAnswer from './SideAnswer.svelte';
+  import { ComposerSide } from '../lib/composer-side.svelte';
   import PreviewReferences from './PreviewReferences.svelte';
 
   /** A centred draft drops the bottom padding so its heading and input form one block. */
   let { store, centered = false }: { store: Store; centered?: boolean } = $props();
 
-  const MAX_LINES = 8;
-  const sizesItself = selfSizing();
-
+  const MAX_LINES = 8, sizesItself = selfSizing();
+  const side = new ComposerSide();
+  $effect(() => { key; store.client; return () => side.clear(); });
   let key = $derived(store.openThread?.id ?? DRAFT_STASH_KEY);
   let composer = $derived(store.composerStates[key]);
   let hasQueue = $derived(!!(composer?.queued.length || store.openThread?.pendingAnswers?.length));
@@ -231,7 +233,7 @@
   let agentItems = $derived.by((): PaletteItem[] => agentSlashItems(store.openThread?.commands ?? []));
 
   /** Boite's prompt controls follow the agent's own commands. */
-  let boiteItems = $derived.by((): PaletteItem[] => boiteSlashItems(CHIP_COMMANDS));
+  let boiteItems = $derived.by((): PaletteItem[] => boiteSlashItems(CHIP_COMMANDS, !!store.openThread && !!provider && supportsSideQuestions(provider.protocol)));
 
   /** Agent commands first, so a tie goes to the agent's own. */
   let slashItems = $derived(rankItems(slashQuery ?? '', [...agentItems, ...boiteItems]));
@@ -316,12 +318,12 @@
       if (input.inputType.endsWith('Backward')) pendingEdit.start = element.selectionStart;
       else pendingEdit.end += Math.max(0, text.length - element.value.length);
     }
-    store.editComposerText(key, element.value, input.inputType === 'historyUndo' || input.inputType === 'historyRedo', pendingEdit);
+    const whole = editComposerInput(store, key, element, input.inputType === 'historyUndo' || input.inputType === 'historyRedo', pendingEdit);
     pendingEdit = undefined;
     recall = null;
     // Typing is proof the box has the keyboard, whatever the focus event did.
     focused = true;
-    track();
+    if (whole === null) track(); else caret = whole;
     if (!sizesItself) grow(); else if (highlighted) syncInput();
   }
 
@@ -373,6 +375,7 @@
     if (!canSend || !choice) return;
     const inputStore = store, inputKey = key, sendChoice = choice;
     const state = stateForInput();
+    if (side.submit(inputStore, inputKey, prompt)) { requestAnimationFrame(grow); return; }
     const editedThread = state.editing ? inputStore.openThread : null;
     if (state.editing && !await rewindComposerEdit(inputStore, inputKey, state)) return;
     // A queue that still holds something takes this prompt too, whatever the
@@ -597,13 +600,9 @@
     put(stashed);
   }
 
-  /**
-   * An agent command is completed into the box for the user to finish, since
-   * only they know its input; one of Boite's runs on the spot and the `/word`
-   * goes. Either way the text stops matching `/word`, so the menu closes itself.
-   */
+  /** Prompt commands complete the box; other commands execute and close the menu. */
   function pickSlash(item: PaletteItem) {
-    if (item.id === 'goal' || item.id === 'loop') {
+    if (item.id === 'goal' || item.id === 'loop' || item.id === 'btw') {
       put(`/${item.id} `);
       box?.focus();
       return;
@@ -722,6 +721,7 @@
       </div>
     {/if}
 
+    {#if side.current && side.current.threadId === store.openThread?.id}<SideAnswer {...side.current} {store} onclose={() => { side.clear(); box?.focus(); }} />{/if}
     {#if attachments.length > 0}
       {#key composer}<ComposerAttachments bind:this={attachmentStrip} {attachments} highlighted={highlightedImage} onremove={removeAttachment} onfocus={() => box?.focus()} />{/key}
     {/if}
@@ -811,7 +811,7 @@
     padding: 0 20px;
   }
 
-  /* A translucent surface with a top reflection; focus only changes its hairline. */
+  /* A translucent surface with a top reflection. */
   .composer {
     position: relative;
     display: flex;
@@ -825,13 +825,13 @@
     border: 1px solid var(--color-border);
     border-top-color: var(--color-edge);
     border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-composer);
-    transition: border-color var(--dur-2) var(--ease-out-quint);
+    --composer-rest: var(--shadow-composer);
+    box-shadow: var(--composer-rest), 0 0 0 3px transparent;
+    transition: border-color var(--dur-3) var(--ease-out-quint), box-shadow var(--dur-3) var(--ease-out-quint);
   }
 
-  .composer:focus-within {
-    border-color: var(--color-composer-focus);
-  }
+  /* Focus tints the hairline with the accent and lays a faint halo of it around the box. */
+  .composer:focus-within { border-color: var(--color-composer-focus); box-shadow: var(--composer-rest), 0 0 0 3px var(--color-composer-halo); }
 
   /* Editing a sent message: one quiet line above the box, the way out on its right. */
   .editing {
@@ -860,7 +860,7 @@
     color: var(--color-foreground);
   }
 
-  textarea.highlighted { color: transparent; caret-color: var(--color-foreground); }
+  textarea.highlighted { color: transparent; caret-color: var(--color-accent); }
   textarea.highlighted::selection { background: var(--color-accent-soft); }
 
   textarea, .input-paint {
@@ -870,8 +870,8 @@
     padding: 12px 14px 6px;
     border: none;
     background: transparent;
-    font-size: var(--text-base);
-    line-height: 1.5;
+    font-size: var(--text-reading);
+    line-height: var(--leading-reading);
   }
 
   textarea { display: block; }
@@ -884,7 +884,7 @@
   }
 
   @media (max-width: 720px) {
-    .composer { box-shadow: var(--shadow-e1); border-radius: var(--radius-xl); }
+    .composer { --composer-rest: var(--shadow-e1); border-radius: var(--radius-xl); }
     .speech-preview { padding: 0 16px 8px; }
     .speech-status { color: var(--color-accent); }
     textarea, .input-mirror { font-size: var(--text-md); }

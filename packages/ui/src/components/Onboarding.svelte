@@ -9,7 +9,7 @@
   import { focusedElement, restoreFocus } from '../lib/focus';
   import { mobileOverlay } from '../lib/mobile-history';
   import { fill, LOCALES, localeSetting, setLocaleSetting, strings, type LocaleSetting } from '../lib/i18n.svelte';
-  import { steps, type OnboardingStep } from '../lib/onboarding';
+  import { onPhone, steps, type OnboardingStep } from '../lib/onboarding';
   import { closeTour } from '../lib/onboarding.svelte';
   import { readTheme, setTheme, type Theme } from '../lib/theme';
   import { work, type Profile } from '../lib/work-prefs.svelte';
@@ -17,7 +17,9 @@
 
   let { store }: { store: Store } = $props();
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
-  const screens = $derived(steps(store.owner));
+  /** Read once, as the tour opens: a window resized halfway keeps the screens it started with. */
+  const phone = onPhone();
+  const screens = $derived(steps(store.owner, phone));
   let index = $state(0);
   $effect(() => { if (index >= screens.length) index = screens.length - 1; });
   const step = $derived<OnboardingStep>(screens[index] ?? 'welcome');
@@ -114,7 +116,7 @@
       <header><BoiteMark size={18} /><span>{strings.onboarding.label}</span><button class="ghost icon" data-testid="onboarding-skip" aria-label={strings.onboarding.skip} onclick={finish}><X size={16} /></button></header>
       {#key step}
         <div class="screen" data-testid="onboarding-step" data-step={step}>
-          <h1 id="onboarding-title" tabindex="-1" class:soul={step === 'privacy'}>{strings.onboarding[step].title}</h1>
+          <h1 id="onboarding-title" tabindex="-1" class:soul={step === 'privacy'}>{phone && step === 'reach' ? strings.onboarding.reach.onPhoneTitle : strings.onboarding[step].title}</h1>
           {#if step === 'welcome'}
             <p class="lead">{strings.onboarding.welcome.body}</p>
             <OnboardingScene scene="welcome" />
@@ -166,9 +168,9 @@
             <p class="lead">{strings.onboarding.usage.body}</p>
             <OnboardingScene scene="usage" />
           {:else if step === 'reach'}
-            <p class="lead">{strings.onboarding.demo.reachHint}</p>
+            <p class="lead">{phone ? strings.onboarding.reach.onPhoneBody : strings.onboarding.demo.reachHint}</p>
             <OnboardingScene scene="reach" />
-            <p class="detail">{strings.onboarding.reach.machinesBody}</p>
+            <p class="detail">{phone ? strings.onboarding.reach.onPhoneSettings : strings.onboarding.reach.machinesBody}</p>
           {:else if step === 'quiet'}
             <p class="lead">{strings.onboarding.demo.quietBody}</p>
             <div class="quiet-scene"><OnboardingScene scene="quiet" /></div>
@@ -188,7 +190,7 @@
       {/key}
       <footer>
         <div class="dots" role="group" aria-label={strings.onboarding.label}>
-          {#each screens as id, position (id)}<button class="dot" class:on={position === index} aria-current={position === index ? 'step' : undefined} aria-label={fill(strings.onboarding.progress, { index: String(position + 1), title: strings.onboarding[id].title })} data-testid="onboarding-dot-{id}" onclick={() => go(position)}></button>{/each}
+          {#each screens as id, position (id)}<button class="dot" class:on={position === index} aria-current={position === index ? 'step' : undefined} aria-label={fill(strings.onboarding.progress, { index: String(position + 1), title: phone && id === 'reach' ? strings.onboarding.reach.onPhoneTitle : strings.onboarding[id].title })} data-testid="onboarding-dot-{id}" onclick={() => go(position)}></button>{/each}
         </div>
         <button class="ghost" disabled={index === 0} data-testid="onboarding-back" onclick={() => go(index - 1)}>{strings.onboarding.back}</button>
         <!-- The consent rows are the privacy screen's way out. -->

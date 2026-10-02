@@ -67,14 +67,13 @@ export class Models {
 
   /**
    * The models to offer for this instance: the ones the agent listed when a
-   * probe already ran, else the descriptor's.
+   * probe already ran. Claude has no descriptor catalog to fall back to.
    */
   modelsOf(providerId: ProviderId, accountId: string | null): ModelInfo[] {
     const probed = accountId ? this.probedModels[probeKey(providerId, accountId)] : undefined;
     if (probed) return probed;
     const provider = this.ctx.store.providerOf(providerId);
-    const models = provider?.models ?? [];
-    return provider?.protocol === 'claude-sdk' ? models.map(({ effort, speeds, ...model }) => model) : models;
+    return provider?.protocol === 'claude-sdk' ? [] : provider?.models ?? [];
   }
 
   /** The model a choice runs on, out of what its own instance offers: what the chips read. */
@@ -96,7 +95,7 @@ export class Models {
   async probeModelEffort(providerId: ProviderId, accountId: string, model: string): Promise<void> {
     const s = this.ctx.store;
     const client = this.ctx.client;
-    if (!client || !s.owner) return;
+    if (!client) return;
     const key = `${probeKey(providerId, accountId)}::${model}`;
     if (this.effortAttempts.has(key)) return;
     await s.probeModels(providerId, accountId);
@@ -124,7 +123,7 @@ export class Models {
   /**
    * The first probe of this instance is running and nothing, live or cached,
    * has answered yet: the picker shows it reading instead of the descriptor's
-   * list. A probe that fails or is never asked leaves that list standing.
+   * list. A failed probe leaves no selectable Claude placeholders.
    */
   modelsPending(providerId: ProviderId, accountId: string | null): boolean {
     return accountId !== null && !this.probedModels[probeKey(providerId, accountId)] && this.isProbing(providerId, accountId);
@@ -145,7 +144,7 @@ export class Models {
     }
     const attempted = this.probeAttempts.has(key);
     const stale = attempted && Date.now() - (this.probeTimes.get(key) ?? 0) >= MODEL_CATALOG_MAX_AGE_MS;
-    if (!client || !this.ctx.store.owner || (!refresh && attempted && !stale)) return Promise.resolve();
+    if (!client || (!refresh && attempted && !stale)) return Promise.resolve();
     const account = this.ctx.store.accountOf(accountId);
     if (!refresh && (account?.status === 'unauthenticated' || account?.status === 'error')) return Promise.resolve();
     this.probeAttempts.add(key);

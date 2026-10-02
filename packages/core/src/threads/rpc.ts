@@ -1,7 +1,7 @@
 import { stat } from 'node:fs/promises';
 import type { ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
-import { refused } from '../errors.ts';
+import { invalidParams, refused } from '../errors.ts';
 import { PullRequests } from '../pull-requests.ts';
 import { steerUser } from './user-steering.ts';
 
@@ -26,6 +26,20 @@ async function requireCwd(core: Core, threadId: ThreadId): Promise<void> {
 }
 
 export function registerThreadMethods(core: Core): void {
+  core.router.register('threads.btw', async params => {
+    await requireCwd(core, params.threadId);
+    return core.threads.sideQuestions.ask(params.threadId, params.question, params.requestId);
+  });
+  core.router.register('threads.btw.fork', async params => {
+    await requireCwd(core, params.threadId);
+    return core.threads.sideQuestions.fork(params.threadId, params.requestId);
+  });
+  core.router.register('threads.btw.cancel', params => {
+    if (typeof params.requestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(params.requestId)) throw invalidParams('threads.btw.cancel.requestId: expected 8 to 128 URL-safe characters');
+    core.threads.require(params.threadId);
+    core.threads.sideQuestions.cancel(params.threadId, params.requestId);
+    return { ok: true };
+  });
   const pullRequests = new PullRequests(core);
   core.router.register('threads.pullRequest', params => pullRequests.read(params.threadId, params.refresh === true));
   core.router.register('threads.compact', async (params) => {

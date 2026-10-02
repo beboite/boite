@@ -15,6 +15,36 @@ async function settled() {
     .map(animation => animation.finished.catch(() => {}))])`);
 }
 
+async function menuAboveWhip(capture: string) {
+  for (const held of [false, true]) {
+    if (held) await page.click(button);
+    await page.evaluate(`(() => {
+      const rect = document.querySelector('${button}').getBoundingClientRect();
+      document.querySelector('[data-testid=thread-title]').dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true, clientX: rect.left, clientY: rect.top
+      }));
+    })()`);
+    await page.waitFor(`document.querySelector('[data-testid=context-menu]')`);
+    await settled();
+    await page.screenshot(join(import.meta.dir, '.artifacts', `${held ? 'held-' : ''}${capture}`));
+    expect(await page.evaluate(`(() => {
+      const rect = document.querySelector('${button}').getBoundingClientRect();
+      const menu = document.querySelector('[data-testid=context-menu]');
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      const box = menu.getBoundingClientRect();
+      return x >= box.left && x <= box.right && y >= box.top && y <= box.bottom
+        && menu.contains(document.elementFromPoint(x, y));
+    })()`)).toBe(true);
+    await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await page.waitFor(`!document.querySelector('[data-testid=context-menu]')`);
+    expect(await page.evaluate(`document.querySelector('${button}').getAttribute('aria-pressed')`)).toBe('false');
+    if (held) {
+      await page.waitFor(`!document.querySelector('[data-testid=whip-canvas]')`);
+    }
+  }
+}
+
 /** In-page: throws the rope, checks the throw moved nothing, then flicks until a crack starts the shake. */
 const crack = () => `(async () => {
     const root = document.getElementById('app');
@@ -132,6 +162,7 @@ test('the Whip experiment uses footer controls, animates a rope and turns off im
   await settled();
   await page.screenshot(join(import.meta.dir, '.artifacts', 'whip-desktop.png'));
   expect(await page.evaluate(`document.querySelector('${button}').closest('.foot') !== null`)).toBe(true);
+  await menuAboveWhip('whip-menu-desktop.png');
   expect(await shake()).toBe(true);
   await verifyRope('whip-rope-desktop.png');
   await page.evaluate(`globalThis.__boiteTest.setTheme('dark')`);
@@ -163,6 +194,7 @@ test('the Whip experiment uses footer controls, animates a rope and turns off im
     return document.querySelector('${button}').closest('.mobile-navigation') !== null && rect.right <= tabs.left && rect.top >= tabs.top && composer.bottom <= rect.top && rect.width >= 44 && rect.height >= 44;
   })()`)).toBe(true);
   await page.screenshot(join(import.meta.dir, '.artifacts', 'whip-phone.png'));
+  await menuAboveWhip('whip-menu-phone.png');
   await page.click('[data-testid=mobile-settings]');
   await page.click('[data-testid=settings-tab-experiments]');
   await page.click('[data-testid=experiment-resident-agents]');

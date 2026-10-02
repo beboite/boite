@@ -35,5 +35,7 @@ export function createPosixPlatform(
     forget() {},
     guardStatus: () => ({ running: false, hook: null, failure: null, audio: 'off', mutedPids: [] }),
     startedAt: (pid) => (os === 'linux' ? linuxStartedAt(pid) : null),
+    // Every process traced here is the core's own child, so the sweep never asks.
+    runningSince: () => null,
   };
 }

@@ -416,12 +416,26 @@ export function releaseThreadJob(threadId: string): void {
  * on purpose: the question is who wears the pid today.
  */
 export function processStartedAt(pid: number): number | null {
+  return createdAtOfPid(pid, false);
+}
+
+/**
+ * The same, for a process that has not exited. A pid still opens after its
+ * process ended for as long as anything holds a handle on it, a parent that
+ * spawned it for one, so the open alone does not say it runs.
+ */
+export function processRunningSince(pid: number): number | null {
+  return createdAtOfPid(pid, true);
+}
+
+function createdAtOfPid(pid: number, runningOnly: boolean): number | null {
   if (!Number.isInteger(pid) || pid <= 0) return null;
   const api = ensureNative();
   if (api === null) return null;
   const handle = api.openProcess(PROCESS_QUERY_LIMITED_INFORMATION, pid);
   if (handle === 0) return null;
   try {
+    if (runningOnly && exitCodeOf(api, handle) !== null) return null;
     return createdAtOf(api, handle);
   } finally {
     api.close(handle);
@@ -758,6 +772,7 @@ function onProcessStarted(threadId: string, pid: number, opened = 0): void {
     exe,
     commandLine: commandLineOf(api, handle),
     parentPid: parentPidOf(api, handle),
+    startedAt: createdAtOf(api, handle),
   });
 }
 

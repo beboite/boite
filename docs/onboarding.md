@@ -1,6 +1,7 @@
 # The tour
 
-Boite opens a seven-screen tour on a new owner device, six on a paired guest.
+Boite opens a seven-screen tour on a new owner device, six on a paired guest,
+and two on a phone ([below](#on-a-phone)).
 It waits for a connected core. Animated miniatures with SVG controls explain the features without
 calling live providers, reading quotas or navigating away from the tour.
 
@@ -47,6 +48,21 @@ management remain in Settings.
 
 In the shell the scrim starts under the title bar, so the window can be dragged,
 minimized or closed during the tour.
+
+## On a phone
+
+A phone runs no agent, so its tour sets nothing up on the computer. A browser
+page that opens under 720 px wide, the width where the phone layout starts, gets
+two screens, for an owner and a paired device alike: Welcome with its language
+and theme, then Reach, retitled "Your computer does the work", which says the
+agents run on the computer and that notifications and the home screen app are in
+Settings. The profile question, the demos, the taskbar limits, the host's focus
+and audio switches and the analytics consent stay in the tour of the computer;
+its preset and its consent are never written from a phone.
+
+`onPhone()` in `lib/onboarding.ts` decides once, as the tour opens: a window
+resized halfway keeps the screens it started with. The desktop shell always gets
+the full tour, however narrow its window.
 
 ## The window it opens in
 
@@ -126,7 +142,7 @@ not-a-developer preset without its permission change.
 Closing it writes `boite.onboarding` in `localStorage`:
 
 ```json
-{ "version": 6, "at": 1789660000000 }
+{ "version": 7, "at": 1789660000000 }
 ```
 
 The device that stores nothing, a browser refusing storage, sees the tour every

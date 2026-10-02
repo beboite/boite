@@ -370,11 +370,13 @@ describe('codex driver', () => {
     process.env['CODEX_FAKE_INIT_FAILURES'] = '99';
     process.env['CODEX_FAKE_INIT_RPC_ERROR'] = 'live';
     const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    const failureLog = client.next('core.log', entry => entry.level === 'error' && entry.threadId === threadId, 20000);
     await client.call('turns.start', { threadId, prompt: 'Never sent' });
     await waitFor(() => fakeLog().includes('initialize RPC error'), 20000);
     const waiting = performance.now();
     expect((await finished).status).toBe('error');
     expect(performance.now() - waiting).toBeLessThan(4000);
+    expect((await failureLog).message).toContain('failed:');
     expect(countLines('initialize')).toBe(1);
     expect(fakeLog()).not.toContain('turn/start');
     await waitFor(() => harness!.core.procs.liveCount(threadId) === 0);

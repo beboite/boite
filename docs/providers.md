@@ -68,8 +68,9 @@ OpenCode's descriptor, with the `linux` and `macos` profiles, `shared` and
   from Boite, and the Accounts page says so instead of pretending.
 - `models` is a `ModelInfo` list: `id`, `name`, an optional `default`, `legacy`
   (still accepted, folded away in the picker), `badge: "new"`, and an `effort`
-  block of named levels with a default. An agent that owns its own list gets the
-  single model `default`, and the probe supplies the rest.
+  block of named levels with a default. A native agent may declare an empty list
+  and let the probe supply its catalog. The unnamed `default` alias remains
+  accepted for existing descriptors. Echo requires at least one static model.
 - `capabilities` is six booleans: `approvals`, `hooks`, `checkpoint`, `images`,
   `planMode`, `resume`. `approvals: false` means the thread's permission mode
   never reaches that agent, and the UI stops promising a gate that does not exist.

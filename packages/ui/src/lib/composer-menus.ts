@@ -28,7 +28,7 @@ export function mentionQueryOf(text: string, caret: number, previewReferences: P
 
 /** The agent's own, in the order it reported them. Never on a draft: there is no agent yet. */
 export function agentSlashItems(commands: AgentCommand[]): PaletteItem[] {
-  return commands.filter((command) => !['goal', 'loop'].includes(command.name)).map((command) => ({
+  return commands.filter((command) => !['goal', 'loop', 'btw'].includes(command.name)).map((command) => ({
     id: `${AGENT_PREFIX}${command.name}`,
     kind: 'command' as const,
     label: `/${command.name}`,
@@ -41,8 +41,9 @@ export function agentSlashItems(commands: AgentCommand[]): PaletteItem[] {
  * Only actions for the current prompt. Application navigation stays in the
  * command palette rather than competing with the agent's slash commands.
  */
-export function boiteSlashItems(chips: Record<string, ChipCommand>): PaletteItem[] {
+export function boiteSlashItems(chips: Record<string, ChipCommand>, sideQuestions = false): PaletteItem[] {
   return [
+    ...(sideQuestions ? [{ id: 'btw', kind: 'command' as const, label: '/btw', hint: '<question>', description: strings.btw.description }] : []),
     { id: 'goal', kind: 'command', label: '/goal', description: strings.activity.goalDescription },
     { id: 'loop', kind: 'command', label: '/loop', description: strings.activity.loopDescription },
     ...Object.entries(chips).map(([name, chip]) => ({

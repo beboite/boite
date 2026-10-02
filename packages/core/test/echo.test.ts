@@ -670,6 +670,7 @@ describe('echo driver', () => {
   });
 
   test('a model change resets the effort to the new model default, and an unknown level is refused', async () => {
+    scriptedClaude(harness);
     const client = await harness.connect();
     const project = await client.call('projects.add', { path: harness.dataDir, name: 'claude project' });
     const account = await client.call('accounts.add', { providerId: 'claude', label: 'effort seat' });

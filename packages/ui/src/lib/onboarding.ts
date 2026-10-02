@@ -16,7 +16,7 @@
 export const ONBOARDING_STORAGE_KEY = 'boite.onboarding';
 
 /** Bumped when the tour changes shape, not when a sentence in it is reworded. */
-export const ONBOARDING_VERSION = 6;
+export const ONBOARDING_VERSION = 7;
 
 export interface OnboardingRecord {
   version: number;
@@ -34,8 +34,26 @@ export type OnboardingStep = 'welcome' | 'profile' | 'agents' | 'usage' | 'reach
  */
 const ORDER: readonly OnboardingStep[] = ['welcome', 'profile', 'agents', 'usage', 'reach', 'quiet', 'privacy'];
 
+/**
+ * A phone runs no agent: it follows a computer's conversations. Its tour says
+ * that and stops. The profile preset, the demos of the panel and the taskbar,
+ * the host's focus and audio switches and its analytics consent all describe
+ * the computer, and stay in the tour that opens there.
+ */
+const PHONE_ORDER: readonly OnboardingStep[] = ['welcome', 'reach'];
+
+/** The width under which the app draws its phone layout, the one Settings switches on too. */
+export const PHONE_QUERY = '(max-width: 720px)';
+
+/** Whether this window is the phone layout of a browser, never the desktop shell. */
+export function onPhone(): boolean {
+  if ('__TAURI_INTERNALS__' in window) return false;
+  return typeof window.matchMedia === 'function' && window.matchMedia(PHONE_QUERY).matches;
+}
+
 /** The screens this build shows, in order. A fresh array: the caller owns it. */
-export function steps(owner = true): OnboardingStep[] {
+export function steps(owner = true, phone = false): OnboardingStep[] {
+  if (phone) return [...PHONE_ORDER];
   return ORDER.filter(step => step !== 'privacy' || owner);
 }
 

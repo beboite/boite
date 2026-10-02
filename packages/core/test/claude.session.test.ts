@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Options } from '@anthropic-ai/claude-agent-sdk';
+import { connect } from '../src/client.ts';
 import { waitFor } from './harness.ts';
 import {
   answerEach,
@@ -369,6 +370,7 @@ describe('claude driver', () => {
 });
 
 test('Claude discovery reports only its model capabilities, caches and refreshes without a prompt', async () => {
+  harness.core.providers.require('claude').models = [];
   scripted(fake => { fake.modelsAnswer = [
     { value: 'default', resolvedModel: 'claude-opus-5', displayName: 'Default (recommended)', description: '', supportsFastMode: true },
     { value: 'opus', resolvedModel: 'claude-opus-5', displayName: 'Opus', description: 'Opus 5.5 with 1M context', supportsEffort: true, supportedEffortLevels: ['low', 'high'], supportsAdaptiveThinking: true, supportsFastMode: true },
@@ -396,10 +398,16 @@ test('Claude discovery reports only its model capabilities, caches and refreshes
   expect(result.models[1]?.effort).toBeUndefined(); expect(result.models[1]?.speeds).toBeUndefined();
   await client.call('providers.probe', { providerId: 'claude', accountId });
   expect(calls).toHaveLength(1); expect(calls[0]?.prompts).toEqual([]); expect(queries[0]?.closes).toBe(1);
-  const refreshed = await client.call('providers.probe', { providerId: 'claude', accountId, refresh: true });
-  expect(calls).toHaveLength(2);
-  expect(refreshed.models.find(model => model.id === 'claude-fable-6')).toMatchObject({ name: 'Fable 6' });
-  expect(refreshed.models.every(model => !model.legacy)).toBe(true);
+  const { grant } = await client.call('pairing.grant', {});
+  const phone = await connect(harness.url, '', { grant });
+  try {
+    expect((await phone.call('providers.probe', { providerId: 'claude', accountId })).models).toEqual(result.models);
+    const refreshed = await phone.call('providers.probe', { providerId: 'claude', accountId, refresh: true });
+    expect(calls).toHaveLength(2);
+    expect(refreshed.models.find(model => model.id === 'claude-fable-6')).toMatchObject({ name: 'Fable 6' });
+    expect(refreshed.models.every(model => !model.legacy)).toBe(true);
+    expect(calls.every(call => call.prompts.length === 0)).toBe(true);
+  } finally { phone.close(); }
   await client.call('threads.update', { threadId: id, model: 'claude-opus-5', speed: 'fast' });
   expect(await runTurn(client, id, 'fast turn')).toBe('done');
   expect(calls.at(-1)?.options.settings).toEqual({ fastMode: true });

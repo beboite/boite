@@ -18,6 +18,37 @@ beforeAll(async () => {
 }, 60_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
+test.each([1440, 390])('paired devices discover, refresh and select native models at %ipx', async width => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 720 });
+  await page.navigate(`${url}&principal=session`);
+  await page.waitFor(`globalThis.__boiteTest.workspace.active.booted`);
+  expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.owner`)).toBe(false);
+  expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.providerOf('claude').models.length`)).toBe(0);
+  await page.click(width < 720 ? '[data-testid=mobile-new]' : '[data-testid=new-thread]');
+  await page.click('[data-testid=composer-picker]');
+  for (const provider of ['claude', 'codex', 'opencode']) {
+    await page.click(`[data-provider="${provider}"]`);
+    await page.waitFor(`document.querySelector('[data-testid=composer-picker-menu] [data-model]') && !document.querySelector('[data-testid=picker-probing]')`);
+    expect(await page.evaluate(`!!globalThis.__boiteTest.workspace.active.probedModels[${JSON.stringify(provider + '::')} + globalThis.__boiteTest.workspace.active.accountsOf(${JSON.stringify(provider)})[0].id]`)).toBe(true);
+    await capture(`picker-paired-${provider}-${width}.png`);
+  }
+  await page.click('[data-provider=codex]');
+  await page.click('[data-testid=picker-refresh]');
+  await page.waitFor(`document.querySelector('[data-model="codex-demo"]') && !document.querySelector('[data-testid=picker-probing]')`);
+  await page.type('[data-testid=picker-search]', 'unlisted-model');
+  await page.waitFor(`document.querySelectorAll('[data-testid=picker-no-models]').length === 1`);
+  await page.type('[data-testid=picker-search]', 'codex');
+  await page.click('[data-model="codex-demo"]');
+  await page.waitFor(`!document.querySelector('[data-testid=composer-picker-menu]')`);
+  expect(await page.evaluate(`(() => {
+    const choice = globalThis.__boiteTest.workspace.active.defaultChoice();
+    return { providerId: choice?.providerId, model: choice?.model, effort: choice?.effort };
+  })()`)).toEqual({ providerId: 'codex', model: 'codex-demo', effort: 'high' });
+  expect(page.errors()).toEqual([]);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.navigate(url);
+}, 30_000);
+
 test.each([1440, 390])('search finds legacy and OpenCode models without changing provider defaults at %ipx', async width => {
   await page.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 720 });
   await page.navigate(url);
