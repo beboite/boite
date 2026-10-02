@@ -556,6 +556,7 @@ export class AccountStore {
     return this.cancelLoginRun(accountId);
   }
 
+  /** Stop login and its final check, including while removal locks the account against new work. */
   private async cancelLoginRun(accountId: AccountId): Promise<{ ok: true }> {
     await this.core.terminals.close(loginThreadId(accountId));
     const run = this.logins.get(accountId);

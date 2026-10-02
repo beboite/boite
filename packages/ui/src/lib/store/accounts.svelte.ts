@@ -137,6 +137,7 @@ export class Accounts {
     }
   }
 
+  /** Hide the login result and prevent an older reload snapshot from restoring it. */
   dismissLogin(accountId: string): void {
     this.loginChanges.set(accountId, ++this.loginRevision);
     delete this.logins[accountId];

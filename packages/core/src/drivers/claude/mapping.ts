@@ -219,6 +219,7 @@ export function isAuthenticationFailure(reason: string): boolean {
   return /\b(?:OAuth (?:session|(?:access )?token) (?:has |is )?(?:expired|revoked)|Signed out of Claude|Invalid API key)\b/i.test(reason);
 }
 
+/** Account-level authentication refusal; delegated-agent failures cannot sign out its parent. */
 export function authenticationFailureOf(message: SDKMessage): string | null {
   if (subagentOf(message) !== null) return null;
   if (message.type === 'assistant' && message.error === 'authentication_failed') return errorSentence(message.error);

@@ -1470,6 +1470,28 @@ test('closing a pairing link discards a pending replacement from the same core',
   } finally { release(); spy.mockRestore(); }
 });
 
+test('replacing a machine endpoint clears its previous pairing link before connecting', async () => {
+  const { store, client } = await ready();
+  await store.mintPairing();
+  expect(store.pairing).not.toBeNull();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const connect = vi.spyOn(store, 'connect').mockReturnValue(gate);
+  let connecting: Promise<void> | undefined;
+  try {
+    connecting = store.connectEndpoint({ url: 'https://replacement.test', token: 'fixture-token', paired: true });
+    expect(store.pairing).toBeNull();
+    release();
+    await connecting;
+    expect(store.pairing).toBeNull();
+  } finally {
+    release();
+    await connecting;
+    connect.mockRestore();
+    store.client?.close(); store.detach(); client.close();
+  }
+});
+
 test('connecting a second account moves the composer to that account, not the first signed in', async () => {
   const store = new Store();
   store.attach(new FakeClient({ delayMs: 0 }));

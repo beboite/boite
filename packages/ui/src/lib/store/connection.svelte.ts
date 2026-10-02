@@ -97,6 +97,7 @@ export class Connection {
 
   async connectEndpoint(endpoint: Endpoint): Promise<void> {
     const s = this.ctx.store;
+    s.closePairing();
     this.attachEndpoint(endpoint, false);
     const client = this.ctx.client;
     let timedOut = false;

@@ -22,6 +22,7 @@ export class Pairing {
     }
   }
 
+  /** Hide this grant and ignore pending mint responses; the grant itself keeps its expiry. */
   closePairing(): void {
     this.revision++;
     this.pairing = null;
