@@ -139,7 +139,13 @@ test('paired resource usage is sanitized, read-only and unavailable to agent tok
     agent = await connect(harness.url, harness.core.agents.tokenFor(threadId));
     await expect(agent.call('resources.usage', { watch: true })).rejects.toThrow("not one of the agent's methods");
     if (process.platform === 'linux') {
-      await waitFor(() => (harness.core.procs.resourceUsage().agents.find(row => row.threadId === threadId)?.disk.writeBytesPerSecond ?? 0) > 0, 5000);
+      // A successful tmpfs write contributes zero physical storage bytes.
+      await waitFor(() => {
+        const disk = harness.core.procs.resourceUsage().agents.find(row => row.threadId === threadId)?.disk;
+        return disk !== undefined && (disk.sampledAt ?? 0) > snapshot.sampledAt
+          && disk.readBytesPerSecond !== null && Number.isFinite(disk.readBytesPerSecond)
+          && disk.writeBytesPerSecond !== null && Number.isFinite(disk.writeBytesPerSecond);
+      }, 5000);
       expect(harness.core.procs.resourceUsage().agents.find(row => row.threadId === threadId)?.disk).toMatchObject({ coverage: 'partial', source: 'linux-proc-io' });
       const unreadable = spyOn(processPlatform, 'sample').mockReturnValue(null);
       try {
