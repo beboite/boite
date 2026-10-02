@@ -20,15 +20,16 @@ beforeAll(async () => {
   await page.click(`[data-testid="thread-row"][data-thread-id="${threadId}"]`);
   await page.click('[data-testid=thread-menu-trigger]');
   await page.click('[data-testid=thread-menu-trigger-menu] [data-value=agents]');
-  await page.waitFor('!!document.querySelector("[data-testid=delegation-launch]")');
+  await page.waitFor('!!document.querySelector("[data-testid=delegation-surface]")');
 }, 60_000);
 afterAll(async () => { await page?.close(); owner?.close(); await core?.stop(); }, 30_000);
 
-test('launch, inspect, forward and stop a real delegated thread from the panel', async () => {
-  await page.type('[data-testid="delegation-task"]', 'Review parser boundaries [sleep:20000]');
-  await page.click('[data-testid="delegation-spawn"]');
+test('inspect and stop a real delegated thread from the panel, which launches nothing itself', async () => {
+  // An empty conversation shows the title and nothing to fill in.
+  expect(await page.evaluate('document.querySelectorAll("[data-testid=delegation-surface] :is(textarea, input, details, p)").length')).toBe(0);
+  await owner.call('delegation.spawn', { threadId, profileId: 'review', task: 'Review parser boundaries [sleep:20000]', requestId: 'first-agent' });
   await page.waitFor('document.querySelectorAll("[data-testid=agent-dock-member]").length === 1');
-  await page.waitFor('!!document.querySelector("[data-testid=delegation-detail]")');
+  await page.waitFor('document.querySelectorAll("[data-testid=delegation-member]").length === 1');
   const view = await owner.call('delegation.get', { threadId });
   expect(view.agents).toHaveLength(1);
   expect(view.agents[0]!.thread.parentThreadId).toBe(threadId);
@@ -41,11 +42,8 @@ test('launch, inspect, forward and stop a real delegated thread from the panel',
   await page.waitFor('!!document.querySelector("[data-testid=delegation-member]")');
   expect(await page.text('[data-testid="delegation-member"]')).toContain('echo');
   await page.click('[data-testid="delegation-member"]');
-  await page.type('[data-testid="delegation-message"]', 'Report only file names');
-  await page.evaluate('document.querySelector("[data-testid=delegation-message]").closest("form").requestSubmit()');
-  await page.waitFor('document.querySelector("[data-testid=delegation-surface]")?.textContent.includes("Report only file names")');
-  const sent = await owner.call('delegation.get', { threadId });
-  expect(sent.messages.find(m => m.text === 'Report only file names')?.origin).toBe('user');
+  await page.waitFor('!!document.querySelector("[data-testid=delegation-detail]")');
+  expect(await page.evaluate('document.querySelectorAll("[data-testid=delegation-surface] :is(textarea, input)").length')).toBe(0);
   await page.click('[data-testid="delegation-stop-all"]');
   await page.waitFor('!document.querySelector("[data-testid=agent-dock]")');
   expect((await owner.call('delegation.get', { threadId })).config.paused).toBe(true);
@@ -69,7 +67,7 @@ test('the phone can open the same team and inspect its retained result', async (
   await page.screenshot(join(import.meta.dir, '.artifacts/delegation-phone.png'));
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 500, deviceScaleFactor: 1, mobile: true });
   await page.waitFor('innerHeight === 500');
-  expect(await page.evaluate('document.querySelector("[data-testid=delegation-message]").getBoundingClientRect().bottom <= innerHeight')).toBe(true);
+  expect(await page.evaluate('document.querySelector("[data-testid=delegation-open-thread]").getBoundingClientRect().bottom <= innerHeight')).toBe(true);
   expect(page.errors()).toEqual([]);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
 }, 15_000);

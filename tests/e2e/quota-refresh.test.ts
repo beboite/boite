@@ -101,3 +101,93 @@ test('quota failures name the provider error at desktop and phone widths', async
     await capture(`quota-grok-error-${width}.png`);
   }
 }, 60_000);
+
+for (const width of [1280, 390]) {
+  test(`subscription names and separate rows survive rename at ${width}px`, async () => {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: width === 390 });
+    await page.navigate(`${origin}/?fake=1&open=recent`);
+    await page.click('[data-testid="nav-settings"]');
+    await page.click('[data-testid="settings-tab-limits"]');
+    await page.waitFor(`document.querySelector('[data-testid="limits-refresh"]')?.getAttribute('aria-busy') === 'false'`);
+    expect(await page.evaluate(`document.querySelector('[data-testid="usage-limit-provider"][data-account-id="a-codex"] strong').textContent`)).toBe('Codex');
+    const tracked = '[data-testid="tracked-account"][data-account-id="a-codex"]';
+    await page.click(`${tracked} [data-testid="account-rename"]`);
+    await page.waitFor(`document.activeElement?.getAttribute('data-testid') === 'account-name'`);
+    await page.type(`${tracked} [data-testid="account-name"]`, 'Personal subscription with a deliberately long account name');
+    await capture(`subscription-rename-${width}.png`);
+    await page.click(`${tracked} [data-testid="account-save"]`);
+    await page.waitFor(`document.querySelector('[data-testid="usage-limit-provider"][data-account-id="a-codex"] strong')?.textContent.startsWith('Personal subscription')`);
+    await page.evaluate(`(async () => {
+      const store = globalThis.__boiteTest.workspace.active;
+      const account = await store.addAccount({ providerId: 'codex', label: 'Work', useDefaultLocation: false });
+      await store.client.call('accounts.login', { accountId: account.id });
+    })()`);
+    await page.waitFor(`globalThis.__boiteTest.workspace.active.accounts.some(account => account.providerId === 'codex' && account.label === 'Work' && account.status === 'ok')`);
+    await page.click('[data-testid="limits-refresh"]');
+    await page.waitFor(`document.querySelectorAll('[data-testid="usage-limit-provider"][data-provider="codex"]').length === 2`);
+    await page.evaluate(`document.querySelector('[data-testid="usage-limit-provider"][data-account-id="a-codex"]').scrollIntoView({ block: 'center' })`);
+    await capture(`subscription-cards-${width}.png`);
+    expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    if (width === 390) return;
+    // The sidebar uses the tray's component and retains both account labels.
+    await page.evaluate(`globalThis.__boiteTest.workspace.active.showChat()`);
+    await page.click('[data-testid="nav-limits"]');
+    await page.waitFor(`document.querySelectorAll('[data-testid="quota-provider"][data-provider="codex"]').length === 2`);
+    const names = await page.evaluate<string[]>(`[...document.querySelectorAll('[data-testid="quota-provider"][data-provider="codex"] .name')].map(row => row.textContent)`);
+    expect(names).toEqual(['Personal subscription with a deliberately long account name', 'Work']);
+    await page.click('[data-testid="quota-provider"][data-provider="codex"] .summary');
+    await page.waitFor(`document.querySelector('[data-testid="quota-provider"][data-provider="codex"] .details')`);
+    await capture(`subscription-lines-${width}.png`);
+    expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    expect(await page.evaluate(`(() => { const body = document.querySelector('[data-testid="limits-glance"] .body'); return body.scrollWidth <= body.clientWidth; })()`)).toBe(true);
+  }, 60_000);
+}
+
+
+test('the tray follows account renames immediately and keeps subscriptions separate', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 650, deviceScaleFactor: 1, mobile: false });
+  await page.evaluate(`localStorage.removeItem('boite.quotas')`);
+  await page.navigate(`${origin}/?fake=1&view=quotas&quotaExtras=1`);
+  await page.waitFor(`document.querySelector('[data-testid="quota-refresh"]')?.getAttribute('aria-busy') === 'false' && document.querySelector('[data-testid="quota-provider"][data-account-id="a-codex"] .name')?.textContent === 'Codex'`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="quota-provider"][data-account-id="a-codex"] .name').textContent`)).toBe('Codex');
+  await page.evaluate(`(async () => {
+    const { FakeClient } = await import('/src/lib/fake-client.ts');
+    const call = FakeClient.prototype.call;
+    FakeClient.prototype.call = async function(method, params) {
+      globalThis.trayClient = this;
+      const result = await call.call(this, method, params);
+      if (method === 'accounts.list' && globalThis.holdAccounts) {
+        return new Promise(resolve => { globalThis.releaseAccounts = () => resolve(result); });
+      }
+      return result;
+    };
+  })()`);
+  await page.click('[data-testid="quota-refresh"]');
+  await page.waitFor(`globalThis.trayClient && document.querySelector('[data-testid="quota-refresh"]').getAttribute('aria-busy') === 'false'`);
+  await page.evaluate(`globalThis.holdAccounts = true`);
+  await page.click('[data-testid="quota-refresh"]');
+  await page.waitFor('globalThis.releaseAccounts');
+  await page.evaluate(`globalThis.trayClient.call('accounts.rename', { accountId: 'a-codex', label: 'Personal subscription with a deliberately long account name' })`);
+  // The account event updates the name even before any quota read.
+  await page.waitFor(`document.querySelector('[data-testid="quota-provider"][data-account-id="a-codex"] .name').textContent.startsWith('Personal subscription')`);
+  await page.evaluate(`globalThis.holdAccounts = false; globalThis.releaseAccounts()`);
+  // The snapshot was captured before the rename: releasing it must retain the event's label.
+  await page.waitFor(`!globalThis.holdAccounts && document.querySelector('[data-testid="quota-refresh"]').getAttribute('aria-busy') === 'false'`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="quota-provider"][data-account-id="a-codex"] .name').textContent`)).toContain('Personal subscription');
+  await page.evaluate(`(async () => {
+    const account = await globalThis.trayClient.call('accounts.add', { providerId: 'codex', label: 'Work', useDefaultLocation: false });
+    await globalThis.trayClient.call('accounts.login', { accountId: account.id });
+  })()`);
+  await page.waitFor(`globalThis.trayClient.call('accounts.list', {}).then(accounts => accounts.some(account => account.label === 'Work' && account.status === 'ok'))`);
+  await page.click('[data-testid="quota-refresh"]');
+  await page.waitFor(`document.querySelectorAll('[data-testid="quota-provider"][data-provider="codex"]').length === 2`);
+  await capture('subscription-tray.png');
+  expect(await page.evaluate(`document.querySelectorAll('[data-testid="quota-provider"][data-provider="codex"] [data-testid="quota-credits"]').length`)).toBe(2);
+  expect(await page.evaluate(`document.querySelectorAll('[data-testid="quota-provider"][data-provider="codex"] [data-testid="quota-extras"] .account').length`)).toBe(0);
+  expect(await page.evaluate(`document.querySelector('section').scrollWidth <= document.querySelector('section').clientWidth`)).toBe(true);
+  const personal = '[data-testid="quota-provider"][data-account-id="a-codex"]';
+  await page.click(`${personal} .summary`);
+  await capture('subscription-tray-expanded.png');
+  expect(await page.evaluate(`document.querySelectorAll('${personal} .details [role="meter"]').length`)).toBe(2);
+  expect(await page.evaluate(`document.querySelectorAll('[data-testid="quota-provider"][data-provider="codex"]')[1].querySelector('.details')`)).toBeNull();
+}, 60_000);

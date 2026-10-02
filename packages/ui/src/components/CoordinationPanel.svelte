@@ -5,8 +5,8 @@
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
-  // Expanded is the thread menu's dialog; embedded is the Agents panel row.
-  let { store, threadId, embedded = false, expanded = false }: { store: Store; threadId: string; embedded?: boolean; expanded?: boolean } = $props();
+  // Expanded is the thread menu's dialog.
+  let { store, threadId, expanded = false }: { store: Store; threadId: string; expanded?: boolean } = $props();
   const fallback = defaultCoordinationConfig();
   let view = $derived(store.coordination?.self.threadId === threadId ? store.coordination : null);
   let config = $derived(view?.config ?? fallback);
@@ -48,7 +48,7 @@
   }
 </script>
 
-<details class="coordination disclosure" class:embedded class:expanded open={expanded} data-testid={embedded ? 'coordination-settings' : 'coordination-panel'} ontoggle={toggleSettings}>
+<details class="coordination disclosure" class:expanded open={expanded} data-testid="coordination-panel" ontoggle={toggleSettings}>
   <summary>
     <Network size={14} strokeWidth={1.75} />
     <span>{strings.coordination.heading}</span>
@@ -189,15 +189,11 @@
   .warnings { margin-top: 8px; padding: 8px 10px; border-left: 2px solid var(--color-live); background: var(--color-surface-2); font-size: var(--text-sm); }
   .warnings p { margin-top: 4px; }
   .error { margin-top: 10px; color: var(--color-danger); font-size: var(--text-sm); }
-  /* In the Agents panel it is one of the panel's rows, like its other settings. */
-  .coordination.embedded { flex: none; width: auto; margin: 0; border: 0; border-bottom: 1px solid var(--color-border); border-radius: 0; background: transparent; }
-  .coordination.embedded > summary { padding: 0 16px; border-radius: 0; }
-  .coordination.embedded .body { padding: 0 16px 14px; }
   .coordination.expanded { width: 100%; margin: 0; border: 0; background: transparent; }
   .coordination.expanded > summary { display: none; }
   .coordination.expanded .body { border: 0; max-height: none; }
   @media (max-width: 720px) {
-    .coordination:not(.embedded):not(.expanded) { width: calc(100% - 20px); margin-top: 6px; }
+    .coordination:not(.expanded) { width: calc(100% - 20px); margin-top: 6px; }
     .body { padding: 0 10px 12px; }
   }
 </style>

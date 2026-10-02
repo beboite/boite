@@ -162,6 +162,8 @@ An agent can also start a new conversation in another project with
 `boite thread new <project> <brief>`; the [CLI page](cli.md) describes it. Its
 first answer comes back as a message from that conversation, and the same
 Communication settings decide whether the agent may start one.
+`boite projects add <folder>` registers a folder as a project first, under the
+same settings.
 
 The CLI uses the authenticated current conversation as sender. Agents cannot
 impersonate a different local conversation, link machines or change

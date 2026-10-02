@@ -990,6 +990,26 @@ test('image references follow the caret, mixed attachments and removal without l
   expect(document.querySelector('[data-testid=composer-image-preview]')).toBeNull();
 });
 
+test('deleting one character of an image reference removes the reference and its image', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await type('A ');
+  paste(pngFile('first.png'));
+  await waitFor(() => input().value === 'A [Image 1] ');
+  paste(pngFile('second.png'));
+  await waitFor(() => input().value === 'A [Image 1] [Image 2] ');
+  // Backspace with the caret right after the first reference's bracket.
+  input().setSelectionRange(11, 11);
+  input().dispatchEvent(new Event('beforeinput', { bubbles: true }));
+  input().value = 'A [Image 1 [Image 2] ';
+  input().setSelectionRange(10, 10);
+  input().dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
+  await waitFor(() => chips().length === 1);
+  expect(input().value).toBe('A  [Image 1] ');
+  expect(input().selectionStart).toBe(2);
+  expect(chips()[0]!.getAttribute('title')).toBe('[Image 1] · second.png');
+});
+
 test('sending waits for a file read so the attachment cannot land in the next prompt', async () => {
   await mountOnFake();
   await store.open('t-trace');

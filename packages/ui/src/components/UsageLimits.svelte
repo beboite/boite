@@ -4,67 +4,59 @@
   import type { AccountQuota } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import { exactTime, quotaWindowName, tenth, weekdayTime } from '../lib/format';
-  import { quotaGroups } from '../lib/quota-reader.svelte';
+  import { quotaAccountName } from '../lib/quota-reader.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
 
   /**
-   * One card per provider, one block per signed-in account inside it. The
-   * account's name shows only when the provider has several; while a new
-   * reading loads, the old one stays desaturated until that account answers.
+   * One card per signed-in account, named by its label beside the provider's
+   * logo. While a new reading loads, the old one stays desaturated until that
+   * account answers.
    */
   let { rows, loading = false, completed = [] }: { rows: AccountQuota[]; loading?: boolean; completed?: string[] } = $props();
 
-  let groups = $derived(quotaGroups(rows));
   const remaining = (used: number) => Math.max(0, Math.round((100 - used) * 10) / 10);
-  /** The oldest reading of the card, the one a glance should doubt first. */
-  const checked = (group: AccountQuota[]) => {
-    const times = group.flatMap((row) => (row.checkedAt === null ? [] : [row.checkedAt]));
-    return times.length > 0 ? Math.min(...times) : null;
-  };
 </script>
 
 <div class="limits" class:loading data-testid="usage-limits">
-  {#each groups as group (group.providerId)}
-    {@const at = checked(group.rows)}
-    {@const observed = group.rows.some((row) => row.source === 'observation')}
-    <section class="card provider" data-testid="usage-limit-provider" data-provider={group.providerId}>
+  {#each rows as row (row.accountId)}
+    {@const name = quotaAccountName(row)}
+    {@const at = row.checkedAt}
+    {@const observed = row.source === 'observation'}
+    {@const pending = loading && !completed.includes(row.accountId)}
+    {@const stale = row.windows.length > 0 && (row.error !== null || row.status === 'unavailable')}
+    <section class="card provider" data-testid="usage-limit-provider" data-provider={row.providerId} data-account-id={row.accountId}>
       <header>
-        <span class="logo"><ProviderLogo providerId={group.providerId} size={22} /></span>
+        <span class="logo" title={row.providerName}><ProviderLogo providerId={row.providerId} size={22} /></span>
         <div class="identity">
-          <strong>{group.providerName}</strong>
+          <strong title={name}>{name}</strong>
           {#if at !== null}<small class="checked" title={fill(observed ? strings.quotas.observed : strings.quotas.checked, { time: observed ? exactTime(at) : weekdayTime(at) })}><Clock3 size={11} aria-hidden="true" />{observed ? exactTime(at) : weekdayTime(at)}</small>{/if}
         </div>
       </header>
-      {#each group.rows as row (row.accountId)}
-        {@const pending = loading && !completed.includes(row.accountId)}
-        <!-- Bars without a fresh answer: the last good reading, kept after a failure or before a re-read. -->
-        {@const stale = row.windows.length > 0 && (row.error !== null || row.status === 'unavailable')}
-        <article data-testid="usage-limit-account" data-provider={row.providerId} aria-busy={pending} class:stale>
-          {#if group.rows.length > 1}<h3>{row.label}</h3>{/if}
-          {#each row.windows as limit (limit.id)}
-            {@const left = remaining(limit.usedPercent)}
-            <div class="window" class:low={limit.usedPercent >= 80} class:out={limit.usedPercent >= 100}>
-              <div class="line">
-                <span class="name">{quotaWindowName(limit.label)}</span>
-                <span class="left">{fill(strings.quotas.remaining, { percent: tenth(left) })}</span>
-              </div>
-              <div class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={left} aria-label="{group.providerName} {quotaWindowName(limit.label)}">
-                <div class="fill" style:width="{left}%"></div>
-              </div>
-              {#if limit.resetsAt}<small class="reset"><Clock3 size={11} aria-hidden="true" />{fill(strings.quotas.resets, { time: weekdayTime(limit.resetsAt) })}</small>{/if}
+      <!-- Bars without a fresh answer: the last good reading, kept after a failure or before a re-read. -->
+      <article data-testid="usage-limit-account" data-provider={row.providerId} aria-busy={pending} class:stale>
+        {#each row.windows as limit (limit.id)}
+          {@const left = remaining(limit.usedPercent)}
+          <div class="window" class:low={limit.usedPercent >= 80} class:out={limit.usedPercent >= 100}>
+            <div class="line">
+              <span class="name">{quotaWindowName(limit.label)}</span>
+              <span class="left">{fill(strings.quotas.remaining, { percent: tenth(left) })}</span>
             </div>
-          {/each}
-          <QuotaExtras {row} />
-          {#if stale}<small data-testid="usage-limit-stale">{row.checkedAt === null ? strings.quotas.stale : `${strings.quotas.stale} · ${weekdayTime(row.checkedAt)}`}</small>{/if}
-          {#if row.windows.length === 0 && !row.error}
-            {#if pending}
-              <p class="muted" role="status" data-testid="usage-limit-loading">{strings.quotas.loading}</p>
-              {#if row.providerId === 'antigravity'}<small>{strings.quotas.slowHint}</small>{/if}
-            {:else}<p class="muted">{strings.quotas.unavailable}</p>{/if}
-          {/if}
-          {#if row.error}<p class="error" role="status">{row.error}</p>{/if}
-        </article>
-      {/each}
+            <div class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={left} aria-label="{name} {quotaWindowName(limit.label)}">
+              <div class="fill" style:width="{left}%"></div>
+            </div>
+            {#if limit.resetsAt}<small class="reset"><Clock3 size={11} aria-hidden="true" />{fill(strings.quotas.resets, { time: weekdayTime(limit.resetsAt) })}</small>{/if}
+          </div>
+        {/each}
+        <QuotaExtras {row} />
+        {#if stale}<small data-testid="usage-limit-stale">{row.checkedAt === null ? strings.quotas.stale : `${strings.quotas.stale} · ${weekdayTime(row.checkedAt)}`}</small>{/if}
+        {#if row.windows.length === 0 && !row.error}
+          {#if pending}
+            <p class="muted" role="status" data-testid="usage-limit-loading">{strings.quotas.loading}</p>
+            {#if row.providerId === 'antigravity'}<small>{strings.quotas.slowHint}</small>{/if}
+          {:else}<p class="muted">{strings.quotas.unavailable}</p>{/if}
+        {/if}
+        {#if row.error}<p class="error" role="status">{row.error}</p>{/if}
+      </article>
     </section>
   {/each}
 </div>
@@ -79,8 +71,6 @@
   .checked, .reset { display: flex; align-items: center; gap: 5px; }
   .checked :global(svg), .reset :global(svg) { flex: none; opacity: 0.7; }
   article { display: grid; gap: 17px; }
-  article + article { padding-top: 14px; border-top: 1px solid var(--color-border); }
-  h3 { margin: 0; font-size: var(--text-sm); font-weight: 500; color: var(--color-muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .window { display: grid; gap: 7px; }
   .line { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: var(--text-sm); }
   .name { font-weight: 500; }

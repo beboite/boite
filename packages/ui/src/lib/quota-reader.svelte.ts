@@ -34,23 +34,23 @@ function remember(key: string, rows: AccountQuota[]): void {
  * someone turned it on.
  */
 export function shownQuotas(rows: AccountQuota[], accounts?: Account[]): AccountQuota[] {
-  return rows.filter((row) => {
+  return namedQuotas(rows, accounts).filter((row) => {
     if (row.status === 'unsupported' || row.status === 'disabled' || !row.enabled) return false;
     return accounts?.find((account) => account.id === row.accountId)?.status !== 'unauthenticated';
   });
 }
 
-export type QuotaGroup = { providerId: string; providerName: string; rows: AccountQuota[] };
+/** Account labels are current metadata, independent of the cached usage reading. */
+export function namedQuotas(rows: AccountQuota[], accounts?: Account[]): AccountQuota[] {
+  return rows.map((row) => {
+    const account = accounts?.find((entry) => entry.id === row.accountId);
+    return account && typeof account.label === 'string' && account.label !== row.label ? { ...row, label: account.label } : row;
+  });
+}
 
-/** One group per provider, in the order the core lists them. */
-export function quotaGroups(rows: AccountQuota[]): QuotaGroup[] {
-  const groups: QuotaGroup[] = [];
-  for (const row of rows) {
-    const group = groups.find((entry) => entry.providerId === row.providerId);
-    if (group) group.rows.push(row);
-    else groups.push({ providerId: row.providerId, providerName: row.providerName, rows: [row] });
-  }
-  return groups;
+/** Older default CLI accounts predate provider-named account labels. */
+export function quotaAccountName(row: AccountQuota): string {
+  return row.label === 'Default' || !row.label.trim() ? row.providerName : row.label;
 }
 
 export class QuotaReader {
