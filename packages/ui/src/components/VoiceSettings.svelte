@@ -1,5 +1,6 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
+  import VoiceInputSettings from './VoiceInputSettings.svelte';
   import { AlertTriangle, Check, Download, LoaderCircle, Trash2 } from '@lucide/svelte';
   import { RpcErrorCode, type SpeechConfig, type SpeechModel, type SpeechStatus } from '@boite/contracts';
   import { RpcFailure } from '../lib/client';
@@ -136,6 +137,8 @@
     <h1>{strings.speech.heading}<InfoTip topic={strings.speech.heading} text={strings.speech.description} /></h1>
     {#if saved}<span class="saved" role="status"><Check size={14} />{strings.speech.saved}</span>{/if}
   </header>
+
+  <VoiceInputSettings />
 
   {#if unsupported}
     <section class="card status" data-testid="voice-status" data-state="unsupported">

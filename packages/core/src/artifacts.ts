@@ -79,6 +79,9 @@ export async function publishArtifact(core: Core, params: RpcParams<'artifacts.p
     };
     core.journal.append({ type: 'artifact.published', threadId: thread.id, version: 1, payload: message }, () => core.journal.putMessage(message));
     committed = true;
+    if (core.threads.runner.handles.has(thread.id) && core.journal.getTurn(turn.id)?.status === 'running') {
+      core.threads.runner.answerAfter.set(turn.id, message.createdAt);
+    }
     core.bus.emit('message.started', message);
     core.bus.emit('message.completed', { threadId: thread.id, messageId: message.id, state: 'complete' });
     return message;

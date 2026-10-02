@@ -5,7 +5,7 @@ import type { SpawnedChild } from '../../procs.ts';
 import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import type { SessionContext, TurnContext } from '../types.ts';
 import { hookReport } from './hooks.ts';
-import { backgroundKind, commandsOf, restoredCost, subagentOf } from './mapping.ts';
+import { authenticationFailureOf, backgroundKind, commandsOf, isAuthenticationFailure, restoredCost, subagentOf } from './mapping.ts';
 import { toolGate } from './permissions.ts';
 import { childEnv, liveSetup, PromptQueue, STDERR_MAX } from './query.ts';
 import type { ClaudeDeps, LiveSetup } from './query.ts';
@@ -84,6 +84,7 @@ export class ClaudeSession {
   private started = false;
   private closing = false;
   private ended = false;
+  private loginRejected = false;
   /** The last `total_cost_usd` this CLI process reported, which the next result includes. */
   private costSoFar = 0;
   /** A resumed session's earlier turns, until the first result says whether the CLI restored them. */
@@ -356,6 +357,12 @@ export class ClaudeSession {
   }
 
   private receive(message: SDKMessage): void {
+    const authFailure = authenticationFailureOf(message);
+    if (authFailure !== null) {
+      this.loginRejected = true;
+      (this.head()?.ctx ?? this.ctx).authenticationFailed?.();
+      if (this.head() === null) { this.finish(authFailure); return; }
+    }
     const sessionId = (message as { session_id?: string }).session_id;
     if (typeof sessionId === 'string' && sessionId.length > 0) this.sessionId = sessionId;
     if (message.type === 'system') this.noteTasks(message);
@@ -389,7 +396,7 @@ export class ClaudeSession {
       if (typeof message.total_cost_usd === 'number') this.costSoFar = message.total_cost_usd;
       // A CLI that could not resume holds no session worth keeping warm: the
       // retry the core sends next must get a query of its own, with no resume.
-      if (turn.sessionLost) this.close(null);
+      if (turn.sessionLost || this.loginRejected) this.close(null);
       this.endTurn(turn);
     }
   }
@@ -487,6 +494,7 @@ export class ClaudeSession {
   /** The loop is over: the CLI is gone, so nothing of this session survives. */
   private finish(reason: string | null): void {
     if (this.ended) return;
+    if (reason !== null && isAuthenticationFailure(reason)) (this.head()?.ctx ?? this.ctx).authenticationFailed?.();
     this.ended = true;
     // Nothing waits on a query that will never open.
     this.markReady();

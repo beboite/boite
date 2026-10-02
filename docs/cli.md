@@ -262,6 +262,11 @@ desktop and paired phones after the original changes or disappears. The thread
 must have a turn and must not be archived. Images, videos and audio appear
 inline by default. PDF and local file previews are under the
 [Chat files and previews experiment](experiments.md#chat-files-and-previews).
+When the agent continues working after publishing, new text and tool cards
+appear below the files. Updates to tools already running stay on their original
+cards. Publishing a file does not end the turn.
+Folding an earlier card keeps a reader following the newest output at the bottom.
+Scrolling up or navigating with the keyboard releases that follow.
 
 Clicking an image opens the zoomable viewer. For other files in the desktop app,
 clicking the name or icon saves it in the system's Downloads folder and opens it.

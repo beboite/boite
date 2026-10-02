@@ -1,51 +1,54 @@
 <script lang="ts">
-  import { UsersRound } from '@lucide/svelte';
-  import { strings } from '../lib/strings';
+  import { ChevronRight } from '@lucide/svelte';
+  import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import StatusMark from './StatusMark.svelte';
+  import AgentElapsed from './AgentElapsed.svelte';
 
   let { store, threadId }: { store: Store; threadId: string } = $props();
   let active = $derived((store.delegation?.agents ?? []).filter(agent => ['queued', 'running', 'waiting'].includes(agent.thread.status)));
   let native = $derived((store.delegation?.nativeAgents ?? []).filter(agent => agent.status === 'running'));
+  let runs = $derived(store.workflowsOf(threadId).filter(run => run.status === 'running'));
+  let count = $derived(active.length + native.length);
+  let startedAt = $derived(Math.min(
+    ...active.map(agent => agent.lastTurn?.startedAt ?? agent.lastTurn?.queuedAt ?? agent.thread.createdAt),
+    ...native.map(agent => agent.startedAt),
+    ...runs.map(run => run.createdAt)
+  ));
 
   $effect(() => { void store.loadDelegation(threadId); });
   $effect(() => { void store.loadWorkflows(threadId); });
 
-  function open(threadId: string): void {
-    store.panel.open('agents');
-    void store.selectDelegatedAgent(threadId);
+  function open(): void {
+    const surface = store.panel.open('agents');
+    store.panel.update(surface.id, { runId: undefined });
+    void store.selectDelegatedAgent(null);
   }
 </script>
 
-{#if active.length > 0 || native.length > 0}
-  <nav class="dock" aria-label={strings.delegation.activeAgents} data-testid="agent-dock">
-    <span class="label"><UsersRound size={14} strokeWidth={1.75} />{strings.delegation.activeAgents}</span>
-    <div class="agents">
-      {#each active as agent (agent.thread.id)}
-        <button type="button" class="chip agent" data-testid="agent-dock-member" data-agent-id={agent.thread.id} onclick={() => open(agent.thread.id)}>
-          <StatusMark status={agent.thread.status} />
-          <span>{agent.thread.title}</span>
-        </button>
-      {/each}
-      {#each native as agent (agent.id)}
-        <button type="button" class="chip agent" data-testid="native-agent-dock-member" onclick={() => { store.panel.open('agents'); void store.selectDelegatedAgent(null); }} title={strings.delegation.nativeHeading}>
-          <StatusMark status="running" />
-          <span>{agent.name ?? agent.task ?? strings.delegation.nativeHeading}</span>
-        </button>
-      {/each}
-    </div>
-  </nav>
+{#if count > 0 || runs.length > 0}
+  <div class="dock" data-testid="agent-dock">
+    <button type="button" class="quiet activity" data-testid="active-subagents" onclick={open}>
+      <StatusMark status="running" />
+      <span class="counts">
+        {#if count > 0}<span>{fill(count === 1 ? strings.delegation.activeOne : strings.delegation.activeMany, { count: String(count) })}</span>{/if}
+        {#if count > 0 && runs.length > 0}<span aria-hidden="true">·</span>{/if}
+        {#if runs.length > 0}<span>{fill(runs.length === 1 ? strings.workflow.activeOne : strings.workflow.activeMany, { count: String(runs.length) })}</span>{/if}
+      </span>
+      <span aria-hidden="true">·</span>
+      <AgentElapsed {startedAt} finishedAt={null} active />
+      <ChevronRight size={13} strokeWidth={1.75} />
+    </button>
+  </div>
 {/if}
 
 <style>
-  .dock { width: min(calc(100% - 40px), var(--content)); margin: 0 auto 8px; padding: 6px 8px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-e1); }
-  .label { display: flex; align-items: center; gap: 5px; flex: none; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 600; }
-  .agents { display: flex; gap: 5px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
-  .agents::-webkit-scrollbar { display: none; }
-  .agent { flex: none; max-width: 190px; cursor: pointer; }
-  .agent span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dock { width: min(calc(100% - 40px), var(--content)); margin: 0 auto 8px; }
+  .activity { max-width: 100%; min-height: 32px; height: auto; gap: 6px; font-size: var(--text-xs); border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
+  .counts { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; text-align: left; }
+  .activity :global(.elapsed) { flex: none; color: var(--color-muted-foreground); }
+  .activity :global(svg) { flex: none; color: var(--color-muted-foreground); }
   @media (max-width: 720px) {
     .dock { width: calc(100% - 20px); }
-    .label { font-size: 0; gap: 0; }
   }
 </style>

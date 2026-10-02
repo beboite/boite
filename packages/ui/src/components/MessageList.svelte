@@ -6,7 +6,7 @@
   import type { Store } from '../lib/store.svelte';
   import MessageTurnSummary from './MessageTurnSummary.svelte';
   import TurnFiles from './TurnFiles.svelte';
-  import { turnDiffs, turnFiles, type TurnDiff, type TurnFile } from '../lib/turn-files';
+  import { visibleTurnFiles } from '../lib/turn-files';
   import MessageOutline from './MessageOutline.svelte';
   import ForwardedAgentMessage from './ForwardedAgentMessage.svelte';
   import DelegationActivity from './DelegationActivity.svelte';
@@ -24,7 +24,7 @@
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
   import { glides } from '../lib/motion';
-  import { BottomGlide, PointerHold, typingKey, watchWheel, wheelsUp } from '../lib/timeline-follow';
+  import { BottomGlide, PointerHold, keysUp, typingKey, watchWheel, wheelsUp } from '../lib/timeline-follow';
   import { workspace } from '../lib/workspace.svelte';
 
   let {
@@ -140,11 +140,17 @@
   /** Bumped by every measurement that moved a height, so the window recomputes on real numbers. */
   let measured = $state(0);
   /** Ids that already played the rise, so a message re-entering the window stays still. */
-  const risen = new Set<string>(savedReading?.heights.keys());
+  const risen = new Set<string>([...(savedReading?.heights.keys() ?? []), ...untrack(() => messages.map(message => message.id))]);
   /** One observer for the viewport's height and for every rendered message. */
   let boxes: ResizeObserver | undefined;
 
-  let scrollTop = $state(savedReading?.top ?? 0);
+  const slots = new SlotTotals(heights);
+  const savedTop = untrack(() => {
+    const anchor = savedReading?.pinned ? undefined : savedReading?.anchor;
+    const at = anchor ? timeline.findIndex(message => message.id === anchor.id) : -1;
+    return at < 0 ? savedReading?.top ?? 0 : Math.max(0, (slots.totals(timeline, timelineOrder)[at] ?? 0) - anchor!.offset);
+  });
+  let scrollTop = $state(savedTop);
   let readingAnchor = savedReading?.anchor;
   let restoringAnchor = Boolean(savedReading?.anchor && !savedReading.pinned);
   function rememberAnchor() {
@@ -181,10 +187,10 @@
   onDestroy(() => {
     if (!viewport || !store.readingPositions) return;
     store.readingPositions.delete(threadId);
-    store.readingPositions.set(threadId, { top: scrollTop, pinned, heights: new Map(heights), anchor: readingAnchor, reservePrompt, followPrompt: promptTarget });
+    store.readingPositions.set(threadId, { top: scrollTop, pinned, heights: new Map(heights), anchor: readingAnchor, height: viewHeight, reservePrompt, followPrompt: promptTarget });
     while (store.readingPositions.size > 32) store.readingPositions.delete(store.readingPositions.keys().next().value!);
   });
-  let viewHeight = $state(0);
+  let viewHeight = $state(savedReading?.height ?? 0);
   let navigationTarget = $state<string | null>(null);
   let promptTarget = $state<string | null>(savedReading?.followPrompt ?? null);
   let reservePrompt = $state<string | null>(savedReading?.reservePrompt ?? null);
@@ -197,12 +203,13 @@
     liftFrame = 0;
     lifting = false;
   }
-  function releaseNavigation() {
+  function releaseNavigation(event?: KeyboardEvent) {
     releaseAnchor(); navigationTarget = null;
     if (promptTarget) pinned = false;
     promptTarget = null;
     stopLift();
     endGlide(false);
+    if (event && !typingKey(event)) { pinned = false; if (keysUp(event, viewport)) leftBottom = true; }
   }
   onDestroy(stopLift);
   const activePrompt = $derived.by(() => {
@@ -248,9 +255,6 @@
   });
 
   const windowed = $derived(timeline.length > WINDOW_FROM);
-
-  /** The running totals of the slot heights, which the window bisects. */
-  const slots = new SlotTotals(heights);
 
   function totals(list: Message[]): number[] {
     return slots.totals(list, timelineOrder);
@@ -362,7 +366,9 @@
       last = reaches(total, count, first, scrollTop + viewHeight);
     }
 
-    const start = Math.max(0, first - OVERSCAN);
+    // At the live end, paint fewer offscreen rows. Reading history keeps the
+    // larger buffer in both directions for wheel and touch navigation.
+    const start = Math.max(0, first - (pinned ? 2 : OVERSCAN));
     const end = Math.min(count, last + OVERSCAN);
     return { start, end, first, above: total[start] ?? 0, below: whole - (total[end] ?? 0) };
   });
@@ -463,7 +469,7 @@
     if (!restoredReading) {
       restoredReading = true;
       if (savedReading && !savedReading.pinned) {
-        box.scrollTop = savedReading.top;
+        box.scrollTop = savedTop;
         // What is loaded now is the baseline: the button counts what arrives after.
         untrack(markSeen);
       }
@@ -507,25 +513,29 @@
     return box.scrollHeight - box.scrollTop - box.clientHeight < 80;
   }
 
+  let scrolledHeight = 0;
   function onscroll() {
     const box = viewport;
     if (!box) return;
+    const height = box.scrollHeight;
+    const resized = height !== scrolledHeight;
+    scrolledHeight = height;
     // Pulled up by a finger or the scrollbar thumb, the list leaves the bottom as the wheel does.
     if (hold.held && box.scrollTop < scrollTop - 1) leftBottom = true;
+    const movedDown = box.scrollTop > scrollTop + 1;
     scrollTop = box.scrollTop;
     viewHeight = box.clientHeight;
     if (navigationTarget || promptTarget) return;
-    // Read right after each event, once the window has rendered. Read before that render, or a frame or
-    // a timer later, a navigation that followed a scroll restored the wrong place (tests/e2e/mobile.test.ts).
+    // Read the anchor after the render, before another navigation can restore it.
     void tick().then(rememberAnchor);
-    const distance = box.scrollHeight - box.scrollTop - box.clientHeight;
+    const distance = height - box.scrollTop - box.clientHeight;
     if (glide.active) {
       if (distance > 1) return;
       endGlide(false);
     }
-    // Only the very bottom takes back a list the wheel took up.
-    if (distance <= 1) leftBottom = false;
-    pinned = !leftBottom && atBottom(box);
+    if (distance <= 1 && movedDown) leftBottom = false;
+    // A card shrinking can clamp scrollTop before new output grows the list again.
+    pinned = !leftBottom && (atBottom(box) || (pinned && resized && !hold.held));
     if (restoringAnchor) pinned = false;
     // Away from the bottom, the way back shows, whether or not anything new came in.
     behind = !pinned;
@@ -625,11 +635,7 @@
 
   $effect(() => () => { glide.stop(); hold.release(); });
 
-  /**
-   * A message arriving, and the bottom one growing no more than ten times a
-   * second. Never the character count of what streams: reading that here ran
-   * this whole effect on every token of every answer.
-   */
+  /** Follow new messages and measured tail growth, never text deltas. */
   $effect(() => {
     void timeline.length;
     void tail;
@@ -643,7 +649,7 @@
     } else if (opened || pinned) {
       // Held by the reader or on its way down, the list is still at the bottom: it takes the new height once free.
       if (opened || untrack(following)) {
-        box.scrollTop = box.scrollHeight;
+        scrolledHeight = box.scrollHeight; box.scrollTop = scrolledHeight;
         scrollTop = box.scrollTop;
       }
       pinned = true;
@@ -685,20 +691,8 @@
   /** What each finished turn wrote, shown once at its end; a turn still running is left alone. */
   const filesByTurn = $derived.by(() => {
     const thread = store.openThread;
-    const result = new Map<string, { files: TurnFile[]; diffs: TurnDiff[]; cwd: string }>();
-    if (!thread || thread.id !== threadId) return result;
-    const parts = new Map<string, Message['parts']>();
-    for (const message of messages) {
-      if (message.role !== 'assistant') continue;
-      parts.set(message.turnId, [...(parts.get(message.turnId) ?? []), ...message.parts]);
-    }
-    for (const turn of thread.turns) {
-      if (turn.status === 'running' || turn.status === 'queued') continue;
-      const own = parts.get(turn.id) ?? [];
-      const files = turnFiles(own, thread.cwd);
-      if (files.length > 0) result.set(turn.id, { files, diffs: turnDiffs(own), cwd: thread.cwd });
-    }
-    return result;
+    if (!thread || thread.id !== threadId) return new Map();
+    return visibleTurnFiles(messages, thread.turns, new Set(rendered.map(message => message.turnId)), thread.cwd);
   });
   const lastInTurn = $derived.by(() => {
     const result = new Map<string, string>();
@@ -758,7 +752,7 @@
     hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = 0; pinned = false; pullOlder(viewport); } }} />
   <!-- Input releases restored and navigation anchors; programmatic corrections keep them. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="timeline" bind:this={viewport} use:watchWheel={onwheel} {onscroll} ontouchstart={press} onpointerdown={press} onkeydown={releaseNavigation} data-testid="timeline">
+  <div class="timeline" bind:this={viewport} use:watchWheel={onwheel} {onscroll} ontouchstart={press} onpointerdown={press} onkeydown={releaseNavigation} style:overflow-anchor={timeline.at(-1)?.state === 'streaming' ? 'none' : undefined} data-testid="timeline">
     <div class="column">
       <!-- paging: the one line the top of the list shows while a page is in flight. -->
       {#if store.loadingOlder}
@@ -840,8 +834,7 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    /* Reserve only the space occupied by the activity overlay. Queued prompts
-       already take their own space in the composer below this viewport. */
+    /* Reserve room for the activity overlay. Queued prompts live in the composer. */
     padding: 20px 20px calc(var(--dock-room, 0px) + 20px) var(--outline-room);
     overscroll-behavior: contain;
   }

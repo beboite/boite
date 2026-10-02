@@ -31,6 +31,8 @@
   let runs = $derived(openThreadId ? store.workflowsOf(openThreadId) : []);
   let run = $derived(runs.find(entry => entry.id === surface.runId) ?? null);
   let agents = $derived(view?.agents ?? []);
+  let native = $derived((view?.nativeAgents ?? []).filter(agent => agent.source !== 'process'));
+  let processes = $derived((view?.nativeAgents ?? []).filter(agent => agent.source === 'process'));
   let selected = $derived(agents.find(agent => agent.thread.id === store.delegationSelectedAgentId) ?? null);
   let busy = $derived(agents.some(agent => ['queued', 'running', 'waiting'].includes(agent.thread.status)) || runs.some(isLive));
 
@@ -178,7 +180,8 @@
           </article>
         {/if}
       </div>
-      {#if !selected && view.nativeAgents?.length}<NativeAgents agents={view.nativeAgents} />{/if}
+      {#if !selected && native.length}<NativeAgents agents={native} />{/if}
+      {#if !selected && processes.length}<NativeAgents agents={processes} source="process" />{/if}
     {/if}
 
     {#if store.delegationError}<p class="error" role="alert">{store.delegationError}</p>{/if}

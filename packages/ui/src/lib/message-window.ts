@@ -9,9 +9,9 @@ import type { Message } from '@boite/contracts';
 export const windowStats = { recomputes: 0, slots: 0 };
 
 /** Under this many messages the list renders whole: a window would cost more than it saves. */
-export const WINDOW_FROM = 60;
+export const WINDOW_FROM = 24;
 /** Messages kept rendered above and below the viewport, so a scroll finds them already there. */
-export const OVERSCAN = 8;
+export const OVERSCAN = 4;
 /** What a message's slot is worth before it has been measured. */
 export const ESTIMATE = 80;
 /** The column's flex gap, which belongs to the slot a message takes. */

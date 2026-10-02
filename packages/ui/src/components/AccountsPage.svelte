@@ -389,6 +389,7 @@
         </form>
       {:else}
         <p class="output bad" data-testid="account-login-output">{login.output}</p>
+        <button type="button" class="quiet small" data-testid="account-login-dismiss" onclick={() => store.dismissLogin(loginAccount.id)}>{strings.common.close}</button>
       {/if}
     </div>
   {/if}

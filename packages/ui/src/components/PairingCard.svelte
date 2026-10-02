@@ -82,6 +82,7 @@
       </button>
       {#if store.pairing}
         <button type="button" onclick={() => void store.copy(store.pairing?.url ?? '')}>{strings.settings.pairing.copy}</button>
+        <button type="button" class="quiet" data-testid="pairing-close" onclick={() => store.closePairing()}>{strings.common.close}</button>
       {/if}
     </div>
     {#if store.pairing}

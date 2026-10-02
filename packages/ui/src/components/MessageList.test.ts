@@ -369,13 +369,13 @@ test('a long thread renders a window of messages and carries the rest in the spa
   const middle = shownIds();
   expect(middle.length).toBeLessThan(60);
   expect(middle).toContain('m-250');
-  expect(middle[0]).toBe('m-242');
-  expect(middle.at(-1)).toBe('m-265');
+  expect(middle[0]).toBe('m-246');
+  expect(middle.at(-1)).toBe('m-261');
 
   const above = spacer('timeline-above');
   const below = spacer('timeline-below');
-  expect(above?.style.height).toBe(`${242 * ESTIMATE}px`);
-  expect(below?.style.height).toBe(`${(500 - 266) * ESTIMATE}px`);
+  expect(above?.style.height).toBe(`${246 * ESTIMATE}px`);
+  expect(below?.style.height).toBe(`${(500 - 262) * ESTIMATE}px`);
 });
 
 test('scrolled up, the way to the bottom shows with nothing new below, and takes the reader there', async () => {
@@ -454,6 +454,16 @@ test('a thread reopened where the reader left it, above the bottom, counts what 
   client.close();
 });
 
+test('a saved message anchor is rendered even when the old scroll offset points elsewhere', () => {
+  const messages = thread(500);
+  stubLayout(messages.length * ESTIMATE);
+  const reading = { ...store, readingPositions: new Map([['t-long', { top: 80, pinned: false, heights: new Map(), anchor: { id: 'm-250', offset: 0 }, height: VIEW_HEIGHT }]]) } as unknown as Store;
+  running = mount(MessageList, { target: document.body, props: { store: reading, threadId: 't-long', messages } });
+  flushSync();
+  expect(shownIds()).toContain('m-250');
+  expect(document.querySelector<HTMLElement>('[data-testid=timeline]')!.scrollTop).toBe(250 * ESTIMATE);
+});
+
 test('Ctrl+F counts matches in messages the window has not drawn, walks to them, and Escape closes it', async () => {
   window.localStorage.clear();
   // jsdom measures no range; the bar only reads one to decide whether to scroll.
@@ -503,7 +513,7 @@ test('Ctrl+F counts matches in messages the window has not drawn, walks to them,
 });
 
 test('a short thread renders whole, with no spacer at all', async () => {
-  const messages = thread(30);
+  const messages = thread(20);
   stubLayout(messages.length * ESTIMATE);
 
   running = mount(MessageList, {
@@ -512,9 +522,9 @@ test('a short thread renders whole, with no spacer at all', async () => {
   });
   await settle();
 
-  expect(articles().length).toBe(30);
+  expect(articles().length).toBe(20);
   expect(shownIds()[0]).toBe('m-0');
-  expect(shownIds().at(-1)).toBe('m-29');
+  expect(shownIds().at(-1)).toBe('m-19');
   expect(spacer('timeline-above')).toBeNull();
   expect(spacer('timeline-below')).toBeNull();
 });
@@ -743,6 +753,38 @@ test('a press holds the pinned list, and a release the window never saw still fr
   expect(document.querySelector('[data-testid=jump-to-latest]')).toBeNull();
   live.detach();
   client.close();
+});
+
+test('a keyboard step up leaves bottom-following even within its 80 pixel tolerance', async () => {
+  window.localStorage.clear();
+  const client = new FakeClient({ delayMs: 0, long: true });
+  const live = new Store();
+  live.attach(client);
+  try {
+    await live.connect(); await live.open('t-long');
+    const messages = live.openThread!.messages;
+    stubLayout(messages.length * ESTIMATE);
+    running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages } });
+    await settle();
+    const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+    timeline.scrollTop = scrollHeight - VIEW_HEIGHT;
+    timeline.dispatchEvent(new Event('scroll'));
+    await settle();
+    timeline.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    timeline.scrollTop -= 30;
+    timeline.dispatchEvent(new Event('scroll'));
+    await settle();
+    expect(document.querySelector('[data-testid=jump-to-latest]')).not.toBeNull();
+    const left = timeline.scrollTop;
+    messages.push({ ...JSON.parse(JSON.stringify(messages.at(-1)!)), id: 'm-keyboard-arrival' });
+    scrollHeight += ESTIMATE;
+    await settle();
+    expect(timeline.scrollTop).toBe(left);
+    timeline.scrollTop = scrollHeight - VIEW_HEIGHT;
+    timeline.dispatchEvent(new Event('scroll'));
+    await settle();
+    expect(document.querySelector('[data-testid=jump-to-latest]')).toBeNull();
+  } finally { live.detach(); client.close(); }
 });
 
 test('the timeline watches the wheel passively, so a notch never waits for the main thread', async () => {
