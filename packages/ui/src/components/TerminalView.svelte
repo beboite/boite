@@ -1,15 +1,16 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { TerminalState, RpcEvents } from '@boite/contracts';
+  import type { TerminalState } from '@boite/contracts';
   import '@xterm/xterm/css/xterm.css';
-  import { openExternal } from '../lib/links';
+  import { focusComposer } from '../lib/focus';
   import type { Store } from '../lib/store.svelte';
 
   /**
-   * One shell of the core, drawn by xterm.js. `start` attaches to it or starts
-   * it at this size; what it prints arrives as `terminal.output`, what is typed
-   * goes back as `terminals.write`. An app chord (Ctrl+J, Ctrl+K) stays the
-   * app's: the terminal lets it through instead of sending it to the shell.
+   * Where one shell of the core shows. The screen itself is the store's
+   * (`lib/terminal-session.svelte.ts`) and outlives this component: it is put
+   * here on mount and taken out again, never redrawn, so hiding the drawer
+   * keeps the scrollback and whatever a full-screen program drew. `start`
+   * attaches to the shell or starts it at the screen's size.
    */
   let {
     store,
@@ -26,131 +27,18 @@
   } = $props();
 
   let host = $state<HTMLDivElement | undefined>(undefined);
-  /** Set once attached: asks the core for the shell again after a reconnect. */
-  let reattach: (() => void) | null = null;
-  let connection: string | null = null;
-
-  // Output sent while the socket was down never arrived, and a restarted core
-  // has no shell any more: back on line, the screen is redrawn from the core.
-  $effect(() => {
-    const now = store.connection;
-    const was = connection;
-    connection = now;
-    if (now === 'ready' && was !== null && was !== 'ready') reattach?.();
-  });
-
-  /**
-   * Chords the app leaves alone while a text field has the focus. The shell
-   * takes them: Ctrl+W deletes a word there; stash and send-and-draft stay with it.
-   */
-  const SHELL_CHORDS = new Set(['close-surface', 'stash', 'send-and-draft']);
-
-  /** The chrome's own tokens, so the terminal changes with the theme. ANSI colours stay xterm's. */
-  function theme() {
-    const css = getComputedStyle(document.documentElement);
-    const token = (name: string) => css.getPropertyValue(name).trim();
-    return {
-      background: token('--color-code-background'),
-      foreground: token('--color-code-foreground'),
-      cursor: token('--color-foreground'),
-      cursorAccent: token('--color-code-background'),
-      selectionBackground: token('--color-selection')
-    };
-  }
 
   onMount(() => {
-    let disposed = false;
-    const cleanups: (() => void)[] = [];
-    void (async () => {
-      const [{ Terminal }, { FitAddon }, { WebLinksAddon }] = await Promise.all([
-        import('@xterm/xterm'),
-        import('@xterm/addon-fit'),
-        import('@xterm/addon-web-links')
-      ]);
-      const client = store.client;
-      if (disposed || !host || !client) return;
-      const css = getComputedStyle(document.documentElement);
-      const term = new Terminal({
-        fontFamily: css.getPropertyValue('--font-mono').trim(),
-        fontSize: 13,
-        cursorBlink: true,
-        scrollback: 5000,
-        theme: theme()
-      });
-      const fit = new FitAddon();
-      term.loadAddon(fit);
-      term.loadAddon(new WebLinksAddon((_event, uri) => void openExternal(uri)));
-      term.open(host);
-      cleanups.push(() => term.dispose());
-      try { fit.fit(); } catch { /* a host with no size yet keeps xterm's default */ }
-      term.attachCustomKeyEventHandler((event) => {
-        if (event.type !== 'keydown') return true;
-        const command = store.commandForKey(event);
-        return command === null || SHELL_CHORDS.has(command);
-      });
-
-      // Everything printed before the snapshot is in it, so only what follows is drawn.
-      let attached = false;
-      let pending: RpcEvents['terminal.output'][] = [];
-      const draw = (state: TerminalState) => {
-        term.write(state.output);
-        for (const event of pending) {
-          if (state.sequence === undefined || event.sequence === undefined || event.sequence > state.sequence) term.write(event.data);
-        }
-        pending = [];
-        attached = true;
-      };
-      cleanups.push(client.on('terminal.output', (event) => {
-        if (event.id !== id) return;
-        if (attached) term.write(event.data);
-        else pending.push(event);
-      }));
-      cleanups.push(client.on('terminal.exited', (event) => {
-        if (event.id === id) onexit?.(event.exitCode);
-      }));
-
-      const state = await start(term.cols, term.rows);
-      if (disposed) return;
-      if (state === null) {
-        onexit?.(null);
-        return;
-      }
-      draw(state);
-      // A thread shell can already be starting while this view's chunk loads.
-      // Give it the measured viewport even when it began with the default size.
-      store.resizeTerminal(id, term.cols, term.rows);
-      const input = term.onData((data) => store.writeTerminal(id, data));
-      const resize = term.onResize(({ cols, rows }) => store.resizeTerminal(id, cols, rows));
-      cleanups.push(() => { input.dispose(); resize.dispose(); });
-
-      const observer = new ResizeObserver(() => {
-        try { fit.fit(); } catch { /* hidden for a frame */ }
-      });
-      observer.observe(host);
-      cleanups.push(() => observer.disconnect());
-      const themes = new MutationObserver(() => { term.options.theme = theme(); });
-      themes.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style', 'class'] });
-      cleanups.push(() => themes.disconnect());
-      if (autofocus) term.focus();
-
-      reattach = () => {
-        attached = false;
-        pending = [];
-        void start(term.cols, term.rows).then((again) => {
-          if (disposed) return;
-          if (again === null) {
-            onexit?.(null);
-            return;
-          }
-          term.reset();
-          draw(again);
-        });
-      };
-    })();
+    const node = host;
+    if (!node) return;
+    const session = store.terminalSession(id, start);
+    session.mount(node, { autofocus, onexit: (code) => onexit?.(code) });
     return () => {
-      disposed = true;
-      reattach = null;
-      for (const cleanup of cleanups.reverse()) cleanup();
+      // The keyboard left with the screen: on `<body>` the next Escape would stop the turn.
+      if (!session.unmount(node)) return;
+      queueMicrotask(() => {
+        if (document.activeElement === null || document.activeElement === document.body) focusComposer();
+      });
     };
   });
 </script>

@@ -7,6 +7,7 @@
  */
 
 import { existsSync } from 'node:fs';
+import { release } from 'node:os';
 import { win32 } from 'node:path';
 import type { TerminalState, ThreadId } from '@boite/contracts';
 import type { Core } from './core.ts';
@@ -20,6 +21,8 @@ export const HISTORY_CHARS = 256 * 1024;
  * first chunk after a quiet window goes at once, so a typed key echoes without delay.
  */
 export const OUTPUT_WINDOW_MS = 16;
+/** How far into a cut history the first line break is looked for. */
+const LINE_SEARCH_CHARS = 4096;
 /** Chunks the history holds before it joins them into one string. */
 const HISTORY_CHUNKS = 4096;
 /** The shell prints its prompt, then goes quiet: that is when a typed command lands on it. */
@@ -27,6 +30,19 @@ const PROMPT_QUIET_MS = 250;
 /** A shell that never goes quiet still gets the command. */
 const PROMPT_TIMEOUT_MS = 5000;
 const CLOSE_TIMEOUT_MS = 5000;
+
+/**
+ * What the emulator needs to know about ConPTY: the third number of `10.0.26100`.
+ * Nothing elsewhere, and nothing when the release does not read that way.
+ */
+export function windowsPty(
+  platform: NodeJS.Platform = process.platform,
+  osRelease: string = release(),
+): Pick<TerminalState, 'windowsPty'> {
+  if (platform !== 'win32') return {};
+  const buildNumber = Number(osRelease.split('.')[2]);
+  return Number.isInteger(buildNumber) && buildNumber > 0 ? { windowsPty: { buildNumber } } : {};
+}
 
 export function threadTerminalId(threadId: ThreadId): string {
   return `terminal:${threadId}`;
@@ -106,9 +122,17 @@ export class OutputHistory {
     }
   }
 
+  /**
+   * A cut window starts on a line of its own: the cut can land inside an
+   * escape sequence, and the half that is left draws as stray characters at
+   * the top of the screen a client redraws.
+   */
   text(): string {
     const all = this.chunks.join('');
-    return all.length > this.max ? all.slice(-this.max) : all;
+    if (all.length <= this.max) return all;
+    const cut = all.slice(-this.max);
+    const line = cut.indexOf('\n');
+    return line === -1 || line > LINE_SEARCH_CHARS ? cut : cut.slice(line + 1);
   }
 }
 
@@ -153,7 +177,7 @@ export class TerminalStore {
     if (running !== undefined) {
       if (running.closing) throw refused(`the shell ${id} is still closing, open it again in a moment`, { id });
       running.terminal.resize(options.cols, options.rows);
-      return { id, cwd: running.cwd, output: running.history.text(), sequence: running.sequence };
+      return { id, cwd: running.cwd, output: running.history.text(), sequence: running.sequence, ...windowsPty() };
     }
     if (!existsSync(options.cwd)) {
       throw refused(`the working directory ${options.cwd} does not exist any more`, { id, cwd: options.cwd });
@@ -237,7 +261,7 @@ export class TerminalStore {
     });
     session = { id, cwd: options.cwd, terminal: spawned.terminal, sequence, history, exited, closing: false };
     this.sessions.set(id, session);
-    return { id, cwd: options.cwd, output: history.text(), sequence };
+    return { id, cwd: options.cwd, output: history.text(), sequence, ...windowsPty() };
   }
 
   has(id: string): boolean {
