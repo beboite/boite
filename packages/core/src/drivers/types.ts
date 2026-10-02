@@ -213,8 +213,11 @@ export interface TurnHandle {
   stop(): void;
   /** Apply permissions to the active native turn. False requests a resume with a new process. */
   setPermissionMode?(mode: ThreadSummary['permissionMode']): Promise<boolean>;
-  /** False means not ready, rejection means uncertain dispatch and must not be replayed. */
-  steer?(message: string, attachments?: ImageAttachment[]): Promise<boolean>;
+  /**
+   * False means not ready, rejection means uncertain dispatch and must not be replayed.
+   * A transport may call `onAccepted` at acknowledgement, before dispatching following output.
+   */
+  steer?(message: string, attachments?: ImageAttachment[], onAccepted?: () => void): Promise<boolean>;
   /** Native user input, when system coordination uses a separate tool-boundary hook. */
   steerUser?(message: string, attachments?: ImageAttachment[]): Promise<boolean>;
 }
