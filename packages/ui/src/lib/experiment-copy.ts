@@ -13,6 +13,7 @@ export function experimentCopy(): Record<ExperimentId, { title: string; hint: st
     'prompt-cache': strings.experiments.promptCache,
     'chat-artifacts': strings.experiments.chatArtifacts,
     'open-chat-links': strings.experiments.openChatLinks,
+    'agent-browser-control': strings.experiments.agentBrowserControl,
     'preview-comments': strings.experiments.previewComments,
     'resident-agents': strings.experiments.residentAgents,
     whip: strings.experiments.whip

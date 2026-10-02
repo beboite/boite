@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ChevronLeft, ChevronRight, Maximize2, Minimize2, Plus, X, GripHorizontal } from '@lucide/svelte';
+  import { ChevronLeft, ChevronRight, Maximize2, Minimize2, Plus, X, GripHorizontal, PanelsTopLeft } from '@lucide/svelte';
   import { floatingPanel, RESIZE_DIRECTIONS } from '../lib/floating-panel';
   import { browserBridge } from '../lib/browser-bridge';
   import { stripOverflows } from '../lib/strip-overflow';
@@ -363,6 +363,14 @@
     {/if}
 
     <span class="spacer"></span>
+
+    {#if rightPanel.floating}
+      <button type="button" class="ghost small icon" data-testid="panel-dock"
+        title={strings.browser.dock} aria-label={strings.browser.dock}
+        onclick={() => { rightPanel.floating = false; rightPanel.maximized = false; }}>
+        <PanelsTopLeft size={14} strokeWidth={1.75} />
+      </button>
+    {/if}
 
     <button
       type="button"

@@ -16,7 +16,7 @@ vi.mock('../lib/browser-bounds', () => ({ watchBrowserBounds: () => () => {} }))
 let app: ReturnType<typeof mount> | null = null;
 afterEach(async () => { if (app) await unmount(app); app = null; rightPanel.maximized = false; rightPanel.floating = false; document.body.innerHTML = ''; });
 
-test('floats and docks the same page without duplicating the panel maximize control', () => {
+test('floats the same page and leaves docking and maximizing to the panel frame', () => {
   const panel = rightPanel.for('browser-window-test');
   panel.open('browser', 'https://example.test');
   const surface = panel.active!;
@@ -25,11 +25,11 @@ test('floats and docks the same page without duplicating the panel maximize cont
   expect(document.querySelector('[data-testid=browser-maximize]')).toBeNull();
   const detach = document.querySelector<HTMLButtonElement>('[data-testid=browser-detach]')!;
   detach.click(); flushSync();
-  expect(detach.getAttribute('aria-pressed')).toBe('true');
+  expect(document.querySelector('[data-testid=browser-detach]')).toBeNull();
   expect(rightPanel.floating).toBe(true);
   expect(document.querySelector('[data-testid=browser-slot]')).not.toBeNull();
-  detach.click(); flushSync();
-  expect(detach.getAttribute('aria-pressed')).toBe('false');
+  rightPanel.floating = false; flushSync();
+  expect(document.querySelector('[data-testid=browser-detach]')).not.toBeNull();
   expect(bridge.create).toHaveBeenCalledTimes(1);
   expect(rightPanel.floating).toBe(false);
 });

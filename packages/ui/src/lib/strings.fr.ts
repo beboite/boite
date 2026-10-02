@@ -1620,6 +1620,7 @@ export const fr: Translation = {
       drop: 'Lâcher le fouet'
     },
     chatArtifacts: { title: 'Fichiers et aperçus dans le chat', hint: 'Ouvrir les liens de fichiers et afficher les fichiers envoyés par un agent dans la conversation' },
+    agentBrowserControl: { title: 'Contrôle du navigateur par les agents', hint: 'Sur ce bureau Windows, autoriser les agents à lire, capturer et manipuler les onglets de la conversation ouverte, y compris les sessions connectées et l’exécution de JavaScript. Désactiver retire cet accès, sans annuler les actions déjà effectuées.' },
     previewComments: { title: 'Commentaires sur les aperçus', hint: 'Sélectionner un élément dans le navigateur intégré et l’ajouter au brouillon de la conversation' },
     themeGrain: {
       title: 'Thème Grain',

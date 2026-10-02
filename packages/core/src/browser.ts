@@ -15,10 +15,14 @@ export class BrowserControl {
   private pending = new Map<string, Pending>();
   constructor(private core: Core, private timeout = 20000) {}
 
-  host({ threadId, enabled }: RpcParams<'browser.host'>, connection: Connection): { ok: true } {
+  host({ threadId, enabled, allowAgentControl }: RpcParams<'browser.host'>, connection: Connection): { ok: true } {
     const thread = this.core.threads.require(threadId);
     if (enabled && (thread.archived || !connection.subscriptions.has(threadId))) throw refused('browser.host needs a subscribed, active conversation');
     const previous = this.hosts.get(threadId);
+    if (enabled && allowAgentControl !== true) {
+      if (previous?.connection.id === connection.id) this.release(threadId);
+      throw refused('browser.host requires explicit consent: enable Agent browser control in Settings > Experiments on the hosting desktop');
+    }
     if (!enabled) {
       if (previous?.connection.id === connection.id) this.release(threadId);
     } else {
@@ -38,7 +42,7 @@ export class BrowserControl {
     const host = this.hosts.get(threadId);
     if (!host || host.expires < Date.now() || !host.connection.subscriptions.has(threadId)) {
       this.release(threadId);
-      throw refused('Open this conversation in the Boite desktop app to use its browser.');
+      throw refused('Open this conversation in the Boite desktop app and enable Agent browser control in Settings > Experiments.');
     }
     if (this.pending.size >= 16 || [...this.pending.values()].some(p => p.threadId === threadId)) throw refused('the browser is busy; wait for the previous command');
     const requestId = crypto.randomUUID();

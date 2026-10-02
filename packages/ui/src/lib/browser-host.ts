@@ -4,15 +4,16 @@ import type { Store } from './store.svelte';
 import { rightPanel } from './right-panel.svelte';
 import { browserBridge } from './browser-bridge';
 import { automateBrowser } from './browser-automation';
+import { experimentOn } from './experiments.svelte';
 
 /** Captures the owning Store/client; a machine switch cannot redirect a command. */
 export function hostBrowser(store: Store, threadId: string): () => void {
   const client = store.client;
-  if (!client || !store.owner || !browserBridge.protocol || !/Windows/.test(navigator.userAgent)) return () => {};
+  if (!experimentOn('agent-browser-control') || !client || !store.owner || !browserBridge.protocol || !/Windows/.test(navigator.userAgent)) return () => {};
   const machine = store.machineId;
   const panel = rightPanel.for(store.threadKey(threadId));
   let stopped = false;
-  const current = () => !stopped && store.client === client && store.machineId === machine && store.openThread?.id === threadId;
+  const current = () => !stopped && experimentOn('agent-browser-control') && store.client === client && store.machineId === machine && store.openThread?.id === threadId;
   const off = client.on('browser.requested', request => {
     if (request.threadId !== threadId) return;
     void (async () => {
@@ -54,7 +55,7 @@ export function hostBrowser(store: Store, threadId: string): () => void {
     })();
   });
   const renew = () => {
-    if (current()) void client.call('browser.host', { threadId, enabled: true }).catch(() => {});
+    if (current()) void client.call('browser.host', { threadId, enabled: true, allowAgentControl: true }).catch(() => {});
   };
   renew();
   const timer = setInterval(renew, 10000);

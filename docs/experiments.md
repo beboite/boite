@@ -79,6 +79,23 @@ PDFs have an optional inline preview. Other files remain downloadable.
 Remote images are links, so reading an answer does not fetch a tracking image.
 Executable URL schemes and arbitrary HTML are not rendered.
 
+## Agent browser control
+
+`agent-browser-control` is off by default. On a Windows desktop, it grants the
+agent access to the open conversation's browser tabs: page text, screenshots,
+clicks, typing, navigation and JavaScript evaluation. The tabs use the existing
+browser profile, including signed-in sessions. Enable this only when those
+sessions may be used for the task. The normal browser remains usable with the
+experiment off.
+
+Only the owner UI can register that grant with the core. The core refuses
+requests without a consenting, subscribed host, and an agent token cannot
+register one or target another conversation. Turning the switch off withdraws
+the grant and rejects pending replies. Actions already dispatched to a page may
+finish; disabling the switch does not undo them. Disconnecting or changing the
+open conversation also releases the host. A phone cannot enable access on the
+hosting desktop. See the [browser CLI](cli.md#test-a-page-in-the-desktop-browser).
+
 ## Resident agents
 
 The Agents page ([agents](agents.md)) and every button that leads there: the

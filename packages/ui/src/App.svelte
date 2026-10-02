@@ -42,7 +42,7 @@
   $effect(() => {
     const threadId = store.openThread?.id;
     void store.connection;
-    if (threadId && store.owner && store.client?.state === 'ready') return hostBrowser(store, threadId);
+    if (experimentOn('agent-browser-control') && threadId && store.owner && store.client?.state === 'ready') return hostBrowser(store, threadId);
   });
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   let appRoot = $state<HTMLDivElement | undefined>(undefined);

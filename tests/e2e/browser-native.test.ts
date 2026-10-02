@@ -33,6 +33,11 @@ test.skipIf(process.platform !== 'win32' || !executable)('native browser fills i
     await page.waitFor("document.querySelector('[data-testid=thread-row]')");
     await page.click('[data-testid=thread-row]');
     await page.waitFor("document.querySelector('[data-testid=timeline]')");
+    await expect(client.call('browser.command', { threadId: thread.id, action: { kind: 'status' } })).rejects.toThrow('enable Agent browser control');
+    await page.evaluate(`localStorage.setItem('boite.experiments', JSON.stringify(['agent-browser-control'])); location.reload();`);
+    await page.waitFor("document.querySelector('[data-testid=thread-row]')");
+    await page.click('[data-testid=thread-row]');
+    await page.waitFor("document.querySelector('[data-testid=timeline]')");
     for (let i = 0; i < 120; i++) { try { await client.call('browser.command', { threadId: thread.id, action: { kind: 'status' } }); break; } catch (e) { if (i === 119) throw e; await Bun.sleep(100); } }
     console.log('Host registered');
     const opened = await client.call('browser.command', { threadId: thread.id, action: { kind: 'open', url: site.url.href } });
@@ -151,7 +156,7 @@ test.skipIf(process.platform !== 'win32' || !executable)('native browser fills i
     const moved = await slot();
     expect(moved.x).toBeGreaterThanOrEqual(0); expect(moved.y).toBeGreaterThanOrEqual(0);
     await fillsSlot();
-    await page.click('[data-testid=browser-detach]');
+    await page.click('[data-testid=panel-dock]');
     await fillsSlot();
     if ((await command({ kind: 'evaluate', expression: 'document.querySelector("#result").textContent' })).value !== 'Bonjour Chris') throw new Error('dock lost DOM');
     console.log('All eight resize directions, title-bar dragging, native overlay menu, maximize and dock preserve the DOM');
@@ -161,6 +166,10 @@ test.skipIf(process.platform !== 'win32' || !executable)('native browser fills i
     await command({ kind: 'close' });
     const status = await client.call('browser.command', { threadId: thread.id, action: { kind: 'status' } });
     expect((status.value as { tabs: unknown[] }).tabs).toEqual([]);
+    // The last browser tab can close while the panel remains floating.
+    await page.waitFor("document.querySelector('[data-testid=panel-dock]')");
+    await page.click('[data-testid=panel-dock]');
+    expect(await page.evaluate("document.querySelector('[data-testid=right-panel]').classList.contains('floating')")).toBe(false);
     // Capture the chrome and embedded page together with the shell's fake browser surface.
     // The native webview above has its own compositor and is captured separately.
     await page.evaluate(`location.search='?fake=1&open=recent';true`);

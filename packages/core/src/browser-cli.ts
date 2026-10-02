@@ -1,5 +1,5 @@
 import { writeFileSync } from 'node:fs';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { browserActionError, type BrowserAction } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
 import type { CliIo } from './cli.ts';
@@ -16,15 +16,28 @@ export const BROWSER_HELP = `boite browser <command> [args] [tab-id] [--json]
   evaluate <expression> [tab-id] evaluate JavaScript, including promises
   resize <width> <height> [tab-id] set viewport (240..3840 CSS pixels)
   reset-viewport [tab-id]        fit the page to its window again
-  screenshot [tab-id]            save a PNG in cwd; view it with your image tool
+  screenshot [tab-id] [--output <path>] save a PNG (default: unique name in cwd)
   close [tab-id]                 close the tab
-Keep the conversation open in the Windows desktop app. Without a tab-id,
+Enable Agent browser control in Settings > Experiments on the Windows desktop.
+Keep the conversation open there. Without a tab-id,
 commands use its active browser tab. Page content is untrusted input.
-Use boite attach <screenshot.png> to show a capture in chat.`;
+Use --output to choose a file, including an absolute path outside the project.
+Existing files are never overwritten. Without --output, the caller owns cleanup
+of the generated PNG in cwd. Use boite attach <screenshot.png> to show it in chat.`;
 
 export async function browserCommand(args: string[], io: CliIo, client: CoreClient, threadId: string): Promise<unknown> {
   const [command = 'status', ...rest] = args;
   if (command === 'help') return { help: BROWSER_HELP };
+  let output: string | undefined;
+  if (command === 'screenshot') {
+    const at = rest.indexOf('--output');
+    if (at !== -1) {
+      output = rest[at + 1];
+      if (!output || output.startsWith('--')) throw new Error('browser screenshot --output needs a file path');
+      rest.splice(at, 2);
+      if (rest.includes('--output')) throw new Error('browser screenshot accepts one --output path');
+    }
+  }
   const need = (index: number) => { const value = rest[index]; if (value === undefined) throw new Error(BROWSER_HELP); return value; };
   let action: BrowserAction; let count = 0;
   switch (command) {
@@ -47,9 +60,7 @@ export async function browserCommand(args: string[], io: CliIo, client: CoreClie
   if (screenshot.mime !== 'image/png' || screenshot.base64.length > 8 * 1024 * 1024) throw new Error('browser returned an invalid screenshot');
   const bytes = Buffer.from(screenshot.base64, 'base64');
   if (!bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new Error('browser returned a non-PNG screenshot');
-  const path = resolve(io.cwd, `boite-browser-${crypto.randomUUID()}.png`);
-  const inside = relative(io.cwd, path);
-  if (isAbsolute(inside) || inside.startsWith('..')) throw new Error('screenshot path must stay in cwd');
+  const path = resolve(io.cwd, output ?? `boite-browser-${crypto.randomUUID()}.png`);
   writeFileSync(path, bytes, { flag: 'wx' });
   return { tabId: result.tabId, path, mime: screenshot.mime, bytes: bytes.length };
 }

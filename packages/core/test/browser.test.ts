@@ -13,7 +13,9 @@ afterEach(async () => { agent?.close(); owner?.close(); await harness?.stop(); }
 test('an agent controls only its conversation; only the registered owner socket can answer', async () => {
   await expect(agent.call('browser.command', { threadId, action: { kind: 'snapshot' } })).rejects.toThrow('desktop app');
   await owner.call('threads.subscribe', { threadId });
-  await owner.call('browser.host', { threadId, enabled: true });
+  await expect(owner.call('browser.host', { threadId, enabled: true })).rejects.toThrow('explicit consent');
+  await expect(owner.call('browser.host', { threadId, enabled: true, allowAgentControl: false })).rejects.toThrow('explicit consent');
+  await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: true });
   await expect(agent.call('browser.host', { threadId, enabled: true })).rejects.toThrow("agent's methods");
   await expect(agent.call('browser.command', { threadId: 'another-thread', action: { kind: 'snapshot' } })).rejects.toThrow('not thread');
   await expect(agent.call('browser.command', { threadId, action: { kind: 'open', url: 'file:///secret' } })).rejects.toThrow('HTTP');
@@ -32,14 +34,16 @@ test('an agent controls only its conversation; only the registered owner socket 
 
 test('leaving or losing the host settles in-flight work and requires a fresh registration', async () => {
   await owner.call('threads.subscribe', { threadId });
-  await owner.call('browser.host', { threadId, enabled: true });
+  await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: true });
   const requested = owner.next('browser.requested', () => true);
   const reply = agent.call('browser.command', { threadId, action: { kind: 'screenshot' } });
   const rejected = reply.catch(error => error as Error);
-  await requested;
+  const request = await requested;
   await owner.call('browser.host', { threadId, enabled: false });
   expect((await rejected as Error).message).toContain('host left');
-  await owner.call('browser.host', { threadId, enabled: true });
+  await expect(owner.call('browser.complete', { requestId: request.requestId, result: {} })).rejects.toThrow('does not belong');
+  await expect(agent.call('browser.command', { threadId, action: { kind: 'evaluate', expression: 'document.cookie' } })).rejects.toThrow('enable Agent browser control');
+  await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: true });
   const again = owner.next('browser.requested', () => true);
   const lost = agent.call('browser.command', { threadId, action: { kind: 'snapshot' } }).catch(error => error as Error);
   await again; owner.close(); expect((await lost as Error).message).toContain('host left');

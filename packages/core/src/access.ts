@@ -78,7 +78,7 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['agent.spawn', 'a new top-level thread in a project the owner added, on its own model, account and permission mode, within its communication settings and an hourly budget; a thread an agent started cannot start another until the user writes in it'],
   ['agent.move', 'its own thread into a project the owner already registered, applied when its turn ends; never another thread, never a folder the owner did not add'],
   ['panel.open', 'showing the user a file, a diff or a page instead of pasting it into the transcript'],
-  ['browser.command', 'testing only browser tabs of its own conversation in the owner desktop; hosting and replies remain owner-only'],
+  ['browser.command', 'only its own conversation with an explicitly consenting owner browser host; registration and replies remain owner-only'],
   ['questions.ask', 'a question card on its own thread that it does not wait on; the answer comes back as a message'],
   ['artifacts.publish', 'explicitly sharing a bounded snapshot from its own working directory in its own conversation'],
   ['artifacts.read', 'reading back only a published snapshot belonging to its own conversation'],

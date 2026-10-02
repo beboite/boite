@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ArrowLeft, ArrowRight, ExternalLink, RotateCw, MousePointer2, PictureInPicture2, PanelsTopLeft } from '@lucide/svelte';
+  import { ArrowLeft, ArrowRight, ExternalLink, RotateCw, MousePointer2, PictureInPicture2 } from '@lucide/svelte';
   import { rightPanel } from '../lib/right-panel.svelte';
   import { browserBridge, normalizeUrl } from '../lib/browser-bridge';
   import { linuxShell } from '../lib/shell-platform';
@@ -240,12 +240,11 @@
         <ExternalLink size={13} strokeWidth={1.75} />
       </button>
     </form>
-    {#if browserBridge.paints}
+    {#if browserBridge.paints && !rightPanel.floating}
       <button type="button" class="ghost small icon" data-testid="browser-detach"
-        title={rightPanel.floating ? strings.browser.dock : strings.browser.detach}
-        aria-label={rightPanel.floating ? strings.browser.dock : strings.browser.detach}
-        aria-pressed={rightPanel.floating} onclick={() => { rightPanel.floating = !rightPanel.floating; rightPanel.maximized = false; }}>
-        {#if rightPanel.floating}<PanelsTopLeft size={14} />{:else}<PictureInPicture2 size={14} />{/if}
+        title={strings.browser.detach} aria-label={strings.browser.detach}
+        onclick={() => { rightPanel.floating = true; rightPanel.maximized = false; }}>
+        <PictureInPicture2 size={14} />
       </button>
     {/if}
     {#if viewport}

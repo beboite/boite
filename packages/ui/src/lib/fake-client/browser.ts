@@ -15,9 +15,13 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, 'browser.hos
   ctx.bus.on('thread.updated', thread => { if (thread.archived) release(thread.id); });
   ctx.bus.on('thread.removed', ({ threadId }) => release(threadId));
   return {
-    'browser.host': async ({ threadId, enabled }) => {
+    'browser.host': async ({ threadId, enabled, allowAgentControl }) => {
       const thread = ctx.thread(threadId);
       if (enabled && (thread.archived || !ctx.bus.subscribed.has(threadId))) throw refusal('browser.host needs a subscribed, active conversation');
+      if (enabled && allowAgentControl !== true) {
+        release(threadId);
+        throw refusal('browser.host requires explicit consent: enable Agent browser control in Settings > Experiments on the hosting desktop');
+      }
       if (enabled) hosts.set(threadId, Date.now() + 35000); else release(threadId);
       return { ok: true };
     },
@@ -28,7 +32,7 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, 'browser.hos
       if (params.tabId !== undefined && (typeof params.tabId !== 'string' || !/^browser:[a-zA-Z0-9:-]{1,100}$/.test(params.tabId))) throw refusal('browser tabId must come from browser status or open');
       if ((hosts.get(params.threadId) ?? 0) < Date.now() || !ctx.bus.subscribed.has(params.threadId)) {
         release(params.threadId);
-        throw refusal('Open this conversation in the Boite desktop app to use its browser.');
+        throw refusal('Open this conversation in the Boite desktop app and enable Agent browser control in Settings > Experiments.');
       }
       if (pending.size >= 16 || [...pending.values()].some(p => p.threadId === params.threadId)) throw refusal('the browser is busy; wait for the previous command');
       const requestId = crypto.randomUUID();

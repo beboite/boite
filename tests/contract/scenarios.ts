@@ -151,7 +151,9 @@ export const SCENARIOS: Record<string, Scenario> = {
     const threadId = created.id;
     await refusedWith(env.call('browser.command', { threadId, action: { kind: 'snapshot' } }), RpcErrorCode.Refused);
     await env.call('threads.subscribe', { threadId });
-    await env.call('browser.host', { threadId, enabled: true });
+    await refusedWith(env.call('browser.host', { threadId, enabled: true }), RpcErrorCode.Refused);
+    await refusedWith(env.call('browser.host', { threadId, enabled: true, allowAgentControl: false }), RpcErrorCode.Refused);
+    await env.call('browser.host', { threadId, enabled: true, allowAgentControl: true });
     const off = env.on('browser.requested', request => {
       if (request.threadId === threadId) void env.call('browser.complete', { requestId: request.requestId, result: { tabId: 'browser:test', value: 'Page text' } });
     });

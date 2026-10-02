@@ -22,7 +22,8 @@ export interface BrowserReply {
   screenshot?: { mime: 'image/png'; base64: string };
 }
 export interface BrowserRpcMethods {
-  'browser.host': { params: { threadId: string; enabled: boolean }; result: { ok: true } };
+  /** Only the owner can grant this; enabled hosts must explicitly consent to agent control. */
+  'browser.host': { params: { threadId: string; enabled: boolean; allowAgentControl?: boolean }; result: { ok: true } };
   'browser.command': { params: { threadId: string; tabId?: string; action: BrowserAction }; result: BrowserReply };
   'browser.complete': { params: { requestId: string; result?: BrowserReply; error?: string }; result: { ok: true } };
 }
