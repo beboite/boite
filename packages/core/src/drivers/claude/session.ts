@@ -42,8 +42,8 @@ export interface SessionHooks {
  * at zero it lives for one turn, which is what the driver did before warm
  * sessions existed; above zero it takes the next turns of the thread too, and
  * only an idle window, a stop, a changed setup or the core going down ends it.
- * A changed model, effort or permission mode is not a changed setup: the SDK
- * has a setter for each of the three, so the CLI takes the new one in place.
+ * Model, effort, speed and permission changes go through the SDK's live
+ * setters, so the CLI takes them without losing its request headers.
  * Permission changes also reach the active turn, and a flag overlay toggles
  * configured hooks when entering or leaving YOLO.
  */
@@ -191,7 +191,7 @@ export class ClaudeSession {
       void this.run(turn);
       return;
     }
-    // A warm query takes a changed model, effort or mode through the SDK's own
+    // A warm query takes a changed model, effort, speed or mode through the SDK's own
     // setters, and this turn's prompt only goes in once they landed. The chain
     // keeps the prompts in the order the turns attached.
     this.pending = this.pending.then(() => this.follow(turn));
@@ -235,8 +235,8 @@ export class ClaudeSession {
   }
 
   /**
-   * The thread's model, effort and permission mode on a query that is already
-   * up. Each one goes out only when it moved, through the setter that changes
+   * The thread's model, effort, speed and permission mode on a query already
+   * up. Each goes out only when it moved, through the setter that changes
    * it in place, so nothing is sent on a turn that changed nothing. False means
    * the turn is no longer this session's.
    */
@@ -257,6 +257,10 @@ export class ClaudeSession {
         // which is what a thread with no effort and `ultrathink` both want.
         await query.applyFlagSettings({ effortLevel: wanted.effortLevel });
         live.effortLevel = wanted.effortLevel;
+      }
+      if (wanted.fastMode !== live.fastMode) {
+        await query.applyFlagSettings({ fastMode: wanted.fastMode });
+        live.fastMode = wanted.fastMode;
       }
       if (wanted.permissionMode !== live.permissionMode) {
         await query.setPermissionMode(wanted.permissionMode);
@@ -566,7 +570,7 @@ export class ClaudeSession {
     if (executable === null) {
       throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
     }
-    // The same three values the setters carry later, so what the query opens on
+    // The same values the setters carry later, so what the query opens on
     // and what the session records as applied can never say different things.
     const setup = liveSetup(ctx.thread);
     return {
@@ -584,7 +588,7 @@ export class ClaudeSession {
       pathToClaudeCodeExecutable: executable,
       settingSources: ['user', 'project', 'local'],
       settings: {
-        fastMode: ctx.thread.speed === 'fast',
+        fastMode: setup.fastMode,
         ...(ctx.thread.permissionMode === 'yolo' ? { disableAllHooks: true } : {}),
       },
       includePartialMessages: true,

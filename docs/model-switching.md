@@ -97,8 +97,9 @@ another model's settings.
 The lightning button beside the effort chip cycles through the model's advertised speeds and
 back to standard. Codex uses its per-model `serviceTiers` list, including Fast or
 Ultrafast only when listed, and sends the selected id as `turn/start.serviceTier`.
-Claude uses `supportsFastMode` and session-scoped `settings.fastMode`; changing it
-reopens the CLI on the same native session. Older Codex catalogs use
+Claude uses `supportsFastMode` and session-scoped `settings.fastMode`; a warm
+CLI applies changes through `applyFlagSettings` before the next prompt. If an
+older CLI refuses the setting, that turn resumes on a new process. Older Codex catalogs use
 `additionalSpeedTiers` when `serviceTiers` is absent.
 Native tiers cycle Fast before Ultrafast regardless of catalog order. When no
 native tier is advertised, a listed model and its `-fast`, `_fast` or `:fast`
@@ -160,11 +161,23 @@ the conversation again uncached; on Codex every effort change missed (`high`,
 `low`, `low`, `medium`, `high` cached 9k, 13k, 39k, 8k and 31k of 31k to
 47k input tokens); on Claude Sonnet 5 an effort change kept the system prompt
 and tools but rewrote every message, while Claude Opus 5.5 kept its cache. Fast
-mode was not measured. So a change of model, effort or speed inside one account
-asks first when the last context reading is over 100,000 tokens and less than
+mode was not measured live. Claude Code documents a cache miss on the first
+Fast activation, which adds a request header. It retains that header when
+returning to standard or enabling Fast again; keeping the CLI running preserves
+this behavior. Codex speed-only changes send a service tier without rewriting
+the prompt. This does not guarantee a provider cache hit.
+
+A change of model or effort inside one account asks first when the last
+context reading is over 100,000 tokens and less than
 an hour old, the longest a provider keeps a cache. An older reading asks
 nothing: that cache is already gone. A change of account is the case above and
-asks only that question.
+asks only that question. Native Codex speed changes and Claude's return to
+standard do not ask. Enabling Claude Fast remains conservative: the client
+cannot know whether this CLI has already sent its Fast header. Unknown
+providers retain the warning, as do speed variants that change the model id.
+
+Sources: [Claude Code prompt caching](https://code.claude.com/docs/en/prompt-caching#turning-on-fast-mode),
+[OpenAI Fast mode](https://developers.openai.com/api/docs/guides/fast-mode).
 
 Historical images use remaining slots within the eight-image turn limit. The
 current prompt's attachments take priority, then the most recent historical

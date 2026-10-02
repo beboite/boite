@@ -70,6 +70,10 @@ do not move the thread's clock.
 Changing the effort level also starts a new cache on most models, which the
 timer does not track.
 
+The first Fast activation adds a request header and can miss the existing
+cache. A warm CLI keeps that header across later speed changes; Boite applies
+them in place through the SDK. The timer does not predict this first miss.
+
 Sources: [How Claude Code uses prompt caching](https://code.claude.com/docs/en/prompt-caching),
 [Prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
 

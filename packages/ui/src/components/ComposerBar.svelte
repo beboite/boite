@@ -97,6 +97,7 @@
   function cacheKey(selection: Choice): CacheKey {
     return {
       accountId: selection.accountId,
+      protocol: store.providers.find(entry => entry.id === selection.providerId)?.protocol ?? null,
       model: selection.model ?? null,
       effort: selection.effort ?? store.modelOf(selection)?.effort?.default ?? null,
       speed: selection.speed ?? null,

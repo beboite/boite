@@ -115,7 +115,8 @@ export class FakeQuery {
     return this.setter('setPermissionMode', mode);
   }
 
-  applyFlagSettings(settings: { effortLevel?: string | null; disableAllHooks?: boolean | null }): Promise<void> {
+  applyFlagSettings(settings: { effortLevel?: string | null; disableAllHooks?: boolean | null; fastMode?: boolean }): Promise<void> {
+    if ('fastMode' in settings) return this.setter('fastMode', String(settings.fastMode));
     if ('disableAllHooks' in settings) return this.setter('disableAllHooks', settings.disableAllHooks === null ? 'the default' : String(settings.disableAllHooks));
     return this.setter('effortLevel', settings.effortLevel ?? 'the default');
   }
