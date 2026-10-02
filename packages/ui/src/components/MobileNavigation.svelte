@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { tick } from 'svelte';
+  import { MediaQuery } from 'svelte/reactivity';
+  import WindowList from './WindowList.svelte';
   import WhipButton from './WhipButton.svelte';
   import { Activity, ArrowLeft, Bot, ChevronDown, Ellipsis, MessageSquare, PencilLine, Pin, Plus, Search, Settings } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
@@ -21,6 +24,16 @@
   import { compareThreads } from '../lib/thread-order';
 
   let { store, screen = $bindable('chat') }: { store: Store; screen: 'chat' | 'threads' | 'activity' } = $props();
+  const mobile = new MediaQuery('(max-width: 720px)');
+  let scrollRoot = $state<HTMLElement>();
+  const scrollPositions = new Map<string, number>();
+  const measuredRows = new Map<string, Map<string, number>>();
+  function measurements(key: string): Map<string, number> {
+    if (!measuredRows.has(key)) measuredRows.set(key, new Map());
+    return measuredRows.get(key)!;
+  }
+  const listKey = $derived(`${screen}:${workspace.view}:${projectView.filter}`);
+  $effect(() => { if (mobile.current && scrollRoot) { const saved = scrollPositions.get(listKey) ?? 0; void tick().then(() => { if (scrollRoot) scrollRoot.scrollTop = saved; }); } });
   /** The clock the rows' times read, a minute's precision is all they show. */
   let now = $state(Date.now());
   $effect(() => {
@@ -127,15 +140,15 @@
   <button class="ghost icon" data-testid="mobile-new" aria-label={strings.sidebar.newThread} disabled={!groups.length || draftOwner.connection !== 'ready'} onclick={newThread}><Plus size={21} /></button>
 </header>
 
-{#if store.page === 'chat' && screen !== 'chat'}
-  <section class="mobile-list" data-testid="mobile-list" aria-label={screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}>
+{#if mobile.current && store.page === 'chat' && screen !== 'chat'}
+  <section class="mobile-list" bind:this={scrollRoot} onscroll={() => { if (scrollRoot) scrollPositions.set(listKey, scrollRoot.scrollTop); }} data-testid="mobile-list" aria-label={screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}>
     <div class="list-heading">
       <div class="heading-row"><h1>{screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}</h1>{#if screen === 'activity'}<button class="ghost icon" aria-label={strings.sidebar.search} onclick={() => store.paletteOpen = true}><Search size={18} /></button>{/if}</div>
       {#if screen === 'threads'}<ProjectViews entries={groups} {store} prefix="mobile-" />{/if}
     </div>
     {#snippet threadRow(row: typeof rows[number])}
       <div class="row">
-        <button class="ghost thread" class:offline={row.machine.store.connection !== 'ready'} data-testid="mobile-thread-{row.thread.id}" onclick={() => { const opening = workspace.select(row.machine.store, row.thread.id); show('chat'); void opening; }}>
+        <button class="ghost thread" class:offline={row.machine.store.connection !== 'ready'} data-testid="mobile-thread-{row.thread.id}" onclick={() => { show('chat'); void workspace.select(row.machine.store, row.thread.id); }}>
           <span class="summary"><span class="title"><span class="provider" data-testid="thread-provider" role="img" aria-label={agentLabel(row.machine.store, row.thread)}><ProviderLogo providerId={row.thread.providerId} size={13} /></span>{#if row.thread.pinned}<Pin size={12} />{/if}{row.thread.title}{#if hasUnsentDraft(row.machine.store.composerStates[row.thread.id])}<span class="draft" data-testid="thread-draft" title={strings.sidebar.unsentDraft} aria-label={strings.sidebar.unsentDraft}><PencilLine size={12} /></span>{/if}</span><span class="detail" title={row.thread.branch ?? undefined}>{[projectName(row.project), several ? row.machine.label : null, row.thread.branch].filter(Boolean).join(' · ')}</span></span>
           <ThreadState thread={row.thread} {now} />
         </button>
@@ -144,6 +157,7 @@
     {/snippet}
     {#if screen === 'threads' && workspace.view === 'projects'}
       {#each groups as group (projectKey(group))}
+        {@const groupRows = rows.filter(row => row.machine.id === group.machine.id && row.thread.projectId === group.project.id)}
         <section data-testid="mobile-project-group" data-project-id={group.project.id} data-machine-id={group.machine.id}>
           <div class="project-heading">
             <h2>{projectName(group.project)}{#if several}<span>{group.machine.label}</span>{/if}</h2>
@@ -154,14 +168,19 @@
               ]} onpick={action => projectView.step(groups, projectKey(group), action === 'up' ? -1 : 1)} label={strings.sidebar.customOrder} placement="bottom" variant="ghost" testid="mobile-project-order"><Ellipsis size={18} /></Menu>
             {/if}
           </div>
-          {#each rows.filter(row => row.machine.id === group.machine.id && row.thread.projectId === group.project.id) as row (row.thread.id)}
-            {@render threadRow(row)}
-          {:else}<p class="empty">{strings.sidebar.noThreads}</p>{/each}
+          <WindowList items={groupRows} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements(projectKey(group))}>
+            {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
+          </WindowList>
+          {#if groupRows.length === 0}<p class="empty">{strings.sidebar.noThreads}</p>{/if}
         </section>
       {/each}
-      {#each rows.filter(row => row.thread.projectId === null) as row (`${row.machine.id}:${row.thread.id}`)}{@render threadRow(row)}{/each}
+      <WindowList items={rows.filter(row => row.thread.projectId === null)} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements('unassigned')}>
+        {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
+      </WindowList>
     {:else}
-      {#each rows as row (`${row.machine.id}:${row.thread.id}`)}{@render threadRow(row)}{/each}
+      <WindowList items={rows} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements(screen)}>
+        {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
+      </WindowList>
     {/if}
     {#if rows.length === 0 && (screen === 'activity' || workspace.view === 'recent' || groups.length === 0)}
       <p class="empty">{screen === 'activity' ? strings.mobile.noActivity : strings.mobile.noThreads}</p>

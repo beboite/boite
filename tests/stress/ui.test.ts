@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { test } from 'bun:test';
+import type { ThreadSummary } from '../../packages/contracts/src/index.ts';
 import { connect } from '../../packages/core/src/client.ts';
 import { BrowserPage } from '../e2e/lib/cdp.ts';
 import { pairingUrlOf, startCore } from '../e2e/lib/core.ts';
 import { ensureProductionUi } from '../e2e/lib/prod-ui.ts';
+import { compareThreads } from '../../packages/ui/src/lib/thread-order';
 
 const artifacts = process.env.BOITE_STRESS_ARTIFACTS ?? join(import.meta.dir, '..', 'e2e', '.artifacts', 'stress');
 
-test('desktop and phone remain usable with 1000 threads and a 256-turn burst', async () => {
+async function exercise(revisit: boolean): Promise<void> {
   ensureProductionUi();
   const core = await startCore();
   const client = await connect(core.url, core.token, { requestTimeoutMs: 30_000 }).catch(async error => {
@@ -23,17 +25,38 @@ test('desktop and phone remain usable with 1000 threads and a 256-turn burst', a
     await client.call('settings.set', { asyncQuestions: false });
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
     const project = await client.call('projects.add', { path: core.dataDir, name: 'Stress workspace' });
-    const threads = [];
+    const threads: ThreadSummary[] = [];
     for (let i = 0; i < 1_000; i++) threads.push(await client.call('threads.create', {
       projectId: project.id, providerId: 'echo', accountId: account.id, title: `UI stress ${i}`,
     }));
     const boot = performance.now();
     page = await BrowserPage.launch({ url: pairingUrlOf(core), windowSize: { width: 1440, height: 1000 } });
     await page.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`, 30_000);
-    await page.waitFor(`(() => {
-      const visible = new Set(Array.from(document.querySelectorAll('[data-testid=thread-row]')).map(row => row.dataset.threadId));
-      return ${JSON.stringify(threads.map(thread => thread.id))}.every(id => visible.has(id));
-    })()`, 30_000);
+    await page.waitFor(`document.querySelector('[data-testid=thread-row]')`, 30_000);
+    assert.equal((await client.call('threads.list', { projectId: project.id })).length, 1000);
+    const mountedRows = await page.evaluate<number>(`document.querySelectorAll('[data-testid=thread-row]').length`);
+    assert(mountedRows < 100, `mounted ${mountedRows} rows instead of a viewport`);
+    async function visitRows(page: BrowserPage): Promise<void> {
+      // The entire model remains navigable: visit the top, an interior row and the last row.
+      const ordered = (await client.call('threads.list', { projectId: project.id })).sort(compareThreads);
+      for (const [fraction, thread] of [[0, ordered[0]!], [0.5, ordered[500]!], [1, ordered.at(-1)!]] as const) {
+        await page.evaluate(`(() => { const list = document.querySelector('.sidebar .scroll'); list.scrollTop = (list.scrollHeight - list.clientHeight) * ${fraction}; })()`);
+        await page.waitFor(`document.querySelector('[data-testid=thread-row][data-thread-id="${thread.id}"]')`, 30_000);
+        await page.click(`[data-testid=thread-row][data-thread-id="${thread.id}"]`);
+        await page.waitFor(`document.querySelector('[data-testid=thread-title]')?.textContent.trim() === ${JSON.stringify(thread.title)}`);
+        assert((await page.evaluate<number>(`document.querySelectorAll('[data-testid=thread-row]').length`)) < 100);
+      }
+      // Search still addresses a conversation whose row is outside the mounted window.
+      await page.evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }))`);
+      await page.waitFor(`document.querySelector('[data-testid=palette-input]')`);
+      await page.type('[data-testid=palette-input]', threads[749]!.title);
+      await page.waitFor(`Array.from(document.querySelectorAll('[data-testid=palette-row]')).some(row => row.textContent.includes(${JSON.stringify(threads[749]!.title)}))`);
+      await page.evaluate(`Array.from(document.querySelectorAll('[data-testid=palette-row]')).find(row => row.textContent.includes(${JSON.stringify(threads[749]!.title)})).click()`);
+      await page.waitFor(`document.querySelector('[data-testid=thread-title]')?.textContent.trim() === ${JSON.stringify(threads[749]!.title)}`);
+      await page.evaluate(`document.querySelector('.sidebar .scroll').scrollTop = 0`);
+      await page.waitFor(`document.querySelector('[data-testid=thread-row][data-thread-id="${ordered[0]!.id}"]')`);
+    }
+    if (revisit) await visitRows(page);
     const bootMs = performance.now() - boot;
     const selected = threads.at(-1)!;
     await page.click(`[data-testid=thread-row][data-thread-id="${selected.id}"]`);
@@ -121,4 +144,7 @@ test('desktop and phone remain usable with 1000 threads and a 256-turn burst', a
     }
   }
   if (cleanupErrors.length > 0) throw new AggregateError(cleanupErrors, 'UI stress cleanup failed');
-}, 120_000);
+}
+
+test('desktop and phone remain usable with 1000 threads and a 256-turn burst', () => exercise(false), 120_000);
+test('a cached conversation revisited through scrolling and search receives its foreground answer during a burst', () => exercise(true), 120_000);

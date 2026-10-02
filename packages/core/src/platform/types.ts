@@ -1,4 +1,4 @@
-import type { Settings, TraceCapability } from '@boite/contracts';
+import type { ResourceByteUsage, Settings, TraceCapability } from '@boite/contracts';
 import type { ServerUpdatePlatform } from '../server-update/types.ts';
 
 export interface NativeProcessInfo {
@@ -25,8 +25,13 @@ export interface ProcessSample {
   processes: number;
   cpuPercent: number;
   memoryBytes: number;
+  /** The first CPU sample has no interval; unsupported or unreadable values are unavailable. */
+  cpuMeasured?: boolean;
+  memoryMeasured?: boolean;
   /** Working set for the UI; private commit for the Windows governor. */
   workingSets?: { pid: number; bytes: number; committedBytes?: number; exe?: string }[];
+  /** Collected only while a visible task manager holds a detail lease. */
+  resources?: { disk: ResourceByteUsage; network: ResourceByteUsage };
 }
 
 /** What the registry wants to hear about. Set once by `ProcRegistry`. */
@@ -84,6 +89,10 @@ export interface ProcessPlatform {
   terminateProcess(threadId: string, pid: number): boolean;
   terminateUnassigned(pid: number): void;
   sample(threadId: string): ProcessSample | null;
+  /** Toggle optional detailed counters without changing protection sampling. */
+  watchResources?(active: boolean): void;
+  /** Finish a shared detail tick after every thread supplied its observed members. */
+  finishResources?(): void;
   /** Null `availableBytes` when the OS gives no honest reading; the reserve check then sits out. */
   machineMemory(): { totalBytes: number; availableBytes: number | null } | null;
   pidAdded(threadId: string, pid: number): void;

@@ -101,6 +101,22 @@ Sidebar pull-request lookups share requests for the same thread and run four
 at a time per client. A manual refresh goes ahead of background lookups, so
 mounting or remounting thousands of rows cannot flood the RPC connection.
 
+Desktop and phone navigation keep the full thread model but mount only the
+visible rows once a list exceeds 80 entries. Measured heights, six rows of
+overscan and machine-qualified keys preserve scroll anchors as rows change.
+Keyboard navigation reaches unmounted entries; search still addresses the full
+model. Parent move eligibility uses one reactive index instead of scanning the
+thread list for every mounted card. Closing the command palette retains its
+last results for the closing animation and stops ranking until it opens again.
+
+The [task manager](trace.md#agent-task-manager) reads cached snapshots. Its
+two-second refresh does not sample processes itself. Linux TCP collection uses
+one lazy Worker, outside the core event loop, while any visible client holds a
+lease. Transport failure preserves that demand and retries on existing sample
+ticks with bounded backoff; a missing Worker response has a two-second deadline.
+Recovered counters start a new observation interval rather than inventing the
+bytes transferred during the gap.
+
 Merged-PR archive maintenance inspects at most 128 thread rowids per pass and
 admits at most eight proof lookups. Its cursor advances over blocked roots,
 with a fixed end rowid per cycle so new rows and replacements cannot keep the
@@ -257,6 +273,12 @@ The service worker still asks the core for the app shell first, but waits
 next open.
 
 ## Core startup
+
+Claude and ACP join the other native drivers behind a lazy factory. Listing
+providers, capabilities or cached models does not load their protocol runtime.
+The first operation shares one import; a failed import can retry. Stop, thread
+release and shutdown retire pending sessions before a late factory can start a
+process. `packages/core/test/lazy-driver.test.ts` covers these boundaries.
 
 `fflate`, the unzip library behind provider installs and the local speech
 runtime, is imported where it unzips. Evaluating it builds its Huffman tables,

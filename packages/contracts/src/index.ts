@@ -1259,6 +1259,43 @@ export interface ThreadResources {
   load: ThreadLoad;
 }
 
+/** Read and write mean storage reads/writes for disk, download/upload for network. */
+export interface ResourceByteUsage {
+  /** Observed deltas since `since`, never an unobserved conversation lifetime. */
+  readBytes: number | null;
+  writeBytes: number | null;
+  /** Null until two readings of the same live counter establish an interval. */
+  readBytesPerSecond: number | null;
+  writeBytesPerSecond: number | null;
+  sampledAt: Timestamp | null;
+  since: Timestamp | null;
+  coverage: 'partial' | 'unavailable';
+  source: 'linux-proc-io' | 'linux-tcp-info' | 'macos-rusage' | 'unavailable';
+  /** Short collector explanation; clients translate known sources and coverage. */
+  note: string;
+}
+
+/** Sanitized resource row suitable for a paired phone; no paths or process arguments. */
+export interface AgentResourceUsage {
+  threadId: ThreadId;
+  title: string;
+  providerId: ProviderId;
+  model: string | null;
+  status: ThreadStatus;
+  projectId: ProjectId | null;
+  parentThreadId: ThreadId | null;
+  load: ThreadLoad;
+  /** Missing on an older core; false distinguishes unavailable readings from a measured zero. */
+  loadAvailable?: { cpu: boolean; memory: boolean };
+  disk: ResourceByteUsage;
+  network: ResourceByteUsage;
+}
+
+export interface AgentResourceSnapshot {
+  sampledAt: Timestamp;
+  agents: AgentResourceUsage[];
+}
+
 /** What the trace can and cannot promise on this OS. */
 export interface TraceCapability {
   os: Os;
@@ -2899,6 +2936,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
 
   'trace.get': { params: { threadId: ThreadId; limit?: number }; result: ProcessRecord[] };
   'resources.list': { params: Record<string, never>; result: ThreadResources[] };
+  /** Visible clients renew a six-second detail lease; false releases only this connection. */
+  'resources.usage': { params: { watch?: boolean }; result: AgentResourceSnapshot };
   /** Owner-only machine memory reading and the limits actually applied by the governor. */
   'resources.memoryStatus': { params: Record<string, never>; result: MemoryStatus };
   'resources.killTree': { params: { threadId: ThreadId }; result: { killed: number } };

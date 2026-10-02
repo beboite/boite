@@ -58,6 +58,7 @@ export class MacMemory {
       return bytes === null ? [] : [{ pid, bytes }];
     });
     if (!workingSets.length) return null;
-    return { processes: workingSets.length, cpuPercent: 0, memoryBytes: workingSets.reduce((sum, process) => sum + process.bytes, 0), workingSets };
+    return { processes: workingSets.length, cpuPercent: 0, cpuMeasured: false, memoryMeasured: true,
+      memoryBytes: workingSets.reduce((sum, process) => sum + process.bytes, 0), workingSets };
   }
 }

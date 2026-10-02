@@ -1,4 +1,5 @@
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, expect, vi } from 'vitest';
+import { test as fixtureTest } from '../test/fake-client';
 import { mount, unmount } from 'svelte';
 import { RpcErrorCode } from '@boite/contracts';
 import App from '../App.svelte';
@@ -18,10 +19,16 @@ import { freshWork, work, WORK_STORAGE_KEY } from '../lib/work-prefs.svelte';
 
 let running: Record<string, unknown> | null = null;
 
+const test = fixtureTest.extend<{ app: void }>({
+  app: async ({}, use) => {
+    await mountOnFake();
+    await use();
+  },
+});
+
 const previewReference = { id: 'composer-element', url: 'https://example.test', selector: '#save', text: 'Save', bounds: { x: 0, y: 0, width: 80, height: 30 } };
 
-test('preview mentions insert at the caret inside prose and keep identical labels distinct', async () => {
-  await mountOnFake();
+test('preview mentions insert at the caret inside prose and keep identical labels distinct', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);
   await type('Change this please');
@@ -41,8 +48,7 @@ test('preview mentions insert at the caret inside prose and keep identical label
   expect(store.composerStates['t-trace']!.previewReferences).toEqual([]);
 });
 
-test('an intact preview mention never opens file completion, while editing it restores file completion', async () => {
-  await mountOnFake();
+test('an intact preview mention never opens file completion, while editing it restores file completion', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);
   const call = vi.spyOn(store.client!, 'call');
@@ -62,8 +68,7 @@ test('an intact preview mention never opens file completion, while editing it re
   expect(mentionMenu()).not.toBeNull();
 });
 
-test('preview references survive queuing and a failed drain, and stashing refuses without changing the draft', async () => {
-  await mountOnFake();
+test('preview references survive queuing and a failed drain, and stashing refuses without changing the draft', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);
   await type('Change the selected control');
@@ -89,8 +94,7 @@ test('preview references survive queuing and a failed drain, and stashing refuse
   expect(store.composerStates['t-trace']!.previewReferences).toEqual([reference]);
 });
 
-test('preview references remain after refused activity commands and return with recalled sent prompts', async () => {
-  await mountOnFake();
+test('preview references remain after refused activity commands and return with recalled sent prompts', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);
   await type('/goal Change the control');
@@ -184,8 +188,7 @@ async function send(prompt: string): Promise<void> {
   await waitFor(() => (store.openThread?.messages.length ?? 0) >= before + 2 && !store.busy);
 }
 
-test.each([false, true])('editing replaces the sent message and later turns (next draft: %s)', async (nextDraft) => {
-  await mountOnFake();
+test.for([false, true])('editing replaces the sent message and later turns (next draft: %s)', async (nextDraft, { app: _app }) => {
   await store.open('t-trace');
   await send('original request');
   const original = store.openThread!.messages.findLast(message => message.role === 'user')!;
@@ -207,8 +210,7 @@ test.each([false, true])('editing replaces the sent message and later turns (nex
   if (nextDraft) expect(store.draft?.projectId).toBe(updated.projectId);
 });
 
-test('a turn that starts during editing does not silently turn the edit into a queued resend', async () => {
-  await mountOnFake();
+test('a turn that starts during editing does not silently turn the edit into a queued resend', async ({ app: _app }) => {
   await store.open('t-trace');
   await send('original request');
   const row = Array.from(document.querySelectorAll('[data-testid=message][data-role=user]')).find(row => row.querySelector('[data-testid=text-part]')?.textContent === 'original request')!;
@@ -226,8 +228,7 @@ test('a turn that starts during editing does not silently turn the edit into a q
   expect(store.openThread!.messages.some(message => message.id === messageId)).toBe(true);
 });
 
-test('an edit submitted before navigation replaces the original thread on its owning machine', async () => {
-  await mountOnFake();
+test('an edit submitted before navigation replaces the original thread on its owning machine', async ({ app: _app }) => {
   await store.open('t-trace');
   await send('original request');
   const message = store.openThread!.messages.findLast(message => message.role === 'user')!;
@@ -251,8 +252,7 @@ test('an edit submitted before navigation replaces the original thread on its ow
   expect(store.openThread?.id).toBe('t-descriptors');
 });
 
-test('Ctrl+Enter sends and leaves a fresh draft open on the same picker values', async () => {
-  await mountOnFake();
+test('Ctrl+Enter sends and leaves a fresh draft open on the same picker values', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
   const thread = store.openThread;
@@ -295,8 +295,7 @@ test('Ctrl+Enter sends and leaves a fresh draft open on the same picker values',
   expect(store.draft?.projectId).toBe(thread.projectId);
 });
 
-test('ArrowUp recalls the sent prompts of this thread and ArrowDown comes back', async () => {
-  await mountOnFake();
+test('ArrowUp recalls the sent prompts of this thread and ArrowDown comes back', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
 
@@ -339,8 +338,7 @@ test('ArrowUp recalls the sent prompts of this thread and ArrowDown comes back',
   expect(input().value).toBe('the newer one');
 });
 
-test('Ctrl+S folds the sidebar without stashing, and Ctrl+Shift+S stashes and restores the composer', async () => {
-  await mountOnFake();
+test('Ctrl+S folds the sidebar without stashing, and Ctrl+Shift+S stashes and restores the composer', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
 
@@ -395,8 +393,7 @@ async function openDraft(): Promise<void> {
   await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
 }
 
-test('the reasoning chip reads the model default level and saves the pick on the open thread', async () => {
-  await mountOnFake();
+test('the reasoning chip reads the model default level and saves the pick on the open thread', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
   // The thread runs the echo model, whose scale is two levels with high as its default.
@@ -417,8 +414,7 @@ test('the reasoning chip reads the model default level and saves the pick on the
   expect(query('[data-testid=composer-picker]').textContent).not.toContain('Low');
 });
 
-test('the reasoning chip remembers the level a draft picks', async () => {
-  await mountOnFake();
+test('the reasoning chip remembers the level a draft picks', async ({ app: _app }) => {
   await openDraft();
   await waitFor(() => effortChip() !== null);
   expect(effortChip()?.textContent?.trim()).toBe('High');
@@ -436,8 +432,7 @@ test('the reasoning chip remembers the level a draft picks', async () => {
   await waitFor(() => effortChip()?.textContent?.trim() === 'Xhigh');
 });
 
-test('the reasoning slider draws one dot per level and the arrows move it', async () => {
-  await mountOnFake();
+test('the reasoning slider draws one dot per level and the arrows move it', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
   await waitFor(() => effortChip() !== null);
@@ -472,8 +467,7 @@ test('the reasoning slider draws one dot per level and the arrows move it', asyn
   await waitFor(() => query('[data-testid=effort-track]').getAttribute('aria-valuenow') === '1');
 });
 
-test('a model with no reasoning scale gets no chip at all', async () => {
-  await mountOnFake();
+test('a model with no reasoning scale gets no chip at all', async ({ app: _app }) => {
   await openDraft();
   await waitFor(() => effortChip() !== null);
 
@@ -516,8 +510,7 @@ test('a first run shows the reasoning, mode and worktree chips at their defaults
   query('[data-testid=effort-fast-mark]');
 });
 
-test('the lightning cycles fast, ultrafast and standard in a draft and saves each native tier on a thread', async () => {
-  await mountOnFake();
+test('the lightning cycles fast, ultrafast and standard in a draft and saves each native tier on a thread', async ({ app: _app }) => {
   await openDraft();
   const choice = store.defaultChoice()!;
   await store.probeModels(choice.providerId, choice.accountId);
@@ -548,8 +541,7 @@ test('the lightning cycles fast, ultrafast and standard in a draft and saves eac
   }
 });
 
-test('the lightning switches a draft to a separate fast model without losing its effort', async () => {
-  await mountOnFake();
+test('the lightning switches a draft to a separate fast model without losing its effort', async ({ app: _app }) => {
   await openDraft();
   const choice = store.defaultChoice()!;
   await store.probeModels(choice.providerId, choice.accountId);
@@ -570,8 +562,7 @@ test('the lightning switches a draft to a separate fast model without losing its
   expect(store.draftChoice?.effort).toBe('high');
 });
 
-test('the picker keeps row, account and legacy keyboard navigation separate', async () => {
-  await mountOnFake();
+test('the picker keeps row, account and legacy keyboard navigation separate', async ({ app: _app }) => {
   await openDraft();
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
@@ -598,8 +589,7 @@ test('the picker keeps row, account and legacy keyboard navigation separate', as
   expect(document.activeElement).toBe(legacyRow);
 });
 
-test('a refused turn keeps the prompt for Enter and Ctrl+Enter', async () => {
-  await mountOnFake();
+test('a refused turn keeps the prompt for Enter and Ctrl+Enter', async ({ app: _app }) => {
   await store.open('t-trace');
   const client = store.client!;
   const call = client.call.bind(client);
@@ -618,8 +608,7 @@ test('a refused turn keeps the prompt for Enter and Ctrl+Enter', async () => {
   }
 });
 
-test('reconnecting queues a send instead of sending it, and a new thread waits for the machine', async () => {
-  await mountOnFake();
+test('reconnecting queues a send instead of sending it, and a new thread waits for the machine', async ({ app: _app }) => {
   await store.open('t-trace');
   const submit = vi.spyOn(store, 'submit');
   store.connection = 'connecting';
@@ -641,8 +630,7 @@ test('reconnecting queues a send instead of sending it, and a new thread waits f
   expect(input().value).toBe('a new thread');
 });
 
-test('ArrowUp removes the latest queued prompt and restores its images for editing', async () => {
-  await mountOnFake();
+test('ArrowUp removes the latest queued prompt and restores its images for editing', async ({ app: _app }) => {
   await store.open('t-trace');
   store.openThread!.status = 'running';
   await type('first pending');
@@ -663,8 +651,7 @@ test('ArrowUp removes the latest queued prompt and restores its images for editi
   expect(store.composerStates['t-trace']!.queued.map((entry) => entry.text)).toEqual(['first pending', 'edited pending prompt']);
 });
 
-test('Escape stops the running turn and sends pending input next', async () => {
-  await mountOnFake();
+test('Escape stops the running turn and sends pending input next', async ({ app: _app }) => {
   await store.open('t-trace');
   await type('Wait for me [permission]');
   press('Enter');
@@ -679,8 +666,7 @@ test('Escape stops the running turn and sends pending input next', async () => {
   expect(store.openThread!.turns.some((turn) => turn.status === 'stopped')).toBe(true);
 });
 
-test('a thread of a machine that dropped still opens and queues its prompts until the machine is back', async () => {
-  await mountOnFake();
+test('a thread of a machine that dropped still opens and queues its prompts until the machine is back', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);
   const other = store.threads.find((t) => t.id === 't-descriptors')!;
@@ -710,8 +696,7 @@ test('a thread of a machine that dropped still opens and queues its prompts unti
   await waitFor(() => asked('threads.get') && asked('collaboration.get') && asked('workflows.list') && asked('delegation.get'));
 });
 
-test('Enter in the emptied composer holds pending input behind an approval', async () => {
-  await mountOnFake();
+test('Enter in the emptied composer holds pending input behind an approval', async ({ app: _app }) => {
   await store.open('t-trace');
   await type('Hold on [permission]');
   press('Enter');
@@ -752,8 +737,7 @@ test('Send now submits a follow-up without interrupting the live agent', async (
   await waitFor(() => !store.busy);
 });
 
-test('goal and loop coexist above the composer with expandable agent tasks', async () => {
-  await mountOnFake();
+test('goal and loop coexist above the composer with expandable agent tasks', async ({ app: _app }) => {
   await store.open('t-trace');
   const call = vi.spyOn(store.client!, 'call');
   await type('/goal Finish the release');
@@ -782,8 +766,7 @@ test('goal and loop coexist above the composer with expandable agent tasks', asy
   expect(query('[data-testid=activity-loop] .objective').getAttribute('title')).toBe('Check CI');
 });
 
-test('all queued prompts run together on their thread without reopening it', async () => {
-  await mountOnFake();
+test('all queued prompts run together on their thread without reopening it', async ({ app: _app }) => {
   await store.open('t-trace');
   await store.send('question');
   await waitFor(() => store.openThread?.status === 'waiting');
@@ -812,8 +795,7 @@ test('all queued prompts run together on their thread without reopening it', asy
 
 
 
-test('a draft keeps its prompt in the created thread when turns.start fails', async () => {
-  await mountOnFake();
+test('a draft keeps its prompt in the created thread when turns.start fails', async ({ app: _app }) => {
   store.startDraft();
   await waitFor(() => store.draft !== null);
   const client = store.client!;
@@ -829,8 +811,7 @@ test('a draft keeps its prompt in the created thread when turns.start fails', as
   expect(input().value).toBe('the first prompt must survive');
 });
 
-test('a pending send cannot duplicate a turn or erase text typed for the next prompt', async () => {
-  await mountOnFake();
+test('a pending send cannot duplicate a turn or erase text typed for the next prompt', async ({ app: _app }) => {
   await store.open('t-trace');
   const client = store.client!;
   const call = client.call.bind(client);
@@ -880,8 +861,7 @@ function chips(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>('[data-testid=composer-attachment]'));
 }
 
-test('a pasted image becomes a chip, comes off again, and rides the prompt', async () => {
-  await mountOnFake();
+test('a pasted image becomes a chip, comes off again, and rides the prompt', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
   // The echo agent reads images, so the chip bar offers the paperclip.
@@ -952,8 +932,7 @@ test('a pasted image becomes a chip, comes off again, and rides the prompt', asy
   expect(document.querySelector('[data-testid=composer-attachments]')).toBeNull();
 });
 
-test('image references follow the caret, mixed attachments and removal without losing browser references', async () => {
-  await mountOnFake();
+test('image references follow the caret, mixed attachments and removal without losing browser references', async ({ app: _app }) => {
   await store.open('t-trace');
   await type('Before after');
   input().setSelectionRange(7, 7);
@@ -993,8 +972,7 @@ test('image references follow the caret, mixed attachments and removal without l
   expect(document.querySelector('[data-testid=composer-image-preview]')).toBeNull();
 });
 
-test('deleting one character of an image reference removes the reference and its image', async () => {
-  await mountOnFake();
+test('deleting one character of an image reference removes the reference and its image', async ({ app: _app }) => {
   await store.open('t-trace');
   await type('A ');
   paste(pngFile('first.png'));
@@ -1013,8 +991,7 @@ test('deleting one character of an image reference removes the reference and its
   expect(chips()[0]!.getAttribute('title')).toBe('[Image 1] · second.png');
 });
 
-test('sending waits for a file read so the attachment cannot land in the next prompt', async () => {
-  await mountOnFake();
+test('sending waits for a file read so the attachment cannot land in the next prompt', async ({ app: _app }) => {
   await store.open('t-trace');
   await type('Read these notes');
   const original = FileReader.prototype.readAsDataURL;
@@ -1035,8 +1012,7 @@ test('sending waits for a file read so the attachment cannot land in the next pr
   expect(sent.parts).toContainEqual({ type: 'file', mimeType: 'text/plain', name: 'notes.txt', data: btoa('notes') });
 });
 
-test.each([true, false])('an image pasted during a pending send preserves only unsent content when accepted=%s', async accepted => {
-  await mountOnFake();
+test.for([true, false])('an image pasted during a pending send preserves only unsent content when accepted=%s', async (accepted, { app: _app }) => {
   await store.open('t-trace');
   paste(pngFile('sent.png'));
   await waitFor(() => chips().length === 1);
@@ -1125,8 +1101,7 @@ function slashMenu(): HTMLElement | null {
   return document.querySelector<HTMLElement>('[data-testid=slash-menu]');
 }
 
-test('recognized slash tokens are colored without changing the editable prompt', async () => {
-  await mountOnFake();
+test('recognized slash tokens are colored without changing the editable prompt', async ({ app: _app }) => {
   for (const prompt of ['/goal', '/loop 2 repeat this', '/shout hello\nnext line', '/model']) {
     await type(prompt);
     const highlight = query('[data-testid=composer-highlight]');
@@ -1146,8 +1121,7 @@ test('recognized slash tokens are colored without changing the editable prompt',
   }
 });
 
-test('permission menu offers YOLO beside Auto and preserves legacy modes until picked', async () => {
-  await mountOnFake();
+test('permission menu offers YOLO beside Auto and preserves legacy modes until picked', async ({ app: _app }) => {
   await waitFor(() => !store.busy);
   for (const legacy of ['plan', 'dontAsk'] as const) {
     store.openThread!.permissionMode = legacy;
@@ -1168,8 +1142,7 @@ test('permission menu offers YOLO beside Auto and preserves legacy modes until p
   }
 });
 
-test('a slash lists the agent commands first, filters, and completes the box', async () => {
-  await mountOnFake();
+test('a slash lists the agent commands first, filters, and completes the box', async ({ app: _app }) => {
   // The thread a boot opens has already run a turn, so the echo agent has
   // already said what it takes.
   await waitFor(() => store.openThread?.id === 't-descriptors' && !store.busy);
@@ -1212,8 +1185,7 @@ test('a slash lists the agent commands first, filters, and completes the box', a
   expect(answer).toBe('HELLO');
 });
 
-test('a composer command opens its control without sending a prompt', async () => {
-  await mountOnFake();
+test('a composer command opens its control without sending a prompt', async ({ app: _app }) => {
   await waitFor(() => store.openThread !== null && !store.busy);
 
   await type('/model');
@@ -1241,8 +1213,7 @@ function mentionMenu(): HTMLElement | null {
   return document.querySelector<HTMLElement>('[data-testid=mention-menu]');
 }
 
-test('an at sign lists the project files, narrows on the word, and writes the pick in as a path', async () => {
-  await mountOnFake();
+test('an at sign lists the project files, narrows on the word, and writes the pick in as a path', async ({ app: _app }) => {
   await waitFor(() => store.openThread !== null && !store.busy);
 
   // Anywhere in the text, not only at the start: the word under the caret is the query.
@@ -1275,8 +1246,7 @@ test('an at sign lists the project files, narrows on the word, and writes the pi
   expect(input().value).toBe('please read @src/lib/strings.ts and @src/components/Composer.svelte ');
 });
 
-test('Escape shuts the mention menu, a space closes it, and nothing matches says so', async () => {
-  await mountOnFake();
+test('Escape shuts the mention menu, a space closes it, and nothing matches says so', async ({ app: _app }) => {
   await waitFor(() => store.openThread !== null && !store.busy);
 
   await type('@');
@@ -1295,8 +1265,7 @@ test('Escape shuts the mention menu, a space closes it, and nothing matches says
   await waitFor(() => mentionMenu() === null);
 });
 
-test('Escape shuts the slash menu and keeps what is typed', async () => {
-  await mountOnFake();
+test('Escape shuts the slash menu and keeps what is typed', async ({ app: _app }) => {
   await waitFor(() => store.openThread !== null && !store.busy);
 
   await type('/');
@@ -1321,8 +1290,7 @@ test('Escape shuts the slash menu and keeps what is typed', async () => {
   expect(input().value).toBe('/whisper ');
 });
 
-test('queued prompts survive settings and wait for a ready connection', async () => {
-  await mountOnFake();
+test('queued prompts survive settings and wait for a ready connection', async ({ app: _app }) => {
   await store.open('t-trace');
   store.openThread!.status = 'running';
   await type('queue through settings');
@@ -1346,8 +1314,7 @@ test('queued prompts survive settings and wait for a ready connection', async ()
   ]);
 });
 
-test('a refused prompt keeps its place in the queue and the next send resumes it in order', async () => {
-  await mountOnFake();
+test('a refused prompt keeps its place in the queue and the next send resumes it in order', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
   const client = store.client!;
@@ -1387,8 +1354,7 @@ test('a refused prompt keeps its place in the queue and the next send resumes it
   expect(sent).toEqual(['P1\n\nP2\n\nP3']);
 });
 
-test('a turn the core opened on its own holds the prompt, then sends it without an error', async () => {
-  await mountOnFake();
+test('a turn the core opened on its own holds the prompt, then sends it without an error', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
   const client = store.client!;
@@ -1428,8 +1394,7 @@ test('a turn the core opened on its own holds the prompt, then sends it without 
   expect(store.error).toBeNull();
 });
 
-test('the mention menu never opens on the project the composer just left', async () => {
-  await mountOnFake();
+test('the mention menu never opens on the project the composer just left', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
   const client = store.client!;
@@ -1456,8 +1421,7 @@ test('the mention menu never opens on the project the composer just left', async
 });
 
 
-test('/btw bypasses the queue while busy, leaves history alone and Escape only closes its answer', async () => {
-  await mountOnFake();
+test('/btw bypasses the queue while busy, leaves history alone and Escape only closes its answer', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);
   store.openThread!.status = 'running';
@@ -1477,8 +1441,7 @@ test('/btw bypasses the queue while busy, leaves history alone and Escape only c
   expect(call.mock.calls.some(([method]) => method === 'turns.stop')).toBe(false);
 });
 
-test('a side answer arriving after navigation stays out of the newly opened conversation', async () => {
-  await mountOnFake();
+test('a side answer arriving after navigation stays out of the newly opened conversation', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);
   const client = store.client!, original = client.call.bind(client);
@@ -1496,8 +1459,7 @@ test('a side answer arriving after navigation stays out of the newly opened conv
 });
 
 
-test('a delivered side answer survives a late admission failure', async () => {
-  await mountOnFake();
+test('a delivered side answer survives a late admission failure', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);
   const client = store.client!, original = client.call.bind(client);
@@ -1516,8 +1478,7 @@ test('a delivered side answer survives a late admission failure', async () => {
   expect(document.querySelector('[data-testid=btw-answer]')?.textContent).not.toContain('admission acknowledgement lost');
 });
 
-test('the side answer fork button opens a fresh conversation holding the exchange', async () => {
-  await mountOnFake();
+test('the side answer fork button opens a fresh conversation holding the exchange', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);
   const before = structuredClone(await store.client!.call('threads.get', { threadId: 't-trace' }));
@@ -1535,8 +1496,7 @@ test('the side answer fork button opens a fresh conversation holding the exchang
   expect(document.querySelector('[data-testid=btw-answer]')).toBeNull();
 });
 
-test('a delayed side fork acknowledgement preserves navigation to another conversation', async () => {
-  await mountOnFake();
+test('a delayed side fork acknowledgement preserves navigation to another conversation', async ({ app: _app }) => {
   await store.open('t-trace');
   await waitFor(() => !store.busy);
   const client = store.client!, original = client.call.bind(client);

@@ -1,19 +1,18 @@
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, expect, vi } from 'vitest';
+import { test } from '../test/fake-client';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { open as nativeOpen } from '@tauri-apps/plugin-dialog';
 import ProjectPicker from './ProjectPicker.svelte';
-import { FakeClient } from '../lib/fake-client';
-import { Store } from '../lib/store.svelte';
+import type { FakeClient, FakeClientOptions } from '../lib/fake-client';
+import type { Store } from '../lib/store.svelte';
 import { workspace } from '../lib/workspace.svelte';
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 let component: Record<string, unknown> | undefined;
-const cleanups: (() => void)[] = [];
 afterEach(async () => {
   if (component) await unmount(component, { outro: false });
   component = undefined;
   workspace.machines = [];
-  for (const cleanup of cleanups.splice(0)) cleanup();
   delete window.__TAURI_INTERNALS__;
   document.body.innerHTML = ''; localStorage.clear(); vi.restoreAllMocks();
 });
@@ -24,11 +23,10 @@ function deferred<T = void>() {
 }
 
 async function settle() { for (let index = 0; index < 5; index++) { await tick(); await Promise.resolve(); } flushSync(); }
-async function draw() {
-  const a = new Store(), b = new Store(), ca = new FakeClient({ delayMs: 0 }), cb = new FakeClient({ delayMs: 0, coreId: 'machine-b' });
+async function draw(createStore: (options?: FakeClientOptions) => { store: Store; client: FakeClient }) {
+  const { store: a, client: ca } = createStore(), { store: b, client: cb } = createStore({ delayMs: 0, coreId: 'machine-b' });
   a.machineId = 'machine-a'; b.machineId = 'machine-b'; a.attach(ca); b.attach(cb);
   await Promise.all([a.connect(), b.connect()]);
-  cleanups.push(() => { a.detach(); b.detach(); ca.close(); cb.close(); });
   await cb.call('projects.add', { path: '/B-collision' });
   workspace.machines = [{ id: 'machine-a', label: 'Machine A', store: a }, { id: 'machine-b', label: 'Machine B', store: b }]; workspace.active = a;
   a.projectPickerOpen = true;
@@ -36,8 +34,8 @@ async function draw() {
   return { a, b, ca, cb };
 }
 
-test.each(['machine', 'cancel-reopen'])('a delayed project Add keeps its owning machine and respects %s intent', async intent => {
-  const { a, b, ca } = await draw();
+test.for(['machine', 'cancel-reopen'])('a delayed project Add keeps its owning machine and respects %s intent', async (intent, { createStore }) => {
+  const { a, b, ca } = await draw(createStore);
   const call = ca.call.bind(ca), started = deferred<void>(), released = deferred<void>();
   const spy = vi.spyOn(ca, 'call').mockImplementation(async (method, params) => {
     const result = await call(method, params);
@@ -59,9 +57,9 @@ test.each(['machine', 'cancel-reopen'])('a delayed project Add keeps its owning 
   expect(a.projects.find(project => project.id === 'p-101')?.path).toBe('/A-project');
 });
 
-test('cancel and reopen invalidates a pending native folder picker before project creation', async () => {
+test('cancel and reopen invalidates a pending native folder picker before project creation', async ({ createStore }) => {
   window.__TAURI_INTERNALS__ = {} as never;
-  const { a, ca } = await draw(); a.localCore = true; await settle();
+  const { a, ca } = await draw(createStore); a.localCore = true; await settle();
   const released = deferred<string>(); vi.mocked(nativeOpen).mockReturnValue(released.promise);
   const spy = vi.spyOn(ca, 'call');
   document.querySelector<HTMLButtonElement>('[data-testid=pick-project]')!.click(); await vi.waitFor(() => expect(nativeOpen).toHaveBeenCalledOnce());

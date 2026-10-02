@@ -59,11 +59,14 @@
 
   let commandItems = $derived.by((): PaletteItem[] => appCommands(store, inShell));
 
+  const snapshot = { rows: [] as PaletteItem[] };
   /** Threads first, commands after: a query ranks across both, nothing typed shows the recents. */
   let rows = $derived.by((): PaletteItem[] => {
+    // Keep the exit animation's rows without subscribing a closed search to live updates.
+    if (!store.paletteOpen) return snapshot.rows;
     const typed = query.trim().length > 0;
     const threads = typed ? threadItems : threadItems.slice(0, RECENT_THREADS);
-    return rankItems(query, [...threads, ...commandItems], PALETTE_LIMIT);
+    return snapshot.rows = rankItems(query, [...threads, ...commandItems], PALETTE_LIMIT);
   });
 
   // The walk starts over on what the user typed, never on the list being

@@ -1,4 +1,4 @@
-import type { PermissionMode, ProjectId, ProviderId } from '@boite/contracts';
+import type { PermissionMode, ProjectId, ProviderId, ThreadId } from '@boite/contracts';
 import type { Client } from './client';
 import { readModelDefaults } from './model-defaults';
 import { readFavorites } from './model-order';
@@ -22,7 +22,7 @@ import type { Workbench } from './store/workbench.svelte';
 import type { Workflows } from './store/workflows.svelte';
 
 export type Page = 'chat' | 'settings' | 'agents';
-export type SettingsTab = 'home' | 'advanced' | 'brain' | 'voice' | 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'limits' | 'resources' | 'experiments';
+export type SettingsTab = 'home' | 'advanced' | 'brain' | 'voice' | 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'limits' | 'resources' | 'task-manager' | 'experiments';
 
 /** A login process the core runs for one account, as `account.login` reports it. */
 export interface LoginState {
@@ -440,6 +440,7 @@ export class Store {
   set imports(value) { this.#ctx.imports.imports = value; }
 
   threadsOf(...args: Parameters<Threads['threadsOf']>) { return this.#ctx.threads.threadsOf(...args); }
+  moveBlocked(threadId: ThreadId) { return this.#ctx.threads.moveBlocked(threadId); }
   compact(...args: Parameters<Threads['compact']>) { return this.#ctx.threads.compact(...args); }
   rewind(...args: Parameters<Threads['rewind']>) { return this.#ctx.threads.rewind(...args); }
   forkSideQuestion(...args: Parameters<Threads['forkSideQuestion']>) { return this.#ctx.threads.forkSideQuestion(...args); }

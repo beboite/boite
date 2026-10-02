@@ -1,5 +1,5 @@
 /** Process trace, live resources and token usage. */
-import { RpcErrorCode, type ThreadId, type ThreadResources, type Usage } from '@boite/contracts';
+import { RpcErrorCode, type AgentResourceSnapshot, type ResourceByteUsage, type ThreadId, type ThreadResources, type Usage } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { addUsage, emptyUsage } from './shared';
 import { fakeUsageHistory } from '../fake-usage';
@@ -24,7 +24,21 @@ function resources(ctx: FakeContext): ThreadResources[] {
 }
 
 export function resourceMethods(ctx: FakeContext) {
+  const unavailable = (): ResourceByteUsage => ({ readBytes: null, writeBytes: null,
+    readBytesPerSecond: null, writeBytesPerSecond: null, sampledAt: null, since: null,
+    coverage: 'unavailable', source: 'unavailable', note: 'No supported per-agent counter' });
   return {
+    'resources.usage': async (params): Promise<AgentResourceSnapshot> => {
+      if (ctx.bus.principal === 'agent') throw new RpcFailure({ code: RpcErrorCode.Refused, message: "resources.usage is not one of the agent's methods" });
+      if (params === null || typeof params !== 'object' || Array.isArray(params)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'resources.usage: expected an object' });
+      if (params.watch !== undefined && typeof params.watch !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'watch: expected a boolean' });
+      return { sampledAt: ctx.now(), agents: resources(ctx).map(resource => {
+        const thread = ctx.threads.get(resource.threadId)!;
+        return { threadId: thread.id, title: thread.title, providerId: thread.providerId, model: thread.model,
+          status: thread.status, projectId: thread.projectId, parentThreadId: thread.parentThreadId ?? null,
+          load: resource.load, loadAvailable: { cpu: thread.load !== null, memory: thread.load !== null }, disk: unavailable(), network: unavailable() };
+      }) };
+    },
     'trace.get': async (params) => {
       const rows = ctx.processes
         .filter((p) => p.threadId === params.threadId)

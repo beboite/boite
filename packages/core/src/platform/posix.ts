@@ -10,12 +10,12 @@ import { linuxServerUpdates } from './linux-server-update.ts';
  */
 export function createPosixPlatform(
   os: 'linux' | 'macos',
-  load: Pick<LinuxLoad, 'add' | 'remove' | 'sample'> & Partial<Pick<LinuxLoad, 'killTree'>> | null = os === 'linux' ? new LinuxLoad(availableParallelism()) : null,
+  load: Pick<LinuxLoad, 'add' | 'remove' | 'sample'> & Partial<Pick<LinuxLoad, 'killTree' | 'watchResources' | 'finishResources' | 'closeResources' | 'forget'>> | null = os === 'linux' ? new LinuxLoad(availableParallelism()) : null,
 ): ProcessPlatform {
   return {
     ...(os === 'linux' ? { serverUpdates: linuxServerUpdates() } : {}),
     retain() {},
-    release: () => Promise.resolve(),
+    release: async () => { load?.watchResources?.(false); await load?.closeResources?.(); },
     capability: () => ({ os, mode: 'poll', note: 'direct children only; Job Objects are Windows-only' }),
     applySettings() {},
     attach: () => false,
@@ -23,6 +23,8 @@ export function createPosixPlatform(
     terminateProcess: (_threadId, pid) => load?.killTree?.(pid) ?? false,
     terminateUnassigned() {},
     sample: (threadId) => load?.sample(threadId) ?? null,
+    watchResources: (active) => load?.watchResources?.(active),
+    finishResources: () => load?.finishResources?.(),
     // macOS `freemem()` leaves out inactive and purgeable pages, far below what the system can hand out.
     machineMemory: () => os === 'linux' ? linuxMachineMemory() : { totalBytes: totalmem(), availableBytes: null },
     pidAdded: (threadId, pid) => {
@@ -32,7 +34,7 @@ export function createPosixPlatform(
       load?.remove(threadId, pid);
     },
     warm() {},
-    forget() {},
+    forget(threadId) { load?.forget?.(threadId); },
     guardStatus: () => ({ running: false, hook: null, failure: null, audio: 'off', mutedPids: [] }),
     startedAt: (pid) => (os === 'linux' ? linuxStartedAt(pid) : null),
     // Every process traced here is the core's own child, so the sweep never asks.

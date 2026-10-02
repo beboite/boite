@@ -447,6 +447,7 @@ export function sampleThreadJob(threadId: string): ProcessSample | null {
   const total = view.getBigUint64(OFF_TOTAL_USER_TIME, true) + view.getBigUint64(OFF_TOTAL_KERNEL_TIME, true);
   const now = Date.now();
   const elapsedMs = now - job.lastSampleAt;
+  const cpuMeasured = job.lastSampleAt > 0 && elapsedMs > 0 && total >= job.lastCpu100ns;
   let cpuPercent = 0;
   if (job.lastSampleAt > 0 && elapsedMs > 0 && total >= job.lastCpu100ns) {
     const cpuMs = Number(total - job.lastCpu100ns) / 10_000;
@@ -467,7 +468,8 @@ export function sampleThreadJob(threadId: string): ProcessSample | null {
     if (memory.peak > entry.peakMemoryBytes) tracked.set(pid, { ...entry, peakMemoryBytes: memory.peak });
   }
 
-  return { processes: view.getUint32(OFF_ACTIVE_PROCESSES, true), cpuPercent, memoryBytes, workingSets };
+  return { processes: view.getUint32(OFF_ACTIVE_PROCESSES, true), cpuPercent, memoryBytes, workingSets,
+    cpuMeasured, memoryMeasured: workingSets.length > 0 };
 }
 
 // -- job creation -----------------------------------------------------------

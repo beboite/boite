@@ -72,6 +72,7 @@ executable, command line, timestamps, exit code, CPU time, peak memory and I/O.
 | --- | --- |
 | `trace.get` | One thread's recorded processes, newest first |
 | `resources.list` | Threads with live processes, their last sampled `ThreadLoad`, busiest first |
+| `resources.usage` | Agent identity and cached CPU, memory, storage and TCP readings, without process arguments or paths |
 | `resources.killTree` | Stops the registered thread tree or groups; wait for live count zero before treating exits as observed |
 | `ThreadLoad` | Sampled process count, CPU percentage and memory on each thread summary |
 
@@ -88,6 +89,40 @@ Protection settings refresh resources every two seconds while visible. Trace
 lists active processes first, then recent starts. Expand a row for command,
 path, IDs, CPU and I/O. Its capability disclosure identifies incomplete tracking.
 A command line belongs in this authorized trace view, not diagnostic logs.
+
+## Agent task manager
+
+Settings > Task manager shows this machine's live processes grouped by agent,
+with search and sorting by memory, CPU, disk or network activity. Desktop owners
+can stop an agent's processes after confirming. Paired phones can read the same
+measurements and open the owning conversation, but cannot stop processes.
+
+The view asks for cached measurements every two seconds while visible.
+`resources.usage { watch: true }` holds a six-second lease owned by its connection;
+closing, hiding or disconnecting releases that connection's lease. Detailed
+collection stops when no lease remains. A request without `watch` reads the
+snapshot without enabling collection. Unsupported cores show an update message
+and wait for an explicit retry.
+
+CPU is a percentage of the machine's logical processors; memory is the current
+platform sample, not lifetime allocation. A missing measurement displays
+"Not available". Totals disclose when only some agents have readable counters.
+Linux sampling separates independently registered nested agents, so their
+subtrees do not contribute to both rows.
+
+Linux disk activity uses task-local procfs storage counters, excluding character
+I/O and a parent's accumulated counters from reaped children. TCP activity joins
+kernel payload counters to an agent's currently held socket descriptors,
+checking process birth, network namespace and socket identity. Shared sockets
+between separately registered agents remain unattributed. Download/upload rates
+and byte totals cover observed intervals while collection is active, not the
+agent's entire lifetime. Short processes or connections can escape observation;
+UDP traffic and protocol overhead are outside these TCP counters. Disk activity
+does not describe folder size.
+
+Windows supplies job CPU and memory measurements. macOS supplies readable
+physical footprint measurements, with CPU unavailable. Storage and network
+activity on unsupported platforms display unavailable rather than zero.
 
 ## Structured diagnostics
 

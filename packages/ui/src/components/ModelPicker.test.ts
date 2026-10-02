@@ -12,8 +12,8 @@ import { FakeClient } from '../lib/fake-client';
 
 let running: Record<string, unknown> | null = null;
 
-afterEach(() => {
-  if (running) unmount(running, { outro: false });
+afterEach(async () => {
+  if (running) await unmount(running, { outro: false });
   running = null;
   document.body.innerHTML = '';
   window.localStorage.clear();
@@ -34,8 +34,8 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 
-async function mountAtLanding(): Promise<FakeClient> {
-  window.history.replaceState(null, '', '/?fake=1&open=landing');
+async function mountAt(open: 'landing' | 'recent'): Promise<FakeClient> {
+  window.history.replaceState(null, '', `/?fake=1&open=${open}`);
   const target = document.createElement('div');
   document.body.appendChild(target);
   store.booted = false;
@@ -44,7 +44,7 @@ async function mountAtLanding(): Promise<FakeClient> {
   store.composerStates = {};
   closeTour();
   running = mount(App, { target });
-  await waitFor(() => store.booted && store.draft !== null);
+  await waitFor(() => store.booted && (open === 'landing' ? store.draft !== null : store.openThread !== null || store.draft !== null));
   return store.client as FakeClient;
 }
 
@@ -64,16 +64,7 @@ test('account chips never reveal the login email in their tooltip', () => {
 });
 
 test('a column of hundreds of models draws its first rows until asked for all', async () => {
-  window.history.replaceState(null, '', '/?fake=1&open=recent');
-  const target = document.createElement('div');
-  document.body.appendChild(target);
-  store.booted = false;
-  store.openThread = null;
-  store.draft = null;
-  store.composerStates = {};
-  closeTour();
-  running = mount(App, { target });
-  await waitFor(() => store.booted && (store.openThread !== null || store.draft !== null));
+  await mountAt('recent');
 
   const many: ModelInfo[] = Array.from({ length: 534 }, (_, index) => ({ id: `vendor${index % 4}/model-${index}`, name: `Model ${index}` }) as ModelInfo);
   const real = store.modelsOf.bind(store);
@@ -117,16 +108,7 @@ test('a first probe shows a reading column, never the descriptor list it is abou
     return original.call(this, method, params) as never;
   });
   vi.spyOn(console, 'warn').mockImplementation(() => {});
-  window.history.replaceState(null, '', '/?fake=1&open=recent');
-  const target = document.createElement('div');
-  document.body.appendChild(target);
-  store.booted = false;
-  store.openThread = null;
-  store.draft = null;
-  store.composerStates = {};
-  closeTour();
-  running = mount(App, { target });
-  await waitFor(() => store.booted && (store.openThread !== null || store.draft !== null));
+  await mountAt('recent');
   document.querySelector<HTMLButtonElement>('[data-testid=new-thread]')!.click();
   await waitFor(() => store.draft !== null);
 
@@ -179,7 +161,7 @@ test('a first probe shows a reading column, never the descriptor list it is abou
 });
 
 test('a model probe that resolves after navigation cannot update the next thread or its remembered choice', async () => {
-  const client = await mountAtLanding();
+  const client = await mountAt('landing');
   await store.probeModels('claude', 'a-claude-main');
   const first = await client.call('threads.create', {
     projectId: 'p-boite', providerId: 'claude', accountId: 'a-claude-main', model: 'claude-sonnet-5', title: 'Picker source'
@@ -230,7 +212,7 @@ test('a model probe that resolves after navigation cannot update the next thread
 });
 
 test('a signed-in Claude seat is probed before its model and account are applied to a thread', async () => {
-  const client = await mountAtLanding();
+  const client = await mountAt('landing');
   await client.call('accounts.login', { accountId: 'a-claude-side' });
   await client.call('accounts.loginInput', { accountId: 'a-claude-side', text: 'test-code' });
   await waitFor(() => store.accountOf('a-claude-side')?.status === 'ok');

@@ -13,7 +13,7 @@ import type {
   Timestamp,
   Turn,
 } from '@boite/contracts';
-import { ensureIndexes, migrate } from './journal/schema.ts';
+import { migrate } from './journal/schema.ts';
 import { toAccount, toMessage, toProcess, toProject, toThread, toTurn, parseJson } from './journal/rows.ts';
 import type { AccountRow, MessageRow, ProcessRow, ProjectIconRow, ProjectRow, ThreadRow, TurnRow } from './journal/rows.ts';
 import type { DetectedIcon as StoredProjectIcon } from './project-icons.ts';
@@ -75,7 +75,6 @@ export class Journal {
       // A large transaction grows the WAL file; this lets it shrink back at the next checkpoint.
       this.db.exec('PRAGMA journal_size_limit = 33554432');
       this.db.transaction(() => migrate(this.db, file))();
-      ensureIndexes(this.db);
     } catch (error) {
       this.db.close(false);
       throw error;

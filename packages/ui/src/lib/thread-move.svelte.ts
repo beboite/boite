@@ -1,12 +1,11 @@
-import type { ProjectId, ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
+import type { ProjectId, ThreadId, ThreadSummary } from '@boite/contracts';
 import { confirm } from './confirm.svelte';
 import { contextMenu } from './context-menu.svelte';
 import { projectName } from './format';
 import type { MenuItem } from './menu';
 import { fill, strings } from './strings';
 import type { Store } from './store.svelte';
-
-const LIVE: ThreadStatus[] = ['running', 'queued', 'waiting'];
+import { workingThread } from './thread-rows';
 
 /** What a thread row carries while it is dragged: the machine it lives on, so a drop elsewhere is ignored. */
 export interface ThreadDrag {
@@ -39,7 +38,7 @@ function find(store: Store, threadId: ThreadId): ThreadSummary | null {
  * The thread's own turn is no reason: its move waits for the turn to end.
  */
 export function moveBlocked(store: Store, threadId: ThreadId): boolean {
-  return store.threads.some((t) => t.parentThreadId === threadId && !t.archived && LIVE.includes(t.status));
+  return store.moveBlocked(threadId);
 }
 
 /** The picker's rows: every other project of the thread's machine, an archived one marked, or one row saying there is none. */
@@ -69,7 +68,7 @@ export async function moveThread(store: Store, threadId: ThreadId, projectId: Pr
   }
   const target = store.projects.find((p) => p.id === projectId);
   const names = { folder: thread.cwd, project: target ? projectName(target) : projectId };
-  const running = LIVE.includes(thread.status);
+  const running = workingThread(thread.status);
   const kinds = [thread, ...store.threads.filter((t) => t.parentThreadId === threadId)].flatMap((t) => t.backgroundWork?.kinds ?? []);
   let stopBackground: boolean | undefined;
   if (kinds.length > 0) {

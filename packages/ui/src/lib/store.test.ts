@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { beforeEach, describe, expect, vi } from 'vitest';
+import { test } from '../test/fake-client';
 import { PROTOCOL_VERSION, RpcErrorCode, type Thread, type ThreadStatus } from '@boite/contracts';
 import { RpcFailure, WsClient, droppedFailure, type SocketLike } from './client';
 import { FakeClient } from './fake-client';
@@ -14,8 +15,7 @@ import { browserBridge } from './browser-bridge';
 import { rightPanel } from './right-panel.svelte';
 import { readStoredEndpoint, storeEndpoint } from './endpoint';
 
-test('opening the drawer starts its shell before a view mounts and shares an in-flight start', async () => {
-  const { store, client } = await ready();
+test('opening the drawer starts its shell before a view mounts and shares an in-flight start', async ({ store, client }) => {
   await store.open(store.threads[0]!.id);
   const threadId = store.openThread!.id;
   const call = client.call.bind(client);
@@ -39,11 +39,10 @@ test('opening the drawer starts its shell before a view mounts and shares an in-
     // Closing still hides a drawer whose lazy display never mounted.
     await store.closeTerminal(`terminal:${threadId}`);
     expect(store.terminalShown(threadId)).toBe(false);
-  } finally { release(); spy.mockRestore(); client.close(); store.detach(); }
+  } finally { release(); spy.mockRestore(); }
 });
 
-test('an older core keeps output arriving before the lazy terminal view attaches', async () => {
-  const { store, client } = await ready();
+test('an older core keeps output arriving before the lazy terminal view attaches', async ({ store, client }) => {
   await store.open(store.threads[0]!.id);
   const threadId = store.openThread!.id;
   const call = client.call.bind(client);
@@ -66,11 +65,10 @@ test('an older core keeps output arriving before the lazy terminal view attaches
     release();
     const state = await attaching;
     expect(state?.output.match(/legacy-early-output/g)).toHaveLength(1);
-  } finally { release(); stop(); spy.mockRestore(); client.close(); store.detach(); }
+  } finally { release(); stop(); spy.mockRestore(); }
 });
 
-test('closing a thread shell invalidates a legacy refresh and delayed view attachment until reopening', async () => {
-  const { store, client } = await ready();
+test('closing a thread shell invalidates a legacy refresh and delayed view attachment until reopening', async ({ store, client }) => {
   await store.open(store.threads[0]!.id);
   const threadId = store.openThread!.id;
   const call = client.call.bind(client);
@@ -99,11 +97,10 @@ test('closing a thread shell invalidates a legacy refresh and delayed view attac
     expect((await store.openTerminal(threadId, 100, 30))?.id).toBe(`terminal:${threadId}`);
     expect(spy.mock.calls.filter(([method]) => method === 'terminals.open')).toHaveLength(2);
     expect(store.terminalShown(threadId)).toBe(true);
-  } finally { release(); spy.mockRestore(); client.close(); store.detach(); }
+  } finally { release(); spy.mockRestore(); }
 });
 
-test('a rejected terminal keystroke reports the failure instead of leaving a silent prompt', async () => {
-  const { store, client } = await ready();
+test('a rejected terminal keystroke reports the failure instead of leaving a silent prompt', async ({ store, client }) => {
   const call = vi.spyOn(client, 'call').mockRejectedValue(new RpcFailure({ code: RpcErrorCode.Unavailable, message: 'Remote terminal transport unavailable' }));
   try {
     store.writeTerminal('terminal:t-remote', 'pwd\r');
@@ -113,11 +110,10 @@ test('a rejected terminal keystroke reports the failure instead of leaving a sil
     store.writeTerminal('terminal:t-remote', 'x');
     await Promise.resolve();
     expect(store.error).toBeNull();
-  } finally { call.mockRestore(); client.close(); store.detach(); }
+  } finally { call.mockRestore(); }
 });
 
-test('changing a Store endpoint drops the previous machine composer and element callbacks', async () => {
-  const { store, client } = await ready();
+test('changing a Store endpoint drops the previous machine composer and element callbacks', async ({ store, client }) => {
   const saved = Object.entries(localStorage);
   const connect = vi.spyOn(store, 'connect').mockResolvedValue();
   const open = vi.spyOn(store, 'openWhereLeft').mockResolvedValue();
@@ -140,8 +136,7 @@ test('changing a Store endpoint drops the previous machine composer and element 
   }
 });
 
-test('changing a Store endpoint drops the previous machine updates, todos, resources and trace', async () => {
-  const { store, client } = await ready();
+test('changing a Store endpoint drops the previous machine updates, todos, resources and trace', async ({ store, client }) => {
   const saved = Object.entries(localStorage);
   const connect = vi.spyOn(store, 'connect').mockResolvedValue();
   const open = vi.spyOn(store, 'openWhereLeft').mockResolvedValue();
@@ -163,21 +158,17 @@ test('changing a Store endpoint drops the previous machine updates, todos, resou
   }
 });
 
-test('a core without agent updates shows none, not the last machine list', async () => {
-  const { store, client } = await ready();
+test('a core without agent updates shows none, not the last machine list', async ({ store, client }) => {
   store.harnessUpdates = [{ providerId: 'claude' }] as never;
   const real = client.call.bind(client);
   vi.spyOn(client, 'call').mockImplementation(((method: string, params: never) => method === 'providers.updates'
     ? Promise.reject(new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: 'unknown method providers.updates' }))
     : real(method as never, params)) as typeof client.call);
-  try {
-    await store.loadHarnessUpdates();
-    expect(store.harnessUpdates).toEqual([]);
-  } finally { store.detach(); client.close(); }
+  await store.loadHarnessUpdates();
+  expect(store.harnessUpdates).toEqual([]);
 });
 
-test('dropped folders use the local core when a remote machine is selected', async () => {
-  const { store, client: remote } = await ready();
+test('dropped folders use the local core when a remote machine is selected', async ({ store, client: remote }) => {
   const local = new FakeClient({ delayMs: 0 });
   const remoteCall = vi.spyOn(remote, 'call');
   const localCall = vi.spyOn(local, 'call');
@@ -227,16 +218,8 @@ function deferred<T = void>() {
   return { promise, resolve };
 }
 
-async function ready(): Promise<{ store: Store; client: FakeClient }> {
-  const client = new FakeClient({ delayMs: 0 });
-  const store = new Store();
-  store.attach(client);
-  await store.connect();
-  return { store, client };
-}
 
-test.each(['reload', 'open'] as const)('a delayed %s request snapshot preserves resolved and newly asked cards', async action => {
-  const { store, client } = await ready();
+test.for(['reload', 'open'] as const)('a delayed %s request snapshot preserves resolved and newly asked cards', async (action, { store, client }) => {
   await store.open('t-scheduler');
   const call = client.call.bind(client);
   const gate = deferred();
@@ -263,11 +246,10 @@ test.each(['reload', 'open'] as const)('a delayed %s request snapshot preserves 
     expect(store.pendingPermissions).toEqual([]);
     expect(store.pendingQuestions.map(row => row.id)).toEqual([fresh.questionId]);
     expect((await call('questions.list', {})).map(row => row.id)).toEqual([fresh.questionId]);
-  } finally { gate.resolve(); await loading; spy.mockRestore(); store.detach(); client.close(); }
+  } finally { gate.resolve(); await loading; spy.mockRestore(); }
 });
 
-test('a delayed thread list cannot undo a newer pin event', async () => {
-  const { store, client } = await ready();
+test('a delayed thread list cannot undo a newer pin event', async ({ store, client }) => {
   const call = client.call.bind(client);
   const gate = deferred();
   const pinned = store.threads.find(row => row.id === 't-trace')!;
@@ -291,11 +273,10 @@ test('a delayed thread list cannot undo a newer pin event', async () => {
     expect(store.threads.some(row => row.id === removed)).toBe(false);
     expect(store.threads.some(row => row.id === 'offline-list-row')).toBe(true);
     expect((await call('threads.get', { threadId: 't-trace' })).pinned).toBe(true);
-  } finally { gate.resolve(); await loading; spy.mockRestore(); store.detach(); client.close(); }
+  } finally { gate.resolve(); await loading; spy.mockRestore(); }
 });
 
-test('a secondary login read cannot hold an accepted prompt behind reload', async () => {
-  const { store, client } = await ready();
+test('a secondary login read cannot hold an accepted prompt behind reload', async ({ store, client }) => {
   await store.open('t-trace');
   const call = client.call.bind(client);
   const gate = deferred();
@@ -312,11 +293,10 @@ test('a secondary login read cannot hold an accepted prompt behind reload', asyn
     sending = store.send('An ordinary prompt', 't-trace');
     await vi.waitFor(() => expect(spy.mock.calls.some(([method]) => method === 'turns.start')).toBe(true), { timeout: 500 });
     expect(await sending).toBe(true);
-  } finally { gate.resolve(); await loading; await sending; spy.mockRestore(); store.detach(); client.close(); }
+  } finally { gate.resolve(); await loading; await sending; spy.mockRestore(); }
 });
 
-test.each(['all-first', 'thread-first'] as const)('the newer request scope wins overlapping %s reads while unrelated offline rows land', async order => {
-  const { store, client } = await ready();
+test.for(['all-first', 'thread-first'] as const)('the newer request scope wins overlapping %s reads while unrelated offline rows land', async (order, { store, client }) => {
   const call = client.call.bind(client), gate = deferred();
   const permissions = (await call('permissions.list', {})).map(row => ({ ...row, threadId: 't-scheduler' }));
   const questions = await call('questions.list', {});
@@ -341,11 +321,10 @@ test.each(['all-first', 'thread-first'] as const)('the newer request scope wins 
     gate.resolve(); await older;
     expect(store.pendingPermissions.map(row => row.id)).toEqual(['offline-permission']);
     expect(store.pendingQuestions.map(row => row.id)).toEqual(['offline-question']);
-  } finally { gate.resolve(); await older; spy.mockRestore(); store.detach(); client.close(); }
+  } finally { gate.resolve(); await older; spy.mockRestore(); }
 });
 
-test.each(['answerQuestion', 'skipQuestion', 'answer'] as const)('a late %s completion or error belongs to the original client incarnation', async action => {
-  const { store, client } = await ready();
+test.for(['answerQuestion', 'skipQuestion', 'answer'] as const)('a late %s completion or error belongs to the original client incarnation', async (action, { store, client }) => {
   const replacement = new FakeClient({ delayMs: 0, coreId: 'other-machine' });
   const call = client.call.bind(client);
   const method = action === 'answerQuestion' ? 'questions.answer' : action === 'skipQuestion' ? 'questions.skip' : 'permissions.answer';
@@ -438,8 +417,7 @@ test('real WsClient event frames overtake held snapshots and secondary metadata'
   } finally { for (const row of delayed) row.reply(); await loading; store.detach(); client.close(); backend.close(); }
 });
 
-test.each(['draft', 'settings', 'detach', 'suspend'])('a pending open respects a newer %s intent and retires its subscription', async intent => {
-  const { store, client } = await ready();
+test.for(['draft', 'settings', 'detach', 'suspend'])('a pending open respects a newer %s intent and retires its subscription', async (intent, { store, client }) => {
   await store.open('t-trace');
   const call = client.call.bind(client), started = deferred<void>(), released = deferred<void>();
   const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
@@ -463,11 +441,10 @@ test.each(['draft', 'settings', 'detach', 'suspend'])('a pending open respects a
     if (intent === 'draft') { expect(store.draft?.projectId).toBe('p-notes'); expect(store.composerStates.draft?.text).toBe('New draft'); }
     if (intent === 'settings') expect(store.page).toBe('settings');
     expect(client.clientSubscriptions).toEqual(intent === 'settings' ? ['t-trace'] : []);
-  } finally { released.resolve(); spy.mockRestore(); store.detach(); client.close(); }
+  } finally { released.resolve(); spy.mockRestore(); }
 });
 
-test('a replaced client cannot report an old open failure into a machine with colliding thread IDs', async () => {
-  const { store, client } = await ready();
+test('a replaced client cannot report an old open failure into a machine with colliding thread IDs', async ({ store, client }) => {
   const replacement = new FakeClient({ delayMs: 0, coreId: 'replacement' });
   const started = deferred<void>(), released = deferred<void>();
   const call = client.call.bind(client);
@@ -488,8 +465,7 @@ test('a replaced client cannot report an old open failure into a machine with co
   } finally { released.resolve(); spy.mockRestore(); store.detach(); client.close(); replacement.close(); }
 });
 
-test.each(['submit', 'submitAndDraft'] as const)('an accepted draft creation through %s sends once on its original thread while a newer draft keeps its input', async action => {
-  const { store, client } = await ready();
+test.for(['submit', 'submitAndDraft'] as const)('an accepted draft creation through %s sends once on its original thread while a newer draft keeps its input', async (action, { store, client }) => {
   store.startDraft('p-boite'); store.editComposerText('draft', 'Sent from A');
   const started = deferred<void>(), released = deferred<void>(), call = client.call.bind(client);
   let createdId = '';
@@ -511,11 +487,11 @@ test.each(['submit', 'submitAndDraft'] as const)('an accepted draft creation thr
     expect(next).toMatchObject({ text: 'Unsent B', attachments: [{ name: 'B.txt' }], queued: [{ text: 'B queue' }], paused: true });
     expect(spy.mock.calls.filter(([method]) => method === 'threads.create')).toHaveLength(1);
     expect(spy.mock.calls.filter(([method]) => method === 'turns.start').map(([, params]) => (params as { threadId: string }).threadId)).toEqual([createdId]);
-  } finally { released.resolve(); spy.mockRestore(); store.detach(); client.close(); }
+  } finally { released.resolve(); spy.mockRestore(); }
 });
 
-test.each(['return-to-thread', 'newer-read'])('trace ignores an older response after %s', async change => {
-  const { store, client } = await ready(); await store.open('t-trace');
+test.for(['return-to-thread', 'newer-read'])('trace ignores an older response after %s', async (change, { store, client }) => {
+ await store.open('t-trace');
   const started = deferred<void>(), released = deferred<void>(), call = client.call.bind(client);
   let reads = 0;
   const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
@@ -529,7 +505,7 @@ test.each(['return-to-thread', 'newer-read'])('trace ignores an older response a
     else await store.refreshTrace();
     const current = [...store.trace]; released.resolve(); await reading;
     expect(store.trace).toEqual(current); expect(store.trace.some(record => record.pid === 999999)).toBe(false);
-  } finally { released.resolve(); spy.mockRestore(); store.detach(); client.close(); }
+  } finally { released.resolve(); spy.mockRestore(); }
 });
 
 test('an older page cannot release a newer thread paging guard or duplicate its cursor request', async () => {
@@ -552,9 +528,8 @@ test('an older page cannot release a newer thread paging guard or duplicate its 
   } finally { firstGate.resolve(); secondGate.resolve(); spy.mockRestore(); store.detach(); client.close(); }
 });
 
-test.each(['missing', 'refused'])('optional startup timing cannot prevent connecting: %s', async (timing) => {
-  const client = new FakeClient({ delayMs: 0 });
-  const store = new Store();
+test.for(['missing', 'refused'])('optional startup timing cannot prevent connecting: %s', async (timing, { createStore }) => {
+  const { client, store } = createStore({ delayMs: 0 });
   store.attach(client);
   const original = globalThis.performance;
   const mark = vi.fn(() => { throw new Error('timing is unavailable'); });
@@ -566,12 +541,11 @@ test.each(['missing', 'refused'])('optional startup timing cannot prevent connec
     expect(store.threads.length).toBeGreaterThan(0);
     expect(store.error).toBeNull();
     if (timing === 'refused') expect(mark).toHaveBeenCalled();
-  } finally { vi.stubGlobal('performance', original); client.close(); store.detach(); }
+  } finally { vi.stubGlobal('performance', original); }
 });
 
-test('delegation selection keeps one child subscription and ignores an overtaken A-B-A response', async () => {
-  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
-  const store = new Store();
+test('delegation selection keeps one child subscription and ignores an overtaken A-B-A response', async ({ createStore }) => {
+  const { client, store } = createStore({ delayMs: 0, delegationDemo: true });
   const real = client.call.bind(client);
   let releaseFirstA: (() => void) | null = null;
   let heldFirstA = true;
@@ -583,150 +557,130 @@ test('delegation selection keeps one child subscription and ignores an overtaken
     return real(method as never, params as never);
   }) as typeof client.call);
   store.attach(client);
-  try {
-    await store.connect();
-    await store.open('t-trace');
-    await store.loadDelegation('t-trace');
-    const first = store.selectDelegatedAgent('t-team-running');
-    await vi.waitFor(() => expect(releaseFirstA).not.toBeNull());
-    await store.selectDelegatedAgent('t-team-done');
-    await store.selectDelegatedAgent('t-team-running');
-    releaseFirstA!();
-    await first;
-    expect(store.delegationSelectedAgentId).toBe('t-team-running');
-    expect(store.delegationThread?.id).toBe('t-team-running');
-    const unsubscribed = asked.mock.calls.filter(([method, params]) => method === 'threads.unsubscribe' && (params as { threadId?: string }).threadId === 't-team-running');
-    expect(unsubscribed).toHaveLength(0);
-  } finally { store.detach(); client.close(); }
+  await store.connect();
+  await store.open('t-trace');
+  await store.loadDelegation('t-trace');
+  const first = store.selectDelegatedAgent('t-team-running');
+  await vi.waitFor(() => expect(releaseFirstA).not.toBeNull());
+  await store.selectDelegatedAgent('t-team-done');
+  await store.selectDelegatedAgent('t-team-running');
+  releaseFirstA!();
+  await first;
+  expect(store.delegationSelectedAgentId).toBe('t-team-running');
+  expect(store.delegationThread?.id).toBe('t-team-running');
+  const unsubscribed = asked.mock.calls.filter(([method, params]) => method === 'threads.unsubscribe' && (params as { threadId?: string }).threadId === 't-team-running');
+  expect(unsubscribed).toHaveLength(0);
 });
 
-test('recent-thread recovery does not open delegated children', async () => {
-  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
-  const store = new Store();
+test('recent-thread recovery does not open delegated children', async ({ createStore }) => {
+  const { client, store } = createStore({ delayMs: 0, delegationDemo: true });
   store.attach(client);
-  try {
-    await store.connect();
-    await store.openWhereLeft();
-    expect(store.openThread?.parentThreadId).toBeFalsy();
-  } finally { store.detach(); client.close(); }
+  await store.connect();
+  await store.openWhereLeft();
+  expect(store.openThread?.parentThreadId).toBeFalsy();
 });
 
-test('a later navigation wins while the previous agent subscription is being released', async () => {
-  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
-  const store = new Store();
+test('a later navigation wins while the previous agent subscription is being released', async ({ createStore }) => {
+  const { client, store } = createStore({ delayMs: 0, delegationDemo: true });
   store.attach(client);
   let release: (() => void) | undefined;
-  try {
-    await store.connect();
-    await store.open('t-trace');
-    await store.selectDelegatedAgent('t-team-running');
-    const real = client.call.bind(client);
-    vi.spyOn(client, 'call').mockImplementation(((method: string, params: { threadId?: string }) => {
-      if (method === 'threads.unsubscribe' && params.threadId === 't-team-running') {
-        return new Promise(resolve => { release = () => { void real(method as never, params as never).then(resolve); }; });
-      }
-      return real(method as never, params as never);
-    }) as typeof client.call);
-    const older = store.open('t-descriptors');
-    await vi.waitFor(() => expect(release).toBeDefined());
-    await store.open('t-trace');
-    release!();
-    await older;
-    expect(store.openThread?.id).toBe('t-trace');
-  } finally { store.detach(); client.close(); }
-});
-
-test('reloading the current conversation keeps the selected agent transcript subscribed', async () => {
-  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
-  const store = new Store();
-  store.attach(client);
-  try {
-    await store.connect();
-    await store.open('t-trace');
-    await store.selectDelegatedAgent('t-team-running');
-    const called = vi.spyOn(client, 'call');
-    await store.reload();
-    expect(store.openThread?.id).toBe('t-trace');
-    expect(store.delegationSelectedAgentId).toBe('t-team-running');
-    expect(store.delegationThread?.id).toBe('t-team-running');
-    expect(called).not.toHaveBeenCalledWith('threads.unsubscribe', { threadId: 't-team-running' });
-  } finally { store.detach(); client.close(); }
-});
-
-test('a reconnect catches up the agent transcript and the team statuses the gap missed', async () => {
-  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
-  const store = new Store();
-  store.attach(client);
-  try {
-    await store.connect();
-    await store.open('t-trace');
-    await store.loadDelegation('t-trace');
-    await store.selectDelegatedAgent('t-team-running');
-    const answer = store.delegationThread!.messages.at(-1)!;
-    const full = (answer.parts[0] as { text: string }).text;
-    // What the gap loses: the end of a streamed reply and a status change.
-    answer.parts = [{ type: 'text', text: 'I found the' }];
-    store.delegation!.agents.find((agent) => agent.thread.id === 't-team-running')!.thread.status = 'idle';
-    const called = vi.spyOn(client, 'call');
-    client.drop();
-    await client.restore();
-    await waitFor(() => (store.delegation?.agents.find((agent) => agent.thread.id === 't-team-running')?.thread.status === 'running' ? true : undefined));
-    await waitFor(() => ((store.delegationThread?.messages.at(-1)?.parts[0] as { text?: string } | undefined)?.text === full ? true : undefined));
-    expect(store.delegationSelectedAgentId).toBe('t-team-running');
-    expect(store.delegationThread?.messages.map((message) => message.id)).toEqual(['m-t-team-running-1', 'm-t-team-running-2']);
-    expect(called).toHaveBeenCalledWith('threads.get', { threadId: 't-team-running', after: 'm-t-team-running-1' });
-  } finally { store.detach(); client.close(); }
-});
-
-test('starting a draft cancels a pending child subscription even without an open subscription', async () => {
-  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
-  const store = new Store();
-  store.attach(client);
-  let release: (() => void) | undefined;
-  try {
-    await store.connect();
-    store.startDraft('p-boite');
-    const real = client.call.bind(client);
-    const called = vi.spyOn(client, 'call').mockImplementation(((method: string, params: { threadId?: string }) => {
-      if (method === 'threads.subscribe' && params.threadId === 't-team-running') {
-        return new Promise(resolve => { release = () => { void real(method as never, params as never).then(resolve); }; });
-      }
-      return real(method as never, params as never);
-    }) as typeof client.call);
-    const selecting = store.selectDelegatedAgent('t-team-running');
-    await vi.waitFor(() => expect(release).toBeDefined());
-    store.startDraft('p-boite');
-    release!();
-    await selecting;
-    expect(store.delegationSelectedAgentId).toBeNull();
-    expect(store.delegationThread).toBeNull();
-    expect(called).toHaveBeenCalledWith('threads.unsubscribe', { threadId: 't-team-running' });
-  } finally { store.detach(); client.close(); }
-});
-
-test.each([false, true])('the chat and agent panel receive complete streaming updates, shared snapshot: %s', async (shared) => {
-  const { store, client } = await ready();
-  try {
-    await store.open('t-trace');
-    await store.selectDelegatedAgent('t-trace');
-    if (shared) store.delegationThread = store.openThread;
-    else client.on('message.started', () => {
-      // A separate threads.get snapshot can land between the start and first delta.
-      store.delegationThread = JSON.parse(JSON.stringify(store.openThread));
-    });
-    await store.send('[tool] one streamed answer');
-    await client.settled();
-    for (const snapshot of [store.openThread, store.delegationThread]) {
-      expect(snapshot?.messages.at(-1)?.state).toBe('complete');
-      const parts = snapshot?.messages.at(-1)?.parts ?? [];
-      expect(parts.filter(part => part.type !== 'tool')).toEqual([
-        { type: 'thinking', text: 'thinking about: [tool] one streamed answer' },
-        { type: 'text', text: '[tool] one streamed answer' }
-      ]);
-      expect(parts.find(part => part.type === 'tool')).toMatchObject({ status: 'done' });
-      expect(snapshot?.turns.at(-1)?.status).toBe('done');
+  await store.connect();
+  await store.open('t-trace');
+  await store.selectDelegatedAgent('t-team-running');
+  const real = client.call.bind(client);
+  vi.spyOn(client, 'call').mockImplementation(((method: string, params: { threadId?: string }) => {
+    if (method === 'threads.unsubscribe' && params.threadId === 't-team-running') {
+      return new Promise(resolve => { release = () => { void real(method as never, params as never).then(resolve); }; });
     }
-  } finally { store.detach(); client.close(); }
+    return real(method as never, params as never);
+  }) as typeof client.call);
+  const older = store.open('t-descriptors');
+  await vi.waitFor(() => expect(release).toBeDefined());
+  await store.open('t-trace');
+  release!();
+  await older;
+  expect(store.openThread?.id).toBe('t-trace');
+});
+
+test('reloading the current conversation keeps the selected agent transcript subscribed', async ({ createStore }) => {
+  const { client, store } = createStore({ delayMs: 0, delegationDemo: true });
+  store.attach(client);
+  await store.connect();
+  await store.open('t-trace');
+  await store.selectDelegatedAgent('t-team-running');
+  const called = vi.spyOn(client, 'call');
+  await store.reload();
+  expect(store.openThread?.id).toBe('t-trace');
+  expect(store.delegationSelectedAgentId).toBe('t-team-running');
+  expect(store.delegationThread?.id).toBe('t-team-running');
+  expect(called).not.toHaveBeenCalledWith('threads.unsubscribe', { threadId: 't-team-running' });
+});
+
+test('a reconnect catches up the agent transcript and the team statuses the gap missed', async ({ createStore }) => {
+  const { client, store } = createStore({ delayMs: 0, delegationDemo: true });
+  store.attach(client);
+  await store.connect();
+  await store.open('t-trace');
+  await store.loadDelegation('t-trace');
+  await store.selectDelegatedAgent('t-team-running');
+  const answer = store.delegationThread!.messages.at(-1)!;
+  const full = (answer.parts[0] as { text: string }).text;
+  // What the gap loses: the end of a streamed reply and a status change.
+  answer.parts = [{ type: 'text', text: 'I found the' }];
+  store.delegation!.agents.find((agent) => agent.thread.id === 't-team-running')!.thread.status = 'idle';
+  const called = vi.spyOn(client, 'call');
+  client.drop();
+  await client.restore();
+  await waitFor(() => (store.delegation?.agents.find((agent) => agent.thread.id === 't-team-running')?.thread.status === 'running' ? true : undefined));
+  await waitFor(() => ((store.delegationThread?.messages.at(-1)?.parts[0] as { text?: string } | undefined)?.text === full ? true : undefined));
+  expect(store.delegationSelectedAgentId).toBe('t-team-running');
+  expect(store.delegationThread?.messages.map((message) => message.id)).toEqual(['m-t-team-running-1', 'm-t-team-running-2']);
+  expect(called).toHaveBeenCalledWith('threads.get', { threadId: 't-team-running', after: 'm-t-team-running-1' });
+});
+
+test('starting a draft cancels a pending child subscription even without an open subscription', async ({ createStore }) => {
+  const { client, store } = createStore({ delayMs: 0, delegationDemo: true });
+  store.attach(client);
+  let release: (() => void) | undefined;
+  await store.connect();
+  store.startDraft('p-boite');
+  const real = client.call.bind(client);
+  const called = vi.spyOn(client, 'call').mockImplementation(((method: string, params: { threadId?: string }) => {
+    if (method === 'threads.subscribe' && params.threadId === 't-team-running') {
+      return new Promise(resolve => { release = () => { void real(method as never, params as never).then(resolve); }; });
+    }
+    return real(method as never, params as never);
+  }) as typeof client.call);
+  const selecting = store.selectDelegatedAgent('t-team-running');
+  await vi.waitFor(() => expect(release).toBeDefined());
+  store.startDraft('p-boite');
+  release!();
+  await selecting;
+  expect(store.delegationSelectedAgentId).toBeNull();
+  expect(store.delegationThread).toBeNull();
+  expect(called).toHaveBeenCalledWith('threads.unsubscribe', { threadId: 't-team-running' });
+});
+
+test.for([false, true])('the chat and agent panel receive complete streaming updates, shared snapshot: %s', async (shared, { store, client }) => {
+  await store.open('t-trace');
+  await store.selectDelegatedAgent('t-trace');
+  if (shared) store.delegationThread = store.openThread;
+  else client.on('message.started', () => {
+    // A separate threads.get snapshot can land between the start and first delta.
+    store.delegationThread = JSON.parse(JSON.stringify(store.openThread));
+  });
+  await store.send('[tool] one streamed answer');
+  await client.settled();
+  for (const snapshot of [store.openThread, store.delegationThread]) {
+    expect(snapshot?.messages.at(-1)?.state).toBe('complete');
+    const parts = snapshot?.messages.at(-1)?.parts ?? [];
+    expect(parts.filter(part => part.type !== 'tool')).toEqual([
+      { type: 'thinking', text: 'thinking about: [tool] one streamed answer' },
+      { type: 'text', text: '[tool] one streamed answer' }
+    ]);
+    expect(parts.find(part => part.type === 'tool')).toMatchObject({ status: 'done' });
+    expect(snapshot?.turns.at(-1)?.status).toBe('done');
+  }
 });
 
 test('a replacement part followed by a delta is appended once in each independent snapshot', async () => {
@@ -789,60 +743,53 @@ test('a streamed delta, message or turn finds the newest item without walking th
   } finally { store.detach(); client.close(); }
 });
 
-test('launching from a child refreshes its team and returns the sibling without another spawn', async () => {
-  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
-  const store = new Store();
+test('launching from a child refreshes its team and returns the sibling without another spawn', async ({ createStore }) => {
+  const { client, store } = createStore({ delayMs: 0, delegationDemo: true });
   store.attach(client);
-  try {
-    await store.connect();
-    await store.open('t-team-done');
-    await store.loadDelegation();
-    const profile = store.delegation!.config.profiles[0]!;
-    const agent = await store.spawnDelegatedAgent(profile.id, 'Review the error path');
-    expect(agent).not.toBeNull();
-    expect(agent?.thread.parentThreadId).toBe('t-trace');
-    expect(store.openThread?.id).toBe('t-team-done');
-    expect(store.delegation?.agents).toHaveLength(3);
-    expect(store.delegation?.agents.some(entry => entry.thread.id === agent?.thread.id)).toBe(true);
-    const call = client.call.bind(client);
-    vi.spyOn(client, 'call').mockImplementation((async (method, params) => {
-      if (method === 'delegation.configure') throw new Error('Configuration refused');
-      return call(method, params);
-    }) as typeof client.call);
-    await store.configureDelegation(store.delegation!.config);
-    expect(store.delegationError).toBe('Configuration refused');
-  } finally { store.detach(); client.close(); }
+  await store.connect();
+  await store.open('t-team-done');
+  await store.loadDelegation();
+  const profile = store.delegation!.config.profiles[0]!;
+  const agent = await store.spawnDelegatedAgent(profile.id, 'Review the error path');
+  expect(agent).not.toBeNull();
+  expect(agent?.thread.parentThreadId).toBe('t-trace');
+  expect(store.openThread?.id).toBe('t-team-done');
+  expect(store.delegation?.agents).toHaveLength(3);
+  expect(store.delegation?.agents.some(entry => entry.thread.id === agent?.thread.id)).toBe(true);
+  const call = client.call.bind(client);
+  vi.spyOn(client, 'call').mockImplementation((async (method, params) => {
+    if (method === 'delegation.configure') throw new Error('Configuration refused');
+    return call(method, params);
+  }) as typeof client.call);
+  await store.configureDelegation(store.delegation!.config);
+  expect(store.delegationError).toBe('Configuration refused');
 });
 
-test('switching conversations clears the old team and refuses missing or mismatched child views', async () => {
-  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
-  const store = new Store();
+test('switching conversations clears the old team and refuses missing or mismatched child views', async ({ createStore }) => {
+  const { client, store } = createStore({ delayMs: 0, delegationDemo: true });
   store.attach(client);
-  try {
-    await store.connect();
-    await store.open('t-trace');
-    await store.loadDelegation();
-    const previous = store.delegation!;
-    await store.open('t-bench');
-    expect(store.delegation).toBeNull();
-    const called = vi.spyOn(client, 'call');
-    store.delegation = previous;
-    await store.configureDelegation(previous.config);
-    expect(await store.spawnDelegatedAgent('reviewer', 'Do not launch on the old team')).toBeNull();
-    expect(await store.messageDelegatedAgent('t-team-running', 'Do not steer the old team')).toBe(false);
-    await store.stopDelegatedAgent();
-    expect(called.mock.calls.filter(([method]) => ['delegation.configure', 'delegation.spawn', 'delegation.send', 'delegation.stop'].includes(method))).toEqual([]);
-    await store.open('t-team-done');
-    store.delegation = null;
-    called.mockClear();
-    await store.configureDelegation(previous.config);
-    expect(await store.spawnDelegatedAgent('reviewer', 'Wait for this child team')).toBeNull();
-    expect(called.mock.calls).toEqual([]);
-  } finally { store.detach(); client.close(); }
+  await store.connect();
+  await store.open('t-trace');
+  await store.loadDelegation();
+  const previous = store.delegation!;
+  await store.open('t-bench');
+  expect(store.delegation).toBeNull();
+  const called = vi.spyOn(client, 'call');
+  store.delegation = previous;
+  await store.configureDelegation(previous.config);
+  expect(await store.spawnDelegatedAgent('reviewer', 'Do not launch on the old team')).toBeNull();
+  expect(await store.messageDelegatedAgent('t-team-running', 'Do not steer the old team')).toBe(false);
+  await store.stopDelegatedAgent();
+  expect(called.mock.calls.filter(([method]) => ['delegation.configure', 'delegation.spawn', 'delegation.send', 'delegation.stop'].includes(method))).toEqual([]);
+  await store.open('t-team-done');
+  store.delegation = null;
+  called.mockClear();
+  await store.configureDelegation(previous.config);
+  expect(await store.spawnDelegatedAgent('reviewer', 'Wait for this child team')).toBeNull();
+  expect(called.mock.calls).toEqual([]);
 });
 
-test('telemetry actions route through the owning client and retain deletion state', async () => {
-  const { store, client } = await ready();
+test('telemetry actions route through the owning client and retain deletion state', async ({ store, client }) => {
   const other = new FakeClient({ delayMs: 0 });
   try {
     expect(await store.telemetryState()).toMatchObject({ mode: 'basic', pendingDeletion: false });
@@ -859,26 +806,22 @@ test('telemetry actions route through the owning client and retain deletion stat
   } finally { store.detach(); client.close(); other.close(); }
 });
 
-test('uninstalled setup starts without account-dependent demo state', async () => {
-  const client = new FakeClient({ delayMs: 0, uninstalled: true });
-  const store = new Store();
+test('uninstalled setup starts without account-dependent demo state', async ({ createStore }) => {
+  const { client, store } = createStore({ delayMs: 0, uninstalled: true });
   store.attach(client);
-  try {
-    await store.connect();
-    await store.openWhereLeft();
-    expect(store.accounts).toEqual([]);
-    expect(store.threads).toEqual([]);
-    expect(store.openThread).toBeNull();
-    expect(await client.call('scheduler.get', {})).toMatchObject({ running: [], queued: [] });
-    // No folder yet: the app lands on a draft in the drafts, which nothing has made.
-    expect(store.projects).toEqual([]);
-    expect(store.draft).toEqual({ projectId: null, worktree: false });
-    expect((await client.call('sessions.list', {})).length).toBeGreaterThan(0);
-  } finally { store.detach(); client.close(); }
+  await store.connect();
+  await store.openWhereLeft();
+  expect(store.accounts).toEqual([]);
+  expect(store.threads).toEqual([]);
+  expect(store.openThread).toBeNull();
+  expect(await client.call('scheduler.get', {})).toMatchObject({ running: [], queued: [] });
+  // No folder yet: the app lands on a draft in the drafts, which nothing has made.
+  expect(store.projects).toEqual([]);
+  expect(store.draft).toEqual({ projectId: null, worktree: false });
+  expect((await client.call('sessions.list', {})).length).toBeGreaterThan(0);
 });
 
-test('a drafts folder asked of a machine left since fails there, not on the new one', async () => {
-  const { store, client } = await ready();
+test('a drafts folder asked of a machine left since fails there, not on the new one', async ({ store, client }) => {
   const other = new FakeClient({ delayMs: 0 });
   const real = client.call.bind(client);
   let reject: (error: Error) => void = () => {};
@@ -899,49 +842,39 @@ test('a drafts folder asked of a machine left since fails there, not on the new 
   } finally { store.detach(); client.close(); other.close(); }
 });
 
-test('provider actions report RPC failures through their owning store', async () => {
-  const { store, client } = await ready();
+test('provider actions report RPC failures through their owning store', async ({ store, client }) => {
   vi.spyOn(client, 'call').mockRejectedValue(new Error('provider unavailable'));
-  try {
-    expect(await store.installProvider('claude')).toBe(false);
-    expect(store.error).toContain('provider unavailable');
-    store.error = null;
-    expect(await store.reloadProviders()).toBe(false);
-    expect(store.error).toContain('provider unavailable');
-  } finally { store.detach(); client.close(); }
+  expect(await store.installProvider('claude')).toBe(false);
+  expect(store.error).toContain('provider unavailable');
+  store.error = null;
+  expect(await store.reloadProviders()).toBe(false);
+  expect(store.error).toContain('provider unavailable');
 });
 
-test('a refusal reaches the surface without its JSON-RPC code', async () => {
-  const { store, client } = await ready();
+test('a refusal reaches the surface without its JSON-RPC code', async ({ store, client }) => {
   const refusal = new RpcFailure({ code: RpcErrorCode.Refused, message: 'This account is no longer available.' });
   vi.spyOn(client, 'call').mockRejectedValue(refusal);
-  try {
-    expect(await store.installProvider('claude')).toBe(false);
-    // The code said nothing to the person reading the toast, and it used to
-    // ride along as `(-32011)` on every refusal.
-    expect(store.error).toBe('This account is no longer available.');
-  } finally { store.detach(); client.close(); }
+  expect(await store.installProvider('claude')).toBe(false);
+  // The code said nothing to the person reading the toast, and it used to
+  // ride along as `(-32011)` on every refusal.
+  expect(store.error).toBe('This account is no longer available.');
 });
 
-test('a failed turn notification names its thread and a later ordinary error clears the link', async () => {
-  const { store, client } = await ready();
-  try {
-    const message = 'turn trn-cyber failed: This content was flagged for possible cybersecurity risk.';
-    client.emitCoreLog('error', message, { threadId: 't-trace' });
-    expect(store.error).toBe('Finish the trace tab');
-    expect(store.errorThreadId).toBe('t-trace');
-    store.error = null;
-    expect(store.errorThreadId).toBeNull();
-    client.emitCoreLog('error', message, { threadId: 't-trace' });
-    client.emitCoreLog('error', 'The connection failed.');
-    expect(store.error).toBe('The connection failed.');
-    expect(store.errorThreadId).toBeNull();
-  } finally { store.detach(); client.close(); }
+test('a failed turn notification names its thread and a later ordinary error clears the link', async ({ store, client }) => {
+  const message = 'turn trn-cyber failed: This content was flagged for possible cybersecurity risk.';
+  client.emitCoreLog('error', message, { threadId: 't-trace' });
+  expect(store.error).toBe('Finish the trace tab');
+  expect(store.errorThreadId).toBe('t-trace');
+  store.error = null;
+  expect(store.errorThreadId).toBeNull();
+  client.emitCoreLog('error', message, { threadId: 't-trace' });
+  client.emitCoreLog('error', 'The connection failed.');
+  expect(store.error).toBe('The connection failed.');
+  expect(store.errorThreadId).toBeNull();
 });
 
-test('one failed boot call leaves every other slice loaded', async () => {
-  const client = new FakeClient({ delayMs: 0 });
-  const store = new Store();
+test('one failed boot call leaves every other slice loaded', async ({ createStore }) => {
+  const { client, store } = createStore({ delayMs: 0 });
   const real = client.call.bind(client);
   vi.spyOn(client, 'call').mockImplementation(((method: string, params: unknown) => {
     if (method === 'providers.list') {
@@ -950,18 +883,15 @@ test('one failed boot call leaves every other slice loaded', async () => {
     return real(method as never, params as never);
   }) as typeof client.call);
   store.attach(client);
-  try {
-    await store.connect();
-    // `Promise.all` used to jump to the catch here, leaving threads, projects
-    // and settings on their pre-reconnect values under a loaded-looking app.
-    expect(store.threads.length).toBeGreaterThan(0);
-    expect(store.projects.length).toBeGreaterThan(0);
-    expect(store.error).toBe('providers are unreadable');
-  } finally { store.detach(); client.close(); }
+  await store.connect();
+  // `Promise.all` used to jump to the catch here, leaving threads, projects
+  // and settings on their pre-reconnect values under a loaded-looking app.
+  expect(store.threads.length).toBeGreaterThan(0);
+  expect(store.projects.length).toBeGreaterThan(0);
+  expect(store.error).toBe('providers are unreadable');
 });
 
-test.each(['same', 'selection', 'kind'])('a lost start response reuses its request id only for identical content and selection: %s', async (change) => {
-  const { store, client } = await ready();
+test.for(['same', 'selection', 'kind'])('a lost start response reuses its request id only for identical content and selection: %s', async (change, { store, client }) => {
   const original = client.call.bind(client);
   const requests: string[] = [];
   let loseResponse = true;
@@ -973,25 +903,22 @@ test.each(['same', 'selection', 'kind'])('a lost start response reuses its reque
     }
     return result;
   });
-  try {
-    const thread = store.threads.find(thread => thread.status === 'idle')!;
-    await store.open(thread.id);
-    const attachments = change === 'kind' ? [{ kind: 'image' as const, mimeType: 'image/png' as const, data: 'YWJj', name: 'test.png' }] : [];
-    expect(await store.send('Retry this prompt', thread.id, attachments)).toBe(false);
-    if (change === 'kind') await client.settled();
-    if (change === 'selection') {
-      await client.settled();
-      expect(await store.update(thread.id, { effort: 'low' })).toBe(true);
-    }
-    expect(await store.send('Retry this prompt', thread.id, change === 'kind' ? attachments.map(a => ({ ...a, kind: 'file' as const })) : attachments)).toBe(true);
-    expect(requests).toHaveLength(2);
-    expect(requests[0]).toBeTruthy();
-    expect(requests[1] === requests[0]).toBe(change === 'same');
-  } finally { store.detach(); client.close(); }
+  const thread = store.threads.find(thread => thread.status === 'idle')!;
+  await store.open(thread.id);
+  const attachments = change === 'kind' ? [{ kind: 'image' as const, mimeType: 'image/png' as const, data: 'YWJj', name: 'test.png' }] : [];
+  expect(await store.send('Retry this prompt', thread.id, attachments)).toBe(false);
+  if (change === 'kind') await client.settled();
+  if (change === 'selection') {
+    await client.settled();
+    expect(await store.update(thread.id, { effort: 'low' })).toBe(true);
+  }
+  expect(await store.send('Retry this prompt', thread.id, change === 'kind' ? attachments.map(a => ({ ...a, kind: 'file' as const })) : attachments)).toBe(true);
+  expect(requests).toHaveLength(2);
+  expect(requests[0]).toBeTruthy();
+  expect(requests[1] === requests[0]).toBe(change === 'same');
 });
 
-test.each(['back', 'gone'])('a start the socket dropped is asked once more when the connection comes back: %s', async (outcome) => {
-  const { store, client } = await ready();
+test.for(['back', 'gone'])('a start the socket dropped is asked once more when the connection comes back: %s', async (outcome, { store, client }) => {
   const original = client.call.bind(client);
   const requests: string[] = [];
   vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
@@ -1004,55 +931,47 @@ test.each(['back', 'gone'])('a start the socket dropped is asked once more when 
     setTimeout(() => { if (outcome === 'back') void client.restore(); else client.close(); }, 5);
     throw droppedFailure('connection closed');
   });
-  try {
-    const thread = store.threads.find(thread => thread.status === 'idle')!;
-    await store.open(thread.id);
-    const accepted = await store.send('Survive the reconnect', thread.id);
-    if (outcome === 'gone') {
-      expect(accepted).toBe(false);
-      expect(requests).toHaveLength(1);
-      expect(store.error).toContain('connection closed');
-      return;
-    }
-    expect(accepted).toBe(true);
-    expect(store.error).toBeNull();
-    expect(requests).toHaveLength(2);
-    expect(requests[1]).toBe(requests[0]);
-    await client.settled();
-    const turns = await original('threads.get', { threadId: thread.id });
-    expect(turns.messages.filter(message => message.role === 'user' && JSON.stringify(message.parts).includes('Survive the reconnect'))).toHaveLength(1);
-  } finally { store.detach(); client.close(); }
+  const thread = store.threads.find(thread => thread.status === 'idle')!;
+  await store.open(thread.id);
+  const accepted = await store.send('Survive the reconnect', thread.id);
+  if (outcome === 'gone') {
+    expect(accepted).toBe(false);
+    expect(requests).toHaveLength(1);
+    expect(store.error).toContain('connection closed');
+    return;
+  }
+  expect(accepted).toBe(true);
+  expect(store.error).toBeNull();
+  expect(requests).toHaveLength(2);
+  expect(requests[1]).toBe(requests[0]);
+  await client.settled();
+  const turns = await original('threads.get', { threadId: thread.id });
+  expect(turns.messages.filter(message => message.role === 'user' && JSON.stringify(message.parts).includes('Survive the reconnect'))).toHaveLength(1);
 });
 
-test.each(['input', 'inputText', 'output', 'documents'])('reading cache excludes oversized tool %s', async (field) => {
-  const { store, client } = await ready();
-  try {
-    await store.open('t-bench');
-    const large = 'x'.repeat(2 * 1024 * 1024 + 1);
-    const part: any = { type: 'tool', toolId: 'large', name: 'read', input: {}, output: null, status: 'done' };
-    part[field] = field === 'documents' ? [{ kind: 'markdown', text: large }] : field === 'input' ? { nested: { text: large } } : large;
-    store.openThread!.messages.unshift({ id: 'cached-only', threadId: 't-bench', turnId: 'old', role: 'assistant', parts: [part], state: 'complete', createdAt: 0 });
-    await store.open('t-scheduler');
-    await store.open('t-bench');
-    const cached = store.openThread!.messages.find(message => message.id === 'cached-only');
-    if (field === 'output') expect(cached?.parts[0]).toMatchObject({ outputDeferred: true, output: large.slice(0, 1024) });
-    else expect(cached).toBeUndefined();
-  } finally { store.detach(); client.close(); }
+test.for(['input', 'inputText', 'output', 'documents'])('reading cache excludes oversized tool %s', async (field, { store, client }) => {
+  await store.open('t-bench');
+  const large = 'x'.repeat(2 * 1024 * 1024 + 1);
+  const part: any = { type: 'tool', toolId: 'large', name: 'read', input: {}, output: null, status: 'done' };
+  part[field] = field === 'documents' ? [{ kind: 'markdown', text: large }] : field === 'input' ? { nested: { text: large } } : large;
+  store.openThread!.messages.unshift({ id: 'cached-only', threadId: 't-bench', turnId: 'old', role: 'assistant', parts: [part], state: 'complete', createdAt: 0 });
+  await store.open('t-scheduler');
+  await store.open('t-bench');
+  const cached = store.openThread!.messages.find(message => message.id === 'cached-only');
+  if (field === 'output') expect(cached?.parts[0]).toMatchObject({ outputDeferred: true, output: large.slice(0, 1024) });
+  else expect(cached).toBeUndefined();
 });
 
-test('sizing a timeline for the reading cache reads string lengths, never a JSON copy of each part', async () => {
-  const { store, client } = await ready();
-  try {
-    await store.open('t-bench');
-    let copies = 0;
-    const big = 'x'.repeat(256 * 1024);
-    const part = () => ({ type: 'text' as const, text: big, toJSON() { copies++; return { type: 'text', text: big }; } });
-    store.openThread!.messages.unshift(...Array.from({ length: 50 }, (_, index) => ({ id: `big-${index}`, threadId: 't-bench', turnId: 'old', role: 'assistant' as const, parts: [part()], state: 'complete' as const, createdAt: 0 })));
-    await store.open('t-scheduler');
-    expect(copies).toBe(0);
-    await store.open('t-bench');
-    expect(store.openThread!.messages.some((message) => message.id === 'big-0')).toBe(false);
-  } finally { store.detach(); client.close(); }
+test('sizing a timeline for the reading cache reads string lengths, never a JSON copy of each part', async ({ store, client }) => {
+  await store.open('t-bench');
+  let copies = 0;
+  const big = 'x'.repeat(256 * 1024);
+  const part = () => ({ type: 'text' as const, text: big, toJSON() { copies++; return { type: 'text', text: big }; } });
+  store.openThread!.messages.unshift(...Array.from({ length: 50 }, (_, index) => ({ id: `big-${index}`, threadId: 't-bench', turnId: 'old', role: 'assistant' as const, parts: [part()], state: 'complete' as const, createdAt: 0 })));
+  await store.open('t-scheduler');
+  expect(copies).toBe(0);
+  await store.open('t-bench');
+  expect(store.openThread!.messages.some((message) => message.id === 'big-0')).toBe(false);
 });
 
 describe('Store', () => {
@@ -1060,8 +979,7 @@ describe('Store', () => {
     window.localStorage.clear();
   });
 
-  test('opens on the seeded core', async () => {
-    const { store } = await ready();
+  test('opens on the seeded core', async ({ store }) => {
 
     expect(store.connection).toBe('ready');
     expect(store.core?.version).toBe('2.0.0-beta.1');
@@ -1079,8 +997,7 @@ describe('Store', () => {
     expect(store.unreadCount).toBe(1);
   });
 
-  test('a draft with the worktree switch on sends the option once, and a project change keeps it', async () => {
-    const { store, client } = await ready();
+  test('a draft with the worktree switch on sends the option once, and a project change keeps it', async ({ store, client }) => {
     store.startDraft('p-boite');
     expect(store.draft?.worktree).toBe(false);
     store.setDraftWorktree(true);
@@ -1105,8 +1022,7 @@ describe('Store', () => {
     expect(store.draft?.worktree).toBe(false);
   });
 
-  test('opening a thread clears its unread badge', async () => {
-    const { store } = await ready();
+  test('opening a thread clears its unread badge', async ({ store }) => {
 
     await store.open('t-descriptors');
 
@@ -1116,7 +1032,7 @@ describe('Store', () => {
     expect(store.unreadCount).toBe(0);
   });
 
-  test('a turn finishing on a thread that is not open sends a toast, the open one does not', async () => {
+  test('a turn finishing on a thread that is not open sends a toast, the open one does not', async ({ ready }) => {
     const sent: Toast[] = [];
     setNotificationSender(async (toast) => {
       sent.push(toast);
@@ -1145,8 +1061,7 @@ describe('Store', () => {
     }
   });
 
-  test('a pinned thread floats above the live ones of its project, and unpinning drops it back', async () => {
-    const { store } = await ready();
+  test('a pinned thread floats above the live ones of its project, and unpinning drops it back', async ({ store }) => {
     const project = store.threads.find((t) => t.id === 't-trace')?.projectId ?? '';
     const sorted = () => store.threadsOf(project).slice().sort(compareThreads).map((t) => t.id);
     const before = sorted();
@@ -1160,8 +1075,7 @@ describe('Store', () => {
     expect(sorted()).toEqual(before);
   });
 
-  test('a prompt streams into one text part and the thread goes running then idle', async () => {
-    const { store, client } = await ready();
+  test('a prompt streams into one text part and the thread goes running then idle', async ({ store, client }) => {
     await store.open('t-trace');
 
     const seen: ThreadStatus[] = [];
@@ -1190,8 +1104,7 @@ describe('Store', () => {
     ]);
   });
 
-  test('only the open thread streams, and the previous one is dropped', async () => {
-    const { store, client } = await ready();
+  test('only the open thread streams, and the previous one is dropped', async ({ store, client }) => {
     await store.open('t-trace');
     await store.open('t-descriptors');
 
@@ -1205,8 +1118,7 @@ describe('Store', () => {
     expect(store.threads.find((t) => t.id === 't-trace')?.unread).toBe(true);
   });
 
-  test('a tool part and a permission part land in the open thread', async () => {
-    const { store, client } = await ready();
+  test('a tool part and a permission part land in the open thread', async ({ store, client }) => {
     await store.open('t-trace');
 
     void store.send('[tool] and [permission] please');
@@ -1227,8 +1139,7 @@ describe('Store', () => {
     expect(tool?.type === 'tool' && tool.status).toBe('done');
   });
 
-  test('a project removed elsewhere drops it, its threads and the open thread', async () => {
-    const { store, client } = await ready();
+  test('a project removed elsewhere drops it, its threads and the open thread', async ({ store, client }) => {
     await store.open('t-trace');
     expect(store.openThread?.projectId).toBe('p-boite');
     const gate = deferred(), started = deferred(), call = client.call.bind(client);
@@ -1253,10 +1164,10 @@ describe('Store', () => {
       expect(store.threads.every(t => t.projectId !== 'p-boite')).toBe(true);
       const reopened = await waitFor(() => store.openThread ?? undefined);
       expect(reopened.projectId).toBe('p-notes');
-    } finally { gate.resolve(); await refresh; spy.mockRestore(); store.detach(); client.close(); }
+    } finally { gate.resolve(); await refresh; spy.mockRestore(); }
   });
 
-  test('cached models survive reload and remain visible during a forced refresh', async () => {
+  test('cached models survive reload and remain visible during a forced refresh', async ({ ready }) => {
     const first = await ready();
     await first.store.probeModels('opencode', 'a-opencode');
     const expected = first.store.modelsOf('opencode', 'a-opencode');
@@ -1281,8 +1192,7 @@ describe('Store', () => {
     expect(calls).toHaveBeenCalledWith('providers.probe', { providerId: 'opencode', accountId: 'a-opencode', refresh: true });
   });
 
-  test('opening a stale catalog refreshes its models without changing saved defaults', async () => {
-    const { store, client } = await ready();
+  test('opening a stale catalog refreshes its models without changing saved defaults', async ({ store, client }) => {
     const original = client.call.bind(client);
     let reads = 0;
     const calls = vi.spyOn(client, 'call').mockImplementation((method, params) => {
@@ -1307,8 +1217,7 @@ describe('Store', () => {
     clock.mockRestore();
   });
 
-  test('failed probes wait for manual retry instead of looping', async () => {
-    const { store, client } = await ready();
+  test('failed probes wait for manual retry instead of looping', async ({ store, client }) => {
     const calls = vi.spyOn(client, 'call').mockRejectedValue(new Error('agent offline'));
     const models = store.modelsOf('opencode', 'a-opencode');
     await store.probeModels('opencode', 'a-opencode');
@@ -1324,8 +1233,7 @@ describe('Store', () => {
     expect(store.error).toBe('agent offline');
   });
 
-  test('background model discovery skips signed-out accounts but a manual refresh can retry', async () => {
-    const { store, client } = await ready();
+  test('background model discovery skips signed-out accounts but a manual refresh can retry', async ({ store, client }) => {
     store.accounts = store.accounts.map(account => account.id === 'a-opencode' ? { ...account, status: 'unauthenticated' } : account);
     const calls = vi.spyOn(client, 'call').mockRejectedValue(new Error('sign in first'));
     await store.probeModels('opencode', 'a-opencode');
@@ -1336,8 +1244,7 @@ describe('Store', () => {
     expect(store.error).toBe('sign in first');
   });
 
-  test('a manual refresh joining background discovery reports its failure without spawning another probe', async () => {
-    const { store, client } = await ready();
+  test('a manual refresh joining background discovery reports its failure without spawning another probe', async ({ store, client }) => {
     let reject!: (error: Error) => void;
     const gate = new Promise<never>((_, fail) => { reject = fail; });
     const calls = vi.spyOn(client, 'call').mockReturnValue(gate);
@@ -1350,8 +1257,7 @@ describe('Store', () => {
     expect(store.isProbing('opencode', 'a-opencode')).toBe(false);
   });
 
-  test('a probe the core refused because the account changed meanwhile is no error, and runs again', async () => {
-    const { store, client } = await ready();
+  test('a probe the core refused because the account changed meanwhile is no error, and runs again', async ({ store, client }) => {
     const original = client.call.bind(client);
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
@@ -1372,8 +1278,7 @@ describe('Store', () => {
     expect(Object.keys(store.probedModels)).toEqual(['opencode::a-opencode']);
   });
 
-  test('a probe elsewhere fills the models of that instance, the descriptor until then', async () => {
-    const { store, client } = await ready();
+  test('a probe elsewhere fills the models of that instance, the descriptor until then', async ({ store, client }) => {
     expect(store.modelsOf('opencode', 'a-opencode').map((m) => m.id)).toEqual(['default']);
     expect(store.probedModels).toEqual({});
     expect(store.modelsPending('opencode', 'a-opencode')).toBe(false);
@@ -1394,9 +1299,8 @@ describe('Store', () => {
     expect(store.modelsOf('echo', 'a-echo').map((m) => m.id)).toEqual(['echo-1']);
   });
 
-  test('a long thread opens on its last page and loadOlder walks back in order', async () => {
-    const client = new FakeClient({ delayMs: 0, long: true });
-    const store = new Store();
+  test('a long thread opens on its last page and loadOlder walks back in order', async ({ createStore }) => {
+    const { client, store } = createStore({ delayMs: 0, long: true });
     store.attach(client);
     await store.connect();
 
@@ -1427,9 +1331,8 @@ describe('Store', () => {
     expect(numbers[0]).toBe(120);
   });
 
-  test('loadOlder stops at the first message and does nothing without a cursor', async () => {
-    const client = new FakeClient({ delayMs: 0, long: true });
-    const store = new Store();
+  test('loadOlder stops at the first message and does nothing without a cursor', async ({ createStore }) => {
+    const { client, store } = createStore({ delayMs: 0, long: true });
     store.attach(client);
     await store.connect();
     await store.open('t-long');
@@ -1448,16 +1351,14 @@ describe('Store', () => {
     expect(await store.loadOlder()).toBe(0);
   });
 
-  test('a short thread opens whole, with no cursor to walk', async () => {
-    const { store } = await ready();
+  test('a short thread opens whole, with no cursor to walk', async ({ store }) => {
     await store.open('t-trace');
 
     expect(store.messagesBefore).toBeNull();
     expect(await store.loadOlder()).toBe(0);
   });
 
-  test('settings changed elsewhere replace the ones the UI holds', async () => {
-    const { store, client } = await ready();
+  test('settings changed elsewhere replace the ones the UI holds', async ({ store, client }) => {
     expect(store.settings?.warmProcessMinutes).not.toBe(9);
 
     await client.call('settings.set', { warmProcessMinutes: 9 });
@@ -1465,8 +1366,7 @@ describe('Store', () => {
     expect(store.settings?.warmProcessMinutes).toBe(9);
   });
 
-  test('the newest open wins, and the socket is left holding that thread alone', async () => {
-    const { store, client } = await ready();
+  test('the newest open wins, and the socket is left holding that thread alone', async ({ store, client }) => {
     await store.open('t-trace');
 
     // Two clicks inside one round trip. The second is the one the user made.
@@ -1481,8 +1381,7 @@ describe('Store', () => {
     expect(client.clientSubscriptions).toEqual(['t-scheduler']);
   });
 
-  test('a refused subscribe leaves the thread that was open subscribed', async () => {
-    const { store, client } = await ready();
+  test('a refused subscribe leaves the thread that was open subscribed', async ({ store, client }) => {
     await store.open('t-trace');
 
     // Archived elsewhere between the render and the click: the core refuses it.
@@ -1494,8 +1393,7 @@ describe('Store', () => {
     expect(client.clientSubscriptions).toEqual(['t-trace']);
   });
 
-  test('a reconnect catches up the open thread first and keeps every sidebar row it can', async () => {
-    const { store, client } = await ready();
+  test('a reconnect catches up the open thread first and keeps every sidebar row it can', async ({ store, client }) => {
     await store.open('t-scheduler');
     const rows = new Map(store.threads.map((row) => [row.id, row]));
     client.drop();
@@ -1511,8 +1409,7 @@ describe('Store', () => {
     expect(methods.indexOf('threads.get')).toBeLessThan(methods.indexOf('threads.list'));
   });
 
-  test('a list answer that lands after the open thread was read does not mark it unread again', async () => {
-    const { store, client } = await ready();
+  test('a list answer that lands after the open thread was read does not mark it unread again', async ({ store, client }) => {
     await store.open('t-scheduler');
     const real = client.call.bind(client);
     let listed: (() => void) | null = null;
@@ -1532,8 +1429,7 @@ describe('Store', () => {
     expect(store.threads.find((row) => row.id === 't-scheduler')?.unread).toBe(false);
   });
 
-  test('a request the core settled while the socket was down leaves the card', async () => {
-    const { store, client } = await ready();
+  test('a request the core settled while the socket was down leaves the card', async ({ store, client }) => {
     await store.open('t-scheduler');
     expect(store.pendingQuestions.map((q) => q.id)).toEqual(['qst-seed-1']);
     expect(store.pendingPermissions.map((p) => p.id)).toEqual(['req-seed-1']);
@@ -1549,15 +1445,13 @@ describe('Store', () => {
     expect(store.pendingPermissions).toEqual([]);
   });
 
-  test('a public address pasted from the address bar saves without an error', async () => {
-    const { store } = await ready();
+  test('a public address pasted from the address bar saves without an error', async ({ store }) => {
     await store.saveSettings({ publicUrl: 'https://boite.example.com/' });
     expect(store.error).toBeNull();
     expect(store.settings?.publicUrl).toBe('https://boite.example.com');
   });
 
-  test('archiving a thread lets go of its panel, browser views, composer and terminal', async () => {
-    const { store, client } = await ready();
+  test('archiving a thread lets go of its panel, browser views, composer and terminal', async ({ store, client }) => {
     const destroy = vi.spyOn(browserBridge, 'destroy');
     try {
       const thread = store.threads.find((t) => t.status === 'idle' && !t.parentThreadId)!;
@@ -1573,24 +1467,20 @@ describe('Store', () => {
       expect(rightPanel.threads[store.threadKey(thread.id)]).toBeUndefined();
       expect(store.composerStates[thread.id]).toBeUndefined();
       expect(store.terminalShown(thread.id)).toBe(false);
-    } finally { destroy.mockRestore(); store.detach(); client.close(); }
+    } finally { destroy.mockRestore(); }
   });
 
-  test('a thread archived from another client drops its panel here too', async () => {
-    const { store, client } = await ready();
-    try {
-      const [shown, other] = store.threads.filter((t) => t.status === 'idle' && !t.parentThreadId);
-      await store.open(shown!.id);
-      rightPanel.for(store.threadKey(other!.id)).open('trace');
-      store.editComposerText(other!.id, 'draft');
-      await client.call('threads.archive', { threadId: other!.id, archived: true });
-      await waitFor(() => (rightPanel.threads[store.threadKey(other!.id)] === undefined ? true : undefined));
-      expect(store.composerStates[other!.id]).toBeUndefined();
-    } finally { store.detach(); client.close(); }
+  test('a thread archived from another client drops its panel here too', async ({ store, client }) => {
+    const [shown, other] = store.threads.filter((t) => t.status === 'idle' && !t.parentThreadId);
+    await store.open(shown!.id);
+    rightPanel.for(store.threadKey(other!.id)).open('trace');
+    store.editComposerText(other!.id, 'draft');
+    await client.call('threads.archive', { threadId: other!.id, archived: true });
+    await waitFor(() => (rightPanel.threads[store.threadKey(other!.id)] === undefined ? true : undefined));
+    expect(store.composerStates[other!.id]).toBeUndefined();
   });
 
-  test.each(['manual', 'pr-merged'] as const)('the open archived thread releases reading state and preserves automatic archive input: %s', async (reason) => {
-    const { store, client } = await ready();
+  test.for(['manual', 'pr-merged'] as const)('the open archived thread releases reading state and preserves automatic archive input: %s', async (reason, { store, client }) => {
     const destroy = vi.spyOn(browserBridge, 'destroy');
     try {
       const [shown, next] = store.threads.filter((t) => t.status === 'idle' && !t.parentThreadId);
@@ -1625,25 +1515,21 @@ describe('Store', () => {
         expect(store.composerStates[shown!.id]).toBeUndefined();
         expect(destroy.mock.calls.map(([id]) => id)).toEqual([view.id]);
       }
-    } finally { destroy.mockRestore(); store.detach(); client.close(); }
+    } finally { destroy.mockRestore(); }
   });
 
-  test('a draft started over an open thread archived elsewhere lets its panel go', async () => {
-    const { store, client } = await ready();
-    try {
-      const shown = store.threads.find((t) => t.status === 'idle' && !t.parentThreadId)!;
-      await store.open(shown.id);
-      store.panel.open('trace');
-      await client.call('threads.archive', { threadId: shown.id, archived: true });
-      await waitFor(() => (store.openThread?.archived ? true : undefined));
-      expect(rightPanel.threads[store.threadKey(shown.id)]).toBeDefined();
-      store.startDraft();
-      expect(rightPanel.threads[store.threadKey(shown.id)]).toBeUndefined();
-    } finally { store.detach(); client.close(); }
+  test('a draft started over an open thread archived elsewhere lets its panel go', async ({ store, client }) => {
+    const shown = store.threads.find((t) => t.status === 'idle' && !t.parentThreadId)!;
+    await store.open(shown.id);
+    store.panel.open('trace');
+    await client.call('threads.archive', { threadId: shown.id, archived: true });
+    await waitFor(() => (store.openThread?.archived ? true : undefined));
+    expect(rightPanel.threads[store.threadKey(shown.id)]).toBeDefined();
+    store.startDraft();
+    expect(rightPanel.threads[store.threadKey(shown.id)]).toBeUndefined();
   });
 
-  test('a reload drops the layouts of threads its core no longer lists, and only its own', async () => {
-    const { store, client } = await ready();
+  test('a reload drops the layouts of threads its core no longer lists, and only its own', async ({ store, client }) => {
     try {
       store.machineId = 'http://a.test';
       const live = store.threads[0]!.id;
@@ -1662,12 +1548,11 @@ describe('Store', () => {
     } finally {
       rightPanel.forget(store.threadKey('t-offline-autoarchived'));
       rightPanel.forget(JSON.stringify(['http://b.test', 't-archived-long-ago']));
-      store.detach(); client.close();
+
     }
   });
 
-  test('an answer sent while the socket is down says so and can be sent again', async () => {
-    const { store, client } = await ready();
+  test('an answer sent while the socket is down says so and can be sent again', async ({ store, client }) => {
     await store.open('t-scheduler');
     client.drop();
     expect(await store.answerQuestion('t-scheduler', 'qst-seed-1', ['short'])).toBe(false);
@@ -1679,8 +1564,7 @@ describe('Store', () => {
     expect(store.pendingQuestions).toEqual([]);
   });
 
-  test('a thread removed elsewhere lets its subscription go before the next one is taken', async () => {
-    const { store, client } = await ready();
+  test('a thread removed elsewhere lets its subscription go before the next one is taken', async ({ store, client }) => {
     await store.open('t-descriptors');
     const spy = vi.spyOn(client, 'call');
 
@@ -1698,8 +1582,7 @@ describe('Store', () => {
     spy.mockRestore();
   });
 
-  test('opening the thread already held asks only for what is past its last message, and keeps the rest', async () => {
-    const { store, client } = await ready();
+  test('opening the thread already held asks only for what is past its last message, and keeps the rest', async ({ store, client }) => {
     await store.open('t-scheduler');
     const before = store.openThread!.messages.map((message) => message.id);
     expect(before.length).toBeGreaterThan(1);
@@ -1728,9 +1611,8 @@ describe('Store', () => {
     } as never)).toBe('m2');
   });
 
-  test('a boot loads the core once, not twice', async () => {
-    const client = new FakeClient({ delayMs: 0 });
-    const store = new Store();
+  test('a boot loads the core once, not twice', async ({ createStore }) => {
+    const { client, store } = createStore({ delayMs: 0 });
     const spy = vi.spyOn(client, 'call');
     store.attach(client);
 
@@ -1753,8 +1635,7 @@ async function waitFor<T>(read: () => T | undefined): Promise<T> {
   throw new Error('condition never became true');
 }
 
-test('account lifecycle reload preserves the running login snapshot', async () => {
-  const { store, client } = await ready();
+test('account lifecycle reload preserves the running login snapshot', async ({ store, client }) => {
   await client.call('accounts.login', { accountId: 'a-claude-side' });
   await waitFor(() => store.logins['a-claude-side']?.url ?? undefined);
   const before = { ...store.logins['a-claude-side'] };
@@ -1762,15 +1643,13 @@ test('account lifecycle reload preserves the running login snapshot', async () =
   expect(store.logins['a-claude-side']).toEqual(before);
 });
 
-test('account lifecycle refuses removal of an account referenced by an archived thread', async () => {
-  const { client } = await ready();
+test('account lifecycle refuses removal of an account referenced by an archived thread', async ({ client }) => {
   await client.call('threads.archive', { threadId: 't-trace', archived: true });
   await expect(client.call('accounts.remove', { accountId: 'a-echo' })).rejects.toThrow(/thread/i);
   expect((await client.call('accounts.list', {})).some((a) => a.id === 'a-echo')).toBe(true);
 });
 
-test('account lifecycle cancellation removes the login and permits retry', async () => {
-  const { store, client } = await ready();
+test('account lifecycle cancellation removes the login and permits retry', async ({ store, client }) => {
   await store.loginAccount('a-claude-side');
   await waitFor(() => store.logins['a-claude-side']?.url ?? undefined);
   expect(await client.call('accounts.logins', {})).toHaveLength(1);
@@ -1784,8 +1663,7 @@ test('account lifecycle cancellation removes the login and permits retry', async
   expect(await client.call('accounts.logins', {})).toEqual([]);
 });
 
-test('account lifecycle fake rejects unsupported login and enforces provider isolation', async () => {
-  const { client } = await ready();
+test('account lifecycle fake rejects unsupported login and enforces provider isolation', async ({ client }) => {
   await expect(client.call('accounts.login', { accountId: 'a-echo' })).rejects.toThrow(/login is not available/i);
   const account = await client.call('accounts.add', {
     providerId: 'antigravity', label: 'isolated only', useDefaultLocation: true
@@ -1793,8 +1671,7 @@ test('account lifecycle fake rejects unsupported login and enforces provider iso
   expect(account.isolationDir).toBeTruthy();
 });
 
-test('account lifecycle newer cancellation beats a stale reload snapshot', async () => {
-  const { store, client } = await ready();
+test('account lifecycle newer cancellation beats a stale reload snapshot', async ({ store, client }) => {
   await store.loginAccount('a-claude-side');
   await waitFor(() => store.logins['a-claude-side']?.url ?? undefined);
   const call = client.call.bind(client);

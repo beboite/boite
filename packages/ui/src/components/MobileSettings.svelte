@@ -1,6 +1,6 @@
 <script lang="ts">
   import TelemetrySettings from './TelemetrySettings.svelte';
-  import { ArchiveRestore, ArrowLeft, Bell, Brain, ChevronRight, Coins, Compass, FlaskConical, Gauge, Minimize2, Monitor, Palette, Mic, ShieldCheck } from '@lucide/svelte';
+  import { Activity, ArchiveRestore, ArrowLeft, Bell, Brain, ChevronRight, Coins, Compass, FlaskConical, Gauge, Minimize2, Monitor, Palette, Mic, ShieldCheck } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
@@ -10,6 +10,7 @@
   import ExperimentsPage from './ExperimentsPage.svelte';
   import LimitsPage from './LimitsPage.svelte';
   import ResourcesPage from './ResourcesPage.svelte';
+  import TaskManagerLoader from './TaskManagerLoader.svelte';
   import MachinesPage from './MachinesPage.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
   import UsagePage from './UsagePage.svelte';
@@ -32,7 +33,7 @@
   let worktreesPage = $derived(store.owner && store.settingsTab === 'general' && store.settingsSection?.id === 'worktrees');
   /** The one card of the desktop's Advanced page that is about conversations, not about the machine. */
   let compactPage = $derived(store.owner && store.settingsTab === 'advanced' && store.settingsSection?.id === 'auto-compact');
-  let page = $derived((store.owner && (store.settingsTab === 'brain' || store.settingsTab === 'resources')) || store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage' || store.settingsTab === 'limits' || store.settingsTab === 'experiments'
+  let page = $derived((store.owner && (store.settingsTab === 'brain' || store.settingsTab === 'resources')) || store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage' || store.settingsTab === 'limits' || store.settingsTab === 'task-manager' || store.settingsTab === 'experiments'
     ? store.settingsTab : phone ? 'phone' : archivePage ? 'archived' : worktreesPage ? 'worktrees' : compactPage ? 'auto-compact' : 'home');
   let machine = $derived(workspace.machines.find(machine => machine.store === store));
   let title = $derived(page === 'brain' ? strings.brain.heading : page === 'phone' ? strings.mobile.settingsPhone
@@ -42,6 +43,7 @@
     : page === 'voice' ? strings.speech.heading : page === 'appearance' ? strings.settings.tabs.appearance
     : page === 'usage' ? strings.usage.heading : page === 'limits' ? strings.usage.limits
     : page === 'resources' ? strings.settings.tabs.resources
+    : page === 'task-manager' ? strings.taskManager.title
     : page === 'experiments' ? strings.settings.tabs.experiments : strings.machines.heading);
   /** The page's own title and its info mark step aside for the bar, so the bar carries the mark. */
   let info = $derived(page === 'usage' ? `${strings.usage.intro} ${strings.usage.note}`
@@ -95,6 +97,9 @@
           <button class="ghost row" data-testid="settings-tab-limits" onclick={() => store.showSettings('limits')}>
             <Gauge size={20} /><span>{strings.usage.limits}</span><ChevronRight size={18} />
           </button>
+          <button class="ghost row" data-testid="settings-tab-task-manager" onclick={() => store.showSettings('task-manager')}>
+            <Activity size={20} /><span>{strings.taskManager.title}</span><ChevronRight size={18} />
+          </button>
           {#if store.owner}
             <button class="ghost row" data-testid="settings-tab-resources" onclick={() => store.showSettings('resources')}>
               <ShieldCheck size={20} /><span>{strings.settings.tabs.resources}</span><ChevronRight size={18} />
@@ -139,6 +144,8 @@
         <UsagePage {store} />
       {:else if page === 'limits'}
         <LimitsPage {store} />
+      {:else if page === 'task-manager'}
+        <TaskManagerLoader {store} />
       {:else if page === 'resources' && store.owner}
         <ResourcesPage {store} />
       {:else if page === 'experiments'}

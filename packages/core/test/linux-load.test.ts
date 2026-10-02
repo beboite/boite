@@ -12,7 +12,7 @@ import { waitFor } from './harness.ts';
 
 /** A stat line as the kernel writes it, with a command name that fights back. */
 function stat(pid: number, utime: number, stime: number, comm = 'node', parentPid = 1): string {
-  const after = ['S', String(parentPid), String(pid), String(pid), '0', '-1', '4194560', '100', '0', '0', '0', String(utime), String(stime), '0', '0', '20', '0', '1'];
+  const after = ['S', String(parentPid), String(pid), String(pid), '0', '-1', '4194560', '100', '0', '0', '0', String(utime), String(stime), '0', '0', '20', '0', '1', '0', '100'];
   return `${pid} (${comm}) ${after.join(' ')}\n`;
 }
 
@@ -113,6 +113,8 @@ describe('a thread load on Linux', () => {
     const reads: string[] = [];
     const load = new LinuxLoad(2, path => { reads.push(path); return proc.read(path); }, proc.now);
     load.add('thr', 100);
+    expect(reads).toEqual(['/proc/100/stat']);
+    reads.length = 0;
     expect(load.sample('thr')?.cpuPercent).toBe(0);
     let ticks = 100;
     for (const elapsedMs of [100, 150, 200, 100, 250, 100, 200]) {
@@ -139,6 +141,8 @@ describe('a thread load on Linux', () => {
     const load = new LinuxLoad(2, path => { reads.push(path); return proc.read(path); }, proc.now);
     load.add('first', 100);
     load.add('second', 200);
+    expect(reads).toEqual(['/proc/100/stat', '/proc/200/stat']);
+    reads.length = 0;
     expect(load.sample('first')?.processes).toBe(2);
     expect(load.sample('second')?.processes).toBe(1);
     expect(reads.filter(path => path === '/proc')).toHaveLength(1);
@@ -216,7 +220,7 @@ describe('a thread load on Linux', () => {
     proc.files.set('/proc/101/comm', 'cargo\n');
     proc.files.set('/proc/102/comm', 'rustc\n');
 
-    expect(load.sample('thr')).toEqual({ processes: 3, cpuPercent: 0, memoryBytes: 6000 * 1024, workingSets: [
+    expect(load.sample('thr')).toEqual({ processes: 3, cpuPercent: 0, cpuMeasured: false, memoryMeasured: false, memoryBytes: 6000 * 1024, workingSets: [
       { pid: 100, bytes: 1000 * 1024, exe: 'agent' },
       { pid: 101, bytes: 2000 * 1024, exe: 'cargo' },
       { pid: 102, bytes: 3000 * 1024, exe: 'rustc' },
@@ -236,7 +240,7 @@ describe('a thread load on Linux', () => {
       proc.files.set(`/proc/${pid}/comm`, `${exe}\n`);
     }
 
-    expect(load.sample('thr')).toEqual({ processes: 3, cpuPercent: 0, memoryBytes: 3000 * 1024, workingSets: [
+    expect(load.sample('thr')).toEqual({ processes: 3, cpuPercent: 0, cpuMeasured: false, memoryMeasured: false, memoryBytes: 3000 * 1024, workingSets: [
       { pid: 100, bytes: 1000 * 1024, exe: 'agent' },
       { pid: 101, bytes: 1000 * 1024, exe: 'a) b (c' },
       { pid: 102, bytes: 1000 * 1024, exe: 'rustc' },
@@ -300,12 +304,12 @@ describe('a thread load on Linux', () => {
     proc.set(100, 1000, 200, 50_000);
     proc.set(101, 10, 0, 30_000);
 
-    expect(load.sample('thr')).toEqual({ processes: 2, cpuPercent: 0, memoryBytes: 80_000 * 1024, workingSets: [{ pid: 100, bytes: 50_000 * 1024 }, { pid: 101, bytes: 30_000 * 1024 }] });
+    expect(load.sample('thr')).toEqual({ processes: 2, cpuPercent: 0, cpuMeasured: false, memoryMeasured: false, memoryBytes: 80_000 * 1024, workingSets: [{ pid: 100, bytes: 50_000 * 1024 }, { pid: 101, bytes: 30_000 * 1024 }] });
 
     // One second later: 2 cores busy on pid 100, idle on 101.
     proc.at += 1000;
     proc.set(100, 1000 + 2 * USER_HZ, 200, 60_000);
-    expect(load.sample('thr')).toEqual({ processes: 2, cpuPercent: 50, memoryBytes: 90_000 * 1024, workingSets: [{ pid: 100, bytes: 60_000 * 1024 }, { pid: 101, bytes: 30_000 * 1024 }] });
+    expect(load.sample('thr')).toEqual({ processes: 2, cpuPercent: 50, cpuMeasured: false, memoryMeasured: false, memoryBytes: 90_000 * 1024, workingSets: [{ pid: 100, bytes: 60_000 * 1024 }, { pid: 101, bytes: 30_000 * 1024 }] });
   });
 
   test('a pid that exited between samples is skipped, and one read the first time adds no CPU', () => {
@@ -319,7 +323,7 @@ describe('a thread load on Linux', () => {
     proc.at += 1000;
     proc.gone(200);
     proc.set(201, 9000, 0, 2000);
-    expect(load.sample('thr')).toEqual({ processes: 1, cpuPercent: 0, memoryBytes: 2000 * 1024, workingSets: [{ pid: 201, bytes: 2000 * 1024 }] });
+    expect(load.sample('thr')).toEqual({ processes: 1, cpuPercent: 0, cpuMeasured: false, memoryMeasured: false, memoryBytes: 2000 * 1024, workingSets: [{ pid: 201, bytes: 2000 * 1024 }] });
 
     proc.gone(201);
     expect(load.sample('thr')).toBeNull();

@@ -1,7 +1,7 @@
 import { spawn as spawnNodeChild } from 'node:child_process';
 import type { ChildProcessByStdio } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
-import type { ProcessRecord, Settings, ThreadId, ThreadLoad, ThreadSummary, TraceCapability, Turn } from '@boite/contracts';
+import type { AgentResourceSnapshot, ProcessRecord, Settings, ThreadId, ThreadLoad, ThreadSummary, TraceCapability, Turn } from '@boite/contracts';
 import type { Bus } from './bus.ts';
 import type { Journal } from './journal.ts';
 import { MemoryGuard } from './memory-guard.ts';
@@ -9,6 +9,7 @@ import type { MemoryProcess } from './memory-guard-logic.ts';
 import { processPlatform } from './platform/index.ts';
 import { stopGroup } from './platform/posix-kill.ts';
 import type { GuardStatus, NativeProcessExit, NativeProcessInfo, ProcessPlatform } from './platform/types.ts';
+import { ResourceCollection } from './resource-usage.ts';
 
 export interface SpawnOptions {
   /** Bounded normal-priority initialization, ended explicitly when the agent is ready. */
@@ -122,6 +123,7 @@ export class ProcRegistry {
   /** Forgetting a thread whose last process exited, once a late job event can no longer arrive. */
   private readonly forgetTimers = new Map<ThreadId, ReturnType<typeof setTimeout>>();
   private readonly lastLoad = new Map<ThreadId, ThreadLoad>();
+  private readonly resources: ResourceCollection;
   /** What was last sent as `thread.updated`. A plain read must never move it. */
   private readonly lastPushed = new Map<ThreadId, ThreadLoad>();
   private readonly loadTimer: ReturnType<typeof setInterval>;
@@ -149,6 +151,7 @@ export class ProcRegistry {
     options: ProcRegistryOptions = {},
   ) {
     this.memory = new MemoryGuard(bus, platform);
+    this.resources = new ResourceCollection(platform);
     this.orphanGraceMs = options.orphanGraceMs ?? ORPHAN_GRACE_MS;
     this.forgetDelayMs = options.forgetDelayMs ?? FORGET_DELAY_MS;
     this.summarize = options.summarize ?? ((thread) => thread);
@@ -209,6 +212,19 @@ export class ProcRegistry {
     return this.platform.capability();
   }
 
+  watchResources(connectionId: string, watch: boolean | undefined): void {
+    this.resources.watch(connectionId, watch);
+  }
+
+  unwatchResources(connectionId: string): void {
+    this.resources.unwatch(connectionId);
+  }
+
+  /** Paths, commands and account identifiers never enter this paired-device DTO. */
+  resourceUsage(): AgentResourceSnapshot {
+    return this.resources.snapshot(this.liveThreads(), id => this.journal.getThread(id), id => this.loadOf(id));
+  }
+
   applySettings(settings: Settings): void {
     this.memory.applySettings(settings);
     this.platform.applySettings(settings);
@@ -232,6 +248,7 @@ export class ProcRegistry {
     for (const timer of this.sweepTimers.values()) clearTimeout(timer);
     this.sweepTimers.clear();
     clearInterval(this.loadTimer);
+    this.resources.close();
     for (const timer of this.exitTimers.values()) clearTimeout(timer);
     this.exitTimers.clear();
     for (const timer of this.forgetTimers.values()) clearTimeout(timer);
@@ -726,6 +743,10 @@ export class ProcRegistry {
     this.exitTimers.delete(pid);
     this.unassigned.delete(pid);
     this.live.get(threadId)?.delete(pid);
+    if ((this.live.get(threadId)?.size ?? 0) === 0) {
+      this.lastLoad.delete(threadId); this.lastPushed.delete(threadId);
+      this.resources.forget(threadId);
+    }
     this.forgetWhenIdle(threadId);
     this.platform.pidRemoved(threadId, pid);
     if (this.journal.isClosed()) return;
@@ -764,6 +785,7 @@ export class ProcRegistry {
       this.live.delete(threadId);
       this.known.delete(threadId);
       this.lastLoad.delete(threadId);
+      this.resources.forget(threadId);
       this.lastPushed.delete(threadId);
       // The thread's Job Object too: an id minted per call would otherwise hold
       // one kernel handle for the life of the core.
@@ -776,6 +798,7 @@ export class ProcRegistry {
 
   private measure(threadId: ThreadId, processes: number, memory?: MemoryProcess[]): ThreadLoad {
     const sample = this.platform.sample(threadId);
+    this.resources.sample(threadId, sample);
     if (sample === null) return { processes, cpuPercent: 0, memoryBytes: 0 };
     for (const measured of sample.workingSets ?? []) {
       const entry = this.live.get(threadId)?.get(measured.pid);
@@ -787,6 +810,8 @@ export class ProcRegistry {
 
   private sampleLoad(): void {
     if (this.journal.isClosed()) return;
+    this.resources.sync();
+    this.resources.sampledAt = Date.now();
     const processes: MemoryProcess[] = [];
     for (const [threadId, byPid] of this.live) {
       if (byPid.size === 0) continue;
@@ -801,8 +826,10 @@ export class ProcRegistry {
     for (const threadId of [...this.lastLoad.keys()]) {
       if ((this.live.get(threadId)?.size ?? 0) > 0) continue;
       this.lastLoad.delete(threadId);
+      this.resources.forget(threadId);
       this.lastPushed.delete(threadId);
     }
+    if (this.resources.active) this.platform.finishResources?.();
     this.memory.sample(processes.reduce((sum, process) => sum + process.bytes, 0), processes, (victim) => {
       const entry = this.live.get(victim.threadId)?.get(victim.pid);
       if (entry?.root) return false;
