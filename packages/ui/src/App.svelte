@@ -208,6 +208,7 @@
     if (!owner || !threadId) return;
     owner.error = null;
     void workspace.select(owner, threadId);
+    mobileScreen = 'chat';
   }
 
   // Ctrl+Q quits the shell after a hold or a double press, never on one slip:

@@ -82,8 +82,23 @@ test('a failed turn offers a compact link to its thread on desktop and phone', a
     await page.waitFor(`document.querySelector('[data-thread-id="t-trace"]') && !document.querySelector('[data-testid="error-toast"]')`);
     expect(await page.evaluate(`(async () => {const {workspace} = await import('/src/lib/workspace.svelte.ts'); return {thread:workspace.active.openThread.id,page:workspace.active.page,error:workspace.active.error};})()`)).toEqual({thread:'t-trace',page:'chat',error:null});
   }
+  // Selecting a thread must also reveal its chat underneath the phone list.
+  for (const tab of ['conversations', 'activity']) {
+    await page.click(`[data-testid="mobile-${tab}"]`);
+    await page.waitFor(`document.querySelector('[data-testid="mobile-list"]')`);
+    await page.evaluate(`(async () => {
+      const {workspace} = await import('/src/lib/workspace.svelte.ts');
+      workspace.active.client.emitCoreLog('error', 'turn trn-cyber failed: cybersecurity risk', 't-trace');
+    })()`);
+    await page.waitFor(`document.querySelector('[data-testid="error-toast"] .open-thread')`);
+    await page.click('[data-testid="error-toast"] .open-thread');
+    await page.waitFor(`!document.querySelector('[data-testid="error-toast"]')`);
+    expect(await page.evaluate(`getComputedStyle(document.querySelector('.app > .body')).visibility`)).toBe('visible');
+    expect(await page.evaluate(`document.querySelector('[data-testid="mobile-list"]') === null`)).toBe(true);
+  }
+  await page.screenshot(join(import.meta.dir, '.artifacts/thread-error-phone-chat.png'));
   expect(page.errors()).toEqual([]);
-});
+}, 20_000);
 
 test('unsupported goals identify the host without sending a normal turn', async () => {
   await page.evaluate(`(async () => {
