@@ -14,6 +14,7 @@
   import Sidebar from './components/Sidebar.svelte';
   import TitleBar from './components/TitleBar.svelte';
   import { Closing } from './lib/closing.svelte';
+  import { focusComposer } from './lib/focus';
   import { runCommand } from './lib/commands.svelte';
   import { confirm } from './lib/confirm.svelte';
   import { startGlass } from './lib/glass';
@@ -258,7 +259,12 @@
   });
   $effect(() => {
     if (terminalShown) terminalSlot.show();
-    else terminalSlot.hide();
+    else {
+      // The drawer goes inert as it leaves, which drops the focus on `<body>`:
+      // the keyboard goes back to the composer first.
+      if (document.activeElement?.closest('[data-testid=terminal-drawer]')) focusComposer();
+      terminalSlot.hide();
+    }
   });
 
   // On a phone the panel covers the chat: Back shuts it.
@@ -543,10 +549,12 @@
           {/key}
         </div>
         {#if terminalSlot.shown && store.openThread}
-          {#key `${store.endpointUrl}:${store.openThread.id}`}
-            <TerminalDrawer {store} threadId={store.openThread.id} cwd={store.openThread.cwd}
-              view={deferred.TerminalView}
-              closing={terminalSlot.closing} attach={terminalSlot.attach} onexit={terminalSlot.end} />
+          {#key store}
+            {#key store.openThread.id}
+              <TerminalDrawer {store} threadId={store.openThread.id} cwd={store.openThread.cwd}
+                view={deferred.TerminalView}
+                closing={terminalSlot.closing} attach={terminalSlot.attach} onexit={terminalSlot.end} />
+            {/key}
           {/key}
         {/if}
       </main>

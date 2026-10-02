@@ -39,13 +39,33 @@ then `/bin/sh`. `BOITE_TERMINAL_SHELL`, set in the core's environment, names
 another one; the core tests set it to `cmd.exe` or `/bin/sh`, so nothing they
 type lands in the user's PowerShell or bash history.
 
-## Reattachment and focus
+## The screen
 
-Output can arrive before the opening or reattachment response. The client
-buffers it and uses the snapshot's sequence number to append only newer events.
-Older cores without sequences retain buffered output but can show overlap.
-Refused keystrokes display their error. Reloading the same conversation preserves
-terminal focus; switching conversation or draft focuses the composer.
+The owning Store keeps the xterm screen in `lib/terminal-session.svelte.ts` until
+the shell ends. Hiding the drawer or switching threads detaches its element;
+reopening reuses the screen, scrollback, selection and full-screen program state.
+
+Reloading, opening another window or reconnecting replays the 256 KiB snapshot.
+Truncation prefers a nearby line boundary. Output arriving before the response is
+buffered; the snapshot sequence excludes events already represented. Older cores
+without sequences can show overlap. Snapshot replay mutes xterm responses to
+terminal queries so reopening cannot type them into the shell.
+
+The screen fits each animation frame during a drag. A resize RPC follows 80 ms
+after the last change. ConPTY snapshots include the Windows build number so xterm
+can account for native line wrapping. ANSI colours use the theme's code background
+with a 4.5:1 minimum contrast ratio, halved for dim text. The cursor is a blinking
+bar. Refused keystrokes display their error. Reloading the same conversation
+preserves terminal focus; switching conversation or draft focuses the composer.
+
+## Keys
+
+The shell receives Ctrl-letter shortcuts such as `Ctrl+K`, `Ctrl+N`, `Ctrl+S` and
+`Ctrl+F`. The app retains `Ctrl+J` to hide the drawer and return focus to the
+composer, plus its Shift/Alt chords and `Ctrl+,`.
+
+On Windows and Linux, `Ctrl+C` copies selected text or interrupts when there is no
+selection, `Ctrl+V` pastes, and `Ctrl+Backspace` deletes a word.
 
 ## Who may open one
 

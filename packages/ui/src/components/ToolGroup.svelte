@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { Bot, ChevronRight, FilePen, FileText, Globe, Search, SquareTerminal, Wrench, X } from '@lucide/svelte';
-  import { strings } from '../lib/strings';
+  import { Bot, ChevronRight, FilePen, FileText, Globe, Search, SquareTerminal, TriangleAlert, Wrench } from '@lucide/svelte';
+  import { fill, strings } from '../lib/strings';
   import { familyOf, liveLabel, runSummary, type ToolPart } from '../lib/tool-groups';
   import ToolCard from './ToolCard.svelte';
 
@@ -25,8 +25,8 @@
   let open = $state(false);
   let live = $derived(parts.findLast((part) => part.status === 'running'));
   let last = $derived(parts.at(-1));
-  /** The mark follows the latest call: an early miss the agent recovered from is no alarm. */
-  let failed = $derived(!live && (last?.status === 'error' || last?.status === 'denied'));
+  let issues = $derived(parts.filter(part => part.status === 'error' || part.status === 'denied').length);
+  let issueLabel = $derived(fill(issues === 1 ? strings.chat.toolIssueOne : strings.chat.toolIssueMany, { count: String(issues) }));
   let label = $derived(live ? liveLabel(live) : runSummary(parts));
   let Glyph = $derived(ICONS[familyOf(live ?? last ?? parts[0]!)]);
   let busy = $derived(parts.some((part) => isBackground(part.toolId)));
@@ -64,18 +64,19 @@
       data-testid="tool-group-toggle"
       aria-expanded={open}
       title={open ? strings.chat.toolRunHide : strings.chat.toolRunShow}
-      aria-label={failed ? `${label}, ${strings.chat.toolFailed}` : undefined}
+      aria-label={issues ? `${label}, ${issueLabel}` : undefined}
       onclick={() => (open = !open)}
     >
-      <span class="glyph" class:failed><Glyph size={15} strokeWidth={1.75} /></span>
+      <span class="glyph"><Glyph size={15} strokeWidth={1.75} /></span>
       <span class="label" class:shimmer={live !== undefined} data-testid="tool-group-label">{label}</span>
       {#if busy}
         <span class="pulse" aria-hidden="true"></span>
       {/if}
       {#if live}
         <span class="spinner" aria-hidden="true"></span>
-      {:else if failed}
-        <span class="status"><X size={12} strokeWidth={2.25} /></span>
+      {/if}
+      {#if issues}
+        <span class="status" data-testid="tool-group-issues" title={issueLabel}><TriangleAlert size={12} strokeWidth={1.75} /><span>{issues}</span></span>
       {/if}
       <span class="caret" class:open aria-hidden="true"><ChevronRight size={12} strokeWidth={2} /></span>
     </button>
@@ -132,14 +133,13 @@
     color: var(--color-subtle);
   }
 
-  .glyph.failed,
-  .status {
-    color: var(--color-danger);
-  }
-
   .status {
     display: inline-flex;
+    align-items: center;
+    gap: 3px;
     flex: none;
+    color: var(--color-subtle);
+    font-size: var(--text-xs);
   }
 
   .label {

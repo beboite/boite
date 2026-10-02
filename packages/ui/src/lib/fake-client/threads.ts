@@ -333,7 +333,19 @@ export function threadMethods(ctx: FakeContext) {
       if (params.model !== undefined && params.model !== thread.model) { thread.model = params.model; thread.effort = null; thread.speed = null; }
       if (params.effort !== undefined) thread.effort = params.effort;
       if (params.speed !== undefined) thread.speed = params.speed;
-      if (params.permissionMode !== undefined) thread.permissionMode = params.permissionMode;
+      if (params.permissionMode !== undefined) {
+        thread.permissionMode = params.permissionMode;
+        for (const turn of thread.turns) {
+          if (turn.status === 'running' && turn.execution) turn.execution.permissionMode = params.permissionMode;
+        }
+        const decision = params.permissionMode === 'bypassPermissions' || params.permissionMode === 'yolo' ? 'allow'
+          : params.permissionMode === 'plan' || params.permissionMode === 'dontAsk' ? 'deny' : null;
+        if (decision) for (const [id, pending] of ctx.pendingPermissions) {
+          if (pending.request.threadId !== thread.id) continue;
+          ctx.pendingPermissions.delete(id);
+          pending.resolve(decision);
+        }
+      }
       if (before !== [thread.accountId, thread.model, thread.effort, thread.speed, thread.permissionMode].join('\0')) thread.selectionVersion = (thread.selectionVersion ?? 0) + 1;
       return ctx.touch(thread);
     },

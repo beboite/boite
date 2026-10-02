@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
+import { connect } from "../../packages/core/src/client.ts";
 import { BrowserPage, freePort } from "./lib/cdp";
+import { pairingUrlOf, startCore } from "./lib/core";
 import { startUi } from "./lib/ui";
 
 async function settled(page: BrowserPage): Promise<void> {
@@ -96,11 +98,14 @@ test("Ctrl+J opens a shell under the thread, typing reaches it, and OpenCode sig
     // xterm holds the focus: what is typed goes to the shell.
     await page.send("Input.insertText", { text: "git status" });
     await page.waitFor('document.querySelector("[data-testid=terminal-drawer] .xterm-rows").textContent.includes("git status")');
-    // An app chord still reaches the app from inside the terminal.
+    // Ctrl and a letter is the shell's inside the terminal, the palette's key included.
     await chord(page, "k", "KeyK", 75);
-    await page.waitFor('document.querySelector("[data-testid=palette]")');
-    await page.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-    await page.waitFor('!document.querySelector("[data-testid=palette]")');
+    // A chord no shell can read still reaches the app: Ctrl+, opens the settings.
+    await chord(page, ",", "Comma", 188);
+    await page.waitFor('document.querySelector("[data-testid=settings]")');
+    expect(await page.evaluate('document.querySelector("[data-testid=palette]") === null')).toBe(true);
+    await page.click("[data-testid=settings-back]");
+    await page.waitFor('document.querySelector("[data-testid=terminal-drawer] .xterm-rows")?.textContent.includes("git status")');
     await settled(page);
     await page.screenshot("tests/e2e/.artifacts/terminal-desktop.png");
 
@@ -173,5 +178,131 @@ test("Ctrl+J opens a shell under the thread, typing reaches it, and OpenCode sig
   } finally {
     await page.close();
     await server.close();
+  }
+}, 90_000);
+
+test("switching Stores with colliding terminal ids restores the owning screen and routes its keystrokes", async () => {
+  const port = await freePort();
+  const server = await startUi(port);
+  const page = await BrowserPage.launch({
+    url: `http://127.0.0.1:${port}/?fake=1&open=recent&machines=1`,
+    windowSize: { width: 1440, height: 900 },
+  });
+  try {
+    await page.waitFor('globalThis.__boiteTest?.workspace.machines.length === 2 && globalThis.__boiteTest.workspace.machines.every(machine => machine.store.connection === "ready")');
+    await page.evaluate(`(() => {
+      const workspace = globalThis.__boiteTest.workspace;
+      globalThis.__terminalOwners = workspace.machines.map(machine => machine.store);
+      globalThis.__terminalWrites = [[], []];
+      globalThis.__terminalOwners.forEach((store, index) => {
+        const call = store.client.call.bind(store.client);
+        store.client.call = (method, params) => {
+          if (method === 'terminals.write') globalThis.__terminalWrites[index].push(params.data);
+          return call(method, params);
+        };
+      });
+      document.documentElement.dataset.motion = 'reduced';
+    })()`);
+    expect(await page.evaluate('globalThis.__terminalOwners.map(store => store.endpointUrl)')).toEqual([null, null]);
+
+    // Both public fake machines retain the same thread id and keep their own shell.
+    for (let owner = 0; owner < 2; owner++) {
+      await page.evaluate(`globalThis.__boiteTest.workspace.select(globalThis.__terminalOwners[${owner}], 't-trace')`);
+      await page.click('[data-testid=terminal-toggle]');
+      await page.waitFor('document.querySelector("[data-testid=terminal-drawer] .xterm-rows")?.textContent.includes("PS ")');
+      await settled(page);
+      await page.evaluate(`document.querySelector('[data-testid=terminal-drawer] .terminal-screen').dataset.owner = '${owner}'`);
+    }
+
+    for (const [owner, text] of [[0, 'first-owner'], [1, 'second-owner']] as const) {
+      await page.evaluate(`globalThis.__boiteTest.workspace.select(globalThis.__terminalOwners[${owner}], 't-trace')`);
+      await page.waitFor('document.querySelector("[data-testid=terminal-drawer] .xterm-helper-textarea")');
+      await settled(page);
+      await page.evaluate(`(() => {
+        globalThis.__terminalWrites = [[], []];
+        document.querySelector('[data-testid=terminal-drawer] .xterm-helper-textarea').focus();
+      })()`);
+      await page.send('Input.insertText', { text });
+      await page.waitFor(`globalThis.__terminalWrites.some(writes => writes.join('').includes('${text}'))`);
+      expect(await page.evaluate('globalThis.__terminalWrites.map(writes => writes.join(""))')).toEqual(owner === 0 ? [text, ''] : ['', text]);
+      expect(await page.evaluate('document.querySelector("[data-testid=terminal-drawer] .terminal-screen").dataset.owner')).toBe(String(owner));
+    }
+    expect(page.errors()).toEqual([]);
+  } finally {
+    await page.close();
+    await server.close();
+  }
+}, 90_000);
+
+async function press(page: BrowserPage, key: string, code: string, keyCode: number, text?: string): Promise<void> {
+  const base = { key, code, windowsVirtualKeyCode: keyCode, ...(text === undefined ? {} : { text }) };
+  await page.send("Input.dispatchKeyEvent", { type: "keyDown", ...base });
+  await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...base });
+}
+
+const screenText = 'document.querySelector("[data-testid=terminal-drawer] .xterm-rows")?.innerText ?? ""';
+
+// bash, for its line editing: Windows has none to start, and the fake shell above covers its drawer.
+test.skipIf(process.platform === "win32")("a real shell keeps its screen while hidden, takes Ctrl+K and Ctrl+C, and a redraw types nothing into it", async () => {
+  const core = await startCore({ env: { BOITE_TERMINAL_SHELL: "/bin/bash", HISTFILE: "/dev/null", PS1: "sh> " } });
+  const client = await connect(core.url, core.token);
+  let page: BrowserPage | undefined;
+  try {
+    const project = await client.call("projects.add", { path: core.dataDir, name: "Documents" });
+    const account = (await client.call("accounts.list", {})).find((a) => a.providerId === "echo")!;
+    const thread = await client.call("threads.create", { projectId: project.id, providerId: "echo", accountId: account.id, title: "Shell" });
+    page = await BrowserPage.launch({ url: pairingUrlOf(core), windowSize: { width: 1440, height: 900 } });
+    const openShell = async () => {
+      await page!.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
+      await page!.click(`[data-thread-id="${thread.id}"]`);
+      await page!.waitFor('document.querySelector("[data-testid=thread-header][data-status]")');
+      await chord(page!, "j", "KeyJ", 74);
+      await page!.waitFor('document.activeElement?.classList.contains("xterm-helper-textarea")');
+      await page!.waitFor(`(${screenText}).includes("$ ")`);
+    };
+    await openShell();
+
+    // Ctrl+K cuts the line at the cursor in bash. It used to open the palette instead.
+    await page.send("Input.insertText", { text: "echo keptCUT" });
+    for (let i = 0; i < 3; i++) await press(page, "ArrowLeft", "ArrowLeft", 37);
+    await chord(page, "k", "KeyK", 75);
+    await press(page, "Enter", "Enter", 13, "\r");
+    await page.waitFor(`(${screenText}).split("\\n").includes("kept")`);
+    expect(await page.evaluate('document.querySelector("[data-testid=palette]") === null')).toBe(true);
+
+    // A program that asks the terminal what it is, as vim, htop and an agent CLI do at start.
+    // xterm answers once; the tty echoes the answer, which is what is counted below.
+    await page.send("Input.insertText", { text: "printf '\\033[c'; cat -v" });
+    await press(page, "Enter", "Enter", 13, "\r");
+    const answers = `(${screenText}).split("^[[?1;2c").length - 1`;
+    await page.waitFor(`${answers} === 1`);
+
+    // Hidden, the screen is kept rather than rebuilt, and the keyboard goes back to the composer.
+    await page.evaluate('document.querySelector("[data-testid=terminal-drawer] .terminal-screen").dataset.kept = "1"');
+    await chord(page, "j", "KeyJ", 74);
+    await page.waitFor('!document.querySelector("[data-testid=terminal-drawer]")');
+    expect(await page.evaluate('document.activeElement?.dataset.testid')).toBe("composer-input");
+    await chord(page, "j", "KeyJ", 74);
+    await page.waitFor('document.querySelector("[data-testid=terminal-drawer] .terminal-screen")?.dataset.kept === "1"');
+    await page.waitFor('document.activeElement?.classList.contains("xterm-helper-textarea")');
+    await settled(page);
+    await page.screenshot("tests/e2e/.artifacts/terminal-real-desktop.png");
+
+    // A reload redraws the screen from the core's snapshot, with the question in it.
+    // Answering it again typed `1;2c` into whatever was running, on every reopen.
+    await page.reload();
+    await openShell();
+    await page.waitFor(`${answers} === 1`);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(await page.evaluate(answers)).toBe(1);
+
+    // Ctrl+C with nothing selected interrupts: cat ends and the prompt is back.
+    await chord(page, "c", "KeyC", 67);
+    await page.waitFor(`(${screenText}).trimEnd().endsWith("$")`);
+    expect(page.errors()).toEqual([]);
+  } finally {
+    await page?.close();
+    client.close();
+    await core.stop();
   }
 }, 90_000);

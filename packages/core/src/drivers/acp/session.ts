@@ -214,6 +214,13 @@ export class AcpSession {
 
   // -- the process ----------------------------------------------------------
 
+  async setPermissionMode(turn: AcpTurn, mode: PermissionMode): Promise<boolean> {
+    if (this.current !== turn || turn.isStopped || this.closing || this.ended) return false;
+    const applied = await this.controls.applyMode({ ...turn.ctx, thread: { ...turn.ctx.thread, permissionMode: mode } });
+    if (applied) turn.ctx.thread.permissionMode = mode;
+    return applied;
+  }
+
   private async runTurn(turn: AcpTurn): Promise<void> {
     this.active = turn;
     if (turn.isStopped) {

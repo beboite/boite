@@ -22,6 +22,73 @@ import {
 useClaudeHarness();
 
 describe('claude driver', () => {
+  test.each([false, true])('an unfinished live control cannot change the next turn after Stop=%s', async stop => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('settings.set', { warmProcessMinutes: 5 });
+    const control = Promise.withResolvers<void>();
+    const answered = Promise.withResolvers<void>();
+    let changing = false;
+    scripted(fake => {
+      fake.emit(init('sess-control-owner'));
+      if (queries.length !== 1) return;
+      const apply = fake.applyFlagSettings.bind(fake);
+      fake.applyFlagSettings = async settings => {
+        if (settings.disableAllHooks === true) {
+          changing = true;
+          await control.promise;
+        }
+        await apply(settings);
+        answered.resolve();
+      };
+    });
+    const first = await client.call('turns.start', { threadId, prompt: 'First task' });
+    await waitFor(() => calls[0]?.prompts.length === 1);
+    await client.call('threads.update', { threadId, permissionMode: 'yolo' });
+    await waitFor(() => changing);
+    const previous = queries[0]!;
+    if (stop) await client.call('turns.stop', { threadId });
+    else previous.emit(success('sess-control-owner'));
+    await waitFor(() => harness.core.journal.getTurn(first.id)?.status === (stop ? 'stopped' : 'done'));
+
+    await client.call('threads.update', { threadId, permissionMode: 'default' });
+    const next = await client.call('turns.start', { threadId, prompt: 'Next task' });
+    // A control that never answers must not hold the next prompt or the finished turn.
+    await waitFor(() => calls.some(call => call.prompts.includes('Next task')));
+    expect(harness.core.journal.getTurn(next.id)?.status).toBe('running');
+    control.resolve();
+    await answered.promise;
+    await Bun.sleep(0);
+    // The former owner's delayed overlay must not issue its second native control.
+    expect(previous.setters).not.toContain('setPermissionMode bypassPermissions');
+    expect(calls.at(-1)!.options.permissionMode).toBe('default');
+    expect(queries.at(-1)!.setters).not.toContain('disableAllHooks true');
+    expect(harness.core.threads.require(threadId).permissionMode).toBe('default');
+    expect(harness.core.journal.getTurn(next.id)?.execution?.permissionMode).toBe('default');
+    queries.at(-1)!.emit(success('sess-control-owner'));
+    await waitFor(() => harness.core.journal.getTurn(next.id)?.status === 'done');
+  });
+
+  test('permission mode and hook changes reach a running query without another prompt', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    scripted(fake => fake.emit(init('sess-live-mode')));
+    const turn = await client.call('turns.start', { threadId, prompt: 'Keep working' });
+    await waitFor(() => calls[0]?.prompts.length === 1);
+    for (const mode of ['bypassPermissions', 'yolo', 'default'] as const) {
+      await client.call('threads.update', { threadId, permissionMode: mode });
+      const expected = mode === 'yolo' ? 'disableAllHooks true' : `setPermissionMode ${mode}`;
+      await waitFor(() => queries[0]!.setters.includes(expected));
+    }
+    expect(queries[0]!.setters).toContain('disableAllHooks the default');
+    expect(queries).toHaveLength(1);
+    expect(calls[0]!.prompts).toEqual(['Keep working']);
+    expect(queries[0]!.interrupts).toBe(0);
+    const snapshot = await client.call('threads.get', { threadId });
+    expect(snapshot.turns[0]).toMatchObject({ id: turn.id, status: 'running' });
+    queries[0]!.emit(success('sess-live-mode'));
+    await waitFor(() => harness.core.journal.getTurn(turn.id)?.status === 'done');
+  });
   test('viewing initializes a prompt-free query and retains it across real turns at zero minutes', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);
@@ -189,8 +256,6 @@ describe('claude driver', () => {
     // Nothing moved yet: the query opened on all three.
     expect(queries[0]?.setters).toEqual([]);
 
-    // `plan` and not `bypassPermissions`: that one is in the session key, and
-    // the test under this one is what covers it.
     await client.call('threads.update', {
       threadId,
       model: 'claude-opus-5',
@@ -212,54 +277,25 @@ describe('claude driver', () => {
     ]);
   });
 
-  test('a switch into bypassPermissions opens a second query, and back out a third', async () => {
+  test('warm queries apply Auto and YOLO in place and restore configured hooks', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);
     await client.call('settings.set', { warmProcessMinutes: 5 });
-
-    scripted(() => undefined, answerEach('sess-bypass'));
-
-    expect(await runTurn(client, threadId, 'first')).toBe('done');
-
-    // `allowDangerouslySkipPermissions` is a query-start option with no setter
-    // beside it, so the warm query cannot be talked into the skip: it closes and
-    // the turn lands on a query opened with the flag.
-    await client.call('threads.update', { threadId, permissionMode: 'bypassPermissions' });
-    expect(await runTurn(client, threadId, 'second')).toBe('done');
-
-    expect(queries).toHaveLength(2);
-    expect(queries[0]?.setters).toEqual([]);
-    expect(calls[0]?.options.allowDangerouslySkipPermissions).toBe(false);
-    expect(calls[1]?.options.allowDangerouslySkipPermissions).toBe(true);
-    expect(calls[1]?.options.permissionMode).toBe('bypassPermissions');
-    expect(calls[1]?.prompts).toEqual(['second']);
-
-    // And the way back is the same: a query opened with the skip keeps it.
-    await client.call('threads.update', { threadId, permissionMode: 'default' });
-    expect(await runTurn(client, threadId, 'third')).toBe('done');
-
-    expect(queries).toHaveLength(3);
-    expect(calls[2]?.options.allowDangerouslySkipPermissions).toBe(false);
-    expect(calls[2]?.prompts).toEqual(['third']);
-  });
-
-  test('entering and leaving YOLO replaces the warm query and restores configured hooks', async () => {
-    const client = await harness.connect();
-    const threadId = await claudeThread(client);
-    await client.call('settings.set', { warmProcessMinutes: 5 });
-    scripted(() => undefined, answerEach('sess-yolo-switch'));
-    for (const mode of ['bypassPermissions', 'yolo', 'bypassPermissions', 'default'] as const) {
+    scripted(() => undefined, answerEach('sess-mode-switch'));
+    for (const mode of ['default', 'bypassPermissions', 'yolo', 'bypassPermissions', 'default'] as const) {
       await client.call('threads.update', { threadId, permissionMode: mode });
       expect(await runTurn(client, threadId, mode)).toBe('done');
     }
-    expect(queries).toHaveLength(4);
-    expect(calls.map(call => call.options.settings)).toEqual([
-      { fastMode: false }, { fastMode: false, disableAllHooks: true }, { fastMode: false }, { fastMode: false },
+    expect(queries).toHaveLength(1);
+    expect(calls[0]!.options.allowDangerouslySkipPermissions).toBe(true);
+    expect(calls[0]!.options.permissionMode).toBe('default');
+    expect(calls[0]!.options.settings).toEqual({ fastMode: false });
+    expect(queries[0]!.setters).toEqual([
+      'setPermissionMode bypassPermissions', 'disableAllHooks true',
+      'disableAllHooks the default', 'setPermissionMode default',
     ]);
-    expect(calls.map(call => call.options.permissionMode)).toEqual([
-      'bypassPermissions', 'bypassPermissions', 'bypassPermissions', 'default',
-    ]);
-    expect(queries.slice(0, 3).every(query => query.closes > 0)).toBe(true);
+    expect(calls[0]!.prompts).toEqual(['default', 'bypassPermissions', 'yolo', 'bypassPermissions', 'default']);
+    expect(queries[0]!.closes).toBe(0);
   });
 
   test('a turn that changed nothing reaches for no setter at all', async () => {

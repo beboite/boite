@@ -780,13 +780,14 @@ export const strings = {
     /** `Running {subject}` for a command whose program has no name. */
     toolCommandWord: 'a command',
     /** A folded run of calls: one clause per kind, joined into one sentence. */
-    toolRunOne: { command: 'Ran {count} command', read: 'Read {count} file', edit: 'Changed {count} file', search: 'Searched the code once', fetch: 'Fetched {count} page', web: 'Searched the web once', agent: 'Delegated {count} task', other: 'Used {count} tool' },
-    toolRunMany: { command: 'Ran {count} commands', read: 'Read {count} files', edit: 'Changed {count} files', search: 'Searched the code {count} times', fetch: 'Fetched {count} pages', web: 'Searched the web {count} times', agent: 'Delegated {count} tasks', other: 'Used {count} tools' },
+    toolRunOne: { command: 'Ran {count} command', read: 'Read {count} file', edit: 'Changed {count} file', search: 'Searched the code once', fetch: 'Fetched {count} page', web: 'Searched the web once', agent: 'Delegated {count} task', other: 'Used {count} tool', attempt: 'Attempted {count} call' },
+    toolRunMany: { command: 'Ran {count} commands', read: 'Read {count} files', edit: 'Changed {count} files', search: 'Searched the code {count} times', fetch: 'Fetched {count} pages', web: 'Searched the web {count} times', agent: 'Delegated {count} tasks', other: 'Used {count} tools', attempt: 'Attempted {count} calls' },
     toolRunJoin: ', ',
     toolRunLast: ' and ',
     toolRunShow: 'Show each call',
     toolRunHide: 'Hide the calls',
-    toolFailed: 'Failed',
+    toolIssueOne: '{count} unsuccessful call',
+    toolIssueMany: '{count} unsuccessful calls',
     system: 'System',
     toolInput: 'Input',
     toolOutput: 'Output',
@@ -811,7 +812,7 @@ export const strings = {
     diffRemoved: '-{count}',
     noOutput: 'No output',
     toolExitCode: 'Exit code {code}',
-    toolCommandFailed: 'Command reported failure. Expand to read the full output.',
+    toolCommandFailed: 'No diagnostic was reported. See the full output below.',
     /** Under an expanded tool input that opened cut to six lines. */
     showAll: 'Show all',
     toolStatus: {

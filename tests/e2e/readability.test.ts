@@ -156,7 +156,7 @@ test('goal prompts and markers stay readable and recognized commands are accente
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
 });
 
-test('tool activity keeps failures visible and answered questions compact at desktop and phone widths', async () => {
+test('tool activity folds unsuccessful calls and keeps their details accessible at desktop and phone widths', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width:1300, height:850, deviceScaleFactor:1, mobile:false });
   await page.evaluate(`(() => { const input = document.querySelector('${id('composer-input')}'); input.value = ''; input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
   await update(`
@@ -183,14 +183,10 @@ test('tool activity keeps failures visible and answered questions compact at des
   await page.evaluate(`document.documentElement.dataset.theme = 'dark'`);
   await capture('activity-desktop');
   expect(await page.evaluate(`document.querySelector('${id('tool-card')} .line').textContent`)).toBe('Ran 1 command');
-  expect(await page.evaluate(`document.querySelector('${id('tool-card')}[data-status=error]').getBoundingClientRect().height > 0`)).toBe(true);
-  expect(await page.text(id('tool-error-preview'))).toBe('error: No such remote origin');
-  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('tool-error-preview')}')).map(e => e.textContent)`)).toEqual([
-    'error: No such remote origin', '(fail) reload keeps messages',
-    'CONFLICT (content): Merge conflict in docs/example.md',
-    'Command reported failure. Expand to read the full output.'
-  ]);
-  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('tool-exit-code')}')).map(e => e.textContent)`)).toEqual(['Exit code 128', 'Exit code 1', 'Exit code 1', 'Exit code 128']);
+  expect(await page.evaluate(`document.querySelector('${id('tool-group')}').dataset.count`)).toBe('6');
+  expect(await page.text(id('tool-group-issues'))).toBe('4');
+  expect(await page.evaluate(`document.querySelector('${id('tool-group-toggle')}').getAttribute('aria-label')`)).toContain('4 unsuccessful calls');
+  expect(await page.evaluate(`document.querySelectorAll('${id('tool-error-preview')}').length`)).toBe(0);
   expect(await page.evaluate(`document.querySelector('${id('question-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
   expect(await page.evaluate(`document.querySelector('${id('tool-card')}[data-status=running] .line').textContent`)).toBe('Running gh');
   expect(await page.evaluate(`document.querySelector('${id('turn-summary')}') === null`)).toBe(true);
@@ -205,10 +201,18 @@ test('tool activity keeps failures visible and answered questions compact at des
     await page.waitFor(`document.querySelector('${id('question-toggle')}').getAttribute('aria-expanded') === 'false'`);
     await page.evaluate(`document.querySelector('${id('timeline')}').scrollTop = 0`);
     await capture(width<720 ? 'activity-phone' : 'activity-desktop');
-    if (width < 720) {
-      await page.evaluate(`document.querySelectorAll('${id('tool-card')}[data-status=error]')[2].scrollIntoView({block:'center'})`);
-      await capture('activity-phone-errors');
-    }
+    await page.click(id('tool-group-toggle'));
+    await page.waitFor(`document.querySelectorAll('${id('tool-card')}[data-status=error]').length === 4`);
+    expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('tool-exit-code')}')).map(e => e.textContent)`)).toEqual(['Exit code 128', 'Exit code 1', 'Exit code 1', 'Exit code 128']);
+    expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('tool-card')}[data-status=error]')).every(e => { const preview = e.querySelector('${id('tool-error-preview')}'); return preview === null || preview.closest('[inert]') !== null; })`)).toBe(true);
+    await page.click(`${id('tool-card')}[data-status=error] ${id('tool-toggle')}`);
+    await page.waitFor(`document.querySelector('${id('tool-error-preview')}')?.textContent === 'error: No such remote origin'`);
+    expect(await page.text(`${id('tool-card')}[data-status=error] ${id('tool-output')}`)).toBe('Earlier successful output\nerror: No such remote origin');
+    await page.evaluate(`document.querySelector('${id('tool-card')}[data-status=error]').scrollIntoView({block:'center'})`);
+    await capture(width<720 ? 'activity-phone-errors' : 'activity-desktop-errors');
+    await page.click(`${id('tool-card')}[data-status=error] ${id('tool-toggle')}`);
+    await page.click(id('tool-group-toggle'));
+    await page.waitFor(`document.querySelector('${id('tool-group-toggle')}').getAttribute('aria-expanded') === 'false'`);
     expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
     const rows = await page.evaluate<number[]>(`Array.from(document.querySelectorAll('${id('question-toggle')}, ${id('tool-toggle')}, ${id('thinking-toggle')}')).filter(e=>!e.closest('[inert]')).map(e=>e.getBoundingClientRect().height)`);
     expect(rows.every(height => height >= (width<720 ? 44 : 30))).toBe(true);

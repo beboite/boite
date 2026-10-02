@@ -90,7 +90,8 @@ selected account's `sessionId`. An account change starts a fresh session seeded
 with bounded journal excerpts. A confirmed missing native session permits one
 retry on a fresh session; other failures retain the ID. Each accepted turn
 freezes its execution target, so later picker changes cannot redirect queued
-work. [Model switching](model-switching.md) owns transfer and revision rules.
+work. Permission modes follow the current selection, including during a running
+turn. [Model switching](model-switching.md) owns transfer and revision rules.
 
 ## The scheduler tracks independent turns
 
@@ -161,6 +162,9 @@ requests once, then retires only that session. Late output from a retired child
 cannot settle its replacement. User Stop takes precedence over a subsequent
 fault. Long-running model requests do not acquire a default request timeout.
 [Providers](providers.md) owns protocol details and control-read deadlines.
+Permission changes use native setters when available. Agents with launch-time
+permissions interrupt and resume within the same Boite turn, retaining the
+execution target and accumulating usage across attempts.
 
 Blocking questions hold a turn in `waiting`. Asynchronous questions leave work
 running and deliver an answer through steering or a later prompt. Skip resolves

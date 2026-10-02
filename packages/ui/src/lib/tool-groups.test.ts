@@ -36,6 +36,10 @@ test('a run of calls reads as one sentence, edits counted by file', () => {
   ];
   expect(runSummary(parts)).toBe('Ran 2 commands, read 1 file and changed 2 files');
   expect(runSummary([tool('Grep', { pattern: 'x' })])).toBe('Searched the code once');
+  expect(runSummary([
+    tool('Edit', { file_path: 'x', old_string: 'a', new_string: 'b' }, { status: 'error' }),
+    tool('Bash', { command: 'git status' }, { status: 'denied' })
+  ])).toBe('Attempted 2 calls');
 });
 
 test('a call reads as its command, or as a sentence in the tense it is in', () => {
@@ -66,7 +70,7 @@ test('calls fold into runs that text, a question or a produced document breaks',
   ]);
 });
 
-test('file changes and failures stand alone, even when a later call succeeds', () => {
+test('successful file changes stand alone while failed attempts stay in their run', () => {
   const parts: MessagePart[] = [
     tool('Read', { file_path: 'x' }),
     tool('Edit', { file_path: 'x', old_string: 'a', new_string: 'b' }),
@@ -77,9 +81,7 @@ test('file changes and failures stand alone, even when a later call succeeds', (
   expect(partRuns(parts)).toEqual([
     { kind: 'tools', indices: [0] },
     { kind: 'tools', indices: [1] },
-    { kind: 'tools', indices: [2] },
-    { kind: 'tools', indices: [3] },
-    { kind: 'tools', indices: [4] }
+    { kind: 'tools', indices: [2, 3, 4] }
   ]);
 });
 

@@ -79,7 +79,7 @@ test('a failed edit claims no change: no counts, no diff drawn from what it mean
   });
   flushSync();
   expect(document.querySelector('[data-testid=tool-diff-counts]')).toBeNull();
-  expect(query('[data-testid=tool-error-preview]').textContent).toBe('old_string not found');
+  expect(document.querySelector('[data-testid=tool-error-preview]')).toBeNull();
   query<HTMLButtonElement>('[data-testid=tool-toggle]').click();
   flushSync();
   expect(document.querySelector('[data-testid=diff-view]')).toBeNull();
@@ -104,26 +104,31 @@ test.each([
   ['bun test', 'bun test v1.4.2\n(pass) first case\n(fail) reload keeps messages\n 1 pass\n 1 fail', '(fail) reload keeps messages'],
   ['git rebase', 'Rebasing (1/1)\rAuto-merging docs/example.md\nCONFLICT (content): Merge conflict in docs/example.md\nerror: could not apply abc123', 'CONFLICT (content): Merge conflict in docs/example.md'],
   ['git status', 'Ordinary command output\n\u001b[31mfatal: not a git repository\u001b[0m', 'fatal: not a git repository'],
-])('a failed %s previews its diagnostic instead of its output banner', (command, output, diagnostic) => {
+])('a failed %s keeps its diagnostic behind the disclosure', (command, output, diagnostic) => {
   running = mount(ToolCard, {
     target: document.body,
     props: { name: 'Bash', input: { command }, output, status: 'error' as const }
   });
   flushSync();
-  expect(query('[data-testid=tool-error-preview]').textContent).toBe(diagnostic);
+  expect(query('[data-testid=tool-toggle] .line').textContent).toBe('Ran 1 command');
+  expect(document.querySelector('[data-testid=tool-error-preview]')).toBeNull();
   query<HTMLButtonElement>('[data-testid=tool-toggle]').click();
   flushSync();
+  expect(query('[data-testid=tool-error-preview]').textContent).toBe(diagnostic);
   expect(query('[data-testid=tool-output]').textContent).toBe(output);
 });
 
-test('a failed command with hidden diagnostics shows its exit code and a failure explanation', () => {
+test('a failed command retains its exit code and puts the explanation behind the disclosure', () => {
   running = mount(ToolCard, {
     target: document.body,
     props: { name: 'Bash', input: { command: 'git status 2>/dev/null' }, output: 'Earlier successful output', status: 'error' as const, exitCode: 128 }
   });
   flushSync();
   expect(query('[data-testid=tool-exit-code]').textContent).toBe('Exit code 128');
-  expect(query('[data-testid=tool-error-preview]').textContent).toBe('Command reported failure. Expand to read the full output.');
+  expect(document.querySelector('[data-testid=tool-error-preview]')).toBeNull();
+  query<HTMLButtonElement>('[data-testid=tool-toggle]').click();
+  flushSync();
+  expect(query('[data-testid=tool-error-preview]').textContent).toBe('No diagnostic was reported. See the full output below.');
 });
 
 test('successful stderr output stays folded as a successful command', () => {

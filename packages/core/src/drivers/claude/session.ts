@@ -1,5 +1,5 @@
 import type { Options, Query, SDKMessage, SpawnOptions as SdkSpawnOptions } from '@anthropic-ai/claude-agent-sdk';
-import type { BackgroundTask } from '@boite/contracts';
+import type { BackgroundTask, PermissionMode } from '@boite/contracts';
 import { messageOf, unavailable } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
 import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
@@ -44,8 +44,8 @@ export interface SessionHooks {
  * only an idle window, a stop, a changed setup or the core going down ends it.
  * A changed model, effort or permission mode is not a changed setup: the SDK
  * has a setter for each of the three, so the CLI takes the new one in place.
- * Permission bypass and YOLO's configured-hook switch are query-start options,
- * so crossing either boundary needs a new query (`sessionKey`).
+ * Permission changes also reach the active turn, and a flag overlay toggles
+ * configured hooks when entering or leaving YOLO.
  */
 export class ClaudeSession {
   private readonly retention = new SessionRetention();
@@ -90,8 +90,10 @@ export class ClaudeSession {
   private carried: { costUsd: number; tokens: number } | null;
   /** What the query was last told to be: the options it opened on, plus every setter since. */
   private applied: LiveSetup | null = null;
-  /** The setters of one turn run to the end before the next turn's, and before its prompt. */
+  /** The setup setters of one turn finish before the next turn's prompt. */
   private pending: Promise<void> = Promise.resolve();
+  /** An unanswered live control makes the query unsafe to retain for another turn. */
+  private permissionTurn: ClaudeTurn | null = null;
   private readonly ready: Promise<void>;
   private markReady: () => void = () => undefined;
   /** The permission callback and the tool hooks, reading the turn the CLI is on. */
@@ -204,6 +206,34 @@ export class ClaudeSession {
     return true;
   }
 
+  async setPermissionMode(turn: ClaudeTurn, mode: PermissionMode): Promise<boolean> {
+    await this.ready;
+    await this.pending;
+    if (this.head() !== turn || turn.settled || turn.isStopped || !this.query || !this.applied || this.closing || this.ended) return false;
+    const query = this.query;
+    const applied = this.applied;
+    const current = () => this.head() === turn && !turn.settled && !turn.isStopped &&
+      this.query === query && this.applied === applied && !this.closing && !this.ended;
+    const wanted = liveSetup({ ...turn.ctx.thread, permissionMode: mode });
+    this.permissionTurn = turn;
+    try {
+      if (wanted.disableHooks !== applied.disableHooks) {
+        await query.applyFlagSettings({ disableAllHooks: wanted.disableHooks ? true : null });
+        if (!current()) return false;
+        applied.disableHooks = wanted.disableHooks;
+      }
+      if (wanted.permissionMode !== applied.permissionMode) {
+        await query.setPermissionMode(wanted.permissionMode);
+        if (!current()) return false;
+        applied.permissionMode = wanted.permissionMode;
+      }
+      turn.ctx.thread.permissionMode = mode;
+      return true;
+    } finally {
+      if (this.permissionTurn === turn) this.permissionTurn = null;
+    }
+  }
+
   /** Apply the next turn's settings before its prompt enters the warm stream. */
   private async follow(turn: ClaudeTurn): Promise<void> {
     if (turn.isStopped || this.closing || this.ended) return;
@@ -241,11 +271,12 @@ export class ClaudeSession {
         live.effortLevel = wanted.effortLevel;
       }
       if (wanted.permissionMode !== live.permissionMode) {
-        // Never a move in or out of `bypassPermissions`: that one is in the
-        // session key, so such a turn never reaches a query opened on the other
-        // side of it.
         await query.setPermissionMode(wanted.permissionMode);
         live.permissionMode = wanted.permissionMode;
+      }
+      if (wanted.disableHooks !== live.disableHooks) {
+        await query.applyFlagSettings({ disableAllHooks: wanted.disableHooks ? true : null });
+        live.disableHooks = wanted.disableHooks;
       }
     } catch (error) {
       this.applied = live;
@@ -386,6 +417,8 @@ export class ClaudeSession {
   }
 
   private endTurn(turn: ClaudeTurn): void {
+    // Retire this transport instead of waiting indefinitely for its control reply.
+    if (this.permissionTurn === turn) this.close(null, STOP_GRACE_MS);
     this.waiting.shift();
     turn.settle();
     this.afterTurns();
@@ -553,7 +586,8 @@ export class ClaudeSession {
       // A level the CLI knows goes in the options; `ultrathink` goes in the prompt.
       ...(setup.effortLevel === null ? {} : { effort: setup.effortLevel }),
       permissionMode: setup.permissionMode,
-      allowDangerouslySkipPermissions: setup.permissionMode === 'bypassPermissions',
+      // This enables the live setter; permissionMode still controls the actual approvals.
+      allowDangerouslySkipPermissions: true,
       pathToClaudeCodeExecutable: executable,
       settingSources: ['user', 'project', 'local'],
       settings: {

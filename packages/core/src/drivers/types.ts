@@ -214,6 +214,8 @@ export type PromptCacheLife = Pick<import('@boite/contracts').PromptCache, 'ttlS
 export interface TurnHandle {
   done: Promise<TurnResult>;
   stop(): void;
+  /** Apply permissions to the active native turn. False requests a resume with a new process. */
+  setPermissionMode?(mode: ThreadSummary['permissionMode']): Promise<boolean>;
   /** False means not ready, rejection means uncertain dispatch and must not be replayed. */
   steer?(message: string, attachments?: ImageAttachment[]): Promise<boolean>;
   /** Native user input, when system coordination uses a separate tool-boundary hook. */

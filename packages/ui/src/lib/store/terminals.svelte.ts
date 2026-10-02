@@ -1,5 +1,6 @@
 import { RpcErrorCode, type RpcEvents, type TerminalState, type ThreadId } from '@boite/contracts';
 import { RpcFailure } from '../client';
+import { TerminalSession, type TerminalStart } from '../terminal-session.svelte';
 import type { StoreContext } from './context';
 
 /** The thread drawers and sign-in shells: which are shown, and the calls that drive them. */
@@ -12,7 +13,27 @@ export class Terminals {
   /** Accounts whose sign-in terminal is open on the Providers page. */
   loginTerminals = $state<string[]>([]);
 
+  /** The screens of the shells this client opened, by terminal id. One lives until its shell ends. */
+  private readonly sessions = new Map<string, TerminalSession>();
+
   constructor(private readonly ctx: StoreContext) {}
+
+  /** The screen of this shell, made the first time. `start` attaches to the shell or starts it. */
+  terminalSession(id: string, start: TerminalStart): TerminalSession {
+    let session = this.sessions.get(id);
+    if (session === undefined) {
+      session = new TerminalSession(this.ctx.store, id, start, () => {
+        if (this.sessions.get(id) === session) this.sessions.delete(id);
+      });
+      this.sessions.set(id, session);
+    }
+    return session;
+  }
+
+  /** Another core, or none: its shells are not this client's to draw any more. */
+  dropSessions(): void {
+    for (const session of [...this.sessions.values()]) session.dispose();
+  }
 
   terminalShown(threadId: ThreadId): boolean {
     return this.terminalThreads.includes(threadId);

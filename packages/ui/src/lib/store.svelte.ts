@@ -142,6 +142,7 @@ export class Store {
     void ctx.threads.unsubscribe();
     this.retitling = [];
     ctx.serverUpdater.reset();
+    ctx.terminals.dropSessions();
     ctx.drafts.stop();
     ctx.workbench.resetMemory();
     ctx.delegation.coordinationEpoch++;
@@ -297,6 +298,7 @@ export class Store {
   set loginTerminals(value) { this.#ctx.terminals.loginTerminals = value; }
 
   terminalShown(...args: Parameters<Terminals['terminalShown']>) { return this.#ctx.terminals.terminalShown(...args); }
+  terminalSession(...args: Parameters<Terminals['terminalSession']>) { return this.#ctx.terminals.terminalSession(...args); }
   toggleTerminal(...args: Parameters<Terminals['toggleTerminal']>) { return this.#ctx.terminals.toggleTerminal(...args); }
   hideTerminal(...args: Parameters<Terminals['hideTerminal']>) { return this.#ctx.terminals.hideTerminal(...args); }
   openTerminal(...args: Parameters<Terminals['openTerminal']>) { return this.#ctx.terminals.openTerminal(...args); }

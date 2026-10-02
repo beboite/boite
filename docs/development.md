@@ -511,13 +511,14 @@ the composer, plans and delegated transcripts share these tokens. Headings
 scale from 1.3 em to body size; code, tables and tool cards retain their
 own sizes. `tests/e2e/readability.test.ts` checks both viewport widths.
 
-Tool cards retain full input/output on expansion. Consecutive successful calls
-fold into a count-based summary in first-seen kind order; failed and denied calls
-keep a diagnostic preview. A diff-producing call stands alone and opens its diff.
-Codex exit codes determine command status; stderr text does not. Answered
-questions expand read-only. Turn receipts mean core acceptance and first
-assistant activity, not a protocol read receipt. Animations pause when hidden
-and respect reduced motion.
+Tool cards retain full input/output on expansion. Consecutive calls fold into a
+count-based summary in first-seen kind order, including failures and denials with
+a muted count. Failed edits do not count as successful changes. Expanding a
+failed call shows its diagnostic above the full input and output. A diff-producing
+call stands alone and opens its diff. Codex exit codes determine command status;
+output text and stderr do not. Answered questions expand read-only. Turn receipts
+mean core acceptance and first assistant activity, not a protocol read receipt.
+Animations pause when hidden and respect reduced motion.
 
 ### Theme colours
 

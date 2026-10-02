@@ -73,11 +73,7 @@ export const SIBLING_MIN = 360;
 /** Past this the panel is an inline column; under it, a sheet over the chat. */
 export const PANEL_INLINE_MIN_VIEWPORT = 981;
 
-export const TRACE_SURFACE_ID = 'trace';
 export const AGENTS_SURFACE_ID = 'agents';
-export const CHANGES_SURFACE_ID = 'changes';
-export const FILES_SURFACE_ID = 'files';
-export const TASKS_SURFACE_ID = 'tasks';
 
 /** Past this the changes surface puts its diff beside the list rather than under it. */
 export const CHANGES_SPLIT_MIN = 900;
