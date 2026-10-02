@@ -1,5 +1,7 @@
 import type { AgentsRpcMethods, AgentsRpcEvents } from './agents';
 import type { WorkflowsRpcMethods, WorkflowsRpcEvents } from './workflows';
+import type { BrowserRpcMethods, BrowserRpcEvents } from './browser';
+export * from './browser';
 export * from './agents';
 export * from './workflows';
 export * from './workflow-plan';
@@ -2186,7 +2188,7 @@ export interface ServerUpdateStatus {
   error: string | null;
 }
 
-export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
+export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods {
   'core.shutdown': { params: Record<string, never>; result: { ok: true } };
   'core.updateStatus': { params: { refresh?: boolean }; result: ServerUpdateStatus };
   /** Confirm the version shown to the owner so a stale dialog cannot install another release. */
@@ -2837,7 +2839,7 @@ export type RpcMethodName = keyof RpcMethods;
 export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
 export type RpcResult<M extends RpcMethodName> = RpcMethods[M]['result'];
 
-export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
+export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserRpcEvents {
   'resources.memory': MemoryEvent;
   'thread.memory': MemoryEvent & { threadId: string };
   'delegation.changed': { threadId: ThreadId };

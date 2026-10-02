@@ -1210,6 +1210,12 @@ export const strings = {
   },
 
   browser: {
+    resetViewport: 'Fit page to window',
+    enlarge: 'Enlarge browser',
+    restore: 'Restore panel',
+    detach: 'Float inside the app',
+    dock: 'Return to panel',
+    move: 'Move the floating panel',
     loading: 'Loading page',
     failed: 'The page could not be opened. {reason}',
     invalidUrl: 'Enter a valid HTTP or HTTPS address, or a search query.',
@@ -1702,6 +1708,7 @@ export const strings = {
       drop: 'Drop the whip'
     },
     chatArtifacts: { title: 'Chat files and previews', hint: 'Open file links and preview files returned by an agent in the conversation' },
+    agentBrowserControl: { title: 'Agent browser control', hint: 'On this Windows desktop, let agents read pages, take screenshots and act in the open conversation’s browser tabs. This includes signed-in sessions and JavaScript execution. Turning this off revokes access; actions already performed are not undone.' },
     previewComments: { title: 'Preview comments', hint: 'Select an element in the integrated browser and add feedback to the conversation draft' },
     themeGrain: {
       title: 'Grain theme',

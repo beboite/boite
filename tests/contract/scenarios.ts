@@ -145,6 +145,26 @@ async function unavailable(env: ContractEnv): Promise<{ provider: ProviderSummar
 }
 
 export const SCENARIOS: Record<string, Scenario> = {
+  'browser requests require a subscribed host and return its matching reply': async env => {
+    const setup = await echo(env);
+    const created = await thread(env, setup);
+    const threadId = created.id;
+    await refusedWith(env.call('browser.command', { threadId, action: { kind: 'snapshot' } }), RpcErrorCode.Refused);
+    await env.call('threads.subscribe', { threadId });
+    await refusedWith(env.call('browser.host', { threadId, enabled: true }), RpcErrorCode.Refused);
+    await refusedWith(env.call('browser.host', { threadId, enabled: true, allowAgentControl: false }), RpcErrorCode.Refused);
+    await env.call('browser.host', { threadId, enabled: true, allowAgentControl: true });
+    const off = env.on('browser.requested', request => {
+      if (request.threadId === threadId) void env.call('browser.complete', { requestId: request.requestId, result: { tabId: 'browser:test', value: 'Page text' } });
+    });
+    try {
+      same(await env.call('browser.command', { threadId, action: { kind: 'snapshot' } }), { tabId: 'browser:test', value: 'Page text' }, 'browser reply');
+      await refusedWith(env.call('browser.command', { threadId, action: { kind: 'open', url: 'file:///private' } }), RpcErrorCode.Refused);
+      await refusedWith(env.call('browser.command', { threadId, tabId: 'main', action: { kind: 'snapshot' } }), RpcErrorCode.Refused);
+      await env.call('browser.host', { threadId, enabled: false });
+      await refusedWith(env.call('browser.command', { threadId, action: { kind: 'status' } }), RpcErrorCode.Refused);
+    } finally { off(); }
+  },
   'YOLO keeps permission requests out of the core and fake conversation': async env => {
     const setup = await echo(env);
     const created = await thread(env, setup);

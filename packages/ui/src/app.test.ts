@@ -10,6 +10,7 @@ import { setExperiment, writeExperiments } from './lib/experiments';
 import { storeEndpoint, upsertEnvironment } from './lib/endpoint';
 import { closeTour } from './lib/onboarding.svelte';
 import { work } from './lib/work-prefs.svelte';
+import { rightPanel } from './lib/right-panel.svelte';
 import { count } from './lib/format';
 
 // The opener plugin is the shell's system browser; nothing real may run here.
@@ -25,6 +26,8 @@ afterEach(() => {
   delete document.documentElement.dataset.theme;
   // Through the writer, so the reactive mirror hears the reset too.
   writeExperiments([]);
+  rightPanel.floating = false;
+  rightPanel.maximized = false;
   window.localStorage.clear();
   work.load();
   delete window.__TAURI_INTERNALS__;
@@ -960,6 +963,34 @@ test('hiding the trace card takes it off the launcher and leaves an open trace t
   expect(document.querySelector('[data-testid=launch-files]')).not.toBeNull();
   work.show('panel.trace', true);
   await waitFor(() => document.querySelector('[data-testid=launch-trace]') !== null);
+});
+
+test('a floating panel can dock after leaving or closing its browser tab and changing threads', async () => {
+  await mountOnFake();
+  await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
+  query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
+  await waitFor(() => store.openThread?.id === 't-trace');
+  store.panel.open('browser', 'https://example.test');
+  const browser = store.panel.active!.id;
+  rightPanel.floating = true;
+  store.panel.openTasks();
+  await waitFor(() => document.querySelector('[data-testid=panel-dock]') !== null);
+  store.panel.close(browser);
+  flushSync();
+  expect(document.querySelector('[data-testid=browser-slot]')).toBeNull();
+  query<HTMLButtonElement>('[data-testid=panel-dock]').click();
+  flushSync();
+  expect(rightPanel.floating).toBe(false);
+  expect(document.querySelector('[data-testid=panel-dock]')).toBeNull();
+  rightPanel.floating = true;
+  const other = store.threads.find(thread => thread.id !== 't-trace' && !thread.archived)!;
+  await store.open(other.id);
+  store.panel.openTasks();
+  await waitFor(() => document.querySelector('[data-testid=panel-dock]') !== null);
+  rightPanel.maximized = true;
+  query<HTMLButtonElement>('[data-testid=panel-dock]').click();
+  expect(rightPanel.floating).toBe(false);
+  expect(rightPanel.maximized).toBe(false);
 });
 
 test("a header button's right click hides it, and the Appearance page brings it back", async () => {

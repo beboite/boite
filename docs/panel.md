@@ -13,6 +13,24 @@ resize handle and tab icon are `SurfaceLauncher.svelte`, `PanelResizeHandle.svel
 and `SurfaceIcon.svelte`; `lib/surface-labels.ts` names each surface and says where
 it is available.
 
+## Floating panel and menus
+
+The browser toolbar can float the panel inside the app. Drag anywhere on its
+top bar, including tab labels, to move it; buttons keep their normal actions.
+Resize from any of its four sides or four corners. Both gestures stay within the app. The
+same page remains mounted, preserving forms and history. **Return to panel**
+in the panel's top bar restores the side panel from any tab, including after
+closing the last browser or switching conversations. The top bar also holds
+the single maximize button.
+Maximizing a floating panel fills the app's content
+area; restoring it returns to its previous size. On a phone it fills the screen.
+
+Native browser views paint above HTML menus. While a menu or dialog overlaps
+the page, the UI parks that view and displays its screenshot underneath the
+menu. Closing the overlay restores the same view without reloading the page.
+
+## Thread and tab lifetime
+
 A thread that is archived, here or from another client, or removed with its
 project, takes its layout with it, and its browser views are destroyed rather
 than parked: a thread restored from Archived threads comes back with a fresh

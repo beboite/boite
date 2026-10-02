@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { hostBrowser } from './lib/browser-host';
   import TerminalDrawer from './components/TerminalDrawer.svelte';
   import UndoToast from './components/UndoToast.svelte';
   import NotificationCard from './components/NotificationCard.svelte';
@@ -39,6 +40,11 @@
   import ThreadPreparation from './components/ThreadPreparation.svelte';
 
   let store = $derived(workspace.active);
+  $effect(() => {
+    const threadId = store.openThread?.id;
+    void store.connection;
+    if (experimentOn('agent-browser-control') && threadId && store.owner && store.client?.state === 'ready') return hostBrowser(store, threadId);
+  });
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   let appRoot = $state<HTMLDivElement | undefined>(undefined);
   let mobileScreen = $state<'chat' | 'threads' | 'activity'>('chat');
@@ -490,7 +496,7 @@
   {#if !inShell && store.booted}<MobileNavigation {store} bind:screen={mobileScreen} />{/if}
   <TitleBar {store} />
 
-  <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && mobileScreen !== 'chat'} class:panel-maximized={rightPanel.maximized && store.panelOpen} class:sidebar-folded={sidebarFolded}>
+  <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && mobileScreen !== 'chat'} class:panel-maximized={rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
     {#if !store.booted}
       <p class="empty boot">{strings.app.loading}</p>
     {:else if store.connection === 'closed' && !store.core}

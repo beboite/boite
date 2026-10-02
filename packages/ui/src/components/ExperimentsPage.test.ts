@@ -38,6 +38,10 @@ test('the page carries one switch per experiment and a toggle writes the enabled
   expect(grain.closest('label')?.textContent).toContain('Grain theme');
   expect(window.localStorage.getItem(EXPERIMENTS_STORAGE_KEY)).toBeNull();
 
+  const browser = query<HTMLInputElement>('[data-testid=experiment-agent-browser-control]');
+  expect(browser.checked).toBe(false);
+  expect(document.getElementById(browser.getAttribute('aria-describedby')!)?.textContent).toContain('signed-in sessions');
+
   grain.click();
   flushSync();
   await tick();

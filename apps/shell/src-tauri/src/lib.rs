@@ -7,6 +7,7 @@ use std::sync::Mutex;
 mod attachments;
 mod attachment_download;
 mod browser;
+mod browser_control;
 mod channel;
 mod closing;
 mod failure;
@@ -159,6 +160,7 @@ pub fn run() {
             browser::browser_annotate,
             browser::browser_highlight,
             browser::browser_destroy,
+            browser_control::browser_protocol,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

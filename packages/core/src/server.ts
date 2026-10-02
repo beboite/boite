@@ -435,6 +435,7 @@ export function startServer(options: ServerOptions): RunningServer {
 
       close(socket) {
         core.coordination.bridge.disconnect(socket.data.connection.id);
+        core.browser.disconnect(socket.data.connection.id);
         core.threads.focus.disconnect(socket.data.connection.id);
         incoming.drop(socket.data.connection);
         core.speech.cancel(socket.data.connection.id);
