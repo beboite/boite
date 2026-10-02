@@ -48,29 +48,37 @@ test('native agents remain visible beside Boite subagents on desktop and phone',
   expect(page.errors()).toEqual([]);
 }, 40_000);
 
-test('a running native agent has a dock entry without becoming a Boite subagent', async () => {
+test('running native agents contribute to one count without becoming Boite subagents', async () => {
   await onStore('store.delegation.nativeAgents[1].status = "running";');
-  await page.waitFor('!!document.querySelector("[data-testid=native-agent-dock-member]")');
+  await page.waitFor('!!document.querySelector("[data-testid=active-subagents]")');
+  expect(await page.text('[data-testid="active-subagents"]')).toContain('1 active subagent');
+  await onStore('store.delegation.nativeAgents[0].status = "running";');
+  await page.waitFor('document.querySelector("[data-testid=active-subagents]")?.textContent.includes("2 active subagents")');
+  expect(await page.evaluate('document.querySelectorAll("[data-testid=agent-dock] button").length')).toBe(1);
   await page.click('[data-testid="panel-close"]');
-  await page.click('[data-testid="native-agent-dock-member"]');
+  await page.click('[data-testid="active-subagents"]');
   await page.waitFor('!!document.querySelector("[data-testid=native-agents]")');
   expect(await page.evaluate('document.querySelectorAll("[data-testid=delegation-member]").length')).toBe(0);
 }, 15_000);
 
-test('a detached CLI agent stays visible on desktop and phone, and its own exit removes the active chip', async () => {
+test('a detached CLI agent keeps the count and timer visible until its own exit on desktop and phone', async () => {
   await page.evaluate('globalThis.__boiteTest.setTheme("dark")');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1310, height: 820, deviceScaleFactor: 1, mobile: false });
   await page.click('[data-testid="panel-close"]');
   await onStore('await store.open("t-cli");');
-  await page.waitFor('!!document.querySelector("[data-testid=native-agent-dock-member]")');
-  expect(await page.text('[data-testid="native-agent-dock-member"]')).toContain('Claude Code');
-  expect(await page.text('[data-testid="native-agent-dock-member"]')).toContain('claude-opus-5-5');
-  await page.click('[data-testid="native-agent-dock-member"]');
+  await page.waitFor('!!document.querySelector("[data-testid=active-subagents]")');
+  expect(await page.text('[data-testid="active-subagents"]')).toContain('1 active subagent');
+  expect(await page.text('[data-testid="active-subagents"]')).not.toContain('claude-opus-5-5');
+  const elapsed = await page.text('[data-testid="active-subagents"] [data-testid="agent-elapsed"]');
+  await page.waitFor(`document.querySelector('[data-testid=active-subagents] [data-testid=agent-elapsed]')?.textContent !== ${JSON.stringify(elapsed)}`);
+  await capture('cli-agent-dock-desktop.png');
+  await page.click('[data-testid="active-subagents"]');
   await page.waitFor('!!document.querySelector("[data-testid=process-agents]")');
   await page.click('[data-testid="process-agent"] > summary');
   expect(await page.text('[data-testid="process-agents"]')).toContain('Started from a command');
   expect(await page.text('[data-testid="process-agents"]')).toContain('Working');
   expect(await page.text('[data-testid="process-agents"]')).toContain('xhigh');
+  expect(await page.text('[data-testid="process-agents"]')).toContain('claude-opus-5-5');
   expect(await page.evaluate('document.querySelectorAll("[data-testid=native-agent]").length')).toBe(0);
   expect(await page.evaluate('document.querySelectorAll("[data-testid=delegation-member]").length')).toBe(0);
   await capture('cli-agent-desktop.png');
@@ -82,7 +90,7 @@ test('a detached CLI agent stays visible on desktop and phone, and its own exit 
   await page.click('[data-testid="panel-close"]');
   await capture('cli-agent-dock-phone.png');
   await onStore('await store.client.call("resources.killTree", { threadId: "t-cli" });');
-  await page.waitFor('!document.querySelector("[data-testid=native-agent-dock-member]")');
+  await page.waitFor('!document.querySelector("[data-testid=active-subagents]")');
   await page.click('[data-testid=thread-menu-trigger]');
   await page.click('[data-testid=thread-menu-trigger-menu] [data-value=agents]');
   await page.waitFor('document.querySelector("[data-testid=process-agent] [data-status=error]") !== null');

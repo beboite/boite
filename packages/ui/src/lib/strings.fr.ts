@@ -908,7 +908,8 @@ export const fr: Translation = {
     nativeStatus: { running: 'En cours', done: 'Terminé', error: 'Échec', stopped: 'Arrêté', unknown: 'État inconnu' },
     panelHint: 'Les sous-agents à qui cette conversation confie du travail',
     parent: 'Fil principal',
-    activeAgents: 'Sous-agents actifs',
+    activeOne: '1 sous-agent actif',
+    activeMany: '{count} sous-agents actifs',
     loadingTranscript: 'Chargement de la conversation sélectionnée',
     noTranscript: "Ce sous-agent n'a encore rien écrit.",
     configure: 'Réglages',
@@ -937,6 +938,8 @@ export const fr: Translation = {
   },
 
   workflow: {
+    activeOne: '1 workflow',
+    activeMany: '{count} workflows',
     status: { running: 'En cours', paused: 'En pause', done: 'Terminé', failed: 'En échec', stopped: 'Arrêté' },
     stepStatus: { waiting: 'En attente', running: 'En cours', done: 'Terminée', failed: 'En échec', skipped: 'Sautée', stopped: 'Arrêtée' },
     steps: '{done}/{total} étapes',

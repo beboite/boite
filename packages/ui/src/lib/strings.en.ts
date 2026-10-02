@@ -954,7 +954,8 @@ export const strings = {
     nativeStatus: { running: 'Working', done: 'Completed', error: 'Failed', stopped: 'Stopped', unknown: 'Status unknown' },
     panelHint: 'The subagents this conversation hands work to',
     parent: 'Parent thread',
-    activeAgents: 'Active subagents',
+    activeOne: '1 active subagent',
+    activeMany: '{count} active subagents',
     loadingTranscript: 'Loading the selected conversation',
     noTranscript: 'This subagent has not written anything yet.',
     configure: 'Settings',
@@ -983,6 +984,8 @@ export const strings = {
   },
 
   workflow: {
+    activeOne: '1 workflow',
+    activeMany: '{count} workflows',
     status: { running: 'Running', paused: 'Paused', done: 'Done', failed: 'Failed', stopped: 'Stopped' },
     stepStatus: { waiting: 'Waiting', running: 'Running', done: 'Done', failed: 'Failed', skipped: 'Skipped', stopped: 'Stopped' },
     steps: '{done}/{total} steps',
