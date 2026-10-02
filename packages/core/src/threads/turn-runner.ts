@@ -1,30 +1,15 @@
-import type { PermissionMode, ThreadId, ThreadSummary, Turn, TurnId, Usage } from '@boite/contracts';
+import type { PermissionMode, ThreadId, ThreadSummary, Turn, TurnId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { getDriver, releaseThread } from '../drivers/index.ts';
-import type { TurnHandle, TurnResult } from '../drivers/types.ts';
+import type { TurnResult } from '../drivers/types.ts';
 import { messageOf } from '../errors.ts';
 import { logMessageOf } from '../log-errors.ts';
 import { promptCacheOf } from '../prompt-cache.ts';
 import type { ThreadStore } from '../threads.ts';
 import { saveThread, setThreadStatus } from './records.ts';
-import type { CarriedInput } from './turn-context.ts';
-import { LivePermissions } from './live-permissions.ts';
-import { totalTokens } from '../usage.ts';
+import { TurnAttempts, type TurnAttemptState } from './turn-attempts.ts';
 
-/**
- * How long a stopped turn may take to settle. Past `ms` the core ends the
- * thread's processes, which is what makes the ACP, pi and Codex sessions see
- * their agent gone; past `ms + forceMs` it settles the turn itself. Mutable so
- * a test can shorten it.
- */
-export const STOP_DEADLINE = { ms: 10_000, forceMs: 2_000 };
-export const STOP_DEADLINE_ERROR = 'The agent did not stop in time; its processes were ended.';
-
-interface StopDeadline {
-  handle: TurnHandle;
-  forced: { promise: Promise<TurnResult>; resolve: (result: TurnResult) => void };
-  timer: ReturnType<typeof setTimeout> | null;
-}
+export { STOP_DEADLINE, STOP_DEADLINE_ERROR } from './turn-attempts.ts';
 
 /**
  * One turn from the scheduler to its end: the driver started and awaited,
@@ -32,13 +17,8 @@ interface StopDeadline {
  * ignores ended by the deadline, and what the finished turn leaves behind.
  */
 export class TurnRunner {
-  readonly handles = new Map<ThreadId, TurnHandle>();
-  private readonly livePermissions = new Map<ThreadId, LivePermissions>();
-  /** Per running turn: what settles it when its driver never answers a stop. */
-  private readonly stopDeadlines = new Map<ThreadId, StopDeadline>();
-  /** Threads whose running turn the user stopped: a lost session is not retried for them. */
-  private readonly stopRequested = new Set<ThreadId>();
-  private readonly preparing = new Set<ThreadId>();
+  private readonly attempts: TurnAttempts;
+  readonly handles: TurnAttempts['handles'];
   readonly steering = new Set<ThreadId>();
   /**
    * Running turns the user wrote into, with when that message was journalled.
@@ -46,10 +26,13 @@ export class TurnRunner {
    */
   readonly userInputAt = new Map<TurnId, number>();
 
-  constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
+  constructor(private readonly core: Core, private readonly threads: ThreadStore) {
+    this.attempts = new TurnAttempts(core, threads);
+    this.handles = this.attempts.handles;
+  }
 
   changePermissionMode(threadId: ThreadId, mode: PermissionMode): void {
-    this.livePermissions.get(threadId)?.change(mode);
+    this.attempts.changePermissionMode(threadId, mode);
   }
 
   async runTurn(turnId: TurnId, threadId: ThreadId): Promise<void> {
@@ -64,113 +47,38 @@ export class TurnRunner {
       this.threads.markQueuedStopped(turnId);
       return;
     }
-    let thread = { ...selected, ...queued.execution, permissionMode: selected.permissionMode };
-    const permissions = new LivePermissions(thread.permissionMode, handle => {
-      this.threads.cards.clearPermissionsOf(threadId);
-      this.threads.cards.clearQuestionsOf(threadId);
-      handle.stop();
-      this.armStopDeadline(threadId, handle);
-    }, mode => {
-      thread.permissionMode = mode;
-      if (running.execution) running.execution = { ...running.execution, permissionMode: mode };
-      this.core.journal.putTurn(running);
-      this.threads.cards.applyPermissionMode(threadId, mode);
-    });
-    this.livePermissions.set(threadId, permissions);
+    const state: TurnAttemptState = {
+      threadId, turnId,
+      thread: { ...selected, ...queued.execution, permissionMode: selected.permissionMode },
+      running: { ...queued, status: 'running', startedAt: Date.now() },
+    };
+    const permissions = this.attempts.open(state);
 
-    let running: Turn = { ...queued, status: 'running', startedAt: Date.now() };
     let result: TurnResult;
     try {
       // Commit the running state before a driver can spawn or stream output.
       this.threads.progress.begin(threadId, turnId);
       this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
-        this.core.journal.append({ type: 'turn.started', threadId, version: 1, payload: running }, () => {
-          this.core.journal.putTurn(running);
+        this.core.journal.append({ type: 'turn.started', threadId, version: 1, payload: state.running }, () => {
+          this.core.journal.putTurn(state.running);
         });
-        this.core.bus.emit('turn.started', running);
+        this.core.bus.emit('turn.started', state.running);
         setThreadStatus(this.core, threadId, 'running');
       })());
-      this.core.workforce.resident.assertThreadRoute(threadId, thread);
-      const provider = this.core.providers.require(thread.providerId);
-      const account = this.core.accounts.require(thread.accountId);
+      this.core.workforce.resident.assertThreadRoute(threadId, state.thread);
+      const provider = this.core.providers.require(state.thread.providerId);
+      const account = this.core.accounts.require(state.thread.accountId);
       const driver = getDriver(provider.protocol);
-      this.stopRequested.delete(threadId);
-      this.preparing.add(threadId);
-      const checkpoint = this.threads.codeCheckpoints.begin(thread, turnId);
-      if (checkpoint) await checkpoint;
-      this.preparing.delete(threadId);
-      if (this.stopRequested.has(threadId)) {
-        result = { status: 'stopped', sessionId: thread.sessionId, usage: null };
-      } else {
-        // Keep consumed input so a retry on a fresh session sends it too.
-        const carried: CarriedInput = {};
-        let retriedLostSession = false;
-        let resumed = false;
-        let usage: Usage | null = null;
-        for (;;) {
-          thread.permissionMode = permissions.mode;
-          const context = this.threads.contexts.makeContext(thread, provider, account, running, carried);
-          if (resumed && thread.sessionId !== null) {
-            context.prompt = `Continue the current task from where it stopped. The user changed the permission mode to ${permissions.mode}. Do not repeat completed work. Retain subsequent instructions already in the conversation.\n\nRequest for reference:\n${context.prompt}`;
-            if (usage) context.sessionBefore = {
-              costUsd: (context.sessionBefore?.costUsd ?? 0) + (usage.costUsdEquivalent ?? 0),
-              tokens: (context.sessionBefore?.tokens ?? 0) + totalTokens(usage),
-            };
-          }
-          if (running.execution) running.execution = { ...running.execution, permissionMode: permissions.mode };
-          this.core.journal.putTurn(running);
-          const handle = driver.startTurn(context);
-          this.handles.set(threadId, handle);
-          permissions.attach(handle);
-          const forced = Promise.withResolvers<TurnResult>();
-          this.stopDeadlines.set(threadId, { handle, forced, timer: null });
-          if (!resumed && !retriedLostSession && !queued.execution?.operation) this.threads.titles.autoTitle(threadId, turnId);
-          result = await Promise.race([handle.done, forced.promise]);
-          permissions.detach();
-          await permissions.settled();
-          const deadline = this.stopDeadlines.get(threadId);
-          if (deadline?.timer) clearTimeout(deadline.timer);
-          const fresh = !retriedLostSession && result.sessionLost === true ? this.dropLostSession(thread, result) : null;
-          if (this.stopRequested.has(threadId)) {
-            result = { ...result, status: 'stopped', ...(fresh ? { error: undefined } : {}) };
-            break;
-          }
-          if (fresh !== null && result.status === 'error') {
-            thread = fresh;
-            retriedLostSession = true;
-            running = { ...running, ...(running.execution ? { execution: { ...running.execution, sessionId: null, sessionGeneration: fresh.sessionGeneration ?? 0 } } : {}) };
-            continue;
-          }
-          if (!permissions.restarting || result.status === 'done') break;
-          usage = sumUsage(usage, result.usage);
-          thread = { ...thread, sessionId: result.sessionId ?? thread.sessionId, sessionResumeAt: null };
-          const current = this.core.journal.getThread(threadId);
-          if (current && (current.sessionGeneration ?? 0) === (thread.sessionGeneration ?? 0)) {
-            saveThread(this.core, { ...current, sessionId: thread.sessionId, sessionResumeAt: null }, 'thread.updated');
-          }
-          this.threads.cards.clearPermissionsOf(threadId);
-          this.threads.cards.clearQuestionsOf(threadId);
-          setThreadStatus(this.core, threadId, 'running');
-          resumed = true;
-        }
-        result = { ...result, usage: sumUsage(usage, result.usage) };
-        if (running.execution) running.execution = { ...running.execution, permissionMode: thread.permissionMode };
-        if (running.execution?.operation === 'coordination' && result.status === 'done') this.core.coordination.submitted(threadId, turnId);
-      }
+      result = await this.attempts.run(queued, state, { provider, account, driver }, permissions);
+      if (state.running.execution?.operation === 'coordination' && result.status === 'done') this.core.coordination.submitted(threadId, turnId);
     } catch (error) {
-      result = { status: 'error', sessionId: thread.sessionId, usage: null, error: messageOf(error), diagnosticError: logMessageOf(error) };
+      result = { status: 'error', sessionId: state.thread.sessionId, usage: null, error: messageOf(error), diagnosticError: logMessageOf(error) };
     } finally {
-      permissions.detach();
-      this.livePermissions.delete(threadId);
-      this.handles.delete(threadId);
-      const deadline = this.stopDeadlines.get(threadId);
-      if (deadline?.timer) clearTimeout(deadline.timer);
-      this.stopDeadlines.delete(threadId);
-      this.stopRequested.delete(threadId);
-      this.preparing.delete(threadId);
+      this.attempts.close(threadId);
       this.userInputAt.delete(turnId);
     }
 
+    const { thread, running } = state;
     const checkpoint = this.threads.codeCheckpoints.end(turnId);
     if (checkpoint) await checkpoint;
     if (this.core.journal.isClosed()) return;
@@ -239,78 +147,7 @@ export class TurnRunner {
     }
   }
 
-  /**
-   * The agent no longer has the native session this turn resumed: a Claude
-   * transcript past `cleanupPeriodDays`, a deleted Codex rollout, a copied data
-   * directory. Keeping the id would fail every prompt of the thread for good,
-   * so it goes, and the generation moves on as an account switch does: the
-   * next start is fresh and carries the journal's history. Returns the turn's
-   * thread snapshot for that fresh start, or null when the thread moved on
-   * meanwhile (archived, switched account, or a resident agent's session).
-   */
-  private dropLostSession(thread: ThreadSummary, result: TurnResult): ThreadSummary | null {
-    if (thread.agentSessionId || thread.sessionId === null) return null;
-    const current = this.core.journal.getThread(thread.id);
-    if (current === null || current.archived) return null;
-    if ((current.sessionGeneration ?? 0) !== (thread.sessionGeneration ?? 0) || current.sessionId !== thread.sessionId) return null;
-    const generation = (current.sessionGeneration ?? 0) + 1;
-    this.core.log('info', `thread ${thread.id}: the agent has no session ${thread.sessionId} any more (${result.diagnosticError ?? result.error ?? 'no reason given'}); starting a fresh one with the thread's history`);
-    saveThread(this.core, { ...current, sessionId: null, sessionResumeAt: null, sessionGeneration: generation, context: null, promptCache: null }, 'thread.updated');
-    return { ...thread, sessionId: null, sessionResumeAt: null, sessionGeneration: generation, context: null, promptCache: null };
-  }
-
   stopRunning(threadId: ThreadId): boolean {
-    const handle = this.handles.get(threadId);
-    if (handle === undefined) {
-      if (!this.preparing.has(threadId)) return false;
-      this.stopRequested.add(threadId);
-      return true;
-    }
-    // An open card is what the driver is parked on. Aborting without answering
-    // it leaves that await pending for good: the turn never finishes, the
-    // thread stays `waiting`, and Stop does nothing the user can see.
-    this.threads.cards.clearPermissionsOf(threadId);
-    this.threads.cards.clearQuestionsOf(threadId);
-    this.stopRequested.add(threadId);
-    handle.stop();
-    this.armStopDeadline(threadId, handle);
-    return true;
+    return this.attempts.stopRunning(threadId);
   }
-
-  /**
-   * A driver whose agent ignores its cancel would leave the thread running for
-   * good, its scheduler slot taken and a project removal waiting on it. Kill
-   * first: settling the turn alone would leave the driver's session busy, and
-   * the next turn would queue behind the wedged one.
-   */
-  private armStopDeadline(threadId: ThreadId, handle: TurnHandle): void {
-    const deadline = this.stopDeadlines.get(threadId);
-    if (deadline === undefined || deadline.handle !== handle || deadline.timer !== null) return;
-    deadline.timer = setTimeout(() => {
-      if (this.handles.get(threadId) !== handle) return;
-      this.core.log('warn', `thread ${threadId} did not stop within ${STOP_DEADLINE.ms} ms: ending its processes`);
-      this.core.procs.killTree(threadId);
-      releaseThread(threadId);
-      deadline.timer = setTimeout(() => {
-        if (this.handles.get(threadId) !== handle) return;
-        const thread = this.core.journal.getThread(threadId);
-        deadline.forced.resolve({ status: 'stopped', sessionId: thread?.sessionId ?? null, usage: null, error: STOP_DEADLINE_ERROR });
-      }, STOP_DEADLINE.forceMs);
-      deadline.timer.unref?.();
-    }, STOP_DEADLINE.ms);
-    deadline.timer.unref?.();
-  }
-}
-
-/** Native attempts belong to one visible turn, including their reported usage. */
-function sumUsage(left: Usage | null, right: Usage | null): Usage | null {
-  if (!left) return right;
-  if (!right) return left;
-  return {
-    inputTokens: left.inputTokens + right.inputTokens,
-    outputTokens: left.outputTokens + right.outputTokens,
-    cacheReadTokens: left.cacheReadTokens + right.cacheReadTokens,
-    cacheWriteTokens: left.cacheWriteTokens + right.cacheWriteTokens,
-    costUsdEquivalent: left.costUsdEquivalent === null && right.costUsdEquivalent === null ? null : (left.costUsdEquivalent ?? 0) + (right.costUsdEquivalent ?? 0),
-  };
 }

@@ -166,6 +166,11 @@ Permission changes use native setters when available. Agents with launch-time
 permissions interrupt and resume within the same Boite turn, retaining the
 execution target and accumulating usage across attempts.
 
+`TurnRunner` admits and settles visible turns. `TurnAttempts` owns native
+handles, retries, live controls, stop timers and reported usage. Both read the
+same execution snapshots after a retry replaces them. Provider and account
+resolution stays with admission.
+
 Blocking questions hold a turn in `waiting`. Asynchronous questions leave work
 running and deliver an answer through steering or a later prompt. Skip resolves
 a card without inventing an answer. Incoming user input or an asynchronous answer
