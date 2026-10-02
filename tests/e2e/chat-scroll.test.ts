@@ -27,7 +27,8 @@ test('sending from history respects reduced motion and preserves the prompt acro
     const box = document.querySelector('${timeline}');
     const prompt = window.__boiteTest.workspace.active.openThread.messages.findLast(message => message.role === 'user');
     const row = box?.querySelector('[data-mid="' + prompt.id + '"]');
-    return !!row && Math.abs(row.getBoundingClientRect().top - box.getBoundingClientRect().top - 20) < 2;
+    const inset = Math.min(96, Math.max(48, box.clientHeight * 0.12));
+    return !!row && Math.abs(row.getBoundingClientRect().top - box.getBoundingClientRect().top - inset) < 2;
   })()`;
   await page.waitFor(`${aligned} && window.__boiteTest.workspace.active.openThread.status === 'idle'`).catch(async error => {
     console.error(await page.evaluate(`(() => { const box = document.querySelector('${timeline}'); return { top: box.scrollTop, height: box.clientHeight, total: box.scrollHeight, room: document.querySelector('[data-testid=prompt-room]')?.getBoundingClientRect().height, rows: [...box.querySelectorAll('[data-mid]')].map(row => ({id: row.dataset.mid, top: row.getBoundingClientRect().top - box.getBoundingClientRect().top, height: row.getBoundingClientRect().height})), focus: window.__boiteTest.workspace.active.promptFocus }; })()`));
@@ -102,15 +103,17 @@ for (const phone of [false, true]) {
           else resolve(positions);
         }; requestAnimationFrame(sample);
       })`);
-      expect(new Set(positions.map(position => Math.round(position))).size).toBeGreaterThan(3);
       const offset = `(() => {
         const box = document.querySelector('${timeline}');
         const store = window.__boiteTest.workspace.active;
         const prompt = store.openThread.messages.findLast(message => message.role === 'user');
         const row = box.querySelector('[data-mid="' + prompt.id + '"]');
-        return row ? Math.abs(row.getBoundingClientRect().top - box.getBoundingClientRect().top - 20) : Infinity;
+        const inset = Math.min(96, Math.max(48, box.clientHeight * 0.12));
+        return row ? Math.abs(row.getBoundingClientRect().top - box.getBoundingClientRect().top - inset) : Infinity;
       })()`;
+      expect(new Set(positions.map(position => Math.round(position))).size).toBeGreaterThan(3);
       await page.waitFor(`${offset} < 2 && document.querySelector('[data-testid=permission-card]')`);
+      expect(await page.evaluate<number>(offset)).toBeLessThan(2);
       expect(await page.evaluate(`document.querySelector('${jump}') === null`)).toBe(true);
       await page.screenshot(join(artifacts, `prompt-top-${name}-${long ? 'windowed' : 'short'}.png`));
 
@@ -118,6 +121,12 @@ for (const phone of [false, true]) {
         const message = window.__boiteTest.workspace.active.openThread.messages.findLast(message => message.role === 'assistant');
         message.parts = [{ type: 'text', text: 'Here is the first part of the answer.\\n\\n' }];
       })()`);
+      await page.waitFor(`${offset} < 2 && document.querySelector('[data-testid=prompt-room]')`);
+      // Keep the prompt inset and answer reserve in sync when the viewport changes.
+      await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 390 : 1280, height: phone ? 480 : 1300, deviceScaleFactor: 1, mobile: phone });
+      await page.waitFor(`${offset} < 2 && document.querySelector('[data-testid=prompt-room]')`);
+      await page.screenshot(join(artifacts, `prompt-resized-${name}-${long ? 'windowed' : 'short'}.png`));
+      await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 390 : 1280, height: 844, deviceScaleFactor: 1, mobile: phone });
       await page.waitFor(`${offset} < 2 && document.querySelector('[data-testid=prompt-room]')`);
       await page.evaluate(`(() => {
         const message = window.__boiteTest.workspace.active.openThread.messages.findLast(message => message.role === 'assistant');

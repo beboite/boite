@@ -260,7 +260,8 @@
     return slots.totals(list, timelineOrder);
   }
 
-  // Keep one screen below the sent prompt. Real response height replaces the
+  const promptInset = $derived(Math.min(96, Math.max(48, viewHeight * 0.12)));
+  // Keep the remaining screen below the sent prompt. Real response height replaces the
   // reserved space, including in a virtualized conversation, without moving it.
   const promptRoom = $derived.by(() => {
     void measured;
@@ -269,7 +270,7 @@
     if (at < 0) return 0;
     const total = totals(timeline);
     const content = (total[timeline.length] ?? 0) - (total[at] ?? 0) - GAP;
-    return Math.max(0, viewHeight - 40 - dockRoom.height - content);
+    return Math.max(0, viewHeight - promptInset - 20 - dockRoom.height - content);
   });
 
   function promptTop(id: string): number {
@@ -277,9 +278,10 @@
     const node = [...box.querySelectorAll<HTMLElement>('[data-mid]')].find(node => node.dataset.mid === id);
     if (node) {
       node.style.animation = 'none';
-      return box.scrollTop + node.getBoundingClientRect().top - box.getBoundingClientRect().top - 20;
+      return box.scrollTop + node.getBoundingClientRect().top - box.getBoundingClientRect().top - promptInset;
     }
-    return totals(timeline)[timeline.findIndex(message => message.id === id)] ?? box.scrollTop;
+    const top = totals(timeline)[timeline.findIndex(message => message.id === id)];
+    return top === undefined ? box.scrollTop : top + 20 - promptInset;
   }
 
   $effect(() => {
