@@ -209,7 +209,8 @@ not an estimated split between system instructions, files and tools.
 
 In an existing Claude conversation, `/btw <question>` asks a temporary question
 while the main turn continues, including while it waits for a permission. The
-answer appears above the composer and closes with Escape or its close button.
+answer appears beneath `/btw` and the question above the composer, and closes
+with Escape or its close button.
 Closing it or leaving the chat cancels an unfinished request. It works from
 paired phones too. Attachments, preview references and message edits must be
 finished or removed first. Offline side questions are refused rather than queued.
@@ -233,7 +234,7 @@ error to subscribed clients with its request ID. Inference must not occupy the
 serialized WebSocket request queue. One side request runs per thread; dismissal
 cancels only its request ID. Archive and core shutdown cancel pending requests.
 
-After a successful answer, "Continue in a new conversation" creates and opens
+After a successful answer, the compact "Fork" button creates and opens
 an idle fork. It carries exactly the bounded text snapshot sent to the side
 request, followed by its question and answer. Later output from the original
 thread stays there. The fork uses a fresh native session, the original selection

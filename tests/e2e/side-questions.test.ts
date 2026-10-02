@@ -38,6 +38,8 @@ test('desktop and paired phone side answers stay temporary until explicitly fork
   await page.type('[data-testid=composer-input]', '/btw Which configuration file?');
   await page.click('[data-testid=composer-send]');
   await page.waitFor("document.querySelector('[data-testid=btw-answer]')?.textContent.includes('Side answer: Which configuration file?')");
+  expect(await page.evaluate("document.querySelector('[data-testid=btw-answer] .question').textContent")).toBe('/btw Which configuration file?');
+  expect(await page.evaluate("document.querySelector('[data-testid=btw-fork]').textContent")).toBe('Fork');
   await page.screenshot(join(import.meta.dir, '.artifacts', 'btw-desktop.png'));
   await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   await page.waitFor("!document.querySelector('[data-testid=btw-answer]')");
