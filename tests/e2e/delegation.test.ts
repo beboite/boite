@@ -47,6 +47,7 @@ test('inspect and stop a real delegated thread from the panel, which launches no
   await page.click('[data-testid="delegation-stop-all"]');
   await page.waitFor('!document.querySelector("[data-testid=agent-dock]")');
   expect((await owner.call('delegation.get', { threadId })).config.paused).toBe(true);
+  await page.waitFor('document.querySelector("[data-testid=delegation-progress]")?.textContent.includes("1 stopped")');
   expect(await page.text('[data-testid="delegation-progress"]')).toContain('1 stopped');
   expect(await page.text('[data-testid="delegation-progress"]')).toContain('0/1 completed');
   expect(page.errors()).toEqual([]);
