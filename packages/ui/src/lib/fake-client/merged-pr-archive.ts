@@ -58,7 +58,8 @@ export async function sweepMergedPrFixtures(ctx: FakeContext): Promise<number> {
     const thread = ctx.thread(id), fixture = ctx.mergedPrFixtures.get(id)!;
     const state = ctx.mergedPrArchive.get(id) ?? { generation: 0, dismissed: [] };
     const checkout = checkoutKey(thread), updatedAt = thread.updatedAt;
-    const proof = fixture.candidates.length === 1 ? fixture.candidates[0] : undefined;
+    const candidate = fixture.candidates.length === 1 ? fixture.candidates[0] : undefined;
+    const proof = candidate ? { ...candidate } : undefined;
     if (!proof || proof.fork || proof.repository !== fixture.repository || proof.branch !== thread.branch || fixture.branch !== thread.branch || proof.sha !== fixture.tip || !/^[a-f0-9]{40,64}$/.test(fixture.tip) || !fixture.clean || !Number.isFinite(Date.parse(proof.mergedAt)) || !Number.isInteger(proof.number) || proof.number < 1) continue;
     let url: URL;
     try { url = new URL(proof.url); } catch { continue; }
@@ -66,7 +67,8 @@ export async function sweepMergedPrFixtures(ctx: FakeContext): Promise<number> {
     if (state.dismissed.includes(proof.url) || state.restoredCheckout === checkout) continue;
     ctx.mergedPrArchive.set(id, { ...state, binding: proof.url });
     await fixture.beforeValidate?.();
-    if (!eligible(ctx, id) || ctx.thread(id).updatedAt !== updatedAt || checkoutKey(ctx.thread(id)) !== checkout || (ctx.mergedPrArchive.get(id)?.generation ?? 0) !== state.generation || !fixture.clean || fixture.tip !== proof.sha || fixture.branch !== proof.branch) continue;
+    const currentFixture = ctx.mergedPrFixtures.get(id);
+    if (!eligible(ctx, id) || ctx.thread(id).updatedAt !== updatedAt || checkoutKey(ctx.thread(id)) !== checkout || (ctx.mergedPrArchive.get(id)?.generation ?? 0) !== state.generation || !currentFixture || currentFixture.repository !== proof.repository || !currentFixture.clean || currentFixture.tip !== proof.sha || currentFixture.branch !== proof.branch) continue;
     const reason: ThreadArchiveReason = { type: 'pr-merged', number: proof.number, url: proof.url, archivedAt: ctx.now() };
     thread.archived = true;
     thread.archiveReason = reason;

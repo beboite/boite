@@ -39,7 +39,6 @@ test.each(['drawer', 'settings'] as const)('the mounted %s shows merged PR ident
   const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
   const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: account.id, title: 'Merged conversation', worktree: { branch: 'merged-ui-fixture' } });
   client.setMergedPrFixture(thread.id, { repository: 'github.com/example/repo', branch: thread.branch!, tip: 'a'.repeat(40), clean: true, candidates: [{ repository: 'github.com/example/repo', branch: thread.branch!, sha: 'a'.repeat(40), number: 7, url: 'https://github.com/example/repo/pull/7', mergedAt: '2026-10-01T12:00:00Z' }] });
-  expect(await client.sweepMergedPrArchives()).toBe(1);
   const draw = async () => {
     running = surface === 'drawer'
       ? mount(ArchivedDrawer, { target: document.body, props: { store, project: store.projects.find(project => project.id === 'p-boite')! } })
@@ -47,8 +46,21 @@ test.each(['drawer', 'settings'] as const)('the mounted %s shows merged PR ident
     await settle();
     if (surface === 'drawer') { document.querySelector<HTMLButtonElement>('[data-testid=archived-drawer-toggle]')!.click(); await settle(); }
   };
-  await draw();
+  if (surface === 'settings') {
+    await client.call('threads.archive', { threadId: 't-parser', archived: false });
+    const calls = vi.spyOn(client, 'call');
+    await draw();
+    expect(document.querySelector('[data-testid=archived-empty]')).not.toBeNull();
+    const loaded = calls.mock.calls.length;
+    expect(await client.sweepMergedPrArchives()).toBe(1);
+    await settle();
+    expect(calls.mock.calls.slice(loaded).some(([method]) => method === 'threads.list')).toBe(false);
+  } else {
+    expect(await client.sweepMergedPrArchives()).toBe(1);
+    await draw();
+  }
   const row = () => document.querySelector<HTMLElement>(`[data-thread-id="${thread.id}"]`)!;
+  expect(row()).not.toBeNull();
   const reason = row().querySelector<HTMLElement>('[data-testid=archive-merged-reason]')!;
   expect(reason.textContent).toContain('Archived after PR #7 merged');
   expect(reason.querySelector('a')?.getAttribute('href')).toBe('https://github.com/example/repo/pull/7');
@@ -63,7 +75,39 @@ test.each(['drawer', 'settings'] as const)('the mounted %s shows merged PR ident
   expect(restored.archived).toBe(false); expect(restored.archiveReason).toBeUndefined(); expect(restored.cwd).toBe(thread.cwd);
   expect(await client.sweepMergedPrArchives()).toBe(0);
   if (surface === 'drawer') expect(row()).toBeNull();
-  else { expect(row().querySelector('[data-testid=archive-merged-reason]')).toBeNull(); expect(row().querySelector('[data-testid=archived-open]')).not.toBeNull(); }
+  else {
+    expect(row().querySelector('[data-testid=archive-merged-reason]')).toBeNull();
+    row().querySelector<HTMLButtonElement>('[data-testid=archived-open]')!.click(); await settle();
+    expect(store.openThread?.id).toBe(thread.id);
+    expect(store.openThread?.cwd).toBe(thread.cwd);
+    await client.call('threads.archive', { threadId: thread.id, archived: true }); await settle();
+    expect(row().querySelector('[data-testid=archived-restore]')).not.toBeNull();
+    await client.call('threads.archive', { threadId: thread.id, archived: false }); await settle();
+    expect(row()).toBeNull();
+  }
+});
+
+test('a mounted settings archive reconciles a late sweep and removal ahead of its initial list response', async () => {
+  const { store, client } = await ready();
+  const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
+  const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: account.id, title: 'Late merged conversation', worktree: { branch: 'late-archive-fixture' } });
+  client.setMergedPrFixture(thread.id, { repository: 'github.com/example/repo', branch: thread.branch!, tip: 'b'.repeat(40), clean: true, candidates: [{ repository: 'github.com/example/repo', branch: thread.branch!, sha: 'b'.repeat(40), number: 8, url: 'https://github.com/example/repo/pull/8', mergedAt: '2026-10-01T13:00:00Z' }] });
+  const started = deferred(), released = deferred(), call = client.call.bind(client);
+  const calls = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const answer = await call(method, params);
+    if (method === 'threads.list' && 'includeArchived' in params && params.includeArchived) { started.resolve(); await released.promise; }
+    return answer;
+  });
+  running = mount(ArchivedThreads, { target: document.body, props: { store, eager: true } });
+  flushSync(); await started.promise;
+  try {
+    expect(await client.sweepMergedPrArchives()).toBe(1);
+    await client.call('threads.remove', { threadId: 't-parser' });
+  } finally { released.resolve(); }
+  await settle();
+  expect([...document.querySelectorAll('[data-testid=archived-list] li')].map(row => row.getAttribute('data-thread-id'))).toEqual([thread.id]);
+  expect(document.querySelector('[data-testid=archived-list] [data-testid=archive-merged-reason]')?.textContent).toContain('Archived after PR #8 merged');
+  expect(calls.mock.calls.filter(([method, params]) => method === 'threads.list' && 'includeArchived' in params && params.includeArchived)).toHaveLength(1);
 });
 
 test('mounted policy menu keeps its owner during an awaited write and ignores a menu from a replaced client', async () => {
@@ -102,22 +146,32 @@ test('mounted policy menu keeps its owner during an awaited write and ignores a 
   expect(store.error).toBeNull();
 });
 
-test('an awaited mounted Restore never inserts its old conversation into a replacement machine', async () => {
+test.each(['drawer', 'settings'] as const)('an awaited mounted %s Restore never inserts its old conversation into a replacement machine', async surface => {
   const { store, client } = await ready();
-  running = mount(ArchivedDrawer, { target: document.body, props: { store, project: store.projects.find(project => project.id === 'p-boite')! } });
-  await settle(); document.querySelector<HTMLButtonElement>('[data-testid=archived-drawer-toggle]')!.click(); await settle();
+  running = surface === 'drawer'
+    ? mount(ArchivedDrawer, { target: document.body, props: { store, project: store.projects.find(project => project.id === 'p-boite')! } })
+    : mount(ArchivedThreads, { target: document.body, props: { store, eager: true } });
+  await settle();
+  if (surface === 'drawer') { document.querySelector<HTMLButtonElement>('[data-testid=archived-drawer-toggle]')!.click(); await settle(); }
   const started = deferred(), released = deferred(), call = client.call.bind(client);
   vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
     const answer = await call(method, params);
     if (method === 'threads.archive') { started.resolve(); await released.promise; }
     return answer;
   });
-  document.querySelector<HTMLButtonElement>('[data-thread-id=t-parser] [data-testid=archived-drawer-restore]')!.click(); await started.promise;
+  document.querySelector<HTMLButtonElement>(`[data-thread-id=t-parser] [data-testid=${surface === 'drawer' ? 'archived-drawer-restore' : 'archived-restore'}]`)!.click(); await started.promise;
   const replacement = new FakeClient({ delayMs: 0, coreId: 'replacement' }); cleanups.push(() => replacement.close());
   store.attach(replacement); await store.connect();
   released.resolve(); await settle();
   expect(store.threads.some(thread => thread.id === 't-parser')).toBe(false);
   expect((await replacement.call('threads.get', { threadId: 't-parser' })).archived).toBe(true);
+  if (surface === 'settings') {
+    const title = document.querySelector('[data-testid=archived-list] [data-thread-id=t-parser] .title')!.textContent;
+    await client.call('threads.archive', { threadId: 't-parser', archived: true });
+    await client.call('threads.update', { threadId: 't-parser', title: 'Old machine archive' });
+    await settle();
+    expect(document.querySelector('[data-testid=archived-list] [data-thread-id=t-parser] .title')!.textContent).toBe(title);
+  }
   expect(store.error).toBeNull();
 });
 

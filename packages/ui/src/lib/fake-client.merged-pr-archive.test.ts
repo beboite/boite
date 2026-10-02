@@ -81,7 +81,7 @@ test('fake hides only proven merged worktree, preserves reason, and restore dism
 test('fake validates proof and protects busy, viewed, pending input and paused workflow fixtures', async () => {
   const { thread, proof } = await fixture();
   const original = structuredClone(proof);
-  for (const patch of [{ clean: false }, { tip: 'b'.repeat(40) }, { branch: 'wrong' }, { candidates: [proof.candidates[0]!, proof.candidates[0]!] }, { workflowActive: true }]) {
+  for (const patch of [{ clean: false }, { tip: 'b'.repeat(40) }, { branch: 'wrong' }, { candidates: [proof.candidates[0]!, proof.candidates[0]!] }, { candidates: [null] }, { candidates: [{}] }, { workflowActive: true }]) {
     Object.assign(proof, original, patch); expect(await client.sweepMergedPrArchives()).toBe(0);
   }
   Object.assign(proof, original);
@@ -94,7 +94,7 @@ test('fake validates proof and protects busy, viewed, pending input and paused w
   await client.call('threads.focus', { threadId: null, protectedThreadIds: [] }); expect(await client.sweepMergedPrArchives()).toBe(1);
 });
 
-test('fake stale opt-out and restore responses cannot hide conversation', async () => {
+test('fake stale policy, restore and checkout evidence cannot hide conversation', async () => {
   const { project, thread, proof } = await fixture();
   proof.beforeValidate = async () => { await client.call('projects.setAutoArchiveMergedPr', { projectId: project.id, enabled: false }); };
   expect(await client.sweepMergedPrArchives()).toBe(0);
@@ -102,6 +102,31 @@ test('fake stale opt-out and restore responses cannot hide conversation', async 
   proof.beforeValidate = async () => { await client.call('threads.archive', { threadId: thread.id, archived: false }); };
   expect(await client.sweepMergedPrArchives()).toBe(0);
   expect(await client.sweepMergedPrArchives()).toBe(0);
+  // Mutations check repository freshness and immutable accepted evidence;
+  // replacements check that validation reads the current checkout evidence.
+  for (const change of ['mutated-repository', 'replaced-repository', 'replaced-dirty', 'advanced-tip-and-candidate'] as const) {
+    const next = await fixture();
+    next.proof.beforeValidate = async () => {
+      if (change === 'mutated-repository') next.proof.repository = 'github.com/other/repo';
+      else if (change === 'advanced-tip-and-candidate') {
+        next.proof.tip = 'b'.repeat(40);
+        next.proof.candidates[0]!.sha = next.proof.tip;
+      } else client.setMergedPrFixture(next.thread.id, {
+        ...next.proof,
+        ...(change === 'replaced-repository' ? { repository: 'github.com/other/repo' } : { clean: false }),
+      });
+    };
+    expect.soft(await client.sweepMergedPrArchives(), change).toBe(0);
+    const retained = await client.call('threads.get', { threadId: next.thread.id });
+    expect.soft(retained.archived, change).toBe(false);
+    expect.soft(retained.archiveReason, change).toBeUndefined();
+    expect.soft(retained.cwd, change).toBe(next.thread.cwd);
+  }
+  const compatible = await fixture();
+  compatible.proof.beforeValidate = async () => {
+    client.setMergedPrFixture(compatible.thread.id, { ...compatible.proof });
+  };
+  expect(await client.sweepMergedPrArchives()).toBe(1);
 });
 
 test('fake stale move and deletion responses leave their new state intact', async () => {

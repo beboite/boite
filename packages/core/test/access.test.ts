@@ -95,6 +95,7 @@ describe('the access gate', () => {
     const seen: string[] = [];
     phone.onAny(name => seen.push(name));
     try {
+      const scheduler = phone.next('scheduler.updated');
       harness.core.bus.emit('account.login', { accountId: 'other-account', state: 'running', output: 'private login output', url: 'https://example.test/login', exitCode: null });
       harness.core.bus.emit('core.log', { level: 'error', message: 'private diagnostic', at: Date.now() });
       harness.core.bus.emit('process.focusPushed', { threadId: 'private-thread', pid: 123, title: 'private window', restored: true, at: Date.now() });
@@ -106,8 +107,11 @@ describe('the access gate', () => {
       harness.core.bus.emit('settings.updated', harness.core.settings.get());
       harness.core.bus.emit('delegation.changed', { threadId: 'another-thread' });
       harness.core.bus.emit('delegation.changed', { threadId });
+      harness.core.bus.emit('scheduler.updated', harness.core.scheduler.state());
+      expect(await scheduler).toEqual(harness.core.scheduler.state());
       await phone.call('settings.get', {});
-      expect(seen).toEqual(['settings.updated', 'delegation.changed']);
+      // Startup can also deliver a coalesced scheduler snapshot during this fixture.
+      expect(seen.filter(name => name !== 'scheduler.updated')).toEqual(['settings.updated', 'delegation.changed']);
     } finally { phone.close(); }
   });
 

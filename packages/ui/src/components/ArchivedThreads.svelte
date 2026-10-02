@@ -4,6 +4,7 @@
   import InfoTip from './InfoTip.svelte';
   import DeletedThreads from './DeletedThreads.svelte';
   import { archivedThreads, restoreThread } from '../lib/archive';
+  import { SnapshotReads } from '../lib/store/snapshot-reads';
   import { canDeleteThread, deleteThread } from '../lib/thread-removal';
   import { ago, exactTime, projectName } from '../lib/format';
   import { fill, strings } from '../lib/strings';
@@ -24,24 +25,53 @@
   /** One automatic ask per connection: a failed read leaves the button for another user ask. */
   let asked = false;
   const removed = new Set<ThreadId>();
+  const rows = new Set<ThreadId>();
+  const reads = new SnapshotReads<ThreadSummary>(thread => thread.projectId ?? '');
   $effect(() => {
     void store.connection;
     const client = store.client;
+    const generation = store.clientGeneration;
+    const current = () => store.client === client && store.clientGeneration === generation;
     threads = null;
+    loading = false;
     restored = [];
     restoring = null;
     asked = false;
     removed.clear();
+    rows.clear();
+    reads.clear();
     const offRemove = client?.on('thread.removed', ({ threadId }) => {
+      if (!current()) return;
       removed.add(threadId);
-      threads = threads?.filter(t => t.id !== threadId) ?? null;
+      reads.change(threadId, null);
+      if (rows.delete(threadId)) threads = threads?.filter(t => t.id !== threadId) ?? null;
+      restored = restored.filter(id => id !== threadId);
     });
     const offRestore = client?.on('thread.created', summary => {
-      if (!removed.delete(summary.id)) return;
-      if (summary.archived && !summary.parentThreadId && threads !== null) threads = [...threads, summary];
+      if (!current() || !removed.delete(summary.id)) return;
+      reconcile(summary);
     });
-    return () => { offRemove?.(); offRestore?.(); };
+    const offUpdate = client?.on('thread.updated', summary => { if (current()) reconcile(summary); });
+    return () => { offRemove?.(); offRestore?.(); offUpdate?.(); reads.clear(); };
   });
+
+  function reconcile(summary: ThreadSummary) {
+    const held = rows.has(summary.id);
+    const keep = !removed.has(summary.id) && !summary.parentThreadId &&
+      (summary.archived || (held && (restoring === summary.id || restored.includes(summary.id))));
+    reads.change(summary.id, keep ? summary : null);
+    if (threads === null) return;
+    // Load samples from unrelated active threads must not rebuild the archive.
+    if (!keep) {
+      if (!rows.delete(summary.id)) return;
+      threads = threads.filter(row => row.id !== summary.id);
+      restored = restored.filter(id => id !== summary.id);
+      return;
+    }
+    if (summary.archived) restored = restored.filter(id => id !== summary.id);
+    rows.add(summary.id);
+    threads = held ? threads.map(row => row.id === summary.id ? summary : row) : [summary, ...threads];
+  }
 
   $effect(() => {
     if (asked || (!eager && store.settingsSection?.id !== 'archived') || store.connection !== 'ready') return;
@@ -56,14 +86,20 @@
   async function load() {
     const client = store.client;
     const generation = store.clientGeneration;
+    const read = reads.begin();
     loading = true;
     try {
       const answer = await archivedThreads(store);
-      if (store.client === client && store.clientGeneration === generation) threads = answer.filter(t => !removed.has(t.id));
+      if (store.client === client && store.clientGeneration === generation && read.active) {
+        threads = read.apply(answer, threads ?? []).filter(t => !removed.has(t.id)).sort((a, b) => b.updatedAt - a.updatedAt);
+        rows.clear();
+        for (const thread of threads) rows.add(thread.id);
+      }
     } catch (error) {
       if (store.client === client && store.clientGeneration === generation) fail(error);
     } finally {
-      loading = false;
+      read.cancel();
+      if (store.client === client && store.clientGeneration === generation) loading = false;
     }
   }
 

@@ -1,6 +1,4 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { PullRequests } from '../src/pull-requests.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
@@ -9,47 +7,55 @@ let restore: (() => void) | undefined;
 beforeEach(async () => { harness = await startTestCore(); });
 afterEach(async () => { restore?.(); restore = undefined; await harness.stop(); });
 
-test('a lookup deadline closes its inherited output reader after the direct child exited', async () => {
+test('a lookup deadline cancels held output readers after the direct child exited', async () => {
   const client = await harness.connect();
   const { threadId } = await echoThread(harness, client);
   const thread = harness.core.threads.require(threadId);
-  const pidFile = join(harness.dataDir, 'held-pipe.pid');
+  // Explicitly open readers make the deadline independent of native pipe lifetime.
+  // Their asynchronous source cleanup remains pending after cancellation.
+  const canceled: string[] = [];
+  const hold = (name: string): ReadableStream<Uint8Array> => new ReadableStream({
+    cancel: () => { canceled.push(name); return new Promise<void>(() => undefined); },
+  });
+  const stdout = hold('stdout'), stderr = hold('stderr');
   const spawn = harness.core.procs.spawn.bind(harness.core.procs);
   let owned: ReturnType<typeof spawn> | undefined;
   const intercepted = spyOn(harness.core.procs, 'spawn').mockImplementation((scope, _command, _args, options) => {
-    owned = spawn(scope, process.execPath, ['-e', `
-      const child = Bun.spawn([process.execPath, '-e', 'setInterval(() => {}, 1000)'], { stdout: 'inherit', stderr: 'inherit' });
-      require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));
-      process.exit(0);
-    `], options);
-    return owned;
+    owned = spawn(scope, process.execPath, ['-e', 'process.exit(0)'], options);
+    return { ...owned, proc: new Proxy(owned.proc, {
+      get: (target, name) => name === 'stdout' ? stdout : name === 'stderr' ? stderr : Reflect.get(target, name, target),
+    }) };
   });
   restore = () => intercepted.mockRestore();
-  const lookups = new PullRequests(harness.core, { timeoutMs: 100 });
+  const lookups = new PullRequests(harness.core, { timeoutMs: 1000 });
   let settled = false;
   let error: unknown;
   const pending = lookups.cleanCheckout({ ...thread, branch: 'topic' }).then(() => { settled = true; }, cause => { settled = true; error = cause; });
-  let holderPid: number | undefined;
   try {
-    await waitFor(() => existsSync(pidFile), 2000);
-    holderPid = Number(readFileSync(pidFile, 'utf8'));
-    expect(holderPid).toBeGreaterThan(0);
+    await waitFor(() => owned !== undefined);
+    expect(owned!.proc.pid).toBeGreaterThan(0);
     await owned!.exited;
     expect(owned!.proc.exitCode).toBe(0);
-    await waitFor(() => settled, 1000);
+    expect(settled).toBe(false);
+    await waitFor(() => settled, 2000);
     expect(String(error)).toContain('timed out');
-    expect(owned!.proc.stdout.locked).toBe(false);
-    expect(owned!.proc.stderr.locked).toBe(false);
-    const reader = owned!.proc.stdout.getReader();
+    expect(canceled.sort()).toEqual(['stderr', 'stdout']);
+    expect(stdout.locked).toBe(false);
+    expect(stderr.locked).toBe(false);
+    const reader = stdout.getReader();
     try { expect((await reader.read()).done).toBe(true); }
     finally { reader.releaseLock(); }
-    const errorReader = owned!.proc.stderr.getReader();
+    const errorReader = stderr.getReader();
     try { expect((await errorReader.read()).done).toBe(true); }
     finally { errorReader.releaseLock(); }
     const turn = await client.call('turns.start', { threadId, prompt: 'unrelated echo work' });
     await waitFor(() => harness.core.journal.listTurns(threadId).some(saved => saved.id === turn.id && saved.status === 'done'));
   } finally {
-    if (holderPid !== undefined) { try { process.kill(holderPid, 'SIGKILL'); } catch { /* Already gone. */ } }
+    if (owned) {
+      if (owned.proc.exitCode === null) owned.proc.kill('SIGKILL');
+      await owned.exited;
+      await Promise.all([owned.proc.stdout.cancel(), owned.proc.stderr.cancel()]);
+    }
     await pending;
   }
 });
