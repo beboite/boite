@@ -60,3 +60,20 @@ test('profile labels stay visible even for Default; missing labels fall back to 
     await unmount(component); component = undefined;
   }
 });
+
+test('an unread account remains reorderable from its row with the keyboard', () => {
+  const writes: string[][] = [];
+  component = mount(QuotaOverview, { target: document.body, props: {
+    rows: [quota('known', 'Personal', 10), { ...quota('unread', 'Work', 0), windows: [] }],
+    connect: () => {}, onreorder: async (ids) => { writes.push(ids); return true; },
+  } });
+  flushSync();
+  const row = document.querySelector<HTMLButtonElement>('[data-account-id="unread"] .summary')!;
+  expect(row.disabled).toBe(false);
+  row.focus();
+  row.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }));
+  flushSync();
+  expect(writes).toEqual([['unread', 'known']]);
+  expect(document.querySelector('[data-testid="quota-provider"]')!.getAttribute('data-account-id')).toBe('unread');
+  expect(document.activeElement).toBe(row);
+});
