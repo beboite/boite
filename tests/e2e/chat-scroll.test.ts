@@ -84,12 +84,17 @@ afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
 for (const phone of [false, true]) {
   const name = phone ? 'phone' : 'desktop';
-  for (const long of [false, true]) {
-    test(`a sent prompt rises smoothly and its response takes the reserved space on ${name}, ${long ? 'windowed' : 'short'} history`, async () => {
+  for (const history of ['empty', 'short', 'windowed']) {
+    test(`a sent prompt rises smoothly and its response takes the reserved space on ${name}, ${history} history`, async () => {
       await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 390 : 1280, height: 844, deviceScaleFactor: 1, mobile: phone });
       await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
-      await page.navigate(long ? url : url.replace('&long=1', ''));
+      await page.navigate(history === 'windowed' ? url : url.replace('&long=1', ''));
       await page.waitFor(`document.querySelector('${timeline}')`);
+      if (history === 'empty') await page.evaluate(`(async () => {
+        const store = window.__boiteTest.workspace.active;
+        const account = store.accountsOf('echo')[0];
+        await store.createThread({ projectId: store.projects[0].id, providerId: 'echo', accountId: account.id, title: 'A fresh conversation' });
+      })()`);
       await settled();
       await page.type('[data-testid=composer-input]', 'Start a fresh view [permission]');
       // Observe real frames from the send button through the end of the lift.
@@ -111,11 +116,11 @@ for (const phone of [false, true]) {
         const inset = Math.min(96, Math.max(48, box.clientHeight * 0.12));
         return row ? Math.abs(row.getBoundingClientRect().top - box.getBoundingClientRect().top - inset) : Infinity;
       })()`;
-      expect(new Set(positions.map(position => Math.round(position))).size).toBeGreaterThan(3);
+      if (history !== 'empty') expect(new Set(positions.map(position => Math.round(position))).size).toBeGreaterThan(3);
       await page.waitFor(`${offset} < 2 && document.querySelector('[data-testid=permission-card]')`);
       expect(await page.evaluate<number>(offset)).toBeLessThan(2);
       expect(await page.evaluate(`document.querySelector('${jump}') === null`)).toBe(true);
-      await page.screenshot(join(artifacts, `prompt-top-${name}-${long ? 'windowed' : 'short'}.png`));
+      await page.screenshot(join(artifacts, `prompt-top-${name}-${history}.png`));
 
       await page.evaluate(`(() => {
         const message = window.__boiteTest.workspace.active.openThread.messages.findLast(message => message.role === 'assistant');
@@ -125,7 +130,7 @@ for (const phone of [false, true]) {
       // Keep the prompt inset and answer reserve in sync when the viewport changes.
       await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 390 : 1280, height: phone ? 480 : 1300, deviceScaleFactor: 1, mobile: phone });
       await page.waitFor(`${offset} < 2 && document.querySelector('[data-testid=prompt-room]')`);
-      await page.screenshot(join(artifacts, `prompt-resized-${name}-${long ? 'windowed' : 'short'}.png`));
+      await page.screenshot(join(artifacts, `prompt-resized-${name}-${history}.png`));
       await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 390 : 1280, height: 844, deviceScaleFactor: 1, mobile: phone });
       await page.waitFor(`${offset} < 2 && document.querySelector('[data-testid=prompt-room]')`);
       await page.evaluate(`(() => {
@@ -151,7 +156,7 @@ for (const phone of [false, true]) {
       expect(Math.abs(await page.evaluate<number>(`document.querySelector('${timeline}').scrollTop`) - reading)).toBeLessThan(2);
       await page.click(jump);
       await page.waitFor(`!document.querySelector('${jump}') && (() => { const box = document.querySelector('${timeline}'); return box.scrollHeight - box.clientHeight - box.scrollTop < 2; })()`);
-      await page.screenshot(join(artifacts, `prompt-response-${name}-${long ? 'windowed' : 'short'}.png`));
+      await page.screenshot(join(artifacts, `prompt-response-${name}-${history}.png`));
       expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
       expect(page.errors()).toEqual([]);
     }, 30_000);

@@ -261,6 +261,11 @@
   }
 
   const promptInset = $derived(Math.min(96, Math.max(48, viewHeight * 0.12)));
+  const promptLead = $derived.by(() => {
+    void measured;
+    const before = reservePrompt ? totals(timeline)[timeline.findIndex(message => message.id === reservePrompt)] ?? 0 : Infinity;
+    return Math.max(0, promptInset - 20 - before);
+  });
   // Keep the remaining screen below the sent prompt. Real response height replaces the
   // reserved space, including in a virtualized conversation, without moving it.
   const promptRoom = $derived.by(() => {
@@ -281,7 +286,7 @@
       return box.scrollTop + node.getBoundingClientRect().top - box.getBoundingClientRect().top - promptInset;
     }
     const top = totals(timeline)[timeline.findIndex(message => message.id === id)];
-    return top === undefined ? box.scrollTop : top + 20 - promptInset;
+    return top === undefined ? box.scrollTop : top + 20 + promptLead - promptInset;
   }
 
   $effect(() => {
@@ -754,7 +759,7 @@
     hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = 0; pinned = false; pullOlder(viewport); } }} />
   <!-- Input releases restored and navigation anchors; programmatic corrections keep them. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="timeline" bind:this={viewport} use:watchWheel={onwheel} {onscroll} ontouchstart={press} onpointerdown={press} onkeydown={releaseNavigation} style:overflow-anchor={timeline.at(-1)?.state === 'streaming' ? 'none' : undefined} data-testid="timeline">
+  <div class="timeline" bind:this={viewport} use:watchWheel={onwheel} {onscroll} ontouchstart={press} onpointerdown={press} onkeydown={releaseNavigation} style:padding-top="{20 + promptLead}px" style:overflow-anchor={timeline.at(-1)?.state === 'streaming' ? 'none' : undefined} data-testid="timeline">
     <div class="column">
       <!-- paging: the one line the top of the list shows while a page is in flight. -->
       {#if store.loadingOlder}
