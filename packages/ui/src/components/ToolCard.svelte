@@ -109,7 +109,7 @@
     return change ? [{ kind: 'diff', ...change }] : [];
   });
   let others = $derived(documents.filter((doc) => doc.kind !== 'diff'));
-  let compact = $derived(!nested && !failed && documents.length === 0 && diffs.length === 0);
+  let compact = $derived(!nested && documents.length === 0 && diffs.length === 0);
   let label = $derived(streaming ? liveLabel(part) : compact ? status === 'running' ? liveLabel(part) : runSummary([part]) : line.text);
   let counts = $derived(diffs.reduce((sum, doc) => {
     const one = diffCounts(diffRows(doc.oldText, doc.newText));
@@ -151,7 +151,7 @@
     aria-label={failed ? `${line.text}, ${strings.chat.toolStatus[status]}` : undefined}
     onclick={() => (toggled = !shown)}
   >
-    <span class="glyph" class:failed><Glyph size={15} strokeWidth={1.75} /></span>
+    <span class="glyph"><Glyph size={15} strokeWidth={1.75} /></span>
     <span class="line" class:mono={!compact && line.mono} class:live={status === 'running'} title={diffs[0]?.path ?? line.title}>{label}</span>
     {#if counts.added > 0 || counts.removed > 0}
       <span class="counts" data-testid="tool-diff-counts">
@@ -174,19 +174,18 @@
     {#if status === 'running'}
       <span class="status" title={strings.chat.toolStatus.running}><span class="spinner"></span></span>
     {:else if failed}
-      <span class="status failed" title={strings.chat.toolStatus[status]}><X size={12} strokeWidth={2.25} /></span>
+      <span class="status" title={strings.chat.toolStatus[status]}><X size={12} strokeWidth={2.25} /></span>
     {/if}
     <span class="caret" class:open={shown} aria-hidden="true"><ChevronRight size={12} strokeWidth={2} /></span>
   </button>
-
-  {#if failed && !shown && errorPreview}
-    <p class="error-preview" data-testid="tool-error-preview">{errorPreview}</p>
-  {/if}
 
   <div class="fold" class:open={shown} inert={!shown}>
     <div class="clip">
       {#if built}
         <div class="body">
+          {#if failed && errorPreview}
+            <p class="error-preview" data-testid="tool-error-preview">{errorPreview}</p>
+          {/if}
           {#if diffs.length > 0}
             <!-- A file change reads as its diff: the input only restates it. -->
             {#if failed}
@@ -281,10 +280,6 @@
     color: var(--color-subtle);
   }
 
-  .glyph.failed {
-    color: var(--color-danger);
-  }
-
   .line {
     flex: 0 1 auto;
     min-width: 0;
@@ -301,7 +296,7 @@
   }
 
   .line.live { color: var(--color-accent); }
-  .error-preview { margin: 2px 0 6px var(--activity-indent); color: var(--color-danger); font-size: var(--text-xs); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+  .error-preview { margin: 0 0 4px; color: var(--color-danger); font-size: var(--text-xs); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 
   .caret {
     display: inline-flex;
@@ -367,10 +362,6 @@
     display: inline-flex;
     flex: none;
     color: var(--color-subtle);
-  }
-
-  .status.failed {
-    color: var(--color-danger);
   }
 
   .spinner {
