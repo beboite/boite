@@ -96,23 +96,27 @@ test('the bytecode compiled launcher runs commands and starts a core that shuts 
     expect(run.stdout.toString()).toBe('');
     expect(run.stderr.toString()).toStartWith(message);
   }
-  const core = await startCore({ command: [binary], dataDir });
-  let stopped = false;
-  const deadline = setTimeout(() => { if (!stopped) process.kill(core.pid, 'SIGKILL'); }, 10_000);
-  try {
-    expect((await fetch(`${core.url}/health`)).status).toBe(200);
-    if (process.platform === 'win32') {
-      const response = await fetch(`${core.url}/shutdown`, { method: 'POST', headers: { Authorization: `Bearer ${core.token}` } });
-      expect(response.status).toBe(200);
-    } else process.kill(core.pid, 'SIGTERM');
-    const code = await core.exited;
-    stopped = true;
-    expect(code).toBe(0);
-    expect(core.output()).toContain('boite-core ready');
-    expect(existsSync(join(dataDir, 'core.lock'))).toBe(false);
-  } finally {
-    clearTimeout(deadline);
-    if (!stopped) await core.stop();
+  for (const mode of process.platform === 'win32' ? ['http'] : ['signal', 'http']) {
+    const shutdownDataDir = join(dir, mode);
+    const core = await startCore({ command: [binary], dataDir: shutdownDataDir });
+    let stopped = false;
+    const deadline = setTimeout(() => { if (!stopped) process.kill(core.pid, 'SIGKILL'); }, 10_000);
+    try {
+      expect((await fetch(`${core.url}/health`)).status).toBe(200);
+      if (mode === 'http') {
+        const response = await fetch(`${core.url}/shutdown`, { method: 'POST', headers: { Authorization: `Bearer ${core.token}` } });
+        expect(response.status).toBe(202);
+        expect(await response.json()).toEqual({ ok: true, pid: core.pid });
+      } else process.kill(core.pid, 'SIGTERM');
+      const code = await core.exited;
+      stopped = true;
+      expect(code).toBe(0);
+      expect(core.output()).toContain('boite-core ready');
+      expect(existsSync(join(shutdownDataDir, 'core.lock'))).toBe(false);
+    } finally {
+      clearTimeout(deadline);
+      if (!stopped) await core.stop();
+    }
   }
 }, 60_000);
 

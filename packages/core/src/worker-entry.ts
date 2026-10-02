@@ -11,6 +11,8 @@ export function workerEntry(base: string, name: string, embeddedRelativePath?: s
     if (existsSync(fileURLToPath(url))) return url.href;
   }
   // Compiled JS entries are visible to Bun's Worker loader, not node:fs.
-  if (embeddedRelativePath && base.startsWith('file:///$bunfs/root/')) return new URL(embeddedRelativePath, base).href;
+  if (embeddedRelativePath && (base.startsWith('file:///$bunfs/root/') || base.startsWith('file:///B:/~BUN/root/'))) {
+    return new URL(embeddedRelativePath, base).href;
+  }
   throw new Error(`no ${name} beside ${base} and none next to ${process.execPath}`);
 }

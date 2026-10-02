@@ -79,7 +79,7 @@ test('a failed turn offers a compact link to its thread on desktop and phone', a
     expect(await page.evaluate(`(() => {const r = document.querySelector('[data-testid="error-toast"]').getBoundingClientRect();return r.left >= 0 && r.right <= innerWidth && r.height < 150;})()`)).toBe(true);
     await page.screenshot(join(import.meta.dir, '.artifacts', viewport.mobile ? 'thread-error-phone.png' : 'thread-error-desktop.png'));
     await page.click('[data-testid="error-toast"] .open-thread');
-    await page.waitFor(`document.querySelector('[data-thread-id="t-trace"]') && !document.querySelector('[data-testid="error-toast"]')`);
+    await page.waitFor(`document.querySelector('[data-testid="thread-title"]')?.textContent.trim() === "Finish the trace tab" && !document.querySelector('[data-testid="error-toast"]')`);
     expect(await page.evaluate(`(async () => {const {workspace} = await import('/src/lib/workspace.svelte.ts'); return {thread:workspace.active.openThread.id,page:workspace.active.page,error:workspace.active.error};})()`)).toEqual({thread:'t-trace',page:'chat',error:null});
   }
   // Selecting a thread must also reveal its chat underneath the phone list.

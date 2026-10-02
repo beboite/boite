@@ -19,8 +19,14 @@ test('worker lookup preserves sibling sources and bundled files before an explic
     const source = join(dir, `${name}.ts`); writeFileSync(source, '');
     expect(workerEntry(base, name)).toBe(pathToFileURL(source).href);
     expect(() => workerEntry(base, 'missing-worker')).toThrow('no missing-worker beside');
-    expect(workerEntry('file:///$bunfs/root/compiled-core', name, './src/platform/entry.ts'))
-      .toBe('file:///$bunfs/root/src/platform/entry.ts');
+    expect(() => workerEntry(base, 'missing-worker', './platform/missing-worker.ts')).toThrow('no missing-worker beside');
+    expect(() => workerEntry('https://example.com/main.ts', name, './worker.ts')).toThrow(TypeError);
+    if (process.platform !== 'win32') {
+      expect(workerEntry('file:///$bunfs/root/compiled-core', name, './src/platform/entry.ts'))
+        .toBe('file:///$bunfs/root/src/platform/entry.ts');
+    }
+    expect(workerEntry('file:///B:/~BUN/root/compiled-core', name, './src/platform/entry.ts'))
+      .toBe('file:///B:/~BUN/root/src/platform/entry.ts');
     const sourceDir = join(dir, 'src');
     mkdirSync(join(sourceDir, 'platform'), { recursive: true });
     writeFileSync(join(sourceDir, 'worker-entry.ts'), readFileSync(join(import.meta.dir, '../src/worker-entry.ts')));

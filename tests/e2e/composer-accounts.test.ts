@@ -68,10 +68,14 @@ test('queued prompts keep their thread, and browser project and account actions 
     mkdirSync(directory);
     await page.type(selector('project-path'), directory);
     await page.click(selector('project-add'));
-    await page.waitFor('document.querySelector("[data-testid=draft-row]")');
+    await page.waitFor('document.querySelector("[data-testid=thread-title]")?.textContent.trim() === "New thread"');
+    expect(await page.evaluate('document.querySelector("[data-testid=mobile-project]").textContent')).toContain("second-project");
+    expect(await page.evaluate('getComputedStyle(document.querySelector("[data-testid=composer-input]")).visibility')).toBe("visible");
+    await page.screenshot(join(artifacts, "phone-added-project-draft.png"));
     expect((await client.call('projects.list', {})).some((entry) => entry.path === directory)).toBe(true);
 
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+    await page.waitFor('document.querySelector("[data-testid=draft-row]")');
     const isolated = await client.call('accounts.add', { providerId: 'echo', label: 'Temporary account' });
     await page.click(selector('nav-settings'));
     await page.click(selector('settings-tab-accounts'));

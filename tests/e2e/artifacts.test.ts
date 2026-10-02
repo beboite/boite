@@ -21,7 +21,8 @@ test('live output after published files stays at the bottom on desktop and paire
       page = await BrowserPage.launch({ url: mobile ? await mintPairing(core) : pairingUrlOf(core), windowSize: { width: 1280, height: 900 } });
       if (mobile) await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
       await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
-      await page.click(`[data-thread-id="${thread.id}"]`);
+      if (mobile) await page.click('[data-testid="mobile-conversations"]');
+      await page.click(mobile ? `[data-testid="mobile-thread-${thread.id}"]` : `[data-thread-id="${thread.id}"]`);
       await client.call('turns.start', { threadId: thread.id, prompt: 'Report prepared.\n\n'.repeat(12) + '[permission][tool]Checking the next change.\n\n[permission]' });
       await page.waitFor('document.querySelector("[data-testid=permission-card]")');
       await client.call('artifacts.publish', { threadId: thread.id, path: 'report.txt' });
@@ -70,7 +71,8 @@ test('live output after published files stays at the bottom on desktop and paire
       await page.screenshot(join(import.meta.dir, '.artifacts', `artifacts-continued-${mobile ? 'phone' : 'desktop'}.png`));
       await page.send('Page.reload', {});
       await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
-      await page.click(`[data-thread-id="${thread.id}"]`);
+      if (mobile) await page.click('[data-testid="mobile-conversations"]');
+      await page.click(mobile ? `[data-testid="mobile-thread-${thread.id}"]` : `[data-thread-id="${thread.id}"]`);
       await page.waitFor('Array.from(document.querySelectorAll("[data-testid=message]")).at(-1)?.textContent.includes("Checking the next change.")');
       expect(page.errors()).toEqual([]);
       await client.call('turns.stop', { threadId: thread.id });

@@ -131,11 +131,13 @@ test('projects follow user activity, then keep a dragged custom order after relo
 }, 20_000);
 
 test('phone management scrolls on short screens and reorders the selected project', async () => {
-  const keys = () => page.evaluate<string[]>(`Array.from(document.querySelectorAll('${id('project')}')).map(e => JSON.stringify([e.dataset.machineId, e.dataset.projectId]))`);
+  const keys = () => page.evaluate<string[]>(`Array.from(document.querySelectorAll('${id('project')}, ${id('mobile-project-group')}')).map(e => JSON.stringify([e.dataset.machineId, e.dataset.projectId]))`);
   const before = await keys();
   await page.evaluate(`(() => { const [machine, project] = ${before[0]}; const owner = globalThis.__boiteTest.workspace.machines.find(m => m.id === machine).store; return globalThis.__boiteTest.workspace.select(owner, undefined, project); })()`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 240, deviceScaleFactor: 1, mobile: true });
   await page.send('Emulation.setTouchEmulationEnabled', { enabled: true });
+  await page.click(id('mobile-conversations'));
+  await page.waitFor(`document.querySelectorAll('${id('mobile-project-group')}').length === 4`);
   await page.click(id('mobile-project-actions'));
   await page.click(`${id('context-menu')} [data-value=manage]`);
   await page.waitFor(`document.querySelector('${id('context-menu')} [data-value=remove]')`);

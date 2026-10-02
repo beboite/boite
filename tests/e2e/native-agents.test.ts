@@ -41,7 +41,8 @@ test('native agents remain visible beside Boite subagents on desktop and phone',
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   expect(await page.evaluate('(e => e.scrollWidth <= e.clientWidth)(document.querySelector("[data-testid=delegation-surface]"))')).toBe(true);
   await page.reload();
-  await page.click('[data-testid="thread-row"][data-thread-id="t-native"]');
+  await page.click('[data-testid="mobile-conversations"]');
+  await page.click('[data-testid="mobile-thread-t-native"]');
   await page.click('[data-testid=thread-menu-trigger]');
   await page.click('[data-testid=thread-menu-trigger-menu] [data-value=agents]');
   await page.waitFor('document.querySelectorAll("[data-testid=native-agent]").length === 2');
