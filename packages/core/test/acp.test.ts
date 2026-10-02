@@ -301,7 +301,7 @@ describe('acp driver', () => {
 
     const thread = await client.call('threads.get', { threadId });
     expect(thread.messages[1]?.parts).toEqual([
-      { type: 'thinking', text: 'thinking about it' },
+      { type: 'thinking', text: 'thinking about it', startedAt: expect.any(Number), finishedAt: expect.any(Number) },
       { type: 'text', text: 'the answer' },
     ]);
   });

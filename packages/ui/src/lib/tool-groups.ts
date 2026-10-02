@@ -27,15 +27,14 @@ function standsAlone(part: ToolPart): boolean {
 }
 
 /**
- * Splits the parts into runs. Thinking is drawn above the parts and a blank
- * text part draws nothing, so neither breaks a run of calls; anything else does.
+ * Splits the parts into runs. A blank text part draws nothing; reasoning and
+ * other visible parts break a run so they keep their place in the timeline.
  * A proposed plan is read, not a call to fold: it is a part of its own.
  */
 export function partRuns(parts: readonly MessagePart[]): PartRun[] {
   const runs: PartRun[] = [];
   let open: { kind: 'tools'; indices: number[] } | null = null;
   parts.forEach((part, index) => {
-    if (part.type === 'thinking') return;
     if (part.type === 'text' && part.text.trim() === '' && index < parts.length - 1) return;
     if (part.type !== 'tool' || planOf(part.name, part.input) !== null) {
       open = null;

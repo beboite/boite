@@ -89,20 +89,25 @@ test('thread metadata, message identity and expandable trace fit a narrow panel'
   await page.click(id('panel-toggle'));
 });
 
-test('paragraphs arrive whole, keep previous nodes and flush when stopped; reasoning replaces itself', async () => {
-  await update(`const turn = thread.turns[0]; turn.status = 'running'; turn.usage = null; turn.finishedAt = null; turn.startedAt = Date.now(); thread.status = 'running'; const m = thread.messages.at(-1); m.state = 'streaming'; m.parts = [{type:'thinking',text:'**Inspecting files**'}, {type:'text',text:'First complete paragraph.\\n\\nAn unfinished'}];`);
+test('paragraphs arrive whole, keep previous nodes and flush when stopped; reasoning steps keep their place and duration', async () => {
+  await update(`const turn = thread.turns[0]; turn.status = 'running'; turn.usage = null; turn.finishedAt = null; turn.startedAt = Date.now(); thread.status = 'running'; thread.memoryEvents = []; const m = thread.messages.at(-1); m.state = 'streaming'; m.parts = [{type:'thinking',text:'**Inspecting files**',startedAt:Date.now()-7000,finishedAt:Date.now()-3000}, {type:'text',text:'First complete paragraph.\\n\\nAn unfinished'}];`);
   await page.waitFor(`document.querySelector('${id('paragraph')}')?.textContent.includes('First complete paragraph.')`);
   expect(await page.evaluate(`document.querySelector('${id('timeline')}').textContent.includes('An unfinished')`)).toBe(false);
   await page.evaluate(`window.__firstParagraph = document.querySelector('${id('paragraph')}')`);
-  await update(`thread.messages.at(-1).parts[1].text += ' paragraph.\\n\\n'; thread.messages.at(-1).parts.push({type:'thinking',text:'**Checking results**'});`);
+  await update(`thread.messages.at(-1).parts[1].text += ' paragraph.\\n\\n'; thread.messages.at(-1).parts.push({type:'thinking',text:'**Checking results**',startedAt:Date.now()-2000,finishedAt:null});`);
   await page.waitFor(`document.querySelectorAll('${id('paragraph')}').length === 2`);
   expect(await page.evaluate(`document.querySelector('${id('paragraph')}') === window.__firstParagraph`)).toBe(true);
-  expect(await page.evaluate(`document.querySelectorAll('${id('thinking-part')}').length`)).toBe(1);
+  expect(await page.evaluate(`document.querySelectorAll('${id('thinking-part')}').length`)).toBe(2);
   expect(await page.evaluate(`document.querySelector('${id('thinking-toggle')}').textContent`)).toContain('Thinking');
-  await page.click(id('thinking-toggle'));
+  expect(await page.text(id('thinking-elapsed'))).toBe('4s');
+  await page.click(`[data-kind='thinking']:last-child ${id('thinking-toggle')}`);
   await page.waitFor(`document.querySelector('${id('thinking-text')}')?.textContent.includes('Checking results')`);
-  await page.click(id('thinking-toggle'));
+  await page.click(`[data-kind='thinking']:last-child ${id('thinking-toggle')}`);
   await capture('readability-working');
+  await page.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+  await capture('thinking-phone');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await page.send('Emulation.setDeviceMetricsOverride',{width:1300,height:850,deviceScaleFactor:1,mobile:false});
   await update(`thread.messages.at(-1).parts.push({type:'text',text:'Last partial paragraph'});`);
   await page.waitFor(`document.querySelector('${id('turn-summary')}').dataset.status === 'running'`);
   expect(await page.evaluate(`document.querySelector('${id('timeline')}').textContent.includes('Last partial paragraph')`)).toBe(false);

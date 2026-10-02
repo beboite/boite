@@ -1422,7 +1422,8 @@ test('a thinking part is folded, opens on its toggle, and a new turn shows it be
   await waitFor(() => answer?.state === 'complete');
   expect(answer?.parts[0]).toEqual({
     type: 'thinking',
-    text: 'thinking about: what the trace panel needs'
+    text: 'thinking about: what the trace panel needs',
+    startedAt: expect.any(Number), finishedAt: expect.any(Number)
   });
   expect(answer?.parts[1]).toEqual({ type: 'text', text: 'what the trace panel needs' });
   expect(document.querySelectorAll('[data-testid=thinking-part]').length).toBe(2);

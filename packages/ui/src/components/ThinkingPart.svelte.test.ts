@@ -13,7 +13,44 @@ let running: Record<string, unknown> | null = null;
 afterEach(() => {
   if (running) unmount(running, { outro: false });
   running = null;
+  vi.useRealTimers();
   document.body.innerHTML = '';
+});
+
+test('reasoning ticks while live, freezes at its recorded end and leaves old blocks untimed', () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(10_000);
+  const props = $state({ text: 'Checking files', live: true, startedAt: 8_000 as number | null, finishedAt: null as number | null });
+  running = mount(ThinkingPart, { target: document.body, props });
+  flushSync();
+  expect(document.querySelector('[data-testid=thinking-elapsed]')?.textContent).toBe('2s');
+  vi.advanceTimersByTime(3000);
+  flushSync();
+  expect(document.querySelector('[data-testid=thinking-elapsed]')?.textContent).toBe('5s');
+  props.live = false;
+  props.finishedAt = 12_000;
+  flushSync();
+  vi.advanceTimersByTime(20_000);
+  flushSync();
+  expect(document.querySelector('[data-testid=thinking-elapsed]')?.textContent).toBe('4s');
+  expect(vi.getTimerCount()).toBe(0);
+  props.startedAt = null;
+  flushSync();
+  expect(document.querySelector('[data-testid=thinking-elapsed]')).toBeNull();
+});
+
+test('opening reasoning keeps earlier headings and shows the paragraph still arriving', () => {
+  const props = $state({ text: '**Inspecting files**\nFirst finding.\n\n**Checking results**\nStill checking', live: true });
+  running = mount(ThinkingPart, { target: document.body, props });
+  flushSync();
+  document.querySelector<HTMLButtonElement>('[data-testid=thinking-toggle]')!.click();
+  flushSync();
+  const body = document.querySelector('[data-testid=thinking-text]')!;
+  expect(body.textContent).toContain('Inspecting files');
+  expect(body.textContent).toContain('Still checking');
+  props.live = false;
+  flushSync();
+  expect(body.querySelectorAll('strong')).toHaveLength(2);
 });
 
 test('a folded reasoning renders each new paragraph once and keeps the earlier ones', () => {

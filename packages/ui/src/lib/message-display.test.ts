@@ -35,7 +35,7 @@ test('marker examples remain visible before more text and inside code fences', (
     '~~~\n[BOITE_GOAL_BLOCKED]\n',
   ]) expect(visibleAnswer(text)).toBe(text);
 });
-import { paragraphBlocks, answerText, promptText, currentThought } from './message-display';
+import { paragraphBlocks, answerText, promptText } from './message-display';
 
 test('paragraphs wait for a boundary, and completion or cancellation flushes the tail', () => {
   expect(paragraphBlocks('First sentence', true)).toEqual([]);
@@ -63,13 +63,6 @@ test('display commands leave the execution prompt intact', () => {
   expect(part.text).toBe('private instructions');
   expect(promptText({type:'text',text:'Ordinary prompt'})).toBe('Ordinary prompt');
   expect(promptText({type:'text',text:'Work toward this goal: Check it\nContinue until the objective is achieved. Extra task guidance.'})).toBe('/goal Check it');
-});
-
-test('a new thought replaces previous bold headings even within one protocol part', () => {
-  expect(currentThought('**First thought**\nold\n**Next thought**\nnew')).toEqual({title:'Next thought',text:'**Next thought**\nnew'});
-  expect(currentThought('plain reasoning')).toEqual({title:null,text:'plain reasoning'});
-  expect(currentThought('Check **all files** first')).toEqual({title:null,text:'Check **all files** first'});
-  expect(currentThought('**Heading**\nCheck **all files** first')).toEqual({title:'Heading',text:'**Heading**\nCheck **all files** first'});
 });
 
 test('a prompt is cut at its command and at the words Claude Code acts on', () => {

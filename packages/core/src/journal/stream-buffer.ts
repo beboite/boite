@@ -269,7 +269,7 @@ function padInPlace(parts: MessagePart[], index: number): void {
 function appendText(parts: MessagePart[], index: number, text: string): void {
   const part = parts[index];
   if (part !== undefined && (part.type === 'text' || part.type === 'thinking')) {
-    parts[index] = { type: part.type, text: part.text + text };
+    parts[index] = { ...part, text: part.text + text };
   } else if (part !== undefined && part.type === 'tool') {
     // On a tool part a delta is the input's JSON, still being typed by the model.
     parts[index] = { ...part, inputText: (part.inputText ?? '') + text };

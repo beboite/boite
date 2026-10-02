@@ -859,7 +859,7 @@ panel end-to-end tests cover card spacing, folded drafts and phone controls.
 ## Chat readability
 
 `bun test tests/e2e/readability.test.ts` checks the sidebar metadata, process
-panel, paragraph buffering, reasoning replacement, goal display and command
+panel, paragraph buffering, reasoning steps and durations, goal display and command
 highlighting, compact tool calls and answered questions through the fake client.
 It writes desktop, phone and light-theme captures under `tests/e2e/.artifacts/`.
 
@@ -887,6 +887,11 @@ activity kind and iteration metadata. The core builds the execution instructions
 when starting the driver. Older messages can carry `displayText`, which the UI
 still honors when displaying or recalling a prompt. Terminal goal control markers
 stay hidden; examples inside answer text or code fences remain visible.
+
+Each reasoning block stays folded at its position in the timeline. The core
+stamps its first appearance and the next part or message completion, for every
+driver. Its clock ticks while active, then keeps the final duration on reload.
+Older and imported blocks without timing metadata show no guessed duration.
 
 Chat status uses two small receipts: core acceptance and the first nonempty
 assistant activity. Agent protocols do not provide a literal read receipt.

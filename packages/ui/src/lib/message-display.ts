@@ -122,6 +122,9 @@ export class ParagraphScan {
   #tail = '';
   #result: string[] | null = null;
 
+  /** The unfinished paragraph, for disclosures that show live text without parsing it. */
+  pending(text: string): string { return text.slice(this.#start).trim(); }
+
   blocks(text: string, live: boolean): string[] {
     if (!text.startsWith(this.#read)) {
       this.#read = '';
@@ -153,13 +156,6 @@ export class ParagraphScan {
     this.#result = tail ? [...this.#done, tail] : [...this.#done];
     return this.#result;
   }
-}
-
-/** Codex can append several bold thought headings inside the same part. */
-export function currentThought(text: string): { title: string | null; text: string } {
-  const headings = [...text.matchAll(/^[\t ]*\*\*([^*\r\n]+)\*\*[\t ]*\r?$/gm)];
-  const last = headings.at(-1);
-  return { title: last?.[1]?.trim() ?? null, text: last ? text.slice(last.index) : text };
 }
 
 /** Everything the agent wrote in one turn, its tool cards left out: what a copy of the answer takes. */
