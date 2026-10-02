@@ -350,7 +350,8 @@ and write a generic diagnostic without the provider's credential-bearing body.
 ## Experimental desktop browser control
 
 Enable **Remote browser** in Settings, Experiments on the Windows desktop and
-on the phone. Open the same conversation on both, leave its browser tab active
+on the phone. Enable **Agent browser control** on the desktop as well to register
+it as the conversation's browser host. Open the same conversation on both, leave its browser tab active
 on the desktop, then choose the live-browser button in the phone's header.
 The dialog shows that desktop tab. Tap to click, swipe to scroll, or tap a page
 field and send text from the input below the preview. Navigation keys and

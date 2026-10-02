@@ -2,7 +2,7 @@
 export const strings = {
   remoteBrowser: {
     title: 'Live desktop browser', waiting: 'Waiting for the desktop', live: 'Live', paused: 'Paused', reconnecting: 'Reconnecting', pause: 'Pause', resume: 'Resume',
-    help: 'On your desktop, open this conversation and a browser tab, then enable the live browser experiment. The PC must stay awake.',
+    help: 'On your desktop, enable Agent browser control and Live browser on other devices in Experiments, then open this conversation and a browser tab. The PC must stay awake.',
     interact: 'Tap or swipe the shared page', image: 'Live view of the desktop browser', scrollUp: 'Scroll up', scrollDown: 'Scroll down',
     text: 'Tap a page field, then type here', send: 'Send text to the page', gesture: 'Tap to click. Swipe to scroll. Pause stops the stream.'
   },
@@ -1723,7 +1723,7 @@ export const strings = {
   },
 
   experiments: {
-    remoteBrowser: { title: 'Live browser on other devices', hint: 'On the desktop, share the open conversation’s browser with paired devices. On a phone, watch and control that page. Both devices must enable this experiment.' },
+    remoteBrowser: { title: 'Live browser on other devices', hint: 'On the desktop, share the open conversation’s browser with paired devices. On a phone, watch and control that page. Enable this experiment on both devices and Agent browser control on the desktop.' },
     prReview: { title: 'Review pull requests', hint: 'Read linked GitHub pull requests, file diffs, comments and check results inside Boite, including on phones.' },
     recordingIndicators: { title: 'Show actions in recordings', hint: 'Add click markers and navigation keys to browser recordings. Typed text and password input are never shown as key labels.' },
     openChatLinks: { title: 'Open chat links in their apps', hint: 'On this desktop, clicking a local file or folder opens its default app, including shortcuts and files outside the project. Only links from this computer are opened.' },

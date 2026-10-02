@@ -1,5 +1,4 @@
 import type { BrowserRecording } from '@boite/contracts';
-import { fixWebmDuration } from '@fix-webm-duration/fix';
 import type { RecordingRect } from './recording-indicators';
 
 const MAX_BYTES = 50 * 1024 * 1024;
@@ -77,7 +76,12 @@ export class BrowserRecorder {
           const result: BrowserRecording = { id: crypto.randomUUID(), mime: 'video/webm', bytes: this.size, durationMs: Math.max(0, Date.now() - this.started), reason: this.reason, ...(this.error ? { error: this.error } : {}) };
           let blob = new Blob(this.chunks, { type: result.mime });
           this.chunks = [];
-          try { if (!this.disposed) blob = await fixWebmDuration(blob, result.durationMs, { logger: false }); }
+          try {
+            if (!this.disposed) {
+              const { fixWebmDuration } = await import('@fix-webm-duration/fix');
+              blob = await fixWebmDuration(blob, result.durationMs, { logger: false });
+            }
+          }
           catch { result.reason = 'error'; result.error = 'Could not finalize the recording duration'; }
           result.bytes = blob.size;
           if (!this.disposed) {

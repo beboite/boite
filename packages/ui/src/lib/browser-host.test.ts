@@ -6,7 +6,7 @@ import type { Store } from './store.svelte';
 
 const { automateBrowser } = vi.hoisted(() => ({ automateBrowser: vi.fn(async () => ({})) }));
 vi.mock('./browser-automation', () => ({ automateBrowser }));
-vi.mock('./browser-bridge', () => ({ browserBridge: { protocol: vi.fn() } }));
+vi.mock('./browser-bridge', () => ({ browserBridge: { protocol: vi.fn(), on: vi.fn() } }));
 let stop: (() => void) | undefined;
 afterEach(() => { stop?.(); stop = undefined; writeExperiments([]); vi.restoreAllMocks(); automateBrowser.mockClear(); });
 
@@ -21,7 +21,11 @@ test('the desktop grants no browser access by default and stops dispatching as s
   expect(client.call).not.toHaveBeenCalled();
   writeExperiments(['agent-browser-control']);
   stop = hostBrowser(store, 'thread');
-  expect(client.call).toHaveBeenCalledWith('browser.host', { threadId: 'thread', enabled: true, allowAgentControl: true });
+  expect(client.call).toHaveBeenCalledWith('browser.host', { threadId: 'thread', enabled: true, allowAgentControl: true, remote: false });
+  writeExperiments(['agent-browser-control', 'remote-browser']);
+  expect(client.call).toHaveBeenLastCalledWith('browser.host', { threadId: 'thread', enabled: true, allowAgentControl: true, remote: true });
+  writeExperiments(['agent-browser-control']);
+  expect(client.call).toHaveBeenLastCalledWith('browser.host', { threadId: 'thread', enabled: true, allowAgentControl: true, remote: false });
   writeExperiments([]);
   requested({ threadId: 'thread', requestId: 'late', action: { kind: 'screenshot' } });
   await vi.waitFor(() => expect(client.call).toHaveBeenCalledWith('browser.complete', { requestId: 'late', error: 'the browser conversation is no longer open' }));

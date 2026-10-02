@@ -14,7 +14,7 @@ import type { Translation } from './i18n.svelte';
 export const fr: Translation = {
   remoteBrowser: {
     title: 'Navigateur du PC en direct', waiting: 'En attente du PC', live: 'En direct', paused: 'En pause', reconnecting: 'Reconnexion', pause: 'Pause', resume: 'Reprendre',
-    help: 'Sur le PC, ouvrez cette conversation et un onglet navigateur, puis activez l’option expérimentale de partage. Le PC doit rester éveillé.',
+    help: 'Sur le PC, activez Contrôle du navigateur par les agents et Navigateur en direct à distance dans Expérimentations, puis ouvrez cette conversation et un onglet navigateur. Le PC doit rester éveillé.',
     interact: 'Toucher ou faire défiler la page partagée', image: 'Vue en direct du navigateur du PC', scrollUp: 'Défiler vers le haut', scrollDown: 'Défiler vers le bas',
     text: 'Touchez un champ de la page, puis écrivez ici', send: 'Envoyer le texte à la page', gesture: 'Touchez pour cliquer. Glissez pour défiler. Pause arrête le direct.'
   },
@@ -1658,7 +1658,7 @@ export const fr: Translation = {
   },
 
   experiments: {
-    remoteBrowser: { title: 'Navigateur en direct à distance', hint: 'Sur le PC, partager le navigateur de la conversation ouverte avec les appareils associés. Sur le téléphone, voir et piloter cette page. Activez cette option sur les deux appareils.' },
+    remoteBrowser: { title: 'Navigateur en direct à distance', hint: 'Sur le PC, partager le navigateur de la conversation ouverte avec les appareils associés. Sur le téléphone, voir et piloter cette page. Activez cette option sur les deux appareils et le contrôle du navigateur par les agents sur le PC.' },
     prReview: { title: 'Revue des pull requests', hint: 'Lire les PR GitHub liées, les modifications, les commentaires et les résultats des tests dans Boite, y compris sur téléphone.' },
     recordingIndicators: { title: 'Actions visibles dans les vidéos', hint: 'Ajouter des repères de clics et les touches de navigation aux enregistrements. Le texte saisi et les mots de passe ne sont jamais affichés comme libellés de touches.' },
     openChatLinks: { title: 'Ouvrir les liens du chat dans leurs applications', hint: 'Sur ce bureau, un clic sur un fichier ou dossier local ouvre son application, y compris les raccourcis et les fichiers hors du projet. Seuls les liens de cet ordinateur sont ouverts.' },
