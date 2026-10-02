@@ -379,6 +379,9 @@ test('a draft names its project in the heading and the dropdown moves it to anot
 
 test('the picker rails the providers as logos and gives the shown one its accounts and models', async () => {
   await mountOnFake();
+  await store.client!.call('accounts.login', { accountId: 'a-claude-side' });
+  await store.client!.call('accounts.loginInput', { accountId: 'a-claude-side', text: 'test-code' });
+  await waitFor(() => store.accountOf('a-claude-side')?.status === 'ok');
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
 
@@ -387,6 +390,7 @@ test('the picker rails the providers as logos and gives the shown one its accoun
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
+  await waitFor(() => shownModels().length === 3);
   // One tile per provider an account answers for, in the core's order: the
   // one still to download or sign into is Settings' business, one tile away.
   expect(tiles()).toEqual(['favorites', 'claude', 'echo', 'opencode', 'codex', 'pi', 'grok', 'muse', 'antigravity-cli', 'more']);
@@ -406,6 +410,8 @@ test('the picker rails the providers as logos and gives the shown one its accoun
 
   // The second account of the same provider, then a model: one thread with both.
   query<HTMLButtonElement>('[data-instance="claude::a-claude-side"]').click();
+  await waitFor(() => document.querySelector('[data-instance="claude::a-claude-side"]')?.getAttribute('aria-pressed') === 'true' &&
+    store.probedModels['claude::a-claude-side'] !== undefined && document.querySelector('[data-model="claude-opus-5"]') !== null);
   query<HTMLButtonElement>('[data-model="claude-opus-5"]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
   expect(query('[data-testid=composer-picker]').textContent).toContain('Opus 5 · Second seat');
@@ -472,6 +478,7 @@ test('past twelve models the column gets a search field, prefix groups and keybo
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
+  await waitFor(() => document.querySelector('[data-testid=picker-search]') !== null);
   // Search is available even on the shorter Claude list.
   expect(document.querySelector('[data-testid=picker-search]')).not.toBeNull();
   await type(query<HTMLInputElement>('[data-testid=picker-search]'), 'opus 4.8');

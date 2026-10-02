@@ -7,6 +7,49 @@ import { FakeClient } from './fake-client';
 beforeEach(() => localStorage.clear());
 const levels = ['low', 'medium', 'high'].map((id) => ({ id, label: id }));
 
+test('a paired device discovers every available provider and the selected ACP model effort', async () => {
+  const client = new FakeClient({ delayMs: 0, principal: 'session' });
+  const store = new Store();
+  store.attach(client);
+  await store.connect();
+  try {
+    expect(store.owner).toBe(false);
+    for (const providerId of ['claude', 'codex', 'opencode', 'pi', 'grok', 'muse']) {
+      const account = store.accountsOf(providerId)[0]!;
+      await store.probeModels(providerId, account.id);
+      expect(store.probedModels[`${providerId}::${account.id}`]?.length).toBeGreaterThan(0);
+    }
+    const models = [{ id: 'vendor/native-model', name: 'Native model' }];
+    store.probedModels = { ...store.probedModels, 'opencode::a-opencode': models };
+    const original = client.call.bind(client);
+    const calls = vi.spyOn(client, 'call').mockImplementation((method, params) => {
+      if (method === 'providers.probe') return Promise.resolve({ models: [{ ...models[0], effort: { levels, default: 'high' } }], probedAt: Date.now() }) as never;
+      return original(method, params);
+    });
+    await store.probeModelEffort('opencode', 'a-opencode', models[0]!.id);
+    expect(calls).toHaveBeenCalledWith('providers.probe', { providerId: 'opencode', accountId: 'a-opencode', model: models[0]!.id });
+    expect(store.modelsOf('opencode', 'a-opencode')[0]?.effort?.default).toBe('high');
+  } finally { store.detach(); vi.restoreAllMocks(); }
+});
+
+test('Claude never offers descriptor placeholders before discovery or after a failed read', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store();
+  store.attach(client);
+  await store.connect();
+  const provider = store.providerOf('claude')!;
+  const account = store.accountsOf('claude')[0]!;
+  provider.models = [{ id: 'placeholder', name: 'Placeholder model' }];
+  const calls = vi.spyOn(client, 'call').mockRejectedValue(new Error('agent offline'));
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    expect(store.modelsOf('claude', account.id)).toEqual([]);
+    await store.probeModels('claude', account.id);
+    expect(store.modelsOf('claude', account.id)).toEqual([]);
+    expect(store.isProbing('claude', account.id)).toBe(false);
+  } finally { store.detach(); calls.mockRestore(); warn.mockRestore(); }
+});
+
 test('an old default alias uses the configured target without changing an explicit model', async () => {
   const store = new Store();
   store.attach(new FakeClient({ delayMs: 0 }));

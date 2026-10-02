@@ -9,8 +9,8 @@ import type { RpcEventName, RpcMethodName } from './index.ts';
 /**
  * What a paired device reaches. Read this as the phone's screen: the sidebar,
  * a thread, the composer, the cards an agent raises, and the settings it only
- * displays. Nothing here writes outside a thread, names a path, starts a
- * process of its own or changes what the core trusts.
+ * displays. Model discovery may start the configured agent without a prompt.
+ * Nothing here names a path or changes what the core trusts.
  */
 export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
   // A paired phone follows persistent work, talks to agents and answers its owner's decisions.
@@ -48,6 +48,9 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'projects.archive',
   // What a thread needs to name its agent.
   'providers.list',
+  // Read or refresh the configured account's native catalog, including ACP
+  // effort metadata. No prompt, executable, path or credential is supplied.
+  'providers.probe',
   'accounts.list',
   // The threads themselves.
   'threads.list',

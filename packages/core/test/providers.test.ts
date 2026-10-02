@@ -290,9 +290,7 @@ describe('providers', () => {
 
     const claude = loaded.find((provider) => provider.id === 'claude');
     expect(claude?.protocol).toBe('claude-sdk');
-    expect(claude?.models[0]?.id).toBe('claude-fable-5-1');
-    expect(claude?.models.find((model) => model.default)?.id).toBe('claude-sonnet-5');
-    expect(claude?.models.some((model) => model.legacy)).toBe(true);
+    expect(claude?.models).toEqual([]);
     expect(claude?.capabilities.planMode).toBe(true);
   });
 
@@ -608,31 +606,12 @@ describe('providers', () => {
     expect(rejected[0]?.field).toBe('profiles.linux.executable[0].value');
   });
 
-  test('the shipped models carry the reasoning effort scale they are meant to', async () => {
+  test('native providers ship no named model catalog and echo retains its static effort scale', async () => {
     const client = await harness.connect();
     const { loaded } = await client.call('providers.list', {});
-    const models = loaded.find((provider) => provider.id === 'claude')?.models ?? [];
-
-    const sonnet = models.find((model) => model.id === 'claude-sonnet-5');
-    expect(sonnet?.effort?.default).toBe('high');
-    expect(sonnet?.effort?.levels.map((level) => level.id)).toEqual([
-      'low',
-      'medium',
-      'high',
-      'xhigh',
-      'max',
-      'ultrathink',
-    ]);
-    expect(sonnet?.effort?.levels.find((level) => level.id === 'xhigh')?.label).toBe('Extra high');
-    expect(sonnet?.effort?.levels.find((level) => level.id === 'ultrathink')?.description).toBe(
-      'Extended thinking, asked for in the prompt',
-    );
-
-    const legacy = models.find((model) => model.id === 'claude-sonnet-4-6');
-    expect(legacy?.effort?.levels.map((level) => level.id)).toEqual(['low', 'medium', 'high']);
-
-    // Haiku has no scale at all, so the picker shows no Reasoning row for it.
-    expect(models.find((model) => model.id === 'claude-haiku-4-5-20251001')?.effort).toBeUndefined();
+    for (const provider of loaded.filter(provider => provider.protocol !== 'echo')) {
+      expect(provider.models.every(model => model.id === 'default')).toBe(true);
+    }
 
     const echo = loaded.find((provider) => provider.id === 'echo')?.models[0];
     expect(echo?.effort).toEqual({
@@ -642,6 +621,20 @@ describe('providers', () => {
       ],
       default: 'high',
     });
+  });
+
+  test('an empty static catalog is refused, while native descriptors can discover theirs', async () => {
+    const client = await harness.connect();
+    const file = writeUserDescriptor('empty.json', { ...validDescriptor(), protocol: 'echo', models: [] });
+    const refused = await client.call('providers.dryRun', { file });
+    expect(refused.ok).toBe(false);
+    if (refused.ok) throw new Error('echo requires a static model');
+    expect(refused.rejected.field).toBe('models');
+    writeUserDescriptor('empty.json', { ...validDescriptor(), protocol: 'acp', models: [] });
+    const native = await client.call('providers.dryRun', { file });
+    expect(native.ok).toBe(true);
+    if (!native.ok) throw new Error(native.rejected.message);
+    expect(native.summary.models).toEqual([]);
   });
 
   test('a user descriptor with a well formed effort scale loads', async () => {

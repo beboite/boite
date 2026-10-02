@@ -632,7 +632,7 @@ test('fake probes use descriptor models for protocols without probing', async ()
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();
   const { loaded } = await client.call('providers.list', {});
-  for (const [providerId, accountId] of [['claude', 'a-claude-main'], ['echo', 'a-echo']] as const) {
+  for (const [providerId, accountId] of [['echo', 'a-echo']] as const) {
     expect((await client.call('providers.probe', { providerId, accountId })).models)
       .toEqual(loaded.find((provider) => provider.id === providerId)?.models);
   }

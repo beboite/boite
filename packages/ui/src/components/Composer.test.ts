@@ -587,6 +587,7 @@ test('the picker keeps row, account and legacy keyboard navigation separate', as
   expect(press('ArrowLeft')).toBe(false);
   expect(document.activeElement).toBe(firstSeat);
 
+  await waitFor(() => document.querySelector('[data-testid=picker-legacy]') !== null);
   const legacyRow = query<HTMLButtonElement>('[data-testid=picker-legacy]');
   legacyRow.focus();
   expect(press('ArrowRight')).toBe(false);

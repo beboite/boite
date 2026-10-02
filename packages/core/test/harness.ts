@@ -38,9 +38,16 @@ export function holdAccountTurns(harness: TestCore, accountId?: string): () => v
   };
 }
 
-/** Scripted SDK tests need an available executable, never a real CLI install. */
+/** Scripted SDK tests supply their own capabilities and executable, independent of shipped catalogs. */
 export function scriptedClaude(harness: TestCore): void {
   const descriptor = harness.core.providers.require('claude');
+  const levels = ['low', 'medium', 'high', 'xhigh', 'max', 'ultrathink'].map(id => ({ id, label: id }));
+  descriptor.models = [
+    { id: 'claude-sonnet-5', name: 'Scripted Sonnet', default: true, effort: { levels, default: 'high' } },
+    { id: 'claude-opus-5', name: 'Scripted Opus', effort: { levels, default: 'high' } },
+    { id: 'claude-opus-4-7', name: 'Scripted legacy Opus', effort: { levels: levels.slice(0, 3), default: 'high' } },
+    { id: 'claude-haiku-4-5-20251001', name: 'Scripted Haiku' },
+  ];
   for (const profile of Object.values(descriptor.profiles)) {
     if (profile) profile.executable = [{ kind: 'file', value: process.execPath }];
   }
