@@ -1,10 +1,11 @@
 <script lang="ts">
   import { RotateCcw, Wallet } from '@lucide/svelte';
+  import type { Snippet } from 'svelte';
   import type { AccountQuota } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import { creditBalance, exactTime, tenth } from '../lib/format';
 
-  let { row, accountLabel = false, compact = false }: { row: AccountQuota; accountLabel?: boolean; compact?: boolean } = $props();
+  let { row, accountLabel = false, compact = false, resetAction }: { row: AccountQuota; accountLabel?: boolean; compact?: boolean; resetAction?: Snippet } = $props();
   let resets = $derived(row.resetCredits);
   let credits = $derived(row.credits);
   let exhausted = $derived(row.windows.some((window) => window.usedPercent >= 100));
@@ -27,7 +28,10 @@
     {#if accountLabel}<small class="account">{row.label}</small>{/if}
     {#if showResets && resets}
       <div class="resets" data-testid="quota-banked-resets">
-        <span class="reserve"><RotateCcw size={13} aria-hidden="true" />{fill(resets.availableCount === 1 ? strings.quotas.bankedReset : strings.quotas.bankedResets, { count: String(resets.availableCount) })}</span>
+        <div class="reset-line">
+          <span class="reserve"><RotateCcw size={13} aria-hidden="true" />{fill(resets.availableCount === 1 ? strings.quotas.bankedReset : strings.quotas.bankedResets, { count: String(resets.availableCount) })}</span>
+          {@render resetAction?.()}
+        </div>
         {#if resets.nextExpiresAt !== null}<small>{fill(strings.quotas.resetExpires, { time: exactTime(resets.nextExpiresAt) })}</small>{/if}
       </div>
     {/if}
@@ -48,6 +52,7 @@
 <style>
   .extras, .resets, .credits { display: grid; gap: 7px; min-width: 0; }
   .extras { gap: 12px; font-size: var(--text-sm); }
+  .reset-line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
   .reserve { display: inline-flex; align-items: center; gap: 6px; justify-self: start; padding: 5px 9px; border-radius: var(--radius-md); background: var(--color-accent-soft); color: var(--color-foreground); font-weight: 550; }
   .reserve :global(svg) { flex: none; color: var(--color-accent); }
   .credits { padding: 12px; border: 1px solid color-mix(in srgb, var(--color-success) 20%, var(--color-border)); border-radius: var(--radius-md); background: color-mix(in srgb, var(--color-success) 5%, var(--color-surface-2)); gap: 10px; }

@@ -36,6 +36,7 @@ let turnCounter = 0;
 let itemCounter = 0;
 let threadId = '';
 let planEnabled = false;
+let experimentalApi = false;
 /** The thread was opened `ephemeral`, the way the core asks for a title. */
 let ephemeral = false;
 /**
@@ -496,6 +497,7 @@ function handle(method: string, raw: unknown): unknown {
   switch (method) {
     case 'initialize':
       log('initialize');
+      experimentalApi = (params['capabilities'] as Record<string, unknown> | null)?.['experimentalApi'] === true;
       if (process.env['CODEX_FAKE_INIT_FAILURES']) {
         const attempts = readFileSync(process.env['CODEX_FAKE_LOG']!, 'utf8').split('\n').filter(line => line === 'initialize').length;
         if (attempts <= Number(process.env['CODEX_FAKE_INIT_FAILURES'])) {
@@ -525,6 +527,10 @@ function handle(method: string, raw: unknown): unknown {
       return { rateLimits: { limitId: 'codex', primary: { usedPercent: 100, windowDurationMins: 300 },
         credits: { hasCredits: true, unlimited: false, balance: '42.5' } },
         rateLimitResetCredits: { availableCount: 2, credits: null } };
+    case 'account/rateLimitResetCredit/consume':
+      if (!experimentalApi) throw new Error('Reset credits require experimentalApi during initialization');
+      log(`account/rateLimitResetCredit/consume ${JSON.stringify(params)}`);
+      return { outcome: 'reset' };
     case 'hooks/list':
       log('hooks/list');
       // `CODEX_FAKE_HOOKS=1`: one hook the user never reviewed, one they did.

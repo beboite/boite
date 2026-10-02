@@ -1,5 +1,13 @@
 import type { QuotaCredits, QuotaReading, QuotaWindow } from '@boite/contracts';
 
+/**
+ * Anthropic answers `cedar_ember=1` with `eligible: false`, reason `cli_version`,
+ * unless the request identifies an installed CLI recent enough to use resets.
+ */
+export function claudeUsageAgent(version: string | null): Record<string, string> {
+  return version !== null && /^[\w.+-]{1,40}$/.test(version) ? { 'User-Agent': `claude-cli/${version} (external, cli)` } : {};
+}
+
 function object(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }

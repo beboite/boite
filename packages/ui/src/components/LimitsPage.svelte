@@ -74,7 +74,7 @@
       <button type="button" onclick={() => store.showSettings('accounts')}>{strings.settings.connectProvider}</button>
     </div>{/if}
   {:else}
-    {#if rows.length > 0}<UsageLimits {rows} loading={reader.loading} completed={reader.completed} />{/if}
+    {#if rows.length > 0}<UsageLimits {rows} {store} loading={reader.loading} completed={reader.completed} />{/if}
     <section class="card tracked" data-testid="limits-tracked">
       <h2>{strings.quotas.tracked}<InfoTip topic={strings.quotas.tracked} text={strings.quotas.trackedHint} /></h2>
       {#each tracked as row (row.accountId)}

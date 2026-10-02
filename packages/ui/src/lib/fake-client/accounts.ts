@@ -23,7 +23,7 @@ function quotas(ctx: FakeContext): AccountQuota[] {
   const accounts = [...ctx.accounts, { id: 'quota:antigravity-cli', providerId: 'antigravity', label: 'Antigravity CLI' }];
   return accounts.map((account, index) => ({
     ...(ctx.quotaExtras && ctx.quotaEnabled[account.id] !== false && ['claude', 'codex'].includes(account.providerId) ? {
-      resetCredits: { availableCount: account.providerId === 'claude' ? 1 : 2, nextExpiresAt: Date.now() + 7 * 86400_000 },
+      resetCredits: { availableCount: Math.max(0, (account.providerId === 'claude' ? 1 : 2) - (ctx.quotaResetsUsed[account.id] ?? 0)), nextExpiresAt: Date.now() + 7 * 86400_000 },
       credits: account.providerId === 'claude'
         ? { kind: 'budget' as const, enabled: true, remaining: 75, limit: 100, unlimited: false }
         : { kind: 'balance' as const, enabled: null, remaining: 42, limit: null, unlimited: false },
@@ -33,7 +33,10 @@ function quotas(ctx: FakeContext): AccountQuota[] {
     // The CLI's own account reports nothing: its limits come from the `quota:antigravity-cli` source.
     status: account.providerId === 'echo' || account.providerId === 'pi' || account.providerId === 'antigravity-cli' || account.id === 'a-antigravity' ? 'unsupported' : ctx.quotaEnabled[account.id] === false || account.id === 'quota:antigravity-cli' && ctx.quotaEnabled[account.id] !== true ? 'disabled' : 'ready',
     checkedAt: Date.now(), error: null,
-    windows: ctx.quotaEnabled[account.id] === false || account.id === 'quota:antigravity-cli' && ctx.quotaEnabled[account.id] !== true ? [] : [
+    windows: ctx.quotaEnabled[account.id] === false || account.id === 'quota:antigravity-cli' && ctx.quotaEnabled[account.id] !== true ? [] : (ctx.quotaResetsUsed[account.id] ?? 0) > 0 ? [
+      { id: 'primary', label: '5 hours', usedPercent: 0, resetsAt: null },
+      { id: 'secondary', label: 'Weekly', usedPercent: 0, resetsAt: null },
+    ] : [
       { id: 'primary', label: '5 hours', usedPercent: ctx.quotaExtras && ['claude', 'codex'].includes(account.providerId) ? 100 : [32, 87, 14, 48, 71, 6, 23, 40][index % 8]!, resetsAt: Date.now() + (1 + index % 4) * 3600_000 },
       { id: 'secondary', label: 'Weekly', usedPercent: [61, 94, 38, 27, 55, 12, 73, 66][index % 8]!, resetsAt: Date.now() + (1 + index % 6) * 86400_000 },
       // Claude also reports a weekly window per model, which the core names `Weekly · <model>`.
@@ -100,6 +103,21 @@ async function finishFakeLogin(ctx: FakeContext, account: Account): Promise<void
 
 export function accountMethods(ctx: FakeContext) {
   return {
+    'quotas.reset': async (params) => {
+      if (params.confirmed !== true) throw new RpcFailure({ code: RpcErrorCode.InvalidParams,
+        message: 'quotas.reset confirmed must be true after user confirmation', data: { field: 'confirmed', expected: true } });
+      const account = ctx.accounts.find(account => account.id === params.accountId);
+      if (!account) throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `unknown account ${params.accountId}`, data: { accountId: params.accountId } });
+      if (!['claude', 'codex'].includes(account.providerId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `Banked resets are not supported for ${account.providerId}.` });
+      if (account.status === 'unauthenticated') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Sign in to this account before using a reset.' });
+      if (ctx.quotaEnabled[account.id] === false) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Enable quota monitoring for this account before using a reset.' });
+      const before = quotas(ctx).find(row => row.accountId === account.id)!;
+      const outcome = !before.resetCredits?.availableCount ? 'noCredit' : before.windows.every(window => window.usedPercent < 100) ? 'nothingToReset' : 'reset';
+      if (outcome === 'reset') ctx.quotaResetsUsed[account.id] = (ctx.quotaResetsUsed[account.id] ?? 0) + 1;
+      const rows = quotas(ctx);
+      ctx.emit('quotas.updated', rows);
+      return { outcome, quota: rows.find(row => row.accountId === account.id)! };
+    },
     'quotas.configure': async (params) => {
       ctx.quotaEnabled[params.accountId] = params.enabled;
       const rows = quotas(ctx); ctx.emit('quotas.updated', rows); return rows;

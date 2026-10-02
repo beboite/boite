@@ -7,6 +7,7 @@ import type { CoreClient } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
 import { readCodexQuota } from '../src/drivers/codex.ts';
 import { codexQuotaDetails } from '../src/quota-details.ts';
+import { consumeCodexReset } from '../src/drivers/codex/models.ts';
 import { memoryLimitOfJob, cpuRateOfGlobalJob } from '../src/platform/windows/jobs.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -238,6 +239,20 @@ async function keepTitle(client: CoreClient, threadId: string): Promise<void> {
 }
 
 describe('codex driver', () => {
+  test('a reset uses the account consume route and the supplied retry key without starting a turn', async () => {
+    const client = await startCore();
+    const { dataDir, accountId } = await codexAccount(client);
+    const core = harness!.core;
+    const provider = core.providers.require('codex-fake');
+    const threadId = `quota-reset:${accountId}`;
+    const outcome = await consumeCodexReset({ provider, accountId, cwd: dataDir,
+      accountEnv: core.accounts.accountEnv(core.accounts.require(accountId), provider),
+      spawnChild: (cmd, args, opts) => core.procs.spawnChild(threadId, cmd, args, opts),
+      killTree: () => core.procs.killTree(threadId), log: () => undefined }, 'fixture-retry-key');
+    await core.procs.stopAndWait(threadId);
+    expect(outcome).toBe('reset');
+    expect(fakeLog().trim().split('\n')).toEqual(['initialize', 'initialized', 'account/rateLimitResetCredit/consume {"idempotencyKey":"fixture-retry-key"}']);
+  });
   test('quota reads preserve reset counts and balances without starting a turn or redeeming credits', async () => {
     const client = await startCore();
     const { dataDir, accountId } = await codexAccount(client);

@@ -56,6 +56,20 @@ test('late progress and a late final response cannot replace a newer refresh', a
   expect(f.listeners.size).toBe(0);
 });
 
+test('an applied reset wins over an older list without replacing another account', async () => {
+  const f = fixture();
+  const reader = new QuotaReader('reset-overlap-test');
+  reader.accept([row('reset', 100), row('other', 60)]);
+  const old = reader.read(f.client, true);
+  reader.acceptReset(row('reset', 0));
+  f.emit(f.calls[0]!.requestId, row('reset', 100));
+  f.calls[0]!.resolve([row('reset', 100), row('other', 99)]);
+  await old;
+  expect(reader.rows).toEqual([row('reset', 0), row('other', 60)]);
+  expect(reader.loading).toBe(false);
+  expect(f.listeners.size).toBe(0);
+});
+
 test('switching an account off still reads, and a failed read keeps its reason until one lands', async () => {
   const f = fixture();
   const reader = new QuotaReader('configure-test');

@@ -191,3 +191,84 @@ test('the tray follows account renames immediately and keeps subscriptions separ
   expect(await page.evaluate(`document.querySelectorAll('${personal} .details [role="meter"]').length`)).toBe(2);
   expect(await page.evaluate(`document.querySelectorAll('[data-testid="quota-provider"][data-provider="codex"]')[1].querySelector('.details')`)).toBeNull();
 }, 60_000);
+
+for (const width of [1280, 390]) {
+  test(`banked resets require confirmation and consume only the selected fake account at ${width}px`, async () => {
+    await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: width === 390 });
+    await page.navigate(`${origin}/?fake=1&open=recent&quotaExtras=1`);
+    await page.click('[data-testid="nav-settings"]');
+    await page.click('[data-testid="settings-tab-limits"]');
+    const codex = '[data-testid="usage-limit-provider"][data-account-id="a-codex"]';
+    const claude = '[data-testid="usage-limit-provider"][data-account-id="a-claude-main"]';
+    const reset = `${codex} [data-testid="quota-use-reset"]`;
+    await page.waitFor(`document.querySelector('${reset}')?.disabled === false`);
+    await page.evaluate(`globalThis.__boiteTest.workspace.active.client.call('accounts.rename', { accountId: 'a-codex', label: 'Work subscription' })`);
+    await page.waitFor(`document.querySelector('${codex} strong').textContent === 'Work subscription'`);
+    await page.evaluate(`document.querySelector('${codex}').scrollIntoView({ block: 'center' })`);
+    await capture(`quota-reset-limits-${width}.png`);
+    // This page has only an in-memory transport. Hold its response after its
+    // broadcast to exercise repeated clicks and the account's refreshed row.
+    await page.evaluate(`(async () => {
+      const { FakeClient } = await import('/src/lib/fake-client.ts');
+      const call = FakeClient.prototype.call;
+      globalThis.resetCalls = [];
+      FakeClient.prototype.call = async function(method, params) {
+        if (method !== 'quotas.reset') return call.call(this, method, params);
+        globalThis.resetCalls.push(params);
+        const result = await call.call(this, method, params);
+        if (globalThis.holdReset) return new Promise(resolve => { globalThis.releaseReset = () => resolve(result); });
+        return result;
+      };
+    })()`);
+    await page.click(reset);
+    await page.waitFor(`document.activeElement?.getAttribute('data-testid') === 'confirm-cancel'`);
+    expect(await page.evaluate(`document.querySelector('[data-testid="confirm-dialog"]').textContent`)).toContain('cannot be undone');
+    expect(await page.evaluate(`document.querySelector('[data-testid="confirm-dialog"]').textContent`)).toContain('Work subscription');
+    expect(await page.evaluate('globalThis.resetCalls.length')).toBe(0);
+    await capture(`quota-reset-confirm-${width}.png`);
+    // Enter on the initially focused Cancel, Escape and a scrim click spend nothing.
+    // Enter's character is required for Chrome to activate the native button.
+    await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+    await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await page.waitFor(`!document.querySelector('[data-testid="confirm-dialog"]')`);
+    await page.click(reset);
+    await page.waitFor(`document.querySelector('[data-testid="confirm-dialog"]')`);
+    await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await page.waitFor(`!document.querySelector('[data-testid="confirm-dialog"]')`);
+    await page.click(reset);
+    await page.waitFor(`document.querySelector('[data-testid="confirm-dialog"]')`);
+    await page.evaluate(`document.querySelector('[data-testid="confirm-dialog"]').parentElement.click()`);
+    await page.waitFor(`!document.querySelector('[data-testid="confirm-dialog"]')`);
+    expect(await page.evaluate('globalThis.resetCalls.length')).toBe(0);
+    await page.evaluate('globalThis.holdReset = true');
+    await page.click(reset);
+    await page.waitFor(`document.querySelector('[data-testid="confirm-dialog"]')`);
+    await page.click('[data-testid="confirm-ok"]');
+    await page.waitFor('globalThis.releaseReset');
+    expect(await page.evaluate(`document.querySelector('${reset}').disabled`)).toBe(true);
+    await page.evaluate(`document.querySelector('${reset}').click(); document.querySelector('${reset}').click()`);
+    expect(await page.evaluate('globalThis.resetCalls')).toEqual([{ accountId: 'a-codex', confirmed: true }]);
+    await page.evaluate('globalThis.holdReset = false; globalThis.releaseReset()');
+    await page.waitFor(`document.querySelector('${codex} [data-testid="quota-reset-status"]')?.textContent.includes('Reset applied')`);
+    expect(await page.evaluate(`document.querySelector('${codex} .window .fill').style.width`)).toBe('100%');
+    expect(await page.evaluate(`document.querySelector('${claude} .window .fill').style.width`)).toBe('0%');
+    expect(await page.evaluate(`document.querySelector('${codex} .reserve').textContent`)).toContain('1 banked reset');
+    await capture(`quota-reset-applied-${width}.png`);
+    expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    // A second confirmation when limits are clear does not consume the remaining credit.
+    await page.click(reset);
+    await page.waitFor(`document.querySelector('[data-testid="confirm-dialog"]')`);
+    await page.click('[data-testid="confirm-ok"]');
+    await page.waitFor(`document.querySelector('${codex} [data-testid="quota-reset-status"]')?.textContent.includes('Nothing to reset')`);
+    expect(await page.evaluate(`document.querySelector('${codex} .reserve').textContent`)).toContain('1 banked reset');
+    // Spending the last credit keeps its result visible after the reserve disappears.
+    await page.click(`${claude} [data-testid="quota-use-reset"]`);
+    await page.waitFor(`document.querySelector('[data-testid="confirm-dialog"]')?.textContent.includes('Claude')`);
+    await page.click('[data-testid="confirm-ok"]');
+    await page.waitFor(`document.querySelector('${claude} [data-testid="quota-reset-status"]')?.textContent.includes('Reset applied')`);
+    expect(await page.evaluate(`document.querySelector('${claude} [data-testid="quota-use-reset"]')`)).toBeNull();
+    expect(page.errors()).toEqual([]);
+  }, 60_000);
+}
