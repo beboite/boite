@@ -28,7 +28,7 @@
 import { workspace } from '../lib/workspace.svelte';
   import { showAppUpdateUi } from '../lib/app-update.svelte';
 
-  let { store }: { store: Store } = $props();
+  let { store, onopenthread }: { store: Store; onopenthread?: () => void } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
 
@@ -232,7 +232,7 @@ import { workspace } from '../lib/workspace.svelte';
 </script>
 
 {#if narrow.current && !inShell}
-  <MobileSettings {store} />
+  <MobileSettings {store} {onopenthread} />
 {:else}
 <div class="settings" data-testid="settings">
   <nav aria-label={strings.settings.heading}>
@@ -306,7 +306,7 @@ import { workspace } from '../lib/workspace.svelte';
       {:else if tab === 'limits'}
         <LimitsPage {store} />
       {:else if tab === 'task-manager'}
-        <TaskManagerLoader {store} />
+        <TaskManagerLoader {store} {onopenthread} />
       {:else if tab === 'plugins'}
         <PluginsPage {store} />
       {:else if tab === 'experiments'}

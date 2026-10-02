@@ -170,7 +170,14 @@ describe('scheduler', () => {
     harness.core.bus.onCommitted((name, payload) => { if (name === 'scheduler.updated') internal.push(payload as SchedulerState); });
     client.on('scheduler.updated', state => states.push(state));
     holdAccountTurns(harness);
+    const canRun = harness.core.delegation.canRun.bind(harness.core.delegation);
+    const blocksAccount = harness.core.plugins.blocksAccount.bind(harness.core.plugins);
+    let admissions = 0, accountChecks = 0;
+    harness.core.delegation.canRun = id => { admissions++; return canRun(id); };
+    harness.core.plugins.blocksAccount = id => { accountChecks++; return blocksAccount(id); };
     for (const thread of threads) harness.core.threads.startTurn(thread.id, '[sleep:60000]');
+    expect(admissions).toBe(threads.length);
+    expect(accountChecks).toBe(threads.length);
     const current = harness.core.scheduler.state();
     expect(current.queued.map(entry => entry.threadId)).toEqual(threads.map(thread => thread.id));
     expect(current.queued.map(entry => entry.position)).toEqual(threads.map((_, index) => index));

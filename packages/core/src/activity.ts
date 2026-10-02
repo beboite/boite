@@ -14,7 +14,10 @@ export class ActivityStore {
   private closed = false;
 
   constructor(private readonly core: Core) {
-    for (const thread of core.journal.listThreads()) {
+    core.journal.validateVisibleThreadJson();
+    const savedThreads = core.journal.db.query(`SELECT threads.id FROM threads JOIN settings ON settings.key = 'activity:' || threads.id
+      WHERE threads.id NOT IN (SELECT thread_id FROM thread_deletions) ORDER BY threads.rowid`).all() as { id: string }[];
+    for (const thread of savedThreads) {
       const saved = core.journal.getSetting(`activity:${thread.id}`) as ThreadActivity | undefined;
       if (!saved) continue;
       let changed = pauseActivity(saved, 'Core restarted. Resume to continue.');

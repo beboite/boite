@@ -47,17 +47,34 @@ test('the real task manager reads owned processes on desktop and a paired phone'
     expect(await desktop.evaluate(`document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true);
     await desktop.evaluate('document.fonts.ready');
     await desktop.screenshot(join(import.meta.dir, '.artifacts', 'task-manager-desktop.png'));
+    const history = await owner.call('threads.get', { threadId });
+    await desktop.click(`${selector} .title`);
+    await desktop.waitFor(`!document.querySelector('[data-testid=task-manager]') && document.querySelector('[data-testid=composer-input]')`);
+    expect(await desktop.evaluate(`document.querySelector('[data-testid=thread-title]')?.textContent`)).toBe(history.title);
+    await desktop.click('[data-testid=nav-settings]');
+    await desktop.click('[data-testid=settings-tab-task-manager]');
+    await desktop.waitFor(`document.querySelector('${selector}')`);
 
     const { url } = await owner.call('pairing.grant', {});
     phone = await BrowserPage.launch({ url, windowSize: { width: 390, height: 844 } });
     await phone.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`);
+    for (const from of ['mobile-conversations', 'mobile-activity']) {
+      await phone.click(`[data-testid=${from}]`);
+      await phone.waitFor(`document.querySelector('[data-testid=mobile-list]')`);
+      await phone.click('[data-testid=mobile-settings]');
+      await phone.click('[data-testid=settings-tab-task-manager]');
+      await phone.waitFor(`document.querySelector('${selector}')`);
+      expect(await phone.evaluate(`document.querySelector('${selector} .actions') === null`)).toBe(true);
+      expect(await phone.evaluate(`document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true);
+      await phone.evaluate('document.fonts.ready');
+      await phone.screenshot(join(import.meta.dir, '.artifacts', 'task-manager-phone.png'));
+      await phone.click(`${selector} .title`);
+      await phone.waitFor(`document.querySelector('.app.phone-chat') && !document.querySelector('[data-testid=mobile-list]') && !document.querySelector('[data-testid=task-manager]') && document.querySelector('[data-testid=composer-input]')`);
+      expect(await phone.evaluate(`document.querySelector('[data-testid=thread-title]')?.textContent`)).toBe(history.title);
+    }
     await phone.click('[data-testid=mobile-settings]');
     await phone.click('[data-testid=settings-tab-task-manager]');
     await phone.waitFor(`document.querySelector('${selector}')`);
-    expect(await phone.evaluate(`document.querySelector('${selector} .actions') === null`)).toBe(true);
-    expect(await phone.evaluate(`document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true);
-    await phone.evaluate('document.fonts.ready');
-    await phone.screenshot(join(import.meta.dir, '.artifacts', 'task-manager-phone.png'));
     await phone.click('[data-testid=mobile-settings-back]');
     await phone.waitFor(`document.querySelector('[data-testid=mobile-settings-home]') && !document.querySelector('[data-testid=task-manager]')`);
 

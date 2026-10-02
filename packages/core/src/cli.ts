@@ -15,7 +15,7 @@ import { AGENT_ENV, CONVERSATION_PROFILE_ID } from '@boite/contracts';
 import type { AgentTask, GitChange, PanelSurface, Todo } from '@boite/contracts';
 import { connect } from './client.ts';
 import type { CoreClient } from './client.ts';
-import { CORE_VERSION } from './core.ts';
+import { CORE_VERSION } from './version.ts';
 import { resolveDataDir } from './paths.ts';
 import { agentCommand } from './agents/cli.ts';
 import { workflowCommand } from './workflow-cli.ts';

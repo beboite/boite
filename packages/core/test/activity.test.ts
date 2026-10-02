@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
+import type { ThreadActivity } from '@boite/contracts';
 import { Core } from '../src/core.ts';
 import { ActivityStore } from '../src/activity.ts';
 import { connect } from '../src/client.ts';
@@ -37,8 +38,12 @@ test.each([
 test('paused activity writes nothing when loaded or closed again', async () => {
   const client = await h.connect();
   const { threadId } = await echoThread(h, client);
+  const thread = h.core.journal.getThread(threadId)!;
+  for (let i = 0; i < 20; i++) h.core.journal.putThread({ ...thread, id: `without-activity-${i}` });
   let writes = 0;
   const original = h.core.journal.setSetting.bind(h.core.journal);
+  const read = h.core.journal.getSetting.bind(h.core.journal);
+  const activityReads: string[] = [];
   h.core.journal.setSetting = (key, value) => {
     if (key.startsWith('activity:')) writes += 1;
     original(key, value);
@@ -50,12 +55,14 @@ test('paused activity writes nothing when loaded or closed again', async () => {
     expect(before).toBeGreaterThan(0);
     h.core.activity.close();
     expect(writes).toBe(before);
+    h.core.journal.getSetting = key => { if (key.startsWith('activity:')) activityReads.push(key); return read(key); };
     const loaded = new ActivityStore(h.core);
     loaded.close();
+    expect(activityReads).toEqual([`activity:${threadId}`]);
     expect(writes).toBe(before);
     // The state lives in its settings row only: no event row carries it again.
     expect((h.core.journal.db.query("SELECT COUNT(*) AS n FROM events WHERE type = 'thread.activity'").get() as { n: number }).n).toBe(0);
-  } finally { h.core.journal.setSetting = original; }
+  } finally { h.core.journal.setSetting = original; h.core.journal.getSetting = read; }
 });
 
 test('starting a turn does not decode historical messages to read its prompt', async () => {
@@ -174,12 +181,55 @@ test('restart preserves tasks and pauses persisted active work', async () => {
   const client = await h.connect();
   const { threadId } = await echoThread(h, client);
   h.core.journal.setSetting(`activity:${threadId}`, { goal: { objective: 'later', status: 'active', iterations: 3, error: null }, loop: null, tasks: [{ id: 'a', text: 'Saved task', status: 'pending' }] });
+  const thread = h.core.journal.getThread(threadId)!;
+  h.core.journal.putThread({ ...thread, id: 'completed' });
+  const completed: ThreadActivity = { goal: { objective: 'done', status: 'complete', iterations: 2, error: null, dismissed: true }, loop: null, tasks: [{ id: 'done', text: 'Finished task', status: 'completed' }], tasksDismissed: true };
+  h.core.journal.setSetting('activity:completed', completed);
+  h.core.journal.putThread({ ...thread, id: 'archived-loop', archived: true });
+  h.core.journal.setSetting('activity:archived-loop', { goal: null, loop: { prompt: 'interrupted', status: 'active', iterations: 1, intervalMs: 1000, maxIterations: 2, nextRunAt: 123, error: null, history: [{ iteration: 1, turnId: 'interrupted', status: 'running', summary: '', startedAt: 100, finishedAt: null }] }, tasks: [] });
+  const deleted = { ...thread, id: 'deleted' };
+  h.core.journal.putThread(deleted);
+  h.core.journal.stageThreadDeletion(deleted.id, [deleted]);
+  for (const id of ['deleted', 'orphan']) h.core.journal.db.query('INSERT INTO settings VALUES (?, ?)').run(`activity:${id}`, '{');
   const restarted = new Core({ dataDir: h.dataDir, token: h.token });
   try {
     expect(restarted.activity.get(threadId).goal?.status).toBe('paused');
     expect(restarted.activity.get(threadId).goal?.iterations).toBe(3);
     expect(restarted.activity.get(threadId).tasks[0]?.text).toBe('Saved task');
+    expect(restarted.activity.get('completed')).toEqual(completed);
+    expect(restarted.activity.get('archived-loop').loop).toMatchObject({ status: 'paused', nextRunAt: null, error: 'Core restarted. Resume to continue.', history: [{ status: 'error', summary: 'Core restarted before this iteration finished.' }] });
+    expect(restarted.activity.get('archived-loop').loop?.history?.[0]?.finishedAt).toBeGreaterThan(100);
+    expect(restarted.activity.get('deleted')).toEqual({ goal: null, loop: null, tasks: [] });
+    expect(restarted.activity.get('orphan')).toEqual({ goal: null, loop: null, tasks: [] });
   } finally { await restarted.close(); }
+});
+
+test('restart preserves thread JSON error precedence and recovery writes before a later corrupt activity row', async () => {
+  const client = await h.connect();
+  const { threadId } = await echoThread(h, client);
+  const thread = h.core.journal.getThread(threadId)!;
+  h.core.journal.putThread({ ...thread, id: 'later' });
+  const deep = '['.repeat(1100) + '0' + ']'.repeat(1100);
+  h.core.journal.db.query('UPDATE threads SET context = ? WHERE id = ?').run(deep, threadId);
+  h.core.journal.setSetting(`activity:${threadId}`, { goal: { objective: 'recover first', status: 'active', iterations: 3, error: null }, loop: null, tasks: [] });
+  h.core.journal.db.query('INSERT INTO settings VALUES (?, ?)').run('activity:later', '{');
+  const write = h.core.journal.setSetting.bind(h.core.journal);
+  const recovered: string[] = [];
+  h.core.journal.setSetting = (key, value) => { if (key.startsWith('activity:')) recovered.push(key); write(key, value); };
+  try {
+    for (const invalid of ['{', new TextEncoder().encode('{}')]) {
+      h.core.journal.db.query('UPDATE threads SET context = ? WHERE id = ?').run(typeof invalid === 'string' ? deep : null, threadId);
+      for (const [field, location] of [['context', 'context'], ['prompt_cache', 'prompt_cache'], ['title_state', 'title_state']] as const) {
+        h.core.journal.db.query(`UPDATE threads SET ${field} = ? WHERE id = ?`).run(invalid, 'later');
+        expect(() => new ActivityStore(h.core)).toThrow(`invalid JSON in threads.${location} of later`);
+        expect(recovered).toEqual([]);
+        h.core.journal.db.query(`UPDATE threads SET ${field} = NULL WHERE id = ?`).run('later');
+      }
+    }
+    expect(() => new ActivityStore(h.core)).toThrow('invalid JSON in settings.value row activity:later');
+    expect(recovered).toEqual([`activity:${threadId}`]);
+    expect(h.core.journal.getSetting(`activity:${threadId}`)).toMatchObject({ goal: { status: 'paused', error: 'Core restarted. Resume to continue.' } });
+  } finally { h.core.journal.setSetting = write; }
 });
 
 test('invalid intervals and empty objectives are refused without mutations', async () => {

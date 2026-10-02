@@ -119,6 +119,8 @@ and byte totals cover observed intervals while collection is active, not the
 agent's entire lifetime. Short processes or connections can escape observation;
 UDP traffic and protocol overhead are outside these TCP counters. Disk activity
 does not describe folder size.
+A failed TCP dump displays unavailable; a later valid reading can recover the
+actual byte delta only when the socket and process identities still match.
 
 Windows supplies job CPU and memory measurements. macOS supplies readable
 physical footprint measurements, with CPU unavailable. Storage and network

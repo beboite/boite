@@ -273,6 +273,16 @@ export class Journal {
     return rows.map(toThread);
   }
 
+  /** Keep full hydration's corruption errors before startup recovery writes. */
+  validateVisibleThreadJson(): void {
+    // SQLite's JSON depth and storage-type rules differ from the JavaScript row parser.
+    const candidates = this.db.query(`SELECT id FROM threads WHERE id NOT IN (SELECT thread_id FROM thread_deletions)
+      AND ((context IS NOT NULL AND (typeof(context) <> 'text' OR NOT json_valid(context)))
+        OR (prompt_cache IS NOT NULL AND (typeof(prompt_cache) <> 'text' OR NOT json_valid(prompt_cache)))
+        OR (title_state IS NOT NULL AND title_state <> '' AND (typeof(title_state) <> 'text' OR NOT json_valid(title_state)))) ORDER BY rowid`).all() as { id: string }[];
+    for (const thread of candidates) this.getThread(thread.id);
+  }
+
   deleteThreadsOfProject(projectId: string): string[] {
     const rows = this.db.query('SELECT id FROM threads WHERE project_id = ?').all(projectId) as { id: string }[];
     const ids = rows.map(row => row.id);

@@ -13,7 +13,7 @@
     "dev": "bun run --watch src/main.ts",
     "build": "bun run bin/clean.ts && bun build src/main.ts src/artifact-retention-worker.ts src/platform/windows/jobs-worker.ts src/platform/windows/guard-worker.ts --target bun '--env=BOITE_RELEASE_*' --outdir dist --splitting --sourcemap=none --entry-naming [name].[ext] --minify-whitespace --minify-syntax && bun build src/platform/linux-tcp-worker.ts --target bun --outfile dist/linux-tcp-worker.js --minify-whitespace --minify-syntax",
     "build:exe": "bun run build && bun run bin/compile.ts",
-    "build:linux": "bun run build && bun ../../scripts/ci/bun-version.ts \"the Linux core\" && bun build --compile --target=bun-linux-x64-baseline '--env=BOITE_RELEASE_*' --minify-whitespace --minify-syntax src/main.ts src/artifact-retention-worker.ts src/platform/linux-tcp-worker.ts --outfile dist/boite-core-linux-x64 && bun run bin/stage-cli.ts",
+    "build:linux": "bun run build && bun ../../scripts/ci/bun-version.ts \"the Linux core\" && bun build --compile --target=bun-linux-x64-baseline '--env=BOITE_RELEASE_*' --minify-whitespace --minify-syntax src/compiled-main.ts src/artifact-retention-worker.ts src/platform/linux-tcp-worker.ts --outfile dist/boite-core-linux-x64 && bun run bin/stage-cli.ts",
     "check": "tsc -p tsconfig.json",
     "test": "bun run bin/test.ts",
     "test:serial": "bun run bin/test.ts --workers 1"

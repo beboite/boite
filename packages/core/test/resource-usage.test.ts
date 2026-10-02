@@ -78,15 +78,25 @@ describe('resource sampling demand and identity', () => {
   });
 
   test('a registered root PID reused before exit reconciliation does not acquire the replacement process', () => {
-    const files = new Map([['/proc', '10'], ['/proc/10/stat', stat(10)], ['/proc/10/status', 'RssAnon: 10 kB\n']]);
+    const files = new Map([['/proc', '10'], ['/proc/10/stat', stat(10)], ['/proc/10/status', 'RssAnon: 10 kB\n'],
+      ['/proc/10/task', '10'], ['/proc/10/task/10/stat', stat(10)], ['/proc/10/task/10/io', 'read_bytes: 100\nwrite_bytes: 200\n']]);
     let now = 1000;
     const load = new LinuxLoad(2, path => files.get(path) ?? null, () => now);
+    load.watchResources(true);
     load.add('agent', 10);
     expect(load.sample('agent')?.memoryBytes).toBe(10 * 1024);
+    files.set('/proc/10/task/10/io', 'read_bytes: 200\nwrite_bytes: 300\n');
+    now += 1000;
+    expect(load.sample('agent')?.resources?.disk).toMatchObject({ writeBytes: 100, writeBytesPerSecond: 100 });
     files.set('/proc/10/stat', stat(10, 1, 200));
     files.set('/proc/10/status', 'RssAnon: 100000 kB\n');
     now += 1000;
     expect(load.sample('agent')).toBeNull();
+    files.set('/proc/10/stat', stat(10));
+    files.set('/proc/10/task/10/io', 'read_bytes: 1000\nwrite_bytes: 2000\n');
+    now += 1000;
+    expect(load.sample('agent')?.resources?.disk).toMatchObject({ writeBytes: 0, writeBytesPerSecond: null, since: now });
+    load.watchResources(false);
   });
 
   test('a replacement descendant with the same PID cannot contribute the previous child CPU delta', () => {
@@ -131,6 +141,13 @@ test('paired resource usage is sanitized, read-only and unavailable to agent tok
     if (process.platform === 'linux') {
       await waitFor(() => (harness.core.procs.resourceUsage().agents.find(row => row.threadId === threadId)?.disk.writeBytesPerSecond ?? 0) > 0, 5000);
       expect(harness.core.procs.resourceUsage().agents.find(row => row.threadId === threadId)?.disk).toMatchObject({ coverage: 'partial', source: 'linux-proc-io' });
+      const unreadable = spyOn(processPlatform, 'sample').mockReturnValue(null);
+      try {
+        await waitFor(() => harness.core.procs.resourceUsage().agents.find(row => row.threadId === threadId)?.loadAvailable?.memory === false, 5000);
+        const unavailable = (await phone.call('resources.usage', {})).agents.find(row => row.threadId === threadId)!;
+        expect(unavailable.disk).toMatchObject({ coverage: 'unavailable', writeBytesPerSecond: null });
+        expect(unavailable.network).toMatchObject({ coverage: 'unavailable', writeBytesPerSecond: null });
+      } finally { unreadable.mockRestore(); }
       await owner.call('resources.usage', { watch: true });
       await phone.call('resources.usage', { watch: false });
       expect(watchSpy?.mock.calls.at(-1)?.[0]).toBe(true);

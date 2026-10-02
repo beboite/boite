@@ -11,7 +11,7 @@
   import ProviderLogo from './ProviderLogo.svelte';
   import StatusMark from './StatusMark.svelte';
 
-  let { store }: { store: Store } = $props();
+  let { store, onopenthread }: { store: Store; onopenthread?: () => void } = $props();
   let snapshot = $state.raw<AgentResourceSnapshot | null>(null);
   let error = $state<string | null>(null);
   let unsupported = $state(false);
@@ -125,7 +125,7 @@
     <section class="card agent" data-testid="task-manager-agent" data-thread-id={entry.threadId}>
       <div class="identity">
         <ProviderLogo providerId={entry.providerId} size={20} />
-        <button class="quiet title" onclick={() => void store.open(entry.threadId)}><span>{entry.title}</span><small>{store.providers.find(row => row.id === entry.providerId)?.name ?? entry.providerId}{entry.model ? ` · ${entry.model}` : ''}</small></button>
+        <button class="quiet title" onclick={() => { const owner = store; onopenthread?.(); void owner.open(entry.threadId); }}><span>{entry.title}</span><small>{store.providers.find(row => row.id === entry.providerId)?.name ?? entry.providerId}{entry.model ? ` · ${entry.model}` : ''}</small></button>
         <StatusMark status={entry.status} />
         <span class="status">{strings.threadStatus[entry.status]}</span>
       </div>

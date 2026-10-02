@@ -97,6 +97,9 @@ in memory only after the queued prompt commits.
 Scheduler notifications publish the newest snapshot in each 16-millisecond
 window. Other events go out as soon as their storage writes commit.
 `scheduler.get` always reads the current state.
+The core constructs one snapshot per microtask batch. Enqueue checks the new
+turn; settings changes and completions reconsider the held queue. Queued
+diagnostics remain ordered before start, stop and drain.
 Sidebar pull-request lookups share requests for the same thread and run four
 at a time per client. A manual refresh goes ahead of background lookups, so
 mounting or remounting thousands of rows cannot flood the RPC connection.
@@ -114,8 +117,13 @@ two-second refresh does not sample processes itself. Linux TCP collection uses
 one lazy Worker, outside the core event loop, while any visible client holds a
 lease. Transport failure preserves that demand and retries on existing sample
 ticks with bounded backoff; a missing Worker response has a two-second deadline.
-Recovered counters start a new observation interval rather than inventing the
-bytes transferred during the gap.
+Worker transport recovery starts a new observation interval.
+A failed native TCP dump displays unavailable. If the next valid dump has the
+same socket and process identities, its actual counter delta spans the elapsed
+interval since the last valid reading.
+Linux load samples share the registered-root ownership index until a process
+is added or removed. A missing sample discards its detailed resource baseline,
+so a returning process starts a new interval.
 
 Merged-PR archive maintenance inspects at most 128 thread rowids per pass and
 admits at most eight proof lookups. Its cursor advances over blocked roots,
@@ -273,6 +281,17 @@ The service worker still asks the core for the app shell first, but waits
 next open.
 
 ## Core startup
+
+The entry loads the CLI for commands and the Core/server graph for server
+startup. Version metadata lives in `packages/core/src/version.ts`.
+The compiled launcher awaits the main module before dispatch, including with
+ESM bytecode. `packages/core/test/main-entry.test.ts` checks command imports,
+port refusal, the compiled binary and graceful lock release.
+
+Activity restoration selects threads with saved activities. Coordination
+recovery selects active threads and threads with potentially pending letters.
+Both validate visible thread JSON before recovery and retain the original
+error order, archived-thread handling and recovery writes.
 
 Claude and ACP join the other native drivers behind a lazy factory. Listing
 providers, capabilities or cached models does not load their protocol runtime.

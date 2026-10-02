@@ -1,73 +1,59 @@
-import { expect, test, vi } from 'vitest';
+import { expect, vi } from 'vitest';
+import { test } from '../test/fake-client';
 import { flushSync } from 'svelte';
 import { FakeClient } from './fake-client';
-import { Store } from './store.svelte';
 import { RpcErrorCode, type RpcResult } from '@boite/contracts';
 import { RpcFailure } from './client';
 import { strings } from './strings';
-
-async function ready(delayMs = 0) {
-  const store = new Store();
-  const client = new FakeClient({ delayMs });
-  store.attach(client);
-  await store.connect();
-  return { store, client };
-}
 
 const queued = (text: string, paused = false) => ({
   text: '', attachments: [], queued: [{ text, attachments: [] }], sending: false, paused
 });
 
-test('queues belong to their Store even when another machine has the same thread id', async () => {
+test('queues belong to their Store even when another machine has the same thread id', async ({ ready }) => {
   const first = await ready();
   const second = await ready();
   const firstCalls = vi.spyOn(first.client, 'call');
   const secondCalls = vi.spyOn(second.client, 'call');
-  try {
-    first.store.composerStates['t-trace'] = queued('First machine');
-    second.store.composerStates['t-trace'] = queued('Second machine');
-    await vi.waitFor(() => {
-      expect(first.store.composerStates['t-trace']?.queued).toHaveLength(0);
-      expect(second.store.composerStates['t-trace']?.queued).toHaveLength(0);
-      expect(first.store.composerStates['t-trace']?.sending).toBe(false);
-      expect(second.store.composerStates['t-trace']?.sending).toBe(false);
-    });
-    expect(firstCalls.mock.calls.filter(([method]) => method === 'turns.start')).toEqual([
-      ['turns.start', expect.objectContaining({ threadId: 't-trace', prompt: 'First machine' })]
-    ]);
-    expect(secondCalls.mock.calls.filter(([method]) => method === 'turns.start')).toEqual([
-      ['turns.start', expect.objectContaining({ threadId: 't-trace', prompt: 'Second machine' })]
-    ]);
-    expect(first.store.openThread).toBeNull();
-    expect(second.store.openThread).toBeNull();
-  } finally {
-    first.store.detach(); first.client.close();
-    second.store.detach(); second.client.close();
-  }
+  first.store.composerStates['t-trace'] = queued('First machine');
+  second.store.composerStates['t-trace'] = queued('Second machine');
+  await vi.waitFor(() => {
+    expect(first.store.composerStates['t-trace']?.queued).toHaveLength(0);
+    expect(second.store.composerStates['t-trace']?.queued).toHaveLength(0);
+    expect(first.store.composerStates['t-trace']?.sending).toBe(false);
+    expect(second.store.composerStates['t-trace']?.sending).toBe(false);
+  });
+  expect(firstCalls.mock.calls.filter(([method]) => method === 'turns.start')).toEqual([
+    ['turns.start', expect.objectContaining({ threadId: 't-trace', prompt: 'First machine' })]
+  ]);
+  expect(secondCalls.mock.calls.filter(([method]) => method === 'turns.start')).toEqual([
+    ['turns.start', expect.objectContaining({ threadId: 't-trace', prompt: 'Second machine' })]
+  ]);
+  expect(first.store.openThread).toBeNull();
+  expect(second.store.openThread).toBeNull();
 });
 
-test('paused, archived and detached queues never send automatically', async () => {
+test('paused, archived and detached queues never send automatically', async ({ ready }) => {
   const { store, client } = await ready();
   const calls = vi.spyOn(client, 'call');
-  try {
-    store.composerStates['t-trace'] = queued('Restored queue', true);
-    store.threads.find(row => row.id === 't-descriptors')!.archived = true;
-    store.composerStates['t-descriptors'] = queued('Archived queue');
-    flushSync();
-    expect(calls.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(0);
-    store.detach();
-    store.composerStates['t-trace']!.paused = false;
-    store.threads.find(row => row.id === 't-descriptors')!.archived = false;
-    flushSync();
-    expect(store.composerStates['t-trace']!.queued).toHaveLength(1);
-    expect(store.composerStates['t-descriptors']!.queued).toHaveLength(1);
-    expect(calls.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(0);
-  } finally { store.detach(); client.close(); }
+  store.composerStates['t-trace'] = queued('Restored queue', true);
+  store.threads.find(row => row.id === 't-descriptors')!.archived = true;
+  store.composerStates['t-descriptors'] = queued('Archived queue');
+  flushSync();
+  expect(calls.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(0);
+  store.detach();
+  store.composerStates['t-trace']!.paused = false;
+  store.threads.find(row => row.id === 't-descriptors')!.archived = false;
+  flushSync();
+  expect(store.composerStates['t-trace']!.queued).toHaveLength(1);
+  expect(store.composerStates['t-descriptors']!.queued).toHaveLength(1);
+  expect(calls.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(0);
 });
 
-test.each([['replacement', 'busy'], ['restored', 'busy'], ['replacement', 'error'], ['restored', 'error']] as const)('a late refusal from the former client cannot populate the %s session: %s', async (owner, refusal) => {
+test.for([['replacement', 'busy'], ['restored', 'busy'], ['replacement', 'error'], ['restored', 'error']] as const)('a late refusal from the former client cannot populate the %s session: %s', async ([owner, refusal], { ready, resources }) => {
   const { store, client } = await ready();
   const replacement = new FakeClient({ delayMs: 0 });
+  resources.push(() => replacement.close());
   let rejectSend!: (error: unknown) => void;
   const pending = new Promise<never>((_resolve, reject) => { rejectSend = reject; });
   const call = client.call.bind(client);
@@ -97,12 +83,13 @@ test.each([['replacement', 'busy'], ['restored', 'busy'], ['replacement', 'error
     expect(formerState).toMatchObject({ text: 'Former session prompt', paused: true });
     expect(store.threads.find(row => row.id === 't-trace')?.title).not.toBe('Former session');
     expect(replacementCalls.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(0);
-  } finally { store.detach(); client.close(); replacement.close(); }
+  } finally { store.detach(); }
 });
 
-test.each(['replacement', 'restored'] as const)('a late accepted batch stays sent after switching to the %s client lease', async owner => {
+test.for(['replacement', 'restored'] as const)('a late accepted batch stays sent after switching to the %s client lease', async (owner, { ready, resources }) => {
   const { store, client } = await ready();
   const replacement = new FakeClient({ delayMs: 0 });
+  resources.push(() => replacement.close());
   let acceptSend!: (result: RpcResult<'turns.start'>) => void;
   const pending = new Promise<RpcResult<'turns.start'>>(resolve => { acceptSend = resolve; });
   // Only the turn is delayed; connection metadata continues to use the fixture.
@@ -140,12 +127,13 @@ test.each(['replacement', 'restored'] as const)('a late accepted batch stays sen
     expect(state.text).toBe('Current unsent input');
     expect(store.promptFocus).toBe(focus);
     expect(calls.mock.calls.filter(([method, params]) => method === 'turns.start' && (params as { prompt: string }).prompt === 'Accepted first prompt\n\nAccepted second prompt')).toHaveLength(owner === 'restored' ? 2 : 1);
-  } finally { store.detach(); client.close(); replacement.close(); }
+  } finally { store.detach(); }
 });
 
-test.each(['replacement', 'restored'] as const)('a late accepted activity command cannot update the %s thread lease', async owner => {
+test.for(['replacement', 'restored'] as const)('a late accepted activity command cannot update the %s thread lease', async (owner, { ready, resources }) => {
   const { store, client } = await ready();
   const replacement = new FakeClient({ delayMs: 0 });
+  resources.push(() => replacement.close());
   let acceptCommand!: (result: RpcResult<'threads.activity.set'>) => void;
   const pending = new Promise<RpcResult<'threads.activity.set'>>(resolve => { acceptCommand = resolve; });
   const call = client.call.bind(client);
@@ -174,13 +162,14 @@ test.each(['replacement', 'restored'] as const)('a late accepted activity comman
     expect(currentState?.text).toBe('Current command input');
     expect(store.promptFocus).toBe(focus);
     expect(calls.mock.calls.filter(([method]) => method === 'threads.activity.set')).toHaveLength(1);
-  } finally { store.detach(); client.close(); replacement.close(); }
+  } finally { store.detach(); }
 });
 
 
-test.each(['prepare', 'update'] as const)('a stale selection %s continuation cannot start a turn after A-B-A attachment', async phase => {
+test.for(['prepare', 'update'] as const)('a stale selection %s continuation cannot start a turn after A-B-A attachment', async (phase, { ready, resources }) => {
   const { store, client } = await ready();
   const replacement = new FakeClient({ delayMs: 0 });
+  resources.push(() => replacement.close());
   const gate = deferred(), started = deferred();
   const call = vi.spyOn(client, 'call');
   const update = store.update.bind(store);
@@ -209,12 +198,13 @@ test.each(['prepare', 'update'] as const)('a stale selection %s continuation can
     expect(call.mock.calls.filter(([method]) => method === 'threads.update')).toHaveLength(phase === 'update' ? 1 : 0);
     expect(store.composerStates['t-trace']).toBe(currentState); expect(currentState?.text).toBe('Newer input');
     expect(store.promptFocus).toBeNull(); expect(store.error).toBeNull();
-  } finally { gate.resolve(); await sending; selection.mockRestore(); prepare.mockRestore(); apply.mockRestore(); store.detach(); client.close(); replacement.close(); }
+  } finally { gate.resolve(); await sending; selection.mockRestore(); prepare.mockRestore(); apply.mockRestore(); store.detach(); }
 });
 
-test.each(['accepted', 'unsupported', 'refused'] as const)('a late steer %s response cannot publish into a restored client lease', async result => {
+test.for(['accepted', 'unsupported', 'refused'] as const)('a late steer %s response cannot publish into a restored client lease', async (result, { ready, resources }) => {
   const { store, client } = await ready();
   const replacement = new FakeClient({ delayMs: 0 });
+  resources.push(() => replacement.close());
   let resolve!: (value: { accepted: boolean }) => void, reject!: (error: Error) => void;
   const pending = new Promise<{ accepted: boolean }>((yes, no) => { resolve = yes; reject = no; });
   const call = client.call.bind(client);
@@ -243,7 +233,7 @@ test.each(['accepted', 'unsupported', 'refused'] as const)('a late steer %s resp
     expect(store.composerStates['t-trace']).toBe(state); expect(state?.text).toBe('Current unsent steering input');
     expect(store.error).toBeNull();
     expect(spy.mock.calls.filter(([method, params]) => method === 'turns.steer' && (params as { prompt: string }).prompt === 'Original steering input')).toHaveLength(2);
-  } finally { resolve({ accepted: false }); await steering; spy.mockRestore(); store.detach(); client.close(); replacement.close(); }
+  } finally { resolve({ accepted: false }); await steering; spy.mockRestore(); store.detach(); }
 });
 
 function deferred() {
@@ -252,55 +242,49 @@ function deferred() {
   return { promise, resolve };
 }
 
-test('a completed tool sends queued input into the running turn even off screen', async () => {
-  const { store, client } = await ready(40);
+test('a completed tool sends queued input into the running turn even off screen', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 40 });
   const calls = vi.spyOn(client, 'call');
-  try {
-    await store.send('[tools] Keep working', 't-trace');
-    store.composerStates['t-trace'] = queued('Use the new instructions');
-    await store.open('t-parser');
-    await vi.waitFor(() => expect(calls.mock.calls.some(([method]) => method === 'turns.steer')).toBe(true));
-    await vi.waitFor(() => expect(store.composerStates['t-trace']?.queued).toHaveLength(0));
-    expect(store.threads.find(thread => thread.id === 't-trace')?.status).toBe('running');
-    expect(calls.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(0);
-    expect(calls.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(1);
-    const steered = calls.mock.calls.find(([method]) => method === 'turns.steer')![1];
-    expect(steered).toMatchObject({ threadId: 't-trace', prompt: 'Use the new instructions' });
-    const original = await client.call('threads.get', { threadId: 't-trace' });
-    expect(original.messages.filter(message => message.role === 'user').at(-1)).toMatchObject({ turnId: original.turns.at(-1)!.id });
-    expect(store.openThread!.id).toBe('t-parser');
-  } finally { store.detach(); client.close(); }
+  await store.send('[tools] Keep working', 't-trace');
+  store.composerStates['t-trace'] = queued('Use the new instructions');
+  await store.open('t-parser');
+  await vi.waitFor(() => expect(calls.mock.calls.some(([method]) => method === 'turns.steer')).toBe(true));
+  await vi.waitFor(() => expect(store.composerStates['t-trace']?.queued).toHaveLength(0));
+  expect(store.threads.find(thread => thread.id === 't-trace')?.status).toBe('running');
+  expect(calls.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(0);
+  expect(calls.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(1);
+  const steered = calls.mock.calls.find(([method]) => method === 'turns.steer')![1];
+  expect(steered).toMatchObject({ threadId: 't-trace', prompt: 'Use the new instructions' });
+  const original = await client.call('threads.get', { threadId: 't-trace' });
+  expect(original.messages.filter(message => message.role === 'user').at(-1)).toMatchObject({ turnId: original.turns.at(-1)!.id });
+  expect(store.openThread!.id).toBe('t-parser');
 });
 
-test('unsupported steering holds the queue until the running turn finishes', async () => {
-  const { store, client } = await ready(20);
+test('unsupported steering holds the queue until the running turn finishes', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 20 });
   const call = client.call.bind(client);
   const calls = vi.spyOn(client, 'call').mockImplementation((method, params) =>
     method === 'turns.steer' ? Promise.resolve({ accepted: false }) as ReturnType<typeof call> : call(method, params));
-  try {
-    await store.send('[tools]', 't-trace');
-    store.composerStates['t-trace'] = queued('After unsupported turn');
-    await vi.waitFor(() => expect(calls.mock.calls.some(([method]) => method === 'turns.steer')).toBe(true));
-    expect(store.composerStates['t-trace']?.queued).toHaveLength(1);
-    expect(store.composerStates['t-trace']?.paused).toBe(false);
-    await vi.waitFor(() => expect(calls.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(2));
-    expect(calls.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(0);
-  } finally { store.detach(); client.close(); }
+  await store.send('[tools]', 't-trace');
+  store.composerStates['t-trace'] = queued('After unsupported turn');
+  await vi.waitFor(() => expect(calls.mock.calls.some(([method]) => method === 'turns.steer')).toBe(true));
+  expect(store.composerStates['t-trace']?.queued).toHaveLength(1);
+  expect(store.composerStates['t-trace']?.paused).toBe(false);
+  await vi.waitFor(() => expect(calls.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(2));
+  expect(calls.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(0);
 });
 
-test('Send now explains an unsupported turn while retaining the queued input', async () => {
-  const { store, client } = await ready(40);
+test('Send now explains an unsupported turn while retaining the queued input', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 40 });
   await store.open('t-trace');
   const call = client.call.bind(client);
   vi.spyOn(client, 'call').mockImplementation((method, params) =>
     method === 'turns.steer' ? Promise.reject(new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: 'no turns.steer method' })) : call(method, params));
-  try {
-    await store.send('[tools] Keep working', 't-trace');
-    store.composerStates['t-trace'] = queued('Keep this input', true);
-    await store.sendQueuedNow('t-trace');
-    expect(store.error).toBe(strings.composer.queueNotAccepted);
-    expect(store.composerStates['t-trace']?.queued.map(entry => entry.text)).toEqual(['Keep this input']);
-    expect(store.composerStates['t-trace']?.sending).toBe(false);
-    expect(store.composerStates['t-trace']?.paused).toBe(false);
-  } finally { store.detach(); client.close(); }
+  await store.send('[tools] Keep working', 't-trace');
+  store.composerStates['t-trace'] = queued('Keep this input', true);
+  await store.sendQueuedNow('t-trace');
+  expect(store.error).toBe(strings.composer.queueNotAccepted);
+  expect(store.composerStates['t-trace']?.queued.map(entry => entry.text)).toEqual(['Keep this input']);
+  expect(store.composerStates['t-trace']?.sending).toBe(false);
+  expect(store.composerStates['t-trace']?.paused).toBe(false);
 });

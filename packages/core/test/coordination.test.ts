@@ -5,7 +5,7 @@ import { sign } from 'node:crypto';
 import { RpcErrorCode, type AgentAddress, type CoordinationConfig } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
-import { coordinationUrl, LETTER_RETENTION_MS, letterPrompt, SWEEP_PROBES } from '../src/coordination.ts';
+import { Coordination, coordinationUrl, LETTER_RETENTION_MS, letterPrompt, SWEEP_PROBES } from '../src/coordination.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
@@ -237,10 +237,55 @@ test('restart pauses pending work while existing idle threads stay reachable and
   h.core.coordination.configure(d, { ...brief, mode: 'off' });
   h.core.coordination.configure(e, { ...brief, remote: true });
   const id = h.core.coordination.identity().coreId;
-  await send(h, a, dest(h, b));
+  const letterBeforeRestart = await send(h, a, dest(h, b));
+  const recovering = [];
+  for (const status of ['queued', 'running', 'waiting'] as const) {
+    const threadId = (await echoThread(h, owner, `Interrupted ${status}`)).threadId;
+    h.core.journal.putThread({ ...h.core.threads.require(threadId), status });
+    recovering.push(threadId);
+  }
+  const archived = (await echoThread(h, owner, 'Archived interrupted')).threadId;
+  h.core.journal.putThread({ ...h.core.threads.require(archived), status: 'waiting', archived: true });
+  const resident = (await echoThread(h, owner, 'Persistent identity')).threadId;
+  h.core.journal.putThread({ ...h.core.threads.require(resident), status: 'waiting', agentSessionId: 'restart-resident' });
+  const deleted = (await echoThread(h, owner, 'Deleted interrupted')).threadId;
+  h.core.journal.putThread({ ...h.core.threads.require(deleted), status: 'waiting' });
+  h.core.journal.db.query('INSERT INTO thread_deletions (thread_id, root_id, archived, deleted_at) VALUES (?, ?, ?, ?)').run(deleted, deleted, 0, Date.now());
+  const pending = [];
+  for (const status of ['queued', 'uncertain'] as const) {
+    const threadId = (await echoThread(h, owner, `Pending ${status}`)).threadId;
+    h.core.coordination.pause(threadId);
+    const letter = await send(h, a, dest(h, threadId));
+    h.core.journal.db.query("UPDATE coordination_letters SET status = ?, data = json_set(data, '$.status', ?, '$.error', ?) WHERE id = ?")
+      .run(status, status, status === 'uncertain' ? 'Queued for provider delivery' : null, letter.id);
+    pending.push({ threadId, letterId: letter.id, status });
+  }
+  for (let i = 0; i < 32; i++) await echoThread(h, owner, `Unrelated idle ${i}`);
+  const deep = '['.repeat(1100) + '0' + ']'.repeat(1100);
+  const deepConfig = JSON.stringify(brief).slice(0, -1) + ',"extension":' + deep + '}';
+  h.core.journal.db.query('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(`coordination:${a}`, deepConfig);
   await h.server.stop(); await h.core.close();
+  const configReads = spyOn(Coordination.prototype, 'config');
+  restores.push(() => configReads.mockRestore());
   const reopened = new Core({ dataDir: h.dataDir, token: h.token });
+  const restartConfigIds = configReads.mock.calls.map(([threadId]) => threadId);
+  configReads.mockRestore();
   try {
+    expect(restartConfigIds).toEqual([a, b, ...recovering, archived, resident, ...pending.map(item => item.threadId)]);
+    expect(reopened.coordination.config(archived).paused).toBe(true);
+    expect(reopened.coordination.config(resident)).toEqual({ mode: 'off', resources: '', remote: false, paused: false });
+    expect(reopened.journal.getSetting(`coordination:${deleted}`)).toBeUndefined();
+    for (const item of pending) {
+      expect(reopened.coordination.get(item.threadId).config.paused).toBe(true);
+      expect(reopened.coordination.get(item.threadId).messages).toContainEqual(expect.objectContaining({ id: item.letterId, status: item.status }));
+      expect(reopened.coordination.get(item.threadId).wakes).toBe(0);
+    }
+    for (const threadId of recovering) {
+      expect(reopened.coordination.get(threadId).config.paused).toBe(true);
+      expect(reopened.coordination.get(threadId).wakes).toBe(0);
+    }
+    expect(reopened.coordination.get(b).messages[0]?.id).toBe(letterBeforeRestart.id);
+    expect(reopened.coordination.get(b).messages[0]?.status).toBe('received');
     expect(reopened.coordination.get(b).self.coreId).toBe(id);
     expect(reopened.coordination.get(b).config.paused).toBe(true);
     expect(reopened.coordination.get(b).messages).toHaveLength(1);
@@ -252,6 +297,44 @@ test('restart pauses pending work while existing idle threads stay reachable and
     await waitFor(() => reopened.coordination.get(e).messages.find(m => m.id === letter.id)?.status === 'delivered');
     expect(reopened.coordination.get(e).wakes).toBe(1);
   } finally { await reopened.close(); }
+});
+
+test('restart selection refuses corrupt visible thread state and saved coordination config', async () => {
+  const { h, a, b } = await setup();
+  for (const field of ['context', 'prompt_cache', 'title_state']) {
+    const saved = h.core.journal.db.query(`SELECT ${field} AS value FROM threads WHERE id = ?`).get(a) as { value: string | null };
+    try {
+      h.core.journal.db.query(`UPDATE threads SET ${field} = ? WHERE id = ?`).run('{', a);
+      expect(() => new Coordination(h.core)).toThrow(`invalid JSON in threads.${field} of ${a}`);
+    } finally { h.core.journal.db.query(`UPDATE threads SET ${field} = ? WHERE id = ?`).run(saved.value, a); }
+  }
+  enable(h, a);
+  h.core.journal.db.query("UPDATE threads SET status = 'waiting' WHERE id = ?").run(a);
+  const deepConfig = JSON.stringify(brief).slice(0, -1) + ',"extension":' + '['.repeat(1100) + '0' + ']'.repeat(1100) + '}';
+  for (const invalid of ['{', new TextEncoder().encode('{}')]) {
+    const saved = typeof invalid === 'string' ? deepConfig : JSON.stringify(brief);
+    h.core.journal.db.query('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(`coordination:${a}`, saved);
+    h.core.journal.db.query('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(`coordination:${b}`, invalid);
+    let unexpected: Coordination | undefined;
+    try {
+      expect(() => { unexpected = new Coordination(h.core); }).toThrow(`invalid JSON in settings.value row coordination:${b}`);
+      expect(h.core.journal.getSetting(`coordination:${a}`)).toEqual({ ...JSON.parse(saved), paused: true });
+    } finally { await unexpected?.close(); }
+  }
+});
+
+test.each(['deleted', 'orphan'])('restart ignores malformed letters belonging to %s threads', async kind => {
+  const { h, a, b } = await setup(); enable(h, a, b);
+  h.core.coordination.pause(b);
+  const letter = await send(h, a, dest(h, b));
+  h.core.journal.db.query("UPDATE coordination_letters SET status = 'uncertain', data = '{' WHERE id = ? AND direction = 'in'").run(letter.id);
+  if (kind === 'deleted') h.core.journal.db.query('INSERT INTO thread_deletions (thread_id, root_id, archived, deleted_at) VALUES (?, ?, ?, ?)').run(b, b, 0, Date.now());
+  else h.core.journal.db.query("UPDATE coordination_letters SET thread_id = 'orphan' WHERE id = ? AND direction = 'in'").run(letter.id);
+  const recovered = new Coordination(h.core);
+  try {
+    expect(h.core.journal.getSetting(`coordination:${a}`)).toEqual({ ...brief, paused: true });
+    expect(h.core.journal.db.query("SELECT status, data FROM coordination_letters WHERE id = ? AND direction = 'in'").get(letter.id)).toEqual({ status: 'uncertain', data: '{' });
+  } finally { await recovered.close(); }
 });
 
 test('a paused recipient keeps messages pending, and expired messages never wake a provider', async () => {

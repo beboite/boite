@@ -515,7 +515,7 @@
       <!-- The notice gives way to Settings: the two cards side by side left
            Settings too narrow for its nav and its page. -->
       {#if store.page === 'settings'}
-        {#if SettingsShell}<SettingsShell {store} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
+        {#if SettingsShell}<SettingsShell {store} onopenthread={() => { mobileScreen = 'chat'; }} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
       {:else}
         <div class="notice framed">
           <h1>{strings.app.noEndpointTitle}</h1>
@@ -528,7 +528,7 @@
     {:else if store.page === 'agents' && experimentOn('resident-agents')}
       {#if AgentsPage}{#key store}<AgentsPage {store} />{/key}{:else}<p class="empty">{agentsLoadError || strings.app.loading}</p>{/if}
     {:else if store.page === 'settings'}
-      {#if SettingsShell}<SettingsShell {store} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
+      {#if SettingsShell}<SettingsShell {store} onopenthread={() => { mobileScreen = 'chat'; }} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
     {:else}
       <Sidebar {store} />
       {#if scrim.shown}

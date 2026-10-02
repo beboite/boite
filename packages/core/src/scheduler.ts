@@ -34,8 +34,9 @@ export class Scheduler {
   }
 
   enqueue(turn: Turn, accountId: AccountId): void {
-    this.queue.set(turn.id, { turnId: turn.id, threadId: turn.threadId, accountId, queuedAt: turn.queuedAt, reportedQueued: false });
-    this.pump();
+    const entry = { turnId: turn.id, threadId: turn.threadId, accountId, queuedAt: turn.queuedAt, reportedQueued: false };
+    this.queue.set(turn.id, entry);
+    this.pump([entry]);
     this.emitUpdated();
   }
 
@@ -80,11 +81,11 @@ export class Scheduler {
     await entry?.done;
   }
 
-  private pump(): void {
+  private pump(entries: Iterable<Entry> = this.queue.values()): void {
     if (this.core.stopping) return;
-    // Eligibility changes repump synchronously through onSettingsChanged.
-    // Map iteration also follows entries added or removed by a reentrant start.
-    for (const entry of this.queue.values()) {
+    // Settings and completions repump held entries; enqueue checks only its new turn.
+    // Broad Map iteration still follows a reentrant start's additions and removals.
+    for (const entry of entries) {
       if (!this.core.delegation.canRun(entry.threadId)
         || this.core.plugins.blocksAccount(entry.accountId)
         || this.running.has(entry.threadId)) continue;

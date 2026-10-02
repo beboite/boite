@@ -1,39 +1,32 @@
-import { afterEach, expect, test, vi } from 'vitest';
-import { FakeClient } from './fake-client';
+import { afterEach, expect, vi } from 'vitest';
+import { test } from '../test/fake-client';
 import { Store } from './store.svelte';
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-test('the draft the boot lands on reuses the project list of the boot, and a draft the user opens asks again', async () => {
-  const client = new FakeClient({ delayMs: 0 });
-  const store = new Store();
+test('the draft the boot lands on reuses the project list of the boot, and a draft the user opens asks again', async ({ createStore }) => {
+  const { store, client } = createStore({ delayMs: 0 });
   const asked = vi.spyOn(client, 'call');
   store.attach(client);
-  try {
-    await store.connect();
-    const lists = () => asked.mock.calls.filter(([method]) => method === 'projects.list').length;
-    expect(lists()).toBe(1);
+  await store.connect();
+  const lists = () => asked.mock.calls.filter(([method]) => method === 'projects.list').length;
+  expect(lists()).toBe(1);
 
-    await store.openLanding();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(store.draft).not.toBeNull();
-    expect(lists()).toBe(1);
+  await store.openLanding();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(store.draft).not.toBeNull();
+  expect(lists()).toBe(1);
 
-    // New thread pressed right away still asks, so a `git init` done meanwhile shows.
-    store.startDraft();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(lists()).toBe(2);
-  } finally {
-    store.detach();
-    client.close();
-  }
+  // New thread pressed right away still asks, so a `git init` done meanwhile shows.
+  store.startDraft();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(lists()).toBe(2);
 });
 
-test('archiving the open project lands elsewhere, and another client hears the flag', async () => {
-  const client = new FakeClient({ delayMs: 0 });
-  const store = new Store();
+test('archiving the open project lands elsewhere, and another client hears the flag', async ({ createStore }) => {
+  const { store, client } = createStore({ delayMs: 0 });
   const other = new Store();
   store.attach(client);
   other.attach(client);
@@ -54,16 +47,13 @@ test('archiving the open project lands elsewhere, and another client hears the f
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(other.projects.find((p) => p.id === 'p-boite')?.archived).toBeUndefined();
   } finally {
-    store.detach();
     other.detach();
-    client.close();
   }
 });
 
-test('worktree defaults follow the project on both clients and saved or explicit draft choices survive', async () => {
+test('worktree defaults follow the project on both clients and saved or explicit draft choices survive', async ({ createStore }) => {
   window.localStorage.clear();
-  const client = new FakeClient({ delayMs: 0 });
-  const store = new Store();
+  const { store, client } = createStore({ delayMs: 0 });
   const other = new Store();
   store.attach(client);
   other.attach(client);
@@ -95,6 +85,6 @@ test('worktree defaults follow the project on both clients and saved or explicit
     other.startDraft('p-boite');
     expect(other.draft?.worktree).toBe(false);
   } finally {
-    store.detach(); other.detach(); client.close();
+    other.detach();
   }
 });

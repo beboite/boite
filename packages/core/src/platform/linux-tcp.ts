@@ -108,8 +108,8 @@ export class LinuxTcp {
   }
 
   private unavailable(members: Map<string, LinuxResourceProcess[]>): void {
+    // A failed snapshot hides readings; the next stable socket counter spans the gap.
     for (const threadId of members.keys()) {
-      this.bytes.delete(threadId);
       this.latest.set(threadId, unavailableResourceBytes('Per-agent TCP diagnostics unavailable or bounded work exceeded'));
     }
   }

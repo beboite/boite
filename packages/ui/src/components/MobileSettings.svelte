@@ -21,7 +21,7 @@
   import AutoCompactSettings from './AutoCompactSettings.svelte';
   import InfoTip from './InfoTip.svelte';
 
-  let { store }: { store: Store } = $props();
+  let { store, onopenthread }: { store: Store; onopenthread?: () => void } = $props();
   let phone = $state(false);
   /**
    * The phone has no General page, so the archive, which lives there on the
@@ -145,7 +145,7 @@
       {:else if page === 'limits'}
         <LimitsPage {store} />
       {:else if page === 'task-manager'}
-        <TaskManagerLoader {store} />
+        <TaskManagerLoader {store} {onopenthread} />
       {:else if page === 'resources' && store.owner}
         <ResourcesPage {store} />
       {:else if page === 'experiments'}

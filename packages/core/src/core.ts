@@ -5,7 +5,7 @@ import { hostname } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { PROTOCOL_VERSION } from '@boite/contracts';
 import type { Channel, CoreInfo, CoreLogContext, ThreadId } from '@boite/contracts';
-import pkg from '../package.json';
+import { CORE_VERSION } from './version.ts';
 import { AccountStore } from './accounts.ts';
 import { AgentStore } from './agents/store.ts';
 import { AgentRuntime } from './agents/runtime.ts';
@@ -49,7 +49,7 @@ import { HookLedger } from './hooks.ts';
 import { TerminalStore } from './terminals.ts';
 import { ServerUpdates, type ServerUpdateOptions } from './server-update.ts';
 
-export const CORE_VERSION: string = pkg.version;
+export { CORE_VERSION } from './version.ts';
 
 /** The server tells the core which threads a live socket is watching, and closes sockets on request. */
 export interface SubscriptionSink {

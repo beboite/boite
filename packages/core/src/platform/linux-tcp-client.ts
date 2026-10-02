@@ -11,7 +11,7 @@ export interface TcpWorkerHandle {
   terminate(): unknown;
 }
 const nativeWorker = (): TcpWorkerHandle =>
-  new Worker(workerEntry(import.meta.url, 'linux-tcp-worker', './src/platform/linux-tcp-worker.ts')) as unknown as TcpWorkerHandle;
+  new Worker(workerEntry(import.meta.url, 'linux-tcp-worker', './platform/linux-tcp-worker.js')) as unknown as TcpWorkerHandle;
 type Pending = { id: number; startedAt: number; members: Map<string, LinuxResourceProcess[]>; epochs: Map<string, number> };
 
 /** One demand-owned worker does procfs descriptor walks and native diagnostics off the core loop. */

@@ -1,17 +1,13 @@
-import { beforeEach, expect, test, vi } from 'vitest';
+import { beforeEach, expect, vi } from 'vitest';
+import { test } from '../test/fake-client';
 import type { ModelInfo } from '@boite/contracts';
 import { INITIAL_MODEL_DEFAULTS, MODEL_DEFAULTS_KEY, readModelDefaults, resolveModelDefault, writeModelDefaults } from './model-defaults';
-import { Store } from './store.svelte';
-import { FakeClient } from './fake-client';
 
 beforeEach(() => localStorage.clear());
 const levels = ['low', 'medium', 'high'].map((id) => ({ id, label: id }));
 
-test('a paired device discovers every available provider and the selected ACP model effort', async () => {
-  const client = new FakeClient({ delayMs: 0, principal: 'session' });
-  const store = new Store();
-  store.attach(client);
-  await store.connect();
+test('a paired device discovers every available provider and the selected ACP model effort', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0, principal: 'session' });
   try {
     expect(store.owner).toBe(false);
     for (const providerId of ['claude', 'codex', 'opencode', 'pi', 'grok', 'muse']) {
@@ -29,14 +25,11 @@ test('a paired device discovers every available provider and the selected ACP mo
     await store.probeModelEffort('opencode', 'a-opencode', models[0]!.id);
     expect(calls).toHaveBeenCalledWith('providers.probe', { providerId: 'opencode', accountId: 'a-opencode', model: models[0]!.id });
     expect(store.modelsOf('opencode', 'a-opencode')[0]?.effort?.default).toBe('high');
-  } finally { store.detach(); vi.restoreAllMocks(); }
+  } finally { vi.restoreAllMocks(); }
 });
 
-test('Claude never offers descriptor placeholders before discovery or after a failed read', async () => {
-  const client = new FakeClient({ delayMs: 0 });
-  const store = new Store();
-  store.attach(client);
-  await store.connect();
+test('Claude never offers descriptor placeholders before discovery or after a failed read', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0 });
   const provider = store.providerOf('claude')!;
   const account = store.accountsOf('claude')[0]!;
   provider.models = [{ id: 'placeholder', name: 'Placeholder model' }];
@@ -47,13 +40,11 @@ test('Claude never offers descriptor placeholders before discovery or after a fa
     await store.probeModels('claude', account.id);
     expect(store.modelsOf('claude', account.id)).toEqual([]);
     expect(store.isProbing('claude', account.id)).toBe(false);
-  } finally { store.detach(); calls.mockRestore(); warn.mockRestore(); }
+  } finally { calls.mockRestore(); warn.mockRestore(); }
 });
 
-test('an old default alias uses the configured target without changing an explicit model', async () => {
-  const store = new Store();
-  store.attach(new FakeClient({ delayMs: 0 }));
-  await store.connect();
+test('an old default alias uses the configured target without changing an explicit model', async ({ ready }) => {
+  const { store } = await ready({ delayMs: 0 });
   const account = store.accountsOf('codex')[0]!;
   const alias = { providerId: 'codex', accountId: account.id, model: 'default', effort: null, permissionMode: 'default' as const };
   expect(store.composerChoice(alias)).toMatchObject({ model: 'gpt-5.6-sol', effort: 'medium' });
@@ -61,14 +52,10 @@ test('an old default alias uses the configured target without changing an explic
   expect(store.composerChoice(explicit)).toEqual(explicit);
   store.setModelDefault('codex', account.id, 'default', null);
   expect(store.modelDefaults.codex).toBeUndefined();
-  store.detach();
 });
 
-test('sending on an old alias saves the named preset before starting the turn', async () => {
-  const client = new FakeClient({ delayMs: 0 });
-  const store = new Store();
-  store.attach(client);
-  await store.connect();
+test('sending on an old alias saves the named preset before starting the turn', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0 });
   const account = store.accountsOf('codex')[0]!;
   await store.probeModels('codex', account.id);
   store.setModelDefault('codex', account.id, 'codex-demo', 'high');
@@ -81,7 +68,6 @@ test('sending on an old alias saves the named preset before starting the turn', 
   expect(names.indexOf('threads.update')).toBeLessThan(names.indexOf('turns.start'));
   expect(store.openThread).toMatchObject({ model: 'codex-demo', effort: 'high' });
   expect(store.openThread!.turns.at(-1)?.execution).toMatchObject({ model: 'codex-demo', effort: 'high' });
-  store.detach();
 });
 
 test.each(Object.entries(INITIAL_MODEL_DEFAULTS))('resolves the requested %s default after the account offers it', (provider, choice) => {
@@ -101,11 +87,8 @@ test('persists an override and drops an effort the account no longer offers', ()
   expect(readModelDefaults()).toEqual({});
 });
 
-test('a configured default survives reconnect and wins over the previous thread model', async () => {
-  const client = new FakeClient({ delayMs: 0 });
-  const store = new Store();
-  store.attach(client);
-  await store.connect();
+test('a configured default survives reconnect and wins over the previous thread model', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0 });
   const provider = store.providerOf('claude')!;
   const account = store.accountsOf('claude')[0]!;
   await store.probeModels('claude', account.id);
@@ -117,18 +100,12 @@ test('a configured default survives reconnect and wins over the previous thread 
   store.startDraft(store.projects[0]!.id);
   expect(store.defaultChoice()).toMatchObject({ model: preferred.id, effort: 'medium', permissionMode: 'plan' });
   store.detach();
-  const next = new Store();
-  next.attach(new FakeClient({ delayMs: 0 }));
-  await next.connect();
+  const { store: next } = await ready({ delayMs: 0 });
   expect(next.defaultChoice()).toMatchObject({ model: preferred.id, effort: 'medium' });
-  next.detach();
 });
 
-test('the first ACP draft probes its default model scale and preserves a later explicit selection', async () => {
-  const client = new FakeClient({ delayMs: 0 });
-  const store = new Store();
-  store.attach(client);
-  await store.connect();
+test('the first ACP draft probes its default model scale and preserves a later explicit selection', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0 });
   const provider = store.providerOf('claude')!;
   provider.protocol = 'acp';
   provider.models = [{ id: 'default', name: 'Default', default: true }];
@@ -156,13 +133,10 @@ test('the first ACP draft probes its default model scale and preserves a later e
   expect(await store.prepareDraftChoice(store.defaultChoice()!)).toBeNull();
   expect(store.error).toContain('unavailable-model');
   call.mockRestore();
-  store.detach();
 });
 
-test('a cached remote model waits for the restarted core catalog before creating its thread', async () => {
-  const first = new Store();
-  first.attach(new FakeClient({ delayMs: 0 }));
-  await first.connect();
+test('a cached remote model waits for the restarted core catalog before creating its thread', async ({ ready }) => {
+  const { store: first } = await ready({ delayMs: 0 });
   const accountId = first.accountsOf('codex')[0]!.id;
   await first.probeModels('codex', accountId);
   const choice = { providerId: 'codex', accountId, model: 'codex-demo', effort: 'high', speed: 'fast', permissionMode: 'plan' as const };
@@ -170,10 +144,7 @@ test('a cached remote model waits for the restarted core catalog before creating
   first.detach();
 
   // The browser retains its catalog while a restarted remote core has none.
-  const client = new FakeClient({ delayMs: 0 });
-  const store = new Store();
-  store.attach(client);
-  await store.connect();
+  const { store, client } = await ready({ delayMs: 0 });
   expect(store.modelsOf('codex', accountId).some(model => model.id === choice.model)).toBe(true);
   store.startDraft(store.projects[0]!.id);
   store.remember(choice);
@@ -195,15 +166,11 @@ test('a cached remote model waits for the restarted core catalog before creating
     expect(store.openThread!.turns.at(-1)?.execution).toMatchObject(choice);
   } finally {
     release();
-    store.detach();
   }
 });
 
-test('a failed catalog read preserves the draft and its cached selection', async () => {
-  const client = new FakeClient({ delayMs: 0 });
-  const store = new Store();
-  store.attach(client);
-  await store.connect();
+test('a failed catalog read preserves the draft and its cached selection', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0 });
   const accountId = store.accountsOf('codex')[0]!.id;
   await store.probeModels('codex', accountId);
   const choice = { providerId: 'codex', accountId, model: 'codex-demo', effort: 'high', permissionMode: 'default' as const };
@@ -215,14 +182,10 @@ test('a failed catalog read preserves the draft and its cached selection', async
     if (method === 'providers.probe') throw new Error('remote catalog unavailable');
     return original(method, params);
   });
-  try {
-    expect(await store.submit('Keep this draft', choice)).toBe(false);
-    expect(store.error).toBe('remote catalog unavailable');
-    expect(store.draft).toBe(draft);
-    expect(store.draftChoice).toEqual(choice);
-    expect(calls.mock.calls.some(([method]) => method === 'threads.create' || method === 'turns.start')).toBe(false);
-    expect(store.modelsOf('codex', accountId).some(model => model.id === choice.model)).toBe(true);
-  } finally {
-    store.detach();
-  }
+  expect(await store.submit('Keep this draft', choice)).toBe(false);
+  expect(store.error).toBe('remote catalog unavailable');
+  expect(store.draft).toBe(draft);
+  expect(store.draftChoice).toEqual(choice);
+  expect(calls.mock.calls.some(([method]) => method === 'threads.create' || method === 'turns.start')).toBe(false);
+  expect(store.modelsOf('codex', accountId).some(model => model.id === choice.model)).toBe(true);
 });

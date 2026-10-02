@@ -122,6 +122,8 @@ function scanProc(read: ProcRead): Omit<ProcSnapshot, 'at'> {
 
 export class LinuxLoad {
   readonly #pids = new Map<string, Set<number>>();
+  /** Rebuilt in registry insertion order, so duplicate roots retain the same winner. */
+  #owners: Map<number, string> | null = null;
   readonly #births = new Map<string, Map<number, number | null>>();
   /** The thread's CPU ticks at its previous sample, per pid, and when that was. */
   readonly #last = new Map<string, { ticks: Map<number, number>; births: Map<number, number | null>; at: number }>();
@@ -189,6 +191,7 @@ export class LinuxLoad {
       this.#pids.set(threadId, pids);
     }
     pids.add(pid);
+    this.#owners = null;
     let births = this.#births.get(threadId);
     if (births === undefined) { births = new Map(); this.#births.set(threadId, births); }
     const stat = this.read(`/proc/${pid}/stat`);
@@ -199,6 +202,7 @@ export class LinuxLoad {
     const pids = this.#pids.get(threadId);
     if (pids === undefined) return;
     pids.delete(pid);
+    this.#owners = null;
     this.#births.get(threadId)?.delete(pid);
     if (pids.size > 0) return;
     this.#pids.delete(threadId);
@@ -223,8 +227,12 @@ export class LinuxLoad {
     const scan = this.#snapshot();
     const at = this.now();
     const pending = new Set(pids);
-    const owners = new Map<number, string>();
-    for (const [owner, roots] of this.#pids) for (const root of roots) owners.set(root, owner);
+    let owners = this.#owners;
+    if (owners === null) {
+      owners = new Map<number, string>();
+      for (const [owner, roots] of this.#pids) for (const root of roots) owners.set(root, owner);
+      this.#owners = owners;
+    }
     const members: LinuxResourceProcess[] = [];
     for (const pid of pending) {
       const status = this.read(`/proc/${pid}/status`);
@@ -250,7 +258,7 @@ export class LinuxLoad {
       // A separately registered agent owns its own subtree, even when nested.
       for (const child of this.#children(pid, scan)) if (!owners.has(child) || owners.get(child) === threadId) pending.add(child);
     }
-    if (processes === 0) return null;
+    if (processes === 0) { this.#resources.forget(threadId); return null; }
 
     const previous = this.#last.get(threadId);
     this.#last.set(threadId, { ticks, births: sampledBirths, at });

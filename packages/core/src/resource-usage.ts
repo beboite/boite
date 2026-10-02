@@ -79,6 +79,7 @@ export class ResourceCollection {
       memory: sample !== null && (sample.memoryMeasured ?? true),
     });
     if (this.active && sample?.resources) this.details.set(threadId, sample.resources);
+    else this.details.delete(threadId);
   }
 
   snapshot(live: ThreadId[], threadOf: (threadId: ThreadId) => ThreadSummary | null, loadOf: (threadId: ThreadId) => ThreadLoad | null): AgentResourceSnapshot {

@@ -85,6 +85,47 @@ describe('the procfs parsers', () => {
 });
 
 describe('a thread load on Linux', () => {
+  test('registered-root ownership work is shared until membership changes, preserving nested and duplicate roots', () => {
+    const proc = new FakeProc();
+    const roots = Array.from({ length: 16 }, (_, i) => 100 + i);
+    proc.files.set('/proc', roots.join(' '));
+    const load = new LinuxLoad(2, proc.read, proc.now);
+    for (const pid of roots) { proc.set(pid, 10, 0, 1000); load.add(`thread-${pid}`, pid); }
+    // The second registered agent is nested under the first, with its own child.
+    proc.files.set('/proc/101/stat', stat(101, 10, 0, 'agent', 100));
+    proc.files.set('/proc/999/stat', stat(999, 10, 0, 'child', 101));
+    proc.files.set('/proc/999/status', status(2000));
+    proc.files.set('/proc', `${roots.join(' ')} 999`);
+    const set = Map.prototype.set;
+    const admissions: [number, string][] = [];
+    const observed = spyOn(Map.prototype, 'set').mockImplementation(function (this: Map<unknown, unknown>, key: unknown, value: unknown) {
+      if (typeof key === 'number' && typeof value === 'string' && (value.startsWith('thread-') || value === 'duplicate') && roots.includes(key)) admissions.push([key, value]);
+      return set.call(this, key, value);
+    });
+    try {
+      for (const pid of roots) expect(load.sample(`thread-${pid}`)?.processes).toBe(pid === 101 ? 2 : 1);
+      expect(admissions).toHaveLength(roots.length);
+      expect(load.sample('thread-100')?.memoryBytes).toBe(1000 * 1024);
+      expect(admissions).toHaveLength(roots.length);
+      load.add('duplicate', 101);
+      admissions.length = 0;
+      expect(load.sample('thread-100')?.processes).toBe(1);
+      expect(admissions.filter(([pid]) => pid === 101)).toEqual([[101, 'thread-101'], [101, 'duplicate']]);
+      expect(load.sample('duplicate')?.memoryBytes).toBe(3000 * 1024);
+      load.remove('thread-101', 101);
+      load.add('thread-101', 101);
+      admissions.length = 0;
+      expect(load.sample('thread-100')?.processes).toBe(1);
+      expect(admissions.filter(([pid]) => pid === 101)).toEqual([[101, 'duplicate'], [101, 'thread-101']]);
+      load.remove('duplicate', 101);
+      load.remove('thread-101', 101);
+      expect(load.sample('thread-100')?.memoryBytes).toBe(4000 * 1024);
+      load.add('thread-101', 101);
+      expect(load.sample('thread-100')?.processes).toBe(1);
+      expect(load.sample('thread-101')?.processes).toBe(2);
+    } finally { observed.mockRestore(); }
+  });
+
   test('a parent scan that takes time does not seed CPU with ticks observed before the sample', () => {
     const proc = new FakeProc();
     proc.files.set('/proc', '100 200');
