@@ -90,13 +90,14 @@ export class TurnContexts {
       return { ...part, startedAt: seen.startedAt, finishedAt: seen.finishedAt };
     };
     /**
-     * A driver writes its whole answer under one message id. Input the user
-     * sends while the turn runs cuts that message: the next part the driver
-     * opens starts a new one, so the timeline shows the user's message where
-     * it arrived instead of under everything the turn wrote afterwards.
+     * A driver writes its whole answer under one message id. A user follow-up
+     * or published file cuts that message: new parts and continued text start
+     * after it, while existing tools keep their original cards.
      */
-    interface Segment { from: number; id: MessageId; open: boolean }
-    const answers = new Map<MessageId, { role: MessageRole; top: number; segments: Segment[] }>();
+    interface Segment { id: MessageId; open: boolean; next: number }
+    interface Slot { segment: Segment; partIndex: number; skip: number; length: number; type: MessagePart['type'] }
+    interface Answer { role: MessageRole; segments: Segment[]; parts: Map<number, Slot> }
+    const answers = new Map<MessageId, Answer>();
     const open = (role: MessageRole, after: number | undefined): MessageId => {
       const message: Message = {
         id: newId('msg_'),
@@ -105,7 +106,7 @@ export class TurnContexts {
         role,
         parts: [],
         state: 'streaming',
-        // Strictly after the user's message, even within the same millisecond.
+        // Strictly after the standalone message, even within the same millisecond.
         createdAt: Math.max(Date.now(), after === undefined ? 0 : after + 1),
       };
       this.core.journal.append({ type: 'message.started', threadId, version: 1, payload: message }, () => {
@@ -131,19 +132,44 @@ export class TurnContexts {
       close(segment, 'complete');
     };
     const route = (messageId: MessageId, partIndex: number): { segment: Segment | null; messageId: MessageId; partIndex: number } => {
-      const segment = answers.get(messageId)?.segments.findLast(one => one.from <= partIndex) ?? null;
-      return segment ? { segment, messageId: segment.id, partIndex: partIndex - segment.from } : { segment: null, messageId, partIndex };
+      const slot = answers.get(messageId)?.parts.get(partIndex);
+      return slot ? { segment: slot.segment, messageId: slot.segment.id, partIndex: slot.partIndex } : { segment: null, messageId, partIndex };
     };
-    const userInputAt = this.threads.runner.userInputAt;
+    const answerAfter = this.threads.runner.answerAfter;
+    const cut = (answer: Answer, after: number): Segment => {
+      answerAfter.delete(turn.id);
+      const previous = answer.segments.at(-1)!;
+      if (answer.parts.size === 0 || answer.role !== 'assistant') return previous;
+      const segment: Segment = { id: open(answer.role, after), open: true, next: 0 };
+      answer.segments.push(segment);
+      closeIdle(previous);
+      return segment;
+    };
+    const continueText = (driverId: MessageId, driverIndex: number, slot: Slot): Slot => {
+      const answer = answers.get(driverId)!;
+      const after = answerAfter.get(turn.id);
+      const segment = after === undefined ? answer.segments.at(-1)! : cut(answer, after);
+      const continued: Slot = { ...slot, segment, partIndex: segment.next++, skip: slot.skip + slot.length, length: 0 };
+      answer.parts.set(driverIndex, continued);
+      emit.part(driverId, driverIndex, { type: slot.type as 'text' | 'thinking', text: '' });
+      return continued;
+    };
     const emit: EmitSink = {
       startMessage: (role: MessageRole): MessageId => {
-        const after = userInputAt.get(turn.id);
-        userInputAt.delete(turn.id);
+        const after = answerAfter.get(turn.id);
+        answerAfter.delete(turn.id);
         const id = open(role, after);
-        answers.set(id, { role, top: -1, segments: [{ from: 0, id, open: true }] });
+        answers.set(id, { role, segments: [{ id, open: true, next: 0 }], parts: new Map() });
         return id;
       },
       delta: (driverId: MessageId, driverIndex: number, text: string): void => {
+        const answer = answers.get(driverId);
+        let slot = answer?.parts.get(driverIndex);
+        if (text.length && slot && (slot.type === 'text' || slot.type === 'thinking') && answer?.role === 'assistant'
+          && (answerAfter.has(turn.id) || slot.segment !== answer.segments.at(-1))) {
+          slot = continueText(driverId, driverIndex, slot);
+        }
+        if (slot) slot.length += text.length;
         const { messageId, partIndex } = route(driverId, driverIndex);
         const last = partProgress.get(`${messageId}:${partIndex}`);
         if (text.length) progress(last?.phase ?? 'working', last?.detail ?? null);
@@ -152,18 +178,17 @@ export class TurnContexts {
       },
       part: (driverId: MessageId, driverIndex: number, raw: MessagePart): void => {
         const answer = answers.get(driverId);
-        if (answer && driverIndex > answer.top) {
-          const after = userInputAt.get(turn.id);
-          if (after !== undefined) {
-            userInputAt.delete(turn.id);
-            // Nothing written yet: the message is created after the input anyway, or holds nothing to cut.
-            if (answer.top >= 0 && answer.role === 'assistant') {
-              const previous = answer.segments.at(-1)!;
-              answer.segments.push({ from: driverIndex, id: open(answer.role, after), open: true });
-              closeIdle(previous);
-            }
-          }
-          answer.top = driverIndex;
+        if (answer && !answer.parts.has(driverIndex)) {
+          const after = answerAfter.get(turn.id);
+          const segment = after === undefined ? answer.segments.at(-1)! : cut(answer, after);
+          answer.parts.set(driverIndex, { segment, partIndex: segment.next++, skip: 0, length: 0, type: raw.type });
+        }
+        let slot = answer?.parts.get(driverIndex);
+        if (slot && (raw.type === 'text' || raw.type === 'thinking')) {
+          if (answer?.role === 'assistant' && raw.text.length > slot.skip + slot.length
+            && (answerAfter.has(turn.id) || slot.segment !== answer.segments.at(-1))) slot = continueText(driverId, driverIndex, slot);
+          raw = { ...raw, text: raw.text.slice(slot.skip) };
+          slot.length = raw.text.length;
         }
         const { segment, messageId, partIndex } = route(driverId, driverIndex);
         const boundary = raw.type === 'tool' && raw.status !== 'running' && toolTimes.get(`${messageId}:${partIndex}`)?.finishedAt == null;

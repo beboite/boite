@@ -745,6 +745,38 @@ test('a press holds the pinned list, and a release the window never saw still fr
   client.close();
 });
 
+test('a keyboard step up leaves bottom-following even within its 80 pixel tolerance', async () => {
+  window.localStorage.clear();
+  const client = new FakeClient({ delayMs: 0, long: true });
+  const live = new Store();
+  live.attach(client);
+  try {
+    await live.connect(); await live.open('t-long');
+    const messages = live.openThread!.messages;
+    stubLayout(messages.length * ESTIMATE);
+    running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages } });
+    await settle();
+    const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+    timeline.scrollTop = scrollHeight - VIEW_HEIGHT;
+    timeline.dispatchEvent(new Event('scroll'));
+    await settle();
+    timeline.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    timeline.scrollTop -= 30;
+    timeline.dispatchEvent(new Event('scroll'));
+    await settle();
+    expect(document.querySelector('[data-testid=jump-to-latest]')).not.toBeNull();
+    const left = timeline.scrollTop;
+    messages.push({ ...JSON.parse(JSON.stringify(messages.at(-1)!)), id: 'm-keyboard-arrival' });
+    scrollHeight += ESTIMATE;
+    await settle();
+    expect(timeline.scrollTop).toBe(left);
+    timeline.scrollTop = scrollHeight - VIEW_HEIGHT;
+    timeline.dispatchEvent(new Event('scroll'));
+    await settle();
+    expect(document.querySelector('[data-testid=jump-to-latest]')).toBeNull();
+  } finally { live.detach(); client.close(); }
+});
+
 test('the timeline watches the wheel passively, so a notch never waits for the main thread', async () => {
   const messages = thread(30);
   stubLayout(messages.length * ESTIMATE);

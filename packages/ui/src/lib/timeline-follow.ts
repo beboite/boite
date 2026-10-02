@@ -21,6 +21,12 @@ export function wheelsUp(event: WheelEvent, box: HTMLElement): boolean {
   return event.deltaY < 0 && box.scrollTop > 0 && box.scrollHeight > box.clientHeight + 1 && !scrollsFirst(event.target, box);
 }
 
+/** An upward keyboard step leaves following before its small scroll can fall inside the bottom tolerance. */
+export function keysUp(event: KeyboardEvent, box: HTMLElement | undefined): boolean {
+  const upward = ['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey);
+  return upward && !!box && box.scrollTop > 0 && box.scrollHeight > box.clientHeight + 1 && !scrollsFirst(event.target, box);
+}
+
 /** Whether something between the pointer and the list scrolls up before the list does: a tool output, a code well. */
 function scrollsFirst(target: EventTarget | null, box: HTMLElement): boolean {
   for (let node = target instanceof Element ? target : null; node && node !== box; node = node.parentElement) {
