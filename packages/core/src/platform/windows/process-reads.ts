@@ -16,6 +16,14 @@ export interface ProcessReads {
   memoryInfo(proc: number, out: Uint8Array): boolean;
 }
 
+interface ProcessAccess extends ProcessReads {
+  openProcess(access: number, pid: number): number;
+  close(handle: number): void;
+}
+
+/** Enough for GetProcessTimes, including processes that refuse the full query right. */
+const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
 /** GetExitCodeProcess's answer for a process still running. */
 const STILL_ACTIVE = 259;
 
@@ -106,6 +114,21 @@ export function cpuMsOf(api: ProcessReads, handle: number): number | null {
   const view = new DataView(times.buffer);
   const total = view.getBigUint64(OFF_KERNEL_TIME, true) + view.getBigUint64(OFF_USER_TIME, true);
   return Math.round(Number(total) / 10_000);
+}
+
+/** Open the current PID owner for this read and always release its handle. */
+export function createdAtOfPid(readApi: () => ProcessAccess | null, pid: number, runningOnly: boolean): number | null {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  const api = readApi();
+  if (api === null) return null;
+  const handle = api.openProcess(PROCESS_QUERY_LIMITED_INFORMATION, pid);
+  if (handle === 0) return null;
+  try {
+    if (runningOnly && exitCodeOf(api, handle) !== null) return null;
+    return createdAtOf(api, handle);
+  } finally {
+    api.close(handle);
+  }
 }
 
 /** When the process was created, in ms since the Unix epoch. */

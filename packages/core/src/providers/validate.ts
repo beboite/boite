@@ -582,9 +582,9 @@ function checkEffort(value: unknown, file: string, field: string): { levels: Eff
   return { levels, default: fallback };
 }
 
-function checkModels(value: unknown, file: string): ModelInfo[] {
+function checkModels(value: unknown, file: string, protocol: Protocol): ModelInfo[] {
   const raw = asArray(value, file, 'models');
-  if (raw.length === 0) reject(file, 'models', 'at least one model', 'models must list at least one model');
+  if (raw.length === 0 && protocol === 'echo') reject(file, 'models', 'at least one model for echo', 'echo models must list at least one model');
   return raw.map((entry, index) => {
     const obj = asObject(entry, file, `models[${index}]`);
     checkKeys(obj, ['id', 'name', 'default', 'legacy', 'badge', 'effort'], file, `models[${index}]`);
@@ -688,7 +688,7 @@ export function validateDescriptor(
       ...(obj['shared'] === undefined ? {} : { shared: checkShared(obj['shared'], file, profiles, guarded) }),
       ...(obj['hookSources'] === undefined ? {} : { hookSources: checkHookSources(obj['hookSources'], file, profiles, capabilities.hooks) }),
       ...(obj['quirks'] === undefined ? {} : { quirks: checkQuirks(obj['quirks'], file) }),
-      models: checkModels(obj['models'], file),
+      models: checkModels(obj['models'], file, protocol as Protocol),
       capabilities,
     },
     dataDir,

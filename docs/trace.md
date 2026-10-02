@@ -145,7 +145,9 @@ Windows can retain processes after the shell that launched them exits. Ten
 seconds after a turn or an agent release, with no intervening turn, the registry
 checks traced processes at least ten seconds old. A missing parent, or a parent
 whose start time is newer than the child because its PID was reused, identifies
-an orphan. Termination uses the original held process handle and its descendants,
+an orphan. Before stopping it, the platform checks whether the untracked parent
+still runs and was created before the child; a live original parent keeps its
+child. Termination uses the original held process handle and its descendants,
 not a newly opened PID. Each action emits a thread-correlated diagnostic.
 
 Processes directly launched by the core and children of live shells remain.

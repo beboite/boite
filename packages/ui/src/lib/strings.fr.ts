@@ -985,6 +985,7 @@ export const fr: Translation = {
     models: 'Modèles',
     searchModels: 'Rechercher un modèle',
     noModels: 'Aucun modèle ne correspond',
+    noModelsAvailable: "L'agent n'a renvoyé aucun modèle. Actualisez pour réessayer.",
     showAllModels: 'Afficher les {count} modèles',
     legacyModels: 'Anciens modèles',
     refreshModels: 'Actualiser les modèles',

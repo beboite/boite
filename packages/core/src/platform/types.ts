@@ -100,4 +100,10 @@ export interface ProcessPlatform {
    * wearing it today.
    */
   startedAt(pid: number): number | null;
+  /**
+   * The same reading for a process that is still running: null too once it has
+   * exited, even while something keeps a handle on it. The orphan sweep asks
+   * this before it stops a process whose parent the registry does not hold.
+   */
+  runningSince(pid: number): number | null;
 }

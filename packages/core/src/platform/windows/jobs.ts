@@ -22,7 +22,7 @@ import {
 import {
   commandLineOf,
   cpuMsOf,
-  createdAtOf,
+  createdAtOfPid,
   creationIdentityOf,
   exitCodeOf,
   imageNameOf,
@@ -55,8 +55,6 @@ const PROCESS_TERMINATE = 0x1;
 const PROCESS_VM_READ = 0x10;
 const PROCESS_SET_QUOTA = 0x100;
 const PROCESS_QUERY_INFORMATION = 0x400;
-/** Enough for GetProcessTimes, and granted on processes the full query right is not. */
-const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 /** What OpenProcess says for a pid no process holds any more. */
 const ERROR_INVALID_PARAMETER = 87;
 const STILL_ACTIVE = 259;
@@ -419,16 +417,16 @@ export function releaseThreadJob(threadId: string): void {
  * on purpose: the question is who wears the pid today.
  */
 export function processStartedAt(pid: number): number | null {
-  if (!Number.isInteger(pid) || pid <= 0) return null;
-  const api = ensureNative();
-  if (api === null) return null;
-  const handle = api.openProcess(PROCESS_QUERY_LIMITED_INFORMATION, pid);
-  if (handle === 0) return null;
-  try {
-    return createdAtOf(api, handle);
-  } finally {
-    api.close(handle);
-  }
+  return createdAtOfPid(ensureNative, pid, false);
+}
+
+/**
+ * The same, for a process that has not exited. A pid still opens after its
+ * process ended for as long as anything holds a handle on it, a parent that
+ * spawned it for one, so the open alone does not say it runs.
+ */
+export function processRunningSince(pid: number): number | null {
+  return createdAtOfPid(ensureNative, pid, true);
 }
 
 /** How many thread jobs are open. Read by the tests only. */

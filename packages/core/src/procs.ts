@@ -610,44 +610,54 @@ export class ProcRegistry {
   /**
    * Stops what the thread left running with nobody above it: a process the job
    * reported whose parent exited, or whose parent pid now names a younger
-   * process, with everything under it. That is what an interrupted or refused
-   * command leaves, since stopping a shell does not stop what it started. The
+   * process, with everything under it. A parent missing from the registry is
+   * looked up in the system first, and one found running there keeps its child.
+   * That is what an interrupted or refused command leaves, since stopping a
+   * shell does not stop what it started. The
    * agent itself and anything the core spawned have the core as their parent
    * and are never taken. Returns the pids stopped.
    */
   sweepOrphans(threadId: ThreadId, now: number = Date.now()): number[] {
     const byPid = this.live.get(threadId);
     if (byPid === undefined || this.journal.isClosed()) return [];
-    const records = [...byPid.values()].map((entry) => entry.record);
-    const stopping = new Map<number, ProcessRecord>();
-    for (const record of records) {
+    const entries = [...byPid.values()];
+    const stopping = new Map<number, Entry>();
+    for (const entry of entries) {
+      const { record } = entry;
       const parentPid = record.parentPid;
       if (parentPid === null || parentPid === process.pid) continue;
-      if (now - record.startedAt < this.orphanGraceMs) continue;
-      const parent = byPid.get(parentPid)?.record;
-      if (parent !== undefined && parent.startedAt <= record.startedAt) continue;
-      stopping.set(record.pid, record);
+      if (now - nativeBirth(entry) < this.orphanGraceMs) continue;
+      const parent = byPid.get(parentPid);
+      if (parent !== undefined && !bornAfter(parent, entry)) continue;
+      // The registry is a copy, and a missed event leaves it short of a parent.
+      // A millisecond lookup must not override a captured newer incarnation.
+      if (parent === undefined || parent.identity.startedAt === null || entry.identity.startedAt === null) {
+        const running = this.platform.runningSince(parentPid);
+        if (running !== null && running <= nativeBirth(entry)) continue;
+      }
+      stopping.set(record.pid, entry);
     }
     if (stopping.size === 0) return [];
     // An orphan's own children still have a live parent: they go with it. One
     // index by parent, then one walk down, so a deep tree costs its size.
-    const children = new Map<number, ProcessRecord[]>();
-    for (const record of records) {
+    const children = new Map<number, Entry[]>();
+    for (const entry of entries) {
+      const { record } = entry;
       if (record.parentPid === null) continue;
       const siblings = children.get(record.parentPid);
-      if (siblings === undefined) children.set(record.parentPid, [record]);
-      else siblings.push(record);
+      if (siblings === undefined) children.set(record.parentPid, [entry]);
+      else siblings.push(entry);
     }
     const pending = [...stopping.values()];
     for (let parent = pending.pop(); parent !== undefined; parent = pending.pop()) {
-      for (const child of children.get(parent.pid) ?? []) {
-        if (stopping.has(child.pid) || parent.startedAt > child.startedAt) continue;
-        stopping.set(child.pid, child);
+      for (const child of children.get(parent.record.pid) ?? []) {
+        if (stopping.has(child.record.pid) || bornAfter(parent, child)) continue;
+        stopping.set(child.record.pid, child);
         pending.push(child);
       }
     }
     const stopped: number[] = [];
-    for (const record of stopping.values()) {
+    for (const { record } of stopping.values()) {
       if (!this.platform.terminateProcess(threadId, record.pid)) continue;
       stopped.push(record.pid);
       this.bus.emit('core.log', {
@@ -814,6 +824,18 @@ function killBunChild(proc: Bun.Subprocess): Promise<void> | undefined {
   if (OWN_GROUP) return stopGroup(proc.pid, () => proc.exitCode === null && proc.signalCode === null);
   proc.kill();
   return undefined;
+}
+
+function nativeBirth(entry: Entry): number {
+  return entry.identity.startedAt ?? entry.record.startedAt;
+}
+
+function bornAfter(parent: Entry, child: Entry): boolean {
+  if (parent.identity.incarnation !== null && child.identity.incarnation !== null) {
+    try { return BigInt(parent.identity.incarnation) > BigInt(child.identity.incarnation); }
+    catch { /* A platform without numeric native identities uses its birth clock. */ }
+  }
+  return nativeBirth(parent) > nativeBirth(child);
 }
 
 function unseenIdentity(next: ProcessIdentity, previous: KnownProcess): boolean {

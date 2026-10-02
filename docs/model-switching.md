@@ -49,8 +49,11 @@ available through the SDK.
 Model catalogs persist in client storage, scoped to the core endpoint and data
 directory and checked against the current provider/account records. Opening an
 agent shows the cached list immediately while discovery runs in the background.
-With no cached list, the column shows placeholder rows and the reading line until
-the first answer lands, and the descriptor's list if that answer fails.
+With no cached list, the column shows loading rows and the reading line until
+the first answer lands. Claude ships no model catalog and never offers descriptor
+placeholders after a failed read. An empty catalog offers a refresh instead.
+Paired phones can discover and refresh the same account models and ACP effort
+metadata as desktop clients, without access to provider or account configuration.
 Reopening the picker after five minutes refreshes that account's catalog, and a
 catalog restored from storage is also revalidated. These reads replace the
 displayed models and their legacy flags without changing per-provider defaults.
@@ -77,8 +80,7 @@ cannot offset or clip them. Pointer-click checks cover both materials.
 Favorites use a single row; an inline account label only distinguishes the same
 model starred on different accounts.
 
-Claude aliases use their resolved id and versioned native name, with descriptor
-names only as a fallback. Default aliases are
+Claude aliases use their resolved id and versioned native name. Default aliases are
 filtered before deduplication so they cannot hide the named Opus row or its Fast
 capability. Native discovery replaces the descriptor list rather than adding
 older descriptor ids. Models without an explicit legacy classification stay in

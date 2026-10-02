@@ -66,7 +66,7 @@ export function checkAsk(params: { text: unknown; options?: unknown; multiple?: 
 }
 
 /** The protocols whose models the agent lists itself, so an unknown one may just be unread. */
-const PROBED_PROTOCOLS = ['acp', 'codex-appserver', 'muse', 'pi', 'agy'];
+const PROBED_PROTOCOLS = ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'];
 
 /** The core's `checkModel`: null is the provider's default, anything else must be listed. */
 export function checkModel(provider: ProviderSummary, accountId: string, models: ModelInfo[], model: string | null): string | null {

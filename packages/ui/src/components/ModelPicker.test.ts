@@ -28,6 +28,26 @@ async function waitFor(check: () => boolean): Promise<void> {
   throw new Error(`gave up waiting, body was:\n${document.body.textContent ?? ''}`);
 }
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+async function mountAtLanding(): Promise<FakeClient> {
+  window.history.replaceState(null, '', '/?fake=1&open=landing');
+  const target = document.createElement('div');
+  document.body.appendChild(target);
+  store.booted = false;
+  store.openThread = null;
+  store.draft = null;
+  store.composerStates = {};
+  closeTour();
+  running = mount(App, { target });
+  await waitFor(() => store.booted && store.draft !== null);
+  return store.client as FakeClient;
+}
+
 const rows = () => document.querySelectorAll('[data-testid=composer-picker-menu] [data-model]').length;
 const showAll = () => document.querySelector<HTMLButtonElement>('[data-testid=picker-show-all]');
 
@@ -130,7 +150,7 @@ test('a first probe shows a reading column, never the descriptor list it is abou
   expect(legacyFold()).not.toBeNull();
 
   // The account changed, so its answer is gone; this time the agent fails and
-  // the descriptor's list comes back instead of a column that reads forever.
+  // no descriptor placeholders appear after the reading state ends.
   document.querySelector<HTMLButtonElement>('[data-testid=composer-picker]')!.click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
   outcome = 'wait';
@@ -140,8 +160,124 @@ test('a first probe shows a reading column, never the descriptor list it is abou
   await waitFor(() => probing() !== null);
   expect(rows()).toBe(0);
   outcome = 'fail';
-  await waitFor(() => rows() > 0 && probing() === null);
-  expect(document.querySelector('[data-model="claude-fable-5-1"]')).not.toBeNull();
-  expect(legacyFold()).not.toBeNull();
+  await waitFor(() => document.querySelector('[data-testid=picker-no-models]') !== null && probing() === null);
+  expect(rows()).toBe(0);
+  expect(legacyFold()).toBeNull();
   expect(store.probedModels['claude::a-claude-main']).toBeUndefined();
+  const search = document.querySelector<HTMLInputElement>('[data-testid=picker-search]')!;
+  search.value = 'gpt';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  expect(document.querySelectorAll('[data-testid=picker-no-models]')).toHaveLength(1);
+  outcome = 'land';
+  document.querySelector<HTMLButtonElement>('[data-testid=picker-refresh]')!.click();
+  await waitFor(() => store.probedModels['claude::a-claude-main'] !== undefined && probing() === null);
+  search.value = '';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => rows() > 0);
+
+});
+
+test('a model probe that resolves after navigation cannot update the next thread or its remembered choice', async () => {
+  const client = await mountAtLanding();
+  await store.probeModels('claude', 'a-claude-main');
+  const first = await client.call('threads.create', {
+    projectId: 'p-boite', providerId: 'claude', accountId: 'a-claude-main', model: 'claude-sonnet-5', title: 'Picker source'
+  });
+  const next = await client.call('threads.create', {
+    projectId: 'p-boite', providerId: 'claude', accountId: 'a-claude-main', model: 'claude-fable-5-1', title: 'Picker destination'
+  });
+  await waitFor(() => store.threads.some((thread) => thread.id === first.id) && store.threads.some((thread) => thread.id === next.id));
+  await store.open(first.id);
+  await waitFor(() => store.openThread?.id === first.id);
+
+  let now = Date.now();
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const gate = deferred();
+  let heldProbes = 0;
+  const original = FakeClient.prototype.call;
+  vi.spyOn(FakeClient.prototype, 'call').mockImplementation(async function (this: FakeClient, method, params) {
+    if (method === 'providers.probe' && (params as { accountId?: string }).accountId === 'a-claude-main') {
+      heldProbes++;
+      await gate.promise;
+    }
+    return original.call(this, method, params) as never;
+  });
+
+  try {
+    const update = vi.spyOn(store, 'update');
+    document.querySelector<HTMLButtonElement>('[data-testid=composer-picker]')!.click();
+    await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null && document.querySelector('[data-model="claude-opus-5"]') !== null);
+    // Opening the picker reused the fresh catalog. Age it only after its rows
+    // appeared, so the model click itself starts the held refresh.
+    now += 5 * 60_000 + 1;
+    document.querySelector<HTMLButtonElement>('[data-model="claude-opus-5"]')!.click();
+    await waitFor(() => heldProbes === 1);
+
+    await store.open(next.id);
+    await waitFor(() => store.openThread?.id === next.id);
+    const prefsAtDestination = { ...store.prefs };
+    gate.resolve();
+    await waitFor(() => !store.isProbing('claude', 'a-claude-main'));
+    flushSync();
+
+    expect(update.mock.calls.filter(([threadId]) => threadId === next.id)).toHaveLength(0);
+    expect((await client.call('threads.get', { threadId: first.id })).model).toBe('claude-sonnet-5');
+    expect((await client.call('threads.get', { threadId: next.id })).model).toBe('claude-fable-5-1');
+    expect(store.openThread?.model).toBe('claude-fable-5-1');
+    expect(store.prefs).toEqual(prefsAtDestination);
+  } finally { gate.resolve(); }
+});
+
+test('a signed-in Claude seat is probed before its model and account are applied to a thread', async () => {
+  const client = await mountAtLanding();
+  await client.call('accounts.login', { accountId: 'a-claude-side' });
+  await client.call('accounts.loginInput', { accountId: 'a-claude-side', text: 'test-code' });
+  await waitFor(() => store.accountOf('a-claude-side')?.status === 'ok');
+  await store.probeModels('claude', 'a-claude-main');
+  const thread = await client.call('threads.create', {
+    projectId: 'p-boite', providerId: 'claude', accountId: 'a-claude-main', model: 'claude-sonnet-5', title: 'Second seat picker'
+  });
+  await store.open(thread.id);
+  await waitFor(() => store.openThread?.id === thread.id);
+
+  const sideKey = 'claude::a-claude-side';
+  expect(store.probedModels[sideKey]).toBeUndefined();
+  const gate = deferred();
+  const calls: { method: string; params: unknown }[] = [];
+  const original = FakeClient.prototype.call;
+  vi.spyOn(FakeClient.prototype, 'call').mockImplementation(async function (this: FakeClient, method, params) {
+    if (method === 'providers.probe' && (params as { accountId?: string }).accountId === 'a-claude-side') {
+      calls.push({ method, params });
+      await gate.promise;
+    }
+    if (method === 'threads.update') calls.push({ method, params });
+    return original.call(this, method, params) as never;
+  });
+
+  try {
+    document.querySelector<HTMLButtonElement>('[data-testid=composer-picker]')!.click();
+    await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null && document.querySelector('[data-instance="claude::a-claude-side"]') !== null);
+    const seat = document.querySelector<HTMLButtonElement>('[data-instance="claude::a-claude-side"]')!;
+    expect(seat.disabled).toBe(false);
+    seat.click();
+    await waitFor(() => calls.some(({ method, params }) => method === 'providers.probe' && (params as { accountId?: string }).accountId === 'a-claude-side'));
+    flushSync();
+
+    expect(calls.some(({ method, params }) => method === 'providers.probe' && (params as { accountId?: string }).accountId === 'a-claude-side')).toBe(true);
+    expect(calls.some(({ method, params }) => method === 'threads.update' && (params as { accountId?: string }).accountId === 'a-claude-side')).toBe(false);
+    expect(store.openThread?.accountId).toBe('a-claude-main');
+    expect(store.probedModels[sideKey]).toBeUndefined();
+    expect(seat.disabled).toBe(true);
+
+    gate.resolve();
+    await waitFor(() => calls.some(({ method, params }) => method === 'threads.update' && (params as { accountId?: string }).accountId === 'a-claude-side') && store.openThread?.accountId === 'a-claude-side');
+    expect(store.probedModels[sideKey]?.some((model) => model.id === store.openThread?.model)).toBe(true);
+    const probeIndex = calls.findIndex(({ method, params }) => method === 'providers.probe' && (params as { accountId?: string }).accountId === 'a-claude-side');
+    const updateIndex = calls.findIndex(({ method, params }) => method === 'threads.update' && (params as { accountId?: string }).accountId === 'a-claude-side');
+    expect(probeIndex).toBeGreaterThanOrEqual(0);
+    expect(updateIndex).toBeGreaterThan(probeIndex);
+  } finally {
+    gate.resolve();
+  }
 });

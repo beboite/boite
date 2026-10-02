@@ -39,6 +39,7 @@ beforeEach(async () => {
       guards = guardEvents;
     },
     startedAt: (pid) => created.get(pid) ?? null,
+    runningSince: (pid) => created.get(pid) ?? null,
     pidAdded: (_threadId, pid) => { added.push(pid); },
     pidRemoved: (_threadId, pid) => { removed.push(pid); },
     sample: () => ({ processes: sampled.length, cpuPercent: 0, memoryBytes: sampled.reduce((sum, process) => sum + process.bytes, 0), workingSets: sampled }),
@@ -107,6 +108,34 @@ test('a warm thread traces a reused pid once and ignores old incarnation events'
     { pid: 9002, startedAt: 2000, cpuMs: 5 },
     { pid: 9001, startedAt: 1000, exitedAt: null },
   ]);
+});
+
+test('orphan sweeps use native birth order when reused pids need separate trace rows', () => {
+  const info = (parentPid: number, incarnation: string): NativeProcessInfo => ({
+    exe: 'tool', commandLine: null, parentPid, startedAt: 3000, incarnation,
+  });
+  const threadId = 'native-orphan';
+  sink.started(threadId, 9002, info(8999, '30000000'));
+  sink.exited(threadId, 9002, { ...EXIT, startedAt: 3000, incarnation: '30000000' });
+  sink.started(threadId, 9002, info(8999, '30000001'));
+  sink.started(threadId, 9003, info(9002, '30000002'));
+  expect(procs.liveOf(threadId).find(record => record.pid === 9002)?.startedAt).toBe(3001);
+  created.set(9002, 3000);
+  created.set(8999, 2999);
+  expect(procs.sweepOrphans(threadId, 40_000)).toEqual([]);
+  // This occupant of the missing parent's pid was born after the orphan.
+  created.set(8999, 3001);
+  expect(procs.sweepOrphans(threadId, 40_000)).toEqual([9002, 9003]);
+
+  stopped.length = 0;
+  const replacementThread = 'native-parent-replacement';
+  sink.started(replacementThread, 9002, info(process.pid, '30000000'));
+  sink.started(replacementThread, 9003, info(9002, '30000001'));
+  sink.exited(replacementThread, 9002, { ...EXIT, startedAt: 3000, incarnation: '30000000' });
+  sink.started(replacementThread, 9002, info(process.pid, '30000002'));
+  // A live replacement with the same millisecond is not this child's parent.
+  expect(procs.sweepOrphans(replacementThread, 40_000)).toEqual([9003]);
+  expect(stopped).toEqual([9003]);
 });
 
 test('a short direct child is not resurrected by its delayed native start', async () => {

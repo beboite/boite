@@ -1034,6 +1034,7 @@ export const strings = {
     models: 'Models',
     searchModels: 'Search models',
     noModels: 'No model matches',
+    noModelsAvailable: 'The agent has not listed any models. Refresh to retry.',
     showAllModels: 'Show all {count} models',
     legacyModels: 'Legacy models',
     refreshModels: 'Refresh models',

@@ -4,6 +4,19 @@ import type { FakeClient } from './fake-client';
 import { DEFAULT_DELEGATION_CONFIG, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, TODO_TEXT_MAX, type RpcMethodName, type Turn } from '@boite/contracts';
 import { FAKE_AUTO_COMPACT_SETTLE_MS } from './fake-client/turns';
 
+test('the fake client directs an unlisted Claude model to native discovery', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'claude' && account.status === 'ok');
+  expect(account).toBeDefined();
+  await expect(client.call('threads.create', {
+    projectId: 'p-boite', providerId: 'claude', accountId: account!.id, model: 'unlisted-native-model',
+  })).rejects.toMatchObject({
+    code: RpcErrorCode.Refused,
+    message: 'the agent has not listed this model: open the model picker so Boite reads its models first',
+    data: { providerId: 'claude', accountId: account!.id, model: 'unlisted-native-model' },
+  });
+});
+
 test('fake byte-bounded pages walk complete escaped UTF-8 messages and fall back from a large reconnect tail', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo', title: 'Byte pages' });
@@ -660,7 +673,7 @@ test('fake probes expose distinct OpenCode, Codex, pi, Grok, Muse and Antigravit
 test('fake probes use descriptor models for protocols without probing', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   const { loaded } = await client.call('providers.list', {});
-  for (const [providerId, accountId] of [['claude', 'a-claude-main'], ['echo', 'a-echo']] as const) {
+  for (const [providerId, accountId] of [['echo', 'a-echo']] as const) {
     expect((await client.call('providers.probe', { providerId, accountId })).models)
       .toEqual(loaded.find((provider) => provider.id === providerId)?.models);
   }

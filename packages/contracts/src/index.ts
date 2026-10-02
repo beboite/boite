@@ -321,6 +321,7 @@ export interface ProviderDescriptor {
   hookSources?: ProviderHookSource[];
   /** Dialect fixes the driver of this protocol applies for this agent only. */
   quirks?: ProviderQuirk[];
+  /** Native protocols may leave this empty; providers.probe supplies the account's catalog. */
   models: ModelInfo[];
   capabilities: ProviderCapabilities;
 }
