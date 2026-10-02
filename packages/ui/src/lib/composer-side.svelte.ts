@@ -3,7 +3,7 @@ import type { Store } from './store.svelte';
 
 /** Local answers belong to one composer and machine, never to the message list. */
 export class ComposerSide {
-  current = $state<{ threadId: string; question: string; answer: string | null; error: string | null } | null>(null);
+  current = $state<{ threadId: string; requestId: string; question: string; answer: string | null; error: string | null } | null>(null);
   private dispose: (() => void) | null = null;
 
   clear(): void { this.dispose?.(); this.dispose = null; this.current = null; }
@@ -25,7 +25,7 @@ export class ComposerSide {
     if (this.current?.answer === null && this.current.error === null) return true;
     this.clear();
     const client = store.client!, id = threadId!, requestId = crypto.randomUUID();
-    this.current = { threadId: id, question, answer: null, error: null };
+    this.current = { threadId: id, requestId, question, answer: null, error: null };
     let pending = true, active = true;
     const off = client.on('thread.btw', result => {
       if (result.threadId !== id || result.requestId !== requestId) return;
@@ -36,7 +36,7 @@ export class ComposerSide {
     this.dispose = () => {
       active = false;
       off();
-      if (pending) void client.call('threads.btw.cancel', { threadId: id, requestId }).catch(() => {});
+      void client.call('threads.btw.cancel', { threadId: id, requestId }).catch(() => {});
     };
     if (state) state.text = '';
     void client.call('threads.btw', { threadId: id, question, requestId }).catch(reason => {

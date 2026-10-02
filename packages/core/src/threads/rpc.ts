@@ -30,6 +30,10 @@ export function registerThreadMethods(core: Core): void {
     await requireCwd(core, params.threadId);
     return core.threads.sideQuestions.ask(params.threadId, params.question, params.requestId);
   });
+  core.router.register('threads.btw.fork', async params => {
+    await requireCwd(core, params.threadId);
+    return core.threads.sideQuestions.fork(params.threadId, params.requestId);
+  });
   core.router.register('threads.btw.cancel', params => {
     if (typeof params.requestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(params.requestId)) throw invalidParams('threads.btw.cancel.requestId: expected 8 to 128 URL-safe characters');
     core.threads.require(params.threadId);

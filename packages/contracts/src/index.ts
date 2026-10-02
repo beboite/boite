@@ -2645,6 +2645,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   /** An ephemeral answer from a snapshot of the chat, without starting or steering its main turn. */
   'threads.btw': { params: { threadId: ThreadId; question: string; requestId: string }; result: { requestId: string } };
   'threads.btw.cancel': { params: { threadId: ThreadId; requestId: string }; result: { ok: true } };
+  /** Persist a completed side answer and its frozen context in a fresh conversation. */
+  'threads.btw.fork': { params: { threadId: ThreadId; requestId: string }; result: ThreadSummary };
   /**
    * Edit a sent message: `messageId`, a user message of the thread, and every
    * message and turn after it leave the conversation, and the next turn
@@ -3055,3 +3057,5 @@ import type { SpeechModelTier } from './speech-models.ts';
 export function supportsSideQuestions(protocol: Protocol): boolean {
   return protocol === 'claude-sdk' || protocol === 'echo';
 }
+
+export { sideQuestionSnapshot } from './side-question-snapshot.ts';

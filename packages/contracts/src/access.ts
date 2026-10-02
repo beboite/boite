@@ -63,6 +63,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'threads.compact', // A paired device can request the same session maintenance as the desktop.
   'threads.btw.cancel', // Dismissal cancels only the named temporary request.
   'threads.btw', // A phone asks the same temporary side questions as the owner's composer.
+  'threads.btw.fork', // Paired devices can turn their temporary answer into a conversation.
   // Editing a sent prompt and branching a conversation are the composer's own
   // moves. A fork in a worktree writes no more than `threads.create` with one,
   // which a device already reaches, and names no path either.

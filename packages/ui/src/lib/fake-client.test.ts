@@ -924,3 +924,34 @@ test('fake /btw admission, duplicate refusal and cancellation match the core wit
     expect(await client.call('threads.get', { threadId: 't-trace' })).toEqual(before);
   } finally { client.close(); }
 });
+
+test('fake side forks consume only the matching completed result and expire dismissed answers', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const threadId = 't-trace', requestId = 'side_fork1';
+    await client.call('threads.subscribe', { threadId });
+    const before = await client.call('threads.get', { threadId });
+    const answered = new Promise<void>(resolve => {
+      const off = client.on('thread.btw', result => { if (result.requestId === requestId) { off(); resolve(); } });
+    });
+    await client.call('threads.btw', { threadId, requestId, question: 'Which file?' });
+    await answered;
+    await expect(client.call('threads.btw.fork', { threadId, requestId: 'side_wrong' })).rejects.toThrow('available completed');
+    const fork = await client.call('threads.btw.fork', { threadId, requestId });
+    const copied = await client.call('threads.get', { threadId: fork.id });
+    expect(copied.messages.slice(-2).map(message => message.parts)).toEqual([
+      [{ type: 'text', text: 'Which file?' }], [{ type: 'text', text: 'Side answer: Which file?' }],
+    ]);
+    expect(copied.turns.every(turn => !turn.usage && !turn.checkpoint)).toBe(true);
+    expect(await client.call('threads.get', { threadId })).toEqual(before);
+    await expect(client.call('threads.btw.fork', { threadId, requestId })).rejects.toThrow('available completed');
+    const dismissed = new Promise<void>(resolve => {
+      const off = client.on('thread.btw', result => { if (result.requestId === 'side_dismiss') { off(); resolve(); } });
+    });
+    await client.call('threads.btw', { threadId, requestId: 'side_dismiss', question: 'Discard this' });
+    await dismissed;
+    await client.call('threads.btw.cancel', { threadId, requestId: 'side_dismiss' });
+    await expect(client.call('threads.btw.fork', { threadId, requestId: 'side_dismiss' })).rejects.toThrow('available completed');
+  } finally { client.close(); }
+});

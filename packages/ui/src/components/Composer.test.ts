@@ -1492,3 +1492,45 @@ test('a delivered side answer survives a late admission failure', async () => {
   await new Promise(done => setTimeout(done, 60));
   expect(document.querySelector('[data-testid=btw-answer]')?.textContent).not.toContain('admission acknowledgement lost');
 });
+
+test('the side answer fork button opens a fresh conversation holding the exchange', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  const before = structuredClone(await store.client!.call('threads.get', { threadId: 't-trace' }));
+  await type('/btw Which file?');
+  press('Enter');
+  await waitFor(() => !!document.querySelector('[data-testid=btw-fork]'));
+  query<HTMLButtonElement>('[data-testid=btw-fork]').click();
+  await waitFor(() => store.openThread?.id !== 't-trace' && !!store.openThread);
+  expect(store.openThread!.messages.slice(-2).map(message => message.parts)).toEqual([
+    [{ type: 'text', text: 'Which file?' }], [{ type: 'text', text: 'Side answer: Which file?' }],
+  ]);
+  expect(store.openThread!.sessionId).toBeNull();
+  expect(store.openThread!.status).toBe('idle');
+  expect(await store.client!.call('threads.get', { threadId: 't-trace' })).toEqual(before);
+  expect(document.querySelector('[data-testid=btw-answer]')).toBeNull();
+});
+
+test('a delayed side fork acknowledgement preserves navigation to another conversation', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  const client = store.client!, original = client.call.bind(client);
+  let release: (() => void) | undefined;
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const result = await original(method, params);
+    if (method === 'threads.btw.fork') await new Promise<void>(resolve => { release = resolve; });
+    return result;
+  });
+  await type('/btw Which file?');
+  press('Enter');
+  await waitFor(() => !!document.querySelector('[data-testid=btw-fork]'));
+  query<HTMLButtonElement>('[data-testid=btw-fork]').click();
+  await waitFor(() => !!release);
+  await store.open('t-descriptors');
+  release!();
+  await new Promise(resolve => setTimeout(resolve, 30));
+  expect(store.openThread!.id).toBe('t-descriptors');
+  expect(document.querySelector('[data-testid=btw-answer]')).toBeNull();
+});

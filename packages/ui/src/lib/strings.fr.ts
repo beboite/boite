@@ -558,6 +558,7 @@ export const fr: Translation = {
   },
 
   btw: {
+    fork: 'Continuer dans une nouvelle conversation', forking: 'Création de la conversation',
     title: 'Question de côté', description: "Poser une question de côté sans interrompre l'agent",
     loading: 'Réponse à votre question en cours', close: 'Fermer la réponse de côté',
     needsThread: 'Ouvrez une conversation avant de poser une question de côté.',

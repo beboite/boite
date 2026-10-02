@@ -27,7 +27,7 @@ beforeAll(async () => {
 
 afterAll(async () => { await page?.close(); client?.close(); await core?.stop(); });
 
-test('a desktop and paired phone ask /btw while the main turn waits, without queuing or recording the question', async () => {
+test('desktop and paired phone side answers stay temporary until explicitly forked while the main turn waits', async () => {
   await client.call('turns.start', { threadId, prompt: 'Read the configuration [permission]' });
   await page.waitFor("document.querySelector('[data-testid=permission-card]')");
   const before = await client.call('threads.get', { threadId });
@@ -54,11 +54,20 @@ test('a desktop and paired phone ask /btw while the main turn waits, without que
   await page.waitFor("document.querySelector('[data-testid=btw-answer]')?.textContent.includes('Side answer: A short side answer on the phone')");
   expect(await page.evaluate("(() => { const r = document.querySelector('[data-testid=btw-answer]').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight; })()")).toBe(true);
   await page.screenshot(join(import.meta.dir, '.artifacts', 'btw-phone.png'));
-  await page.click('[data-testid=btw-close]');
+  await page.click('[data-testid=btw-fork]');
+  await page.waitFor("document.querySelector('[data-testid=thread-title]')?.textContent.includes('(fork)')");
   await page.waitFor("!document.querySelector('[data-testid=btw-answer]')");
   const after = await client.call('threads.get', { threadId });
   expect(after.messages).toEqual(before.messages);
   expect(after.turns).toEqual(before.turns);
   expect(after.status).toBe('waiting');
+  const fork = (await client.call('threads.list', {})).find(thread => thread.id !== threadId && thread.title.endsWith('(fork)'))!;
+  expect(fork).toBeDefined();
+  const forked = await client.call('threads.get', { threadId: fork.id });
+  expect(forked.messages.slice(-2).map(message => message.parts)).toEqual([
+    [{ type: 'text', text: 'A short side answer on the phone' }],
+    [{ type: 'text', text: 'Side answer: A short side answer on the phone' }],
+  ]);
+  expect(forked.status).toBe('idle');
   expect(page.errors()).toEqual([]);
 }, 60_000);

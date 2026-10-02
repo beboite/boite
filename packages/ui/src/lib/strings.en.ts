@@ -572,6 +572,7 @@ export const strings = {
 
   /** The composer's slash menu: the agent's own commands over Boite's. */
   btw: {
+    fork: 'Continue in a new conversation', forking: 'Creating the conversation',
     title: 'Side question', description: 'Ask a side question without interrupting the agent',
     loading: 'Answering your side question', close: 'Close the side answer',
     needsThread: 'Open a conversation before asking a side question.',

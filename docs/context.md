@@ -218,7 +218,7 @@ A fresh Claude SDK query uses the thread's account, model and supported effort,
 with tools, MCP servers, settings loading and session persistence disabled. It
 receives a snapshot of the journal's text and observed tool inputs and outputs,
 including streamed output; private reasoning and image payloads stay out. The
-snapshot retains the most recent 120,000 characters and says when earlier
+snapshot retains up to 512 messages and the most recent 120,000 characters and says when earlier
 context was omitted. This is a separate request, so native prompt cache reuse
 is not guaranteed. Neither the question nor its answer enters the conversation,
 changes its native session or updates the main context meter.
@@ -232,3 +232,13 @@ providing a temporary answer.
 error to subscribed clients with its request ID. Inference must not occupy the
 serialized WebSocket request queue. One side request runs per thread; dismissal
 cancels only its request ID. Archive and core shutdown cancel pending requests.
+
+After a successful answer, "Continue in a new conversation" creates and opens
+an idle fork. It carries exactly the bounded text snapshot sent to the side
+request, followed by its question and answer. Later output from the original
+thread stays there. The fork uses a fresh native session, the original selection
+and folder, and normal tool permissions on its next turn. It does not create a
+worktree or automatically run another turn. Copied usage and checkpoints are
+cleared. Closing the answer, replacing it or leaving the chat discards its fork
+context. Completed answers expire after ten minutes, and the core keeps at most
+64 of them in memory; nothing is persisted until the user forks.
