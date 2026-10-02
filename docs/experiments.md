@@ -1,15 +1,24 @@
 # Experiments
 
-`open-chat-links` adds desktop file opening to chat links. An explicit click in
-the main UI opens a local file or folder in its associated application, including
-Windows shortcuts and absolute paths outside the checkout. It is off by default
-and independent of `chat-artifacts`. It only applies to the owning local core;
-remote-machine links keep their preview behavior. Pages in the integrated browser
-and agent RPCs cannot invoke this native action. Network and device paths are refused.
-
 Enable these separately in Settings > Experiments. Switches are off by default
 and belong to this client device. They do not change another machine's settings.
 A phone has its own Experiments row under Settings, This phone.
+
+## Open chat links
+
+`open-chat-links` enables the same rich link parsing as `chat-artifacts`:
+Markdown file links, bare web URLs, absolute paths, `file:///` links and paths
+inside inline code. Either switch enables this parsing; enabling both adds no
+further link types.
+
+On the owning local desktop, this switch also makes an explicit click open a
+file or folder in its associated application, including Windows shortcuts and
+absolute paths outside the checkout. On a remote machine or phone, links still
+use the inline preview and its existing owner and working-directory checks.
+They never open a file on the device displaying the conversation.
+
+Pages in the integrated browser and agent RPCs cannot invoke the native action.
+Network and device paths are refused before and after path resolution.
 
 ## Whip
 
@@ -38,7 +47,9 @@ directory and the message stores a reference. Downloads support HTTP ranges,
 so videos can seek without loading the entire file. The UI renews download
 tickets while the card is mounted. Unreferenced snapshots and interrupted
 copies older than a day are removed by daily maintenance; forks retain their
-referenced files. User uploads still have their separate 5 MB limit.
+referenced files. The reference scan runs in a worker so large journals do not
+block the core's event loop. A pass that overlaps journal writes skips deletion
+to avoid acting on stale references. User uploads still have their separate 5 MB limit.
 Relative and absolute paths must
 stay inside that directory, including resolved symlinks. A missing file,
 directory, oversized file or archived thread is refused. The thread must have
@@ -53,6 +64,9 @@ Published images, videos and audio appear directly in the conversation without
 enabling this experiment. Media keeps its aspect ratio within a bounded card;
 videos have playback, seeking and fullscreen controls and never autoplay.
 Images open in a keyboard-accessible viewer with zoom, fit and download controls.
+Images larger than 5 MB show their name, size and download first. Click Load image
+or the filename to download and display them; opening a conversation does not
+fetch these images automatically.
 If decoding fails, the card keeps its download and offers a retry.
 
 With the experiment enabled, answers also support Markdown file links, bare web

@@ -104,3 +104,19 @@ test('a media decoding failure keeps download available and can retry the previe
   expect(document.querySelector('img')).not.toBeNull();
   expect(document.querySelector('[role=status]')).toBeNull();
 });
+
+test.each([false, true])('large images wait for a click, with rich previews %j', async rich => {
+  writeExperiments(rich ? ['chat-artifacts'] : []);
+  const url = `https://core.example/file/${'b'.repeat(64)}`;
+  const file = { type: 'artifact' as const, id: 'large-image', name: 'panorama.png', mimeType: 'image/png', bytes: 60 * 1024 * 1024 };
+  const readArtifact = vi.fn(async () => ({ ok: true, value: { ...file, url } }));
+  running = mount(ChatFile, { target: document.body, props: { file, store: { readArtifact } as unknown as Store, threadId: 'thread', messageId: 'message' } });
+  await vi.waitFor(() => expect(document.querySelector('[data-testid=artifact-load-image]')).not.toBeNull());
+  expect(document.querySelector('img')).toBeNull();
+  expect(document.querySelector('[data-testid=artifact-content]')).toBeNull();
+  expect(query<HTMLAnchorElement>('[data-testid=artifact-download]').href).toBe(url);
+  query<HTMLButtonElement>('[data-testid=artifact-load-image]').click(); flushSync();
+  expect(query<HTMLImageElement>('.preview img').src).toBe(url);
+  query<HTMLButtonElement>('[data-testid=artifact-launch]').click(); flushSync();
+  expect(query<HTMLImageElement>('[data-testid=image-viewer] img').src).toBe(url);
+});

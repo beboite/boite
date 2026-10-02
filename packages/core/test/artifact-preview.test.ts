@@ -94,3 +94,25 @@ test('previews work in a symlinked project folder and stop serving it when the l
   symlinkSync(join(harness.dataDir, 'replacement'), alias, linkType);
   expect((await fetch(url)).status).toBe(404);
 });
+
+test('a full preview pool evicts the least recently used origin and admits another thread', async () => {
+  const opened: { url: string }[] = [];
+  for (let index = 0; index < 16; index++) {
+    writeFileSync(join(harness.dataDir, 'preview', `${index}.html`), `<h1>Preview ${index}</h1>`);
+    opened.push(await agent.call('artifacts.preview', { threadId, path: `preview/${index}.html` }));
+  }
+  // Both an explicit reopen and a successful asset request count as activity.
+  expect((await agent.call('artifacts.preview', { threadId, path: 'preview/0.html' })).url).toBe(opened[0]!.url);
+  expect((await fetch(new URL('style.css', opened[1]!.url))).status).toBe(200);
+  const other = await echoThread(harness, owner, 'other');
+  const admitted = await owner.call('artifacts.preview', { threadId: other.threadId, path: 'preview/index.html' });
+  expect(await (await fetch(admitted.url)).text()).toContain('<button');
+  expect(await (await fetch(opened[0]!.url)).text()).toContain('Preview 0');
+  expect(await (await fetch(opened[1]!.url)).text()).toContain('Preview 1');
+  // A recycled port must not make an evicted URL valid on the replacement server.
+  expect(await fetch(opened[2]!.url).then(response => response.ok, () => false)).toBe(false);
+  const reopened = await agent.call('artifacts.preview', { threadId, path: 'preview/2.html' });
+  expect(reopened.url).not.toBe(opened[2]!.url);
+  expect(await (await fetch(reopened.url)).text()).toContain('Preview 2');
+  expect(await fetch(opened[3]!.url).then(response => response.ok, () => false)).toBe(false);
+});

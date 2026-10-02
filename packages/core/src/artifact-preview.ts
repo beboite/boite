@@ -28,6 +28,11 @@ export class ArtifactPreviews {
 
   private key(threadId: string, path: string): string { return `${threadId}\0${path}`; }
 
+  private touch(key: string, preview: Preview): void {
+    this.previews.delete(key);
+    this.previews.set(key, preview);
+  }
+
   open(threadId: string, path: string): { url: string; port: number; path: string } {
     this.unlisten ??= this.core.bus.onAny((name) => {
       if (name !== 'thread.updated' && name !== 'thread.removed') return;
@@ -43,9 +48,16 @@ export class ArtifactPreviews {
     const root = realpathSync(dirname(found.absolute));
     const key = this.key(threadId, found.relative);
     const previous = this.previews.get(key);
-    if (previous && previous.root === root) return { url: previous.url, port: previous.port, path: found.relative };
+    if (previous && previous.root === root) {
+      this.touch(key, previous);
+      return { url: previous.url, port: previous.port, path: found.relative };
+    }
     if (previous) { previous.server.stop(true); this.previews.delete(key); }
-    if (this.previews.size >= MAX_PREVIEWS) throw refused('artifacts.preview has 16 open previews; close one with boite preview-close <file>');
+    if (this.previews.size >= MAX_PREVIEWS) {
+      const [oldestKey, oldest] = this.previews.entries().next().value!;
+      oldest.server.stop(true);
+      this.previews.delete(oldestKey);
+    }
     const token = newToken();
     const prefix = `/${token}/`;
     const server = Bun.serve({
@@ -68,6 +80,8 @@ export class ArtifactPreviews {
           // macOS /var aliases and linked project folders must compare canonical paths.
           existingInside(realpathSync(thread.cwd), target.absolute, 'file', 'preview asset');
           if (realpathSync(root) !== root || target.stats.size > MAX_ASSET_BYTES) return notFound();
+          const active = this.previews.get(key);
+          if (active) this.touch(key, active);
           const file = Bun.file(target.absolute);
           return fileResponse(file, request.headers.get('range'), {
             'content-type': mime, 'cache-control': 'no-store',

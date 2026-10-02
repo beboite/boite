@@ -19,6 +19,8 @@ test('agent deliverables and file links open in chat on desktop and paired phone
     const picturePath = join(projectDir, 'tests', 'e2e', '.artifacts', 'preview.png').replaceAll('\\', '/');
     mkdirSync(join(projectDir, 'tests', 'e2e', '.artifacts'), { recursive: true });
     writeFileSync(picturePath, readFileSync(join(import.meta.dir, '../../packages/ui/public/icons/icon-192.png')));
+    const largePicturePath = join(projectDir, 'large-picture.png');
+    writeFileSync(largePicturePath, Buffer.concat([readFileSync(picturePath), Buffer.alloc(6 * 1024 * 1024)]));
     const objects = [
       '<</Type/Catalog/Pages 2 0 R>>', '<</Type/Pages/Kids[3 0 R]/Count 1>>',
       '<</Type/Page/Parent 2 0 R/MediaBox[0 0 400 300]/Resources<</Font<</F1 5 0 R>>>>/Contents 4 0 R>>',
@@ -41,6 +43,7 @@ test('agent deliverables and file links open in chat on desktop and paired phone
     await done;
     await client.call('artifacts.publish', { threadId: thread.id, path: 'handoff.pdf' });
     await client.call('artifacts.publish', { threadId: thread.id, path: 'tests/e2e/.artifacts/preview.png' });
+    await client.call('artifacts.publish', { threadId: thread.id, path: 'large-picture.png' });
     for (const mobile of [false, true]) {
       page = await BrowserPage.launch({ url: mobile ? await mintPairing(core) : pairingUrlOf(core) });
       await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
@@ -55,6 +58,11 @@ test('agent deliverables and file links open in chat on desktop and paired phone
       expect(await page.evaluate(`document.querySelector('[data-testid=text-part] a[href="https://example.com/review"]') !== null`)).toBe(true);
       // Published images are already visible; their preview needs no extra click.
       await page.waitFor('document.querySelector("[data-testid=artifact-enlarge] img")?.naturalWidth === 192');
+      const largeCard = 'Array.from(document.querySelectorAll("[data-testid=chat-file]")).find(card => card.textContent.includes("large-picture.png"))';
+      await page.waitFor(`${largeCard}?.querySelector('[data-testid=artifact-load-image]')`);
+      expect(await page.evaluate(`${largeCard}.querySelector('img') === null`)).toBe(true);
+      await page.evaluate(`${largeCard}.querySelector('[data-testid=artifact-load-image]').click()`);
+      await page.waitFor(`${largeCard}.querySelector('img')?.naturalWidth === 192`);
       // An attached picture opens full size from its name, over the whole window.
       await page.evaluate('Array.from(document.querySelectorAll("[data-testid=artifact-launch]")).find(b => b.textContent.includes("preview.png")).click()');
       await page.waitFor('document.querySelector("[data-testid=image-viewer] img")?.naturalWidth === 192');

@@ -26,6 +26,8 @@ pub async fn open_local_file(webview: Webview, directory: String, path: String) 
 }
 
 fn resolve_chat_path(directory: &Path, path: &str) -> Result<PathBuf, String> {
+    crate::platform::require_local_path(directory)?;
+    crate::platform::require_local_path(Path::new(path))?;
     if !directory.is_absolute() || !directory.is_dir() {
         return Err("directory: expected an existing absolute thread directory".into());
     }
@@ -33,7 +35,9 @@ fn resolve_chat_path(directory: &Path, path: &str) -> Result<PathBuf, String> {
         return Err("path: expected a local file or folder, not a network or device path".into());
     }
     let candidate = directory.join(path);
+    crate::platform::require_local_path(&candidate)?;
     let resolved = candidate.canonicalize().map_err(|error| format!("path {path}: {error}"))?;
+    crate::platform::require_local_path(&resolved)?;
     if !resolved.is_file() && !resolved.is_dir() {
         return Err(format!("path {path}: expected a file or folder"));
     }
@@ -62,7 +66,7 @@ mod tests {
         assert!(resolve_chat_path(&project, "notes.txt").is_ok());
         assert_eq!(resolve_chat_path(&project, &root.join("test shortcut.lnk").to_string_lossy()).unwrap(), root.join("test shortcut.lnk").canonicalize().unwrap());
         assert!(resolve_chat_path(&project, &root.to_string_lossy()).unwrap().is_dir());
-        for path in ["", "//server/share/file.txt", "\\\\server\\share\\file.txt", "bad\0file", "missing.txt"] {
+        for path in ["", "//server/share/file.txt", "\\\\server\\share\\file.txt", "\\/server/share/file.txt", "/\\server/share/file.txt", "bad\0file", "missing.txt"] {
             assert!(resolve_chat_path(&project, path).is_err());
         }
         std::fs::remove_dir_all(root).unwrap();

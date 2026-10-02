@@ -1,4 +1,4 @@
-﻿import { open, mkdir, rename, unlink, readFile } from 'node:fs/promises';
+import { open, mkdir, rename, unlink, readFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { basename, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
