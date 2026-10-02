@@ -1,5 +1,7 @@
 //! OS integration. The shell's orchestration and IPC authorization stay outside it.
 mod paths;
+mod local_paths;
+pub(crate) use local_paths::require_local_path;
 pub(crate) use paths::default_data_dir;
 
 #[cfg(windows)]

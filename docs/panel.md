@@ -70,7 +70,9 @@ symlinks are refused. Files are read live, so reload reflects edits.
 
 `boite preview-close reports/index.html` stops its server. Archiving or removing
 the thread and shutting down the core also close previews. Up to 16 can be open
-at once. After a core restart, run `preview` again to obtain a new URL. Remote
+at once. Opening another evicts the least recently used preview; reopening a
+preview or fetching one of its assets updates its recency. Run `preview` again
+after eviction or a core restart to obtain a new URL. Remote
 desktop clients need a direct connection to the preview's additional HTTP port;
 a proxy that forwards only the core port does not forward artifact previews.
 
