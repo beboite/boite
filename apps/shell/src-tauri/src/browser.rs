@@ -398,7 +398,8 @@ pub async fn browser_create(
         )
     })?;
 
-    let mut builder = WebviewBuilder::new(label.clone(), WebviewUrl::External(start))
+    let initial = if cfg!(windows) { checked_url(&id, BLANK)? } else { start.clone() };
+    let mut builder = WebviewBuilder::new(label.clone(), WebviewUrl::External(initial))
         // A file dragged onto the page is the page's business, not the folder
         // drop the shell listens for on the main webview.
         .disable_drag_drop_handler();
@@ -545,7 +546,19 @@ pub async fn browser_create(
         )
         .map_err(|error| format!("the browser surface {id:?} could not be created: {error}"))?;
     view.hide()
-        .map_err(|error| format!("the browser surface {id:?} could not be parked: {error}"))
+        .map_err(|error| format!("the browser surface {id:?} could not be parked: {error}"))?;
+    #[cfg(windows)]
+    {
+        if let Err(error) = crate::platform::browser_diagnostics::attach(view.clone(), id.clone()).await {
+            crate::platform::browser_diagnostics::remove(&id); let _ = view.close(); return Err(error);
+        }
+        if let Err(error) = view.navigate(start) {
+            crate::platform::browser_diagnostics::remove(&id);
+            let _ = view.close();
+            return Err(error.to_string());
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -709,6 +722,8 @@ pub async fn browser_highlight(app: AppHandle, webview: Webview, id: String, req
 #[tauri::command]
 pub async fn browser_destroy(app: AppHandle, webview: Webview, id: String) -> Result<(), String> {
     only_main(&webview)?;
+    #[cfg(windows)]
+    crate::platform::browser_diagnostics::remove(&id);
     cancel_pick(&id);
     if let Ok(mut highlights) = HIGHLIGHTS.lock() { highlights.remove(&id); }
     surfaces().want(&label_of(&id)?, false);

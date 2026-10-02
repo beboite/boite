@@ -52,6 +52,7 @@ async function probeProvider(
       // A probe runs the same executable a turn would, so it holds the same lease:
       // removing a managed install under a probe would be the same crash.
       spawnChild: (cmd, args, opts) => {
+        core.accounts.require(account.id);
         const child = core.procs.spawnChild(threadId, cmd, args, opts);
         exits.push(new Promise<void>((resolve) => {
           child.once('close', () => resolve());
@@ -76,6 +77,7 @@ async function probeProvider(
         core.log(level, message, { ...context, source: provider.id, event: 'provider.probe', threadId });
       },
     });
+    core.accounts.require(account.id);
     if (!isCurrent()) throw refused('the provider or account changed during discovery; refresh models');
     core.bus.emit('providers.probed', { providerId: provider.id, accountId: account.id, models, probedAt });
     return { models, probedAt };

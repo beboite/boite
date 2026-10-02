@@ -48,6 +48,9 @@ export function mayReceiveEvent(name: RpcEventName, connection: Connection): boo
  * of these methods changes the owner's trust, routes or permissions.
  */
 export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMethodName, string>([
+  ['threads.pullRequests', 'read the pull requests attached to its own conversation'],
+  ['threads.linkPullRequest', 'attach a verified GitHub PR to its own conversation; does not publish or modify the PR'],
+  ['threads.unlinkPullRequest', 'remove a conversation link without changing the GitHub PR'],
   ['agents.routine.save', 'bounded durable scheduling for its own identity from its direct conversation, when the owner enabled routines'],
   ['agents.snapshot', 'only the persistent identity, context and resources of this execution'],
   ['agents.history', 'older messages, work and memory of this execution context, under the snapshot rules'],

@@ -147,6 +147,7 @@ export class FakeContext {
   accounts: Account[] = [];
   readonly mergedPrFixtures = new Map<ThreadId, MergedPrFixture>();
   readonly mergedPrArchive = new Map<ThreadId, FakeArchiveState>();
+  readonly removedDefaultProviders = new Set<string>();
   readonly threads = new Map<ThreadId, Thread>();
   readonly deletedThreads = new Map<ThreadId, { threads: Thread[]; archived: boolean[]; deletedAt: number }>();
   readonly coordination = new Map<ThreadId, CoordinationConfig>();

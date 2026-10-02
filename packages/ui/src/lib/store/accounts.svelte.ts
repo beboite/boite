@@ -140,10 +140,16 @@ export class Accounts {
     try {
       await client.call('accounts.loginCancel', { accountId });
       if (!this.ctx.currentClient(client, generation)) return;
-      delete this.logins[accountId];
+      this.dismissLogin(accountId);
     } catch (error) {
       if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
     }
+  }
+
+  /** Hide the login result and prevent an older reload snapshot from restoring it. */
+  dismissLogin(accountId: string): void {
+    this.loginChanges.set(accountId, ++this.loginRevision);
+    delete this.logins[accountId];
   }
 
   /** Start the provider's login for this account; the rest arrives as `account.login`. */

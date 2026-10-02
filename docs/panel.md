@@ -7,6 +7,21 @@ starts with the panel closed, without changing the stored desktop layout.
 `lib/right-panel.svelte.ts` owns layout and `RightPanel.svelte` renders it;
 `lib/surface-labels.ts` defines labels and availability.
 
+## Browser tools and linked pull requests
+
+On Windows, the browser's screen menu selects phone, tablet and desktop
+viewport sizes, portrait or landscape orientation, and the page's light or
+dark appearance. It also opens diagnostics with console messages, exceptions,
+failed requests and recent automation actions. These tools remain inside
+Boite. The recording button captures the page; stopping opens a video player
+with download and discard actions. The [CLI](cli.md) exposes the same tools
+to agents, including recording and attaching the result to chat.
+
+The conversation header lists explicitly linked pull requests, their current
+states and branch dependencies. The owner can add, refresh or remove links.
+Removing a link does not close its PR. A failed GitHub refresh keeps the last
+known state and displays the error.
+
 ## Floating panel and browser overlays
 
 In the shell, the browser toolbar can detach the panel into a floating card
@@ -189,3 +204,35 @@ watching keeps the request on its panel for the next open.
 open their surface, `close-surface` closes the active tab. The defaults are in
 [keybindings.md](keybindings.md). With the launcher showing, a single letter
 opens a surface: A, B, C, F, K, T.
+
+## Experimental PR review
+
+Settings, Experiments, **PR review** adds **Read in Boite** to each PR linked
+to the conversation. The review shows the description, changed files and their
+diffs, discussion and inline comments, reviews, and GitHub check results. The
+same dialog works at phone width; diffs scroll horizontally and long filenames
+wrap without covering their change counts.
+
+Reads use the desktop core's existing `gh` login. A paired phone can read only
+PRs already linked to that conversation; it cannot add links or make arbitrary
+GitHub queries. The feature does not post comments, approve, merge, or archive
+the conversation. The external GitHub link remains available for those actions.
+
+Files load 30 at a time. Binary files without a patch are named explicitly.
+Large patches and discussions show a truncation notice, and GitHub remains the
+source for omitted content. Results are cached for ten seconds. Descriptions
+and comments use the existing escaped Markdown renderer; remote images are
+not fetched.
+
+## Experimental recording indicators
+
+Enable **Recording indicators** before starting a browser recording to include
+fading click rings and navigation-key labels in the saved video. The collector
+keeps at most twelve recent marks, omits printable key labels, and ignores
+navigation keys in password and payment fields. Page contents are still part
+of the recording. Stopping or closing the browser removes the collector.
+
+The encoder receives each completed canvas frame after both the page capture
+and its indicators have been drawn. `tests/e2e/browser-remote.test.ts` decodes
+the saved recording and checks that a navigation-key badge is present; a
+collector receiving an event alone does not verify the exported video.

@@ -479,6 +479,7 @@ export function startServer(options: ServerOptions): RunningServer {
 
   const broadcast = (name: RpcEventName, payload: EventPayload): void => {
     const scoped =
+      name === 'threads.pullRequestsChanged' ||
       name.startsWith('message.') ||
       name.startsWith('permission.') ||
       name.startsWith('question.') ||

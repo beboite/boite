@@ -30,12 +30,14 @@ const snapshot = `(() => {
 })()`;
 
 function target(selector: string, typing: boolean): string {
-  return `(() => {
+  return `(async () => {
     const nodes = document.querySelectorAll(${JSON.stringify(selector)});
     if (nodes.length !== 1) throw new Error('selector must match exactly one element; matched ' + nodes.length);
     const el = nodes[0];
     if (el.disabled || el.readOnly) throw new Error('element is disabled or read-only');
     el.scrollIntoView({block:'center', inline:'center'});
+    // Native input uses the composited page, which can lag behind DOM scrolling.
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const r = el.getBoundingClientRect(), s = getComputedStyle(el);
     if (!r.width || !r.height || s.visibility === 'hidden') throw new Error('element is hidden');
     const x = Math.max(0, Math.min(innerWidth - 1, r.left + r.width / 2));

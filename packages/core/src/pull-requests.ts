@@ -1,9 +1,10 @@
-import type { ThreadSummary } from '@boite/contracts';
+import { pullRequestAddress, type LinkedPullRequest, type ThreadSummary } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, normalize, resolve } from 'node:path';
 import { messageOf, refused } from './errors.ts';
 import { GIT_PROBE_TIMEOUT_MS, hasGitMarker } from './projects.ts';
+import { PullRequestReviews } from './pull-request-review.ts';
 
 type PullRequest = ThreadSummary['pullRequest'];
 
@@ -167,6 +168,7 @@ function unavailable(error: unknown): boolean {
  */
 export class PullRequests {
   #proofs = new Map<string, SharedProof>();
+  readonly reviews = new PullRequestReviews((threadId, args) => { const thread = this.core.threads.require(threadId); return this.#run(thread, thread.cwd, 'gh', args); });
   #remotes = new Map<string, Cached<boolean>>();
   #lists = new Map<string, Cached<PullRequestList>>();
   #branches = new Map<string, Cached<PullRequest>>();
@@ -180,6 +182,24 @@ export class PullRequests {
   constructor(private core: Core, options: PullRequestOptions = {}) {
     this.#timeoutMs = options.timeoutMs ?? TIMEOUT_MS;
     this.#maxOutputBytes = options.maxOutputBytes ?? 8 * 1024 * 1024;
+  }
+
+  async detail(threadId: string, input: string): Promise<LinkedPullRequest> {
+    const address = pullRequestAddress(input);
+    const host = (process.env.GH_HOST ?? 'github.com').toLowerCase();
+    if (address.host !== host) throw refused(`pull request host must be ${host}`);
+    const thread = this.core.threads.require(threadId);
+    const raw = await this.#run(thread, thread.cwd, 'gh', ['pr', 'view', address.url, '--json', 'url,number,title,state,isDraft,headRefName,baseRefName,headRepository,headRepositoryOwner']);
+    if (raw.length > 64 * 1024) throw refused('pull request metadata exceeds 64 KB');
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    const basic = toPullRequest(value);
+    if (pullRequestAddress(basic.url).url.toLowerCase() !== address.url.toLowerCase()) throw refused('gh returned a different pull request URL');
+    if (typeof value.title !== 'string' || typeof value.headRefName !== 'string' || typeof value.baseRefName !== 'string') throw refused('gh returned incomplete pull request metadata');
+    const repository = value.headRepository as { name?: string } | null;
+    const owner = value.headRepositoryOwner as { login?: string } | null;
+    return { ...address, title: value.title.slice(0, 500), state: basic.state, draft: value.isDraft === true,
+      head: value.headRefName.slice(0, 500), base: value.baseRefName.slice(0, 500),
+      headRepository: owner?.login && repository?.name ? `${owner.login}/${repository.name}` : '', checkedAt: Date.now() };
   }
 
   read(threadId: string, refresh = false): Promise<PullRequest> {

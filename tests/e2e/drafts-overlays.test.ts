@@ -144,8 +144,8 @@ test('drafts survive reload and composer menus stay above the chrome', async () 
     await page.click('[data-testid=terminal-toggle]');
     await page.waitFor('document.querySelector("[data-testid=terminal-drawer]")');
     await settle(page);
-    await page.click('[data-testid=terminal-hide]');
     expect(await page.evaluate('getComputedStyle(document.querySelector("[data-testid=terminal-drawer]")).transitionProperty')).toBe('height');
+    await page.click('[data-testid=terminal-hide]');
     await page.waitFor('!document.querySelector("[data-testid=terminal-drawer]")');
     await page.evaluate('document.documentElement.dataset.motion = "reduced"');
     await page.click('[data-testid=panel-toggle]');

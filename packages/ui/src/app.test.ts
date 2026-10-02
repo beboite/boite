@@ -1962,6 +1962,33 @@ test('account lifecycle cancel button stops login and restores retry', async ({ 
   expect(document.querySelector('[data-testid=account-login]')).not.toBeNull();
 });
 
+test('a failed account login can be dismissed and removed without restarting', async ({ app: _app }) => {
+  store.showSettings('accounts');
+  await openProviderDetails('claude');
+  store.logins['a-claude-side'] = { state: 'failed', output: 'Sign-in failed', url: null, exitCode: 1 };
+  await waitFor(() => document.querySelector('[data-testid=account-login-output]')?.textContent === 'Sign-in failed');
+  query<HTMLButtonElement>('[data-testid=account-login-dismiss]').click();
+  await waitFor(() => document.querySelector('[data-testid=account-login-row]') === null);
+  query<HTMLButtonElement>('[data-testid=account-remove][data-account-id=a-claude-side]').click();
+  await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') !== null);
+  query<HTMLButtonElement>('[data-testid=confirm-ok]').click();
+  await waitFor(() => !store.accounts.some(account => account.id === 'a-claude-side'));
+});
+
+test('a pairing link can be closed and a fresh one created', async ({ app: _app }) => {
+  store.showSettings('machines');
+  await waitFor(() => document.querySelector('[data-testid=pairing-mint]') !== null);
+  query<HTMLButtonElement>('[data-testid=pairing-mint]').click();
+  await waitFor(() => document.querySelector('[data-testid=pairing-link]') !== null);
+  const first = store.pairing!.grant;
+  query<HTMLButtonElement>('[data-testid=pairing-close]').click();
+  await waitFor(() => document.querySelector('[data-testid=pairing-link]') === null);
+  expect(store.pairing).toBeNull();
+  query<HTMLButtonElement>('[data-testid=pairing-mint]').click();
+  await waitFor(() => document.querySelector('[data-testid=pairing-link]') !== null);
+  expect(store.pairing!.grant).not.toBe(first);
+});
+
 test('a new isolated account is signed out, and a thread on it offers the sign-in', async ({ app: _app }) => {
   const client = store.client!;
   const account = await client.call('accounts.add', { providerId: 'claude', label: 'Work', useDefaultLocation: false });

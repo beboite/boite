@@ -127,6 +127,26 @@ const staleReason = skipShell ? null : exeMissing
   : (staleCoreReason() ?? staleUiReason());
 const shellTest = skipShell || staleReason !== null ? test.skip : test;
 
+// The desktop CI entry point also exercises browser features in isolated test
+// processes, so this file's shell lifecycle hooks cannot affect their sessions.
+shellTest('native browser tools and paired control', async () => {
+  const suite = Bun.spawn({
+    cmd: [process.execPath, 'test', 'tests/e2e/browser-parity.test.ts', 'tests/e2e/browser-remote.test.ts'],
+    cwd: ROOT,
+    env: { ...process.env, BOITE_E2E_SHELL_EXE: EXE },
+    stdout: 'inherit',
+    stderr: 'inherit',
+    windowsHide: true,
+  });
+  const timeout = setTimeout(() => killProcessTree(suite.pid), 260_000);
+  try {
+    expect(await suite.exited).toBe(0);
+  } finally {
+    clearTimeout(timeout);
+    if (suite.exitCode === null) killProcessTree(suite.pid);
+  }
+}, 270_000);
+
 // One failure, right away, instead of two turn tests timing out in two minutes.
 if (staleReason !== null) {
   const reason = staleReason;

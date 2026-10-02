@@ -38,6 +38,20 @@ display a capture inside the thread's working directory in chat.
 and scale down to fit the panel, with pointer input mapped to the displayed page.
 `reset-viewport` fills the panel again. The toolbar's size button also resets it.
 
+`preset iphone-15-pro landscape` selects a screen size and orientation.
+`appearance dark`, `light` or `system` changes the page's color scheme.
+These are CSS viewport and media-query settings, not device or touch emulation.
+`diagnostics` returns console output, JavaScript exceptions, failed requests,
+HTTP errors and action history. Each tab retains the latest 200 page events
+and 100 actions. Network URLs omit credentials, queries and fragments. Action
+history records operation names, not typed values or evaluated code.
+`diagnostics-clear` clears both buffers.
+
+`recording-start` and `recording-stop` save a silent WebM in the working
+directory, at up to 8 frames per second and 1920 × 1080. Recording stops at
+three minutes or the 50 MiB transfer limit. Run `boite attach <video.webm>`
+to show it in chat. Closing the tab discards an unfinished recording.
+
 Automation uses WebView2's native devtools channel, without a debugging port.
 Only the owner UI can register a host or answer its requests. The agent token
 can request actions for its own conversation only while the owner host has
@@ -46,6 +60,16 @@ closing the host rejects pending work. Actions already dispatched to a page
 may finish and are not undone. Commands have a 20 second deadline. macOS, Linux and the
 phone client do not provide automation yet. Every provider uses this same CLI;
 no provider-specific integration or paid model call is needed for these tests.
+
+## Pull requests linked to a conversation
+
+`boite pr link <url>` verifies a GitHub pull request and saves its link in the
+current conversation. Link each PR in a stack. `boite pr list` returns them
+in dependency order; `boite pr refresh` updates titles and states from GitHub.
+`boite pr unlink <url>` removes the saved link without changing the PR.
+An agent can manage links only in its own conversation. Paired devices can
+read the list. Lookup uses the local `gh` login and the configured `GH_HOST`.
+At most 20 PRs can be linked to one conversation.
 
 ## How an agent finds the core
 

@@ -218,6 +218,7 @@ export class Store {
   set sessions(value) { this.#ctx.pairing.sessions = value; }
 
   mintPairing(...args: Parameters<Pairing['mintPairing']>) { return this.#ctx.pairing.mintPairing(...args); }
+  closePairing() { return this.#ctx.pairing.closePairing(); }
   loadSessions(...args: Parameters<Pairing['loadSessions']>) { return this.#ctx.pairing.loadSessions(...args); }
   revokeSession(...args: Parameters<Pairing['revokeSession']>) { return this.#ctx.pairing.revokeSession(...args); }
 
@@ -372,6 +373,7 @@ export class Store {
   addAccount(...args: Parameters<Accounts['addAccount']>) { return this.#ctx.accounts.addAccount(...args); }
   removeAccount(...args: Parameters<Accounts['removeAccount']>) { return this.#ctx.accounts.removeAccount(...args); }
   cancelLogin(...args: Parameters<Accounts['cancelLogin']>) { return this.#ctx.accounts.cancelLogin(...args); }
+  dismissLogin(...args: Parameters<Accounts['dismissLogin']>) { return this.#ctx.accounts.dismissLogin(...args); }
   loginAccount(...args: Parameters<Accounts['loginAccount']>) { return this.#ctx.accounts.loginAccount(...args); }
   sendLoginInput(...args: Parameters<Accounts['sendLoginInput']>) { return this.#ctx.accounts.sendLoginInput(...args); }
   renameAccount(...args: Parameters<Accounts['renameAccount']>) { return this.#ctx.accounts.renameAccount(...args); }

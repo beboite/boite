@@ -7,7 +7,9 @@ owns their lifecycle; [providers](providers.md) defines descriptor fields.
 `accounts.logins` restores running login cards after reconnect. `accounts.loginCancel`
 stops the login process and waits for it to exit. Removing an account does the
 same before deleting its isolated directory; default CLI directories stay on
-disk. Removal is refused while any thread still references the account.
+disk. Removal also stops connection checks and model discovery before deleting
+the directory, and blocks new account operations while it runs. Removal is
+refused while any thread still references the account.
 
 ## The isolation directory
 
@@ -95,6 +97,14 @@ account named after the provider. No signed-out `Default` account is added
 beside it. Terminal logins retain the default account, and a provider whose
 login can live outside session files retains its account with unknown status.
 
+Removing a default account opts that provider out of automatic adoption on this
+core. Reloads, managed installs and core restarts respect that choice, even if
+the CLI remains signed in or changes its login. The CLI's own files stay intact,
+and other providers are unaffected. Guided sign-in can still create a new
+isolated account. "Use my command-line login" explicitly restores the CLI
+account and permits automatic adoption again, through an account added with
+`useDefaultLocation: true`.
+
 The core resolves unset isolation variables to provider defaults: the XDG pair resolve
 under `~/.local/share` and `~/.config`,
 `CODEX_HOME` to `~/.codex`, `CLAUDE_CONFIG_DIR` to `~/.claude`, `GROK_HOME`
@@ -115,6 +125,12 @@ models or sending a prompt. Codex reads its account through the app-server with
 Keychain accounts. Both return the signed-in email. Other providers retain their
 session-file check. A failed check displays its reason instead of reporting a
 model count. Passive checks do not launch an agent process.
+
+A native Claude authentication refusal marks the account signed out, including
+when it happens during preparation before the first prompt. Boite remembers
+the refusal across restarts: a session file alone cannot restore the connected
+status. A successful fresh CLI check or completed sign-in clears it. Billing,
+rate limits and failures inside subagents do not invalidate the account.
 
 Changed account statuses and identities reach every client as `accounts.updated`.
 An unchanged passive check writes no journal row and sends no event.
@@ -150,6 +166,11 @@ The user enters the code on the sign-in page, with no code field to send it back
 to Boite. Cancellation closes the process; expired codes show a retryable error.
 Piped login output from other agents has terminal control sequences removed
 before the core extracts links or displays text.
+
+Failed sign-ins have a Close button. Cancelling stops an ongoing post-login
+connection check as well as the login process; a refused login command reports
+its failure immediately without starting that check. The account can then be
+retried or removed from its row.
 
 The other shape is `login.acp`, for an ACP agent whose sign-in is the protocol's
 own `authenticate` call rather than a command. The core starts the agent itself
