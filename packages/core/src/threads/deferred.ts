@@ -42,7 +42,7 @@ export class DeferredInput {
         .then(submitted => {
           if (this.core.stopping) return;
           if (!submitted) return;
-          if (turnId) this.threads.runner.userInputAt.set(turnId, this.recordAnswer(threadId, turnId, text));
+          if (turnId) this.threads.runner.answerAfter.set(turnId, this.recordAnswer(threadId, turnId, text));
           const held = this.deferredAnswers.get(threadId) ?? [];
           const index = held.indexOf(text);
           if (index >= 0) held.splice(index, 1);
@@ -121,7 +121,7 @@ export class DeferredInput {
     const held = this.deferredAnswers.get(threadId);
     if (held === undefined) return null;
     const turnId = this.core.journal.listTurns(threadId).findLast(turn => turn.status === 'running')?.id;
-    if (turnId) this.threads.runner.userInputAt.set(turnId, this.recordAnswer(threadId, turnId, held.join('\n\n')));
+    if (turnId) this.threads.runner.answerAfter.set(turnId, this.recordAnswer(threadId, turnId, held.join('\n\n')));
     this.deferredAnswers.delete(threadId);
     this.changed(threadId);
     return `The user answered while you were working:\n\n${held.join('\n\n')}`;

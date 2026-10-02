@@ -21,10 +21,10 @@ export class TurnRunner {
   readonly handles: TurnAttempts['handles'];
   readonly steering = new Set<ThreadId>();
   /**
-   * Running turns the user wrote into, with when that message was journalled.
-   * The turn's emitter reads it to start a new assistant message after it.
+   * Standalone messages inserted during a running answer, with their timestamps.
+   * The turn's emitter starts its next segment after the latest one.
    */
-  readonly userInputAt = new Map<TurnId, number>();
+  readonly answerAfter = new Map<TurnId, number>();
 
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {
     this.attempts = new TurnAttempts(core, threads);
@@ -75,7 +75,7 @@ export class TurnRunner {
       result = { status: 'error', sessionId: state.thread.sessionId, usage: null, error: messageOf(error), diagnosticError: logMessageOf(error) };
     } finally {
       this.attempts.close(threadId);
-      this.userInputAt.delete(turnId);
+      this.answerAfter.delete(turnId);
     }
 
     const { thread, running } = state;

@@ -4,6 +4,80 @@ import { expect, test } from 'bun:test';
 import { connect } from '../../packages/core/src/client.ts';
 import { BrowserPage } from './lib/cdp.ts';
 import { mintPairing, pairingUrlOf, startCore } from './lib/core.ts';
+import { ensureProductionUi } from './lib/prod-ui.ts';
+
+test('live output after published files stays at the bottom on desktop and paired phone', async () => {
+  ensureProductionUi();
+  const core = await startCore();
+  const client = await connect(core.url, core.token);
+  let page: BrowserPage | undefined;
+  try {
+    await client.call('brain.configure', { path: null, enabled: false, boiteGuide: false });
+    const project = await client.call('projects.add', { path: core.dataDir, name: 'Deliverables' });
+    const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
+    writeFileSync(join(core.dataDir, 'report.txt'), 'Report ready');
+    for (const mobile of [false, true]) {
+      const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, permissionMode: 'default', title: 'Continue after the report' });
+      page = await BrowserPage.launch({ url: mobile ? await mintPairing(core) : pairingUrlOf(core), windowSize: { width: 1280, height: 900 } });
+      if (mobile) await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+      await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
+      await page.click(`[data-thread-id="${thread.id}"]`);
+      await client.call('turns.start', { threadId: thread.id, prompt: 'Report prepared.\n\n'.repeat(12) + '[permission][tool]Checking the next change.\n\n[permission]' });
+      await page.waitFor('document.querySelector("[data-testid=permission-card]")');
+      await client.call('artifacts.publish', { threadId: thread.id, path: 'report.txt' });
+      const file = await client.call('artifacts.publish', { threadId: thread.id, path: 'report.txt' });
+      await page.waitFor('document.querySelectorAll("[data-testid=chat-file]").length === 2');
+      // The reader follows the delivered files, rather than holding the initial prompt at the top.
+      await page.evaluate(`(() => {
+        const box = document.querySelector('[data-testid=timeline]');
+        box.dispatchEvent(new WheelEvent('wheel', { deltaY: -250, bubbles: true }));
+        box.scrollTop -= 250;
+      })()`);
+      await page.waitFor('document.querySelector("[data-testid=jump-to-latest]")');
+      await page.click('[data-testid=jump-to-latest]');
+      await page.waitFor(`(() => { const box = document.querySelector('[data-testid=timeline]'); return !document.querySelector('[data-testid=jump-to-latest]') && box.scrollHeight - box.scrollTop - box.clientHeight <= 1; })()`);
+      const [permission] = await client.call('permissions.list', { threadId: thread.id });
+      await client.call('permissions.answer', { requestId: permission!.id, decision: 'allow' });
+      await page.waitFor('Array.from(document.querySelectorAll("[data-testid=message] [data-testid=text-part]")).some(part => part.textContent.includes("Checking the next change."))');
+      const snapshot = await client.call('threads.get', { threadId: thread.id });
+      const continued = snapshot.messages.at(-1)!;
+      expect(continued.id).not.toBe(file.id);
+      expect(snapshot.messages.at(-2)?.id).toBe(file.id);
+      expect(snapshot.turns).toHaveLength(1);
+      expect(snapshot.turns[0]?.status).toBe('running');
+      expect(snapshot.messages.filter(message => message.role === 'user')).toHaveLength(1);
+      const visibility = `(() => {
+        const messages = Array.from(document.querySelectorAll('[data-testid=message]'));
+        const last = messages.at(-1);
+        const previous = messages.at(-2);
+        const paragraph = Array.from(last.querySelectorAll('[data-testid=paragraph]')).find(part => part.textContent.includes('Checking the next change.'));
+        if (!previous.querySelector('[data-testid=chat-file]') || !paragraph) return false;
+        const rect = paragraph.getBoundingClientRect();
+        const viewport = document.querySelector('[data-testid=timeline]').getBoundingClientRect();
+        return rect.top >= viewport.top && rect.bottom <= viewport.bottom;
+      })()`;
+      await page.waitFor(visibility).catch(async error => {
+        console.error(await page!.evaluate(`(() => { const box = document.querySelector('[data-testid=timeline]'); return JSON.stringify({ top: box.scrollTop, height: box.clientHeight, total: box.scrollHeight, state: box.dataset }); })()`));
+        throw error;
+      });
+      expect(await page.evaluate<boolean>(visibility)).toBe(true);
+      await page.waitFor('!document.querySelector("[data-testid=jump-to-latest]")').catch(async error => {
+        console.error(await page!.evaluate(`(() => { const box = document.querySelector('[data-testid=timeline]'); return JSON.stringify({ top: box.scrollTop, height: box.clientHeight, total: box.scrollHeight, state: box.dataset }); })()`));
+        await page!.screenshot(join(import.meta.dir, '.artifacts', `artifacts-continued-failure-${mobile ? 'phone' : 'desktop'}.png`));
+        throw error;
+      });
+      await page.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
+      await page.screenshot(join(import.meta.dir, '.artifacts', `artifacts-continued-${mobile ? 'phone' : 'desktop'}.png`));
+      await page.send('Page.reload', {});
+      await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
+      await page.click(`[data-thread-id="${thread.id}"]`);
+      await page.waitFor('Array.from(document.querySelectorAll("[data-testid=message]")).at(-1)?.textContent.includes("Checking the next change.")');
+      expect(page.errors()).toEqual([]);
+      await client.call('turns.stop', { threadId: thread.id });
+      await page.close(); page = undefined;
+    }
+  } finally { await page?.close(); client.close(); await core.stop(); }
+}, 90_000);
 
 test('agent deliverables and file links open in chat on desktop and paired phone', async () => {
   const core = await startCore();
@@ -70,6 +144,12 @@ test('agent deliverables and file links open in chat on desktop and paired phone
       await page.screenshot(join(import.meta.dir, '.artifacts', `artifacts-viewer-${mobile ? 'phone' : 'desktop'}.png`));
       await page.click('[data-testid=image-viewer-close]');
       await page.waitFor('document.querySelector("[data-testid=image-viewer]") === null');
+      // Read the link above the attachments before opening its lazy preview.
+      await page.evaluate(`(() => {
+        const box = document.querySelector('[data-testid=timeline]');
+        box.dispatchEvent(new WheelEvent('wheel', { deltaY: -250, bubbles: true }));
+        document.querySelector('a[data-file-path=' + ${JSON.stringify(JSON.stringify(notesPath))} + ']').scrollIntoView({ block: 'center' });
+      })()`);
       await page.click(`a[data-file-path=${JSON.stringify(notesPath)}]`);
       await page.waitFor(mobile ? 'document.querySelector("[data-testid=chat-file] [role=alert]")' : 'document.querySelector("[data-testid=artifact-content] pre")');
       expect(await page.text('[data-testid=chat-file]')).toContain(mobile ? 'owner connection' : 'Ready for review.');
@@ -79,7 +159,11 @@ test('agent deliverables and file links open in chat on desktop and paired phone
         await page.click(`a[data-file-path=${JSON.stringify(picturePath)}]`);
         // The published picture is already loaded. Wait for the preview opened by this link.
         const linkedImage = '[data-testid="chat-file"]:has([data-testid="artifact-preview"]) [data-testid="artifact-content"] img';
-        await page.waitFor(`document.querySelector(${JSON.stringify(linkedImage)})?.naturalWidth > 0`);
+        await page.waitFor(`document.querySelector(${JSON.stringify(linkedImage)})?.naturalWidth > 0`).catch(async error => {
+          console.error(await page!.evaluate(`JSON.stringify(Array.from(document.querySelectorAll('[data-testid=chat-file]')).map(card => ({ text: card.textContent, images: Array.from(card.querySelectorAll('img')).map(img => ({ src: img.src, width: img.naturalWidth })) })))`));
+          await page!.screenshot(join(import.meta.dir, '.artifacts', 'artifacts-linked-image-failure.png'));
+          throw error;
+        });
         expect(await page.evaluate(`document.querySelector(${JSON.stringify(linkedImage)}).naturalWidth`)).toBe(192);
         await page.screenshot(join(import.meta.dir, '.artifacts', 'artifacts-image-desktop.png'));
         await page.evaluate('Array.from(document.querySelectorAll("[data-testid=chat-file]")).find(card => card.textContent.includes("handoff.pdf")).querySelector("[data-testid=artifact-preview]").click()');

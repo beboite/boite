@@ -225,7 +225,7 @@ test('a pinned conversation follows its answer on every frame, and a wheel turne
   // A streaming answer shows whole paragraphs, so the echo is made of short ones.
   await page.evaluate(`(() => {
     const input = document.querySelector('[data-testid=composer-input]');
-    input.value = 'A paragraph long enough to wrap across the conversation column, sent back word for word.\\n\\n'.repeat(24);
+    input.value = 'A paragraph long enough to wrap across the conversation column, sent back word for word.\\n\\n'.repeat(48);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   })()`);
   await page.click('[data-testid=composer-send]');
@@ -241,6 +241,19 @@ test('a pinned conversation follows its answer on every frame, and a wheel turne
   expect(gaps.length).toBeGreaterThan(5);
   // Before, the list caught up ten times a second and painted the new lines below the fold in between.
   expect(Math.max(...gaps)).toBeLessThanOrEqual(1);
+
+  // A small keyboard step leaves following too, before reaching its 80 px tolerance.
+  await page.evaluate(`(() => { const box = document.querySelector('${timeline}'); box.tabIndex = -1; box.focus({ preventScroll: true }); })()`);
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38 });
+  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38 });
+  await page.waitFor(`document.querySelector('${jump}')`);
+  await page.evaluate('new Promise((done) => setTimeout(done, 300))');
+  const keyed = await page.evaluate<number>(`document.querySelector('${timeline}').scrollTop`);
+  await page.evaluate('new Promise((done) => setTimeout(done, 400))');
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'chat-scroll-keyboard.png'));
+  expect(Math.abs((await page.evaluate<number>(`document.querySelector('${timeline}').scrollTop`)) - keyed)).toBeLessThanOrEqual(1);
+  await page.click(jump);
+  await page.waitFor(`!document.querySelector('${jump}') && (() => { const t = document.querySelector('${timeline}'); return t.scrollHeight - t.clientHeight - t.scrollTop < 2; })()`);
 
   const box = await page.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('${timeline}').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -120 });
