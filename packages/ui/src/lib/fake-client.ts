@@ -303,6 +303,7 @@ export class FakeClient implements ObservableClient {
   // and each domain module answers its own share of it.
   #answer(ctx: FakeContext): FakeMethods {
     const threads = threadMethods(ctx);
+    const projects = projectMethods(ctx);
     return {
       'core.shutdown': async () => { ctx.agents.close(); await Promise.all([...ctx.threads.keys()].map(id => ctx.stopTurn(id))); setTimeout(() => this.close(), 25); return { ok: true }; },
       'hello': async (params) => {
@@ -313,11 +314,11 @@ export class FakeClient implements ObservableClient {
       ...serverUpdateMethods(ctx),
       ...hookMethods(ctx),
       ...pairingMethods(ctx),
-      ...projectMethods(ctx),
+      ...projects,
       ...projectIconMethods(ctx),
       ...threads,
       ...threadMoveMethods(ctx),
-      ...spawnMethods(ctx, threads['threads.create']),
+      ...spawnMethods(ctx, threads['threads.create'], projects['projects.add']),
       ...activityMethods(ctx),
       ...requestMethods(ctx),
       ...providerCatalogMethods(ctx),

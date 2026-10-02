@@ -68,6 +68,10 @@ development assets with `NODE_ENV=production`. The core fixture clears inherited
 `BOITE_UI_DIR` unless the test explicitly supplies one, so installed assets
 cannot replace this checkout's UI.
 
+The service worker never registers under `?fake=1`, so a rebuild is always what
+a reload shows. Run `svelte-check` before source-based browser scenarios: writing
+its generated tsconfig makes Vite reload the page and can reset a fixture mid-test.
+
 Fake browser fixtures do not always need a development server.
 `tests/e2e/lib/ui.ts` selects a prebuilt fixture from `BOITE_E2E_FAKE_UI`, builds
 one per test process with `BOITE_E2E_PREBUILT_UI=1`, or falls back to Vite.

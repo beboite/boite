@@ -156,6 +156,36 @@ test('fake resources.list carries only threads running something now, like the c
     expect(entry.live.every(record => record.exitedAt === null)).toBe(true);
     expect(entry.load.processes).toBeGreaterThan(0);
   }
+  // A turn can settle while its API-started processes keep running.
+  const [question] = await client.call('questions.list', { threadId: 't-scheduler' });
+  await client.call('questions.skip', { threadId: 't-scheduler', questionId: question!.id });
+  expect((await client.call('threads.get', { threadId: 't-scheduler' })).status).toBe('idle');
+  const live = (await client.call('trace.get', { threadId: 't-scheduler' })).filter(record => record.exitedAt === null);
+  expect(live).toHaveLength(2);
+  const unrelatedHistory = await client.call('trace.get', { threadId: 't-trace' });
+  await client.call('threads.subscribe', { threadId: 't-scheduler' });
+  const exits: number[] = [];
+  client.on('process.exited', record => exits.push(record.pid));
+  await client.call('delegation.configure', { threadId: 't-scheduler', config: {
+    ...DEFAULT_DELEGATION_CONFIG, enabled: true,
+    profiles: [{ id: 'echo', name: 'Echo', providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null }]
+  } });
+  const child = await client.call('delegation.spawn', { threadId: 't-scheduler', profileId: 'echo', task: '[permission]', requestId: 'archive-child' });
+  const unrelated = await client.call('turns.start', { threadId: 't-descriptors', prompt: '[permission]' });
+  await vi.waitFor(async () => {
+    expect((await client.call('threads.get', { threadId: child.thread.id })).status).toBe('waiting');
+    expect((await client.call('threads.get', { threadId: unrelated.threadId })).status).toBe('waiting');
+  });
+  await client.call('threads.archive', { threadId: 't-scheduler' });
+  expect((await client.call('resources.list', {})).some(entry => entry.threadId === 't-scheduler')).toBe(false);
+  expect((await client.call('trace.get', { threadId: 't-scheduler' })).every(record => record.exitedAt !== null)).toBe(true);
+  expect(exits.sort()).toEqual(live.map(record => record.pid).sort());
+  expect((await client.call('threads.get', { threadId: child.thread.id })).turns.at(-1)?.status).toBe('stopped');
+  expect((await client.call('threads.get', { threadId: unrelated.threadId })).turns.at(-1)?.status).toBe('running');
+  expect(await client.call('trace.get', { threadId: 't-trace' })).toEqual(unrelatedHistory);
+  await client.call('threads.archive', { threadId: 't-scheduler', archived: false });
+  expect(exits).toHaveLength(2);
+  expect((await client.call('trace.get', { threadId: 't-scheduler' })).every(record => record.exitedAt !== null)).toBe(true);
 });
 
 test('fake artifacts refuse publication if the thread is archived during the media read', async ({ createClient }) => {
@@ -222,6 +252,21 @@ test('fake agent.spawn starts a real thread marked at both ends and keeps retrie
   const back = await client.call('threads.get', { threadId: caller.id });
   expect(back.messages.at(-1)?.parts[0]).toMatchObject({ started: { threadId: spawned.thread.id, project: target.name } });
   await expect(client.call('agent.spawn', { ...params, requestId: 'spawn-2', project: 'nowhere' })).rejects.toMatchObject({ code: RpcErrorCode.NotFound, data: { field: 'project' } });
+});
+
+test('fake agent.addProject registers a folder once, with a line in the caller, and refuses a relative one', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const threadId = 't-descriptors';
+  const seen: string[] = [];
+  client.on('project.added', project => { seen.push(project.path); });
+  const added = await client.call('agent.addProject', { threadId, path: '/workspace/site', name: 'Website' });
+  expect(added).toMatchObject({ name: 'Website', path: '/workspace/site', current: false, added: true });
+  expect(await client.call('agent.addProject', { threadId, path: '/workspace/site' })).toMatchObject({ id: added.id, name: 'Website', added: false });
+  expect(seen).toEqual(['/workspace/site']);
+  expect((await client.call('agent.projects', { threadId })).map(p => p.id)).toContain(added.id);
+  const back = await client.call('threads.get', { threadId });
+  expect(back.messages.at(-1)).toMatchObject({ role: 'system', parts: [{ text: 'The agent added the project Website (/workspace/site).' }] });
+  await expect(client.call('agent.addProject', { threadId, path: 'site' })).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
 });
 
 test('paired fake clients can inspect, message and stop delegation but cannot configure or spawn', async ({ createClient }) => {

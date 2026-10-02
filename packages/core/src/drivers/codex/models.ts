@@ -175,6 +175,21 @@ export async function readModels(ctx: ProbeContext): Promise<ModelInfo[]> {
   }
 }
 
+/**
+ * Codex answers a failed quota read with its own reason. Only a missing or
+ * rejected login is the account's fault; a request that never reached OpenAI
+ * says so, instead of sending the user to repair a login that works.
+ */
+export function codexQuotaError(reason: string): Error {
+  if (/authentication required|not logged in|unauthorized|\b401\b|token.*(expired|invalid|revoked)/i.test(reason)) {
+    return new Error('Codex is not signed in to a subscription. Check its login in Providers.');
+  }
+  if (/error sending request|timed? ?out|connect|dns|network/i.test(reason)) {
+    return new Error('Codex could not reach OpenAI to read subscription quotas. Retrying in five minutes.');
+  }
+  return new Error(`Codex could not read subscription quotas: ${reason.slice(0, 200)}`);
+}
+
 /** Reads subscription limits without creating a thread or submitting a prompt. */
 export async function readCodexQuota(ctx: ProbeContext): Promise<unknown> {
   const profile = profileFor(ctx.provider);
@@ -200,7 +215,10 @@ export async function readCodexQuota(ctx: ProbeContext): Promise<unknown> {
       await rpc.request('initialize', { clientInfo: { name: CLIENT_NAME, title: null, version: pkg.version }, capabilities: null });
       rpc.notify('initialized', {});
       try { return await rpc.request('account/rateLimits/read', {}); }
-      catch { throw new Error('Codex could not read subscription quotas. Check its login in Providers.'); }
+      catch (error) {
+        ctx.log('warn', `account/rateLimits/read failed: ${messageOf(error)}`);
+        throw codexQuotaError(messageOf(error));
+      }
     })();
     return await Promise.race([read, failure]);
   } finally {

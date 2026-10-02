@@ -7,7 +7,6 @@
 
 <section class="native" data-testid="native-agents">
   <h3>{strings.delegation.nativeHeading} <span>{agents.length}</span></h3>
-  <p class="hint">{strings.delegation.nativeHint}</p>
   {#each agents as agent, index (agent.id)}
     <details class="agent" data-testid="native-agent">
       <summary>
@@ -25,7 +24,7 @@
 
 <style>
   .native { flex: none; padding: 14px 16px; border-bottom: 1px solid var(--color-border); }
-  h3 { display: flex; gap: 8px; font-size: var(--text-sm); }
+  h3 { display: flex; gap: 8px; margin-bottom: 6px; font-size: var(--text-sm); }
   h3 span, .hint, small, .status { color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .hint { margin: 5px 0 10px; line-height: 1.5; }
   .agent + .agent { border-top: 1px solid var(--color-border); }

@@ -67,6 +67,18 @@ link is not cut off every time. While the browser reports itself offline, a
 remote host is not retried at all: the `online` event starts the next attempt.
 A loopback core is retried regardless, since it is on the same machine.
 
+A key a remote core refuses is not retried: the machine shows as closed with
+the reason. A page opened on its own core with no key says the device holds
+none. Pasting a pairing link under Add a machine replaces the key of any
+listed machine that is not connected, the page's own included, which cannot
+be removed. Only a connected machine is refused as already connected.
+
+The link decides which machine is reached; the name only labels it. Once a
+link is pasted the form names the host it reaches and the listed machine at
+that address, if any. A name already used by another machine gets the
+newcomer's host beside it, as in `Studio (build.example)`, when pairing and
+when renaming.
+
 ## Agent links
 
 Two machines connected here with owner connections are linked for agent

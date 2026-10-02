@@ -75,6 +75,12 @@ executable, command line, timestamps, exit code, CPU time, peak memory and I/O.
 | `resources.killTree` | Stops the registered thread tree or groups; wait for live count zero before treating exits as observed |
 | `ThreadLoad` | Sampled process count, CPU percentage and memory on each thread summary |
 
+Manual archive stops the thread's turns and those of its child threads, then
+ends their registered processes once the stopped turns settle. Exited
+processes remain in `trace.get`. An archived thread appears in `resources.list`
+only while it has live processes, including ones explicitly started after
+archive cleanup.
+
 Protection settings refresh resources every two seconds while visible. Trace
 lists active processes first, then recent starts. Expand a row for command,
 path, IDs, CPU and I/O. Its capability disclosure identifies incomplete tracking.

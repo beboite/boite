@@ -12,6 +12,7 @@ export interface Parsed {
   requestId?: string;
   worktree: boolean;
   title?: string;
+  name?: string;
   wait: boolean;
   timeout?: number;
   last?: number;
@@ -44,6 +45,7 @@ export function parse(argv: string[]): Parsed {
     else if (numeric !== undefined) parsed[numeric] = number(arg, next());
     else if (arg === '--request-id') parsed.requestId = next();
     else if (arg === '--title') parsed.title = next();
+    else if (arg === '--name') parsed.name = next();
     else if (arg === '--limit') {
       const value = number(arg, next());
       if (!Number.isInteger(value) || value < 1 || value > 200) throw new Usage('--limit needs an integer from 1 to 200');

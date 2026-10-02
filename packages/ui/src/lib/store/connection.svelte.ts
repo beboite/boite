@@ -1,5 +1,5 @@
-import type { CoreInfo, Principal, ThreadId } from '@boite/contracts';
-import { WsClient, type Client, type ClientState, type ObservableClient } from '../client';
+import { RpcErrorCode, type CoreInfo, type Principal, type ThreadId } from '@boite/contracts';
+import { RpcFailure, WsClient, type Client, type ClientState, type ObservableClient } from '../client';
 import { confirm } from '../confirm.svelte';
 import { clearStoredEndpoint, refreshLocalEnvironment, fromTauri, shellEndpointError, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, servesThisPage, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from '../endpoint';
 import { onboardingSeen } from '../onboarding';
@@ -65,6 +65,8 @@ export class Connection {
   reloading: { client: Client; generation: number; epoch: number; promise: Promise<void>; essential: Promise<void>; release: () => void } | null = null;
   #readEpoch = 0;
   #localRecovery: ReturnType<typeof setTimeout> | null = null;
+  /** The endpoint came with neither a token nor a grant: the page's own origin, asked with nothing. */
+  #keyless = false;
 
   constructor(private readonly ctx: StoreContext) {}
 
@@ -226,6 +228,7 @@ export class Connection {
     this.endpointUrl = url;
     this.paired = paired;
     this.localCore = endpoint.local === true;
+    this.#keyless = endpoint.token === '' && endpoint.grant === undefined;
     this.ctx.store.attach(
       new WsClient({
         url,
@@ -343,7 +346,10 @@ export class Connection {
     } catch (error) {
       if (!this.ctx.currentClient(client, generation)) return;
       this.connection = client.state;
-      this.ctx.fail(error);
+      // No key at all, on a page its core served: this device was never paired
+      // there, or its pairing was forgotten. The page says what opens it.
+      if (this.#keyless && error instanceof RpcFailure && error.code === RpcErrorCode.Unauthorized) s.error = strings.errors.unpaired;
+      else this.ctx.fail(error);
     }
   }
 

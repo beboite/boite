@@ -4,7 +4,8 @@
   import InfoTip from './InfoTip.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import UsageLimits from './UsageLimits.svelte';
-  import { quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
+  import AccountRename from './AccountRename.svelte';
+  import { namedQuotas, quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
 
@@ -19,8 +20,8 @@
   let reader = $derived(quotaReader(store.endpointUrl ?? 'here'));
   let rows = $derived(reader.rows === null ? null : shownQuotas(reader.rows, store.accounts));
   /** Every signed-in account with limits to read, switched on or not. */
-  let tracked = $derived(reader.rows?.filter((row) => row.status !== 'unsupported'
-    && store.accounts?.find((account) => account.id === row.accountId)?.status !== 'unauthenticated') ?? []);
+  let tracked = $derived(namedQuotas(reader.rows ?? [], store.accounts).filter((row) => row.status !== 'unsupported'
+    && store.accounts?.find((account) => account.id === row.accountId)?.status !== 'unauthenticated'));
 
   $effect(() => {
     const client = store.client;
@@ -78,11 +79,15 @@
       <h2>{strings.quotas.tracked}<InfoTip topic={strings.quotas.tracked} text={strings.quotas.trackedHint} /></h2>
       {#each tracked as row (row.accountId)}
         {@const account = row.accountId.startsWith('quota:') ? strings.quotas.cliSource : row.label}
-        <label class="track-row">
-          <ProviderLogo providerId={row.providerId} size={16} />
-          <span class="who"><span class="provider">{row.providerName}</span><span class="account">{account}</span></span>
-          <input type="checkbox" role="switch" data-testid="quota-monitor" data-account-id={row.accountId} aria-label="{row.providerName} · {account}" checked={row.enabled} onchange={(event) => void monitor(row.accountId, event.currentTarget.checked)} />
-        </label>
+        {@const entry = store.accounts?.find((entry) => entry.id === row.accountId)}
+        <div class="tracked-account" data-testid="tracked-account" data-account-id={row.accountId}>
+          <label class="track-row">
+            <ProviderLogo providerId={row.providerId} size={16} />
+            <span class="who"><span class="provider">{row.providerName}</span><span class="account">{account}</span></span>
+            <input type="checkbox" role="switch" data-testid="quota-monitor" data-account-id={row.accountId} aria-label="{row.providerName} · {account}" checked={row.enabled} onchange={(event) => void monitor(row.accountId, event.currentTarget.checked)} />
+          </label>
+          {#if entry}<AccountRename {store} account={entry} />{/if}
+        </div>
       {/each}
     </section>
   {/if}
@@ -97,9 +102,12 @@
   .tracked { display: grid; gap: 2px; max-width: var(--settings-width); margin-top: 12px; padding: var(--settings-padding); }
   .tracked h2 { display: flex; align-items: center; margin: 0 0 8px; font-size: var(--text-base); font-weight: 600; }
   .track-row { display: flex; align-items: center; gap: 10px; min-height: var(--row); cursor: pointer; }
+  .tracked-account { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 8px; }
+  .tracked-account :global(form) { grid-column: 1 / -1; }
   .who { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; font-size: var(--text-sm); }
   .provider { flex: none; font-weight: 500; }
   .account { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted-foreground); }
+  @media (max-width: 480px) { .who { flex-direction: column; align-items: flex-start; gap: 2px; } .account { max-width: 100%; } }
   .failed { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: var(--settings-width); margin-bottom: 12px; padding: var(--settings-padding); color: var(--color-danger); font-size: var(--text-sm); }
   .failed p { margin: 0; min-width: 0; overflow-wrap: anywhere; }
   .empty { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: var(--settings-width); padding: var(--settings-padding); }

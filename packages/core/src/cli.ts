@@ -37,7 +37,9 @@ export const USAGE = `usage: boite <command> [args] [--json]
   thread new <project> <brief>   start a thread in a project; its first answer
                                  comes back as an agent message
                                  (--worktree, --title <title>)
-  projects                       the projects the owner added
+  projects                       the projects added to Boite
+  projects add <folder>          add an existing folder as a project, so thread
+                                 new and thread move can name it (--name <name>)
   attach <file>                  publish a file in chat, up to 5 MB (experimental)
   show <file>[:line]             open a file in the panel, at a line
   diff [file]                    open the changes, or one file's diff
@@ -292,6 +294,17 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       );
     },
     projects: async () => {
+      if (rest.length > 0) {
+        if (rest[0] !== 'add') throw new Usage(`projects: unknown action ${rest[0]}`);
+        const folder = rest.slice(1).join(' ').trim();
+        if (folder.length === 0) throw new Usage('projects add needs a folder');
+        const project = await client.call('agent.addProject', { threadId, path: absolute(io.cwd, folder), ...(parsed.name === undefined ? {} : { name: parsed.name }) });
+        print([
+          `project: ${project.id}`, `name: ${project.name}`, `path: ${project.path}`, `git: ${project.repository ? 'yes' : 'no'}`,
+          project.added ? 'Added. boite thread new and boite thread move accept it by name, id or folder.' : 'Already a project; nothing changed.',
+        ], project);
+        return;
+      }
       const projects = await client.call('agent.projects', { threadId });
       print(projects.map(p => `${p.id} ${JSON.stringify(p.name)} ${p.path}${p.current ? ' (this thread)' : ''}${p.repository ? '' : ' no-git'}${p.drafts ? ' drafts' : ''}`), projects);
     },

@@ -8,8 +8,8 @@ ends, its results come back to the conversation as one message. No model sits
 in the middle deciding what runs next, so the plan behaves the same whichever
 provider wrote it or runs its steps.
 
-The main agent writes a plan and runs it with `boite workflow run`. The owner
-can save a run as a template and start it again from the panel. Nothing has to
+The main agent writes a plan and runs it with `boite workflow run`, and keeps
+one as a template with `boite workflow save`. Nothing has to
 be enabled or configured first: a plan whose steps name no profile runs in any
 conversation, on the model already chosen there.
 
@@ -131,12 +131,14 @@ one of its turns, delivery waits for that turn to finish.
 
 ## Following a run
 
-`boite workflow run` opens the Workflows tab in the [right panel](panel.md).
+`boite workflow run` opens the run in the Subagents tab of the
+[right panel](panel.md), which lists every run of the conversation above its
+subagents.
 The chat shows one card per run where it started, with the run's status, steps
 done out of the total, one bar per phase and the elapsed time. Clicking it
 opens the run.
 
-The tab draws the plan top to bottom, the way the panel is shaped: one row per
+A run draws its plan top to bottom, the way the panel is shaped: one row per
 dependency level, the steps of a row side by side, and an arrow down from each
 step to the steps waiting for it. An arrow already implied by another path is
 left out. The default panel width and a phone fit two steps in a row. A row
@@ -146,10 +148,9 @@ fan-out, and its elapsed time.
 
 Clicking a step opens its detail: dependencies, condition, each execution, its
 structured output and its conversation streaming live in the height left
-below. "Open conversation" jumps to the step's own thread. Saved workflows sit at the
-bottom of the tab,
-where the owner saves the shown run as a template, starts one or deletes one.
-The palette's "Show the workflows" toggles the tab.
+below. "Open conversation" jumps to the step's own thread. The arrow in the run's
+header goes back to the list. Templates are saved, listed and started from the
+CLI only.
 
 Captures: [the graph on the desktop](images/workflow-desktop.png) · [a step's
 detail](images/workflow-step.png) · [the graph on a phone](images/workflow-phone.png)
@@ -179,11 +180,11 @@ delay their delivery.
 
 The plan checks and the path rules are shared by the core and the UI in
 `packages/contracts/src/workflow-plan.ts`. The core's runner is
-`packages/core/src/workflows.ts`. It keeps a durable JSON record per run and rereads it
-across synchronous turn
-completion and later admission. Close fences prevent scheduled callbacks from
-launching after teardown begins. Step threads are ordinary child conversations, recorded in
-`workflow_steps`. The CLI is `packages/core/src/workflow-cli.ts`, the panel tab
-is `packages/ui/src/components/WorkflowSurface.svelte`, and the fake client
+`packages/core/src/workflows.ts`. It keeps a durable JSON record per run and
+rereads it across synchronous turn completion and later admission. Close
+fences prevent callbacks from launching after teardown begins. Step threads
+are ordinary child conversations, recorded in `workflow_steps`. The CLI is
+`packages/core/src/workflow-cli.ts`; `WorkflowRunPane.svelte` displays the run
+inside `DelegationSurface.svelte`. The fake client
 runs plans in memory in `packages/ui/src/lib/fake-client/workflows.ts`. A task
 that contains the word "fail" fails there, so retry can be tried on `?fake=1`.

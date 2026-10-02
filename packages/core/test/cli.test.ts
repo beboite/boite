@@ -228,6 +228,38 @@ describe('where', () => {
   });
 });
 
+test('projects add names a relative folder, respects agent permissions and retries without a duplicate', async () => {
+  const folder = join(cwd, 'CLI folder');
+  mkdirSync(folder);
+  harness.core.coordination.configure(threadId, { mode: 'off', resources: 'CLI integration', remote: false, paused: false });
+  const refused = await boite(['projects', 'add', 'CLI', 'folder', '--name', 'CLI project', '--json']);
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain('communication is off');
+  expect(harness.core.projects.registered(folder)).toBeNull();
+
+  harness.core.coordination.configure(threadId, { mode: 'brief', resources: 'CLI integration', remote: true, paused: false });
+  const added = await boite(['projects', 'add', 'CLI', 'folder', '--name', 'CLI project', '--json']);
+  expect(added.code).toBe(0);
+  expect(added.err).toBe('');
+  const project = JSON.parse(added.out);
+  expect(project).toMatchObject({ name: 'CLI project', path: folder, added: true, current: false });
+  const listed = await boite(['projects', '--json']);
+  expect(listed.code).toBe(0);
+  expect(JSON.parse(listed.out).filter((row: { id: string }) => row.id === project.id)).toHaveLength(1);
+
+  harness.core.coordination.configure(threadId, { mode: 'off', resources: 'CLI integration', remote: false, paused: false });
+  const again = await boite(['projects', 'add', 'CLI folder', '--name', 'A different name']);
+  expect(again.code).toBe(0);
+  expect(again.out).toContain('Already a project; nothing changed.');
+  expect(harness.core.projects.registered(folder)).toMatchObject({ id: project.id, name: 'CLI project' });
+  for (const args of [['projects', 'remove'], ['projects', 'add'], ['projects', 'add', 'CLI folder', '--name', '--json']]) {
+    expect((await boite(args)).code).toBe(2);
+  }
+  const help = await boite(['help']);
+  expect(help.err).toContain('projects add <folder>');
+  expect(help.err).toContain('--name <name>');
+});
+
 describe('panel', () => {
   test('show reaches a subscribed client with the relative path and the line', async () => {
     const watcher = await harness.connect();

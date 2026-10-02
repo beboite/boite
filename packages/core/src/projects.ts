@@ -325,6 +325,13 @@ export class ProjectStore {
     }
   }
 
+  /** The project a folder already is, archived ones included, or null. */
+  registered(path: string): Project | null {
+    const key = pathKey(resolve(path));
+    const existing = this.core.journal.listProjects().find((project) => pathKey(project.path) === key);
+    return existing === undefined ? null : this.described(existing);
+  }
+
   add(path: string, name?: string): Project {
     const full = resolve(path);
     let isDirectory = false;

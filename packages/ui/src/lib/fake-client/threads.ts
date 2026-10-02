@@ -298,7 +298,29 @@ export function threadMethods(ctx: FakeContext) {
       if (params.archived === false) dismissMergedPr(ctx, thread.id);
       const was = thread.archived;
       thread.archived = params.archived ?? true;
-      if (thread.archived) await putAway(ctx, thread);
+      if (thread.archived) {
+        const family = [...ctx.threads.values()].filter(member => member.id === thread.id || member.parentThreadId === thread.id);
+        await Promise.all(family.map(member => putAway(ctx, member)));
+        // A restore during the stops keeps processes; new child work keeps its own.
+        if (ctx.threads.get(thread.id) === thread && thread.archived && !removing.has(thread.id)) {
+          for (const member of family) {
+            if (ctx.threads.get(member.id) !== member || ctx.inFlight.has(member.id)
+              || ['queued', 'running', 'waiting'].includes(member.status)) continue;
+            let ended = false;
+            for (const record of ctx.processes) {
+              if (record.threadId !== member.id || record.exitedAt !== null) continue;
+              record.exitedAt = ctx.now();
+              record.exitCode = 1;
+              ended = true;
+              ctx.emitToThread(member.id, 'process.exited', structuredClone(record));
+            }
+            if (ended) {
+              member.load = null;
+              if (member !== thread) ctx.touch(member);
+            }
+          }
+        }
+      }
       const summary = ctx.touch(thread);
       if (was !== thread.archived && !thread.parentThreadId && thread.projectId !== null) announceProject(ctx, thread.projectId);
       return summary;

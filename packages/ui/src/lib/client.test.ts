@@ -621,6 +621,35 @@ describe('WsClient', () => {
     expect(sockets).toHaveLength(2);
   });
 
+  test('a key another machine refuses is not retried, while the shell core keeps being asked', async () => {
+    const refusal = { code: RpcErrorCode.Unauthorized, message: 'the token is wrong' };
+    const run = async (url: string) => {
+      const sockets: FakeSocket[] = [];
+      const client = new WsClient({
+        url,
+        token: '',
+        backoff: () => 0,
+        socketFactory: () => {
+          const socket = new FakeSocket();
+          sockets.push(socket);
+          return socket;
+        }
+      });
+      void client.connect().catch(() => undefined);
+      const first = take(sockets, 0);
+      first.open();
+      first.receive({ jsonrpc: '2.0', id: first.frame(0).id, error: refusal });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const outcome = { state: client.state, sockets: sockets.length };
+      client.close();
+      return outcome;
+    };
+    // A phone on the page its core serves, holding no key: retrying would say so forever.
+    expect(await run('https://core.example')).toEqual({ state: 'closed', sockets: 1 });
+    // The shell's own core restarts with a new token and is followed there.
+    expect((await run('http://127.0.0.1:8777')).state).toBe('connecting');
+  });
+
   test('a paired key that speaks as the owner is still revoked when it stops opening the core', async () => {
     const sockets: FakeSocket[] = [];
     let revoked = 0;

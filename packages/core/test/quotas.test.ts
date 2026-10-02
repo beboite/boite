@@ -4,6 +4,7 @@ import { QuotaStore, claudeQuotaWindows, claudeUsageAgent, codexQuotaWindows } f
 import { claudeQuotaDetails, codexQuotaDetails, museQuotaReading } from '../src/quota-details.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { codexQuotaError } from '../src/drivers/codex/models.ts';
 import { startTestCore, type TestCore } from './harness.ts';
 let harness: TestCore | undefined;
 afterEach(async () => { await harness?.stop(); harness = undefined; });
@@ -146,6 +147,15 @@ test('Codex selects the account bucket and respects monthly plans and reset seco
   expect(result).toEqual([{ id: 'primary', label: 'Monthly', usedPercent: 31, resetsAt: 1900000000000 }]);
   expect(codexQuotaWindows({ rateLimits: { limitId: 'spark', primary: { usedPercent: 99 } } })).toEqual([]);
 });
+test('a Codex quota failure blames the login only when Codex reports a login problem', () => {
+  // The two reasons below are what codex-cli 0.159.3 answers to account/rateLimits/read.
+  expect(codexQuotaError('codex account authentication required to read rate limits').message).toContain('Check its login in Providers');
+  const offline = codexQuotaError('failed to fetch codex rate limits: error sending request for url (https://chatgpt.com/backend-api/wham/usage)').message;
+  expect(offline).toContain('could not reach OpenAI');
+  expect(offline).not.toContain('login');
+  expect(codexQuotaError('unexpected payload').message).toBe('Codex could not read subscription quotas: unexpected payload');
+});
+
 test('Claude retains zero readings, rejects missing percentages and includes model windows', () => {
   expect(claudeQuotaWindows({ five_hour: { utilization: 0, resets_at: '2026-09-12T10:00:00Z' },
     seven_day: { utilization: null }, model_scoped: [{ display_name: 'Model A', utilization: 110, resets_at: 'invalid' }] })).toEqual([

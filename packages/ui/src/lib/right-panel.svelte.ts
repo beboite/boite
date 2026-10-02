@@ -13,12 +13,11 @@ import { browserBridge } from './browser-bridge';
 import { work } from './work-prefs.svelte';
 import { ZOOM_STEPS } from './zoom';
 
-export type SurfaceKind = 'agents' | 'workflow' | 'trace' | 'browser' | 'changes' | 'files' | 'file' | 'tasks';
+export type SurfaceKind = 'agents' | 'trace' | 'browser' | 'changes' | 'files' | 'file' | 'tasks';
 
 /** Every kind a stored layout may name, and what `parse` checks a blob against. */
 export const SURFACE_KINDS: readonly SurfaceKind[] = [
   'agents',
-  'workflow',
   'trace',
   'browser',
   'changes',
@@ -31,7 +30,7 @@ export const SURFACE_KINDS: readonly SurfaceKind[] = [
  * The kinds that get one tab and no more: asking for them again brings the tab
  * that exists forward. A browser page and a file are the two that multiply.
  */
-const SINGLETON_KINDS: readonly SurfaceKind[] = ['agents', 'workflow', 'trace', 'changes', 'files', 'tasks'];
+const SINGLETON_KINDS: readonly SurfaceKind[] = ['agents', 'trace', 'changes', 'files', 'tasks'];
 
 export interface Surface {
   id: string;
@@ -49,7 +48,7 @@ export interface Surface {
   path?: string;
   /** The line a file tab lands on, when whoever opened it named one. */
   line?: number;
-  /** The run the workflow tab shows; absent means the newest one. */
+  /** The workflow run the subagents tab is on; absent means its list. */
   runId?: string;
 }
 
@@ -71,6 +70,17 @@ export const PANEL_DEFAULT = 360;
 export const PANEL_MIN = 300;
 /** The chat column never drops under this, whatever the drag asks for. */
 export const SIBLING_MIN = 360;
+/** Past this the panel is an inline column; under it, a sheet over the chat. */
+export const PANEL_INLINE_MIN_VIEWPORT = 981;
+
+export const TRACE_SURFACE_ID = 'trace';
+export const AGENTS_SURFACE_ID = 'agents';
+export const CHANGES_SURFACE_ID = 'changes';
+export const FILES_SURFACE_ID = 'files';
+export const TASKS_SURFACE_ID = 'tasks';
+
+/** Past this the changes surface puts its diff beside the list rather than under it. */
+export const CHANGES_SPLIT_MIN = 900;
 
 /** A browser surface walks the interface zoom's own ladder (`lib/zoom.ts`). */
 export { ZOOM_DEFAULT, ZOOM_STEPS, stepZoom } from './zoom';
@@ -112,7 +122,11 @@ function parse(raw: string): Record<string, PanelState> {
     const surfaces: Surface[] = [];
     for (const surface of raws) {
       if (typeof surface !== 'object' || surface === null) continue;
-      const { id, kind, title, url, zoom, path, line, runId } = surface as Surface;
+      const { title, url, zoom, path, line, runId } = surface as Surface;
+      // A layout stored while workflows had a tab of their own: that tab is the subagents tab now.
+      const merged = (surface as { kind?: unknown }).kind === 'workflow';
+      const kind = merged ? 'agents' : (surface as Surface).kind;
+      const id = merged ? AGENTS_SURFACE_ID : (surface as Surface).id;
       if (typeof id !== 'string') continue;
       if (!SURFACE_KINDS.includes(kind)) continue;
       // A file tab with no path has nothing to read, so it is not a tab.
@@ -132,7 +146,8 @@ function parse(raw: string): Record<string, PanelState> {
         ...(typeof runId === 'string' ? { runId } : {})
       });
     }
-    const active = (value as PanelState).activeSurfaceId;
+    const stored = (value as PanelState).activeSurfaceId;
+    const active = stored === 'workflow' ? AGENTS_SURFACE_ID : stored;
     out[threadId] = {
       isOpen: (value as PanelState).isOpen === true && surfaces.length > 0,
       activeSurfaceId:
@@ -376,9 +391,9 @@ export class BoundPanel {
     return this.open('tasks');
   }
 
-  /** The workflow tab, on one run when one is named. */
+  /** The subagents tab, on one workflow run when one is named. */
   openWorkflow(runId?: string): Surface {
-    const opened = this.open('workflow');
+    const opened = this.open('agents');
     if (runId !== undefined) this.update(opened.id, { runId });
     return this.state.surfaces.find((surface) => surface.id === opened.id) ?? opened;
   }
