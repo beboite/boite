@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { bytes, clockTime, elapsed, levelName, millis, quotaWindowName, relativeTime } from './format';
+import { bytes, clockTime, elapsed, levelName, millis, quotaResetTime, quotaWindowName, relativeTime } from './format';
 import { setLocaleSetting } from './i18n.svelte';
 
 test('elapsed reads like a stopwatch', () => {
@@ -37,6 +37,8 @@ test('clockTime gives the hour today, a weekday this week and a date beyond', ()
 });
 
 test('durations, sizes, effort levels and quota windows follow the language the app speaks', async () => {
+  const friday = new Date(2026, 8, 25, 20, 55).getTime();
+  expect(quotaResetTime(friday)).toMatch(/^Friday /);
   expect(millis(38_000)).toBe('38.0 s');
   // Xhigh reads as the providers spell it, whatever label the core sends.
   expect(levelName({ id: 'xhigh', label: 'Extra high' })).toBe('Xhigh');
@@ -56,6 +58,7 @@ test('durations, sizes, effort levels and quota windows follow the language the 
     expect(quotaWindowName('Weekly · Opus')).toBe('Hebdomadaire · Opus');
     expect(quotaWindowName('Gemini Pro · 5 hours')).toBe('Gemini Pro · 5 heures');
     expect(quotaWindowName('Credits')).toBe('Crédits');
+    expect(quotaResetTime(friday)).toBe('vendredi 20:55');
     expect(levelName({ id: 'none', label: 'None' })).toBe('Aucun');
   } finally { await setLocaleSetting('en'); }
 });

@@ -317,11 +317,20 @@ readings. The schema exposes neither paid credit balances nor banked resets.
 Live Muse observations are kept in memory per account, not polled as fresh
 HTTP snapshots.
 
-The tray Usage window, sidebar glance and Settings, Limits show each monitored,
+The tray popup, sidebar glance and Settings, Limits show each monitored,
 signed-in account separately. Each row or card shows the chosen account label
-beside the provider's logo. Older accounts labelled `Default` show the provider
-name until renamed. Each compact row shows that account's lowest remaining limit
-and next reported reset; opening it shows its own windows, credits and reset times.
+beside the provider's logo, including accounts named `Default`. The tray and
+sidebar use the same compact popup, with window bars side by side and a reset
+icon followed by the full weekday and local time. Opening a row
+shows each window's remaining allowance and reset time. An exhausted account
+puts its available credits or monthly budget first, with "Using credits" only
+when the provider confirms paid usage is enabled.
+
+Drag a row's handle to prioritize subscriptions, including on touch screens;
+arrow keys, Home and End work from the focused handle. Long lists scroll while
+dragging near an edge. The core saves this order and broadcasts it to the app
+and tray, separately for each machine. New subscriptions follow the ordered
+ones. The Limits page's monitoring list keeps its account order.
 Monitoring switches live under Tracked accounts on Settings, Limits: one per
 signed-in account with limits to read, the Antigravity CLI source included.
 Rename beside a tracked account edits its label, including default CLI accounts;

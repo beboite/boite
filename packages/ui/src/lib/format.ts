@@ -22,6 +22,7 @@ interface Formatters {
   whole: Intl.NumberFormat;
   credits: Intl.NumberFormat;
   weekday: Intl.DateTimeFormat;
+  quotaDay: Intl.DateTimeFormat;
   /** What `Date.toLocaleString(tag)` writes, built once rather than on every call. */
   exact: Intl.DateTimeFormat;
   /** The day spelled out and the time to the second: a message's hover title. */
@@ -46,6 +47,7 @@ function formatters(): Formatters {
     whole: new Intl.NumberFormat(tag, { maximumFractionDigits: 0 }),
     credits: new Intl.NumberFormat(tag, { maximumSignificantDigits: 6 }),
     weekday: new Intl.DateTimeFormat(tag, { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
+    quotaDay: new Intl.DateTimeFormat(tag, { weekday: 'long' }),
     exact: new Intl.DateTimeFormat(tag, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' }),
     full: new Intl.DateTimeFormat(tag, { dateStyle: 'full', timeStyle: 'medium' })
   };
@@ -142,6 +144,12 @@ export function elapsed(ms: number): string {
 /** A day and an hour: what a quota window's reset reads as. */
 export function weekdayTime(value: number): string {
   return formatters().weekday.format(new Date(value));
+}
+
+/** Quota resets spell the day out and keep the screen's preferred clock. */
+export function quotaResetTime(value: number): string {
+  const set = formatters();
+  return `${set.quotaDay.format(value)} ${set.dayClock.format(value)}`;
 }
 
 export function tokens(value: number): string {

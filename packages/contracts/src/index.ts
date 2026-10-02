@@ -1302,6 +1302,8 @@ export interface DeletedThreadSummary extends ThreadSummary {
 }
 
 export interface Settings {
+  /** Subscription priority shared by this core's clients and tray. Account ids stay on their owning machine. */
+  quotaOrder?: AccountId[];
   /** Days after deletion before history is purged. 0 keeps it indefinitely. Missing means 30. */
   threadDeletionRetentionDays?: number;
   /** New worktrees only. Missing means project mode; existing checkouts keep their path. */
