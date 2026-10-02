@@ -62,9 +62,9 @@ accounts in Limits; the tray has no switch. [Accounts](accounts.md) owns login
 and isolation.
 
 Each monitored, signed-in account has its own row or card, with its label and
-provider logo. An older account labelled `Default` uses the provider name until
-renamed. Rename under Tracked accounts changes the label, including default
-CLI accounts. Save commits it; Cancel or Escape keeps the previous name. Open
+provider logo, including accounts labelled `Default`. Rename under Tracked
+accounts changes the label, including default CLI accounts. Save commits it;
+Cancel or Escape keeps the previous name. Open
 quota views update the label immediately while retaining their cached windows.
 
 | Source | Read behavior and limits |
@@ -123,9 +123,17 @@ schema](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-
 
 ### Tray window
 
-Each account row uses its lowest remaining monitored limit and next reset.
-Expanding shows that account's windows and reset times. The browser retains the
-last reading while refreshing, including after restart.
+The tray and sidebar share a compact popup. Each account row shows its windows
+side by side, with a reset icon, full weekday and local time. Expanding shows
+each window's allowance and reset time. Exhausted accounts put credits or their
+monthly budget first; "Using credits" requires confirmed paid-usage activation.
+The browser retains the last reading while refreshing, including after restart.
+
+Drag a row's handle to reorder subscriptions, including on touch screens.
+Arrow keys, Home and End work from the focused handle; long lists scroll near
+an edge. The core saves and broadcasts the order per machine to the app and
+tray. New subscriptions follow ordered ones. The Limits monitoring list keeps
+its account order.
 
 The popup opens after 100 ms of continuous hover; leaving cancels and clicking
 does not bypass the delay. On Windows it fits the monitor's work area and
