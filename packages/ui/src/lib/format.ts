@@ -9,6 +9,7 @@ import { formatLocale, strings } from './i18n.svelte';
  * row drawn after that reads the new one.
  */
 interface Formatters {
+  relative: Intl.RelativeTimeFormat;
   clock: Intl.DateTimeFormat;
   dayClock: Intl.DateTimeFormat;
   calendar: Intl.DateTimeFormat;
@@ -35,6 +36,7 @@ function formatters(): Formatters {
   const known = sets.get(tag);
   if (known) return known;
   const made: Formatters = {
+    relative: new Intl.RelativeTimeFormat(tag, { style: 'short', numeric: 'always' }),
     clock: new Intl.DateTimeFormat(tag, { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
     dayClock: new Intl.DateTimeFormat(tag, { hour: '2-digit', minute: '2-digit' }),
     calendar: new Intl.DateTimeFormat(tag, { day: 'numeric', month: 'short' }),
@@ -194,6 +196,20 @@ export function ago(value: number, now = Date.now()): string {
     then.getMonth() === today.getMonth() &&
     then.getDate() === today.getDate();
   return sameDay ? set.dayClock.format(then) : set.calendar.format(then);
+}
+
+const relativeUnits: readonly [Intl.RelativeTimeFormatUnit, number][] = [
+  ['year', 31_536_000_000], ['month', 2_592_000_000], ['week', 604_800_000],
+  ['day', 86_400_000], ['hour', 3_600_000], ['minute', 60_000]
+];
+
+/** An elapsed age, kept relative even for mail from another day. */
+export function relativeTime(value: number, now = Date.now()): string {
+  const delta = Math.max(0, now - value);
+  for (const [unit, size] of relativeUnits) {
+    if (delta >= size) return formatters().relative.format(-Math.floor(delta / size), unit);
+  }
+  return strings.time.now;
 }
 
 /** The first line of a prompt, cut for a sidebar row. */
