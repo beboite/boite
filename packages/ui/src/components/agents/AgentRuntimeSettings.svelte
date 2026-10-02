@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { secureId } from '../../lib/secure-id';
   import { onMount } from 'svelte';
   import { X } from '@lucide/svelte';
   import type { AgentProfile, AgentRuntimeConfig, AgentSelection, DelegationProfile } from '@boite/contracts';
@@ -20,8 +21,10 @@
 
   function add(child: boolean) {
     if (!config) return;
-    const route: DelegationProfile = { ...config.defaultRoute, id: crypto.randomUUID(), name: child ? labels.subagents : labels.model, model: config.defaultRoute.model! };
-    if (child) config.subagents.profiles.push(route); else config.allowedRoutes.push(route);
+    try {
+      const route: DelegationProfile = { ...config.defaultRoute, id: secureId(), name: child ? labels.subagents : labels.model, model: config.defaultRoute.model! };
+      if (child) config.subagents.profiles.push(route); else config.allowedRoutes.push(route);
+    } catch (error) { view.error = error instanceof Error ? error.message : String(error); }
   }
   function remove(child: boolean, id: string) {
     if (!config) return;
@@ -36,12 +39,14 @@
   }
   async function save() {
     if (!config) return;
-    // The core refuses a default outside the allowed list; picking a new default allows it.
-    const d = config.defaultRoute;
-    if (d.model && !config.allowedRoutes.some(r => r.providerId === d.providerId && r.accountId === d.accountId && r.model === d.model)) {
-      config.allowedRoutes.push({ id: crypto.randomUUID(), name: view.store.modelOf(d)?.name ?? d.model, providerId: d.providerId, accountId: d.accountId, model: d.model, effort: d.effort });
-    }
-    await view.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: agent.revision, config });
+    try {
+      // The core refuses a default outside the allowed list; picking a new default allows it.
+      const d = config.defaultRoute;
+      if (d.model && !config.allowedRoutes.some(r => r.providerId === d.providerId && r.accountId === d.accountId && r.model === d.model)) {
+        config.allowedRoutes.push({ id: secureId(), name: view.store.modelOf(d)?.name ?? d.model, providerId: d.providerId, accountId: d.accountId, model: d.model, effort: d.effort });
+      }
+      await view.call('agents.runtime.configure', { agentId: agent.id, expectedRevision: agent.revision, config });
+    } catch (error) { view.error = error instanceof Error ? error.message : String(error); }
   }
 </script>
 

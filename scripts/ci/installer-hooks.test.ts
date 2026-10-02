@@ -3,21 +3,18 @@
 // starts. It needs what a Windows `bun run build:shell` leaves behind: makensis
 // under %LOCALAPPDATA%\tauri\NSIS and the generated installer.nsi under the
 // cargo target directory (CARGO_TARGET_DIR, else apps/shell/src-tauri/target).
-// Without them it is skipped. Nothing it runs opens a window: the installers
+// Without them it skips locally and fails when BOITE_CI_INSTALLER_REQUIRED=1.
+// Nothing it runs opens a window: the installers
 // are silent and every process is started hidden.
 import { afterAll, describe, expect, test } from 'bun:test';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { installerPrerequisites } from './installer-prerequisites.ts';
 
 const ROOT = resolve(import.meta.dir, '../..');
 const HOOKS = join(ROOT, 'apps/shell/src-tauri/windows/hooks.nsh');
-const NSIS = join(process.env.LOCALAPPDATA ?? '', 'tauri', 'NSIS');
-const MAKENSIS = join(NSIS, 'makensis.exe');
-const PLUGINS = join(NSIS, 'Plugins', 'x86-unicode', 'additional');
-const TARGET = process.env.CARGO_TARGET_DIR ?? join(ROOT, 'apps/shell/src-tauri/target');
-const GENERATED = join(TARGET, 'release', 'nsis', 'x64');
-const ready = process.platform === 'win32' && existsSync(MAKENSIS) && existsSync(join(GENERATED, 'installer.nsi'));
+const { nsis: NSIS, makensis: MAKENSIS, plugins: PLUGINS, generated: GENERATED, ready } = installerPrerequisites({ root: ROOT });
 
 const scratch = ready ? mkdtempSync(join(tmpdir(), 'boite-hooks-')) : '';
 const started: number[] = [];

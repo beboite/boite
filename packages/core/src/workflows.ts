@@ -290,9 +290,10 @@ export class Workflows {
       if (run.status !== 'running' || this.halted(run)) break;
       const running = run.nodes.reduce((n, node) => n + node.instances.filter(i => i.status === 'running').length, 0);
       if (running >= run.limits.maxConcurrent) break;
-      const node = run.nodes.find(n => n.instances.some(i => i.status === 'waiting'));
+      const ready = (inst: WorkflowInstance) => inst.status === 'waiting' && (!inst.outputCorrection || !inst.threadId || !BUSY.includes(this.core.journal.getThread(inst.threadId)?.status ?? 'idle'));
+      const node = run.nodes.find(n => n.instances.some(ready));
       if (!node) break;
-      this.launch(run, node, node.instances.find(i => i.status === 'waiting')!, config);
+      this.launch(run, node, node.instances.find(ready)!, config);
     }
     this.settle(runId);
   }
@@ -372,18 +373,20 @@ export class Workflows {
       }
     }
     const previous = inst.error;
-    Object.assign(inst, { status: 'running', attempts: 1, error: null, result: null, output: null, startedAt: now, finishedAt: null });
+    const correction = inst.outputCorrection;
+    Object.assign(inst, { status: 'running', attempts: correction ? inst.attempts : 1, error: null, result: null, output: null, startedAt: correction ? inst.startedAt : now, finishedAt: null });
+    delete inst.outputCorrection;
     this.save(run);
-    const prompt = retry
+    const prompt = correction ?? (retry
       ? `Try this workflow step again. The previous attempt ended with: ${previous ?? 'no result'}. The task is unchanged.\n${this.prompt(run, node, inst)}`
-      : this.prompt(run, node, inst);
+      : this.prompt(run, node, inst));
     try {
-      this.core.threads.startTurn(threadId, prompt, [], undefined, 'delegation', undefined, undefined, inst.task ?? undefined);
+      this.core.threads.startTurn(threadId, prompt, [], undefined, 'delegation', undefined, undefined, correction ? 'Workflow output did not match' : inst.task ?? undefined);
     } catch (error) {
       this.mutate(run.id, current => {
         const found = this.instance(current, inst.key);
         if (!found || found.status !== 'running') return false;
-        Object.assign(found, { status: 'failed', error: messageOf(error), finishedAt: Date.now() });
+        Object.assign(found, { status: 'failed', error: `${correction ? 'output retry: ' : ''}${messageOf(error)}`, finishedAt: Date.now() });
       });
     }
   }
@@ -461,7 +464,7 @@ export class Workflows {
       if (pending.length) setTimeout(() => { for (const run of pending) this.deliver(run.id); }, 0).unref?.();
       return;
     }
-    let fix: string | null = null;
+    let correction = false;
     this.mutate(entry.runId, run => {
       const inst = this.instance(run, entry.key);
       // A retry past an archived conversation runs in a new one: the old one speaks for nothing.
@@ -477,7 +480,9 @@ export class Workflows {
           if (!mismatch) inst.output = parsed!.value;
           else if (inst.attempts < WORKFLOW_LIMITS.attempts) {
             inst.attempts += 1;
-            fix = `Your result does not match this workflow step's output shape: ${mismatch}. Reply with only one \`\`\`json block matching ${JSON.stringify(step.output)}, or run boite workflow output '<json>'.`;
+            inst.outputCorrection = `Your result does not match this workflow step's output shape: ${mismatch}. Reply with only one \`\`\`json block matching ${JSON.stringify(step.output)}, or run boite workflow output '<json>'.`;
+            inst.status = 'waiting';
+            correction = true;
             return;
           } else return void Object.assign(inst, { status: 'failed', error: `output: ${mismatch}`, finishedAt: now });
         }
@@ -486,21 +491,9 @@ export class Workflows {
         Object.assign(inst, { status: 'stopped', error: 'Stopped', finishedAt: now });
       } else Object.assign(inst, { status: 'failed', error: turn.error ?? 'The turn failed', finishedAt: now });
     });
-    if (fix !== null) {
-      const prompt = fix;
-      // `turn.finished` fires before the thread is idle again: the new turn waits a tick.
-      this.later(() => {
-        try {
-          this.core.threads.startTurn(turn.threadId, prompt, [], undefined, 'delegation', undefined, undefined, 'Workflow output did not match');
-        } catch (error) {
-          this.mutate(entry.runId, run => {
-            const inst = this.instance(run, entry.key);
-            if (!inst || inst.status !== 'running') return false;
-            Object.assign(inst, { status: 'failed', error: `output retry: ${messageOf(error)}`, finishedAt: Date.now() });
-          });
-          this.advance(entry.runId);
-        }
-      });
+    if (correction) {
+      // Admission rereads the durable run after the previous turn becomes idle.
+      this.later(() => this.advance(entry.runId));
       return;
     }
     this.advance(entry.runId);
@@ -622,6 +615,7 @@ export class Workflows {
             // An archived or removed step conversation takes no turn: the retry gets a new one.
             const gone = inst.threadId !== null && this.core.journal.getThread(inst.threadId)?.archived !== false;
             Object.assign(inst, { status: 'waiting', finishedAt: null, ...(gone ? { threadId: null } : {}) });
+            delete inst.outputCorrection;
           }
           // Stopped only because another step failed, it never ran: it waits again with the retried one.
           else if (inst.status === 'stopped' && inst.error === NOT_STARTED) Object.assign(inst, { status: 'waiting', error: null, finishedAt: null });
@@ -654,7 +648,10 @@ export class Workflows {
     // Record the stop first: the turns stopped below finish into a run that is no longer running.
     this.mutate(run.id, current => {
       for (const node of current.nodes) {
-        for (const inst of node.instances) if (inst.status === 'waiting') Object.assign(inst, { status: 'stopped', error: reason, finishedAt: now });
+        for (const inst of node.instances) if (inst.status === 'waiting') {
+          Object.assign(inst, { status: 'stopped', error: reason, finishedAt: now });
+          delete inst.outputCorrection;
+        }
         if (node.status === 'waiting') Object.assign(node, { status: 'stopped', error: reason, finishedAt: now });
       }
       Object.assign(current, { status: 'stopped', error: reason, finishedAt: now, delivered: true });

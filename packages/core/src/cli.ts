@@ -12,15 +12,16 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { AGENT_ENV, CONVERSATION_PROFILE_ID } from '@boite/contracts';
-import type { AgentTask, Channel, GitChange, PanelSurface, Todo } from '@boite/contracts';
+import type { AgentTask, GitChange, PanelSurface, Todo } from '@boite/contracts';
 import { connect } from './client.ts';
 import type { CoreClient } from './client.ts';
-import { CORE_VERSION } from './core.ts';
+import { CORE_VERSION } from './version.ts';
 import { resolveDataDir } from './paths.ts';
 import { agentCommand } from './agents/cli.ts';
 import { workflowCommand } from './workflow-cli.ts';
 import { browserCommand, BROWSER_HELP } from './browser-cli.ts';
 import { agentsCommand, AgentsUsage, WAIT_MAX_S } from './agents-cli.ts';
+import { parse, requiredText, Usage, type Parsed } from './cli-args.ts';
 
 export interface CliIo {
   out(text: string): void;
@@ -53,6 +54,9 @@ export const USAGE = `usage: boite <command> [args] [--json]
   status                         git status of the working directory
   server check|update|cancel      check or update this server, or cancel the
                                  pending update; no thread needed as owner
+  logs [--limit <n>] [--level info|warn|error]
+                                 recent private diagnostics, owner only;
+                                 --thread filters one conversation
   ask <question> [option ...]    ask the user without stopping; the answer
                                  arrives later as a message (--multiple)
   task list                      the agent's task list
@@ -118,63 +122,6 @@ const TASK_MARK: Record<AgentTask['status'], string> = {
   completed: '[x]',
 };
 
-class Usage extends Error {}
-
-interface Parsed {
-  positional: string[];
-  json: boolean;
-  multiple: boolean;
-  thread: string | undefined;
-  dataDir: string | undefined;
-  channel: Channel;
-  requestId?: string;
-  worktree: boolean;
-  title?: string;
-  wait: boolean;
-  timeout?: number;
-  last?: number;
-  before?: number;
-  name?: string;
-}
-
-function parse(argv: string[]): Parsed {
-  const parsed: Parsed = { positional: [], json: false, multiple: false, worktree: false, wait: false, thread: undefined, dataDir: undefined, channel: 'stable' };
-  const number = (flag: string, raw: string): number => {
-    const value = Number(raw);
-    if (!Number.isFinite(value) || value < 0) throw new Usage(`${flag} needs a number, got ${raw}`);
-    return value;
-  };
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index] ?? '';
-    const next = (): string => {
-      const value = argv[index + 1];
-      if (value === undefined || value === '' || value.startsWith('--')) throw new Usage(`${arg} needs a value`);
-      index += 1;
-      return value;
-    };
-    if (arg === '--json') parsed.json = true;
-    else if (arg === '--request-id') parsed.requestId = next();
-    else if (arg === '--multiple') parsed.multiple = true;
-    else if (arg === '--worktree') parsed.worktree = true;
-    else if (arg === '--title') parsed.title = next();
-    else if (arg === '--wait') parsed.wait = true;
-    else if (arg === '--timeout') parsed.timeout = number(arg, next());
-    else if (arg === '--last') parsed.last = number(arg, next());
-    else if (arg === '--before') parsed.before = number(arg, next());
-    else if (arg === '--name') parsed.name = next();
-    else if (arg === '--thread') parsed.thread = next();
-    else if (arg === '--data-dir') parsed.dataDir = next();
-    else if (arg === '--channel') {
-      const channel = next();
-      if (channel !== 'stable' && channel !== 'dev') throw new Usage(`unknown channel ${channel}`);
-      parsed.channel = channel;
-    } else if (arg === '--help' || arg === '-h') throw new Usage('');
-    else if (arg === '--output' && parsed.positional[0] === 'browser' && parsed.positional[1] === 'screenshot') parsed.positional.push(arg, next());
-    else if (arg.startsWith('--')) throw new Usage(`unknown flag ${arg}`);
-    else parsed.positional.push(arg);
-  }
-  return parsed;
-}
 
 interface Target {
   url: string;
@@ -195,7 +142,7 @@ function targetOf(parsed: Parsed, env: CliIo['env']): Target {
     }
     return { url, token, threadId: own };
   }
-  const threadId = parsed.thread ?? own ?? (parsed.positional[0] === 'server' ? '' : undefined);
+  const threadId = parsed.thread ?? own ?? (['server', 'logs'].includes(parsed.positional[0] ?? '') ? '' : undefined);
   if (threadId === undefined) {
     throw new Error(`not inside a Boite thread (${AGENT_ENV.threadId} is not set); pass --thread <id>`);
   }
@@ -269,23 +216,30 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     print([`shown: ${shown ? 'yes' : 'no, nobody is watching this thread; it is queued on its panel'}`], { shown });
   };
 
-  switch (command) {
-    case 'pr': {
+  const commands: Record<string, () => Promise<void>> = {
+    pr: async () => {
       const action = rest[0] ?? 'list';
       if (!['list', 'refresh', 'link', 'unlink'].includes(action) || rest.length > (action === 'link' || action === 'unlink' ? 2 : 1)) throw new Usage('pr expects list, refresh, link <url> or unlink <url>');
       const result = action === 'link' || action === 'unlink'
         ? await client.call(action === 'link' ? 'threads.linkPullRequest' : 'threads.unlinkPullRequest', { threadId, url: want(1, 'a pull request URL') })
         : await client.call('threads.pullRequests', { threadId, refresh: action === 'refresh' });
       print(result.map(pr => `${pr.state} #${pr.number} ${pr.title} (${pr.head} -> ${pr.base}) ${pr.url}${pr.error ? ` [${pr.error}]` : ''}`), result);
-      break;
-    }
-    case 'browser': {
-      if (rest[0] === 'help') { print([BROWSER_HELP], { help: BROWSER_HELP }); break; }
+    },
+    browser: async () => {
+      if (rest[0] === 'help') { print([BROWSER_HELP], { help: BROWSER_HELP }); return; }
       const result = await browserCommand(rest, io, client, threadId);
       print([JSON.stringify(result, null, 2)], result);
-      break;
-    }
-    case 'server': {
+    },
+    logs: async () => {
+      if (rest.length > 0) throw new Usage('logs takes --limit, --level and --thread filters');
+      const records = await client.call('core.logs', {
+        ...(parsed.limit === undefined ? {} : { limit: parsed.limit }),
+        ...(parsed.level === undefined ? {} : { level: parsed.level }),
+        ...(parsed.thread === undefined ? {} : { threadId: parsed.thread }),
+      });
+      print(records.map(record => `${new Date(record.at).toISOString()} ${record.level.toUpperCase()} ${record.source}/${record.event}${record.threadId ? ` thread=${record.threadId}` : ''}${record.turnId ? ` turn=${record.turnId}` : ''}${record.requestId ? ` request=${record.requestId}` : ''} ${record.message.replace(/[\r\n]+/g, ' ')}`), records);
+    },
+    server: async () => {
       const action = rest[0] ?? 'check';
       if (!['check', 'update', 'cancel'].includes(action)) throw new Usage('server expects check, update or cancel');
       let state = action === 'cancel' ? await client.call('core.updateCancel', {}) : await client.call('core.updateStatus', { refresh: true });
@@ -295,19 +249,16 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         if (state.version && state.phase === 'available') state = await client.call('core.updateInstall', { version: state.version });
       }
       print([`server: ${state.currentVersion}`, `update: ${state.phase}`, ...(state.version ? [`version: ${state.version}`] : []), ...(state.error ? [`error: ${state.error}`] : [])], state);
-      return;
-    }
-    case 'agent': {
+    },
+    agent: async () => {
       const result = await agentCommand(client, threadId, rest, parsed.requestId ?? crypto.randomUUID());
       print([JSON.stringify(result)], result);
-      return;
-    }
-    case 'attach': {
+    },
+    attach: async () => {
       const message = await client.call('artifacts.publish', { threadId, path: absolute(io.cwd, want(0, 'a file')) });
       print([`attached: ${rest[0]}`, `message: ${message.id}`], message);
-      return;
-    }
-    case 'delegate': {
+    },
+    delegate: async () => {
       const action = want(0, 'profiles, list, spawn, send or stop');
       if (action === 'profiles' || action === 'list') {
         const view = await client.call('delegation.get', { threadId });
@@ -322,36 +273,31 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         ], view);
       } else if (action === 'spawn') {
         const profileId = want(1, 'a profile id from delegate profiles');
-        const task = rest.slice(2).join(' ');
-        if (!task) throw new Usage('delegate spawn needs a bounded task brief');
+        const task = requiredText(rest, 2, 'delegate spawn needs a bounded task brief', false);
         const agent = await client.call('delegation.spawn', { threadId, profileId, task, requestId: parsed.requestId ?? crypto.randomUUID() });
         print([`agent: ${agent.thread.id}`, `status: ${agent.thread.status}`, `model: ${agent.thread.providerId}/${agent.thread.model}`, 'Result will be forwarded to the parent automatically.'], agent);
       } else if (action === 'send') {
         const toThreadId = want(1, 'a parent or child thread id');
-        const body = rest.slice(2).join(' ');
-        if (!body) throw new Usage('delegate send needs message text');
+        const body = requiredText(rest, 2, 'delegate send needs message text', false);
         const letter = await client.call('delegation.send', { threadId, toThreadId, text: body, requestId: parsed.requestId ?? crypto.randomUUID() });
         print([`id: ${letter.id}`, `status: ${letter.status}`, 'Queued messages are not an acknowledgement or consent.'], letter);
       } else if (action === 'stop') {
         const result = await client.call('delegation.stop', { threadId, ...(rest[1] ? { agentId: rest[1] } : {}) });
         print([`stopped: ${result.stopped}`], result);
       } else throw new Usage('delegate expects profiles, list, spawn, send or stop');
-      return;
-    }
-    case 'agents': {
+    },
+    agents: async () => {
       try {
         await agentsCommand(client, threadId, rest, { ...(parsed.requestId === undefined ? {} : { requestId: parsed.requestId }), wait: parsed.wait, ...(parsed.timeout === undefined ? {} : { timeout: parsed.timeout }), ...(parsed.last === undefined ? {} : { last: parsed.last }), ...(parsed.before === undefined ? {} : { before: parsed.before }) }, print);
       } catch (error) {
         if (error instanceof AgentsUsage) throw new Usage(error.message);
         throw error;
       }
-      return;
-    }
-    case 'workflow': {
+    },
+    workflow: async () => {
       await workflowCommand(client, threadId, rest, io, print, parsed.requestId);
-      return;
-    }
-    case 'where': {
+    },
+    where: async () => {
       const where = await client.call('agent.where', { threadId });
       print(
         [
@@ -365,9 +311,8 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         ],
         where,
       );
-      return;
-    }
-    case 'projects': {
+    },
+    projects: async () => {
       if (rest.length > 0) {
         if (rest[0] !== 'add') throw new Usage(`projects: unknown action ${rest[0]}`);
         const folder = rest.slice(1).join(' ').trim();
@@ -381,14 +326,12 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       }
       const projects = await client.call('agent.projects', { threadId });
       print(projects.map(p => `${p.id} ${JSON.stringify(p.name)} ${p.path}${p.current ? ' (this thread)' : ''}${p.repository ? '' : ' no-git'}${p.drafts ? ' drafts' : ''}`), projects);
-      return;
-    }
-    case 'thread': {
+    },
+    thread: async () => {
       const action = want(0, 'move or new');
       if (action === 'new') {
         const project = want(1, 'a project name, id or folder (boite projects lists them)');
-        const prompt = rest.slice(2).join(' ').trim();
-        if (prompt.length === 0) throw new Usage('thread new needs a brief after the project');
+        const prompt = requiredText(rest, 2, 'thread new needs a brief after the project');
         const spawned = await client.call('agent.spawn', {
           threadId, project, prompt, requestId: parsed.requestId ?? crypto.randomUUID(),
           ...(parsed.title === undefined ? {} : { title: parsed.title }), ...(parsed.worktree ? { worktree: true } : {}),
@@ -403,8 +346,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         return;
       }
       if (action !== 'move') throw new Usage(`thread: unknown action ${action}`);
-      const project = rest.slice(1).join(' ').trim();
-      if (project.length === 0) throw new Usage('thread move needs a project name, id or folder');
+      const project = requiredText(rest, 1, 'thread move needs a project name, id or folder');
       const moved = await client.call('agent.move', { threadId, project });
       const where = moved.cwd ?? `a new folder of ${moved.projectPath}`;
       const background = moved.stopsBackground ? ' Background work stops then.' : '';
@@ -414,37 +356,31 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
           : [`Moved to ${moved.project} (${moved.projectPath}); the next turn starts in ${where}.${background}`],
         moved,
       );
-      return;
-    }
-    case 'show': {
+    },
+    show: async () => {
       const { path, line } = splitLine(want(0, 'a file'));
       await opened({ kind: 'file', path: absolute(io.cwd, path), ...(line === undefined ? {} : { line }) });
-      return;
-    }
-    case 'diff': {
+    },
+    diff: async () => {
       const path = rest[0];
       await opened(path === undefined ? { kind: 'diff' } : { kind: 'diff', path: absolute(io.cwd, path) });
-      return;
-    }
-    case 'browse': {
+    },
+    browse: async () => {
       const target = want(0, 'a url or an HTML file');
       if (!/^https?:/i.test(target) && /\.html?$/i.test(target)) {
         const result = await client.call('artifacts.preview', { threadId, path: absolute(io.cwd, target) });
         print([`preview: ${result.url}`, `shown: ${result.shown}`], result);
       } else await opened({ kind: 'browser', url: target });
-      return;
-    }
-    case 'preview': {
+    },
+    preview: async () => {
       const result = await client.call('artifacts.preview', { threadId, path: absolute(io.cwd, want(0, 'an HTML file')) });
       print([`preview: ${result.url}`, `shown: ${result.shown}`], result);
-      return;
-    }
-    case 'preview-close': {
+    },
+    'preview-close': async () => {
       const result = await client.call('artifacts.previewClose', { threadId, path: absolute(io.cwd, want(0, 'an HTML file')) });
       print(['preview closed'], result);
-      return;
-    }
-    case 'open': {
+    },
+    open: async () => {
       const kind = want(0, 'trace, tasks, changes, files or workflow');
       if (kind === 'trace' || kind === 'tasks') await opened({ kind });
       else if (kind === 'workflow') await opened(rest[1] === undefined ? { kind } : { kind, runId: rest[1] });
@@ -453,24 +389,21 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         const dir = rest[1];
         await opened(dir === undefined ? { kind: 'files' } : { kind: 'files', path: absolute(io.cwd, dir) });
       } else throw new Usage(`open: unknown surface ${kind}`);
-      return;
-    }
-    case 'ask': {
+    },
+    ask: async () => {
       const text = want(0, 'a question');
       const options = rest.slice(1);
       const asked = await client.call('questions.ask', { threadId, text, ...(options.length > 0 ? { options } : {}), ...(parsed.multiple ? { multiple: true } : {}) });
       print([`asked: ${asked.questionId}`, 'Keep working. The answer arrives as a message quoting the question; without one, go on with a sensible default.'], asked);
-      return;
-    }
-    case 'status': {
+    },
+    status: async () => {
       const status = await client.call('git.status', { threadId });
       const head = [`branch: ${status.branch ?? '(detached)'}`];
       if (status.upstream !== null) head.push(`upstream: ${status.upstream} +${status.ahead} -${status.behind}`);
       head.push(`changes: ${status.changes.length}`);
       print([...head, ...status.changes.map(changeRow)], status);
-      return;
-    }
-    case 'task': {
+    },
+    task: async () => {
       const action = want(0, 'list, add, start, done, remove or clear');
       const tasks = await client.call('threads.tasks.get', { threadId });
       if (action === 'list') {
@@ -479,8 +412,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       }
       let next: AgentTask[];
       if (action === 'add') {
-        const text = rest.slice(1).join(' ').trim();
-        if (text.length === 0) throw new Usage('task add needs a text');
+        const text = requiredText(rest, 1, 'task add needs a text');
         next = [...tasks, { id: nextTaskId(tasks), text, status: 'pending' }];
       } else if (action === 'clear') next = [];
       else if (action === 'start' || action === 'done' || action === 'remove') {
@@ -493,30 +425,25 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       } else throw new Usage(`task: unknown action ${action}`);
       const activity = await client.call('threads.tasks.set', { threadId, tasks: next });
       print(activity.tasks.length === 0 ? ['tasks: none'] : activity.tasks.map(taskRow), activity.tasks);
-      return;
-    }
-    case 'todo': {
+    },
+    todo: async () => {
       const action = want(0, 'list, add or claim');
       if (action === 'list') {
         const todos = await client.call('todos.list', { threadId });
         print(todos.length === 0 ? ['todos: none'] : todos.map(todoRow), todos);
       } else if (action === 'add') {
-        const text = rest.slice(1).join(' ').trim();
-        if (text.length === 0) throw new Usage('todo add needs a text');
+        const text = requiredText(rest, 1, 'todo add needs a text');
         const todo = await client.call('todos.add', { threadId, text });
         print([todoRow(todo)], todo);
       } else if (action === 'claim') {
         const todo = await client.call('todos.update', { threadId, todoId: want(1, 'a todo id'), status: 'claimed' });
         print([todoRow(todo)], todo);
       } else throw new Usage(`todo: unknown action ${action}`);
-      return;
-    }
-    case undefined:
-    case 'help':
-      throw new Usage('');
-    default:
-      throw new Usage(`unknown command ${command}`);
-  }
+    },
+  };
+  const handler = command !== undefined && Object.hasOwn(commands, command) ? commands[command] : undefined;
+  if (handler === undefined) throw new Usage(`unknown command ${command}`);
+  await handler();
 }
 
 /** The exit code: 0, 1 on a refusal or a failure, 2 on a usage error. */

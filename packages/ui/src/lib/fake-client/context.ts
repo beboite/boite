@@ -1,8 +1,12 @@
+import { secureId } from '../secure-id';
+import type { FakeArchiveState, MergedPrFixture } from './merged-pr-archive';
 /** The state one fake core keeps, and the plumbing every domain module shares. */
 import { observeProgress } from './progress';
 import {
   DEFAULT_THREAD_DELETION_RETENTION_DAYS,
   PROTOCOL_VERSION,
+  normalizeCoreLogText,
+  normalizeCoreLogOutput,
   RpcErrorCode,
   processAgentCommand,
   type Attachment,
@@ -13,6 +17,7 @@ import {
   type CoordinationConfig,
   type CoordinationPeer,
   type CoreInfo,
+  type CoreLogRecord,
   type DelegationConfig,
   type HarnessUpdate,
   type HooksStatus,
@@ -64,6 +69,7 @@ import { createAgentSession } from './threads';
 import { startTurn, stopTurn } from './turns';
 import { FakeWorkflows } from './workflows';
 import { initialServerUpdate } from './server-update';
+import { observeLog } from './logs';
 import type { FakeWorktree } from './worktrees';
 
 /** One handler per contract method; plugins, agents and workflows answer from their own classes. */
@@ -102,6 +108,15 @@ function tokenStream(): number | undefined {
 type Rest<F> = F extends (ctx: FakeContext, ...rest: infer R) => unknown ? R : never;
 
 export class FakeContext {
+  hasProtectedInput(threadId: ThreadId): boolean {
+    return this.bus.protectAllThreads || this.bus.protectedThreadIds.has(threadId);
+  }
+  readonly logs: CoreLogRecord[] = [];
+  readonly logRunId = secureId();
+  logSequence = 0;
+  logQueued = new Set<string>();
+  readonly logTurns = new Map<string, string>();
+  readonly logProcesses = new Map<string, string>();
   serverUpdate: ServerUpdateStatus = initialServerUpdate();
   readonly bus: FakeBus;
   readonly agents: FakeAgents;
@@ -130,6 +145,8 @@ export class FakeContext {
   /** Where each managed install stood before the running one started, for a cancel. */
   readonly installBefore = new Map<string, ProviderInstallState>();
   accounts: Account[] = [];
+  readonly mergedPrFixtures = new Map<ThreadId, MergedPrFixture>();
+  readonly mergedPrArchive = new Map<ThreadId, FakeArchiveState>();
   readonly removedDefaultProviders = new Set<string>();
   readonly threads = new Map<ThreadId, Thread>();
   readonly deletedThreads = new Map<ThreadId, { threads: Thread[]; archived: boolean[]; deletedAt: number }>();
@@ -202,7 +219,7 @@ export class FakeContext {
   /** Threads whose title is being written, which the core refuses a second ask for. */
   readonly retitling = new Set<ThreadId>();
   seq = 0;
-  readonly turnRequests = new Map<string, { content: string; turn: Turn }>();
+  readonly turnRequests = new Map<string, { content: string; turn: Turn; messageId: string }>();
   readonly delayMs: number;
   readonly chunkSize: number | undefined;
   readonly long: boolean;
@@ -246,7 +263,7 @@ export class FakeContext {
     this.delayMs = options.delayMs ?? 18;
     this.chunkSize = options.chunkSize ?? tokenStream();
     this.long = options.long ?? false;
-    const coreId = options.coreId ?? `fake-core-${crypto.randomUUID()}`;
+    const coreId = options.coreId ?? `fake-core-${secureId()}`;
     this.identity = {
       coreId,
       name: options.coreName ?? 'This PC',
@@ -319,6 +336,15 @@ export class FakeContext {
   }
 
   emit<E extends RpcEventName>(event: E, payload: RpcEvents[E]): void {
+    if (event === 'core.log') {
+      const log = payload as RpcEvents['core.log'];
+      const bounded = (value: string): string => normalizeCoreLogText(value).replace(/[\r\n\t]/g, ' ').slice(0, 200);
+      payload = { level: log.level, at: log.at, message: log.kind === 'provider-output' ? normalizeCoreLogOutput(log.message) : normalizeCoreLogText(log.message), source: bounded(log.source ?? 'core'), event: bounded(log.event ?? 'core.log'),
+        ...(log.threadId === undefined ? {} : { threadId: bounded(log.threadId) }), ...(log.turnId === undefined ? {} : { turnId: bounded(log.turnId) }), ...(log.requestId === undefined ? {} : { requestId: bounded(log.requestId) }),
+        ...(log.kind === 'provider-output' ? { kind: log.kind } : {}),
+      } as RpcEvents[E];
+    }
+    observeLog(this, event, payload);
     if (event === 'turn.finished') {
       const turn = payload as Turn;
       const agentThread = this.threads.get(turn.threadId);
@@ -335,6 +361,7 @@ export class FakeContext {
   emitToThread<E extends RpcEventName>(threadId: ThreadId, event: E, payload: RpcEvents[E]): void {
     observeProgress(this, threadId, event, payload);
     if (this.bus.subscribed.has(threadId)) this.emit(event, payload);
+    else observeLog(this, event, payload);
     if (event === 'message.part') {
       const { messageId, partIndex, part } = payload as RpcEvents['message.part'];
       const boundary = `${messageId}:${partIndex}`;

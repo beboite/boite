@@ -8,11 +8,13 @@ import { deleteThread } from './thread-removal';
 import { RpcFailure } from './client';
 import { RpcErrorCode } from '@boite/contracts';
 import { strings } from './strings';
+import { closed } from './archive-history';
 
 const stores: Store[] = [];
 afterEach(() => {
   vi.restoreAllMocks();
   undo.dismiss();
+  closed.length = 0;
   for (const store of stores.splice(0)) { store.client?.close(); store.detach(); }
 });
 async function ready() {
@@ -26,9 +28,24 @@ async function ready() {
 test('deleting a just-archived thread removes its undo offer and reopening skips it', async () => {
   const store = await ready();
   expect(await archiveThread(store, 't-trace')).toBe(true);
+  const client = store.client!, call = client.call.bind(client);
+  const failure = vi.spyOn(client, 'call').mockImplementation((method, params) => method === 'threads.archive'
+    ? Promise.reject(new Error('Restore temporarily unavailable')) : call(method, params as never));
+  expect(await reopenLastArchived(store)).toBe(false);
+  expect(store.error).toBe('Restore temporarily unavailable');
+  expect(closed.at(-1)?.threadId).toBe('t-trace');
+  failure.mockRestore(); store.error = null;
+  expect(await reopenLastArchived(store)).toBe(true);
+  expect(store.openThread?.id).toBe('t-trace');
+  expect(await archiveThread(store, 't-trace')).toBe(true);
   expect(undo.current).not.toBeNull();
   expect(await store.removeThread('t-trace')).toBe(true);
   expect(undo.current).toBeNull();
+  const unavailable = vi.spyOn(client, 'call').mockImplementation((method, params) => method === 'threads.list'
+    ? Promise.reject(new Error('Archive list temporarily unavailable')) : call(method, params as never));
+  expect(await reopenLastArchived(store)).toBe(false);
+  expect(store.error).toBe('Archive list temporarily unavailable');
+  unavailable.mockRestore(); store.error = null;
   expect(await reopenLastArchived(store)).toBe(true);
   expect(store.openThread?.id).toBe('t-parser');
   expect(store.error).toBeNull();

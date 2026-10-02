@@ -1,12 +1,9 @@
 # Keybindings
 
-Every chord Boite answers to is one row of a table, and the table has two
-layers: the defaults, which live in the UI, and `keybindings.json` in the
-core's data directory, which only says what differs. The core reads the file
-at start and again the moment it changes, hands the result to every client
-through `keybindings.get` and `keybindings.updated`, and the UI applies it
-everywhere at once: the key handler, the palette hints, the tooltips, and the
-Keyboard page in Settings, which lists the whole table by group and changes it.
+The UI defines default shortcuts; `<dataDir>/keybindings.json` stores overrides.
+The core reads the file at startup and watches for changes, publishing them
+through `keybindings.get` and `keybindings.updated`. Clients update keyboard
+handling, palette hints, tooltips and the Keyboard settings page together.
 
 ## From Settings
 
@@ -42,10 +39,9 @@ or to `null` to take a key away:
 }
 ```
 
-Save it and the change is live. There is no restart, no reload, no button:
-the core watches the directory and reads the file again 120 milliseconds after
-the last write, then announces the whole table. An editor
-that saves by writing a temporary file and renaming it is read the same way.
+The core watches the directory and reads the file 120 milliseconds after the
+last write, including saves that rename a temporary file. It publishes the
+whole table without a restart or reload.
 
 ## The chords
 
@@ -113,9 +109,8 @@ the keypad and of any layout included), which follow the browser's own keys
 
 ## What is refused
 
-Nothing is dropped in silence. Each entry the core cannot take is one line
-in `errors`, named on the Keyboard page under "Refused" and on `core.log` at
-`warn`, while every other entry of the file applies:
+Invalid entries appear in `errors`, on the Keyboard page under "Refused", and
+in `core.log` at `warn`. Valid entries still apply. The core refuses:
 
 - an id that is not in the table above;
 - a value that is neither a string nor `null`;

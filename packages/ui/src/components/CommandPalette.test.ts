@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import CommandPalette from './CommandPalette.svelte';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
+import * as palette from '../lib/palette';
 
 let running: Record<string, unknown> | null = null;
 let store: Store;
@@ -19,9 +20,12 @@ beforeEach(async () => {
   flushSync();
 });
 
-afterEach(() => {
-  if (running) unmount(running, { outro: false });
+afterEach(async () => {
+  if (running) await unmount(running, { outro: false });
   running = null;
+  store.detach();
+  client.close();
+  vi.restoreAllMocks();
   document.body.innerHTML = '';
   window.localStorage.clear();
 });
@@ -114,6 +118,16 @@ test('a command runs: settings opens on the tab asked, and Escape closes without
   store.paletteOpen = true;
   flushSync();
   await tick();
+  await type('task manager');
+  expect(rows()).toEqual(['task-manager']);
+  key('Enter');
+  expect(store.page).toBe('settings');
+  expect(store.settingsTab).toBe('task-manager');
+  expect(store.paletteOpen).toBe(false);
+
+  store.paletteOpen = true;
+  flushSync();
+  await tick();
   await type('zzzz');
   expect(rows()).toEqual([]);
   expect(document.body.textContent).toContain('Nothing matches.');
@@ -160,6 +174,35 @@ test('a load tick leaves the row the keyboard is on where it is', async () => {
   // Typing still starts the walk over: that reset belongs to the query.
   await type('thread');
   expect(selectedId()).toBe(rows()[0]);
+});
+
+test('a closed search stops ranking live updates and reopening reads the latest titles', async () => {
+  const ranking = vi.spyOn(palette, 'rankItems');
+  store.paletteOpen = true;
+  flushSync();
+  await tick();
+  await type('sched');
+  expect(rows()).toEqual(['thread:t-scheduler']);
+  key('Escape');
+  // Keep the result during the exit animation, then leave no live search work.
+  expect(rows()).toEqual(['thread:t-scheduler']);
+  for (let i = 0; i < 3; i++) { await tick(); flushSync(); }
+  expect(document.querySelector('[data-testid=palette]')).toBeNull();
+  ranking.mockClear();
+  for (let i = 0; i < 20; i++) {
+    client.sampleLoad('t-scheduler');
+    store.threads.find(thread => thread.id === 't-scheduler')!.status = i % 2 === 0 ? 'running' : 'idle';
+    flushSync();
+  }
+  store.threads = store.threads.map(thread => thread.id === 't-scheduler' ? { ...thread, title: 'Latest scheduler title' } : thread);
+  flushSync();
+  expect(ranking).not.toHaveBeenCalled();
+  store.paletteOpen = true;
+  flushSync();
+  await tick();
+  expect(document.querySelector<HTMLInputElement>('[data-testid=palette-input]')?.value).toBe('');
+  expect(document.body.textContent).toContain('Latest scheduler title');
+  expect(ranking).toHaveBeenCalled();
 });
 
 test('Escape on a row closes, Tab stays in the search field, and closing gives the focus back', async () => {

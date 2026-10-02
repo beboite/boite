@@ -66,7 +66,7 @@ test('a failed turn offers a compact link to its thread on desktop and phone', a
       document.documentElement.dataset.theme = 'dark';
       await workspace.active.open('t-descriptors');
       workspace.active.showSettings();
-      workspace.active.client.emitCoreLog('error', 'turn trn-cyber failed: This content was flagged for possible cybersecurity risk. Apply for Daybreak access before retrying.', 't-trace');
+      workspace.active.client.emitCoreLog('error', 'turn trn-cyber failed: This content was flagged for possible cybersecurity risk. Apply for Daybreak access before retrying.', { threadId: 't-trace' });
     })()`);
     await page.waitFor(`document.querySelector('[data-testid="settings-home"], [data-testid="mobile-settings-home"]')`);
     await page.evaluate(`document.fonts.ready`);
@@ -80,7 +80,7 @@ test('a failed turn offers a compact link to its thread on desktop and phone', a
     expect(await page.evaluate(`(() => {const r = document.querySelector('[data-testid="error-toast"]').getBoundingClientRect();return r.left >= 0 && r.right <= innerWidth && r.height < 150;})()`)).toBe(true);
     await page.screenshot(join(import.meta.dir, '.artifacts', viewport.mobile ? 'thread-error-phone.png' : 'thread-error-desktop.png'));
     await page.click('[data-testid="error-toast"] .open-thread');
-    await page.waitFor(`document.querySelector('[data-thread-id="t-trace"]') && !document.querySelector('[data-testid="error-toast"]')`);
+    await page.waitFor(`document.querySelector('[data-testid="thread-title"]')?.textContent.trim() === "Finish the trace tab" && !document.querySelector('[data-testid="error-toast"]')`);
     expect(await page.evaluate(`(async () => {const {workspace} = await import('/src/lib/workspace.svelte.ts'); return {thread:workspace.active.openThread.id,page:workspace.active.page,error:workspace.active.error};})()`)).toEqual({thread:'t-trace',page:'chat',error:null});
   }
   // Selecting a thread must also reveal its chat underneath the phone list.
@@ -89,7 +89,7 @@ test('a failed turn offers a compact link to its thread on desktop and phone', a
     await page.waitFor(`document.querySelector('[data-testid="mobile-list"]')`);
     await page.evaluate(`(async () => {
       const {workspace} = await import('/src/lib/workspace.svelte.ts');
-      workspace.active.client.emitCoreLog('error', 'turn trn-cyber failed: cybersecurity risk', 't-trace');
+      workspace.active.client.emitCoreLog('error', 'turn trn-cyber failed: cybersecurity risk', { threadId: 't-trace' });
     })()`);
     await page.waitFor(`document.querySelector('[data-testid="error-toast"] .open-thread')`);
     await page.click('[data-testid="error-toast"] .open-thread');

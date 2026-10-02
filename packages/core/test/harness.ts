@@ -28,6 +28,13 @@ export interface TestCoreOptions {
   onShutdown?: () => void;
 }
 
+const HOST_AGENT_OPT_INS = [
+  'BOITE_E2E_CLAUDE', 'BOITE_E2E_CODEX', 'BOITE_E2E_GROK', 'BOITE_E2E_GROK_QUOTA',
+  'BOITE_E2E_OPENCODE', 'BOITE_E2E_PI', 'BOITE_E2E_AGY', 'BOITE_E2E_ANTIGRAVITY',
+  'BOITE_E2E_ANTIGRAVITY_INSTALL', 'BOITE_E2E_INSTALLS', 'BOITE_E2E_KEBACC_INSTALL',
+  'BOITE_BENCH_CLAUDE', 'BOITE_BENCH_HOST_AGENTS',
+];
+
 /** Hold admission as an account login would, without limiting unrelated work. */
 export function holdAccountTurns(harness: TestCore, accountId?: string): () => void {
   const blocksAccount = harness.core.plugins.blocksAccount;
@@ -62,7 +69,7 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
   process.env.BOITE_ECHO = '1';
   // No test runs the agents installed on this machine, unless an opt-in live
   // test asked for them: a version check or a probe would start the user's CLIs.
-  const live = Object.keys(process.env).some((name) => /^BOITE_(E2E|BENCH)_/.test(name) && process.env[name] === '1');
+  const live = HOST_AGENT_OPT_INS.some(name => process.env[name] === '1');
   process.env.BOITE_HOST_AGENTS = live ? '1' : '0';
   // A shell the tests open must not write what they type into the user's own
   // PowerShell or bash history: cmd and sh keep none.

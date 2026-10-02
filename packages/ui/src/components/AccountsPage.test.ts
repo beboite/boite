@@ -1,20 +1,18 @@
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, expect, vi } from 'vitest';
+import { test } from '../test/fake-client';
 import { flushSync, mount, unmount } from 'svelte';
 import type { Account, ProviderSummary } from '@boite/contracts';
 import AccountsPage from './AccountsPage.svelte';
-import { Store } from '../lib/store.svelte';
-import { FakeClient } from '../lib/fake-client';
 import { nextAccountLabel, setupStep } from '../lib/provider-setup';
 
 let mounted: ReturnType<typeof mount> | undefined;
-afterEach(() => { if (mounted) unmount(mounted); document.body.innerHTML = ''; });
+afterEach(async () => { if (mounted) await unmount(mounted); mounted = undefined; document.body.innerHTML = ''; });
 
 const row = (id: string) => document.querySelector(`[data-testid="provider-settings"][data-provider-id="${id}"]`);
 
-test('every missing provider has exactly one next step in its row', async () => {
-  const client = new FakeClient();
+test('every missing provider has exactly one next step in its row', async ({ createStore }) => {
+  const { store, client } = createStore({});
   await client.connect();
-  const store = new Store();
   const { loaded } = await client.call('providers.list', {});
   store.providers = loaded.map(provider => ({ ...provider, available: false, executable: null }));
   mounted = mount(AccountsPage, { target: document.body, props: { store } });
@@ -28,7 +26,6 @@ test('every missing provider has exactly one next step in its row', async () => 
   expect(row('claude')?.querySelector('a')?.getAttribute('href')).toContain('code.claude.com');
   expect(row('claude')?.querySelector('[data-testid="providers-refresh"]')).not.toBeNull();
   expect(document.querySelector('button:disabled')).toBeNull();
-  client.close();
 });
 
 const provider = (patch: Partial<ProviderSummary>): ProviderSummary => ({
@@ -61,11 +58,8 @@ test('an added account is named after its provider, numbered from the second', (
 });
 
 
-test('checking a signed-out account reports its connection without probing models', async () => {
-  const client = new FakeClient({ delayMs: 0 });
-  const store = new Store();
-  store.attach(client);
-  await store.connect();
+test('checking a signed-out account reports its connection without probing models', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0 });
   const signedOut = await store.addAccount({ providerId: 'codex', label: 'Signed out' });
   const calls = vi.spyOn(client, 'call');
   mounted = mount(AccountsPage, { target: document.body, props: { store } });
@@ -77,14 +71,11 @@ test('checking a signed-out account reports its connection without probing model
   await vi.waitFor(() => expect(target.querySelector('[role="status"]')?.textContent).toContain('not signed in'));
   expect(calls.mock.calls.some(([method]) => method === 'providers.probe')).toBe(false);
   expect(calls.mock.calls.some(([method, params]) => method === 'accounts.check' && 'refresh' in params && params.refresh === true)).toBe(true);
-  store.detach(); client.close();
+
 });
 
-test('accounts keep their chosen name and reveal the email on demand', async () => {
-  const store = new Store();
-  const client = new FakeClient({ delayMs: 0 });
-  store.attach(client);
-  await store.connect();
+test('accounts keep their chosen name and reveal the email on demand', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0 });
   store.providers = [provider({})];
   store.accounts = [account({ identity: 'work@example.com' })];
   const rename = vi.spyOn(store, 'renameAccount').mockResolvedValue(true);
@@ -102,5 +93,5 @@ test('accounts keep their chosen name and reveal the email on demand', async () 
   input.value = 'Work'; input.dispatchEvent(new Event('input', { bubbles: true }));
   input.form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   await vi.waitFor(() => expect(rename).toHaveBeenCalledWith('a1', 'Work'));
-  store.detach(); client.close();
+
 });

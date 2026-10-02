@@ -1,9 +1,11 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import type { Message } from '@boite/contracts';
+import { MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES } from '@boite/contracts';
 import { Journal } from '../src/journal.ts';
 import { JournalTooNewError, SCHEMA_VERSION } from '../src/journal/schema.ts';
 
@@ -37,6 +39,132 @@ afterEach(() => {
 });
 
 describe('journal', () => {
+  test('legacy input receipts bind only exact unique messages and ambiguous cuts retain replay protection after reopen', () => {
+    const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+    const input = (id: string, text: string): Message => ({ ...sampleMessage(id), role: 'user', state: 'complete', parts: [{ type: 'text', text }] });
+    journal.putMessage(input('held-answer', 'An earlier held answer'));
+    journal.putMessage(input('original', 'Original prompt'));
+    journal.putMessage(input('kept-steer', 'Kept follow-up'));
+    journal.putMessage(input('unique-cut-steer', 'Removed follow-up'));
+    journal.putMessage(input('cut-steer', 'Ambiguous follow-up'));
+    journal.putMessage(input('other-cut-steer', 'Ambiguous follow-up'));
+    journal.putTurnRequest('thr_test', 'original_request', hash(['Original prompt', []]), 'trn_test');
+    journal.putTurnRequest('thr_test', 'kept_request', `steer:accepted:${hash(['trn_test', 'Kept follow-up', [], []])}`, 'trn_test');
+    journal.putTurnRequest('thr_test', 'removed_request', `steer:accepted:${hash(['trn_test', 'Removed follow-up', [], []])}`, 'trn_test');
+    const ambiguous = hash(['trn_test', 'Ambiguous follow-up', [], []]);
+    journal.putTurnRequest('thr_test', 'ambiguous_request', `steer:accepted:${ambiguous}`, 'trn_test');
+    journal.putTurnRequest('thr_test', 'uncertain_request', 'steer:pending:uncertain', 'trn_test');
+    journal.putTurnRequest('thr_test', 'unknown_start', 'unrecoverable-start-fingerprint', 'trn_test');
+    if (journal.db.query("SELECT name FROM pragma_table_info('turn_requests') WHERE name = 'message_id'").get()) journal.db.exec('ALTER TABLE turn_requests DROP COLUMN message_id');
+    journal.db.exec('PRAGMA user_version = 26');
+    journal.close(); journal = new Journal(file);
+    const bindings = journal.db.query('SELECT request_id, message_id FROM turn_requests ORDER BY request_id').all();
+    expect(bindings).toEqual([
+      { request_id: 'ambiguous_request', message_id: null }, { request_id: 'kept_request', message_id: 'kept-steer' },
+      { request_id: 'original_request', message_id: 'original' }, { request_id: 'removed_request', message_id: 'unique-cut-steer' },
+      { request_id: 'uncertain_request', message_id: null },
+      { request_id: 'unknown_start', message_id: null },
+    ]);
+    const cut = journal.db.query('SELECT rowid FROM messages WHERE id = ?').get('unique-cut-steer') as { rowid: number };
+    journal.append({ type: 'thread.rewound', threadId: 'thr_test', version: 1, payload: {} }, () => journal.truncateMessages('thr_test', cut.rowid));
+    journal.close(); journal = new Journal(file);
+    expect(journal.turnRequest('thr_test', 'original_request')?.fingerprint).toBe(hash(['Original prompt', []]));
+    expect(journal.turnRequest('thr_test', 'kept_request')?.fingerprint).toBe(`steer:accepted:${hash(['trn_test', 'Kept follow-up', [], []])}`);
+    expect(journal.turnRequest('thr_test', 'removed_request')).toBeNull();
+    expect(journal.turnRequest('thr_test', 'ambiguous_request')?.fingerprint).toBe(`steer:pending:${ambiguous}`);
+    expect(journal.turnRequest('thr_test', 'uncertain_request')?.fingerprint).toBe('steer:pending:uncertain');
+    expect(journal.turnRequest('thr_test', 'unknown_start')?.fingerprint).toBe('start:pending:unrecoverable-start-fingerprint');
+    journal.append({ type: 'thread.rewound', threadId: 'thr_test', version: 1, payload: {} }, () => journal.truncateMessages('thr_test', 0));
+    expect(journal.turnRequest('thr_test', 'original_request')).toBeNull();
+    expect(journal.turnRequest('thr_test', 'kept_request')).toBeNull();
+    expect(journal.turnRequest('thr_test', 'unknown_start')).toBeNull();
+    expect(journal.turnRequest('thr_test', 'ambiguous_request')?.fingerprint).toBe(`steer:pending:${ambiguous}`);
+    expect(journal.turnRequest('thr_test', 'uncertain_request')?.fingerprint).toBe('steer:pending:uncertain');
+  });
+
+  test.each([0, 25])('index failure rolls back schema %i and a later open retries the entire migration', (version) => {
+    const target = join(dir, 'index-failure.db');
+    const indexes = ['thread_deletions_by_date', 'processes_by_started', 'turns_by_status', 'messages_by_turn', 'turns_by_finished'];
+    if (version === 25) {
+      const previous = new Journal(target);
+      try {
+        previous.putProject({ id: 'kept', name: 'kept', path: dir, createdAt: 1 });
+        for (const name of indexes) previous.db.exec(`DROP INDEX ${name}`);
+        previous.db.exec('ALTER TABLE threads DROP COLUMN branch_naming_pending; PRAGMA user_version = 25');
+      } finally {
+        previous.close();
+      }
+    }
+    const failure = new Error('maintenance index failed');
+    const original = Database.prototype.exec;
+    const mock = spyOn(Database.prototype, 'exec').mockImplementation(function (this: Database, sql: string) {
+      if (sql.includes('CREATE INDEX IF NOT EXISTS messages_by_turn')) throw failure;
+      return original.call(this, sql);
+    });
+    try {
+      expect(() => new Journal(target)).toThrow(failure);
+    } finally {
+      mock.mockRestore();
+    }
+    const raw = new Database(target);
+    try {
+      expect(raw.query('PRAGMA user_version').get()).toEqual({ user_version: version });
+      expect(raw.query("SELECT name FROM sqlite_master WHERE type = 'index'").all()
+        .filter(row => indexes.includes((row as { name: string }).name))).toEqual([]);
+      expect(raw.query("SELECT name FROM pragma_table_info('threads') WHERE name = 'branch_naming_pending'").get()).toBeNull();
+      if (version === 0) expect(raw.query("SELECT name FROM sqlite_master WHERE type = 'table'").all()).toEqual([]);
+      else expect(raw.query('SELECT id FROM projects').all()).toEqual([{ id: 'kept' }]);
+    } finally {
+      raw.close();
+    }
+    const retried = new Journal(target);
+    try {
+      expect(retried.db.query('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
+      expect(retried.db.query("SELECT name FROM sqlite_master WHERE type = 'index'").all()
+        .filter(row => indexes.includes((row as { name: string }).name))).toHaveLength(indexes.length);
+      if (version === 25) expect(retried.getProject('kept')?.name).toBe('kept');
+    } finally {
+      retried.close();
+    }
+  });
+
+  test.each([0, 1, 2, 3, 4, 5, 6, 7, 8])('schema %i retains rows, applies historical defaults and repairs old thread ownership', (version) => {
+    journal.putProject({ id: 'kept', name: 'kept', path: dir, createdAt: 1 });
+    journal.putThread({ id: 'old', projectId: 'kept', title: 'existing', titleSource: 'user', providerId: 'echo', accountId: 'acc', model: null, effort: 'high', cwd: dir, branch: 'kept-branch', permissionMode: 'default', status: 'idle', unread: false, archived: false, pinned: true, sessionId: null, load: null, context: null, createdAt: 1, updatedAt: 2 });
+    journal.putMessage({ ...sampleMessage('kept-message'), threadId: 'old', state: 'complete' });
+    if (version >= 4) journal.db.exec("INSERT INTO sessions VALUES ('paired', 'hash', 'phone', '1', 1, 2, 'owner')");
+    // Restore the old NOT NULL ownership constraint without losing newer columns or indexes.
+    const definition = journal.db.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'threads'").get() as { sql: string };
+    const indexes = journal.db.query("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'threads' AND sql IS NOT NULL").all() as { sql: string }[];
+    journal.db.exec(definition.sql.replace(/CREATE TABLE (?:IF NOT EXISTS )?["`\[]?threads["`\]]?/i, 'CREATE TABLE threads_legacy')
+      .replace(/project_id TEXT/i, 'project_id TEXT NOT NULL'));
+    journal.db.exec('INSERT INTO threads_legacy SELECT * FROM threads; DROP TABLE threads; ALTER TABLE threads_legacy RENAME TO threads');
+    for (const index of indexes) journal.db.exec(index.sql);
+    const addedColumns = [[2, 'threads', 'effort'], [3, 'threads', 'pinned'], [5, 'threads', 'branch'], [6, 'threads', 'title_source'], [7, 'threads', 'context'], [9, 'threads', 'session_generation'], [9, 'threads', 'selection_version'], [9, 'turns', 'execution'], [10, 'threads', 'speed'], [15, 'threads', 'agent_session_id']] as const;
+    for (const [since, table, column] of addedColumns) {
+      if (version < since) journal.db.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+    }
+    if (version < 4) journal.db.exec('DROP TABLE sessions');
+    else if (version < 8) journal.db.exec('ALTER TABLE sessions DROP COLUMN role');
+    journal.db.exec(`DROP TABLE turn_requests; DROP TABLE coordination_letters; DROP TABLE coordination_wakes; PRAGMA user_version = ${version}`);
+    journal.close();
+    journal = new Journal(file);
+    expect(journal.db.query('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
+    expect(journal.getProject('kept')?.name).toBe('kept');
+    expect(journal.getThread('old')).toMatchObject({ title: 'existing', projectId: 'kept', effort: version >= 2 ? 'high' : null,
+      pinned: version >= 3, branch: version >= 5 ? 'kept-branch' : null, titleSource: version >= 6 ? 'user' : 'prompt' });
+    expect(journal.listMessages('old').map(message => message.id)).toEqual(['kept-message']);
+    expect(journal.db.query("SELECT name, \"notnull\" FROM pragma_table_info('threads') WHERE name = 'project_id'").get())
+      .toEqual({ name: 'project_id', notnull: 0 });
+    expect(journal.db.query('SELECT agent_session_id, session_generation, selection_version FROM threads WHERE id = ?').get('old'))
+      .toEqual({ agent_session_id: null, session_generation: 0, selection_version: 0 });
+    if (version >= 4) expect(journal.db.query('SELECT role FROM sessions WHERE id = ?').get('paired'))
+      .toEqual({ role: version >= 8 ? 'owner' : 'device' });
+    journal.close();
+    journal = new Journal(file);
+    expect(journal.getThread('old')?.title).toBe('existing');
+  });
+
   test('schema 24 projects migrate with worktree defaults off and retain enabled defaults after reopen', () => {
     journal.putProject({ id: 'prj_default', name: 'test', path: dir, createdAt: 1 });
     journal.db.exec('ALTER TABLE projects DROP COLUMN worktree_default; PRAGMA user_version = 24');
@@ -70,6 +198,44 @@ describe('journal', () => {
     journal.appendDelta('thr_test', 'streaming-snapshot', 0, 'already delivered');
     expect(journal.listMessagePage('thr_test', { limit: 120 }).messages[0]?.parts)
       .toEqual([{ type: 'text', text: 'already delivered' }]);
+    journal.putMessage({ ...sampleMessage('older-large'), state: 'complete', parts: [{ type: 'text', text: 'x'.repeat(7 * 1024 * 1024) }] });
+    journal.putMessage(sampleMessage('latest-live'));
+    journal.appendDelta('thr_test', 'latest-live', 0, 'y'.repeat(7 * 1024 * 1024));
+    const page = journal.listMessagePage('thr_test', { limit: 120 });
+    expect(page.messages.map(message => message.id)).toEqual(['latest-live']);
+    expect(page.before).toBe('latest-live');
+    expect((page.messages[0]?.parts[0] as { text: string }).text.length).toBe(7 * 1024 * 1024);
+    expect(journal.listMessagesFrom('thr_test', journal.messageRowid('thr_test', 'older-large')!, 120) === null).toBe(true);
+    const delta = journal.listMessagesFrom('thr_test', journal.messageRowid('thr_test', 'latest-live')!, 120);
+    expect(delta?.[0]?.parts).toEqual(page.messages[0]?.parts);
+    const older = { ...journal.getMessage('older-large')!, parts: [{ type: 'text' as const, text: '' }] };
+    const padding = 'a'.repeat(MESSAGE_PAGE_MAX_BYTES - Buffer.byteLength(JSON.stringify([older, delta![0]])));
+    journal.db.query('UPDATE messages SET parts = ? WHERE id = ?').run(JSON.stringify([{ type: 'text', text: padding }]), older.id);
+    const exact = journal.listMessagesFrom('thr_test', journal.messageRowid('thr_test', older.id)!, 120);
+    expect(exact?.length).toBe(2);
+    expect(Buffer.byteLength(JSON.stringify(exact))).toBe(MESSAGE_PAGE_MAX_BYTES);
+    journal.appendDelta('thr_test', 'latest-live', 0, '!');
+    expect(journal.listMessagesFrom('thr_test', journal.messageRowid('thr_test', older.id)!, 120) === null).toBe(true);
+    const resized = journal.listMessagePage('thr_test', { limit: 120 }).messages;
+    expect(resized.map(message => message.id)).toEqual(['latest-live']);
+    expect(resized[0]?.parts[0]?.type === 'text' && resized[0].parts[0].text.endsWith('!')).toBe(true);
+  });
+
+  test('a single message can exceed the page budget for progress but an untransportable message is refused by name', () => {
+    const data = 'A'.repeat(Math.ceil(5 * 1024 * 1024 / 3) * 4 - 1) + '=';
+    journal.putMessage({ ...sampleMessage('legal-attachment'), state: 'complete', parts: ['first.bin', 'second.bin'].map(name => ({ type: 'file', name, mimeType: 'application/octet-stream', data })) });
+    const page = journal.listMessagePage('thr_test', { limit: 120 });
+    expect(page.messages.map(message => message.id)).toEqual(['legal-attachment']);
+    expect(page.before).toBeNull();
+    const bytes = Buffer.byteLength(JSON.stringify(page.messages));
+    expect(bytes).toBeGreaterThan(MESSAGE_PAGE_MAX_BYTES);
+    expect(bytes).toBeLessThan(RPC_MAX_FRAME_BYTES);
+    const tailTooLarge = journal.listMessagesFrom('thr_test', journal.messageRowid('thr_test', 'legal-attachment')!, 120) === null;
+    journal.putMessage({ ...sampleMessage('oversized-message'), state: 'complete', parts: [{ type: 'text', text: 'x'.repeat(RPC_MAX_FRAME_BYTES) }] });
+    expect(() => journal.listMessagePage('thr_test', { limit: 120 })).toThrow('message oversized-message');
+    try { journal.listMessagePage('thr_test', { limit: 120 }); }
+    catch (error) { expect(error).toMatchObject({ data: { field: 'messages', messageId: 'oversized-message', expected: `a complete message below ${RPC_MAX_FRAME_BYTES} serialized UTF-8 bytes` } }); }
+    expect(tailTooLarge).toBe(true);
   });
 
   test('corrupt JSON names its table, row and column', () => {

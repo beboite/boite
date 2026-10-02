@@ -28,6 +28,7 @@ export class AgyTurn {
 
   private status: TurnResult['status'] = 'done';
   private error: string | null = null;
+  private diagnosticError: string | undefined;
   private resolve: (result: TurnResult) => void = () => undefined;
   private decide: () => void = () => undefined;
   private wake: () => void = () => undefined;
@@ -159,9 +160,10 @@ export class AgyTurn {
   }
 
   /** The turn cannot go on: a dead child, a failed launch. */
-  fail(reason: string): void {
+  fail(reason: string, diagnostic?: string): void {
     if (this.decided) return;
     this.noteError(reason);
+    this.diagnosticError = diagnostic;
     this.status = 'error';
     this.decided = true;
     this.decide();
@@ -180,6 +182,7 @@ export class AgyTurn {
       sessionId: this.sessionId,
       usage: this.usage,
       error: this.error ?? undefined,
+      ...(this.diagnosticError === undefined ? {} : { diagnosticError: this.diagnosticError }),
     });
   }
 

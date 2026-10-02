@@ -13,6 +13,7 @@
     shownAccountId,
     choice,
     locked,
+    busy = false,
     onpick
   }: {
     shown: ProviderSummary | null;
@@ -20,6 +21,7 @@
     shownAccountId: string | null;
     choice: Choice | null;
     locked: boolean;
+    busy?: boolean;
     /** A seat that can be taken and is not the choice already. */
     onpick: (seat: Account) => void;
   } = $props();
@@ -51,12 +53,12 @@
 </script>
 
 {#if seats.length > 1}
-  <div class="seats" role="group" aria-label={strings.accounts.heading}>
+  <div class="seats" role="group" aria-label={strings.accounts.heading} aria-busy={busy}>
     {#each seats as seat (seat.id)}
       <button
         type="button"
         class="seat"
-        disabled={seatHeld(seat) || !(shown?.available ?? false)}
+        disabled={busy || seatHeld(seat) || !(shown?.available ?? false)}
         data-seat
         data-instance="{shown?.id}::{seat.id}"
         aria-pressed={seat.id === shownAccountId}

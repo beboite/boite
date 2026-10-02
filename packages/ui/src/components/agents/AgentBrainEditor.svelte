@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { secureId } from '../../lib/secure-id';
   import { onMount } from 'svelte';
   import type { AgentBrain } from '@boite/contracts';
   import type { AgentsView } from '../../lib/agents.svelte';
@@ -9,6 +10,10 @@
   const sessions = $derived(view.snapshot?.sessions.filter(s => s.agentId === agentId) ?? []);
   onMount(() => { void view.call('agents.brain.get', { agentId }).then(value => { brain = value; }); });
   async function save() { if (brain) { const saved = await view.call('agents.brain.save', { agentId, expectedRevision: brain.revision, instructions: brain.instructions, memory: brain.memory }); if (saved) brain = saved; } }
+  async function compact(sessionId: string) {
+    try { await view.call('agents.context.compact', { sessionId, requestId: secureId() }); }
+    catch (error) { view.error = error instanceof Error ? error.message : String(error); }
+  }
   function scopeName(kind: string, id: string): string {
     const s = view.snapshot;
     if (kind === 'agent') return labels.conversation;
@@ -30,7 +35,7 @@
       {#each sessions as session (session.id)}
         <div class="switch-row">
           <span class="text">{scopeName(session.scope.kind, session.scope.id)}</span>
-          {#if view.store.owner}<button type="button" class="small" disabled={view.pending} onclick={() => void view.call('agents.context.compact', { sessionId: session.id, requestId: crypto.randomUUID() })}>{labels.compactNow}</button>{/if}
+          {#if view.store.owner}<button type="button" class="small" disabled={view.pending} onclick={() => void compact(session.id)}>{labels.compactNow}</button>{/if}
         </div>
       {/each}
     </section>

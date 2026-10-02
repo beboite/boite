@@ -116,8 +116,8 @@ compare; the records themselves stay.
 ## Providers and tools
 
 Profiles use existing model probing, account selection, effort and drivers.
-Names such as Gemini 3.8 Flash or Muse Spark 1.3 Contributor are not hard-coded
-or promised for every account: the model must appear in its current probe.
+A selected model must appear in the account's current probe; examples and saved
+profiles do not establish availability.
 
 Antigravity CLI uses agy stream-json and its single default login. Print mode
 has no interactive tool-approval channel. Muse Code uses MSP, including
@@ -165,9 +165,8 @@ saved while the routine is paused.
 
 Models and limits separates the required default route, allowed main routes,
 and allowed subagent profiles. A route names a provider, account and model.
-For example, a Kimi main route can delegate only to configured Luna profiles
-without having access to the Claude, GPT or Gemini main routes. Availability
-comes from the existing provider/account probes, not from these example names.
+An allowed main route can delegate only to configured subagent profiles,
+without gaining other main routes. Provider/account probes determine availability.
 There is no silent fallback to an unapproved model.
 
 Account access grants each subscription to all identities or an explicit list.
@@ -188,13 +187,13 @@ the brain and policy, converse and handle decisions on the selected host.
 The directory opens conversations, activity, scoped memory, routines, the
 individual brain and model limits. The machine picker selects the owning core;
 closing this client does not stop that core. Disconnection marks the last state
-as stale. Portrait experiments and the graphical studio are deliberately
-deferred. The scene source remains available, but has no navigation entry.
+as stale. The interface exposes the supported conversations and policy pages; retained
+scene sources have no navigation entry.
 
-Contracts live in `packages/contracts/src/agents.ts`. Schema 16 combines domain
-records, receipts and projectless managed threads with prompt-cache and native
-delegation storage. It accepts the earlier persistent-agent schema 14 and the
-main branch's schema 14 without discarding their history. Records and
+Contracts live in `packages/contracts/src/agents.ts`. The journal stores domain records,
+receipts and projectless managed threads
+with prompt-cache and native delegation data. Supported schema migrations
+preserve their history. Records and
 events commit together. Revision checks protect edits; request receipts protect
 message, artifact and decision retries. Runs freeze execution and supplied
 context. `agents.changed` invalidates a revision without broadcasting messages.
@@ -227,9 +226,8 @@ runs of a thread. `events_agents` serves the snapshot's revision.
 
 ## Verification
 
-Run `bun run check`, `bun run test`, `bun run test:shell`, then
-`bun run build:shell`, `bun run apps/shell/scripts/stage-sidecar.ts` and
-`bun run e2e`.
+Follow the relevant [development checks](development.md#checks-and-tests) and
+[shell procedure](development.md#rebuilding-the-shell-executable).
 
 Core tests cover assignments, scope isolation, receipts, decisions, resource
 serialization, CLI tools, interrupted runs and workspace preparation recovery.

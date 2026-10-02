@@ -104,6 +104,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // Paired phones can dismiss the same question cards as the owner's chat.
   'questions.skip',
   // Read-only screens.
+  // Sanitized per-thread usage has no command lines, executable paths or account identifiers.
+  'resources.usage',
   'scheduler.get',
   'usage.get',
   // Sums of the same finished turns per day, provider and model. The thread

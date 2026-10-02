@@ -22,6 +22,53 @@ import {
 useClaudeHarness();
 
 describe('claude driver', () => {
+  test.each([false, true])('an unfinished live control cannot change the next turn after Stop=%s', async stop => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('settings.set', { warmProcessMinutes: 5 });
+    const control = Promise.withResolvers<void>();
+    const answered = Promise.withResolvers<void>();
+    let changing = false;
+    scripted(fake => {
+      fake.emit(init('sess-control-owner'));
+      if (queries.length !== 1) return;
+      const apply = fake.applyFlagSettings.bind(fake);
+      fake.applyFlagSettings = async settings => {
+        if (settings.disableAllHooks === true) {
+          changing = true;
+          await control.promise;
+        }
+        await apply(settings);
+        answered.resolve();
+      };
+    });
+    const first = await client.call('turns.start', { threadId, prompt: 'First task' });
+    await waitFor(() => calls[0]?.prompts.length === 1);
+    await client.call('threads.update', { threadId, permissionMode: 'yolo' });
+    await waitFor(() => changing);
+    const previous = queries[0]!;
+    if (stop) await client.call('turns.stop', { threadId });
+    else previous.emit(success('sess-control-owner'));
+    await waitFor(() => harness.core.journal.getTurn(first.id)?.status === (stop ? 'stopped' : 'done'));
+
+    await client.call('threads.update', { threadId, permissionMode: 'default' });
+    const next = await client.call('turns.start', { threadId, prompt: 'Next task' });
+    // A control that never answers must not hold the next prompt or the finished turn.
+    await waitFor(() => calls.some(call => call.prompts.includes('Next task')));
+    expect(harness.core.journal.getTurn(next.id)?.status).toBe('running');
+    control.resolve();
+    await answered.promise;
+    await Bun.sleep(0);
+    // The former owner's delayed overlay must not issue its second native control.
+    expect(previous.setters).not.toContain('setPermissionMode bypassPermissions');
+    expect(calls.at(-1)!.options.permissionMode).toBe('default');
+    expect(queries.at(-1)!.setters).not.toContain('disableAllHooks true');
+    expect(harness.core.threads.require(threadId).permissionMode).toBe('default');
+    expect(harness.core.journal.getTurn(next.id)?.execution?.permissionMode).toBe('default');
+    queries.at(-1)!.emit(success('sess-control-owner'));
+    await waitFor(() => harness.core.journal.getTurn(next.id)?.status === 'done');
+  });
+
   test('permission mode and hook changes reach a running query without another prompt', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

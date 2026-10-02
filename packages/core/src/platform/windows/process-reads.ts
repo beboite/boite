@@ -16,6 +16,14 @@ export interface ProcessReads {
   memoryInfo(proc: number, out: Uint8Array): boolean;
 }
 
+interface ProcessAccess extends ProcessReads {
+  openProcess(access: number, pid: number): number;
+  close(handle: number): void;
+}
+
+/** Enough for GetProcessTimes, including processes that refuse the full query right. */
+const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
 /** GetExitCodeProcess's answer for a process still running. */
 const STILL_ACTIVE = 259;
 
@@ -108,13 +116,33 @@ export function cpuMsOf(api: ProcessReads, handle: number): number | null {
   return Math.round(Number(total) / 10_000);
 }
 
+/** Open the current PID owner for this read and always release its handle. */
+export function createdAtOfPid(readApi: () => ProcessAccess | null, pid: number, runningOnly: boolean): number | null {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  const api = readApi();
+  if (api === null) return null;
+  const handle = api.openProcess(PROCESS_QUERY_LIMITED_INFORMATION, pid);
+  if (handle === 0) return null;
+  try {
+    if (runningOnly && exitCodeOf(api, handle) !== null) return null;
+    return createdAtOf(api, handle);
+  } finally {
+    api.close(handle);
+  }
+}
+
 /** When the process was created, in ms since the Unix epoch. */
 export function createdAtOf(api: ProcessReads, handle: number): number | null {
+  return creationIdentityOf(api, handle)?.startedAt ?? null;
+}
+
+/** Capture both the trace timestamp and the exact identity from the same held handle. */
+export function creationIdentityOf(api: ProcessReads, handle: number): { startedAt: number; incarnation: string } | null {
   const times = new Uint8Array(32);
   if (!api.processTimes(handle, times)) return null;
   const created = new DataView(times.buffer).getBigUint64(OFF_CREATION_TIME, true);
   if (created <= FILETIME_UNIX_EPOCH) return null;
-  return Number((created - FILETIME_UNIX_EPOCH) / 10_000n);
+  return { startedAt: Number((created - FILETIME_UNIX_EPOCH) / 10_000n), incarnation: created.toString() };
 }
 
 /** Bytes the process read and wrote, files, pipes and devices alike. */

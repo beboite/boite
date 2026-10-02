@@ -40,6 +40,7 @@ export class CodexTurn {
 
   private status: TurnResult['status'] = 'done';
   private error: string | null = null;
+  private diagnosticError: string | undefined;
   private resolve: (result: TurnResult) => void = () => undefined;
   private decide: () => void = () => undefined;
   private wake: () => void = () => undefined;
@@ -103,11 +104,12 @@ export class CodexTurn {
     this.decide();
   }
 
-  fail(reason: string): void {
+  fail(reason: string, diagnostic?: string): void {
     if (this.decided) return;
     this.decided = true;
     this.status = 'error';
     this.error = reason;
+    this.diagnosticError = diagnostic;
     this.part(this.takeIndex(), { type: 'error', message: reason });
     this.decide();
   }
@@ -153,6 +155,7 @@ export class CodexTurn {
       sessionId: this.sessionId,
       usage: this.usage,
       error: this.error ?? undefined,
+      ...(this.diagnosticError === undefined ? {} : { diagnosticError: this.diagnosticError }),
       promptCache: this.cacheLife,
       ...(this.sessionLost ? { sessionLost: true } : {}),
     });

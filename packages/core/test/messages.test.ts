@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { MESSAGE_PAGE, MESSAGE_PAGE_MAX } from '@boite/contracts';
+import { MESSAGE_PAGE, MESSAGE_PAGE_MAX, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES } from '@boite/contracts';
 import type { Message } from '@boite/contracts';
+import type { CoreClient } from '../src/client.ts';
 import { echoThread, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -93,6 +94,67 @@ describe('message paging', () => {
     expect(walked.at(-1)).toBe('msg_0299');
     expect(walked).toEqual([...walked].sort());
   });
+
+  test('serialized UTF-8 bounds large pages and reconnect tails without losing messages over WsClient', async () => {
+    const owner = await harness.connect();
+    const { threadId } = await echoThread(harness, owner);
+    // Each unit uses five UTF-16 code units but ten bytes after JSON escaping.
+    const text = '\u{1f600}\n"\\'.repeat(512 * 1024);
+    seed(threadId, 7);
+    for (const message of harness.core.journal.listMessages(threadId)) {
+      harness.core.journal.putMessage({ ...message, parts: [{ type: 'text', text }] });
+    }
+    const initial = harness.core.threads.get(threadId);
+    expect(Buffer.byteLength(JSON.stringify(initial.messages))).toBeLessThanOrEqual(MESSAGE_PAGE_MAX_BYTES);
+    expect(initial.messages).toHaveLength(2);
+    // An untouched old row is not decoded while opening only the latest page.
+    harness.core.journal.db.query('UPDATE messages SET parts = ? WHERE id = ?').run('{', 'msg_0000');
+    expect(ids(harness.core.threads.get(threadId).messages)).toEqual(ids(initial.messages));
+    harness.core.journal.db.query('UPDATE messages SET parts = ? WHERE id = ?').run(JSON.stringify([{ type: 'text', text }]), 'msg_0000');
+    const fallback = harness.core.threads.get(threadId, 'msg_0000');
+    expect(fallback.messagesFrom).toBeUndefined();
+    expect(ids(fallback.messages)).toEqual(ids(initial.messages));
+    const tail = harness.core.threads.get(threadId, 'msg_0005');
+    expect(tail.messagesFrom).toBe('msg_0005');
+    expect(ids(tail.messages)).toEqual(['msg_0005', 'msg_0006']);
+
+    // Exercise the browser transport without adding DOM globals to the core's compiler.
+    const { WsClient } = await import(new URL('../../ui/src/lib/client.ts', import.meta.url).href);
+    const client: Pick<CoreClient, 'call' | 'close'> & { connect(): Promise<unknown> } =
+      new WsClient({ url: harness.url, token: harness.token, reconnect: false });
+    try {
+      await client.connect();
+      const first = await client.call('threads.get', { threadId, after: 'msg_0000' });
+      expect(first.messagesFrom).toBeUndefined();
+      const walked = ids(first.messages);
+      let cursor = first.messagesBefore;
+      let pages = 1;
+      while (cursor !== null) {
+        const page = await client.call('messages.list', { threadId, before: cursor, limit: MESSAGE_PAGE_MAX });
+        expect(Buffer.byteLength(JSON.stringify(page.messages))).toBeLessThanOrEqual(MESSAGE_PAGE_MAX_BYTES);
+        expect(Buffer.byteLength(JSON.stringify({ jsonrpc: '2.0', id: 999, result: page }))).toBeLessThan(RPC_MAX_FRAME_BYTES);
+        for (const message of page.messages) {
+          expect(message.parts[0]?.type).toBe('text');
+          expect(message.parts[0]?.type === 'text' && message.parts[0].text === text).toBe(true);
+        }
+        walked.unshift(...ids(page.messages));
+        cursor = page.before;
+        expect(++pages).toBeLessThan(10);
+      }
+      expect(walked).toEqual(Array.from({ length: 7 }, (_, i) => `msg_${String(i).padStart(4, '0')}`));
+      expect(pages).toBe(4);
+      const attached = await echoThread(harness, owner, 'Complete bundle');
+      const data = 'A'.repeat(Math.ceil(5 * 1024 * 1024 / 3) * 4 - 1) + '=';
+      harness.core.journal.putMessage({ id: 'msg_bundle', threadId: attached.threadId, turnId: 'trn_bundle', role: 'user', state: 'complete', createdAt: 1,
+        parts: ['first.bin', 'second.bin'].map(name => ({ type: 'file', name, mimeType: 'application/octet-stream', data })) });
+      const bundle = await client.call('threads.get', { threadId: attached.threadId, after: 'msg_bundle' });
+      expect(bundle.messagesFrom).toBeUndefined();
+      expect(bundle.messages).toHaveLength(1);
+      expect(bundle.messagesBefore).toBeNull();
+      expect(Buffer.byteLength(JSON.stringify(bundle.messages))).toBeGreaterThan(MESSAGE_PAGE_MAX_BYTES);
+      expect(bundle.messages[0]?.parts.filter(part => part.type === 'file').every(part => part.data === data)).toBe(true);
+    } finally { client.close(); }
+  }, 60_000);
 
   test('a limit is honoured and never exceeds the maximum', async () => {
     const client = await harness.connect();

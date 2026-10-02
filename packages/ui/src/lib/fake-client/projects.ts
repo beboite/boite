@@ -14,6 +14,15 @@ export function projectMethods(ctx: FakeContext) {
     'projects.list': async (params) => {
       return ctx.projects.map((project) => describedProject(ctx, project));
     },
+    'projects.setAutoArchiveMergedPr': async (params) => {
+      const project = ctx.projects.find(project => project.id === params.projectId);
+      if (!project) throw ctx.notFound('project', params.projectId);
+      if (typeof params.enabled !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'projects.setAutoArchiveMergedPr.enabled must be a boolean', data: { field: 'enabled', expected: 'true or false' } });
+      project.autoArchiveMergedPr = params.enabled;
+      const summary = describedProject(ctx, project);
+      ctx.emit('project.updated', summary);
+      return summary;
+    },
     'projects.setWorktreeDefault': async (params) => {
       const project = ctx.projects.find(p => p.id === params.projectId);
       if (!project) throw ctx.notFound('project', params.projectId);
@@ -42,7 +51,7 @@ export function projectMethods(ctx: FakeContext) {
       }
       // As the core on Windows: the same folder in another case is the project already there.
       const existing = ctx.projects.find((p) => pathKey(p.path) === pathKey(params.path));
-      if (existing) return structuredClone(existing);
+      if (existing) return describedProject(ctx, existing);
       const project: Project = {
         id: `p-${++ctx.seq}`,
         name: params.name ?? params.path.split(/[\\/]/).filter(Boolean).pop() ?? params.path,
@@ -52,12 +61,13 @@ export function projectMethods(ctx: FakeContext) {
         repository: true
       };
       ctx.projects.push(project);
-      ctx.emit('project.added', structuredClone(project));
-      return structuredClone(project);
+      const summary = describedProject(ctx, project);
+      ctx.emit('project.added', summary);
+      return summary;
     },
     'projects.drafts': async () => {
       const existing = ctx.projects.find((p) => p.kind === 'drafts');
-      if (existing) return structuredClone(existing);
+      if (existing) return describedProject(ctx, existing);
       const project: Project = {
         id: `p-${++ctx.seq}`,
         name: 'Drafts',
@@ -67,8 +77,9 @@ export function projectMethods(ctx: FakeContext) {
         kind: 'drafts'
       };
       ctx.projects.push(project);
-      ctx.emit('project.added', structuredClone(project));
-      return structuredClone(project);
+      const summary = describedProject(ctx, project);
+      ctx.emit('project.added', summary);
+      return summary;
     },
     'projects.remove': async (params) => {
       if (!ctx.projects.some((p) => p.id === params.projectId)) throw ctx.notFound('project', params.projectId);
@@ -80,7 +91,10 @@ export function projectMethods(ctx: FakeContext) {
         });
       }
       ctx.projects = ctx.projects.filter((p) => p.id !== params.projectId);
-      for (const [id, family] of ctx.deletedThreads) if (family.threads.some(t => t.projectId === params.projectId)) ctx.deletedThreads.delete(id);
+      for (const [id, family] of ctx.deletedThreads) if (family.threads.some(t => t.projectId === params.projectId)) {
+        for (const thread of family.threads) { ctx.mergedPrFixtures.delete(thread.id); ctx.mergedPrArchive.delete(thread.id); }
+        ctx.deletedThreads.delete(id);
+      }
       ctx.emit('thread.deletionsUpdated', {});
       const threads = [...ctx.threads.values()].filter((thread) => thread.projectId === params.projectId);
       // As the core: each thread is archived, and says so, before the records go.
@@ -90,6 +104,8 @@ export function projectMethods(ctx: FakeContext) {
       }
       await Promise.all(threads.map((thread) => putAway(ctx, thread)));
       for (const thread of threads) {
+        ctx.mergedPrFixtures.delete(thread.id);
+        ctx.mergedPrArchive.delete(thread.id);
         ctx.threads.delete(thread.id);
         ctx.emit('thread.removed', { threadId: thread.id });
       }

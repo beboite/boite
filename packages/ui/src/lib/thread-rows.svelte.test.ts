@@ -3,6 +3,7 @@ import { flushSync } from 'svelte';
 import { FakeClient } from './fake-client';
 import { Store } from './store.svelte';
 import { unlistedPanels } from './thread-rows';
+import { moveBlocked } from './thread-move.svelte';
 
 async function ready(): Promise<{ store: Store; client: FakeClient }> {
   const client = new FakeClient({ delayMs: 0 });
@@ -62,6 +63,49 @@ test('the project lists hold the live top-level threads of each project', async 
   } finally {
     store.detach();
     client.close();
+  }
+});
+
+test('mounted parent rows share move eligibility work and track child lifecycle within their machine', async () => {
+  const { store, client } = await ready();
+  const { store: other, client: otherClient } = await ready();
+  let stop = () => {};
+  try {
+    let visits = 0;
+    const sample = store.threads[0]!;
+    const parents = Array.from({ length: 200 }, (_, index) => ({
+      ...sample, id: `parent-${index}`, get parentThreadId() { visits++; return null; },
+    }));
+    store.threads = parents;
+    const blocked = new Map<string, boolean>();
+    stop = $effect.root(() => {
+      for (const parent of store.threads) $effect(() => { blocked.set(parent.id, moveBlocked(store, parent.id)); });
+    });
+    flushSync();
+    expect([...blocked.values()].every(value => value === false)).toBe(true);
+    expect(visits).toBeLessThanOrEqual(parents.length * 2);
+    const child = { ...sample, id: 'child', parentThreadId: parents[0]!.id, archived: false, status: 'running' as const };
+    store.threads.push(child);
+    flushSync();
+    expect(blocked.get(child.parentThreadId)).toBe(true);
+    expect(moveBlocked(other, child.parentThreadId)).toBe(false);
+    for (const status of ['idle', 'queued', 'waiting', 'error'] as const) {
+      store.threads.at(-1)!.status = status;
+      flushSync();
+      expect(blocked.get(child.parentThreadId)).toBe(status === 'queued' || status === 'waiting');
+    }
+    store.threads.at(-1)!.status = 'running';
+    store.threads.at(-1)!.archived = true;
+    flushSync();
+    expect(blocked.get(child.parentThreadId)).toBe(false);
+    store.threads.at(-1)!.archived = false;
+    flushSync();
+    expect(blocked.get(child.parentThreadId)).toBe(true);
+    store.threads.pop();
+    flushSync();
+    expect(blocked.get(child.parentThreadId)).toBe(false);
+  } finally {
+    stop(); store.detach(); client.close(); other.detach(); otherClient.close();
   }
 });
 

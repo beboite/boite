@@ -12,14 +12,13 @@ import { uptime } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { Channel, PairingGrant, PairingRole, Settings } from '@boite/contracts';
-import { processIo, runCli } from './cli.ts';
 import { connect } from './client.ts';
-import { CORE_VERSION, Core } from './core.ts';
+import type { Core } from './core.ts';
+import { CORE_VERSION } from './version.ts';
 import { messageOf } from './errors.ts';
 import { newToken } from './ids.ts';
 import { resolveDataDir } from './paths.ts';
 import { processPlatform } from './platform/index.ts';
-import { startServerOnStickyPort } from './server.ts';
 
 const CHANNELS: readonly Channel[] = ['stable', 'dev'];
 
@@ -306,7 +305,7 @@ export function main(argv: string[]): void {
   if (argv[0] === 'cli') {
     // The exit code is set and the process left to end on its own: `process.exit`
     // would cut what a piped stdout has not flushed yet, and a long list is piped.
-    runCli(argv.slice(1), processIo()).then(
+    void import('./cli.ts').then(({ runCli, processIo }) => runCli(argv.slice(1), processIo())).then(
       (code) => {
         process.exitCode = code;
       },
@@ -334,132 +333,149 @@ export function main(argv: string[]): void {
     return;
   }
 
-  let flags: Flags;
-  let dataDir: string;
-  let unlock: () => void;
-  try {
-    flags = parseFlags(argv);
-    dataDir = resolveDataDir(flags.dataDir, flags.channel);
-    prepareDataDir(dataDir);
-    // Before the journal is opened, because opening it is already a write.
-    unlock = lockDataDir(dataDir);
-  } catch (error) {
-    refuseToStart(error);
-  }
-  const coreFile = join(dataDir, 'core.json');
-  const previous = readPreviousRun(coreFile);
-  const token = previous.token ?? newToken();
-  let core: Core;
-  try {
-    // Windows ships a Bun runtime and a split bundle. Capture what this run
-    // loaded now; reading it on /health after a reinstall would describe new code.
-    const entry = process.argv[1];
-    const bundleHash = entry?.endsWith('.js') && existsSync(entry)
-      ? createHash('sha256').update(readFileSync(entry)).digest('hex') : undefined;
-    core = new Core({ dataDir, token, channel: flags.channel, bundleHash, onShutdown: () => shutdown() });
-  } catch (error) {
-    // A journal from a newer release, among others: say why and leave the data as it is.
-    unlock();
-    refuseToStart(error);
-  }
-  const publicUrl = flags.publicUrl ?? process.env.BOITE_PUBLIC_URL;
-  if (publicUrl !== undefined) core.settings.set({ publicUrl });
-  const settings = core.settings.get();
-  const host = resolveHost(flags, settings);
-  const server = startServerOnStickyPort({ core, host, port: flags.port, explicitPort: flags.portExplicit, previousPort: previous.port });
-  core.updates.start();
-  core.serverUpdates.start();
-  if (core.cliDir === null) {
-    console.warn('the boite CLI shim is not beside the core: agents started here cannot run `boite`. Copy `boite` next to the executable, or name its directory in BOITE_CLI_DIR');
-  }
-  if (!flags.hostExplicit) {
-    core.log('info', `listening on ${host} because listenOnLan is ${settings.listenOnLan ? 'on' : 'off'}`);
-  }
-
-  const state: CoreFile = {
-    port: server.port,
-    host,
-    token,
-    pid: process.pid,
-    startedAt: core.startedAt,
-    version: core.version,
-  };
-  // The file carries the token that owns this core, so it is the owner's to
-  // read and nobody else's. Windows ignores the mode, which is why the file
-  // sits in the user's own application data directory to begin with.
-  writeFileSync(coreFile, `${JSON.stringify(state, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-  if (process.platform !== 'win32') chmodSync(coreFile, 0o600);
-
-  // No pairing grant here. Every start used to mint a live one and print it,
-  // so any log, any terminal scrollback and any shell that reprinted the line
-  // handed out a session token nobody had asked for. A phone pairs when the
-  // owner asks for a link in settings or with `boite-core pair`, and that link
-  // is the only one.
-  process.stdout.write(`boite-core ready ${core.baseUrl()}\n`);
-
-  let stopping = false;
-  const shutdown = (): void => {
-    // A second signal is the operator saying the graceful path is taking too
-    // long. Honour it rather than ignoring it, which used to leave no way out
-    // short of killing the process.
-    if (stopping) {
-      core.log('warn', 'second shutdown signal, exiting now');
-      process.exit(1);
+  // Commands do not need the server graph. Finish imports before taking its data lock.
+  void Promise.all([import('./core.ts'), import('./server.ts')]).then(([{ Core }, { startServerOnStickyPort }]) => {
+    let flags: Flags;
+    let dataDir: string;
+    let unlock: () => void;
+    try {
+      flags = parseFlags(argv);
+      dataDir = resolveDataDir(flags.dataDir, flags.channel);
+      prepareDataDir(dataDir);
+      // Before the journal is opened, because opening it is already a write.
+      unlock = lockDataDir(dataDir);
+    } catch (error) {
+      refuseToStart(error);
     }
-    stopping = true;
-    // A driver that never answers its stop must not hold the process open, and
-    // a rejection anywhere in the chain must not skip unlock() and the exit.
-    const deadline = setTimeout(() => {
-      core.log('error', `shutdown did not finish in ${SHUTDOWN_TIMEOUT_MS} ms, exiting`);
+    const coreFile = join(dataDir, 'core.json');
+    const previous = readPreviousRun(coreFile);
+    const token = previous.token ?? newToken();
+    let core: Core;
+    try {
+      // Windows ships a Bun runtime and a split bundle. Capture what this run
+      // loaded now; reading it on /health after a reinstall would describe new code.
+      const entry = process.argv[1];
+      const bundleHash = entry?.endsWith('.js') && existsSync(entry)
+        ? createHash('sha256').update(readFileSync(entry)).digest('hex') : undefined;
+      core = new Core({ dataDir, token, channel: flags.channel, bundleHash, onShutdown: () => shutdown() });
+    } catch (error) {
+      // A journal from a newer release, among others: say why and leave the data as it is.
       unlock();
-      process.exit(1);
-    }, SHUTDOWN_TIMEOUT_MS);
-    deadline.unref();
-    void core
-      .drain()
-      .then(() => server.stop())
-      .then(() => core.close())
-      .catch((error: unknown) => {
-        core.log('error', `shutdown failed: ${messageOf(error)}`);
-      })
-      .finally(() => {
-        clearTimeout(deadline);
-        unlock();
-        process.exit(typeof process.exitCode === 'number' ? process.exitCode : 0);
-      });
-  };
-  process.on('SIGINT', shutdown);
-  // What a service manager sends for a restart, an update or a reboot. The
-  // first one hands the running turns to the next core: each ends its tool
-  // call, 30 seconds at most, and resumes after the restart. A second one
-  // stops them now, and they still resume. A third exits.
-  let terms = 0;
-  process.on('SIGTERM', () => {
-    terms += 1;
-    if (stopping || terms > 2) shutdown();
-    else if (terms === 1) core.requestHandoffShutdown();
-    else core.requestShutdown();
-  });
-  // The last line of defence: Bun exits on either anyway. This leaves a log
-  // line, stops the turns and releases the lock on the way out; the process
-  // never carries on after an error nobody expected.
-  const fatal = (kind: string) => (error: unknown): void => {
-    core.log('error', `${kind}: ${messageOf(error)}`);
-    process.stderr.write(`boite-core ${kind}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
-    process.exitCode = 1;
-    shutdown();
-  };
-  process.on('uncaughtException', fatal('uncaught exception'));
-  process.on('unhandledRejection', fatal('unhandled rejection'));
+      refuseToStart(error);
+    }
+    const publicUrl = flags.publicUrl ?? process.env.BOITE_PUBLIC_URL;
+    if (publicUrl !== undefined) core.settings.set({ publicUrl });
+    const settings = core.settings.get();
+    const host = resolveHost(flags, settings);
+    let server: ReturnType<typeof startServerOnStickyPort>;
+    try {
+      server = startServerOnStickyPort({ core, host, port: flags.port, explicitPort: flags.portExplicit, previousPort: previous.port });
+    } catch (error) {
+      const deadline = setTimeout(() => { unlock(); refuseToStart(error); }, SHUTDOWN_TIMEOUT_MS);
+      deadline.unref();
+      void core.close()
+        .catch(closeError => core.log('error', `startup cleanup failed: ${messageOf(closeError)}`))
+        .finally(() => {
+          clearTimeout(deadline);
+          unlock();
+          refuseToStart(error);
+        });
+      return;
+    }
+    core.updates.start();
+    core.serverUpdates.start();
+    if (core.cliDir === null) {
+      console.warn('the boite CLI shim is not beside the core: agents started here cannot run `boite`. Copy `boite` next to the executable, or name its directory in BOITE_CLI_DIR');
+    }
+    if (!flags.hostExplicit) {
+      core.log('info', `listening on ${host} because listenOnLan is ${settings.listenOnLan ? 'on' : 'off'}`);
+    }
 
-  // The terminal a core was started from closed. Off Windows each child leads a
-  // session of its own and gets no hang-up of its own any more, so without this
-  // the core died on the default action and left every group running. A hang-up
-  // can arrive twice (from the kernel and from `bun run` passing it on) and is
-  // never the operator asking to hurry, so a repeat does not cut the shutdown short.
-  process.on('SIGHUP', () => {
-    if (!stopping) shutdown();
-  });
+    const state: CoreFile = {
+      port: server.port,
+      host,
+      token,
+      pid: process.pid,
+      startedAt: core.startedAt,
+      version: core.version,
+    };
+    // The file carries the token that owns this core, so it is the owner's to
+    // read and nobody else's. Windows ignores the mode, which is why the file
+    // sits in the user's own application data directory to begin with.
+    writeFileSync(coreFile, `${JSON.stringify(state, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+    if (process.platform !== 'win32') chmodSync(coreFile, 0o600);
+
+    // No pairing grant here. Every start used to mint a live one and print it,
+    // so any log, any terminal scrollback and any shell that reprinted the line
+    // handed out a session token nobody had asked for. A phone pairs when the
+    // owner asks for a link in settings or with `boite-core pair`, and that link
+    // is the only one.
+    process.stdout.write(`boite-core ready ${core.baseUrl()}\n`);
+
+    let stopping = false;
+    const shutdown = (): void => {
+      // A second signal is the operator saying the graceful path is taking too
+      // long. Honour it rather than ignoring it, which used to leave no way out
+      // short of killing the process.
+      if (stopping) {
+        core.log('warn', 'second shutdown signal, exiting now');
+        process.exit(1);
+      }
+      stopping = true;
+      // A driver that never answers its stop must not hold the process open, and
+      // a rejection anywhere in the chain must not skip unlock() and the exit.
+      const deadline = setTimeout(() => {
+        core.log('error', `shutdown did not finish in ${SHUTDOWN_TIMEOUT_MS} ms, exiting`);
+        unlock();
+        process.exit(1);
+      }, SHUTDOWN_TIMEOUT_MS);
+      deadline.unref();
+      void core
+        .drain()
+        .then(() => server.stop())
+        .then(() => core.close())
+        .catch((error: unknown) => {
+          core.log('error', `shutdown failed: ${messageOf(error)}`);
+        })
+        .finally(() => {
+          clearTimeout(deadline);
+          unlock();
+          process.exit(typeof process.exitCode === 'number' ? process.exitCode : 0);
+        });
+    };
+    process.on('SIGINT', shutdown);
+    // What a service manager sends for a restart, an update or a reboot. The
+    // first one hands the running turns to the next core: each ends its tool
+    // call, 30 seconds at most, and resumes after the restart. A second one
+    // stops them now, and they still resume. A third exits.
+    let terms = 0;
+    process.on('SIGTERM', () => {
+      terms += 1;
+      if (stopping || terms > 2) shutdown();
+      else if (terms === 1) core.requestHandoffShutdown();
+      else core.requestShutdown();
+    });
+    // The last line of defence: Bun exits on either anyway. This leaves a log
+    // line, stops the turns and releases the lock on the way out; the process
+    // never carries on after an error nobody expected.
+    const fatal = (kind: string) => (error: unknown): void => {
+      core.log('error', `${kind}: ${messageOf(error)}`);
+      process.stderr.write(`boite-core ${kind}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
+      process.exitCode = 1;
+      shutdown();
+    };
+    process.on('uncaughtException', fatal('uncaught exception'));
+    process.on('unhandledRejection', fatal('unhandled rejection'));
+
+    // The terminal a core was started from closed. Off Windows each child leads a
+    // session of its own and gets no hang-up of its own any more, so without this
+    // the core died on the default action and left every group running. A hang-up
+    // can arrive twice (from the kernel and from `bun run` passing it on) and is
+    // never the operator asking to hurry, so a repeat does not cut the shutdown short.
+    process.on('SIGHUP', () => {
+      if (!stopping) shutdown();
+    });
+  }, refuseToStart);
 }
 
 if (import.meta.main) main(process.argv.slice(2));

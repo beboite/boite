@@ -7,6 +7,7 @@ import type { ThreadStore } from '../threads.ts';
 const QUESTION_MAX = 12_000;
 const TIMEOUT_MS = 90_000;
 const ANSWER_TTL_MS = 10 * 60_000;
+interface Pending { controller: AbortController; requestId: string; timer: ReturnType<typeof setTimeout> }
 interface Completed { requestId: string; source: ThreadSummary; messages: Message[]; turns: Turn[]; question: string; answer: string; timer: ReturnType<typeof setTimeout> }
 
 function sideQuestionPrompt(messages: Message[], question: string): string {
@@ -21,17 +22,24 @@ function sideQuestionPrompt(messages: Message[], question: string): string {
 
 /** Answers stay in bounded transient memory until explicitly forked or dismissed. */
 export class SideQuestions {
-  private readonly pending = new Map<ThreadId, { controller: AbortController; requestId: string }>();
+  private readonly pending = new Map<ThreadId, Pending>();
   private readonly completed = new Map<ThreadId, Completed>();
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
+
+  /** Inference keeps the core awake; retained answers keep their conversation visible. */
+  get busy(): boolean { return this.pending.size > 0; }
+  active(threadId: ThreadId): boolean { return this.pending.has(threadId) || this.completed.has(threadId); }
 
   ask(threadId: ThreadId, question: string, requestId: string): { requestId: string } {
     if (typeof requestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(requestId)) throw invalidParams('threads.btw.requestId: expected 8 to 128 URL-safe characters');
     if (typeof question !== 'string' || !question.trim() || question.length > QUESTION_MAX) {
       throw invalidParams(`threads.btw.question: expected 1 to ${QUESTION_MAX} characters`);
     }
+    if (this.core.stopping) throw refused('the core is stopping; reconnect before asking a side question');
     const thread = this.threads.require(threadId);
+    if (this.threads.isRemoving(threadId)) throw refused('threads.btw.threadId: this conversation is being deleted', { threadId });
     if (thread.archived) throw refused('threads.btw.threadId: expected a thread that is not archived', { threadId });
+    this.requireParent(thread);
     const provider = this.core.providers.require(thread.providerId);
     const account = this.core.accounts.require(thread.accountId);
     assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), account);
@@ -46,9 +54,11 @@ export class SideQuestions {
     });
     const prompt = sideQuestionPrompt(messages, question.trim());
     const controller = new AbortController();
-    this.pending.set(threadId, { controller, requestId });
-    const timer = setTimeout(() => controller.abort(new Error('the side question timed out after 90 s')), TIMEOUT_MS);
-    timer.unref?.();
+    const pending: Pending = { controller, requestId, timer: setTimeout(() => {
+      this.abort(threadId, pending, new Error('the side question timed out after 90 s'));
+    }, TIMEOUT_MS) };
+    pending.timer.unref?.();
+    this.pending.set(threadId, pending);
     // Return admission before inference: WebSocket frames from one client are serialized.
     void (async () => {
       let answer: string | null = null, error: string | null = null;
@@ -64,16 +74,19 @@ export class SideQuestions {
         answer = null;
         error = reason instanceof Error ? reason.message : String(reason);
       } finally {
-        clearTimeout(timer);
-        if (this.pending.get(threadId)?.controller === controller) this.pending.delete(threadId);
+        clearTimeout(pending.timer);
       }
-      if (answer !== null && !error && !controller.signal.aborted && !this.core.journal.isClosed()) {
+      // Cancelled or replaced inference owns neither the retained answer nor its events.
+      if (this.pending.get(threadId) !== pending) return;
+      this.pending.delete(threadId);
+      if (this.core.stopping || this.core.journal.isClosed()) return;
+      if (answer !== null && !error && !controller.signal.aborted) {
         if (this.completed.size >= 64) this.forget(this.completed.keys().next().value!);
         const timer = setTimeout(() => this.forget(threadId, requestId), ANSWER_TTL_MS);
         timer.unref?.();
         this.completed.set(threadId, { requestId, source, messages, turns, question: question.trim(), answer, timer });
       }
-      if (!this.core.journal.isClosed()) this.core.bus.emit('thread.btw', { threadId, requestId, answer, error });
+      this.core.bus.emit('thread.btw', { threadId, requestId, answer, error });
     })();
     return { requestId };
   }
@@ -82,24 +95,46 @@ export class SideQuestions {
     this.forget(threadId, requestId);
     const pending = this.pending.get(threadId);
     if (pending && (requestId === undefined || requestId === pending.requestId)) {
-      pending.controller.abort();
-      this.pending.delete(threadId);
+      this.abort(threadId, pending, new Error('side request cancelled'));
+    }
+  }
+  private abort(threadId: ThreadId, pending: Pending, reason: Error): void {
+    if (this.pending.get(threadId) !== pending) return;
+    this.pending.delete(threadId);
+    clearTimeout(pending.timer);
+    pending.controller.abort(reason);
+    if (!this.core.stopping && !this.core.journal.isClosed()) {
+      this.core.bus.emit('thread.btw', { threadId, requestId: pending.requestId, answer: null, error: reason.message });
     }
   }
   fork(threadId: ThreadId, requestId: string): ThreadSummary {
     const current = this.threads.require(threadId), held = this.completed.get(threadId);
+    this.requireParent(current);
     if (current.archived || !held || held.requestId !== requestId) throw refused('threads.btw.fork.requestId: expected an available completed side answer', { threadId });
     if (current.cwd !== held.source.cwd || current.projectId !== held.source.projectId) throw refused('threads.btw.fork.threadId: the conversation moved since the side question', { threadId });
     const result = this.threads.branching.forkSnapshot(held.source, held.messages, held.turns, held.question, held.answer);
     this.forget(threadId, requestId);
     return result;
   }
+  private requireParent(thread: ThreadSummary): void {
+    const seen = new Set<ThreadId>([thread.id]);
+    let parentId = thread.parentThreadId;
+    while (parentId) {
+      const parent = this.core.journal.getThread(parentId);
+      if (!parent || parent.archived || this.threads.isRemoving(parentId) || seen.has(parentId)) {
+        throw refused('threads.btw.threadId: expected a conversation whose parent is not archived or being deleted', { threadId: thread.id, parentThreadId: parentId });
+      }
+      seen.add(parentId);
+      parentId = parent.parentThreadId;
+    }
+  }
   private forget(threadId: ThreadId, requestId?: string): void {
     const held = this.completed.get(threadId);
     if (held && (requestId === undefined || held.requestId === requestId)) { clearTimeout(held.timer); this.completed.delete(threadId); }
   }
   close(): void {
-    for (const pending of this.pending.values()) pending.controller.abort();
+    for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.controller.abort(); }
+    this.pending.clear();
     for (const id of this.completed.keys()) this.forget(id);
   }
 }

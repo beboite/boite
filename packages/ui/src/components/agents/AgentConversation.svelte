@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { secureId } from '../../lib/secure-id';
   import { tick, untrack } from 'svelte';
   import { ArrowUp } from '@lucide/svelte';
   import type { AgentScope } from '@boite/contracts';
@@ -50,9 +51,11 @@
     if (!text.trim() || view.pending) return;
     const recipientIds = scope.kind === 'agent' ? [scope.id] : recipients;
     const signature = JSON.stringify(recipientIds);
-    if (!request || request.text !== text || request.recipients !== signature) request = { text, recipients: signature, id: crypto.randomUUID() };
-    const sent = await view.call('agents.message.send', { scope, text, recipientIds, requestId: request.id });
-    if (sent) { text = ''; request = null; }
+    try {
+      if (!request || request.text !== text || request.recipients !== signature) request = { text, recipients: signature, id: secureId() };
+      const sent = await view.call('agents.message.send', { scope, text, recipientIds, requestId: request.id });
+      if (sent) { text = ''; request = null; }
+    } catch (error) { view.error = error instanceof Error ? error.message : String(error); }
   }
   function onkeydown(event: KeyboardEvent) {
     if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;

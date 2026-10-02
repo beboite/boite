@@ -1,3 +1,4 @@
+import { secureId } from '../secure-id';
 import type {
   AgentContact,
   CoordinationConfig,
@@ -270,7 +271,7 @@ export class Delegation {
         profileId,
         task: task.trim(),
         ...(title?.trim() ? { title: title.trim() } : {}),
-        requestId: crypto.randomUUID()
+        requestId: secureId()
       });
       if (client !== this.ctx.client || s.openThread?.id !== openThreadId) return null;
       await s.loadDelegation(openThreadId);
@@ -288,7 +289,7 @@ export class Delegation {
     if (!client || !threadId || !text.trim()) return false;
     this.delegationError = null;
     try {
-      await client.call('delegation.send', { threadId, toThreadId, text: text.trim(), requestId: crypto.randomUUID() });
+      await client.call('delegation.send', { threadId, toThreadId, text: text.trim(), requestId: secureId() });
       if (client !== this.ctx.client || this.delegation?.rootThreadId !== threadId) return false;
       await s.loadDelegation(s.openThread?.id);
       return true;

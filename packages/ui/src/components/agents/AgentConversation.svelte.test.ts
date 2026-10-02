@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { AgentsView } from '../../lib/agents.svelte';
 import AgentConversation from './AgentConversation.svelte';
@@ -8,6 +8,7 @@ afterEach(async () => {
   if (mounted) await unmount(mounted);
   mounted = undefined;
   document.body.innerHTML = '';
+  vi.unstubAllGlobals();
 });
 
 const settle = async () => { for (let i = 0; i < 20; i++) { await Promise.resolve(); flushSync(); } };
@@ -59,4 +60,28 @@ test('an agent message follows a reader at the bottom and leaves one reading old
   view.seen.messages = [...view.seen.messages, message('m4', null)];
   await settle();
   expect(top).toBe(1200);
+});
+
+test('HTTP agent sending keeps its secure request id for an uncertain retry', async () => {
+  vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) });
+  const call = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'm-sent' });
+  const view = {
+    seen: { messages: [], deliveries: [] }, snapshot: { profiles: [{ id: 'a-ada', name: 'Ada' }], groups: [] },
+    pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call,
+  };
+  mounted = mount(AgentConversation, { target: document.body, props: { view: view as unknown as AgentsView, scope } });
+  await settle();
+  const input = document.querySelector<HTMLTextAreaElement>('[data-testid="agent-message-input"]')!;
+  input.value = 'Keep the original request'; input.dispatchEvent(new Event('input', { bubbles: true }));
+  await settle();
+  const send = document.querySelector<HTMLButtonElement>('[data-testid="agent-message-send"]')!;
+  send.click(); await settle();
+  expect(call).toHaveBeenCalledOnce();
+  const first = call.mock.calls[0]![1];
+  expect(first.requestId).toMatch(/^[a-f0-9]{32}$/);
+  expect(input.value).toBe('Keep the original request');
+  send.click(); await settle();
+  expect(call).toHaveBeenCalledTimes(2);
+  expect(call.mock.calls[1]![1]).toEqual(first);
+  expect(input.value).toBe('');
 });

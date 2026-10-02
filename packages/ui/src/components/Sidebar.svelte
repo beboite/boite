@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { tick } from 'svelte';
+  import { MediaQuery } from 'svelte/reactivity';
+  import WindowList from './WindowList.svelte';
   import WhipButton from './WhipButton.svelte';
   import { Bot, ChevronRight, Ellipsis, FolderX, GripVertical, LoaderCircle, Plus, Settings } from '@lucide/svelte';
   import type { Project } from '@boite/contracts';
@@ -27,6 +30,16 @@
   import MachineIcon from './MachineIcon.svelte';
   import ProjectTile from './ProjectTile.svelte';
   let { store }: { store: Store } = $props();
+  const mobile = new MediaQuery('(max-width: 720px)');
+  let scrollRoot = $state<HTMLDivElement>();
+  let savedScroll = 0;
+  const measuredRows = new Map<string, Map<string, number>>();
+  function measurements(key: string): Map<string, number> {
+    if (!measuredRows.has(key)) measuredRows.set(key, new Map());
+    return measuredRows.get(key)!;
+  }
+  const showRows = $derived(mobile.current ? store.sidebarOpen : !store.sidebarCollapsed);
+  $effect(() => { if (showRows && scrollRoot) void tick().then(() => { if (scrollRoot && showRows) scrollRoot.scrollTop = savedScroll; }); });
   let projectButton = $state<HTMLButtonElement>();
   let now = $state(Date.now());
   let filter = $state<string | null>(null);
@@ -155,7 +168,8 @@
   data-testid="sidebar"
 >
   <div class="views"><ProjectViews entries={groups} {store} /></div>
-  <div class="scroll">
+  <div class="scroll" bind:this={scrollRoot} onscroll={() => { if (showRows && scrollRoot) savedScroll = scrollRoot.scrollTop; }}>
+    {#if showRows}
     {#if groups.length === 0}<p class="empty">{strings.sidebar.noProjects}</p>{/if}
     {#if workspace.view === 'recent'}
       {#each visible as machine (machine.id)}
@@ -163,7 +177,9 @@
           <DraftRow owner={machine.store} {entry} />
         {/each}
       {/each}
-      {#each recent as entry (`${entry.machine.id}:${entry.thread.id}`)}<ThreadCard {...entry} {now} showProject={recentGroups.length > 1} showMachine={multi} />{/each}
+      <WindowList items={recent} keyOf={entry => JSON.stringify([entry.machine.id, entry.thread.id])} {scrollRoot} estimate={56} measurements={measurements('recent')}>
+        {#snippet row(entry)}<ThreadCard {...entry} {now} showProject={recentGroups.length > 1} showMachine={multi} />{/snippet}
+      </WindowList>
       {#if groups.length > 0 && recent.length === 0}<p class="none">
           {strings.sidebar.noThreads}
         </p>{/if}
@@ -228,7 +244,9 @@
           <div class="fold" class:expanded={!collapsed} inert={collapsed}>
             <div class="rows">
               {#if draftHere}<DraftRow {owner} entry={draftHere} />{/if}
-              {#each threads as thread (thread.id)}<ThreadCard {machine} {project} {thread} {now} hidden={collapsed} showProject={false} showMachine={false} />{/each}
+              <WindowList items={threads} keyOf={thread => JSON.stringify([machine.id, thread.id])} {scrollRoot} active={!collapsed} estimate={34} measurements={measurements(JSON.stringify([machine.id, project.id]))}>
+                {#snippet row(thread)}<ThreadCard {machine} {project} {thread} {now} showProject={false} showMachine={false} />{/snippet}
+              </WindowList>
               {#if threads.length === 0 && !draftHere}<p class="none">
                   {strings.sidebar.noThreads}
                 </p>{/if}
@@ -238,6 +256,7 @@
         </section>
       {/each}
       <ArchivedProjects entries={shelved} {multi} />
+    {/if}
     {/if}
   </div>
   <div class="foot">

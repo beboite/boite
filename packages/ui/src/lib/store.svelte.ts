@@ -1,4 +1,4 @@
-import type { PermissionMode, ProjectId, ProviderId } from '@boite/contracts';
+import type { PermissionMode, ProjectId, ProviderId, ThreadId } from '@boite/contracts';
 import type { Client } from './client';
 import { readModelDefaults } from './model-defaults';
 import { readFavorites } from './model-order';
@@ -22,7 +22,7 @@ import type { Workbench } from './store/workbench.svelte';
 import type { Workflows } from './store/workflows.svelte';
 
 export type Page = 'chat' | 'settings' | 'agents';
-export type SettingsTab = 'home' | 'advanced' | 'brain' | 'voice' | 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'limits' | 'resources' | 'experiments';
+export type SettingsTab = 'home' | 'advanced' | 'brain' | 'voice' | 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'limits' | 'resources' | 'task-manager' | 'experiments';
 
 /** A login process the core runs for one account, as `account.login` reports it. */
 export interface LoginState {
@@ -99,6 +99,8 @@ export class Store {
   get client(): Client | null {
     return this.#ctx.client;
   }
+  get clientGeneration(): number { return this.#ctx.clientGeneration; }
+  get navigationGeneration(): number { return this.#ctx.threads.openGeneration; }
   get serverUpdater() { return this.#ctx.serverUpdater; }
 
   // -------------------------------------------------------------------------
@@ -136,8 +138,10 @@ export class Store {
 
   detach(): void {
     const ctx = this.#ctx;
-    ctx.threads.openGeneration++;
+    ctx.clientGeneration++;
+    void ctx.threads.unsubscribe();
     ctx.threads.loadingThreadId = null;
+    this.retitling = [];
     ctx.serverUpdater.reset();
     ctx.terminals.dropSessions();
     ctx.drafts.stop();
@@ -412,6 +416,8 @@ export class Store {
   projectIconUrl(...args: Parameters<Projects['projectIconUrl']>) { return this.#ctx.projects.projectIconUrl(...args); }
   loadProjectIcon(...args: Parameters<Projects['loadProjectIcon']>) { return this.#ctx.projects.loadProjectIcon(...args); }
   setProjectWorktreeDefault(...args: Parameters<Projects['setProjectWorktreeDefault']>) { return this.#ctx.projects.setProjectWorktreeDefault(...args); }
+  projectAutoArchiveMergedPrBusy(...args: Parameters<Projects['projectAutoArchiveMergedPrBusy']>) { return this.#ctx.projects.projectAutoArchiveMergedPrBusy(...args); }
+  setProjectAutoArchiveMergedPr(...args: Parameters<Projects['setProjectAutoArchiveMergedPr']>) { return this.#ctx.projects.setProjectAutoArchiveMergedPr(...args); }
   refreshProjectIcon(...args: Parameters<Projects['refreshProjectIcon']>) { return this.#ctx.projects.refreshProjectIcon(...args); }
   startDraft(...args: Parameters<Projects['startDraft']>) { return this.#ctx.projects.startDraft(...args); }
   setDraftProject(...args: Parameters<Projects['setDraftProject']>) { return this.#ctx.projects.setDraftProject(...args); }
@@ -437,6 +443,7 @@ export class Store {
   set imports(value) { this.#ctx.imports.imports = value; }
 
   threadsOf(...args: Parameters<Threads['threadsOf']>) { return this.#ctx.threads.threadsOf(...args); }
+  moveBlocked(threadId: ThreadId) { return this.#ctx.threads.moveBlocked(threadId); }
   compact(...args: Parameters<Threads['compact']>) { return this.#ctx.threads.compact(...args); }
   rewind(...args: Parameters<Threads['rewind']>) { return this.#ctx.threads.rewind(...args); }
   forkSideQuestion(...args: Parameters<Threads['forkSideQuestion']>) { return this.#ctx.threads.forkSideQuestion(...args); }
@@ -466,6 +473,7 @@ export class Store {
 
   get composerStates() { return this.#ctx.composer.composerStates; }
   get draftEntries() { return this.#ctx.drafts.entries; }
+  get draftsReadable() { return this.#ctx.drafts.readable; }
   flushDrafts() { return this.#ctx.drafts.flush(); }
   set composerStates(value) { this.#ctx.composer.composerStates = value; }
 

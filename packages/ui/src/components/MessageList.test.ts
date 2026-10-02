@@ -1,12 +1,12 @@
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, expect, vi } from 'vitest';
+import { test } from '../test/fake-client';
 import { flushSync, mount, unmount } from 'svelte';
 import { DEFAULT_DELEGATION_CONFIG, type AgentLetter, type Message } from '@boite/contracts';
 import MessageList from './MessageList.svelte';
 import { windowStats } from '../lib/message-window';
 import { turnProgressStats } from '../lib/turn-progress.svelte';
-import { FakeClient } from '../lib/fake-client';
 import { findHits } from '../lib/find';
-import { Store } from '../lib/store.svelte';
+import type { Store } from '../lib/store.svelte';
 import { workspace } from '../lib/workspace.svelte';
 import { RightPanelStore } from '../lib/right-panel.svelte';
 import AgentMessagesSurface from './AgentMessagesSurface.svelte';
@@ -73,76 +73,70 @@ function restoreLayout(): void {
 
 let running: Record<string, unknown> | null = null;
 
-test('the parent timeline retains one team row, updates completion counts and opens the whole team', async () => {
-  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
-  const owner = new Store();
+test('the parent timeline retains one team row, updates completion counts and opens the whole team', async ({ createStore }) => {
+  const { store: owner, client } = createStore({ delayMs: 0, delegationDemo: true });
   owner.attach(client);
-  try {
-    await owner.connect();
-    await owner.open('t-trace');
-    await owner.loadDelegation();
-    running = mount(MessageList, { target: document.body, props: { store: owner, threadId: 't-trace', messages: owner.openThread!.messages } });
-    flushSync();
-    const row = document.querySelector<HTMLButtonElement>('[data-testid=delegation-activity]')!;
-    expect(row.textContent).toContain('Started 2 subagents');
-    expect(row.textContent).toContain('1/2 completed');
-    await owner.selectDelegatedAgent('t-team-running');
-    row.click();
-    flushSync();
-    expect(owner.panel.isOpen).toBe(true);
-    expect(owner.delegationSelectedAgentId).toBeNull();
-    const agent = owner.delegation!.agents.find(agent => agent.thread.id === 't-team-running')!;
-    agent.thread.status = 'idle';
-    agent.lastTurn!.status = 'done';
-    agent.lastTurn!.finishedAt = agent.thread.createdAt + 60_000;
-    flushSync();
-    expect(document.querySelectorAll('[data-testid=delegation-activity]')).toHaveLength(1);
-    expect(row.textContent).toContain('2/2 completed');
-    expect(row.querySelector('[data-testid=agent-elapsed]')?.textContent).toContain('1');
-    // A child transcript must not claim that it launched its siblings.
-    await unmount(running); running = null;
-    await owner.open('t-team-done');
-    await owner.loadDelegation();
-    running = mount(MessageList, { target: document.body, props: { store: owner, threadId: 't-team-done', messages: owner.openThread!.messages } });
-    flushSync();
-    expect(document.querySelector('[data-testid=delegation-activity]')).toBeNull();
-  } finally { owner.detach(); client.close(); }
+  await owner.connect();
+  await owner.open('t-trace');
+  await owner.loadDelegation();
+  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: 't-trace', messages: owner.openThread!.messages } });
+  flushSync();
+  const row = document.querySelector<HTMLButtonElement>('[data-testid=delegation-activity]')!;
+  expect(row.textContent).toContain('Started 2 subagents');
+  expect(row.textContent).toContain('1/2 completed');
+  await owner.selectDelegatedAgent('t-team-running');
+  row.click();
+  flushSync();
+  expect(owner.panel.isOpen).toBe(true);
+  expect(owner.delegationSelectedAgentId).toBeNull();
+  const agent = owner.delegation!.agents.find(agent => agent.thread.id === 't-team-running')!;
+  agent.thread.status = 'idle';
+  agent.lastTurn!.status = 'done';
+  agent.lastTurn!.finishedAt = agent.thread.createdAt + 60_000;
+  flushSync();
+  expect(document.querySelectorAll('[data-testid=delegation-activity]')).toHaveLength(1);
+  expect(row.textContent).toContain('2/2 completed');
+  expect(row.querySelector('[data-testid=agent-elapsed]')?.textContent).toContain('1');
+  // A child transcript must not claim that it launched its siblings.
+  await unmount(running); running = null;
+  await owner.open('t-team-done');
+  await owner.loadDelegation();
+  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: 't-team-done', messages: owner.openThread!.messages } });
+  flushSync();
+  expect(document.querySelector('[data-testid=delegation-activity]')).toBeNull();
 });
 
-afterEach(() => {
-  if (running) unmount(running, { outro: false });
+afterEach(async () => {
+  if (running) await unmount(running, { outro: false });
   running = null;
   restoreLayout();
   document.body.innerHTML = '';
 });
 
-test('one model label covers a turn split across text and separate attachments, and the next turn names its own model', async () => {
-  const client = new FakeClient({ delayMs: 0 });
-  const owner = new Store();
+test('one model label covers a turn split across text and separate attachments, and the next turn names its own model', async ({ createStore }) => {
+  const { store: owner, client } = createStore({ delayMs: 0 });
   owner.attach(client);
-  try {
-    await owner.connect();
-    await owner.open('t-trace');
-    const thread = owner.openThread!;
-    const first = thread.turns[0]!;
-    first.execution = { ...thread, providerId: 'codex', accountId: 'a-codex', model: 'gpt-6.1-sol', sessionGeneration: 0, selectionVersion: 0 };
-    thread.turns.push({ ...first, id: 'turn-next', execution: { ...first.execution, model: 'gpt-6-astra' } });
-    thread.messages = [
-      { id: 'm-intro', threadId: thread.id, turnId: first.id, role: 'assistant', state: 'complete', createdAt: 1, parts: [{ type: 'text', text: 'Here are the files.' }] },
-      ...['README.md', 'review-small.mp4', 'NOTES.md'].map((name, index): Message => ({
-        id: `m-file-${index}`, threadId: thread.id, turnId: first.id, role: 'assistant', state: 'complete', createdAt: index + 2,
-        parts: [{ type: 'file', name, mimeType: name.endsWith('.mp4') ? 'video/mp4' : 'text/markdown', data: 'ZmlsZQ==' }]
-      })),
-      { id: 'm-next', threadId: thread.id, turnId: 'turn-next', role: 'assistant', state: 'streaming', createdAt: 5, parts: [{ type: 'text', text: 'Next answer.\n\n' }] }
-    ];
-    running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
-    flushSync();
-    const labels = [...document.querySelectorAll('[data-testid=message-model]')];
-    expect(labels).toHaveLength(2);
-    expect(labels[0]!.closest('[data-mid]')?.getAttribute('data-mid')).toBe('m-intro');
-    expect(labels[1]!.textContent).toContain('gpt-6-astra');
-    expect(document.querySelectorAll('[data-mid^=m-file-]')).toHaveLength(3);
-  } finally { owner.detach(); client.close(); }
+  await owner.connect();
+  await owner.open('t-trace');
+  const thread = owner.openThread!;
+  const first = thread.turns[0]!;
+  first.execution = { ...thread, providerId: 'codex', accountId: 'a-codex', model: 'gpt-6.1-sol', sessionGeneration: 0, selectionVersion: 0 };
+  thread.turns.push({ ...first, id: 'turn-next', execution: { ...first.execution, model: 'gpt-6-astra' } });
+  thread.messages = [
+    { id: 'm-intro', threadId: thread.id, turnId: first.id, role: 'assistant', state: 'complete', createdAt: 1, parts: [{ type: 'text', text: 'Here are the files.' }] },
+    ...['README.md', 'review-small.mp4', 'NOTES.md'].map((name, index): Message => ({
+      id: `m-file-${index}`, threadId: thread.id, turnId: first.id, role: 'assistant', state: 'complete', createdAt: index + 2,
+      parts: [{ type: 'file', name, mimeType: name.endsWith('.mp4') ? 'video/mp4' : 'text/markdown', data: 'ZmlsZQ==' }]
+    })),
+    { id: 'm-next', threadId: thread.id, turnId: 'turn-next', role: 'assistant', state: 'streaming', createdAt: 5, parts: [{ type: 'text', text: 'Next answer.\n\n' }] }
+  ];
+  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
+  flushSync();
+  const labels = [...document.querySelectorAll('[data-testid=message-model]')];
+  expect(labels).toHaveLength(2);
+  expect(labels[0]!.closest('[data-mid]')?.getAttribute('data-mid')).toBe('m-intro');
+  expect(labels[1]!.textContent).toContain('gpt-6-astra');
+  expect(document.querySelectorAll('[data-mid^=m-file-]')).toHaveLength(3);
 });
 
 /**
@@ -159,9 +153,8 @@ const store = {
   workflowsOf: () => []
 } as unknown as Store;
 
-test('a workflow the thread started is one card that opens its graph, and a step shows none', async () => {
-  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
-  const owner = new Store();
+test('a workflow the thread started is one card that opens its graph, and a step shows none', async ({ createStore }) => {
+  const { store: owner, client } = createStore({ delayMs: 0, delegationDemo: true });
   owner.attach(client);
   try {
     await owner.connect();
@@ -185,7 +178,7 @@ test('a workflow the thread started is one card that opens its graph, and a step
     running = mount(MessageList, { target: document.body, props: { store: owner, threadId: step, messages: owner.openThread!.messages } });
     flushSync();
     expect(document.querySelector('[data-testid=workflow-activity]')).toBeNull();
-  } finally { owner.detach(); client.close(); window.localStorage.clear(); }
+  } finally { window.localStorage.clear(); }
 });
 
 test('system coordination messages show their display text outside the user bubble', () => {
@@ -296,51 +289,46 @@ test('delegation mail opens its messages tab with local family identity, without
   } finally { open.mockRestore(); }
 });
 
-test('a burst of 33 agent messages stays in two counters as new mail arrives, and user messages split bursts', async () => {
+test('a burst of 33 agent messages stays in two counters as new mail arrives, and user messages split bursts', async ({ ready }) => {
   stubLayout(400);
-  const client = new FakeClient({ delayMs: 0 });
-  const owner = new Store();
-  owner.attach(client);
-  try {
-    await owner.connect();
-    await owner.open('t-trace');
-    const thread = owner.openThread!;
-    thread.memoryEvents = [];
-    thread.messages = [
-      { id: 'before', threadId: thread.id, turnId: 'before', role: 'assistant', state: 'complete', createdAt: 10, parts: [{ type: 'text', text: 'Work begins.' }] },
-      { id: 'divider', threadId: thread.id, turnId: 'divider', role: 'user', state: 'complete', createdAt: 50, parts: [{ type: 'text', text: 'Continue with the deployment.' }] }
-    ];
-    const self = { coreId: 'core-local', threadId: thread.id };
-    const peer = { coreId: 'core-remote', threadId: 'remote-agent' };
-    const letters: AgentLetter[] = Array.from({ length: 33 }, (_, index) => ({
-      id: `burst-${index}`, from: { ...(index < 13 ? self : peer), title: 'Agent', machine: 'PC', resources: '', status: 'idle', mode: 'brief' },
-      to: index < 13 ? peer : self, toTitle: 'Agent', text: `Private exchange ${index}`, replyTo: null,
-      createdAt: 20 + index / 10, expiresAt: 1000, status: index === 0 ? 'rejected' : 'delivered', error: index === 0 ? 'Recipient unavailable' : null
-    }));
-    owner.coordination = { self, config: { mode: 'brief', resources: '', remote: true, paused: false }, messages: letters, sent: 13, sendLimit: null, wakes: 0, wakeLimit: null };
-    running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
-    flushSync();
-    const group = document.querySelector('[data-testid=agent-message-group]')!;
-    expect(group.textContent).toContain('Forwarded 13 messages');
-    expect(group.textContent).toContain('Received 20 messages');
-    expect(group.textContent).toContain('1 message needs attention');
-    expect(document.body.textContent).not.toContain('Private exchange');
-    expect(document.querySelectorAll('[data-testid=agent-message-group]')).toHaveLength(1);
-    expect(articles()).toHaveLength(3);
-    owner.coordination!.messages.push({ ...letters[32]!, id: 'extra', createdAt: 24 });
-    flushSync();
-    expect(document.querySelector('[data-testid=agent-message-group]')).toBe(group);
-    expect(group.textContent).toContain('Received 21 messages');
-    group.querySelector<HTMLButtonElement>('[data-direction=incoming]')!.click();
-    expect(owner.panel.active).toMatchObject({ kind: 'messages', mailDirection: 'incoming', letterId: 'burst-13' });
-    owner.coordination!.messages.push({ ...letters[32]!, id: 'after-prompt', createdAt: 60 });
-    flushSync();
-    expect(document.querySelectorAll('[data-testid=agent-message-group]')).toHaveLength(2);
-    expect(articles().map(article => article.textContent)).toEqual([
-      expect.stringContaining('Work begins.'), expect.stringContaining('Received 21 messages'),
-      expect.stringContaining('Continue with the deployment.'), expect.stringContaining('Received 1 message')
-    ]);
-  } finally { owner.detach(); client.close(); }
+  const { store: owner } = await ready({ delayMs: 0 });
+  await owner.open('t-trace');
+  const thread = owner.openThread!;
+  thread.memoryEvents = [];
+  thread.messages = [
+    { id: 'before', threadId: thread.id, turnId: 'before', role: 'assistant', state: 'complete', createdAt: 10, parts: [{ type: 'text', text: 'Work begins.' }] },
+    { id: 'divider', threadId: thread.id, turnId: 'divider', role: 'user', state: 'complete', createdAt: 50, parts: [{ type: 'text', text: 'Continue with the deployment.' }] }
+  ];
+  const self = { coreId: 'core-local', threadId: thread.id };
+  const peer = { coreId: 'core-remote', threadId: 'remote-agent' };
+  const letters: AgentLetter[] = Array.from({ length: 33 }, (_, index) => ({
+    id: `burst-${index}`, from: { ...(index < 13 ? self : peer), title: 'Agent', machine: 'PC', resources: '', status: 'idle', mode: 'brief' },
+    to: index < 13 ? peer : self, toTitle: 'Agent', text: `Private exchange ${index}`, replyTo: null,
+    createdAt: 20 + index / 10, expiresAt: 1000, status: index === 0 ? 'rejected' : 'delivered', error: index === 0 ? 'Recipient unavailable' : null
+  }));
+  owner.coordination = { self, config: { mode: 'brief', resources: '', remote: true, paused: false }, messages: letters, sent: 13, sendLimit: null, wakes: 0, wakeLimit: null };
+  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
+  flushSync();
+  const group = document.querySelector('[data-testid=agent-message-group]')!;
+  expect(group.textContent).toContain('Forwarded 13 messages');
+  expect(group.textContent).toContain('Received 20 messages');
+  expect(group.textContent).toContain('1 message needs attention');
+  expect(document.body.textContent).not.toContain('Private exchange');
+  expect(document.querySelectorAll('[data-testid=agent-message-group]')).toHaveLength(1);
+  expect(articles()).toHaveLength(3);
+  owner.coordination!.messages.push({ ...letters[32]!, id: 'extra', createdAt: 24 });
+  flushSync();
+  expect(document.querySelector('[data-testid=agent-message-group]')).toBe(group);
+  expect(group.textContent).toContain('Received 21 messages');
+  group.querySelector<HTMLButtonElement>('[data-direction=incoming]')!.click();
+  expect(owner.panel.active).toMatchObject({ kind: 'messages', mailDirection: 'incoming', letterId: 'burst-13' });
+  owner.coordination!.messages.push({ ...letters[32]!, id: 'after-prompt', createdAt: 60 });
+  flushSync();
+  expect(document.querySelectorAll('[data-testid=agent-message-group]')).toHaveLength(2);
+  expect(articles().map(article => article.textContent)).toEqual([
+    expect.stringContaining('Work begins.'), expect.stringContaining('Received 21 messages'),
+    expect.stringContaining('Continue with the deployment.'), expect.stringContaining('Received 1 message')
+  ]);
 });
 
 /** A store whose thread still has older messages behind the window. */
@@ -460,12 +448,9 @@ test('scrolled up, the way to the bottom shows with nothing new below, and takes
   expect(jumpButton()).toBeNull();
 });
 
-test('what arrives while the reader is scrolled up is counted on the way back, and the count clears at the bottom', async () => {
+test('what arrives while the reader is scrolled up is counted on the way back, and the count clears at the bottom', async ({ ready }) => {
   window.localStorage.clear();
-  const client = new FakeClient({ delayMs: 0, long: true });
-  const live = new Store();
-  live.attach(client);
-  await live.connect();
+  const { store: live, client } = await ready({ delayMs: 0, long: true });
   await live.open('t-long');
   const messages = live.openThread?.messages ?? [];
   stubLayout(messages.length * ESTIMATE);
@@ -487,16 +472,11 @@ test('what arrives while the reader is scrolled up is counted on the way back, a
   jumpButton()!.click();
   await settle();
   expect(jumpButton()).toBeNull();
-  live.detach();
-  client.close();
 });
 
-test('a thread reopened where the reader left it, above the bottom, counts what arrives after', async () => {
+test('a thread reopened where the reader left it, above the bottom, counts what arrives after', async ({ ready }) => {
   window.localStorage.clear();
-  const client = new FakeClient({ delayMs: 0, long: true });
-  const live = new Store();
-  live.attach(client);
-  await live.connect();
+  const { store: live, client } = await ready({ delayMs: 0, long: true });
   await live.open('t-long');
   const messages = live.openThread?.messages ?? [];
   stubLayout(messages.length * ESTIMATE);
@@ -510,8 +490,6 @@ test('a thread reopened where the reader left it, above the bottom, counts what 
   scrollHeight = messages.length * ESTIMATE;
   await settle();
   expect(jumpButton()?.textContent?.trim()).toBe('1 new message');
-  live.detach();
-  client.close();
 });
 
 test('a saved message anchor is rendered even when the old scroll offset points elsewhere', () => {
@@ -524,14 +502,11 @@ test('a saved message anchor is rendered even when the old scroll offset points 
   expect(document.querySelector<HTMLElement>('[data-testid=timeline]')!.scrollTop).toBe(250 * ESTIMATE);
 });
 
-test('Ctrl+F counts matches in messages the window has not drawn, walks to them, and Escape closes it', async () => {
+test('Ctrl+F counts matches in messages the window has not drawn, walks to them, and Escape closes it', async ({ ready }) => {
   window.localStorage.clear();
   // jsdom measures no range; the bar only reads one to decide whether to scroll.
   Range.prototype.getBoundingClientRect ??= () => new DOMRect(0, 0, 0, 0);
-  const client = new FakeClient({ delayMs: 0, long: true });
-  const live = new Store();
-  live.attach(client);
-  await live.connect();
+  const { store: live, client } = await ready({ delayMs: 0, long: true });
   await live.open('t-long');
   const messages = live.openThread?.messages ?? [];
   stubLayout(messages.length * ESTIMATE);
@@ -568,8 +543,6 @@ test('Ctrl+F counts matches in messages the window has not drawn, walks to them,
   await settle();
   expect(live.findOpen).toBe(false);
   expect(document.querySelector('[data-testid=find-bar]')).toBeNull();
-  live.detach();
-  client.close();
 });
 
 test('a short thread renders whole, with no spacer at all', async () => {
@@ -646,12 +619,9 @@ test('a thread whose first message is loaded asks for nothing at the top', async
  * nor the pin; and a scroll reads no slot height, because the spacers come off
  * the running totals instead of a walk over the list.
  */
-test('four hundred messages, two hundred deltas: the window and the pin stay put', async () => {
+test('four hundred messages, two hundred deltas: the window and the pin stay put', async ({ ready }) => {
   window.localStorage.clear();
-  const client = new FakeClient({ delayMs: 0, long: true });
-  const store = new Store();
-  store.attach(client);
-  await store.connect();
+  const { store, client } = await ready({ delayMs: 0, long: true });
   await store.open('t-long');
   // `threads.get` hands back the last page: the bench wants the whole thread in
   // the list, so the pages above it are pulled in before anything is mounted.
@@ -735,12 +705,9 @@ test('four hundred messages, two hundred deltas: the window and the pin stay put
   // Shared CI runners need time for the full streaming and scrolling workload.
 }, 20_000);
 
-test('the second receipt waits for the first streamed character of the answer', async () => {
+test('the second receipt waits for the first streamed character of the answer', async ({ ready }) => {
   window.localStorage.clear();
-  const client = new FakeClient({ delayMs: 0, long: true });
-  const store = new Store();
-  store.attach(client);
-  await store.connect();
+  const { store, client } = await ready({ delayMs: 0, long: true });
   await store.open('t-long');
   const messages = store.openThread?.messages ?? [];
   stubLayout(messages.length * ESTIMATE);
@@ -772,12 +739,9 @@ test('a page in flight shows one line at the top of the list', async () => {
   expect(row?.textContent).toBe('Loading earlier messages');
 });
 
-test('a press holds the pinned list, and a release the window never saw still frees it', async () => {
+test('a press holds the pinned list, and a release the window never saw still frees it', async ({ ready }) => {
   window.localStorage.clear();
-  const client = new FakeClient({ delayMs: 0, long: true });
-  const live = new Store();
-  live.attach(client);
-  await live.connect();
+  const { store: live, client } = await ready({ delayMs: 0, long: true });
   await live.open('t-long');
   const messages = live.openThread?.messages ?? [];
   stubLayout(messages.length * ESTIMATE);
@@ -811,40 +775,35 @@ test('a press holds the pinned list, and a release the window never saw still fr
   await arrive();
   expect(timeline.scrollTop).toBe(scrollHeight);
   expect(document.querySelector('[data-testid=jump-to-latest]')).toBeNull();
-  live.detach();
-  client.close();
 });
 
-test('a keyboard step up leaves bottom-following even within its 80 pixel tolerance', async () => {
+test('a keyboard step up leaves bottom-following even within its 80 pixel tolerance', async ({ createStore }) => {
   window.localStorage.clear();
-  const client = new FakeClient({ delayMs: 0, long: true });
-  const live = new Store();
+  const { store: live, client } = createStore({ delayMs: 0, long: true });
   live.attach(client);
-  try {
-    await live.connect(); await live.open('t-long');
-    const messages = live.openThread!.messages;
-    stubLayout(messages.length * ESTIMATE);
-    running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages } });
-    await settle();
-    const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
-    timeline.scrollTop = scrollHeight - VIEW_HEIGHT;
-    timeline.dispatchEvent(new Event('scroll'));
-    await settle();
-    timeline.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
-    timeline.scrollTop -= 30;
-    timeline.dispatchEvent(new Event('scroll'));
-    await settle();
-    expect(document.querySelector('[data-testid=jump-to-latest]')).not.toBeNull();
-    const left = timeline.scrollTop;
-    messages.push({ ...JSON.parse(JSON.stringify(messages.at(-1)!)), id: 'm-keyboard-arrival' });
-    scrollHeight += ESTIMATE;
-    await settle();
-    expect(timeline.scrollTop).toBe(left);
-    timeline.scrollTop = scrollHeight - VIEW_HEIGHT;
-    timeline.dispatchEvent(new Event('scroll'));
-    await settle();
-    expect(document.querySelector('[data-testid=jump-to-latest]')).toBeNull();
-  } finally { live.detach(); client.close(); }
+  await live.connect(); await live.open('t-long');
+  const messages = live.openThread!.messages;
+  stubLayout(messages.length * ESTIMATE);
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages } });
+  await settle();
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  timeline.scrollTop = scrollHeight - VIEW_HEIGHT;
+  timeline.dispatchEvent(new Event('scroll'));
+  await settle();
+  timeline.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+  timeline.scrollTop -= 30;
+  timeline.dispatchEvent(new Event('scroll'));
+  await settle();
+  expect(document.querySelector('[data-testid=jump-to-latest]')).not.toBeNull();
+  const left = timeline.scrollTop;
+  messages.push({ ...JSON.parse(JSON.stringify(messages.at(-1)!)), id: 'm-keyboard-arrival' });
+  scrollHeight += ESTIMATE;
+  await settle();
+  expect(timeline.scrollTop).toBe(left);
+  timeline.scrollTop = scrollHeight - VIEW_HEIGHT;
+  timeline.dispatchEvent(new Event('scroll'));
+  await settle();
+  expect(document.querySelector('[data-testid=jump-to-latest]')).toBeNull();
 });
 
 test('the timeline watches the wheel passively, so a notch never waits for the main thread', async () => {

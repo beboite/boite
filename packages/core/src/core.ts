@@ -1,9 +1,11 @@
+import { MergedPrArchive } from './merged-pr-archive.ts';
+import { PullRequests } from './pull-requests.ts';
 import { existsSync, mkdirSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { PROTOCOL_VERSION } from '@boite/contracts';
-import type { Channel, CoreInfo, ThreadId } from '@boite/contracts';
-import pkg from '../package.json';
+import type { Channel, CoreInfo, CoreLogContext, ThreadId } from '@boite/contracts';
+import { CORE_VERSION } from './version.ts';
 import { AccountStore } from './accounts.ts';
 import { AgentStore } from './agents/store.ts';
 import { AgentRuntime } from './agents/runtime.ts';
@@ -14,6 +16,7 @@ import { shutdownDrivers } from './drivers/index.ts';
 import { ImportStore } from './imports.ts';
 import { Journal, scheduleEventRetention } from './journal.ts';
 import { KeybindingStore } from './keybindings.ts';
+import { DiagnosticLogs } from './logs.ts';
 import { registerModules } from './modules.ts';
 import { currentOs } from './paths.ts';
 import { lanAddress } from './server/lan.ts';
@@ -46,7 +49,7 @@ import { HookLedger } from './hooks.ts';
 import { TerminalStore } from './terminals.ts';
 import { ServerUpdates, type ServerUpdateOptions } from './server-update.ts';
 
-export const CORE_VERSION: string = pkg.version;
+export { CORE_VERSION } from './version.ts';
 
 /** The server tells the core which threads a live socket is watching, and closes sockets on request. */
 export interface SubscriptionSink {
@@ -109,6 +112,9 @@ export class Core {
   readonly startedAt = Date.now();
 
   readonly bus: Bus;
+  readonly logs: DiagnosticLogs;
+  readonly pullRequests: PullRequests;
+  readonly mergedPrArchive: MergedPrArchive;
   readonly journal: Journal;
   readonly router: Router;
   readonly settings: SettingsStore;
@@ -174,6 +180,7 @@ export class Core {
     const threads = this.threads;
     if (this.router.activeRequests > 0 || scheduler.running.length > 0 || scheduler.queued.length > 0
       || this.agentRuntime.busy || this.procs.liveThreads().length > 0
+      || threads.sideQuestions.busy
       || threads.runner.handles.size > 0 || threads.runner.steering.size > 0
       || threads.deferred.pendingWakes.size > 0 || threads.deferred.deferredAnswers.size > 0
       || [...threads.agentState.background.values()].some(tasks => tasks.length > 0)) return 'busy';
@@ -227,6 +234,8 @@ export class Core {
     mkdirSync(this.dataDir, { recursive: true });
 
     this.bus = new Bus();
+    this.logs = new DiagnosticLogs(this.dataDir, [this.token]);
+    this.logs.attach(this.bus);
     this.bus.onError = (message) => this.log('error', message);
     this.journal = new Journal(join(this.dataDir, 'journal.db'), { onError: (message) => this.log('error', message) });
     this.stopArtifactRetention = scheduleArtifactRetention(this);
@@ -259,6 +268,7 @@ export class Core {
     this.terminals = new TerminalStore(this);
 
     this.workforce = new AgentStore(this);
+    this.pullRequests = new PullRequests(this);
     registerModules(this);
     this.#onShutdown = options.onShutdown;
     this.router.register('core.shutdown', () => {
@@ -275,6 +285,9 @@ export class Core {
     queueMicrotask(() => this.threads.titles.recover());
     this.agentRuntime = new AgentRuntime(this);
     this.brain.start();
+    this.mergedPrArchive = new MergedPrArchive(this, this.pullRequests);
+    this.mergedPrArchive.start();
+    this.logs.record('info', 'Core started', { source: 'core', event: 'core.started' }, this.startedAt);
   }
 
   setEndpoint(host: string, port: number): void {
@@ -316,8 +329,8 @@ export class Core {
     };
   }
 
-  log(level: 'info' | 'warn' | 'error', message: string, threadId?: ThreadId): void {
-    this.bus.emit('core.log', { level, message, at: Date.now(), ...(threadId ? { threadId } : {}) });
+  log(level: 'info' | 'warn' | 'error', message: string, context: CoreLogContext = {}): void {
+    this.bus.emit('core.log', { level, message, at: Date.now(), ...context });
   }
 
   /**
@@ -332,6 +345,7 @@ export class Core {
     this.delegation.beginClose();
     this.workflows.beginClose();
     this.coordination.beginClose();
+    void this.mergedPrArchive.close();
     this.activity.close();
     this.threads.autoCompact.close();
     this.#drainPromise = this.agentRuntime.close().then(() => this.scheduler.drain(timeoutMs));
@@ -351,6 +365,7 @@ export class Core {
     this.browser.close();
     this.artifactPreviews.stop();
     this.threads.sideQuestions.close();
+    await this.mergedPrArchive.close();
     this.threads.titles.close();
     this.threads.autoCompact.close();
     await this.agentRuntime.close();
@@ -381,5 +396,7 @@ export class Core {
     this.#stopDeletionRetention();
     await this.stopArtifactRetention();
     this.journal.close();
+    this.logs.record('info', 'Core stopped', { source: 'core', event: 'core.stopped' });
+    await this.logs.close();
   }
 }

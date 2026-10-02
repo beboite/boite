@@ -1,17 +1,11 @@
 # The right panel
 
-The panel opens to the right of the chat, per thread, from the header's Panel
-button, the `panel` chord or one of the surface chords. It keeps its own tabs
-and width for each thread in the browser's storage, so a thread comes back the
-way it was left. Under 720 px the panel is a sheet over the whole chat, so a
-reload there opens on the chat with the panel shut and its tabs kept for the
-next open, and Back shuts it. That reload-time shut is held in memory beside
-the stored layout, so a wider window of the same browser still finds its panels
-open after the phone has used its own. `packages/ui/src/lib/right-panel.svelte.ts` is the store,
-`RightPanel.svelte` the frame, one component per surface. The frame's launcher,
-resize handle and tab icon are `SurfaceLauncher.svelte`, `PanelResizeHandle.svelte`
-and `SurfaceIcon.svelte`; `lib/surface-labels.ts` names each surface and says where
-it is available.
+The Panel button or [surface shortcuts](keybindings.md) open a thread's tabs
+beside the chat. Tabs are stored per machine/thread; width is shared on this device.
+Below 720 px it covers the chat; Back closes it. A mobile reload keeps tabs but
+starts with the panel closed, without changing the stored desktop layout.
+`lib/right-panel.svelte.ts` owns layout and `RightPanel.svelte` renders it;
+`lib/surface-labels.ts` defines labels and availability.
 
 ## Browser tools and linked pull requests
 
@@ -28,34 +22,36 @@ states and branch dependencies. The owner can add, refresh or remove links.
 Removing a link does not close its PR. A failed GitHub refresh keeps the last
 known state and displays the error.
 
-## Floating panel and menus
+## Floating panel and browser overlays
 
-The browser toolbar can float the panel inside the app. Drag anywhere on its
-top bar, including tab labels, to move it; buttons keep their normal actions.
-Resize from any of its four sides or four corners. Both gestures stay within the app. The
-same page remains mounted, preserving forms and history. **Return to panel**
-in the panel's top bar restores the side panel from any tab, including after
-closing the last browser or switching conversations. The top bar also holds
-the single maximize button.
-Maximizing a floating panel fills the app's content
-area; restoring it returns to its previous size. On a phone it fills the screen.
+In the shell, the browser toolbar can detach the panel into a floating card
+inside the app. Drag its top bar, including tab labels, to move it; controls keep
+their actions. Resize from any edge or corner. The card stays within the app
+content area. Moving, resizing, maximizing and docking keep the same page
+mounted, preserving forms and history. The Dock panel control restores the side
+panel from any tab, including after the last browser closes or the conversation
+changes. Maximizing fills the app content area; restoring returns to the previous
+size. At phone width the floating panel fills the screen.
 
-Native browser views paint above HTML menus. While a menu or dialog overlaps
-the page, the UI parks that view and displays its screenshot underneath the
-menu. Closing the overlay restores the same view without reloading the page.
+In the shell, the native browser view paints above HTML menus. While a menu or
+dialog overlaps its page, the UI parks the view and displays a screenshot
+underneath the overlay. Closing it restores the same view without reloading the
+page.
 
 ## Thread and tab lifetime
 
-A thread that is archived, here or from another client, or removed with its
-project, takes its layout with it, and its browser views are destroyed rather
-than parked: a thread restored from Archived threads comes back with a fresh
-panel, never with what it had open. The one
-exception is the thread on screen when another client archives it: it stays
-open with its tabs and unsaved file edits, reconnects included, and its layout
-goes when this client opens another thread or a draft. Each machine's
-`threads.list` also drops that machine's layouts for threads it no longer
-lists, which covers archives made while this client was away, except the open
-thread's. A machine that has not connected yet keeps its layouts.
+Manual archive here or project removal clears the thread's panel and destroys
+its browser views. After the layout has been cleared, restoring the thread starts
+with a fresh panel. If another client archives the open thread, it stays on
+screen with its tabs and unsaved file edits, reconnects included, until this
+client opens another thread or a draft. Leaving a manually archived thread drops
+its layout.
+Automatic merged-PR archive preserves unsent composer input and unsaved file
+drafts for restoration. On reconnect, this machine's `threads.list` prunes
+layouts for threads it no longer lists, except the open thread and layouts with
+unsaved file drafts. A machine that has not connected keeps its own layouts.
+[Automatic merged-PR archive](machines.md#merged-pr-conversations) documents
+the archive conditions.
 
 A panel with no tab yet opens on the surface the device starts with, Files or
 Changes, or on its launcher. The tour's first question sets it and Settings,
@@ -68,7 +64,7 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 
 | Surface  | Tab      | What it shows                                                                 |
 | -------- | -------- | ----------------------------------------------------------------------------- |
-| Browser  | many     | a page in a child webview of the shell (persistent cookies), an iframe in a browser |
+| Browser  | many     | a shell child webview with persistent cookies; test fixtures use an iframe |
 | Changes  | one      | `git.status` of the working directory, a file's diff on click                 |
 | Files    | one      | the working directory as a tree, `files.list` one directory at a time         |
 | File     | per path | a text editor with save, an image viewer with zoom and pan, a video or audio player |
@@ -77,10 +73,10 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 | Subagents | one     | the thread's workflow runs and subagents in one list, a run's graph, a subagent's conversation, see [delegation.md](delegation.md) and [workflows.md](workflows.md) |
 | Trace    | one      | the thread's processes, see [trace.md](trace.md)                              |
 
-The Browser is the shell's child webview and shares the main webview's profile
-directory, which is why a login survives a restart. A plain browser gets an
-iframe with the sites that allow it. [machines.md](machines.md) has the origins
-and the bridge.
+Browser tabs share the shell's webview profile, so logins survive restart.
+The iframe bridge belongs to browser test fixtures; ordinary web clients have
+no native Browser surface. [Portability](portability.md#remaining-gaps) records
+the Linux shell's system-browser fallback.
 
 The address field accepts public hosts, local development addresses such as
 `localhost:5173` or a private IPv4 server, and search terms. Loopback, private
@@ -150,7 +146,7 @@ selected and never opened: a program an agent wrote is not run from here. A
 file outside the thread's directory shows without the open action, since
 `files.read` stays inside it.
 
-Captures: [changes](images/panel-changes-desktop.png) · [files](images/panel-files-desktop.png) · [editor](images/panel-file-text-desktop.png) · [picture, zoomed](images/panel-file-image-zoomed.png) · [video](images/panel-cli-video.png) · [tasks](images/panel-tasks-desktop.png) · [changes at phone width](images/panel-changes-phone.png) · [editor at phone width](images/panel-file-text-phone.png)
+Captures: [changes](images/panel-changes-desktop.png) · [files](images/panel-files-desktop.png) · [editor](images/panel-file-text-desktop.png) · [picture, zoomed](images/panel-file-image-zoomed.png) · [video](images/panel-cli-video.png) · [tasks](images/panel-tasks-desktop.png) · [changes at phone width](images/panel-changes-phone.png) · [editor at phone width](images/panel-file-text-phone.png) · [floating panel](images/browser-floating-desktop.png) · [floating browser menu](images/browser-floating-menu.png) · [floating panel at phone width](images/browser-floating-phone.png)
 
 ## What the core provides
 

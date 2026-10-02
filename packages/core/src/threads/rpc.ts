@@ -2,11 +2,11 @@ import { stat } from 'node:fs/promises';
 import type { AccountId, ProviderId, ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { invalidParams, refused } from '../errors.ts';
-import { PullRequests } from '../pull-requests.ts';
 import type { ProviderProbe } from '../providers/probe.ts';
 import { defaultModel, needsModelDiscovery } from './selection.ts';
 import { LinkedPullRequests } from '../linked-pull-requests.ts';
 import { steerUser } from './user-steering.ts';
+import { readToolOutput } from './records.ts';
 
 /**
  * A turn in a folder that is gone is refused by that folder. An archived
@@ -51,7 +51,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     core.threads.sideQuestions.cancel(params.threadId, params.requestId);
     return { ok: true };
   });
-  const pullRequests = new PullRequests(core);
+  const pullRequests = core.pullRequests;
   const linked = new LinkedPullRequests(core, (threadId, url) => pullRequests.detail(threadId, url));
   core.router.register('threads.pullRequestReview', async p => {
     const url = linked.requireLink(p.threadId, p.url), result = await pullRequests.reviews.review(p.threadId, url);
@@ -82,7 +82,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
   });
   core.router.register('threads.get', (params) => core.threads.get(params.threadId, params.after, params));
   core.router.register('messages.list', (params) => core.threads.messages(params));
-  core.router.register('messages.toolOutput', (params) => core.threads.toolOutput(params));
+  core.router.register('messages.toolOutput', (params) => readToolOutput(core, params));
   core.router.register('threads.update', async (params) => {
     const thread = core.threads.require(params.threadId);
     const version = thread.selectionVersion ?? 0;
@@ -126,7 +126,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     return { ok: true } as const;
   });
   core.router.register('threads.focus', (params, ctx) => {
-    core.threads.focus.set(ctx.connection.id, params.threadId);
+    core.threads.focus.set(ctx.connection.id, params.threadId, params.protectedThreadIds, params.protectAllThreads);
     return { ok: true } as const;
   });
   core.router.register('turns.start', async (params) => {

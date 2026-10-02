@@ -48,12 +48,12 @@ export async function decodeFrame(data: Uint8ClampedArray, width: number, height
   return (await loadDecoder())(data, width, height);
 }
 
-async function reader(): Promise<(video: HTMLVideoElement) => Promise<string | null>> {
+async function reader(): Promise<(video: HTMLVideoElement) => Promise<string[]>> {
   const Native = (window as unknown as { BarcodeDetector?: DetectorClass }).BarcodeDetector;
   if (Native) {
     try {
       const detector = new Native({ formats: ['qr_code'] });
-      return async video => (await detector.detect(video))[0]?.rawValue || null;
+      return async video => (await detector.detect(video)).map(code => code.rawValue);
     } catch { /* a build without the QR format falls through to jsQR */ }
   }
   // Loaded before the first frame: a chunk that cannot be fetched fails the scan
@@ -68,7 +68,8 @@ async function reader(): Promise<(video: HTMLVideoElement) => Promise<string | n
     if (canvas.width !== width) canvas.width = width;
     if (canvas.height !== height) canvas.height = height;
     context.drawImage(video, 0, 0, width, height);
-    return decode(context.getImageData(0, 0, width, height).data, width, height);
+    const text = decode(context.getImageData(0, 0, width, height).data, width, height);
+    return text ? [text] : [];
   };
 }
 
@@ -82,10 +83,11 @@ export async function scanVideo(video: HTMLVideoElement, signal: AbortSignal, ac
   for (;;) {
     if (signal.aborted) throw new DOMException('scan stopped', 'AbortError');
     if (video.readyState >= 2 && video.videoWidth > 0) {
-      const text = await read(video).catch(() => null);
+      const texts = await read(video).catch(() => []);
       // A frame still decoding when the view closed must not pair anything.
       if (signal.aborted) throw new DOMException('scan stopped', 'AbortError');
-      if (text && accept(text)) return text;
+      const text = texts.find(text => text && accept(text));
+      if (text) return text;
     }
     await new Promise(resolve => setTimeout(resolve, FRAME_MS));
   }

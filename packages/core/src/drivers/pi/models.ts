@@ -1,3 +1,4 @@
+import { withLogDiagnostic } from '../../log-errors.ts';
 import type { EffortLevel, ModelInfo, ProviderDescriptor } from '@boite/contracts';
 import { messageOf, unavailable } from '../../errors.ts';
 import { launchPrefix, profileFor, resolveExecutable } from '../../providers/resolve.ts';
@@ -136,34 +137,29 @@ export async function readModels(ctx: ProbeContext): Promise<ModelInfo[]> {
     }
   });
 
-  const say = (head: string): string => (lastStderr.length === 0 ? head : `${head}: ${lastStderr}`);
+  const say = (head: string) => withLogDiagnostic(unavailable(lastStderr.length === 0 ? head : `${head}: ${lastStderr}`, detail), head);
   const detail = { providerId: ctx.provider.id, accountId: ctx.accountId };
   let timer: Timer | null = null;
   const peer = new PiPeer(child, {
     // A probe runs no turn: pi has nothing to stream and nothing to ask.
     event: () => undefined,
-    log: (level, message) => {
-      ctx.log(level, message);
+    log: (level, message, context) => {
+      ctx.log(level, message, context);
     },
   });
 
   try {
     const died = new Promise<never>((_resolve, reject) => {
       child.once('exit', (code) => {
-        reject(unavailable(say(`the ${ctx.provider.id} agent exited with code ${code ?? 'unknown'}`), detail));
+        reject(say(`the ${ctx.provider.id} agent exited with code ${code ?? 'unknown'}`));
       });
       child.once('error', (error) => {
-        reject(unavailable(say(`the ${ctx.provider.id} agent did not start: ${messageOf(error)}`), detail));
+        reject(say(`the ${ctx.provider.id} agent did not start: ${messageOf(error)}`));
       });
     });
     const expired = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
-        reject(
-          unavailable(
-            say(`the ${ctx.provider.id} agent did not list its models in ${PROBE_TIMEOUT_MS / 1000} s`),
-            detail,
-          ),
-        );
+        reject(say(`the ${ctx.provider.id} agent did not list its models in ${PROBE_TIMEOUT_MS / 1000} s`));
       }, PROBE_TIMEOUT_MS);
       timer.unref?.();
     });

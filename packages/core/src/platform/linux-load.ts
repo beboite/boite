@@ -9,6 +9,7 @@
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import type { ProcessPlatform, ProcessSample } from './types.ts';
+import { LinuxResources, type LinuxResourceProcess } from './linux-resources.ts';
 
 /**
  * The unit of the stat file's CPU fields. The kernel fixes the value it exports
@@ -21,7 +22,7 @@ export type ProcRead = (path: string) => string | null;
 
 function readProc(path: string): string | null {
   try {
-    if (path === '/proc' || path.endsWith('/task')) return readdirSync(path).join('\n');
+    if (path === '/proc' || path.endsWith('/task') || path.endsWith('/fd')) return readdirSync(path).join('\n');
     return readFileSync(path, 'utf8');
   } catch {
     return null;
@@ -121,17 +122,29 @@ function scanProc(read: ProcRead): Omit<ProcSnapshot, 'at'> {
 
 export class LinuxLoad {
   readonly #pids = new Map<string, Set<number>>();
+  /** Rebuilt in registry insertion order, so duplicate roots retain the same winner. */
+  #owners: Map<number, string> | null = null;
+  readonly #births = new Map<string, Map<number, number | null>>();
   /** The thread's CPU ticks at its previous sample, per pid, and when that was. */
-  readonly #last = new Map<string, { ticks: Map<number, number>; at: number }>();
+  readonly #last = new Map<string, { ticks: Map<number, number>; births: Map<number, number | null>; at: number }>();
   /** One parent scan serves every thread sampled in the same tick. */
   #scan: ProcSnapshot | null = null;
+  readonly #resources: LinuxResources;
 
   constructor(
     private readonly logicalCpus: number,
     private readonly read: ProcRead = readProc,
     private readonly now: () => number = Date.now,
     private readonly signal: (pid: number) => void = (pid) => { process.kill(pid, 'SIGKILL'); },
-  ) {}
+  ) { this.#resources = new LinuxResources(read, now); }
+
+  watchResources(active: boolean): void { this.#resources.watch(active); }
+
+  finishResources(): void { this.#resources.finish(); }
+
+  closeResources(): Promise<void> { return this.#resources.close(); }
+
+  forget(threadId: string): void { this.#resources.forget(threadId); }
 
   #snapshot(fresh = false): ProcSnapshot {
     const at = this.now();
@@ -178,15 +191,24 @@ export class LinuxLoad {
       this.#pids.set(threadId, pids);
     }
     pids.add(pid);
+    this.#owners = null;
+    let births = this.#births.get(threadId);
+    if (births === undefined) { births = new Map(); this.#births.set(threadId, births); }
+    const stat = this.read(`/proc/${pid}/stat`);
+    births.set(pid, stat === null ? null : statField(stat, 22));
   }
 
   remove(threadId: string, pid: number): void {
     const pids = this.#pids.get(threadId);
     if (pids === undefined) return;
     pids.delete(pid);
+    this.#owners = null;
+    this.#births.get(threadId)?.delete(pid);
     if (pids.size > 0) return;
     this.#pids.delete(threadId);
+    this.#births.delete(threadId);
     this.#last.delete(threadId);
+    this.#resources.forget(threadId);
   }
 
   /**
@@ -198,12 +220,20 @@ export class LinuxLoad {
     const pids = this.#pids.get(threadId);
     if (pids === undefined) return null;
     const ticks = new Map<number, number>();
+    const sampledBirths = new Map<number, number | null>();
     let memoryBytes = 0;
     const workingSets: NonNullable<ProcessSample['workingSets']> = [];
     let processes = 0;
     const scan = this.#snapshot();
     const at = this.now();
     const pending = new Set(pids);
+    let owners = this.#owners;
+    if (owners === null) {
+      owners = new Map<number, string>();
+      for (const [owner, roots] of this.#pids) for (const root of roots) owners.set(root, owner);
+      this.#owners = owners;
+    }
+    const members: LinuxResourceProcess[] = [];
     for (const pid of pending) {
       const status = this.read(`/proc/${pid}/status`);
       // Topology can be shared for 500 ms, but CPU ticks must describe this
@@ -214,30 +244,43 @@ export class LinuxLoad {
         : this.read(`/proc/${pid}/stat`);
       const used = stat === null ? null : cpuTicks(stat);
       if (used === null) continue;
+      const birth = stat === null ? null : statField(stat, 22);
+      const expectedBirth = this.#births.get(threadId)?.get(pid);
+      if (pids.has(pid) && expectedBirth != null && birth !== expectedBirth) continue;
+      if (birth !== null && Number.isSafeInteger(birth) && (!pids.has(pid) || expectedBirth === birth)) members.push({ pid, birth });
       processes += 1;
       ticks.set(pid, used);
+      sampledBirths.set(pid, birth);
       const bytes = status === null ? null : residentBytes(status);
       const exe = this.read(`/proc/${pid}/comm`)?.trim();
       if (bytes !== null) workingSets.push({ pid, bytes, ...(exe ? { exe } : {}) });
       memoryBytes += bytes ?? 0;
-      for (const child of this.#children(pid, scan)) pending.add(child);
+      // A separately registered agent owns its own subtree, even when nested.
+      for (const child of this.#children(pid, scan)) if (!owners.has(child) || owners.get(child) === threadId) pending.add(child);
     }
-    if (processes === 0) return null;
+    if (processes === 0) { this.#resources.forget(threadId); return null; }
 
     const previous = this.#last.get(threadId);
-    this.#last.set(threadId, { ticks, at });
+    this.#last.set(threadId, { ticks, births: sampledBirths, at });
     let cpuPercent = 0;
+    let cpuMeasured = false;
     const elapsedMs = previous === undefined ? 0 : at - previous.at;
     if (previous !== undefined && elapsedMs > 0) {
       // Per pid, so a process that exited or started in between moves nothing.
       let spent = 0;
       for (const [pid, now] of ticks) {
         const before = previous.ticks.get(pid);
-        if (before !== undefined && now >= before) spent += now - before;
+        if (before !== undefined && sampledBirths.get(pid) === previous.births.get(pid) && now >= before) {
+          spent += now - before; cpuMeasured = sampledBirths.get(pid) !== null || cpuMeasured;
+        }
       }
       const cpuMs = (spent * 1000) / USER_HZ;
       cpuPercent = Math.round((cpuMs / (elapsedMs * Math.max(1, this.logicalCpus))) * 1000) / 10;
     }
-    return { processes, cpuPercent, memoryBytes, workingSets };
+    const resources = this.#resources.sample(threadId, members);
+    const trustedRoots = [...pids].every(pid => this.#births.get(threadId)?.get(pid) != null);
+    return { processes, cpuPercent, memoryBytes, workingSets,
+      cpuMeasured: cpuMeasured && trustedRoots,
+      memoryMeasured: workingSets.length > 0 && trustedRoots, ...(resources ? { resources } : {}) };
   }
 }

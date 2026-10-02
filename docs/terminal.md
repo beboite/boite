@@ -21,14 +21,17 @@ xterm.js. xterm loads the first time a terminal opens, never at startup.
   The first output after a quiet moment goes out at once, so a typed key echoes
   without delay; output that keeps coming is sent every 16 ms as one event.
   The 256 KiB snapshot is exactly what those events carried so far.
-- `terminals.close` kills the shell with everything it started and waits for
-  it to exit. `terminal.exited` follows, and the drawer closes.
+- `terminals.close` stops the shell and waits for it to exit.
+  `terminal.exited` follows, and the drawer closes. Descendant termination
+  follows the platform limits below.
 - Archiving the thread and stopping the core close its shell too.
 
 The shell runs under the trace id `terminal:<threadId>`, apart from the
 thread's own processes. Stopping a turn ends what the agent started and leaves
-the user's shell alone. Like every process, it goes through `procs` into a Job
-Object and the trace ([trace.md](trace.md)).
+the user's shell alone. It launches through `procs`: Windows Job Objects track
+descendants exactly, while Linux and macOS register direct children and signal
+their process groups. A descendant that leaves its group can survive. See
+[trace](trace.md) for tracking and shutdown limits.
 
 The shell is PowerShell 7 when `pwsh.exe` is on the `PATH`, else Windows
 PowerShell, else `cmd.exe`. On Linux and macOS it is `$SHELL`, then `/bin/bash`,
@@ -38,37 +41,31 @@ type lands in the user's PowerShell or bash history.
 
 ## The screen
 
-The xterm.js screen of a shell belongs to the store
-(`lib/terminal-session.svelte.ts`) and lives until the shell ends. Hiding the
-drawer or opening another thread takes its element out of the page and puts the
-same one back later, with the scrollback, the selection and whatever a
-full-screen program drew. Nothing is asked of the core for that.
+The owning Store keeps the xterm screen in `lib/terminal-session.svelte.ts` until
+the shell ends. Hiding the drawer or switching threads detaches its element;
+reopening reuses the screen, scrollback, selection and full-screen program state.
 
-A reload, a second window or a reconnect redraws from the 256 KiB snapshot. A
-cut snapshot starts on a whole line. The keyboard is ignored while the snapshot
-replays: xterm answers the queries in it again (device attributes, cursor
-position), and those answers used to be typed into the shell on every reopen.
+Reloading, opening another window or reconnecting replays the 256 KiB snapshot.
+Truncation prefers a nearby line boundary. Output arriving before the response is
+buffered; the snapshot sequence excludes events already represented. Older cores
+without sequences can show overlap. Snapshot replay mutes xterm responses to
+terminal queries so reopening cannot type them into the shell.
 
-The drawer's edge fits the screen every frame and tells the shell its new size
-once the drag settles, 80 ms after the last move. Under ConPTY the core sends
-the Windows build number with the snapshot, which xterm needs to know whether
-ConPTY rewraps lines itself.
-
-Colours are xterm's ANSI palette on the theme's code background, each moved
-until it reads at 4.5:1. Dim text is asked half of that, so the command
-PowerShell suggests after a typed letter stays grey. The cursor is a blinking
-bar.
+The screen fits each animation frame during a drag. A resize RPC follows 80 ms
+after the last change. ConPTY snapshots include the Windows build number so xterm
+can account for native line wrapping. ANSI colours use the theme's code background
+with a 4.5:1 minimum contrast ratio, halved for dim text. The cursor is a blinking
+bar. Refused keystrokes display their error. Reloading the same conversation
+preserves terminal focus; switching conversation or draft focuses the composer.
 
 ## Keys
 
-Inside the terminal the shell takes Ctrl with a letter, even where the app has
-a command on it: `Ctrl+K`, `Ctrl+N`, `Ctrl+S` and `Ctrl+F` are readline's and
-nano's. The app keeps the terminal's own key, so `Ctrl+J` always hides the
-drawer, and every chord a shell cannot read: those with Shift or Alt, and
-`Ctrl+,`. Hiding the drawer gives the keyboard back to the composer.
+The shell receives Ctrl-letter shortcuts such as `Ctrl+K`, `Ctrl+N`, `Ctrl+S` and
+`Ctrl+F`. The app retains `Ctrl+J` to hide the drawer and return focus to the
+composer, plus its Shift/Alt chords and `Ctrl+,`.
 
-On Windows and Linux, `Ctrl+C` copies when text is selected and interrupts
-otherwise, `Ctrl+V` pastes, and `Ctrl+Backspace` deletes a word.
+On Windows and Linux, `Ctrl+C` copies selected text or interrupts when there is no
+selection, `Ctrl+V` pastes, and `Ctrl+Backspace` deletes a word.
 
 ## Who may open one
 

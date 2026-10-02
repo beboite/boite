@@ -1,18 +1,18 @@
 # Analytics
 
 Boite can report usage counts through a Cloudflare Worker to PostHog EU.
-Basic counters start on for new hosts. Enhanced analytics start off and are
-offered explicitly in the onboarding tour. Skipping the tour does not enable
-enhanced mode. An existing saved choice, including Off, is never overwritten.
+Basic counters are enabled on new hosts. Enhanced analytics start disabled and
+are offered in the onboarding tour. Skipping the tour leaves enhanced mode
+disabled. The host preserves any saved choice, including Off.
 The tour's privacy step has three answers: the "NO! Just the basic counters"
 row keeps the counters, the "DEAL" row turns on enhanced mode, and the "turn
 everything off" link under both rows saves Off. Each one closes the tour.
-Settings > General > Privacy and analytics has two
-switches. On a phone connected as the owner, they are under App & notifications.
+Settings > General > Privacy and analytics has two switches. On a phone connected
+as the owner, they are under App & notifications.
 Paired guest devices and agents cannot read or change these settings.
 
-Consent belongs to the host, so opening another desktop or phone does not
-create another installation or duplicate a conversation event.
+The host stores consent. Opening another desktop or phone does not create a
+second installation or duplicate conversation events.
 
 ## Modes
 
@@ -25,11 +25,12 @@ create another installation or duplicate a conversation event.
 - Enhanced: a separate random UUID identifies events over time, allowing
   retention analysis. Enabling it also enables counters. Disabling it discards
   queued events and requests deletion of the corresponding profile and events.
-  Failed deletion remains on disk and retries after restart. Re-enabling enhanced
-  mode immediately creates a new identifier without cancelling earlier deletion.
-  Uploads wait for the pending deletions to be accepted; the consent switches and
-  onboarding navigation do not. Export and deletion status live in Settings,
-  not in the onboarding tour.
+  Failed deletions remain on disk and retry after restart. Re-enabling enhanced
+  mode immediately creates a new identifier without cancelling earlier deletion
+  requests.
+  Pending deletions block uploads until accepted; consent switches and onboarding
+  navigation remain available. Settings contains export and deletion status;
+  the onboarding tour does not.
 
 Export downloads up to 10,000 enhanced events as JSON. PostHog processes event
 deletion asynchronously after accepting the request. A batch already received
@@ -56,16 +57,17 @@ Enhanced `turn_finished` events also carry the selected public `model`, `effort`
 `speed`, `permission_mode`, `operation`, scheduler `queue_ms`, and reported
 `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens` rounded
 to 100 tokens and capped at ten million. Missing usage stays absent.
-The frozen execution snapshot supplies these values, not a later model choice.
+These values come from the frozen execution snapshot, regardless of later model
+changes.
 `default` means the provider chose its model; it does not claim a resolved model.
-`packages/contracts/src/telemetry.ts` lists public models explicitly. Unknown models, custom
+`packages/contracts/src/telemetry.ts` lists public models. Unknown models, custom
 aliases, paths and fine-tuned IDs become `other` on both the host and relay.
 Basic mode strips every enhanced field even from modified clients.
 
-These fields support model adoption, retention among consenting installations,
-turn success/stop rates, queue delay, duration and token-volume comparisons.
-They do not measure answer quality, subscriber spending or all users: enhanced
-data comes only from installations whose owners opted in.
+These fields measure model adoption, retention among consenting installations,
+turn success/stop rates, queue delay, duration and token volume. They do not
+measure answer quality or subscriber spending. Enhanced data represents only
+installations whose owners opted in.
 
 No prompt, response, reasoning, tool argument, file content, project name, path,
 account identifier, private model name, error message, screenshot or recording is sent.
@@ -73,17 +75,18 @@ The relay overwrites the IP field and disables GeoIP enrichment. The PostHog
 project also discards IP data. Cloudflare processes the source IP in transit for
 country lookup, daily hashing and rate limits; it is not forwarded to PostHog.
 
-The queue holds at most 200 events in memory. Upload starts after 20 seconds and
+The in-memory queue holds at most 200 events. Upload starts after 20 seconds and
 normally runs every five minutes. Failed batches retry with exponential backoff,
-up to an hour, preserving event UUIDs for deduplication. Old events can be lost
-when the queue fills or the host exits. Only consent, identifiers and pending
-deletion are persisted in `telemetry.json`, outside the application journal.
+up to an hour, keeping event UUIDs for deduplication. Old events can be lost when
+the queue fills or the host exits. `telemetry.json` stores only consent,
+identifiers and pending deletion, outside the application journal.
 
 ## Repairing consent state
 
-An unreadable or invalid `telemetry.json` stops host startup. The host does not
-replace it with defaults: its `forget` array may contain outstanding deletion
-requests, and its `installId` may identify an enhanced profile still to delete.
+An unreadable or invalid `telemetry.json` stops host startup. The host preserves
+the file because its `forget` array may contain pending deletion requests and
+its `installId` may identify an enhanced profile still to delete. It does not
+replace the file with defaults.
 
 With the host stopped, keep a copy of the damaged file. Check its read permissions
 and JSON syntax first. Restore a valid backup only if it retains every pending
@@ -103,10 +106,10 @@ separate and require correcting `BOITE_TELEMETRY_URL`, not this file.
 The dedicated relay is configured in `telemetry/wrangler.toml`. Only published
 builds default to it: the Windows installer of a nightly or stable release and
 the published server image. Their CI sets `BOITE_RELEASE_TELEMETRY=1` and every
-core build passes `--env=BOITE_RELEASE_*`, which inlines the flag. A run from
-sources, a local `build:shell` or `build:shell:dev`, a pull request's installer
-and every test have no relay, so a scratch data directory never counts as an
-installation. Settings then says that nothing is sent.
+core build passes `--env=BOITE_RELEASE_*` to inline the flag. Source runs, local
+`build:shell` or `build:shell:dev` builds, pull request installers and tests have
+no relay, so a scratch data directory never counts as an installation. Settings
+then reports that nothing is sent.
 
 Set `BOITE_TELEMETRY_URL` at runtime to override either default, or to an empty
 string to disable networking. Only HTTPS is accepted, except loopback HTTP for

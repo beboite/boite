@@ -33,7 +33,7 @@ export async function titleQuery(deps: ClaudeDeps, ctx: TitleContext): Promise<s
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => {
       const text = chunk.trim();
-      if (text.length > 0) ctx.log('warn', `claude cli (title): ${text.slice(0, STDERR_MAX)}`);
+      if (text.length > 0) ctx.log('warn', `claude cli (title): ${text.slice(0, STDERR_MAX)}`, { kind: 'provider-output', event: 'provider.output' });
     });
     return child;
   };

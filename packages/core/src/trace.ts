@@ -1,10 +1,17 @@
 import type { ProcessRecord, ThreadResources } from '@boite/contracts';
 import type { Core } from './core.ts';
+import { invalidParams } from './errors.ts';
 
 const DEFAULT_TRACE_LIMIT = 200;
 
 
 export function registerTraceMethods(core: Core): void {
+  core.router.register('resources.usage', (params, { connection }) => {
+    if (params === null || typeof params !== 'object' || Array.isArray(params)) throw invalidParams('resources.usage: expected an object');
+    if (params.watch !== undefined && typeof params.watch !== 'boolean') throw invalidParams('watch: expected a boolean');
+    core.procs.watchResources(connection.id, params.watch);
+    return core.procs.resourceUsage();
+  });
   core.router.register('resources.memoryStatus', () => core.procs.memory.status());
   core.router.register('trace.get', (params): ProcessRecord[] =>
     core.journal.listProcesses(params.threadId, params.limit ?? DEFAULT_TRACE_LIMIT),

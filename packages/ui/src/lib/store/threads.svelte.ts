@@ -13,7 +13,7 @@ import { readingCacheBytes, READING_CACHE_BYTES } from '../reading-cache';
 import { INITIAL_MESSAGE_PAGE, MESSAGE_PAGE_MAX, previewToolOutputs } from '@boite/contracts';
 import { forgetArchivedThread } from '../archive-history';
 import { rightPanel } from '../right-panel.svelte';
-import { lastIndexById, mergeResumed, patchRow, reconcileThread, resumeRequest, threadsByProject } from '../thread-rows';
+import { blockedMoveParents, lastIndexById, mergeResumed, patchRow, reconcileThread, resumeRequest, threadsByProject } from '../thread-rows';
 import type { StoreContext } from './context';
 import { RpcErrorCode } from '@boite/contracts';
 import { RpcFailure } from '../client';
@@ -44,14 +44,23 @@ export class Threads {
   readonly readingPositions = new Map<string, { top: number; pinned: boolean; heights: Map<string, number>; anchor?: { id: string; offset: number }; height?: number; reservePrompt?: string | null; followPrompt?: string | null }>();
   readingThreads = new Map<string, Thread>();
   subscribedThreadId: ThreadId | null = null;
-  /** The number of the newest `open()`, so an older one writes nothing. */
+  /** The newest navigation intent, including drafts, pages and detached clients. */
   openGeneration = 0;
   /** What that newest run is opening, so an older one knows what to give back. */
   #openTarget: ThreadId | null = null;
+  #olderGeneration = 0;
   /** Refreshing this visit keeps disclosures; leaving it invalidates their pending fetches. */
   #toolOutputVisit = 0;
 
   constructor(private readonly ctx: StoreContext) {}
+
+  invalidateNavigation(): number {
+    this.#openTarget = null;
+    this.#olderGeneration++;
+    this.loadingOlder = false;
+    this.loadingThreadId = null;
+    return ++this.openGeneration;
+  }
 
   rememberReadingThread(): void {
     const thread = this.openThread;
@@ -87,11 +96,16 @@ export class Threads {
     return this.#byProject.get(projectId) ?? [];
   }
 
+  #blockedMoveParents = $derived(blockedMoveParents(this.threads));
+  moveBlocked(threadId: ThreadId): boolean { return this.#blockedMoveParents.has(threadId); }
+
   async compact(): Promise<void> {
     const thread = this.openThread;
-    if (!thread || !this.ctx.client) return;
-    try { await this.ctx.client.call('threads.compact', { threadId: thread.id, expectedSelectionVersion: thread.selectionVersion ?? 0 }); }
-    catch (error) { this.ctx.fail(error); }
+    const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
+    if (!thread || !client) return;
+    try { await client.call('threads.compact', { threadId: thread.id, expectedSelectionVersion: thread.selectionVersion ?? 0 }); }
+    catch (error) { if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error); }
   }
 
   /**
@@ -103,14 +117,16 @@ export class Threads {
    */
   async rewind(messageId: MessageId, threadId: ThreadId | undefined = this.openThread?.id): Promise<RewoundMessage | null> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client || !threadId) return null;
     try {
       const { thread, ...rewound } = await client.call('threads.rewind', { threadId, messageId });
+      if (!this.ctx.currentClient(client, clientGeneration)) return null;
       this.applyRewound(thread);
       if (rewound.files?.status === 'unavailable') this.ctx.store.error = strings.composer.filesUnavailable;
       return rewound;
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
       return null;
     }
   }
@@ -123,14 +139,17 @@ export class Threads {
    */
   async fork(messageId: MessageId, options: { worktree?: boolean } = {}, threadId: ThreadId | undefined = this.openThread?.id): Promise<ThreadSummary | null> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client || !threadId) return null;
+    const generation = this.openGeneration;
     try {
       const summary = await client.call('threads.fork', { threadId, messageId, worktree: options.worktree === true });
+      if (!this.ctx.currentClient(client, clientGeneration)) return null;
       this.upsertThread(summary);
-      await this.ctx.store.open(summary.id);
+      if (this.ctx.currentNavigation(client, generation)) await this.ctx.store.open(summary.id);
       return summary;
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentNavigation(client, generation)) this.ctx.fail(error);
       return null;
     }
   }
@@ -188,16 +207,18 @@ export class Threads {
   /** The last page of a thread again, over the copies held, when what they hold cannot be patched. */
   async reload(threadId: ThreadId): Promise<void> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client) return;
     try {
       const fresh = await client.call('threads.get', { threadId });
+      if (!this.ctx.currentClient(client, clientGeneration)) return;
       for (const held of this.threadSnapshots(threadId)) {
         held.messages = fresh.messages;
         held.turns = fresh.turns;
         held.messagesBefore = fresh.messagesBefore;
       }
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     }
   }
 
@@ -208,16 +229,20 @@ export class Threads {
    * refused subscribe leaves the thread on screen with the socket it had
    * rather than with none at all.
    */
-  async open(threadId: ThreadId, navigate = true): Promise<void> {
+  async open(threadId: ThreadId, navigate = true, options: { requests?: boolean } = {}): Promise<void> {
     const s = this.ctx.store;
     const { delegation } = this.ctx;
     const client = this.ctx.client;
     if (!client) return;
-    const generation = ++this.openGeneration;
-    this.loadingOlder = false;
+    const generation = this.invalidateNavigation();
     this.#openTarget = threadId;
     if (s.connection !== 'ready') { this.loadingThreadId = null; this.#openOffline(threadId, navigate); return; }
-    const newest = (): boolean => this.openGeneration === generation && this.ctx.client === client;
+    const newest = (): boolean => this.ctx.currentNavigation(client, generation);
+    const retire = async (): Promise<void> => {
+      if (client !== this.ctx.client || (this.subscribedThreadId !== threadId && delegation.delegationSubscribedThreadId !== threadId && (this.#openTarget !== threadId || newest()))) {
+        await client.call('threads.unsubscribe', { threadId }).catch(() => undefined);
+      }
+    };
     const previousThread = this.openThread;
     const held = this.openThread?.id === threadId ? this.openThread : this.readingThreads.get(threadId);
     const deselect = this.openThread?.id !== threadId && s.delegationSelectedAgentId && s.delegationSelectedAgentId !== threadId;
@@ -229,6 +254,9 @@ export class Threads {
     this.loadingThreadId = held ? null : threadId;
     const deselected = deselect ? s.selectDelegatedAgent(null) : Promise.resolve();
     let loaded = false;
+    const summaryRead = this.ctx.threadReads.begin(threadId);
+    let permissionRead: ReturnType<StoreContext['requests']['permissionRead']> | undefined;
+    let questionRead: ReturnType<StoreContext['requests']['questionRead']> | undefined;
     try {
       const previous = this.subscribedThreadId;
       // Everything this open needs leaves in one burst, in the order the core
@@ -240,27 +268,32 @@ export class Threads {
       // what it cannot vouch for: a reconnect on a long conversation used to
       // download its last 120 messages again for the two that were new.
       const fetched = client.call('threads.get', { ...resumeRequest(threadId, held), limit: held ? MESSAGE_PAGE_MAX : INITIAL_MESSAGE_PAGE, compactTools: true });
-      const permissionsAsked = client.call('permissions.list', { threadId });
-      const questionsAsked = client.call('questions.list', { threadId });
+      if (options.requests !== false) {
+        permissionRead = this.ctx.requests.permissionRead(client, threadId);
+        questionRead = this.ctx.requests.questionRead(client, threadId);
+      }
+      const permissionsAsked = permissionRead?.promise ?? Promise.resolve([]);
+      const questionsAsked = questionRead?.promise ?? Promise.resolve([]);
       // A run that a newer click overtakes returns early and never awaits these.
       for (const asked of [fetched, permissionsAsked, questionsAsked]) asked.catch(() => undefined);
       await subscribed;
       if (!newest()) {
         // A newer click took over while this one was in flight. Its own thread
         // is the one the socket keeps, so this subscription goes back.
-        if (this.#openTarget !== threadId) {
-          await client.call('threads.unsubscribe', { threadId }).catch(() => undefined);
-        }
+        await retire();
         return;
       }
+      const thread = await fetched;
+      if (!newest()) { await retire(); return; }
+      const metadata = summaryRead.apply([summaryOf(thread)], this.threads).find(row => row.id === threadId);
+      if (metadata) Object.assign(thread, metadata);
+      this.upsertThread(summaryOf(thread));
       this.subscribedThreadId = threadId;
       // A thread already left that the core will not let go of costs a few
       // events, not the open of this one.
       const unsubscribed: Promise<unknown> = previous && previous !== threadId && previous !== delegation.delegationSubscribedThreadId
         ? client.call('threads.unsubscribe', { threadId: previous }).catch(() => undefined)
         : Promise.resolve();
-      const thread = await fetched;
-      if (!newest()) return;
       const cached = held ?? this.readingThreads.get(threadId);
       const freshIds = new Set(thread.messages.map(m => m.id));
       if (thread.messagesFrom !== undefined && held) mergeResumed(held, thread);
@@ -285,8 +318,8 @@ export class Threads {
       const questions = await questionsAsked;
       await unsubscribed;
       if (!newest()) return;
-      this.ctx.requests.mergePermissions(permissions, threadId);
-      this.ctx.requests.mergeQuestions(questions, threadId);
+      permissionRead?.apply(permissions);
+      questionRead?.apply(questions);
       if (thread.unread) {
         await client.call('threads.markRead', { threadId });
         if (!newest()) return;
@@ -304,7 +337,11 @@ export class Threads {
         }
         this.ctx.fail(error);
       }
+      await retire();
     } finally {
+      summaryRead.cancel();
+      permissionRead?.cancel();
+      questionRead?.cancel();
       if (newest()) this.loadingThreadId = null;
       await deselected;
     }
@@ -395,11 +432,13 @@ export class Threads {
     const cursor = open.messagesBefore;
     if (cursor === null || this.loadingOlder) return 0;
     this.loadingOlder = true;
-    const generation = this.openGeneration;
+    const generation = ++this.#olderGeneration;
+    const navigation = this.openGeneration;
+    const current = () => generation === this.#olderGeneration && this.ctx.currentNavigation(client, navigation);
     try {
       const page = await client.call('messages.list', { threadId: open.id, before: cursor, compactTools: true });
       const still = this.openThread;
-      if (this.ctx.client !== client || generation !== this.openGeneration || !still || still.id !== open.id || still.messagesBefore !== cursor) return 0;
+      if (!current() || !still || still.id !== open.id || still.messagesBefore !== cursor) return 0;
       const known = new Set(still.messages.map((m) => m.id));
       const older = page.messages.filter((m) => !known.has(m.id));
       still.messages.unshift(...older);
@@ -409,10 +448,10 @@ export class Threads {
       still.messagesBefore = page.before;
       return older.length;
     } catch (error) {
-      if (this.ctx.client === client && generation === this.openGeneration) this.ctx.fail(error);
+      if (current()) this.ctx.fail(error);
       return 0;
     } finally {
-      if (this.ctx.client === client && generation === this.openGeneration) this.loadingOlder = false;
+      if (current()) this.loadingOlder = false;
     }
   }
 
@@ -471,16 +510,19 @@ export class Threads {
     effort?: string | null;
     speed?: string | null;
     worktree?: { branch?: string };
-  }): Promise<ThreadSummary | null> {
+  }, options: { navigate?: boolean } = {}): Promise<ThreadSummary | null> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client) return null;
+    const generation = this.openGeneration;
     try {
       const summary = await client.call('threads.create', input);
+      if (!this.ctx.currentClient(client, clientGeneration)) return null;
       this.upsertThread(summary);
-      await this.ctx.store.open(summary.id);
+      if (options.navigate !== false && this.ctx.currentNavigation(client, generation)) await this.ctx.store.open(summary.id);
       return summary;
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentNavigation(client, generation)) this.ctx.fail(error);
       return null;
     }
   }
@@ -490,15 +532,17 @@ export class Threads {
     patch: { title?: string; accountId?: string; model?: string | null; effort?: string | null; speed?: string | null; permissionMode?: PermissionMode; expectedSelectionVersion?: number }
   ): Promise<boolean> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client) return false;
     try {
       const summary = await client.call('threads.update', { threadId, ...patch });
+      if (!this.ctx.currentClient(client, clientGeneration)) return false;
       this.upsertThread(summary);
       const open = this.openThread;
       if (open && open.id === threadId) Object.assign(open, summary);
       return true;
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
       return false;
     }
   }
@@ -518,30 +562,34 @@ export class Threads {
   /** The agent's own title for the thread, asked again. The menu item is out while it runs. */
   async retitle(threadId: ThreadId): Promise<void> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client || this.retitling.includes(threadId)) return;
     this.retitling = [...this.retitling, threadId];
     try {
       const summary = await client.call('threads.retitle', { threadId });
+      if (!this.ctx.currentClient(client, clientGeneration)) return;
       this.upsertThread(summary);
       const open = this.openThread;
       if (open && open.id === threadId) Object.assign(open, summary);
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     } finally {
-      this.retitling = this.retitling.filter((id) => id !== threadId);
+      if (this.ctx.currentClient(client, clientGeneration)) this.retitling = this.retitling.filter((id) => id !== threadId);
     }
   }
 
   async pin(threadId: ThreadId, pinned: boolean): Promise<void> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client) return;
     try {
       const summary = await client.call('threads.pin', { threadId, pinned });
+      if (!this.ctx.currentClient(client, clientGeneration)) return;
       this.upsertThread(summary);
       const open = this.openThread;
       if (open && open.id === threadId) open.pinned = summary.pinned;
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     }
   }
 
@@ -562,24 +610,29 @@ export class Threads {
 
   private async moveCall(threadId: ThreadId, call: (client: NonNullable<typeof this.ctx.client>) => Promise<ThreadSummary>): Promise<ThreadSummary | null> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client) return null;
     try {
       const summary = await call(client);
+      if (!this.ctx.currentClient(client, clientGeneration)) return null;
       this.upsertThread(summary);
       const open = this.openThread;
       if (open && open.id === threadId) Object.assign(open, summary);
       return summary;
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
       return null;
     }
   }
 
   async archive(threadId: ThreadId): Promise<void> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client) return;
     try {
       await client.call('threads.archive', { threadId, archived: true });
+      if (!this.ctx.currentClient(client, clientGeneration)) return;
+      this.ctx.threadReads.change(threadId, null);
       this.threads = this.threads.filter((t) => t.id !== threadId);
       this.ctx.requests.dropRequestsOf(threadId);
       const wasOpen = this.openThread?.id === threadId;
@@ -590,37 +643,43 @@ export class Threads {
         await this.ctx.store.openWhereLeft();
       }
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     }
   }
 
   async removeThread(threadId: ThreadId): Promise<boolean> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client) return false;
     try {
       await client.call('threads.remove', { threadId });
+      if (!this.ctx.currentClient(client, clientGeneration)) return false;
       await this.removed(threadId);
       return true;
     } catch (error) {
+      if (!this.ctx.currentClient(client, clientGeneration)) return false;
       if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) {
         this.ctx.store.error = strings.sidebar.deleteUnavailable;
-      } else this.ctx.fail(error);
+      } else if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
       return false;
     }
   }
 
   async restoreDeletedThread(threadId: ThreadId): Promise<ThreadSummary | null> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client) return null;
     try {
       const summary = await client.call('threads.restore', { threadId });
+      if (!this.ctx.currentClient(client, clientGeneration)) return null;
       this.upsertThread(summary);
       return summary;
-    } catch (error) { this.ctx.fail(error); return null; }
+    } catch (error) { if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error); return null; }
   }
 
   /** Applied to this machine only, for both RPC answers and removal events. */
   async removed(threadId: ThreadId): Promise<void> {
+    this.ctx.threadReads.change(threadId, null);
     const s = this.ctx.store;
     this.threads = this.threads.filter(t => t.id !== threadId);
     forgetArchivedThread(s, threadId);
@@ -639,6 +698,7 @@ export class Threads {
   // -------------------------------------------------------------------------
 
   async unsubscribe(): Promise<void> {
+    this.invalidateNavigation();
     const s = this.ctx.store;
     const delegation = this.ctx.delegation;
     const client = this.ctx.client;
@@ -655,28 +715,34 @@ export class Threads {
   }
 
   upsertThread(summary: ThreadSummary): void {
+    this.ctx.threadReads.change(summary.id, summary);
     const row = this.threads.find((t) => t.id === summary.id);
     if (row) patchRow(row, summary);
     else this.threads.push(summary);
   }
 
-  /** What the UI keeps per thread, dropped once the thread is archived or gone: a restored thread starts fresh. */
-  forgetThread(threadId: ThreadId): void {
+  /** Drops reading state; automatic archives can retain unsent input for restoration. */
+  forgetThread(threadId: ThreadId, preserveInput = false): void {
     const s = this.ctx.store;
     const composer = this.ctx.composer;
-    delete s.composerStates[threadId];
-    composer.previewUndo.delete(s.threadKey(threadId));
-    composer.pendingSends.delete(threadId);
+    if (preserveInput) {
+      const input = s.composerStates[threadId];
+      if (input) input.paused = true;
+    } else {
+      delete s.composerStates[threadId];
+      composer.previewUndo.delete(s.threadKey(threadId));
+      composer.pendingSends.delete(threadId);
+      rightPanel.forget(s.threadKey(threadId));
+    }
     this.readingThreads.delete(threadId);
     this.readingPositions.delete(threadId);
     if (s.terminalShown(threadId)) s.hideTerminal(threadId);
-    rightPanel.forget(s.threadKey(threadId));
   }
 
   /** The open thread, archived from another client, stayed on screen with its panel; leaving it lets that go. */
   leaveArchived(next: ThreadId | null): void {
     const left = this.openThread;
-    if (left?.archived && left.id !== next) this.forgetThread(left.id);
+    if (left?.archived && left.id !== next) this.forgetThread(left.id, left.archiveReason?.type === 'pr-merged');
   }
 
   threadSnapshots(threadId: ThreadId): Set<Thread> {

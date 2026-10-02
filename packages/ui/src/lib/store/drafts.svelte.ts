@@ -6,13 +6,18 @@ import type { StoreContext } from './context';
 import { strings } from '../strings';
 import { readDraftJournal, writeDraftJournal } from '../draft-journal';
 import { unresolvedAssetId, type DraftAttachment } from '../draft-attachments';
+import { secureId } from '../secure-id';
 
 type Input = Composer['composerStates'][string];
 type SavedDraft = { draft: Draft; choice: Choice | null; input: Input };
 type Journal = { updatedAt?: number; inputs?: Record<string, unknown>; drafts?: Record<string, unknown> };
+type Source = { section: 'inputs' | 'drafts'; id: string; input: Input; draft?: Draft };
+type CachedEntry = { section: Source['section']; id: string; value: unknown; serialized: string; updatedAt: number; backedUp: boolean };
+const entryKey = (section: Source['section'], id: string) => JSON.stringify([section, id]);
 const empty = (): Input => ({ text: '', attachments: [], queued: [], sending: false, paused: false });
 const hasText = (input: Input | undefined) => !!(input?.text || input?.queued.length);
 const hasContent = (input: Input | undefined) => hasText(input) || !!(input?.attachments.length || input?.previewReferences?.length);
+const vacant = (input: Input | undefined) => !hasContent(input) && !input?.editing && !input?.sending;
 const projectKey = (id: string | null) => JSON.stringify(id);
 /**
  * How long the durable journal waits after the last keystroke. The synchronous
@@ -29,15 +34,20 @@ export class Drafts {
   saved = $state<Record<string, SavedDraft>>({});
   #key: string | null = null;
   #stop: (() => void) | null = null;
-  #lastJournal: string | null = null;
+  #entries = new Map<string, CachedEntry>();
+  #collecting = false;
+  #changed = false;
+  #writingAssets = new Set<string>();
+  #storedAssetIds = new Set<string>();
+  #failedEntries = new Set<string>();
   #pending: { key: string; value: unknown } | null = null;
   #writing: Promise<void> | null = null;
   #generation = 0;
   #revision = 0;
   #assetIds = new Map<string, string>();
   #writeFailed = false;
-  #hydrated = false;
-  #durableReady = false;
+  #hydrated = $state(false);
+  #durableReady = $state(false);
   /** A file the durable journal has never held: its bytes live nowhere else yet. */
   #newAsset = false;
   /** The synchronous backup refused the last write, so the durable journal is the only copy. */
@@ -46,6 +56,8 @@ export class Drafts {
   #waitingSince = 0;
 
   constructor(private readonly ctx: StoreContext) {}
+
+  get readable(): boolean { return this.#hydrated && this.#durableReady; }
 
   async start(): Promise<void> {
     if (this.#stop) return;
@@ -61,29 +73,45 @@ export class Drafts {
       this.#durableReady = readable;
       this.#writeFailed = !readable;
       if (!readable) s.error = strings.errors.draftStorage;
-      const data = durable && (durable.updatedAt ?? 0) >= (local?.updatedAt ?? 0) ? durable
+      const previous = durable && (durable.updatedAt ?? 0) >= (local?.updatedAt ?? 0) ? durable
         : local?.incomplete && durable ? { ...local, inputs: { ...durable.inputs, ...local.inputs }, drafts: { ...durable.drafts, ...local.drafts } } : local;
+      const data = overlayBackup(this.#key!, previous);
       const assets = journalAssets(durable);
+      this.#storedAssetIds = new Set(assets.keys());
       for (const [id, bytes] of assets) this.#assetIds.set(bytes, id);
       this.#revision = typeof data?.updatedAt === 'number' && Number.isFinite(data.updatedAt) ? data.updatedAt : 0;
       if (data && typeof data === 'object') {
         for (const [id, input] of Object.entries(data.inputs ?? {})) {
           const restored = restoreInput(input, assets);
-          if (restored) this.ctx.composer.composerStates[id] ??= restored;
+          if (restored && vacant(this.ctx.composer.composerStates[id])) this.ctx.composer.composerStates[id] = restored;
         }
         for (const value of Object.values(data.drafts ?? {})) {
           const entry = value as Partial<SavedDraft> | null;
           if (!entry?.draft || (entry.draft.projectId !== null && typeof entry.draft.projectId !== 'string')) continue;
           const input = restoreInput(entry.input, assets);
-          if (input) this.saved[projectKey(entry.draft.projectId)] = {
+          const key = projectKey(entry.draft.projectId);
+          if (input && vacant(this.saved[key]?.input)) this.saved[key] = {
             draft: { projectId: entry.draft.projectId, worktree: entry.draft.worktree === true, worktreeExplicit: true },
             choice: null, input
           };
         }
+        const current = s.draft;
+        const saved = current && this.saved[projectKey(current.projectId)];
+        if (current && saved && vacant(this.ctx.composer.composerStates.draft)) {
+          this.ctx.composer.composerStates.draft = saved.input;
+          if (!current.worktreeExplicit) s.draft = { ...saved.draft };
+        }
       }
     } catch { /* An unavailable or malformed journal leaves the current session usable. */ }
     this.#hydrated = true;
-    const root = $effect.root(() => { $effect(() => this.persist()); });
+    this.persist();
+    const root = $effect.root(() => {
+      $effect(() => {
+        const sources = this.#sources();
+        untrack(() => this.#removeMissing(sources));
+        for (const source of sources) $effect(() => this.#capture(source));
+      });
+    });
     // Leaving the page or the app going to the background writes the durable
     // journal at once: a phone may never bring a hidden page back.
     const leave = () => { this.persist(); this.#writeNow(); };
@@ -106,8 +134,11 @@ export class Drafts {
     this.#key = null;
     this.#hydrated = false;
     this.#durableReady = false;
-    this.#lastJournal = null;
+    this.#entries.clear();
+    this.#changed = false;
     this.#assetIds.clear();
+    this.#storedAssetIds.clear();
+    this.#failedEntries.clear();
     this.saved = {};
   }
 
@@ -131,7 +162,13 @@ export class Drafts {
 
   forget(projectId: string | null): void { delete this.saved[projectKey(projectId)]; }
   has(projectId: string | null): boolean { return hasContent(this.saved[projectKey(projectId)]?.input); }
-  async flush(): Promise<boolean> { this.persist(); this.#writeNow(); while (this.#writing) await this.#writing; return !this.#writeFailed; }
+  async flush(): Promise<boolean> {
+    this.persist(); this.#writeNow();
+    while (this.#writing) await this.#writing;
+    // Without IndexedDB, every entry must have reached its synchronous backup.
+    return this.readable && !this.#writeFailed && !this.#failedEntries.size
+      && (typeof indexedDB !== 'undefined' || [...this.#entries.values()].every(entry => entry.backedUp));
+  }
 
   get entries(): { projectId: string | null; text: string; active: boolean }[] {
     const s = this.ctx.store;
@@ -146,42 +183,104 @@ export class Drafts {
     return entries;
   }
 
-  /**
-   * Called synchronously on typing, and reactively for queue, send and
-   * navigation changes. The small backup is written here, every time; the
-   * durable journal follows once typing pauses, or at once for a new file.
-   */
-  persist(): void {
-    if (!this.#key || !this.#hydrated) return;
-    const inputs = Object.fromEntries(Object.entries(this.ctx.composer.composerStates)
-      .filter(([id, input]) => id !== 'draft' && hasContent(input)).map(([id, input]) => [id, savedInput(input, this.#assetId)]));
-    const drafts = { ...this.saved };
-    const current = this.ctx.store.draft;
-    if (current) {
-      const input = this.ctx.composer.composerStates.draft;
-      const key = projectKey(current.projectId);
-      if (hasContent(input)) drafts[key] = { draft: current, choice: null, input: input! };
-      else delete drafts[key];
+  /** Back up new input before hydration; only a readable journal can receive a full checkpoint. */
+  persist(key?: string): void {
+    if (!this.#key) return;
+    this.#collecting = true;
+    try {
+      if (key !== undefined) {
+        const input = this.ctx.composer.composerStates[key];
+        const draft = this.ctx.store.draft;
+        if (key === 'draft') {
+          if (draft && input) this.#capture({ section: 'drafts', id: projectKey(draft.projectId), input, draft: { ...draft } });
+        } else if (input) this.#capture({ section: 'inputs', id: key, input });
+        else this.#capture(null, entryKey('inputs', key));
+      } else {
+        const sources = this.#sources();
+        this.#removeMissing(sources);
+        for (const source of sources) this.#capture(source);
+      }
+    } finally {
+      this.#collecting = false;
+      if (this.#changed || this.#writeFailed) this.#checkpoint();
+      else this.#pruneAssets();
     }
-    const full = { inputs, drafts: Object.fromEntries(Object.entries(drafts)
-      .filter(([, entry]) => hasContent(entry.input)).map(([id, entry]) => [id, { draft: { ...entry.draft }, input: savedInput(entry.input, this.#assetId) }])) };
-    // The small synchronous backup covers typing while the durable transaction is pending.
-    const journal = JSON.stringify(full, (key, value) => key === 'data' ? undefined : value);
-    untrack(() => {
-      if (journal === this.#lastJournal) return;
-      const updatedAt = this.#revision = Math.max(Date.now(), this.#revision + 1);
-      // The journal is an object: the stamp goes in before its closing brace,
-      // rather than parsing the whole text back to add one field.
-      const stamp = `,"updatedAt":${updatedAt}${this.#durableReady ? '' : ',"incomplete":true'}}`;
-      try { localStorage.setItem(this.#key!, journal.slice(0, -1) + stamp); this.#backupFailed = false; }
-      catch { this.#backupFailed = true; if (typeof indexedDB === 'undefined') this.ctx.store.error = strings.errors.draftStorage; }
-      this.#lastJournal = journal;
-      // Never replace a durable journal we could not read. Text still has its backup.
-      if (!this.#durableReady) return;
-      this.#pending = { key: this.#key!, value: { ...full, updatedAt } };
+  }
+
+  #sources(): Source[] {
+    const sources: Source[] = Object.entries(this.ctx.composer.composerStates)
+      .filter(([id]) => id !== 'draft').map(([id, input]) => ({ section: 'inputs', id, input }));
+    const drafts = new Map(Object.entries(this.saved).map(([id, entry]) => [id, { section: 'drafts' as const, id, input: entry.input, draft: { ...entry.draft } }]));
+    const current = this.ctx.store.draft;
+    const input = this.ctx.composer.composerStates.draft;
+    if (current && input) drafts.set(projectKey(current.projectId), { section: 'drafts', id: projectKey(current.projectId), input, draft: { ...current } });
+    return [...sources, ...drafts.values()];
+  }
+
+  #removeMissing(sources: Source[]): void {
+    const present = new Set(sources.map(source => entryKey(source.section, source.id)));
+    for (const key of this.#failedEntries) if (!present.has(key)) this.#failedEntries.delete(key);
+    for (const key of this.#entries.keys()) if (!present.has(key)) this.#capture(null, key);
+  }
+
+  #capture(source: Source | null, key = source ? entryKey(source.section, source.id) : ''): void {
+    if (!this.#key) return;
+    try {
+      const input = source && hasContent(source.input) ? savedInput(source.input, this.#assetId) : null;
+      const value = input && source ? source.section === 'drafts' ? { draft: source.draft, input } : input : null;
+      const stored = this.#storedAssetIds;
+      // Until a strict durable write succeeds, keep inline bytes in the atomic
+      // backup too. This also preserves old journals without IndexedDB.
+      const serialized = JSON.stringify(value, function (this: { assetId?: string }, field, value) {
+        return field === 'data' && stored.has(this.assetId ?? '') ? undefined : value;
+      });
+      untrack(() => {
+        const previous = this.#entries.get(key);
+        this.#failedEntries.delete(key);
+        // A blank placeholder cannot delete a journal entry we did not read.
+        if (value === null && !previous) return;
+        if (previous?.serialized === serialized && previous.backedUp) return;
+        const updatedAt = this.#revision = Math.max(Date.now(), this.#revision + 1);
+        const entry = { section: source?.section ?? previous!.section, id: source?.id ?? previous!.id, value, serialized, updatedAt, backedUp: false };
+        this.#entries.set(key, entry);
+        // Each atomic entry includes its own revision; null is a deletion tombstone.
+        // The old complete v1 backup remains available throughout migration.
+        try { localStorage.setItem(`${this.#key}:entry:${key}`, `{"updatedAt":${updatedAt},"value":${serialized}}`); entry.backedUp = true; }
+        catch { if (typeof indexedDB === 'undefined') this.ctx.store.error = strings.errors.draftStorage; }
+        this.#changed = true;
+        if (!this.#collecting) this.#checkpoint();
+      });
+    } catch {
+      this.#failedEntries.add(key);
+      this.#writeFailed = true;
+      this.ctx.store.error = strings.errors.draftStorage;
+    }
+  }
+
+  #checkpoint(): void {
+    this.#changed = false;
+    this.#backupFailed = [...this.#entries.values()].some(entry => !entry.backedUp);
+    if (this.#durableReady) {
+      const inputs: Record<string, unknown> = {}, drafts: Record<string, unknown> = {};
+      for (const entry of this.#entries.values()) if (entry.value !== null) (entry.section === 'inputs' ? inputs : drafts)[entry.id] = entry.value;
+      this.#pending = { key: this.#key!, value: { inputs, drafts, updatedAt: this.#revision } };
       if (this.#newAsset || this.#backupFailed) this.#writeNow();
       else this.#writeLater();
-    });
+    }
+    this.#pruneAssets();
+  }
+
+  #pruneAssets(): void {
+    const retained = new Set(this.#writingAssets);
+    for (const entry of this.#entries.values()) {
+      const input = (entry.section === 'inputs' ? entry.value : (entry.value as { input?: Input } | null)?.input) as Input | null;
+      if (!input) continue;
+      for (const file of [...input.attachments, ...input.queued.flatMap(item => item.attachments)]) {
+        if (typeof file.data === 'string') retained.add(file.data);
+      }
+    }
+    for (const bytes of journalAssets(this.#pending?.value).values()) retained.add(bytes);
+    for (const bytes of this.#assetIds.keys()) if (!retained.has(bytes)) this.#assetIds.delete(bytes);
   }
 
   /** The durable journal after a pause in typing, never later than the longest wait. */
@@ -202,7 +301,7 @@ export class Drafts {
 
   #assetId = (bytes: string): string => {
     let id = this.#assetIds.get(bytes);
-    if (!id) { id = crypto.randomUUID(); this.#assetIds.set(bytes, id); this.#newAsset = true; }
+    if (!id) { id = secureId(); this.#assetIds.set(bytes, id); this.#newAsset = true; }
     return id;
   };
 
@@ -218,10 +317,24 @@ export class Drafts {
     while (this.#pending && this.#timer === undefined) {
       const next = this.#pending;
       this.#pending = null;
-      try { await writeDraftJournal(next.key, next.value); this.#writeFailed = false; }
-      catch {
-        if (next.key === this.#key) { this.#writeFailed = true; this.#lastJournal = null; this.ctx.store.error = strings.errors.draftStorage; }
+      this.#writingAssets = new Set(journalAssets(next.value).values());
+      try {
+        await writeDraftJournal(next.key, next.value);
+        if (next.key === this.#key) {
+          this.#writeFailed = false;
+          if (typeof indexedDB !== 'undefined') {
+            this.#storedAssetIds = new Set(journalAssets(next.value).keys());
+            // Retire the complete legacy backup only after the strict commit
+            // and a successful synchronous backup for every current entry.
+            if ([...this.#entries.values()].every(entry => entry.backedUp)) {
+              try { localStorage.removeItem(next.key); } catch { /* Keep the older backup. */ }
+            }
+          }
+        }
       }
+      catch {
+        if (next.key === this.#key) { this.#writeFailed = true; this.ctx.store.error = strings.errors.draftStorage; }
+      } finally { this.#writingAssets.clear(); this.#pruneAssets(); }
     }
   }
 }
@@ -275,4 +388,26 @@ function journalAssets(value: unknown): Map<string, string> {
     }
   }
   return assets;
+}
+
+/** Overlay only newer entry revisions, preserving older journals and deletion intent. */
+function overlayBackup(key: string, previous: Journal | null): Journal | null {
+  const prefix = `${key}:entry:`;
+  let data = previous;
+  const checkpoint = previous?.updatedAt ?? 0;
+  let names: string[];
+  try { names = Object.keys(localStorage); } catch { return previous; }
+  for (const name of names) {
+    if (!name.startsWith(prefix)) continue;
+    try {
+      const [section, id] = JSON.parse(name.slice(prefix.length));
+      const entry = JSON.parse(localStorage.getItem(name)!);
+      if (!['inputs', 'drafts'].includes(section) || typeof id !== 'string' || typeof entry.updatedAt !== 'number' || !Number.isFinite(entry.updatedAt) || entry.updatedAt <= checkpoint || !('value' in entry)) continue;
+      data ??= { inputs: {}, drafts: {} };
+      data = { ...data, inputs: { ...data.inputs }, drafts: { ...data.drafts }, updatedAt: Math.max(data.updatedAt ?? 0, entry.updatedAt) };
+      const entries = section === 'inputs' ? data.inputs! : data.drafts!;
+      if (entry.value === null) delete entries[id]; else entries[id] = entry.value;
+    } catch { /* One malformed entry does not hide recoverable inputs. */ }
+  }
+  return data;
 }

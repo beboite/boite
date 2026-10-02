@@ -1,26 +1,26 @@
 # The Android app
 
 `apps/android` is a Trusted Web Activity: a small Android package that opens
-one core's page in Chrome, full screen, with no address bar. Everything on
-screen is the UI that core serves, so the app changes when the core updates,
-not when the APK does. Chrome still runs the page, which keeps the service
-worker, Web Push and the microphone working as they do in the installed web app
+one core's page in Chrome, full screen, without an address bar. The core serves
+the UI, so core updates change the app without an APK update. Chrome runs the
+page and keeps the service worker, Web Push and microphone working as they do
+in the installed web app
 ([phone.md](phone.md)). The package is `com.boite.two`.
 
 ## One host per APK
 
-A TWA trusts a single origin, fixed at build time. The repository names none:
-the nightly reads it from the repository variable `ANDROID_HOST`, a bare
-hostname such as `boite.example.com`, and refuses to publish without it. The
+A TWA trusts a single origin, fixed at build time. The repository has no
+hard-coded origin. The nightly requires `ANDROID_HOST`, a repository variable
+containing a bare hostname such as `boite.example.com`, before publishing. The
 page must be served over HTTPS at that host, through a proxy as in
 [phone.md](phone.md).
 
 Android opens the page full screen only after it has checked both halves of
 Digital Asset Links. The app half is inside the APK and names the host. The site
-half is `/.well-known/assetlinks.json`, which every core serves from
-`packages/ui/public/.well-known/`, and names the package and the certificate
-that signs it. When the check fails, the app still opens, in a Custom Tab with
-an address bar.
+half is `/.well-known/assetlinks.json`, served by every core from
+`packages/ui/public/.well-known/`. It names the package and its signing
+certificate. If validation fails, the app opens in a Custom Tab with an address
+bar.
 
 The APK also claims `https://<host>/` links. Set the core's Public HTTPS address
 to that same host, and a pairing QR code scanned on the phone opens the app
@@ -37,18 +37,17 @@ matches and the version code is higher.
 ## What a nightly publishes
 
 The nightly calls `.github/workflows/android.yml` with `release: true`.
-`scripts/ci/android-apk.ts reuse` looks at the newest published release that
-carries a signed APK and takes that file back, under its original name, when
-all of these hold:
+`scripts/ci/android-apk.ts reuse` checks the newest published release with a
+signed APK. It reuses that file under its original name when all of these hold:
 
 - `apps/android/` has no change between that release's tag and this commit;
 - the APK opens the host `ANDROID_HOST` names now;
 - its certificate is the one `assetlinks.json` publishes.
 
-Otherwise the job builds, signs with `apksigner` and checks the certificate
-again before uploading. A reused file keeps the version it was built with,
-which is why its name can be older than the release it sits on. Nothing else
-in the repository goes into the APK, so a UI or core change never rebuilds it.
+Otherwise the job builds the APK, signs it with `apksigner` and checks the
+certificate before uploading. A reused APK keeps its original version, so its
+filename may name an older version than the release containing it. Only the
+Android wrapper goes into the APK; UI and core changes never rebuild it.
 
 The version name is the nightly version and the version code is the number of
 commits on `main`, which only grows. `ci` builds an unsigned APK when
@@ -57,11 +56,11 @@ commits on `main`, which only grows. `ci` builds an unsigned APK when
 
 ## The signing key
 
-A PKCS12 keystore holding one key under the alias `boite`, stored as the
-repository secrets `ANDROID_KEYSTORE` (base64 of the file) and
-`ANDROID_KEYSTORE_PASSWORD`. The same password protects the key. A missing
-secret fails the job: an unsigned APK is not a fallback, since no phone
-installs one.
+The PKCS12 keystore holds one signing key under the alias `boite`. Repository
+secrets hold `ANDROID_KEYSTORE` (the base64-encoded file) and
+`ANDROID_KEYSTORE_PASSWORD`; the same password protects the key. A missing
+secret fails the job. It never falls back to an unsigned APK, which phones
+cannot install.
 
 Changing the key means a new SHA-256 fingerprint in `assetlinks.json`, and
 every installed app must be uninstalled first, because Android refuses an
@@ -83,6 +82,6 @@ version and `1`. The unsigned APK lands in
 `zipalign` and `apksigner` as the workflow does.
 
 The wrapper came from [Bubblewrap](https://github.com/GoogleChromeLabs/bubblewrap).
-Regenerating it would write literal values over `app/build.gradle`, which reads
-the host and version from Gradle properties, and drop the hand-added
-`RECORD_AUDIO` permission that dictation needs. Edit the files instead.
+Regenerating it would replace the property-based host and version settings in
+`app/build.gradle` with literal values. It would also drop the added
+`RECORD_AUDIO` permission needed for dictation. Edit the files directly.

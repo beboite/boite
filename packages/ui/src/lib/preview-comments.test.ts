@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, vi } from 'vitest';
+import { test } from '../test/fake-client';
 import { flushSync, mount, unmount } from 'svelte';
 import BrowserSurface from '../components/BrowserSurface.svelte';
 import { browserBridge, FakeBridge, type BrowserEvent } from './browser-bridge';
@@ -8,7 +9,6 @@ import { strings } from './strings';
 import { installPreviewPicker, previewReferenceLabel, validPreviewSelection } from './preview-comments';
 import highlightPreviewElement from './preview-highlight.js';
 import { Store } from './store.svelte';
-import { FakeClient } from './fake-client';
 import { editPreviewMentions, insertPreviewMention, restorePreviewMentions } from './preview-mentions';
 
 afterEach(() => { document.body.innerHTML = ''; });
@@ -143,11 +143,8 @@ test('iframe picking reports invalid geometry and can pick again after failure',
   } finally { bridge.destroy('invalid'); }
 });
 
-test('an invalid native selection settles the picker, reports failure and permits an immediate retry', async () => {
-  const store = new Store();
-  const client = new FakeClient({ delayMs: 0 });
-  store.attach(client);
-  await store.connect();
+test('an invalid native selection settles the picker, reports failure and permits an immediate retry', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0 });
   await store.open('t-trace');
   const panel = new RightPanelStore().for('t-trace');
   const surface = panel.open('browser', 'https://example.test');
@@ -183,16 +180,11 @@ test('an invalid native selection settles the picker, reports failure and permit
     setExperiment('preview-comments', previewCommentsWasEnabled);
     subscription.mockRestore();
     annotate.mockRestore();
-    store.detach();
-    client.close();
   }
 });
 
-test('Escape in the address field cancels active picking and restores the current URL', async () => {
-  const store = new Store();
-  const client = new FakeClient({ delayMs: 0 });
-  store.attach(client);
-  await store.connect();
+test('Escape in the address field cancels active picking and restores the current URL', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0 });
   await store.open('t-trace');
   const panel = new RightPanelStore().for('t-trace');
   const surface = panel.open('browser', 'https://example.test');
@@ -222,8 +214,6 @@ test('Escape in the address field cancels active picking and restores the curren
     await unmount(component);
     setExperiment('preview-comments', previewCommentsWasEnabled);
     annotate.mockRestore();
-    store.detach();
-    client.close();
   }
 });
 
@@ -270,11 +260,8 @@ test('inline mentions distinguish identical labels and restore metadata on nativ
   expect(capped.composerStates.thread!.previewReferences?.some(ref => ref.id === 'ref-0')).toBe(false);
 });
 
-test('accepted sends retry the same reference request and changed references receive a new request id', async () => {
-  const store = new Store();
-  const client = new FakeClient({ delayMs: 0 });
-  store.attach(client);
-  await store.connect();
+test('accepted sends retry the same reference request and changed references receive a new request id', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0 });
   await store.open('t-trace');
   const reference = { id: 'retry-ref', url: 'https://example.test', selector: '#save', text: 'Save', bounds: { x: 0, y: 0, width: 1, height: 1 } };
   const real = client.call.bind(client);
@@ -288,14 +275,12 @@ test('accepted sends retry the same reference request and changed references rec
     }
     return result;
   });
-  try {
-    expect(await store.send('Change it', 't-trace', [], [reference])).toBe(false);
-    expect(await store.send('Change it', 't-trace', [], [reference])).toBe(true);
-    expect(requests[0]).toBe(requests[1]);
-    await client.settled();
-    expect(await store.send('Change it', 't-trace', [], [{ ...reference, selector: '#other' }])).toBe(true);
-    expect(requests[2]).not.toBe(requests[1]);
-    expect(await store.send('/goal Change it', 't-trace', [], [reference])).toBe(false);
-    expect(store.error).toContain('references');
-  } finally { store.detach(); client.close(); }
+  expect(await store.send('Change it', 't-trace', [], [reference])).toBe(false);
+  expect(await store.send('Change it', 't-trace', [], [reference])).toBe(true);
+  expect(requests[0]).toBe(requests[1]);
+  await client.settled();
+  expect(await store.send('Change it', 't-trace', [], [{ ...reference, selector: '#other' }])).toBe(true);
+  expect(requests[2]).not.toBe(requests[1]);
+  expect(await store.send('/goal Change it', 't-trace', [], [reference])).toBe(false);
+  expect(store.error).toContain('references');
 });

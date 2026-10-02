@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { closeSync, mkdtempSync, openSync, readFileSync, readSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { killProcessTree, removeDirectory } from '../../tests/e2e/lib/core.ts';
@@ -29,7 +29,7 @@ function powershell(script: string): string {
   return run.stdout.toString();
 }
 
-/** One Win32_Process pass. Everything else here reads from this snapshot. */
+/** One Win32_Process pass for the snapshot-based helpers. */
 export function snapshot(): Map<number, ProcessInfo> {
   const raw = powershell(
     'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,WorkingSetSize,ExecutablePath | ConvertTo-Json -Compress',
@@ -56,6 +56,33 @@ export function snapshot(): Map<number, ProcessInfo> {
 }
 
 export function workingSet(pid: number, from?: Map<number, ProcessInfo>): number {
+  if (from === undefined && process.platform === 'linux') {
+    if (!Number.isSafeInteger(pid) || pid <= 0) throw new RangeError('pid: expected a positive safe integer');
+    const path = `/proc/${pid}/status`;
+    let fd: number | undefined;
+    try {
+      fd = openSync(path, 'r');
+      const limit = 64 * 1024;
+      const buffer = Buffer.alloc(limit + 1);
+      let length = 0;
+      while (length < buffer.length) {
+        const bytes = readSync(fd, buffer, length, buffer.length - length, null);
+        if (bytes === 0) break;
+        length += bytes;
+      }
+      if (length > limit) throw new Error(`${path}: expected at most ${limit} bytes`);
+      const rss = /^VmRSS:\s+(\d+)\s+kB$/m.exec(buffer.toString('utf8', 0, length));
+      if (!rss) throw new Error(`${path}: expected VmRSS in kB`);
+      const bytes = Number(rss[1]) * 1024;
+      if (!Number.isSafeInteger(bytes)) throw new Error(`${path}: expected VmRSS within safe byte range`);
+      return bytes;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
+      throw error;
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+    }
+  }
   const table = from ?? snapshot();
   return table.get(pid)?.workingSetBytes ?? 0;
 }

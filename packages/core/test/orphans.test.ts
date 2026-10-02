@@ -76,12 +76,12 @@ describe('orphan sweep', () => {
     procs.applySettings(DEFAULT_SETTINGS);
     // The agent, its MCP server, a shell, what the shell started and its child.
     const sink = job.sink();
-    sink.started(THREAD, 100, { exe: 'C:\\agent\\claude.exe', commandLine: null, parentPid: process.pid });
-    sink.started(THREAD, 101, { exe: 'C:\\tools\\mcp.exe', commandLine: null, parentPid: 100 });
-    sink.started(THREAD, 102, { exe: 'C:\\Windows\\cmd.exe', commandLine: null, parentPid: 100 });
-    sink.started(THREAD, 103, { exe: 'C:\\tools\\bun.exe', commandLine: null, parentPid: 102 });
-    sink.started(THREAD, 104, { exe: 'C:\\tools\\chrome.exe', commandLine: null, parentPid: 103 });
-    sink.started(THREAD, 105, { exe: 'C:\\tools\\unknown.exe', commandLine: null, parentPid: null });
+    sink.started(THREAD, 100, { exe: 'C:\\agent\\claude.exe', commandLine: null, parentPid: process.pid, startedAt: 1000 });
+    sink.started(THREAD, 101, { exe: 'C:\\tools\\mcp.exe', commandLine: null, parentPid: 100, startedAt: 2000 });
+    sink.started(THREAD, 102, { exe: 'C:\\Windows\\cmd.exe', commandLine: null, parentPid: 100, startedAt: 3000 });
+    sink.started(THREAD, 103, { exe: 'C:\\tools\\bun.exe', commandLine: null, parentPid: 102, startedAt: 4000 });
+    sink.started(THREAD, 104, { exe: 'C:\\tools\\chrome.exe', commandLine: null, parentPid: 103, startedAt: 4500 });
+    sink.started(THREAD, 105, { exe: 'C:\\tools\\unknown.exe', commandLine: null, parentPid: null, startedAt: 4600 });
     // An interrupted command: the shell goes, what it started stays.
     sink.exited(THREAD, 102, { exitCode: 1, cpuMs: null, peakMemoryBytes: null, ioBytes: null });
   });
@@ -124,8 +124,8 @@ describe('orphan sweep', () => {
     await Bun.sleep(5);
     // The shell 102 exited in the setup. Windows hands its pid to a new shell,
     // which starts a dev server in the background.
-    sink.started(THREAD, 102, { exe: 'C:\\tools\\bash.exe', commandLine: null, parentPid: 100 });
-    sink.started(THREAD, 110, { exe: 'C:\\tools\\node.exe', commandLine: null, parentPid: 102 });
+    sink.started(THREAD, 102, { exe: 'C:\\tools\\bash.exe', commandLine: null, parentPid: 100, startedAt: 5000 });
+    sink.started(THREAD, 110, { exe: 'C:\\tools\\node.exe', commandLine: null, parentPid: 102, startedAt: 5100 });
     expect(procs.liveOf(THREAD).map((record) => record.pid).sort()).toEqual([100, 101, 102, 103, 104, 105, 110]);
 
     bus.emit(...turn('turn.finished'));

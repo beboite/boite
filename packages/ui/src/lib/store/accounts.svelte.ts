@@ -79,13 +79,15 @@ export class Accounts {
   }): Promise<Account | null> {
     const client = this.ctx.client;
     if (!client) return null;
+    const generation = this.ctx.clientGeneration;
     try {
       const account = await client.call('accounts.add', input);
+      if (!this.ctx.currentClient(client, generation)) return null;
       if (!this.accounts.some((a) => a.id === account.id))
         this.accounts = [...this.accounts, account];
       return account;
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
       return null;
     }
   }
@@ -106,34 +108,41 @@ export class Accounts {
   }
 
   async renameAccount(accountId: string, label: string): Promise<boolean> {
-    if (!this.ctx.client) return false;
+    const client = this.ctx.client;
+    if (!client) return false;
+    const generation = this.ctx.clientGeneration;
     try {
-      const account = await this.ctx.client.call('accounts.rename', { accountId, label });
+      const account = await client.call('accounts.rename', { accountId, label });
+      if (!this.ctx.currentClient(client, generation)) return false;
       this.accounts = this.accounts.map(entry => entry.id === account.id ? account : entry);
       return true;
-    } catch (error) { this.ctx.fail(error); return false; }
+    } catch (error) { if (this.ctx.currentClient(client, generation)) this.ctx.fail(error); return false; }
   }
 
   async removeAccount(accountId: string): Promise<void> {
     const client = this.ctx.client;
     if (!client) return;
+    const generation = this.ctx.clientGeneration;
     try {
       await client.call('accounts.remove', { accountId });
+      if (!this.ctx.currentClient(client, generation)) return;
       this.accounts = this.accounts.filter((a) => a.id !== accountId);
       delete this.logins[accountId];
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
     }
   }
 
   async cancelLogin(accountId: string): Promise<void> {
     const client = this.ctx.client;
     if (!client) return;
+    const generation = this.ctx.clientGeneration;
     try {
       await client.call('accounts.loginCancel', { accountId });
+      if (!this.ctx.currentClient(client, generation)) return;
       this.dismissLogin(accountId);
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
     }
   }
 
@@ -147,10 +156,11 @@ export class Accounts {
   async loginAccount(accountId: string): Promise<void> {
     const client = this.ctx.client;
     if (!client) return;
+    const generation = this.ctx.clientGeneration;
     try {
       await client.call('accounts.login', { accountId });
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
     }
   }
 
@@ -158,22 +168,25 @@ export class Accounts {
   async sendLoginInput(accountId: string, text: string): Promise<void> {
     const client = this.ctx.client;
     if (!client || text.trim().length === 0) return;
+    const generation = this.ctx.clientGeneration;
     try {
       await client.call('accounts.loginInput', { accountId, text: text.trim() });
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
     }
   }
 
   async checkAccount(accountId: string, refresh = false): Promise<Account | null> {
     const client = this.ctx.client;
     if (!client) return null;
+    const generation = this.ctx.clientGeneration;
     try {
       const account = await client.call('accounts.check', { accountId, ...(refresh ? { refresh: true } : {}) });
+      if (!this.ctx.currentClient(client, generation)) return null;
       this.accounts = this.accounts.map((a) => (a.id === account.id ? account : a));
       return account;
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
       return null;
     }
   }
@@ -185,13 +198,18 @@ export class Accounts {
   async reloadProviders(): Promise<boolean> {
     const client = this.ctx.client;
     if (!client) return false;
+    const generation = this.ctx.clientGeneration;
     try {
       const { loaded } = await client.call('providers.reload', {});
+      if (!this.ctx.currentClient(client, generation)) return false;
       this.providers = loaded;
-      for (const account of this.accounts) await this.ctx.store.checkAccount(account.id);
-      return true;
+      for (const account of this.accounts) {
+        if (!this.ctx.currentClient(client, generation)) return false;
+        await this.ctx.store.checkAccount(account.id);
+      }
+      return this.ctx.currentClient(client, generation);
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
       return false;
     }
   }
@@ -204,12 +222,14 @@ export class Accounts {
   async loadHarnessUpdates(refresh = false): Promise<void> {
     const client = this.ctx.client;
     if (!client || !this.ctx.store.owner) return;
+    const generation = this.ctx.clientGeneration;
     try {
       const updates = await client.call('providers.updates', refresh ? { refresh: true } : {});
-      if (client === this.ctx.client) this.harnessUpdates = updates;
+      if (this.ctx.currentClient(client, generation)) this.harnessUpdates = updates;
     } catch (error) {
+      if (!this.ctx.currentClient(client, generation)) return;
       if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) {
-        if (client === this.ctx.client) this.harnessUpdates = [];
+        this.harnessUpdates = [];
         return;
       }
       if (refresh) this.ctx.fail(error);
@@ -220,21 +240,26 @@ export class Accounts {
   async updateHarness(providerId: ProviderId): Promise<void> {
     const client = this.ctx.client;
     if (!client) return;
+    const generation = this.ctx.clientGeneration;
     try {
       const update = await client.call('providers.update', { providerId });
+      if (!this.ctx.currentClient(client, generation)) return;
       this.#putHarnessUpdate(update);
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
     }
   }
 
   async skipHarnessUpdate(providerId: ProviderId, version: string | null): Promise<void> {
     const client = this.ctx.client;
     if (!client) return;
+    const generation = this.ctx.clientGeneration;
     try {
-      this.#putHarnessUpdate(await client.call('providers.updateSkip', { providerId, version }));
+      const update = await client.call('providers.updateSkip', { providerId, version });
+      if (!this.ctx.currentClient(client, generation)) return;
+      this.#putHarnessUpdate(update);
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
     }
   }
 
@@ -248,12 +273,14 @@ export class Accounts {
   async installProvider(providerId: ProviderId): Promise<boolean> {
     const client = this.ctx.client;
     if (!client) return false;
+    const generation = this.ctx.clientGeneration;
     try {
       const state = await client.call('providers.install', { providerId });
+      if (!this.ctx.currentClient(client, generation)) return false;
       this.installStates = { ...this.installStates, [providerId]: state };
       return true;
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
       return false;
     }
   }
@@ -263,10 +290,11 @@ export class Accounts {
     const state = this.ctx.store.installOf(providerId);
     if (!client || state === null || state.state === 'absent' || state.state === 'installed' || state.state === 'failed')
       return;
+    const generation = this.ctx.clientGeneration;
     try {
       await client.call('providers.installCancel', { providerId, operationId: state.operationId });
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
     }
   }
 
@@ -274,11 +302,13 @@ export class Accounts {
   async uninstallProvider(providerId: ProviderId): Promise<void> {
     const client = this.ctx.client;
     if (!client) return;
+    const generation = this.ctx.clientGeneration;
     try {
       const state = await client.call('providers.uninstall', { providerId });
+      if (!this.ctx.currentClient(client, generation)) return;
       this.installStates = { ...this.installStates, [providerId]: state };
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
     }
   }
 }

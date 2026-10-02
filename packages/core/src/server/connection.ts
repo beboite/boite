@@ -1,4 +1,4 @@
-import type { RpcError, RpcEventName, RpcEvents, ThreadId } from '@boite/contracts';
+import { RPC_MAX_FRAME_BYTES, RpcErrorCode, type RpcError, type RpcEventName, type RpcEvents, type ThreadId } from '@boite/contracts';
 import type { ServerWebSocket } from 'bun';
 import type { Core } from '../core.ts';
 import { newId } from '../ids.ts';
@@ -99,7 +99,24 @@ export class ServerConnection implements Connection {
 
   sendResponse(response: OutgoingResponse): void {
     this.flushPaced();
-    if (this.write(response) === 0) this.close(1013, 'connection dropped a response; reconnect');
+    let serialized = JSON.stringify(response);
+    const bytes = Buffer.byteLength(serialized);
+    if (bytes > RPC_MAX_FRAME_BYTES) {
+      const error: RpcError = { code: RpcErrorCode.Refused,
+        message: `RPC response exceeds ${RPC_MAX_FRAME_BYTES} serialized UTF-8 bytes; request a smaller result`,
+        data: { field: 'response', bytes, max: RPC_MAX_FRAME_BYTES, expected: `a complete RPC response at most ${RPC_MAX_FRAME_BYTES} serialized UTF-8 bytes` },
+      };
+      serialized = JSON.stringify({ jsonrpc: '2.0', id: response.id, error });
+      if (Buffer.byteLength(serialized) > RPC_MAX_FRAME_BYTES) {
+        // A large valid caller ID may leave room only for a minimal matched error.
+        serialized = JSON.stringify({ jsonrpc: '2.0', id: response.id, error: { code: RpcErrorCode.Refused, message: 'RPC response exceeds the 16 MiB frame limit' } });
+        if (Buffer.byteLength(serialized) > RPC_MAX_FRAME_BYTES) {
+          this.close(1009, 'request ID leaves no room for a bounded RPC response');
+          return;
+        }
+      }
+    }
+    if (this.write(response, serialized) === 0) this.close(1013, 'connection dropped a response; reconnect');
   }
 
   close(code: number, reason?: string): void {
@@ -115,9 +132,9 @@ export class ServerConnection implements Connection {
     return this.socket?.getBufferedAmount() ?? 0;
   }
 
-  private write(frame: unknown): number {
+  private write(frame: unknown, serialized?: string): number {
     if (this.socket === null) return 0;
-    return this.socket.send(JSON.stringify(frame), this.remote);
+    return this.socket.send(serialized ?? JSON.stringify(frame), this.remote);
   }
 
   /**

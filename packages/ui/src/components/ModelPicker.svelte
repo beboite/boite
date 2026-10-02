@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { ChevronDown, ChevronRight, Plug, Sparkles, Star, RefreshCw } from '@lucide/svelte';
   import { isNamedModel, orderedModels, type FavoriteModel } from '../lib/model-order';
   import type { Account, ModelInfo } from '@boite/contracts';
@@ -42,7 +43,12 @@
 
   const popover = new Closing();
   const legacy = new Closing();
-  $effect(() => { if (!popover.open) legacy.hide(); });
+  let mounted = true;
+  let pickEpoch = 0;
+  onDestroy(() => { mounted = false; pickEpoch += 1; });
+  $effect(() => {
+    if (!popover.open) { legacy.hide(); pickEpoch += 1; pickPending = false; }
+  });
   let legacyOpen = $derived(legacy.open);
   let menu = $state<HTMLDivElement | undefined>(undefined);
   let root = $state<HTMLDivElement | undefined>(undefined);
@@ -52,22 +58,43 @@
   /** The provider whose column is shown: the choice's until another tile is clicked. */
   let shownProviderId = $state<string | null>(null);
   let favoritesOpen = $state(false);
-  let favoritePending = $state(false);
+  let pickPending = $state(false);
   const favorites = $derived(store.favorites.filter((f) => store.accountOf(f.accountId)?.providerId === f.providerId));
   const favoriteSet = $derived.by(() => favoriteIds(store.favorites, shown?.id, shownAccountId));
   function favorite(model: ModelInfo): boolean {
     return favoriteSet.has(model.id);
   }
-  async function pickFavorite(entry: FavoriteModel) {
-    if (favoritePending) return;
-    favoritePending = true;
+  async function applyPick(instance: { providerId: string; accountId: string }, requested?: string, close = true) {
+    if (pickPending || disabled) return;
+    const owner = store;
+    const generation = owner.clientGeneration;
+    const navigation = owner.navigationGeneration;
+    const epoch = ++pickEpoch;
+    const apply = onpick;
+    const current = () => mounted && epoch === pickEpoch && store === owner
+      && owner.clientGeneration === generation && owner.navigationGeneration === navigation;
+    pickPending = true;
     try {
-      const protocol = store.providerOf(entry.providerId)?.protocol;
-      if (protocol === 'claude-sdk' || protocol === 'acp' || protocol === 'codex-appserver' || protocol === 'muse' || protocol === 'pi' || protocol === 'agy') await store.probeModels(entry.providerId, entry.accountId);
-      if (!store.modelsOf(entry.providerId, entry.accountId).some((m) => m.id === entry.model.id)) { store.error = strings.composer.favoriteUnavailable; return; }
-      onpick({ providerId: entry.providerId, accountId: entry.accountId, model: entry.model.id });
-      popover.hide();
-    } finally { favoritePending = false; }
+      const provider = owner.providerOf(instance.providerId);
+      if (!provider) return;
+      const native = ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'].includes(provider.protocol);
+      if (native) await owner.probeModels(instance.providerId, instance.accountId);
+      if (!current()) return;
+      const models = owner.modelsOf(instance.providerId, instance.accountId);
+      const preferred = owner.defaultModelOf(provider, instance.accountId);
+      const model = requested ?? (models.some(entry => entry.id === preferred) ? preferred
+        : models.find(entry => entry.default)?.id ?? models[0]?.id ?? null);
+      if ((model !== null && !models.some(entry => entry.id === model)) || (native && models.length === 0)) {
+        owner.error = strings.composer.favoriteUnavailable;
+        return;
+      }
+      apply({ ...instance, model });
+      if (close) popover.hide();
+    } finally { if (epoch === pickEpoch) pickPending = false; }
+  }
+
+  function pickFavorite(entry: FavoriteModel) {
+    return applyPick(entry, entry.model.id);
   }
 
   let provider = $derived(choice ? store.providerOf(choice.providerId) : null);
@@ -208,6 +235,8 @@
 
   /** A tile only moves the column: the choice follows a model or an account chip. */
   function pickTile(providerId: string) {
+    pickEpoch += 1;
+    pickPending = false;
     favoritesOpen = false;
     shownProviderId = providerId;
     legacy.hide();
@@ -217,23 +246,16 @@
   function pickSeat(seat: Account) {
     if (!shown) return;
     modelQuery = '';
-    onpick({ providerId: shown.id, accountId: seat.id, model: store.defaultModelOf(shown) });
+    return applyPick({ providerId: shown.id, accountId: seat.id }, undefined, false);
   }
 
-  async function pickModel(model: ModelInfo) {
+  function pickModel(model: ModelInfo) {
     if (!shown) return;
     const instance =
       choice && choice.providerId === shown.id
         ? { providerId: choice.providerId, accountId: choice.accountId }
         : firstInstanceOf(shown.id);
-    if (!instance || favoritePending) return;
-    favoritePending = true;
-    try {
-      await store.probeModels(instance.providerId, instance.accountId);
-      if (!store.modelsOf(instance.providerId, instance.accountId).some(m => m.id === model.id)) { store.error = strings.composer.favoriteUnavailable; return; }
-      onpick({ ...instance, model: model.id });
-      popover.hide();
-    } finally { favoritePending = false; }
+    if (instance) return applyPick(instance, model.id);
   }
 
   /** Installing and signing in happen on the Providers page, so the picker sends you there. */
@@ -315,7 +337,7 @@
       onanimationend={popover.end}
       {onkeydown}
     >
-      <button class="refresh" type="button" data-testid="picker-refresh" aria-label={strings.composer.refreshModels} title={strings.composer.refreshModels} disabled={probing || needsInstall} onclick={() => void refreshModels()}><RefreshCw size={14} class={probing ? 'spin' : ''} /></button>
+      <button class="refresh" type="button" data-testid="picker-refresh" aria-label={strings.composer.refreshModels} title={strings.composer.refreshModels} disabled={disabled || probing || pickPending || needsInstall} onclick={() => void refreshModels()}><RefreshCw size={14} class={probing || pickPending ? 'spin' : ''} /></button>
       {#if !single}
         <div class="column rail">
           <ProviderTiles {store} {choice} {locked} current={shown?.id ?? null} {favoritesOpen} onfavorites={() => { favoritesOpen = true; modelQuery = ''; }} onpick={pickTile} onmore={openInstall} />
@@ -332,6 +354,7 @@
             role="menuitem"
             data-row
             data-model={model.id}
+            disabled={disabled || pickPending}
             onclick={() => pickModel(model)}
           >
             <span class="mark"></span>
@@ -349,7 +372,7 @@
           <div class="model-list">
           {#each favorites as entry (`${entry.providerId}:${entry.accountId}:${entry.model.id}`)}
             <div class="model-entry">
-              <button type="button" class="row model favorite-row" role="menuitem" data-row data-testid="favorite-model" disabled={favoritePending || !store.providerOf(entry.providerId)?.available} onclick={() => void pickFavorite(entry)}>
+              <button type="button" class="row model favorite-row" role="menuitem" data-row data-testid="favorite-model" disabled={disabled || pickPending || !store.providerOf(entry.providerId)?.available} onclick={() => void pickFavorite(entry)}>
                 <ProviderLogo providerId={entry.providerId} size={16} /><span class="name">{store.modelsOf(entry.providerId, entry.accountId).find(m => m.id === entry.model.id)?.name ?? entry.model.name}{#if favorites.some(other => other.providerId === entry.providerId && other.model.id === entry.model.id && other.accountId !== entry.accountId)}<span class="account-label">{store.accountOf(entry.accountId)?.label}</span>{/if}</span>
               </button>
               <button type="button" class="favorite-button" aria-label={strings.composer.unfavorite} onclick={() => store.toggleFavorite(entry.providerId, entry.accountId, entry.model)}><Star size={14} fill="currentColor" /></button>
@@ -359,7 +382,7 @@
         {:else}
         <div class="head">
           <span class="provider-name">{shown ? shown.name : strings.composer.models}</span>
-          <AccountSeats {shown} {seats} {shownAccountId} {choice} {locked} onpick={pickSeat} />
+          <AccountSeats {shown} {seats} {shownAccountId} {choice} {locked} busy={disabled || pickPending} onpick={pickSeat} />
         </div>
         {#key `${shown?.id}:${shownAccountId}`}
         <div class="model-list">

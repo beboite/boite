@@ -1,19 +1,15 @@
 # Performance
 
-What boite does to stay cheap on a slow link and quick to start, how each part
-is measured, and the numbers of the last run. A claim about speed or size needs
+This guide describes bandwidth, startup and rendering mechanisms and their
+bench commands. Dated reports hold measured results. A claim about speed or size needs
 a fresh run of the bench that covers it, with the command and the date.
 
 ## Concurrent-agent resource use
 
-The [2026-09-29 audit](../bench/results/2026-09-29-resources.md) compares the
-streaming journal, team refreshes, process sampling and idle core against
-`606bc56d`. On the tested Linux workloads, journal CPU fell from 8,863 to 379 ms and
-sampled peak RSS from 253.24 to 109.21 MiB. Sampling 64 processes with the real
-clock used 964 to 458 ms CPU and 94.97 to 82.13 MiB peak RSS. Team updates used
-348 to 116 ms CPU, with 128 snapshots reduced to one. The idle core stayed at
-about 60 MiB and 0.4% of one CPU core. These are scoped measurements,
-not a 30% to 50% reduction in the whole application or its provider processes.
+The [2026-09-29 audit](../bench/results/2026-09-29-resources.md) records paired
+Linux measurements against `606bc56d`, workload limits and remaining candidates.
+Its subsystem results exclude provider memory and do not establish a whole-app
+CPU or RAM reduction.
 
 Message reads overlay current buffered parts only for the selected rows. They
 leave the adaptive persistence timer alone instead of rewriting every dirty
@@ -72,12 +68,17 @@ threads and a 256-turn burst, checks a foreground reply and writes desktop and
 phone captures. `BOITE_STRESS_ARTIFACTS` selects the capture directory.
 An HTTP 503 fixture verifies that failed health checks mark both the scenario
 and the overall benchmark report failed even when every agent stops normally.
+The benchmark's per-PID memory reads use Linux `VmRSS` or Windows working sets.
+The separate snapshot-based process tree and continuous sampler still require
+Windows.
 The smaller six-process regression runs in the normal core suite and starts a
 fresh core so earlier tests cannot hide a race in first-use imports.
 
 Authenticated RPC requests rotate between connections in four-millisecond
 slices. At most eight handlers per connection and 64 overall can wait on
-asynchronous work. Each connection retains at most 1,024 frames or 32 MiB of
+asynchronous work. Authenticated agents can occupy at most 48 of those slots,
+leaving capacity for owner actions, paired clients and authentication while
+agents wait for replies. Each connection retains at most 1,024 frames or 32 MiB of
 text; the total stays below 4,096 frames or 64 MiB, including active requests.
 A sender exceeding its limit closes with a reconnect reason. At the shared
 limit, the largest queued contributor closes to leave room for other readers.
@@ -96,50 +97,47 @@ in memory only after the queued prompt commits.
 Scheduler notifications publish the newest snapshot in each 16-millisecond
 window. Other events go out as soon as their storage writes commit.
 `scheduler.get` always reads the current state.
+The core constructs one snapshot per microtask batch. Enqueue checks the new
+turn; settings changes and completions reconsider the held queue. Queued
+diagnostics remain ordered before start, stop and drain.
 Sidebar pull-request lookups share requests for the same thread and run four
 at a time per client. A manual refresh goes ahead of background lookups, so
 mounting or remounting thousands of rows cannot flood the RPC connection.
 
-Initial measurements on Windows with Bun 1.4.2, 2026-09-29, before scheduler
-launch limits were retired:
+Desktop and phone navigation keep the full thread model but mount only the
+visible rows once a list exceeds 80 entries. Measured heights, six rows of
+overscan and machine-qualified keys preserve scroll anchors as rows change.
+Keyboard navigation reaches unmounted entries; search still addresses the full
+model. Parent move eligibility uses one reactive index instead of scanning the
+thread list for every mounted card. Closing the command palette retains its
+last results for the closing animation and stops ranking until it opens again.
 
-| Scenario | Observed result |
-| --- | --- |
-| 24 scripted agents, cold then warm turns | Initially 38 processes instead of 24; sharing the pending driver load kept all 24 warm processes |
-| 1,000 echo threads, one observer, initial baseline | Both streaming bursts completed with exact answers; all 1,000 turns cancelled and recovered after a crash |
-| Same baseline, core memory at 64 concurrent turns | 115.8 MiB; this excludes real agent processes |
-| Same baseline, scheduler payloads | 163.3 MiB of decoded scheduler JSON on one connection during the 64-turn burst |
-| 1,000 threads and 12 additional readers before request pacing | Three HTTP requests timed out after ten seconds each; turn-start requests exceeded thirty seconds |
-| Same load after bounded dispatch and snapshot coalescing | Both bursts passed with exact streams; six concurrent turns took 60.0 s and 64 took 59.4 s |
-| Same run, independent health | No timeouts; p95 217/660 ms and maximum 1.81/3.51 s at six/64 concurrent turns |
-| Same run, scheduler payloads at 64 concurrent turns | 7.0 MiB of decoded JSON on the owner connection |
-| Same run, mass cancellation and crash recovery | All 1,000 turns cancelled in 19.5 s; 64 running and 936 queued turns recovered after an 8.1 s restart |
-| Production UI, 1,000 threads and a 256-turn burst | Foreground reply in 0.99 s, typing in 3.7 ms and maximum timer lag 36 ms; desktop and phone checked |
+The [task manager](trace.md#agent-task-manager) reads cached snapshots. Its
+two-second refresh does not sample processes itself. Linux TCP collection uses
+one lazy Worker, outside the core event loop, while any visible client holds a
+lease. Transport failure preserves that demand and retries on existing sample
+ticks with bounded backoff; a missing Worker response has a two-second deadline.
+Worker transport recovery starts a new observation interval.
+A failed native TCP dump displays unavailable. If the next valid dump has the
+same socket and process identities, its actual counter delta spans the elapsed
+interval since the last valid reading.
+Linux load samples share the registered-root ownership index until a process
+is added or removed. A missing sample discards its detailed resource baseline,
+so a returning process starts a new interval.
 
-After launch limits were retired, the same command with 12 additional readers
-passed on 2026-09-30 after grouping synchronous startup and completion writes:
+Merged-PR archive maintenance inspects at most 128 thread rowids per pass and
+admits at most eight proof lookups. Its cursor advances over blocked roots,
+with a fixed end rowid per cycle so new rows and replacements cannot keep the
+scan chasing the tail. Initial SQLite column checks avoid hydrating unrelated
+history; selection yields every eight rows and shares a scheduler snapshot only
+within that synchronous group. Family, input, result and checkout guards remain
+fresh after asynchronous validation and immediately before the archive write.
+Large retained families and unindexed branch-holder checks can still cost more.
 
-| Scenario | Observed result |
-| --- | --- |
-| 1,000 threads, workloads bounded by the generator | Exact streams at six/64 concurrent turns in 40.8/18.3 s |
-| Independent HTTP health during streaming | Zero errors; p95 58/131 ms and maximum 1.84/0.16 s at six/64 concurrent turns |
-| Scheduler payloads at 64 concurrent turns | 1.09 MiB of decoded JSON on the owner connection; no scheduler queue in this workload |
-| All 1,000 turns running together, cold then already used | Starts accepted in 10.2/10.6 s and cancelled in 9.7/6.1 s with the 30-second RPC deadline unchanged |
-| Independent HTTP health during mass start/stop | Zero errors; p95 117/109 ms and maximum 3.27/0.15 s for cold/warm phases |
-| Crash with 1,000 running turns | All recovered, earlier answers and both cancellations preserved, and a new turn completed after a 3.0 s restart |
-| Production UI, 2026-09-30, 1,000 threads and a 256-turn burst | Foreground reply in 0.68 s, typing in 3.3 ms and maximum timer lag 26 ms; desktop and phone checked |
-
-Two additional runs exceeded the 30-second deadline during 1,000 simultaneous
-starts. The instrumented failure accepted 505 starts before expiry, with no
-HTTP errors and maximum health latency 1.00 s. The full run above then passed
-with the same deadline. Background machine load was not controlled. These runs establish
-failures and reproducible checks. They do not
-establish a supported agent count or measure real provider quotas, agent RAM,
-the native shell, Linux or macOS under this load.
-The UI test gives background RPCs the benchmark's 30-second deadline, while
-the application uses 120 seconds. Visible replies keep a 30-second deadline;
-typing and individual browser tasks must stay below five seconds. Foreground
-timing excludes the separate wait for the background batch to be accepted.
+The [dated stress report](../bench/results/2026-09-29-resources.md#stress-measurements-2026-09-29-and-2026-09-30)
+preserves the Windows Bun 1.4.2 runs, tables and failed 1,000-start attempts from
+2026-09-29 and 2026-09-30. These fixtures do not establish a supported real-agent
+count, provider quota, native shell performance or physical-phone behavior.
 
 ## Naming a long conversation
 
@@ -169,13 +167,12 @@ unfinished work, and runs without their instructions. At 500 and 8,000 steps it
 measured 86 KB and 260 KB; the difference is the session list, which grows with
 contexts rather than with history. Main measured 10.8 MB at 500 steps.
 
-## A remote client and a local one are not served alike
+## Local and remote connections
 
 The core decides per connection. A WebSocket whose `Host` header is
 `127.0.0.1`, `localhost` or `::1` is the shell or a browser on the same
-machine: its bytes are free and its CPU is not, so nothing is compressed and
-every delta leaves at once. Any other `Host` is a phone or a laptop somewhere
-else, and gets two things.
+machine: frames are uncompressed and deltas leave immediately. Other `Host`
+values enable compression and delta batching.
 
 - Every frame is deflated. Bun runs permessage-deflate without context
   takeover, which takes a 30 KB JSON answer to 1.6 KB. The mode with a shared
@@ -186,6 +183,14 @@ else, and gets two things.
   are what saves bytes while text streams. Held deltas always leave before any
   other event and before any response, so the order on the wire stays the order
   of the turn.
+
+The core checks each complete RPC response against 16 MiB of serialized UTF-8,
+including its envelope, caller ID, turns, memory notices and other metadata.
+An oversized result or error becomes a bounded `Refused` response with
+`field: response`, the measured bytes and the limit, matched to the request.
+The connection remains usable. A very large caller ID may require a smaller
+matched refusal or a 1009 close when even that refusal cannot fit. A successful
+response is serialized once; paced deltas still flush before it.
 
 When a socket backs up (Bun's `send` returns -1), every frame is still queued
 except `message.delta`, which is dropped. On `drain` the core resends the text
@@ -216,8 +221,17 @@ instead of arriving after it as a second copy.
 - `threads.get` takes `after`, a message the client already holds. The answer
   then starts at that message and says so in `messagesFrom`; the UI keeps what
   it had before it. A reconnect to a quiet thread costs one message instead of
-  the last 120. An unknown message, or a tail longer than a page, gets the whole
-  page as before.
+  the last 120. An unknown message, or a tail above 120 messages or 12 MiB of
+  serialized UTF-8 message data, gets a normal page without `messagesFrom`.
+  A reconnect tail is complete or replaced by a page; it is never truncated.
+- History pages carry at most 120 messages by default, 200 for `messages.list`,
+  and 12 MiB of serialized UTF-8 message data, including JSON escaping and array
+  separators. The journal iterates its thread index and stops at the count or
+  byte boundary, retaining complete messages and a gapless backwards cursor.
+  Current buffered parts count toward the budget. One complete attachment-sized
+  message can exceed 12 MiB so pagination advances; a message or complete RPC
+  response above 16 MiB is refused explicitly rather than losing content.
+  Turns, thread metadata and memory events also occupy that RPC response budget.
 - On a reconnect, the open thread's `threads.get` leaves before the boot lists,
   so the missed text does not wait for the slowest of them. The fresh
   `threads.list` is laid over the rows already held: a row keeps its object and
@@ -268,6 +282,23 @@ next open.
 
 ## Core startup
 
+The entry loads the CLI for commands and the Core/server graph for server
+startup. Version metadata lives in `packages/core/src/version.ts`.
+The compiled launcher awaits the main module before dispatch, including with
+ESM bytecode. `packages/core/test/main-entry.test.ts` checks command imports,
+port refusal, the compiled binary and graceful lock release.
+
+Activity restoration selects threads with saved activities. Coordination
+recovery selects active threads and threads with potentially pending letters.
+Both validate visible thread JSON before recovery and retain the original
+error order, archived-thread handling and recovery writes.
+
+Claude and ACP join the other native drivers behind a lazy factory. Listing
+providers, capabilities or cached models does not load their protocol runtime.
+The first operation shares one import; a failed import can retry. Stop, thread
+release and shutdown retire pending sessions before a late factory can start a
+process. `packages/core/test/lazy-driver.test.ts` covers these boundaries.
+
 `fflate`, the unzip library behind provider installs and the local speech
 runtime, is imported where it unzips. Evaluating it builds its Huffman tables,
 about 8 ms per core start measured on 2026-09-25, for code most starts never
@@ -294,64 +325,32 @@ whatever the page said, so a broken bundle still gets a window to quit from.
 
 ## What a frame costs
 
-A frame has to be drawn again wherever something moved, and some styles make
-that redraw expensive for as long as they are on screen. Measured on
-2026-09-30 with `bench/ui-frames.ts`, in headless Chrome with software
-compositing, the case a WebView2 without acceleration meets:
+Rendering regressions are measured with `bench/ui-frames.ts`. The current UI
+limits expensive work while streaming, typing and scrolling:
 
-- A backdrop blur is redrawn whenever anything under it moves. A window-wide
-  one under the command palette or the tour, over a streaming answer or an
-  animated scene, drew 6 to 12 fps instead of 60. Scrims are a flat
-  `--color-scrim` tint; a blur stays on the bounded floating surfaces (the
-  composer, the activity panel, toasts, notification and update cards), where
-  it measured no cost even with a 401 px activity panel over a scrolled thread.
-- An endless animation moves only opacity or a transform, which the
-  compositor plays without painting. The two exceptions repaint a box a few
-  pixels high and are named in the test.
-- A `:has()` never takes the app's outer containers for its subject: it is
-  checked again whenever that subtree changes, which is every node a streaming
-  answer or a scroll mounts. A class set from the state does the same job.
-- An entrance animation belongs to what arrives live. A paragraph eases in
-  only while its answer streams, and a message rises only when it lands at the
-  bottom being watched, not when a scroll up the history mounts it again.
-- Scrolling reads layout as little as it can: the outline rail follows once
-  per frame, and a message's height comes from its `ResizeObserver` entry. A
-  wheel up a 400-message thread went from 340 to 310 ms of main thread per
-  1,000 px. The reading anchor is still read right after each scroll event,
-  once the window has rendered: read before that render, or a frame or a timer
-  later, a navigation that left the thread right after a scroll brought it
-  back on the wrong message.
-- The conversation watches the wheel with a passive listener. It only reads
-  the wheel to leave the bottom and never cancels it; a cancellable listener
-  made the browser ask the main thread before the first notch of each gesture
-  scrolled, which a streaming answer keeps busy. `MessageList.test.ts` fails
-  on a wheel listener that can cancel.
-- What a scroll changes eases only a transform or opacity. The outline rail's
-  active bar eased its width, and the active prompt changes every few lines:
-  that dirtied layout before every scroll event, and a wheel up the
-  400-message thread ran 333 layouts in about 180 frames. Easing a transform
-  took it to 153. The rail keys its two groups by side, so the prompts a
-  scroll passes rewrite them instead of rebuilding them.
-- A message mounts cheaply, because a scroll mounts one every few lines.
-  Lucide icons draw through `LucideGlyph.svelte`, which clones shapes built
-  once per icon instead of spreading attributes on each one; date formatters
-  are built once per language; a finished paragraph's markup is kept, up to
-  four million characters. In a CPU profile of the same wheel, mounting the
-  user messages took 71 ms instead of 139.
-- A keystroke lays the page out once. The composer sizes itself with
-  `field-sizing: content` where the engine has it; measuring its own height
-  inside the input event made three layouts per key. The IndexedDB draft
-  journal waits for a pause in typing: writing it on every key cloned a draft
-  picture each time, and at CPU x4 a key with a 1.5 MB picture took 40 ms to
-  reach the screen instead of 19.
-- A conversation at its bottom follows its answer from its `ResizeObserver`,
-  after layout and before paint, so a paragraph lands already in view. Caught
-  up ten times a second, it was painted up to 36 px below the fold first.
+- Window-wide scrims use `--color-scrim`; backdrop blur stays on bounded
+  floating surfaces such as the composer, activity panel and notifications.
+- Endless animations use opacity or transforms, apart from the small repainting
+  boxes named in `render-cost.test.ts`. Outer app containers avoid `:has()`.
+- Entrance animations run for arriving messages, rather than history remounts.
+- The outline rail updates once per frame and animates transforms. Message
+  heights come from `ResizeObserver`; reading anchors are captured after the
+  scroll render so immediate navigation restores the same message.
+- Wheel listeners are passive: they release bottom following without
+  cancelling browser scrolling. `MessageList.test.ts` guards the listener
+  options.
+- Icon shapes and locale date formatters are reused. Finished Markdown markup
+  has a four-million-character cache bound.
+- The composer uses `field-sizing: content` where supported; IndexedDB draft
+  writes wait for a typing pause. Bottom following runs after layout and before
+  paint through `ResizeObserver`.
 
-`packages/ui/src/render-cost.test.ts` fails on a blur outside the named
-surfaces or on any `inset: 0` rule, on an endless animation of anything else,
-on a `:has()` on `html`, `body`, `#app`, `.app` or `.body`, and on an outline
-bar that eases its width.
+`packages/ui/src/render-cost.test.ts` rejects unbounded blur, forbidden endless
+animation properties, outer-container `:has()` and outline width transitions.
+The [frame report](../bench/results/2026-09-30-ui-frames.md) and
+[typing/scroll report](../bench/results/2026-09-30-typing-and-scroll.md) retain
+2026-09-30 measurements and the streaming-fixture correction. They use software
+compositing and mobile emulation, with uncontrolled background load.
 
 ## Browser tools and review bundle size
 
@@ -418,65 +417,14 @@ Results: [bench/results/2026-09-19-wire-and-startup.md](../bench/results/2026-09
 
 ## The Windows sidecar is the signed runtime
 
-`bun build --compile` writes an 86 MB executable with no signature, and Windows
-11 inspects it at every start: about 650 ms pass between the spawn and the
-first line of script, 5 ms of it inside the process, and a compiled hello-world
-costs the same. The Bun runtime carries its publisher's signature and skips
-that. So the Windows installer ships the runtime as `boite-core.exe` with the
-bundled core in `core/` beside it ([releasing.md](releasing.md)). Renaming the
-runtime changes nothing: the signature is in the file.
+Windows ships Bun's signed baseline runtime as `boite-core.exe`, with the core
+JavaScript beside it. The baseline supports x64 CPUs without AVX2. Compiled
+Linux/macOS sidecars and x64 server builds keep their platform packaging.
+[Releasing](releasing.md#what-each-step-produces) owns runtime download,
+checksum/signature validation and bundle layout.
 
-Core alone, spawn to `/health`, medians of 7, 2026-09-19. The parent is a
-second copy of the runtime, because a child whose image the parent already has
-mapped starts in 105 ms and would flatter the result:
-
-| core started as | ms |
-| --- | ---: |
-| compiled `boite-core.exe` | 902 |
-| runtime copied as `boite-core.exe`, running `dist/main.js` | 260 |
-
-`bun run bench/startup.ts --runs 7`, medians, on a release shell with the
-compiled core beside it, then on one staged with the runtime and the bundle:
-
-| spawn to | compiled | runtime and bundle |
-| --- | ---: | ---: |
-| core answering `/health` | 1215 | 559 |
-| first contentful paint | 749 | 604 |
-| UI holding its data | 1245 | 716 |
-
-Linux and macOS keep the compiled core: nothing was measured there.
-
-## The x64 runtime is Bun's baseline build
-
-Bun publishes two x64 builds. The default one needs AVX2, so it stops with an
-illegal instruction on a pre-Haswell CPU and on many Celeron, Pentium and Atom
-laptops. The Windows sidecar, the compiled core on x64 Linux and Windows, and
-the server core are the baseline build, and the Docker image's `oven/bun` base
-already ships the baseline build for x64. On this core the choice costs nothing
-measurable. Bundle under each runtime, both runtimes copied away from the
-parent's own image, a fresh data directory, `BOITE_HOST_AGENTS=0`, 2026-09-25 on
-a Ryzen 7 9800X3D:
-
-| runtime | spawn to `/health`, median of 6 | echo turn round trip, median of 7 |
-| --- | ---: | ---: |
-| `bun-windows-x64` 1.4.2 | 245 ms | 162 ms |
-| `bun-windows-x64-baseline` 1.4.2 | 244 ms | 162 ms |
-
-The echo turn is `docker/smoke.ts create` run against that core with
-`BOITE_SMOKE_PROVIDERS=echo`: project, account, thread, one turn and its
-completion. Local dictation's whisper.cpp runtime needs no AVX2 either: its
-`whisper-bin-x64.zip` ships `ggml-cpu-*.dll` backends from plain x64 to Alder
-Lake, and ggml loads the one the CPU supports.
-
-The bundle and the compiled core minify whitespace and syntax and keep
-identifiers, so a logged stack still names its functions. On the Windows
-sidecar that moved spawn to `/health` from a median of 249 ms to 244 ms over 7
-runs on the same day. The compiled core also carries bytecode, which saves
-parsing where no signature check dominates the start; on Windows the compiled
-core stayed at about 790 ms either way.
-
-The account connection changes measured on Windows CI on 2026-09-29 use
-525,128 bytes for the UI entry chunk, 3,396,864 bytes for the UI distribution
-and 821,226 bytes for the core bundle. Account editing and device-login UI
-add client code; native authentication checks add core code. The size budgets
-in `scripts/ci/budgets.json` retain about 10% headroom above those measurements.
+The [dated runtime measurements](../bench/results/2026-09-29-resources.md#runtime-and-bundle-measurements-2026-09-19-to-2026-09-29)
+retain the Windows compiled-versus-signed startup results, baseline comparison
+and account-change bundle sizes. No corresponding Linux/macOS startup gain
+was measured. Current emitted-size limits live in
+[CI](ci.md#build-cost) and `scripts/ci/budgets.json`.

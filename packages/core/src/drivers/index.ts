@@ -8,102 +8,23 @@ import type {
   ThreadId,
 } from '@boite/contracts';
 import { unavailable } from '../errors.ts';
-import { createAcpDriver } from './acp.ts';
-import { createClaudeDriver } from './claude.ts';
 import { echoDriver } from './echo.ts';
-import type { Driver, ProbeContext, ProbeFilter, ProbeResult, TitleContext, SessionContext, TurnContext, TurnHandle } from './types.ts';
-
-/**
- * A driver whose module is imported on its first turn. The Claude and ACP
- * drivers load their SDK that way; the Codex one carries its own transport, so
- * the whole module is what stays out of core start.
- */
-function lazyDriver(protocol: Protocol, load: () => Promise<Driver>, options: { titles?: boolean; prepare?: boolean } = {}): Driver {
-  let loaded: Driver | null = null;
-  let loading: Promise<Driver> | null = null;
-  const viewed = new Set<ThreadId>();
-  const ready = async (): Promise<Driver> => {
-    if (loaded !== null) return loaded;
-    // Concurrent first turns must share the driver and its warm-session registry.
-    loading ??= load().then(driver => { loaded = driver; return driver; }).finally(() => { loading = null; });
-    return loading;
-  };
-  return {
-    protocol,
-    // Declared up front, since `writesTitles` asks before anything is loaded.
-    ...(options.titles === true
-      ? { title: async (ctx: TitleContext): Promise<string | null> => (await ready()).title?.(ctx) ?? null }
-      : {}),
-    ...(options.prepare === true ? {
-      prepare: async (ctx: SessionContext): Promise<void> => {
-        const driver = await ready();
-        if (!viewed.has(ctx.thread.id)) return;
-        driver.setViewed?.(ctx.thread.id, true);
-        await driver.prepare?.(ctx);
-      },
-      setViewed: (threadId: ThreadId, active: boolean): void => {
-        if (active) viewed.add(threadId);
-        else viewed.delete(threadId);
-        loaded?.setViewed?.(threadId, active);
-      },
-    } : {}),
-    startTurn(ctx: TurnContext): TurnHandle {
-      let inner: TurnHandle | null = null;
-      let stopped = false;
-      const done = ready().then((driver) => {
-        if (viewed.has(ctx.thread.id)) driver.setViewed?.(ctx.thread.id, true);
-        inner = driver.startTurn(ctx);
-        if (stopped) inner.stop();
-        return inner.done;
-      });
-      return {
-        done,
-        get steer() { return inner?.steer?.bind(inner); },
-        get steerUser() { return inner?.steerUser?.bind(inner); },
-        stop: (): void => {
-          stopped = true;
-          inner?.stop();
-        },
-      };
-    },
-    // A probe is the other reason to load the module, so it awaits it like a
-    // turn does. The two synchronous ones never load anything: a module that
-    // has not run has probed nothing and caches nothing to forget.
-    async probe(ctx: ProbeContext): Promise<ProbeResult> {
-      const driver = await ready();
-      if (driver.probe === undefined) return { models: ctx.provider.models, probedAt: Date.now() };
-      return driver.probe(ctx);
-    },
-    probedModels(providerId: ProviderId, accountId: AccountId): ModelInfo[] | null {
-      return loaded?.probedModels?.(providerId, accountId) ?? null;
-    },
-    forgetProbes(filter: ProbeFilter): void {
-      loaded?.forgetProbes?.(filter);
-    },
-    releaseThread(threadId: ThreadId): void {
-      viewed.delete(threadId);
-      loaded?.releaseThread?.(threadId);
-    },
-    shutdown(): void {
-      viewed.clear();
-      loaded?.shutdown?.();
-    },
-  };
-}
+import { lazyDriver } from './lazy.ts';
+import type { Driver, ProbeContext, ProbeFilter, ProbeResult } from './types.ts';
 
 const DRIVERS = new Map<Protocol, Driver>([
   ['echo', echoDriver],
   [
     'claude-sdk',
-    createClaudeDriver({
-      loadQuery: () => import('@anthropic-ai/claude-agent-sdk').then((module) => module.query),
-    }),
+    lazyDriver('claude-sdk', () => import('./claude.ts').then(module => module.createClaudeDriver({
+      loadQuery: () => import('@anthropic-ai/claude-agent-sdk').then(sdk => sdk.query),
+    })), { titles: true, prepare: true, sideQuestion: true }),
   ],
   [
     'acp',
-    createAcpDriver({
+    lazyDriver('acp', () => import('./acp.ts').then(module => module.createAcpDriver({
       loadSdk: () => import('@agentclientprotocol/sdk'),
-    }),
+    }))),
   ],
   [
     'codex-appserver',

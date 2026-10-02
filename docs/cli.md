@@ -1,14 +1,10 @@
 # The `boite` CLI
 
-`boite` is the command an agent runs inside a thread to reach Boite: where it
-is, what to show in the thread's panel, its task list, the project's todo list,
-the state of the working tree. It answers in a few `key: value` lines or one
-row per item, so a model reads the result at the lowest cost. `--json` on any
-command prints the raw RPC result instead, for a script.
-
-Boite 2 has no MCP server, on purpose. A CLI on the PATH costs the agent
-nothing until it is called, needs no tool schema in the prompt, and works the
-same for every provider, including one that has no MCP client.
+`boite` lets an agent reach its thread's panel, tasks, project todos and Git
+state. Human-readable output uses key/value lines or rows; `--json` returns the
+RPC result for scripts. The command loads on demand and works with every driver,
+including providers without an MCP client. Boite exposes these tools through
+its CLI rather than an MCP server.
 
 Every new native agent session receives a compact CLI guide before its first
 request, even without a connected brain. Enabled coordination and delegation
@@ -89,10 +85,11 @@ three variables and one PATH entry, put there by
 | `PATH`             | the directory holding `boite` and `boite.cmd`, first |
 
 The CLI says hello with that token and becomes the `agent` principal of that
-one thread. An agent reaches the methods listed in `AGENT_METHODS`
-(`packages/core/src/access.ts`) on its own thread and nothing else: a call that
-names another thread, or an owner-only method such as `files.write` or
-`trace.get`, is refused by name. The token is forgotten when the thread is
+one thread. `AGENT_METHODS` in `packages/core/src/access.ts` lists its allowed
+calls and reasons. Each call is bound to that authenticated thread; delegation
+and coordination additionally check relationships and authorized contacts.
+An owner-only method such as `files.write`, `trace.get` or `core.logs` is refused. The
+token is forgotten when the thread is
 archived or removed, a socket an agent already opened with it is closed at the
 same moment, and the token is never written to disk.
 
@@ -158,6 +155,10 @@ boite workflow output|templates|save|start
 boite help
 ```
 
+Coordination commands are documented in [coordination](coordination.md#agent-commands),
+child controls in [delegation](delegation.md#agent-commands), and plan/output
+commands in [workflows](workflows.md#commands).
+
 Persistent agents with the `routines` tool enabled can schedule work from their
 direct conversation. `agent schedule` accepts `name`, `prompt`, and `schedule`,
 for example `{"kind":"daily","time":"09:00","timezone":"Europe/Paris"}`.
@@ -174,33 +175,13 @@ opens the file at line 12. A `show`, `diff`, `browse` or `open` answers
 `shown: no ...` when nobody was watching: the request still lands on the
 thread's panel and is there when the thread is next opened.
 
-`thread move` moves the calling thread, and only it, to another project the
-owner already added: `agent.move` holds the token to its own thread, and the
-project is named by its id, its name in any case, or its absolute folder. A
-name two projects share is refused with both ids. The agent's process cannot
-change folder in the middle of a turn, so the move waits for the turn to end
-and the CLI answers at once with what will happen:
-
-```
-Moves to notes (C:\src\notes) when this turn ends; the next turn starts in C:\src\notes.
-```
-
-A thread idle at the time (a script outside a turn) moves on the spot. The move
-is the same one the user makes from the thread menu (see
-[development](development.md#moving-a-thread)): a thread that had a worktree
-of its own gets a new one in a target that is a git repository, the old folder
-is left as it was, and background work the agent left running stops, since the
-agent asked to leave. The agent already knows about the move, so no note is
-added to its next prompt; the timeline shows "Moved by the agent to
-<project>". Refusals name the field and the expected value: an unknown project
-(`project`), the thread's own project (`projectId`), a sub-thread, or a
-sub-thread still working. A worktree with uncommitted changes is not refused:
-nothing in the old folder is touched. A move that became impossible by the
-turn's end (the project removed meanwhile) leaves a system line in the thread
-saying why. Until then the thread's row shows "Moves to <project> after this
-turn", and the user can cancel it or replace it with a move of their own, which
-waits for the same turn end. A pending move lives in memory: a core restart
-before the turn ends drops it.
+`thread move` accepts a project ID, unique name or absolute registered folder.
+Ambiguous names are refused with matching IDs. It moves only the authenticated
+root when its current turn ends, or immediately when idle, and stops background
+work because the agent asked to leave. Existing files and worktrees stay in
+place. A pending move can be cancelled by the user and is lost on core restart.
+[Moving a thread](development.md#moving-a-thread) owns the full lifecycle,
+working-directory, session and child restrictions.
 
 `thread new` starts an ordinary top-level thread in a project the owner
 added, named like `thread move` does, and sends the brief as its first
@@ -209,31 +190,25 @@ appears there, keeps its own session and can be opened, answered, moved or
 archived like any other. It is not a delegated child. The new thread runs on
 the caller's provider, account, model, effort and permission mode, in the
 project folder or, with `--worktree`, on a new `boite/` branch of its own.
-The title is `--title` or the brief's first line. The CLI prints the thread,
-its folder and its address:
-
-```
-thread: thr_...
-title: Blog post for 2.4
-project: Website
-cwd: /src/website
-agent: claude claude-opus-5-5
-address: <core-id>/thr_...
-Its first answer comes back to you as an agent message; do not poll. boite agents send <address> <text> steers it.
-```
+The title is `--title` or the brief's first line. The CLI prints its thread ID, title,
+project, working directory, provider/model
+and coordination address. Its first answer returns automatically; later steering
+uses `agents send`.
 
 The agent there reads a note before the brief: which thread's agent started
 it, that the user did not type it, and that it grants no approval the user
 did not give. When that first turn ends, its final answer, or its failure,
 goes back to the starter as an [agent coordination](coordination.md) message
-from the new thread, capped at 4,000 characters, and wakes an idle starter. Later turns report nothing by themselves; the two agents
+from the new thread, capped at 4,000 characters, and wakes an idle starter. Later turns
+report nothing by themselves; the two agents
 use `agents send` and `agents reply` like any pair of conversations. Both
 timelines show a line linking the other thread: "Started by the agent of ..."
 above the first prompt, "The agent started ..." in the starter.
 
 The owner's Communication settings of the calling thread decide: Off refuses,
 Pause refuses, and a thread restricted to its own project cannot start one
-elsewhere. There is no hourly limit. A thread an agent started cannot start another until the user has
+elsewhere. There is no hourly limit. A thread an agent started cannot start another
+until the user has
 written in it, so agents cannot chain threads on their own. Delegated
 children, workflow steps and persistent agent sessions are refused. A retry
 with the same `--request-id` returns the thread already started.
@@ -298,7 +273,8 @@ into the running turn when the agent takes steering (Codex, pi, Muse, Grok),
 handed to Claude at the main agent's next tool call through the PostToolUse
 hook, otherwise sent as the next prompt once the thread is idle. A prompt the
 user queued meanwhile goes out after that turn, not in its place. Agents
-without asynchronous questions of their own are told about the command once per session, unless the "Asynchronous
+without asynchronous questions of their own are told about the command once per session,
+unless the "Asynchronous
 questions" setting is off. Codex asks natively (`delivery: "async"`), and
 Boite draws those cards the same way.
 
@@ -322,7 +298,8 @@ flag each call gets a fresh id. An artifact object contains `missionId`, `taskId
 and `options`; it yields execution until the user answers. A memory contains
 `title` and `text`, with `id` and `expectedRevision` for an edit. The core adds
 the source context. Use `--json` to preserve the structured result.
-[Delegation](delegation.md) uses owner-approved model profiles and records
+[Delegation](delegation.md) uses the built-in conversation route or owner-added
+profiles and records
 team usage. Children share the parent's checkout, retain their own sessions,
 and return bounded results automatically. `delegate stop` pauses the whole team;
 only the owner can change profiles or resume a paused team.
@@ -330,24 +307,34 @@ only the owner can change profiles or resume a paused team.
 prints the whole format, `workflow run` starts it and opens it in the panel,
 and the results come back as one message when the run ends.
 
+## Owner diagnostics
+
+Outside a thread, an owner can read recent structured diagnostics without
+selecting a conversation:
+
+```sh
+boite logs --limit 50 --level error
+boite logs --thread <thread-id> --limit 100 --json
+boite logs --data-dir <data-directory> --level warn
+```
+
+The CLI reads the owner credential from that core's `core.json`. `--thread`
+filters the history; it is optional. Each text row carries timestamp, level,
+source/event and available thread, turn and request correlation. `--json` keeps
+the record fields. [Trace](trace.md#structured-diagnostics) owns rotation,
+redaction, output exclusions and query bounds. Inside a thread the CLI remains
+an agent and cannot gain this access by changing a data-directory flag.
+
 ## Where the command lives
 
-`boite` is `boite-core cli`: the same executable, one more subcommand, so the
-installer carries no second Bun binary. On Windows, where the sidecar is the
-runtime and the core a bundle beside it ([releasing.md](releasing.md)), both
-shims pass `core/main.js` before the subcommand. Two shims put it on the PATH,
-`packages/core/shims/boite` for a POSIX shell (Git Bash included) and
-`packages/core/shims/boite.cmd` for cmd and PowerShell; `stage-sidecar.ts`
-copies both beside `boite-core.exe` and the bundle overlay lists them as
-resources. Linux and macOS packages keep those resources apart from executables.
-The shell sets `BOITE_CLI_DIR` to the resource directory unless explicitly
-overridden, and `BOITE_CORE_EXECUTABLE` to the installed core's absolute path.
-The POSIX shim quotes that path, including spaces in a macOS application name.
-Standalone core installs still find the executable beside the shim.
-From the sources, `packages/core/bin/boite` and `boite.cmd` run the
-same subcommand through `bun`, and the core puts that directory on the PATH
-when it runs from the sources. `BOITE_CLI_DIR` overrides the directory in both
-cases, and a core refuses to start on one that holds no shim.
+`boite` invokes `boite-core cli`, sharing the installed executable. Packaged
+runtime and resource paths are described in [releasing](releasing.md).
+`packages/core/shims/boite` and `boite.cmd` provide POSIX and Windows launchers;
+source runs use the equivalents under `packages/core/bin/` through Bun.
+The shell supplies `BOITE_CORE_EXECUTABLE` and a resource `BOITE_CLI_DIR` for
+packaged launches. Standalone cores resolve their executable beside the shim.
+Paths with spaces are quoted. An explicit `BOITE_CLI_DIR` overrides lookup;
+a directory without the expected shim refuses startup.
 
 The `panel.open` request becomes a `panel.requested` event on every client
 subscribed to the thread; [panel.md](panel.md) says what the UI does with it.

@@ -1,3 +1,4 @@
+import { secureId } from './secure-id';
 /**
  * The right panel is a strip of surfaces per thread, T3 Code's model: the
  * thread stays in the sidebar and what sits beside it is a tab. Trace, changes,
@@ -7,7 +8,7 @@
  */
 
 import type { PanelSurface } from '@boite/contracts';
-import { SvelteSet } from 'svelte/reactivity';
+import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { browserBridge } from './browser-bridge';
 import { work } from './work-prefs.svelte';
 import { ZOOM_STEPS } from './zoom';
@@ -76,11 +77,7 @@ export const SIBLING_MIN = 360;
 /** Past this the panel is an inline column; under it, a sheet over the chat. */
 export const PANEL_INLINE_MIN_VIEWPORT = 981;
 
-export const TRACE_SURFACE_ID = 'trace';
 export const AGENTS_SURFACE_ID = 'agents';
-export const CHANGES_SURFACE_ID = 'changes';
-export const FILES_SURFACE_ID = 'files';
-export const TASKS_SURFACE_ID = 'tasks';
 
 /** Past this the changes surface puts its diff beside the list rather than under it. */
 export const CHANGES_SPLIT_MIN = 900;
@@ -102,7 +99,7 @@ function surfaceId(kind: SurfaceKind, path?: string): string {
   // existed still names the trace tab the same way.
   if (SINGLETON_KINDS.includes(kind)) return kind;
   if (kind === 'file') return `file:${path ?? ''}`;
-  return `browser:${crypto.randomUUID()}`;
+  return `browser:${secureId()}`;
 }
 
 /** The basename of a path the core wrote, which always uses forward slashes. */
@@ -189,7 +186,7 @@ export class RightPanelStore {
    * panel or opening another thread unmounts the editor, and the edit used to
    * go with it. Held in memory only: the layout is stored, a draft is not.
    */
-  readonly drafts = new Map<string, Map<string, string>>();
+  readonly drafts = new SvelteMap<string, SvelteMap<string, string>>();
 
   /**
    * The threads a phone-width load shut, kept beside the stored layout rather
@@ -440,7 +437,7 @@ export class BoundPanel {
       return;
     }
     if (held) held.set(id, text);
-    else this.#root.drafts.set(this.#key, new Map([[id, text]]));
+    else this.#root.drafts.set(this.#key, new SvelteMap([[id, text]]));
   }
 
   /** The ids a close action takes away, so the question asked and the tabs closed agree. */

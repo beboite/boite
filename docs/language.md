@@ -1,8 +1,7 @@
 # Language
 
-Boite speaks English and French. The choice belongs to the screen, not to the
-core: it lives in `localStorage` beside the theme, so a phone paired to the
-same core has its own, and nothing about it crosses the wire.
+Boite supports English and French. Each client stores its language choice in
+`localStorage`, independently of the core and other connected devices.
 
 The default is `system`, which reads the languages the operating system gave
 the webview. A machine set to French gets French, `fr-CA` and `fr-BE` included,
@@ -60,8 +59,8 @@ and a small script the build puts in `index.html` (`lib/locale-preload.ts`)
 starts that fetch beside the entry's. A switch in the settings keeps the screen
 in the current language until the new one has arrived, then swaps all of it.
 
-A component imports from `lib/strings` and nothing else, the way it did before
-there were two languages. Only `i18n.svelte.ts` reads the catalogues, and only
+Components import sentences from `lib/strings`. Only `i18n.svelte.ts` reads
+the catalogues, and only
 a screen that changes the language itself, the Appearance page and the tour,
 imports `lib/i18n.svelte` for `setLocaleSetting` and the list of locales.
 
@@ -84,9 +83,8 @@ another length), and a sentence whose `{slots}` differ from the English one.
 `Translation` type, and `src/lib/i18n.test.ts` and `scripts/ci/translations.ts`
 refuse all three.
 
-Read the sentence, not the key: a string is captured when a module runs, so a
-value read once at the top of a module or in a `const` is stuck in the language
-of the first frame. In a component, read `strings.x.y` in the markup or in a
+Reading a sentence once at module initialization keeps that language after a
+switch. In a component, read `strings.x.y` in the markup or in a
 `$derived`; in a plain module, read it inside the function that uses it.
 
 ## Adding a language

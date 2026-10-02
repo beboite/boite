@@ -2,6 +2,11 @@ import { strings } from './strings';
 
 export type ActivityCommand = { goal: { objective: string } } | { loop: { prompt: string; intervalMs: number; maxIterations?: number } };
 
+/** Classification does not validate input while the queue waits for a turn. */
+export function isActivityCommand(text: string): boolean {
+  return /^\/(goal|loop)(?:\s|$)/.test(text.trim());
+}
+
 /** A loop needs an explicit cadence or iteration count, never an invented timer. */
 export function activityCommand(text: string): ActivityCommand | null {
   const command = /^\/(goal|loop)(?:\s+([\s\S]*))?$/.exec(text.trim());

@@ -116,7 +116,7 @@ export const fr: Translation = {
   activityUnsupported: 'Les références ne sont pas disponibles avec /goal ou /loop. Envoyez un message ordinaire ou retirez les références.',
   stashUnsupported: 'Ce brouillon contient des références et ne peut pas être mis de côté. Envoyez-le ou retirez les références.'
 },
-  artifacts: { loadImage: 'Charger', retry: 'Réessayer', mediaFailed: 'Impossible d’afficher ce média. Réessayez ou téléchargez le fichier pour l’ouvrir.', saving: 'Enregistrement…', zoomIn: 'Agrandir', zoomOut: 'Réduire', fitImage: 'Ajuster l’image', open: 'Ouvrir', openLocal: 'Ouvrez ce fichier dans son application par défaut.', preview: 'Aperçu', download: 'Télécharger', close: 'Fermer l’aperçu', closeImage: 'Fermer l’image', enlarge: 'Voir en grand', saved: 'Enregistré dans Téléchargements', loading: 'Chargement du fichier', unavailable: 'Ce fichier ne peut pas être affiché ici. Téléchargez-le pour l’ouvrir.', failed: 'Impossible d’ouvrir ce fichier', ownerOnly: 'Les liens vers les fichiers locaux nécessitent une connexion propriétaire. Demandez à l’agent de joindre le fichier pour le partager avec cet appareil.' },
+  artifacts: { loadImage: 'Charger', retry: 'Réessayer', mediaFailed: 'Impossible d’afficher ce média. Réessayez ou téléchargez le fichier pour l’ouvrir.', saving: 'Enregistrement', zoomIn: 'Agrandir', zoomOut: 'Réduire', fitImage: 'Ajuster l’image', open: 'Ouvrir', openLocal: 'Ouvrez ce fichier dans son application par défaut.', preview: 'Aperçu', download: 'Télécharger', close: 'Fermer l’aperçu', closeImage: 'Fermer l’image', enlarge: 'Voir en grand', saved: 'Enregistré dans Téléchargements', loading: 'Chargement du fichier', unavailable: 'Ce fichier ne peut pas être affiché ici. Téléchargez-le pour l’ouvrir.', failed: 'Impossible d’ouvrir ce fichier', ownerOnly: 'Les liens vers les fichiers locaux nécessitent une connexion propriétaire. Demandez à l’agent de joindre le fichier pour le partager avec cet appareil.' },
 
   brain: {
     heading: 'Brain', description: 'Les mêmes instructions et skills pour tous vos agents.',
@@ -492,6 +492,7 @@ export const fr: Translation = {
     copyPath: 'Copier le chemin',
     manageProject: 'Gérer le projet',
     worktreeDefault: 'Worktree par défaut',
+    autoArchiveMergedPr: 'Archiver les conversations des PR fusionnées',
     backToProjectMenu: 'Retour',
     viewArchivedThreads: 'Voir les conversations archivées',
     importSession: 'Importer une session Claude Code',
@@ -1037,6 +1038,9 @@ export const fr: Translation = {
     queued: 'Envoyé après le prochain outil, ou à la fin du tour',
     queuedPaused: 'Retenu après un envoi refusé',
     sendNow: 'Envoyer maintenant',
+    queueWaitForEnd: 'Les objectifs et les boucles attendent la fin du tour en cours. Votre commande reste en attente.',
+    queueTurnNotReady: "Ce client n'a pas encore reçu le tour en cours. Votre message reste en attente.",
+    queueNotAccepted: "Ce tour n'a pas accepté le message. Il reste en attente et sera envoyé à la fin du tour.",
     sendNowHint: "Transmet les messages à l'agent en cours sans l'arrêter. Entrée dans le champ vide fait de même.",
     retryQueuedHint: 'Renvoie tous les messages en attente ensemble. Entrée dans le champ vide fait de même.',
     picker: 'Fournisseur et modèle',
@@ -1269,6 +1273,20 @@ export const fr: Translation = {
     limits: 'Limites de ressources',
     tasks: 'Gestionnaire de tâches',
     windows: "La mise au second plan, le son et les limites de ressources s'appliquent sur un hôte Windows.",
+  },
+  taskManager: {
+    title: 'Gestionnaire des tâches', scope: 'Processus actifs sur cette machine, regroupés par agent.',
+    agents: 'Agents', live: 'Actualisé toutes les 2 secondes', paused: 'Actualisation en pause', disconnected: 'Machine déconnectée',
+    loading: 'Lecture de la consommation des agents', unsupported: 'Mettez Boite à jour sur cette machine pour voir la consommation des agents.',
+    loadFailed: 'Le gestionnaire des tâches n’a pas pu se charger. Réessayez.',
+    search: 'Trouver un agent', noMatches: 'Aucun agent correspondant.', sortBy: 'Trier par consommation',
+    sort: { memory: 'Plus de mémoire', cpu: 'Plus de CPU', disk: 'Plus d’activité disque', network: 'Plus d’activité réseau' },
+    disk: 'Disque', network: 'Réseau', read: 'Lecture', write: 'Écriture', download: 'Réception', upload: 'Envoi',
+    observed: 'Observé', unavailableHint: 'Aucune mesure disponible pour le moment, ou ce compteur est non pris en charge. Une valeur absente ne signifie pas une consommation nulle.',
+    partialHint: 'Ce total comprend seulement les agents dont la consommation peut être mesurée.',
+    diskHint: 'Lectures et écritures sur le stockage observées pendant que cette vue est ouverte. Les processus brefs peuvent échapper à la mesure. Il s’agit d’activité, pas de la taille du dossier.',
+    tcpHint: 'Réception et envoi TCP observés pendant que cette vue est ouverte. Les connexions brèves et le trafic UDP peuvent échapper à la mesure.',
+    stop: 'Arrêter les processus', stopConfirm: 'Arrêter tous les processus de cette conversation ?', stopping: 'Arrêt des processus',
   },
   resources: {
     memory: 'Mémoire',
@@ -1590,6 +1608,7 @@ export const fr: Translation = {
     noCore: 'Pas connecté à un cœur.',
     archived: {
       heading: 'Conversations archivées',
+      mergedReason: 'Archivée après la fusion de la PR #{number}',
       intro: 'L\'agent d\'une conversation archivée s\'arrête. Il repart au premier message après une restauration.',
       show: 'Afficher les conversations archivées',
       empty: 'Aucune conversation archivée sur cette machine.',

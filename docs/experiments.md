@@ -61,21 +61,25 @@ download the published snapshot. They cannot publish or browse arbitrary host
 files through the file APIs.
 
 Published images, videos and audio appear directly in the conversation without
-enabling this experiment. Media keeps its aspect ratio within a bounded card;
-videos have playback, seeking and fullscreen controls and never autoplay.
-Images open in a keyboard-accessible viewer with zoom, fit and download controls.
-Images larger than 5 MB show their name, size and download first. Click Load image
-or the filename to download and display them; opening a conversation does not
-fetch these images automatically.
-If decoding fails, the card keeps its download and offers a retry.
+an experiment. Media keeps its aspect ratio in a bounded card; videos have
+playback, seeking and fullscreen controls and never autoplay. Images open in a
+keyboard-accessible viewer with zoom, fit and download controls. Images larger
+than 5 MB show their name, size and download first. Click Load image or the
+filename to load them; opening a conversation does not fetch them automatically.
+If decoding fails, the card keeps its download and offers a retry. Published PDFs
+have an optional inline preview with `chat-artifacts`; other types remain
+downloadable. Mutable file editing and viewing belong to the
+[right panel](panel.md).
 
-With the experiment enabled, answers also support Markdown file links, bare web
-URLs, local absolute paths, `file:///` links, and file paths inside inline code.
-Wrap the link destination in angle brackets for paths with spaces, such as
-`<reports/review one.pdf>`. Source references
-can carry `:line` or `#Lline`. Files resolve against the message's thread and
-owning machine. Links outside its working directory are refused. Published
-PDFs have an optional inline preview. Other files remain downloadable.
+With either `chat-artifacts` or `open-chat-links` enabled, answers recognize
+Markdown links, bare URLs, absolute paths, `file:///` links and inline-code file
+paths. Use angle brackets for spaces, such as `<reports/review one.pdf>`, and
+`:line` or `#Lline` for source locations. Files resolve through the message's
+owning thread and machine; preview paths stay inside its working directory.
+The local desktop's explicit open action follows the rules in
+[Open chat links](#open-chat-links).
+
+Captures: [chat media on desktop](images/chat-media-desktop.png) · [chat media on a phone](images/chat-media-phone.png)
 Remote images are links, so reading an answer does not fetch a tracking image.
 Executable URL schemes and arbitrary HTML are not rendered.
 

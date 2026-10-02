@@ -1,9 +1,11 @@
+import { logMessageOf } from '../../log-errors.ts';
 import { resolve } from 'node:path';
 import { messageOf } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
 import { agentEnv, profileFor } from '../../providers/resolve.ts';
 import { writeLandsInside } from '../../workdir.ts';
 import type { QuestionAsk, TurnContext } from '../types.ts';
+import { exitWithin } from '../exit.ts';
 import {
   addUsage,
   answerOf,
@@ -83,6 +85,7 @@ export class MuseSession {
   private lastStderr = '';
   private exitCode: number | null = null;
   private exited: Promise<number | null> | null = null;
+  private processClosed: Promise<void> = Promise.resolve();
   private idle: Timer | null = null;
   /** The turn waiting on the host's startup, which a stop ends by closing the host. */
   private opening: MuseTurn | null = null;
@@ -261,8 +264,9 @@ export class MuseSession {
         if (turn.isStopped) this.interrupt(turn);
       }
     } catch (error) {
-      const code = await this.exitWithin(EXIT_GRACE_MS);
-      turn.fail(code === undefined ? commandFailure(error) : this.exitSentence(code));
+      const code = await exitWithin(this.exited, EXIT_GRACE_MS, this.processClosed);
+      if (turn.isStopped) turn.finish('cancelled', null);
+      else turn.fail(code === undefined ? commandFailure(error) : this.exitSentence(code), code === undefined ? logMessageOf(error) : this.exitSentence(code, true));
       this.current = null;
       this.endTurn(turn, true);
       return;
@@ -325,11 +329,14 @@ export class MuseSession {
     this.killTree = ctx.killTree ?? null;
     const rpc = new MuseRpc(child, {
       notification: (method, params) => {
+        if (this.child !== child) return;
         this.onNotification(method, params);
       },
-      log: (level, message) => {
-        ctx.log(level, message);
+      log: (level, message, context) => {
+        if (this.child !== child) return;
+        ctx.log(level, message, context);
       },
+      fault: (reason) => { void this.transportFault(child, reason); },
     });
     this.rpc = rpc;
     this.watch(child, ctx, rpc);
@@ -390,54 +397,61 @@ export class MuseSession {
   }
 
   private watch(child: SpawnedChild, ctx: TurnContext, rpc: MuseRpc): void {
+    let closed = (): void => undefined;
+    this.processClosed = new Promise<void>(resolve => { closed = resolve; });
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => {
+      if (this.child !== child) return;
       for (const line of chunk.split(/\r?\n/)) {
         const text = line.trim();
         if (text.length === 0) continue;
         this.lastStderr = text.slice(0, STDERR_MAX);
-        ctx.log('warn', `muse host: ${this.lastStderr}`);
+        ctx.log('warn', `muse host: ${this.lastStderr}`, { kind: 'provider-output', event: 'provider.output' });
       }
     });
     this.exited = new Promise<number | null>((resolve) => {
       child.once('exit', (code) => {
-        this.exitCode = code;
+        if (this.child === child) this.exitCode = code;
         resolve(code);
       });
       child.once('close', () => {
+        closed();
+        if (this.child !== child) return;
         const sentence = this.exitSentence(this.exitCode);
-        rpc.fail(sentence);
-        this.current?.fail(sentence);
+        rpc.fail(sentence, this.exitSentence(this.exitCode, true));
+        this.failCurrent(sentence, this.exitSentence(this.exitCode, true));
         if (!this.closing) this.drop();
       });
       child.once('error', (error) => {
         resolve(null);
+        closed();
+        if (this.child !== child) return;
         const sentence = `the muse host did not start: ${messageOf(error)}`;
         rpc.fail(sentence);
-        this.current?.fail(sentence);
+        this.failCurrent(sentence, logMessageOf(error));
         if (!this.closing) this.drop();
       });
     });
   }
 
-  private exitWithin(ms: number): Promise<number | null | undefined> {
-    const exited = this.exited;
-    if (exited === null) return Promise.resolve(undefined);
-    return new Promise<number | null | undefined>((resolve) => {
-      const timer = setTimeout(() => {
-        resolve(undefined);
-      }, ms);
-      timer.unref?.();
-      void exited.then((code) => {
-        clearTimeout(timer);
-        resolve(code);
-      });
-    });
+  private async transportFault(child: SpawnedChild, reason: string): Promise<void> {
+    if (this.child !== child) return;
+    this.closing = true;
+    const code = await exitWithin(this.exited, EXIT_GRACE_MS, this.processClosed);
+    if (this.child !== child) return;
+    this.failCurrent(code === undefined ? reason : this.exitSentence(code), code === undefined ? reason : this.exitSentence(code, true));
+    this.drop();
   }
 
-  private exitSentence(code: number | null): string {
+  private failCurrent(reason: string, diagnostic: string): void {
+    const turn = this.current;
+    if (turn?.isStopped) turn.finish('cancelled', null);
+    else turn?.fail(reason, diagnostic);
+  }
+
+  private exitSentence(code: number | null, diagnostic = false): string {
     const head = `the muse host exited with code ${code === null ? 'unknown' : code}`;
-    return this.lastStderr.length === 0 ? head : `${head}: ${this.lastStderr}`;
+    return diagnostic || this.lastStderr.length === 0 ? head : `${head}: ${this.lastStderr}`;
   }
 
   private drop(): void {

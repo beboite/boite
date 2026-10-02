@@ -4,11 +4,12 @@ import { join, resolve } from 'node:path';
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
 import { defineConfig, type Plugin } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
-import { stampWorkerCache } from './src/lib/worker-stamp';
-import { tooNewForFloor } from './src/lib/browser-floor';
-import { localePreloadScript } from './src/lib/locale-preload';
-import { colorsBootScript } from './src/lib/theme-colors';
+import { stampWorkerCache } from './src/lib/worker-stamp.ts';
+import { tooNewForFloor } from './src/lib/browser-floor.ts';
+import { localePreloadScript } from './src/lib/locale-preload.ts';
+import { colorsBootScript } from './src/lib/theme-colors.ts';
 import { lucideGlyph } from './icon-plugin.ts';
+import { prepaintMinify } from './prepaint.ts';
 
 const COMPRESSIBLE = /\.(?:html|js|css|svg|json|webmanifest)$/;
 
@@ -131,8 +132,9 @@ function localePreload(): Plugin {
   };
 }
 
+
 export default defineConfig({
-  plugins: [lucideGlyph(), svelte(), { name: 'boite-colors-prepaint', transformIndexHtml: () => [{ tag: 'script', children: colorsBootScript(), injectTo: 'head' }] }, browserFloor(), dropFakeClient(), localePreload(), precompress()],
+  plugins: [lucideGlyph(), svelte(), { name: 'boite-colors-prepaint', transformIndexHtml: () => [{ tag: 'script', children: colorsBootScript(), injectTo: 'head' }] }, browserFloor(), dropFakeClient(), localePreload(), prepaintMinify(), precompress()],
   base: './',
   // AudioWorklet modules must be same-origin files, never data URLs under the shell CSP.
   build: { outDir: 'dist', emptyOutDir: true, target: 'es2022', assetsInlineLimit: (file) => file.endsWith('speech-worklet.js') ? false : undefined },

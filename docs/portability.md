@@ -28,7 +28,7 @@ Three portability regressions have dedicated coverage:
 
 | Area | Current behavior and consequence |
 |---|---|
-| Process ownership | Only direct agent children are tracked and stopped. Grandchildren can survive a stopped turn. A hard shell exit can leave its core running. See [trace](trace.md). |
+| Process ownership | The registry tracks direct children. Shutdown signals their process groups; descendants that leave those groups can survive. A hard shell exit can leave its core running. See [trace](trace.md). |
 | Resource protection | The CPU cap, focus protection and audio muting are Windows-only. The memory guard runs everywhere and stops the heaviest child tree of a thread past its share ([trace](trace.md)). |
 | Browser panel on Linux | Tauri packs a child webview into the window's GTK box, where it cannot be placed, so the Linux app shows no built-in browser; the panel offers the system browser instead. Windows and macOS are unaffected. |
 | Dictation on Linux | WebKitGTK ships with media capture off and Tauri answers no permission request, so the Linux app says dictation is unavailable. A browser client on the same core can dictate. |

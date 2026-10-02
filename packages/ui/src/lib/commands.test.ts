@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect } from 'vitest';
+import { test } from '../test/fake-client';
 import { appCommands, isAgentCommand, runCommand, slashName } from './commands.svelte';
 import { setExperiment, writeExperiments } from './experiments';
-import { FakeClient } from './fake-client';
-import { Store } from './store.svelte';
+import type { Store } from './store.svelte';
 import { THEME_STORAGE_KEY } from './theme';
 import { work } from './work-prefs.svelte';
 
@@ -11,14 +11,7 @@ import { work } from './work-prefs.svelte';
  * both run on. Same fake as the palette's own test, same shape of check.
  */
 
-let store: Store;
-
-beforeEach(async () => {
-  window.localStorage.clear();
-  store = new Store();
-  store.attach(new FakeClient({ delayMs: 0 }));
-  await store.connect();
-});
+beforeEach(() => window.localStorage.clear());
 
 afterEach(() => {
   writeExperiments([]);
@@ -26,23 +19,24 @@ afterEach(() => {
   delete document.documentElement.dataset['theme'];
 });
 
-function ids(): string[] {
+function ids(store: Store): string[] {
   return appCommands(store, false).map((item) => item.id);
 }
 
-test('the list carries every app command, the thread ones only while one is open', async () => {
+test('the list carries every app command, the thread ones only while one is open', async ({ store }) => {
   // Session import joins the palette; persistent agents only have their launcher.
-  expect(ids()).not.toContain('import-session');
-  expect(ids()).not.toContain('agents');
+  expect(ids(store)).not.toContain('import-session');
+  expect(ids(store)).not.toContain('agents');
   setExperiment('session-import', true);
   setExperiment('resident-agents', true);
-  expect(ids()).toEqual([
+  expect(ids(store)).toEqual([
     'new-thread',
     'add-project',
     'import-session',
     'sidebar',
     'settings',
     'appearance',
+    'task-manager',
     'archived',
     'reopen-thread',
     'providers',
@@ -54,7 +48,7 @@ test('the list carries every app command, the thread ones only while one is open
   ]);
 
   await store.open('t-descriptors');
-  expect(ids()).toEqual([
+  expect(ids(store)).toEqual([
     'new-thread',
     'add-project',
     'import-session',
@@ -73,6 +67,7 @@ test('the list carries every app command, the thread ones only while one is open
     'sidebar',
     'settings',
     'appearance',
+    'task-manager',
     'archived',
     'reopen-thread',
     'providers',
@@ -88,7 +83,7 @@ test('the list carries every app command, the thread ones only while one is open
   expect(appCommands(store, false).some(isAgentCommand)).toBe(false);
 });
 
-test('runCommand dispatches: the theme is stored and stamped, settings opens on its tab', () => {
+test('runCommand dispatches: the theme is stored and stamped, settings opens on its tab', ({ store }) => {
   runCommand(store, 'theme-dark', false);
   expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
   // Dark is the palette on `:root`, so it removes the attribute rather than setting one.
@@ -115,11 +110,11 @@ test('runCommand dispatches: the theme is stored and stamped, settings opens on 
   expect(store.page).toBe('chat');
 });
 
-test('a hidden trace card stays in the palette, while persistent agents only open from their launcher', async () => {
+test('a hidden trace card stays in the palette, while persistent agents only open from their launcher', async ({ store }) => {
   await store.open('t-descriptors');
   // The palette is the way back to a button put away in Appearance.
   work.show('panel.trace', false);
-  expect(ids()).toContain('trace');
+  expect(ids(store)).toContain('trace');
   runCommand(store, 'trace', false);
   expect(store.panel.surfaces.some((surface) => surface.kind === 'trace')).toBe(true);
   work.show('panel.trace', true);
@@ -127,7 +122,7 @@ test('a hidden trace card stays in the palette, while persistent agents only ope
   runCommand(store, 'agents', false);
   expect(store.page).toBe('chat');
   setExperiment('resident-agents', true);
-  expect(ids()).not.toContain('agents');
+  expect(ids(store)).not.toContain('agents');
   runCommand(store, 'agents', false);
   expect(store.page).toBe('chat');
   store.showAgents();

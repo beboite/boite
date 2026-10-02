@@ -181,6 +181,59 @@ test("Ctrl+J opens a shell under the thread, typing reaches it, and OpenCode sig
   }
 }, 90_000);
 
+test("switching Stores with colliding terminal ids restores the owning screen and routes its keystrokes", async () => {
+  const port = await freePort();
+  const server = await startUi(port);
+  const page = await BrowserPage.launch({
+    url: `http://127.0.0.1:${port}/?fake=1&open=recent&machines=1`,
+    windowSize: { width: 1440, height: 900 },
+  });
+  try {
+    await page.waitFor('globalThis.__boiteTest?.workspace.machines.length === 2 && globalThis.__boiteTest.workspace.machines.every(machine => machine.store.connection === "ready")');
+    await page.evaluate(`(() => {
+      const workspace = globalThis.__boiteTest.workspace;
+      globalThis.__terminalOwners = workspace.machines.map(machine => machine.store);
+      globalThis.__terminalWrites = [[], []];
+      globalThis.__terminalOwners.forEach((store, index) => {
+        const call = store.client.call.bind(store.client);
+        store.client.call = (method, params) => {
+          if (method === 'terminals.write') globalThis.__terminalWrites[index].push(params.data);
+          return call(method, params);
+        };
+      });
+      document.documentElement.dataset.motion = 'reduced';
+    })()`);
+    expect(await page.evaluate('globalThis.__terminalOwners.map(store => store.endpointUrl)')).toEqual([null, null]);
+
+    // Both public fake machines retain the same thread id and keep their own shell.
+    for (let owner = 0; owner < 2; owner++) {
+      await page.evaluate(`globalThis.__boiteTest.workspace.select(globalThis.__terminalOwners[${owner}], 't-trace')`);
+      await page.click('[data-testid=terminal-toggle]');
+      await page.waitFor('document.querySelector("[data-testid=terminal-drawer] .xterm-rows")?.textContent.includes("PS ")');
+      await settled(page);
+      await page.evaluate(`document.querySelector('[data-testid=terminal-drawer] .terminal-screen').dataset.owner = '${owner}'`);
+    }
+
+    for (const [owner, text] of [[0, 'first-owner'], [1, 'second-owner']] as const) {
+      await page.evaluate(`globalThis.__boiteTest.workspace.select(globalThis.__terminalOwners[${owner}], 't-trace')`);
+      await page.waitFor('document.querySelector("[data-testid=terminal-drawer] .xterm-helper-textarea")');
+      await settled(page);
+      await page.evaluate(`(() => {
+        globalThis.__terminalWrites = [[], []];
+        document.querySelector('[data-testid=terminal-drawer] .xterm-helper-textarea').focus();
+      })()`);
+      await page.send('Input.insertText', { text });
+      await page.waitFor(`globalThis.__terminalWrites.some(writes => writes.join('').includes('${text}'))`);
+      expect(await page.evaluate('globalThis.__terminalWrites.map(writes => writes.join(""))')).toEqual(owner === 0 ? [text, ''] : ['', text]);
+      expect(await page.evaluate('document.querySelector("[data-testid=terminal-drawer] .terminal-screen").dataset.owner')).toBe(String(owner));
+    }
+    expect(page.errors()).toEqual([]);
+  } finally {
+    await page.close();
+    await server.close();
+  }
+}, 90_000);
+
 async function press(page: BrowserPage, key: string, code: string, keyCode: number, text?: string): Promise<void> {
   const base = { key, code, windowsVirtualKeyCode: keyCode, ...(text === undefined ? {} : { text }) };
   await page.send("Input.dispatchKeyEvent", { type: "keyDown", ...base });
