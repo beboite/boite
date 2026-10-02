@@ -242,7 +242,7 @@ describe('muse driver', () => {
     const threadId = await museThread(client);
     expect((await runTurn(client, threadId, '[thought]the answer')).status).toBe('done');
     expect(await lastParts(client, threadId)).toEqual([
-      { type: 'thinking', text: 'thinking about it' },
+      { type: 'thinking', text: 'thinking about it', startedAt: expect.any(Number), finishedAt: expect.any(Number) },
       { type: 'text', text: 'the answer' },
     ]);
   });

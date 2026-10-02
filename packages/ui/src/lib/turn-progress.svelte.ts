@@ -6,36 +6,13 @@ import type { Message } from '@boite/contracts';
  */
 export const turnProgressStats = { finishedScans: 0 };
 
-export interface Thought {
-  host: string;
-  text: string;
-  live: boolean;
-}
-
 function wrote(message: Message): boolean {
   return message.parts.some((part) => (part.type === 'text' || part.type === 'thinking' ? part.text.length > 0 : true));
 }
 
-/** One reasoning disclosure per turn: new reasoning replaces the text, the first message keeps the host. */
-function collectThoughts(messages: Message[]): Map<string, Thought> {
-  const result = new Map<string, Thought>();
-  for (const message of messages) {
-    for (const [index, part] of message.parts.entries()) {
-      if (part.type !== 'thinking') continue;
-      const previous = result.get(message.turnId);
-      result.set(message.turnId, {
-        host: previous?.host ?? message.id,
-        text: part.text || previous?.text || '',
-        live: message.state === 'streaming' && index === message.parts.length - 1
-      });
-    }
-  }
-  return result;
-}
-
 /**
- * Which turns have started answering and what each one reasoned, for the
- * timeline. Finished messages and streaming ones are derived apart: a delta
+ * Which turns have started answering in the timeline. Finished messages and
+ * streaming ones are derived apart: a delta
  * appends to a streaming part, so only the small live side re-runs, and the
  * scan over every loaded message happens when a message finishes or arrives.
  * The live side of `responded` is a string, so once a turn has answered the
@@ -53,8 +30,7 @@ export class TurnProgress {
     turnProgressStats.finishedScans += 1;
     const answered = this.#messages().filter((message) => message.role === 'assistant' && message.state !== 'streaming');
     return {
-      responded: new Set(answered.filter(wrote).map((message) => message.turnId)),
-      thoughts: collectThoughts(answered)
+      responded: new Set(answered.filter(wrote).map((message) => message.turnId))
     };
   });
 
@@ -64,16 +40,7 @@ export class TurnProgress {
 
   #liveRespondedSet = $derived(new Set(this.#liveResponded.split('\n').filter(Boolean)));
 
-  #liveThoughts = $derived(collectThoughts(this.#streaming));
-
   responded(turnId: string): boolean {
     return this.#finished.responded.has(turnId) || this.#liveRespondedSet.has(turnId);
-  }
-
-  thought(turnId: string): Thought | undefined {
-    const done = this.#finished.thoughts.get(turnId);
-    const live = this.#liveThoughts.get(turnId);
-    if (!live) return done;
-    return { host: done?.host ?? live.host, text: live.text || done?.text || '', live: live.live };
   }
 }

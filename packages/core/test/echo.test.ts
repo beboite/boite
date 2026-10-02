@@ -69,6 +69,10 @@ describe('echo driver', () => {
     await client.call('threads.subscribe', { threadId });
 
     const deltas: { partIndex: number; text: string }[] = [];
+    const thoughts: Extract<MessagePart, { type: 'thinking' }>[] = [];
+    client.on('message.part', event => {
+      if (event.threadId === threadId && event.part.type === 'thinking') thoughts.push(event.part);
+    });
     client.on('message.delta', (event) => {
       if (event.threadId === threadId) deltas.push({ partIndex: event.partIndex, text: event.text });
     });
@@ -79,13 +83,39 @@ describe('echo driver', () => {
 
     const thread = await client.call('threads.get', { threadId });
     expect(thread.messages[1]?.parts).toEqual([
-      { type: 'thinking', text: 'thinking about: what the echo says' },
+      { type: 'thinking', text: 'thinking about: what the echo says', startedAt: expect.any(Number), finishedAt: expect.any(Number) },
       { type: 'text', text: 'what the echo says' },
     ]);
     // Two deltas on the thinking part, whatever the journal coalesced after them.
     expect(deltas.filter((delta) => delta.partIndex === 0).map((delta) => delta.text).join('')).toBe(
       'thinking about: what the echo says',
     );
+    expect(thoughts).toHaveLength(2);
+    expect(thoughts[0]?.finishedAt).toBeNull();
+    expect(thoughts[1]?.startedAt).toBe(thoughts[0]?.startedAt);
+    expect(thoughts[1]?.finishedAt).toBeGreaterThanOrEqual(thoughts[1]!.startedAt!);
+    expect(harness.core.journal.getMessage(thread.messages[1]!.id)?.parts[0]).toEqual(thoughts[1]);
+  });
+
+  test('reasoning closes when the message finishes or the turn is stopped before another part', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    await client.call('threads.subscribe', { threadId });
+    for (const stop of [false, true]) {
+      const finished = client.next('turn.finished', turn => turn.threadId === threadId, 10000);
+      const thought = client.next('message.part', event => event.threadId === threadId && event.part.type === 'thinking');
+      await client.call('turns.start', { threadId, prompt: stop ? '[think][sleep:30000]' : '[think]' });
+      const started = await thought;
+      if (stop) await client.call('turns.stop', { threadId });
+      expect((await finished).status).toBe(stop ? 'stopped' : 'done');
+      const message = harness.core.journal.getMessage(started.messageId)!;
+      const part = message.parts[0];
+      expect(part?.type).toBe('thinking');
+      if (part?.type !== 'thinking') throw new Error('missing reasoning');
+      expect(part.startedAt).toBe(started.part.type === 'thinking' ? started.part.startedAt : undefined);
+      expect(part.finishedAt).toBeGreaterThanOrEqual(part.startedAt!);
+      expect(message.state).toBe('complete');
+    }
   });
 
   test('every turn writes the context meter on the thread, and a compact directive lowers it behind a divider', async () => {

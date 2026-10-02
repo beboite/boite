@@ -128,7 +128,7 @@ describe('claude driver', () => {
     const assistants = thread.messages.filter((message) => message.role === 'assistant');
     expect(assistants).toHaveLength(1);
     expect(assistants[0]?.parts).toEqual([
-      { type: 'thinking', text: 'let me check' },
+      { type: 'thinking', text: 'let me check', startedAt: expect.any(Number), finishedAt: expect.any(Number) },
       { type: 'text', text: 'pong' },
     ]);
   });

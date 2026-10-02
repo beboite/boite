@@ -380,7 +380,7 @@ test.each([false, true])('the chat and agent panel receive complete streaming up
       expect(snapshot?.messages.at(-1)?.state).toBe('complete');
       const parts = snapshot?.messages.at(-1)?.parts ?? [];
       expect(parts.filter(part => part.type !== 'tool')).toEqual([
-        { type: 'thinking', text: 'thinking about: [tool] one streamed answer' },
+        { type: 'thinking', text: 'thinking about: [tool] one streamed answer', startedAt: expect.any(Number), finishedAt: expect.any(Number) },
         { type: 'text', text: '[tool] one streamed answer' }
       ]);
       expect(parts.find(part => part.type === 'tool')).toMatchObject({ status: 'done' });
@@ -845,7 +845,7 @@ describe('Store', () => {
     expect(assistant?.state).toBe('complete');
     // The fake reasons before it answers, like a provider that streams thinking.
     expect(assistant?.parts).toEqual([
-      { type: 'thinking', text: 'thinking about: read the trace note' },
+      { type: 'thinking', text: 'thinking about: read the trace note', startedAt: expect.any(Number), finishedAt: expect.any(Number) },
       { type: 'text', text: 'read the trace note' }
     ]);
   });

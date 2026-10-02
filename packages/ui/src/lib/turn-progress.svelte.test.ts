@@ -13,25 +13,30 @@ function finished(turn: number): Message[] {
 function setup() {
   const messages = $state<Message[]>(Array.from({ length: 200 }, (_, turn) => finished(turn)).flat());
   let progress!: TurnProgress;
-  const track: { responded: boolean; thought: string | undefined; live: boolean | undefined } = { responded: false, thought: undefined, live: undefined };
+  const track: { responded: boolean } = { responded: false };
   const stop = $effect.root(() => {
     progress = new TurnProgress(() => messages);
     $effect(() => {
       track.responded = progress.responded('turn-live');
-      const thought = progress.thought('turn-live');
-      track.thought = thought?.text;
-      track.live = thought?.live;
     });
   });
   flushSync();
   return { messages, progress, track, stop };
 }
 
-test('a finished turn has answered and keeps its reasoning', () => {
+test('a finished turn has answered', () => {
   const { progress, stop } = setup();
   expect(progress.responded('turn-3')).toBe(true);
-  expect(progress.thought('turn-3')).toEqual({ host: 'a3', text: 'why 3', live: false });
   expect(progress.responded('turn-missing')).toBe(false);
+  stop();
+});
+
+test('a tool call counts as a response even before a later empty reasoning block', () => {
+  const { messages, progress, stop } = setup();
+  messages.push({ id: 'first', threadId: 't', turnId: 'turn-x', role: 'assistant', parts: [{ type: 'tool', toolId: 'x', name: 'Read', input: {}, output: 'ok', status: 'done' }], state: 'complete', createdAt: 3 });
+  messages.push({ id: 'second', threadId: 't', turnId: 'turn-x', role: 'assistant', parts: [{ type: 'thinking', text: '' }], state: 'streaming', createdAt: 4 });
+  flushSync();
+  expect(progress.responded('turn-x')).toBe(true);
   stop();
 });
 
@@ -49,8 +54,6 @@ test('the second receipt turns on with the first streamed character, and a delta
   thinking.text += 'hmm';
   flushSync();
   expect(track.responded).toBe(true);
-  expect(track.thought).toBe('hmm');
-  expect(track.live).toBe(true);
 
   live.parts.push({ type: 'text', text: '' });
   const text = live.parts[1];
@@ -65,29 +68,10 @@ test('the second receipt turns on with the first streamed character, and a delta
   }
   // Pushing the text part is a structural change; the deltas after it are not.
   expect(turnProgressStats.finishedScans - scans).toBe(0);
-  expect(track.live).toBe(false);
 
   live.state = 'complete';
   flushSync();
   expect(turnProgressStats.finishedScans - scans).toBe(1);
   expect(track.responded).toBe(true);
-  expect(track.thought).toBe('hmm'.concat(' more'.repeat(50)));
-  stop();
-});
-
-test('later reasoning of a turn replaces the text and keeps the first host', () => {
-  const { messages, progress, stop } = setup();
-  messages.push({ id: 'first', threadId: 't', turnId: 'turn-x', role: 'assistant', parts: [{ type: 'thinking', text: 'one' }, { type: 'tool', id: 'x', name: 'Read', input: {}, status: 'done' }], state: 'complete', createdAt: 3 } as Message);
-  messages.push({ id: 'second', threadId: 't', turnId: 'turn-x', role: 'assistant', parts: [{ type: 'thinking', text: '' }], state: 'streaming', createdAt: 4 } as Message);
-  flushSync();
-  // An empty live part keeps the earlier text until its first character.
-  expect(progress.thought('turn-x')).toEqual({ host: 'first', text: 'one', live: true });
-  const part = messages.at(-1)!.parts[0];
-  if (part?.type !== 'thinking') throw new Error('reasoning');
-  part.text = 'two';
-  flushSync();
-  expect(progress.thought('turn-x')).toEqual({ host: 'first', text: 'two', live: true });
-  // A tool call counts as an answer even with no text.
-  expect(progress.responded('turn-x')).toBe(true);
   stop();
 });

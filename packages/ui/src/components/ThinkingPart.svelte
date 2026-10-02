@@ -1,13 +1,26 @@
 <script lang="ts">
   import { Brain, ChevronRight } from '@lucide/svelte';
   import { renderMarkdown } from '../lib/markdown';
-  import { ParagraphScan, currentThought } from '../lib/message-display';
+  import { ParagraphScan } from '../lib/message-display';
   import { strings } from '../lib/strings';
+  import { elapsed } from '../lib/format';
 
-  let { text, live = false }: { text: string; live?: boolean } = $props();
+  let { text, live = false, startedAt = null, finishedAt = null }: { text: string; live?: boolean; startedAt?: number | null; finishedAt?: number | null } = $props();
+
+  let now = $state(Date.now());
+  let hidden = $state(document.hidden);
+  $effect(() => {
+    if (!live || startedAt === null || hidden) return;
+    now = Date.now();
+    const timer = setInterval(() => { now = Date.now(); }, 1000);
+    return () => clearInterval(timer);
+  });
+  const took = $derived(startedAt === null || (!live && finishedAt === null) ? '' : elapsed((live ? now : finishedAt!) - startedAt));
 
   // Folded by default, and the fold belongs to this part alone.
   let open = $state(false);
+  const empty = $derived(text.trim().length === 0);
+  const shown = $derived(open && !empty);
 
   // Built on the first open, then folded rather than thrown away: that is what
   // gives the height something to animate on the way back.
@@ -16,17 +29,16 @@
     if (open) built = true;
   });
 
-  let current = $derived(currentThought(text));
   // One block per paragraph, like Prose: a new paragraph renders alone and the
   // earlier ones keep their nodes, folded or not.
   const scan = new ParagraphScan();
-  let blocks = $derived(scan.blocks(current.text, live));
-  // A provider can open a reasoning block and never send its text: the label
-  // still says the agent is thinking, and there is nothing to unfold. A click
-  // meanwhile is kept, so the text unfolds when it arrives.
-  let empty = $derived(text.trim().length === 0);
-  let shown = $derived(open && !empty);
+  const content = $derived.by(() => {
+    const blocks = scan.blocks(text, live);
+    return { blocks, pending: live ? scan.pending(text) : '' };
+  });
 </script>
+
+<svelte:document onvisibilitychange={() => hidden = document.hidden} />
 
 <div class="thinking" data-testid="thinking-part">
   <button
@@ -39,20 +51,19 @@
   >
     <span class="glyph"><Brain size={15} strokeWidth={1.75} /></span>
     <span class="label">{strings.chat.thinking}</span>
+    {#if took}<span class="took" data-testid="thinking-elapsed">{took}</span>{/if}
     {#if live}
       <span class="dot" aria-label={strings.chat.streaming}></span>
     {/if}
-    {#if !empty}
-      <span class="caret" class:open={shown} aria-hidden="true"><ChevronRight size={12} strokeWidth={2} /></span>
-    {/if}
+    {#if !empty}<span class="caret" class:open={shown} aria-hidden="true"><ChevronRight size={12} strokeWidth={2} /></span>{/if}
   </button>
 
   <div class="fold" class:open={shown} inert={!shown}>
     <div class="clip">
       {#if built}
         <div class="body" data-testid="thinking-text">
-          {#if blocks.length === 0 && current.title}<div class="paragraph">{current.title}</div>{/if}
-          {#each blocks as block, index (index)}<div class="paragraph">{@html renderMarkdown(block)}</div>{/each}
+          {#each content.blocks as block, index (index)}<div class="paragraph">{@html renderMarkdown(block)}</div>{/each}
+          {#if content.pending}<div class="paragraph">{content.pending}</div>{/if}
         </div>
       {/if}
     </div>
@@ -62,8 +73,6 @@
 <style>
   .thinking {
     max-width: 100%;
-    padding-left: var(--activity-padding);
-    margin-bottom: var(--chat-part-gap);
   }
 
   .head {
@@ -79,6 +88,7 @@
   }
 
   .glyph { display: inline-flex; flex: none; width: var(--activity-glyph); justify-content: center; color: var(--color-subtle); }
+  .took { flex: none; color: var(--color-subtle); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
 
   .head:hover:not(:disabled) {
     color: var(--color-foreground);
