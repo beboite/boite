@@ -79,7 +79,7 @@ test('fake hides only proven merged worktree, preserves reason, and restore dism
 });
 
 test('fake validates proof and protects busy, viewed, pending input and paused workflow fixtures', async () => {
-  const { thread, proof } = await fixture();
+  const { project, thread, proof } = await fixture();
   const original = structuredClone(proof);
   for (const patch of [{ clean: false }, { tip: 'b'.repeat(40) }, { branch: 'wrong' }, { candidates: [proof.candidates[0]!, proof.candidates[0]!] }, { candidates: [null] }, { candidates: [{}] }, { workflowActive: true }]) {
     Object.assign(proof, original, patch); expect(await client.sweepMergedPrArchives()).toBe(0);
@@ -88,10 +88,27 @@ test('fake validates proof and protects busy, viewed, pending input and paused w
   proof.workflowActive = false;
   await client.call('threads.pin', { threadId: thread.id, pinned: true }); expect(await client.sweepMergedPrArchives()).toBe(0);
   await client.call('threads.pin', { threadId: thread.id, pinned: false });
+  await client.call('threads.focus', { threadId: null });
+  expect(await client.sweepMergedPrArchives()).toBe(0);
+  expect((await client.call('threads.get', { threadId: thread.id })).archived).toBe(false);
   await client.call('threads.focus', { threadId: thread.id }); expect(await client.sweepMergedPrArchives()).toBe(0);
   await client.call('threads.focus', { threadId: null, protectedThreadIds: [thread.id] }); expect(await client.sweepMergedPrArchives()).toBe(0);
   await client.call('threads.focus', { threadId: null }); expect(await client.sweepMergedPrArchives()).toBe(0);
-  await client.call('threads.focus', { threadId: null, protectedThreadIds: [] }); expect(await client.sweepMergedPrArchives()).toBe(1);
+  await client.call('threads.focus', { threadId: null, protectAllThreads: false }); expect(await client.sweepMergedPrArchives()).toBe(0);
+  await client.call('threads.focus', { threadId: null, protectAllThreads: true }); expect(await client.sweepMergedPrArchives()).toBe(0);
+  await client.call('threads.focus', { threadId: null, protectedThreadIds: [] }); expect(await client.sweepMergedPrArchives()).toBe(0);
+  await client.call('threads.focus', { threadId: null, protectAllThreads: false }); expect(await client.sweepMergedPrArchives()).toBe(1);
+
+  const reconnected = await client.call('threads.create', { projectId: project.id, providerId: thread.providerId, accountId: thread.accountId, worktree: { branch: 'topic-reconnected' } });
+  const reconnectProof: MergedPrFixture = { ...proof, branch: reconnected.branch!, candidates: proof.candidates.map(candidate => ({ ...candidate, branch: reconnected.branch! })) };
+  client.setMergedPrFixture(reconnected.id, reconnectProof);
+  await client.call('threads.focus', { threadId: null, protectedThreadIds: [reconnected.id] });
+  client.drop();
+  await client.restore();
+  await client.call('threads.focus', { threadId: null });
+  expect(await client.sweepMergedPrArchives()).toBe(0);
+  await client.call('threads.focus', { threadId: null, protectAllThreads: false });
+  expect(await client.sweepMergedPrArchives()).toBe(1);
 });
 
 test('fake stale policy, restore and checkout evidence cannot hide conversation', async () => {

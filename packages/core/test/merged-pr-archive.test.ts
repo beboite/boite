@@ -358,6 +358,10 @@ test('archive close during validation cannot archive or write after the Journal 
 test('merged archive retains checkout and reason, and restored exact PR stays dismissed after restart', async () => {
   const f = await fixture();
   const secondOwner = await harness.connect();
+  // Older clients omit input leases and clear parked drafts on archive events.
+  await f.client.call('threads.focus', { threadId: null });
+  expect(await service.sweep()).toBe(0);
+  expect(harness.core.threads.require(f.threadId).archived).toBe(false);
   await f.client.call('threads.focus', { threadId: null, protectedThreadIds: [f.threadId] });
   await secondOwner.call('threads.focus', { threadId: null, protectedThreadIds: [f.threadId] });
   expect(await service.sweep()).toBe(0);
@@ -369,7 +373,13 @@ test('merged archive retains checkout and reason, and restored exact PR stays di
   await f.client.call('threads.focus', { threadId: null, protectAllThreads: true });
   secondOwner.close();
   expect(await service.sweep()).toBe(0);
+  await f.client.call('threads.focus', { threadId: null, protectedThreadIds: [] });
+  expect(await service.sweep()).toBe(0);
+  const legacyOwner = await harness.connect();
+  await legacyOwner.call('threads.focus', { threadId: null });
   await f.client.call('threads.focus', { threadId: null, protectAllThreads: false });
+  expect(await service.sweep()).toBe(0);
+  legacyOwner.close();
   let archiveCount = 0;
   for (let attempt = 0; attempt < 100; attempt++) {
     archiveCount += await service.sweep();
@@ -425,7 +435,7 @@ test('busy, viewed, paused workflow, child and stale opt-out or restore leave th
     harness.core.journal.putThread({ ...original, ...patch }); expect(await service.sweep()).toBe(0);
   }
   harness.core.journal.putThread(original);
-  harness.core.threads.focus.set('fixture-viewer', f.threadId);
+  harness.core.threads.focus.set('fixture-viewer', f.threadId, [], false);
   expect(await service.sweep()).toBe(0);
   harness.core.threads.focus.set('fixture-viewer', null);
   harness.core.journal.db.query("INSERT INTO workflow_runs (id,root_id,status,created_at,updated_at,data) VALUES ('paused',?,'paused',0,0,'{}')").run(f.threadId);

@@ -2812,7 +2812,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   /** Only subscribed threads stream message events to this connection. */
   'threads.subscribe': { params: { threadId: ThreadId }; result: { ok: true } };
   'threads.unsubscribe': { params: { threadId: ThreadId }; result: { ok: true } };
-  /** The visible conversation and unsent input leases. Omitted leases remain; an empty list clears them. */
+  /** The visible conversation and unsent input leases. Omitted leases remain; an empty list clears them.
+   * A focus caller without an input report blocks automatic archive until it reports leases or disconnects. */
   'threads.focus': { params: { threadId: ThreadId | null; protectedThreadIds?: ThreadId[]; protectAllThreads?: boolean }; result: { ok: true } };
 
   /** `attachments` are journalled with the prompt. Files become host paths; images use native provider payloads. */

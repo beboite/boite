@@ -408,6 +408,12 @@ export function threadMethods(ctx: FakeContext) {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'protectAllThreads must be a boolean', data: { field: 'protectAllThreads', expected: 'boolean' } });
       }
       if (params.threadId !== null) ctx.thread(params.threadId);
+      const reportsProtection = params.protectedThreadIds !== undefined || params.protectAllThreads !== undefined;
+      if (!ctx.bus.protectionReported) {
+        if (reportsProtection) ctx.bus.protectAllThreads = false;
+        else ctx.bus.protectAllThreads = true;
+        if (reportsProtection) ctx.bus.protectionReported = true;
+      }
       if (params.protectedThreadIds !== undefined) ctx.bus.protectedThreadIds = new Set(params.protectedThreadIds);
       if (params.protectAllThreads !== undefined) ctx.bus.protectAllThreads = params.protectAllThreads;
       ctx.bus.focusedThreadId = params.threadId;

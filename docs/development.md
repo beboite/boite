@@ -190,10 +190,12 @@ Automatic archive changes visibility and records its reason; it does not stop
 work or remove a worktree or branch. Restore dismisses the exact PR and protects
 that restored checkout from another automatic archive, including after restart.
 Connected clients publish protected drafts and pending input through
-`threads.focus`; a disconnected or older client cannot report parked local
-input. The current UI retains unsent composer input, paused queues, preview undo
-and unsaved panel drafts on automatic archive. Manual archive and deletion keep
-their explicit clearing behavior.
+`threads.focus`. A focus caller that has never reported input protection blocks
+automatic archive until it reports protection or disconnects. This keeps older
+connected UIs from clearing parked input on an archive event; disconnected
+clients cannot report their input. The current UI retains unsent composer input,
+paused queues, preview undo and unsaved panel drafts on automatic archive.
+Manual archive and deletion keep their explicit clearing behavior.
 
 ### Moving a thread
 

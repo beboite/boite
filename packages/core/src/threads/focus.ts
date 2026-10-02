@@ -10,6 +10,7 @@ export class ThreadFocus {
   private readonly viewers = new Map<string, ThreadId>();
   private readonly protectedInputs = new Map<string, Set<ThreadId>>();
   private readonly protectAll = new Set<string>();
+  private readonly inputReports = new Set<string>();
   private readonly prepared = new Map<ThreadId, { key: string; pending: boolean }>();
   private readonly unlisten: () => void;
   private closed = false;
@@ -41,6 +42,13 @@ export class ThreadFocus {
     }
     if (this.closed || this.core.stopping) return;
     if (threadId !== null) this.core.threads.require(threadId);
+    // Older UIs clear parked input on archive events but cannot report it.
+    if (!this.inputReports.has(connectionId)) {
+      if (protectedThreadIds !== undefined || protectAllThreads !== undefined) {
+        this.inputReports.add(connectionId);
+        this.protectAll.delete(connectionId);
+      } else this.protectAll.add(connectionId);
+    }
     if (protectedThreadIds !== undefined) {
       if (protectedThreadIds.length) this.protectedInputs.set(connectionId, new Set(protectedThreadIds));
       else this.protectedInputs.delete(connectionId);
@@ -57,7 +65,10 @@ export class ThreadFocus {
     if (threadId !== null) this.refresh(threadId);
   }
 
-  disconnect(connectionId: string): void { this.set(connectionId, null, [], false); }
+  disconnect(connectionId: string): void {
+    this.set(connectionId, null, [], false);
+    this.inputReports.delete(connectionId);
+  }
 
   viewed(threadId: ThreadId): boolean {
     return [...this.viewers.values()].includes(threadId);
@@ -116,6 +127,7 @@ export class ThreadFocus {
     this.viewers.clear();
     this.protectedInputs.clear();
     this.protectAll.clear();
+    this.inputReports.clear();
     this.prepared.clear();
   }
 }

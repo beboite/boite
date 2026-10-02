@@ -13,6 +13,7 @@ export class FakeBus {
   focusedThreadId: ThreadId | null = null;
   protectedThreadIds = new Set<ThreadId>();
   protectAllThreads = false;
+  protectionReported = false;
   /** The calls the socket is holding, so `drop()` can reject them from underneath. */
   readonly pending = new Set<{ reject: (error: RpcFailure) => void }>();
 
@@ -41,6 +42,7 @@ export class FakeBus {
       this.focusedThreadId = null;
       this.protectedThreadIds.clear();
       this.protectAllThreads = false;
+      this.protectionReported = false;
     }
     if (this.state === state) return;
     this.state = state;
