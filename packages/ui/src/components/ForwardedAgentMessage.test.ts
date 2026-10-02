@@ -1,6 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { AgentLetter } from '@boite/contracts';
+import { setLocaleSetting } from '../lib/i18n.svelte';
 import ForwardedAgentMessage from './ForwardedAgentMessage.svelte';
 
 let component: ReturnType<typeof mount> | undefined;
@@ -9,6 +10,8 @@ afterEach(async () => {
   if (component) await unmount(component);
   component = undefined;
   document.body.innerHTML = '';
+  vi.useRealTimers();
+  await setLocaleSetting('en');
 });
 
 test('a failed delivery keeps its reason behind a touch-friendly status disclosure', async () => {
@@ -45,6 +48,31 @@ const received: AgentLetter = {
   to: { coreId: 'destination', threadId: 'recipient' }, toTitle: 'Maintenance agent', toProject: 'Infrastructure', toMachine: 'Server',
   text: 'Please wait before restarting.', replyTo: null, createdAt: 20, expiresAt: 1000, status: 'delivered', error: null,
 };
+
+test('mail shows its age and exact timestamp, updates the age and follows the app language', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-02T12:00:00Z'));
+  const letter = { ...received, createdAt: Date.now() - 120_000 };
+  component = mount(ForwardedAgentMessage, { target: document.body, props: { letter, self: received.to } });
+  flushSync();
+  const time = document.querySelector<HTMLTimeElement>('[data-testid="agent-letter-age"]');
+  expect(time).not.toBeNull();
+  expect(time!.dateTime).toBe('2026-10-02T11:58:00.000Z');
+  expect(time!.title).toContain('11:58');
+  expect(time!.textContent).toBe('2 min. ago');
+
+  await vi.advanceTimersByTimeAsync(60_000);
+  flushSync();
+  expect(time!.textContent).toBe('3 min. ago');
+  await setLocaleSetting('fr');
+  flushSync();
+  expect(time!.textContent?.replace(/\s/g, ' ')).toBe('il y a 3 min');
+
+  await unmount(component);
+  component = undefined;
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(vi.getTimerCount()).toBe(0);
+});
 
 test.each([
   { direction: 'incoming', self: received.to, title: received.from.title, project: 'Release tools', machine: 'Build PC', address: received.from },

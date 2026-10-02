@@ -1,10 +1,11 @@
 <script lang="ts">
   import { Gauge, RefreshCw, Settings2, X } from '@lucide/svelte';
   import type { AccountQuota } from '@boite/contracts';
+  import type { Snippet } from 'svelte';
   import { fill, strings } from '../lib/strings';
   import QuotaOverview from './QuotaOverview.svelte';
 
-  let { rows, loading, completed, error = '', owner = true, order = [], reorder, refresh, connect, settings, close, testPrefix = 'quota' }: {
+  let { rows, loading, completed, error = '', owner = true, order = [], reorder, refresh, connect, settings, close, title, testPrefix = 'quota' }: {
     rows: AccountQuota[] | null;
     loading: boolean;
     completed: string[];
@@ -16,13 +17,14 @@
     connect: () => void;
     settings: () => void;
     close: () => void;
+    title?: Snippet;
     testPrefix?: string;
   } = $props();
 </script>
 
 <div class="quota-popup" data-testid="quota-panel">
   <header>
-    <h2><Gauge size={17} />{strings.quotas.glance}</h2>
+    <h2><Gauge size={17} /><span>{#if title}{@render title()}{:else}{strings.quotas.glance}{/if}</span></h2>
     <div class="actions">
       {#if owner}
         <button type="button" class="ghost icon" aria-label={strings.quotas.refresh} title={strings.quotas.refresh} aria-busy={loading} data-testid={`${testPrefix}-refresh`} onclick={refresh}><RefreshCw size={16} class={loading ? 'spinning' : ''} /></button>
@@ -57,9 +59,9 @@
   header, footer { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 10px 4px 12px; }
   header { border-bottom: 1px solid var(--color-border); }
   footer { border-top: 1px solid var(--color-border); }
-  h2 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: var(--text-sm); font-weight: 600; }
-  h2 :global(svg) { color: var(--color-muted-foreground); }
-  .actions { display: flex; gap: 2px; }
+  h2 { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0; font-size: var(--text-sm); font-weight: 600; }
+  h2 :global(svg) { flex: none; color: var(--color-muted-foreground); }
+  .actions { flex: none; display: flex; gap: 2px; }
   .body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 2px 8px; }
   footer button { font-size: var(--text-sm); }
   .failed { display: grid; justify-items: start; gap: 8px; padding: 12px 4px; color: var(--color-danger); font-size: var(--text-sm); }

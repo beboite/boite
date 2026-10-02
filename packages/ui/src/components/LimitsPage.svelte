@@ -5,6 +5,7 @@
   import ProviderLogo from './ProviderLogo.svelte';
   import UsageLimits from './UsageLimits.svelte';
   import AccountRename from './AccountRename.svelte';
+  import QuotaMachineScope from './QuotaMachineScope.svelte';
   import { namedQuotas, quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
@@ -15,7 +16,7 @@
    * listed at all. Under them, the switch of every account that has limits to
    * read: the one place monitoring is turned on or off.
    */
-  let { store }: { store: Store } = $props();
+  let { store, showTitle = true }: { store: Store; showTitle?: boolean } = $props();
 
   let reader = $derived(quotaReader(store.endpointUrl ?? 'here'));
   let rows = $derived(reader.rows === null ? null : shownQuotas(reader.rows, store.accounts));
@@ -47,7 +48,7 @@
 
 <div class="page limits-page" data-testid="limits-page">
   <header class="top">
-    <h1>{strings.usage.limits}</h1>
+    {#if showTitle}<h1><QuotaMachineScope {store} fallback={strings.usage.limits} /></h1>{/if}
     {#if store.owner}
       <button type="button" class="quiet icon refresh" aria-label={strings.usage.refresh} title={strings.usage.refresh} data-testid="limits-refresh" aria-busy={reader.loading} onclick={refresh}>
         <RefreshCw size={15} strokeWidth={1.75} class={reader.loading ? 'spinning' : ''} />
