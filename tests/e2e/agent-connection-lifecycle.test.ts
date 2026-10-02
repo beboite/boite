@@ -38,7 +38,39 @@ for (const [name, width, height, mobile] of [['desktop', 1280, 900, false], ['ph
       await page.click(id('connect-close'));
       await page.waitFor(`!document.querySelector('${id('connect-dialog')}')`);
 
-      if (!mobile) {
+      if (mobile) {
+        // Account administration is on desktop; this phone observes the core's removal.
+        await page.evaluate(`${store}.removeAccount('a-pi')`);
+        await page.evaluate(`${store}.reloadProviders()`);
+        await page.evaluate(`${store}.reloadProviders()`);
+        expect(await page.evaluate(`${store}.accounts.filter(account => account.providerId === 'pi').length`)).toBe(0);
+        await page.evaluate(`${store}.openConnect('pi')`);
+        await page.waitFor(`document.querySelector('${id('connect-step')}')?.dataset.step === 'external'`);
+        expect(await page.evaluate(`document.querySelector('${id('connect-use')}')`)).toBeNull();
+        await capture('removed-default');
+        await page.click(id('connect-close'));
+        await page.waitFor(`!document.querySelector('${id('connect-dialog')}')`);
+      } else {
+        await page.evaluate(`${store}.showSettings('accounts')`);
+        const pi = '[data-provider-id="pi"]';
+        await page.waitFor(`document.querySelector('${pi} ${id('provider-details-toggle')}')`);
+        await page.click(`${pi} ${id('provider-details-toggle')}`);
+        await page.waitFor(`document.querySelector('${pi} ${id('account-remove')}')`);
+        await page.click(`${pi} ${id('account-remove')}`);
+        await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);
+        await page.click(id('confirm-ok'));
+        await page.waitFor(`${store}.accounts.every(account => account.providerId !== 'pi')`);
+        await page.click(id('providers-refresh'));
+        await page.waitFor(`!document.querySelector('${id('providers-refresh')}').disabled`);
+        await page.evaluate(`${store}.reloadProviders()`);
+        expect(await page.evaluate(`${store}.accounts.filter(account => account.providerId === 'pi').length`)).toBe(0);
+        await page.evaluate(`document.querySelector('${pi}').scrollIntoView()`);
+        await capture('removed-default');
+        await page.click(`${pi} ${id('account-use-cli')}`);
+        await page.waitFor(`document.querySelector('${pi} ${id('account-row')}')`);
+        await page.evaluate(`${store}.reloadProviders()`);
+        expect(await page.evaluate(`${store}.accounts.filter(account => account.providerId === 'pi').length`)).toBe(1);
+
         await page.evaluate(`${store}.showSettings('machines')`);
         await page.waitFor(`document.querySelector('${id('pairing-mint')}')`);
         await page.click(id('pairing-mint'));

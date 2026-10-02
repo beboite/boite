@@ -131,6 +131,7 @@ export class AccountStore {
     };
     this.core.journal.append({ type: 'account.added', threadId: null, version: 1, payload: account }, () => {
       this.core.journal.putAccount(account);
+      if (useDefault) this.core.journal.deleteSetting(`account-default-removed:${provider.id}`);
     });
     this.prepare(account, provider);
     return this.check(account.id, true);
@@ -174,6 +175,7 @@ export class AccountStore {
         { type: 'account.removed', threadId: null, version: 1, payload: { accountId } },
         () => {
           this.core.journal.deleteAccount(accountId);
+          if (account.isolationDir === null) this.core.journal.setSetting(`account-default-removed:${account.providerId}`, true);
           this.core.journal.deleteSetting(`account-auth-rejected:${accountId}`);
           // A stale grant would make every later agents.accounts.set refuse the whole list.
           const grants = this.core.workforce.resident.grants();
@@ -342,7 +344,7 @@ export class AccountStore {
   ensureDefaults(): void {
     const known = new Set(this.list().map((account) => account.providerId));
     for (const summary of this.core.providers.available()) {
-      if (known.has(summary.id)) continue;
+      if (known.has(summary.id) || this.core.journal.getSetting(`account-default-removed:${summary.id}`) === true) continue;
       const provider = this.core.providers.require(summary.id);
       if (provider.isolation?.alwaysIsolated !== true && provider.login !== undefined
         && provider.login.terminal !== true && this.sessionStatus({ isolationDir: null }, provider) === 'unauthenticated') continue;

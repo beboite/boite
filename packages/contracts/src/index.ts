@@ -2554,6 +2554,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
     params: { providerId: ProviderId; label: string; useDefaultLocation?: boolean };
     result: Account;
   };
+  /** Removing a default CLI account prevents automatic adoption; an explicit add can restore it. */
   'accounts.remove': { params: { accountId: AccountId }; result: { ok: true } };
   'accounts.rename': { params: { accountId: AccountId; label: string }; result: Account };
   /** Refresh the provider's login when requested; never uses a model catalogue as authentication. */

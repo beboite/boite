@@ -129,6 +129,7 @@ export class FakeContext {
   /** Where each managed install stood before the running one started, for a cancel. */
   readonly installBefore = new Map<string, ProviderInstallState>();
   accounts: Account[] = [];
+  readonly removedDefaultProviders = new Set<string>();
   readonly threads = new Map<ThreadId, Thread>();
   readonly deletedThreads = new Map<ThreadId, { threads: Thread[]; archived: boolean[]; deletedAt: number }>();
   readonly coordination = new Map<ThreadId, CoordinationConfig>();

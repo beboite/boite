@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { CoreClient } from '../src/client.ts';
+import { Core } from '../src/core.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -170,7 +171,7 @@ describe('accounts', () => {
     expect(echo?.status).toBe('ok');
   });
 
-  test('reload adopts an existing CLI login while terminal sign-in keeps its default account', async () => {
+  test('a removed terminal default stays removed even when its CLI signs in later', async () => {
     const client = await harness.connect();
     const providerId = await addLoginProvider(harness, client);
     const provider = harness.core.providers.require(providerId);
@@ -192,9 +193,45 @@ describe('accounts', () => {
     writeFileSync(join(own, '.credentials.json'), '{}');
     harness.core.accounts.ensureDefaults();
     harness.core.accounts.ensureDefaults();
-    expect(harness.core.accounts.list().filter(entry => entry.providerId === providerId)).toEqual([
-      expect.objectContaining({ label: 'Default', isolationDir: null, status: 'ok' })
-    ]);
+    expect(harness.core.accounts.list().filter(entry => entry.providerId === providerId)).toEqual([]);
+    expect(readFileSync(join(own, '.credentials.json'), 'utf8')).toBe('{}');
+    const isolated = await client.call('accounts.add', { providerId, label: 'New sign-in' });
+    expect(isolated.isolationDir).not.toBeNull();
+    await client.call('accounts.remove', { accountId: isolated.id });
+    harness.core.accounts.ensureDefaults();
+    expect(harness.core.accounts.list().filter(entry => entry.providerId === providerId)).toEqual([]);
+    const restored = await client.call('accounts.add', { providerId, label: 'My CLI', useDefaultLocation: true });
+    expect(restored).toMatchObject({ isolationDir: null, status: 'ok' });
+    harness.core.accounts.ensureDefaults();
+    expect(harness.core.accounts.list().filter(entry => entry.providerId === providerId)).toEqual([restored]);
+  });
+
+  test('removing a default survives provider reloads and core restart without disabling other providers', async () => {
+    const client = await harness.connect();
+    const account = harness.core.accounts.list().find(entry => entry.providerId === 'echo')!;
+    await client.call('accounts.remove', { accountId: account.id });
+    for (let i = 0; i < 2; i++) await client.call('providers.reload', {});
+    expect(harness.core.accounts.list().filter(entry => entry.providerId === 'echo')).toEqual([]);
+    expect(harness.core.providers.available().some(provider => provider.id === 'echo')).toBe(true);
+    const providerId = await addLoginProvider(harness, client);
+    const provider = harness.core.providers.require(providerId);
+    provider.auth = { kind: 'none' };
+    for (const profile of Object.values(provider.profiles)) {
+      if (profile) profile.executable = [{ kind: 'file', value: process.execPath }];
+    }
+    harness.core.accounts.ensureDefaults();
+    const other = harness.core.accounts.list().find(entry => entry.providerId === providerId)!;
+    expect(other).toMatchObject({ label: 'Default', isolationDir: null, status: 'ok' });
+
+    await harness.core.close();
+    const restarted = new Core({ dataDir: harness.dataDir, token: harness.token });
+    try {
+      expect(restarted.accounts.list().filter(entry => entry.providerId === 'echo')).toEqual([]);
+      const restored = restarted.accounts.add({ providerId: 'echo', label: 'Use echo again', useDefaultLocation: true });
+      restarted.accounts.ensureDefaults();
+      expect(restarted.accounts.list().filter(entry => entry.providerId === 'echo')).toEqual([restored]);
+      expect(restarted.accounts.require(other.id)).toEqual(other);
+    } finally { await restarted.close(); }
   });
 
   test('the default opencode account reads its own login, an isolated one reads unauthenticated', async () => {

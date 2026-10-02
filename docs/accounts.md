@@ -86,6 +86,14 @@ account named after the provider. No signed-out `Default` account is added
 beside it. Terminal logins retain the default account, and a provider whose
 login can live outside session files retains its account with unknown status.
 
+Removing a default account opts that provider out of automatic adoption on this
+core. Reloads, managed installs and core restarts respect that choice, even if
+the CLI remains signed in or changes its login. The CLI's own files stay intact,
+and other providers are unaffected. Guided sign-in can still create a new
+isolated account. "Use my command-line login" explicitly restores the CLI
+account and permits automatic adoption again, through an account added with
+`useDefaultLocation: true`.
+
 Reading it correctly needs one thing the descriptor does not say, which is what
 the isolation variable means when nobody sets it. The core carries those
 defaults: the XDG pair resolve under `~/.local/share` and `~/.config`,
