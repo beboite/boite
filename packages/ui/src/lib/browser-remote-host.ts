@@ -1,4 +1,4 @@
-import type { RemoteBrowserFrame, RemoteBrowserInput } from '@boite/contracts';
+import { remoteBrowserInputError, type RemoteBrowserFrame, type RemoteBrowserInput } from '@boite/contracts';
 import { browserBridge } from './browser-bridge';
 import { isExperimentEnabled } from './experiments';
 
@@ -40,6 +40,8 @@ export async function captureRemoteBrowser(id: string, assertCurrent: () => void
 }
 
 export async function inputRemoteBrowser(id: string, frameId: string, input: RemoteBrowserInput, assertCurrent: () => void): Promise<void> {
+  const problem = remoteBrowserInputError(input);
+  if (problem) throw new Error(problem);
   const saved = captured.get(frameId);
   const changed = () => new Error('the page changed; wait for a fresh frame before interacting');
   if (!saved || saved.frame.tabId !== id) throw changed();
@@ -49,6 +51,14 @@ export async function inputRemoteBrowser(id: string, frameId: string, input: Rem
   });
   if (!samePage(saved.page, await evaluate(pageInfo) as Page)) throw changed();
   switch (input.kind) {
+    case 'viewport':
+    case 'reset-viewport': {
+      // Retire coordinates captured before changing the shared viewport, even on failure.
+      for (const [key, value] of captured) if (value.frame.tabId === id) captured.delete(key);
+      if (input.kind === 'viewport') await protocol('Emulation.setDeviceMetricsOverride', { width: input.width, height: input.height, deviceScaleFactor: 1, mobile: false });
+      else await protocol('Emulation.clearDeviceMetricsOverride', {});
+      break;
+    }
     case 'tap': {
       const point = { x: Math.min(saved.page.width - 1, input.x * saved.page.width), y: Math.min(saved.page.height - 1, input.y * saved.page.height), button: 'left', clickCount: 1 };
       await protocol('Input.dispatchMouseEvent', { type: 'mousePressed', ...point });

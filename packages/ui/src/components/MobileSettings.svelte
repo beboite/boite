@@ -60,7 +60,11 @@
   {#key page}
   {#if page === 'home'}
     <div class="home" data-testid="mobile-settings-home">
+      <div class="brand"><img src="./icons/icon.svg" alt="" width="32" height="32" /><div><strong>Boite</strong><span>{strings.mobile.settingsDevice}</span></div></div>
       <h1>{strings.settings.heading}</h1>
+      <button class="ghost machine-link" data-testid="mobile-settings-connection" onclick={() => store.showSettings('machines')}>
+        <Monitor size={20} /><span><strong>{machine?.label ?? strings.machines.heading}</strong><small class:ready={store.connection === 'ready'}>{store.pairingRequired ? strings.mobile.pairingRequired : strings.connection[store.connection]}</small></span><ChevronRight size={18} />
+      </button>
       <section aria-labelledby="phone-preferences">
         <h2 id="phone-preferences">{strings.mobile.settingsDevice}</h2>
         <div class="rows">
@@ -163,7 +167,17 @@
   .mobile-settings { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .home, .detail { animation: fade var(--dur-2) var(--ease-out-quint); min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   .home { padding: 20px 16px; }
-  h1 { font-size: var(--text-lg); margin: 0; }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 28px; }
+  .brand img { border-radius: var(--radius-md); }
+  .brand strong { font-size: var(--text-md); }
+  .brand span { display: block; font-size: var(--text-xs); color: var(--color-muted-foreground); margin-top: 2px; }
+  h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.5px; margin: 0; }
+  .machine-link { width: 100%; height: auto; min-height: 72px; display: flex; align-items: center; gap: 12px; text-align: left; padding: 14px; margin-top: 20px; background: var(--color-surface); border: 1px solid var(--color-edge); border-radius: var(--radius-lg); }
+  .machine-link > span { flex: 1; min-width: 0; }
+  .machine-link strong { display: block; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-sm); color: var(--color-foreground); }
+  .machine-link small { display: block; font-size: var(--text-xs); margin-top: 5px; color: var(--color-muted-foreground); }
+  .machine-link small.ready { color: var(--color-success); }
+  .machine-link :global(svg) { flex: none; }
   section { margin-top: 28px; }
   h2 { font-size: var(--text-sm); font-weight: 500; color: var(--color-muted-foreground); margin: 0 0 8px; }
   p { font-size: var(--text-sm); color: var(--color-muted-foreground); line-height: 1.5; margin: 8px 0 12px; }

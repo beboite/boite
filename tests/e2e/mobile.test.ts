@@ -5,6 +5,13 @@ import { startUi } from './lib/ui.ts';
 
 let server: { close(): Promise<void> };
 let page: BrowserPage;
+async function navigateMobile(destination: string) {
+  await page.click('[data-testid=mobile-menu]');
+  await page.click('[data-testid=' + destination + ']');
+}
+async function newMobileThread() {
+  await navigateMobile('mobile-menu-new');
+}
 async function capture(name: string) {
   const settled = await page.evaluate<{ timedOut: boolean; fonts: FontFaceSetLoadStatus; animations: Array<{ playState: AnimationPlayState; currentTime: number | null; endTime: number }> }>(`(async () => {
     const animations = document.getAnimations().filter(animation => animation.effect?.getTiming().iterations !== Infinity);
@@ -30,13 +37,13 @@ beforeAll(async () => {
   server = await startUi(port);
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent&machines=1`, experiments: ['resident-agents'] });
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  await page.waitFor(`document.querySelector('[data-testid=mobile-tabs]')`);
+  await page.waitFor(`document.querySelector('[data-testid=mobile-menu]')`);
 }, 60_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
 test('phone settings expose owner protection and keep paired devices out of remote administration', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 1, mobile: true });
-  await page.click('[data-testid=mobile-settings]');
+  await navigateMobile('mobile-settings');
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
   expect(await page.evaluate(`document.querySelector('[data-testid=settings-tab-resources]') !== null && document.querySelector('[data-testid=settings-tab-keyboard]') === null`)).toBe(true);
   await page.click('[data-testid=settings-tab-resources]');
@@ -72,11 +79,12 @@ test('phone settings expose owner protection and keep paired devices out of remo
 }, 30_000);
 
 test('phone navigates conversations, activity and settings without a sidebar', async () => {
-  await page.click('[data-testid=mobile-conversations]');
+  await navigateMobile('mobile-conversations');
   await page.waitFor(`document.querySelector('[data-testid=mobile-list] .thread')`);
-  const tabs = await page.evaluate<{ bottom: number; height: number }>(`(() => { const r = document.querySelector('[data-testid=mobile-tabs]').getBoundingClientRect(); return {bottom:r.bottom,height:r.height}; })()`);
-  expect(tabs.bottom).toBeLessThanOrEqual(844);
-  expect(tabs.height).toBeGreaterThanOrEqual(44);
+  const header = await page.evaluate<{ top: number; height: number }>(`(() => { const r = document.querySelector('[data-testid=mobile-header]').getBoundingClientRect(); return {top:r.top,height:r.height}; })()`);
+  expect(header.top).toBeGreaterThanOrEqual(0);
+  expect(header.height).toBeGreaterThanOrEqual(44);
+  expect(await page.evaluate(`document.querySelector('[data-testid=mobile-tabs]') === null`)).toBe(true);
   expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
   // Each row names its provider, and a worktree thread its branch after the project.
   expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid=mobile-list] .thread')).every(row => row.querySelector('[data-testid=thread-provider]'))`)).toBe(true);
@@ -85,21 +93,21 @@ test('phone navigates conversations, activity and settings without a sidebar', a
   await page.click('[data-testid=mobile-list] .thread');
   await page.waitFor(`!document.querySelector('[data-testid=mobile-list]') && document.querySelector('[data-testid=chat]')`);
   await capture('mobile-chat.png');
-  expect(await page.evaluate(`document.querySelector('[data-testid=titlebar]').getBoundingClientRect().bottom <= document.querySelector('[data-testid=timeline]').getBoundingClientRect().top`)).toBe(true);
-  await page.click('[data-testid=mobile-activity]');
+  expect(await page.evaluate(`document.querySelector('[data-testid=mobile-header]').getBoundingClientRect().bottom <= document.querySelector('[data-testid=timeline]').getBoundingClientRect().top`)).toBe(true);
+  await navigateMobile('mobile-activity');
   await page.waitFor(`document.querySelector('[data-testid=mobile-list] h1')?.textContent === 'Activity'`);
   await capture('mobile-activity.png');
-  await page.click('[data-testid=mobile-settings]');
+  await navigateMobile('mobile-settings');
   await page.waitFor(`document.querySelector('[data-testid=settings]')`);
-  await page.click('[data-testid=mobile-conversations]');
-  await page.click('[data-testid=mobile-new]');
+  await navigateMobile('mobile-conversations');
+  await newMobileThread();
   await page.waitFor(`document.querySelector('[data-testid=composer]') && !document.querySelector('[data-testid=settings]')`);
   expect(page.errors()).toEqual([]);
 }, 30_000);
 
 test('draft survives navigation and the light phone layout fits landscape', async () => {
   await page.evaluate(`(() => { const t = document.querySelector('[data-testid=composer-input]'); t.value = 'Keep this draft'; t.dispatchEvent(new Event('input', {bubbles:true})); })()`);
-  await page.click('[data-testid=mobile-conversations]');
+  await navigateMobile('mobile-conversations');
   await page.click('[data-testid=mobile-header] [data-testid=mobile-new]');
   expect(await page.evaluate(`document.querySelector('[data-testid=composer-input]').value`)).toBe('Keep this draft');
   await page.evaluate(`document.documentElement.dataset.theme = 'light'`);
@@ -111,9 +119,45 @@ test('draft survives navigation and the light phone layout fits landscape', asyn
   expect(bounds.bottom).toBeLessThanOrEqual(390);
 }, 15_000);
 
+test('the phone header and composer stay visible when keyboard focus scrolls the document', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.navigate(`${origin}/?fake=1&open=recent`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.waitFor(`document.querySelector('[data-testid=composer-input]')`);
+  try {
+    await page.evaluate(`(() => {
+      // Reproduce Safari's root scroll separately from the chat's own scroller.
+      document.documentElement.style.overflow = 'auto'; document.body.style.overflow = 'visible';
+      const spacer = document.createElement('div'); spacer.style.height = '1200px'; document.body.append(spacer);
+      const input = document.querySelector('[data-testid=composer-input]');
+      input.value = 'Keep this keyboard draft'; input.dispatchEvent(new Event('input', { bubbles: true })); input.focus();
+      Object.defineProperty(visualViewport, 'height', { configurable: true, value: 450 });
+      Object.defineProperty(visualViewport, 'offsetTop', { configurable: true, value: 0 });
+      visualViewport.dispatchEvent(new Event('resize')); window.scrollTo(0, 140);
+    })()`);
+    await page.waitFor(`scrollY >= 140 && document.documentElement.dataset.keyboard === 'open'`);
+    const bounds = await page.evaluate<{ top: number; bottom: number }>(`({ top: document.querySelector('[data-testid=mobile-header]').getBoundingClientRect().top, bottom: document.querySelector('[data-testid=composer]').getBoundingClientRect().bottom })`);
+    expect(bounds.top).toBeGreaterThanOrEqual(0);
+    expect(bounds.bottom).toBeLessThanOrEqual(450);
+    expect(bounds.bottom).toBeGreaterThan(350);
+    expect(await page.evaluate(`!!document.querySelector('[data-testid=mobile-tabs]')`)).toBe(false);
+    await capture('mobile-keyboard-root-scroll.png');
+    await page.evaluate(`(() => {
+      delete visualViewport.height; delete visualViewport.offsetTop;
+      document.querySelector('[data-testid=composer-input]').blur();
+      visualViewport.dispatchEvent(new Event('resize'));
+    })()`);
+    await page.waitFor(`document.documentElement.dataset.keyboard === 'closed'`);
+    expect(await page.evaluate(`document.querySelector('[data-testid=mobile-header]').getBoundingClientRect().top`)).toBe(0);
+    expect(await page.evaluate(`document.querySelector('[data-testid=composer-input]').value`)).toBe('Keep this keyboard draft');
+  } finally {
+    await page.navigate(`${origin}/?fake=1&open=recent`);
+  }
+}, 20_000);
+
 test('model sheets stay on screen and browser Back closes the sheet without losing the draft', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  await page.click('[data-testid=mobile-new]');
+  await newMobileThread();
   await page.waitFor(`document.querySelector('[data-testid=composer-input]')`);
   await page.evaluate(`(() => { const t = document.querySelector('[data-testid=composer-input]'); t.value = 'Keep this draft'; t.dispatchEvent(new Event('input', {bubbles:true})); })()`);
   await page.click('[data-testid=composer-picker]');
@@ -127,7 +171,7 @@ test('model sheets stay on screen and browser Back closes the sheet without losi
   await page.evaluate('history.back()');
   await page.waitFor(`!document.querySelector('[data-testid=composer-picker-menu]')`);
   expect(await page.evaluate(`document.querySelector('[data-testid=composer-input]').value`)).toBe('Keep this draft');
-  await page.click('[data-testid=mobile-settings]');
+  await navigateMobile('mobile-settings');
   await page.click('[data-testid=mobile-settings-phone]');
   await page.waitFor(`document.querySelector('[data-testid=phone-settings]')`);
   await capture('mobile-installation.png');
@@ -141,10 +185,10 @@ test('returning to a long conversation preserves the reading position', async ()
   await capture('mobile-long-reading.png');
   const visibleAnchor = `(() => { const t=document.querySelector('[data-testid=timeline]'); const top=t.getBoundingClientRect().top; const m=[...t.querySelectorAll('[data-mid]')].find(m=>m.getBoundingClientRect().bottom>top); return {id:m.dataset.mid,offset:m.getBoundingClientRect().top-top}; })()`;
   const anchor = await page.evaluate<{ id: string; offset: number }>(visibleAnchor);
-  await page.click('[data-testid=mobile-conversations]');
+  await navigateMobile('mobile-conversations');
   await page.click('[data-testid=mobile-list] .thread:not([data-testid=mobile-thread-t-long])');
   await page.waitFor(`!document.querySelector('[data-testid=mobile-list]')`);
-  await page.click('[data-testid=mobile-conversations]');
+  await navigateMobile('mobile-conversations');
   await page.click('[data-testid=mobile-thread-t-long]');
   await page.waitFor(`!document.querySelector('[data-testid=mobile-list]')`);
   await capture('mobile-long-restored.png');
@@ -178,7 +222,7 @@ test('leaving a long conversation right after a scroll returns to that scroll', 
   await page.evaluate('new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))');
   const visibleAnchor = `(() => { const t=document.querySelector('[data-testid=timeline]'); const top=t.getBoundingClientRect().top; const m=[...t.querySelectorAll('[data-mid]')].find(m=>m.getBoundingClientRect().bottom>top); return {id:m.dataset.mid,offset:m.getBoundingClientRect().top-top}; })()`;
   const anchor = await page.evaluate<{ id: string; offset: number }>(visibleAnchor);
-  await page.click('[data-testid=mobile-conversations]');
+  await navigateMobile('mobile-conversations');
   await page.evaluate(`(() => { globalThis.__holdMeasurements = false; globalThis.__pendingMeasurements.splice(0).forEach(deliver => deliver()); })()`);
   await page.evaluate('new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))');
   await page.click('[data-testid=mobile-list] .thread:not([data-testid=mobile-thread-t-long])');
@@ -186,7 +230,7 @@ test('leaving a long conversation right after a scroll returns to that scroll', 
   const savedAnchor = await page.evaluate<{ id: string; offset: number }>(`globalThis.__boiteTest.workspace.active.readingPositions.get('t-long').anchor`);
   expect(savedAnchor.id).toBe(anchor.id);
   expect(Math.abs(savedAnchor.offset - anchor.offset)).toBeLessThan(1);
-  await page.click('[data-testid=mobile-conversations]');
+  await navigateMobile('mobile-conversations');
   await page.click('[data-testid=mobile-thread-t-long]');
   await page.waitFor(`!document.querySelector('[data-testid=mobile-list]')`);
   // Returning mounts the list before ResizeObserver restores its reading anchor.
@@ -231,10 +275,10 @@ test('the panel sheet, Agents and Settings keep clear of a notch and the status 
     await capture('mobile-safe-panel.png');
     await page.click('[data-testid=panel-close]');
     await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
-    await page.click('[data-testid=mobile-agents]');
+    await navigateMobile('mobile-agents');
     await page.waitFor(`document.querySelector('.agents-page h1')`);
     expect(await top('.agents-page h1')).toBeGreaterThanOrEqual(47);
-    await page.click('[data-testid=mobile-settings]');
+    await navigateMobile('mobile-settings');
     await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home] h1')`);
     expect(await top('[data-testid=mobile-settings-home] h1')).toBeGreaterThanOrEqual(47);
     await capture('mobile-safe-settings.png');
@@ -249,7 +293,7 @@ test('the connect sheet keeps its last button above the home indicator', async (
   await page.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 47, bottom: 34, left: 0, right: 0 } });
   try {
     await page.waitFor(`document.querySelector('[data-testid=composer-connect], [data-testid=mobile-new]')`);
-    if (!(await page.evaluate<boolean>(`!!document.querySelector('[data-testid=composer-connect]')`))) await page.click('[data-testid=mobile-new]');
+    if (!(await page.evaluate<boolean>(`!!document.querySelector('[data-testid=composer-connect]')`))) await newMobileThread();
     await page.click('[data-testid=composer-connect]');
     await page.click('[data-testid=connect-service][data-provider=claude]');
     await page.click('[data-testid=connect-install]');
@@ -267,7 +311,7 @@ test('Appearance in French at 360 px keeps every label beside its choices readab
   await page.navigate(`${origin}/?fake=1&open=recent`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 780, deviceScaleFactor: 1, mobile: true });
   try {
-    await page.click('[data-testid=mobile-settings]');
+    await navigateMobile('mobile-settings');
     await page.click('[data-testid=settings-tab-appearance]');
     await page.click('[data-testid=locale-fr]');
     await page.waitFor(`document.querySelector('[data-testid=appearance-page] h1')?.textContent.includes('Apparence')`);
@@ -293,8 +337,8 @@ test('a phone pins and archives a thread without a right-click, from the header 
   const id = await page.evaluate<string>('__boiteTest.workspace.active.openThread.id');
   const trigger = await page.evaluate<{ width: number; height: number }>(`(() => { const r = document.querySelector('[data-testid=thread-menu-trigger]').getBoundingClientRect(); return { width: r.width, height: r.height }; })()`);
   expect(trigger.height).toBeGreaterThanOrEqual(44);
-  // Subagents and Terminal sit in the title's sheet, so the title keeps most of the row.
-  expect(trigger.width).toBeGreaterThan(200);
+  // The single header shares its width with Back, browser and navigation controls.
+  expect(trigger.width).toBeGreaterThanOrEqual(100);
   expect(await page.evaluate(`['terminal-toggle'].map(id => document.querySelector('[data-testid=' + id + ']')?.offsetParent ?? null)`)).toEqual([null]);
   await page.click('[data-testid=thread-menu-trigger]');
   await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger-menu]')`);
@@ -310,7 +354,7 @@ test('a phone pins and archives a thread without a right-click, from the header 
   await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger-menu]')`);
   await page.click('[data-testid=thread-menu-trigger-menu] [data-value=pin]');
   await page.waitFor(`__boiteTest.workspace.active.openThread.pinned === true`);
-  await page.click('[data-testid=mobile-conversations]');
+  await navigateMobile('mobile-conversations');
   await page.click(`[data-testid=mobile-thread-menu-${id}]`);
   await page.waitFor(`document.querySelector('[data-testid=mobile-thread-menu-${id}-menu] [data-value=pin]')?.textContent.includes('Unpin')`);
   await capture('mobile-thread-row-menu.png');
@@ -319,12 +363,12 @@ test('a phone pins and archives a thread without a right-click, from the header 
   expect(page.errors()).toEqual([]);
 }, 20_000);
 
-test('a phone header shows the label of a draft and most of a French title at 360 px', async () => {
+test('a phone header shows the label of a draft and a truncated French title at 360 px', async () => {
   const origin = await page.evaluate<string>('location.origin');
   await page.navigate(`${origin}/?fake=1&open=recent`);
   await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger]')?.offsetParent`);
   // A draft has no title menu: its own label is the header's title.
-  await page.click('[data-testid=mobile-new]');
+  await newMobileThread();
   await page.waitFor(`document.querySelector('[data-testid=thread-title]')?.classList.contains('draft')`);
   const draft = await page.evaluate<{ text: string; width: number }>(`(() => { const t = document.querySelector('[data-testid=thread-title]'); return { text: t.textContent.trim(), width: t.getBoundingClientRect().width }; })()`);
   expect(draft.text).toBe('New thread');
@@ -337,8 +381,8 @@ test('a phone header shows the label of a draft and most of a French title at 36
     await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger]')?.offsetParent && document.documentElement.lang === 'fr'`);
     const title = await page.evaluate<{ visible: number; full: number }>(`(() => { const t = document.querySelector('[data-testid=thread-menu-trigger] .title-text'); return { visible: t.getBoundingClientRect().width, full: t.scrollWidth }; })()`);
     await capture('mobile-title-fr-360.png');
-    expect(title.visible).toBeGreaterThanOrEqual(160);
-    expect(title.visible).toBeGreaterThanOrEqual(title.full * 0.6);
+    expect(title.visible).toBeGreaterThanOrEqual(80);
+    expect(await page.evaluate(`document.querySelector('[data-testid=thread-menu-trigger]').getBoundingClientRect().right <= document.querySelector('[data-testid=mobile-menu]').getBoundingClientRect().left`)).toBe(true);
   } finally {
     await page.evaluate(`localStorage.setItem('boite.locale', 'en')`);
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
@@ -355,7 +399,7 @@ test('Back returns from a conversation to the list and closes the context popup,
     await page.waitFor(`!document.querySelector(${JSON.stringify(gone)})`);
     expect(await page.evaluate<string>('location.origin')).toBe(origin);
   };
-  await page.click('[data-testid=mobile-conversations]');
+  await navigateMobile('mobile-conversations');
   await page.click('[data-testid=mobile-list] .thread');
   await page.waitFor(`!document.querySelector('[data-testid=mobile-list]') && document.querySelector('[data-testid=chat]')`);
   await page.click('[data-testid=context-trigger]');
@@ -365,7 +409,8 @@ test('Back returns from a conversation to the list and closes the context popup,
   await page.waitFor(`document.querySelector('[data-testid=right-panel]')`);
   await back('[data-testid=right-panel]');
   // The project sheet pops its own entry while the picker pushes one.
-  await page.click('[data-testid=mobile-project]');
+  await page.click('[data-testid=mobile-menu]');
+  await page.click('[data-testid=mobile-menu-project]');
   await page.click('[data-value="add-project"]');
   await page.waitFor(`document.querySelector('[data-testid=project-picker]')`);
   await Bun.sleep(400);
@@ -388,19 +433,18 @@ test('Back returns from a conversation to the list and closes the context popup,
 
 // A control takes a finger when a tap 19 px off its centre, on either axis, still lands on it.
 // A control inside a label is skipped: the whole label row is its target.
-// The bottom tab bar is the screen's edge for what scrolls under it, as the viewport's edge is.
+// The settings scrollport clips controls at its edge, just as the viewport does.
 const smallTargets = `(() => {
   const small = [];
-  const tabs = document.querySelector('[data-testid=mobile-tabs]');
   for (const el of document.querySelectorAll('button, summary, [role=button]')) {
     if (el.closest('label')) continue;
     const r = el.getBoundingClientRect();
     const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    const detail = el.closest('[data-testid=mobile-settings-detail]')?.getBoundingClientRect();
     if (!r.width || !r.height || x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue;
     const at = (px, py) => { const hit = document.elementFromPoint(px, py); return !!hit && (hit === el || el.contains(hit)); };
     if (!at(x, y)) continue;
-    const underTabs = (px, py) => !!tabs && !tabs.contains(el) && tabs.contains(document.elementFromPoint(px, py));
-    const reach = [[x - 19, y], [x + 19, y], [x, y - 19], [x, y + 19]].filter(([px, py]) => px >= 0 && py >= 0 && px < innerWidth && py < innerHeight && !underTabs(px, py));
+    const reach = [[x - 19, y], [x + 19, y], [x, y - 19], [x, y + 19]].filter(([px, py]) => px >= 0 && py >= 0 && px < innerWidth && py < innerHeight && (!detail || (py >= detail.top && py < detail.bottom)));
     if (reach.every(([px, py]) => at(px, py))) continue;
     small.push((el.dataset.testid || el.getAttribute('aria-label') || el.className || el.tagName) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height));
   }
@@ -427,10 +471,10 @@ test('every phone control on the chat, the panel, the list and Appearance takes 
     expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
     await page.click('[data-testid=panel-close]');
     await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
-    await page.click('[data-testid=mobile-conversations]');
+    await navigateMobile('mobile-conversations');
     await page.waitFor(`document.querySelector('[data-testid=mobile-list] .thread')`);
     expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
-    await page.click('[data-testid=mobile-settings]');
+    await navigateMobile('mobile-settings');
     await page.click('[data-testid=settings-tab-appearance]');
     await page.waitFor(`document.querySelector('[data-testid=colors-customize]')`);
     expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);

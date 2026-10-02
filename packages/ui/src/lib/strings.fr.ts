@@ -13,6 +13,10 @@ import type { Translation } from './i18n.svelte';
 
 export const fr: Translation = {
   remoteBrowser: {
+    display: 'Affichage', resolution: 'Résolution de la page', fitPhone: 'Adapter à cet écran', phone: 'Téléphone', tablet: 'Tablette', rotate: 'Pivoter', width: 'Largeur', height: 'Hauteur', apply: 'Appliquer', sharedSize: 'La résolution change aussi l’onglet partagé sur le PC.', restoreSize: 'Reprendre la taille du panneau PC', previewZoom: 'Zoom de l’aperçu (cet appareil seulement)', fit: 'Ajuster', panHint: 'Glissez pour déplacer l’aperçu. Utilisez les flèches pour défiler dans la page.',
+    open: 'Ouvrir le navigateur en direct', experimental: 'Partage du navigateur expérimental', enable: 'Activer sur cet appareil',
+    hint: 'Affichez et contrôlez l’onglet navigateur partagé par votre PC, dans Boite.',
+    hostMissing: 'Le PC ne partage pas encore de navigateur pour cette conversation. Ouvrez la même conversation et un onglet navigateur dans Boite sur le PC, avec les deux expérimentations du navigateur activées.',
     title: 'Navigateur du PC en direct', waiting: 'En attente du PC', live: 'En direct', paused: 'En pause', reconnecting: 'Reconnexion', pause: 'Pause', resume: 'Reprendre',
     help: 'Sur le PC, activez Contrôle du navigateur par les agents et Navigateur en direct à distance dans Expérimentations, puis ouvrez cette conversation et un onglet navigateur. Le PC doit rester éveillé.',
     interact: 'Toucher ou faire défiler la page partagée', image: 'Vue en direct du navigateur du PC', scrollUp: 'Défiler vers le haut', scrollDown: 'Défiler vers le bas',
@@ -229,6 +233,20 @@ export const fr: Translation = {
     subscriptionFailed: "Le navigateur n'a pas renvoyé un abonnement push complet."
   },
   mobile: {
+    clearSearch: 'Effacer la recherche', draftTitle: 'Que voulez-vous faire ?', draftHint: 'Lancez une tâche, posez une question ou reprenez votre travail.',
+    pairTitle: 'Votre Boite, sur votre téléphone',
+    pairBody: 'Connectez votre ordinateur pour retrouver ici vos projets, vos conversations et vos agents.',
+    pairStep: 'Sur votre ordinateur, ouvrez Réglages → Machines et appareils et créez un code d’appairage.',
+    pairInstalled: 'Vous venez d’installer Boite ? Associez-la ici aussi : sur iPhone, l’application garde sa connexion séparément du navigateur.',
+    pairPrivacy: 'Scannez depuis cette application. Le code est à usage unique et expire après 10 minutes.',
+    pairingRequired: 'Associer cette application',
+    offlineTitle: 'En attente de votre ordinateur',
+    offlineBody: 'Gardez Boite ouverte sur votre ordinateur et vérifiez votre connexion. Si vous utilisez Tailscale, gardez-le connecté sur les deux appareils.',
+    emptyTitle: 'Commencez une conversation',
+    emptyBody: 'Confiez une tâche à un agent. Vos conversations apparaîtront ici.',
+    emptyActivity: 'Tout est à jour',
+    computer: 'Ordinateur connecté',
+    pairAgain: 'Associer à nouveau',
     settingsDevice: 'Ce téléphone',
     settingsPhone: 'Application et notifications',
     settingsBack: 'Retour aux réglages',

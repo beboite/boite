@@ -93,6 +93,8 @@ export interface WsClientOptions {
   paired?: boolean;
   /** The session this client held stopped opening the core: it was revoked. The client is closed for good. */
   onRevoked?: () => void;
+  /** Every authentication refusal during hello, including automatic retries and resume attempts. */
+  onUnauthorized?: (error: RpcFailure) => void;
   clientName?: ClientName;
   version?: string;
   socketFactory?: SocketFactory;
@@ -220,7 +222,7 @@ function browserSocket(url: string): SocketLike {
 }
 
 export class WsClient implements ObservableClient {
-  #options: Required<Omit<WsClientOptions, 'clientName' | 'version' | 'grant' | 'paired' | 'onSession' | 'onRevoked'>> & {
+  #options: Required<Omit<WsClientOptions, 'clientName' | 'version' | 'grant' | 'paired' | 'onSession' | 'onRevoked' | 'onUnauthorized'>> & {
     clientName: ClientName;
     version: string;
   };
@@ -236,6 +238,7 @@ export class WsClient implements ObservableClient {
   #paired: boolean;
   #onSession: ((session: Session) => void) | null;
   #onRevoked: (() => void) | null;
+  #onUnauthorized: ((error: RpcFailure) => void) | null;
   #principal: Principal | null = null;
   #socket: SocketLike | null = null;
   #state: ClientState = 'idle';
@@ -272,6 +275,7 @@ export class WsClient implements ObservableClient {
     this.#paired = options.paired ?? options.grant !== undefined;
     this.#onSession = options.onSession ?? null;
     this.#onRevoked = options.onRevoked ?? null;
+    this.#onUnauthorized = options.onUnauthorized ?? null;
     this.#remote = !isLoopbackUrl(options.url);
   }
 
@@ -520,6 +524,7 @@ export class WsClient implements ObservableClient {
               refused ||
               (error instanceof RpcFailure &&
                 (error.code === RpcErrorCode.InvalidParams || (grant !== null && error.code === RpcErrorCode.Unauthorized)));
+            if (error instanceof RpcFailure && error.code === RpcErrorCode.Unauthorized) this.#onUnauthorized?.(error);
             if (permanent) this.close();
             else socket.close();
             if (revoked) this.#onRevoked?.();

@@ -93,6 +93,14 @@
       {/key}
     {:else}
       <div class="draft-body" data-testid="draft-empty">
+        <div class="mobile-welcome">
+          <img src="./icons/icon.svg" alt="" width="42" height="42" />
+          <h1>{strings.mobile.draftTitle}</h1>
+          <p>{strings.mobile.draftHint}</p>
+          <Menu items={projectItems} onpick={pickProject} variant="chip" label={strings.thread.changeProject} testid="mobile-draft-project"><FolderOpen size={15} />{project ? projectName(project) : strings.drafts.name}<ChevronDown size={14} /></Menu>
+          {#if draftChoice}<small>{strings.thread.draftMode[draftChoice.permissionMode]}</small>{/if}
+          {#if store.draft?.worktree}<small>{strings.thread.inWorktree}</small>{/if}
+        </div>
         <h1 class="start" data-testid="draft-sentence">
           <span>{strings.thread.start}</span>
           {#if store.draft?.worktree}<span>{strings.thread.inWorktree}</span>{/if}
@@ -142,6 +150,7 @@
 {/if}
 
 <style>
+  .mobile-welcome { display: none; }
   .none {
     margin: auto;
     padding: 40px;
@@ -203,8 +212,16 @@
   }
 
   @media (max-width: 720px) {
+    .start { display: none; }
+    .draft-tail { display: none; }
+    .mobile-welcome { display: flex; flex-direction: column; align-items: center; max-width: 340px; text-align: center; gap: 14px; }
+    .mobile-welcome img { border-radius: var(--radius-lg); }
+    .mobile-welcome h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.6px; line-height: 1.2; }
+    .mobile-welcome p { margin: 0 0 6px; font-size: var(--text-sm); line-height: 1.6; color: var(--color-muted-foreground); }
+    .mobile-welcome small { color: var(--color-muted-foreground); font-size: var(--text-xs); }
     .draft-body {
-      padding: 16px 10px;
+      padding: 24px; align-items: center; min-height: 0; overflow-y: auto;
     }
+    :global(html[data-keyboard='open']) .draft-body { align-items: flex-start; }
   }
 </style>
