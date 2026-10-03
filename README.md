@@ -21,19 +21,18 @@ and follow the work from your desktop or a paired phone.
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/boite-dark.png" />
     <source media="(prefers-color-scheme: dark)" srcset="docs/media/boite-dark.gif" />
     <source media="(prefers-color-scheme: light)" srcset="docs/media/boite-light.gif" />
-    <img src="docs/media/boite-dark.gif" alt="Boite walkthrough: projects, model selection, code changes, subagents and the phone interface" width="100%" />
+    <img src="docs/media/boite-dark.gif" alt="Boite walkthrough: projects, model selection, code changes and subagents" width="100%" />
   </picture>
 </p>
 <p align="center">
-  Watch the full walkthrough:
+  Watch the 12-second walkthrough:
   <a href="docs/media/boite-dark.mp4">Dark mode</a> ·
   <a href="docs/media/boite-light.mp4">Light mode</a>
 </p>
 
 The walkthroughs use staged sample data in the real Boite web interface.
 They show the same task in both themes, from choosing a model to reviewing
-changes and following subagents. The phone scene illustrates the paired-device
-layout; agents execute on the computer that holds the project.
+changes and following subagents, with Boite filling the entire frame.
 
 ## From a task to its result
 

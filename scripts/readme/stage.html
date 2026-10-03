@@ -3,46 +3,12 @@
 <meta charset="utf-8">
 <title>Boite walkthrough</title>
 <style>
-@font-face{font-family:Inter;src:url('/fonts/Inter-latin.woff2')}
-:root{color-scheme:dark;--ground:hsl(240 13% 6%);--ink:hsl(240 10% 95%);--muted:hsl(240 6% 62%);--line:hsl(240 8% 23%);--accent:hsl(254 87% 77%);--glow:hsl(254 60% 22% / .28)}
-html.light{color-scheme:light;--ground:hsl(240 20% 97%);--ink:hsl(240 15% 12%);--muted:hsl(240 6% 44%);--line:hsl(240 14% 84%);--accent:hsl(254 65% 52%);--glow:hsl(254 70% 85% / .45)}
-*{box-sizing:border-box}body{margin:0;width:1600px;height:1000px;overflow:hidden;background:var(--ground);color:var(--ink);font-family:Inter,system-ui,sans-serif}
-body:before{content:'';position:absolute;inset:80px -200px -300px;background:radial-gradient(ellipse at 50% 60%,var(--glow),transparent 65%);pointer-events:none}
-header{position:absolute;left:64px;right:64px;top:32px;display:flex;align-items:center;justify-content:space-between;font-size:20px;letter-spacing:-.5px}
-.brand{display:flex;align-items:center;gap:12px;font-weight:650}.brand img{width:32px;height:32px}.edition{color:var(--muted);font-size:14px;letter-spacing:2px;text-transform:uppercase}
-.copy{position:absolute;left:64px;top:100px;z-index:2;transition:opacity .35s,transform .6s}.eyebrow{color:var(--accent);font-size:14px;letter-spacing:2px;text-transform:uppercase}.copy h1{font-size:46px;line-height:1.15;letter-spacing:-1.8px;font-weight:550;margin:12px 0 9px}.copy p{font-size:19px;color:var(--muted);margin:0}
-.device{position:absolute;left:64px;top:260px;width:1472px;height:666px;border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 30px 100px hsl(240 30% 0% / .18);background:var(--ground);transform-origin:center;transition:transform 1.4s cubic-bezier(.22,1,.36,1),opacity .6s}
-.device iframe{width:1470px;height:664px;border:0;display:block}
-.phone{left:1030px;top:150px;width:410px;height:782px;border-radius:40px;padding:10px;background:var(--ink);transform:translateY(45px);opacity:0;pointer-events:none}
-.phone iframe{width:390px;height:760px;border-radius:31px;background:var(--ground)}
-body.mobile .device.desktop{transform:translateX(-255px) translateY(55px) scale(.72)}
-body.mobile .phone{opacity:1;transform:translateY(0)}
-body.mobile .copy{max-width:790px}
-footer{position:absolute;bottom:26px;left:64px;right:64px;display:flex;justify-content:space-between;align-items:center;color:var(--muted);font-size:13px}
-.chapters{display:flex;gap:26px}.chapters span{transition:color .4s}.chapters span.active{color:var(--accent)}
-.progress{position:absolute;bottom:0;left:0;height:3px;background:var(--accent);width:0;transition:width 1s linear}
-#cursor{position:fixed;left:0;top:0;z-index:100;pointer-events:none;transform:translate(-100px,-100px);transition:transform .7s cubic-bezier(.22,1,.36,1);filter:drop-shadow(0 2px 3px hsl(240 20% 0% / .45))}
-#cursor svg{width:24px;height:30px}#pulse{position:fixed;z-index:99;width:44px;height:44px;border-radius:50%;border:2px solid var(--accent);pointer-events:none;opacity:0}
-#pulse.pressed{animation:press .6s ease-out}@keyframes press{0%{opacity:.8;scale:.4}100%{opacity:0;scale:1.5}}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}
+#desktop{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
+#cursor{position:fixed;left:0;top:0;z-index:100;pointer-events:none;transform:translate(-100px,-100px);transition:transform .45s cubic-bezier(.22,1,.36,1);filter:drop-shadow(0 2px 3px hsl(240 20% 0% / .45))}
+#cursor svg{width:24px;height:30px}#pulse{position:fixed;z-index:99;width:44px;height:44px;border-radius:50%;border:2px solid hsl(254 87% 77%);pointer-events:none;opacity:0}
+#pulse.pressed{animation:press .45s ease-out}@keyframes press{0%{opacity:.8;scale:.4}100%{opacity:0;scale:1.5}}
 </style>
-<header><div class="brand"><img src="/__readme-logo" alt="">boite <span style="font-weight:400;color:var(--muted)">[bwat]</span></div><div class="edition" id="edition"></div></header>
-<div class="copy"><div class="eyebrow" id="eyebrow">01 / Your workspace</div><h1 id="heading">A place for every task.</h1><p id="subtitle">Projects, conversations and agents. Together.</p></div>
-<div class="device desktop"><iframe id="desktop" title="Boite desktop"></iframe></div>
-<div class="device phone"><iframe id="phone" title="Boite phone"></iframe></div>
-<footer><div class="chapters"><span class="active">Workspace</span><span>Models</span><span>Changes</span><span>Subagents</span><span>Phone</span></div><span>Staged sample data · Real Boite interface</span></footer>
-<div class="progress" id="progress"></div>
+<iframe id="desktop" title="Boite desktop" src="/?fake=1&amp;open=recent&amp;team=1"></iframe>
 <div id="pulse"></div><div id="cursor"><svg viewBox="0 0 24 30"><path d="M3 2v23l6-6 5 9 4-2-5-9h9z" fill="white" stroke="hsl(240 10% 12%)" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
-<script>
-const theme=new URLSearchParams(location.search).get('theme')||'dark';
-document.documentElement.classList.toggle('light',theme==='light');
-document.getElementById('edition').textContent=theme+' edition';
-for(const id of ['desktop','phone'])document.getElementById(id).src='/?fake=1&open=recent&team=1';
-window.chapter=(index,title,subtitle)=>{
-  document.querySelector('.copy').animate([{opacity:0,transform:'translateY(8px)'},{opacity:1,transform:'translateY(0)'}],{duration:450,easing:'ease-out'});
-  document.getElementById('eyebrow').textContent=String(index+1).padStart(2,'0')+' / '+['Your workspace','Your model','Your changes','Your team','Your phone'][index];
-  document.getElementById('heading').textContent=title;document.getElementById('subtitle').textContent=subtitle;
-  document.querySelectorAll('.chapters span').forEach((el,i)=>el.classList.toggle('active',i===index));
-  document.getElementById('progress').style.width=((index+1)*20)+'%';
-};
-</script>
 </html>
