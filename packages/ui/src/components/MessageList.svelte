@@ -806,14 +806,11 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    /* Reserve room for the activity overlay. Queued prompts live in the composer. */
-    padding: 20px 20px calc(var(--dock-room, 0px) + 20px) var(--outline-room);
+    scrollbar-gutter: stable both-edges;
+    /* Balance the outline rail on both sides; keep room below for the activity overlay. */
+    padding: 20px var(--outline-room) calc(var(--dock-room, 0px) + 20px);
     overscroll-behavior: contain;
   }
-
-  /* The scrollbar's room is kept on both sides from the first message: a reply that first fills the
-     window no longer shifts the column 5 px sideways. The phone layout has no width to give it. */
-  @media (min-width: 721px) { .timeline { scrollbar-gutter: stable both-edges; } }
 
   .column {
     display: flex;
@@ -845,10 +842,6 @@
 
   .message.user {
     align-items: flex-end;
-  }
-
-  @media (max-width: 720px) {
-    .timeline { padding-left: 26px; padding-right: 12px; }
   }
 
   .jump {
