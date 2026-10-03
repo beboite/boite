@@ -67,6 +67,7 @@ describe('historical journal inspection', () => {
 test('inspection RPC is owner only for paired devices and scoped agents', async () => {
   let h: TestCore | undefined;
   const clients: CoreClient[] = [];
+  const failures: Error[] = [];
   let phase = 'start isolated core';
   const open = async (token: string, options: Parameters<typeof connect>[2] = {}): Promise<CoreClient> => {
     const client = await connect(h!.url, token, { ...options, requestTimeoutMs: 5000 });
@@ -90,13 +91,18 @@ test('inspection RPC is owner only for paired devices and scoped agents', async 
     phase = 'refuse scoped agent inspection';
     await expect(agent.call('journal.inspect', {})).rejects.toThrow('agent');
   } catch (cause) {
-    throw new Error(`journal.inspect authorization test failed during ${phase}`, { cause });
+    failures.push(new Error(`journal.inspect authorization test failed during ${phase}`, { cause }));
   } finally {
-    for (const client of clients) client.close();
+    for (const client of clients) {
+      try { client.close(); }
+      catch (cause) { failures.push(new Error('journal.inspect authorization test failed during client cleanup', { cause })); }
+    }
     if (h) {
       console.info('journal.inspect authorization: isolated core cleanup started');
       try { await h.stop(); console.info('journal.inspect authorization: isolated core cleanup finished'); }
-      catch (cause) { throw new Error('journal.inspect authorization test failed during isolated core cleanup', { cause }); }
+      catch (cause) { failures.push(new Error('journal.inspect authorization test failed during isolated core cleanup', { cause })); }
     }
   }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, 'journal.inspect authorization and cleanup failed');
 });
