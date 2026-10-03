@@ -198,9 +198,9 @@ them in SQLite:
   providers. A removed or unused provider returns an empty history.
   Legacy turns with no provider identity remain in the all-provider totals as
   "Unknown provider"; they have no individual filter option.
-  If an older core returns other providers for a filtered request, the page
-  reports the unsupported filter and asks for an update instead of showing
-  those totals as filtered usage.
+  If an older core returns rows or conversations from other providers for a
+  filtered request, the page reports the unsupported filter and asks for an
+  update instead of showing those totals as filtered usage.
 
 The query reads the `turns_by_finished` index on `turns (finished_at)`, created
 on open when the journal lacks it. `EXPLAIN QUERY PLAN` shows

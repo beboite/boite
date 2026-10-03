@@ -83,7 +83,7 @@ test('legacy turns without a provider keep their totals without duplicating the 
   expect(document.querySelectorAll('[data-testid=usage-provider-filter-menu] [data-row]')).toHaveLength(1);
 });
 
-test('an older core that ignores the provider filter is reported instead of displaying unfiltered totals', async () => {
+test('an older core with unfiltered rows or thread identities is reported instead of displaying them as filtered', async () => {
   const call = vi.fn(async (_method: string, params: { edges: number[] }) => history(params.edges, 'selected-provider'));
   mounted = mount(UsagePage, { target: document.body, props: { store: store(call) } });
   await settle();
@@ -91,6 +91,18 @@ test('an older core that ignores the provider filter is reported instead of disp
   click('[data-testid=usage-provider-filter]');
   await settle();
   click('[data-testid=usage-provider-filter-menu] [data-value=selected-provider]');
+  await settle();
+  expect(document.querySelector('[role=alert]')?.textContent).toContain('did not filter usage');
+  expect(document.querySelector('[data-testid=usage-total]')).toBeNull();
+
+  // Even with one execution provider in the range, an old core labels a switched
+  // conversation with its current provider instead of the selected execution.
+  call.mockImplementationOnce(async (_method, params) => {
+    const result = history(params.edges, 'selected-provider');
+    result.threads = [{ threadId: 'switched-thread', projectId: 'test-project', title: 'Switched provider', providerId: 'another-provider', archived: false, turns: 2, usage: result.rows[0]!.usage }];
+    return result;
+  });
+  click('[data-testid=usage-refresh]');
   await settle();
   expect(document.querySelector('[role=alert]')?.textContent).toContain('did not filter usage');
   expect(document.querySelector('[data-testid=usage-total]')).toBeNull();

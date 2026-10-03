@@ -47,7 +47,10 @@
     try {
       const result = await client.call('usage.history', { edges: dayEdges(days), ...(providerId === null ? {} : { providerId }) });
       if (request !== latest) return;
-      if (providerId !== null && result.rows.some((row) => row.providerId !== providerId)) {
+      if (providerId !== null && (
+        result.rows.some((row) => row.providerId !== providerId) ||
+        result.threads.some((thread) => thread.providerId !== providerId)
+      )) {
         throw new Error(strings.usage.filterUnsupported);
       }
       history = result;
