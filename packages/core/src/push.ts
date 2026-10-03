@@ -146,7 +146,8 @@ export class PushStore {
   }
 
   private notify(threadId: string, text: Pick<PushPayload, 'body' | 'label'>, tag: string) {
-    if (this.closed) return;
+    // The thread is on a screen someone is looking at: on any of their devices, push would only interrupt.
+    if (this.closed || this.core.threads.focus.attended(threadId)) return;
     const title = this.core.journal.getThread(threadId)?.title ?? 'Boite';
     const badge = this.badge(threadId);
     for (const sessionId of Object.keys(this.subscriptions())) {

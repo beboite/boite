@@ -419,6 +419,19 @@ push switch, the granted permission and a live browser subscription. A device
 without push, and a page's notices about another machine, keep the local
 notification, through the service worker and the per-thread tag a push would use.
 
+No device gets a push about a thread someone is looking at. A page reports its
+conversation `attentive` in `threads.focus` while it is visible, focused and
+touched in the last three minutes (`lib/attention.ts`): the phone app in the
+foreground on that thread, or the desktop window in front with it open. The
+core then skips every push about that thread, finished turns, questions and
+permission requests alike (`ThreadFocus.attended`). A locked phone, an app in
+the background, a window behind another one, a PC left alone or another thread
+on screen do not count. The thread stays silenced for 5 seconds after the page
+looks away. The page repeats its report every 15 seconds and the core believes
+it for 40, so a phone that iOS suspends before it can say so stops silencing
+push within that time. The filter lives in the core: iOS may revoke the
+subscription of a service worker that receives a push and shows nothing.
+
 The title is the thread's title. A finished turn's body is the start of the
 agent's last message, markdown removed, on one line and cut at a word near 140
 characters; a question or a permission request shows its text, else the tool

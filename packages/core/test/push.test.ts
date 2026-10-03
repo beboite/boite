@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
-import type { RpcEvents, Turn, TurnExecution } from '@boite/contracts';
+import { afterEach, beforeEach, expect, setSystemTime, test } from 'bun:test';
+import { ATTENTION_GRACE_MS, ATTENTION_LEASE_MS, type RpcEvents, type Turn, type TurnExecution } from '@boite/contracts';
 import { createECDH, randomBytes } from 'node:crypto';
 import { connect } from '../src/client.ts';
 import { validateSubscription } from '../src/push.ts';
@@ -133,6 +133,50 @@ test('a phone hears of a team\'s final answer and a persistent agent\'s failures
     { threadId: rootId, body: 'Done', label: 'done' },
     { threadId: agent.id, body: 'The agent encountered an error', label: 'failed' },
   ]);
+});
+
+test('no push about a thread someone is looking at, on the PC or the phone, nor a moment after', async () => {
+  const paired = session();
+  harness.core.push.subscribe(paired.id, subscription());
+  const deliveries: { threadId: string; tag: string }[] = [];
+  harness.core.push.send = async (_target, payload) => { deliveries.push(JSON.parse(payload)); };
+  const desktop = await harness.connect();
+  const phone = await connect(harness.url, paired.token);
+  try {
+    const { threadId } = await echoThread(harness, desktop);
+    const other = { ...harness.core.journal.getThread(threadId)!, id: 'push_other' };
+    harness.core.journal.putThread(other);
+    let n = 0;
+    const finish = (id: string) => harness.core.bus.emit('turn.finished', { id: `attention_${++n}`, threadId: id, status: 'done', queuedAt: 1, startedAt: 1, finishedAt: 2, usage: null, error: null, execution: { providerId: other.providerId, accountId: other.accountId, model: null, effort: null, permissionMode: other.permissionMode, sessionId: null, sessionGeneration: 0, selectionVersion: 0 } });
+    const ask = (id: string) => harness.core.bus.emit('question.asked', { id: `ask_${++n}`, threadId: id, text: 'Which branch?' } as RpcEvents['question.asked']);
+    const delivered = async (count: number) => { await waitFor(() => deliveries.length === count); await Bun.sleep(30); expect(deliveries).toHaveLength(count); };
+
+    // The phone in the foreground on the thread: nothing about it, still news about another one.
+    await phone.call('threads.focus', { threadId, attentive: true });
+    finish(threadId); ask(threadId); finish(other.id);
+    await delivered(1);
+    expect(deliveries[0]!.threadId).toBe(other.id);
+    // Locked or in the background: a few seconds of grace, then push again.
+    await phone.call('threads.focus', { threadId, attentive: false });
+    finish(threadId);
+    const start = Date.now();
+    setSystemTime(new Date(start + ATTENTION_GRACE_MS + 1));
+    finish(threadId);
+    await delivered(2);
+    // The desktop window in front with the thread open; a desktop that only has it open does not count.
+    await desktop.call('threads.focus', { threadId, attentive: true });
+    ask(threadId);
+    await desktop.call('threads.focus', { threadId: other.id });
+    setSystemTime(new Date(start + 2 * ATTENTION_GRACE_MS + 2));
+    ask(threadId); ask(other.id);
+    await delivered(4);
+    // A report that never got out (a phone suspended mid-turn) stops silencing push once its lease ends.
+    await phone.call('threads.focus', { threadId, attentive: true });
+    setSystemTime(new Date(Date.now() + ATTENTION_LEASE_MS + 1));
+    finish(threadId);
+    await delivered(5);
+    await expect(phone.call('threads.focus', { threadId, attentive: 'yes' as never })).rejects.toThrow('attentive');
+  } finally { setSystemTime(); phone.close(); }
 });
 
 test('a notification carries the icon badge: the threads waiting on the user, the notified one included', async () => {
