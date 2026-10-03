@@ -131,6 +131,33 @@ test('a phone hears of a team\'s final answer and a persistent agent\'s failures
   ]);
 });
 
+test('a notification carries the icon badge: the threads waiting on the user, the notified one included', async () => {
+  const paired = session();
+  harness.core.push.subscribe(paired.id, subscription());
+  const deliveries: { threadId: string; badge?: number }[] = [];
+  harness.core.push.send = async (_target, payload) => { deliveries.push(JSON.parse(payload)); };
+  const client = await harness.connect();
+  const { threadId } = await echoThread(harness, client);
+  const base = harness.core.journal.getThread(threadId)!;
+  harness.core.journal.putThread({ ...base, unread: false, status: 'idle' });
+  harness.core.journal.putThread({ ...base, id: 'badge_waiting', unread: false, status: 'waiting' });
+  harness.core.journal.putThread({ ...base, id: 'badge_unread', unread: true, status: 'idle' });
+  harness.core.journal.putThread({ ...base, id: 'badge_archived', unread: true, status: 'waiting', archived: true });
+  expect(harness.core.push.badge()).toBe(2);
+  expect(harness.core.push.badge(threadId)).toBe(3);
+  expect(harness.core.push.badge('badge_waiting')).toBe(2);
+  expect(harness.core.push.badge('badge_archived')).toBe(2);
+
+  harness.core.bus.emit('question.asked', { id: 'badge_question', threadId } as RpcEvents['question.asked']);
+  await waitFor(() => deliveries.length === 1);
+  expect(deliveries[0]).toMatchObject({ threadId, badge: 3 });
+
+  // The test notification leaves the badge as it is.
+  const sent: Record<string, unknown>[] = [];
+  harness.core.push.send = async (_target, payload) => { sent.push(JSON.parse(payload)); };
+  await harness.core.push.test(paired.id);
+  expect(sent[0]).not.toHaveProperty('badge');
+});
 test('public HTTPS origin is validated, used for QR links and accepted by the socket', async () => {
   const owner = await harness.connect();
   for (const publicUrl of ['http://phone.test', 'https://phone.test/path', 'https://user:pass@phone.test', 'https://phone.test?token=x']) {

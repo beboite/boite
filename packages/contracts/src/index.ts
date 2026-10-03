@@ -1930,6 +1930,41 @@ export interface PairingGrant {
   grant: string;
   role: PairingRole;
   expiresAt: Timestamp;
+  /**
+   * The same grant as a short code to type, `XXXX-XXXX`, for an installed
+   * iPhone app that cannot open the link (the camera hands it to Safari, which
+   * keeps its own storage). Valid until `codeExpiresAt`, once, like the grant.
+   */
+  code?: string;
+  codeExpiresAt?: Timestamp;
+}
+
+/**
+ * Where `tailscale serve` stands for this core. `missing`: no CLI. `stopped`
+ * and `needs-login`: Tailscale is off or signed out. `https-disabled`: the
+ * tailnet has no HTTPS certificates (admin console, DNS page). `off`: ready,
+ * nothing served on 443. `on`: 443 proxies to this core. `conflict`: 443
+ * already proxies to something else, left alone unless asked to replace it.
+ * `error`: the CLI answered something unreadable, `detail` says which step.
+ */
+export type TailscaleState = 'missing' | 'stopped' | 'needs-login' | 'https-disabled' | 'off' | 'on' | 'conflict' | 'error';
+
+export interface TailscaleStatus {
+  state: TailscaleState;
+  /** MagicDNS name of this machine, without the trailing dot; null when unknown. */
+  dnsName: string | null;
+  /** `https://<dnsName>` once HTTPS can be served, null otherwise. */
+  url: string | null;
+  /** What 443 proxies to now, when something does. */
+  servedTarget: string | null;
+  /** The local address `tailscale serve` should proxy to. */
+  target: string;
+  /** True when settings.publicUrl is `url`. */
+  publicUrlMatches: boolean;
+  /** A safe label for an error or a refusal, never raw CLI output. */
+  detail?: 'not-logged-in' | 'permission-denied' | 'timeout' | 'serve-consent' | 'unknown';
+  /** A Tailscale page to open to fix the state (login, enabling serve). */
+  actionUrl?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -2559,7 +2594,13 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'files.write': { params: { threadId: ThreadId; path: string; text: string }; result: { bytes: number; modifiedAt: Timestamp } };
 
   /** A fresh one-time pairing link, `device` unless the role says otherwise. Owner only. */
-  'pairing.grant': { params: { role?: PairingRole }; result: PairingGrant };
+  'pairing.grant': { params: { role?: PairingRole; short?: boolean }; result: PairingGrant };
+  /** Tailscale CLI and `tailscale serve` state for this core. Owner only. */
+  'tailscale.status': { params: Record<string, never>; result: TailscaleStatus };
+  /** Serve this core on https://<MagicDNS name> and make it the public URL. `replace` takes 443 from another target. Owner only. */
+  'tailscale.enable': { params: { replace?: boolean }; result: TailscaleStatus };
+  /** Stop serving this core through Tailscale and clear the public URL it set. Owner only. */
+  'tailscale.disable': { params: Record<string, never>; result: TailscaleStatus };
   /** Every paired client still able to connect. */
   'sessions.list': { params: Record<string, never>; result: PairedSession[] };
   /** Forget a paired client: its sockets close and its token opens nothing any more. Owner only. */
@@ -3236,6 +3277,21 @@ export const GRANT_QUERY_PARAM = 'grant';
 export const GRANT_TTL_MS = 10 * 60 * 1000;
 /** Every role `pairing.grant` takes; anything else is refused by name. */
 export const PAIRING_ROLES: readonly PairingRole[] = ['device', 'owner'];
+/** How long a typed pairing code and a short owner grant stay valid. */
+export const PAIRING_CODE_TTL_MS = 5 * 60 * 1000;
+/** Letters of a pairing code: Crockford base32, no I, L, O or U to misread. */
+export const PAIRING_CODE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+/**
+ * A typed or pasted pairing code in its canonical 8-letter form, or null when
+ * it cannot be one. Case, spaces and dashes are ignored; O reads as 0, I and L as 1.
+ */
+export function normalizePairingCode(text: string): string | null {
+  const code = text.toUpperCase().replace(/[\s-]+/g, '').replace(/O/g, '0').replace(/[IL]/g, '1');
+  if (code.length !== 8) return null;
+  for (const letter of code) if (!PAIRING_CODE_ALPHABET.includes(letter)) return null;
+  return code;
+}
 
 export const CLIENT_NAMES = ['shell', 'pwa', 'cli', 'test', 'bench'] as const;
 export type ClientName = (typeof CLIENT_NAMES)[number];

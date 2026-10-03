@@ -6,7 +6,8 @@ import type { Core } from './core.ts';
 import { invalidParams, refused } from './errors.ts';
 
 type Subscription = RpcParams<'push.subscribe'>;
-type Payload = { title: string; body: string; threadId: string | null; tag: string };
+/** `badge` is the app icon's count after this notification, set by the service worker. */
+type Payload = { title: string; body: string; threadId: string | null; tag: string; badge?: number };
 type Keys = { publicKey: string; privateKey: string };
 const SUBSCRIPTIONS = 'web-push.subscriptions';
 const KEYS = 'web-push.keys';
@@ -117,11 +118,27 @@ export class PushStore {
 
   unsubscribe(sessionId: string | null) { return this.remove(this.requireSession(sessionId)); }
 
+  /**
+   * What the app icon's badge says: the threads waiting for the user, the
+   * same count the window title shows. The thread being notified about counts
+   * even when its row has not caught up with the event yet.
+   */
+  badge(threadId: string | null = null): number {
+    if (this.core.journal.isClosed()) return 0;
+    const rows = this.core.journal.db
+      .query("SELECT id FROM threads WHERE archived = 0 AND (unread != 0 OR status = 'waiting')")
+      .all() as { id: string }[];
+    const ids = new Set(rows.map((row) => row.id));
+    if (threadId !== null && this.core.journal.getThread(threadId)?.archived === false) ids.add(threadId);
+    return ids.size;
+  }
+
   private notify(threadId: string, body: string, tag: string) {
     if (this.closed) return;
     const title = this.core.journal.getThread(threadId)?.title ?? 'Boite';
+    const badge = this.badge(threadId);
     for (const sessionId of Object.keys(this.subscriptions())) {
-      this.track(this.deliver(sessionId, { title, body, threadId, tag }).catch(() => {
+      this.track(this.deliver(sessionId, { title, body, threadId, tag, badge }).catch(() => {
         this.core.log('warn', 'Web Push delivery failed; the conversation remains available in Boite');
       }));
     }
