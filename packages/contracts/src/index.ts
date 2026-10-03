@@ -3139,8 +3139,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * Finished turns summed per bucket, provider and model. `edges` are 2 to 367
    * ascending timestamps chosen by the client, usually its local midnights, so
    * a day follows the reader's calendar whatever the core's time zone.
+   * Optional `providerId` filters execution snapshots before ranking threads.
    */
-  'usage.history': { params: { edges: Timestamp[] }; result: UsageHistory };
+  'usage.history': { params: { edges: Timestamp[]; providerId?: ProviderId }; result: UsageHistory };
 
   'telemetry.state': { params: Record<string, never>; result: TelemetryState };
   'telemetry.configure': { params: { mode: TelemetryState['mode'] }; result: TelemetryState };
