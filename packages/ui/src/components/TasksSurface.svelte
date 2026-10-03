@@ -50,28 +50,28 @@
       onclick={() => (open.activity = !open.activity)}
     >
       <ChevronDown size={13} strokeWidth={1.75} class={open.activity ? 'turned' : ''} />
-      <span class="section-label">{strings.tasks.goalSection}</span>
+      <span class="section-label ui-label">{strings.tasks.goalSection}</span>
     </button>
     <div class="disclosure-fold" id="{sectionId}-activity" class:open={open.activity} inert={!open.activity}>
       <div class="disclosure-clip"><div class="body">
         {#if activity?.goal}
           <div class="line" data-testid="tasks-goal">
             <Target size={13} strokeWidth={1.75} />
-            <span class="text" title={activity.goal.objective}>{activity.goal.objective}</span>
-            <span class="meta">{fill(strings.tasks.iterations, { count: String(activity.goal.iterations) })}</span>
-            <span class="state" class:live={activity.goal.status === 'active'}>{strings.activity[activity.goal.status]}</span>
+            <span class="text ui-label" title={activity.goal.objective}>{activity.goal.objective}</span>
+            <span class="meta ui-label">{fill(strings.tasks.iterations, { count: String(activity.goal.iterations) })}</span>
+            <span class="state ui-label-box" class:live={activity.goal.status === 'active'}><span class="ui-label">{strings.activity[activity.goal.status]}</span></span>
           </div>
         {/if}
         {#if activity?.loop}
           <div class="line" data-testid="tasks-loop">
             <Repeat size={13} strokeWidth={1.75} />
-            <span class="text" title={activity.loop.prompt}>{activity.loop.prompt}</span>
+            <span class="text ui-label" title={activity.loop.prompt}>{activity.loop.prompt}</span>
             {#if activity.loop.nextRunAt}
-              <span class="meta">{fill(strings.tasks.nextRun, { time: time(activity.loop.nextRunAt) })}</span>
+              <span class="meta ui-label">{fill(strings.tasks.nextRun, { time: time(activity.loop.nextRunAt) })}</span>
             {:else}
-              <span class="meta">{fill(strings.tasks.iterations, { count: String(activity.loop.iterations) })}</span>
+              <span class="meta ui-label">{fill(strings.tasks.iterations, { count: String(activity.loop.iterations) })}</span>
             {/if}
-            <span class="state" class:live={activity.loop.status === 'active'}>{strings.activity[activity.loop.status]}</span>
+            <span class="state ui-label-box" class:live={activity.loop.status === 'active'}><span class="ui-label">{strings.activity[activity.loop.status]}</span></span>
           </div>
         {/if}
         {#if !activity?.goal && !activity?.loop}
@@ -92,9 +92,9 @@
       onclick={() => (open.tasks = !open.tasks)}
     >
       <ChevronDown size={13} strokeWidth={1.75} class={open.tasks ? 'turned' : ''} />
-      <span class="section-label">{strings.tasks.agentSection}</span>
+      <span class="section-label ui-label">{strings.tasks.agentSection}</span>
       {#if tasks.length > 0}
-        <span class="meta">
+        <span class="meta ui-label">
           {fill(strings.activity.taskCount, {
             done: String(tasks.filter((task) => task.status === 'completed').length),
             total: String(tasks.length)
@@ -115,7 +115,7 @@
                 <Circle size={13} strokeWidth={1.75} />
               {/if}
             </span>
-            <span class="text" title={task.text}>{task.text}</span>
+            <span class="text ui-label" title={task.text}>{task.text}</span>
           </div>
         {:else}
           <p class="empty">{strings.tasks.noTasks}</p>
@@ -135,7 +135,7 @@
       onclick={() => (open.todos = !open.todos)}
     >
       <ChevronDown size={13} strokeWidth={1.75} class={open.todos ? 'turned' : ''} />
-      <span class="section-label">{strings.tasks.todoSection}</span>
+      <span class="section-label ui-label">{strings.tasks.todoSection}</span>
     </button>
     <div class="disclosure-fold" id="{sectionId}-todos" class:open={open.todos} inert={!open.todos}>
       <div class="disclosure-clip"><div class="body">

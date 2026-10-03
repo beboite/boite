@@ -113,7 +113,7 @@
 {#if overlay.shown}
   <div class="scrim" class:shell={inShell} class:closing={overlay.closing} role="presentation" data-testid="onboarding">
     <div class="panel" class:closing={overlay.closing} role="dialog" aria-modal="true" aria-labelledby="onboarding-title" tabindex="-1" bind:this={panel} use:overlay.attach onanimationend={overlay.end}>
-      <header><BoiteMark size={18} /><span>{strings.onboarding.label}</span><button class="ghost icon" data-testid="onboarding-skip" aria-label={strings.onboarding.skip} onclick={finish}><X size={16} /></button></header>
+      <header><BoiteMark size={18} /><span class="ui-label">{strings.onboarding.label}</span><button class="ghost icon" data-testid="onboarding-skip" aria-label={strings.onboarding.skip} onclick={finish}><X size={16} /></button></header>
       {#key step}
         <div class="screen" data-testid="onboarding-step" data-step={step}>
           <h1 id="onboarding-title" tabindex="-1" class:soul={step === 'privacy'}>{phone && step === 'reach' ? strings.onboarding.reach.onPhoneTitle : strings.onboarding[step].title}</h1>
@@ -121,12 +121,12 @@
             <p class="lead">{strings.onboarding.welcome.body}</p>
             <OnboardingScene scene="welcome" />
             <div class="preferences">
-              <div class="preference"><Languages size={17} /><span>{strings.settings.language}</span><div class="segmented" role="group" aria-label={strings.settings.language}>
-                <button class:on={locale === 'system'} aria-pressed={locale === 'system'} data-testid="onboarding-locale-system" onclick={() => { locale = 'system'; setLocaleSetting(locale); }}>{strings.settings.languageSystem}</button>
-                {#each LOCALES as id (id)}<button class:on={locale === id} aria-pressed={locale === id} data-testid="onboarding-locale-{id}" onclick={() => { locale = id; setLocaleSetting(id); }}>{strings.settings.languageNames[id]}</button>{/each}
+              <div class="preference"><Languages size={17} /><span class="ui-label">{strings.settings.language}</span><div class="segmented" role="group" aria-label={strings.settings.language}>
+                <button class:on={locale === 'system'} aria-pressed={locale === 'system'} data-testid="onboarding-locale-system" onclick={() => { locale = 'system'; setLocaleSetting(locale); }}><span class="ui-label">{strings.settings.languageSystem}</span></button>
+                {#each LOCALES as id (id)}<button class:on={locale === id} aria-pressed={locale === id} data-testid="onboarding-locale-{id}" onclick={() => { locale = id; setLocaleSetting(id); }}><span class="ui-label">{strings.settings.languageNames[id]}</span></button>{/each}
               </div></div>
-              <div class="preference"><Palette size={17} /><span>{strings.settings.theme}</span><div class="segmented" role="group" aria-label={strings.settings.theme}>
-                {#each themes as option (option.id)}<button class:on={theme === option.id} aria-pressed={theme === option.id} data-testid="onboarding-theme-{option.id}" onclick={() => { theme = option.id; setTheme(theme); }}>{option.label}</button>{/each}
+              <div class="preference"><Palette size={17} /><span class="ui-label">{strings.settings.theme}</span><div class="segmented" role="group" aria-label={strings.settings.theme}>
+                {#each themes as option (option.id)}<button class:on={theme === option.id} aria-pressed={theme === option.id} data-testid="onboarding-theme-{option.id}" onclick={() => { theme = option.id; setTheme(theme); }}><span class="ui-label">{option.label}</span></button>{/each}
               </div></div>
             </div>
           {:else if step === 'profile'}
@@ -146,7 +146,7 @@
               {#each examples as item (item.id)}
                 <button class:on={example === item.id} aria-pressed={example === item.id} data-testid="onboarding-example-{item.id}" onclick={() => { example = item.id; }}>
                   {#if item.id === 'agents'}<ArrowLeftRight size={20} />{:else if item.id === 'voice'}<Mic size={20} />{:else}<FileDiff size={20} />{/if}
-                  <span>{item.label}</span>
+                  <span class="ui-label">{item.label}</span>
                   {#if example === item.id}<Check size={13} class="selected-mark" />{/if}
                 </button>
               {/each}
@@ -157,9 +157,9 @@
                 {#if speech?.ready}<p data-testid="onboarding-voice-ready">{strings.onboarding.demo.readyVoice}</p>
                 {:else if speech?.installing}
                   <label>{strings.onboarding.demo.installingVoice}<progress max={speech.totalBytes || 1} value={speech.downloadedBytes}></progress></label>
-                  <button disabled={speechBusy} onclick={() => void setupVoice(true)}>{strings.onboarding.demo.cancelVoice}</button>
+                  <button disabled={speechBusy} onclick={() => void setupVoice(true)}><span class="ui-label">{strings.onboarding.demo.cancelVoice}</span></button>
                 {:else if speech?.canInstallRuntime}
-                  <span>{strings.onboarding.demo.downloadVoice}</span><button data-testid="onboarding-voice-install" disabled={speechBusy} onclick={() => void setupVoice()}>{strings.onboarding.demo.installVoice}</button>
+                  <span class="ui-label">{strings.onboarding.demo.downloadVoice}</span><button data-testid="onboarding-voice-install" disabled={speechBusy} onclick={() => void setupVoice()}><span class="ui-label">{strings.onboarding.demo.installVoice}</span></button>
                 {:else}<p>{speech ? strings.onboarding.changeLater : strings.onboarding.voice.reading}</p>{/if}
                 {#if speechError || speechPollError || speech?.error}<p role="alert">{speechError || speechPollError || speech?.error}</p>{/if}
               </div>
@@ -175,11 +175,11 @@
             <p class="lead">{strings.onboarding.demo.quietBody}</p>
             <div class="quiet-scene"><OnboardingScene scene="quiet" /></div>
             <div class="rows">
-              <label class="row"><Bell size={18} /><span>{strings.settings.notifications}</span><input type="checkbox" role="switch" data-testid="onboarding-notifications" checked={store.notifications} onchange={event => void store.setNotifications(event.currentTarget.checked)} /></label>
-              {#if inShell}<label class="row"><Minimize2 size={18} /><span>{strings.settings.closeToTray}</span><input type="checkbox" role="switch" data-testid="onboarding-tray" checked={tray} disabled={!trayReady || trayBusy} onchange={event => void setTray(event.currentTarget.checked)} /></label>{/if}
+              <label class="row"><Bell size={18} /><span class="ui-label">{strings.settings.notifications}</span><input type="checkbox" role="switch" data-testid="onboarding-notifications" checked={store.notifications} onchange={event => void store.setNotifications(event.currentTarget.checked)} /></label>
+              {#if inShell}<label class="row"><Minimize2 size={18} /><span class="ui-label">{strings.settings.closeToTray}</span><input type="checkbox" role="switch" data-testid="onboarding-tray" checked={tray} disabled={!trayReady || trayBusy} onchange={event => void setTray(event.currentTarget.checked)} /></label>{/if}
               {#if store.owner}
-                <label class="row"><AppWindow size={18} /><span>{strings.settings.focusGuard}</span><input type="checkbox" role="switch" data-testid="onboarding-focus-guard" checked={store.settings?.focusGuard ?? true} onchange={event => void store.saveSettings({ focusGuard: event.currentTarget.checked })} /></label>
-                <label class="row"><VolumeX size={18} /><span>{strings.settings.muteAgents}</span><input type="checkbox" role="switch" data-testid="onboarding-mute" checked={store.settings?.muteAgents ?? true} onchange={event => void store.saveSettings({ muteAgents: event.currentTarget.checked })} /></label>
+                <label class="row"><AppWindow size={18} /><span class="ui-label">{strings.settings.focusGuard}</span><input type="checkbox" role="switch" data-testid="onboarding-focus-guard" checked={store.settings?.focusGuard ?? true} onchange={event => void store.saveSettings({ focusGuard: event.currentTarget.checked })} /></label>
+                <label class="row"><VolumeX size={18} /><span class="ui-label">{strings.settings.muteAgents}</span><input type="checkbox" role="switch" data-testid="onboarding-mute" checked={store.settings?.muteAgents ?? true} onchange={event => void store.saveSettings({ muteAgents: event.currentTarget.checked })} /></label>
               {/if}
             </div>
             {#if error}<p role="alert">{error}</p>{/if}
@@ -192,9 +192,9 @@
         <div class="dots" role="group" aria-label={strings.onboarding.label}>
           {#each screens as id, position (id)}<button class="dot" class:on={position === index} aria-current={position === index ? 'step' : undefined} aria-label={fill(strings.onboarding.progress, { index: String(position + 1), title: phone && id === 'reach' ? strings.onboarding.reach.onPhoneTitle : strings.onboarding[id].title })} data-testid="onboarding-dot-{id}" onclick={() => go(position)}></button>{/each}
         </div>
-        <button class="ghost" disabled={index === 0} data-testid="onboarding-back" onclick={() => go(index - 1)}>{strings.onboarding.back}</button>
+        <button class="ghost" disabled={index === 0} data-testid="onboarding-back" onclick={() => go(index - 1)}><span class="ui-label">{strings.onboarding.back}</span></button>
         <!-- The consent rows are the privacy screen's way out. -->
-        {#if step !== 'privacy'}<button class="primary" data-testid="onboarding-next" onclick={() => last ? finish() : go(index + 1)}>{last ? strings.onboarding.done : strings.onboarding.next}</button>{/if}
+        {#if step !== 'privacy'}<button class="primary" data-testid="onboarding-next" onclick={() => last ? finish() : go(index + 1)}><span class="ui-label">{last ? strings.onboarding.done : strings.onboarding.next}</span></button>{/if}
       </footer>
     </div>
   </div>

@@ -24,7 +24,7 @@
     {#if showResets && resets}
       <div class="resets" data-testid="quota-banked-resets">
         <div class="reset-line">
-          <span class="reserve"><RotateCcw size={13} aria-hidden="true" />{fill(resets.availableCount === 1 ? strings.quotas.bankedReset : strings.quotas.bankedResets, { count: String(resets.availableCount) })}</span>
+          <span class="reserve"><RotateCcw size={13} aria-hidden="true" /><span class="ui-label">{fill(resets.availableCount === 1 ? strings.quotas.bankedReset : strings.quotas.bankedResets, { count: String(resets.availableCount) })}</span></span>
           {@render resetAction?.()}
         </div>
         {#if resets.nextExpiresAt !== null}<small>{fill(strings.quotas.resetExpires, { time: exactTime(resets.nextExpiresAt) })}</small>{/if}
@@ -33,8 +33,8 @@
     {#if showCredits && credits}
       <div class="credits" data-testid="quota-credits">
         <div class="legend">
-          <span class="heading">{#if !compact}<Wallet size={15} aria-hidden="true" />{/if}{headings[credits.kind]}</span>
-          <span class="amount">{credits.kind === 'budget' ? budgetLabel : fill(strings.quotas.creditBalance, { count: creditBalance(credits.remaining!) })}</span>
+          <span class="heading">{#if !compact}<Wallet size={15} aria-hidden="true" />{/if}<span class="ui-label">{headings[credits.kind]}</span></span>
+          <span class="amount ui-label">{credits.kind === 'budget' ? budgetLabel : fill(strings.quotas.creditBalance, { count: creditBalance(credits.remaining!) })}</span>
         </div>
         {#if percent !== null}
           <div class="track" role="meter" aria-label={credits.kind === 'budget' ? strings.quotas.budgetRemaining : strings.quotas.creditRemaining} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><div class="fill" style:width="{percent}%"></div></div>

@@ -39,7 +39,7 @@
   {#if shown}
     <Menu {items} onpick={pick} {label} variant="ghost" testid="machine-status">
       {#if issues}<TriangleAlert size={15} />{:else}<Monitor size={15} />{/if}
-      {#if chosen}<span class="name">{chosen.label}</span>{/if}
+      {#if chosen}<span class="name ui-label">{chosen.label}</span>{/if}
     </Menu>
   {/if}
 </div>

@@ -231,28 +231,28 @@
           {/if}
         {:else}
           <div class="step" data-testid="connect-step" data-step={step}>
-            <p class="plan-line"><ProviderLogo providerId={provider.id} size={20} /><span>{planOf(provider)}</span></p>
+            <p class="plan-line"><ProviderLogo providerId={provider.id} size={20} /><span class="ui-label">{planOf(provider)}</span></p>
             {#if step === 'install'}
               {#if install?.state === 'failed'}<p class="bad" role="alert">{install.message}</p>{/if}
-              <button type="button" class="primary" data-testid="connect-install" onclick={() => void startInstall()}>{fill(strings.connect.install, { provider: provider.name })}</button>
+              <button type="button" class="primary" data-testid="connect-install" onclick={() => void startInstall()}><span class="ui-label">{fill(strings.connect.install, { provider: provider.name })}</span></button>
               {#if install?.state === 'absent'}<p class="muted">{fill(strings.connect.installNote, { size: bytes(install.archiveBytes) })}</p>{/if}
             {:else if step === 'installing'}
               <div class="track" role="progressbar" aria-label={strings.install.progress} aria-valuenow={Math.round(ratio())} aria-valuemin={0} aria-valuemax={100}>
                 <span class="bar" class:indeterminate={install?.state !== 'downloading'} style="width: {ratio()}%"></span>
               </div>
               <p class="muted" role="status">{install?.state === 'downloading' ? fill(strings.install.downloading, { percent: percent(ratio()) }) : install?.state === 'verifying' ? strings.install.verifying : strings.install.extracting}</p>
-              <button type="button" class="quiet small" onclick={() => void store.cancelInstall(provider.id)}>{strings.install.cancel}</button>
+              <button type="button" class="quiet small" onclick={() => void store.cancelInstall(provider.id)}><span class="ui-label">{strings.install.cancel}</span></button>
             {:else if step === 'repair'}
-              <button type="button" class="primary" onclick={async () => { await store.uninstallProvider(provider.id); await startInstall(); }}>{strings.install.repair}</button>
+              <button type="button" class="primary" onclick={async () => { await store.uninstallProvider(provider.id); await startInstall(); }}><span class="ui-label">{strings.install.repair}</span></button>
             {:else if step === 'manual'}
               <p>{fill(strings.connect.manual, { provider: provider.name })}</p>
               <div class="row-actions">
-                {#if SETUP_URLS[provider.id]}<a class="button primary" href={SETUP_URLS[provider.id]} target="_blank" rel="noreferrer" data-testid="connect-installer">{strings.connect.manualOpen}</a>{/if}
-                <button type="button" class="quiet" disabled={detecting} data-testid="connect-check" onclick={() => void checkAgain()}>{strings.connect.checkAgain}</button>
+                {#if SETUP_URLS[provider.id]}<a class="button primary" href={SETUP_URLS[provider.id]} target="_blank" rel="noreferrer" data-testid="connect-installer"><span class="ui-label">{strings.connect.manualOpen}</span></a>{/if}
+                <button type="button" class="quiet" disabled={detecting} data-testid="connect-check" onclick={() => void checkAgain()}><span class="ui-label">{strings.connect.checkAgain}</span></button>
               </div>
             {:else if step === 'sign-in'}
               {#if login?.state === 'failed'}<p class="bad" role="alert" data-testid="connect-login-failed">{login.output}</p>{/if}
-              <button type="button" class="primary" data-testid="connect-sign-in" disabled={busy} onclick={() => void signIn()}>{fill(strings.connect.signIn, { provider: provider.name })}</button>
+              <button type="button" class="primary" data-testid="connect-sign-in" disabled={busy} onclick={() => void signIn()}><span class="ui-label">{fill(strings.connect.signIn, { provider: provider.name })}</span></button>
               <p class="muted">{strings.connect.signInNote}</p>
             {:else if step === 'signing-in' && loginAccount && store.loginTerminals.includes(loginAccount.id)}
               {@const terminalAccount = loginAccount}
@@ -268,26 +268,26 @@
                   />
                 {/await}
               </div>
-              <button type="button" class="quiet small" data-testid="connect-login-terminal-close" onclick={() => void store.closeTerminal(`login:${terminalAccount.id}`)}>{strings.accounts.terminalDone}</button>
+              <button type="button" class="quiet small" data-testid="connect-login-terminal-close" onclick={() => void store.closeTerminal(`login:${terminalAccount.id}`)}><span class="ui-label">{strings.accounts.terminalDone}</span></button>
             {:else if step === 'signing-in' && loginAccount}
               {#if login?.url}
-                <a class="button primary" href={login.url} target="_blank" rel="noreferrer" data-testid="connect-login-url">{strings.accounts.loginOpen}</a>
+                <a class="button primary" href={login.url} target="_blank" rel="noreferrer" data-testid="connect-login-url"><span class="ui-label">{strings.accounts.loginOpen}</span></a>
                 <p class="muted">{strings.connect.signInNote}</p>
                 {#if provider.login && provider.login.kind === 'device'}<p class="muted" style="white-space: pre-line" data-testid="connect-login-code">{login.output}</p>{/if}
                 <form class="code" onsubmit={(event) => void sendCode(event)}>
                   {#if provider.login && provider.login.kind !== 'device'}<input data-testid="connect-login-input" placeholder={provider.login && provider.login.kind === 'acp' ? strings.accounts.loginRedirectPlaceholder : strings.accounts.loginInputPlaceholder} bind:value={code} />
-                  <button type="submit" class="quiet small">{strings.accounts.loginSend}</button>{:else}<span class="muted">{strings.providerSettings.deviceHint}</span>{/if}
+                  <button type="submit" class="quiet small"><span class="ui-label">{strings.accounts.loginSend}</span></button>{:else}<span class="muted">{strings.providerSettings.deviceHint}</span>{/if}
                 </form>
               {:else}
                 <p class="muted" role="status">{strings.accounts.loginStarting}</p>
               {/if}
-              <button type="button" class="quiet small" data-testid="connect-login-cancel" onclick={() => void store.cancelLogin(loginAccount.id)}>{strings.accounts.loginCancel}</button>
+              <button type="button" class="quiet small" data-testid="connect-login-cancel" onclick={() => void store.cancelLogin(loginAccount.id)}><span class="ui-label">{strings.accounts.loginCancel}</span></button>
             {:else if step === 'external'}
               <p>{fill(strings.connect.external, { provider: provider.name })}</p>
-              <button type="button" class="quiet" disabled={detecting} data-testid="connect-check" onclick={() => void checkAgain()}>{strings.connect.checkAgain}</button>
+              <button type="button" class="quiet" disabled={detecting} data-testid="connect-check" onclick={() => void checkAgain()}><span class="ui-label">{strings.connect.checkAgain}</span></button>
             {:else if step === 'ready'}
-              <p class="done" role="status"><Check size={16} />{fill(strings.connect.ready, { provider: provider.name })}</p>
-              <button type="button" class="primary" data-testid="connect-use" onclick={use}>{fill(strings.connect.use, { provider: provider.name })}</button>
+              <p class="done" role="status"><Check size={16} /><span class="ui-label">{fill(strings.connect.ready, { provider: provider.name })}</span></p>
+              <button type="button" class="primary" data-testid="connect-use" onclick={use}><span class="ui-label">{fill(strings.connect.use, { provider: provider.name })}</span></button>
             {/if}
           </div>
         {/if}

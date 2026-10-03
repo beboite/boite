@@ -20,7 +20,7 @@
 <div class="page" data-testid="experiments-page">
   <header>
     <div>
-      <h1>{strings.settings.tabs.experiments}<InfoTip topic={strings.settings.tabs.experiments} text={strings.settings.experiments.intro} /></h1>
+      <h1 class="ui-label-box"><span class="ui-label">{strings.settings.tabs.experiments}</span><InfoTip topic={strings.settings.tabs.experiments} text={strings.settings.experiments.intro} /></h1>
     </div>
   </header>
 
@@ -28,7 +28,7 @@
     {#each EXPERIMENT_IDS as id (id)}
       <label for="{uid}-{id}" class="switch-row" id="settings-{id}">
         <span class="text">
-          <span id="{uid}-{id}-name">{copy[id].title}</span><InfoTip topic={copy[id].title} text={copy[id].hint} />
+          <span class="ui-label-box"><span class="ui-label" id="{uid}-{id}-name">{copy[id].title}</span><InfoTip topic={copy[id].title} text={copy[id].hint} /></span>
           {#if id === 'agent-browser-control'}<span class="hint" id="{uid}-{id}-hint">{copy[id].hint}</span>{/if}
         </span>
         <input id="{uid}-{id}" aria-labelledby="{uid}-{id}-name"

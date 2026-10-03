@@ -334,7 +334,7 @@
             </span>
             <span class="cross"><X size={14} strokeWidth={2} /></span>
           </button>
-          <span class="name">{label(surface)}</span>
+          <span class="name ui-label">{label(surface)}</span>
         </div>
       {/each}
     </div>

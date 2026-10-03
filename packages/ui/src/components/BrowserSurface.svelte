@@ -259,12 +259,12 @@
     {/if}
     {#if viewport}
       <button type="button" class="ghost small zoom" title={strings.browser.resetViewport} aria-label={strings.browser.resetViewport}
-        onclick={() => void runBrowserAction(id, { kind: 'reset-viewport' }).catch(error => { problem = String(error); })}>{viewport.width}×{viewport.height}</button>
+        onclick={() => void runBrowserAction(id, { kind: 'reset-viewport' }).catch(error => { problem = String(error); })}><span class="ui-label">{viewport.width}×{viewport.height}</span></button>
     {/if}
     {#if zoom !== ZOOM_DEFAULT}
       <button type="button" class="ghost small zoom" data-testid="browser-zoom"
         title={strings.browser.resetZoom} aria-label={strings.browser.resetZoom}
-        onclick={() => { browserBridge.setZoom(id, ZOOM_DEFAULT); panel.update(id, { zoom: ZOOM_DEFAULT }); }}>{Math.round(zoom * 100)}%</button>
+        onclick={() => { browserBridge.setZoom(id, ZOOM_DEFAULT); panel.update(id, { zoom: ZOOM_DEFAULT }); }}><span class="ui-label">{Math.round(zoom * 100)}%</span></button>
     {/if}
     {#if enabled}
       <button type="button" class="ghost small icon" title={previewStrings.annotate}

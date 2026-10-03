@@ -50,8 +50,8 @@
     onclick={() => (open = !open)}
   >
     <span class="glyph"><Brain size={15} strokeWidth={1.75} /></span>
-    <span class="label">{strings.chat.thinking}</span>
-    {#if took}<span class="took" data-testid="thinking-elapsed">{took}</span>{/if}
+    <span class="label ui-label">{strings.chat.thinking}</span>
+    {#if took}<span class="took ui-label" data-testid="thinking-elapsed">{took}</span>{/if}
     {#if live}
       <span class="dot" aria-label={strings.chat.streaming}></span>
     {/if}

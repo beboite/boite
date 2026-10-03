@@ -23,14 +23,14 @@
 
 {#if thread.forkOrigin}
   <section class="fork" data-testid="fork-return" aria-label={strings.chat.forkOrigin}>
-    <div class="origin"><span>{strings.chat.forkOrigin}</span><button type="button" class="ghost" disabled={!source || source.archived} onclick={() => void store.open(thread.forkOrigin!.threadId)}>{source?.title ?? strings.chat.forkSourceUnavailable}</button></div>
+    <div class="origin"><span class="ui-label">{strings.chat.forkOrigin}</span><button type="button" class="ghost" disabled={!source || source.archived} onclick={() => void store.open(thread.forkOrigin!.threadId)}><span class="ui-label">{source?.title ?? strings.chat.forkSourceUnavailable}</span></button></div>
     <small>{thread.forkOrigin.mode === 'native' ? strings.chat.forkNative : strings.chat.forkSeeded}</small>
     <details bind:open>
       <summary>{strings.chat.forkReturn}</summary>
       <form onsubmit={event => { event.preventDefault(); void submit(); }}>
         <label for="fork-summary">{strings.chat.forkSummary}</label>
         <textarea id="fork-summary" bind:value={summary} disabled={pending || unavailable} maxlength="4000" rows="3" data-testid="fork-return-text"></textarea>
-        <div class="actions"><small>{summary.length}/4000</small><button type="submit" disabled={pending || unavailable || !summary.trim()} data-testid="fork-return-send">{pending ? strings.app.loading : strings.chat.forkReturn}</button></div>
+        <div class="actions"><small class="ui-label">{summary.length}/4000</small><button type="submit" disabled={pending || unavailable || !summary.trim()} data-testid="fork-return-send"><span class="ui-label">{pending ? strings.app.loading : strings.chat.forkReturn}</span></button></div>
       </form>
     </details>
     {#if sent}<p role="status">{strings.chat.forkReturned}</p>{/if}

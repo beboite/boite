@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 import { startUi } from './lib/ui.ts';
+import { labelOffsets } from './lib/text-metrics';
 
 let server: { close(): Promise<void> };
 let page: BrowserPage;
@@ -28,6 +29,22 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
         state: 'cancelled', observedAt: Date.now(), finishedAt: Date.now(), reason: 'core-restarted' }];
     })()`);
     await page.waitFor('document.querySelector("[data-testid=thread-recovery]") !== null');
+    if (viewport.width === 1280) {
+      for (const font of ['inter', 'geist', 'plex', 'atkinson', 'figtree', 'source', 'dm', 'system']) {
+        await page.evaluate(`(async () => {
+          document.documentElement.dataset.font = '${font}';
+          const family = getComputedStyle(document.body).fontFamily;
+          await document.fonts.load('600 13px ' + family);
+          await document.fonts.load('500 13px ' + family);
+          await document.fonts.ready;
+        })()`);
+        for (const result of await labelOffsets(page, [
+          ['[data-testid="thread-recovery"] > svg', '[data-testid="thread-recovery"] .title .ui-label'],
+          ['[data-testid="thread-recovery"] button', '[data-testid="thread-recovery"] button .ui-label'],
+        ])) expect(Math.abs(result.offset), `${font}: recovery text`).toBeLessThanOrEqual(0.8);
+      }
+      await page.evaluate(`document.documentElement.dataset.font = 'inter'; document.fonts.ready`);
+    }
     await page.click('[data-testid=background-history] summary');
     await page.evaluate('document.fonts.ready');
     expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);

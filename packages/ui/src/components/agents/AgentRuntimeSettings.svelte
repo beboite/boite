@@ -58,7 +58,7 @@
       <button type="button" class="ghost icon" aria-label={labels.removeRoute} title={labels.removeRoute} onclick={() => remove(child, route.id)}><X size={14} /></button>
     </div>
   {/each}
-  <button type="button" class="small agent-add" onclick={() => add(child)}>{labels.addModel}</button>
+  <button type="button" class="small agent-add" onclick={() => add(child)}><span class="ui-label">{labels.addModel}</span></button>
 {/snippet}
 
 {#if config}
@@ -69,7 +69,7 @@
       <div class="agent-inline">
         <ModelPicker store={view.store} choice={config.defaultRoute} onpick={patch => { if (config) config.defaultRoute = { ...config.defaultRoute, effort: null, ...patch }; }} />
         {#if effort?.levels.length}<EffortSlider levels={effort.levels} active={config.defaultRoute.effort ?? effort.default} onpick={id => { if (config) config.defaultRoute.effort = id; }} />{/if}
-        <Menu placement="bottom" label={labels.permissions} items={PERMISSIONS.map(id => ({ id, label: permissionLabels[id], active: config?.defaultRoute.permissionMode === id }))} onpick={id => { if (config) config.defaultRoute.permissionMode = id as AgentSelection['permissionMode']; }}>{permissionLabels[config.defaultRoute.permissionMode]}</Menu>
+        <Menu placement="bottom" label={labels.permissions} items={PERMISSIONS.map(id => ({ id, label: permissionLabels[id], active: config?.defaultRoute.permissionMode === id }))} onpick={id => { if (config) config.defaultRoute.permissionMode = id as AgentSelection['permissionMode']; }}><span class="ui-label">{permissionLabels[config.defaultRoute.permissionMode]}</span></Menu>
       </div>
       {#if view.store.providerOf(config.defaultRoute.providerId)?.capabilities.approvals === false}<p class="hint">{labels.noApprovals}</p>{/if}
     </fieldset>
@@ -82,9 +82,9 @@
 
     <fieldset class="card" disabled={locked}>
       <h2>{labels.subagents}</h2>
-      <label class="switch-row"><span class="text">{labels.enableSubagents}</span><input type="checkbox" role="switch" bind:checked={config.subagents.enabled} /></label>
+      <label class="switch-row"><span class="text ui-label">{labels.enableSubagents}</span><input type="checkbox" role="switch" bind:checked={config.subagents.enabled} /></label>
       {#if config.subagents.enabled}
-        <label class="switch-row"><span class="text">{labels.paused}</span><input type="checkbox" role="switch" bind:checked={config.subagents.paused} /></label>
+        <label class="switch-row"><span class="text ui-label">{labels.paused}</span><input type="checkbox" role="switch" bind:checked={config.subagents.paused} /></label>
         {@render routes(true)}
       {/if}
     </fieldset>
@@ -97,6 +97,6 @@
       </div>
     </fieldset>
 
-    {#if view.store.owner}<div class="agent-form-actions"><button class="primary" disabled={view.pending} data-testid="agent-runtime-save">{labels.save}</button></div>{/if}
+    {#if view.store.owner}<div class="agent-form-actions"><button class="primary" disabled={view.pending} data-testid="agent-runtime-save"><span class="ui-label">{labels.save}</span></button></div>{/if}
   </form>
 {/if}

@@ -68,21 +68,21 @@
 
 <div class="colors" data-testid="theme-colors">
   <div class="heading">
-    <h3>{strings.settings.colors.title}<InfoTip topic={strings.settings.colors.title} text={strings.settings.colors.hint} /></h3>
+    <h3><span class="ui-label">{strings.settings.colors.title}</span><InfoTip topic={strings.settings.colors.title} text={strings.settings.colors.hint} /></h3>
     <div class="actions">
-      <button type="button" class="small ghost" disabled={!canUndo} onclick={undoEdit} data-testid="colors-undo">{strings.settings.colors.undo}</button>
-      <button type="button" class="small ghost" disabled={!custom} onclick={reset} data-testid="colors-reset"><RotateCcw size={13} />{strings.settings.colors.reset}</button>
+      <button type="button" class="small ghost" disabled={!canUndo} onclick={undoEdit} data-testid="colors-undo"><span class="ui-label">{strings.settings.colors.undo}</span></button>
+      <button type="button" class="small ghost" disabled={!custom} onclick={reset} data-testid="colors-reset"><RotateCcw size={13} /><span class="ui-label">{strings.settings.colors.reset}</span></button>
     </div>
   </div>
   <div class="presets" role="group" aria-label={strings.settings.colors.palette}>
     {#each presets as preset (preset.id)}
       <button type="button" class="preset" aria-pressed={matching === preset.id} onclick={() => pick(preset.id)} data-testid="palette-{preset.id}">
-        <span>{strings.settings.colors.palettes[preset.id]}</span>{#if matching === preset.id}<Check size={14} />{/if}
+        <span class="ui-label">{strings.settings.colors.palettes[preset.id]}</span>{#if matching === preset.id}<Check size={14} />{/if}
       </button>
     {/each}
   </div>
   <div class="selection">
-    <button type="button" class="ghost small customize" aria-expanded={customizing} aria-controls={editorId} onclick={() => { customizing = !customizing; }} data-testid="colors-customize"><SlidersHorizontal size={14} />{strings.settings.colors.customize}</button>
+    <button type="button" class="ghost small customize" aria-expanded={customizing} aria-controls={editorId} onclick={() => { customizing = !customizing; }} data-testid="colors-customize"><SlidersHorizontal size={14} /><span class="ui-label">{strings.settings.colors.customize}</span></button>
   </div>
   <div class="editor" class:customizing id={editorId}>
     {#if customizing}
@@ -107,8 +107,8 @@
   </div>
   {#if ratio < 4.5}
   <div class="contrast" data-testid="theme-contrast">
-    <span>{fill(strings.settings.colors.contrastLow, { ratio: tenth(ratio) })}<InfoTip topic={strings.settings.colors.contrast} text={strings.settings.colors.contrastHint} /></span>
-    <button type="button" class="small" onclick={improveContrast} data-testid="colors-contrast-fix">{strings.settings.colors.improveContrast}</button>
+    <span class="ui-label-box"><span class="ui-label">{fill(strings.settings.colors.contrastLow, { ratio: tenth(ratio) })}</span><InfoTip topic={strings.settings.colors.contrast} text={strings.settings.colors.contrastHint} /></span>
+    <button type="button" class="small" onclick={improveContrast} data-testid="colors-contrast-fix"><span class="ui-label">{strings.settings.colors.improveContrast}</span></button>
   </div>
   {/if}
 </div>

@@ -21,8 +21,8 @@
 </script>
 
 <div class="done-notice" data-testid="done-thread-notice">
-  <span>{strings.sidebar.doneNotice}</span>
-  <button type="button" class="small" data-testid="done-thread-reopen" disabled={restoring || store.connection !== 'ready'} onclick={() => void reopen()}><ArchiveRestore size={14} />{strings.sidebar.reopenThread}</button>
+  <span class="ui-label">{strings.sidebar.doneNotice}</span>
+  <button type="button" class="small" data-testid="done-thread-reopen" disabled={restoring || store.connection !== 'ready'} onclick={() => void reopen()}><ArchiveRestore size={14} /><span class="ui-label">{strings.sidebar.reopenThread}</span></button>
 </div>
 
 <style>

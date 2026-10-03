@@ -152,10 +152,10 @@
             {#if item.projectTile}<ProjectTile project={item.projectTile.project} store={item.projectTile.store} size={18} />{/if}
             {#if item.glyph}<span class="glyph" class:live={item.live}><item.glyph size={14} strokeWidth={1.75} /></span>{/if}
             {#if item.status}<span class="status-dot" data-tone={item.status.tone} role="img" aria-label={item.status.label} title={item.status.label}></span>{/if}
-            {item.label}
+            <span class="ui-label">{item.label}</span>
           </span>
           {#if item.hint}
-            <span class="hint">{item.hint}</span>
+            <span class="hint ui-label">{item.hint}</span>
           {/if}
         </button>
         {/if}

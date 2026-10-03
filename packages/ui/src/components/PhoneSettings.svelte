@@ -80,9 +80,9 @@
   <h2>{strings.phone.heading}</h2>
   {#if store.owner && showServerSettings}
     <div class="block">
-      <label for="{uid}-public-url"><span><span id="{uid}-public-url-name">{strings.phone.publicUrl}</span><InfoTip topic={strings.phone.publicUrl} text={strings.phone.publicUrlHint} /></span><input id="{uid}-public-url" aria-labelledby="{uid}-public-url-name" type="url" bind:value={publicUrl} placeholder={strings.phone.urlPlaceholder} data-testid="phone-public-url" /></label>
+      <label for="{uid}-public-url"><span class="ui-label-box"><span class="ui-label" id="{uid}-public-url-name">{strings.phone.publicUrl}</span><InfoTip topic={strings.phone.publicUrl} text={strings.phone.publicUrlHint} /></span><input id="{uid}-public-url" aria-labelledby="{uid}-public-url-name" type="url" bind:value={publicUrl} placeholder={strings.phone.urlPlaceholder} data-testid="phone-public-url" /></label>
       <div class="actions">
-        <button disabled={store.connection !== 'ready'} onclick={() => void store.saveSettings({ publicUrl: publicUrl.trim() || null })}>{strings.settings.save}</button>
+        <button disabled={store.connection !== 'ready'} onclick={() => void store.saveSettings({ publicUrl: publicUrl.trim() || null })}><span class="ui-label">{strings.settings.save}</span></button>
       </div>
     </div>
   {/if}
@@ -91,7 +91,7 @@
       {#if standalone}<p class="hint">{strings.phone.installed}</p>
       {:else}
         <div class="actions">
-          <button onclick={async () => { standalone = await installApp() || installed(); if (!standalone) message = strings.phone.installHint; }}>{strings.phone.install}</button>
+          <button onclick={async () => { standalone = await installApp() || installed(); if (!standalone) message = strings.phone.installHint; }}><span class="ui-label">{strings.phone.install}</span></button>
           <InfoTip topic={strings.phone.install} text={strings.phone.installHint} />
         </div>
       {/if}
@@ -105,9 +105,9 @@
         <div class="actions">
           <InfoTip topic={strings.phone.heading} text={strings.phone.pushHint} />
           {#if subscribed}
-            <button disabled={busy} onclick={disable}>{strings.phone.disable}</button>
-            <button disabled={busy} onclick={testPush}>{strings.phone.test}</button>
-          {:else}<button disabled={busy || !key} onclick={enable}>{strings.phone.enable}</button>{/if}
+            <button disabled={busy} onclick={disable}><span class="ui-label">{strings.phone.disable}</span></button>
+            <button disabled={busy} onclick={testPush}><span class="ui-label">{strings.phone.test}</span></button>
+          {:else}<button disabled={busy || !key} onclick={enable}><span class="ui-label">{strings.phone.enable}</span></button>{/if}
         </div>
       {/if}
       {#if message}<p class="hint" role="status">{message}</p>{/if}

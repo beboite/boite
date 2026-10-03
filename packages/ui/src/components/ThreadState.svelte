@@ -36,10 +36,10 @@
   <span class="when" title={exactTime(thread.lastUserMessageAt ?? thread.createdAt)}>{ago(thread.lastUserMessageAt ?? thread.createdAt, now)}</span>
 {:else}
   <span class="when state {kind}" data-testid="thread-state" data-state={kind} title={label} aria-label={label}>
-    {#if kind === 'working'}<LoaderCircle size={11} class="spinner" aria-hidden="true" />{spent ?? strings.sidebar.state.working}
-    {:else if kind === 'monitoring'}<Radar size={11} class="pulse" aria-hidden="true" />{spent ?? strings.sidebar.state.monitoring}
-    {:else if kind === 'background'}<span class="dot pulse" aria-hidden="true"></span>{spent ?? strings.sidebar.state.background}
-    {:else}{label}{/if}
+    {#if kind === 'working'}<LoaderCircle size={11} class="spinner" aria-hidden="true" /><span class="ui-label">{spent ?? strings.sidebar.state.working}</span>
+    {:else if kind === 'monitoring'}<Radar size={11} class="pulse" aria-hidden="true" /><span class="ui-label">{spent ?? strings.sidebar.state.monitoring}</span>
+    {:else if kind === 'background'}<span class="dot pulse" aria-hidden="true"></span><span class="ui-label">{spent ?? strings.sidebar.state.background}</span>
+    {:else}<span class="ui-label">{label}</span>{/if}
   </span>
 {/if}
 
