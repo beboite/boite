@@ -119,6 +119,7 @@
   const meta = (model: SpeechModel): string => [
     model.bytes ? `${megabytes(model.bytes)} ${strings.units.megabytes}` : '',
     model.tier ? strings.speech.tiers[model.tier] : model.host ?? '',
+    model.streaming ? strings.speech.streaming : model.backend === 'whistle' ? strings.speech.whistleLanguages : '',
   ].filter(Boolean).join(' · ');
   /** What the top line says: one state, at most one action. */
   const stage = $derived.by((): 'ready' | 'downloading' | 'failed' | 'broken' | 'local' | 'api' => {
@@ -161,6 +162,7 @@
         <div class="text">
           {#if stage === 'ready'}
             {status.engine === 'local' ? fill(strings.speech.readyLocal, { model: modelName }) : fill(strings.speech.readyApi, { provider: provider(config.apiProvider) })}
+            {#if status.streaming}<span class="hint">{strings.speech.streamingHint}</span>{/if}
             {#if status.engine === 'local' && status.runtimeOutdated}<span class="hint">{strings.speech.updateHint}</span>{/if}
           {:else if stage === 'downloading'}
             {fill(strings.speech.downloadingModel, { model: fetching?.name ?? '' })}

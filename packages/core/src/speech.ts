@@ -1,10 +1,12 @@
 import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute, join, dirname } from 'node:path';
 import { SPEECH_DEFAULT_MODEL, SPEECH_MAX_BYTES, isSpeechModelId, speechUrlProblem, type SpeechConfig, type SpeechStatus } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, refused } from './errors.ts';
 import { SpeechLocal, transcribeLocal, type SpeechTarget } from './speech-local.ts';
 import { catalogueEntry, catalogueSpec, customId, customName, whisperHeaderProblem, type CustomRecord } from './speech-models.ts';
+import { SpeechStreams, type SpeechJob } from './speech-streams.ts';
+import { transcribeWhistle } from './speech-whistle.ts';
 
 export const DEFAULT_SPEECH: SpeechConfig = { engine: 'local', language: '', apiProvider: 'groq', fallback: false, executable: '', modelPath: '', model: SPEECH_DEFAULT_MODEL };
 type Credentials = { groqKey: string; openrouterKey: string };
@@ -15,10 +17,10 @@ const ENDPOINTS = {
 };
 
 /** Accept only the bounded PCM format produced by the recorder, before starting any work. */
-export function decodeSpeechAudio(value: unknown): Uint8Array {
+export function decodeSpeechAudio(value: unknown, short = false): Uint8Array {
   if (typeof value !== 'string' || value.length > Math.ceil(SPEECH_MAX_BYTES / 3) * 4 || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) throw invalidParams('speech.audio must be a base64 WAV of at most 120 seconds');
   const data = Buffer.from(value, 'base64');
-  if (data.length < 3244 || data.length > SPEECH_MAX_BYTES || data.toString('ascii', 0, 4) !== 'RIFF' || data.toString('ascii', 8, 16) !== 'WAVEfmt ' || data.readUInt32LE(16) !== 16 || data.readUInt16LE(20) !== 1 || data.readUInt16LE(22) !== 1 || data.readUInt32LE(24) !== 16000 || data.readUInt32LE(28) !== 32000 || data.readUInt16LE(32) !== 2 || data.readUInt16LE(34) !== 16 || data.toString('ascii', 36, 40) !== 'data' || data.readUInt32LE(40) !== data.length - 44 || data.readUInt32LE(4) !== data.length - 8 || data.length % 2 !== 0) throw invalidParams('speech.audio must be mono, 16 kHz, 16-bit PCM WAV between 0.1 and 120 seconds');
+  if (data.length < (short ? 46 : 3244) || data.length > SPEECH_MAX_BYTES || data.toString('ascii', 0, 4) !== 'RIFF' || data.toString('ascii', 8, 16) !== 'WAVEfmt ' || data.readUInt32LE(16) !== 16 || data.readUInt16LE(20) !== 1 || data.readUInt16LE(22) !== 1 || data.readUInt32LE(24) !== 16000 || data.readUInt32LE(28) !== 32000 || data.readUInt16LE(32) !== 2 || data.readUInt16LE(34) !== 16 || data.toString('ascii', 36, 40) !== 'data' || data.readUInt32LE(40) !== data.length - 44 || data.readUInt32LE(4) !== data.length - 8 || data.length % 2 !== 0) throw invalidParams('speech.audio must be mono, 16 kHz, 16-bit PCM WAV between 0.1 and 120 seconds');
   return data;
 }
 
@@ -41,17 +43,19 @@ export class SpeechStore {
   private config: SpeechConfig = { ...DEFAULT_SPEECH };
   private keys: Credentials = { groqKey: '', openrouterKey: '' };
   private loadError: string | null = null;
-  private readonly running = new Map<string, { id: string; controller: AbortController }>();
+  private readonly running = new Map<string, SpeechJob>();
+  readonly streams: SpeechStreams;
   private readonly file: string;
   constructor(private readonly core: Core) {
     this.local = new SpeechLocal(core);
+    this.streams = new SpeechStreams(this.local, this.running, () => this.get(), () => this.status(), decodeSpeechAudio);
     this.file = join(core.dataDir, 'speech.json');
     if (existsSync(this.file)) {
       try {
         const saved = JSON.parse(readFileSync(this.file, 'utf8'));
         this.validate(saved);
         // A speech.json from before the model choice holds Whisper Small, the one model it could have.
-        this.config = this.publicConfig({ ...saved, model: saved.model ?? SPEECH_DEFAULT_MODEL });
+        this.config = this.publicConfig({ ...saved, model: saved.model ?? 'small-q5_1' });
         this.keys = { groqKey: saved.groqKey ?? '', openrouterKey: saved.openrouterKey ?? '' };
       } catch {
         this.config = { ...DEFAULT_SPEECH };
@@ -62,7 +66,8 @@ export class SpeechStore {
   }
   get(): SpeechConfig { return { ...this.config }; }
   status(): SpeechStatus {
-    const localReady = this.local.ready(this.config.executable, this.local.modelFile(this.config));
+    const backend = this.config.modelPath ? undefined : catalogueEntry(this.config.model)?.backend;
+    const localReady = this.local.ready(this.config.executable, this.local.modelFile(this.config), this.config.modelPath ? undefined : this.config.model);
     const groqKeySet = this.keys.groqKey.length > 0;
     const openrouterKeySet = this.keys.openrouterKey.length > 0;
     return {
@@ -71,8 +76,10 @@ export class SpeechStore {
       ready: this.loadError === null && (this.config.engine === 'local' ? localReady && !this.removing && !this.local.updatingRuntime :this.config.apiProvider === 'groq' ? groqKeySet : openrouterKeySet),
       localReady, groqKeySet, openrouterKeySet,
       installing: this.local.installing, downloadedBytes: this.local.downloadedBytes, totalBytes: this.local.totalBytes,
-      error: this.loadError ?? this.local.error, canInstallRuntime: this.local.canInstallRuntime,
-      models: this.local.models.list(), downloading: this.local.downloading, runtimeOutdated: this.local.runtimeOutdated(),
+      error: this.loadError ?? this.local.error, canInstallRuntime: this.local.canInstallModel(this.config.model),
+      models: this.local.models.list(), downloading: this.local.downloading, runtimeOutdated: !backend && this.local.runtimeOutdated(),
+      streaming: this.config.engine === 'local' && backend === 'nemotron',
+      previewIntervalMs: this.config.engine === 'api' ? 2500 : backend === 'whistle' ? 1000 : 1500,
     };
   }
   private publicConfig(p: SpeechConfig): SpeechConfig { return { engine: p.engine, language: p.language, apiProvider: p.apiProvider, fallback: p.fallback, executable: p.executable, modelPath: p.modelPath, model: p.model }; }
@@ -96,7 +103,9 @@ export class SpeechStore {
     const before = this.config;
     // A recording made under other settings is refused; the loaded model follows the choice.
     this.revision = crypto.randomUUID();
+    for (const job of this.running.values()) job.controller.abort();
     if (before.engine !== config.engine || before.model !== config.model || before.modelPath !== config.modelPath || before.executable !== config.executable) void this.local.server.stop();
+    if (before.engine !== config.engine || before.model !== config.model || before.modelPath !== config.modelPath) void this.local.native.stop();
     this.config = config;
     this.keys = keys;
     this.loadError = null;
@@ -147,6 +156,12 @@ export class SpeechStore {
   /** Loads the configured model in the background; a failure is for the request that follows to report. */
   warm(): { ok: true } {
     if (this.config.engine !== 'local' || this.removing || this.local.installing || !this.status().ready) return { ok: true };
+    const backend = this.config.modelPath ? undefined : catalogueEntry(this.config.model)?.backend;
+    if (backend === 'nemotron') {
+      void this.local.native.ensure(this.local.nativeRuntime, dirname(this.local.modelFile(this.config))).catch(() => {});
+      return { ok: true };
+    }
+    if (backend === 'whistle') return { ok: true };
     const command = this.local.serverCommand(this.config.executable);
     if (command) void this.local.server.ensure(command, this.local.modelFile(this.config)).catch(() => {});
     return { ok: true };
@@ -159,6 +174,7 @@ export class SpeechStore {
     for (const job of this.running.values()) job.controller.abort();
     await this.local.cancel();
     await this.local.server.stop();
+    await this.local.native.stop();
   }
   async transcribe(connection: string, p: TranscribeParams): Promise<{ text: string; language?: string }> {
     if (!p || typeof p.requestId !== 'string' || !/^[a-zA-Z0-9-]{1,64}$/.test(p.requestId)) throw invalidParams('speech.requestId must be 1 to 64 letters, digits or hyphens');
@@ -174,7 +190,13 @@ export class SpeechStore {
     const config = this.get(), keys = { ...this.keys };
     try {
       let result: { text: string; language?: string };
-      if (config.engine === 'local') {
+      const backend = config.modelPath ? undefined : catalogueEntry(config.model)?.backend;
+      if (config.engine === 'local' && backend === 'whistle') {
+        result = await transcribeWhistle(this.core, this.local, audio, config.language || p.language || '', signal);
+      } else if (config.engine === 'local' && backend === 'nemotron') {
+        await this.local.native.ensure(this.local.nativeRuntime, dirname(this.local.modelFile(config)), signal);
+        result = await this.local.native.request('transcribe', { audio: p.audio, language: config.language }, signal);
+      } else if (config.engine === 'local') {
         result = await transcribeLocal(this.core, this.local, audio, {
           executable: config.executable,
           model: this.local.modelFile(config),
@@ -194,6 +216,7 @@ export class SpeechStore {
         result = { text };
       }
       signal.throwIfAborted();
+      if (!result || typeof result.text !== 'string' || result.text.length > 100_000) throw refused('speech: decoder returned an invalid transcript');
       return { ...result, text: result.text.trim() };
     } catch (error) {
       if (signal.aborted) throw refused(controller.signal.aborted ? 'speech: transcription cancelled' : 'speech: transcription timed out');
@@ -252,5 +275,8 @@ export function registerSpeechMethods(core: Core): void {
   core.router.register('speech.uninstall', p => core.speech.uninstall(p));
   core.router.register('speech.warm', () => core.speech.warm());
   core.router.register('speech.transcribe', (p, ctx) => core.speech.transcribe(ctx.connection.id, p));
+  core.router.register('speech.streamStart', (p, ctx) => core.speech.streams.start(ctx.connection.id, p));
+  core.router.register('speech.streamChunk', (p, ctx) => core.speech.streams.chunk(ctx.connection.id, p));
+  core.router.register('speech.streamFinish', (p, ctx) => core.speech.streams.chunk(ctx.connection.id, p, true));
   core.router.register('speech.cancel', (p, ctx) => { if (!p || typeof p.requestId !== 'string') throw invalidParams('speech.requestId is required'); core.speech.cancel(ctx.connection.id, p.requestId); return { ok: true }; });
 }

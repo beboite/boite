@@ -8,14 +8,20 @@ Recordings last at most two minutes. A failed transcription can be retried
 while the composer remains open; audio stays in memory until retry or cancel.
 
 The microphone remains in the toolbar during recording; press it again to
-finish. A compact live preview inside the composer refreshes approximately
-every 2.5 seconds, subject to engine latency. It transcribes at most the latest
-12 seconds, replaces the provisional text, and never edits the typed draft.
-Only one preview request runs at a time. Silence skips uploads; a failed
-preview pauses further previews and shows the error. Finish cancels and drains
-the preview before transcribing the full recording for the draft. Each preview
-is a separate transcription request returning complete text. API mode sends
-these additional requests while recording.
+finish. With Nemotron Streaming, a compact preview receives new audio every
+400 ms, subject to engine latency. Each sample is uploaded once, including
+silence. Finish waits for the current chunk, sends the remaining audio and
+drains the decoder's lookahead. It does not transcribe the recording again.
+Provisional text replaces the preview and never edits the typed draft.
+
+Whistle, Whisper and API mode use separate preview transcriptions. Whistle
+refreshes approximately every second over the latest four seconds. Whisper
+refreshes every 1.5 seconds over at most twelve seconds; API mode every 2.5
+seconds. Only one request runs at a time and silence skips batch previews.
+Finish cancels and drains a batch preview before transcribing the full
+recording. API mode sends these additional requests while recording. A failed
+preview pauses further previews and shows the error; the recording remains
+available for retry.
 
 Once a local preview has heard the language, the next previews and the final
 request pass it back, which skips whisper's language detection. A language set
@@ -34,8 +40,9 @@ top says whether dictation works now and, when it does not, offers the one
 action that fixes it: Set up dictation downloads the local engine, Try again
 restarts a failed download, Save to repair rewrites an unreadable
 `speech.json`, Update replaces a runtime installed before whisper-server was
-part of it. With no configuration the engine is Local, so on Windows x64 a
-single click is the whole setup. The microphone beside Send links to this page
+part of it. New configurations use Local with Nemotron Streaming; existing
+choices remain selected. On supported platforms a single click downloads the
+model and native runtime. The microphone beside Send links to this page
 when the engine is not ready. Explanations sit behind the (i) beside each
 label.
 
@@ -57,12 +64,13 @@ read local paths.
 
 ## Engines
 
-- Local runs whisper.cpp on the core's machine, with no cloud fallback. Windows
-  x64 downloads the pinned CPU runtime (v1.9.2, `whisper-cli` and
-  `whisper-server`) with the chosen model. Other platforms download the model
-  and use `whisper-cli` on PATH, or the executable path in Local paths. Paths
-  refer to the core, never the phone. See [Models](#models) and
-  [Resident server](#resident-server).
+- Local runs the selected engine on the core's machine, with no cloud fallback.
+  Nemotron downloads sherpa-onnx 1.13.8 on Windows x64, Linux x64/ARM64 and macOS
+  x64/ARM64. Whistle downloads Needle on Windows x64/ARM64, Linux x64/ARM64 and
+  macOS ARM64. Whisper downloads its pinned CPU runtime v1.9.2 on Windows x64;
+  other platforms use `whisper-cli` on PATH or the executable in Local paths.
+  A model path set by hand always uses Whisper. Paths refer to the core,
+  never the phone. See [Models](#models) and [Resident server](#resident-server).
 - API supports Groq `whisper-large-v3-turbo` and OpenRouter
   `openai/whisper-large-v3-turbo`. Groq accepts multipart audio; OpenRouter accepts
   JSON with base64 `input_audio`. Optionally try the other provider on failure
@@ -71,19 +79,33 @@ read local paths.
 
 ## Models
 
-The Model card lists three multilingual models from the whisper.cpp
-repository on Hugging Face, each pinned by size and SHA-256:
+The Model card offers two newer engines and the existing Whisper models.
+Each artifact is pinned by immutable revision or version, size and SHA-256:
 
 | Model | File | Size |
 | --- | --- | --- |
+| Nemotron 3.5 Streaming (default) | Encoder, decoder, joiner and tokens | 682 MB |
+| Whistle | `whistle.cact` | 17 MB |
 | Whisper Base | `ggml-base-q5_1.bin` | 60 MB |
-| Whisper Small (default) | `ggml-small-q5_1.bin` | 190 MB |
+| Whisper Small | `ggml-small-q5_1.bin` | 190 MB |
 | Whisper Large v3 Turbo | `ggml-large-v3-turbo-q5_0.bin` | 574 MB |
+
+Nemotron supports French and incremental decoding with a 560 ms acoustic
+window. Its native decoder runs in a separate traced process, limited to four
+CPU threads, so inference cannot block the core's RPC event loop. It loads
+lazily, stays resident between dictations and stops after 150 seconds idle,
+on cancel, disconnect, model changes or core shutdown.
+
+[Whistle](https://cactuscompute.com/blog/whistle) supports English, German,
+French, Spanish, Italian, Dutch and Polish. It is a batch engine rather than
+a causal streaming model. Long recordings use 25-second windows with a
+one-second overlap, joining shared words. Each window runs with at most four
+threads. Whistle does not need a resident server.
 
 One model is in use at a time. Picking one already downloaded uses it at once;
 picking one that is not downloads it, then makes it the model in use. Each
 downloaded model has its own remove button; removing the model in use hands over
-to another downloaded one, or back to Small for a link.
+to another downloaded one, or back to the default when none remains.
 
 Add from a link takes an `https://` URL to any whisper.cpp ggml model, such as
 a Hugging Face `resolve` link. A link has no known size or digest, so the core
@@ -163,12 +185,16 @@ turning off Voice, leaving the page or hiding the app releases capture.
 
 ## Lifecycle and limits
 
-`speech.status`, `speech.transcribe`, `speech.cancel` and `speech.warm` are
+`speech.status`, `speech.transcribe`, `speech.cancel`, `speech.warm` and the
+stream start/chunk/finish methods are
 available to paired devices. Configuration, download and removal methods are
 owner-only. Cancellation is
 scoped to a connection and request ID. Disconnecting aborts its active request.
 At most two API transcriptions or one local transcription run at once; extra
-requests fail visibly and can be retried. The full request expires after three
+requests fail visibly and can be retried. A stream holds the same local decoder
+reservation, requires ordered sequence numbers and accepts at most two seconds
+per chunk. Its final tail may be longer. Both paths enforce two minutes of
+audio and invalidate old configuration revisions. The full request expires after three
 minutes. Transcription does not occupy an agent turn or alter a native session.
 
 The core validates audio before spawning or calling a provider. It does not
@@ -189,6 +215,7 @@ loads it.
 
 ```sh
 bun test packages/core/test/speech.test.ts
+bun test packages/core/test/speech-streams.test.ts packages/core/test/speech-assets.test.ts
 bun test tests/e2e/speech.test.ts
 ```
 
@@ -206,3 +233,13 @@ downloads the real runtime/model into a temporary directory, transcribes the
 upstream JFK fixture, checks the text and removes the managed files. It does
 not call a cloud API. Cloud tests use substituted responses and do not
 establish live credentials or provider availability.
+
+`BOITE_E2E_SPEECH_NATIVE=1 bun test packages/core/test/speech.native.live.test.ts`
+downloads and verifies the real Nemotron and Whistle artifacts in a fresh
+temporary data directory, transcribes a public French fixture, checks text
+arriving before Finish, and removes the managed files. It prints
+`NATIVE_SPEECH_MEASURED` with first-text and finalization latency. On 2026-10-03,
+the 6.85-second fixture produced first text after 1842 ms and finalized in
+211 ms after Finish on Linux x64. These are one-clip observations, not a
+language accuracy benchmark. Native Windows/macOS decoding and physical-phone
+microphone permissions need separate device testing.

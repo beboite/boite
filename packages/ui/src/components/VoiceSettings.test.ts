@@ -84,7 +84,7 @@ test('a model already here is used at once, one that is not downloads, and a lin
   await settle();
   expect(text('voice-status')).toContain('Ready, Whisper Small on this machine');
   expect(document.querySelector('[data-testid="voice-model-small-q5_1"] [role=radio]')?.getAttribute('aria-checked')).toBe('true');
-  expect(text('voice-model-base-q5_1')).toContain('60 MB · Fastest');
+  expect(text('voice-model-base-q5_1')).toContain('60 MB · Small download');
 
   document.querySelector<HTMLButtonElement>('[data-testid="voice-model-base-q5_1"] [role=radio]')!.click();
   await settle();

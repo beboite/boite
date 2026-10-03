@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, openSync, closeSync, writeSync, renameSync, rmSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, closeSync, writeSync, renameSync, rmSync, readdirSync, readFileSync, statSync, writeFileSync, chmodSync } from 'node:fs';
 import { join, basename, dirname } from 'node:path';
 import type { Core } from './core.ts';
 import { refused } from './errors.ts';
 import { freeBytesAt } from './providers/install.ts';
-import { CUSTOM_MAX_BYTES, SpeechModels, type CustomRecord, type DownloadSpec } from './speech-models.ts';
+import { CUSTOM_MAX_BYTES, SpeechModels, catalogueEntry, type CustomRecord, type DownloadSpec } from './speech-models.ts';
 import { previewContext, SpeechServer, speechThreads } from './speech-server.ts';
+import { SpeechNative } from './speech-native.ts';
+import { NEMOTRON_FILES, sherpaRuntime, whistleRuntime, unpackSpeechRuntime } from './speech-artifacts.ts';
 
 const RUNTIME: DownloadSpec = {
   url: 'https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.2/whisper-bin-x64.zip',
@@ -59,6 +61,7 @@ export class SpeechLocal {
   readonly root: string;
   readonly models: SpeechModels;
   readonly server: SpeechServer;
+  readonly native: SpeechNative;
   installing = false;
   /** The model the running download is for. */
   downloading: string | null = null;
@@ -78,12 +81,19 @@ export class SpeechLocal {
     this.root = join(core.dataDir, 'speech');
     this.models = new SpeechModels(this.root);
     this.server = new SpeechServer(core, this.root);
+    this.native = new SpeechNative(core, this.root);
     // Remove only our transient audio directories left by a hard-killed core.
     if (existsSync(this.root)) for (const name of readdirSync(this.root)) {
       if (/^speech-[a-f0-9-]{36}$/.test(name)) rmSync(join(this.root, name), { recursive: true, force: true });
     }
   }
   private get runtime(): string { return join(this.root, 'runtime'); }
+  get nativeRuntime(): string { return join(this.root, 'runtime-sherpa'); }
+  get needle(): string { return join(this.root, 'runtime-whistle', process.platform === 'win32' ? 'needle.exe' : 'needle'); }
+  canInstallModel(id: string): boolean {
+    const backend = catalogueEntry(id)?.backend;
+    return backend === 'whistle' ? !!whistleRuntime() : backend === 'nemotron' ? !!sherpaRuntime() : this.canInstallRuntime;
+  }
   /** The running download replaces the runtime, which a transcription would be using. */
   get updatingRuntime(): boolean { return this.installing && this.runtimeBytes > 0; }
   get executable(): string {
@@ -94,7 +104,10 @@ export class SpeechLocal {
   modelFile(config: { model: string; modelPath: string }): string {
     return config.modelPath || this.models.file(config.model);
   }
-  ready(executable: string, model: string): boolean {
+  ready(executable: string, model: string, id?: string): boolean {
+    const backend = id ? catalogueEntry(id)?.backend : undefined;
+    if (backend === 'whistle') return isFile(this.needle) && this.models.installed(id!);
+    if (backend === 'nemotron') return isFile(join(this.nativeRuntime, 'ready.json')) && this.models.installed(id!);
     return isFile(executable || this.executable) && isFile(model);
   }
   /** Installed by a Boite that fetched only whisper-cli: it works, one model load per request. */
@@ -102,7 +115,10 @@ export class SpeechLocal {
     return this.canInstallRuntime && existsSync(join(this.runtime, 'whisper-cli.exe')) && !existsSync(join(this.runtime, 'whisper-server.exe'));
   }
   /** A retry after a failed model download keeps the runtime it already unpacked. */
-  needsRuntime(): boolean {
+  needsRuntime(id?: string): boolean {
+    const backend = id ? catalogueEntry(id)?.backend : undefined;
+    if (backend === 'whistle') return !isFile(this.needle);
+    if (backend === 'nemotron') return !isFile(join(this.nativeRuntime, 'ready.json'));
     return this.canInstallRuntime && !(existsSync(join(this.runtime, 'whisper-cli.exe')) && existsSync(join(this.runtime, 'whisper-server.exe')));
   }
   /** The whisper-server of the same build as the whisper-cli in use, or null to run whisper-cli per request. */
@@ -116,16 +132,20 @@ export class SpeechLocal {
   /** True when there was something to download; false when the model and runtime are already here. */
   start(target: SpeechTarget, done: (id: string) => void): boolean {
     if (this.installing) throw refused('speech: a download is already running');
-    const runtime = this.needsRuntime();
+    const backend = catalogueEntry(target.id)?.backend;
+    if (backend && !this.canInstallModel(target.id)) throw refused(`speech: ${backend} runtime is unavailable on ${process.platform}/${process.arch}`);
+    const runtime = this.needsRuntime(target.id);
     const model = !this.models.installed(target.id);
     if (!runtime && !model) return false;
     this.installing = true;
     this.downloading = target.id;
     this.error = null;
     this.downloadedBytes = 0;
-    this.runtimeBytes = runtime ? RUNTIME_BYTES : 0;
+    const runtimeSize = backend === 'whistle' ? whistleRuntime()!.bytes! : backend === 'nemotron' ? sherpaRuntime()!.reduce((sum, file) => sum + file.bytes!, 0) : RUNTIME_BYTES;
+    this.runtimeBytes = runtime ? runtimeSize : 0;
     // A link's size is known once its server answers.
-    this.totalBytes = model && target.spec.bytes === null ? 0 : this.runtimeBytes + (model ? target.spec.bytes ?? 0 : 0);
+    const modelBytes = backend === 'nemotron' ? NEMOTRON_FILES.filter(file => !isFile(join(this.root, 'nemotron', file.file))).reduce((sum, file) => sum + file.bytes!, 0) : model ? target.spec.bytes ?? 0 : 0;
+    this.totalBytes = model && target.spec.bytes === null ? 0 : this.runtimeBytes + modelBytes;
     if (target.custom) this.models.saveCustom(target.custom);
     const controller = new AbortController();
     this.controller = controller;
@@ -143,12 +163,20 @@ export class SpeechLocal {
     if (id === undefined || this.downloading === id) await this.cancel();
     // A loaded model file cannot be removed on Windows.
     await this.server.stop();
+    await this.native.stop();
     if (id !== undefined) {
       this.models.remove(id);
       this.error = null;
       return;
     }
     rmSync(this.runtime, { recursive: true, force: true });
+    rmSync(join(this.root, 'runtime-whistle'), { recursive: true, force: true });
+    rmSync(this.nativeRuntime, { recursive: true, force: true });
+    rmSync(join(this.root, 'native-staging'), { recursive: true, force: true });
+    for (const archive of ['bindings.tgz', 'native.tgz']) {
+      rmSync(join(this.root, archive), { force: true });
+      dropPart(join(this.root, `${archive}.part`));
+    }
     this.models.removeAll();
     rmSync(join(this.root, 'runtime.zip'), { force: true });
     dropPart(join(this.root, 'runtime.zip.part'));
@@ -313,6 +341,11 @@ export class SpeechLocal {
   }
   private async install(target: SpeechTarget, runtime: boolean, signal: AbortSignal): Promise<void> {
     mkdirSync(this.root, { recursive: true });
+    const backend = catalogueEntry(target.id)?.backend;
+    if (backend === 'whistle' || backend === 'nemotron') {
+      await this.installNative(target, runtime, signal);
+      return;
+    }
     if (runtime) {
       const free = freeBytesAt(this.root);
       if (free !== null && free < RUNTIME_BYTES * 4 + MARGIN) throw refused(`speech: ${megabytes(RUNTIME_BYTES * 4 + MARGIN)} MB of free space is required for the download`);
@@ -350,6 +383,42 @@ export class SpeechLocal {
       await this.download(target.spec, file, signal);
       if (target.custom) this.models.saveCustom({ ...target.custom, bytes: statSync(file).size });
     }
+  }
+
+  private async installNative(target: SpeechTarget, runtime: boolean, signal: AbortSignal): Promise<void> {
+    const nemotron = catalogueEntry(target.id)?.backend === 'nemotron';
+    const required = this.totalBytes * (runtime ? 2 : 1) + MARGIN;
+    const free = freeBytesAt(this.root);
+    if (free !== null && free < required) throw refused(`speech: ${megabytes(required)} MB of free space is required for the download`);
+    if (runtime) {
+      if (nemotron) {
+        const staging = join(this.root, 'native-staging');
+        rmSync(staging, { recursive: true, force: true });
+        try {
+          for (const spec of sherpaRuntime()!) {
+            const archive = join(this.root, spec.file);
+            await this.download(spec, archive, signal);
+            await unpackSpeechRuntime(archive, staging, signal);
+            rmSync(archive, { force: true });
+          }
+          for (const name of ['streaming-asr.js', 'addon.js', 'sherpa-onnx.node']) if (!isFile(join(staging, name))) throw refused(`speech runtime: ${name} missing`);
+          signal.throwIfAborted();
+          await this.native.stop();
+          writeFileSync(join(staging, 'ready.json'), JSON.stringify({ version: '1.13.8' }), { mode: 0o600 });
+          rmSync(this.nativeRuntime, { recursive: true, force: true });
+          renameSync(staging, this.nativeRuntime);
+        } finally { rmSync(staging, { recursive: true, force: true }); }
+      } else {
+        mkdirSync(dirname(this.needle), { recursive: true });
+        await this.download(whistleRuntime()!, this.needle, signal);
+        chmodSync(this.needle, 0o700);
+      }
+    }
+    if (nemotron) {
+      const directory = join(this.root, 'nemotron');
+      mkdirSync(directory, { recursive: true });
+      for (const spec of NEMOTRON_FILES) if (!isFile(join(directory, spec.file))) await this.download(spec, join(directory, spec.file), signal);
+    } else if (!this.models.installed(target.id)) await this.download(target.spec, this.models.file(target.id), signal);
   }
 }
 

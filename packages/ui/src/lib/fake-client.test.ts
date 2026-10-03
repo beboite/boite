@@ -1,7 +1,7 @@
 import { expect, vi } from 'vitest';
 import { test } from '../test/fake-client';
 import type { FakeClient } from './fake-client';
-import { ATTACHMENT_MAX_BYTES, DEFAULT_DELEGATION_CONFIG, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, TODO_TEXT_MAX, type RpcEvents, type RpcMethodName, type Turn } from '@boite/contracts';
+import { ATTACHMENT_MAX_BYTES, DEFAULT_DELEGATION_CONFIG, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, SPEECH_DEFAULT_MODEL, TODO_TEXT_MAX, type RpcEvents, type RpcMethodName, type Turn } from '@boite/contracts';
 import { FAKE_AUTO_COMPACT_SETTLE_MS } from './fake-client/turns';
 import { FakeContext } from './fake-client/context';
 
@@ -637,7 +637,7 @@ test('fake speech downloads a model from a link, uses it, and removing it hands 
   expect(done.installing).toBe(false);
   expect((await client.call('speech.config', {})).model).toBe(started.downloading);
   await client.call('speech.uninstall', { model: started.downloading! });
-  expect((await client.call('speech.config', {})).model).toBe('small-q5_1');
+  expect((await client.call('speech.config', {})).model).toBe(SPEECH_DEFAULT_MODEL);
   expect((await client.call('speech.status', {})).models.some(model => model.kind === 'custom')).toBe(false);
 });
 

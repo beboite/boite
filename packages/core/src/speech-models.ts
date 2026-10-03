@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import { join } from 'node:path';
 import { SPEECH_CATALOGUE, SPEECH_CUSTOM_ID, type SpeechCatalogueModel, type SpeechModel } from '@boite/contracts';
 import { invalidParams } from './errors.ts';
+import { NEMOTRON_FILES } from './speech-artifacts.ts';
 
 const CATALOGUE_BASE = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/';
 /** large-v3 at f16 is 3.1 GB; nothing whisper.cpp loads on a CPU is bigger. */
@@ -31,6 +32,8 @@ export function catalogueEntry(id: string): SpeechCatalogueModel | undefined {
 }
 
 export function catalogueSpec(model: SpeechCatalogueModel): DownloadSpec {
+  if (model.backend === 'whistle') return { url: 'https://huggingface.co/Cactus-Compute/whistle/resolve/b358ddadd89b7a713b5aa131f23032d3cca1b251/whistle.cact', bytes: model.bytes, sha256: model.sha256 };
+  if (model.backend === 'nemotron') return NEMOTRON_FILES[0]!;
   return { url: `${CATALOGUE_BASE}${model.file}`, bytes: model.bytes, sha256: model.sha256 };
 }
 
@@ -99,6 +102,10 @@ export class SpeechModels {
 
   /** The file, its partial download and, for a custom model, its record. */
   remove(id: string): void {
+    if (catalogueEntry(id)?.backend === 'nemotron') {
+      rmSync(join(this.root, 'nemotron'), { recursive: true, force: true });
+      return;
+    }
     const file = this.file(id);
     rmSync(file, { force: true });
     rmSync(`${file}.part`, { force: true });
@@ -112,12 +119,16 @@ export class SpeechModels {
   }
 
   installed(id: string): boolean {
+    if (catalogueEntry(id)?.backend === 'nemotron') return NEMOTRON_FILES.every(file => {
+      try { return statSync(join(this.root, 'nemotron', file.file)).isFile(); } catch { return false; }
+    });
     try { return statSync(this.file(id)).isFile(); } catch { return false; }
   }
 
   list(): SpeechModel[] {
     const models: SpeechModel[] = SPEECH_CATALOGUE.map(entry => ({
       id: entry.id, kind: 'catalogue', name: entry.name, bytes: entry.bytes, tier: entry.tier, installed: this.installed(entry.id),
+      ...(entry.backend ? { backend: entry.backend } : {}), ...(entry.streaming ? { streaming: true } : {}),
     }));
     if (!existsSync(this.customDir)) return models;
     const records = readdirSync(this.customDir)

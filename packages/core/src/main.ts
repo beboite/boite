@@ -292,6 +292,10 @@ export function withUtf8Locale(env: Record<string, string | undefined>, platform
 }
 
 export function main(argv: string[]): void {
+  if (argv[0] === '--speech-worker') {
+    void import('./speech-native-worker.ts').then(worker => worker.runSpeechWorker());
+    return;
+  }
   withUtf8Locale(process.env, process.platform);
   if (argv[0] === 'update-apply') {
     void (async () => {

@@ -20,6 +20,8 @@
  * local paths and account failures even after credential redaction.
  * resources.usage permits paired reads of sanitized metrics; process traces,
  * resource settings and tree termination remain owner-only.
+ * speech.streamStart/Chunk/Finish permit phone dictation only through the
+ * owner's configured engine; sessions and cancellation belong to one connection.
  */
 
 import { AGENT_EVENTS, DEVICE_EVENTS, DEVICE_METHODS, type RpcEventName, type RpcMethodName } from '@boite/contracts';
