@@ -3,13 +3,15 @@ import { existsSync, readFileSync, mkdirSync, rmSync, statSync, writeFileSync } 
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { connect } from '../src/client.ts';
-import { DEFAULT_SPEECH, decodeSpeechAudio, SpeechStore } from '../src/speech.ts';
+import { DEFAULT_SPEECH as CURRENT_DEFAULT_SPEECH, decodeSpeechAudio, SpeechStore } from '../src/speech.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 
+// These existing scenarios exercise the legacy Whisper runtime and its downloads.
+const DEFAULT_SPEECH = { ...CURRENT_DEFAULT_SPEECH, model: 'small-q5_1' };
 let harness: TestCore;
 const stubFetch = (callback: (url: string | URL | Request, init?: RequestInit) => Promise<Response>) => spyOn(globalThis, 'fetch').mockImplementation(callback as typeof fetch);
 let fetchSpy: ReturnType<typeof spyOn> | undefined;
-beforeEach(async () => { harness = await startTestCore(); });
+beforeEach(async () => { harness = await startTestCore(); harness.core.speech.configure(DEFAULT_SPEECH); });
 afterEach(async () => { fetchSpy?.mockRestore(); fetchSpy = undefined; await harness.stop(); });
 
 export function testWav(): string {
@@ -135,7 +137,7 @@ test.each(['{"groqKey":"private-fixture",', '{"engine":"invalid","groqKey":"priv
   writeFileSync(file, raw);
   const loaded = new SpeechStore(harness.core);
   try {
-    expect(loaded.get()).toEqual(DEFAULT_SPEECH);
+    expect(loaded.get()).toEqual(CURRENT_DEFAULT_SPEECH);
     expect(loaded.status().ready).toBe(false);
     expect(loaded.status().error).toContain('speech.json');
     expect(JSON.stringify(loaded.status())).not.toContain('private-fixture');
@@ -331,7 +333,7 @@ describe('the model choice', () => {
     expect(JSON.stringify(status)).not.toContain(url);
     const removed = await speech.uninstall({ model: custom.id });
     expect(removed.models.some(model => model.kind === 'custom')).toBe(false);
-    expect(speech.get().model).toBe('small-q5_1');
+    expect(speech.get().model).toBe(CURRENT_DEFAULT_SPEECH.model);
     expect(existsSync(join(speech.local.models.customDir, `${custom.id}.bin`))).toBe(false);
   });
 
@@ -351,7 +353,7 @@ describe('the model choice', () => {
 
   test('a catalogue model downloads from its pinned file; an unknown one is refused with the choices', async () => {
     const speech = harness.core.speech;
-    expect(() => speech.install({ model: 'ggml-small' })).toThrow('speech.model must be one of base-q5_1, small-q5_1, large-v3-turbo-q5_0');
+    expect(() => speech.install({ model: 'ggml-small' })).toThrow('speech.model must be one of whistle, nemotron-streaming, base-q5_1, small-q5_1, large-v3-turbo-q5_0');
     expect(() => speech.install({ model: 'custom-000000000000' })).toThrow('not a model on this core');
     expect(() => speech.install({ model: 'base-q5_1', url: 'https://models.example/ggml-tiny-fixture.bin' })).toThrow('either model or url');
     speech.install({ model: 'base-q5_1' });

@@ -52,6 +52,12 @@ test('text and icons share a vertical centre across reading fonts, menus and pho
       ['[data-testid="harness-updates-card"] h4 .info-tip', '[data-testid="harness-updates-card"] h4 .ui-label'],
       ['[data-testid="harness-updates-check"]', '[data-testid="harness-updates-check"] .ui-label'],
     ])) expect(Math.abs(result.offset), `${font}: machine updates`).toBeLessThanOrEqual(0.8);
+    await page.evaluate(`__boiteTest.workspace.active.showSettings('voice')`);
+    await page.waitFor(`document.querySelector('[data-testid="voice-models"] [data-testid^="voice-model-download-"] .ui-label')`);
+    for (const result of await labelOffsets(page, [
+      ['[data-testid="voice-models"] h2 .info-tip', '[data-testid="voice-models"] h2 .ui-label'],
+      ['[data-testid="voice-models"] [data-testid^="voice-model-download-"]', '[data-testid="voice-models"] [data-testid^="voice-model-download-"] .ui-label'],
+    ])) expect(Math.abs(result.offset), `${font}: voice model choices`).toBeLessThanOrEqual(0.8);
     await page.evaluate(`__boiteTest.workspace.active.showChat()`);
   }
   await page.click('[data-testid="composer-mode"]');

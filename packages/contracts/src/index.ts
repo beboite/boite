@@ -2065,6 +2065,10 @@ export interface SpeechModel {
   /** Custom only: the host it came from. The link itself stays on the core. */
   host?: string;
   installed: boolean;
+  backend?: SpeechBackend;
+  streaming?: boolean;
+  /** Earlier catalogue choices kept for saved configurations, under Advanced. */
+  legacy?: boolean;
 }
 export interface SpeechStatus {
   revision: string;
@@ -2085,6 +2089,10 @@ export interface SpeechStatus {
   downloading: string | null;
   /** The managed runtime predates the resident engine; `speech.install` fetches it again (8 MB). */
   runtimeOutdated: boolean;
+  /** Incremental sessions are supported by the currently selected local model. */
+  streaming?: boolean;
+  /** Preview cadence advertised by the engine, in milliseconds. */
+  previewIntervalMs?: number;
 }
 export const SPEECH_MAX_SECONDS = 120;
 export const SPEECH_MAX_BYTES = 44 + 16000 * 2 * SPEECH_MAX_SECONDS;
@@ -2545,6 +2553,11 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    */
   'speech.transcribe': { params: { requestId: string; revision: string; audio: string; preview?: boolean; language?: string }; result: { text: string; language?: string } };
   'speech.cancel': { params: { requestId: string }; result: { ok: true } };
+  'speech.streamStart': { params: { requestId: string; revision: string }; result: { ok: true } };
+  /** A bounded, non-overlapping PCM WAV chunk; sequence starts at zero. */
+  'speech.streamChunk': { params: { requestId: string; revision: string; sequence: number; audio: string }; result: { text: string } };
+  /** Drains the decoder and returns the entire transcript, including optional remaining audio. */
+  'speech.streamFinish': { params: { requestId: string; revision: string; sequence: number; audio?: string }; result: { text: string } };
   /** Attachments accompany the first turn of a single new goal or loop, then remain in its conversation history. */
   'threads.activity.set': { params: { threadId: ThreadId; goal?: { objective: string } | null; loop?: { prompt: string; intervalMs: number; maxIterations?: number | null } | null; attachments?: Attachment[] }; result: ThreadActivity };
   'threads.activity.control': { params: { threadId: ThreadId; kind: 'goal' | 'loop'; action: 'pause' | 'resume' | 'remove' | 'complete' }; result: ThreadActivity };
@@ -3394,8 +3407,8 @@ export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, checkSe
 import type { AutoCompact } from './settings-validation.ts';
 export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
-export { SPEECH_CATALOGUE, SPEECH_CUSTOM_ID, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechCatalogueModel, type SpeechModelTier } from './speech-models.ts';
-import type { SpeechModelTier } from './speech-models.ts';
+export { SPEECH_CATALOGUE, SPEECH_CUSTOM_ID, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechCatalogueModel, type SpeechModelTier, type SpeechBackend } from './speech-models.ts';
+import type { SpeechModelTier, SpeechBackend } from './speech-models.ts';
 
 /** Protocols that can answer a side question with tools disabled. */
 export function supportsSideQuestions(protocol: Protocol): boolean {
