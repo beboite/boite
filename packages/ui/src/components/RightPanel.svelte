@@ -22,6 +22,7 @@
   import DelegationSurface from './DelegationSurface.svelte';
   import AgentMessagesSurface from './AgentMessagesSurface.svelte';
   import ChangesSurface from './ChangesSurface.svelte';
+  import DeviceSurface from './DeviceSurface.svelte';
   import FileSurface from './FileSurface.svelte';
   import FilesSurface from './FilesSurface.svelte';
   import Menu from './Menu.svelte';
@@ -440,6 +441,10 @@
       {#key active.id}
         <FileSurface {store} surface={active} {panel} />
       {/key}
+    {:else if active?.kind === 'device'}
+      {#if store.openThread}
+        {#key store.threadKey(store.openThread.id)}<DeviceSurface {store} threadId={store.openThread.id} />{/key}
+      {/if}
     {:else if active?.kind === 'tasks'}
       <TasksSurface {store} />
     {:else}
