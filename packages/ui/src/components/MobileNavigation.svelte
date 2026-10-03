@@ -130,8 +130,11 @@
 <header class="mobile-header" class:chatting class:settings={store.page !== 'chat'} data-testid="mobile-header">
   {#if chatting}
     <button class="ghost icon" data-testid="mobile-back" aria-label={strings.mobile.threads} onclick={() => show('threads')}><ArrowLeft size={20} /></button>
-  {:else}
+  {:else if recover}
     <img class="brand-icon" src="./icons/icon.svg" alt="" width="30" height="30" />
+  {:else}
+    <!-- The logo stands where Back does in a conversation, and goes to the same list. -->
+    <button class="ghost icon home" data-testid="mobile-home" aria-label={strings.mobile.threads} onclick={() => show('threads')}><img class="brand-icon" src="./icons/icon.svg" alt="" width="30" height="30" /></button>
   {/if}
   {#if chatting && narrow.current}
     <div class="chat-heading">{#key store}<ThreadHeader {store} />{/key}</div>
@@ -231,6 +234,7 @@
     .search:focus-within { border-color: var(--color-accent); }
     .search input:focus { outline: none; }
     .brand-icon { flex: none; border-radius: var(--radius-md); }
+    .home { flex: none; padding: 0; }
     .brand strong { display: block; font-size: var(--text-md); font-weight: 600; letter-spacing: -0.3px; }
     .connection { display: flex; gap: 5px; height: auto; min-height: var(--touch-target); max-width: 100%; padding: 0; font-size: var(--text-xs); color: var(--color-muted-foreground); }
     .connection > span:not(.dot) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

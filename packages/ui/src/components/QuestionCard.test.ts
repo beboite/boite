@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import type { Attachment, QuestionAnswer } from '@boite/contracts';
+import type { QuestionAnswer } from '@boite/contracts';
 import QuestionCard from './QuestionCard.svelte';
 
 let running: Record<string, unknown> | null = null;
@@ -31,7 +31,7 @@ function submit(): HTMLButtonElement {
 }
 
 test('an option turns Answer on, and what was picked goes out once', () => {
-  const sent: { optionIds: string[]; text: string }[] = [];
+  const sent: string[][] = [];
   running = mount(QuestionCard, {
     target: document.body,
     props: {
@@ -41,15 +41,17 @@ test('an option turns Answer on, and what was picked goes out once', () => {
       multiple: false,
       answer: null,
       pending: true,
-      submit: (optionIds: string[], text: string) => sent.push({ optionIds, text })
+      submit: (optionIds: string[]) => sent.push(optionIds)
     }
   });
   flushSync();
 
   expect(query('[data-testid=question-card]').getAttribute('data-state')).toBe('pending');
   expect(options()).toHaveLength(2);
-  // Nothing picked and nothing typed: there is nothing to send yet.
+  // Nothing picked and nothing in the composer: there is nothing to send yet.
   expect(submit().disabled).toBe(true);
+  // The card has no field of its own: the composer is the free answer.
+  expect(document.querySelector('input, textarea')).toBeNull();
 
   options()[0]?.click();
   flushSync();
@@ -62,14 +64,9 @@ test('an option turns Answer on, and what was picked goes out once', () => {
   expect(options()[0]?.getAttribute('aria-checked')).toBe('false');
   expect(options()[1]?.getAttribute('aria-checked')).toBe('true');
 
-  const field = query<HTMLInputElement>('[data-testid=question-text-input]');
-  field.value = 'the whole thing please';
-  field.dispatchEvent(new Event('input', { bubbles: true }));
-  flushSync();
-
   submit().click();
   flushSync();
-  expect(sent).toEqual([{ optionIds: ['long'], text: 'the whole thing please' }]);
+  expect(sent).toEqual([['long']]);
 
   // A second press changes nothing: the card is already answered.
   submit().click();
@@ -107,67 +104,52 @@ test('Skip sends no answer, prevents duplicate presses and allows retry after fa
   settle(true);
 });
 
-test('typing alone is enough when the question allows text and offers nothing', () => {
-  const sent: { optionIds: string[]; text: string }[] = [];
-  running = mount(QuestionCard, {
-    target: document.body,
-    props: {
-      text: 'What should the branch be called?',
-      options: [],
-      allowText: true,
-      multiple: false,
-      answer: null,
-      pending: true,
-      submit: (optionIds: string[], text: string) => sent.push({ optionIds, text })
-    }
-  });
-  flushSync();
+test('what the composer holds is enough to answer, and the card points to it', () => {
+  const sent: string[][] = [];
+  const onwrite = vi.fn();
+  const card = (replying: boolean, drafted: boolean) => {
+    if (running) unmount(running, { outro: false });
+    running = mount(QuestionCard, {
+      target: document.body,
+      props: {
+        text: 'What should the branch be called?', options: [], allowText: true, multiple: false,
+        answer: null, pending: true, replying, drafted, onwrite,
+        submit: (optionIds: string[]) => sent.push(optionIds)
+      }
+    });
+    flushSync();
+  };
 
-  expect(options()).toHaveLength(0);
+  // Another question or an ordinary message has the composer: the card offers to take it.
+  card(false, false);
+  expect(submit().disabled).toBe(true);
+  expect(document.querySelector('[data-testid=question-reply-hint]')).toBeNull();
+  query<HTMLButtonElement>('[data-testid=question-write]').click();
+  expect(onwrite).toHaveBeenCalledTimes(1);
+
+  card(true, false);
+  expect(document.querySelector('[data-testid=question-write]')).toBeNull();
+  expect(query('[data-testid=question-reply-hint]').textContent).toContain('message box below');
   expect(submit().disabled).toBe(true);
 
-  const field = query<HTMLInputElement>('[data-testid=question-text-input]');
-  field.value = 'feat/question-part';
-  field.dispatchEvent(new Event('input', { bubbles: true }));
-  flushSync();
-
+  card(true, true);
   expect(submit().disabled).toBe(false);
   submit().click();
   flushSync();
-  expect(sent).toEqual([{ optionIds: [], text: 'feat/question-part' }]);
+  expect(sent).toEqual([[]]);
 });
-
-test.each([false, true])('Enter sends a typed answer once, including async questions (%s)', (async) => {
-  const sent: { optionIds: string[]; text: string }[] = [];
+test('a question without free text never offers the composer', () => {
   running = mount(QuestionCard, {
     target: document.body,
-    props: {
-      text: 'Which shape?', options: OPTIONS, allowText: true, multiple: false,
-      async, answer: null, pending: true,
-      submit: (optionIds: string[], text: string) => sent.push({ optionIds, text })
-    }
+    props: { text: 'Allow?', options: OPTIONS, allowText: false, multiple: false, answer: null, pending: true, submit: () => undefined, onwrite: () => {} }
   });
   flushSync();
-  const field = query<HTMLInputElement>('[data-testid=question-text-input]');
-  const enter = (init: KeyboardEventInit = {}) => {
-    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init }));
-    flushSync();
-  };
-  enter();
-  expect(sent).toEqual([]);
-  options()[0]?.click();
-  field.value = ' one line please ';
-  field.dispatchEvent(new Event('input', { bubbles: true }));
-  flushSync();
-  enter({ isComposing: true });
-  expect(sent).toEqual([]);
-  enter();
-  enter();
-  expect(sent).toEqual([{ optionIds: ['short'], text: 'one line please' }]);
+  expect(document.querySelector('[data-testid=question-write]')).toBeNull();
+  expect(document.querySelector('[data-testid=question-reply-hint]')).toBeNull();
 });
 
 test('several options are kept at once when the question takes several', () => {
-  const sent: { optionIds: string[]; text: string }[] = [];
+  const sent: string[][] = [];
   running = mount(QuestionCard, {
     target: document.body,
     props: {
@@ -177,18 +159,17 @@ test('several options are kept at once when the question takes several', () => {
       multiple: true,
       answer: null,
       pending: true,
-      submit: (optionIds: string[], text: string) => sent.push({ optionIds, text })
+      submit: (optionIds: string[]) => sent.push(optionIds)
     }
   });
   flushSync();
 
-  expect(document.querySelector('[data-testid=question-text-input]')).toBeNull();
   options()[0]?.click();
   options()[1]?.click();
   flushSync();
   submit().click();
   flushSync();
-  expect(sent).toEqual([{ optionIds: ['short', 'long'], text: '' }]);
+  expect(sent).toEqual([['short', 'long']]);
 });
 
 test('an answered card folds to one line and asks nothing more', () => {
@@ -298,81 +279,6 @@ test('a send that failed gives the card back, and a second press sends again', a
   await new Promise((resolve) => setTimeout(resolve, 0));
   flushSync();
   expect(submit().disabled).toBe(true);
-});
-
-async function settle(until: () => boolean): Promise<void> {
-  for (let tries = 0; tries < 100 && !until(); tries += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    flushSync();
-  }
-}
-
-test('a photo goes with the answer: picked, pasted or dropped, shown, removable, and alone enough to answer', async () => {
-  const sent: { optionIds: string[]; text: string; attachments: Attachment[] }[] = [];
-  running = mount(QuestionCard, {
-    target: document.body,
-    props: {
-      text: 'Which layout?',
-      options: OPTIONS,
-      allowText: true,
-      multiple: false,
-      answer: null,
-      pending: true,
-      submit: (optionIds: string[], text: string, attachments: Attachment[]) => sent.push({ optionIds, text, attachments })
-    }
-  });
-  flushSync();
-  expect(submit().disabled).toBe(true);
-  const picker = query<HTMLInputElement>('[data-testid=question-file]');
-  Object.defineProperty(picker, 'files', { configurable: true, value: [new File(['png'], 'mockup.png', { type: 'image/png' })] });
-  picker.dispatchEvent(new Event('change', { bubbles: true }));
-  await settle(() => document.querySelectorAll('[data-testid=question-file-item]').length === 1);
-  expect(query<HTMLImageElement>('[data-testid=question-file-item] img').alt).toBe('mockup.png');
-  // A file alone answers the question.
-  expect(submit().disabled).toBe(false);
-
-  const field = query<HTMLInputElement>('[data-testid=question-text-input]');
-  const paste = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
-  const pasted = new File(['log'], 'trace.txt', { type: 'text/plain' });
-  Object.defineProperty(paste, 'clipboardData', { value: { items: [{ kind: 'file', getAsFile: () => pasted }] } });
-  field.dispatchEvent(paste);
-  expect(paste.defaultPrevented).toBe(true);
-  await settle(() => document.querySelectorAll('[data-testid=question-file-item]').length === 2);
-
-  const drop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
-  const dropped = new File(['b'], 'second.png', { type: 'image/png' });
-  const list = Object.assign([dropped], { item: (at: number) => [dropped][at] ?? null });
-  Object.setPrototypeOf(list, FileList.prototype);
-  Object.defineProperty(drop, 'dataTransfer', { value: { files: list, items: [{ kind: 'file' }] } });
-  query('[data-testid=question-card]').dispatchEvent(drop);
-  expect(drop.defaultPrevented).toBe(true);
-  await settle(() => document.querySelectorAll('[data-testid=question-file-item]').length === 3);
-
-  query<HTMLButtonElement>('[data-testid=question-file-remove]').click();
-  flushSync();
-  expect(Array.from(document.querySelectorAll('[data-testid=question-file-item]')).map((item) => item.getAttribute('title'))).toEqual(['trace.txt', 'second.png']);
-
-  submit().click();
-  flushSync();
-  expect(sent).toHaveLength(1);
-  expect(sent[0]!.optionIds).toEqual([]);
-  expect(sent[0]!.attachments.map((one) => [one.kind, one.mimeType, one.name])).toEqual([
-    ['file', 'text/plain', 'trace.txt'],
-    ['image', 'image/png', 'second.png']
-  ]);
-});
-
-test('a question without a free field takes no files', () => {
-  running = mount(QuestionCard, {
-    target: document.body,
-    props: { text: 'Allow?', options: OPTIONS, allowText: false, multiple: false, answer: null, pending: true, submit: () => undefined }
-  });
-  flushSync();
-  expect(document.querySelector('[data-testid=question-attach]')).toBeNull();
-  const drop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
-  Object.defineProperty(drop, 'dataTransfer', { value: { files: [new File(['x'], 'x.png', { type: 'image/png' })], items: [] } });
-  query('[data-testid=question-card]').dispatchEvent(drop);
-  expect(drop.defaultPrevented).toBe(false);
 });
 
 test('an answer given with files lists them, and a files-only answer says how many', () => {

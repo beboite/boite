@@ -1521,6 +1521,9 @@ test('an async question waits in the dock above the composer, stacked, and the t
   await sendPrompt('[ask] one');
   await waitFor(() => document.querySelectorAll('[data-testid=activity-question]').length === 1);
   await waitFor(() => store.openThread?.status === 'idle');
+  // The composer answers the docked question until it is set aside for an ordinary prompt.
+  query<HTMLButtonElement>('[data-testid=composer-reply-ignore]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-reply]') === null);
   await sendPrompt('[ask] two');
   await waitFor(() => document.querySelectorAll('[data-testid=activity-question]').length === 2);
 

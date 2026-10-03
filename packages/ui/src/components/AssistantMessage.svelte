@@ -1,6 +1,7 @@
 <script lang="ts">
   import { CircleAlert, FishingHook, MessageCircleQuestionMark } from '@lucide/svelte';
   import { showDockedQuestion } from '../lib/question-dock.svelte';
+  import { replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
   import type { Account, MemoryEvent, Message } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -100,6 +101,8 @@
           <span class="docked-hint">{strings.chat.questionDocked}</span>
         </button>
       {:else if part.type === 'question'}
+        {@const asked = store.pendingQuestions.find((q) => q.id === part.questionId)}
+        {@const reply = replyOf(store, part.questionId)}
         <QuestionCard
           text={part.text}
           options={part.options}
@@ -107,10 +110,13 @@
           multiple={part.multiple}
           async={part.async === true}
           answer={part.answer ?? null}
-          pending={store.pendingQuestions.some((q) => q.id === part.questionId)}
-          submit={(optionIds, text, attachments) =>
-            store.answerQuestion(message.threadId, part.questionId, optionIds, text, attachments)}
+          pending={asked !== undefined}
+          bind:picked={() => repliesOf(store).picks[part.questionId] ?? [], (ids) => (repliesOf(store).picks[part.questionId] = ids)}
+          replying={reply.replying}
+          drafted={reply.drafted}
+          submit={() => asked !== undefined && sendAnswer(store, asked)}
           skip={() => store.skipQuestion(message.threadId, part.questionId)}
+          onwrite={() => writeAnswer(store, part.questionId)}
         />
       {:else if part.type === 'compaction'}
         <div class="compaction" data-testid="compaction-part" data-trigger={part.trigger}>

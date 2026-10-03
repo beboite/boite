@@ -7,6 +7,7 @@
   import { fill, strings } from '../lib/strings';
   import { imageLabel } from '../lib/composer-images';
   import { Closing } from '../lib/closing.svelte';
+  import { focusWithin, keepFocus } from '../lib/focus';
 
   /** The attachments this prompt carries, above the box they were pasted into. */
   let { attachments, highlighted = null, onremove, onfocus }: {
@@ -17,21 +18,31 @@
   } = $props();
   let selected = $state<Attachment | null>(null);
   let previewElement = $state<HTMLElement>();
+  let strip = $state<HTMLElement>();
   const preview = new Closing();
   const images = $derived(attachments.filter(attachment => attachment.kind === 'image'));
   const visible = $derived(selected?.kind === 'image' && attachments.includes(selected) && !unresolvedAssetId(selected) ? selected : null);
+
+  /**
+   * Back to the box when the focus is in the composer, where a keyboard put it.
+   * A tap keeps the focus it had (`keepFocus`): focusing the box from there
+   * would open a phone's keyboard the user had closed.
+   */
+  function refocus() {
+    if (focusWithin(strip?.closest('[data-testid="composer"]'))) onfocus();
+  }
 
   export function open(attachment: Attachment) {
     if (attachment.kind !== 'image' || unresolvedAssetId(attachment)) return;
     selected = attachment;
     preview.show();
-    onfocus();
+    refocus();
   }
 
   export function closePreview(): boolean {
     if (!visible || !preview.shown) return false;
     preview.hide();
-    onfocus();
+    refocus();
     return true;
   }
 </script>
@@ -47,13 +58,13 @@
     <header>
       <span>{imageLabel(images.indexOf(visible) + 1)}</span>
       <span class="preview-name">{visible.name ?? strings.composer.attachAlt}</span>
-      <button type="button" class="ghost icon" data-testid="composer-image-close" title={strings.composer.imagePreviewClose} aria-label={strings.composer.imagePreviewClose} onclick={closePreview}><X size={16} /></button>
+      <button type="button" class="ghost icon" data-testid="composer-image-close" title={strings.composer.imagePreviewClose} aria-label={strings.composer.imagePreviewClose} onmousedown={keepFocus} onclick={closePreview}><X size={16} /></button>
     </header>
     <img src="data:{visible.mimeType};base64,{visible.data}" alt={visible.name ?? strings.composer.attachAlt} />
   </section>
 {/if}
 
-<div class="attachments" data-testid="composer-attachments">
+<div bind:this={strip} class="attachments" data-testid="composer-attachments">
   {#each attachments as attachment, at (attachment)}
     {@const label = attachment.name ?? strings.composer.attachAlt}
     {@const pending = unresolvedAssetId(attachment)}
@@ -61,7 +72,7 @@
       {#if attachment.kind === 'image' && !pending}
         <button type="button" class="image-open" data-testid="composer-image-open"
           aria-label={fill(strings.composer.imagePreview, { image: imageLabel(images.indexOf(attachment) + 1) })}
-          aria-expanded={visible === attachment && preview.shown} onclick={() => open(attachment)}>
+          aria-expanded={visible === attachment && preview.shown} onmousedown={keepFocus} onclick={() => open(attachment)}>
           <img src="data:{attachment.mimeType};base64,{attachment.data}" alt={label} />
         </button>
       {:else}
@@ -74,6 +85,7 @@
         data-testid="composer-attachment-remove"
         title={fill(strings.composer.attachRemove, { name: label })}
         aria-label={fill(strings.composer.attachRemove, { name: label })}
+        onmousedown={keepFocus}
         onclick={() => onremove(at)}
       >
         <X size={12} strokeWidth={2.25} />

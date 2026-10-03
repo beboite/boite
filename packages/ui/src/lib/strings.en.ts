@@ -670,7 +670,6 @@ export const strings = {
     share: 'Share or save',
     shareFailed: '{name} could not be shared.',
     shareReady: '{name} is ready: tap Share again.',
-    answerAttach: 'Attach a photo or a file',
     answerFiles: 'Files given: {names}',
     answerFileCount: '{count} files'
   },
@@ -974,12 +973,13 @@ export const strings = {
     questionHeading: 'Asks you',
     questionAsyncHeading: 'Asks you, without waiting',
     questionAsyncHint: 'The agent keeps working. Without an answer it goes on with a default.',
-    questionTextLabel: 'Your own answer',
-    questionTextPlaceholder: 'Type an answer',
     questionAnswer: 'Answer',
     questionAnswered: 'Answered',
     questionCancelled: 'No longer waiting for an answer',
     questionSkip: 'Skip',
+    /** The composer is the free field of the question; the card points there. */
+    questionReplying: 'Write your answer in the message box below, with any photos or files.',
+    questionWrite: 'Answer in writing',
     /** The timeline's line for a question waiting in the dock above the composer. */
     questionDocked: 'Waiting for your answer above the message box',
     questionOpen: 'Answer it',
@@ -1116,6 +1116,12 @@ export const strings = {
     editingQueued: 'Send or remove the queued messages before replacing a sent message.',
     filesUnavailable: 'The messages were rewound, but this edit has no complete file backup. The code could not be restored.',
     editingCancel: 'Stop editing (Esc)',
+    /** A question waits for a written answer: the box writes it, the row above names the question. */
+    replying: 'Answering: {question}',
+    replyPlaceholder: 'Your answer…',
+    replySend: 'Send the answer',
+    replyIgnore: 'Ignore',
+    replyIgnoreHint: 'Leave the question waiting and write an ordinary message',
     switchTitle: 'Switch a {tokens} token thread to {provider}?',
     switchBody: '{provider} starts a new session and receives excerpts of the opening and of the most recent exchanges, about 20k tokens. The rest is lost to it. Compacting first changes nothing.',
     switchConfirm: 'Switch',
