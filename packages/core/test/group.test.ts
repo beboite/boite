@@ -8,7 +8,13 @@ import { isAllowedOrigin } from '../src/server.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 const cores: TestCore[] = [];
-afterEach(async () => { for (const core of cores.splice(0)) await core.stop(); });
+afterEach(async () => {
+  const stopping = cores.splice(0);
+  // Every roster exchange still in flight ends while all the servers answer. Stopping
+  // a server under a request made from this same process crashed Bun on Windows.
+  await Promise.all(stopping.map((core) => core.core.group.close()));
+  for (const core of stopping) await core.stop();
+});
 
 async function machine(): Promise<TestCore> {
   const core = await startTestCore();
