@@ -3,6 +3,11 @@ import type { Machine } from './workspace.svelte';
 import { lastActivity } from './thread-order';
 
 export interface ProjectEntry { machine: Machine; project: Project }
+/** Imported conversations can be older than the project that received them. */
+export function projectActivity(entry: ProjectEntry): number {
+  const threads = entry.machine.store.threadsOf(entry.project.id);
+  return threads.reduce((latest, thread) => Math.max(latest, lastActivity(thread)), 0);
+}
 export function projectKey(entry: ProjectEntry): string {
   const core = entry.machine.store.core;
   // A local core gets a new port on restart. Its data directory keeps the same projects.
@@ -39,15 +44,14 @@ export class ProjectView {
 
   sorted(entries: ProjectEntry[]): ProjectEntry[] {
     const positions = new Map(this.keys.map((key, index) => [key, index]));
-    const times = new Map(entries.map(entry => [projectKey(entry), entry.machine.store.threadsOf(entry.project.id)
-      .reduce((latest, thread) => Math.max(latest, lastActivity(thread)), entry.project.createdAt)]));
+    const times = new Map(entries.map(entry => [projectKey(entry), projectActivity(entry)]));
     return [...entries].sort((a, b) => {
       const ak = projectKey(a), bk = projectKey(b);
       if (this.order === 'manual') {
         const position = (positions.get(ak) ?? Infinity) - (positions.get(bk) ?? Infinity);
         if (position) return position;
       }
-      return times.get(bk)! - times.get(ak)! || ak.localeCompare(bk);
+      return times.get(bk)! - times.get(ak)! || b.project.createdAt - a.project.createdAt || ak.localeCompare(bk);
     });
   }
 

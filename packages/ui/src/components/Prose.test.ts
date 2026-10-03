@@ -66,6 +66,30 @@ function query<T extends Element>(selector: string): T {
   return node;
 }
 
+test('dragging across a game path never launches it, and the next click still does', async () => {
+  writeExperiments(['chat-artifacts']);
+  const invoke = vi.fn(async () => {});
+  window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
+  const store = { owner: true, localCore: true, threads: [{ id: 'game', cwd: 'C:/project' }] } as unknown as Store;
+  running = mount(Prose, { target: document.body, props: { text: '[Launch game](build/game.exe)', store, threadId: 'game' } });
+  flushSync();
+  const link = query<HTMLAnchorElement>('a[data-file-path]');
+  link.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 10 }));
+  link.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, buttons: 1, clientX: 60, clientY: 10 }));
+  link.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0, clientX: 60, clientY: 10 }));
+  link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+  await vi.dynamicImportSettled();
+  expect(invoke).not.toHaveBeenCalled();
+  link.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 10 }));
+  link.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0, clientX: 10, clientY: 10 }));
+  link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+  await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
+  await vi.dynamicImportSettled();
+  link.click();
+  await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('open_local_file', { directory: 'C:/project', path: 'build/game.exe' }, undefined));
+});
+
 test('the direct-link experiment opens a desktop shortcut and text outside the checkout only on a click', async () => {
   const invoke = vi.fn(async () => {});
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
