@@ -1,8 +1,20 @@
-import type { BrowserRecording } from '@boite/contracts';
+import type { BrowserRecording, BrowserRecordingMime } from '@boite/contracts';
 import type { RecordingRect } from './recording-indicators';
 
 const MAX_BYTES = 50 * 1024 * 1024;
 const MAX_MS = 180_000;
+/**
+ * H.264 in MP4 first: Safari on an iPhone plays it everywhere, WebM only on
+ * recent iOS. Plain `video/mp4` is not listed, since it may carry VP9.
+ */
+const RECORDING_TYPES: [string, BrowserRecordingMime][] = [
+  ['video/mp4;codecs=avc1.640028', 'video/mp4'], ['video/mp4;codecs=avc1.4d0028', 'video/mp4'], ['video/mp4;codecs=avc1.42E01E', 'video/mp4'], ['video/mp4;codecs=avc1', 'video/mp4'],
+  ['video/webm;codecs=vp9', 'video/webm'], ['video/webm;codecs=vp8', 'video/webm'], ['video/webm', 'video/webm'],
+];
+export function pickRecordingType(supported: (type: string) => boolean): { type: string; mime: BrowserRecordingMime } | null {
+  const found = RECORDING_TYPES.find(([type]) => supported(type));
+  return found ? { type: found[0], mime: found[1] } : null;
+}
 export class BrowserRecorder {
   private recorder: MediaRecorder | null = null;
   private stream: MediaStream | null = null;
@@ -29,8 +41,8 @@ export class BrowserRecorder {
     if (this.blob) throw new Error('download or discard the previous recording first');
     this.starting = true;
     try {
-      const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find(type => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type));
-      if (!mime) throw new Error('this browser does not support WebM recording');
+      const format = typeof MediaRecorder === 'undefined' ? null : pickRecordingType(type => MediaRecorder.isTypeSupported(type));
+      if (!format) throw new Error('this browser does not support MP4 or WebM recording');
       const canvas = document.createElement('canvas');
       const draw = async (first: boolean) => {
         const image = new Image(); image.src = `data:image/jpeg;base64,${await this.capture()}`;
@@ -58,7 +70,7 @@ export class BrowserRecorder {
         this.stream.getTracks().forEach(track => track.stop());
         this.stream = canvas.captureStream(8);
       }
-      const recorder = new MediaRecorder(this.stream, { mimeType: mime, videoBitsPerSecond: 2_500_000 });
+      const recorder = new MediaRecorder(this.stream, { mimeType: format.type, videoBitsPerSecond: 2_500_000 });
       this.recorder = recorder; this.chunks = []; this.size = 0; this.reason = 'stopped'; this.error = undefined;
       this.finish = new Promise<BrowserRecording>((resolve) => {
         recorder.ondataavailable = event => {
@@ -73,11 +85,12 @@ export class BrowserRecorder {
         recorder.onstop = async () => {
           this.finalizing = true;
           this.cleanup();
-          const result: BrowserRecording = { id: crypto.randomUUID(), mime: 'video/webm', bytes: this.size, durationMs: Math.max(0, Date.now() - this.started), reason: this.reason, ...(this.error ? { error: this.error } : {}) };
+          const result: BrowserRecording = { id: crypto.randomUUID(), mime: format.mime, bytes: this.size, durationMs: Math.max(0, Date.now() - this.started), reason: this.reason, ...(this.error ? { error: this.error } : {}) };
           let blob = new Blob(this.chunks, { type: result.mime });
           this.chunks = [];
           try {
-            if (!this.disposed) {
+            // A recorded MP4 already states its duration; a recorded WebM does not.
+            if (!this.disposed && result.mime === 'video/webm') {
               const { fixWebmDuration } = await import('@fix-webm-duration/fix');
               blob = await fixWebmDuration(blob, result.durationMs, { logger: false });
             }

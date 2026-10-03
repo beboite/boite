@@ -54,19 +54,24 @@ test.skipIf(process.platform !== 'win32' || !executable)('native presets, appear
     expect(await runCli(['browser', 'recording-stop', id, '--thread', session.threadId, '--data-dir', session.dataDir, '--json'], {
       cwd: session.projectDir, env: { BOITE_DATA_DIR: session.dataDir }, out: text => lines.push(text), err: text => { throw new Error(text); },
     })).toBe(0);
-    const recorded = JSON.parse(lines.join('')) as { path: string; bytes: number; durationMs: number };
+    const recorded = JSON.parse(lines.join('')) as { path: string; mime: string; bytes: number; durationMs: number };
     expect(recorded.bytes).toBeGreaterThan(1000); expect(recorded.durationMs).toBeGreaterThan(1000);
-    const bytes = readFileSync(recorded.path); expect(bytes.subarray(0, 4)).toEqual(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
-    writeFileSync(join(captures, 'browser-parity-native.webm'), bytes);
-    // A browser decodes the produced container, not just its EBML magic bytes.
+    // WebView2 encodes H.264 into MP4, which iPhones play; WebM is the fallback.
+    const extension = recorded.mime === 'video/mp4' ? 'mp4' : 'webm';
+    expect(recorded.path.endsWith(`.${extension}`)).toBe(true);
+    const bytes = readFileSync(recorded.path);
+    if (extension === 'mp4') expect(bytes.subarray(4, 8).toString('latin1')).toBe('ftyp');
+    else expect(bytes.subarray(0, 4)).toEqual(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
+    writeFileSync(join(captures, `browser-parity-native.${extension}`), bytes);
+    // A browser decodes the produced container, not just its magic bytes.
     const global = await page.send('Runtime.evaluate', { expression: 'globalThis' }) as { result: { objectId: string } };
     let decoded: { width: number; height: number; duration: number; seeked: number };
     try {
       const playback = await page.send('Runtime.callFunctionOn', {
         objectId: global.result.objectId,
-        functionDeclaration: `function(base64) { return new Promise((resolve, reject) => {
+        functionDeclaration: `function(base64, mime) { return new Promise((resolve, reject) => {
           const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-          const video = document.createElement('video'), url = URL.createObjectURL(new Blob([bytes], { type: 'video/webm' }));
+          const video = document.createElement('video'), url = URL.createObjectURL(new Blob([bytes], { type: mime }));
           const cleanup = () => { video.remove(); URL.revokeObjectURL(url); };
           video.onloadeddata = () => {
             video.onseeked = () => { resolve({ width: video.videoWidth, height: video.videoHeight, duration: video.duration, seeked: video.currentTime }); cleanup(); };
@@ -75,7 +80,7 @@ test.skipIf(process.platform !== 'win32' || !executable)('native presets, appear
           video.onerror = () => { cleanup(); reject(new Error('recording cannot play')); };
           video.src = url; video.load();
         }); }`,
-        arguments: [{ value: bytes.toString('base64') }],
+        arguments: [{ value: bytes.toString('base64') }, { value: recorded.mime }],
         awaitPromise: true, returnByValue: true,
       }) as { result: { value: typeof decoded }; exceptionDetails?: unknown };
       expect(playback.exceptionDetails).toBeUndefined();
@@ -87,7 +92,7 @@ test.skipIf(process.platform !== 'win32' || !executable)('native presets, appear
     const turn = await session.client.call('turns.start', { threadId: session.threadId, prompt: 'Vidéo du test du navigateur' });
     for (let i = 0; i < 100; i++) { if ((await session.client.call('threads.get', { threadId: session.threadId })).turns.find(t => t.id === turn.id)?.status === 'done') break; await Bun.sleep(50); }
     expect(await runCli(['attach', recorded.path, '--thread', session.threadId, '--data-dir', session.dataDir, '--json'], { cwd: session.projectDir, env: { BOITE_DATA_DIR: session.dataDir }, out: () => {}, err: text => { throw new Error(text); } })).toBe(0);
-    expect(JSON.stringify((await session.client.call('threads.get', { threadId: session.threadId })).messages)).toContain('video/webm');
+    expect(JSON.stringify((await session.client.call('threads.get', { threadId: session.threadId })).messages)).toContain(recorded.mime);
     // Dismiss the review opened on stop, then exercise visible controls.
     await page.evaluate(`document.querySelector('[data-testid=browser-tools-dialog]')?.dispatchEvent(new Event('cancel'));true`);
     await page.click('[data-testid=browser-tools]');

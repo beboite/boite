@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { BROWSER_PRESETS, type BrowserAction, type BrowserDiagnostics, type BrowserPreset } from '@boite/contracts';
+  import { BROWSER_PRESETS, BROWSER_RECORDING_TYPES, type BrowserAction, type BrowserDiagnostics, type BrowserPreset } from '@boite/contracts';
   import { MonitorSmartphone, Circle, Square, X, Download, RefreshCw, Trash2 } from '@lucide/svelte';
   import { browserTools, runBrowserAction } from '../lib/browser-tools.svelte';
   import { strings, fill } from '../lib/strings';
@@ -91,10 +91,10 @@
       {:else if toolsState.result && toolsState.url}
         <!-- svelte-ignore a11y_media_has_caption -->
         <video controls src={toolsState.url} data-testid="browser-recording-preview"></video>
-        <p class="muted">{fill(strings.browserTools.recorded, { seconds: String(Math.round(toolsState.result.durationMs / 1000)), mb: (toolsState.result.bytes / 1024 / 1024).toFixed(1) })}</p>
+        <p class="muted">{fill(strings.browserTools.recorded, { seconds: String(Math.round(toolsState.result.durationMs / 1000)), mb: (toolsState.result.bytes / 1024 / 1024).toFixed(1), format: BROWSER_RECORDING_TYPES[toolsState.result.mime].toUpperCase() })}</p>
         {#if toolsState.result.reason !== 'stopped'}<p role="status">{strings.browserTools[toolsState.result.reason === 'error' ? 'recordingError' : 'recordingLimit']}{toolsState.result.error ? ` ${toolsState.result.error}` : ''}</p>{/if}
         <div class="actions">
-          <a class="chip" href={toolsState.url} download={`boite-browser-${toolsState.result.id}.webm`} data-testid="browser-recording-download"><Download size={14} />{strings.browserTools.download}</a>
+          <a class="chip" href={toolsState.url} download={`boite-browser-${toolsState.result.id}.${BROWSER_RECORDING_TYPES[toolsState.result.mime]}`} data-testid="browser-recording-download"><Download size={14} />{strings.browserTools.download}</a>
           <button type="button" class="chip" onclick={() => { void act({ kind: 'recording-discard', recordingId: toolsState.result!.id }); view = null; }}><Trash2 size={14} />{strings.browserTools.discard}</button>
         </div>
       {/if}

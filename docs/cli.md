@@ -47,10 +47,11 @@ and 100 actions. Network URLs omit credentials, queries and fragments. Action
 history records operation names, not typed values or evaluated code.
 `diagnostics-clear` clears both buffers.
 
-`recording-start` and `recording-stop` save a silent WebM in the working
-directory, at up to 8 frames per second and 1920 × 1080. Recording stops at
-three minutes or the 50 MiB transfer limit. Run `boite attach <video.webm>`
-to show it in chat. Closing the tab discards an unfinished recording.
+`recording-start` and `recording-stop` save a silent video in the working
+directory: H.264 MP4 where the engine encodes it (WebView2 does), which iPhones
+play, else WebM. Its extension follows the format. Recording runs at up to 8
+frames per second and 1920 × 1080, and stops at three minutes or the 50 MiB
+transfer limit. Run `boite attach <video.mp4>` to show it in chat. Closing the tab discards an unfinished recording.
 
 Automation uses WebView2's native devtools channel, without a debugging port.
 Only the owner UI can register a host or answer its requests. The agent token

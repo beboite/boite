@@ -404,6 +404,11 @@ and the reconnection; layout checks at iPhone width run in Chromium. They do
 not establish behavior on a physical iPhone or Safari, including keyboard,
 backgrounding and network handover.
 
+Browser recordings are H.264 MP4 when the desktop engine encodes it (WebView2
+does), which every iPhone plays, else WebM. A video the device reports it
+cannot play, such as WebM on an older iPhone, shows a download button instead
+of a black frame; a video that fails while loading also offers it.
+
 ## The limits
 
 - What a phone gets with the core asleep is the app shell painting from disk, an

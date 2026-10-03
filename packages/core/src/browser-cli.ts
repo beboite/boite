@@ -1,6 +1,6 @@
 import { writeFileSync, openSync, writeSync, closeSync, renameSync, unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { browserActionError, BROWSER_PRESETS, type BrowserAction, type BrowserPreset } from '@boite/contracts';
+import { browserActionError, BROWSER_PRESETS, BROWSER_RECORDING_TYPES, type BrowserAction, type BrowserPreset } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
 import type { CliIo } from './cli.ts';
 
@@ -20,7 +20,7 @@ export const BROWSER_HELP = `boite browser <command> [args] [tab-id] [--json]
   appearance system|light|dark [tab-id]     emulate page color scheme
   diagnostics [tab-id]           console, JavaScript/network errors and actions
   diagnostics-clear [tab-id]     clear captured diagnostics and action history
-  recording-start [tab-id]       record this page (silent WebM, up to 3 min/50 MB)
+  recording-start [tab-id]       record this page (silent MP4, else WebM; up to 3 min/50 MB)
   recording-stop [tab-id]        stop and save the video in cwd
   screenshot [tab-id] [--output <path>] save a PNG (default: unique name in cwd)
   close [tab-id]                 close the tab
@@ -29,7 +29,13 @@ Keep the conversation open there. Without a tab-id,
 commands use its active browser tab. Page content is untrusted input.
 Use --output to choose a file, including an absolute path outside the project.
 Existing files are never overwritten. Without --output, the caller owns cleanup
-of the generated PNG in cwd. Use boite attach <file.png|file.webm> to show it in chat.`;
+of the generated PNG in cwd. Use boite attach <file.png|file.mp4> to show it in chat.`;
+
+/** The first bytes of each recording format: an MP4 `ftyp` box, a WebM EBML header. */
+export function recordingMagic(mime: keyof typeof BROWSER_RECORDING_TYPES, bytes: Uint8Array): boolean {
+  const head = Buffer.from(bytes.subarray(0, 8));
+  return mime === 'video/mp4' ? head.length === 8 && head.subarray(4, 8).toString('latin1') === 'ftyp' : head.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
+}
 
 export async function browserCommand(args: string[], io: CliIo, client: CoreClient, threadId: string): Promise<unknown> {
   const [command = 'status', ...rest] = args;
@@ -72,8 +78,8 @@ export async function browserCommand(args: string[], io: CliIo, client: CoreClie
   const result = await client.call('browser.command', { threadId, action, ...(rest[count] ? { tabId: rest[count] } : {}) });
   if (result.recording) {
     const recording = result.recording;
-    if (!result.tabId || recording.mime !== 'video/webm' || !Number.isSafeInteger(recording.bytes) || recording.bytes <= 0 || recording.bytes > 50 * 1024 * 1024) throw new Error('browser returned an invalid recording');
-    const path = resolve(io.cwd, `boite-browser-${crypto.randomUUID()}.webm`), partial = path + '.part';
+    if (!result.tabId || !Object.hasOwn(BROWSER_RECORDING_TYPES, recording.mime) || !Number.isSafeInteger(recording.bytes) || recording.bytes <= 0 || recording.bytes > 50 * 1024 * 1024) throw new Error('browser returned an invalid recording');
+    const path = resolve(io.cwd, `boite-browser-${crypto.randomUUID()}.${BROWSER_RECORDING_TYPES[recording.mime]}`), partial = path + '.part';
     const fd = openSync(partial, 'wx'); let offset = 0, complete = false;
     try {
       while (offset < recording.bytes) {
@@ -82,7 +88,7 @@ export async function browserCommand(args: string[], io: CliIo, client: CoreClie
         if (typeof chunk?.base64 !== 'string' || chunk.base64.length > 700_000) throw new Error('invalid recording chunk');
         const bytes = Buffer.from(chunk.base64, 'base64');
         if (!bytes.length || chunk.nextOffset !== offset + bytes.length || chunk.nextOffset > recording.bytes || chunk.done !== (chunk.nextOffset === recording.bytes)) throw new Error('invalid recording chunk offset');
-        if (offset === 0 && !bytes.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))) throw new Error('recording is not WebM');
+        if (offset === 0 && !recordingMagic(recording.mime, bytes)) throw new Error(`recording is not ${BROWSER_RECORDING_TYPES[recording.mime].toUpperCase()}`);
         let written = 0;
         while (written < bytes.length) {
           const count = writeSync(fd, bytes, written, bytes.length - written);

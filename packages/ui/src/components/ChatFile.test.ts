@@ -120,3 +120,29 @@ test.each([false, true])('large images wait for a click, with rich previews %j',
   query<HTMLButtonElement>('[data-testid=artifact-launch]').click(); flushSync();
   expect(query<HTMLImageElement>('[data-testid=image-viewer] img').src).toBe(url);
 });
+
+test('a video the device cannot play offers its download, and a failed one can also be retried', async () => {
+  // An iPhone that plays MP4 but not WebM.
+  const canPlayType = vi.spyOn(HTMLMediaElement.prototype, 'canPlayType').mockImplementation(type => type === 'video/mp4' ? 'maybe' : '');
+  try {
+    const url = `http://127.0.0.1:4311/file/${'b'.repeat(64)}`;
+    const readArtifact = vi.fn(async () => ({ ok: true, value: { name: 'run.webm', mimeType: 'video/webm', bytes: 2048, url } }));
+    running = mount(ChatFile, { target: document.body, props: { store: { readArtifact } as unknown as Store, threadId: 'thread', messageId: 'message', file: { type: 'artifact', id: 'artifact', mimeType: 'video/webm', name: 'run.webm', bytes: 2048 } } });
+    await vi.waitFor(() => expect(document.querySelector('[data-testid=media-fallback]')).not.toBeNull());
+    expect(document.querySelector('video')).toBeNull();
+    expect(query('[data-testid=media-fallback]').textContent).toContain('cannot play this video');
+    expect(query<HTMLAnchorElement>('[data-testid=media-fallback-download]').href).toBe(url);
+    expect(query<HTMLAnchorElement>('[data-testid=media-fallback-download]').download).toBe('run.webm');
+    // Retrying would fail the same way, so it is not offered.
+    expect(query('[data-testid=media-fallback]').querySelector('button')).toBeNull();
+    unmount(running!, { outro: false }); running = null;
+
+    const mp4 = vi.fn(async () => ({ ok: true, value: { name: 'run.mp4', mimeType: 'video/mp4', bytes: 2048, url } }));
+    running = mount(ChatFile, { target: document.body, props: { store: { readArtifact: mp4 } as unknown as Store, threadId: 'thread', messageId: 'message', file: { type: 'artifact', id: 'artifact', mimeType: 'video/mp4', name: 'run.mp4', bytes: 2048 } } });
+    await vi.waitFor(() => expect(document.querySelector('video')).not.toBeNull());
+    query('video').dispatchEvent(new Event('error'));
+    flushSync();
+    expect(query('[data-testid=media-fallback]').querySelector('button')?.textContent).toContain('Try again');
+    expect(query<HTMLAnchorElement>('[data-testid=media-fallback-download]').href).toBe(url);
+  } finally { canPlayType.mockRestore(); }
+});
