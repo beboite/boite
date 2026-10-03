@@ -75,6 +75,8 @@
     const account = choice ? store.accountOf(choice.accountId) : null;
     return account?.status === 'unauthenticated' ? account : null;
   });
+  /** The thread names an account that was removed: it sends again once another one is picked. */
+  let accountRemoved = $derived(store.openThread !== null && store.accounts.length > 0 && store.accountOf(store.openThread.accountId) === null);
   let modeItems = $derived(
     modes.map((mode) => ({
       id: mode,
@@ -200,6 +202,9 @@
     <ModelPicker {store} {choice} disabled={picking} onpick={pick} />
     {#if signedOut && store.owner}
       <button type="button" class="chip signed-out" data-testid="composer-reconnect" title={fill(strings.connect.signedOut, { provider: provider?.name ?? '' })} onclick={() => store.openConnect(signedOut.providerId, signedOut.id)}><span class="ui-label">{strings.connect.reconnect}</span></button>
+    {/if}
+    {#if accountRemoved}
+      <button type="button" class="chip signed-out" data-testid="composer-account-removed" title={strings.accounts.removedHint} onclick={() => void openChip('composer-picker')}><span class="ui-label">{strings.accounts.removed}</span></button>
     {/if}
 
     <div class="desktop-options">

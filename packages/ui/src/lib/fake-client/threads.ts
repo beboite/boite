@@ -563,7 +563,8 @@ export function threadMethods(ctx: FakeContext) {
       // As the core, in its order: an archived or busy thread first, then whether the agent can run at all.
       if (!thread.archived && !['queued', 'running', 'waiting'].includes(thread.status) && !ctx.inFlight.has(thread.id)) {
         const account = ctx.accounts.find((a) => a.id === thread.accountId);
-        if (account) checkRunnable(provider, account);
+        if (!account) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'accountId: the account of this conversation was removed; choose another account in it first', data: { threadId: thread.id, accountId: thread.accountId, field: 'accountId', expected: 'an existing account' } });
+        checkRunnable(provider, account);
       }
       const error = attachmentError(params.attachments ?? [], provider);
       if (error) throw new RpcFailure({ code: RpcErrorCode.Refused, ...error });

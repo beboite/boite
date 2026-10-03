@@ -9,7 +9,7 @@ stops the login process and waits for it to exit. Removing an account does the
 same before deleting its isolated directory; default CLI directories stay on
 disk. Removal also stops connection checks and model discovery before deleting
 the directory, and blocks new account operations while it runs. Removal is
-refused while any thread still references the account.
+refused while a turn is queued or running on the account.
 
 ## The isolation directory
 
@@ -279,6 +279,14 @@ that runs under `node` names nothing there, because the process in the job is
 `node` and killing every `node` on the machine is not a thing Boite will ever do.
 The shared links are removed before the directory, so deleting the account
 never walks into the user's own `skills` or `plugins`.
+
+Conversations that name the account stay, archived ones included. `accounts.threads`
+counts them, and the confirmation says how many before anything is deleted. Such a
+conversation keeps its history and its title, and its mode can still change, but
+`turns.start` and a model change are refused with `field: accountId` until
+`threads.update` gives it another account. That switch starts a new native session,
+so the agent reads the conversation again from Boite's journal. The composer shows
+an Account removed chip that opens the model picker.
 
 ## Provider controls and account pools
 

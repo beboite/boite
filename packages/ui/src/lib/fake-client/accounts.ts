@@ -167,12 +167,17 @@ export function accountMethods(ctx: FakeContext) {
       ctx.emit('accounts.updated', structuredClone(account));
       return structuredClone(account);
     },
+    'accounts.threads': async (params) => {
+      if (!ctx.accounts.some(a => a.id === params.accountId)) throw ctx.notFound('account', params.accountId);
+      return { count: [...ctx.threads.values()].filter((t) => t.accountId === params.accountId && !t.parentThreadId).length };
+    },
     'accounts.remove': async (params) => {
       const account = ctx.accounts.find(a => a.id === params.accountId);
       if (!account) throw ctx.notFound('account', params.accountId);
-      const referenced = [...ctx.threads.values()].find((t) => t.accountId === params.accountId);
-      if (referenced) {
-        throw new RpcFailure({ code: RpcErrorCode.Refused, message: `account ${params.accountId} is used by thread ${referenced.id}` });
+      // As the core: only a turn in flight keeps the account, a conversation that names it does not.
+      const busy = [...ctx.threads.values()].some((t) => t.accountId === params.accountId && (['queued', 'running', 'waiting'].includes(t.status) || ctx.inFlight.has(t.id)));
+      if (busy) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this account is running a turn; stop it or wait for it before removing the account', data: { accountId: params.accountId } });
       }
       cancelLogin(ctx, params.accountId);
       if (account.isolationDir === null) ctx.removedDefaultProviders.add(account.providerId);

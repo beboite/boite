@@ -372,6 +372,7 @@ export class Store {
   openConnect(...args: Parameters<Accounts['openConnect']>) { return this.#ctx.accounts.openConnect(...args); }
   closeConnect(...args: Parameters<Accounts['closeConnect']>) { return this.#ctx.accounts.closeConnect(...args); }
   addAccount(...args: Parameters<Accounts['addAccount']>) { return this.#ctx.accounts.addAccount(...args); }
+  accountThreads(...args: Parameters<Accounts['accountThreads']>) { return this.#ctx.accounts.accountThreads(...args); }
   removeAccount(...args: Parameters<Accounts['removeAccount']>) { return this.#ctx.accounts.removeAccount(...args); }
   cancelLogin(...args: Parameters<Accounts['cancelLogin']>) { return this.#ctx.accounts.cancelLogin(...args); }
   dismissLogin(...args: Parameters<Accounts['dismissLogin']>) { return this.#ctx.accounts.dismissLogin(...args); }

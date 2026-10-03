@@ -368,13 +368,25 @@ describe('accounts', () => {
     expect(existsSync(account.isolationDir ?? '')).toBe(false);
   });
 
-  test('an account used by a thread cannot be removed', async () => {
+  test('removing an account leaves its threads waiting for another one', async () => {
     const client = await harness.connect();
     const account = await client.call('accounts.add', { providerId: 'echo', label: 'Used' });
+    const other = harness.core.accounts.list().find(entry => entry.providerId === 'echo' && entry.id !== account.id)!;
     const project = await client.call('projects.add', { path: harness.dataDir });
-    await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id });
-    await expect(client.call('accounts.remove', { accountId: account.id })).rejects.toThrow('used by');
-    expect(existsSync(account.isolationDir ?? '')).toBe(true);
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id });
+    await client.call('threads.archive', { threadId: thread.id, archived: true });
+    expect(await client.call('accounts.threads', { accountId: account.id })).toEqual({ count: 1 });
+    await client.call('accounts.remove', { accountId: account.id });
+    expect(existsSync(account.isolationDir ?? '')).toBe(false);
+    await client.call('threads.archive', { threadId: thread.id, archived: false });
+    await expect(client.call('turns.start', { threadId: thread.id, prompt: 'hello' })).rejects.toThrow('was removed');
+    await expect(client.call('threads.update', { threadId: thread.id, model: null })).rejects.toThrow('was removed');
+    expect((await client.call('threads.update', { threadId: thread.id, title: 'Kept' })).title).toBe('Kept');
+    const moved = await client.call('threads.update', { threadId: thread.id, accountId: other.id });
+    expect(moved.accountId).toBe(other.id);
+    const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
+    expect(turn.threadId).toBe(thread.id);
+    await harness.core.scheduler.stopAndWait(thread.id);
   });
 
   test('a running login can be listed and cancelled', async () => {
