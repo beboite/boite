@@ -31,6 +31,12 @@ export class TurnRunner {
     this.handles = this.attempts.handles;
   }
 
+  /** Mail is a timeline boundary even when the provider has not accepted it yet. */
+  noteMail(threadId: ThreadId, at: number): void {
+    const turn = this.core.journal.listTurns(threadId).findLast(turn => turn.status === 'running');
+    if (turn) this.answerAfter.set(turn.id, Math.max(at, this.answerAfter.get(turn.id) ?? 0));
+  }
+
   changePermissionMode(threadId: ThreadId, mode: PermissionMode): void {
     this.attempts.changePermissionMode(threadId, mode);
   }

@@ -32,7 +32,11 @@ export function chatLink(raw: string): ChatLink | null {
   return { kind: 'file', target, ...(line ? { line: Number(line[1] ?? line[2]) } : {}) };
 }
 
+// Ratios and dates can have path separators without naming a file.
+const NUMERIC_PATH = /^[\\/]?\d[\d.,\\/]*$/;
+
 export function fileLike(text: string): boolean {
+  if (NUMERIC_PATH.test(text)) return false;
   return /^(?:\.{0,2}[\\/]|[a-z]:[\\/]|file:\/\/)/i.test(text) || /^[\w@.-]+[\\/][^\s]+$/.test(text) || /^[\w.-]+\.[a-z\d]{1,8}(?::\d+)?$/i.test(text);
 }
 
@@ -69,6 +73,8 @@ function* linkTokens(text: string): Generator<RegExpExecArray> {
       match = absolute;
       tokens.lastIndex = match.index + match[0].length;
     }
+    // A numeric denominator can end on markdown delimiters, not just punctuation.
+    if (match[0].startsWith('/') && /\d/.test(text[match.index - 1] ?? '')) continue;
     yield match;
   }
 }
@@ -77,7 +83,6 @@ function* linkTokens(text: string): Generator<RegExpExecArray> {
 export function richInline(text: string, format: (text: string) => string): string {
   let out = '', start = 0;
   for (const match of linkTokens(text)) {
-    out += format(text.slice(start, match.index));
     let raw = match[2] ?? match[3] ?? match[4] ?? match[0];
     let suffix = '';
     if (!match[1] && !match[4]) {
@@ -85,6 +90,8 @@ export function richInline(text: string, format: (text: string) => string): stri
       suffix = raw.slice(clean.length); raw = clean;
       while (raw.endsWith(')') && (raw.match(/\)/g)?.length ?? 0) > (raw.match(/\(/g)?.length ?? 0)) { raw = raw.slice(0, -1); suffix = ')' + suffix; }
     }
+    if (match[1] === undefined && match[4] === undefined && NUMERIC_PATH.test(raw)) continue;
+    out += format(text.slice(start, match.index));
     out += linkHtml(match[1] ?? raw, raw) + escapeHtml(suffix);
     start = match.index + match[0].length;
   }
