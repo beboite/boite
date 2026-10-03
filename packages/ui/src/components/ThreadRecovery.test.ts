@@ -14,6 +14,7 @@ test('a held prompt resumes once on its owning store, retaining input and execut
   const { store, client } = await ready();
   const held = client.holdAfterRestart('t-trace', 'keep this exact prompt');
   await store.open('t-trace');
+  await expect(client.call('threads.archive', { threadId: held.threadId, onlyIfIdle: true })).rejects.toThrow('pending');
   const before = store.openThread!.messages.filter(message => message.turnId === held.id && message.role === 'user');
   const spy = vi.spyOn(client, 'call');
   view = mount(ThreadRecovery, { target: document.body, props: { store } });

@@ -2994,8 +2994,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * Put a thread away, or bring it back with `archived: false`. Archiving
    * stops its turn and its sub-threads' turns at once and answers; their
    * processes end once those turns have settled. Restoring restarts nothing.
+   * `onlyIfIdle: true` refuses active work in the family before changing it.
    */
-  'threads.archive': { params: { threadId: ThreadId; archived?: boolean }; result: ThreadSummary };
+  'threads.archive': { params: { threadId: ThreadId; archived?: boolean; onlyIfIdle?: boolean }; result: ThreadSummary };
   /**
    * Hide a conversation and its sub-threads after stopping their work. The
    * owner can restore their history across restarts until the configured

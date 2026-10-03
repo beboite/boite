@@ -494,6 +494,20 @@ export const SCENARIOS: Record<string, Scenario> = {
     updates.stop();
     check(answer.archived, 'the answer is not archived');
   },
+  'threads.archive onlyIfIdle refuses pending work and preserves restore': async (env) => {
+    const setup = await echo(env);
+    const created = await thread(env, setup);
+    await env.call('turns.start', { threadId: created.id, prompt: '[permission]' });
+    await until('the pending permission', async () => (await env.call('threads.get', { threadId: created.id })).status === 'waiting');
+    const data = await refusedWith(env.call('threads.archive', { threadId: created.id, onlyIfIdle: true }), RpcErrorCode.Refused, ['threadId', 'expected', 'activeThreadId']);
+    same(data.activeThreadId, created.id, 'the active family member');
+    const kept = await env.call('threads.get', { threadId: created.id });
+    check(!kept.archived && kept.status === 'waiting', 'Done interrupted pending work');
+    await env.call('turns.stop', { threadId: created.id });
+    await until('the stopped turn', async () => (await env.call('threads.get', { threadId: created.id })).status === 'idle');
+    check((await env.call('threads.archive', { threadId: created.id, onlyIfIdle: true })).archived, 'the idle thread was not put away');
+    check(!(await env.call('threads.archive', { threadId: created.id, archived: false })).archived, 'the completed thread was not restored');
+  },
   'threads.remove hides conversations and undo restores history and the prior archive state': async (env) => {
     const setup = await echo(env);
     const kept = await thread(env, setup);

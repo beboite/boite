@@ -55,6 +55,8 @@ describe('crash recovery', () => {
       expect(next.journal.getTurn(turn.id)).toEqual(held);
       expect(next.scheduler.state().queued.map(entry => entry.turnId)).toEqual([turn.id, discarded.id]);
       expect(next.scheduler.state().running).toEqual([]);
+      await expect(reader.call('threads.archive', { threadId: first.threadId, onlyIfIdle: true })).rejects.toThrow('pending');
+      expect(next.journal.getTurn(turn.id)).toEqual(held);
       expect((await reader.call('turns.start', input)).id).toBe(turn.id);
       expect(next.threads.get(first.threadId).messages).toHaveLength(1);
       await expect(reader.call('turns.recover', { threadId: first.threadId, turnId: discarded.id, action: 'discard' })).rejects.toThrow('turnId');
@@ -75,6 +77,7 @@ describe('crash recovery', () => {
       expect(await reader.call('turns.recover', { threadId: second.threadId, turnId: discarded.id, action: 'resume' })).toMatchObject({ id: discarded.id, status: 'stopped' });
       expect(next.threads.get(second.threadId).messages).toHaveLength(1);
       expect(next.scheduler.state().queued).toEqual([]);
+      expect((await reader.call('threads.archive', { threadId: second.threadId, onlyIfIdle: true })).archived).toBe(true);
       expect(inspectJournal(next.journal, { limit: 500 }).issues).toEqual([]);
     } finally {
       reader.close();

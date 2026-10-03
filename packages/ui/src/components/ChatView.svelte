@@ -15,6 +15,8 @@
   import ThreadRecovery from './ThreadRecovery.svelte';
   import BackgroundHistory from './BackgroundHistory.svelte';
   import ForkReturn from './ForkReturn.svelte';
+  import ProjectTile from './ProjectTile.svelte';
+  import DoneThreadNotice from './DoneThreadNotice.svelte';
 
   let { store }: { store: Store } = $props();
 
@@ -52,13 +54,15 @@
           id: JSON.stringify([machine.id, null]),
           label: strings.drafts.name,
           hint: place ? `${place} · ${strings.drafts.hint}` : strings.drafts.hint,
-          active: here && store.draftInDrafts
+          active: here && store.draftInDrafts,
+          projectTile: drafts ? { project: drafts, store: machine.store } : undefined
         },
         ...machine.store.projects.filter((entry) => entry.id !== drafts?.id && entry.archived !== true).map((entry) => ({
           id: JSON.stringify([machine.id, entry.id]),
           label: projectName(entry),
           hint: place ? `${place} · ${entry.path}` : entry.path,
-          active: here && entry.id === store.draft?.projectId
+          active: here && entry.id === store.draft?.projectId,
+          projectTile: { project: entry, store: machine.store }
         }))
       ];
     }),
@@ -103,7 +107,7 @@
           <img src="./icons/icon.svg" alt="" width="42" height="42" />
           <h1>{strings.mobile.draftTitle}</h1>
           <p>{strings.mobile.draftHint}</p>
-          <Menu items={projectItems} onpick={pickProject} variant="chip" label={strings.thread.changeProject} testid="mobile-draft-project"><FolderOpen size={15} />{project ? projectName(project) : strings.drafts.name}<ChevronDown size={14} /></Menu>
+          <span class="project-choice"><Menu items={projectItems} onpick={pickProject} variant="text" label={strings.thread.changeProject} testid="mobile-draft-project">{#if project}<ProjectTile {project} {store} />{:else}<FolderOpen size={15} />{/if}<span class="project-label">{project ? projectName(project) : strings.drafts.name}</span><ChevronDown size={14} /></Menu></span>
           {#if draftChoice}<small>{strings.thread.draftMode[draftChoice.permissionMode]}</small>{/if}
           {#if store.draft?.worktree}<small>{strings.thread.inWorktree}</small>{/if}
         </div>
@@ -114,16 +118,17 @@
           <span>{strings.thread.inProject}</span>
           <!-- It opens upward, into the empty half of the column: under the
                heading it would land on the composer. -->
-          <Menu
+          <span class="project-choice"><Menu
             items={projectItems}
             onpick={pickProject}
             variant="text"
             label={strings.thread.changeProject}
             testid="draft-project"
           >
-            &quot;{project ? projectName(project) : strings.drafts.name}&quot;
+            {#if project}<ProjectTile {project} {store} />{:else}<FolderOpen size={15} />{/if}
+            <span class="project-label">{project ? projectName(project) : strings.drafts.name}</span>
             <ChevronDown size={14} strokeWidth={2} />
-          </Menu>
+          </Menu></span>
           {#if draftChoice}
             <span>{strings.thread.using} {modelLabel}</span>
             {#if effortLabel}<span>{fill(strings.thread.onEffort, { effort: effortLabel })}</span>{/if}
@@ -137,7 +142,7 @@
     {#if thread}<ThreadRecovery {store} />{/if}
     {#if !thread?.agentSessionId}
       {#if store.openProject?.missing === true}<FolderGoneNotice {store} project={store.openProject} />{/if}
-      <Composer {store} centered={!thread} />
+      {#if thread?.archived}<DoneThreadNotice {store} threadId={thread.id} />{:else}<Composer {store} centered={!thread} />{/if}
     {/if}
 
     <!-- The draft's heading and composer are one block in the middle of the
@@ -158,6 +163,11 @@
 {/if}
 
 <style>
+  .project-choice { display: inline-flex; max-width: 100%; border: 1px dashed var(--color-muted-foreground); border-radius: var(--radius-md); }
+  .project-choice:hover, .project-choice:focus-within { border-color: var(--color-accent); }
+  .project-choice :global(.menu) { min-width: 0; max-width: 100%; }
+  .project-choice :global(.trigger) { min-height: var(--row); height: auto; max-width: 100%; padding: 3px 8px; gap: 6px; }
+  .project-label { min-width: 0; overflow-wrap: anywhere; }
   .mobile-welcome { display: none; }
   .none {
     margin: auto;
@@ -220,6 +230,7 @@
   }
 
   @media (max-width: 720px) {
+    .project-choice :global(.trigger) { min-height: var(--touch-target); }
     .start { display: none; }
     .draft-tail { display: none; }
     .mobile-welcome { display: flex; flex-direction: column; align-items: center; max-width: 340px; text-align: center; gap: 14px; }

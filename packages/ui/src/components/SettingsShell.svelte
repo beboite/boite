@@ -122,6 +122,7 @@ import { workspace } from '../lib/workspace.svelte';
    * people look for "network" or "accent", not for the card's title.
    */
   let settingsWords = $derived<[SettingsTab, string | null, string][]>([
+    ['general', 'conversations', strings.settings.groupWorkingThreads],
     ['general', 'conversations', strings.settings.notifications],
     ['general', 'conversations', strings.settings.asyncQuestions],
     ['general', 'conversations', strings.settings.titleModel],

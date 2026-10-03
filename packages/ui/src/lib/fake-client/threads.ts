@@ -1,4 +1,5 @@
 import { dismissMergedPr } from './merged-pr-archive';
+import { assertIdleFamily } from './completion';
 import { protectedThreadIdsError } from '@boite/contracts';
 /** Threads and their messages: create, read, select, archive, and the turn entry points. */
 import { DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
@@ -370,6 +371,7 @@ export function threadMethods(ctx: FakeContext) {
     'threads.retitle': async (params) => writeTitle(ctx, ctx.thread(params.threadId)),
     'threads.archive': async (params) => {
       const thread = ctx.thread(params.threadId);
+      if (params.archived !== false && params.onlyIfIdle === true) assertIdleFamily(ctx, thread.id);
       if (params.archived === false && removing.has(thread.id)) throw refusal('threadId: this conversation is being deleted', { threadId: thread.id, field: 'threadId', expected: 'a conversation not being deleted' });
       if (params.archived === false) dismissMergedPr(ctx, thread.id);
       const was = thread.archived;

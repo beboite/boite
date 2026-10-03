@@ -104,7 +104,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
   });
   core.router.register('threads.retitle', (params) => core.threads.retitle(params.threadId));
   core.router.register('threads.archive', (params) =>
-    core.threads.archive(params.threadId, params.archived !== false),
+    core.threads.archive(params.threadId, params.archived !== false, params.onlyIfIdle === true),
   );
   core.router.register('threads.remove', async (params) => {
     await core.threads.remove(params.threadId);

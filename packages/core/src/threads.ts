@@ -1,4 +1,5 @@
 import { archiveState, archiveStateKey } from './merged-pr-archive-state.ts';
+import { assertIdleFamily } from './threads/completion.ts';
 import { repositoryOf, type MergedPrProof } from './pull-requests.ts';
 import { previewToolOutputs, previewReferencesError, previewPrompt, MESSAGE_PAGE, MESSAGE_PAGE_MAX, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type AgentProfile } from '@boite/contracts';
 import type {
@@ -487,8 +488,9 @@ export class ThreadStore {
     return archivedThread;
   }
 
-  archive(threadId: ThreadId, archived: boolean): ThreadSummary {
+  archive(threadId: ThreadId, archived: boolean, onlyIfIdle = false): ThreadSummary {
     this.require(threadId);
+    if (archived && onlyIfIdle) assertIdleFamily(this.core, threadId);
     if (archived) {
       // Temporary inference belongs to the visible family, including retained descendants.
       const family = this.core.journal.db.query('WITH RECURSIVE family(id) AS (SELECT ? UNION SELECT child.id FROM threads child JOIN family ON child.parent_thread_id = family.id) SELECT id FROM family').all(threadId) as { id: ThreadId }[];

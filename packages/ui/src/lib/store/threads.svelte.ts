@@ -664,12 +664,12 @@ export class Threads {
     }
   }
 
-  async archive(threadId: ThreadId): Promise<void> {
+  async archive(threadId: ThreadId, onlyIfIdle = false): Promise<void> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
     if (!client) return;
     try {
-      await client.call('threads.archive', { threadId, archived: true });
+      await client.call('threads.archive', { threadId, archived: true, ...(onlyIfIdle ? { onlyIfIdle: true } : {}) });
       if (!this.ctx.currentClient(client, clientGeneration)) return;
       this.ctx.threadReads.change(threadId, null);
       this.threads = this.threads.filter((t) => t.id !== threadId);
