@@ -1063,6 +1063,9 @@ test('the composer buttons keep the focus where it was, and a removed chip opens
   query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
   expect(document.activeElement).not.toBe(input());
+  // Nothing has the focus, so Escape reaches the app: it closes the preview first.
+  document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') === null);
   query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
   await waitFor(() => chips().length === 0);
   expect(document.activeElement).not.toBe(input());

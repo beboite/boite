@@ -49,6 +49,12 @@
 
 <svelte:document onpointerdowncapture={(event) => {
   if (preview.open && event.target instanceof Node && !previewElement?.closest('[data-testid="composer"]')?.contains(event.target)) preview.hide();
+}} onkeydowncapture={(event) => {
+  // A tap opens the preview without moving the focus; with nothing focused,
+  // Escape closes the preview before the app reads it as stopping the turn.
+  if (event.target === document.body && event.key === 'Escape' && !event.isComposing && !event.defaultPrevented && closePreview()) {
+    event.preventDefault(); event.stopPropagation();
+  }
 }} />
 
 {#if visible && preview.shown}
