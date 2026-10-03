@@ -385,6 +385,7 @@ test('the same popup shares priorities across the app, tray and phone through th
       expect(await browser.evaluate(`document.querySelector('[data-account-id="${accounts[1]!.id}"] .paid').textContent`)).toContain('Using credits');
       expect(await browser.evaluate(`getComputedStyle(document.querySelector('[data-account-id="${accounts[0]!.id}"] .track')).height`)).toBe('7px');
       expect(await browser.evaluate(`document.querySelector('[data-account-id="${accounts[0]!.id}"] .reset').textContent`)).toMatch(/^Wednesday /);
+      expect(await browser.evaluate(`document.querySelectorAll('${panel} .reorder').length`)).toBe(0);
       // Five profiles fit in the usual popup without scrolling to reach the last one.
       expect(await browser.evaluate(`(() => {
         const body = document.querySelector('${panel} .body').getBoundingClientRect();
@@ -407,6 +408,20 @@ test('the same popup shares priorities across the app, tray and phone through th
     await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...bounds.to, button: 'left', clickCount: 1 });
     await tray.waitFor(`document.querySelector('[data-testid="quota-provider"]')?.dataset.accountId === '${accounts[1]!.id}'`);
     expect((await client.call('settings.get', {})).quotaOrder?.[0]).toBe(accounts[1]!.id);
+    // Releasing a row drag must not also expand its details.
+    expect(await page.evaluate(`document.querySelectorAll('${panel} .details').length`)).toBe(0);
+    // A click with a small pointer wobble still opens the quota details without changing priorities.
+    await page.waitFor(`document.querySelector('[data-account-id="${accounts[1]!.id}"] .summary')?.disabled === false`);
+    const clickPoint = await page.evaluate<{ x: number; y: number }>(`(() => {
+      const name = document.querySelector('[data-account-id="${accounts[1]!.id}"] .name').getBoundingClientRect();
+      return { x: name.x + name.width / 2, y: name.y + name.height / 2 };
+    })()`);
+    await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...clickPoint, button: 'left', buttons: 1, clickCount: 1 });
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: clickPoint.x + 2, y: clickPoint.y + 2, buttons: 1 });
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: clickPoint.x + 2, y: clickPoint.y + 2, button: 'left', clickCount: 1 });
+    await page.waitFor(`document.querySelector('[data-account-id="${accounts[1]!.id}"] .details')`);
+    expect((await client.call('settings.get', {})).quotaOrder?.[0]).toBe(accounts[1]!.id);
+    await page.click(`[data-account-id="${accounts[1]!.id}"] .summary`);
     await capture('limits-popup-dragged.png');
 
     // Keyboard reversal in the tray reaches the app too.
@@ -423,7 +438,7 @@ test('the same popup shares priorities across the app, tray and phone through th
     // A constrained viewport still allows dragging from the bottom to the top while scrolling.
     await tray.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 300, deviceScaleFactor: 1, mobile: false });
     await tray.waitFor(`document.querySelector('${panel} .body').clientHeight < 220`);
-    // The settings event can update the order before the previous save enables the grips.
+    // The settings event can update the order before the previous save enables the rows.
     await tray.waitFor(`document.querySelector('[data-account-id="${accounts[4]!.id}"] [data-testid="quota-reorder"]')?.disabled === false`);
     const scrollDrag = await tray.evaluate<{ from: { x: number; y: number }; to: { x: number; y: number } }>(`(async () => {
       const body = document.querySelector('${panel} .body');
@@ -458,7 +473,7 @@ test('the same popup shares priorities across the app, tray and phone through th
       // The phone sheet animates and its ResizeObserver places it after the rows appear.
       await Promise.all(document.getAnimations().filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {})));
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      const grip = document.querySelector('[data-account-id="${accounts[1]!.id}"] [data-testid="quota-reorder"]').getBoundingClientRect();
+      const grip = document.querySelector('[data-account-id="${accounts[1]!.id}"] .name').getBoundingClientRect();
       const first = document.querySelector('[data-testid="quota-provider"]').getBoundingClientRect();
       return { from: { x: grip.x + grip.width / 2, y: grip.y + grip.height / 2 }, to: { x: grip.x + grip.width / 2, y: first.y + 16 } };
     })()`);
@@ -468,6 +483,7 @@ test('the same popup shares priorities across the app, tray and phone through th
     await page.waitFor(`document.querySelector('[data-testid="quota-provider"]')?.dataset.accountId === '${accounts[1]!.id}'`);
     await page.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await tray.waitFor(`document.querySelector('[data-testid="quota-provider"]')?.dataset.accountId === '${accounts[1]!.id}'`);
+    expect(await page.evaluate(`document.querySelectorAll('${panel} .details').length`)).toBe(0);
     await capture('limits-popup-phone.png');
     expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth && document.querySelector('${panel} .body').scrollWidth <= document.querySelector('${panel} .body').clientWidth`)).toBe(true);
     await client.call('accounts.rename', { accountId: accounts[1]!.id, label: 'Work subscription' });
@@ -476,5 +492,24 @@ test('the same popup shares priorities across the app, tray and phone through th
     await tray.navigate(`${origin}/?view=quotas`);
     await tray.waitFor(`document.querySelector('[data-testid="quota-provider"] .name')?.textContent === 'Work subscription'`);
     expect((await client.call('settings.get', {})).quotaOrder?.[0]).toBe(accounts[1]!.id);
+
+    // Swiping a meter on a short phone viewport scrolls without rearranging or expanding its account.
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 340, deviceScaleFactor: 1, mobile: true });
+    await page.waitFor(`document.querySelector('${panel} .body').scrollHeight > document.querySelector('${panel} .body').clientHeight`);
+    const swipe = await page.evaluate<{ x: number; y: number }>(`(async () => {
+      const body = document.querySelector('${panel} .body');
+      body.scrollTop = 0;
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const meter = document.querySelector('[data-account-id="${accounts[0]!.id}"] .track').getBoundingClientRect();
+      return { x: meter.x + meter.width / 2, y: meter.y + meter.height / 2 };
+    })()`);
+    await page.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...swipe, id: 1 }] });
+    for (let step = 1; step <= 6; step++) {
+      await page.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: swipe.x, y: swipe.y - step * 12, id: 1 }] });
+    }
+    await page.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitFor(`document.querySelector('${panel} .body').scrollTop > 0`);
+    expect((await client.call('settings.get', {})).quotaOrder?.[0]).toBe(accounts[1]!.id);
+    expect(await page.evaluate(`document.querySelectorAll('${panel} .details').length`)).toBe(0);
   } finally { await tray?.close(); client.close(); await harness.stop(); }
 }, 60_000);
