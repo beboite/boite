@@ -182,7 +182,7 @@ export class Core {
       || this.agentRuntime.busy || this.procs.liveThreads().length > 0
       || threads.sideQuestions.busy
       || threads.runner.handles.size > 0 || threads.runner.steering.size > 0
-      || threads.deferred.pendingWakes.size > 0 || threads.deferred.deferredAnswers.size > 0
+      || threads.deferred.pendingWakes.size > 0 || threads.deferred.deferredAnswers.size > 0 || threads.deferred.consumed.size > 0
       || [...threads.agentState.background.values()].some(tasks => tasks.length > 0)) return 'busy';
     // Persist an updater's acknowledgement before closing admission or scheduling exit.
     beforeShutdown?.();

@@ -175,8 +175,10 @@ export class Journal {
 
   deleteProject(projectId: string): void {
     this.deleteSetting(`project-auto-archive-merged-pr:${projectId}`);
+    this.deleteSetting(`todos:${projectId}`);
     this.db.query('DELETE FROM projects WHERE id = ?').run(projectId);
     this.db.query('DELETE FROM project_icons WHERE project_id = ?').run(projectId);
+    this.db.query('DELETE FROM workflow_templates WHERE project_id = ?').run(projectId);
   }
 
   /** What every project's icon reads as, bytes left out: one small query per list. */
@@ -347,7 +349,7 @@ export class Journal {
         this.db.query('DELETE FROM workflow_steps WHERE thread_id = ? OR run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id, id);
         this.db.query('DELETE FROM workflow_requests WHERE run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id);
         this.db.query('DELETE FROM workflow_runs WHERE root_id = ?').run(id);
-        for (const prefix of ['merged-pr-archive:', 'linked-pull-requests:', 'activity:', 'activity-input:', 'move-note:', 'memory-notices:', 'coordination:', 'coordination-autopause:', 'delegation:', 'delegation-turns:', 'delegation-episode:']) this.deleteSetting(`${prefix}${id}`);
+        for (const prefix of ['merged-pr-archive:', 'linked-pull-requests:', 'activity:', 'activity-input:', 'move-note:', 'memory-notices:', 'coordination:', 'coordination-autopause:', 'delegation:', 'delegation-turns:', 'delegation-episode:', 'spawn-origin:', 'spawns:']) this.deleteSetting(`${prefix}${id}`);
         this.db.query('DELETE FROM threads WHERE id = ?').run(id);
         this.db.query('DELETE FROM thread_deletions WHERE thread_id = ?').run(id);
       }

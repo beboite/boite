@@ -10,7 +10,9 @@
  * command (`ext::`), a local file read (`file://`) or a login prompt (ssh), so
  * git is told `protocol.allow=never` with https the one exception, and the
  * credential helpers are emptied: a private or missing repository fails at
- * once instead of opening a sign-in window on the user's screen.
+ * once instead of opening a sign-in window on the user's screen. The user's
+ * gitconfig is not read either: an `insteadOf` rewrite or an `ext` allow
+ * there would otherwise apply under those flags.
  */
 
 import { existsSync, mkdirSync } from 'node:fs';
@@ -23,6 +25,8 @@ import { newId } from '../ids.ts';
 import { MANIFEST_MAX_BYTES, httpsProblem } from './manifest.ts';
 
 const REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
+/** An empty config file. Git reads it as no global and no system config. */
+const EMPTY_GIT_CONFIG = process.platform === 'win32' ? 'NUL' : '/dev/null';
 const FETCH_TIMEOUT_MS = 60_000;
 const STALE_FETCH_MS = 15 * 60_000;
 const OUTPUT_MAX_BYTES = 1024 * 1024;
@@ -103,9 +107,11 @@ export async function fetchManifest(
   const config = [
     '-c', 'protocol.allow=never',
     '-c', 'protocol.https.allow=always',
-    ...(allowLocal ? ['-c', 'protocol.file.allow=always'] : []),
+    '-c', 'protocol.ext.allow=never',
+    '-c', allowLocal ? 'protocol.file.allow=always' : 'protocol.file.allow=never',
     '-c', 'credential.helper=',
     '-c', 'core.askPass=',
+    '-c', 'core.fsmonitor=',
   ];
   const git = async (args: string[]): Promise<GitRun> => {
     if (options.signal?.aborted) throw refused('Boite is shutting down.');
@@ -113,7 +119,21 @@ export async function fetchManifest(
     try {
       spawned = core.procs.spawn(threadId, 'git', [...config, ...args], {
         cwd: root,
-        env: { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: '', SSH_ASKPASS: '' },
+        env: {
+          GIT_TERMINAL_PROMPT: '0',
+          GCM_INTERACTIVE: 'never',
+          GIT_ASKPASS: '',
+          SSH_ASKPASS: '',
+          // `spawn` overlays this on the process environment and cannot delete
+          // a key. A count of 0 drops `GIT_CONFIG_KEY_*` pairs. An empty
+          // `GIT_CONFIG_PARAMETERS` is the other channel: an inherited
+          // `insteadOf` there still rewrites the URL under the flags above.
+          GIT_CONFIG_COUNT: '0',
+          GIT_CONFIG_PARAMETERS: '',
+          GIT_CONFIG_NOSYSTEM: '1',
+          GIT_CONFIG_GLOBAL: EMPTY_GIT_CONFIG,
+          GIT_CONFIG_SYSTEM: EMPTY_GIT_CONFIG,
+        },
       });
     } catch (error) {
       throw refused(`git did not start (${messageOf(error)}): adding a plugin from a URL needs git on PATH`, { args });

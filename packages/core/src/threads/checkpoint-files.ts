@@ -111,13 +111,33 @@ export async function snapshot(core: Core, threadId: string, root: string, objec
     if (bytes > BYTE_LIMIT) throw new Error('workspace exceeds the 128 MiB checkpoint limit');
     result[name] = saved.entry;
     next.set(name, { entry: saved.entry, metadata: saved.metadata, size: saved.size });
-    if (saved.bytes) {
-      try { await writeFile(join(objects, saved.entry.hash), saved.bytes, { flag: 'wx', mode: 0o600 }); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
-    }
+    if (saved.bytes) await writeCheckpointBlob(join(objects, saved.entry.hash), saved.entry.hash, saved.bytes);
   }
   if (previous) { previous.clear(); for (const [name, entry] of next) previous.set(name, entry); }
   return result;
+}
+
+/**
+ * One content-addressed blob. A crash can leave a short file at the hash
+ * name: `wx` then fails with EEXIST and a later rewind would trust the
+ * partial bytes until the restore hash check refuses the whole rewind.
+ * A matching file stays. A mismatch is replaced. Any other write error
+ * removes the partial file this attempt created.
+ */
+export async function writeCheckpointBlob(dest: string, hash: string, bytes: Buffer): Promise<void> {
+  try {
+    await writeFile(dest, bytes, { flag: 'wx', mode: 0o600 });
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+      await rm(dest, { force: true });
+      throw error;
+    }
+  }
+  const existing = await readFile(dest).catch(() => null);
+  if (existing !== null && createHash('sha256').update(existing).digest('hex') === hash) return;
+  await rm(dest, { force: true });
+  await writeFile(dest, bytes, { flag: 'wx', mode: 0o600 });
 }
 
 export async function workspaceRoot(cwd: string): Promise<string> { return realpath(cwd); }

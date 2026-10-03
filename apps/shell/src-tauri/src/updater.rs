@@ -387,6 +387,11 @@ mod tests {
 
     /// The download's outcome and how long the download alone took.
     fn download_fixture(payload: Payload) -> (Result<Vec<u8>, String>, Duration) {
+        download_fixture_version(payload, false)
+    }
+
+    /// `require_signed_version` is off for the fixtures signed before that comment existed.
+    fn download_fixture_version(payload: Payload, require_signed_version: bool) -> (Result<Vec<u8>, String>, Duration) {
         use std::{io::{Read, Write}, net::TcpListener};
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -423,7 +428,9 @@ mod tests {
         });
         let mut context = tauri::test::mock_context(tauri::test::noop_assets());
         context.config_mut().plugins.0.insert("updater".into(), serde_json::json!({
-            "pubkey": config["plugins"]["updater"]["pubkey"], "dangerousInsecureTransportProtocol": true,
+            "pubkey": config["plugins"]["updater"]["pubkey"],
+            "dangerousInsecureTransportProtocol": true,
+            "requireSignedVersion": require_signed_version,
         }));
         let app = tauri::test::mock_builder().plugin(tauri_plugin_updater::Builder::new().build()).build(context).unwrap();
         let result = tauri::async_runtime::block_on(async {
@@ -455,5 +462,10 @@ mod tests {
         // The server keeps the connection open for 4 s: an error well before
         // then is the read timeout, not the server letting go.
         assert!(took < Duration::from_secs(3), "the stalled download held on for {took:?}: {error}");
+    }
+    #[test]
+    fn native_updater_refuses_a_signature_whose_trusted_comment_has_no_version() {
+        let error = download_fixture_version(Payload::Signed, true).0.unwrap_err();
+        assert!(error.to_lowercase().contains("version"), "{error}");
     }
 }
