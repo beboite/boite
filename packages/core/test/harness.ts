@@ -83,6 +83,10 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
   // Keep scripted replies limited to test input unless testing session context.
   if (!options.boiteGuide) core.journal.setSetting('brain', { path: null, enabled: false, boiteGuide: false });
 
+  // Finish the setup snapshot before the server subscribes, so its delayed
+  // broadcast cannot reach a test observing only its own scheduler changes.
+  await Promise.resolve();
+
   const server = startServer({
     core,
     host: '127.0.0.1',
