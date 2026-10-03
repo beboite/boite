@@ -379,7 +379,9 @@
     // thread's status: sending it on its own would put it ahead of prompts the
     // user typed first. Sending is also how he resumes a queue a refusal paused.
     if (!editedThread && (inputStore.busy || state.queued.length > 0 || offline)) {
-      state.queued.push({ text: prompt, attachments: images, afterBoundary: store.inputBoundaries[key]?.boundary, ...(references.length ? { previewReferences: references } : {}) });
+      // Written while the machine is away, it joins the outbox: its own request id and the chips' model and effort.
+      inputStore.queuePrompt(inputKey, { text: prompt, attachments: images, afterBoundary: store.inputBoundaries[key]?.boundary, ...(references.length ? { previewReferences: references } : {}) },
+        offline ? { choice: $state.snapshot(sendChoice) } : undefined);
       state.editing = null;
       state.text = '';
       state.attachments = [];
@@ -487,7 +489,9 @@
    */
   let sendNow = $derived<'steer' | 'resume' | null>(
     !composer?.queued.length || composer.sending || store.connection !== 'ready' || !store.openThread ? null
-      : store.openThread.status === 'running' ? 'steer' : store.busy ? null : composer.paused ? 'resume' : null
+      // A refused outbox prompt has its own Send again; one written offline is a turn of its own, not steering.
+      : composer.queued[0]!.request?.failed !== undefined ? null
+      : store.openThread.status === 'running' ? (composer.queued[0]!.request ? null : 'steer') : store.busy ? null : composer.paused ? 'resume' : null
   );
 
   /**
@@ -701,9 +705,9 @@
     {#if composer && composer.queued.length > 0}
       <ComposerQueue queued={composer.queued}
         disabled={composer.sending || text.length > 0 || attachments.length > 0 || previewReferences.length > 0}
-        paused={composer.paused}
+        paused={composer.paused} sending={composer.sending} connected={store.connection === 'ready'} machine={machineLabel}
         {sendNow}
-        onrestore={restoreQueued}
+        onrestore={restoreQueued} onremove={(at) => store.removeQueued(key, at)} onretry={(at) => store.retryQueued(key, at)}
         onsendnow={sendQueuedNow} />
     {/if}
   </div>

@@ -935,9 +935,12 @@ test.for(['back', 'gone'])('a start the socket dropped is asked once more when t
   await store.open(thread.id);
   const accepted = await store.send('Survive the reconnect', thread.id);
   if (outcome === 'gone') {
-    expect(accepted).toBe(false);
+    // The machine did not come back: the prompt waits in the outbox under the
+    // request id it already went out with, so the core can only take it once.
+    expect(accepted).toBe(true);
     expect(requests).toHaveLength(1);
-    expect(store.error).toContain('connection closed');
+    expect(store.error).toBeNull();
+    expect(store.composerStates[thread.id]?.queued).toMatchObject([{ text: 'Survive the reconnect', request: { id: requests[0] } }]);
     return;
   }
   expect(accepted).toBe(true);

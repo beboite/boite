@@ -397,8 +397,10 @@ Safari, including keyboard, backgrounding and network handover.
 
 - What a phone gets with the core asleep is the app shell painting from disk, an
   empty chat, and "Connecting" in the sidebar footer until the socket comes
-  back on its own. No queued messages, no offline history: the journal is on the
-  core.
+  back on its own. No offline history: the journal is on the core. Prompts
+  written in a thread that was open before the connection went wait in the
+  device's outbox (`docs/machines.md`), and go out once it is back, even after
+  the PWA was closed in between; a new thread still needs the core.
 - Pairing is a link somebody carries over, by hand or by the QR code beside it,
   and it has to be opened within ten minutes. There is no discovery on the
   network.

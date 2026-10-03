@@ -685,15 +685,59 @@ test('a thread of a machine that dropped still opens and queues its prompts unti
   press('Enter');
   await waitFor(() => input().value === '' && store.composerStates[other.id]?.queued.length === 1);
   expect(query('[data-testid=composer-queued]').textContent).toContain('Run this once you are back');
+  // It sits in the outbox, says what it waits for, and already holds its request id.
+  expect(query('[data-testid=composer-outbox-pending]').textContent).toContain('Waiting for');
+  const id = store.composerStates[other.id]!.queued[0]!.request!.id;
   expect(rpc).not.toHaveBeenCalled();
   await fake.restore();
   const start = () => rpc.mock.calls.find(([method]) => method === 'turns.start')?.[1] as { threadId: string; prompt: string } | undefined;
   await waitFor(() => start() !== undefined && store.composerStates[other.id]?.queued.length === 0);
   const started = start();
-  expect(started).toMatchObject({ threadId: other.id, prompt: 'Run this once you are back' });
+  expect(started).toMatchObject({ threadId: other.id, prompt: 'Run this once you are back', clientRequestId: id });
   // What the offline open skipped is read once the machine is back.
   const asked = (method: string) => rpc.mock.calls.some(([name, params]) => name === method && (params as { threadId?: string }).threadId === other.id);
   await waitFor(() => asked('threads.get') && asked('collaboration.get') && asked('workflows.list') && asked('delegation.get'));
+});
+
+test('an outbox prompt the core refuses shows why, holds the next one, and goes again on Send again', async ({ app: _app }) => {
+  await store.open('t-descriptors');
+  await waitFor(() => !store.busy);
+  const fake = store.client as FakeClient;
+  const original = fake.call.bind(fake);
+  const starts: { prompt: string; clientRequestId: string }[] = [];
+  let refuse = true;
+  vi.spyOn(fake, 'call').mockImplementation(async (method, params) => {
+    if (method === 'turns.start') {
+      starts.push(params as { prompt: string; clientRequestId: string });
+      if (refuse) { refuse = false; throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'The account is signed out' }); }
+    }
+    return original(method, params);
+  });
+  fake.drop();
+  await waitFor(() => input().placeholder.includes('offline'));
+  for (const prompt of ['First while away', 'Second while away', 'Third while away']) {
+    await type(prompt);
+    press('Enter');
+    await waitFor(() => input().value === '');
+  }
+  expect(store.composerStates['t-descriptors']!.queued.map(entry => entry.text)).toEqual(['First while away', 'Second while away', 'Third while away']);
+  await fake.restore();
+  await waitFor(() => document.querySelector('[data-testid=composer-outbox-failed]') !== null);
+  expect(query('[data-testid=composer-outbox-failed]').textContent).toContain('The account is signed out');
+  // The refused head holds the ones written after it.
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(starts.map(start => start.prompt)).toEqual(['First while away']);
+  // The last one is cancelled; Send again sends the first under the same id, then the second.
+  document.querySelectorAll<HTMLButtonElement>('[data-testid=composer-queued-remove]')[2]!.click();
+  await waitFor(() => store.composerStates['t-descriptors']!.queued.length === 2);
+  query<HTMLButtonElement>('[data-testid=composer-outbox-retry]').click();
+  await waitFor(() => store.composerStates['t-descriptors']!.queued.length === 0 && !store.busy);
+  expect(starts.map(start => start.prompt)).toEqual(['First while away', 'First while away', 'Second while away']);
+  expect(starts[1]!.clientRequestId).toBe(starts[0]!.clientRequestId);
+  expect(starts[2]!.clientRequestId).not.toBe(starts[0]!.clientRequestId);
+  const sent = store.openThread!.messages.filter(message => message.role === 'user').map(message => JSON.stringify(message.parts));
+  expect(sent.filter(parts => parts.includes('while away'))).toHaveLength(2);
+  expect(sent.some(parts => parts.includes('Third while away'))).toBe(false);
 });
 
 test('Enter in the emptied composer holds pending input behind an approval', async ({ app: _app }) => {
