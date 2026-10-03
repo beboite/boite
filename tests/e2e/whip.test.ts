@@ -171,6 +171,26 @@ async function enableWhip() {
   await settled();
 }
 
+test('Escape cancels a throw before the lazy rope overlay can load', async () => {
+  // A cold or unavailable lazy chunk must not leave the lightweight control held.
+  await page.send('Network.setBlockedURLs', { urls: ['*WhipOverlay*'] });
+  await enableWhip();
+  await page.click(button);
+  await page.waitFor(`document.querySelector('${button}').getAttribute('aria-pressed') === 'true'`);
+  expect(await page.evaluate(`document.querySelector('[data-testid=whip-canvas]') === null`)).toBe(true);
+  await page.evaluate(`(() => {
+    globalThis.__whipShortcutCount = 0;
+    window.addEventListener('keydown', () => globalThis.__whipShortcutCount++);
+  })()`);
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  expect(await page.evaluate(`document.querySelector('${button}').getAttribute('aria-pressed')`)).toBe('false');
+  expect(await page.evaluate('globalThis.__whipShortcutCount')).toBe(0);
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  expect(await page.evaluate('globalThis.__whipShortcutCount')).toBe(1);
+}, 30_000);
+
 test('Whip desktop controls animate, release and respect reduced motion', async () => {
   await enableWhip();
   await page.screenshot(join(import.meta.dir, '.artifacts', 'whip-desktop.png'));

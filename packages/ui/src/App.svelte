@@ -24,6 +24,7 @@
   import { closeTabs } from './lib/panel-close';
   import { strings } from './lib/strings';
   import { experimentOn } from './lib/experiments.svelte';
+  import { installWhipEscape } from './lib/whip.svelte';
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
   import type { Store } from './lib/store.svelte';
@@ -145,6 +146,8 @@
     if (store.connectDialog) need('ConnectFlow');
     if (tour) need('Onboarding');
   });
+
+  onMount(installWhipEscape);
 
   onMount(() => {
     const stopViewport = startViewport();

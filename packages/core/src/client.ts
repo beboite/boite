@@ -61,6 +61,15 @@ function socketUrl(url: string): string {
   return base.endsWith(RPC_PATH) ? base : base + RPC_PATH;
 }
 
+export class SocketClosedError extends Error {
+  readonly reason: string;
+  constructor(readonly code: number, reason: string, prefix = 'the socket closed') {
+    const bounded = reason.slice(0, 80);
+    super(`${prefix} (${code}${bounded ? `: ${JSON.stringify(bounded)}` : ''})`);
+    this.reason = bounded;
+  }
+}
+
 export async function connect(url: string, token: string, options: ConnectOptions = {}): Promise<CoreClient> {
   const timeoutMs = options.timeoutMs ?? 5000;
   const deadline = Date.now() + timeoutMs;
@@ -120,13 +129,14 @@ export async function connect(url: string, token: string, options: ConnectOption
   const watchers = new Set<{ cancel(): void; fail(error: Error): void }>();
   let ownerClosed = false;
 
-  socket.addEventListener('close', () => {
+  socket.addEventListener('close', (event: CloseEvent) => {
     closed = true;
-    for (const waiter of pending.values()) waiter.reject(new Error('the socket closed'));
+    const error = new SocketClosedError(event.code, event.reason);
+    for (const waiter of pending.values()) waiter.reject(error);
     pending.clear();
     for (const watcher of [...watchers]) {
       if (ownerClosed) watcher.cancel();
-      else watcher.fail(new Error('the socket closed'));
+      else watcher.fail(error);
     }
   });
 
@@ -140,9 +150,9 @@ export async function connect(url: string, token: string, options: ConnectOption
       clearTimeout(timer);
       reject(new Error('the socket failed to open'));
     });
-    socket.addEventListener('close', () => {
+    socket.addEventListener('close', (event: CloseEvent) => {
       clearTimeout(timer);
-      reject(new Error('the socket closed before opening'));
+      reject(new SocketClosedError(event.code, event.reason, 'the socket closed before opening'));
     }, { once: true });
   }).catch(error => { socket.close(); throw error; });
 
@@ -175,7 +185,10 @@ export async function connect(url: string, token: string, options: ConnectOption
     threadId: hello.threadId ?? null,
     async call<M extends RpcMethodName>(method: M, params: RpcMethods[M]['params']): Promise<RpcMethods[M]['result']> {
       if (closed) throw new Error('the client is closed');
-      return (await send(method, params)) as RpcMethods[M]['result'];
+      const wait = method === 'delegation.wait' && options.requestTimeoutMs === undefined
+        ? Math.min(3_600_000, Math.max(0, (params as RpcMethods['delegation.wait']['params']).timeoutMs ?? 600_000)) + 5000
+        : undefined;
+      return (await send(method, params, wait)) as RpcMethods[M]['result'];
     },
     on<E extends RpcEventName>(event: E, handler: (payload: RpcEvents[E]) => void): () => void {
       return on(event, (payload) => handler(payload as RpcEvents[E]));

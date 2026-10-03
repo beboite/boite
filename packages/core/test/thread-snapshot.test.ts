@@ -39,3 +39,35 @@ test('a quiet return omits its unchanged payload and an unseen tool suffix still
   expect(fresh.messages).toHaveLength(1);
   expect(fresh.messagesSync?.hash).not.toBe(first.messagesSync?.hash);
 });
+
+test('opening and quiet reconnect snapshots retain durable native background history after completion', async () => {
+  const client = await harness.connect();
+  const { threadId } = await echoThread(harness, client);
+  const finished = client.next('turn.finished', turn => turn.threadId === threadId);
+  await client.call('turns.start', { threadId, prompt: 'Snapshot history' });
+  const turn = await finished;
+  const source = harness.core.threads.require(threadId);
+  const owner = { providerId: source.providerId, sessionGeneration: source.sessionGeneration ?? 0, parentTurnId: turn.id };
+  harness.core.threads.agentState.noteBackground(threadId, [{ id: 'snapshot-native-task', kind: 'shell', description: 'Native work', toolId: null, startedAt: Date.now() }], owner);
+  const opened = await client.call('threads.get', { threadId, compactFiles: true, sync: true, open: { markRead: true } });
+  expect(opened.background).toHaveLength(1);
+  expect(opened.backgroundHistory).toMatchObject([{ id: 'snapshot-native-task', state: 'running', parentTurnId: turn.id }]);
+  expect(opened.opened).toEqual({ permissions: [], questions: [] });
+  if (!opened.messagesSync) throw new Error('completed fixture needs a resume proof');
+  harness.core.threads.agentState.finishBackground(threadId, 'snapshot-native-task', owner, 'completed');
+  const reconnected = await harness.connect();
+  const quiet = await reconnected.call('threads.get', {
+    threadId, after: opened.messagesSync.from, compactFiles: true, sync: opened.messagesSync, open: { markRead: true },
+  });
+  expect(quiet.messages).toEqual([]);
+  expect(quiet.messagesUnchanged).toBe(true);
+  expect(quiet.background).toEqual([]);
+  expect(quiet.backgroundHistory).toMatchObject([{ id: 'snapshot-native-task', state: 'completed', parentTurnId: turn.id }]);
+  const { Core } = await import('../src/core');
+  const restarted = new Core({ dataDir: harness.dataDir, token: harness.token });
+  try {
+    const restored = restarted.threads.get(threadId, undefined, { compactFiles: true, sync: true });
+    expect(restored.background).toEqual([]);
+    expect(restored.backgroundHistory).toEqual(quiet.backgroundHistory);
+  } finally { await restarted.close(); }
+});

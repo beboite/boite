@@ -41,17 +41,9 @@
       pointerX = e.clientX;
       pointerY = e.clientY;
     };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || !rope || !whip.held) return;
-      whip.held = false;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-    };
-    window.addEventListener('keydown', onKey, true);
     window.addEventListener("pointermove", onMove, { passive: true });
     return () => {
       window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("keydown", onKey, true);
       if (frame) cancelAnimationFrame(frame);
       closeCrackAudio();
       cancelShake();

@@ -437,7 +437,7 @@ export function startServer(options: ServerOptions): RunningServer {
         core.browser.disconnect(socket.data.connection.id);
         core.threads.focus.disconnect(socket.data.connection.id);
         incoming.drop(socket.data.connection);
-        core.speech.cancel(socket.data.connection.id);
+        socket.data.connection.close(1000);
         clearTimeout(helloTimers.get(socket.data.connection));
         helloTimers.delete(socket.data.connection);
         connections.delete(socket.data.connection);
