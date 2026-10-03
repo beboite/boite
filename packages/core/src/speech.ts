@@ -73,7 +73,7 @@ export class SpeechStore {
     return {
       revision: this.revision, engine: this.config.engine,
       // Another model may download while this one dictates; only a runtime being replaced stops it.
-      ready: this.loadError === null && (this.config.engine === 'local' ? localReady && !this.removing && !this.local.updatingRuntime :this.config.apiProvider === 'groq' ? groqKeySet : openrouterKeySet),
+      ready: this.loadError === null && (this.config.engine === 'local' ? localReady && !this.removing && !this.local.updatingRuntimeFor(this.config.modelPath ? undefined : this.config.model) :this.config.apiProvider === 'groq' ? groqKeySet : openrouterKeySet),
       localReady, groqKeySet, openrouterKeySet,
       installing: this.local.installing, downloadedBytes: this.local.downloadedBytes, totalBytes: this.local.totalBytes,
       error: this.loadError ?? this.local.error, canInstallRuntime: this.local.canInstallModel(this.config.model),

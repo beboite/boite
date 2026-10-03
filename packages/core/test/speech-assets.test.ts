@@ -65,3 +65,22 @@ test('new configuration defaults to streaming while explicitly selected Whisper 
   harness.core.speech.configure({ ...DEFAULT_SPEECH, model: 'small-q5_1' });
   expect(harness.core.speech.get().model).toBe('small-q5_1');
 });
+
+test('installing another native engine keeps the already installed engine ready for dictation', async () => {
+  const speech = harness.core.speech, local = speech.local;
+  if (!local.canInstallModel('nemotron-streaming')) return;
+  mkdirSync(join(local.root, 'runtime-whistle'), { recursive: true });
+  writeFileSync(local.needle, 'fixture');
+  writeFileSync(local.models.file('whistle'), 'fixture');
+  speech.configure({ ...DEFAULT_SPEECH, model: 'whistle' });
+  expect(speech.status().ready).toBe(true);
+  const download = spyOn(local, 'download' as any).mockImplementation((_spec: unknown, _target: string, signal: AbortSignal) =>
+    new Promise<void>((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true })));
+  restore = () => download.mockRestore();
+  try {
+    const downloading = speech.install({ model: 'nemotron-streaming' });
+    expect(downloading.installing).toBe(true);
+    expect(downloading.ready).toBe(true);
+    expect(speech.get().model).toBe('whistle');
+  } finally { await local.cancel(); }
+});

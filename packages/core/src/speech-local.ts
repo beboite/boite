@@ -94,8 +94,12 @@ export class SpeechLocal {
     const backend = catalogueEntry(id)?.backend;
     return backend === 'whistle' ? !!whistleRuntime() : backend === 'nemotron' ? !!sherpaRuntime() : this.canInstallRuntime;
   }
-  /** The running download replaces the runtime, which a transcription would be using. */
-  get updatingRuntime(): boolean { return this.installing && this.runtimeBytes > 0; }
+  /** A different engine's runtime can install while the selected engine still dictates. */
+  updatingRuntimeFor(id?: string): boolean {
+    const backend = catalogueEntry(id ?? '')?.backend ?? 'whisper';
+    const downloadingBackend = catalogueEntry(this.downloading ?? '')?.backend ?? 'whisper';
+    return this.installing && this.runtimeBytes > 0 && backend === downloadingBackend;
+  }
   get executable(): string {
     const managed = join(this.runtime, 'whisper-cli.exe');
     return existsSync(managed) ? managed : Bun.which('whisper-cli') ?? '';

@@ -103,7 +103,9 @@ one-second overlap, joining shared words. Each window runs with at most four
 threads. Whistle does not need a resident server.
 
 One model is in use at a time. Picking one already downloaded uses it at once;
-picking one that is not downloads it, then makes it the model in use. Each
+picking one that is not downloads it, then makes it the model in use. Engines
+have separate runtimes, so downloading another engine keeps the installed
+choice usable until the new model takes over. Each
 downloaded model has its own remove button; removing the model in use hands over
 to another downloaded one, or back to the default when none remains.
 
