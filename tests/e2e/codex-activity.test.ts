@@ -44,7 +44,11 @@ test('silent Codex reasoning and completed stored tools remain visible after rec
     // Closing the page drops its websocket and subscription, then a new page loads the stored snapshot.
     await page.close();
     page = await BrowserPage.launch({ url: `${origin}/?core=${encodeURIComponent(core.url)}&token=${encodeURIComponent(core.token)}` });
-    await page.click('[data-testid=confirm-ok]'); await page.click(`[data-thread-id="${thread.id}"]`);
+    await page.click('[data-testid=confirm-ok]');
+    const working = `[data-testid=project][data-project-id="${project.id}"] [data-testid=project-working-toggle]`;
+    await page.waitFor(`document.querySelector(${JSON.stringify(working)})?.dataset.count === '1'`);
+    await page.click(working);
+    await page.click(`[data-thread-id="${thread.id}"]`);
     await page.waitFor('document.querySelector("[data-testid=turn-progress]")?.textContent === "Waiting for provider"');
     expect(await page.evaluate('globalThis.__boiteTest.workspace.active.openThread.messages.map(message => message.id)')).toEqual(ids);
     expect(await page.evaluate('document.querySelectorAll("[data-role=assistant]").length')).toBe(1);

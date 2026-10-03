@@ -15,9 +15,8 @@ export class ProjectThreadView {
     return this[kind].includes(projectKey(entry));
   }
 
-  toggle(entry: ProjectEntry, kind: ProjectThreadKind): void {
+  toggle(entry: ProjectEntry, kind: ProjectThreadKind, collapsed = false): void {
     const key = projectKey(entry);
-    const collapsed = entry.machine.store.isCollapsed(entry.project.id);
     if (collapsed) entry.machine.store.toggleProject(entry.project.id);
     if (collapsed && this.isOpen(entry, kind)) return;
     this[kind] = this[kind].includes(key) ? this[kind].filter(value => value !== key) : [...this[kind], key];

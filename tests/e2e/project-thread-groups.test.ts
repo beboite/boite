@@ -48,6 +48,16 @@ for (const width of [1280, 390]) {
       expect(await page.evaluate(`document.querySelector('${second} ${id('project-done-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
       expect(await page.evaluate(`!!document.querySelector('${row(first, 't-scheduler')}')`)).toBe(true);
       await shot('expanded');
+      if (width < 720) {
+        // Phone counters do not inherit a collapsed desktop project.
+        await page.evaluate(`globalThis.__boiteTest.workspace.machines[0].store.toggleProject('p-boite')`);
+        await click(`${first} ${id('project-working-toggle')}`);
+        expect(await page.evaluate(`document.querySelector('${first} ${id('project-working-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
+        expect(await page.evaluate(`globalThis.__boiteTest.workspace.machines[0].store.isCollapsed('p-boite')`)).toBe(true);
+        expect(await page.evaluate(`document.querySelector('${first} ${id('project-done-toggle')}').getAttribute('aria-expanded')`)).toBe('true');
+        await click(`${first} ${id('project-working-toggle')}`);
+        await page.waitFor(`document.querySelector('${row(first, 't-scheduler')}')`);
+      }
       const trace = row(first, 't-trace');
       if (width < 720) {
         await click(`${trace} ${id('mobile-thread-menu-t-trace')}`);
