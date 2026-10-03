@@ -53,6 +53,13 @@
       { id: 'worktree', label: strings.chat.forkWorktree }
     ], (id) => fork?.(id === 'worktree'));
   }
+
+  const actions = $derived([
+    { id: 'copy', label: copied ? strings.chat.copied : strings.chat.copyMessage, icon: copied ? Check : Copy, run: text ? copy : undefined },
+    { id: 'edit', label: strings.chat.editMessage, icon: Pencil, run: edit },
+    { id: 'retry', label: strings.chat.retry, icon: RotateCcw, run: retry },
+    { id: 'fork', label: strings.chat.fork, icon: GitFork, run: fork ? openFork : undefined }
+  ].filter(action => action.run));
 </script>
 
 <span class="message-actions" data-testid="message-actions">
@@ -60,20 +67,9 @@
     {@const full = fullTime(at)}
     <time class="stamp" data-testid="message-time" datetime={new Date(at).toISOString()} title={fill(strings.chat.sentAt, { time: full })}>{clockTime(at)}</time>
   {/if}
-  {#if text}
-    <button type="button" class="act" data-testid="message-copy" title={copied ? strings.chat.copied : strings.chat.copyMessage} aria-label={copied ? strings.chat.copied : strings.chat.copyMessage} onclick={() => void copy()}>
-      {#if copied}<Check size={13} />{:else}<Copy size={13} />{/if}
-    </button>
-  {/if}
-  {#if edit}
-    <button type="button" class="act" data-testid="message-edit" title={strings.chat.editMessage} aria-label={strings.chat.editMessage} onclick={edit}><Pencil size={13} /></button>
-  {/if}
-  {#if retry}
-    <button type="button" class="act" data-testid="message-retry" title={strings.chat.retry} aria-label={strings.chat.retry} onclick={retry}><RotateCcw size={13} /></button>
-  {/if}
-  {#if fork}
-    <button type="button" class="act" data-testid="message-fork" title={strings.chat.fork} aria-label={strings.chat.fork} aria-haspopup="menu" onclick={openFork}><GitFork size={13} /></button>
-  {/if}
+  {#each actions as action (action.id)}
+    <button type="button" class="act" data-testid={`message-${action.id}`} title={action.label} aria-label={action.label} aria-haspopup={action.id === 'fork' ? 'menu' : undefined} onclick={action.run}><action.icon size={13} /></button>
+  {/each}
 </span>
 
 <style>

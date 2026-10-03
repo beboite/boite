@@ -54,8 +54,12 @@
 </script>
 
 <svelte:document onvisibilitychange={() => hidden = document.hidden} />
+{#snippet metric(id: string, text: string | null, title?: string, quiet = false)}
+  <span class="dot" aria-hidden="true">·</span>
+  <span class:quiet data-testid={id} {title}>{text}</span>
+{/snippet}
 {#if preparing}
-  <div class="reply-pending"><TypingIndicator bubble label={strings.chat.preparingReply} /></div>
+  <div class="reply-pending"><TypingIndicator /><span aria-hidden="true">{strings.chat.preparingReply}</span></div>
 {/if}
 {#if turn.status !== 'queued' && !(running && activeTool && !waiting && background.length === 0 && !observed)}
   <div class="summary" class:preparing class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
@@ -64,22 +68,17 @@
       <span data-testid="turn-elapsed">{fill(running ? strings.chat.workingFor : strings.chat.workedFor, { time: elapsed(spent) })}</span>
     {/if}
     {#if observed}
-      <span class="dot" aria-hidden="true">·</span>
-      <span data-testid="turn-progress" title={observed.detail ?? undefined}>{activityLabel}{observed.detail ? `: ${observed.detail}` : ''}</span>
-      <span class="dot" aria-hidden="true">·</span>
-      <span class:quiet={quiet >= 60_000} data-testid="turn-last-activity">{fill(quiet >= 60_000 ? strings.chat.noActivity : strings.chat.lastActivity, { time: elapsed(quiet) })}</span>
+      {@render metric('turn-progress', observed.detail ? `${activityLabel}: ${observed.detail}` : activityLabel, observed.detail ?? undefined)}
+      {@render metric('turn-last-activity', fill(quiet >= 60_000 ? strings.chat.noActivity : strings.chat.lastActivity, { time: elapsed(quiet) }), undefined, quiet >= 60_000)}
       {#if providerAge !== null && observed.providerAt! > observed.at}
-        <span class="dot" aria-hidden="true">·</span>
-        <span data-testid="turn-provider-signal">{fill(strings.chat.providerSignal, { time: elapsed(providerAge) })}</span>
+        {@render metric('turn-provider-signal', fill(strings.chat.providerSignal, { time: elapsed(providerAge) }))}
       {/if}
     {/if}
     {#if turn.finishedAt !== null}
-      <span class="dot" aria-hidden="true">·</span>
-      <span data-testid="turn-finished-at" title={new Date(turn.finishedAt).toLocaleString(formatLocale())}>{fill(strings.chat.finishedAt, { time: clockTime(turn.finishedAt) })}</span>
+      {@render metric('turn-finished-at', fill(strings.chat.finishedAt, { time: clockTime(turn.finishedAt) }), new Date(turn.finishedAt).toLocaleString(formatLocale()))}
     {/if}
     {#if total > 0}
-      <span class="dot" aria-hidden="true">·</span>
-      <span data-testid="turn-tokens" title={breakdown}>{formatTokens(total)} {strings.units.tokens}</span>
+      {@render metric('turn-tokens', `${formatTokens(total)} ${strings.units.tokens}`, breakdown)}
     {/if}
     {#if still}
       <span class="dot" aria-hidden="true">·</span>
@@ -99,7 +98,8 @@
 <style>
   .summary { display: flex; flex-wrap: wrap; align-self: stretch; align-items: center; gap: 4px 6px; margin: 12px 0 0 4px; font-size: var(--text-xs); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; }
   .summary[data-status='running'] { color: var(--color-accent); }
-  .reply-pending { align-self: flex-start; margin: var(--chat-block-gap) 0 0 var(--activity-padding); }
+  .reply-pending { display: flex; align-items: center; gap: 10px; align-self: flex-start; margin: var(--chat-block-gap) 0 0 var(--activity-padding); color: var(--color-muted-foreground); }
+  .reply-pending :global(.typing) { min-height: 40px; padding: 10px 14px; }
   .summary.preparing { margin-top: 6px; color: var(--color-muted-foreground); }
   .summary[data-status='error'] { color: var(--color-danger); }
   .dot { opacity: .6; }

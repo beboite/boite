@@ -295,9 +295,7 @@
   --chat-part-gap: 4px;
   --chat-block-gap: 12px;
   --chat-message-gap: 20px;
-  --radius-chat-bubble: 18px;
-  --color-chat-reply: var(--color-surface-2);
-  --color-chat-reply-edge: var(--color-border);
+  --radius-bubble: 18px;
   /* The timeline's left margin, which the message outline rail sits in. */
   --outline-room: 38px;
   --settings-width: 880px;
@@ -583,6 +581,23 @@
   --palette-light-amethyst-danger: #a14572;
   --palette-light-amethyst-live: #866325;
 }
+
+.answer-bubble, .reply-pending .typing {
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-bubble);
+  border-bottom-left-radius: var(--radius-sm);
+}
+
+.answer-bubble { width: fit-content; max-width: 100%; padding: 12px 16px; }
+@media (max-width: 720px) { .answer-bubble { padding: 10px 14px; } }
+.typing { display: inline-flex; align-items: center; gap: 4px; min-height: 24px; color: var(--color-muted-foreground); }
+.typing > span { width: 5px; height: 5px; border-radius: var(--radius-full); background: currentColor; animation: typing var(--dur-typing) ease-in-out infinite; animation-play-state: var(--typing-state, running); }
+.typing > span:nth-child(2) { animation-delay: var(--dur-typing-step); }
+.typing > span:nth-child(3) { animation-delay: calc(var(--dur-typing-step) * 2); }
+@keyframes typing { 0%, 60%, 100% { opacity: .4; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .typing > span { animation: none; } }
+html[data-motion='reduced'] .typing > span { animation: none; }
 
 /* The conversation's width, stamped by `lib/chat-width.ts`: wider for a big
    screen, or the whole window. The reading column stamps nothing. */

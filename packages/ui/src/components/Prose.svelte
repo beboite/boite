@@ -113,19 +113,6 @@
     line-height: var(--leading-reading);
   }
 
-  .answer-bubble {
-    width: fit-content;
-    max-width: 100%;
-    min-width: 0;
-    padding: 12px 16px;
-    background: var(--color-chat-reply);
-    border: 1px solid var(--color-chat-reply-edge);
-    border-radius: var(--radius-chat-bubble);
-    border-bottom-left-radius: var(--radius-sm);
-  }
-
-  @media (max-width: 720px) { .answer-bubble { padding: 10px 14px; } }
-
   /* `pretty` keeps a paragraph from ending on one stranded word. */
   .prose :global(p) {
     white-space: pre-wrap;

@@ -123,7 +123,7 @@
     padding: 12px 16px;
     background: var(--color-accent-soft);
     border: 1px solid color-mix(in oklch, var(--color-accent) 35%, transparent);
-    border-radius: var(--radius-chat-bubble);
+    border-radius: var(--radius-bubble);
     border-bottom-right-radius: var(--radius-sm);
     box-shadow: var(--shadow-e1);
   }
