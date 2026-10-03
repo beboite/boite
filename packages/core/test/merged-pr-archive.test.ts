@@ -353,6 +353,8 @@ test('archive close cancels its last proof consumer and captured GitHub process'
     expect(scopes).toHaveLength(1);
     const closing = service.close().then(() => { closed = true; });
     await waitFor(() => closed, 500);
+    // Windows exit tracing can settle after the archive loop closes.
+    await waitFor(() => harness.core.procs.liveCount(scopes[0]!) === 0);
     expect(harness.core.procs.liveCount(scopes[0]!)).toBe(0);
     expect(await pass).toBe(0);
     expect(harness.core.threads.require(f.threadId).archived).toBe(false);
