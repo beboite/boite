@@ -10,6 +10,7 @@
   import { fitHeight, selfSizing } from '../lib/composer-size';
   import { editComposerInput, insertImageReference, removeImageReferences, trackImageSend } from '../lib/composer-images';
   import { unresolvedAssetId } from '../lib/draft-attachments';
+  import { focusWithin } from '../lib/focus';
   import { sentPrompts, type SentPrompt } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
@@ -465,9 +466,12 @@
 
   function removeAttachment(at: number) {
     const state = stateForInput();
+    // The keyboard's remove button goes with its chip, so the focus comes back to
+    // the box. A tap leaves it where it was: focusing the box would open a phone's keyboard.
+    const refocus = focusWithin(box?.closest('[data-testid="composer"]'));
     removeImageReferences(store, key, at);
     state.attachments = state.attachments.filter((_, index) => index !== at);
-    box?.focus({ preventScroll: true });
+    if (refocus) box?.focus({ preventScroll: true });
   }
 
   /**

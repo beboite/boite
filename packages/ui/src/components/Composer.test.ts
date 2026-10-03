@@ -917,6 +917,7 @@ test('a pasted image becomes a chip, comes off again, and rides the prompt', asy
   expect(query<HTMLImageElement>('[data-testid=composer-attachment] img').getAttribute('src')).toBe(
     `data:image/png;base64,${PIXEL}`
   );
+  input().focus();
   query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
   expect(document.activeElement).toBe(input());
@@ -974,6 +975,53 @@ test('a pasted image becomes a chip, comes off again, and rides the prompt', asy
   // What went out left the composer, text and picture together.
   expect(input().value).toBe('');
   expect(document.querySelector('[data-testid=composer-attachments]')).toBeNull();
+});
+
+/**
+ * On a phone the focus is the keyboard: a press that moved it closed the
+ * keyboard (Send took two taps), and removing a chip focused the box and opened it.
+ */
+test('the composer buttons keep the focus where it was, and a removed chip opens no keyboard', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
+  paste(pngFile());
+  await waitFor(() => chips().length === 1);
+  const pressed = (selector: string) => {
+    const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    query(selector).dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  for (const selector of ['[data-testid=composer-send]', '[data-testid=composer-attachment-remove]', '[data-testid=composer-image-open]']) {
+    expect(pressed(selector), selector).toBe(true);
+  }
+
+  // Keyboard closed: neither the preview nor the removal focuses the box.
+  input().blur();
+  query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
+  expect(document.activeElement).not.toBe(input());
+  query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
+  await waitFor(() => chips().length === 0);
+  expect(document.activeElement).not.toBe(input());
+
+  // Keyboard open: it stays open through the removal.
+  paste(pngFile());
+  await waitFor(() => chips().length === 1);
+  input().focus();
+  const blur = vi.fn();
+  input().addEventListener('blur', blur);
+  query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
+  await waitFor(() => chips().length === 0);
+  expect(document.activeElement).toBe(input());
+  expect(blur).not.toHaveBeenCalled();
+
+  // A keyboard user's remove button goes with its chip: the focus comes back to the box.
+  paste(pngFile());
+  await waitFor(() => chips().length === 1);
+  query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').focus();
+  query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
+  await waitFor(() => chips().length === 0);
+  expect(document.activeElement).toBe(input());
 });
 
 test('image references follow the caret, mixed attachments and removal without losing browser references', async ({ app: _app }) => {

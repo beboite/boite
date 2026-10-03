@@ -17,6 +17,7 @@
   import { work } from '../lib/work-prefs.svelte';
   import { voice, VOICE_STORAGE_KEY } from '../lib/voice-prefs.svelte';
   import { controlMenu } from '../lib/controls';
+  import { keepFocus } from '../lib/focus';
   import { contextLevel, contextPercent } from '../lib/tokens';
   import { speedControl } from '../lib/model-speeds';
 
@@ -237,7 +238,7 @@
     <div class="context-control" oncontextmenu={(event) => controlMenu(event, store, 'header.context')}><ContextControl {store} /></div>
   {/if}
   {#if store.busy}
-    <button type="button" class="icon stop" data-testid="composer-stop" title={strings.composer.stop} aria-label={strings.composer.stop} onclick={() => void store.stop()}>
+    <button type="button" class="icon stop" data-testid="composer-stop" title={strings.composer.stop} aria-label={strings.composer.stop} onmousedown={keepFocus} onclick={() => void store.stop()}>
       <Square size={12} strokeWidth={2.5} />
     </button>
   {/if}
@@ -279,6 +280,7 @@
     title={strings.composer.send}
     aria-label={strings.composer.send}
     disabled={!canSend}
+    onmousedown={keepFocus}
     onclick={() => onsubmit()}
   >
     <ArrowUp size={16} strokeWidth={2.25} />
