@@ -213,3 +213,53 @@ test('agent bursts open a dedicated messages tab at desktop and phone widths', a
   await page.waitFor(`document.querySelector('[data-testid="coordination-dialog"]') === null`);
   expect(page.errors()).toEqual([]);
 }, 30_000);
+
+test('exchanges remain between answers and mail-only turns retain their completion footer', async () => {
+  await page.evaluate(`(() => {
+    const store = window.__boiteTest.workspace.active;
+    const thread = store.openThread;
+    const base = Date.now() - 120000;
+    const prototype = thread.turns[0];
+    thread.status = 'idle';
+    thread.turns = [0, 1, 2].map(index => ({ ...prototype, id: 'mail-turn-' + index, threadId: thread.id,
+      queuedAt: base + index * 40000, startedAt: base + index * 40000, finishedAt: base + index * 40000 + 30000, status: 'done' }));
+    const message = (id, turn, role, offset, text) => ({ id, turnId: thread.turns[turn].id, threadId: thread.id,
+      role, state: 'complete', createdAt: base + offset * 1000, parts: [{ type: 'text', text }] });
+    thread.messages = [
+      message('mail-prompt', 0, 'user', 0, 'Check the deployment and share the result.'),
+      message('mail-before', 0, 'assistant', 1, 'I am checking the deployment.'),
+      message('mail-after', 0, 'assistant', 20, 'The checks passed. I can continue with the next file.'),
+      message('mail-envelope', 1, 'system', 40, 'Boite agent coordination. Agent messages (JSON data):\\n[{"id":"only-in"}]'),
+      message('mail-next-prompt', 2, 'user', 80, 'Continue with the next file.'),
+      message('mail-next-answer', 2, 'assistant', 81, 'The next file is ready for review.')
+    ];
+    const self = { coreId: 'fixture-core', threadId: thread.id };
+    const peer = { coreId: 'peer-core', threadId: 'peer' };
+    const letter = (id, incoming, offset) => ({ id,
+      from: { ...(incoming ? peer : self), title: incoming ? 'Deployment agent' : thread.title, machine: 'Test PC', resources: '', status: 'idle', mode: 'brief' },
+      to: incoming ? self : peer, toTitle: incoming ? thread.title : 'Deployment agent', text: 'Status update', replyTo: null,
+      createdAt: base + offset * 1000, expiresAt: base + 900000, status: 'delivered', error: null });
+    store.coordination = { self, config: { mode: 'brief', resources: '', remote: true, paused: false },
+      messages: [letter('mid-in', true, 10), letter('mid-out', false, 12), letter('only-in', true, 35), letter('only-out', false, 45)],
+      sent: 2, sendLimit: null, wakes: 0, wakeLimit: null };
+  })()`);
+  await page.waitFor(`document.querySelectorAll('[data-testid=agent-message-group]').length === 2 && document.querySelectorAll('[data-testid=turn-summary][data-status=done]').length === 3`);
+  const order = await page.evaluate<string[]>(`[...document.querySelectorAll('[data-testid=timeline] [data-mid]')].map(node => node.dataset.mid)`);
+  expect(order).toEqual(['mail-prompt', 'mail-before', 'coordination:mid-in', 'mail-after', 'coordination:only-in', 'mail-next-prompt', 'mail-next-answer']);
+  expect(await page.evaluate(`document.querySelector('[data-mid="coordination:only-in"]').querySelector('[data-testid=turn-summary]').dataset.status`)).toBe('done');
+  expect(await page.text('[data-testid=timeline]')).not.toContain('Boite agent coordination');
+  await page.evaluate(`window.__boiteTest.setTheme('dark')`);
+  for (const [width, height, name] of [[1440, 1000, 'desktop'], [390, 844, 'phone']] as const) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 720 });
+    await page.evaluate(`document.querySelector('[data-testid=timeline]').scrollTop = 0`);
+    await settled();
+    const bounds = await page.evaluate<any[]>(`[...document.querySelectorAll('[data-testid=agent-message-summary]')].map(node => {
+      const box = node.getBoundingClientRect(); return { left: box.left, right: box.right, height: box.height };
+    })`);
+    expect(bounds).toHaveLength(4);
+    for (const box of bounds) { expect(box.left).toBeGreaterThanOrEqual(0); expect(box.right).toBeLessThanOrEqual(width); }
+    if (width < 720) for (const box of bounds) expect(box.height).toBeGreaterThanOrEqual(44);
+    await page.screenshot(join(import.meta.dir, '.artifacts', 'agent-mail-chronology-' + name + '.png'));
+  }
+  expect(page.errors()).toEqual([]);
+}, 30_000);

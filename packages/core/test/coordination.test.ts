@@ -168,6 +168,9 @@ test('local messages remain valid when the clock advances between timestamp read
     const letter = await send(h, a, dest(h, b));
     expect(letter.status).toBe('received');
     expect(h.core.coordination.get(b).messages).toHaveLength(1);
+    const sent = h.core.journal.db.query("SELECT created_at FROM coordination_letters WHERE id = ? AND direction = 'out'").get(letter.id) as { created_at: number };
+    expect(h.core.coordination.get(a).messages[0]?.createdAt).toBe(sent.created_at);
+    expect(h.core.coordination.get(b).messages[0]!.createdAt).toBeGreaterThan(sent.created_at);
   } finally {
     clock.mockRestore();
   }

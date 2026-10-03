@@ -78,3 +78,41 @@ test('memory stops stay between tools, fold together and link to a working switc
   }
   expect(page.errors()).toEqual([]);
 }, 60000);
+
+test('a single stopped process fits both themes and narrow screens, including long executable names', async () => {
+  await page.evaluate(`(async () => {
+    const { setLocaleSetting } = await import('/src/lib/i18n.svelte.ts');
+    await setLocaleSetting('en');
+    const thread = __boiteTest.workspace.active.openThread;
+    thread.memoryEvents = [{
+      threadId: thread.id, kind: 'killed', reason: 'machine', limitBytes: 3277 * 1048576,
+      exe: 'C:\\\\tools\\\\python.exe', bytes: 334 * 1048576, state: 'critical', at: Date.now(),
+      anchor: { messageId: thread.messages.at(-1).id, partIndex: 3 },
+    }];
+  })()`);
+  await page.waitFor(`document.querySelector('${id('memory-row')} .process')?.textContent === 'python.exe'`);
+  for (const width of [1280, 390]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 720 });
+    for (const theme of ['dark', 'light']) {
+      await page.evaluate(`__boiteTest.setTheme('${theme}')`);
+      await page.evaluate(`document.querySelector('${id('memory-row')}').scrollIntoView({ block: 'center' })`);
+      await capture(`single-${width < 720 ? 'phone' : 'desktop'}-${theme}`);
+      expect(await page.text(`${id('memory-row')} .size`)).toBe('334 MB');
+      expect(await page.evaluate(`(() => {
+        const row = document.querySelector('${id('memory-row')}');
+        const r = row.getBoundingClientRect();
+        const button = row.querySelector('.configure').getBoundingClientRect();
+        return r.left >= 0 && r.right <= innerWidth && row.scrollWidth <= row.clientWidth
+          && button.right <= r.right && button.bottom <= r.bottom;
+      })()`)).toBe(true);
+    }
+  }
+  await page.evaluate(`__boiteTest.workspace.active.openThread.memoryEvents[0].exe = '/bin/' + 'long-build-worker-'.repeat(12) + '.exe'`);
+  await page.waitFor(`document.querySelector('${id('memory-row')} .process')?.textContent.startsWith('long-build-worker-')`);
+  expect(await page.evaluate(`(() => {
+    const row = document.querySelector('${id('memory-row')}');
+    const process = row.querySelector('.process');
+    return row.scrollWidth <= row.clientWidth && process.scrollWidth <= process.clientWidth;
+  })()`)).toBe(true);
+  expect(page.errors()).toEqual([]);
+}, 30000);

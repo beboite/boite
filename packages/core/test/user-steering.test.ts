@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import { setThreadStatus } from '../src/threads/records.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
@@ -218,6 +219,41 @@ test('a follow-up cuts the running answer, so what the agent writes next lands a
   const completed = owner.next('turn.finished', item => item.id === turn.id);
   finish(); await completed;
   expect(shape().map(row => row[1])).toEqual(['complete', 'complete', 'complete', 'complete']);
+});
+
+test.each(['incoming', 'outgoing', 'delegation'] as const)('%s agent mail cuts continued text without moving a running tool', async direction => {
+  const { owner, threadId, turn, context, finish } = await running();
+  const peer = (await echoThread(h, owner, 'Peer agent')).threadId;
+  for (const id of [threadId, peer]) h.core.coordination.configure(id, { mode: 'brief', resources: '', remote: true, paused: id === (direction === 'incoming' ? threadId : peer) });
+  if (direction === 'delegation') {
+    h.core.journal.putThread({ ...h.core.threads.require(peer), parentThreadId: threadId, status: 'waiting' });
+    h.core.delegation.configure(threadId, { ...DEFAULT_DELEGATION_CONFIG, enabled: true });
+  }
+  const emit = context().emit;
+  const reply = emit.startMessage('assistant');
+  emit.part(reply, 0, { type: 'text', text: 'Before mail' });
+  emit.part(reply, 1, { type: 'tool', toolId: 'mail-tool', name: 'Bash', input: {}, output: null, status: 'running' });
+  const letter = direction === 'delegation' ? h.core.delegation.send({ threadId, toThreadId: peer, text: 'Coordination update', requestId: 'split-delegation' }) : await h.core.coordination.send({
+    threadId: direction === 'incoming' ? peer : threadId,
+    to: h.core.coordination.get(direction === 'incoming' ? threadId : peer).self,
+    text: 'Coordination update', requestId: `split-${direction}`
+  });
+  emit.delta(reply, 0, 'After mail');
+  emit.part(reply, 0, { type: 'text', text: 'Before mailAfter mail', complete: true });
+  const history = await owner.call('threads.get', { threadId });
+  const answers = history.messages.filter(message => message.role === 'assistant');
+  expect(answers).toHaveLength(2);
+  expect(answers[1]!.createdAt).toBeGreaterThanOrEqual(letter.createdAt + 1);
+  expect(answers[0]!.parts[0]).toMatchObject({ type: 'text', text: 'Before mail' });
+  expect(answers[1]!.parts).toEqual([{ type: 'text', text: 'After mail', complete: true }]);
+  emit.part(reply, 1, { type: 'tool', toolId: 'mail-tool', name: 'Bash', input: {}, output: 'ok', status: 'done' });
+  const reconnected = await h.connect();
+  const reopened = await reconnected.call('threads.get', { threadId });
+  expect(reopened.messages.find(message => message.id === reply)?.parts[1]).toMatchObject({ type: 'tool', status: 'done' });
+  expect(reopened.messages.at(-1)?.id).toBe(answers[1]!.id);
+  emit.complete(reply, 'complete');
+  const completed = owner.next('turn.finished', item => item.id === turn.id);
+  finish(); await completed;
 });
 
 test('continued output follows published files while existing tools keep their original cards', async () => {

@@ -798,6 +798,7 @@ export class ThreadStore {
   noteCoordination(threadId: string, turnId: string, text: string): void {
     const message: Message = { id: newId('msg_'), threadId, turnId, role: 'system', parts: [{ type: 'text', text, displayText: 'Agent coordination' }], state: 'complete', createdAt: Date.now() };
     this.core.journal.append({ type: 'coordination.context', threadId, version: 1, payload: message }, () => this.core.journal.putMessage(message));
+    this.runner.noteMail(threadId, message.createdAt);
     this.core.bus.emit('message.started', message);
     this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
   }
