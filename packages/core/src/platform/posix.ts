@@ -2,6 +2,7 @@ import { availableParallelism, totalmem } from 'node:os';
 import { LinuxLoad, linuxMachineMemory, linuxStartedAt } from './linux-load.ts';
 import type { ProcessPlatform } from './types.ts';
 import { linuxServerUpdates } from './linux-server-update.ts';
+import { findTailscaleCli } from './tailscale.ts';
 
 /**
  * Linux and macOS currently track direct children through the registry. Linux
@@ -14,6 +15,7 @@ export function createPosixPlatform(
 ): ProcessPlatform {
   return {
     ...(os === 'linux' ? { serverUpdates: linuxServerUpdates() } : {}),
+    tailscaleCli: () => findTailscaleCli(os),
     retain() {},
     release: async () => { load?.watchResources?.(false); await load?.closeResources?.(); },
     capability: () => ({ os, mode: 'poll', note: 'direct children only; Job Objects are Windows-only' }),

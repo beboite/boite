@@ -1,7 +1,7 @@
 import { untrack } from 'svelte';
 import { previewReferencesError, type Attachment, type PreviewReference } from '@boite/contracts';
 import type { Choice, Draft } from '../store.svelte';
-import type { Composer } from './composer.svelte';
+import type { Composer, OutboxRequest } from './composer.svelte';
 import type { StoreContext } from './context';
 import { strings } from '../strings';
 import { readDraftJournal, writeDraftJournal } from '../draft-journal';
@@ -344,7 +344,17 @@ function savedInput(input: Input, assetId: (bytes: string) => string) {
     assetId: unresolvedAssetId(item) ?? assetId(item.data), ...(unresolvedAssetId(item) ? {} : { data: item.data }) });
   return { text: input.text, editing: input.editing ?? null, attachments: input.attachments.map(file),
     previewReferences: $state.snapshot(input.previewReferences),
-    queued: input.queued.map(item => ({ text: item.text, attachments: item.attachments.map(file), previewReferences: $state.snapshot(item.previewReferences) })) };
+    queued: input.queued.map(item => ({ text: item.text, attachments: item.attachments.map(file), previewReferences: $state.snapshot(item.previewReferences),
+      ...(item.request ? { request: $state.snapshot(item.request) } : {}) })) };
+}
+
+/** An outbox prompt's request id, choice, refusal and whether it went out, or nothing for a stored value that is not one. */
+function outboxRequest(value: unknown): OutboxRequest | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Partial<OutboxRequest>;
+  if (typeof raw.id !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(raw.id)) return undefined;
+  const choice = raw.choice && typeof raw.choice === 'object' && typeof raw.choice.providerId === 'string' && typeof raw.choice.accountId === 'string' ? raw.choice : null;
+  return { id: raw.id, choice, queuedAt: typeof raw.queuedAt === 'number' ? raw.queuedAt : 0, ...(typeof raw.failed === 'string' ? { failed: raw.failed } : {}), ...(raw.sent === true ? { sent: true as const } : {}) };
 }
 
 function references(value: unknown): PreviewReference[] {
@@ -354,11 +364,19 @@ function references(value: unknown): PreviewReference[] {
 function restoreInput(value: unknown, assets: Map<string, string>): Input | null {
   if (!value || typeof value !== 'object' || !('text' in value) || typeof value.text !== 'string') return null;
   const raw = value as { text: string; editing?: unknown; queued?: unknown; previewReferences?: unknown; attachments?: unknown };
+  const queued: Input['queued'] = Array.isArray(raw.queued) ? raw.queued.filter(item => item && typeof item.text === 'string').map(item => {
+    const request = outboxRequest(item.request);
+    return { text: item.text, attachments: attachments(item.attachments, assets), previewReferences: references(item.previewReferences), ...(request ? { request } : {}) };
+  }) : [];
   return { ...empty(), text: raw.text, editing: typeof raw.editing === 'string' ? raw.editing : null,
     previewReferences: references(raw.previewReferences),
     attachments: attachments(raw.attachments, assets),
-    queued: Array.isArray(raw.queued) ? raw.queued.filter(item => item && typeof item.text === 'string').map(item => ({ text: item.text, attachments: attachments(item.attachments, assets), previewReferences: references(item.previewReferences) })) : [],
-    paused: true };
+    queued,
+    // A restored queue waits for the user, since a prompt that was going out
+    // when the page went may have reached the core. Outbox prompts carry their
+    // request id, which the core recognises, so a queue of only those goes out
+    // by itself once the machine is back.
+    paused: !queued.every(item => item.request) };
 }
 
 function attachments(value: unknown, assets: Map<string, string>): Attachment[] {

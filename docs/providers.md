@@ -628,6 +628,24 @@ that do today. A question is
 not a permission mode and is never gated by one: an agent whose approvals are
 off can still ask.
 
+An answer can carry files when the question has a free field, as T3 Code's
+question attachments do: a screenshot of the bug, a mockup. The card has no
+field of its own. While such a question waits, the composer is its free answer,
+as in T3 Code: its placeholder and a line above the box name the question, and
+Send takes the card's picks with the text and files
+(`lib/question-reply.svelte.ts`). Files arrive by the composer's paperclip, a
+paste or a drop, with its caps and image reduction, and a file alone is a valid
+answer. Ignore on that line sets the thread's questions aside, and the composer
+sends ordinary messages again; the card's "Answer in writing" brings it back.
+No protocol carries an image in
+a question's answer (Claude's `AskUserQuestion` takes strings, Codex's
+`requestUserInput` and Muse's `userInput` take text, pi's dialogs a value), so
+the core writes each file under `<dataDir>/attachments/` like a prompt's files
+and appends their paths to the answer text, with the note prompts use; the
+agent reads them with its own tools (Read, `view_image`). The journalled answer
+and the card keep only each file's kind, type, name and size, never its bytes
+or path. ACP and Antigravity questions offer options only, so they take no files.
+
 ## Stdio transport failures
 
 Codex, Muse and pi use `drivers/stdio.ts` for request lifetime and newline

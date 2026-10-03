@@ -89,10 +89,16 @@ export class TauriBridge implements BrowserBridge {
   isReady(id: string): boolean { return this.#loaded.has(id); }
   #boot: Promise<Invoke> | null = null;
 
-  create(id: string, url: string): void {
+  create(id: string, url: string, profile?: string): void {
     if (this.#live.has(id)) return;
     this.#live.add(id);
-    this.#run(id, 'browser_create', { url });
+    this.#run(id, 'browser_create', { url, ...(profile === undefined ? {} : { profile }) });
+  }
+
+  /** Not queued behind a surface: the profile's tabs are already closing. */
+  async deleteProfile(profile: string): Promise<void> {
+    const invoke = await this.#ready();
+    await invoke<null>('browser_profile_delete', { profile });
   }
 
   navigate(id: string, url: string): void {

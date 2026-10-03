@@ -144,7 +144,8 @@ export function askAsync(ctx: FakeContext, thread: Thread, turn: Turn, running: 
       settleQuestion(ctx, thread, host, partIndex, request, answer);
       if (answer === null) return;
       const picked = answer.optionIds.map((id) => asked.options.find((option) => option.id === id)?.label ?? id).join(', ');
-      const reply = [picked, answer.text ?? ''].filter((line) => line.length > 0).join('\n');
+      const files = (answer.attachments ?? []).map((file) => `[file ${file.mimeType}, ${file.bytes} bytes, ${file.name ?? 'attachment'}]`).join('\n');
+      const reply = [picked, answer.text ?? '', files].filter((line) => line.length > 0).join('\n');
       holdAnswer(ctx, thread, `> ${text}\n\n${reply}`);
     }
   });
@@ -273,6 +274,9 @@ export function requestMethods(ctx: FakeContext) {
       const text = params.text ?? '';
       const answer: QuestionAnswer =
         text.length > 0 ? { optionIds: [...params.optionIds], text } : { optionIds: [...params.optionIds] };
+      // The core writes the bytes to its disk and keeps this list on the card.
+      const files = params.attachments ?? [];
+      if (files.length > 0) answer.attachments = files.map((file) => ({ kind: file.kind, mimeType: file.mimeType, name: file.name, bytes: Math.floor(file.data.length * 3 / 4) - (file.data.match(/=*$/)?.[0].length ?? 0) }));
       pending.resolve(answer);
       return { ok: true };
     },

@@ -1,12 +1,13 @@
 import { test, expect } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { BROWSER_RECORDING_TYPES } from '../../packages/contracts/src/index.ts';
 import { startBrowserSession } from './lib/browser-session.ts';
 import { connect } from '../../packages/core/src/client.ts';
 const executable = process.env.BOITE_E2E_SHELL_EXE;
 test.skipIf(process.platform !== 'win32' || !executable)('a paired phone sees and controls the native page; recording marks omit typed and password keys', async () => {
   const site = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response(`<!doctype html><meta name="viewport" content="width=device-width"><title>Boite · direct iPhone</title><style>body{font:24px system-ui;padding:40px;background:#f4f0e8;color:#163d34}button,input{font:inherit;padding:16px;margin:12px}#result{min-height:40px}</style><h1>Depuis votre iPhone</h1><button id="action" onclick="document.querySelector('#result').textContent='Le téléphone a cliqué !'">Tester le clic</button><p id="result">En attente du téléphone</p><input id="message" placeholder="Votre message"><input id="password" type="password"><div style="height:1200px">Glissez pour défiler</div>`, { headers: { 'content-type': 'text/html;charset=utf-8' } }) });
-  const session = await startBrowserSession(executable!, 'Validation du direct et des vidéos', ['remote-browser', 'pr-review', 'recording-indicators']);
+  const session = await startBrowserSession(executable!, 'Validation du direct et des vidéos', ['remote-browser', 'recording-indicators']);
   const captures = join(import.meta.dir, '.artifacts'); mkdirSync(captures, { recursive: true });
   const { client, command, threadId, page } = session;
   const { grant } = await client.call('pairing.grant', {}), phone = await connect(session.url, '', { grant, client: { name: 'pwa', version: 'test' } });
@@ -47,7 +48,7 @@ test.skipIf(process.platform !== 'win32' || !executable)('a paired phone sees an
     expect(result.bytes).toBeGreaterThan(1000); expect(result.reason).toBe('stopped');
     const chunks: Buffer[] = []; let offset = 0;
     for (;;) { const r = (await command({ kind: 'recording-read', recordingId: result.id, offset })).value as { base64: string; nextOffset: number; done: boolean }; chunks.push(Buffer.from(r.base64, 'base64')); offset = r.nextOffset; if (r.done) break; }
-    writeFileSync(join(captures, 'recording-indicators.webm'), Buffer.concat(chunks));
+    writeFileSync(join(captures, `recording-indicators.${BROWSER_RECORDING_TYPES[result.mime]}`), Buffer.concat(chunks));
     expect((await command({ kind: 'evaluate', expression: "Object.keys(globalThis).filter(k=>k.startsWith('__boiteInput_')).length" })).value).toBe(0);
     await page.waitFor("document.querySelector('[data-testid=browser-recording-preview]')?.readyState >= 2");
     // Decode the saved clip: collecting an event alone did not prove that the

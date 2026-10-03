@@ -1717,6 +1717,8 @@ input[type=checkbox][role=switch]:disabled { opacity: .45; cursor: not-allowed; 
   .mobile-sheet-backdrop { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: var(--color-scrim); animation: fade var(--dur-2) var(--ease-out-quint); }
   .mobile-sheet-backdrop.closing { animation-name: fade-out; pointer-events: none; }
   [data-mobile-sheet='true'] { position: fixed !important; max-width: none !important; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; border-radius: var(--radius-xl) !important; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  /* No outline rail on a phone (MessageList.svelte): the timeline's left edge matches its right. */
+  :root { --outline-room: 20px; }
   :root { --text-reading: var(--text-md); --settings-padding: 18px; --control: var(--touch-target); --control-sm: var(--touch-target); --control-lg: var(--touch-target); --input: var(--touch-target); --row: var(--touch-target); }
   input, textarea { font-size: var(--text-md); }
   button.icon { min-width: var(--touch-target); min-height: var(--touch-target); }

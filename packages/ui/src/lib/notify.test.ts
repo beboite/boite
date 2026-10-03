@@ -4,6 +4,7 @@ import {
   finishNotifies,
   NOTIFICATIONS_STORAGE_KEY,
   onNotificationOpen,
+  pushCovers,
   readNotifications,
   sendNotification,
   setNotificationSender,
@@ -85,6 +86,34 @@ describe('toastFor', () => {
     });
     expect(toastFor('error', 't-1', 'Port the scheduler', null).body).toBe('Failed');
     expect(toastFor('needs-you', 't-1', 'Port the scheduler', null).body).toBe('Needs your answer');
+    expect(toastFor('needs-you', 't-1', 'Port the scheduler', 'Which branch?').body).toBe('Which branch?');
+  });
+});
+
+describe('pushCovers', () => {
+  afterEach(() => { localStorage.removeItem('boite.web-push'); vi.unstubAllGlobals(); });
+
+  /** A page whose browser holds `subscription`, with the notification permission granted. */
+  function device(subscription: object | null) {
+    vi.stubGlobal('Notification', Object.assign(vi.fn(), { permission: 'granted' }));
+    vi.stubGlobal('navigator', { serviceWorker: { getRegistration: vi.fn().mockResolvedValue({ pushManager: { getSubscription: vi.fn().mockResolvedValue(subscription) } }) } });
+  }
+
+  test('a device its core pushes to stays quiet: the push is the one notice', async () => {
+    device({ endpoint: 'https://web.push.apple.com/x' });
+    localStorage.setItem('boite.web-push', 'on');
+    expect(await pushCovers(location.origin)).toBe(true);
+  });
+
+  test('a device without push, or a toast about another machine, keeps the local notice', async () => {
+    device({ endpoint: 'https://web.push.apple.com/x' });
+    expect(await pushCovers(location.origin)).toBe(false);
+    localStorage.setItem('boite.web-push', 'on');
+    expect(await pushCovers('https://remote.test')).toBe(false);
+    expect(await pushCovers(undefined)).toBe(false);
+    // The flag outlived its subscription.
+    device(null);
+    expect(await pushCovers(location.origin)).toBe(false);
   });
 });
 

@@ -12,6 +12,7 @@ import { registerProbeMethods } from './providers/probe.ts';
 import { registerUpdateMethods } from './providers/updates.ts';
 import { registerSchedulerMethods } from './scheduler.ts';
 import { registerSessionMethods } from './sessions.ts';
+import { registerTailscaleMethods } from './tailscale.ts';
 import { registerSettingsMethods } from './settings.ts';
 import { registerSubscriptionProxy } from './subscription-proxy.ts';
 import { registerThreadMethods } from './threads/rpc.ts';
@@ -75,6 +76,7 @@ export function registerModules(core: Core): void {
   registerSubscriptionProxy(core);
   registerKeybindingMethods(core);
   registerSessionMethods(core);
+  registerTailscaleMethods(core);
   registerImportMethods(core);
   registerTerminalMethods(core);
   registerWorktreeMethods(core);

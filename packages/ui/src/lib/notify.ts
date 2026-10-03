@@ -13,7 +13,8 @@
  * of it.
  */
 
-import { notifiesOnFinish, threadActive, type ThreadSummary, type Turn } from '@boite/contracts';
+import { notifiesOnFinish, threadActive, type NotificationLabel, type ThreadSummary, type Turn } from '@boite/contracts';
+import { PUSH_ENABLED_KEY } from './pwa';
 import { strings } from './strings';
 
 export const NOTIFICATIONS_STORAGE_KEY = 'boite.notifications';
@@ -76,15 +77,51 @@ export interface Toast {
   threadId: string;
 }
 
-/** The words for each kind, so the store never builds prose. */
+/**
+ * The body: `detail` is what happened in the agent's own words, the start of
+ * its reply or the question it asks; without one, the words for the kind.
+ */
 export function toastFor(kind: NotifyKind, threadId: string, title: string, detail: string | null): Toast {
-  const body =
-    kind === 'done'
-      ? strings.notify.done
-      : kind === 'error'
-        ? (detail ?? strings.notify.failed)
-        : strings.notify.needsYou;
+  const body = detail
+    || (kind === 'done' ? strings.notify.done : kind === 'error' ? strings.notify.failed : strings.notify.needsYou);
   return { title, body, threadId };
+}
+
+/** The words a push labelled by the core is shown with, in the language this app speaks. */
+export function notificationWords(): Record<NotificationLabel, string> {
+  return { done: strings.notify.done, failed: strings.notify.failed, needsYou: strings.notify.needsYou, connected: strings.notify.connected };
+}
+
+/** Where `sw.js` reads them. Not a `boite-ui-` cache: those go with each new build. */
+export const NOTIFICATION_WORDS_CACHE = 'boite-notify';
+export const NOTIFICATION_WORDS_PATH = '/notification-words';
+
+/**
+ * Leaves the words where the service worker finds them. The core speaks no
+ * language: the page knows the user's, and writes it again when it changes.
+ */
+export async function storeNotificationWords(words: Record<NotificationLabel, string>): Promise<void> {
+  try {
+    if (typeof caches === 'undefined') return;
+    const cache = await caches.open(NOTIFICATION_WORDS_CACHE);
+    await cache.put(NOTIFICATION_WORDS_PATH, new Response(JSON.stringify(words), { headers: { 'content-type': 'application/json' } }));
+  } catch { /* A push then shows the core's English body. */ }
+}
+
+/**
+ * Whether this page's own core pushes the same notice to this device. The
+ * service worker must show every push on iOS, so the page is the one that
+ * stays quiet: showing both doubled each notice on an iPhone, tag or not.
+ */
+export async function pushCovers(origin: string | undefined): Promise<boolean> {
+  try {
+    if (origin === undefined || origin !== location.origin || !navigator.serviceWorker) return false;
+    if (localStorage.getItem(PUSH_ENABLED_KEY) !== 'on' || typeof Notification === 'undefined' || Notification.permission !== 'granted') return false;
+    const registration = await navigator.serviceWorker.getRegistration();
+    return Boolean(await registration?.pushManager?.getSubscription());
+  } catch {
+    return false;
+  }
 }
 
 type Sender = (toast: Toast) => Promise<void>;
@@ -129,8 +166,7 @@ async function webSender(toast: Toast): Promise<void> {
   if (typeof Notification === 'undefined') return;
   if (Notification.permission === 'default') await Notification.requestPermission();
   if (Notification.permission !== 'granted') return;
-  // A subscription is not a delivery receipt. Keep the local path available,
-  // using the same worker and tag as push so the latest notice replaces it.
+  // A device without push: the same worker and tag a push would use.
   if (toast.origin === location.origin && toast.coreThreadId && navigator.serviceWorker) {
     try {
       const registration = await navigator.serviceWorker.getRegistration();

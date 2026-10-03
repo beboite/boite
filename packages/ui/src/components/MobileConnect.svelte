@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Monitor, RefreshCw, ShieldCheck, WifiOff } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
+  import { installed } from '../lib/pwa';
   import { strings } from '../lib/strings';
   import PairMachine from './PairMachine.svelte';
 
@@ -21,7 +22,7 @@
     <section class="pairing" aria-label={strings.mobile.pairingRequired}>
       <div class="step"><Monitor size={18} /><p>{strings.mobile.pairStep}</p></div>
       <PairMachine mobile {onpaired} />
-      <p class="installed">{strings.mobile.pairInstalled}</p>
+      <p class="installed" data-testid="mobile-pair-hint">{installed() ? strings.mobile.scanInApp : strings.mobile.pairInstalled}</p>
     </section>
     <p class="privacy"><ShieldCheck size={16} /><span>{strings.mobile.pairPrivacy}</span></p>
   {:else}

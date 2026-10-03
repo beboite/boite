@@ -140,7 +140,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     return { ok: true } as const;
   });
   core.router.register('threads.focus', (params, ctx) => {
-    core.threads.focus.set(ctx.connection.id, params.threadId, params.protectedThreadIds, params.protectAllThreads);
+    core.threads.focus.set(ctx.connection.id, params.threadId, params.protectedThreadIds, params.protectAllThreads, params.attentive, params.idleMs);
     return { ok: true } as const;
   });
   core.router.register('turns.start', async (params) => {
@@ -173,6 +173,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
       questionId: params.questionId,
       optionIds: params.optionIds,
       ...(params.text === undefined ? {} : { text: params.text }),
+      ...(params.attachments === undefined ? {} : { attachments: params.attachments }),
     });
     return { ok: true } as const;
   });

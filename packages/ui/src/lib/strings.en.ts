@@ -15,15 +15,12 @@ export const strings = {
   },
   remoteBrowser: {
     display: 'Display', resolution: 'Page resolution', fitPhone: 'Fit this screen', phone: 'Phone', tablet: 'Tablet', rotate: 'Rotate', width: 'Width', height: 'Height', apply: 'Apply', sharedSize: 'Resolution also changes the shared tab on the PC.', restoreSize: 'Use the PC panel size', previewZoom: 'Preview zoom (this device only)', fit: 'Fit', panHint: 'Drag to pan the preview. Use the arrows to scroll the page.',
-    open: 'Open live browser', experimental: 'Experimental browser sharing', enable: 'Enable on this device',
-    hint: 'View and control the browser tab shared by your PC, inside Boite.',
-    hostMissing: 'The PC is not sharing a browser for this conversation yet. Open the same conversation and a browser tab in Boite on the PC, with both browser experiments enabled.',
+    hostMissing: 'The PC is not showing this conversation’s browser yet.',
+    address: 'Address', go: 'Go', back: 'Back', forward: 'Forward', reload: 'Reload', badAddress: 'Enter a web address (http or https).',
     title: 'Live desktop browser', waiting: 'Waiting for the desktop', live: 'Live', paused: 'Paused', reconnecting: 'Reconnecting', pause: 'Pause', resume: 'Resume',
-    help: 'On your desktop, enable Agent browser control and Live browser on other devices in Experiments, then open this conversation and a browser tab. The PC must stay awake.',
     interact: 'Tap or swipe the shared page', image: 'Live view of the desktop browser', scrollUp: 'Scroll up', scrollDown: 'Scroll down',
-    text: 'Tap a page field, then type here', send: 'Send text to the page', gesture: 'Tap to click. Swipe to scroll. Pause stops the stream.'
+    text: 'Tap a page field, then type here', send: 'Send text to the page', gesture: 'Tap to click. Drag to scroll. Return sends the text and Enter; ⌫ on an empty field erases in the page.'
   },
-  prReview: { open: 'Read in Boite', back: 'Linked pull requests', files: 'Files', comments: 'Comments', checks: 'Checks', overview: 'Overview', loading: 'Loading review…', empty: 'Nothing to display.', more: 'Load more files', unavailable: 'GitHub did not provide a text diff for this file.', truncated: 'Some content was shortened. Open GitHub to read it in full.', github: 'Open on GitHub', refresh: 'Refresh review', viewed: 'Viewed', changed: 'Changed', fileCount: '{count} files loaded', readOnly: 'Reading this review does not publish comments or merge the PR.' },
   agents: {
     runtime: "Models and limits",
     brain: "Brain",
@@ -117,7 +114,7 @@ export const strings = {
   activityUnsupported: 'Element references cannot be used with /goal or /loop. Send a regular message or remove the references.',
   stashUnsupported: 'This draft contains element references and cannot be stashed. Send it or remove the references first.'
 },
-  artifacts: { loadImage: 'Load image', retry: 'Try again', mediaFailed: 'This media could not be previewed. Try again or download the file to open it.', saving: 'Saving', zoomIn: 'Zoom in', zoomOut: 'Zoom out', fitImage: 'Fit image', open: 'Open', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', closeImage: 'Close image', enlarge: 'View full size', saved: 'Saved in Downloads', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
+  artifacts: { loadImage: 'Load image', retry: 'Try again', mediaFailed: 'This media could not be previewed. Try again or download the file to open it.', videoFailed: 'This device cannot play this video. Download it to watch it in another app.', saving: 'Saving', zoomIn: 'Zoom in', zoomOut: 'Zoom out', fitImage: 'Fit image', open: 'Open', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', closeImage: 'Close image', enlarge: 'View full size', saved: 'Saved in Downloads', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
 
   brain: {
     heading: 'Brain', description: 'Your agents share the same instructions and skills.',
@@ -249,7 +246,43 @@ export const strings = {
     enable: 'Enable notifications', disable: 'Disable notifications', test: 'Send test notification',
     enabled: 'Notifications enabled for this device.', testSent: 'The push service accepted the test notification.',
     denied: 'Notifications were not allowed. You can change this in the browser or device settings.',
-    subscriptionFailed: 'The browser did not return a complete push subscription.'
+    subscriptionFailed: 'The browser did not return a complete push subscription.',
+    multiMachine: 'Notifications come from the machine this app was installed from. For another machine, open its own pairing link in Safari and add it to the Home Screen as a separate app.',
+    tailscale: {
+      heading: 'HTTPS through Tailscale',
+      hint: 'Tailscale gives this machine an HTTPS address on your tailnet. Boite serves itself there with tailscale serve, and new pairing links use it. A phone needs Tailscale connected to reach it.',
+      checking: 'Checking Tailscale…',
+      missing: 'Tailscale is not installed on this machine.',
+      download: 'Get Tailscale',
+      stopped: 'Tailscale is installed but not connected. Open Tailscale and connect, then check again.',
+      needsLogin: 'Tailscale is signed out on this machine. Sign in, then check again.',
+      signIn: 'Sign in to Tailscale',
+      httpsDisabled: 'HTTPS certificates are off for your tailnet. In the Tailscale admin console, DNS page, turn on MagicDNS and HTTPS Certificates, then check again.',
+      openAdmin: 'Open the admin console',
+      off: 'Ready: this core can be served at {url}.',
+      on: 'This core is served at {url}.',
+      onPublic: 'New pairing links use this address.',
+      conflict: '{url} already serves {target}. Boite leaves it alone unless you replace it.',
+      error: 'The tailscale command did not answer as expected.',
+      enable: 'Enable HTTPS via Tailscale',
+      disable: 'Disable',
+      replace: 'Replace…',
+      refresh: 'Check again',
+      pair: 'Pair a phone',
+      approve: 'Allow Serve',
+      replaceTitle: 'Replace what {url} serves?',
+      replaceBody: 'Tailscale serves {target} at this address now. Replacing it points the address at Boite, and what used it stops being reachable there.',
+      replaceConfirm: 'Replace',
+      disableTitle: 'Stop serving Boite through Tailscale?',
+      disableBody: 'Phones paired through {url} cannot reach this core until it is served again. Their keys stay valid.',
+      details: {
+        'permission-denied': 'Tailscale refused the change. On Linux, run sudo tailscale set --operator=$USER once, then try again.',
+        'serve-consent': 'Your tailnet has not allowed Serve yet. Open the link, approve it, then try again.',
+        'not-logged-in': 'Tailscale is signed out. Sign in, then try again.',
+        timeout: 'Tailscale did not answer in time. Try again.',
+        unknown: 'Tailscale refused the change. Run tailscale serve status on this machine to see why.'
+      }
+    }
   },
   mobile: {
     clearSearch: 'Clear search', draftTitle: 'What would you like to do?', draftHint: 'Start a task, ask a question, or pick up your work.',
@@ -257,7 +290,8 @@ export const strings = {
     pairBody: 'Connect to your computer to find your projects, conversations and agents here.',
     pairStep: 'On your computer, open Settings → Machines and updates and create a pairing code.',
     pairInstalled: 'Just installed Boite? Pair it here too: the iPhone app keeps its connection separately from the browser.',
-    pairPrivacy: 'Scan from this app. The code is single-use and expires after 10 minutes.',
+    pairPrivacy: 'Scan from this app, or type the code shown under the QR code. Either works once and expires within minutes.',
+    scanInApp: 'Use the Scan button here rather than the Camera app: the camera opens the link in Safari, which keeps a pairing of its own.',
     pairingRequired: 'Pair this app',
     offlineTitle: 'Waiting for your computer',
     offlineBody: 'Keep Boite running on your computer and check your connection. If you use Tailscale, keep it connected on both devices.',
@@ -281,6 +315,9 @@ export const strings = {
     label: 'Machine name', icon: 'Machine icon', icons: { desktop: 'Desktop', laptop: 'Laptop', server: 'Server', rack: 'Server rack', cloud: 'Cloud', cpu: 'Processor' }, link: 'Pairing link', add: 'Add machine', adding: 'Connecting', connect: 'Connect',
     addHint: 'On the other machine, open Settings, Machines and updates, make a pairing link and paste it here. Full control there lets this machine manage its accounts and settings.',
     scan: 'Scan a QR code', pasteLink: 'Paste a pairing link', scanTitle: 'Scan the pairing code',
+    typeCode: 'Type a pairing code', codeLabel: 'Pairing code', codePlaceholder: 'ABCD-EFGH',
+    codeHint: 'The 8-character code shown under the QR code on your computer.',
+    codeInvalid: 'A pairing code has 8 letters and digits, like ABCD-EFGH.',
     scanHint: 'On the other machine, open Settings, Machines and updates, create a pairing link and point the camera at its QR code.',
     scanStarting: 'Starting the camera', scanClose: 'Close the camera',
     scanErrors: {
@@ -648,6 +685,19 @@ export const strings = {
     close: 'Close'
   },
 
+  /** Images on their way to an agent, files given with an answer, and the full-screen viewer. */
+  media: {
+    sourceTooLarge: '{name} weighs {size}: Boite shrinks images of {max} at most, so it was left out.',
+    viewer: 'Media viewer',
+    previous: 'Previous',
+    next: 'Next',
+    position: '{index} of {total}',
+    share: 'Share or save',
+    shareFailed: '{name} could not be shared.',
+    shareReady: '{name} is ready: tap Share again.',
+    answerFiles: 'Files given: {names}',
+    answerFileCount: '{count} files'
+  },
   /** The composer's slash menu: the agent's own commands over Boite's. */
   btw: {
     fork: 'Fork', forking: 'Forking',
@@ -723,7 +773,8 @@ export const strings = {
     done: 'Done',
     failed: 'Failed',
     openThread: 'Open thread',
-    needsYou: 'Needs your answer'
+    needsYou: 'Needs your answer',
+    connected: 'Notifications are connected'
   },
 
   permissionMode: {
@@ -959,12 +1010,13 @@ export const strings = {
     questionHeading: 'Asks you',
     questionAsyncHeading: 'Asks you, without waiting',
     questionAsyncHint: 'The agent keeps working. Without an answer it goes on with a default.',
-    questionTextLabel: 'Your own answer',
-    questionTextPlaceholder: 'Type an answer',
     questionAnswer: 'Answer',
     questionAnswered: 'Answered',
     questionCancelled: 'No longer waiting for an answer',
     questionSkip: 'Skip',
+    /** The composer is the free field of the question; the card points there. */
+    questionReplying: 'Write your answer in the message box below, with any photos or files.',
+    questionWrite: 'Answer in writing',
     /** The timeline's line for a question waiting in the dock above the composer. */
     questionDocked: 'Waiting for your answer above the message box',
     questionOpen: 'Answer it',
@@ -1109,6 +1161,12 @@ export const strings = {
     editingQueued: 'Send or remove the queued messages before replacing a sent message.',
     filesUnavailable: 'The messages were rewound, but this edit has no complete file backup. The code could not be restored.',
     editingCancel: 'Stop editing (Esc)',
+    /** A question waits for a written answer: the box writes it, the row above names the question. */
+    replying: 'Answering: {question}',
+    replyPlaceholder: 'Your answer…',
+    replySend: 'Send the answer',
+    replyIgnore: 'Ignore',
+    replyIgnoreHint: 'Leave the question waiting and write an ordinary message',
     switchTitle: 'Switch a {tokens} token thread to {provider}?',
     switchBody: '{provider} starts a new session and receives excerpts of the opening and of the most recent exchanges, about 20k tokens. The rest is lost to it. Compacting first changes nothing.',
     switchConfirm: 'Switch',
@@ -1134,6 +1192,15 @@ export const strings = {
     queueNotAccepted: 'This turn did not accept the queued input. It remains queued and will be sent when the turn ends.',
     sendNowHint: 'Sends pending messages to the running agent without stopping it. Enter in the empty composer does the same.',
     retryQueuedHint: 'Sends all pending messages together again. Enter in the empty composer does the same.',
+    /** The outbox: messages written while the machine was away, kept on this device. */
+    outboxKept: 'Kept on this device and sent in order, once each',
+    outboxWaiting: 'Waiting for {machine}',
+    outboxNext: 'Goes out when the thread is free',
+    outboxSending: 'Sending…',
+    outboxFailed: 'Not sent: {reason}',
+    outboxRetry: 'Send again',
+    outboxSettings: 'The model and effort it was written with could not be set again.',
+    removeQueued: 'Remove this pending message',
     picker: 'Provider and model',
     models: 'Models',
     searchModels: 'Search models',
@@ -1210,7 +1277,7 @@ export const strings = {
     file: 'File',
     tasks: 'Tasks',
     tasksHint: "The goal, the agent's tasks and the project's todos",
-    desktopOnly: 'Only in the desktop app',
+    browserAbsent: 'Opens when an agent uses the browser',
     ownerOnly: "Only in the owner's app",
     launcher: 'Open a surface in this panel',
     untitled: 'Browser'
@@ -1231,6 +1298,11 @@ export const strings = {
     pick: 'Pick a file to see its diff',
     loading: 'Reading the working tree',
     renamedFrom: 'Renamed from {path}',
+    /** A narrow panel shows the list or one diff: the way back, and the steps between files. */
+    backToList: 'All changes',
+    previousFile: 'Previous file',
+    nextFile: 'Next file',
+    position: '{index} of {count}',
     status: {
       added: 'Added',
       modified: 'Modified',
@@ -1306,18 +1378,12 @@ export const strings = {
     binary: 'Nothing here reads as text.'
   },
 
-  pullRequests: {
-    title: 'Conversation pull requests', hint: 'Linked PRs are shown in dependency order. Linking does not change anything on GitHub.',
-    refresh: 'Refresh', empty: 'No pull requests linked yet.', url: 'Pull request URL', link: 'Link PR', unlink: 'Unlink PR #{number}',
-    dependsOn: 'Depends on #{number}', stale: 'Could not refresh. Showing the last known state.',
-    OPEN: 'Open', CLOSED: 'Closed', MERGED: 'Merged', draft: 'Draft',
-  },
   browserTools: {
     title: 'Browser testing tools', desktop: 'Desktop', laptop: 'Laptop', portrait: 'Portrait', landscape: 'Landscape',
     system: 'Follow system appearance', light: 'Light page', dark: 'Dark page', diagnostics: 'Page diagnostics and actions',
     startRecording: 'Record this browser tab', stopRecording: 'Stop recording', reviewRecording: 'Recorded video',
     refresh: 'Refresh', clear: 'Clear', pageEvents: 'Page events', actions: 'Actions', noEvents: 'No page events captured.', noActions: 'No actions recorded yet.',
-    omitted: '{count} older or oversized events omitted.', recorded: '{seconds} seconds · {mb} MB · silent WebM',
+    omitted: '{count} older or oversized events omitted.', recorded: '{seconds} seconds · {mb} MB · silent {format}',
     recordingError: 'Recording stopped after an error.', recordingLimit: 'Recording stopped at the duration or size limit.',
     download: 'Download video', discard: 'Discard video',
   },
@@ -1339,6 +1405,30 @@ export const strings = {
     openExternal: 'Open in the system browser',
     slotEmpty: 'The page opens here once the shell provides the webview',
     slotLinux: 'The built-in browser is not available in the Linux app yet. Open the page in your own browser.'
+  },
+
+  browserProfiles: {
+    heading: 'Browser profiles',
+    hint: 'Each profile keeps its own cookies, storage and sign-ins in the built-in browser, and keeps them after a restart. A private tab keeps nothing once the last private tab closes.',
+    default: 'Default',
+    private: 'Private',
+    profile: 'Browser profile: {name}',
+    newTabIn: 'New tab in {name}',
+    newPrivateTab: 'New private tab',
+    manage: 'Manage browser profiles',
+    isDefault: 'Opens new tabs',
+    makeDefault: 'Open new tabs here',
+    rename: 'Rename',
+    renameLabel: 'New name for {name}',
+    delete: 'Delete',
+    addLabel: 'New profile name',
+    addPlaceholder: 'Work, Personal…',
+    add: 'Add profile',
+    invalidName: 'Choose a name of 1 to 40 characters that no other profile uses, other than Default or Private.',
+    tooMany: 'At most {count} browser profiles.',
+    deleteTitle: 'Delete the profile {name}?',
+    deleteBody: 'Its open tabs close, and its cookies, storage and sign-ins are erased from this computer. This cannot be undone.',
+    deleteFailed: 'The profile was removed, but its data could not be erased: {reason}'
   },
 
   terminal: {
@@ -1791,7 +1881,14 @@ export const strings = {
       ownerHint:
         'For another computer of yours: its key drives this core as you do. Leave it off for a phone.',
       ownerTag: 'full control',
-      pasteOwner: 'Paste it in Settings, General, on the other computer.'
+      pasteOwner: 'Paste it in Settings, General, on the other computer.',
+      code: 'Or type this code in the installed app',
+      codeExpires: 'The code works once, until {time}.',
+      ownerQr: 'QR code for a phone',
+      ownerQrTitle: 'Give a phone full control?',
+      ownerQrBody: 'Whoever scans this QR code or types its code in the next 5 minutes drives this core as you do: agents, files, accounts and settings. Show it only to your own phone, and revoke the device below if in doubt.',
+      ownerQrConfirm: 'Show the code',
+      ownerScan: 'Scan it from the Boite app on your phone, or type the code there. It works once, within 5 minutes.'
     }
   },
 
@@ -1840,8 +1937,7 @@ export const strings = {
   },
 
   experiments: {
-    remoteBrowser: { title: 'Live browser on other devices', hint: 'On the desktop, share the open conversation’s browser with paired devices. On a phone, watch and control that page. Enable this experiment on both devices and Agent browser control on the desktop.' },
-    prReview: { title: 'Review pull requests', hint: 'Read linked GitHub pull requests, file diffs, comments and check results inside Boite, including on phones.' },
+    remoteBrowser: { title: 'Live browser on other devices', hint: 'On the desktop, let paired devices watch and drive a conversation’s browser tab, such as the one an agent opened. It appears by itself in that conversation on the phone. Agents do not get browser control from it.' },
     recordingIndicators: { title: 'Show actions in recordings', hint: 'Add click markers and navigation keys to browser recordings. Typed text and password input are never shown as key labels.' },
     openChatLinks: { title: 'Open chat links in their apps', hint: 'On this desktop, clicking a local file or folder opens its default app, including shortcuts and files outside the project. Only links from this computer are opened.' },
     whip: {

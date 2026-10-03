@@ -229,6 +229,7 @@ export class FakeClient implements ObservableClient {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is for the owner only` });
     }
     if (bus.principal === 'session' && method === 'agents.message.send' && (params as RpcParams<'agents.message.send'>).threadId !== undefined) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agents.message.send: paired devices must omit threadId and speak as the user' });
+    if (bus.principal === 'session' && method === 'git.diff' && ![undefined, '', 'HEAD'].includes((params as RpcParams<'git.diff'>).ref)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'git.diff: paired devices compare the working tree with HEAD only' });
     const result = await bus.hold(this.#dispatch(method, params)) as RpcResult<M>;
     // The real client writes its set from the answer, never from the request.
     if (method === 'threads.subscribe') {

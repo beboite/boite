@@ -106,7 +106,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 588,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,020,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,100,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,376,000 |
 
@@ -138,6 +138,11 @@ limit retains 36,266 bytes above that Windows measurement. Alignment changes
 leave the entry and core limits unchanged.
 After integrating main at `8b72af5b` and aligning the new proxy controls, the
 same Linux setup measured 3,992,019 UI bytes, within the existing limit.
+On 2026-10-03, phone remote coding merged with main at `c3e9c37` measured
+4,068,675 UI bytes on Windows, and 4,069,242 with its review fixes: about
+107 KB above the combined build for the phone composer, viewer, browser sharing
+and settings. The 4,100,000-byte limit keeps 30,758 bytes above it; the entry
+and core limits are unchanged.
 Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
 

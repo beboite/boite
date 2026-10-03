@@ -103,6 +103,28 @@ card mints one, `boite-core pair --owner` mints one on a machine with no window
 ([server.md](server.md)), and the Connection card of the other computer takes it
 pasted. A role anything but those two is refused by name.
 
+### Pairing codes, and an owner QR code
+
+A device link also comes with a code, `XXXX-XXXX` in Crockford base32, shown
+under the QR code. **Type a pairing code** on the installed app's pairing
+screen takes it, in any case, with or without the dash, `O` and `I`/`L` read as
+`0` and `1`. The code names the same one-time grant: the app sends it in `hello`
+as the grant, on the origin that served the page, with the same nonce retry.
+The installed iPhone app needs it because the Camera app hands a link to
+Safari, whose storage the home-screen app does not share.
+
+A code is good for five minutes at most, and once: using the link spends it,
+and a code typed after the link was used is refused like a wrong one, by name.
+Eight letters are 40 bits; ten wrong codes in a row drop every live code (the
+links keep working, a new link brings a new code), so guessing one is out of
+reach. The refusal never says whether a code existed.
+
+An owner link is pasted, not drawn, because a QR code on screen is a camera
+away from any phone in the room. **QR code for a phone** on an owner link draws one
+after a confirmation on the computer: that grant is minted `short`, lives five
+minutes instead of ten, is still single use, and carries a code too. Expiry,
+revocation and the nonce rule are unchanged for every grant.
+
 Session keys are stored hashed in the journal, so pairings survive restart
 without storing the recoverable key there. `sessions.list` shows
 every paired device with the client it said it was, its role and when it was last seen;
@@ -117,6 +139,21 @@ They cover conversation lists, prompts, agent cards and permitted read-only
 settings. Methods absent from the list remain owner-only, including newly
 added methods. A refusal names the method, such as
 `projects.add is for the owner only`.
+
+The Changes and Files panels are read-only on a paired device: `git.status`,
+`git.diff`, `files.list` and `files.read`, never `files.write`, Tasks or the
+trace. The core runs git itself, refuses a device diff against any revision but
+`HEAD`, and before every read checks that the thread's real working directory is
+inside its project or the core's worktree folder for it; each path is then held
+inside that directory, links included. Inside it a device still cannot read
+boite's data folder, folders such as `.git`, `.ssh` and `.aws`, or files that
+hold credentials (`.env`, `.envrc`, `.netrc`, `.pgpass`, Terraform variables and
+state, private keys, Java keystores; `workdir.ts` has the list). No list of
+names covers everything: a project that is a home folder also exposes `.config`,
+where many tools keep their tokens, so make a narrower folder the project when a
+phone is paired. At a phone's width the Changes panel shows
+the list, then one diff with Back and previous/next file; a file reads as wrapped,
+numbered lines with no editor.
 
 An owner holds the core token from `core.json` or an owner-paired session key.
 Only owners can choose arbitrary host paths, administer providers or change
@@ -217,6 +254,21 @@ A browser under the floor fails to parse the app, so `main.ts` never runs. An
 inline script in `index.html` notices on `load` and writes one sentence in the
 page instead: this browser cannot start Boite, and the versions it needs.
 
+## Pictures and videos
+
+Screenshots and photos shrink before they leave the phone: 2048 px on the long
+edge, JPEG or PNG, HEIC converted to JPEG by Safari. A turn takes twenty
+files ([development.md](development.md#file-attachments)). While a question
+waits, the composer's paperclip attaches them to the answer.
+
+A picture or a video in the thread opens full screen (`ImageViewer.svelte`).
+Pinch or double-tap to zoom, drag a zoomed picture to pan, swipe sideways to
+the thread's other pictures and videos, and drag down to close. Share opens
+the system sheet with the file itself, so Save Image or Save to Files keeps it;
+where the browser has no share sheet, the file downloads. A remote file is
+fetched on the first tap, which may come too late for iOS to open the sheet:
+the viewer then says the file is ready, and the next tap shares it.
+
 ## HTTPS and installation
 
 HTTP on a LAN opens the chat, but service workers and push need a secure origin.
@@ -230,6 +282,36 @@ boite.example.com {
     reverse_proxy 127.0.0.1:7337
 }
 ```
+
+### Through Tailscale
+
+On a tailnet the phone is already on, Settings, Machines, Phone app has
+**HTTPS through Tailscale**. It reads the `tailscale` CLI (found on `PATH`, or
+where the installers put it on Windows, macOS and Linux; `BOITE_TAILSCALE_CLI`
+names another) and says which of these it found, with the way out of each:
+
+| State | Meaning | Offered |
+|---|---|---|
+| `missing` | no CLI | the download page |
+| `stopped` | the daemon does not answer or is not running | connect, then **Check again** |
+| `needs-login` | signed out | Tailscale's sign-in page |
+| `https-disabled` | MagicDNS or HTTPS certificates off for the tailnet | the admin DNS page |
+| `off` | ready, nothing served on 443 | **Enable HTTPS via Tailscale** |
+| `on` | 443 proxies to this core | **Pair a phone**, **Disable** |
+| `conflict` | 443 serves something else | **Replace…** after a confirmation |
+| `error` | the CLI refused (operator rights) or timed out | **Check again** |
+
+Enabling runs `tailscale serve --bg --https=443 http://127.0.0.1:<port>`, sets
+the public URL to `https://<machine>.<tailnet>.ts.net` (the origin gate already
+admits it) and mints a phone link through it. A tailnet that never allowed Serve
+answers with a consent page, offered as **Allow Serve**. Disabling runs
+`tailscale serve --https=443 off` and clears the public URL if it is still the
+tailnet one. Another target already on 443 is never replaced without the
+owner's confirmation. The CLI's own output never reaches a client, since a
+failing command can echo an auth key: failures are reduced to a label. The
+three methods, `tailscale.status`, `tailscale.enable` and `tailscale.disable`,
+are owner only. A machine with no window has `boite-core tailscale [status|on
+[--replace]|off]` ([server.md](server.md)).
 
 Replace the example hostname with a domain pointing at the proxy. Caddy needs
 access to the ports required for its certificate challenge and public HTTPS.
@@ -251,11 +333,13 @@ or install the nightly APK ([android.md](android.md)).
 Open the installed icon and pair from inside Boite. On iPhone, installation
 does not copy the browser's localStorage, where Boite keeps its session key.
 The installed app therefore needs its own pairing even if Chrome or Safari
-was already connected. Its welcome screen offers **Scan a QR code** and
-**Paste a pairing link**. Create a fresh code on the computer and scan it with
-that button; using the iPhone Camera app opens the browser instead.
+was already connected. Its welcome screen offers **Scan a QR code**, **Type a
+pairing code** and **Paste a pairing link**. Create a fresh link on the computer
+and scan it with that button, or type the code under it; using the iPhone
+Camera app opens the browser instead, which the installed app's screen says.
 
-A missing or revoked key opens that recovery screen. A network outage offers
+A missing or revoked key opens that recovery screen, narrow or wide (an iPhone
+on its side), instead of a stale page. A network outage offers
 reconnection without discarding the saved key. The pairing form stays open
 while a replacement key is being exchanged, and a rejected link can be replaced
 without leaving the screen. After pairing, the saved session is reused on
@@ -334,34 +418,125 @@ remembered machines to connect. The worker only opens
 URLs on its own origin. Enable notifications from the machine's own page, not
 while viewing it through another machine's UI.
 
-A connected page retains its local notification path even when push is enabled.
-For its own core, it uses the service worker and the same per-thread notification
-tag as push, so the latest notification replaces the previous one. A saved push
-subscription is not treated as proof that a notification reached the phone.
+An event makes one notification on a device. iOS shows every push and does not
+let a tag replace a notification the page shows, so a page whose own core
+pushes to it stays quiet: `pushCovers` in `lib/notify.ts` requires the page's
+push switch, the granted permission and a live browser subscription. A device
+without push, and a page's notices about another machine, keep the local
+notification, through the service worker and the per-thread tag a push would use.
+
+No device gets a push about news someone saw on screen. A page reports its
+conversation `attentive` in `threads.focus` while it is visible, in front and
+used in the last 45 seconds (`lib/attention.ts`): the phone app in the
+foreground on that thread, or the desktop window in front with it open. The
+desktop shell answers what a webview cannot (`user_presence`): whether its
+window is the one in front, and on Windows how long the whole session has gone
+without a key or a mouse move (`GetLastInputInfo`), so a window left in front
+of an empty chair or a locked screen stops counting. A browser counts input on
+the page. The page repeats its report every 10 seconds and the core believes it
+for 25, so a phone that iOS suspends before it can say so (`pagehide`,
+`freeze`) stops counting within that time.
+
+The core holds back a push about an attended thread, finished turns, questions
+and permission requests alike, rather than dropping it (`PushStore.notify`).
+Each report carries `idleMs`, how long ago the page was last used while
+attentive; use after the news arrived means it was seen, and the held push is
+dropped. The page reports its first use after a quiet spell at once, at most
+every 5 seconds. Otherwise the push goes when nobody watches the thread any
+more: the page looks away, goes 45 seconds without use, disconnects, or lets
+its lease run out. Someone who sends from the PC and walks away gets the reply
+on the phone at most 45 seconds after their last input. A locked phone, an app
+in the background, a window behind another one, a PC left alone or another
+thread on screen never hold anything back. The filter lives in the core: iOS
+may revoke the subscription of a service worker that receives a push and shows
+nothing.
+The title is the thread's title. A finished turn's body is the start of the
+agent's last message, markdown removed, on one line and cut at a word near 140
+characters; a question or a permission request shows its text, else the tool
+and its command or path (`notification-text.ts` in the contracts, shared by
+the core's push and the page's notice). When there is no such text, the core
+sends a generic English body with a `label` (`done`, `failed`, `needsYou`,
+`connected`). The language belongs to the page, so the page writes the words
+for those labels in the language it speaks to the worker's `boite-notify`
+cache, again on each language change; the worker shows them in place of the
+English body, which stays the fallback until the page has run once.
 
 Disabling removes the server subscription and unsubscribes the browser.
 Revocation deletes the subscription with the pairing. Push services returning
 404 or 410 retire the destination. Other delivery failures leave it subscribed
 and write a generic diagnostic without the provider's credential-bearing body.
 
-## Experimental desktop browser control
+### The icon badge
 
-Enable **Remote browser** and **Agent browser control** in Settings, Experiments
-on the Windows desktop to register it as the conversation's browser host.
-Open the same conversation on both devices and leave its browser tab active
-on the desktop. On the phone, choose **Browser** in the conversation's header
-or panel, then **Enable on this device** if prompted. This experiment is saved
-separately on each device. Opening its setup screen does not start sharing;
-frame requests start after activation. If the desktop is not sharing the
-conversation, the viewer explains what to open there.
-The dialog shows that desktop tab. Tap to click, swipe to scroll, or tap a page
-field and send text from the input below the preview. Navigation keys and
-scroll buttons remain available without a hardware keyboard.
+The installed app's icon carries the count the window title shows: the threads
+of every connected machine waiting on an answer or finished unread, archived
+ones aside (`lib/badge.ts`, through `navigator.setAppBadge`). A push carries
+the core's own count in `badge`, which the worker sets on the icon as it shows
+the notification; zero clears it, and the test notification leaves it alone.
+iOS (16.4 or later, installed app, notifications allowed) only runs the worker
+for a notification it shows, so with the app closed the badge moves only when
+one arrives.
 
-The phone requests JPEG frames while the dialog is open and visible. Pause,
-closing the dialog, switching off the experiment or hiding the app stops those
-requests. This is a periodically refreshed preview, not a video stream with
-audio. The desktop must stay awake, with Boite and that conversation open.
+### iOS push, checked
+
+The path is: the installed app's Enable notifications asks the permission from
+the tap, subscribes with the core's VAPID key, and stores the subscription with
+`push.subscribe` against its pairing. A notification's payload is
+`{title, body, threadId, tag, label, badge}` (`PushPayload` in the contracts); tapping it focuses an open window and
+posts it the thread, or, if the page refuses focus or none is open, opens
+`/?thread=<id>` on the worker's own origin.
+
+### One app, several machines
+
+An installed web app belongs to one origin, and a subscription is bound to the
+VAPID key of the core that served it. So one installed app receives the
+notifications of the machine it was installed from, not of the other machines
+it shows through that machine's UI; the Phone app section says so once
+subscribed. Today each machine whose notifications matter needs its own
+installed app, from its own HTTPS address (each one has its own icon and
+pairing). Doing it with one app would need the installing core to relay: the
+other cores send their events to it over coordination, and it pushes them
+with its own key.
+
+## The desktop browser on a phone
+
+Enable **Live browser on other devices** in Settings, Experiments on the
+Windows desktop. That consent alone shares the browser tabs of the
+conversation the desktop shows with paired devices; it does not give agents
+control, which stays behind **Agent browser control**. The phone needs no
+setting and has nothing to open: like the desktop panel, it shows a browser
+when the conversation has one. When an agent opens a tab in the conversation
+on the desktop (`browser open`), the desktop tells the core
+(`browser.host` with `live`), the core tells the conversation's subscribers
+(`browser.remoteChanged`) and the phone opens its panel on that tab. A phone
+that opens the conversation later asks once (`browser.remoteStatus`). When the
+last browser tab of the conversation closes on the desktop, the view leaves
+the phone. A view the user closed stays closed for that tab; the panel's
+**Browser** card brings it back while the tab exists, and is disabled
+otherwise. The phone cannot ask the desktop to open a browser or a
+conversation.
+
+The view shows the desktop's active browser tab under an address bar with
+back, forward and reload. Tap to click and drag to scroll, as on the phone
+itself. Tap a page field and type in the input below the preview: Return sends
+the text and then Enter, and Backspace in the empty input erases on the page.
+Navigation keys and scroll buttons remain available without a hardware
+keyboard. When the desktop shows another surface of its panel, or another
+conversation, the view waits for it.
+
+The phone requests JPEG frames while the view is shown and the app visible,
+one at a time: the next as soon as the last has arrived, at most four a second
+while the page moves, slower on a still page or a slow link, sized to the
+phone's screen (at most twice its CSS width) and lighter when frames take long
+to arrive. Each frame is decoded before it replaces the one shown. The desktop captures its tab as shown and
+shrinks the image itself: asking Chromium for a smaller capture redraws the
+live tab at that size and made it flash on the PC each time the phone's
+keyboard shrank the preview. A lost desktop is retried with a growing pause up
+to eight seconds. Pause, closing the view or hiding the app stops those
+requests; returning to the app, regaining the network or reconnecting resumes
+them at once. This is a periodically refreshed preview, not a video stream
+with audio. The desktop must stay awake with Boite open; a minimized window may
+stop producing frames.
 
 **Display** offers phone, tablet and PC resolutions, custom dimensions from
 240 to 3840 pixels, rotation and a fit-to-screen action. Resolution changes the
@@ -370,26 +545,41 @@ Preview zoom stays on the viewing device. At 100, 150 or 200 percent, drag to
 pan the enlarged image and use the arrow buttons to scroll the web page.
 Changing resolution waits for a new frame before accepting more input.
 
-The core permits the paired device's `browser.remoteFrame` and
-`browser.remoteInput` only for a subscribed conversation whose owner desktop
-has opted in. Inputs must refer to a recent frame issued to that connection.
-The desktop refuses an input after the page navigates or its viewport changes.
-Turning off desktop sharing invalidates frames, including captures in flight.
-The phone cannot use `browser.command`, execute JavaScript or register itself
-as the desktop host. It can interact with the visible web page, so pair only
-devices you intend to give that control.
+The core permits the paired device's `browser.remoteStatus`,
+`browser.remoteFrame` and `browser.remoteInput` only for a subscribed
+conversation, and frames only from an owner desktop that has opted in. The
+status says only whether a shared tab exists, never its address. Inputs
+must refer to a recent frame issued to that connection. The desktop refuses a
+tap or key after the page navigates or its viewport changes; the address bar
+accepts only http and https addresses. Turning off desktop sharing invalidates
+frames, including captures in flight. The phone cannot use `browser.command`,
+execute JavaScript or register itself as the desktop host. It can interact
+with the visible web page, including sites signed in on the desktop, so pair
+only devices you intend to give that control. For that reason the experiment
+stays off by default. The desktop that hosts the browser shows its real panel
+and never a remote view of itself.
 
 On iPhone, use the HTTPS web app in Safari or install it on the Home Screen.
-The preview uses JPEG and ordinary touch controls. Layout checks at iPhone
-width run in Chromium; they do not establish behavior on a physical iPhone or
-Safari, including keyboard, backgrounding and network handover.
+Taps map through the letterboxed preview, its zoom and rotation, and the phone's
+pixel ratio, in page coordinates. Unit tests cover that arithmetic, the polling,
+the reconnection and the view appearing and leaving with the tab; layout
+checks at iPhone width run in Chromium. They do not establish behavior on a
+physical iPhone or Safari, including keyboard, backgrounding and network
+handover.
+
+Browser recordings are H.264 MP4 when the desktop engine encodes it (WebView2
+does), which every iPhone plays, else WebM. A video the device reports it
+cannot play, such as WebM on an older iPhone, shows a download button instead
+of a black frame; a video that fails while loading also offers it.
 
 ## The limits
 
 - What a phone gets with the core asleep is the app shell painting from disk, an
   empty chat, and "Connecting" in the sidebar footer until the socket comes
-  back on its own. No queued messages, no offline history: the journal is on the
-  core.
+  back on its own. No offline history: the journal is on the core. Prompts
+  written in a thread that was open before the connection went wait in the
+  device's outbox (`docs/machines.md`), and go out once it is back, even after
+  the PWA was closed in between; a new thread still needs the core.
 - Pairing is a link somebody carries over, by hand or by the QR code beside it,
   and it has to be opened within ten minutes. There is no discovery on the
   network.

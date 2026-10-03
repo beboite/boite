@@ -285,4 +285,34 @@ describe('claude driver: questions and background work', () => {
     expect(parts.filter((part) => part.type === 'question').map((part) => part.type === 'question' ? part.answer?.optionIds : null)).toEqual([['2'], ['1', '3']]);
   });
 
+  test('a screenshot given with an AskUserQuestion answer reaches Claude as a path it can Read', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const input = { questions: [{ question: 'Which layout?', header: 'Layout', multiSelect: false, options: [{ label: 'Grid' }, { label: 'List' }] }] };
+    const answers: (PermissionResult | null)[] = [];
+    scripted((fake, options) => {
+      const ask = options.canUseTool!;
+      fake.emit(init('sess-askf'));
+      void (async () => {
+        answers.push(await ask('AskUserQuestion', input, { signal: new AbortController().signal, toolUseID: 'toolu_f', requestId: 'req_f' }));
+        fake.emit(success('sess-askf'));
+        fake.end();
+      })();
+    });
+    const asked = client.next('question.asked', (q) => q.threadId === threadId, 10000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'lay it out' });
+    const question = await asked;
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    await client.call('questions.answer', {
+      threadId, questionId: question.id, optionIds: ['1'], text: 'like this',
+      attachments: [{ kind: 'image', mimeType: 'image/png', data: png, name: 'mockup.png' }],
+    });
+    expect((await finished).status).toBe('done');
+    const given = (answers[0] as unknown as { updatedInput: { answers: Record<string, string> } }).updatedInput.answers['Which layout?']!;
+    expect(given.startsWith('Grid, like this\n\nAttached files available on this machine')).toBe(true);
+    expect(given).toContain('"name":"mockup.png"');
+    expect(given).toContain('"mimeType":"image/png"');
+  });
+
 });

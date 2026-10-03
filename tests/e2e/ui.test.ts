@@ -342,7 +342,7 @@ test(
 );
 
 test(
-  'a question is asked inline, answered from the card, and the answer comes back',
+  'a question is asked inline, answered from the card and the composer, and the answer comes back',
   async () => {
     await page.type(testid('composer-input'), 'now question please');
     await clickWhenEnabled(testid('composer-send'));
@@ -354,7 +354,9 @@ test(
     ).toBe(true);
 
     await page.click(`${testid('question-option')}[data-option=short]`);
-    await page.type(testid('question-text-input'), 'one line please');
+    // The composer is the question's free field: Enter there sends the pick with the text.
+    await page.waitFor(`document.querySelector('${testid('composer-reply')}')`, 30_000);
+    await page.type(testid('composer-input'), 'one line please');
     await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
 
@@ -819,9 +821,12 @@ test(
     await page.waitFor('navigator.serviceWorker.controller !== null', RECONNECT_TIMEOUT_MS);
     await page.evaluate<null>('navigator.serviceWorker.ready.then(() => null)');
     const cacheNames = await page.evaluate<string[]>('caches.keys()');
-    expect(cacheNames).toHaveLength(1);
-    expect(cacheNames[0]!.startsWith(UI_CACHE_PREFIX)).toBe(true);
-    const uiCache = cacheNames[0]!;
+    // Beside the shell, the words the page leaves the worker for its push notices.
+    expect(cacheNames).toContain('boite-notify');
+    const uiCaches = cacheNames.filter((name) => name !== 'boite-notify');
+    expect(uiCaches).toHaveLength(1);
+    expect(uiCaches[0]!.startsWith(UI_CACHE_PREFIX)).toBe(true);
+    const uiCache = uiCaches[0]!;
 
     // The hashed files of the first load were fetched before the worker took
     // control, so they only reach the cache on the load after it: which is
