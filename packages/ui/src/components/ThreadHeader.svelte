@@ -14,7 +14,6 @@
   import type { Store } from '../lib/store.svelte';
   import Menu from './Menu.svelte';
   import CoordinationDialog from './CoordinationDialog.svelte';
-  import ThreadPullRequests from './ThreadPullRequests.svelte';
   import RemoteBrowser from './RemoteBrowser.svelte';
   let { store }: { store: Store } = $props();
   let thread = $derived(store.openThread);
@@ -168,7 +167,7 @@
       {/if}
 
       <span class="spacer"></span>
-      {#if thread}{#key store.threadKey(thread.id)}<RemoteBrowser {store} threadId={thread.id} /><ThreadPullRequests {store} threadId={thread.id} />{/key}{/if}
+      {#if thread}{#key store.threadKey(thread.id)}<RemoteBrowser {store} threadId={thread.id} />{/key}{/if}
 
       {#if thread?.parentThreadId}
         <button type="button" class="chip parent" data-testid="delegation-back-parent" onclick={() => void store.open(thread!.parentThreadId!)}>

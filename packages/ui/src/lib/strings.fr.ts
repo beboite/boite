@@ -1198,12 +1198,6 @@ export const fr: Translation = {
     binary: 'Rien ici ne se lit comme du texte.'
   },
 
-  pullRequests: {
-    title: 'PR de la conversation', hint: 'Les PR liées sont affichées dans leur ordre de dépendance. Le rattachement ne modifie rien sur GitHub.',
-    refresh: 'Actualiser', empty: 'Aucune PR rattachée pour le moment.', url: 'Adresse de la PR', link: 'Rattacher', unlink: 'Détacher la PR n°{number}',
-    dependsOn: 'Dépend de la PR n°{number}', stale: 'Actualisation impossible. Dernier état connu affiché.',
-    OPEN: 'Ouverte', CLOSED: 'Fermée', MERGED: 'Fusionnée', draft: 'Brouillon',
-  },
   browserTools: {
     title: 'Outils de test du navigateur', desktop: 'Ordinateur', laptop: 'Portable', portrait: 'Portrait', landscape: 'Paysage',
     system: 'Apparence du système', light: 'Page claire', dark: 'Page sombre', diagnostics: 'Diagnostics et actions de la page',
