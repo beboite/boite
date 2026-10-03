@@ -85,12 +85,19 @@ export class Store {
   readonly #ctx = new StoreContext(this);
   machineId = '';
   visible = true;
-  #error = $state<string | null>(null);
+  #error = $state<{ message: string; severity: 'minor' | 'major' } | null>(null);
   errorThreadId = $state<string | null>(null);
 
-  get error(): string | null { return this.#error; }
+  get error(): string | null { return this.#error?.message ?? null; }
+  get errorSeverity(): 'minor' | 'major' { return this.#error?.severity ?? 'major'; }
   set error(value: string | null) {
-    this.#error = value;
+    this.#error = value === null ? null : { message: value, severity: 'major' };
+    this.errorThreadId = null;
+  }
+
+  /** Only explicitly minor action failures expire; unknown failures remain visible. */
+  reportError(error: unknown, severity: 'minor' | 'major' = 'major'): void {
+    this.#error = { message: this.#ctx.reason(error), severity };
     this.errorThreadId = null;
   }
 

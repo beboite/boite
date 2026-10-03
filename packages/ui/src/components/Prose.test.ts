@@ -32,11 +32,12 @@ test('a native open failure is shown and never falls back to downloading', async
   writeExperiments(['chat-artifacts']);
   const invoke = vi.fn(async () => { throw 'game.exe: file does not exist'; });
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
-  const store = { owner: true, localCore: true, threads: [{ id: 'game', cwd: 'C:/project' }], error: null } as unknown as Store;
+  const reportError = vi.fn();
+  const store = { owner: true, localCore: true, threads: [{ id: 'game', cwd: 'C:/project' }], reportError } as unknown as Store;
   running = mount(Prose, { target: document.body, props: { text: '[Launch game](game.exe)', store, threadId: 'game' } });
   flushSync();
   query<HTMLAnchorElement>('a[data-file-path]').click();
-  await vi.waitFor(() => expect(store.error).toBe('game.exe: file does not exist'));
+  await vi.waitFor(() => expect(reportError).toHaveBeenCalledWith('game.exe: file does not exist', 'minor'));
   expect(document.querySelector('[data-testid=artifact-download]')).toBeNull();
 });
 

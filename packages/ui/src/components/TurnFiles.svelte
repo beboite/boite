@@ -47,7 +47,7 @@
     try {
       await revealFile(file.absolute);
     } catch (error) {
-      store.error = fill(strings.chat.revealFailed, { reason: error instanceof Error ? error.message : String(error) });
+      store.reportError(fill(strings.chat.revealFailed, { reason: error instanceof Error ? error.message : String(error) }), 'minor');
     }
   }
 </script>

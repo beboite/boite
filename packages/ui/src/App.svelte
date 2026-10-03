@@ -262,7 +262,8 @@
     : null;
 
   $effect(() => {
-    const error = store.error;
+    const owner = store;
+    const error = owner.error;
     // Missing/revoked phone credentials have a persistent recovery screen.
     // Keep other errors (including a failed pairing attempt) visible.
     const pairingNotice = !inShell && (narrow.current || wideRecovery) && store.pairingRequired
@@ -275,6 +276,11 @@
     toastThreadId = store.errorThreadId;
     toastStore = store;
     toast.show();
+    if (owner.errorSeverity !== 'minor' || owner.errorThreadId) return;
+    const timer = setTimeout(() => {
+      if (owner.error === error && owner.errorSeverity === 'minor') owner.error = null;
+    }, 5_000);
+    return () => clearTimeout(timer);
   });
 
   $effect(() => {
