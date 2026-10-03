@@ -605,6 +605,18 @@ export const fr: Translation = {
     close: 'Fermer'
   },
 
+  media: {
+    sourceTooLarge: '{name} pèse {size} : Boite réduit les images de {max} au plus, elle a donc été laissée de côté.',
+    viewer: 'Visionneuse',
+    previous: 'Précédente',
+    next: 'Suivante',
+    position: '{index} sur {total}',
+    share: 'Partager ou enregistrer',
+    shareFailed: 'Impossible de partager {name}.',
+    answerAttach: 'Joindre une photo ou un fichier',
+    answerFiles: 'Fichiers joints : {names}',
+    answerFileCount: '{count} fichiers'
+  },
   btw: {
     fork: 'Fork', forking: 'Création du fork',
     title: 'Question de côté', description: "Poser une question de côté sans interrompre l'agent",

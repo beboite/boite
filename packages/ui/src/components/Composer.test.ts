@@ -1059,7 +1059,8 @@ test('a file read uses the original provider even if the user switches threads',
   vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader, blob: Blob) {
     release = () => original.call(this, blob);
   });
-  paste(pngFile());
+  // A GIF is read as it is, so the read is the wait (a PNG is refused before it).
+  paste(new File([Uint8Array.from(atob(PIXEL), (character) => character.charCodeAt(0))], 'loop.gif', { type: 'image/gif' }));
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace');
   release();
