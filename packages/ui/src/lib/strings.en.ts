@@ -21,7 +21,6 @@ export const strings = {
     interact: 'Tap or swipe the shared page', image: 'Live view of the desktop browser', scrollUp: 'Scroll up', scrollDown: 'Scroll down',
     text: 'Tap a page field, then type here', send: 'Send text to the page', gesture: 'Tap to click. Drag to scroll. Return sends the text and Enter; ⌫ on an empty field erases in the page.'
   },
-  prReview: { open: 'Read in Boite', back: 'Linked pull requests', files: 'Files', comments: 'Comments', checks: 'Checks', overview: 'Overview', loading: 'Loading review…', empty: 'Nothing to display.', more: 'Load more files', unavailable: 'GitHub did not provide a text diff for this file.', truncated: 'Some content was shortened. Open GitHub to read it in full.', github: 'Open on GitHub', refresh: 'Refresh review', viewed: 'Viewed', changed: 'Changed', fileCount: '{count} files loaded', readOnly: 'Reading this review does not publish comments or merge the PR.' },
   agents: {
     runtime: "Models and limits",
     brain: "Brain",
@@ -1938,7 +1937,6 @@ export const strings = {
 
   experiments: {
     remoteBrowser: { title: 'Live browser on other devices', hint: 'On the desktop, let paired devices watch and drive a conversation’s browser tab, such as the one an agent opened. It appears by itself in that conversation on the phone. Agents do not get browser control from it.' },
-    prReview: { title: 'Review pull requests', hint: 'Read linked GitHub pull requests, file diffs, comments and check results inside Boite, including on phones.' },
     recordingIndicators: { title: 'Show actions in recordings', hint: 'Add click markers and navigation keys to browser recordings. Typed text and password input are never shown as key labels.' },
     openChatLinks: { title: 'Open chat links in their apps', hint: 'On this desktop, clicking a local file or folder opens its default app, including shortcuts and files outside the project. Only links from this computer are opened.' },
     whip: {

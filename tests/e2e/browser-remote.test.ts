@@ -7,7 +7,7 @@ import { connect } from '../../packages/core/src/client.ts';
 const executable = process.env.BOITE_E2E_SHELL_EXE;
 test.skipIf(process.platform !== 'win32' || !executable)('a paired phone sees and controls the native page; recording marks omit typed and password keys', async () => {
   const site = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response(`<!doctype html><meta name="viewport" content="width=device-width"><title>Boite · direct iPhone</title><style>body{font:24px system-ui;padding:40px;background:#f4f0e8;color:#163d34}button,input{font:inherit;padding:16px;margin:12px}#result{min-height:40px}</style><h1>Depuis votre iPhone</h1><button id="action" onclick="document.querySelector('#result').textContent='Le téléphone a cliqué !'">Tester le clic</button><p id="result">En attente du téléphone</p><input id="message" placeholder="Votre message"><input id="password" type="password"><div style="height:1200px">Glissez pour défiler</div>`, { headers: { 'content-type': 'text/html;charset=utf-8' } }) });
-  const session = await startBrowserSession(executable!, 'Validation du direct et des vidéos', ['remote-browser', 'pr-review', 'recording-indicators']);
+  const session = await startBrowserSession(executable!, 'Validation du direct et des vidéos', ['remote-browser', 'recording-indicators']);
   const captures = join(import.meta.dir, '.artifacts'); mkdirSync(captures, { recursive: true });
   const { client, command, threadId, page } = session;
   const { grant } = await client.call('pairing.grant', {}), phone = await connect(session.url, '', { grant, client: { name: 'pwa', version: 'test' } });

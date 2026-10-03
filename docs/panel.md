@@ -7,7 +7,7 @@ starts with the panel closed, without changing the stored desktop layout.
 `lib/right-panel.svelte.ts` owns layout and `RightPanel.svelte` renders it;
 `lib/surface-labels.ts` defines labels and availability.
 
-## Browser tools and linked pull requests
+## Browser tools
 
 On Windows, the browser's screen menu selects phone, tablet and desktop
 viewport sizes, portrait or landscape orientation, and the page's light or
@@ -16,11 +16,6 @@ failed requests and recent automation actions. These tools remain inside
 Boite. The recording button captures the page; stopping opens a video player
 with download and discard actions. The [CLI](cli.md) exposes the same tools
 to agents, including recording and attaching the result to chat.
-
-The conversation header lists explicitly linked pull requests, their current
-states and branch dependencies. The owner can add, refresh or remove links.
-Removing a link does not close its PR. A failed GitHub refresh keeps the last
-known state and displays the error.
 
 ## Floating panel and browser overlays
 

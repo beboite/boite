@@ -32,7 +32,6 @@ export const fr: Translation = {
     interact: 'Toucher ou faire défiler la page partagée', image: 'Vue en direct du navigateur du PC', scrollUp: 'Défiler vers le haut', scrollDown: 'Défiler vers le bas',
     text: 'Touchez un champ de la page, puis écrivez ici', send: 'Envoyer le texte à la page', gesture: 'Touchez pour cliquer. Glissez pour défiler. Retour envoie le texte puis Entrée ; ⌫ sur un champ vide efface dans la page.'
   },
-  prReview: { open: 'Lire dans Boite', back: 'PR liées', files: 'Fichiers', comments: 'Commentaires', checks: 'Tests', overview: 'Aperçu', loading: 'Chargement de la revue…', empty: 'Rien à afficher.', more: 'Charger d’autres fichiers', unavailable: 'GitHub ne fournit pas de différence texte pour ce fichier.', truncated: 'Une partie du contenu a été raccourcie. Ouvrez GitHub pour la lire en entier.', github: 'Ouvrir sur GitHub', refresh: 'Actualiser la revue', viewed: 'Lu', changed: 'Modifié', fileCount: '{count} fichiers chargés', readOnly: 'La lecture ne publie aucun commentaire et ne fusionne pas la PR.' },
   agents: {
     runtime: "Modèles et limites",
     brain: "Cerveau",
@@ -1867,7 +1866,6 @@ export const fr: Translation = {
 
   experiments: {
     remoteBrowser: { title: 'Navigateur en direct à distance', hint: 'Sur le PC, laisser les appareils associés voir et piloter l’onglet navigateur d’une conversation, comme celui qu’un agent a ouvert. Il apparaît de lui-même dans cette conversation sur le téléphone. Cette option ne donne pas le contrôle du navigateur aux agents.' },
-    prReview: { title: 'Revue des pull requests', hint: 'Lire les PR GitHub liées, les modifications, les commentaires et les résultats des tests dans Boite, y compris sur téléphone.' },
     recordingIndicators: { title: 'Actions visibles dans les vidéos', hint: 'Ajouter des repères de clics et les touches de navigation aux enregistrements. Le texte saisi et les mots de passe ne sont jamais affichés comme libellés de touches.' },
     openChatLinks: { title: 'Ouvrir les liens du chat dans leurs applications', hint: 'Sur ce bureau, un clic sur un fichier ou dossier local ouvre son application, y compris les raccourcis et les fichiers hors du projet. Seuls les liens de cet ordinateur sont ouverts.' },
     whip: {
