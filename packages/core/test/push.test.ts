@@ -84,9 +84,12 @@ test('a recreated push store retains its keys and delivers completed turns to th
     expect(await restarted.status(paired.id)).toEqual({ ...before, subscribed: true });
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
-    await client.call('turns.start', { threadId, prompt: 'Notify the phone' });
+    // The body is the start of the reply, as one line of plain text cut at a word.
+    await client.call('turns.start', { threadId, prompt: '## Build\n\nThe **build** passed: see [the log](https://example.test/log) and `bun test`.\n\n' + 'More details follow here. '.repeat(10) });
     await waitFor(() => deliveries.length > 0);
-    expect(deliveries).toEqual([expect.objectContaining({ threadId, body: 'Done' })]);
+    const body = 'Build · The build passed: see the log and bun test. More details follow here. More details follow here. More details follow here. More…';
+    expect(deliveries).toEqual([expect.objectContaining({ threadId, body })]);
+    expect(deliveries[0]).not.toHaveProperty('label');
     harness.core.sessions.revoke(paired.id);
     expect(harness.core.journal.getSetting('web-push.subscriptions')).toEqual({});
   } finally { await restarted.close(); }
@@ -95,7 +98,7 @@ test('a recreated push store retains its keys and delivers completed turns to th
 test('a phone hears of a team\'s final answer and a persistent agent\'s failures, not of every turn under them', async () => {
   const paired = session();
   harness.core.push.subscribe(paired.id, subscription());
-  const deliveries: { threadId: string; body: string }[] = [];
+  const deliveries: { threadId: string; body: string; label?: string }[] = [];
   harness.core.push.send = async (_target, payload) => { deliveries.push(JSON.parse(payload)); };
   const client = await harness.connect();
   const { threadId: rootId } = await echoThread(harness, client);
@@ -116,7 +119,7 @@ test('a phone hears of a team\'s final answer and a persistent agent\'s failures
   finish(rootId, 'done', 'compact');
   finish(agent.id, 'done');
   // A child blocked on a question still reaches the phone.
-  harness.core.bus.emit('question.asked', { id: 'push_question', threadId: child.id } as RpcEvents['question.asked']);
+  harness.core.bus.emit('question.asked', { id: 'push_question', threadId: child.id, text: 'Which `branch` should I use?' } as RpcEvents['question.asked']);
   await waitFor(() => deliveries.length === 1);
 
   harness.core.journal.putThread({ ...child, status: 'idle' });
@@ -124,10 +127,11 @@ test('a phone hears of a team\'s final answer and a persistent agent\'s failures
   finish(agent.id, 'error');
   await waitFor(() => deliveries.length === 3);
   await Bun.sleep(50);
-  expect(deliveries.map(({ threadId, body }) => ({ threadId, body }))).toEqual([
-    { threadId: child.id, body: 'Needs your answer' },
-    { threadId: rootId, body: 'Done' },
-    { threadId: agent.id, body: 'The agent encountered an error' },
+  // A turn with no reply to quote, and a failure, say so through a label the phone translates.
+  expect(deliveries.map(({ threadId, body, label }) => ({ threadId, body, label }))).toEqual([
+    { threadId: child.id, body: 'Which branch should I use?', label: undefined },
+    { threadId: rootId, body: 'Done', label: 'done' },
+    { threadId: agent.id, body: 'The agent encountered an error', label: 'failed' },
   ]);
 });
 

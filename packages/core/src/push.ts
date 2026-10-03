@@ -1,13 +1,11 @@
 import { createHash, ECDH } from 'node:crypto';
-import { notifiesOnFinish } from '@boite/contracts';
-import type { RpcEvents, RpcParams } from '@boite/contracts';
+import { lastAgentText, notifiesOnFinish, requestExcerpt } from '@boite/contracts';
+import type { PushPayload, RpcEvents, RpcParams } from '@boite/contracts';
 import type { PushSubscription } from 'web-push';
 import type { Core } from './core.ts';
 import { invalidParams, refused } from './errors.ts';
 
 type Subscription = RpcParams<'push.subscribe'>;
-/** `badge` is the app icon's count after this notification, set by the service worker. */
-type Payload = { title: string; body: string; threadId: string | null; tag: string; badge?: number };
 type Keys = { publicKey: string; privateKey: string };
 const SUBSCRIPTIONS = 'web-push.subscriptions';
 const KEYS = 'web-push.keys';
@@ -46,15 +44,29 @@ export class PushStore {
         this.remove((payload as RpcEvents['sessions.updated']).sessionId);
       } else if (name === 'permission.requested' || name === 'question.asked') {
         const request = payload as RpcEvents['permission.requested'] | RpcEvents['question.asked'];
-        this.notify(request.threadId, 'Needs your answer', `request-${request.id}`);
+        const text = requestExcerpt(request);
+        this.notify(request.threadId, text ? { body: text } : { body: 'Needs your answer', label: 'needsYou' }, `request-${request.id}`);
       } else if (name === 'turn.finished') {
         const turn = payload as RpcEvents['turn.finished'];
         if (this.closed || this.core.journal.isClosed() || (turn.status !== 'done' && turn.status !== 'error')) return;
         const thread = this.core.journal.getThread(turn.threadId);
         if (thread === null || !notifiesOnFinish(thread, turn, this.activeChildren(thread.id))) return;
-        this.notify(turn.threadId, turn.status === 'done' ? 'Done' : 'The agent encountered an error', `turn-${turn.id}`);
+        // The reply is the news; an error's own message is often a stack or a
+        // provider's JSON, so the phone says only that the turn failed.
+        const reply = turn.status === 'done' ? this.lastReply(turn.threadId, turn.id) : null;
+        this.notify(turn.threadId, reply ? { body: reply }
+          : turn.status === 'done' ? { body: 'Done', label: 'done' } : { body: 'The agent encountered an error', label: 'failed' }, `turn-${turn.id}`);
       }
     });
+  }
+
+  /** The start of what the agent last wrote in the turn, one line. */
+  private lastReply(threadId: string, turnId: string): string | null {
+    for (const message of this.core.journal.walkAgentMessagesBackwards(threadId, turnId)) {
+      const text = lastAgentText([message]);
+      if (text) return text;
+    }
+    return null;
   }
 
   /** The parent's delegated agents with a turn still under way. */
@@ -133,12 +145,12 @@ export class PushStore {
     return ids.size;
   }
 
-  private notify(threadId: string, body: string, tag: string) {
+  private notify(threadId: string, text: Pick<PushPayload, 'body' | 'label'>, tag: string) {
     if (this.closed) return;
     const title = this.core.journal.getThread(threadId)?.title ?? 'Boite';
     const badge = this.badge(threadId);
     for (const sessionId of Object.keys(this.subscriptions())) {
-      this.track(this.deliver(sessionId, { title, body, threadId, tag, badge }).catch(() => {
+      this.track(this.deliver(sessionId, { title, ...text, threadId, tag, badge }).catch(() => {
         this.core.log('warn', 'Web Push delivery failed; the conversation remains available in Boite');
       }));
     }
@@ -159,7 +171,7 @@ export class PushStore {
     });
   };
 
-  private async deliver(sessionId: string, payload: Payload): Promise<void> {
+  private async deliver(sessionId: string, payload: PushPayload): Promise<void> {
     const keys = await this.keys();
     if (this.closed || !this.core.journal.getSession(sessionId)) return;
     const subscription = this.subscriptions()[sessionId];
@@ -177,7 +189,7 @@ export class PushStore {
   async test(sessionId: string | null) {
     const id = this.requireSession(sessionId);
     if (!this.subscriptions()[id]) throw refused('Enable notifications on this device first');
-    await this.track(this.deliver(id, { title: 'Boite', body: 'Notifications are connected', threadId: null, tag: 'test' }));
+    await this.track(this.deliver(id, { title: 'Boite', body: 'Notifications are connected', label: 'connected', threadId: null, tag: 'test' }));
     return { ok: true } as const;
   }
 

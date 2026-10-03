@@ -541,6 +541,15 @@ export class Journal {
     return row === null ? null : this.currentMessage(row);
   }
 
+  /** The agent's messages of a turn, newest first: a notification reads only as far as the last reply. */
+  *walkAgentMessagesBackwards(threadId: string, turnId: string): Iterable<Message> {
+    this.flushDeltas();
+    const statement = this.db.prepare("SELECT * FROM messages WHERE thread_id = ? AND turn_id = ? AND role = 'assistant' ORDER BY rowid DESC");
+    try {
+      for (const row of statement.iterate(threadId, turnId)) yield this.currentMessage(row as MessageRow);
+    } finally { statement.finalize(); }
+  }
+
   *walkTurnMessages(threadId: string, turnId: string): Iterable<Message> {
     this.flushDeltas();
     const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? AND turn_id = ? ORDER BY rowid');

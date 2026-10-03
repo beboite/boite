@@ -412,10 +412,23 @@ remembered machines to connect. The worker only opens
 URLs on its own origin. Enable notifications from the machine's own page, not
 while viewing it through another machine's UI.
 
-A connected page retains its local notification path even when push is enabled.
-For its own core, it uses the service worker and the same per-thread notification
-tag as push, so the latest notification replaces the previous one. A saved push
-subscription is not treated as proof that a notification reached the phone.
+An event makes one notification on a device. iOS shows every push and does not
+let a tag replace a notification the page shows, so a page whose own core
+pushes to it stays quiet: `pushCovers` in `lib/notify.ts` requires the page's
+push switch, the granted permission and a live browser subscription. A device
+without push, and a page's notices about another machine, keep the local
+notification, through the service worker and the per-thread tag a push would use.
+
+The title is the thread's title. A finished turn's body is the start of the
+agent's last message, markdown removed, on one line and cut at a word near 140
+characters; a question or a permission request shows its text, else the tool
+and its command or path (`notification-text.ts` in the contracts, shared by
+the core's push and the page's notice). When there is no such text, the core
+sends a generic English body with a `label` (`done`, `failed`, `needsYou`,
+`connected`). The language belongs to the page, so the page writes the words
+for those labels in the language it speaks to the worker's `boite-notify`
+cache, again on each language change; the worker shows them in place of the
+English body, which stays the fallback until the page has run once.
 
 Disabling removes the server subscription and unsubscribes the browser.
 Revocation deletes the subscription with the pairing. Push services returning
@@ -438,7 +451,7 @@ one arrives.
 The path is: the installed app's Enable notifications asks the permission from
 the tap, subscribes with the core's VAPID key, and stores the subscription with
 `push.subscribe` against its pairing. A notification's payload is
-`{title, body, threadId, tag, badge}`; tapping it focuses an open window and
+`{title, body, threadId, tag, label, badge}` (`PushPayload` in the contracts); tapping it focuses an open window and
 posts it the thread, or, if the page refuses focus or none is open, opens
 `/?thread=<id>` on the worker's own origin.
 

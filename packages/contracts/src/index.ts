@@ -1075,6 +1075,23 @@ export const MESSAGE_PAGE = 120;
 /** The first paint needs a small tail; older history uses the ordinary page size. */
 export const INITIAL_MESSAGE_PAGE = 40;
 export { previewToolOutputs, TOOL_OUTPUT_INLINE_CHARS, TOOL_OUTPUT_PREVIEW_CHARS } from './message-preview';
+export { lastAgentText, notificationExcerpt, requestExcerpt, NOTIFICATION_TEXT_CHARS } from './notification-text';
+/**
+ * The core's generic notification body, named so a phone can show it in the
+ * language it speaks: the service worker looks the label up in the words the
+ * page left it, and falls back on the English body.
+ */
+export type NotificationLabel = 'done' | 'failed' | 'needsYou' | 'connected';
+/** A Web Push payload, as the core sends it and the service worker reads it. */
+export interface PushPayload {
+  title: string;
+  body: string;
+  threadId: string | null;
+  tag: string;
+  label?: NotificationLabel;
+  /** The app icon's count after this notification. */
+  badge?: number;
+}
 /** The most `messages.list` will ever hand back in one call, whatever `limit` says. */
 export const MESSAGE_PAGE_MAX = 200;
 /**
