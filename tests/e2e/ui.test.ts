@@ -821,9 +821,12 @@ test(
     await page.waitFor('navigator.serviceWorker.controller !== null', RECONNECT_TIMEOUT_MS);
     await page.evaluate<null>('navigator.serviceWorker.ready.then(() => null)');
     const cacheNames = await page.evaluate<string[]>('caches.keys()');
-    expect(cacheNames).toHaveLength(1);
-    expect(cacheNames[0]!.startsWith(UI_CACHE_PREFIX)).toBe(true);
-    const uiCache = cacheNames[0]!;
+    // Beside the shell, the words the page leaves the worker for its push notices.
+    expect(cacheNames).toContain('boite-notify');
+    const uiCaches = cacheNames.filter((name) => name !== 'boite-notify');
+    expect(uiCaches).toHaveLength(1);
+    expect(uiCaches[0]!.startsWith(UI_CACHE_PREFIX)).toBe(true);
+    const uiCache = uiCaches[0]!;
 
     // The hashed files of the first load were fetched before the worker took
     // control, so they only reach the cache on the load after it: which is
