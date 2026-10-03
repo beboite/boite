@@ -1731,7 +1731,9 @@ describe('native Codex fork', () => {
     const client = await startCore(); const threadId = await codexThread(client);
     const path = harness!.dataDir;
     for (const args of [['init', '-q'], ['commit', '-q', '--allow-empty', '-m', 'init']]) {
-      const git = Bun.spawnSync({ cmd: ['git', ...args], cwd: path, stdout: 'pipe', stderr: 'pipe', windowsHide: true });
+      const git = Bun.spawnSync({ cmd: ['git', ...args], cwd: path, stdout: 'pipe', stderr: 'pipe', windowsHide: true,
+        env: { ...process.env, GIT_AUTHOR_NAME: 'boite test', GIT_AUTHOR_EMAIL: 'test@boite.invalid', GIT_COMMITTER_NAME: 'boite test', GIT_COMMITTER_EMAIL: 'test@boite.invalid' },
+      });
       if (!git.success) throw new Error(git.stderr.toString());
     }
     const reply = await completed(client, threadId, 'First');
@@ -1792,9 +1794,16 @@ describe('native Codex rewind', () => {
     await run(client, threadId, 'Replacement');
     expect(fakeLog()).toContain(`thread/resume ${result.thread.sessionId}`);
   });
-  test('failed file restoration discards only the prepared fork without cutting the thread', async () => {
-    const client = await startCore(); const threadId = await codexThread(client);
+  test.each([0, 1])('failed file restoration discards only the prepared fork without cutting the thread (warm minutes %s)', async warmProcessMinutes => {
+    const client = await startCore({ warmProcessMinutes }); const threadId = await codexThread(client);
     await run(client, threadId, 'First'); await run(client, threadId, 'Second');
+    // Cold source teardown is asynchronous; a retained warm source owns its
+    // lease throughout the failed rewind. Neither belongs to the setup fork.
+    if (warmProcessMinutes === 0) await waitFor(() => harness!.core.procs.liveCount(threadId) === 0);
+    const sourcePids = harness!.core.procs.liveOf(threadId).map(process => process.pid);
+    const sourceLeases = harness!.core.providers.installs.leaseCount('codex-fake');
+    expect(sourcePids).toHaveLength(warmProcessMinutes === 0 ? 0 : 1);
+    expect(sourceLeases).toBe(sourcePids.length);
     const before = harness!.core.threads.get(threadId);
     const secondPrompt = before.messages.filter(message => message.role === 'user')[1]!;
     const restore = spyOn(harness!.core.threads.codeCheckpoints, 'rewind').mockRejectedValue(new Error('files changed externally'));
@@ -1803,7 +1812,8 @@ describe('native Codex rewind', () => {
     expect({ ...harness!.core.threads.get(threadId), load: null }).toEqual({ ...before, load: null });
     expect(fakeLog()).toContain('thread/archive codex-fork-');
     expect(fakeLog()).not.toContain(`thread/archive ${before.sessionId}`);
-    expect(harness!.core.providers.installs.leaseCount('codex-fake')).toBe(0);
+    expect(harness!.core.procs.liveOf(threadId).map(process => process.pid)).toEqual(sourcePids);
+    expect(harness!.core.providers.installs.leaseCount('codex-fake')).toBe(sourceLeases);
   });
   test('rewinding first prompt stays fresh and does not call native fork', async () => {
     const client = await startCore(); const threadId = await codexThread(client);

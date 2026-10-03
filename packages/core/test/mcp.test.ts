@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
+import { pathToFileURL } from 'node:url';
 import { AGENT_ENV } from '@boite/contracts';
 import { AGENT_METHODS } from '../src/access.ts';
 import { boundedMcpResult, dispatchMcpTool, MCP_MAX_RESULT_BYTES, MCP_TOOLS, requestWithCancellation } from '../src/mcp/tools.ts';
@@ -59,7 +60,8 @@ test('MCP wait cancellation closes only its dedicated RPC connection and preserv
 });
 
 async function child(env: Record<string, string | undefined>) {
-  const entry = process.env['BOITE_MCP_TEST_ENTRY'] ?? new URL('../src/cli.ts', import.meta.url).pathname;
+  const override = process.env['BOITE_MCP_TEST_ENTRY'];
+  const entry = override ? pathToFileURL(override).href : new URL('../src/cli.ts', import.meta.url).href;
   const script = `import { runCli, processIo } from ${JSON.stringify(entry)}; process.exitCode = await runCli(['mcp'], processIo());`;
   const spawned = h.core.procs.spawnPiped('mcp-test-child', process.execPath, ['-e', script], { cwd: h.dataDir, env: { ...process.env, ...env } });
   const replies = new Map<number, Record<string, any>>();
@@ -88,7 +90,8 @@ async function child(env: Record<string, string | undefined>) {
     async rpc(method: string, params: unknown) {
       const request = ++id;
       spawned.proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: request, method, params }) + '\n');
-      await waitFor(() => replies.has(request), 5000);
+      await waitFor(() => replies.has(request) || spawned.proc.exitCode !== null, 5000);
+      if (!replies.has(request)) { await errors; throw new Error(`MCP fixture exited before ${method}: ${stderr}`); }
       return replies.get(request)!;
     },
     lastId: () => id,
@@ -171,6 +174,7 @@ test('stdio refuses absent identity and refuses an owner token before offering t
     finally { if (transport.spawned.proc.exitCode === null) transport.spawned.proc.kill(); }
     expect(await transport.spawned.exited).toBe(1);
     expect(transport.frames).toHaveLength(0);
+    expect(transport.stderr()).toContain('thread-bound');
     expect(transport.stderr()).not.toContain(h.token);
   }
 });
