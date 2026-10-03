@@ -643,7 +643,6 @@ export const fr: Translation = {
     goalUsage: 'Utilisez /goal suivi d\'un objectif.',
     loopUsage: 'Utilisez /loop 2 prompt pour deux itérations, ou /loop 5m prompt pour un rythme. Entre 1 et 1000 itérations.',
     intervalError: "L'intervalle d'une boucle doit tenir entre 1 seconde et 24 heures.",
-    noAttachments: 'Envoyez les images dans un message avant de lancer un objectif ou une boucle.',
     active: 'Active',
     paused: 'En pause',
     complete: 'Terminée',

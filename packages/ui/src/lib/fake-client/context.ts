@@ -163,6 +163,7 @@ export class FakeContext {
   readonly activityTimers = new Map<string, ReturnType<typeof setTimeout>>();
   readonly activityTurns = new Map<string, { kind: 'goal' | 'loop'; generation: number }>();
   readonly activityGenerations = new Map<string, number>();
+  readonly activityAttachments = new Map<string, Attachment[]>();
   processes: ProcessRecord[] = [];
   memoryState: MemoryState = 'ok';
   readonly usage = new Map<ThreadId, Usage>();
