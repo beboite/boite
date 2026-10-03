@@ -4,6 +4,7 @@ import { protectedThreadIdsError } from '@boite/contracts';
 /** Threads and their messages: create, read, select, archive, and the turn entry points. */
 import { DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
 import { steerUser } from './user-steering';
+import { recoverTurn } from './recovery';
 import { RpcFailure } from '../client';
 import { checkCwd, checkEffort, checkModel, checkRunnable, defaultModel } from './checks';
 import { writeTitle } from './titles';
@@ -14,7 +15,7 @@ import { modelsOf, checkSpeed, discoverSelection } from './provider-catalog';
 import { delegationConfig, stopDelegation } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
 import { registerFakeWorktree, requireFakeCwd } from './worktrees';
-import { previewToolOutputs } from '@boite/contracts';
+import { previewToolOutputs, previewFileData, resumeAnchor, snapshotOptionsProblem } from '@boite/contracts';
 import { dropWaitingMove, fakeMoveNote } from './thread-move';
 import { cancelFamilySideQuestions, cancelSide, sideQuestionMethods } from './side-questions';
 
@@ -32,6 +33,7 @@ function writeFakeFork(ctx: FakeContext, source: Thread, kept: Message[], placed
     id: turnIds.get(turn.id) ?? turn.id,
     threadId: id,
     status: turn.status === 'queued' || turn.status === 'running' ? 'stopped' : turn.status,
+    queueHold: null,
     startedAt: turn.startedAt ?? turn.queuedAt,
     finishedAt: turn.finishedAt ?? now,
     usage: null,
@@ -41,6 +43,7 @@ function writeFakeFork(ctx: FakeContext, source: Thread, kept: Message[], placed
     providerId: source.providerId, accountId: source.accountId, model: source.model, effort: source.effort, speed: source.speed ?? null,
     cwd: placed?.path ?? source.cwd, branch: placed?.branch ?? source.branch, branchNamingPending: placed?.namingPending ?? false, permissionMode: source.permissionMode,
     status: 'idle', unread: false, archived: false, pinned: false,
+    forkOrigin: { threadId: source.id, messageId: kept.at(-1)?.id ?? null, turnId: kept.at(-1)?.turnId ?? null, mode: 'seeded' },
     sessionId: null, sessionGeneration: 1, selectionVersion: 0, load: null, context: null,
     createdAt: now, updatedAt: now, messages, turns, commands: [], messagesBefore: null,
   };
@@ -102,6 +105,17 @@ function tailOf(messages: Message[], from: number, limit = MESSAGE_PAGE): Messag
   return messages.slice(from);
 }
 
+/** Opaque fixture proofs. The real core uses native SHA-256 over the same complete message data. */
+function snapshotHash(messages: Message[], options: RpcParams<'threads.get'>): string {
+  const json = `${!!options.compactTools}:${!!options.compactFiles}:` + JSON.stringify(messages);
+  let a = 0x811c9dc5, b = 0x9e3779b9;
+  for (let i = 0; i < json.length; i++) {
+    a = Math.imul(a ^ json.charCodeAt(i), 0x01000193);
+    b = Math.imul(b ^ json.charCodeAt(i), 0x85ebca6b);
+  }
+  return (a >>> 0).toString(16).padStart(8, '0') + (b >>> 0).toString(16).padStart(8, '0');
+}
+
 /** The fake has no wire; check the same reply envelope before copying a page. */
 function pagingReply<T>(result: T): T {
   const bytes = new TextEncoder().encode(JSON.stringify({ jsonrpc: '2.0', id: 0, result })).byteLength;
@@ -128,7 +142,7 @@ export async function putAway(ctx: FakeContext, thread: Thread): Promise<void> {
     pending.resolve(null);
   }
   ctx.heldAnswers.delete(thread.id);
-  if ((thread.background?.length ?? 0) > 0) ctx.setBackground(thread, []);
+  if ((thread.background?.length ?? 0) > 0) ctx.setBackground(thread, [], 'session-ended');
   closeTerminal(ctx, `terminal:${thread.id}`);
 }
 
@@ -260,6 +274,8 @@ export function threadMethods(ctx: FakeContext) {
     },
     'threads.get': async (params) => {
       const thread = ctx.thread(params.threadId);
+      const problem = snapshotOptionsProblem(params);
+      if (problem) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `threads.get.${problem.field}: expected ${problem.expected}`, data: problem });
       const asked = params.limit ?? MESSAGE_PAGE;
       if (!Number.isFinite(asked)) throw refusal('threads.get limit must be a finite number');
       const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
@@ -267,16 +283,26 @@ export function threadMethods(ctx: FakeContext) {
       // the tail exceeds a page's count or bytes, and then a full page.
       const from = params.after === undefined ? -1 : thread.messages.findIndex((message) => message.id === params.after);
       const tail = from === -1 ? null : tailOf(thread.messages, from, limit);
-      if (tail !== null) {
-        const messages = params.compactTools ? previewToolOutputs(tail) : tail;
-        // As the core's `listTurnsFor`: the turns of the messages sent, and whatever is still queued or running.
-        const sent = new Set(messages.map((message) => message.turnId));
-        const turns = thread.turns.filter((turn) => turn.status === 'queued' || turn.status === 'running' || sent.has(turn.id));
-        return pagingReply({ ...thread, messages, turns, messagesBefore: null, messagesFrom: params.after });
-      }
-      const page = pageOf(thread.messages, thread.messages.length, limit);
-      if (params.compactTools) page.messages = previewToolOutputs(page.messages);
-      return pagingReply({ ...thread, messages: page.messages, messagesBefore: page.before });
+      const page = tail === null ? pageOf(thread.messages, thread.messages.length, limit) : { messages: tail, before: null };
+      const sent = new Set(page.messages.map(message => message.turnId));
+      const turns = thread.turns.filter(turn => turn.status === 'queued' || turn.status === 'running' || sent.has(turn.id));
+      const anchor = params.sync ? resumeAnchor({ messages: page.messages, turns }) : null;
+      const proof = anchor === null ? undefined : { from: anchor, hash: snapshotHash(page.messages.slice(page.messages.findIndex(message => message.id === anchor)), params) };
+      const known = params.sync && params.sync !== true ? params.sync : undefined;
+      const unchanged = tail !== null && params.after !== undefined && known?.from === params.after && known.hash === (proof?.from === params.after ? proof.hash : snapshotHash(tail, params));
+      const snapshot = { ...thread, turns, messages: unchanged ? [] : params.compactTools ? previewToolOutputs(page.messages) : page.messages, messagesBefore: page.before,
+        ...(tail !== null ? { messagesFrom: params.after } : {}), ...(proof ? { messagesSync: proof } : {}), ...(unchanged ? { messagesUnchanged: true as const } : {}) };
+      if (params.compactFiles) snapshot.messages = previewFileData(snapshot.messages);
+      if (!params.open) return pagingReply(snapshot);
+      ctx.bus.subscribed.add(thread.id);
+      if (params.open.previous && params.open.previous !== thread.id) ctx.bus.subscribed.delete(params.open.previous);
+      if (params.open.markRead && thread.unread) { thread.unread = false; ctx.touch(thread); }
+      snapshot.unread = thread.unread;
+      const opened = params.open.requests === false ? {} : {
+        permissions: [...ctx.pendingPermissions.values()].map(item => item.request).filter(item => item.threadId === thread.id).sort((a, b) => a.createdAt - b.createdAt),
+        questions: [...ctx.pendingQuestions.values()].map(item => item.request).filter(item => item.threadId === thread.id).sort((a, b) => a.createdAt - b.createdAt)
+      };
+      return pagingReply({ ...snapshot, opened });
     },
     'messages.list': async (params) => {
       const thread = ctx.thread(params.threadId);
@@ -292,6 +318,7 @@ export function threadMethods(ctx: FakeContext) {
       const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
       const page = pageOf(thread.messages, at, limit);
       if (params.compactTools) page.messages = previewToolOutputs(page.messages);
+      if (params.compactFiles) page.messages = previewFileData(page.messages);
       const turns = new Set(page.messages.map((message) => message.turnId));
       return pagingReply({ ...page, turns: thread.turns.filter((turn) => turns.has(turn.id)) });
     },
@@ -301,6 +328,15 @@ export function threadMethods(ctx: FakeContext) {
       const part = message.parts.find(part => part.type === 'tool' && part.toolId === params.toolId);
       if (!part || part.type !== 'tool') throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `tool ${params.toolId} is not a tool of message ${params.messageId}` });
       return { output: part.output };
+    },
+    'messages.attachment': async params => {
+      const thread = ctx.thread(params.threadId);
+      if (!Number.isSafeInteger(params.partIndex) || params.partIndex < 0) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'messages.attachment.partIndex: expected a nonnegative integer', data: { field: 'partIndex', expected: 'a nonnegative integer' } });
+      const message = thread.messages.find(message => message.id === params.messageId);
+      if (!message) throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `message ${params.messageId} is not a message of thread ${params.threadId}`, data: { threadId: params.threadId, messageId: params.messageId } });
+      const part = message.parts[params.partIndex];
+      if (part?.type !== 'file' && part?.type !== 'image') throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `part ${params.partIndex} is not an attachment of message ${params.messageId}`, data: { messageId: params.messageId, partIndex: params.partIndex } });
+      return { data: part.data };
     },
     'threads.update': async (params) => {
       const thread = ctx.thread(params.threadId);
@@ -329,6 +365,7 @@ export function threadMethods(ctx: FakeContext) {
         if (!account || !provider?.available || account.status === 'unauthenticated') {
           throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the selected account is unavailable' });
         }
+        if (thread.background?.length) ctx.setBackground(thread, [], 'session-ended');
         thread.accountId = account.id;
         thread.providerId = account.providerId;
         thread.model = params.model === undefined ? defaultModel(provider) : params.model;
@@ -618,11 +655,12 @@ export function threadMethods(ctx: FakeContext) {
       const stopped = await ctx.stopTurn(params.threadId) || childrenStopped > 0;
       // As the core: Stop on an idle thread ends what it still runs in the background.
       if (!stopped && (thread.background?.length ?? 0) > 0) {
-        ctx.setBackground(thread, []);
+        ctx.setBackground(thread, [], 'session-ended');
         return { stopped: true };
       }
       return { stopped };
     },
+    'turns.recover': params => recoverTurn(ctx, params),
     'agent.where': async (params) => {
       const thread = ctx.thread(params.threadId);
       const project = ctx.projects.find((one) => one.id === thread.projectId);

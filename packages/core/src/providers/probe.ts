@@ -4,7 +4,8 @@ import { removeDir } from '../fs-retry.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Core } from '../core.ts';
-import { forgetProbes, probeModels } from '../drivers/index.ts';
+import { forgetProbes, probeModels, rememberExternalModels } from '../drivers/index.ts';
+import { readSubscriptionProxyModels } from '../subscription-proxy.ts';
 import { invalidParams, refused } from '../errors.ts';
 import { logMessageOf } from '../log-errors.ts';
 
@@ -38,6 +39,14 @@ async function probeProvider(
     });
   }
 
+  const proxyModels = await readSubscriptionProxyModels(core, provider);
+  if (proxyModels !== null) {
+    if (!isCurrent()) throw refused('the subscription proxy changed during discovery; refresh models');
+    const probedAt = Date.now();
+    rememberExternalModels(provider.protocol, provider.id, account.id, proxyModels);
+    core.bus.emit('providers.probed', { providerId: provider.id, accountId: account.id, models: proxyModels, probedAt });
+    return { models: proxyModels, probedAt };
+  }
   const threadId = probeThreadId(provider.id, account.id);
   const cleanupContext = { source: provider.id, event: 'provider.probeCleanup', threadId };
   const directory = mkdtempSync(join(tmpdir(), 'boite-probe-'));
@@ -113,6 +122,7 @@ export type ProviderProbe = (params: RpcParams<'providers.probe'>) => Promise<Rp
 export function registerProbeMethods(core: Core): ProviderProbe {
   /** Bumped when the descriptors are re-read, which outdates every probe. */
   let revision = 0;
+  let proxyConfig = JSON.stringify(core.settings.get().subscriptionProxy);
   /** Bumped per account: another account signing in says nothing about this one's models. */
   const accountRevisions = new Map<AccountId, number>();
   const accountRevision = (accountId: AccountId): number => accountRevisions.get(accountId) ?? 0;
@@ -152,6 +162,14 @@ export function registerProbeMethods(core: Core): ProviderProbe {
   core.router.register('providers.probe', probe);
 
   core.bus.onAny((name, payload) => {
+    if (name === 'settings.updated') {
+      const nextProxy = JSON.stringify((payload as RpcEvents['settings.updated']).subscriptionProxy);
+      if (nextProxy === proxyConfig) return;
+      proxyConfig = nextProxy;
+      revision++;
+      forgetProbes();
+      return;
+    }
     // The descriptors were re-read, so what an agent listed under the old ones
     // says nothing about the new ones.
     if (name === 'providers.updated') {

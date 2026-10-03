@@ -6,13 +6,14 @@ import { Store } from '../lib/store.svelte';
 import { FakeClient } from '../lib/fake-client';
 import Dictation from './Dictation.svelte';
 
-const recorder = vi.hoisted(() => ({ ended: () => {}, stop: vi.fn(async () => new Uint8Array([1])), dispose: vi.fn() }));
+const recorder = vi.hoisted(() => ({ ended: () => {}, stop: vi.fn(async () => new Uint8Array(3244)), dispose: vi.fn() }));
 vi.mock('../lib/speech-recorder', () => ({
   SpeechRecorder: class {
     async start(_level: unknown, ended: () => void) { recorder.ended = ended; }
     stop = recorder.stop;
     dispose = recorder.dispose;
     async snapshot() { return null; }
+    async takeChunk() { return null; }
   },
   audioBase64: () => 'AQ==', microphoneError: (error: Error) => error.message,
 }));
@@ -59,6 +60,29 @@ test('a core without the voice engine names the machine to update instead of the
   expect(JSON.stringify(onpreview.mock.calls)).not.toContain('unknown method');
 });
 
+test('cancelling a streaming finalization cancels its request and suppresses the late transcript', async () => {
+  let finish!: (result: { text: string }) => void;
+  const call = vi.fn((method: string) => method === 'speech.status'
+    ? Promise.resolve({ ready: true, engine: 'local', streaming: true, revision: 'revision' })
+    : method === 'speech.streamFinish' ? new Promise(resolve => { finish = resolve; }) : Promise.resolve({ ok: true }));
+  const ontext = vi.fn();
+  mounted = mount(Dictation, { target: document.body, props: {
+    store: { client: { call }, connection: 'ready', owner: true } as unknown as Store,
+    ontext, onbusy: vi.fn(), onpreview: vi.fn(),
+  } });
+  flushSync(); document.querySelector<HTMLButtonElement>('[data-testid="dictation-start"]')!.click();
+  for (let i = 0; i < 25; i++) { await Promise.resolve(); flushSync(); }
+  document.querySelector<HTMLButtonElement>('[data-testid="dictation-stop"]')!.click();
+  for (let i = 0; i < 25; i++) { await Promise.resolve(); flushSync(); }
+  expect(call).toHaveBeenCalledWith('speech.streamFinish', expect.objectContaining({ sequence: 0 }));
+  document.querySelector<HTMLButtonElement>('[data-testid="dictation-cancel"]')!.click();
+  finish({ text: 'Too late.' });
+  for (let i = 0; i < 25; i++) { await Promise.resolve(); flushSync(); }
+  expect(call).toHaveBeenCalledWith('speech.cancel', expect.objectContaining({ requestId: expect.any(String) }));
+  expect(ontext).not.toHaveBeenCalled();
+  expect(document.querySelector('[data-testid="dictation"]')?.getAttribute('data-phase')).toBe('idle');
+});
+
 
 test('HTTP capabilities boot a real Store and fake core, then finish mounted dictation', async () => {
   vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) });
@@ -69,7 +93,7 @@ test('HTTP capabilities boot a real Store and fake core, then finish mounted dic
     expect(store.connection).toBe('ready');
     const status = await client.call('speech.status', {});
     const config = await client.call('speech.config', {});
-    const changed = await client.call('speech.configure', { ...config, language: 'french' });
+    const changed = await client.call('speech.configure', { ...config, model: 'small-q5_1', modelPath: '/fixture/whisper-model.bin', language: 'french' });
     expect(changed.revision).not.toBe(status.revision);
     const ontext = vi.fn(), onpreview = vi.fn();
     mounted = mount(Dictation, { target: document.body, props: { store, ontext, onbusy: vi.fn(), onpreview } });

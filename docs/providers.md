@@ -1,5 +1,40 @@
 # Providers
 
+## Subscription proxy
+
+Settings, Providers offers an optional subscription proxy for Claude and Codex.
+Choose Douane or CLIProxyAPI, enter the gateway's API URL and its limits dashboard
+URL, enable the switch and save. The API URL accepts an origin or a path ending
+in `/v1`. Model discovery runs on the machine hosting the core through
+`GET /v1/models`; paired phones use that same catalog.
+
+Douane's default dashboard path is `/admin/#quotas`; CLIProxyAPI uses
+`/management.html#/quota`. With the proxy enabled, Limits opens this page inside
+Boite instead of the account popup. Desktop uses the shell's existing browser
+view, and browsers and phones use an iframe. The dashboard must permit embedding
+and its configured URL must be reachable from the device displaying it.
+HTTPS browser sessions require an HTTPS dashboard URL; Boite shows this before
+creating a blocked HTTP frame. Open dashboard provides a separate sign-in page,
+then Reload retries the embedded view. Some gateways refuse framing or restrict
+cross-site cookies; those dashboards remain available through Open dashboard.
+Show account limits opens the native limits and monitoring switches for agents
+that keep their own configuration; Show proxy dashboard returns to the gateway.
+
+An optional API key stays on the core and is supplied through the agent's
+environment, never a URL or process argument. Leave the key field empty to keep
+a saved key, or select Remove saved key. Configuration and key changes are saved
+in one transaction. Use HTTPS when sending a key over an untrusted network;
+HTTP remains available for local and private-network gateways. Dashboard management credentials belong
+to the dashboard's own sign-in and are not passed by Boite.
+
+Claude calls the gateway's Messages API. Codex uses its Responses API with
+WebSocket support enabled. Codex owns the conversation identifier and prompt
+cache key, retaining them between turns and after a socket reconnect; Boite
+does not override those headers. Cache-read token counts reported by the agent
+remain visible in usage. Disabling the proxy restores native login checks,
+model discovery and subscription quota monitoring. Other agents use their
+existing configuration.
+
 A provider descriptor configures an agent for an existing driver. Adding an ACP
 provider can use JSON alone; adding a new protocol requires runtime code. Shipped
 descriptors live in

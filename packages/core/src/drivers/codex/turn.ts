@@ -38,6 +38,7 @@ export class CodexTurn {
   private readonly dirty = new Set<string>();
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
+  private completedTurnId: string | null = null;
   private status: TurnResult['status'] = 'done';
   private error: string | null = null;
   private diagnosticError: string | undefined;
@@ -90,6 +91,7 @@ export class CodexTurn {
     if (this.decided) return;
     switch (record.status) {
       case 'completed':
+        this.completedTurnId = record.id;
         break;
       case 'interrupted':
         this.status = 'stopped';
@@ -157,6 +159,8 @@ export class CodexTurn {
       error: this.error ?? undefined,
       ...(this.diagnosticError === undefined ? {} : { diagnosticError: this.diagnosticError }),
       promptCache: this.cacheLife,
+      ...(this.status === 'done' && this.sessionId && this.completedTurnId
+        ? { checkpoint: { sessionId: this.sessionId, entry: this.completedTurnId } } : {}),
       ...(this.sessionLost ? { sessionLost: true } : {}),
     });
   }

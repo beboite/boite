@@ -28,7 +28,7 @@ const DRIVERS = new Map<Protocol, Driver>([
   ],
   [
     'codex-appserver',
-    lazyDriver('codex-appserver', () => import('./codex.ts').then((module) => module.createCodexDriver()), { titles: true, prepare: true }),
+    lazyDriver('codex-appserver', () => import('./codex.ts').then((module) => module.createCodexDriver()), { titles: true, prepare: true, forkSession: true }),
   ],
   ['muse', lazyDriver('muse', () => import('./muse.ts').then((module) => module.createMuseDriver()))],
   ['pi', lazyDriver('pi', () => import('./pi.ts').then((module) => module.createPiDriver()))],
@@ -92,16 +92,25 @@ export function probeModels(protocol: Protocol, ctx: ProbeContext): Promise<Prob
 }
 
 /** The models a probe already read for this account, or null if none ever ran. */
+const externalModels = new Map<string, { providerId: ProviderId; accountId: AccountId; models: ModelInfo[] }>();
+
+export function rememberExternalModels(protocol: Protocol, providerId: ProviderId, accountId: AccountId, models: ModelInfo[]): void {
+  externalModels.set(JSON.stringify([protocol, providerId, accountId]), { providerId, accountId, models });
+}
+
 export function probedModelsOf(
   protocol: Protocol,
   providerId: ProviderId,
   accountId: AccountId,
 ): ModelInfo[] | null {
-  return DRIVERS.get(protocol)?.probedModels?.(providerId, accountId) ?? null;
+  return externalModels.get(JSON.stringify([protocol, providerId, accountId]))?.models ?? DRIVERS.get(protocol)?.probedModels?.(providerId, accountId) ?? null;
 }
 
 /** A reload, a changed account or a removed one: what a probe cached is stale. */
 export function forgetProbes(filter: ProbeFilter = {}): void {
+  for (const [key, entry] of externalModels) {
+    if ((!filter.providerId || entry.providerId === filter.providerId) && (!filter.accountId || entry.accountId === filter.accountId)) externalModels.delete(key);
+  }
   for (const driver of DRIVERS.values()) driver.forgetProbes?.(filter);
 }
 

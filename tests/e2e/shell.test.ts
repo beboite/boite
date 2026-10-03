@@ -377,7 +377,10 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     await ownPage.click('[data-testid="close-to-tray"]');
     await ownPage.waitFor(`document.querySelector('[data-testid="close-to-tray"]').checked`);
     await ownPage.screenshot(join(import.meta.dir, '.artifacts', 'shell-close-settings.png'));
-    expect(JSON.parse(readFileSync(join(ownDataDir, 'shell-settings.json'), 'utf8')).close_to_tray).toBe(true);
+    // The checkbox flips before the native command atomically saves the file.
+    const settingsPath = join(ownDataDir, 'shell-settings.json');
+    await waitUntil(() => existsSync(settingsPath), 5000);
+    expect(JSON.parse(readFileSync(settingsPath, 'utf8')).close_to_tray).toBe(true);
     // The tour leaves the title bar above its scrim: the window still drags and closes.
     await ownPage.click('[data-testid="settings-tour"]');
     await ownPage.waitFor(`document.querySelector('[data-testid="onboarding-step"]')`);

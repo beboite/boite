@@ -2,7 +2,6 @@
   import { MediaQuery } from 'svelte/reactivity';
   import { tick } from 'svelte';
   import MobileSettings from './MobileSettings.svelte';
-  import AppUpdateNotice from './AppUpdateNotice.svelte';
   import BrainPage from './BrainPage.svelte';
   import { Activity, ArrowLeft, Brain, ChevronRight, Coins, FlaskConical, Gauge, House, Keyboard, Mic, Monitor, Palette, Puzzle, Settings2, ShieldCheck, SlidersHorizontal, Users } from '@lucide/svelte';
   import KeyboardPage from './KeyboardPage.svelte';
@@ -26,7 +25,6 @@
   import VoiceSettings from './VoiceSettings.svelte';
   import { providerGroups } from '../lib/provider-family';
 import { workspace } from '../lib/workspace.svelte';
-  import { showAppUpdateUi } from '../lib/app-update.svelte';
 
   let { store, onopenthread }: { store: Store; onopenthread?: () => void } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
@@ -66,7 +64,6 @@ import { workspace } from '../lib/workspace.svelte';
       { id: 'archived', label: strings.settings.archived.heading },
       ...(store.owner ? [{ id: 'worktrees', label: strings.settings.worktrees.heading }] : []),
       { id: 'app', label: strings.settings.app },
-      ...(showAppUpdateUi() ? [{ id: 'updates', label: strings.appUpdate.heading }] : []),
       ...(store.owner ? [{ id: 'privacy', label: strings.telemetry.heading }] : [])
     ],
     appearance: [{ id: 'theme', label: strings.settings.display }, { id: 'reading', label: strings.settings.reading }, { id: 'workspace', label: strings.settings.workspace }, { id: 'buttons', label: strings.controls.heading }],
@@ -89,7 +86,8 @@ import { workspace } from '../lib/workspace.svelte';
       { id: 'tasks', label: strings.protection.tasks }
     ],
     machines: [
-      { id: 'machines', label: strings.machines.heading },
+      { id: 'updates', label: strings.serverUpdate.updates },
+      { id: 'machines', label: strings.machines.connections },
       // MachinesPage draws the card only while this window owns two machines.
       ...(workspace.machines.filter((machine) => machine.store.owner).length > 1 ? [{ id: 'agent-links', label: strings.machines.agentLinks }] : []),
       { id: 'devices', label: strings.settings.pairing.heading },
@@ -108,7 +106,7 @@ import { workspace } from '../lib/workspace.svelte';
    * whose names are already in view, and a sub-entry there only repeats a
    * heading. The search still finds every section above.
    */
-  const LONG_PAGES: SettingsTab[] = ['keyboard', 'usage'];
+  const LONG_PAGES: SettingsTab[] = ['keyboard', 'usage', 'machines'];
   let toc = $derived<Partial<Record<SettingsTab, { id: string; label: string }[]>>>(
     Object.fromEntries(LONG_PAGES.map((id) => [id, children[id] ?? []]))
   );
@@ -141,7 +139,10 @@ import { workspace } from '../lib/workspace.svelte';
     ['appearance', 'buttons', strings.terminal.title],
     ['appearance', 'buttons', strings.rightPanel.trace],
     ['accounts', null, strings.settings.modelDefaults],
-    ['accounts', null, strings.harnessUpdates.auto],
+    ['machines', 'updates', strings.appUpdate.heading],
+    ['machines', 'updates', strings.harnessUpdates.auto],
+    ['machines', 'updates', strings.harnessUpdates.heading],
+    ['machines', 'updates', strings.serverUpdate.updates],
     ['resources', 'quiet', strings.settings.focusGuard],
     ['resources', 'quiet', strings.settings.muteAgents],
     ['resources', 'limits', strings.settings.memoryProtection],
@@ -176,6 +177,10 @@ import { workspace } from '../lib/workspace.svelte';
   const motion = (): ScrollBehavior => (window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth');
 
   function jump(id: string) {
+    if (tab === 'machines') {
+      store.showSettings('machines', id);
+      return;
+    }
     store.settingsSection = null;
     selectedSection = id;
     const target = document.getElementById(`settings-${id}`);
@@ -252,7 +257,7 @@ import { workspace } from '../lib/workspace.svelte';
         data-testid="settings-tab-{entry.id}"
         aria-current={tab === entry.id ? 'page' : undefined}
         aria-expanded={toc[entry.id] ? tab === entry.id : undefined}
-        onclick={() => { selectedSection = ''; store.showSettings(entry.id); }}
+        onclick={() => { selectedSection = ''; store.showSettings(entry.id, entry.id === 'machines' ? 'updates' : undefined); }}
       >
         <Icon size={15} strokeWidth={1.75} />
         <span>{entry.label}</span>
@@ -269,7 +274,6 @@ import { workspace } from '../lib/workspace.svelte';
       {/if}
       </div>
     {/each}
-    <div class="update-footer"><AppUpdateNotice /></div>
   </nav>
 
   {#if toc[tab]}
@@ -355,7 +359,6 @@ import { workspace } from '../lib/workspace.svelte';
     overflow-y: auto;
   }
 
-  .update-footer { margin-top: auto; padding-top: 16px; flex: none; }
 
   .back {
     justify-content: flex-start;
@@ -365,8 +368,11 @@ import { workspace } from '../lib/workspace.svelte';
   .tab {
     justify-content: flex-start;
     width: 100%;
-    height: var(--row);
-    padding: 0 10px;
+    min-height: var(--row);
+    height: auto;
+    padding: 6px 10px;
+    white-space: normal;
+    line-height: 1.35;
     color: var(--color-muted-foreground);
   }
 

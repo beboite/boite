@@ -7,7 +7,7 @@ let server: { close(): Promise<void> };
 let page: BrowserPage;
 let base: string;
 const id = (name: string) => `[data-testid="${name}"]`;
-const card = `${id('machine-card')}[data-machine-id="http://builder.test"]`;
+const card = `${id('machine-updates-card')}[data-machine-id="http://builder.test"]`;
 const captureDir = process.env.BOITE_SERVER_UPDATE_CAPTURES ?? join(import.meta.dir, '.artifacts');
 
 beforeAll(async () => { const port = await freePort(); base = `http://127.0.0.1:${port}`; server = await startUi(port); }, 90_000);
@@ -31,7 +31,7 @@ async function capture(name: string) {
   await page.screenshot(join(captureDir, `server-update-${name}.png`));
 }
 
-test('current servers hide update actions and available updates open their owning machine', async () => {
+test('Machines owns server updates without a footer shortcut and actions target their owning machine', async () => {
   await size(1400);
   await machines();
   await page.waitFor(`document.querySelector('${card} ${id('server-update-check')}')`);
@@ -39,11 +39,15 @@ test('current servers hide update actions and available updates open their ownin
   expect(await page.evaluate(`document.querySelector('${card} ${id('server-update-install')}') === null`)).toBe(true);
   await capture('current-desktop');
   await page.navigate(`${base}/?fake=1&machines=1&open=recent&serverUpdate=available`);
-  await page.waitFor(`document.querySelector('${id('nav-app-update')}')`);
-  await page.click(id('nav-app-update'));
-  await page.waitFor(`Array.from(document.querySelectorAll('${id('nav-server-update')}')).some(button => button.textContent.includes('Builder'))`);
-  await page.evaluate(`Array.from(document.querySelectorAll('${id('nav-server-update')}')).find(button => button.textContent.includes('Builder')).click()`);
-  await page.waitFor(`window.__boiteTest.workspace.active.machineId === 'http://builder.test' && document.querySelector('${card} ${id('server-update-install')}')`);
+  await page.waitFor(`document.querySelector('${id('nav-settings')}') && window.__boiteTest?.workspace.machines.length === 2`);
+  expect(await page.evaluate(`document.querySelector('${id('nav-app-update')}') === null`)).toBe(true);
+  const active = await page.evaluate('window.__boiteTest.workspace.active.machineId');
+  await page.click(id('nav-settings'));
+  await page.waitFor(`document.querySelector('${id('settings-tab-machines')}')`);
+  await page.click(id('settings-tab-machines'));
+  await page.waitFor(`document.querySelector('${card} ${id('server-update-install')}')`);
+  expect(await page.evaluate('window.__boiteTest.workspace.active.machineId')).toBe(active);
+  expect(await page.evaluate(`document.querySelector('${id('app-update-popover')}') === null`)).toBe(true);
   await capture('available-desktop');
   await page.click(`${card} ${id('server-update-install')}`);
   await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);

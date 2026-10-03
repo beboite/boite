@@ -99,7 +99,8 @@ for (const width of [1280, 390]) {
       await page.waitFor(`!globalThis.__boiteTest.workspace.active.threads.some(t => t.id === ${JSON.stringify(id)})`);
       await page.waitFor(`document.querySelector('[data-testid=undo-toast]')`);
       await page.waitFor(`!document.querySelector('[data-testid=undo-toast]')`, 12_000);
-      expect(await page.evaluate(`document.querySelectorAll('[data-testid=harness-update-notice]').length`)).toBe(2);
+      expect(await page.evaluate(`document.querySelectorAll('[data-testid=harness-update-notice]').length`)).toBe(0);
+      expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.harnessUpdates.filter(update => update.pending).length`)).toBe(2);
       await page.screenshot(join(import.meta.dir, '.artifacts', `thread-delete-auto-dismiss-${width}.png`));
       expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
       if (width < 720) {

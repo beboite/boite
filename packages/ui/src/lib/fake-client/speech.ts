@@ -4,15 +4,16 @@ import { RpcErrorCode, SPEECH_CATALOGUE, SPEECH_DEFAULT_MODEL, isSpeechModelId, 
 import { RpcFailure } from '../client';
 import type { FakeContext, FakeMethods } from './context';
 
-/** The catalogue as the fake core first holds it: Whisper Small downloaded, like a finished setup. */
+/** The catalogue as the fake core first holds it, with the default model installed. */
 export function fakeSpeechModels(): SpeechModel[] {
-  return SPEECH_CATALOGUE.map(entry => ({ id: entry.id, kind: 'catalogue', name: entry.name, bytes: entry.bytes, tier: entry.tier, installed: entry.id === SPEECH_DEFAULT_MODEL }));
+  return SPEECH_CATALOGUE.map(entry => ({ id: entry.id, kind: 'catalogue', name: entry.name, bytes: entry.bytes, tier: entry.tier, installed: entry.id === SPEECH_DEFAULT_MODEL, ...(entry.backend ? { backend: entry.backend } : {}), ...(entry.streaming ? { streaming: true } : {}), ...(entry.legacy ? { legacy: true } : {}) }));
 }
 
 /** What a fake link weighs once its server answers: a large-v3-turbo at q8_0. */
 const CUSTOM_BYTES = 874188075;
 /** One simulated download per fake core, advanced by a timer. */
 const downloads = new WeakMap<FakeContext, ReturnType<typeof setInterval>>();
+const streams = new WeakMap<FakeContext, { id: string; sequence: number }>();
 
 const invalid = (message: string) => new RpcFailure({ code: RpcErrorCode.InvalidParams, message });
 const refused = (message: string) => new RpcFailure({ code: RpcErrorCode.Refused, message });
@@ -25,6 +26,7 @@ function customId(url: string): string {
 }
 
 function snapshot(ctx: FakeContext): SpeechStatus {
+  settle(ctx);
   return { ...ctx.speechStatus, models: ctx.speechStatus.models.map(model => ({ ...model })) };
 }
 
@@ -33,6 +35,8 @@ function settle(ctx: FakeContext): void {
   const status = ctx.speechStatus;
   status.localReady = ctx.speech.modelPath !== '' || status.models.some(model => model.id === ctx.speech.model && model.installed);
   status.engine = ctx.speech.engine;
+  status.streaming = ctx.speech.engine === 'local' && !ctx.speech.modelPath && ctx.speech.model === 'nemotron-streaming';
+  status.previewIntervalMs = ctx.speech.engine === 'api' ? 2500 : ctx.speech.model === 'whistle' ? 1000 : 1500;
   status.ready = ctx.speech.engine === 'local' ? status.localReady : ctx.speech.apiProvider === 'groq' ? status.groqKeySet : status.openrouterKeySet;
 }
 
@@ -60,12 +64,13 @@ export function speechMethods(ctx: FakeContext) {
     'speech.configure': async (params) => {
       const p = params;
       const model = p.model ?? ctx.speech.model;
-      if (!isSpeechModelId(model)) throw invalid('speech.model must be one of base-q5_1, small-q5_1, large-v3-turbo-q5_0 or custom-<12 hex>');
+      if (!isSpeechModelId(model)) throw invalid(`speech.model must be one of ${SPEECH_CATALOGUE.map(model => model.id).join(', ')} or custom-<12 hex>`);
       if (model !== ctx.speech.model && !ctx.speechStatus.models.some(entry => entry.id === model)) throw invalid(`speech.model: ${model} is not a model on this core; add it from a link first`);
       ctx.speech = { engine: p.engine, language: p.language, apiProvider: p.apiProvider, fallback: p.fallback, executable: p.executable, modelPath: p.modelPath, model };
       if (p.groqKey !== undefined) ctx.speechStatus.groqKeySet = !!p.groqKey;
       if (p.openrouterKey !== undefined) ctx.speechStatus.openrouterKeySet = !!p.openrouterKey;
       ctx.speechStatus.revision = secureId();
+      streams.delete(ctx); ctx.speechRequests.clear();
       settle(ctx);
       return snapshot(ctx);
     },
@@ -136,7 +141,31 @@ export function speechMethods(ctx: FakeContext) {
     'speech.warm': async () => ({ ok: true }),
     'speech.cancel': async (params) => {
       ctx.speechRequests.delete(params.requestId);
+      if (streams.get(ctx)?.id === params.requestId) streams.delete(ctx);
       return { ok: true };
+    },
+    'speech.streamStart': async (params) => {
+      settle(ctx);
+      if (params.revision !== ctx.speechStatus.revision) throw refused('Voice settings changed during recording');
+      if (!ctx.speechStatus.ready || !ctx.speechStatus.streaming) throw refused('Select and install Nemotron Streaming first');
+      if (ctx.speechRequests.size) throw refused('Another transcription is running');
+      streams.set(ctx, { id: params.requestId, sequence: 0 });
+      ctx.speechRequests.set(params.requestId, Symbol(params.requestId));
+      return { ok: true };
+    },
+    'speech.streamChunk': async (params) => {
+      const stream = streams.get(ctx);
+      if (params.revision !== ctx.speechStatus.revision || stream?.id !== params.requestId) throw refused('No active stream with this requestId');
+      if (params.sequence !== stream.sequence) throw invalid(`speech.sequence must be ${stream.sequence}`);
+      stream.sequence++;
+      return { text: 'Please add a test for this change.' };
+    },
+    'speech.streamFinish': async (params) => {
+      const stream = streams.get(ctx);
+      if (params.revision !== ctx.speechStatus.revision || stream?.id !== params.requestId) throw refused('No active stream with this requestId');
+      if (params.sequence !== stream.sequence) throw invalid(`speech.sequence must be ${stream.sequence}`);
+      streams.delete(ctx); ctx.speechRequests.delete(params.requestId);
+      return { text: 'Please add a test for this change.' };
     },
     'speech.transcribe': async (params) => {
       const p = params;

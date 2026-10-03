@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { previewPrompt, previewReferencesError, type Message, type MessagePart, type RpcParams } from '@boite/contracts';
+import { previewPrompt, previewReferencesError, type Message, type MessagePart, type RpcParams, type ThreadCapabilityReason, type Turn } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { prepareAttachments } from '../attachments.ts';
 import { messageOf, refused } from '../errors.ts';
@@ -7,6 +7,21 @@ import { newId } from '../ids.ts';
 import type { ThreadStore } from '../threads.ts';
 import { checkAttachmentArray, checkAttachments } from './inputs.ts';
 import { saveThread } from './records.ts';
+
+/** Shared read-only gate for the composer and the live submission path. */
+export function userSteeringUnavailable(core: Core, threads: ThreadStore, threadId: string, turn: Turn | null): ThreadCapabilityReason | null {
+  const thread = threads.require(threadId);
+  if (core.stopping) return 'stopping';
+  if (thread.archived) return 'archived';
+  if (thread.agentSessionId) return 'agent-session';
+  const handle = threads.runner.handles.get(threadId);
+  if (thread.status !== 'running' || !turn || turn.threadId !== threadId || turn.status !== 'running') return 'not-running';
+  if (turn.execution?.operation === 'compact' || threads.runner.steering.has(threadId)) return 'busy';
+  if (!handle?.steerUser && !handle?.steer) return 'unsupported';
+  if ((turn.execution?.selectionVersion ?? 0) !== (thread.selectionVersion ?? 0)) return 'selection-changed';
+  if (threads.listPermissions(threadId).length || threads.listQuestions(threadId).some(question => !question.async)) return 'awaiting-input';
+  return null;
+}
 
 /** User input keeps its own provenance and receipt while sharing the active provider turn. */
 export async function steerUser(core: Core, threads: ThreadStore, params: RpcParams<'turns.steer'>): Promise<{ accepted: boolean }> {
@@ -33,10 +48,7 @@ export async function steerUser(core: Core, threads: ThreadStore, params: RpcPar
   const runner = threads.runner;
   const handle = runner.handles.get(threadId);
   const submit = handle?.steerUser?.bind(handle) ?? handle?.steer?.bind(handle);
-  if (thread.status !== 'running' || !turn || turn.threadId !== threadId || turn.status !== 'running' || turn.execution?.operation === 'compact' || !submit || runner.steering.has(threadId)) return { accepted: false };
-  // Picker changes apply to the next turn, never to input for the old execution.
-  if ((turn.execution?.selectionVersion ?? 0) !== (thread.selectionVersion ?? 0)) return { accepted: false };
-  if (threads.listPermissions(threadId).length || threads.listQuestions(threadId).some(question => !question.async)) return { accepted: false };
+  if (userSteeringUnavailable(core, threads, threadId, turn) !== null || !submit) return { accepted: false };
   const prepared = prepareAttachments(core.dataDir, { prompt: previewPrompt(prompt, references), attachments });
   const message: Message = { id: newId('msg_'), threadId, turnId, role: 'user', state: 'complete', createdAt: Date.now(), parts: [
     { type: 'text', text: previewPrompt(prompt, references), ...(references.length ? { displayText: prompt, previewReferences: structuredClone(references) } : {}) },

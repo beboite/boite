@@ -192,8 +192,19 @@ The connection remains usable. A very large caller ID may require a smaller
 matched refusal or a 1009 close when even that refusal cannot fit. A successful
 response is serialized once; paced deltas still flush before it.
 
-When a socket backs up (Bun's `send` returns -1), every frame is still queued
-except `message.delta`, which is dropped. On `drain` the core resends the text
+Each connection admits a frame only when Bun's `getBufferedAmount()` plus
+that frame's serialized UTF-8 size fits within 32 MiB. Events also obey the
+16 MiB frame limit; oversized events close with 1009. A backed-up socket
+closes with reconnectable 1013 after 10 seconds without draining, or before
+a frame would exceed the byte budget. Further sends are ignored and timers
+and pending parts are cleared. This closes only that client; the journal and
+other connections continue. Reconnecting clients load a fresh thread snapshot.
+
+When a socket backs up (Bun's `send` returns -1), subsequent frames stay queued
+within these limits except `message.delta`, which is dropped. Catch-up tracks
+at most 1,024 distinct parts and 16 MiB of UTF-8 keys before closing with 1013.
+Pacing flushes at 1,024 parts or 16 MiB of serialized held frames, preserving
+wire order without an additional transport queue. On `drain` the core resends the text
 parts those deltas belonged to, one `message.part` each, and nothing else: a
 finished tool output in the same message never goes out twice. Deltas the bus
 still holds are dispatched before that resend, so they fold into the part
@@ -206,8 +217,10 @@ instead of arriving after it as a second copy.
   Unchanged messages and turns keep their identities through revalidation.
   The cache retains up to 16 visits, at most 4 MiB of text per thread and
   16 MiB in total, with a 2,000-message bound per thread.
-- `Store.open` writes subscribe, `threads.get`, `permissions.list` and
-  `questions.list` in one burst instead of one round trip each.
+- Cores advertising `threadSnapshots` receive one `threads.get` for an open.
+  Its receipt includes pending cards, subscribes this socket, replaces the
+  previous subscription and acknowledges unread content after a successful read.
+  Older cores keep the four-call burst for subscription, snapshot and cards.
 - A first visit requests 40 messages, then pages backwards by 120. A cached
   visit allows up to 200 messages to catch up before falling back to a tail.
   These limits affect the displayed window; the journal retains the history.
@@ -218,10 +231,18 @@ instead of arriving after it as a second copy.
   disclosures fall back to their existing history methods if needed.
   An expanded output refreshes after compact revalidation: matching preview
   prefixes cannot prove that the omitted text stayed unchanged.
+- File links arrive with their name, MIME type and decoded byte count. Their
+  base64 data loads through `messages.attachment` when opened or downloaded.
+  User images and assistant media previews retain their bytes on first read.
+  Older cores return full files, and a cached deferred file can fall back to
+  their history methods after a downgrade.
 - `threads.get` takes `after`, a message the client already holds. The answer
   then starts at that message and says so in `messagesFrom`; the UI keeps what
-  it had before it. A reconnect to a quiet thread costs one message instead of
-  the last 120. An unknown message, or a tail above 120 messages or 12 MiB of
+  it had before it. With snapshot support, a SHA-256 proof covers the complete
+  resume tail and its representation options, including deferred bytes.
+  A matching proof sends no message bodies; metadata and turns stay fresh.
+  Without this feature, a quiet reconnect still sends the last message.
+  An unknown message, or a tail above the requested count or 12 MiB of
   serialized UTF-8 message data, gets a normal page without `messagesFrom`.
   A reconnect tail is complete or replaced by a page; it is never truncated.
 - History pages carry at most 120 messages by default, 200 for `messages.list`,
@@ -258,6 +279,15 @@ baseline checkout. The [2026-10-02 measurements](../bench/results/2026-10-02-thr
 record samples, reading-position drift and the subsequent t3code comparison.
 `tests/e2e/thread-switch.test.ts` separately exercises the production UI with
 a real temporary core, a 750 ms snapshot delay and a large folded tool output.
+
+`bun bench/thread-traffic.ts --rtt 150 --mbps 2 --runs 7` compares both opening
+protocols through a paced TCP relay on the same temporary core. It counts actual
+compressed WebSocket bytes in each direction and cold and quiet-return RPC
+latency. `--attachment-kib 0` measures text alone. The
+[2026-10-03 report](../bench/results/2026-10-03-thread-traffic.md) records both
+fixtures and limits. `tests/e2e/thread-loading.test.ts` checks compact first
+reads, unchanged returns and byte-exact downloads in the production desktop
+and paired-phone browser UI.
 
 ## Static files
 

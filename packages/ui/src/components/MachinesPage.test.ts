@@ -53,6 +53,9 @@ function input(selector: string, value: string) {
 
 test('sync stays on the list and the settings button edits the owning machine without changing the active conversation', async () => {
   const { source, target } = await setup();
+  expect(query('[data-testid="machines-page"] h1').textContent).toContain(strings.settings.tabs.machines);
+  expect(document.querySelectorAll('#settings-updates [data-testid="machine-updates-card"]')).toHaveLength(2);
+  expect(document.querySelector('#settings-machines [data-testid="harness-updates-card"]')).toBeNull();
   await source.store.open('t-trace');
   const thread = source.store.openThread;
   await source.store.client!.call('settings.set', { asyncQuestions: false, warmProcessMinutes: 9, agentMemoryBudgetPercent: 70 });
@@ -64,6 +67,9 @@ test('sync stays on the list and the settings button edits the owning machine wi
   expect(document.querySelector('[data-testid="machine-sync-report"]')).toBeNull();
   expect(document.querySelector('[data-testid="machine-settings"]')).toBeNull();
   expect(target.store.settings).toMatchObject({ warmProcessMinutes: 2, agentMemoryBudgetPercent: 40 });
+  query<HTMLInputElement>('[data-machine-id="target"] [data-testid="setting-auto-update-harnesses"]').click();
+  await vi.waitFor(() => expect(target.store.settings?.autoUpdateHarnesses).toBe(true));
+  expect(source.store.settings?.autoUpdateHarnesses).toBe(false);
 
   query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-settings-open"]').click();
   flushSync();
@@ -80,9 +86,6 @@ test('sync stays on the list and the settings button edits the owning machine wi
   query<HTMLButtonElement>('[data-testid="scheduler-save"]').click();
   await vi.waitFor(() => expect(target.store.settings?.warmProcessMinutes).toBe(12));
   expect(source.store.settings?.warmProcessMinutes).toBe(9);
-  query<HTMLInputElement>('[data-testid="setting-auto-update-harnesses"]').click();
-  await vi.waitFor(() => expect(target.store.settings?.autoUpdateHarnesses).toBe(true));
-  expect(source.store.settings?.autoUpdateHarnesses).toBe(false);
   expect(document.querySelector('[data-testid="worktree-storage"]')).not.toBeNull();
   await source.store.client!.call('settings.set', { asyncQuestions: true });
   await vi.waitFor(() => expect(target.store.settings?.asyncQuestions).toBe(true));
@@ -94,6 +97,13 @@ test('sync stays on the list and the settings button edits the owning machine wi
   flushSync();
   expect(query<HTMLInputElement>('[data-machine-id="target"] [data-testid="machine-sync"]').checked).toBe(true);
   expect(workspace.active).toBe(source.store);
+  query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-settings-open"]').click();
+  flushSync();
+  source.store.showSettings('machines', 'updates');
+  flushSync();
+  expect(document.querySelector('[data-testid="machine-settings"]')).toBeNull();
+  expect(document.querySelector('#settings-updates')).not.toBeNull();
+  expect(source.store.openThread).toBe(thread);
 });
 
 test('offline and paired machines cannot be edited and a removed target never falls back to the active machine', async () => {

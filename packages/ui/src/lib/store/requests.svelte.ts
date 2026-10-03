@@ -52,10 +52,10 @@ export class Requests {
     ({ pending: this.pendingQuestions, records: this.questionRequests } = mergeRequests(this.pendingQuestions, this.questionRequests, requests, scope));
   }
 
-  permissionRead(client: Client, scope: ThreadId | 'all') {
+  permissionRead(client: Client, scope: ThreadId | 'all', fetch?: () => Promise<PermissionRequest[]>) {
     const read = this.#permissions.begin(scope), generation = this.ctx.clientGeneration;
     return {
-      promise: client.call('permissions.list', scope === 'all' ? {} : { threadId: scope }).catch(error => { read.cancel(); throw error; }),
+      promise: (fetch ? fetch() : client.call('permissions.list', scope === 'all' ? {} : { threadId: scope })).catch(error => { read.cancel(); throw error; }),
       apply: (rows: PermissionRequest[]) => {
         if (this.ctx.currentClient(client, generation) && read.active) this.mergePermissions(read.apply(rows, this.pendingPermissions), 'all');
         else read.cancel();
@@ -64,10 +64,10 @@ export class Requests {
     };
   }
 
-  questionRead(client: Client, scope: ThreadId | 'all') {
+  questionRead(client: Client, scope: ThreadId | 'all', fetch?: () => Promise<QuestionRequest[]>) {
     const read = this.#questions.begin(scope), generation = this.ctx.clientGeneration;
     return {
-      promise: client.call('questions.list', scope === 'all' ? {} : { threadId: scope }).catch(error => { read.cancel(); throw error; }),
+      promise: (fetch ? fetch() : client.call('questions.list', scope === 'all' ? {} : { threadId: scope })).catch(error => { read.cancel(); throw error; }),
       apply: (rows: QuestionRequest[]) => {
         if (this.ctx.currentClient(client, generation) && read.active) this.mergeQuestions(read.apply(rows, this.pendingQuestions), 'all');
         else read.cancel();

@@ -100,7 +100,7 @@ function move(ctx: FakeContext, threadId: ThreadId, projectId: string, stopBackg
   let answer = toSummary(thread);
   for (const one of familyOf(ctx, thread)) {
     one.branchNamingPending = branchNamingPending;
-    if ((one.background?.length ?? 0) > 0 && stopBackground === true) ctx.setBackground(one, []);
+    if ((one.background?.length ?? 0) > 0 && stopBackground === true) ctx.setBackground(one, [], 'session-ended');
     // The core keeps only Codex's session, whose resume takes the new folder.
     const protocol = ctx.providers.find((p) => p.id === one.providerId)?.protocol;
     if (protocol !== 'codex-appserver' || one.sessionId === null) {

@@ -76,9 +76,12 @@ export function listen(ctx: StoreContext, client: Client): void {
     if (open && open.id === threadId) open.commands = commands;
   });
   // What the agent still runs in the background, whole each time, like the commands.
-  on('thread.background', ({ threadId, tasks }) => {
+  on('thread.background', ({ threadId, tasks, history }) => {
     const open = s.openThread;
-    if (open && open.id === threadId) open.background = tasks;
+    if (open && open.id === threadId) {
+      open.background = tasks;
+      if (history) open.backgroundHistory = history;
+    }
   });
   on('thread.activity', ({ threadId, activity }) => {
     if (s.openThread?.id === threadId) s.openThread.activity = activity;
@@ -133,6 +136,7 @@ export function listen(ctx: StoreContext, client: Client): void {
   });
 
   on('message.started', (message) => {
+    threads.invalidateSync(message.threadId);
     for (const target of threads.threadSnapshots(message.threadId)) {
       const index = lastIndexById(target.messages, message.id);
       if (index >= 0) target.messages[index] = message;
@@ -141,6 +145,7 @@ export function listen(ctx: StoreContext, client: Client): void {
   });
 
   on('message.delta', ({ threadId, messageId, partIndex, text }) => {
+    threads.invalidateSync(threadId);
     for (const message of threads.messages(threadId, messageId)) {
       const part = message.parts[partIndex];
       // A delta appends to whatever kind of text part sits there: text or thinking.
@@ -152,10 +157,12 @@ export function listen(ctx: StoreContext, client: Client): void {
   });
 
   on('message.part', ({ threadId, messageId, partIndex, part }) => {
+    threads.invalidateSync(threadId);
     for (const message of threads.messages(threadId, messageId)) message.parts[partIndex] = part;
   });
 
   on('message.completed', ({ threadId, messageId, state }) => {
+    threads.invalidateSync(threadId);
     for (const message of threads.messages(threadId, messageId)) message.state = state;
   });
 
@@ -167,6 +174,7 @@ export function listen(ctx: StoreContext, client: Client): void {
     layout.notify('needs-you', request.threadId, null);
   });
   on('permission.resolved', ({ requestId, threadId, decision }) => {
+    threads.invalidateSync(threadId);
     requests.resolvePermission(requestId);
     if (decision !== 'allow' && decision !== 'deny') return;
     for (const thread of threads.threadSnapshots(threadId)) {
@@ -243,6 +251,9 @@ export function listen(ctx: StoreContext, client: Client): void {
   });
   on('settings.updated', (settings) => {
     ctx.metadataRevision.settings++;
+    if (JSON.stringify(s.settings?.subscriptionProxy) !== JSON.stringify(settings.subscriptionProxy)) {
+      for (const account of s.accounts) models.dropProbes(account.id);
+    }
     s.settings = settings;
     void s.refreshMemory();
   });

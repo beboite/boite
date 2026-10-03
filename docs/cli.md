@@ -3,8 +3,8 @@
 `boite` lets an agent reach its thread's panel, tasks, project todos and Git
 state. Human-readable output uses key/value lines or rows; `--json` returns the
 RPC result for scripts. The command loads on demand and works with every driver,
-including providers without an MCP client. Boite exposes these tools through
-its CLI rather than an MCP server.
+including providers without an MCP client. The CLI also exposes a bounded set of thread-scoped tools through
+`boite mcp` for providers with an MCP client.
 
 Every new native agent session receives a compact CLI guide before its first
 request, even without a connected brain. Enabled coordination and delegation
@@ -13,6 +13,61 @@ through `boite workflow help`. The guide never creates a file in the brain or
 project. [Brain settings](brain.md#boite-guide) describes its switch.
 Task tracking is optional: agents use a task list only when laying out steps
 helps them and the user follow the work.
+
+## MCP stdio
+
+Run `boite mcp` from an agent process inside a Boite thread. The command reuses
+`BOITE_CORE_URL`, `BOITE_AGENT_TOKEN` and `BOITE_THREAD_ID`, performs the normal
+RPC hello, and requires the authenticated agent identity to match that thread.
+It refuses owner credential fallback and owner/session tokens. Configure the
+host to launch command `boite` with argument `mcp` and inherit that agent
+environment. No global MCP configuration or provider setting is written.
+
+The official MCP TypeScript server SDK loads only for this subcommand. It owns
+stdio framing, initialization, JSON Schema argument validation and request
+cancellation. stdout contains protocol messages only; diagnostics use stderr.
+Closing stdin or sending SIGINT/SIGTERM closes the MCP transport and its Boite
+connection. It never stops a delegated child as part of transport teardown or
+call cancellation. A submitted action may continue after cancellation; use the
+explicit stop tool when that is intended.
+
+The fixed tools expose this thread's location, projects, runtime capabilities,
+authorized contact directory/search/read/send, delegation get/spawn/send/stop/wait/result,
+fork summary merge-back, plan get/set and asynchronous questions. Every call injects the authenticated
+source thread and reaches the existing RPC access and relationship checks.
+Arguments cannot select an arbitrary RPC method or another source thread.
+There are no command execution, file access or diagnostic log tools. Mutation
+tools that support request IDs require a stable caller-supplied `requestId`,
+so retrying the same request does not silently create another child or letter.
+`boite_merge_back` sends a supplied summary (maximum 4000 characters) to the
+fork's recorded source under coordination policy; it does not merge files.
+Tool-output disclosure is omitted because the agent RPC policy does not grant
+`messages.toolOutput` access.
+
+`boite_delegate_wait` waits for direct children for 10 minutes by default,
+with `timeoutMs` from 0 to 3600000. Each wait owns a separate authenticated RPC
+connection; cancelling it closes that connection and releases the core waiter
+without stopping the child or disconnecting other tools. Use a returned
+`resultRef` with `boite_delegate_result`, which accepts `offset` and `limit`
+(maximum 16000). Continue with `nextOffset` until it is null. Offsets count
+Unicode code points; returned pages also stay within 16000 UTF-16 units.
+
+`boite_projects`, `boite_contacts` and `boite_contact_search` accept `offset`
+and `limit` (1 to 100, default 20). Their result has `items` and `page`, including
+`nextOffset`. `boite_contact_read` accepts a limit and `before`; when its result
+has `more: true`, use the oldest returned entry's `at` to read older messages.
+Results include both text and `structuredContent`. The complete result is
+bounded to 256 KiB; larger values return `truncated: true`, measured bytes and
+an explicit preview instead of pretending the output is complete. Read smaller
+pages to recover transcript output. Do not repeat a mutation to recover a
+truncated response. The stdio input frame is limited to 64 KiB.
+
+Implementation: `packages/core/src/mcp/`, pinned
+`@modelcontextprotocol/server` 2.3.0 and Zod 4.6.5. The source CLI dispatch is
+already included in the normal core build and sidecar, so no extra executable
+or staging path is required. See the official SDK
+[stdio guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/serving/stdio.md)
+and [tool guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/servers/tools.md).
 
 ## Test a page in the desktop browser
 

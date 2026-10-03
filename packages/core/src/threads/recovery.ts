@@ -1,7 +1,10 @@
-import type { Message, MessageId, MessagePart, ThreadId, Turn } from '@boite/contracts';
+import type { Message, MessageId, MessagePart, RpcParams, ThreadId, Turn } from '@boite/contracts';
 import type { Core } from '../core.ts';
+import { assertDriverRunnable } from '../drivers/index.ts';
+import { notFound, refused } from '../errors.ts';
 import { newId } from '../ids.ts';
 import { saveThread } from './records.ts';
+import { checkStoredEffort, checkStoredSpeed } from './selection.ts';
 
 /** What a turn a dead core left behind says, once the next core has closed it. */
 export const CRASH_WHILE_RUNNING = 'The core stopped while this turn was running; send the prompt again.';
@@ -17,10 +20,9 @@ export class ThreadRecovery {
   /**
    * A core that dies mid-turn leaves that turn `running` or `queued` in the
    * journal, and the next start comes up with an empty scheduler: nothing would
-   * ever finish it, so the thread would read as busy forever. Every such turn
-   * becomes an error here, through the same events a failing turn writes, before
-   * the server accepts a connection. Nothing is retried: the prompt is in the
-   * journal and the user sends it again.
+   * ever finish it. Unsent ordinary prompts retain their identity and frozen
+   * selection, held until the user resumes or discards them. A turn that may
+   * have reached its provider becomes an error; it is never replayed here.
    */
   recoverStuckTurns(): number {
     const stuck = this.core.journal.unfinishedTurns();
@@ -31,6 +33,18 @@ export class ThreadRecovery {
     for (const turn of stuck) {
       const previous = turn.status;
       if (handoff.requeues(turn)) {
+        waiting.add(turn.threadId);
+        continue;
+      }
+      const thread = this.core.journal.getThread(turn.threadId);
+      if (previous === 'queued' && turn.startedAt === null && turn.execution
+        && !turn.execution.operation && thread && !thread.archived && !thread.parentThreadId && !thread.agentSessionId) {
+        const held: Turn = { ...turn, queueHold: turn.queueHold ?? { reason: 'core-restarted', since: Date.now() } };
+        this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
+          if (!turn.queueHold) this.core.journal.append({ type: 'turn.held', threadId: turn.threadId, version: 1, payload: held }, () => this.core.journal.putTurn(held));
+          if (thread.status !== 'queued') saveThread(this.core, { ...thread, status: 'queued' }, 'thread.status');
+        })());
+        this.core.scheduler.enqueue(held, held.execution!.accountId);
         waiting.add(turn.threadId);
         continue;
       }
@@ -54,6 +68,37 @@ export class ThreadRecovery {
       }
     }
     return stuck.length;
+  }
+
+  /** Changing a held prompt never makes a second turn or input receipt. */
+  recover(params: RpcParams<'turns.recover'>): Turn {
+    const { threadId, turnId, action } = params;
+    if (action !== 'resume' && action !== 'discard') throw refused('action must be resume or discard', { field: 'action', expected: ['resume', 'discard'] });
+    if (this.core.stopping) throw refused('the core is stopping; reconnect before recovering a prompt');
+    const thread = this.core.threads.require(threadId);
+    const turn = this.core.journal.getTurn(turnId);
+    if (!turn || turn.threadId !== threadId) throw notFound('turnId must name a turn of this thread', { field: 'turnId', threadId, turnId });
+    // A response lost after admission is an idempotent read, not another launch.
+    if (turn.status !== 'queued' || !turn.queueHold) return turn;
+    if (action === 'discard') {
+      if (!this.core.scheduler.stop(threadId)) this.core.threads.markQueuedStopped(turnId);
+      return this.core.journal.getTurn(turnId)!;
+    }
+    if (thread.archived) throw refused('cannot resume a prompt on an archived thread', { threadId });
+    const target = turn.execution;
+    if (!target || target.operation || thread.parentThreadId || thread.agentSessionId) throw refused('only an unsent conversation prompt can be resumed', { turnId });
+    this.core.threads.codeCheckpoints.assertAvailable(thread.cwd);
+    const provider = this.core.providers.require(target.providerId);
+    const account = this.core.accounts.require(target.accountId);
+    if (account.providerId !== provider.id) throw refused('the saved account belongs to another provider', { accountId: account.id, providerId: provider.id });
+    if (this.core.updates.updating(provider.id)) throw refused('the saved provider is updating; resume the prompt after the update');
+    assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), account, () => this.core.providers.launcherScriptOnly(provider.id));
+    checkStoredEffort(provider, account.id, target.model, target.effort);
+    checkStoredSpeed(provider, account.id, target.model, target.speed ?? null);
+    const resumed: Turn = { ...turn, queueHold: null };
+    this.core.journal.append({ type: 'turn.resumed', threadId, version: 1, payload: resumed }, () => this.core.journal.putTurn(resumed));
+    this.core.scheduler.enqueue(resumed, account.id);
+    return resumed;
   }
 
   /** A turn the previous core was handing over when it was killed: stopped, with no error part. */

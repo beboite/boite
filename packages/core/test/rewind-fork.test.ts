@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { RpcErrorCode } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
@@ -214,6 +214,57 @@ describe('threads.fork', () => {
     expect(after.sessionId).toBe(before.sessionId);
     await run(threadId, 'delta');
     expect(seen.at(-1)?.sessionId).toBe(before.sessionId);
+  });
+
+  test.each(['metadata', 'boundary'] as const)('a seeded worktree snapshot revalidates %s while placement waits', async change => {
+    const path = join(h.dataDir, 'running-repo');
+    mkdirSync(path);
+    for (const args of [['init', '-q'], ['commit', '-q', '--allow-empty', '-m', 'init']]) {
+      const git = Bun.spawnSync({ cmd: ['git', ...args], cwd: path,
+        env: { ...process.env, GIT_AUTHOR_NAME: 'boite test', GIT_AUTHOR_EMAIL: 'test@boite.invalid', GIT_COMMITTER_NAME: 'boite test', GIT_COMMITTER_EMAIL: 'test@boite.invalid' },
+        stdout: 'pipe', stderr: 'pipe', windowsHide: true });
+      if (!git.success) throw new Error(git.stderr.toString());
+    }
+    const project = await client.call('projects.add', { path, name: 'running repo' });
+    const account = (await client.call('accounts.list', {})).find(entry => entry.providerId === 'echo')!;
+    const source = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title: 'source' });
+    const done = Promise.withResolvers<TurnResult>();
+    restore = setDriver('echo', { protocol: 'echo', startTurn() {
+      return { done: done.promise, stop: () => done.resolve({ status: 'stopped', sessionId: null, usage: null }) };
+    } });
+    const turn = await client.call('turns.start', { threadId: source.id, prompt: 'captured prompt' });
+    await waitFor(() => h.core.journal.getTurn(turn.id)?.status === 'running');
+    const user = userMessages(source.id)[0]!;
+    const add = h.core.worktrees.add.bind(h.core.worktrees);
+    const entered = Promise.withResolvers<void>(), proceed = Promise.withResolvers<void>();
+    const placement = spyOn(h.core.worktrees, 'add').mockImplementation(async (...args) => {
+      entered.resolve(); await proceed.promise; return add(...args);
+    });
+    try {
+      const forked = h.core.threads.fork(source.id, user.id, true);
+      await entered.promise;
+      if (change === 'boundary') h.core.journal.putMessage({ ...user, parts: [{ type: 'text', text: 'changed boundary' }] });
+      else {
+        const current = h.core.threads.require(source.id);
+        h.core.journal.putThread({ ...current, title: 'new source title', selectionVersion: (current.selectionVersion ?? 0) + 1, updatedAt: current.updatedAt + 1 });
+      }
+      proceed.resolve();
+      if (change === 'boundary') {
+        await expect(forked).rejects.toThrow('source thread changed');
+        expect(h.core.journal.listThreads()).toHaveLength(1);
+        expect(h.core.journal.getTurn(turn.id)?.status).toBe('running');
+        return;
+      }
+      const fork = await forked;
+      expect(fork.sessionId).toBeNull();
+      expect(fork.forkOrigin?.mode).toBe('seeded');
+      expect(fork.cwd).not.toBe(source.cwd);
+      const snapshot = h.core.threads.get(fork.id);
+      expect(snapshot.messages.map(message => message.parts)).toEqual([user.parts]);
+      expect(snapshot.turns[0]?.status).toBe('stopped');
+      expect(h.core.journal.getTurn(turn.id)?.status).toBe('running');
+      expect(h.core.threads.require(source.id).title).toBe('new source title');
+    } finally { proceed.resolve(); placement.mockRestore(); }
   });
 
   test('with worktree, the fork runs in a git worktree of its own', async () => {

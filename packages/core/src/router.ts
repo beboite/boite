@@ -12,6 +12,8 @@ export interface Connection {
   readonly identity: Identity;
   sendEvent<E extends RpcEventName>(name: E, payload: RpcEvents[E]): void;
   close(code: number, reason?: string): void;
+  /** Release held requests when this socket leaves, without stopping their work. */
+  onClose?(callback: () => void): () => void;
 }
 
 export interface RpcContext {

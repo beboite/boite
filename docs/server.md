@@ -134,11 +134,10 @@ no real provider call and uses no existing login directory.
 
 ## Updating from the app
 
-Open Settings, Machines. Each remote server shows its installed version and a
-Check for updates action. When a signed server release is available, Update
-appears on that machine's card and in the sidebar's update menu. That menu is
-hidden when neither the app nor a server has an update available. The desktop
-app's own manual check and channel choices remain in Settings, General.
+Open Settings, Machines and updates. In Updates, each remote server shows its
+installed version and a Check for updates action. When a signed server release
+is available, Update appears on that machine's card. The desktop app's own
+manual check and channel choices appear in the same Updates section.
 Cards show the installed and offered versions together. Details expands the
 idle wait, backup and recovery behavior without adding it to the confirmation.
 
@@ -296,7 +295,8 @@ says which role it carries and until when it works. Without `--owner` the link
 is a phone's. `--data-dir` and `--channel` name another core, as they do at
 start.
 
-Paste the link into Settings, Machines, Add machine. Full control permits
+Paste the link into Settings, Machines and updates, Add machine. Full control
+permits
 accounts, projects, settings and further pairing. Removing the local connection
 forgets its key; revoking it on the server invalidates it. [Machines](machines.md)
 owns routing/reconnection and [phone pairing](phone.md#pairing) owns grant

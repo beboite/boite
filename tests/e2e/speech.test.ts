@@ -154,6 +154,11 @@ test('voice settings save API selection, hide credentials on reload, and fit pho
   await capture('speech-phone-settings.png');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1360, height: 950, deviceScaleFactor: 1, mobile: false });
   await page.waitFor(`document.querySelector('${id('voice-local')}')`);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('voice-models')} > .models > .model')).map(row => row.dataset.testid)`)).toEqual([
+    'voice-model-whistle', 'voice-model-nemotron-streaming', 'voice-model-large-v3-turbo-q5_0',
+  ]);
+  await page.evaluate(`document.querySelector('${id('voice-models')}').scrollIntoView({block:'center'})`);
+  await capture('speech-desktop-three-models.png');
   // Choosing the engine applies it at once; the keys wait for their own button.
   await page.click(id('voice-api'));
   await page.waitFor(`document.querySelector('${id('voice-api')}')?.getAttribute('aria-checked') === 'true' && document.querySelector('${id('voice-status')}')?.dataset.state === 'api'`);

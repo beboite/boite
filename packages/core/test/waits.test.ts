@@ -53,6 +53,6 @@ test('a core that goes away rejects a pending event wait at once', async () => {
   const wait = client.next('turn.finished', undefined, 5000).catch(error => { caught = error; });
   await h.stop();
   await wait;
-  expect((caught as Error).message).toBe('the socket closed');
+  expect((caught as Error).message).toStartWith('the socket closed');
   expect(Date.now() - started).toBeLessThan(4000);
 });

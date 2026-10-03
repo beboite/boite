@@ -36,6 +36,7 @@ import { settingsMethods } from './fake-client/settings';
 import { DEVICE_METHODS, toSummary } from './fake-client/shared';
 import { speechMethods } from './fake-client/speech';
 import { terminalMethods } from './fake-client/terminals';
+import { capabilityMethods } from './fake-client/capabilities';
 import { purgeDeletedThreads, threadMethods } from './fake-client/threads';
 import { threadMoveMethods } from './fake-client/thread-move';
 import { spawnMethods } from './fake-client/spawn';
@@ -46,6 +47,9 @@ import { pullRequestMethods } from './fake-client/pull-requests';
 import { worktreeMethods } from './fake-client/worktrees';
 import { serverUpdateMethods } from './fake-client/server-update';
 import { closeSideQuestions } from './fake-client/side-questions';
+import { holdAfterRestart } from './fake-client/recovery';
+import { journalInspectionMethods } from './fake-client/journal-inspection';
+import { forkReturnMethods } from './fake-client/fork-return';
 
 export type { FakeClientOptions } from './fake-client/context';
 
@@ -116,6 +120,11 @@ export class FakeClient implements ObservableClient {
    */
   becomes(principal: Principal): void {
     this.#ctx.bus.principal = principal;
+  }
+
+  /** Test fixture: no provider turn is started. */
+  holdAfterRestart(threadId: ThreadId, prompt: string) {
+    return holdAfterRestart(this.#ctx, threadId, prompt);
   }
 
   /**
@@ -212,6 +221,8 @@ export class FakeClient implements ObservableClient {
     if (generation !== this.#transportGeneration || (bus.state !== 'ready' && method !== 'hello')) {
       throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'connection changed before RPC dispatch' });
     }
+    // The fixture has no thread-bound agent token; do not widen this scoped read.
+    if (bus.principal === 'agent' && (method === 'threads.capabilities' || method === 'threads.mergeBack')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} requires a thread-bound agent identity` });
     if (bus.principal === 'agent' && (method === 'core.logs' || method === 'projects.setAutoArchiveMergedPr' || method === 'quotas.reset')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is not one of the agent's methods` });
     // The router's gate, word for word: deny by default, `hello` before it.
     if (bus.principal === 'session' && method !== 'hello' && !DEVICE_METHODS.has(method)) {
@@ -222,6 +233,10 @@ export class FakeClient implements ObservableClient {
     // The real client writes its set from the answer, never from the request.
     if (method === 'threads.subscribe') {
       bus.clientSubscribed.add((params as RpcParams<'threads.subscribe'>).threadId);
+    } else if (method === 'threads.get' && (result as RpcResult<'threads.get'>).opened) {
+      const request = params as RpcParams<'threads.get'>;
+      bus.clientSubscribed.add(request.threadId);
+      if (request.open?.previous && request.open.previous !== request.threadId) bus.clientSubscribed.delete(request.open.previous);
     } else if (method === 'threads.unsubscribe') {
       bus.clientSubscribed.delete((params as RpcParams<'threads.unsubscribe'>).threadId);
     }
@@ -329,6 +344,9 @@ export class FakeClient implements ObservableClient {
       ...projects,
       ...projectIconMethods(ctx),
       ...threads,
+      ...capabilityMethods(ctx),
+      ...forkReturnMethods(ctx),
+      ...journalInspectionMethods(ctx),
       ...threadMoveMethods(ctx),
       ...spawnMethods(ctx, threads['threads.create'], projects['projects.add']),
       ...activityMethods(ctx),

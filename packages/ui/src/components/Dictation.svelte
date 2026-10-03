@@ -7,6 +7,7 @@
   import { RpcFailure, type Client } from '../lib/client';
   import { SpeechRecorder, audioBase64, microphoneError } from '../lib/speech-recorder';
   import { SpeechPreview } from '../lib/speech-preview';
+  import { SpeechStream } from '../lib/speech-stream';
   import { strings } from '../lib/strings';
   import { voice } from '../lib/voice-prefs.svelte';
   let { store, ontext, onbusy, onpreview }: { store: Store; ontext: (text: string) => void; onbusy: (busy: boolean) => void; onpreview: (text: string, status: string, error: boolean) => void } = $props();
@@ -24,6 +25,7 @@
   let disposed = false;
   let client: Client | null = null;
   let preview: SpeechPreview | null = null;
+  let stream: SpeechStream | null = null;
   let previewText = '';
   /** The language a preview heard, sent with the final request so the engine skips its detection. */
   let heard: string | undefined;
@@ -37,6 +39,7 @@
   function cancel() {
     generation++;
     void stopPreview();
+    void stream?.stop(); stream = null;
     recorder?.dispose(); recorder = null; audio = null;
     if (requestId && client) void client.call('speech.cancel', { requestId }).catch(() => {});
     requestId = null; phase = 'idle'; onbusy(false); onpreview('', '', false);
@@ -70,13 +73,21 @@
       if (!status.ready) { needsSetup = true; throw new Error(store.owner ? strings.speech.setup : strings.speech.ownerSetup); }
       phase = 'recording';
       onpreview('', strings.speech.listening, false);
-      preview = new SpeechPreview(client, revision, text => {
+      const onLiveText = (text: string) => {
         if (run !== generation || disposed || phase !== 'recording') return;
         previewText = text; onpreview(text, strings.speech.live, false);
-      }, cause => {
+      };
+      const onLiveError = (cause: unknown) => {
         if (run === generation && !disposed && phase === 'recording') onpreview(previewText, `${strings.speech.previewFailed} ${microphoneError(cause)}`, true);
-      });
-      previewTimer = setInterval(() => preview?.update(() => capture.snapshot()), 2500);
+      };
+      if (status.streaming) {
+        stream = new SpeechStream(client, revision, onLiveText, onLiveError);
+        previewTimer = setInterval(() => stream?.update(() => capture.takeChunk()), 400);
+      } else {
+        preview = new SpeechPreview(client, revision, onLiveText, onLiveError);
+        const interval = Math.max(1000, status.previewIntervalMs ?? 2500);
+        previewTimer = setInterval(() => preview?.update(() => capture.snapshot(interval <= 1000 ? 4 : 12)), interval);
+      }
       if (captureEnded) void stop();
     } catch (cause) { capture.dispose(); if (run === generation && !disposed) fail(cause); }
   }
@@ -85,10 +96,22 @@
     const run = generation;
     phase = 'transcribing';
     onpreview(previewText, strings.speech.transcribing, false);
-    heard = preview?.language;
+    const lastPreview = preview;
     const drained = stopPreview();
-    try { const recording = await recorder.stop(); await drained; if (run === generation && !disposed) { audio = recording; await transcribe(); } }
-    catch (cause) { if (run === generation && !disposed) fail(cause); }
+    const liveStream = stream;
+    try {
+      const recording = await recorder.stop(); await drained;
+      if (run !== generation || disposed) { await liveStream?.stop(); return; }
+      audio = recording; heard = lastPreview?.language;
+      if (liveStream) {
+        const text = await liveStream.finish(recording);
+        if (run !== generation || disposed) return;
+        if (!text.trim()) throw new Error(strings.speech.silence);
+        ontext(text); audio = null; phase = 'idle'; onbusy(false); onpreview('', '', false);
+      } else await transcribe();
+    }
+    catch (cause) { await liveStream?.stop(); if (run === generation && !disposed) fail(cause); }
+    finally { if (stream === liveStream) stream = null; }
   }
   async function transcribe() {
     if (!audio || !client) return;

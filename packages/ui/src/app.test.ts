@@ -1750,7 +1750,7 @@ test('a provider Boite installs waits in Settings, one tile away, and joins the 
   expect(store.defaultChoice()?.providerId).toBe('antigravity');
 });
 
-test('the Providers page says where each managed install stands and offers Update on the one behind', async () => {
+test('Providers keeps installation details and Machines updates the managed copy that runs', async () => {
   store.draft = null;
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=nav-settings]').click();
@@ -1781,23 +1781,33 @@ test('the Providers page says where each managed install stands and offers Updat
   await waitFor(() => store.harnessUpdates.some((update) => update.providerId === 'opencode'));
   expect(store.harnessUpdates.find((update) => update.providerId === 'opencode')?.route).toBe('self');
   expect(document.querySelector(`${behind} [data-testid=install-update]`)).toBeNull();
+  query<HTMLButtonElement>('[data-testid=settings-tab-machines]').click();
+  await waitFor(() => document.querySelector('[data-testid=machine-agent-update][data-provider-id=opencode]') !== null);
+  expect(document.querySelector('[data-testid=machine-agent-update][data-provider-id=opencode] [data-testid=install-update]')).toBeNull();
+  expect(query('[data-testid=machine-agent-update][data-provider-id=opencode] .version').textContent).toBe('1.18.31');
+  query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
+  await waitFor(() => document.querySelector(behind) !== null);
 
-  // With Boite's copy the one that runs, down and one release behind: the row
-  // offers Update, the details name both versions.
+  // Providers keeps the installed version; update controls belong to Machines.
   store.harnessUpdates = store.harnessUpdates.filter((update) => update.providerId !== 'opencode');
-  await waitFor(() => document.querySelector(`${behind} [data-testid=install-update]`) !== null);
-  expect(query(`${behind} [data-testid=install-update]`).textContent?.trim()).toBe('Update');
   await openProviderDetails('opencode');
-  expect(query(`${behind} [data-testid=install-status]`).textContent?.trim()).toBe('Version 0.4.12 · 0.5.0 is available');
+  expect(query(`${behind} [data-testid=install-status]`).textContent?.trim()).toBe('Installed by Boite · version 0.4.12');
   expect(document.querySelector(`${behind} [data-testid=install-remove]`)).not.toBeNull();
+  expect(document.querySelector(`${behind} [data-testid=install-update]`)).toBeNull();
+
+  query<HTMLButtonElement>('[data-testid=settings-tab-machines]').click();
+  const update = '[data-testid=machine-agent-update][data-provider-id=opencode]';
+  await waitFor(() => document.querySelector(`${update} [data-testid=install-update]`) !== null);
+  expect(query(`${update} [data-testid=install-update]`).textContent?.trim()).toBe('Update');
+  expect(query(update).textContent).toContain('0.4.12 → 0.5.0');
 
   // The update is the same download: the track and Cancel, the same a first install draws.
-  query<HTMLButtonElement>(`${behind} [data-testid=install-update]`).click();
-  await waitFor(() => document.querySelector(`${behind} [data-testid=install-progress]`) !== null);
-  expect(document.querySelector(`${behind} [data-testid=install-cancel]`)).not.toBeNull();
+  query<HTMLButtonElement>(`${update} [data-testid=install-update]`).click();
+  await waitFor(() => document.querySelector(`${update} [data-testid=install-progress]`) !== null);
+  expect(document.querySelector(`${update} [data-testid=install-cancel]`)).not.toBeNull();
 
   await waitFor(
-    () => document.querySelector(`${behind} [data-testid=install-status]`)?.textContent?.trim() === 'Installed by Boite · version 0.5.0'
+    () => store.installOf('opencode')?.state === 'installed' && document.querySelector(`${update} .version`)?.textContent?.trim() === '0.5.0'
   );
   expect(document.querySelector('[data-testid=install-update]')).toBeNull();
 

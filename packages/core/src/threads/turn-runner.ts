@@ -1,12 +1,12 @@
-import type { PermissionMode, ThreadId, ThreadSummary, Turn, TurnId } from '@boite/contracts';
+import type { PermissionMode, ThreadId, Turn, TurnId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { getDriver, releaseThread } from '../drivers/index.ts';
 import type { TurnResult } from '../drivers/types.ts';
 import { messageOf } from '../errors.ts';
 import { logMessageOf } from '../log-errors.ts';
-import { promptCacheOf } from '../prompt-cache.ts';
+import { reportSettlementError, settleTurn } from './turn-settlement.ts';
 import type { ThreadStore } from '../threads.ts';
-import { saveThread, setThreadStatus } from './records.ts';
+import { setThreadStatus, withLoad } from './records.ts';
 import { TurnAttempts, type TurnAttemptState } from './turn-attempts.ts';
 
 export { STOP_DEADLINE, STOP_DEADLINE_ERROR } from './turn-attempts.ts';
@@ -55,6 +55,7 @@ export class TurnRunner {
     const permissions = this.attempts.open(state);
 
     let result: TurnResult;
+    let started = false;
     try {
       // Commit the running state before a driver can spawn or stream output.
       this.threads.progress.begin(threadId, turnId);
@@ -65,6 +66,7 @@ export class TurnRunner {
         this.core.bus.emit('turn.started', state.running);
         setThreadStatus(this.core, threadId, 'running');
       })());
+      started = true;
       this.core.workforce.resident.assertThreadRoute(threadId, state.thread);
       const provider = this.core.providers.require(state.thread.providerId);
       const account = this.core.accounts.require(state.thread.accountId);
@@ -74,21 +76,19 @@ export class TurnRunner {
     } catch (error) {
       result = { status: 'error', sessionId: state.thread.sessionId, usage: null, error: messageOf(error), diagnosticError: logMessageOf(error) };
     } finally {
-      this.attempts.close(threadId);
+      try { this.attempts.close(threadId); }
+      catch (error) { reportSettlementError(this.core, threadId, turnId, 'attempt cleanup', error); }
       this.answerAfter.delete(turnId);
     }
 
     const { thread, running } = state;
-    const checkpoint = this.threads.codeCheckpoints.end(turnId);
-    if (checkpoint) await checkpoint;
+    try {
+      const checkpoint = this.threads.codeCheckpoints.end(turnId);
+      if (checkpoint) await checkpoint;
+    } catch (error) { reportSettlementError(this.core, threadId, turnId, 'checkpoint', error); }
     if (this.core.journal.isClosed()) return;
-    this.core.delegation.submitted(threadId, turnId, result.status === 'done');
-    // Writes what the turn streamed to its rows before anything reads them as finished.
-    this.core.journal.releaseTurn(turnId);
-    this.core.bus.flush();
-    this.threads.cards.clearPermissionsOf(threadId);
-    this.threads.cards.clearQuestionsOf(threadId);
-
+    try { this.core.delegation.submitted(threadId, turnId, result.status === 'done'); }
+    catch (error) { reportSettlementError(this.core, threadId, turnId, 'delegation submission', error); }
     const finished: Turn = {
       ...running,
       status: result.status === 'done' ? 'done' : result.status,
@@ -97,35 +97,35 @@ export class TurnRunner {
       error: result.error ?? null,
       ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}),
     };
-    const completion = this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
-      this.threads.progress.end(threadId, turnId);
-      this.core.journal.append({ type: 'turn.finished', threadId, version: 1, payload: finished }, () => {
-        this.core.journal.putTurn(finished);
-      });
-      this.core.bus.emit('turn.finished', finished);
-      if (result.status === 'error') {
-        this.core.log('error', `turn ${turnId} failed: ${result.diagnosticError ?? result.error ?? 'unknown error'}`, { source: thread.providerId, event: 'turn.failed', threadId, turnId });
-      }
-      const current = this.core.journal.getThread(threadId);
-      if (current === null) return null;
-      const sameSession = (current.sessionGeneration ?? 0) === (thread.sessionGeneration ?? 0);
-      if (current.archived || !sameSession) releaseThread(threadId);
-      // A lost session already moved the generation on, so do not bump it again.
-      const sessionId = sameSession ? result.sessionId ?? current.sessionId : current.sessionId;
-      const next: ThreadSummary = {
-        ...current,
-        sessionId,
-        // Keep a cut only while the thread still names the session it cuts.
-        sessionResumeAt: current.sessionResumeAt && sessionId === current.sessionId && sessionId === thread.sessionId ? current.sessionResumeAt : null,
-        status: result.status === 'error' ? 'error' : 'idle',
-        unread: current.unread || !this.core.subscribers.hasSubscribers(threadId),
-        promptCache: sameSession ? promptCacheOf(result, thread, finished.finishedAt ?? Date.now(), current.promptCache ?? null) ?? current.promptCache ?? null : current.promptCache ?? null,
-      };
-      saveThread(this.core, next, 'thread.finished');
-      return { next, sameSession };
-    })());
-    if (completion === null) return;
-    const { next, sameSession } = completion;
+    const completion = await settleTurn(this.core, { queued, running, thread, result, started, finished });
+    // No in-memory events or after-finish effects run before the transaction
+    // commits. Even a failure in the thread write cannot publish completion twice.
+    if (completion === null) {
+      // An abandoned result still owns its old progress, but a newer turn does not.
+      if (!this.core.journal.isClosed()) this.threads.progress.end(threadId, turnId);
+      return;
+    }
+    const { next, sameSession, threadOwned } = completion;
+    this.threads.progress.end(threadId, turnId);
+    if (threadOwned) {
+      try {
+        this.threads.cards.clearPermissionsOf(threadId);
+        this.threads.cards.clearQuestionsOf(threadId);
+      } catch (error) { reportSettlementError(this.core, threadId, turnId, 'card cleanup', error); }
+    }
+    this.core.bus.emit('turn.finished', finished);
+    if (result.status === 'error') {
+      this.core.log('error', `turn ${turnId} failed: ${result.diagnosticError ?? result.error ?? 'unknown error'}`, { source: thread.providerId, event: 'turn.failed', threadId, turnId });
+    }
+    if (!next) return;
+    if (!threadOwned) {
+      // This completion still belongs to its parent, even if the child thread
+      // now names a newer execution. Do not run work against that execution.
+      await this.threads.spawns.finished(finished);
+      return;
+    }
+    if (next.archived) releaseThread(threadId);
+    this.core.bus.emit('thread.updated', withLoad(this.core, next));
     // A move the agent asked for during the turn happens now that no process
     // works in the old folder, before any wake or held answer starts the next.
     await this.threads.moves.applyWaiting(threadId);
