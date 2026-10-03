@@ -81,6 +81,14 @@ documentation](https://learn.chatgpt.com/docs/app-server#trigger-thread-compacti
 and [pi RPC
 documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md#compact).
 
+`threads.capabilities` reports both implementation support and current
+availability for steering, compaction, images, plans, pending approvals and
+questions, native or seeded branching, session preparation and task observations.
+It reads runtime metadata without starting a provider. The compaction menu
+refreshes that answer when opened and when its session changes; older cores
+retain the existing local checks. Mutation methods still validate availability
+again when invoked.
+
 ## Automatic compaction
 
 `Settings.autoCompact` is `{ tokens, moments }` or null, set by the owner under
@@ -273,13 +281,23 @@ including any finished message into a new thread titled after the source with
 the way `threads.create` does, from the project's HEAD. The source thread's
 branch and uncommitted changes are not copied.
 
+Every new fork retains its original thread and message boundary in `forkOrigin`,
+including whether it preserved native context or copied visible history. The
+fork shows that distinction and links back to its source on desktop and phone.
+Send conclusions back submits an explicit summary of at most 4000 characters
+through `threads.mergeBack`. It creates a coordination letter under the existing
+permissions, not a file merge. A stable request ID returns the same receipt on
+retry within the coordination retention period; a changed body is refused.
+Deleted or archived sources cannot receive a return.
+
 The agent must forget the removed part too. Each driver does it in one of two
 ways, and the rewind result's `session` field says which one applied:
 
 | Driver | Behaviour |
 |---|---|
 | Claude | Exact. Each turn records `checkpoint: { sessionId, entry }`, the uuid of the last transcript entry it wrote. The next turn resumes that session with `resumeSessionAt: entry` and `forkSession: true`, so the CLI keeps the transcript up to the cut under a new session id and the original transcript is never shortened. A rewind closes the warm process first. |
-| Codex, ACP, Muse, pi, agy and echo | Seeded. The thread drops its native session. The next turn starts a fresh one carrying the kept history as bounded excerpts, the same [context transfer](model-switching.md#context-transfer) a change of account uses. |
+| Codex | Exact at a completed native turn boundary on the same account and session generation. A traced appserver calls `thread/fork` with the retained native turn ID as an inclusive boundary. Rewind prepares a new native session before restoring files and committing the journal cut. The source native transcript is unchanged. |
+| ACP, Muse, pi, agy and echo | Seeded. The thread drops its native session. The next turn starts a fresh one carrying the kept history as bounded excerpts, the same [context transfer](model-switching.md#context-transfer) a change of account uses. |
 
 Claude falls back to the seeded path in four cases: the kept turn left no
 checkpoint (it ran before checkpoints existed, failed early, or was stopped
@@ -288,8 +306,18 @@ fork is placed in a worktree (the CLI files transcripts by folder), or the CLI
 refuses the cut before writing anything, in which case the core retries the
 turn once on a fresh seeded session. A fork cut in the middle of a turn is
 also seeded, because the transcript has no entry at that point. No driver
-resumes the whole old session after a rewind: the session id the thread keeps
-is either the checkpoint's own, always resumed with `forkSession`, or none.
+resumes the whole old session after a rewind. Codex uses seeded history when no
+matching completed checkpoint exists, including cuts inside a turn. Native fork
+setup rechecks source ownership after asynchronous work and discards the new
+native session on failure; failed setup cannot truncate the source. A successful
+rewind keeps the newly forked Codex session, Claude's bounded resume checkpoint,
+or no native session for the seeded path.
+
+Codex native setup verifies the fork's last turn with a one-item, summary-only
+`thread/turns/list` request. An older appserver that explicitly lacks this API
+uses seeded history only after the temporary native fork is archived and its
+setup process has exited. An incorrect boundary or uncertain cleanup refuses
+the operation instead of adopting unverified context.
 
 ## The divider
 

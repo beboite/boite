@@ -76,6 +76,12 @@ with exponential backoff up to 5 seconds. Buffered deltas for completed messages
 are dropped after three failed flushes, with a diagnostic. Thread activity is a
 settings row; detected project icons are derived rows that can be rebuilt.
 
+Terminal persistence retries independently of provider execution. The scheduler
+keeps the turn until its terminal transaction commits, retaining the original
+result and publishing completion once. A changed execution identity prevents a
+late result from overwriting a replacement turn or session. Shutdown ends this
+retry; startup applies the normal recovery rules to any unfinished rows.
+
 Deletion stops a conversation and its children before hiding them behind durable
 markers. Restore retains history and previous archive flags without restarting
 agents. The default deletion retention is 30 days; `threadDeletionRetentionDays`
@@ -99,6 +105,12 @@ Independent conversations start immediately, including on the same account.
 There is no global or per-account interactive turn ceiling. A conversation has
 one in-flight turn and can stay queued while its account is being configured or
 its team is paused. Process resource guards are separate from admission.
+
+After an unplanned restart, an ordinary queued prompt that never started stays
+held with its original turn, input receipt and execution selection. Desktop and
+phone offer Resume and Discard through `turns.recover`; neither creates a second
+input. Work that may already have reached a provider is never replayed by this
+recovery path. Explicit restart handoff keeps its own authorization rules.
 
 Owner and paired-device connections name one visible conversation through
 `threads.focus`. Claude and Codex can prepare their traced process and native
@@ -166,7 +178,8 @@ Permission changes use native setters when available. Agents with launch-time
 permissions interrupt and resume within the same Boite turn, retaining the
 execution target and accumulating usage across attempts.
 
-`TurnRunner` admits and settles visible turns. `TurnAttempts` owns native
+`TurnRunner` admits visible turns and publishes their completion after
+`settleTurn` commits local state. `TurnAttempts` owns native
 handles, retries, live controls, stop timers and reported usage. Both read the
 same execution snapshots after a retry replaces them. Provider and account
 resolution stays with admission.
@@ -177,6 +190,13 @@ a card without inventing an answer. Incoming user input or an asynchronous answe
 splits the assistant message at its arrival; earlier running tools finish in
 the earlier message. Claude background work can keep a session alive after its
 foreground turn and later open a background-completion turn.
+
+Native task observations persist with the provider, session generation and
+originating turn. The UI shows the latest 100 observations separately from
+Boite's delegated conversations. A missing live task is marked ended, not
+successful; explicit provider outcomes can complete it later. Session release
+and core restart record cancellation without trying to adopt or restart native
+work. Delayed callbacks cannot change another session's observations.
 
 `/btw` asks a tool-free side question over a frozen transcript excerpt. It does
 not steer the main turn or append its answer to the journal. A pending request

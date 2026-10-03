@@ -175,7 +175,10 @@ export async function connect(url: string, token: string, options: ConnectOption
     threadId: hello.threadId ?? null,
     async call<M extends RpcMethodName>(method: M, params: RpcMethods[M]['params']): Promise<RpcMethods[M]['result']> {
       if (closed) throw new Error('the client is closed');
-      return (await send(method, params)) as RpcMethods[M]['result'];
+      const wait = method === 'delegation.wait' && options.requestTimeoutMs === undefined
+        ? Math.min(3_600_000, Math.max(0, (params as RpcMethods['delegation.wait']['params']).timeoutMs ?? 600_000)) + 5000
+        : undefined;
+      return (await send(method, params, wait)) as RpcMethods[M]['result'];
     },
     on<E extends RpcEventName>(event: E, handler: (payload: RpcEvents[E]) => void): () => void {
       return on(event, (payload) => handler(payload as RpcEvents[E]));

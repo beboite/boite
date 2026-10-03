@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import type { MessagePart } from '@boite/contracts';
 import { parseJson } from './rows.ts';
 
-export const SCHEMA_VERSION = 27;
+export const SCHEMA_VERSION = 28;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -362,6 +362,15 @@ export function migrate(db: Database, file: string): void {
     bindLegacyTurnRequests(db);
     version = 27;
   }
+  db.exec(`CREATE TABLE IF NOT EXISTS background_observations (
+    thread_id TEXT NOT NULL, provider_id TEXT NOT NULL, session_generation INTEGER NOT NULL,
+    parent_turn_id TEXT NOT NULL, task_id TEXT NOT NULL, payload TEXT NOT NULL,
+    PRIMARY KEY(thread_id, provider_id, session_generation, parent_turn_id, task_id)
+  ); CREATE INDEX IF NOT EXISTS background_observations_thread ON background_observations(thread_id);
+    CREATE INDEX IF NOT EXISTS background_observations_live ON background_observations(thread_id, provider_id, session_generation, json_extract(payload, '$.state'));
+    CREATE INDEX IF NOT EXISTS background_observations_recent ON background_observations(thread_id, json_extract(payload, '$.observedAt') DESC);`);
+  if (!hasColumn('threads', 'fork_origin')) db.exec('ALTER TABLE threads ADD COLUMN fork_origin TEXT');
+  if (!hasColumn('turns', 'queue_hold')) db.exec('ALTER TABLE turns ADD COLUMN queue_hold TEXT');
   version = Math.max(version, SCHEMA_VERSION);
   if (row?.user_version !== version) db.exec(`PRAGMA user_version = ${version}`);
 }

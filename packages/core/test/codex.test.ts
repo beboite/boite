@@ -1,9 +1,11 @@
+import { inspectJournal } from '../src/journal/integrity.ts';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import type { MessagePart, PermissionMode, RpcEvents, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
+import { Core } from '../src/core.ts';
 import { getDriver } from '../src/drivers/index.ts';
 import { readCodexQuota } from '../src/drivers/codex.ts';
 import { codexQuotaDetails } from '../src/quota-details.ts';
@@ -16,7 +18,7 @@ import { countLogLines, countProcesses, readScriptedLog, writeScriptedProvider }
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
 /** The fixture's environment switches a test may set; every one is cleared after it. */
-const FAKE_SWITCHES = ['CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR'];
+const FAKE_SWITCHES = ['CODEX_FAKE_FORK_ERROR', 'CODEX_FAKE_FORK_SAME', 'CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR'];
 
 test('native collaboration is journalled and appears in Team without using Boite delegation', async () => {
   const client = await startCore();
@@ -1608,4 +1610,264 @@ test('cancelling a Codex device login closes its process and releases the instal
   expect(await client.call('accounts.logins', {})).toEqual([]);
   expect(harness!.core.procs.liveCount(`login:${accountId}`)).toBe(0);
   expect(harness!.core.providers.installs.leaseCount('codex-fake')).toBe(0);
+});
+
+describe('native Codex fork', () => {
+  async function completed(client: CoreClient, threadId: string, prompt: string) {
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId);
+    await client.call('turns.start', { threadId, prompt });
+    expect((await finished).status).toBe('done');
+    return (await client.call('threads.get', { threadId })).messages.at(-1)!;
+  }
+  test('native boundary uses the recorded native turn, independent target session and runtime settings', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    const provider = harness!.core.providers.require('codex-fake');
+    for (const profile of Object.values(provider.profiles)) if (profile) profile.isolation = { CODEX_HOME: '{isolationDir}' };
+    const isolated = await client.call('accounts.add', { providerId: 'codex-fake', label: 'Fork isolated' });
+    await client.call('threads.update', { threadId, accountId: isolated.id });
+    const first = await completed(client, threadId, 'First');
+    await completed(client, threadId, 'Second');
+    const before = harness!.core.threads.require(threadId);
+    const starts = fakeLog().split('turn/start ').length;
+    const fork = await client.call('threads.fork', { threadId, messageId: first.id });
+    expect(fakeLog().split('turn/start ').length).toBe(starts);
+    expect(fork.sessionId).toBeTruthy();
+    expect(fork.sessionId).not.toBe(before.sessionId);
+    expect(harness!.core.threads.require(threadId)).toEqual(before);
+    const wire = fakeLog().split('\n').find(line => line.startsWith('thread/fork '));
+    expect(wire).toContain(`threadId=${before.sessionId} lastTurnId=codex-fake-turn-1`);
+    expect(wire).toContain(`cwd=${fork.cwd} model=fake-codex`);
+    expect(wire).toContain('approvalPolicy=on-request sandbox=workspace-write');
+    expect(wire).toContain(`accountHome=${isolated.isolationDir}`);
+    expect(wire).toContain('excludeTurns=true planEnabled=true');
+    expect(fakeLog()).toContain(`thread/turns/list threadId=${fork.sessionId} limit=1 sortDirection=desc`);
+    expect(harness!.core.procs.liveCount(fork.id)).toBe(0);
+    expect(harness!.core.threads.get(fork.id).messages).toHaveLength(2);
+    await client.call('threads.subscribe', { threadId: fork.id });
+    await completed(client, fork.id, 'Fork continuation');
+    expect(fakeLog()).toContain(`thread/resume ${fork.sessionId}`);
+  });
+  test('native fork failure leaves source and journal thread count unchanged', async () => {
+    const client = await startCore(); const threadId = await codexThread(client);
+    const reply = await completed(client, threadId, 'First');
+    const before = harness!.core.threads.require(threadId);
+    const count = harness!.core.journal.db.query('SELECT COUNT(*) AS count FROM threads').get();
+    process.env['CODEX_FAKE_FORK_ERROR'] = '1';
+    try { await expect(harness!.core.threads.fork(threadId, reply.id, false)).rejects.toThrow('native fork refused'); }
+    finally { delete process.env['CODEX_FAKE_FORK_ERROR']; }
+    expect(harness!.core.threads.require(threadId)).toEqual(before);
+    expect(harness!.core.journal.db.query('SELECT COUNT(*) AS count FROM threads').get()).toEqual(count);
+  });
+  test('partial turn falls back to bounded seed without native fork', async () => {
+    const client = await startCore(); const threadId = await codexThread(client);
+    await completed(client, threadId, 'First');
+    const prompt = harness!.core.threads.get(threadId).messages[0]!;
+    const fork = await client.call('threads.fork', { threadId, messageId: prompt.id });
+    expect(fork.sessionId).toBeNull();
+    expect(harness!.core.threads.get(fork.id).messages).toHaveLength(1);
+    expect(fakeLog()).not.toContain('thread/fork ');
+  });
+  test('source selection changes during native preparation discard only the new session', async () => {
+    const client = await startCore(); const threadId = await codexThread(client);
+    const reply = await completed(client, threadId, 'First');
+    const before = harness!.core.threads.require(threadId);
+    const count = harness!.core.journal.db.query('SELECT COUNT(*) AS count FROM threads').get();
+    const driver = getDriver('codex-appserver');
+    const original = driver.forkSession!.bind(driver);
+    let forkId: string | null = null;
+    const fork = spyOn(driver, 'forkSession').mockImplementation(async (ctx, checkpoint) => {
+      const native = await original(ctx, checkpoint);
+      forkId = native.sessionId;
+      harness!.core.journal.putThread({ ...before, selectionVersion: (before.selectionVersion ?? 0) + 1 });
+      return native;
+    });
+    try { await expect(harness!.core.threads.fork(threadId, reply.id, false)).rejects.toThrow('source thread changed'); }
+    finally { fork.mockRestore(); }
+    expect(fakeLog()).toContain(`thread/archive ${forkId}`);
+    expect(fakeLog()).not.toContain(`thread/archive ${before.sessionId}`);
+    expect(harness!.core.journal.db.query('SELECT COUNT(*) AS count FROM threads').get()).toEqual(count);
+    expect(harness!.core.providers.installs.leaseCount('codex-fake')).toBe(0);
+  });
+  test.each(['CODEX_FAKE_FORK_IGNORE_CUT', 'CODEX_FAKE_FORK_VERIFY_ERROR'])('unverified native boundary fails closed with %s', async flag => {
+    const client = await startCore(); const threadId = await codexThread(client);
+    const reply = await completed(client, threadId, 'First');
+    await completed(client, threadId, 'Later secret');
+    const source = harness!.core.threads.require(threadId);
+    const count = harness!.core.journal.db.query('SELECT COUNT(*) AS count FROM threads').get();
+    process.env[flag] = '1';
+    try { await expect(harness!.core.threads.fork(threadId, reply.id, false)).rejects.toThrow(); }
+    finally { delete process.env[flag]; }
+    expect(harness!.core.threads.require(threadId)).toEqual(source);
+    expect(harness!.core.journal.db.query('SELECT COUNT(*) AS count FROM threads').get()).toEqual(count);
+    expect(fakeLog()).toContain('thread/archive codex-fork-');
+    expect(fakeLog()).not.toContain(`thread/archive ${source.sessionId}`);
+    expect(harness!.core.providers.installs.leaseCount('codex-fake')).toBe(0);
+  });
+  test('unsupported bounded verification seeds fork and rewind only after confirmed native cleanup', async () => {
+    const client = await startCore(); const threadId = await codexThread(client);
+    const reply = await completed(client, threadId, 'First');
+    await completed(client, threadId, 'Later secret');
+    const source = harness!.core.threads.get(threadId);
+    process.env['CODEX_FAKE_FORK_NO_LIST'] = '1';
+    try {
+      const fork = await harness!.core.threads.fork(threadId, reply.id, false);
+      expect(fork.sessionId).toBeNull();
+      expect(fork.forkOrigin?.mode).toBe('seeded');
+      expect(harness!.core.threads.get(fork.id).messages).toHaveLength(2);
+      process.env['CODEX_FAKE_FORK_ARCHIVE_ERROR'] = '1';
+      try { await expect(harness!.core.threads.fork(threadId, reply.id, false)).rejects.toThrow(); }
+      finally { delete process.env['CODEX_FAKE_FORK_ARCHIVE_ERROR']; }
+      expect({ ...harness!.core.threads.get(threadId), load: null }).toEqual({ ...source, load: null });
+      const nextPrompt = source.messages.filter(message => message.role === 'user')[1]!;
+      const rewind = await harness!.core.threads.rewind(threadId, nextPrompt.id);
+      expect(rewind.session).toBe('seeded');
+      expect(rewind.thread.sessionId).toBeNull();
+      expect(rewind.thread.messages).toHaveLength(2);
+      expect(fakeLog()).not.toContain(`thread/archive ${source.sessionId}`);
+    } finally { delete process.env['CODEX_FAKE_FORK_NO_LIST']; }
+  });
+  test('native fork carries the worktree cwd rather than seeding a different folder', async () => {
+    const client = await startCore(); const threadId = await codexThread(client);
+    const path = harness!.dataDir;
+    for (const args of [['init', '-q'], ['commit', '-q', '--allow-empty', '-m', 'init']]) {
+      const git = Bun.spawnSync({ cmd: ['git', ...args], cwd: path, stdout: 'pipe', stderr: 'pipe', windowsHide: true });
+      if (!git.success) throw new Error(git.stderr.toString());
+    }
+    const reply = await completed(client, threadId, 'First');
+    const fork = await client.call('threads.fork', { threadId, messageId: reply.id, worktree: true });
+    expect(fork.cwd).not.toBe(path);
+    expect(fork.sessionId).toBeTruthy();
+    expect(fakeLog()).toContain(`cwd=${fork.cwd} model=fake-codex`);
+  });
+
+  test('a server returning the source session id is rejected without archiving source', async () => {
+    const client = await startCore(); const threadId = await codexThread(client);
+    const reply = await completed(client, threadId, 'First');
+    const source = harness!.core.threads.require(threadId);
+    process.env['CODEX_FAKE_FORK_SAME'] = '1';
+    try { await expect(harness!.core.threads.fork(threadId, reply.id, false)).rejects.toThrow('distinct from the source'); }
+    finally { delete process.env['CODEX_FAKE_FORK_SAME']; }
+    expect(fakeLog()).not.toContain(`thread/archive ${source.sessionId}`);
+    expect(harness!.core.threads.require(threadId)).toEqual(source);
+    expect(harness!.core.providers.installs.leaseCount('codex-fake')).toBe(0);
+  });
+
+  test('native provenance survives a cold core reopen', async () => {
+    const client = await startCore(); const threadId = await codexThread(client);
+    const reply = await completed(client, threadId, 'First');
+    const fork = await client.call('threads.fork', { threadId, messageId: reply.id });
+    expect(fork.forkOrigin).toEqual({ threadId, messageId: reply.id, turnId: reply.turnId, mode: 'native' });
+    expect(inspectJournal(harness!.core.journal, { limit: 500 }).issues).toEqual([]);
+    await harness!.server.stop(); await harness!.core.close();
+    const reopened = new Core({ dataDir: harness!.dataDir, token: harness!.token });
+    try { expect(reopened.threads.require(fork.id).forkOrigin).toEqual(fork.forkOrigin); }
+    finally { await reopened.close(); }
+  });
+
+});
+
+describe('native Codex rewind', () => {
+  async function run(client: CoreClient, threadId: string, prompt: string) {
+    const done = client.next('turn.finished', turn => turn.threadId === threadId);
+    await client.call('turns.start', { threadId, prompt });
+    expect((await done).status).toBe('done');
+  }
+  test('rewind forks the last kept completed native turn and leaves old session untouched', async () => {
+    const client = await startCore(); const threadId = await codexThread(client);
+    await run(client, threadId, 'First'); await run(client, threadId, 'Second');
+    const before = harness!.core.threads.require(threadId);
+    const secondPrompt = harness!.core.threads.get(threadId).messages.filter(message => message.role === 'user')[1]!;
+    const result = await client.call('threads.rewind', { threadId, messageId: secondPrompt.id });
+    expect(result.session).toBe('native');
+    expect(inspectJournal(harness!.core.journal, { limit: 500 }).issues).toEqual([]);
+    expect(result.thread.sessionId).toBeTruthy();
+    expect(result.thread.sessionId).not.toBe(before.sessionId);
+    expect(result.thread.sessionResumeAt ?? null).toBeNull();
+    expect(result.thread.sessionGeneration).toBe((before.sessionGeneration ?? 0) + 1);
+    expect(result.thread.messages).toHaveLength(2);
+    expect(fakeLog()).toContain(`thread/fork threadId=${before.sessionId} lastTurnId=codex-fake-turn-1`);
+    expect(fakeLog()).not.toContain('thread/rollback');
+    expect(fakeLog()).not.toContain(`thread/archive ${before.sessionId}`);
+    await run(client, threadId, 'Replacement');
+    expect(fakeLog()).toContain(`thread/resume ${result.thread.sessionId}`);
+  });
+  test('failed file restoration discards only the prepared fork without cutting the thread', async () => {
+    const client = await startCore(); const threadId = await codexThread(client);
+    await run(client, threadId, 'First'); await run(client, threadId, 'Second');
+    const before = harness!.core.threads.get(threadId);
+    const secondPrompt = before.messages.filter(message => message.role === 'user')[1]!;
+    const restore = spyOn(harness!.core.threads.codeCheckpoints, 'rewind').mockRejectedValue(new Error('files changed externally'));
+    try { await expect(harness!.core.threads.rewind(threadId, secondPrompt.id)).rejects.toThrow('files changed externally'); }
+    finally { restore.mockRestore(); }
+    expect({ ...harness!.core.threads.get(threadId), load: null }).toEqual({ ...before, load: null });
+    expect(fakeLog()).toContain('thread/archive codex-fork-');
+    expect(fakeLog()).not.toContain(`thread/archive ${before.sessionId}`);
+    expect(harness!.core.providers.installs.leaseCount('codex-fake')).toBe(0);
+  });
+  test('rewinding first prompt stays fresh and does not call native fork', async () => {
+    const client = await startCore(); const threadId = await codexThread(client);
+    await run(client, threadId, 'First');
+    const first = harness!.core.threads.get(threadId).messages[0]!;
+    const result = await client.call('threads.rewind', { threadId, messageId: first.id });
+    expect(result.session).toBe('seeded');
+    expect(result.thread.sessionId).toBeNull();
+    expect(result.thread.messages).toHaveLength(0);
+    expect(fakeLog()).not.toContain('thread/fork ');
+  });
+  test('a retained point inside a completed native turn stays seeded', async () => {
+    const client = await startCore(); const threadId = await codexThread(client);
+    await run(client, threadId, 'First');
+    const first = harness!.core.threads.get(threadId).messages[0]!;
+    harness!.core.journal.putMessage({ ...first, id: 'mid-followup', createdAt: first.createdAt + 10 });
+    harness!.core.journal.putMessage({ ...first, id: 'mid-final-reply', role: 'assistant', createdAt: first.createdAt + 20 });
+    const result = await client.call('threads.rewind', { threadId, messageId: 'mid-followup' });
+    expect(result.session).toBe('seeded');
+    expect(result.thread.sessionId).toBeNull();
+    expect(result.thread.messages).toHaveLength(2);
+    expect(fakeLog()).not.toContain('thread/fork ');
+  });
+  test('native failure runs no file restoration and leaves all source records intact', async () => {
+    const client = await startCore(); const threadId = await codexThread(client);
+    await run(client, threadId, 'First'); await run(client, threadId, 'Second');
+    const before = harness!.core.threads.get(threadId);
+    const secondPrompt = before.messages.filter(message => message.role === 'user')[1]!;
+    const restore = spyOn(harness!.core.threads.codeCheckpoints, 'rewind');
+    process.env['CODEX_FAKE_FORK_ERROR'] = '1';
+    try { await expect(harness!.core.threads.rewind(threadId, secondPrompt.id)).rejects.toThrow('native fork refused'); }
+    finally { delete process.env['CODEX_FAKE_FORK_ERROR']; }
+    expect(restore).not.toHaveBeenCalled(); restore.mockRestore();
+    expect({ ...harness!.core.threads.get(threadId), load: null }).toEqual({ ...before, load: null });
+  });
+
+  test('source selection changed during file preparation rejects native commit and discards its fork', async () => {
+    const client = await startCore(); const threadId = await codexThread(client);
+    await run(client, threadId, 'First'); await run(client, threadId, 'Second');
+    const before = harness!.core.threads.require(threadId);
+    const messages = harness!.core.threads.get(threadId).messages;
+    const secondPrompt = messages.filter(message => message.role === 'user')[1]!;
+    const restore = spyOn(harness!.core.threads.codeCheckpoints, 'rewind').mockImplementation(async (_thread, _turns, _message, cut) => {
+      harness!.core.journal.putThread({ ...before, selectionVersion: (before.selectionVersion ?? 0) + 1 });
+      return cut({ status: 'unchanged', count: 0 });
+    });
+    try { await expect(harness!.core.threads.rewind(threadId, secondPrompt.id)).rejects.toThrow('changed while restoring files'); }
+    finally { restore.mockRestore(); }
+    expect(harness!.core.threads.get(threadId).messages).toEqual(messages);
+    expect(harness!.core.threads.require(threadId).sessionId).toBe(before.sessionId);
+    expect(fakeLog()).toContain('thread/archive codex-fork-');
+    expect(fakeLog()).not.toContain(`thread/archive ${before.sessionId}`);
+  });
+  test('native capability discovery does not hydrate turn or message histories', async () => {
+    const client = await startCore(); const threadId = await codexThread(client);
+    await run(client, threadId, 'First');
+    const thread = harness!.core.threads.require(threadId);
+    const turns = spyOn(harness!.core.journal, 'listTurns').mockImplementation(() => { throw new Error('Unexpected full turn hydration'); });
+    const messages = spyOn(harness!.core.journal, 'walkMessages').mockImplementation(() => { throw new Error('Unexpected transcript hydration'); });
+    try {
+      expect(harness!.core.threads.branching.nativeForkAvailable(thread)).toBe(true);
+      expect(harness!.core.threads.branching.nativeRewindAvailable(thread)).toBe(true);
+      expect(harness!.core.threads.branching.nativeForkAvailable({ ...thread, sessionGeneration: (thread.sessionGeneration ?? 0) + 1 })).toBe(false);
+    } finally { turns.mockRestore(); messages.mockRestore(); }
+  });
+
 });

@@ -166,6 +166,7 @@ export class ThreadStore {
       memoryEvents: readMemoryEvents(this.core.journal, threadId),
       commands: this.agentState.commands.get(threadId) ?? [],
       background: this.agentState.background.get(threadId) ?? [],
+      backgroundHistory: this.agentState.backgroundHistory.list(threadId),
       activity: this.core.activity.get(threadId),
       messagesBefore: page.before,
       // The turns of that page and the ones still in flight, never the whole history.
@@ -447,6 +448,7 @@ export class ThreadStore {
       next.selectionVersion = (thread.selectionVersion ?? 0) + 1;
     }
     if (switched) {
+      this.agentState.cancelBackground(thread.id);
       if (!['queued', 'running', 'waiting'].includes(thread.status)) {
         this.releaseAgent(thread.id);
         this.agentState.noteBackground(thread.id, []);
@@ -787,6 +789,7 @@ export class ThreadStore {
    * its exit, and with no `turn.finished` to follow nothing else would sweep it.
    */
   releaseAgent(threadId: ThreadId): void {
+    this.agentState.cancelBackground(threadId);
     releaseThread(threadId);
     this.core.procs.sweepSoon(threadId);
   }
@@ -828,7 +831,7 @@ export class ThreadStore {
   markQueuedStopped(turnId: TurnId): void {
     const turn = this.core.journal.getTurn(turnId);
     if (turn === null) return;
-    const next: Turn = { ...turn, status: 'stopped', finishedAt: Date.now() };
+    const next: Turn = { ...turn, status: 'stopped', queueHold: null, finishedAt: Date.now() };
     this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
       this.core.journal.append({ type: 'turn.stopped', threadId: turn.threadId, version: 1, payload: next }, () => {
         this.core.journal.putTurn(next);
@@ -842,6 +845,10 @@ export class ThreadStore {
   /** Closes the turns a stopped core left `running` or `queued` (`threads/recovery.ts`). */
   recoverStuckTurns(): number {
     return this.recovery.recoverStuckTurns();
+  }
+
+  recoverTurn(params: RpcParams<'turns.recover'>): Turn {
+    return this.recovery.recover(params);
   }
 
   runTurn(turnId: TurnId, threadId: ThreadId): Promise<void> {

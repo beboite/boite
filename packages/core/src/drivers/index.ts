@@ -28,7 +28,7 @@ const DRIVERS = new Map<Protocol, Driver>([
   ],
   [
     'codex-appserver',
-    lazyDriver('codex-appserver', () => import('./codex.ts').then((module) => module.createCodexDriver()), { titles: true, prepare: true }),
+    lazyDriver('codex-appserver', () => import('./codex.ts').then((module) => module.createCodexDriver()), { titles: true, prepare: true, forkSession: true }),
   ],
   ['muse', lazyDriver('muse', () => import('./muse.ts').then((module) => module.createMuseDriver()))],
   ['pi', lazyDriver('pi', () => import('./pi.ts').then((module) => module.createPiDriver()))],

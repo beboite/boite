@@ -135,6 +135,8 @@ export interface TurnContext {
    * The set outlives the turn: an empty list is how a driver says it all ended.
    */
   background?(list: import('@boite/contracts').BackgroundTask[]): void;
+  /** Explicit native terminal outcome, reported through the task's original context. */
+  backgroundFinished?(taskId: string, state: 'completed' | 'error' | 'cancelled'): void;
   /**
    * The agent resumed on its own after the turn ended (a background shell
    * finished and it went on). The core opens a turn for it with `text` as its
@@ -179,7 +181,7 @@ export interface TurnContext {
 export type SessionContext = Pick<TurnContext,
   'thread' | 'account' | 'provider' | 'sessionId' | 'resumeAt' | 'sessionBefore' |
   'accountEnv' | 'warmProcessMinutes' | 'log' | 'authenticationFailed' | 'commands' | 'context' | 'hook' |
-  'background' | 'wake' | 'spawnChild' | 'finishStartup'>;
+  'background' | 'backgroundFinished' | 'wake' | 'spawnChild' | 'finishStartup'>;
 
 export interface TurnResult {
   status: 'done' | 'stopped' | 'error';
@@ -292,8 +294,18 @@ export interface ProbeFilter {
   accountId?: AccountId;
 }
 
+/** A native fork is unpublished until the caller validates its source and writes the branch. */
+export interface ForkedSession {
+  sessionId: string;
+  /** Close the owned process; discard also archives only the newly forked native session. */
+  release(): Promise<void>;
+  discard(): Promise<void>;
+}
+
 export interface Driver {
   protocol: Protocol;
+  /** Exact inclusive completed turn boundary; no prompt or source mutation. */
+  forkSession?(ctx: SessionContext, checkpoint: { sessionId: string; entry: string }): Promise<ForkedSession>;
   startTurn(ctx: TurnContext): TurnHandle;
   /** A separate, tool-free request. No native session or chat transcript is changed. */
   sideQuestion?(ctx: SideQuestionContext): Promise<string>;

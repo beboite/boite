@@ -24,7 +24,7 @@ export type RewoundMessage = Omit<ThreadRewind, 'thread'>;
 
 /** The row part of a thread, without what only an open thread carries. */
 function summaryOf(thread: Thread): ThreadSummary {
-  const { memoryEvents: _memoryEvents, messages: _messages, turns: _turns, commands: _commands, background: _background, activity: _activity, messagesBefore: _before, messagesFrom: _from, ...summary } = thread;
+  const { memoryEvents: _memoryEvents, messages: _messages, turns: _turns, commands: _commands, background: _background, backgroundHistory: _history, activity: _activity, messagesBefore: _before, messagesFrom: _from, ...summary } = thread;
   return summary;
 }
 
@@ -53,6 +53,32 @@ export class Threads {
   #toolOutputVisit = 0;
 
   constructor(private readonly ctx: StoreContext) {}
+
+  async capabilities(threadId: ThreadId) {
+    const client = this.ctx.client;
+    const generation = this.ctx.clientGeneration;
+    if (!client) return null;
+    try {
+      const capabilities = await client.call('threads.capabilities', { threadId });
+      return this.ctx.currentClient(client, generation) ? capabilities : null;
+    } catch (error) {
+      // Older cores keep their existing action checks until updated.
+      if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) return null;
+      throw error;
+    }
+  }
+
+  async recoverTurn(threadId: ThreadId, turnId: string, action: 'resume' | 'discard'): Promise<void> {
+    const client = this.ctx.client;
+    const generation = this.ctx.clientGeneration;
+    if (!client) return;
+    try {
+      const turn = await client.call('turns.recover', { threadId, turnId, action });
+      if (this.ctx.currentClient(client, generation)) this.upsertTurn(threadId, turn);
+    } catch (error) {
+      if (this.ctx.currentClient(client, generation) && this.openThread?.id === threadId) this.ctx.fail(error);
+    }
+  }
 
   invalidateNavigation(): number {
     this.#openTarget = null;
@@ -165,6 +191,19 @@ export class Threads {
       return summary;
     } catch (error) {
       if (this.ctx.client === client) this.ctx.fail(error);
+      return null;
+    }
+  }
+
+  async mergeBack(threadId: ThreadId, summary: string, requestId: string) {
+    const client = this.ctx.client;
+    const generation = this.ctx.clientGeneration;
+    if (!client) return null;
+    try {
+      const receipt = await client.call('threads.mergeBack', { threadId, summary, requestId });
+      return this.ctx.currentClient(client, generation) ? receipt : null;
+    } catch (error) {
+      if (this.ctx.currentClient(client, generation) && this.openThread?.id === threadId) this.ctx.fail(error);
       return null;
     }
   }

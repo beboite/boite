@@ -106,15 +106,18 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 588,000 |
-| UI files, excluding `.br` and `.gz` copies | 3,940,000 |
+| UI files, excluding `.br` and `.gz` copies | 3,960,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 2,816,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,376,000 |
 
-The total JavaScript measure excludes native binaries and source maps. Its
-limit was set from a 2,559,701-byte build on 2026-10-01. The UI total measured
-3,923,496 bytes on 2026-10-02 after integrating banked reset controls and speed
-switching changes; its limit retains 16,504 bytes of headroom. Explain measured
-growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
+The total JavaScript measure excludes native binaries and source maps. On
+2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
+UI bytes. The orchestration additions measured 3,228,444 and 3,943,301 bytes:
+the core gains 533,240 bytes, mostly the official MCP SDK and its validation
+dependency, loaded only by `boite mcp`; the UI gains 10,992 bytes for recovery,
+task history, capabilities and fork return. The entry sizes stayed below their
+unchanged limits. These are build sizes, not startup or memory measurements.
+Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
 
 ### E2E preparation

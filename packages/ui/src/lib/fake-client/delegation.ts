@@ -1,5 +1,5 @@
 /** Delegation: a parent thread's team of child threads, their usage and letters. */
-import { collectNativeAgents, collectProcessAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, RpcErrorCode, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationProfile, type DelegationView, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { collectNativeAgents, collectProcessAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, RpcErrorCode, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationProfile, type DelegationView, type DelegationWaitResult, type RpcParams, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { addUsage, emptyUsage, toSummary } from './shared';
 import type { FakeContext, FakeMethods } from './context';
@@ -21,7 +21,7 @@ function delegatedAgent(ctx: FakeContext, row: { threadId: ThreadId; profileId: 
     ? thread.messages.filter(message => message.turnId === lastTurn.id && message.role === 'assistant').at(-1)?.parts
         .filter(part => part.type === 'text').map(part => part.text).join('\n').trim().slice(0, 4000) || lastTurn.error
     : null;
-  return { thread: structuredClone(toSummary(thread)), profileId: row.profileId, task: row.task, lastTurn: structuredClone(lastTurn), result: result || null };
+  return { thread: structuredClone(toSummary(thread)), profileId: row.profileId, task: row.task, lastTurn: structuredClone(lastTurn), result: result || null, ...(lastTurn && !['queued', 'running'].includes(lastTurn.status) ? { resultRef: { agentId: thread.id, turnId: lastTurn.id }, settlement: 'result_available' as const } : lastTurn === null ? { settlement: 'settled' as const } : {}) };
 }
 
 function delegationView(ctx: FakeContext, rootId: ThreadId, callerId = rootId): DelegationView {
@@ -31,6 +31,7 @@ function delegationView(ctx: FakeContext, rootId: ThreadId, callerId = rootId): 
   for (const row of rows) for (const turn of ctx.thread(row.threadId).turns) if (turn.usage) usage = addUsage(usage, turn.usage);
   return {
     rootThreadId: rootId,
+    settlement: rows.some(row => { const turn = ctx.thread(row.threadId).turns.at(-1); return turn && ['queued', 'running'].includes(turn.status); }) ? 'waiting_for_children' : 'settled',
     config: delegationConfig(ctx, rootId),
     agents: rows.map(row => delegatedAgent(ctx, row)),
     nativeAgents: [...collectNativeAgents(ctx.thread(callerId).messages.flatMap(message => message.role === 'assistant' ? message.parts.map(part => ({ part, at: message.createdAt, turnId: message.turnId, turnStatus: ctx.thread(callerId).turns.find(turn => turn.id === message.turnId)?.status })) : []), ctx.thread(callerId).background), ...collectProcessAgents(ctx.processes.filter(record => record.threadId === callerId), ctx.processes.filter(record => record.threadId === callerId && record.exitedAt === null))],
@@ -183,8 +184,62 @@ export function pumpDelegation(ctx: FakeContext, rootId: ThreadId): void {
   }
 }
 
+function directChildren(ctx: FakeContext, threadId: ThreadId, agentId?: ThreadId) {
+  if (typeof threadId !== 'string' || !threadId || (agentId !== undefined && (typeof agentId !== 'string' || !agentId))) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'threadId and agentId: expected nonempty strings' });
+  if (ctx.thread(threadId).parentThreadId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'threadId: expected the parent of direct delegated children' });
+  const rows = ctx.delegationAgents.get(threadId) ?? [];
+  if (agentId !== undefined && !rows.some(row => row.threadId === agentId && ctx.thread(agentId).parentThreadId === threadId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agentId: expected a direct delegated child of threadId' });
+  return agentId === undefined ? rows : rows.filter(row => row.threadId === agentId);
+}
+
+function waitDelegation(ctx: FakeContext, params: RpcParams<'delegation.wait'>): Promise<DelegationWaitResult> {
+  const timeout = params.timeoutMs === undefined ? 600_000 : params.timeoutMs;
+  if (!Number.isInteger(timeout) || timeout < 0 || timeout > 3_600_000) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'timeoutMs: expected an integer from 0 to 3600000' });
+  directChildren(ctx, params.threadId, params.agentId);
+  return new Promise((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let finished = false;
+    const subscriptions: (() => void)[] = [];
+    const cleanup = () => { finished = true; subscriptions.forEach(off => off()); if (timer !== undefined) clearTimeout(timer); };
+    const inspect = (timedOut = false) => {
+      if (finished) return;
+      try {
+        directChildren(ctx, params.threadId, params.agentId);
+        const agents = delegationView(ctx, params.threadId).agents.filter(agent => params.agentId === undefined || agent.thread.id === params.agentId);
+        const waiting = agents.some(agent => !agent.lastTurn || ['queued', 'running'].includes(agent.lastTurn.status));
+        if (waiting && !timedOut) return;
+        cleanup();
+        resolve({ state: waiting ? 'waiting_for_children' : params.agentId && agents.some(agent => agent.resultRef) ? 'result_available' : 'settled', timedOut, agents });
+      } catch (error) { cleanup(); reject(error); }
+    };
+    subscriptions.push(ctx.bus.on('turn.finished', () => inspect()), ctx.bus.on('delegation.changed', () => inspect()), ctx.bus.on('thread.removed', () => inspect()));
+    subscriptions.push(ctx.bus.onState(state => {
+      if (state !== 'ready') { cleanup(); reject(new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation.wait: connection closed' })); }
+    }));
+    timer = setTimeout(() => inspect(true), timeout);
+    inspect();
+  });
+}
+
 export function delegationMethods(ctx: FakeContext) {
   return {
+    'delegation.wait': async params => waitDelegation(ctx, params),
+    'delegation.result': async params => {
+      directChildren(ctx, params.threadId, params.agentId);
+      if (typeof params.turnId !== 'string' || !params.turnId) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'turnId: expected a nonempty string' });
+      const child = ctx.thread(params.agentId);
+      const turn = child.turns.find(turn => turn.id === params.turnId);
+      if (!turn || ['queued', 'running'].includes(turn.status)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'turnId: expected a terminal turn of the named direct child' });
+      const offset = params.offset === undefined ? 0 : params.offset, limit = params.limit === undefined ? 16_000 : params.limit;
+      const full = child.messages.filter(message => message.turnId === turn.id && message.role === 'assistant').flatMap(message => message.parts.flatMap(part => part.type === 'text' ? [part.text] : [])).join('\n');
+      const chars = Array.from(full);
+      if (!Number.isInteger(offset) || offset < 0 || offset > chars.length) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `offset: expected an integer from 0 to ${chars.length}` });
+      if (!Number.isInteger(limit) || limit < 1 || limit > 16_000) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'limit: expected an integer from 1 to 16000' });
+      let text = chars.slice(offset, offset + limit).join('').slice(0, 16_000);
+      if (text.charCodeAt(text.length - 1) >= 0xd800 && text.charCodeAt(text.length - 1) <= 0xdbff) text = text.slice(0, -1);
+      const next = offset + Array.from(text).length;
+      return { resultRef: { agentId: params.agentId, turnId: params.turnId }, text, offset, nextOffset: next < chars.length ? next : null, total: chars.length };
+    },
     'delegation.get': async ({ threadId }) => {
       return delegationView(ctx, delegationRoot(ctx, threadId), threadId);
     },

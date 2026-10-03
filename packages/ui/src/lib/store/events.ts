@@ -76,9 +76,12 @@ export function listen(ctx: StoreContext, client: Client): void {
     if (open && open.id === threadId) open.commands = commands;
   });
   // What the agent still runs in the background, whole each time, like the commands.
-  on('thread.background', ({ threadId, tasks }) => {
+  on('thread.background', ({ threadId, tasks, history }) => {
     const open = s.openThread;
-    if (open && open.id === threadId) open.background = tasks;
+    if (open && open.id === threadId) {
+      open.background = tasks;
+      if (history) open.backgroundHistory = history;
+    }
   });
   on('thread.activity', ({ threadId, activity }) => {
     if (s.openThread?.id === threadId) s.openThread.activity = activity;

@@ -192,8 +192,19 @@ The connection remains usable. A very large caller ID may require a smaller
 matched refusal or a 1009 close when even that refusal cannot fit. A successful
 response is serialized once; paced deltas still flush before it.
 
-When a socket backs up (Bun's `send` returns -1), every frame is still queued
-except `message.delta`, which is dropped. On `drain` the core resends the text
+Each connection admits a frame only when Bun's `getBufferedAmount()` plus
+that frame's serialized UTF-8 size fits within 32 MiB. Events also obey the
+16 MiB frame limit; oversized events close with 1009. A backed-up socket
+closes with reconnectable 1013 after 10 seconds without draining, or before
+a frame would exceed the byte budget. Further sends are ignored and timers
+and pending parts are cleared. This closes only that client; the journal and
+other connections continue. Reconnecting clients load a fresh thread snapshot.
+
+When a socket backs up (Bun's `send` returns -1), subsequent frames stay queued
+within these limits except `message.delta`, which is dropped. Catch-up tracks
+at most 1,024 distinct parts and 16 MiB of UTF-8 keys before closing with 1013.
+Pacing flushes at 1,024 parts or 16 MiB of serialized held frames, preserving
+wire order without an additional transport queue. On `drain` the core resends the text
 parts those deltas belonged to, one `message.part` each, and nothing else: a
 finished tool output in the same message never goes out twice. Deltas the bus
 still holds are dispatched before that resend, so they fold into the part

@@ -228,6 +228,89 @@ describe('server', () => {
     expect(healthObserved).toBeLessThan(processed);
   });
 
+  test('a socket that never drains bounds subsequent responses and isolates the healthy client', () => {
+    const closed: number[] = [], frames: string[] = [];
+    let buffered = 0;
+    const slow = new ServerConnection(harness.core);
+    slow.attach({ getBufferedAmount: () => buffered,
+      send: (frame: string) => { frames.push(frame); buffered += Buffer.byteLength(frame); return -1; },
+      close: (code: number) => closed.push(code) } as unknown as Parameters<ServerConnection['attach']>[0]);
+    const result = 'x'.repeat(1024 * 1024);
+    for (let id = 0; id < 50; id++) {
+      if (id % 2) slow.sendEvent('message.part', { threadId: 't', messageId: 'm', partIndex: 0, part: { type: 'text', text: result } });
+      else slow.sendResponse({ jsonrpc: '2.0', id, result });
+    }
+    expect(closed).toEqual([1013]);
+    expect(buffered).toBeLessThanOrEqual(32 * 1024 * 1024);
+    const count = frames.length;
+    slow.sendEvent('message.delta', { threadId: 't', messageId: 'm', partIndex: 0, text: 'late' });
+    slow.drain();
+    slow.close(1013);
+    expect(frames).toHaveLength(count);
+    expect(closed).toEqual([1013]);
+    const healthy: string[] = [];
+    const connection = new ServerConnection(harness.core);
+    connection.attach({ getBufferedAmount: () => 0, send: (frame: string) => { healthy.push(frame); return frame.length; },
+      close: () => undefined } as unknown as Parameters<ServerConnection['attach']>[0]);
+    connection.sendResponse({ jsonrpc: '2.0', id: 1, result: 'ok' });
+    expect(JSON.parse(healthy[0]!).result).toBe('ok');
+    connection.close(1000);
+  });
+
+  test('congestion expiry closes once, while draining clears its deadline', async () => {
+    const expired: number[] = [], recovered: number[] = [];
+    let buffered = 1;
+    const slow = new ServerConnection(harness.core, false, 20);
+    slow.attach({ getBufferedAmount: () => buffered, send: () => -1, close: (code: number) => expired.push(code) } as unknown as Parameters<ServerConnection['attach']>[0]);
+    slow.sendResponse({ jsonrpc: '2.0', id: 1, result: 'held' });
+    // A spurious drain with bytes still queued cannot extend the deadline.
+    slow.drain();
+    const healthy = new ServerConnection(harness.core, false, 20);
+    healthy.attach({ getBufferedAmount: () => buffered, send: () => -1, close: (code: number) => recovered.push(code) } as unknown as Parameters<ServerConnection['attach']>[0]);
+    healthy.sendResponse({ jsonrpc: '2.0', id: 1, result: 'held' });
+    buffered = 0;
+    healthy.drain();
+    await Bun.sleep(50);
+    expect(expired).toEqual([1013]);
+    expect(recovered).toEqual([]);
+    slow.close(1013);
+    expect(expired).toEqual([1013]);
+    healthy.close(1000);
+  });
+
+  test('catch-up parts are bounded and a fresh connection reads the authoritative journal', async () => {
+    const owner = await harness.connect();
+    const { threadId } = await echoThread(harness, owner);
+    const messageId = 'msg_outbound_snapshot';
+    harness.core.journal.putMessage({ id: messageId, threadId, turnId: 'trn_snapshot', role: 'assistant', state: 'streaming', createdAt: Date.now(), parts: [] });
+    const closed: number[] = [];
+    let writes = 0;
+    const slow = new ServerConnection(harness.core);
+    slow.attach({ getBufferedAmount: () => 1, send: () => { writes++; return -1; }, close: (code: number) => closed.push(code) } as unknown as Parameters<ServerConnection['attach']>[0]);
+    for (let partIndex = 0; partIndex <= 1024; partIndex++) {
+      slow.sendEvent('message.delta', { threadId, messageId, partIndex, text: 'text' });
+    }
+    expect(closed).toEqual([1013]);
+    expect(writes).toBe(1);
+    harness.core.journal.appendDelta(threadId, messageId, 0, 'continued after disconnect');
+    harness.core.journal.flushDeltas();
+    const fresh = await harness.connect();
+    const snapshot = await fresh.call('threads.get', { threadId });
+    expect(snapshot.messages.find(message => message.id === messageId)?.parts[0]).toMatchObject({ type: 'text', text: 'continued after disconnect' });
+    fresh.close();
+    owner.close();
+  });
+
+  test('oversized events close without queueing an invalid UTF-8 frame', () => {
+    const closed: number[] = [];
+    let writes = 0;
+    const connection = new ServerConnection(harness.core, true);
+    connection.attach({ getBufferedAmount: () => 0, send: () => { writes++; return 1; }, close: (code: number) => closed.push(code) } as unknown as Parameters<ServerConnection['attach']>[0]);
+    connection.sendEvent('message.delta', { threadId: 't', messageId: 'm', partIndex: 0, text: 'é'.repeat(RPC_MAX_FRAME_BYTES / 2) });
+    expect(closed).toEqual([1009]);
+    expect(writes).toBe(0);
+  });
+
   test('drain sends the journal including deltas still inside the coalescing window', () => {
     const journal = harness.core.journal;
     journal.putMessage({ id: 'msg_drain', threadId: 'thr_drain', turnId: 'turn_drain', role: 'assistant',
@@ -236,7 +319,7 @@ describe('server', () => {
     const closed: number[] = [];
     let result = -1;
     const connection = new ServerConnection(harness.core);
-    connection.attach({ send: (frame: string) => { writes.push(frame); return result; },
+    connection.attach({ getBufferedAmount: () => 0, send: (frame: string) => { writes.push(frame); return result; },
       close: (code: number) => { closed.push(code); } } as unknown as Parameters<ServerConnection['attach']>[0]);
     const delta = { threadId: 'thr_drain', messageId: 'msg_drain', partIndex: 0, text: 'first' };
     journal.appendDelta(delta.threadId, delta.messageId, 0, delta.text);
@@ -260,7 +343,7 @@ describe('server', () => {
     const writes: { method: string; params: { partIndex?: number; part?: { text?: string } } }[] = [];
     let result = -1;
     const connection = new ServerConnection(harness.core);
-    connection.attach({ send: (frame: string) => { writes.push(JSON.parse(frame)); return result; },
+    connection.attach({ getBufferedAmount: () => 0, send: (frame: string) => { writes.push(JSON.parse(frame)); return result; },
       close: () => undefined } as unknown as Parameters<ServerConnection['attach']>[0]);
     const delta = { threadId: 'thr_parts', messageId: 'msg_parts', partIndex: 1, text: 'one' };
     journal.appendDelta(delta.threadId, delta.messageId, 1, delta.text);
@@ -296,7 +379,7 @@ describe('server', () => {
     const frames: { method: string; params: { partIndex: number; text?: string; part?: { text: string } } }[] = [];
     let result = -1;
     const connection = new ServerConnection(harness.core);
-    connection.attach({ send: (frame: string) => { frames.push(JSON.parse(frame)); return result; },
+    connection.attach({ getBufferedAmount: () => 0, send: (frame: string) => { frames.push(JSON.parse(frame)); return result; },
       close: () => undefined } as unknown as Parameters<ServerConnection['attach']>[0]);
     const off = bus.onAny((name, payload) => connection.sendEvent(name, payload));
     // The same two buffers threads/turn-context.ts feeds for every delta.
