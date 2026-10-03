@@ -1049,15 +1049,8 @@ shellTest('native preview references attach to the composer and highlight from s
     await child.waitFor(`document.querySelector('#native-preview-target')`);
     await page.click(testid('preview-annotate'));
     await child.waitFor(`typeof window.__boiteStopPreviewPick === 'function'`);
-    // Even while the data-only picker is armed, a page gets no host commands.
-    const refused = await child.evaluate<string[]>(`(async () => {
-      if (!window.__TAURI_INTERNALS__?.invoke) throw new Error('Tauri invoke bridge unavailable');
-      return Promise.all(['core_endpoint', 'whip_window'].map(async command => {
-        try { await window.__TAURI_INTERNALS__.invoke(command); return 'allowed'; }
-        catch { return 'refused'; }
-      }));
-    })()`);
-    expect(refused).toEqual(['refused', 'refused']);
+    // Even while the data-only picker is armed, a page carries no host bridge.
+    expect(await child.evaluate<string[]>('[typeof window.__TAURI_INTERNALS__, typeof window.ipc, typeof window.chrome?.webview]')).toEqual(['undefined', 'undefined', 'undefined']);
     await child.click('#native-preview-target');
     await page.waitFor(`document.querySelector('${testid('composer')} ${testid('preview-reference')}')`);
     expect(await page.text(`${testid('composer')} ${testid('preview-reference')}`)).toBe('@Save changes');
