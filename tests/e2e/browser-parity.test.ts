@@ -110,5 +110,22 @@ test.skipIf(process.platform !== 'win32' || !executable)('native presets, appear
     await command({ kind: 'open', url: site.url.href });
     expect(JSON.stringify(await command({ kind: 'snapshot' }))).toContain('ATELIER BOITE');
     console.log('Visible controls and recording teardown passed');
+    // A second conversation must leave the first page and its host available.
+    const before = await command({ kind: 'status' });
+    const tabId = (before.value as { tabs: { tabId: string }[] }).tabs[0]!.tabId;
+    await command({ kind: 'evaluate', expression: 'globalThis.persistenceMarker = "same live page"' }, tabId);
+    const original = await session.client.call('threads.get', { threadId: session.threadId });
+    const other = await session.client.call('threads.create', { projectId: original.projectId!, providerId: original.providerId, accountId: original.accountId, title: 'Another conversation' });
+    await page.waitFor(`document.querySelector('[data-testid=thread-row][data-thread-id="${other.id}"]')`);
+    await page.click(`[data-testid=thread-row][data-thread-id="${other.id}"]`);
+    await page.waitFor(`document.querySelector('[data-testid=thread-row][data-thread-id="${other.id}"]')?.closest('.thread')?.classList.contains('open')`);
+    expect((await command({ kind: 'evaluate', expression: 'globalThis.persistenceMarker' }, tabId)).value).toBe('same live page');
+    const background = await command({ kind: 'open', url: site.url.href });
+    expect(JSON.stringify(await command({ kind: 'snapshot' }, background.tabId))).toContain('ATELIER BOITE');
+    await command({ kind: 'close' }, background.tabId);
+    await page.click(`[data-testid=thread-row][data-thread-id="${session.threadId}"]`);
+    await page.waitFor(`document.querySelector('[data-testid=thread-row][data-thread-id="${session.threadId}"]')?.closest('.thread')?.classList.contains('open')`);
+    expect((await command({ kind: 'evaluate', expression: 'globalThis.persistenceMarker' }, tabId)).value).toBe('same live page');
+    console.log('Native background open, snapshot, close and live page persistence passed');
   } finally { await session.close(); site.stop(true); }
 }, 120_000);

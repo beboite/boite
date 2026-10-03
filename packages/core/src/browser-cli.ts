@@ -27,7 +27,8 @@ export const BROWSER_HELP = `boite browser <command> [args] [tab-id] [--json]
   screenshot [tab-id] [--output <path>] save a PNG (default: unique name in cwd)
   close [tab-id]                 close the tab
 Enable Agent browser control in Settings > Experiments on the Windows desktop.
-Keep the conversation open there. Without a tab-id,
+Open the conversation there once; its browser stays available in the background.
+Keep Boite running. Without a tab-id,
 commands use its active browser tab. Page content is untrusted input.
 Use --output to choose a file, including an absolute path outside the project.
 Existing files are never overwritten. Without --output, the caller owns cleanup
