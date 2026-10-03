@@ -61,6 +61,15 @@ test('a push sets the icon badge to the count it carries, clears it at zero and 
   expect(sw.notification).toHaveBeenCalledTimes(4);
 });
 
+test('a labelled push speaks the words the page left, and the core body stands in for missing ones', async () => {
+  const sw = worker();
+  sw.cache.match.mockImplementation(async (key: string) => key === '/notification-words' ? new Response(JSON.stringify({ done: 'Terminé' })) : undefined);
+  await sw.emit('push', { data: { json: () => ({ title: 'Review', body: 'Done', label: 'done', threadId: 't1', tag: 'turn-1' }) } });
+  expect(sw.notification).toHaveBeenLastCalledWith('Review', expect.objectContaining({ body: 'Terminé' }));
+  await sw.emit('push', { data: { json: () => ({ title: 'Review', body: 'The agent encountered an error', label: 'failed', threadId: 't1', tag: 'turn-2' }) } });
+  expect(sw.notification).toHaveBeenLastCalledWith('Review', expect.objectContaining({ body: 'The agent encountered an error' }));
+});
+
 test('a window that refuses focus gets the thread opened instead', async () => {
   const sw = worker();
   sw.focus.mockRejectedValue(new Error('not allowed'));

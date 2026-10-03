@@ -733,7 +733,8 @@ export const fr: Translation = {
     done: 'Terminé',
     failed: 'Échec',
     openThread: 'Ouvrir la conversation',
-    needsYou: 'Attend votre réponse'
+    needsYou: 'Attend votre réponse',
+    connected: 'Les notifications fonctionnent'
   },
 
   permissionMode: {

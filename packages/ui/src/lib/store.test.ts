@@ -1045,9 +1045,11 @@ describe('Store', () => {
       const { store, client } = await ready();
       await store.open('t-descriptors');
 
-      await client.call('turns.start', { threadId: 't-trace', prompt: 'quietly' });
+      // The thread is not on screen: its reply is read from the core, as the push quotes it.
+      await client.call('turns.start', { threadId: 't-trace', prompt: '## Result\n\nThe trace tab is **finished**, see `trace.ts`.' });
       await client.settled();
-      expect(sent).toEqual([{ title: 'Finish the trace tab', body: 'Done', threadId: 't-trace', coreThreadId: 't-trace' }]);
+      await vi.waitFor(() => expect(sent).toHaveLength(1));
+      expect(sent).toEqual([{ title: 'Finish the trace tab', body: 'Result · The trace tab is finished, see trace.ts.', threadId: 't-trace', coreThreadId: 't-trace' }]);
 
       await store.send('in front of me');
       await client.settled();

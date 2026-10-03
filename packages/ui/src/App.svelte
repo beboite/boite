@@ -22,7 +22,7 @@
   import { startGlass } from './lib/glass';
   import { installExternalLinks } from './lib/links';
   import { isQuitChord, QUIT_HOLD_MS, QuitHold } from './lib/quit-hold';
-  import { onNotificationOpen } from './lib/notify';
+  import { notificationWords, onNotificationOpen, storeNotificationWords } from './lib/notify';
   import { closeTabs } from './lib/panel-close';
   import { strings } from './lib/strings';
   import { experimentOn } from './lib/experiments.svelte';
@@ -300,6 +300,13 @@
       .catch(() => {
         // An older shell without the command keeps its English menu.
       });
+  });
+
+  // The same for a push: the service worker shows the core's generic notices
+  // in the words this page left it, written again when the language changes.
+  (() => {
+    if (inShell) return;
+    void storeNotificationWords(notificationWords());
   });
 
   // Every http(s) link the UI shows goes to the system browser, once, from here.

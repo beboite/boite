@@ -4,7 +4,7 @@ import type { Attachment, Message, MessageId, ThreadSummary, TurnInFlightData } 
 import { drainQueue, sentPrompt } from '../composer-queue';
 import { restorePreviewMentions } from '../preview-mentions';
 import { activityCommand, isActivityCommand } from '../activity-command';
-import { RpcFailure, readyAgain, wasDropped } from '../client';
+import { RpcFailure, readyAgain, wasUnanswered } from '../client';
 import { titleFrom } from '../format';
 import { DRAFT_STASH_KEY } from '../prefs';
 import { editPreviewMentions, insertPreviewMention } from '../preview-mentions';
@@ -454,9 +454,10 @@ export class Composer {
       const ask = sent;
       const start = () => client.call('turns.start', { threadId, prompt, clientRequestId: ask.id, expectedSelectionVersion: selectionVersion,
         ...(attachments.length > 0 ? { attachments } : {}), ...(previewReferences.length > 0 ? { previewReferences } : {}) });
-      // A socket lost under the call loses its answer, maybe not the turn: the same request id asks once more, and the core answers with the turn it took.
+      // A socket lost under the call, or an answer that never came, loses the answer, maybe not the turn:
+      // the same request id asks once more, and the core answers with the turn it took.
       const accepted = await start().catch(async (error: unknown) => {
-        if (!wasDropped(error) || !this.ctx.currentClient(client, clientGeneration) || !(await readyAgain(client)) || !this.ctx.currentClient(client, clientGeneration)) throw error;
+        if (!wasUnanswered(error) || !this.ctx.currentClient(client, clientGeneration) || !(await readyAgain(client)) || !this.ctx.currentClient(client, clientGeneration)) throw error;
         await connection.reloading?.essential;
         if (!this.ctx.currentClient(client, clientGeneration) || (!request && this.pendingSends.get(threadId) !== ask)) throw error;
         return start();
@@ -477,11 +478,12 @@ export class Composer {
         return 'sent';
       }
       // An outbox prompt waits for the machine; only the core's own refusal stops it.
-      if (request) return wasDropped(error) || s.connection !== 'ready' ? 'wait' : { failed: this.ctx.reason(error) };
-      // The machine did not come back in time: the prompt joins the outbox under
-      // the request id it already went out with, so a turn the core took before
-      // the socket went is answered, not started twice.
-      if (sent && wasDropped(error) && this.pendingSends.get(threadId) === sent) {
+      if (request) return wasUnanswered(error) || s.connection !== 'ready' ? 'wait' : { failed: this.ctx.reason(error) };
+      // The machine did not come back in time, or still does not answer: the
+      // prompt joins the outbox under the request id it already went out with,
+      // so a turn the core took is answered, not started twice. Handing the
+      // text back to the box is what made the user send it again.
+      if (sent && wasUnanswered(error) && this.pendingSends.get(threadId) === sent) {
         this.pendingSends.delete(threadId);
         this.queuePrompt(threadId, { text: prompt, attachments, ...(previewReferences.length ? { previewReferences } : {}) }, { choice: target, id: sent.id, head: true });
         return 'sent';

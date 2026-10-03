@@ -152,6 +152,20 @@ export function wasDropped(error: unknown): boolean {
   return error instanceof RpcFailure && (error.data as { transport?: unknown } | undefined)?.transport === 'dropped';
 }
 
+/**
+ * A call that got no answer in time. The core may well have run it: iOS
+ * freezes a page in the background, and on its way back the call's timer
+ * fires before the answer waiting on the socket is read.
+ */
+export function unansweredFailure(method: RpcMethodName): RpcFailure {
+  return new RpcFailure({ code: RpcErrorCode.Internal, message: `${method} timed out; check the conversation before retrying`, data: { transport: 'unanswered' } });
+}
+
+/** Lost or unanswered: either way the core may have run the call, and a deduplicated one can be asked again. */
+export function wasUnanswered(error: unknown): boolean {
+  return wasDropped(error) || (error instanceof RpcFailure && (error.data as { transport?: unknown } | undefined)?.transport === 'unanswered');
+}
+
 /** True once `client` is ready again, false when it closes or `waitMs` passes first. */
 export function readyAgain(client: Client, waitMs = 15_000): Promise<boolean> {
   if (client.state === 'ready') return Promise.resolve(true);
@@ -411,7 +425,7 @@ export class WsClient implements ObservableClient {
     return new Promise<RpcResult<M>>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
-        reject(transportFailure(`${method} timed out; check the conversation before retrying`));
+        reject(unansweredFailure(method));
         // A call that never answers is the first sign of a half-open socket:
         // ask once, and replace the socket if nothing at all comes back.
         if (method !== 'hello') this.#suspect(socket);

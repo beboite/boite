@@ -1,5 +1,6 @@
 import type { ThreadId } from '@boite/contracts';
 import {
+  pushCovers,
   readNotifications,
   requestNotificationPermission,
   sendNotification,
@@ -119,8 +120,11 @@ export class Layout {
   // Notifications
   // -------------------------------------------------------------------------
 
-  /** A toast for what happened where the user was not looking; the decision is `shouldNotify`. */
-  notify(kind: NotifyKind, threadId: ThreadId, detail: string | null): void {
+  /**
+   * A toast for what happened where the user was not looking; the decision is
+   * `shouldNotify`. `detail` is the body, read only once a toast goes out.
+   */
+  notify(kind: NotifyKind, threadId: ThreadId, detail: string | null | (() => Promise<string | null>)): void {
     const s = this.ctx.store;
     const go = shouldNotify({
       kind,
@@ -131,11 +135,14 @@ export class Layout {
     });
     if (!go) return;
     const title = s.threads.find((t) => t.id === threadId)?.title ?? strings.app.name;
-    void sendNotification({
-      ...toastFor(kind, s.threadKey(threadId), title, detail),
-      coreThreadId: threadId,
-      origin: s.endpointUrl ? new URL(s.endpointUrl).origin : undefined
-    });
+    const origin = s.endpointUrl ? new URL(s.endpointUrl).origin : undefined;
+    const key = s.threadKey(threadId);
+    void (async () => {
+      // The core's push already brings this one to the device.
+      if (await pushCovers(origin)) return;
+      const body = typeof detail === 'function' ? await detail().catch(() => null) : detail;
+      await sendNotification({ ...toastFor(kind, key, title, body), coreThreadId: threadId, origin });
+    })();
   }
 
   /** The switch of the Background card; the platform prompt comes with the first turn-on. */

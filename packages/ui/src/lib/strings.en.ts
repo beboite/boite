@@ -750,7 +750,8 @@ export const strings = {
     done: 'Done',
     failed: 'Failed',
     openThread: 'Open thread',
-    needsYou: 'Needs your answer'
+    needsYou: 'Needs your answer',
+    connected: 'Notifications are connected'
   },
 
   permissionMode: {
