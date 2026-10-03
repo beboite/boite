@@ -67,7 +67,7 @@ Connect both machines in Machines using owner connections. The app relays signed
 requests between these connections, including a desktop core without a public
 address. Both connections must remain open for this route. For communication
 while the app is closed, give each core an HTTPS public address in Settings,
-Machines and devices, Phone app, reachable from the other core. The app links every pair
+Machines and updates, Phone app, reachable from the other core. The app links every pair
 of owner machines it holds
 at the same time: Boite exchanges their public identities and checks the
 connection in both directions. A pair that fails shows why in the agent links

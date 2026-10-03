@@ -47,7 +47,7 @@
     : page === 'usage' ? strings.usage.heading : page === 'limits' ? strings.usage.limits
     : page === 'resources' ? strings.settings.tabs.resources
     : page === 'task-manager' ? strings.taskManager.title
-    : page === 'experiments' ? strings.settings.tabs.experiments : strings.machines.heading);
+    : page === 'experiments' ? strings.settings.tabs.experiments : strings.settings.tabs.machines);
   /** The page's own title and its info mark step aside for the bar, so the bar carries the mark. */
   let info = $derived(page === 'usage' ? `${strings.usage.intro} ${strings.usage.note}`
     : page === 'experiments' ? strings.settings.experiments.intro : '');
@@ -98,7 +98,7 @@
         <h2 id="remote-machines">{strings.machines.heading}</h2>
         <div class="rows">
           <button class="ghost row" data-testid="settings-tab-machines" onclick={() => store.showSettings('machines')}>
-            <Monitor size={20} /><span class="ui-label">{strings.connection.manage}</span><ChevronRight size={18} />
+            <Monitor size={20} /><span class="ui-label">{strings.settings.tabs.machines}</span><ChevronRight size={18} />
           </button>
           {#if store.owner}<button class="ghost row" data-testid="settings-tab-brain" onclick={() => store.showSettings('brain')}><Brain size={20} /><span class="ui-label">{strings.brain.heading}</span><ChevronRight size={18} /></button>{/if}
           <button class="ghost row" data-testid="settings-tab-voice" onclick={() => store.showSettings('voice')}>

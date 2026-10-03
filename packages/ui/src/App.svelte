@@ -5,7 +5,6 @@
   import TerminalDrawer from './components/TerminalDrawer.svelte';
   import UndoToast from './components/UndoToast.svelte';
   import NotificationCard from './components/NotificationCard.svelte';
-  import HarnessUpdateNotices from './components/HarnessUpdateNotices.svelte';
   import ChatView from './components/ChatView.svelte';
 
   import ConfirmDialog from './components/ConfirmDialog.svelte';
@@ -611,7 +610,6 @@
     </div>
   {/if}
 
-  {#if !(tour && deferred.Onboarding)}<HarnessUpdateNotices />{/if}
 
   {#if toast.shown}
     <div

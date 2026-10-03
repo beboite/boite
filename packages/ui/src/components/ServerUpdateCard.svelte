@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowRight, CircleArrowDown, ExternalLink, RefreshCw } from '@lucide/svelte';
+  import { ArrowRight, Download, ExternalLink, RefreshCw } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { bytes, time } from '../lib/format';
   import { fill, strings } from '../lib/strings';
@@ -34,7 +34,7 @@
     </div>
     {#if store.owner}
       {#if state?.mode === 'systemd' && updater.offered && !active}
-        <button class="primary small" disabled={!connected || updater.busy || updater.preparing} onclick={() => void updater.install(label)} data-testid="server-update-install"><CircleArrowDown size={14} /><span class="ui-label">{strings.appUpdate.readyAction}</span></button>
+        <button class="primary small" disabled={!connected || updater.busy || updater.preparing} onclick={() => void updater.install(label)} data-testid="server-update-install"><Download size={14} /><span class="ui-label">{strings.appUpdate.readyAction}</span></button>
       {:else if active && state?.phase !== 'installing'}
         <button class="small" disabled={!connected || updater.busy} onclick={() => void updater.cancel()} data-testid="server-update-cancel"><span class="ui-label">{strings.common.cancel}</span></button>
       {:else if state?.mode === 'systemd' && !active}

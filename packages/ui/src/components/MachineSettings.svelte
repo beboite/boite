@@ -2,13 +2,11 @@
   import { ArrowLeft } from '@lucide/svelte';
   import type { Machine } from '../lib/workspace.svelte';
   import { fill, strings } from '../lib/strings';
-  import InfoTip from './InfoTip.svelte';
   import ResourcesPage from './ResourcesPage.svelte';
   import SchedulerSettings from './SchedulerSettings.svelte';
   import WorktreeStorageSetting from './WorktreeStorageSetting.svelte';
 
   let { machine, source, onback }: { machine: Machine; source?: string; onback: () => void } = $props();
-  const uid = $props.id();
   const store = $derived(machine.store);
 </script>
 
@@ -24,18 +22,6 @@
   <fieldset class="page" disabled={store.connection !== 'ready' || !store.settings}>
     <ResourcesPage {store} limitsOnly />
     <SchedulerSettings {store} />
-    <section class="card">
-      <h2>{strings.harnessUpdates.heading}</h2>
-      <label class="switch-row" for="{uid}-auto-update">
-        <span class="ui-label-box"><span class="ui-label">{strings.providerSettings.autoUpdate}</span><InfoTip topic={strings.providerSettings.autoUpdate} text={strings.harnessUpdates.autoHint} /></span>
-        <input id="{uid}-auto-update" type="checkbox" role="switch" data-testid="setting-auto-update-harnesses"
-          checked={store.settings?.autoUpdateHarnesses ?? false}
-          onchange={async (event) => {
-            const input = event.currentTarget;
-            if (!await store.saveSettings({ autoUpdateHarnesses: input.checked })) input.checked = store.settings?.autoUpdateHarnesses ?? false;
-          }} />
-      </label>
-    </section>
     <section class="card">
       <h2>{strings.settings.worktrees.storage}</h2>
       <WorktreeStorageSetting {store} />
@@ -55,11 +41,9 @@
   .machine-settings > fieldset.page :global(.page) { padding: 0; }
   fieldset :global(.card) { margin-bottom: 16px; }
   fieldset :global([data-testid='worktree-storage']) { padding-bottom: 0; margin-bottom: 0; border-bottom: 0; }
-  .switch-row > span { display: inline-flex; align-items: center; }
   .error { color: var(--color-danger); overflow-wrap: anywhere; }
   @media (max-width: 720px) {
     .machine-settings { padding: 16px; }
     .back { min-height: var(--touch-target); }
-    .switch-row { flex-wrap: wrap; gap: 12px; }
   }
 </style>

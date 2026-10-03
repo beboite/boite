@@ -65,6 +65,14 @@ test('text and icons share a vertical centre across reading fonts, menus and pho
     ])) {
       expect(Math.abs(result.offset), `${font}: heading information icon`).toBeLessThanOrEqual(0.8);
     }
+    await page.evaluate(`__boiteTest.workspace.active.showSettings('machines')`);
+    await page.waitFor(`document.querySelector('[data-testid="harness-updates-card"] h4 .info-tip')`);
+    for (const result of await offsets([
+      ['#updates-heading svg', '#updates-heading .ui-label'],
+      ['#connections-heading svg', '#connections-heading .ui-label'],
+      ['[data-testid="harness-updates-card"] h4 .info-tip', '[data-testid="harness-updates-card"] h4 .ui-label'],
+      ['[data-testid="harness-updates-check"]', '[data-testid="harness-updates-check"] .ui-label'],
+    ])) expect(Math.abs(result.offset), `${font}: machine updates`).toBeLessThanOrEqual(0.8);
     await page.evaluate(`__boiteTest.workspace.active.showChat()`);
   }
   await page.click('[data-testid="composer-mode"]');

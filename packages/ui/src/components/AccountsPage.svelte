@@ -4,8 +4,8 @@
   import { onMount } from 'svelte';
   import { slide } from 'svelte/transition';
   import { ChevronRight, Plus, RefreshCw, Terminal } from '@lucide/svelte';
-  import type { Account, HarnessUpdate, ProviderSummary } from '@boite/contracts';
-  import ProviderVersion, { updatable } from './ProviderVersion.svelte';
+  import type { Account, ProviderSummary } from '@boite/contracts';
+  import ProviderVersion from './ProviderVersion.svelte';
   import ProviderIcon from './ProviderLogo.svelte';
   import ModelPicker from './ModelPicker.svelte';
   import EffortSlider from './EffortSlider.svelte';
@@ -18,8 +18,8 @@
 
   /**
    * One row per provider, one next step per row: install what is missing, sign
-   * in when nothing is signed in, otherwise its version and the update when one
-   * is out. Connected providers come first; the rest wait below as the ways to
+   * in when nothing is signed in, otherwise its installed version.
+   * Connected providers come first; the rest wait below as the ways to
    * add one. Accounts, the default model and the uninstall sit behind
    * the row's chevron. A family (Antigravity and its CLI) is one row, each way
    * in its own block inside it.
@@ -41,8 +41,6 @@
   let checking = $state<string | null>(null);
   let detecting = $state(false);
   let lastDetect = 0;
-  let checkingUpdates = $state(false);
-  let updatesBusy = $derived(checkingUpdates || store.harnessUpdates.some((update) => update.state === 'checking'));
 
   let groups = $derived(providerGroups(store.providers, store.accounts));
   /** With nothing connected yet, the ways in are the page's main actions. */
@@ -125,15 +123,6 @@
     const install = store.installOf(provider.id);
     if (install?.state !== 'downloading' || install.totalBytes <= 0) return 0;
     return Math.min(100, (install.receivedBytes / install.totalBytes) * 100);
-  }
-
-  const updateOf = (providerId: string): HarnessUpdate | undefined =>
-    store.harnessUpdates.find((update) => update.providerId === providerId);
-
-  async function checkUpdates() {
-    checkingUpdates = true;
-    try { await store.loadHarnessUpdates(true); }
-    finally { checkingUpdates = false; }
   }
 
   /** The login a row shows: the running one first, else the last that failed. */
@@ -242,9 +231,6 @@
   }
 
   onMount(() => {
-    // The core answers from its last reading and never runs the agents for a
-    // plain list: opening this page on a core that has not read them yet is the moment to.
-    if (store.client !== null && store.owner && store.harnessUpdates.length === 0 && !updatesBusy) void checkUpdates();
     // The download the row asked for is on disk. The core made the default
     // account before it said so, which means an existing command-line login already
     // reads as ready here and only a provider nobody is signed into goes on.
@@ -276,14 +262,6 @@
     return () => { offProviders?.(); offInstall?.(); window.removeEventListener('focus', onFocus); chained = {}; };
   });
 </script>
-
-<!-- An update that failed says why, under the line it belongs to. -->
-{#snippet updateNote(provider: ProviderSummary)}
-  {@const update = updateOf(provider.id)}
-  {#if update?.state === 'failed'}
-    <p class="note bad" role="status">{update.message ?? strings.harnessUpdates.failed(update.name)}</p>
-  {/if}
-{/snippet}
 
 <!-- The one next step: install, repair, cancel, the installer's guide or the sign-in. -->
 {#snippet stepAction(provider: ProviderSummary, step: SetupStep, main: boolean)}
@@ -489,9 +467,7 @@
         <div class="fact">
           <dt>{strings.providerSettings.version}</dt>
           <dd class="managed">
-            <span class="ui-label" data-testid="install-status">{updatable(store, provider)
-              ? strings.install.updateAvailable.replace('{installed}', install.version).replace('{available}', install.available)
-              : strings.install.upToDate.replace('{version}', install.version)}</span>
+            <span class="ui-label" data-testid="install-status">{strings.install.upToDate.replace('{version}', install.version)}</span>
             <button class="quiet small" data-testid="install-remove" onclick={() => void uninstall(provider)}><span class="ui-label">{strings.install.remove}</span></button>
           </dd>
         </div>
@@ -561,7 +537,6 @@
         {@render stepAction(lead, step, main)}
       </div>
     </div>
-    {#if !secondary}{@render updateNote(lead)}{/if}
     {@render progress(lead, step)}
     {#each row.members as member (member.id)}{@render logins(member)}{/each}
 
@@ -589,7 +564,6 @@
                 {/if}
               </div>
               {#if member.id !== lead.id}
-                {@render updateNote(member)}
                 {@render progress(member, memberStep)}
               {/if}
               {@render memberBody(member)}
@@ -608,28 +582,6 @@
     <div>
       <h1 class="ui-label-box"><span class="ui-label">{strings.providerSettings.heading}</span><InfoTip topic={strings.providerSettings.heading} text={strings.providerSettings.intro} /></h1>
     </div>
-    {#if store.owner}
-      <!-- Agent updates for this machine: two controls, the versions are on the rows. -->
-      <div class="updates">
-        <label class="auto" for="{uid}-auto">
-          <span class="ui-label" id="{uid}-auto-name">{strings.providerSettings.autoUpdate}</span>
-          <InfoTip topic={strings.providerSettings.autoUpdate} text="{strings.harnessUpdates.intro} {strings.harnessUpdates.autoHint}." />
-          <input
-            id="{uid}-auto"
-            aria-labelledby="{uid}-auto-name"
-            type="checkbox"
-            role="switch"
-            class="switch-sm"
-            data-testid="setting-auto-update-harnesses"
-            checked={store.settings?.autoUpdateHarnesses ?? false}
-            onchange={(event) => void store.saveSettings({ autoUpdateHarnesses: event.currentTarget.checked })}
-          />
-        </label>
-        <button type="button" class="quiet small" data-testid="harness-updates-check" disabled={updatesBusy} onclick={() => void checkUpdates()}>
-          <RefreshCw size={13} /><span class="ui-label">{updatesBusy ? strings.harnessUpdates.checking : strings.providerSettings.checkUpdates}</span>
-        </button>
-      </div>
-    {/if}
   </header>
 
   {#if groups.connected.length > 0}
@@ -709,7 +661,6 @@
   .state { margin: 0; display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
   .bad { color: var(--color-danger); }
   .hint { margin: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); }
-  .note { margin: 0 0 0 64px; font-size: var(--text-sm); }
 
   /* Hue is for status only: green once an account is signed in, amber while Boite works. */
   .dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--color-subtle); }
@@ -773,44 +724,7 @@
   .default-model { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .pending-effort { color: var(--color-muted-foreground); font-size: var(--text-sm); text-transform: capitalize; padding: 2px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
 
-  /* The page's update controls, small enough to sit beside the title, under it in a narrow window. */
   header { flex-wrap: wrap; }
-  .updates { display: flex; align-items: center; gap: 12px; flex: 0 1 auto; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
-  .auto { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-sm); color: var(--color-muted-foreground); cursor: pointer; }
-  .auto input { margin-left: 4px; }
-
-  /* General's switch at the size of a row control, so no toggle here is a bare checkbox. */
-  .page input.switch-sm {
-    flex: none;
-    width: 28px;
-    height: 16px;
-    min-height: 16px;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    appearance: none;
-    border-radius: 999px;
-    background: var(--color-edge);
-    position: relative;
-    cursor: pointer;
-    transition: background var(--dur-2) var(--ease-out-quint);
-  }
-
-  .page input.switch-sm::after {
-    content: '';
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: var(--color-background);
-    transition: transform var(--dur-2) var(--ease-out-quint);
-  }
-
-  .page input.switch-sm:checked { background: var(--color-foreground); }
-  .page input.switch-sm:checked::after { transform: translateX(12px); }
-  .page input.switch-sm:focus-visible { outline-offset: 3px; }
 
   /* Phones never reach this page. Beside the settings nav a small window leaves
      the row about 480 px, where the action drops under the name. */
@@ -820,9 +734,7 @@
     .line .summary { flex: 1 1 260px; }
     .line .act { margin-left: auto; }
     .account-line .act, .member-line .act { order: 3; flex-basis: 100%; justify-content: flex-start; }
-    .note { margin-left: 0; }
     .details { margin-left: 0; }
     .fact { grid-template-columns: 1fr; gap: 2px; }
-    .updates { justify-content: flex-start; }
   }
 </style>
