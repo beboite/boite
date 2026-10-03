@@ -764,7 +764,7 @@
             <TurnFiles {store} {...filesByTurn.get(turn.id)!} />
           {/if}
           {#if turn && lastInTurn.get(turn.id) === message.id}
-            <MessageTurnSummary {store} {threadId} {turn} {message}>
+            <MessageTurnSummary {store} {threadId} {turn} {message} {messages}>
               {#snippet actions()}
                 <MessageActions
                   text={() => answerOf(turn.id)}
