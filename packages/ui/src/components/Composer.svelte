@@ -713,7 +713,7 @@
     {#if composer?.editing}
       <div class="editing" data-testid="composer-editing">
         <Pencil size={13} />
-        <span>{strings.composer.editing}</span>
+        <span class="ui-label">{strings.composer.editing}</span>
         <button type="button" class="ghost small icon" data-testid="composer-editing-cancel" title={strings.composer.editingCancel} aria-label={strings.composer.editingCancel} onclick={cancelEdit}><X size={13} /></button>
       </div>
     {/if}

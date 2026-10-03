@@ -31,12 +31,12 @@
     {#if view.store.owner}
       <div class="agent-form-actions">
         {#if finished}
-          <button type="button" class="small" disabled={view.pending} onclick={() => void setStatus('active')}>{labels.reopenMission}</button>
+          <button type="button" class="small" disabled={view.pending} onclick={() => void setStatus('active')}><span class="ui-label">{labels.reopenMission}</span></button>
         {:else}
-          {#if ['open', 'active'].includes(mission.status)}<button type="button" class="ghost small" onclick={() => void setStatus('paused')}>{labels.pause}</button>
-          {:else if ['paused', 'waiting', 'review'].includes(mission.status)}<button type="button" class="ghost small" onclick={() => void setStatus('active')}>{labels.resume}</button>{/if}
-          <button type="button" class="ghost small" onclick={() => void setStatus('cancelled')}>{labels.cancel}</button>
-          <button type="button" class="primary small" disabled={view.pending || unfinished} onclick={() => void setStatus('done')} data-testid="agent-mission-finish">{labels.finishMission}</button>
+          {#if ['open', 'active'].includes(mission.status)}<button type="button" class="ghost small" onclick={() => void setStatus('paused')}><span class="ui-label">{labels.pause}</span></button>
+          {:else if ['paused', 'waiting', 'review'].includes(mission.status)}<button type="button" class="ghost small" onclick={() => void setStatus('active')}><span class="ui-label">{labels.resume}</span></button>{/if}
+          <button type="button" class="ghost small" onclick={() => void setStatus('cancelled')}><span class="ui-label">{labels.cancel}</span></button>
+          <button type="button" class="primary small" disabled={view.pending || unfinished} onclick={() => void setStatus('done')} data-testid="agent-mission-finish"><span class="ui-label">{labels.finishMission}</span></button>
         {/if}
       </div>
     {/if}
@@ -47,23 +47,23 @@
 </section>
 
 <section class="card">
-  <div class="agent-card-head"><h2>{labels.tasks}</h2>{#if view.store.owner && !adding}<button type="button" class="small" onclick={() => { adding = true; }}>{labels.addTask}</button>{/if}</div>
+  <div class="agent-card-head"><h2>{labels.tasks}</h2>{#if view.store.owner && !adding}<button type="button" class="small" onclick={() => { adding = true; }}><span class="ui-label">{labels.addTask}</span></button>{/if}</div>
   {#each tasks as task (task.id)}
     <article class="agent-task" data-testid="agent-task-{task.id}">
       <div class="agent-card-head">
         <div><h3>{task.title}</h3>{#if task.assigneeId || task.dependsOn.length}<p class="hint">{[task.assigneeId ? nameOf(task.assigneeId) : '', task.dependsOn.length ? `${labels.dependencies}: ${task.dependsOn.map(id => tasks.find(t => t.id === id)?.title ?? id).join(', ')}` : ''].filter(Boolean).join(' · ')}</p>{/if}</div>
         <div class="agent-form-actions">
           {#if task.status === 'open' && view.store.owner}
-            <Menu placement="bottom" align="end" label={labels.acquire} items={mission.agentIds.map(id => ({ id, label: nameOf(id), disabled: task.dependsOn.some(d => tasks.find(t => t.id === d)?.status !== 'done') }))} onpick={agentId => { void view.call('agents.task.acquire', { taskId: task.id, agentId, expectedRevision: task.revision }); }}>{labels.acquire}</Menu>
+            <Menu placement="bottom" align="end" label={labels.acquire} items={mission.agentIds.map(id => ({ id, label: nameOf(id), disabled: task.dependsOn.some(d => tasks.find(t => t.id === d)?.status !== 'done') }))} onpick={agentId => { void view.call('agents.task.acquire', { taskId: task.id, agentId, expectedRevision: task.revision }); }}><span class="ui-label">{labels.acquire}</span></Menu>
           {/if}
-          <span class="agent-state" data-status={task.status}>{labels[task.status]}</span>
+          <span class="agent-state ui-label" data-status={task.status}>{labels[task.status]}</span>
         </div>
       </div>
       {#if task.result}<details class="agent-record" open={task.status === 'review'}><summary>{labels.result}</summary><div class="prose">{@html renderMarkdown(task.result)}</div></details>{/if}
-      {#if task.workspace}<p class="hint agent-prewrap">{labels.workspace}: <code>{task.workspace.path}</code> <button type="button" class="ghost small" onclick={() => { void navigator.clipboard.writeText(task.workspace!.path).catch(error => { view.error = String(error); }); }}>{labels.copyPath}</button></p>{/if}
+      {#if task.workspace}<p class="hint agent-prewrap">{labels.workspace}: <code>{task.workspace.path}</code> <button type="button" class="ghost small" onclick={() => { void navigator.clipboard.writeText(task.workspace!.path).catch(error => { view.error = String(error); }); }}><span class="ui-label">{labels.copyPath}</span></button></p>{/if}
       {#if task.status === 'review' && view.store.owner}
         <label class="agent-field">{labels.feedback}<textarea bind:value={feedback[task.id]} rows="2"></textarea></label>
-        <div class="agent-form-actions"><button type="button" class="primary small" disabled={view.pending} onclick={() => void review(task, 'done')}>{labels.approve}</button><button type="button" class="small" disabled={view.pending || !feedback[task.id]?.trim()} onclick={() => void review(task, 'open')}>{labels.revise}</button><button type="button" class="ghost small" disabled={view.pending} onclick={() => void review(task, 'cancelled')}>{labels.reject}</button></div>
+        <div class="agent-form-actions"><button type="button" class="primary small" disabled={view.pending} onclick={() => void review(task, 'done')}><span class="ui-label">{labels.approve}</span></button><button type="button" class="small" disabled={view.pending || !feedback[task.id]?.trim()} onclick={() => void review(task, 'open')}><span class="ui-label">{labels.revise}</span></button><button type="button" class="ghost small" disabled={view.pending} onclick={() => void review(task, 'cancelled')}><span class="ui-label">{labels.reject}</span></button></div>
       {/if}
     </article>
   {:else}{#if !adding}<p class="hint">{labels.empty}</p>{/if}{/each}
@@ -71,8 +71,8 @@
     <form class="agents-form agent-inline-form" onsubmit={e => { e.preventDefault(); void addTask(); }}>
       <label class="agent-field">{labels.task}<input required bind:value={title} data-testid="agent-task-title" /></label>
       <label class="agent-field">{labels.instructions}<textarea bind:value={instructions} rows="3"></textarea></label>
-      {#if tasks.length}<fieldset class="agent-field"><legend>{labels.dependencies}</legend><div class="agent-checks">{#each tasks as task (task.id)}<label class="agent-chip-check"><input type="checkbox" checked={dependencies.includes(task.id)} onchange={() => { dependencies = dependencies.includes(task.id) ? dependencies.filter(id => id !== task.id) : [...dependencies, task.id]; }} />{task.title}</label>{/each}</div></fieldset>{/if}
-      <div class="agent-form-actions"><button class="primary" disabled={view.pending}>{labels.save}</button><button type="button" class="ghost" onclick={() => { adding = false; }}>{labels.cancel}</button></div>
+      {#if tasks.length}<fieldset class="agent-field"><legend>{labels.dependencies}</legend><div class="agent-checks">{#each tasks as task (task.id)}<label class="agent-chip-check"><input type="checkbox" checked={dependencies.includes(task.id)} onchange={() => { dependencies = dependencies.includes(task.id) ? dependencies.filter(id => id !== task.id) : [...dependencies, task.id]; }} /><span class="ui-label">{task.title}</span></label>{/each}</div></fieldset>{/if}
+      <div class="agent-form-actions"><button class="primary" disabled={view.pending}><span class="ui-label">{labels.save}</span></button><button type="button" class="ghost" onclick={() => { adding = false; }}><span class="ui-label">{labels.cancel}</span></button></div>
     </form>
   {/if}
 </section>
@@ -82,7 +82,7 @@
     <h2>{labels.artifacts}</h2>
     {#each artifacts as artifact (artifact.id)}
       {@const run = view.seen.runs.find(r => r.id === artifact.runId) ?? view.snapshot?.sessions.find(s => s.agentId === artifact.agentId && s.scope.kind === 'mission' && s.scope.id === mission.id)}
-      <article class="agent-task"><h3>{artifact.title}</h3><div class="prose">{@html renderMarkdown(artifact.summary)}</div><p class="hint">{labels.verification}: {artifact.verification || labels.noUsage}</p>{#if artifact.paths.length}<p class="agent-prewrap hint">{artifact.paths.join('\n')}</p>{/if}{#if artifact.commit}<code>{artifact.commit}</code>{/if}{#if run}<button type="button" class="ghost small" onclick={() => void view.store.open(run.threadId)}>{labels.openRun}</button>{/if}</article>
+      <article class="agent-task"><h3>{artifact.title}</h3><div class="prose">{@html renderMarkdown(artifact.summary)}</div><p class="hint">{labels.verification}: {artifact.verification || labels.noUsage}</p>{#if artifact.paths.length}<p class="agent-prewrap hint">{artifact.paths.join('\n')}</p>{/if}{#if artifact.commit}<code>{artifact.commit}</code>{/if}{#if run}<button type="button" class="ghost small" onclick={() => void view.store.open(run.threadId)}><span class="ui-label">{labels.openRun}</span></button>{/if}</article>
     {/each}
   </section>
 {/if}

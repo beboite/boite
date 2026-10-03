@@ -13,7 +13,7 @@
     <button type="button" class="ghost toggle" data-testid="other-projects-toggle" aria-expanded={projectThreadView.otherOpen}
       aria-controls={uid} onclick={() => projectThreadView.otherOpen = !projectThreadView.otherOpen}>
       <span class="caret" class:open={projectThreadView.otherOpen}><ChevronRight size={12} aria-hidden="true" /></span>
-      <span class="label">{strings.sidebar.otherProjects}</span><span>{formatCount(count)}</span>
+      <span class="label ui-label">{strings.sidebar.otherProjects}</span><span class="ui-label">{formatCount(count)}</span>
     </button>
     <div id={uid} hidden={!projectThreadView.otherOpen}>
       {#if projectThreadView.otherOpen}{@render children()}{/if}

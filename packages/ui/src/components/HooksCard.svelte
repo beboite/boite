@@ -136,7 +136,7 @@
 {/snippet}
 
 <section class="card hooks" id="settings-hooks" data-testid="hooks-card" aria-busy={loading}>
-  <h2>{strings.hooks.heading}<InfoTip topic={strings.hooks.heading} text={strings.hooks.description} /></h2>
+  <h2 class="ui-label-box"><span class="ui-label">{strings.hooks.heading}</span><InfoTip topic={strings.hooks.heading} text={strings.hooks.description} /></h2>
   {#if status || error}
     <button type="button" class="ghost small icon refresh" aria-label={strings.hooks.refresh} title={strings.hooks.refresh} disabled={loading} onclick={() => void load()} data-testid="hooks-refresh"><RefreshCw size={14} strokeWidth={1.75} /></button>
   {/if}
@@ -152,8 +152,8 @@
           <details>
             <summary>
               <ProviderLogo providerId={provider.providerId} size={16} />
-              <span class="name">{provider.name}</span>
-              <span class="found">{found(provider)}</span>
+              <span class="name ui-label">{provider.name}</span>
+              <span class="found ui-label">{found(provider)}</span>
               {#if provider.reports}
                 <span class="counters" data-testid="hooks-counters">
                   {#each counters(provider) as counter, index (counter.kind)}{#if index > 0}{' '}<span class="dot" aria-hidden="true">·</span>{' '}{/if}<span class={counter.kind}>{counter.text}</span>{/each}
@@ -193,7 +193,7 @@
       </ol>
       {#if status.recent.length > SHOWN}
         <details class="disclosure more">
-          <summary>{fill(strings.hooks.more, { count: figure(status.recent.length - SHOWN) })}</summary>
+          <summary><span class="ui-label">{fill(strings.hooks.more, { count: figure(status.recent.length - SHOWN) })}</span></summary>
           <ol class="runs">
             {#each status.recent.slice(SHOWN) as run, index (`${run.at}:${index}`)}{@render runRow(run)}{/each}
           </ol>

@@ -214,24 +214,24 @@
         <span class="provider" data-testid="thread-provider" title={agent} aria-label={agent}>
           <ProviderLogo providerId={thread.providerId} size={12} />
         </span>
-        <span class="title">{thread.title}</span>
+        <span class="title ui-label">{thread.title}</span>
         {#if draft}<span class="draft" data-testid="thread-draft" title={strings.sidebar.unsentDraft} aria-label={strings.sidebar.unsentDraft}><PencilLine size={12} /></span>{/if}
         {#if thread.pinned}<Pin size={12} />{/if}
         <ThreadState {thread} {now} />
       </span>
       {#if pending}
-        <span class="pending" data-testid="thread-pending" title={pending}><FolderInput size={12} /><span>{pending}</span></span>
+        <span class="pending" data-testid="thread-pending" title={pending}><FolderInput size={12} /><span class="ui-label">{pending}</span></span>
       {/if}
     </button>
     {#if meta}
     <div class="metadata">
-      {#if showProject}<span class="project-name" data-testid="thread-project" title={project.path}><Folder size={12} /><span>{projectName(project)}</span></span>{/if}
+      {#if showProject}<span class="project-name" data-testid="thread-project" title={project.path}><Folder size={12} /><span class="ui-label">{projectName(project)}</span></span>{/if}
       {#if pullRequest}
         <a class="pr-link" data-testid="thread-pr" href={pullRequest.url} target="_blank" rel="noopener noreferrer"
-          title={pullRequest.url} aria-label={`#${pullRequest.number}`}><GitPullRequest size={12} />#{pullRequest.number}</a>
+          title={pullRequest.url} aria-label={`#${pullRequest.number}`}><GitPullRequest size={12} /><span class="ui-label">#{pullRequest.number}</span></a>
       {/if}
       <!-- Only on a card that already has a second line: a branch alone would double every worktree row. -->
-      {#if thread.branch}<span class="branch" data-testid="thread-branch" title={thread.branch}><GitBranch size={12} /><span>{thread.branch}</span></span>{/if}
+      {#if thread.branch}<span class="branch" data-testid="thread-branch" title={thread.branch}><GitBranch size={12} /><span class="ui-label">{thread.branch}</span></span>{/if}
     </div>
     {/if}
     {#if showDone && doneAllowed}<button type="button" class="ghost small icon done" data-testid="thread-done"
@@ -292,6 +292,7 @@
   .headline {
     display: flex;
     align-items: center;
+    min-height: 1lh; /* Keep the row stable when machine glyphs appear. */
     gap: 8px;
     min-width: 0;
   }

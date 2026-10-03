@@ -50,7 +50,7 @@
   <header>
     <button type="button" class="ghost small icon" aria-label={strings.workflow.back} title={strings.workflow.back} data-testid="workflow-back" onclick={onback}><ArrowLeft size={15} strokeWidth={1.75} /></button>
     <div class="title">
-      <strong><WorkflowMark status={node.status} />{node.title}</strong>
+      <strong><WorkflowMark status={node.status} /><span class="ui-label">{node.title}</span></strong>
       <small>
         {strings.workflow.stepStatus[node.status]}
         {#if route}· <ProviderLogo providerId={route.providerId} size={12} /> {route.model || route.profile}{/if}
@@ -58,7 +58,7 @@
       </small>
     </div>
     {#if canRetry}
-      <button type="button" class="quiet small" data-testid="workflow-retry-step" onclick={() => void store.controlWorkflow(run, 'retry', node.id)}><RotateCcw size={13} strokeWidth={1.75} />{strings.workflow.retry}</button>
+      <button type="button" class="quiet small" data-testid="workflow-retry-step" onclick={() => void store.controlWorkflow(run, 'retry', node.id)}><RotateCcw size={13} strokeWidth={1.75} /><span class="ui-label">{strings.workflow.retry}</span></button>
     {/if}
   </header>
 
@@ -78,7 +78,7 @@
         {#each node.instances as inst (inst.key)}
           <button type="button" class="instance" class:chosen={inst.key === instance?.key} role="option" aria-selected={inst.key === instance?.key} data-testid="workflow-instance" onclick={() => (picked = inst.key)}>
             <WorkflowMark status={inst.status} />
-            <span class="label">{inst.label || inst.key}</span>
+            <span class="label ui-label">{inst.label || inst.key}</span>
             {#if inst.startedAt !== null}<span class="time"><AgentElapsed startedAt={inst.startedAt} finishedAt={inst.finishedAt} active={inst.status === 'running'} /></span>{/if}
           </button>
         {/each}
@@ -99,7 +99,7 @@
       {#if instance.threadId}
         <div class="conversation-head">
           <p class="section-label">{strings.workflow.conversation}</p>
-          <button type="button" class="quiet small" data-testid="workflow-open-thread" onclick={() => void openThread(instance.threadId!)}>{strings.workflow.openThread}</button>
+          <button type="button" class="quiet small" data-testid="workflow-open-thread" onclick={() => void openThread(instance.threadId!)}><span class="ui-label">{strings.workflow.openThread}</span></button>
         </div>
         {#if store.delegationThread?.id === instance.threadId}
           <div class="transcript"><DelegationTranscript messages={store.delegationThread.messages} /></div>
@@ -119,6 +119,7 @@
   header { flex: none; min-height: 48px; padding: 7px 12px 7px 9px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--color-border); }
   .title { flex: 1; min-width: 0; }
   .title strong { display: flex; align-items: center; gap: 7px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--text-sm); font-weight: 600; }
+  .title strong .ui-label { overflow: hidden; text-overflow: ellipsis; }
   .title small { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .body { flex: 1; min-height: 0; padding: 12px 16px 18px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
   .facts { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; color: var(--color-muted-foreground); font-size: var(--text-sm); }

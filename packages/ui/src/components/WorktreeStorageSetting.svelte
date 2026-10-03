@@ -57,10 +57,10 @@
 <form data-testid="worktree-storage" onsubmit={event => { event.preventDefault(); void save(); }}>
   <fieldset disabled={busy || !store.settings || store.connection !== 'ready'}>
   <div class="switch-row">
-    <span>{s.storage}</span>
+    <span class="ui-label">{s.storage}</span>
     <Menu {items} label={s.storage} placement="bottom" align="end" testid="worktree-storage-mode"
       onpick={id => edit({ mode: id as Draft['mode'] })}>
-      {current.mode === 'project' ? s.storageProject : s.storageShared}<ChevronDown size={13} />
+      <span class="ui-label">{current.mode === 'project' ? s.storageProject : s.storageShared}</span><ChevronDown size={13} />
     </Menu>
   </div>
   {#if current.mode === 'project'}
@@ -79,7 +79,7 @@
   {/if}
   <p class="hint">{s.storageNewOnly}</p>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
-  <button type="submit" data-testid="worktree-storage-save" disabled={busy || !store.settings || !changed || store.connection !== 'ready'}>{strings.settings.save}</button>
+  <button type="submit" data-testid="worktree-storage-save" disabled={busy || !store.settings || !changed || store.connection !== 'ready'}><span class="ui-label">{strings.settings.save}</span></button>
   </fieldset>
 </form>
 

@@ -104,20 +104,20 @@
   >
     <span class="head">
       <WorkflowMark status={node.status} />
-      <span class="name">{node.title}</span>
-      {#if node.forEach && progress.total > 0}<span class="count" data-testid="workflow-node-count">{progress.done}/{progress.total}</span>{/if}
+      <span class="name ui-label">{node.title}</span>
+      {#if node.forEach && progress.total > 0}<span class="count ui-label" data-testid="workflow-node-count">{progress.done}/{progress.total}</span>{/if}
     </span>
     {#if route}
-      <span class="route"><ProviderLogo providerId={route.providerId} size={12} /><span>{route.model || route.profile}</span></span>
+      <span class="route"><ProviderLogo providerId={route.providerId} size={12} /><span class="ui-label">{route.model || route.profile}</span></span>
     {/if}
     {#if node.forEach && progress.total > 0}
       <span class="bar" aria-hidden="true">
         {#each node.instances as inst (inst.key)}<i class={inst.status}></i>{/each}
       </span>
     {/if}
-    {#if note}<span class="note">{note}</span>{/if}
+    {#if note}<span class="note ui-label">{note}</span>{/if}
     {#if node.status === 'skipped'}
-      <span class="note">{strings.workflow.stepStatus.skipped}</span>
+      <span class="note ui-label">{strings.workflow.stepStatus.skipped}</span>
     {:else if timing.startedAt !== null}
       <span class="note"><AgentElapsed startedAt={timing.startedAt} finishedAt={timing.finishedAt} active={timing.active} /></span>
     {/if}

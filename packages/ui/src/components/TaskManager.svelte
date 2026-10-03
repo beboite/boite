@@ -105,14 +105,14 @@
     <div><span>{strings.taskManager.agents}</span><strong>{snapshot ? count(snapshot.agents.length) : strings.resources.unknown}</strong></div>
     <div><span>{strings.trace.cpu}{#if snapshot && total.cpuCount > 0 && total.cpuCount < snapshot.agents.length}<InfoTip topic={strings.trace.cpu} text={strings.taskManager.partialHint} />{/if}</span><strong>{snapshot && (total.cpuCount || !snapshot.agents.length) ? cpu(total.cpu) : strings.resources.unknown}</strong></div>
     <div><span>{strings.resources.memory}{#if snapshot && total.memoryCount > 0 && total.memoryCount < snapshot.agents.length}<InfoTip topic={strings.resources.memory} text={strings.taskManager.partialHint} />{/if}</span><strong>{snapshot && (total.memoryCount || !snapshot.agents.length) ? bytes(total.memory) : strings.resources.unknown}</strong></div>
-    <span class="live" class:paused={store.connection !== 'ready' || !!error || !snapshot}><span aria-hidden="true"></span>{store.connection !== 'ready' ? strings.taskManager.disconnected : error ? strings.taskManager.paused : !snapshot ? strings.taskManager.loading : strings.taskManager.live}</span>
+    <span class="live" class:paused={store.connection !== 'ready' || !!error || !snapshot}><span aria-hidden="true"></span><span class="ui-label">{store.connection !== 'ready' ? strings.taskManager.disconnected : error ? strings.taskManager.paused : !snapshot ? strings.taskManager.loading : strings.taskManager.live}</span></span>
   </div>
   <div class="toolbar">
     <label class="search"><Search size={16} /><input type="search" bind:value={query} placeholder={strings.taskManager.search} aria-label={strings.taskManager.search} data-testid="task-manager-search" /></label>
-    <Menu items={(['memory', 'cpu', 'disk', 'network'] as const).map(id => ({ id, label: strings.taskManager.sort[id], active: sort === id }))} onpick={id => (sort = id as typeof sort)} label={strings.taskManager.sortBy} placement="bottom" testid="task-manager-sort">{strings.taskManager.sort[sort]}<ChevronDown size={13} /></Menu>
+    <Menu items={(['memory', 'cpu', 'disk', 'network'] as const).map(id => ({ id, label: strings.taskManager.sort[id], active: sort === id }))} onpick={id => (sort = id as typeof sort)} label={strings.taskManager.sortBy} placement="bottom" testid="task-manager-sort"><span class="ui-label">{strings.taskManager.sort[sort]}</span><ChevronDown size={13} /></Menu>
   </div>
   {#if error}
-    <div class="notice" role="status" data-testid="task-manager-error"><span>{error}</span><button class="quiet" onclick={() => retry++}>{strings.common.refresh}</button></div>
+    <div class="notice" role="status" data-testid="task-manager-error"><span class="ui-label">{error}</span><button class="quiet" onclick={() => retry++}><span class="ui-label">{strings.common.refresh}</span></button></div>
   {:else if store.connection !== 'ready'}
     <p class="hint" role="status">{strings.taskManager.disconnected}</p>
   {:else if !snapshot}
@@ -125,18 +125,18 @@
     <section class="card agent" data-testid="task-manager-agent" data-thread-id={entry.threadId}>
       <div class="identity">
         <ProviderLogo providerId={entry.providerId} size={20} />
-        <button class="quiet title" onclick={() => { const owner = store; onopenthread?.(); void owner.open(entry.threadId); }}><span>{entry.title}</span><small>{store.providers.find(row => row.id === entry.providerId)?.name ?? entry.providerId}{entry.model ? ` · ${entry.model}` : ''}</small></button>
+        <button class="quiet title" onclick={() => { const owner = store; onopenthread?.(); void owner.open(entry.threadId); }}><span class="ui-label">{entry.title}</span><small>{store.providers.find(row => row.id === entry.providerId)?.name ?? entry.providerId}{entry.model ? ` · ${entry.model}` : ''}</small></button>
         <StatusMark status={entry.status} />
-        <span class="status">{strings.threadStatus[entry.status]}</span>
+        <span class="status ui-label">{strings.threadStatus[entry.status]}</span>
       </div>
       <dl class="metrics">
-        <div><dt><Cpu size={14} />{strings.trace.cpu}</dt><dd data-testid="task-manager-cpu">{available(entry, 'cpu') ? cpu(entry.load.cpuPercent) : strings.resources.unknown}</dd></div>
-        <div><dt><MemoryStick size={14} />{strings.resources.memory}</dt><dd data-testid="task-manager-memory">{available(entry, 'memory') ? bytes(entry.load.memoryBytes) : strings.resources.unknown}</dd></div>
+        <div><dt><Cpu size={14} /><span class="ui-label">{strings.trace.cpu}</span></dt><dd data-testid="task-manager-cpu">{available(entry, 'cpu') ? cpu(entry.load.cpuPercent) : strings.resources.unknown}</dd></div>
+        <div><dt><MemoryStick size={14} /><span class="ui-label">{strings.resources.memory}</span></dt><dd data-testid="task-manager-memory">{available(entry, 'memory') ? bytes(entry.load.memoryBytes) : strings.resources.unknown}</dd></div>
         {#each ['disk', 'network'] as kind}
           {@const usage = entry[kind as 'disk' | 'network']}
           <div class="transfer" data-testid="task-manager-{kind}">
-            <dt>{#if kind === 'disk'}<HardDrive size={14} />{:else}<Network size={14} />{/if}{kind === 'disk' ? strings.taskManager.disk : strings.taskManager.network}<InfoTip topic={kind === 'disk' ? strings.taskManager.disk : strings.taskManager.network} text={hint(usage)} /></dt>
-            <dd>{#if usage.coverage === 'unavailable'}<span class="unavailable">{strings.resources.unknown}</span>{:else}<span title={kind === 'disk' ? strings.taskManager.read : strings.taskManager.download}><ArrowDown size={12} />{speed(usage.readBytesPerSecond)}</span><span title={kind === 'disk' ? strings.taskManager.write : strings.taskManager.upload}><ArrowUp size={12} />{speed(usage.writeBytesPerSecond)}</span>{/if}</dd>
+            <dt class="ui-label-box">{#if kind === 'disk'}<HardDrive size={14} />{:else}<Network size={14} />{/if}<span class="ui-label">{kind === 'disk' ? strings.taskManager.disk : strings.taskManager.network}</span><InfoTip topic={kind === 'disk' ? strings.taskManager.disk : strings.taskManager.network} text={hint(usage)} /></dt>
+            <dd>{#if usage.coverage === 'unavailable'}<span class="unavailable">{strings.resources.unknown}</span>{:else}<span title={kind === 'disk' ? strings.taskManager.read : strings.taskManager.download}><ArrowDown size={12} /><span class="ui-label">{speed(usage.readBytesPerSecond)}</span></span><span title={kind === 'disk' ? strings.taskManager.write : strings.taskManager.upload}><ArrowUp size={12} /><span class="ui-label">{speed(usage.writeBytesPerSecond)}</span></span>{/if}</dd>
             {#if usage.readBytes !== null && usage.writeBytes !== null}<small>{strings.taskManager.observed}: {bytes(usage.readBytes + usage.writeBytes)}</small>{/if}
           </div>
         {/each}
@@ -144,9 +144,9 @@
       {#if store.owner}
         <div class="actions">
           {#if confirming === entry.threadId}
-            <span>{strings.taskManager.stopConfirm}</span><button class="danger" disabled={!!stopping} onclick={() => void stop(entry.threadId)}>{strings.taskManager.stop}</button><button class="quiet" onclick={() => confirming = null}>{strings.common.cancel}</button>
+            <span class="ui-label">{strings.taskManager.stopConfirm}</span><button class="danger" disabled={!!stopping} onclick={() => void stop(entry.threadId)}><span class="ui-label">{strings.taskManager.stop}</span></button><button class="quiet" onclick={() => confirming = null}><span class="ui-label">{strings.common.cancel}</span></button>
           {:else}
-            <button class="quiet" disabled={!!stopping} onclick={() => confirming = entry.threadId}>{stopping === entry.threadId ? strings.taskManager.stopping : strings.taskManager.stop}</button>
+            <button class="quiet" disabled={!!stopping} onclick={() => confirming = entry.threadId}><span class="ui-label">{stopping === entry.threadId ? strings.taskManager.stopping : strings.taskManager.stop}</span></button>
           {/if}
         </div>
       {/if}
@@ -161,8 +161,8 @@
   .overview strong { font-size: var(--text-lg); font-weight: 600; font-variant-numeric: tabular-nums; }
   .overview span, dt, small, .status { color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .live { display: flex; align-items: center; gap: 6px; margin-left: auto; }
-  .live > span { width: 6px; height: 6px; border-radius: 50%; background: var(--color-success); }
-  .live.paused > span { background: var(--color-muted-foreground); }
+  .live > span[aria-hidden] { width: 6px; height: 6px; border-radius: 50%; background: var(--color-success); }
+  .live.paused > span[aria-hidden] { background: var(--color-muted-foreground); }
   .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
   .search { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; padding: 0 12px; border: 1px solid var(--color-edge); border-radius: var(--radius-md); }
   .search input { width: 100%; min-width: 0; border: 0; background: transparent; padding: 10px 0; }

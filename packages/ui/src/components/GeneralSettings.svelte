@@ -34,23 +34,23 @@
   <section class="card" id="settings-conversations">
     <h2>{strings.settings.conversations}</h2>
     <label for="{uid}-group-working" class="switch-row">
-      <span class="text">
-        <span id="{uid}-group-working-name">{strings.settings.groupWorkingThreads}</span><InfoTip topic={strings.settings.groupWorkingThreads} text={strings.settings.groupWorkingThreadsHint} />
+      <span class="text ui-label-box">
+        <span class="ui-label" id="{uid}-group-working-name">{strings.settings.groupWorkingThreads}</span><InfoTip topic={strings.settings.groupWorkingThreads} text={strings.settings.groupWorkingThreadsHint} />
       </span>
       <input id="{uid}-group-working" aria-labelledby="{uid}-group-working-name" type="checkbox" role="switch" data-testid="setting-group-working-threads"
         checked={recentPreferences.groupWorking} onchange={event => recentPreferences.setGroupWorking(event.currentTarget.checked)} />
     </label>
     <label for="{uid}-notifications" class="switch-row">
-      <span class="text">
-        <span id="{uid}-notifications-name">{strings.settings.notifications}</span><InfoTip topic={strings.settings.notifications} text={strings.settings.notificationsHint} />
+      <span class="text ui-label-box">
+        <span class="ui-label" id="{uid}-notifications-name">{strings.settings.notifications}</span><InfoTip topic={strings.settings.notifications} text={strings.settings.notificationsHint} />
       </span>
       <input id="{uid}-notifications" aria-labelledby="{uid}-notifications-name" type="checkbox" role="switch" data-testid="setting-notifications"
         checked={store.notifications} onchange={(event) => void store.setNotifications(event.currentTarget.checked)} />
     </label>
     {#if store.owner}
       <label for="{uid}-async" class="switch-row">
-        <span class="text">
-          <span id="{uid}-async-name">{strings.settings.asyncQuestions}</span><InfoTip topic={strings.settings.asyncQuestions} text={strings.settings.asyncQuestionsHint} />
+        <span class="text ui-label-box">
+          <span class="ui-label" id="{uid}-async-name">{strings.settings.asyncQuestions}</span><InfoTip topic={strings.settings.asyncQuestions} text={strings.settings.asyncQuestionsHint} />
         </span>
         <input id="{uid}-async" aria-labelledby="{uid}-async-name" type="checkbox" role="switch" data-testid="setting-async-questions"
           checked={store.settings?.asyncQuestions ?? true} disabled={!store.settings} onchange={(event) => void toggleAsync(event.currentTarget)} />
@@ -69,7 +69,7 @@
       <span class="text">
         <span>{strings.onboarding.label}</span>
       </span>
-      <button type="button" data-testid="settings-tour" onclick={() => { store.showChat(); openTour(); }}>{strings.settings.tourReplay}</button>
+      <button type="button" data-testid="settings-tour" onclick={() => { store.showChat(); openTour(); }}><span class="ui-label">{strings.settings.tourReplay}</span></button>
     </div>
   </section>
 

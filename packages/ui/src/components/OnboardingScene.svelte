@@ -33,10 +33,10 @@
   <svg class="pointer {extra}" viewBox="0 0 28 32" aria-hidden="true"><path d="M4 2v24l6-6 5 10 5-3-5-9h10z" /></svg>
 {/snippet}
 {#snippet author(provider: 'claude' | 'codex')}
-  <span class="author"><ProviderLogo providerId={provider} size={17} />{provider === 'claude' ? 'Claude' : 'Codex'}</span>
+  <span class="author"><ProviderLogo providerId={provider} size={17} /><span class="ui-label">{provider === 'claude' ? 'Claude' : 'Codex'}</span></span>
 {/snippet}
 {#snippet threadHeader()}
-  <div class="chrome"><BoiteMark size={16} /><span>{t.task}</span><span class="chrome-end"><Check size={14} /></span></div>
+  <div class="chrome"><BoiteMark size={16} /><span class="ui-label">{t.task}</span><span class="chrome-end"><Check size={14} /></span></div>
 {/snippet}
 
 <figure data-testid="onboarding-scene" data-scene={scene} class:paused class:playing={playing && !paused}>
@@ -47,8 +47,8 @@
           {#each [{ name: t.task, provider: 'claude', result: t.taskResult }, { name: t.secondTask, provider: 'codex', result: t.loginResult }, { name: t.thirdTask, provider: 'claude', result: t.testsResult }] as item, i (i)}
             <li class="task" style:--order={i}>
               <ProviderLogo providerId={item.provider} size={18} />
-              <strong>{item.name}</strong>
-              <span class="task-state"><span class="task-working"><span class="spinner"></span>{t.working}</span><span class="task-done"><Check size={15} />{item.result}</span></span>
+              <strong class="ui-label">{item.name}</strong>
+              <span class="task-state"><span class="task-working"><span class="spinner"></span><span class="ui-label">{t.working}</span></span><span class="task-done"><Check size={15} /><span class="ui-label">{item.result}</span></span></span>
             </li>
           {/each}
         </ul>
@@ -72,14 +72,14 @@
             </div>
           </div>
         </div>
-        <div class="scene-outcome"><span class="before-handoff"><ArrowDown size={16} />{t.chooseAgent}</span><span class="after-handoff"><Check size={16} />{t.handoff}</span></div>
+        <div class="scene-outcome"><span class="before-handoff"><ArrowDown size={16} /><span class="ui-label">{t.chooseAgent}</span></span><span class="after-handoff"><Check size={16} /><span class="ui-label">{t.handoff}</span></span></div>
       {:else if scene === 'voice'}
         <div class="voice-sequence"><span><b>1</b>{t.record}</span><span><b>2</b>{t.speak}</span><span><b>3</b>{t.review}</span></div>
         <div class="mini-app">
           {@render threadHeader()}
           <div class="recording-area">
-            <div class="recording-live"><span class="record-dot"></span>{t.listening}</div>
-            <div class="recording-done"><Check size={17} />{t.review}</div>
+            <div class="recording-live"><span class="record-dot"></span><span class="ui-label">{t.listening}</span></div>
+            <div class="recording-done"><Check size={17} /><span class="ui-label">{t.review}</span></div>
             <svg class="waveform" viewBox="0 0 360 66" aria-hidden="true">
               <path class="wave-axis" d="M4 33h352" />
               {#each [8, 14, 26, 18, 38, 50, 28, 44, 60, 36, 20, 48, 32, 54, 24, 40, 16, 30, 12, 8] as height, i (i)}
@@ -90,23 +90,23 @@
           <div class="composer voice-composer">
             <span class="draft-label">{t.draft}</span>
             <p class="transcript">{#each t.voiceWords.split(' ') as word, i (i)}<span style:--word={i}>{word + ' '}</span>{/each}<span class="caret"></span></p>
-            <div class="composer-tools"><span class="local"><LockKeyhole size={13} />{t.localLabel}</span><div class="voice-actions"><span class="mic-target"><Mic size={20} />{@render pointer('mic-pointer')}</span><span class="send voice-send"><ArrowUp size={17} /></span></div></div>
+            <div class="composer-tools"><span class="local"><LockKeyhole size={13} /><span class="ui-label">{t.localLabel}</span></span><div class="voice-actions"><span class="mic-target"><Mic size={20} />{@render pointer('mic-pointer')}</span><span class="send voice-send"><ArrowUp size={17} /></span></div></div>
           </div>
         </div>
       {:else if scene === 'panel'}
         <div class="mini-app">
           {@render threadHeader()}
           <div class="split-view">
-            <div class="chat-side"><div class="message user">{t.request}</div><div class="message assistant">{@render author('claude')}<p>{t.answer}</p><span class="file-chip"><FileCode2 size={15} />{t.changedFile}</span></div></div>
-            <div class="diff-side"><div class="diff-title"><FileCode2 size={16} /><strong>{t.changes}</strong><span>+2 −1</span></div><div class="file-name">{t.changedFile}</div><div class="code-diff"><div class="removed">− &lt;button&gt;{t.buttonBefore}</div><div class="added">+ &lt;button type="submit"&gt;<br />+ &nbsp; {t.buttonAfter}</div></div><div class="preview"><span>{t.before}</span><div class="old-button">{t.buttonBefore}</div><span>{t.after}</span><div class="new-button">{t.buttonAfter}<ArrowRight size={14} /></div></div></div>
+            <div class="chat-side"><div class="message user">{t.request}</div><div class="message assistant">{@render author('claude')}<p>{t.answer}</p><span class="file-chip"><FileCode2 size={15} /><span class="ui-label">{t.changedFile}</span></span></div></div>
+            <div class="diff-side"><div class="diff-title"><FileCode2 size={16} /><strong class="ui-label">{t.changes}</strong><span class="ui-label">+2 −1</span></div><div class="file-name">{t.changedFile}</div><div class="code-diff"><div class="removed">− &lt;button&gt;{t.buttonBefore}</div><div class="added">+ &lt;button type="submit"&gt;<br />+ &nbsp; {t.buttonAfter}</div></div><div class="preview"><span>{t.before}</span><div class="old-button">{t.buttonBefore}</div><span>{t.after}</span><div class="new-button"><span class="ui-label">{t.buttonAfter}</span><ArrowRight size={14} /></div></div></div>
           </div>
         </div>
-        <div class="scene-outcome"><Check size={16} />{t.changesReady}</div>
+        <div class="scene-outcome"><Check size={16} /><span class="ui-label">{t.changesReady}</span></div>
       {:else if scene === 'usage'}
         <div class="desktop-space">
-          <div class="quota-popup"><div class="quota-title"><ProviderLogo providerId="claude" size={22} /><strong>{t.usageLabel}</strong></div><div class="quota-value"><span>{t.window}</span><strong>{t.used}</strong></div><div class="quota-track"><span></span></div><p>{t.reset}</p></div>
-          <div class="tray-instruction">{t.hoverTray}<ArrowDown size={18} /></div>
-          <div class="taskbar"><span class="desktop-app"><Folder size={18} /></span><span class="desktop-app"><Monitor size={18} /></span><div class="system-tray"><ChevronDown size={14} /><span class="tray-target"><BoiteMark size={20} />{@render pointer('tray-pointer')}</span><VolumeX size={16} /><span class="clock">14:32</span></div></div>
+          <div class="quota-popup"><div class="quota-title"><ProviderLogo providerId="claude" size={22} /><strong class="ui-label">{t.usageLabel}</strong></div><div class="quota-value"><span>{t.window}</span><strong>{t.used}</strong></div><div class="quota-track"><span></span></div><p>{t.reset}</p></div>
+          <div class="tray-instruction"><span class="ui-label">{t.hoverTray}</span><ArrowDown size={18} /></div>
+          <div class="taskbar"><span class="desktop-app"><Folder size={18} /></span><span class="desktop-app"><Monitor size={18} /></span><div class="system-tray"><ChevronDown size={14} /><span class="tray-target"><BoiteMark size={20} />{@render pointer('tray-pointer')}</span><VolumeX size={16} /><span class="clock ui-label">14:32</span></div></div>
         </div>
       {:else if scene === 'reach'}
         <!-- The same three lines on both screens: the picture says "same conversation" without text to read. -->
@@ -116,13 +116,13 @@
           <span class="done"><Check size={13} /></span>
         {/snippet}
         <div class="devices">
-          <div class="computer"><div class="monitor">{@render chat()}</div><div class="stand"></div><span class="device-label"><Monitor size={14} />{t.desktop}</span></div>
+          <div class="computer"><div class="monitor">{@render chat()}</div><div class="stand"></div><span class="device-label"><Monitor size={14} /><span class="ui-label">{t.desktop}</span></span></div>
           <div class="sync-link" aria-hidden="true"><span></span></div>
-          <div class="phone-side"><div class="phone">{@render chat()}</div><span class="device-label"><Smartphone size={14} />{t.phone}</span></div>
+          <div class="phone-side"><div class="phone">{@render chat()}</div><span class="device-label"><Smartphone size={14} /><span class="ui-label">{t.phone}</span></span></div>
         </div>
-        <div class="scene-outcome"><Check size={16} />{t.synced}</div>
+        <div class="scene-outcome"><Check size={16} /><span class="ui-label">{t.synced}</span></div>
       {:else}
-        <div class="quiet-desktop"><div class="background-agent"><BoiteMark size={18} /><span>{t.background}</span></div><div class="notes"><div class="chrome"><FileCode2 size={15} />{t.notes}<span class="chrome-end"><VolumeX size={15} /></span></div><strong>{t.writing}</strong><p><span class="empty-check"></span>{t.noteOne}</p><p><span class="empty-check"></span>{t.noteTwo}<span class="caret"></span></p></div><div class="notification"><Bell size={18} /><div><strong>Boite</strong><span>{t.notification}</span></div><Check size={16} /></div></div>
+        <div class="quiet-desktop"><div class="background-agent"><BoiteMark size={18} /><span class="ui-label">{t.background}</span></div><div class="notes"><div class="chrome"><FileCode2 size={15} /><span class="ui-label">{t.notes}</span><span class="chrome-end"><VolumeX size={15} /></span></div><strong>{t.writing}</strong><p><span class="empty-check"></span>{t.noteOne}</p><p><span class="empty-check"></span>{t.noteTwo}<span class="caret"></span></p></div><div class="notification"><Bell size={18} /><div><strong>Boite</strong><span>{t.notification}</span></div><Check size={16} /></div></div>
       {/if}
     </div>
   {/key}

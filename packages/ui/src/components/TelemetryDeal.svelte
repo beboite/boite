@@ -108,8 +108,8 @@
     </button>
   </div>
   <p class="note">{strings.onboarding.privacy.optOut}
-    <button class="link" disabled={busy || refusing} data-testid="onboarding-telemetry-off" onclick={() => void off()}>{strings.onboarding.privacy.offLabel}</button></p>
-  <button class="link" disabled={refusing} onclick={() => void openExternal(DOC_URL)}>{strings.onboarding.privacy.doc}</button>
+    <button class="link" disabled={busy || refusing} data-testid="onboarding-telemetry-off" onclick={() => void off()}><span class="ui-label">{strings.onboarding.privacy.offLabel}</span></button></p>
+  <button class="link" disabled={refusing} onclick={() => void openExternal(DOC_URL)}><span class="ui-label">{strings.onboarding.privacy.doc}</span></button>
   {#if error}<p role="alert">{error}</p>{/if}
 </div>
 

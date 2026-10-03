@@ -17,7 +17,7 @@
     <p class:thread-title={!!action} title={action ? message : undefined}>{message}</p>
     {#if action}
       <button type="button" class="ghost open-thread" onclick={action.run}>
-        {action.label}<ArrowRight size={14} />
+        <span class="ui-label">{action.label}</span><ArrowRight size={14} />
       </button>
     {/if}
   </div>

@@ -71,16 +71,16 @@
   <section class="card" data-testid="deleted-threads">
     <h2>{strings.settings.deleted.heading}</h2>
     <form class="retention" onsubmit={(event) => { event.preventDefault(); void saveRetention(); }}>
-      <label for="{uid}-days">{strings.settings.deleted.retentionLabel}<InfoTip topic={strings.settings.deleted.retentionLabel} text={strings.settings.deleted.retentionHint} /></label>
+      <label class="ui-label-box" for="{uid}-days"><span class="ui-label">{strings.settings.deleted.retentionLabel}</span><InfoTip topic={strings.settings.deleted.retentionLabel} text={strings.settings.deleted.retentionHint} /></label>
       <div class="retention-actions">
         <input id="{uid}-days" type="number" min="0" max="3650" step="1" bind:value={days} oninput={() => { dirty = true; }} aria-invalid={!valid} aria-describedby={valid ? undefined : `${uid}-error`} data-testid="deleted-retention-days" />
-        <button type="submit" disabled={!valid || !dirty || saving || !store.settings || store.connection !== 'ready'} data-testid="deleted-retention-save">{strings.settings.save}</button>
+        <button type="submit" disabled={!valid || !dirty || saving || !store.settings || store.connection !== 'ready'} data-testid="deleted-retention-save"><span class="ui-label">{strings.settings.save}</span></button>
       </div>
       {#if !valid}<p id="{uid}-error" class="field-error" role="alert">{strings.settings.deleted.retentionError}</p>{/if}
     </form>
     {#if threads === null}
       <button type="button" data-testid="deleted-show" disabled={loading || store.connection !== 'ready'} onclick={() => void load()}>
-        {strings.settings.deleted.show}
+        <span class="ui-label">{strings.settings.deleted.show}</span>
       </button>
     {:else if threads.length === 0}
       <p class="muted" data-testid="deleted-empty">{strings.settings.deleted.empty}</p>
@@ -96,7 +96,7 @@
             </div>
             <span class="subtle meta">{projectOf(thread)}</span>
             <button type="button" class="small" data-testid="deleted-restore" disabled={restoring !== null || store.connection !== 'ready'} onclick={() => void restore(thread.id)}>
-              {strings.sidebar.undo}
+              <span class="ui-label">{strings.sidebar.undo}</span>
             </button>
           </li>
         {/each}

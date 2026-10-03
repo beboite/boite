@@ -22,17 +22,17 @@
 <button type="button" class="ghost icon" data-testid="mobile-menu" aria-label={strings.mobile.navigation} aria-expanded={shown} onclick={() => { shown = true; }}><Ellipsis size={21} /></button>
 {#if shown}
   <dialog bind:this={dialog} aria-label={strings.mobile.navigation} data-testid="mobile-menu-dialog" oncancel={e => { e.preventDefault(); shown = false; }}>
-    <header><img src="./icons/icon.svg" alt="" width="28" height="28" /><strong>Boite</strong><button class="ghost icon" aria-label={strings.imports.close} onclick={() => { shown = false; }}><X size={20} /></button></header>
+    <header><img src="./icons/icon.svg" alt="" width="28" height="28" /><strong class="ui-label">Boite</strong><button class="ghost icon" aria-label={strings.imports.close} onclick={() => { shown = false; }}><X size={20} /></button></header>
     <button class="connection ghost" onclick={() => go(() => store.showSettings('machines'))}><Monitor size={18} /><span><strong>{place}</strong><small>{strings.connection[store.connection]}</small></span><ChevronRight size={16} /></button>
     <nav aria-label={strings.mobile.navigation}>
-      <button class="ghost" data-testid="mobile-conversations" aria-current={store.page === 'chat' && screen !== 'activity' ? 'page' : undefined} onclick={() => go(() => navigate('threads'))}><MessageSquare size={20} /><span>{strings.mobile.threads}</span></button>
-      <button class="ghost" data-testid="mobile-activity" aria-current={store.page === 'chat' && screen === 'activity' ? 'page' : undefined} onclick={() => go(() => navigate('activity'))}><Activity size={20} /><span>{strings.mobile.activity}</span>{#if waiting}<span class="badge">{waiting}</span>{/if}</button>
-      <button class="ghost" data-testid="mobile-settings" aria-current={store.page === 'settings' ? 'page' : undefined} onclick={() => go(() => store.showSettings())}><Settings size={20} /><span>{strings.settings.heading}</span></button>
-      {#if experimentOn('resident-agents')}<button class="ghost" data-testid="mobile-agents" onclick={() => go(() => store.showAgents())}><Bot size={20} /><span>{strings.agents.heading}</span></button>{/if}
+      <button class="ghost" data-testid="mobile-conversations" aria-current={store.page === 'chat' && screen !== 'activity' ? 'page' : undefined} onclick={() => go(() => navigate('threads'))}><MessageSquare size={20} /><span class="ui-label">{strings.mobile.threads}</span></button>
+      <button class="ghost" data-testid="mobile-activity" aria-current={store.page === 'chat' && screen === 'activity' ? 'page' : undefined} onclick={() => go(() => navigate('activity'))}><Activity size={20} /><span class="ui-label">{strings.mobile.activity}</span>{#if waiting}<span class="badge ui-label-box"><span class="ui-label">{waiting}</span></span>{/if}</button>
+      <button class="ghost" data-testid="mobile-settings" aria-current={store.page === 'settings' ? 'page' : undefined} onclick={() => go(() => store.showSettings())}><Settings size={20} /><span class="ui-label">{strings.settings.heading}</span></button>
+      {#if experimentOn('resident-agents')}<button class="ghost" data-testid="mobile-agents" onclick={() => go(() => store.showAgents())}><Bot size={20} /><span class="ui-label">{strings.agents.heading}</span></button>{/if}
     </nav>
-    <div class="project-picker"><Menu items={projects} onpick={id => go(() => pickProject(id))} label={strings.mobile.project} placement="bottom" variant="ghost" testid="mobile-menu-project"><Folder size={18} /><span>{strings.mobile.project}</span><ChevronDown size={15} /></Menu></div>
-    <button class="primary create" data-testid="mobile-menu-new" disabled={store.connection !== 'ready'} onclick={() => go(create)}><Plus size={18} />{strings.sidebar.newThread}</button>
-    {#if experimentOn('whip')}<div class="extra"><WhipButton mobile onthrown={() => { shown = false; }} /><span>{strings.experiments.whip.title}</span></div>{/if}
+    <div class="project-picker"><Menu items={projects} onpick={id => go(() => pickProject(id))} label={strings.mobile.project} placement="bottom" variant="ghost" testid="mobile-menu-project"><Folder size={18} /><span class="ui-label">{strings.mobile.project}</span><ChevronDown size={15} /></Menu></div>
+    <button class="primary create" data-testid="mobile-menu-new" disabled={store.connection !== 'ready'} onclick={() => go(create)}><Plus size={18} /><span class="ui-label">{strings.sidebar.newThread}</span></button>
+    {#if experimentOn('whip')}<div class="extra"><WhipButton mobile onthrown={() => { shown = false; }} /><span class="ui-label">{strings.experiments.whip.title}</span></div>{/if}
   </dialog>
 {/if}
 

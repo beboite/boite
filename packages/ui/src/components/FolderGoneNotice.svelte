@@ -26,8 +26,8 @@
     <p>{fill(strings.sidebar.projectMissingBody, { path: project.path })}</p>
   </div>
   <div class="actions">
-    <button type="button" class="ghost small" data-testid="folder-gone-check" disabled={checking} onclick={check}>{strings.sidebar.projectMissingCheck}</button>
-    {#if store.owner}<button type="button" class="ghost small danger" data-testid="folder-gone-remove" onclick={() => confirmRemoveProject(store, project)}>{strings.sidebar.removeProject}</button>{/if}
+    <button type="button" class="ghost small" data-testid="folder-gone-check" disabled={checking} onclick={check}><span class="ui-label">{strings.sidebar.projectMissingCheck}</span></button>
+    {#if store.owner}<button type="button" class="ghost small danger" data-testid="folder-gone-remove" onclick={() => confirmRemoveProject(store, project)}><span class="ui-label">{strings.sidebar.removeProject}</span></button>{/if}
   </div>
 </article>
 

@@ -46,7 +46,7 @@
 
 {#if supported}
   <button type="button" class="ghost small icon pr-toggle" data-testid="thread-prs" title={strings.pullRequests.title} aria-label={strings.pullRequests.title} onclick={() => { shown = true; }}>
-    <GitPullRequest size={15} />{#if prs.length}<span>{prs.length}</span>{/if}
+    <GitPullRequest size={15} />{#if prs.length}<span class="ui-label">{prs.length}</span>{/if}
   </button>
 {/if}
 {#if shown}
@@ -57,7 +57,7 @@
         {#key reviewUrl}<PullRequestReview {store} {threadId} url={reviewUrl} onback={() => { reviewUrl = null; }} />{/key}
       {:else}
       <p class="muted">{strings.pullRequests.hint}</p>
-      <button type="button" class="chip" disabled={busy} data-testid="thread-prs-refresh" onclick={() => void refresh(true)}><RefreshCw size={14} />{strings.pullRequests.refresh}</button>
+      <button type="button" class="chip" disabled={busy} data-testid="thread-prs-refresh" onclick={() => void refresh(true)}><RefreshCw size={14} /><span class="ui-label">{strings.pullRequests.refresh}</span></button>
       {#if error}<p role="alert">{error}</p>{/if}
       {#if !prs.length}<p class="muted">{strings.pullRequests.empty}</p>{/if}
       <ol>{#each prs as pr (pr.url)}
@@ -67,14 +67,14 @@
             <span class="status" class:merged={pr.state === 'MERGED'} class:closed={pr.state === 'CLOSED'}>{pr.draft && pr.state === 'OPEN' ? strings.pullRequests.draft : strings.pullRequests[pr.state]}</span>
             {#if store.owner}<button type="button" class="ghost small icon" disabled={busy} aria-label={fill(strings.pullRequests.unlink, { number: String(pr.number) })} onclick={() => void change('threads.unlinkPullRequest', pr.url)}><Unlink size={14} /></button>{/if}</div>
           <small>{pr.repository} · {pr.head} → {pr.base}</small>
-          {#if experimentOn('pr-review')}<button type="button" class="chip read-review" data-testid="pr-read" onclick={() => { reviewUrl = pr.url; }}>{strings.prReview.open}</button>{/if}
+          {#if experimentOn('pr-review')}<button type="button" class="chip read-review" data-testid="pr-read" onclick={() => { reviewUrl = pr.url; }}><span class="ui-label">{strings.prReview.open}</span></button>{/if}
           {#if parent}<p class="dependency">{fill(strings.pullRequests.dependsOn, { number: String(parent.number) })}</p>{/if}
           {#if pr.error}<p class="stale" role="status">{strings.pullRequests.stale} {pr.error}</p>{/if}
         </li>
       {/each}</ol>
       {#if store.owner}<form onsubmit={event => { event.preventDefault(); void change('threads.linkPullRequest', url); }}>
         <label for="pr-url">{strings.pullRequests.url}</label>
-        <div class="add"><input id="pr-url" type="url" required bind:value={url} placeholder="https://github.com/owner/repo/pull/123" data-testid="thread-pr-url" /><button type="submit" class="chip" disabled={busy || !url.trim()} data-testid="thread-pr-link">{strings.pullRequests.link}</button></div>
+        <div class="add"><input id="pr-url" type="url" required bind:value={url} placeholder="https://github.com/owner/repo/pull/123" data-testid="thread-pr-url" /><button type="submit" class="chip" disabled={busy || !url.trim()} data-testid="thread-pr-link"><span class="ui-label">{strings.pullRequests.link}</span></button></div>
       </form>{/if}
       {/if}
     </div>

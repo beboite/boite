@@ -18,7 +18,7 @@
       title={label} aria-label={label} aria-expanded={open} aria-controls="{controls}-{kind}" disabled={total === 0 || (kind === 'working' && searching)}
       onclick={() => projectThreadView.toggle(entry, kind, collapsed)}>
       {#if kind === 'working'}<LoaderCircle size={12} aria-hidden="true" />{:else}<CheckCheck size={12} aria-hidden="true" />{/if}
-      <span>{formatCount(total)}</span>
+      <span class="ui-label">{formatCount(total)}</span>
     </button>
   {/each}
 </div>

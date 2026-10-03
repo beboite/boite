@@ -31,8 +31,8 @@
           <summary>
             <div class="headline">
               <ChevronRight size={14} />
-              <span class="exe" data-exe={record.exe} title={`${record.exe}\npid ${record.pid}`}>{name(record.exe)}</span>
-              <span class="status" class:failed={record.exitedAt !== null && record.exitCode !== null && record.exitCode !== 0}>
+              <span class="exe ui-label" data-exe={record.exe} title={`${record.exe}\npid ${record.pid}`}>{name(record.exe)}</span>
+              <span class="status ui-label" class:failed={record.exitedAt !== null && record.exitCode !== null && record.exitCode !== 0}>
                 {record.exitedAt === null ? strings.trace.live : record.exitCode === 0 ? strings.trace.finished : record.exitCode === null ? strings.common.unknown : `${strings.trace.exit} ${record.exitCode}`}
               </span>
             </div>

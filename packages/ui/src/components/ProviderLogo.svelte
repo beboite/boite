@@ -58,7 +58,7 @@
     data-initial={providerId}
     style="width: {size}px; height: {size}px; font-size: {Math.round(size * 0.72)}px"
   >
-    {initial}
+    <span class="ui-label">{initial}</span>
   </span>
 {/if}
 

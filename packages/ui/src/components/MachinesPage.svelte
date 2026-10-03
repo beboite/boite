@@ -60,17 +60,17 @@
 <div class="page machines-page" data-testid="machines-page">
   <header class="head">
     <div>
-      <h1>{strings.settings.tabs.machines}<InfoTip topic={strings.settings.tabs.machines} text={strings.machines.intro} /></h1>
+      <h1 class="ui-label-box"><span class="ui-label">{strings.settings.tabs.machines}</span><InfoTip topic={strings.settings.tabs.machines} text={strings.machines.intro} /></h1>
     </div>
 
   </header>
 
   <section class="updates-section" id="settings-updates" aria-labelledby="updates-heading">
-    <h2 class="section-heading" id="updates-heading"><Download size={16} />{strings.serverUpdate.updates}</h2>
+    <h2 class="section-heading ui-label-box" id="updates-heading"><Download size={16} /><span class="ui-label">{strings.serverUpdate.updates}</span></h2>
     <p class="section-hint">{strings.machines.updatesHint}</p>
     {#if showAppUpdateUi()}
       <section class="card app-update-card" data-testid="app-update-card">
-        <h3>{strings.appUpdate.heading}<span>{strings.machines.local}</span></h3>
+        <h3 class="ui-label-box"><span class="ui-label">{strings.appUpdate.heading}</span><span class="local ui-label">{strings.machines.local}</span></h3>
         <AppUpdateContent beforeInstall={() => undefined} />
       </section>
     {/if}
@@ -80,8 +80,8 @@
           <section class="card update-machine" data-testid="machine-updates-card" data-machine-id={machine.id}>
             <header class="update-machine-heading">
               <MachineIcon icon={machine.icon} os={machine.store.core?.os} size={18} />
-              <h3>{machine.label}</h3>
-              <span class="status" class:ready={machine.store.connection === 'ready'}>{machine.store.pairingRequired ? strings.mobile.pairingRequired : strings.connection[machine.store.connection]}</span>
+              <h3 class="ui-label-box"><span class="ui-label">{machine.label}</span></h3>
+              <span class="status ui-label" class:ready={machine.store.connection === 'ready'}>{machine.store.pairingRequired ? strings.mobile.pairingRequired : strings.connection[machine.store.connection]}</span>
             </header>
             {#if !machine.store.localCore}<ServerUpdateCard store={machine.store} label={machine.label} />{/if}
             {#if machine.store.owner}<HarnessUpdatesCard store={machine.store} />{/if}
@@ -92,7 +92,7 @@
   </section>
 
   <section class="connections-section" id="settings-machines" aria-labelledby="connections-heading">
-    <h2 class="section-heading" id="connections-heading"><Monitor size={16} />{strings.machines.connections}</h2>
+    <h2 class="section-heading ui-label-box" id="connections-heading"><Monitor size={16} /><span class="ui-label">{strings.machines.connections}</span></h2>
     <PairMachine {mobile} bind:this={pairingForm} />
 
     <div class="machines">
@@ -111,13 +111,13 @@
               <input class="machine-name" data-testid="machine-rename" aria-label={strings.machines.label} value={machine.label} maxlength="80" onchange={(event) => { workspace.customize(machine.id, event.currentTarget.value, machine.icon); event.currentTarget.value = machine.label; }} />
               <span class="meta">
                 <span class="dot" class:ready={machine.store.connection === 'ready'} aria-hidden="true"></span>
-                <span class="status" class:ready={machine.store.connection === 'ready'}>{machine.store.pairingRequired ? strings.mobile.pairingRequired : strings.connection[machine.store.connection]}</span>
-                <span class="address">{machine.store.localCore ? strings.machines.local : machine.id}</span>
+                <span class="status ui-label" class:ready={machine.store.connection === 'ready'}>{machine.store.pairingRequired ? strings.mobile.pairingRequired : strings.connection[machine.store.connection]}</span>
+                <span class="address ui-label">{machine.store.localCore ? strings.machines.local : machine.id}</span>
               </span>
             </div>
             <div class="actions">
               {#if machine.store.pairingRequired}
-                <button class="ghost small" data-testid="machine-repair" onclick={() => pairingForm?.startAdding()}><ScanLine size={15} />{strings.mobile.pairAgain}</button>
+                <button class="ghost small" data-testid="machine-repair" onclick={() => pairingForm?.startAdding()}><ScanLine size={15} /><span class="ui-label">{strings.mobile.pairAgain}</span></button>
               {:else if machine.store.connection === 'closed'}
                 <button class="ghost icon-only" aria-label={strings.common.refresh} title={strings.common.refresh} onclick={() => void machine.store.connect()}><RefreshCw size={15} /></button>
               {/if}
@@ -127,7 +127,7 @@
               <!-- The machine already open has nowhere to go. -->
               {#if machine.store !== workspace.active}
                 <button class="ghost small" data-testid="machine-open" onclick={() => void workspace.select(machine.store)}
-                  >{strings.machines.open}<ArrowUpRight size={13} /></button
+                  ><span class="ui-label">{strings.machines.open}</span><ArrowUpRight size={13} /></button
                 >
               {/if}
             </div>
@@ -145,14 +145,14 @@
             <label class="sync-option">
               <input type="checkbox" data-testid="machine-sync" checked={sync.enabled(machine)}
                 onchange={(event) => sync.set(machine, event.currentTarget.checked ? source : null)} />
-              <span>{fill(strings.machines.syncFrom, { source: sync.source(machine)?.label ?? source?.label ?? '' })}</span>
+              <span class="ui-label">{fill(strings.machines.syncFrom, { source: sync.source(machine)?.label ?? source?.label ?? '' })}</span>
               <InfoTip topic={strings.machines.syncConfirm} text={strings.machines.syncHint} />
             </label>
             {#if sync.busy[machine.id]}<p class="sync-progress" role="status">{strings.machines.syncing}</p>{/if}
           {/if}
           {#if machine.store.owner && machine.store.core}
             <button class="ghost small machine-settings-button" data-testid="machine-settings-open" disabled={machine.store.connection !== 'ready' || !machine.store.settings} onclick={() => settingsId = machine.id}>
-              <Settings2 size={14} />{strings.machines.settings}
+              <Settings2 size={14} /><span class="ui-label">{strings.machines.settings}</span>
             </button>
           {/if}
           {#if sync.reports[machine.id]}
@@ -163,7 +163,7 @@
                 {#if done.report.brain === 'absent'}<p>{strings.machines.syncBrainAbsent}</p>{/if}
                 {#if done.report.providers.length > 0}
                   <p>{fill(strings.machines.syncProviders, { providers: done.report.providers.map((row) => row.name).join(', ') })}</p>
-                  <button class="small" data-testid="machine-sync-providers" onclick={() => void openProviders(machine)}>{strings.machines.syncOpenProviders}</button>
+                  <button class="small" data-testid="machine-sync-providers" onclick={() => void openProviders(machine)}><span class="ui-label">{strings.machines.syncOpenProviders}</span></button>
                 {/if}
               </div>
             {/if}
@@ -209,7 +209,7 @@
   .update-machine-heading .status { font-size: var(--text-xs); }
   .app-update-card { padding: 0; margin-bottom: 12px; }
   .app-update-card h3 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 0; padding: 14px 14px 0; font-size: var(--text-sm); }
-  .app-update-card h3 span { font-size: var(--text-xs); font-weight: 400; color: var(--color-muted-foreground); }
+  .app-update-card h3 .local { font-size: var(--text-xs); font-weight: 400; color: var(--color-muted-foreground); }
   .head {
     display: flex;
     align-items: flex-start;

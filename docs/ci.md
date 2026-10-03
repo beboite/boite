@@ -106,7 +106,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 588,000 |
-| UI files, excluding `.br` and `.gz` copies | 3,990,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,020,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,376,000 |
 
@@ -126,9 +126,18 @@ Reproduce it with `bun run build:ui && bun run build:core && bun scripts/ci/budg
 On 2026-10-03, `290ba1f3` measured 3,977,635 UI bytes. Adding project Working
 and Done counters, folded project lists and their empty states measured
 3,983,551 bytes, a 5,916-byte increase using the same source filename hashes.
-The UI total limit is 3,990,000 bytes, leaving 6,449 bytes of headroom. The
+At that revision the UI total limit was 3,990,000 bytes, leaving 6,449 bytes of headroom. The
 534,926-byte entry remains below its unchanged limit; core limits are unchanged.
 
+On 2026-10-03, Linux
+UI builds with Bun 1.4.2 measured 3,950,303 bytes at `df3159d4` and 3,974,754
+bytes at `807387a0` after the vertical text alignment changes. Text leaves and shared label
+rules add 24,451 bytes (0.62%). Windows desktop CI at `a77909e6` measured
+3,983,734 bytes, above the former 3,980,000-byte limit. The 4,020,000-byte
+limit retains 36,266 bytes above that Windows measurement. Alignment changes
+leave the entry and core limits unchanged.
+After integrating main at `8b72af5b` and aligning the new proxy controls, the
+same Linux setup measured 3,992,019 UI bytes, within the existing limit.
 Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
 

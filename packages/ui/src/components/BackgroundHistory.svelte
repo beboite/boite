@@ -15,7 +15,7 @@
       {#each recent as task (`${task.providerId}:${task.sessionGeneration}:${task.parentTurnId}:${task.id}`)}
         <li data-state={task.state}>
           <div class="description">{task.description || task.kind}</div>
-          <div class="status"><span>{label(task)}</span><time datetime={new Date(task.observedAt).toISOString()}>{exactTime(task.observedAt)}</time></div>
+          <div class="status"><span class="ui-label">{label(task)}</span><time class="ui-label" datetime={new Date(task.observedAt).toISOString()}>{exactTime(task.observedAt)}</time></div>
         </li>
       {/each}
     </ul>

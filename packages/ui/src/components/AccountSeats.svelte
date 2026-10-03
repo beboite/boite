@@ -65,7 +65,7 @@
         title={seatTitle(seat)}
         onclick={() => pickSeat(seat)}
       >
-        {seat.label}
+        <span class="ui-label">{seat.label}</span>
       </button>
     {/each}
   </div>

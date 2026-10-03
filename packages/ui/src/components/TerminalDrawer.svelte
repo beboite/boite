@@ -85,8 +85,8 @@
       onpointerdown={startDrag}
     ></div>
     <header>
-      <span class="title">{strings.terminal.title}</span>
-      <span class="cwd" title={cwd}>{cwd}</span>
+      <span class="title ui-label">{strings.terminal.title}</span>
+      <span class="cwd ui-label" title={cwd}>{cwd}</span>
       <span class="spacer"></span>
       <button
         type="button"

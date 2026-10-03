@@ -21,7 +21,7 @@
 
 <!-- A row of General's App card, not a card of its own: one switch does not need a frame. -->
 <label for="{uid}-close-to-tray" class="switch-row" data-testid="shell-settings">
-  <span class="text"><span id="{uid}-close-to-tray-name">{strings.settings.closeToTray}</span><InfoTip topic={strings.settings.closeToTray} text={strings.settings.closeToTrayHint} /></span>
+  <span class="text ui-label-box"><span class="ui-label" id="{uid}-close-to-tray-name">{strings.settings.closeToTray}</span><InfoTip topic={strings.settings.closeToTray} text={strings.settings.closeToTrayHint} /></span>
   <input id="{uid}-close-to-tray" aria-labelledby="{uid}-close-to-tray-name" type="checkbox" role="switch" data-testid="close-to-tray" checked={enabled} disabled={!ready} onchange={(event) => void update(event.currentTarget.checked)} />
 </label>
 {#if error}<p class="error" role="alert">{error}</p>{/if}

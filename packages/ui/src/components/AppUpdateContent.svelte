@@ -43,7 +43,7 @@
     {#if update.version}
       <h3>{update.channel === 'nightly' ? strings.appUpdate.nightly : strings.appUpdate.stable} {update.version}</h3>
       {#if age}<p class="published" data-testid="app-update-published">{fill(strings.appUpdate.released, { time: age })}</p>{/if}
-      <a class="changelog" href={`https://github.com/beboite/boite/releases/tag/v${encodeURIComponent(update.version)}`} target="_blank" rel="noopener noreferrer" data-testid="app-update-changelog">{strings.appUpdate.changelog}<ExternalLink size={13} /></a>
+      <a class="changelog" href={`https://github.com/beboite/boite/releases/tag/v${encodeURIComponent(update.version)}`} target="_blank" rel="noopener noreferrer" data-testid="app-update-changelog"><span class="ui-label">{strings.appUpdate.changelog}</span><ExternalLink size={13} /></a>
     {/if}
 
     <div class="status" class:ready={update.phase === 'ready'} class:error={update.phase === 'error'} role="status" aria-live="polite" data-testid="app-update-status">
@@ -70,19 +70,19 @@
     <div class="actions">
       {#if update.phase === 'ready'}
         <button type="button" class="primary" disabled={appUpdateInstall.preparing} onclick={() => { beforeInstall(); void appUpdateInstall.request(updater); }} data-testid="app-update-install">
-          {strings.appUpdate.install}
+          <span class="ui-label">{strings.appUpdate.install}</span>
         </button>
       {:else if update.phase === 'waiting'}
         <button type="button" disabled={updater.cancelling} aria-busy={updater.cancelling} onclick={() => { void updater.cancelInstall(); }} data-testid="app-update-cancel">
-          {strings.common.cancel}
+          <span class="ui-label">{strings.common.cancel}</span>
         </button>
       {:else if update.phase === 'available'}
         <button type="button" onclick={() => updater.download()} data-testid="app-update-download">
-          {strings.appUpdate.download}
+          <span class="ui-label">{strings.appUpdate.download}</span>
         </button>
       {:else if update.phase === 'error'}
         <button type="button" onclick={() => updater.check(update.channel)} data-testid="app-update-retry">
-          {strings.appUpdate.retry}
+          <span class="ui-label">{strings.appUpdate.retry}</span>
         </button>
       {:else if update.phase !== 'downloading' && update.phase !== 'installing'}
         <!-- Keep the running check visible and disabled. -->
@@ -94,7 +94,7 @@
           data-testid="app-update-check"
         >
           <RefreshCw size={13} class={update.phase === 'checking' ? 'spinning' : undefined} />
-          {update.phase === 'checking' ? strings.appUpdate.checkingAction : strings.appUpdate.check}
+          <span class="ui-label">{update.phase === 'checking' ? strings.appUpdate.checkingAction : strings.appUpdate.check}</span>
         </button>
       {/if}
     </div>
@@ -105,7 +105,7 @@
         {#each ['stable', 'nightly'] as const as channel (channel)}
           <button type="button" class:on={update.channel === channel} aria-pressed={update.channel === channel}
             disabled={update.phase === 'waiting' || update.phase === 'installing'} onclick={() => choose(channel)} data-testid={`app-update-${channel}`}>
-            {channel === 'nightly' ? strings.appUpdate.nightly : strings.appUpdate.stable}
+            <span class="ui-label">{channel === 'nightly' ? strings.appUpdate.nightly : strings.appUpdate.stable}</span>
           </button>
         {/each}
       </div>

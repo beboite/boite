@@ -33,15 +33,15 @@
 <div data-testid="agent-routines">
   {#if routines.length}
     <section class="card">
-      <div class="agent-card-head"><h2>{labels.routines}</h2>{#if view.store.owner && !adding}<button type="button" class="small" onclick={() => { adding = true; }}>{labels.addRoutine}</button>{/if}</div>
+      <div class="agent-card-head"><h2>{labels.routines}</h2>{#if view.store.owner && !adding}<button type="button" class="small" onclick={() => { adding = true; }}><span class="ui-label">{labels.addRoutine}</span></button>{/if}</div>
       <p class="hint">{labels.routineHint}</p>
       {#each routines as routine (routine.id)}
         <article class="switch-row">
           <span class="text">{routine.name}<span class="hint">{routine.prompt}</span><span class="hint">{when(routine)}</span></span>
           {#if view.store.owner}
             <span class="agent-form-actions">
-              <button type="button" class="small" disabled={view.pending} onclick={() => void run(routine.id)}>{labels.runNow}</button>
-              {#if !spent(routine)}<button type="button" class="ghost small" disabled={view.pending} onclick={() => void toggle(routine)}>{routine.enabled ? labels.pause : labels.resume}</button>{/if}
+              <button type="button" class="small" disabled={view.pending} onclick={() => void run(routine.id)}><span class="ui-label">{labels.runNow}</span></button>
+              {#if !spent(routine)}<button type="button" class="ghost small" disabled={view.pending} onclick={() => void toggle(routine)}><span class="ui-label">{routine.enabled ? labels.pause : labels.resume}</span></button>{/if}
             </span>
           {/if}
         </article>
@@ -56,15 +56,15 @@
       <label class="agent-field">{labels.instructions}<textarea required rows="3" bind:value={prompt} maxlength="16000" data-testid="routine-prompt"></textarea></label>
       <div class="agent-field"><span>{labels.schedule}</span>
         <div class="agent-inline">
-          <Menu label={labels.schedule} placement="bottom" items={(['once', 'interval', 'daily'] as const).map(id => ({ id, label: labels[id], active: kind === id }))} onpick={id => { kind = id as typeof kind; }}>{labels[kind]}</Menu>
-          {#if kind === 'interval'}<input class="agent-number" aria-label={labels.everyMinutes} title={labels.everyMinutes} type="number" min="1" max="525600" required bind:value={minutes} /><span class="muted">{labels.minutesUnit}</span>
+          <Menu label={labels.schedule} placement="bottom" items={(['once', 'interval', 'daily'] as const).map(id => ({ id, label: labels[id], active: kind === id }))} onpick={id => { kind = id as typeof kind; }}><span class="ui-label">{labels[kind]}</span></Menu>
+          {#if kind === 'interval'}<input class="agent-number" aria-label={labels.everyMinutes} title={labels.everyMinutes} type="number" min="1" max="525600" required bind:value={minutes} /><span class="muted ui-label">{labels.minutesUnit}</span>
           {:else if kind === 'daily'}<input aria-label={labels.localTime} type="time" required bind:value={time} /><input aria-label={labels.timezone} required bind:value={timezone} />
           {:else}<input aria-label={labels.localTime} type="datetime-local" required bind:value={at} />{/if}
         </div>
       </div>
       <div class="agent-form-actions">
-        <button class="primary" disabled={view.pending} data-testid="routine-save">{labels.addRoutine}</button>
-        {#if routines.length}<button type="button" class="ghost" onclick={() => { adding = false; }}>{labels.cancel}</button>{/if}
+        <button class="primary" disabled={view.pending} data-testid="routine-save"><span class="ui-label">{labels.addRoutine}</span></button>
+        {#if routines.length}<button type="button" class="ghost" onclick={() => { adding = false; }}><span class="ui-label">{labels.cancel}</span></button>{/if}
       </div>
     </form>
   {/if}

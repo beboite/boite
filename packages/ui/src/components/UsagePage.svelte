@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { RefreshCw } from '@lucide/svelte';
+  import { ChevronDown, RefreshCw } from '@lucide/svelte';
   import type { UsageHistory } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
@@ -9,7 +9,7 @@
     dayEdges,
     formatMetric,
     modelName,
-    OTHER,
+    reportedValue,
     seriesFor,
     summarize,
     topThreads,
@@ -21,6 +21,7 @@
     type UsageTotals
   } from '../lib/usage';
   import InfoTip from './InfoTip.svelte';
+  import Menu from './Menu.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import UsageChart from './UsageChart.svelte';
 
@@ -29,21 +30,31 @@
   let range = $state<UsageRange>(30);
   let metric = $state<UsageMetric>('tokens');
   let breakdown = $state<'model' | 'day'>('model');
+  let provider = $state<string | null>(null);
+  let historicalProviders = $state<string[]>([]);
   let history = $state<UsageHistory | null>(null);
   let loading = $state(false);
   let failure = $state<string | null>(null);
   /** Only the newest request writes, so a slow 90-day answer never lands over a 7-day one. */
   let latest = 0;
 
-  async function load(days: UsageRange) {
+  async function load(days: UsageRange, providerId = provider) {
     const client = store.client;
     if (!client) return;
     const request = ++latest;
     loading = true;
+    failure = null;
     try {
-      const result = await client.call('usage.history', { edges: dayEdges(days) });
+      const result = await client.call('usage.history', { edges: dayEdges(days), ...(providerId === null ? {} : { providerId }) });
       if (request !== latest) return;
+      if (providerId !== null && (
+        result.rows.some((row) => row.providerId !== providerId) ||
+        result.threads.some((thread) => thread.providerId !== providerId)
+      )) {
+        throw new Error(strings.usage.filterUnsupported);
+      }
       history = result;
+      historicalProviders = [...new Set([...historicalProviders, ...result.rows.map((row) => row.providerId)])];
       failure = null;
     } catch (error) {
       if (request === latest) failure = error instanceof Error ? error.message : String(error);
@@ -53,9 +64,16 @@
   }
 
   $effect(() => {
+    void store;
+    untrack(() => { provider = null; historicalProviders = []; history = null; });
+  });
+
+  $effect(() => {
     const days = range;
+    const selected = provider;
     if (!store.client) return;
-    untrack(() => void load(days));
+    untrack(() => { history = null; void load(days, selected); });
+    return () => { latest += 1; };
   });
 
   $effect(() => {
@@ -74,27 +92,38 @@
     void load(range);
   }
 
-  let view = $derived(history === null ? null : summarize(history, metric));
+  let providerIds = $derived([...new Set([...store.providers.map((entry) => entry.id), ...historicalProviders, ...(provider === null ? [] : [provider])])]);
+  let view = $derived(history === null ? null : summarize(history, metric, provider === null ? providerIds : [provider]));
+  let chartSeries = $derived(view?.series.filter((serie) => view!.bySeries[serie.key]!.turns > 0) ?? []);
   let names = $derived(new Map(store.providers.map((provider) => [provider.id, provider.name])));
-  let modelNames = $derived(new Map(store.providers.flatMap((provider) => provider.models.map((model) => [model.id, model.name] as const))));
-  let colors = $derived(new Map(view?.series.map((serie) => [serie.key, serie.color]) ?? []));
-  let keyOf = $derived(seriesFor(view?.series.flatMap((serie) => serie.providerIds) ?? []).keyOf);
+  let modelNames = $derived(new Map(store.providers.flatMap((entry) => entry.models.map((model) => [`${entry.id}\u0000${model.id}`, model.name] as const))));
+  let colors = $derived(new Map(seriesFor(providerIds).series.map((serie) => [serie.key, serie.color])));
+  let providerItems = $derived([
+    { id: '', label: strings.usage.allProviders, active: provider === null },
+    ...seriesFor(providerIds).series.filter((serie) => serie.key.trim()).map((serie) => ({ id: serie.key, label: providerName(serie.key), active: provider === serie.key }))
+  ]);
   let known = $derived(new Set(store.threads.map((thread) => thread.id)));
   let threads = $derived(history === null ? [] : topThreads(history.threads, metric));
   let threadPeak = $derived(threads[0]?.value ?? 0);
   let dayRows = $derived(view?.days.filter((day) => day.turns > 0) ?? []);
 
   function providerName(providerId: string): string {
-    if (providerId === OTHER) return strings.usage.other;
+    if (!providerId.trim()) return strings.usage.unknownProvider;
     return names.get(providerId) ?? providerId;
   }
 
   function colorOf(providerId: string): string {
-    return colors.get(keyOf(providerId)) ?? 'var(--series-other)';
+    return colors.get(providerId) ?? 'var(--series-other)';
   }
 
   function money(totals: UsageTotals): string {
     return totals.priced === 0 ? strings.usage.noPrice : formatMetric('cost', totals.usage.costUsdEquivalent ?? 0);
+  }
+
+  function valueOf(totals: UsageTotals & { value: number }): string {
+    if (metric === 'cost') return money(totals);
+    if (metric === 'tokens' && totals.turns > 0 && totals.reported === 0) return strings.usage.noUsage;
+    return formatMetric(metric, totals.value);
   }
 
   // In the language the app speaks, not the system's.
@@ -104,10 +133,10 @@
 
 {#snippet numbers(totals: UsageTotals)}
   <td class="num mid">{formatMetric('turns', totals.turns)}</td>
-  <td class="num">{formatMetric('tokens', totalTokens(totals.usage))}</td>
-  <td class="num wide">{formatMetric('tokens', totals.usage.inputTokens)}</td>
-  <td class="num wide">{formatMetric('tokens', totals.usage.outputTokens)}</td>
-  <td class="num wide">{formatMetric('tokens', totals.usage.cacheReadTokens + totals.usage.cacheWriteTokens)}</td>
+  <td class="num" class:muted={totals.reported === 0}>{totals.reported === 0 ? strings.usage.noUsage : formatMetric('tokens', totalTokens(totals.usage))}</td>
+  <td class="num wide">{reportedValue('tokens', totals.usage.inputTokens, totals)}</td>
+  <td class="num wide">{reportedValue('tokens', totals.usage.outputTokens, totals)}</td>
+  <td class="num wide">{reportedValue('tokens', totals.usage.cacheReadTokens + totals.usage.cacheWriteTokens, totals)}</td>
   <td class="num" class:muted={totals.priced === 0}>{money(totals)}</td>
 {/snippet}
 
@@ -125,24 +154,27 @@
 
 <div class="page usage" data-testid="usage-page">
   <header>
-    <div><h1>{strings.usage.heading}<InfoTip topic={strings.usage.heading} text={`${strings.usage.intro} ${strings.usage.note}`} /></h1></div>
+    <div><h1 class="ui-label-box"><span class="ui-label">{strings.usage.heading}</span><InfoTip topic={strings.usage.heading} text={`${strings.usage.intro} ${strings.usage.note}`} /></h1></div>
   </header>
 
   <div class="filters">
     <div class="segmented" role="group" aria-label={strings.usage.range}>
       {#each USAGE_RANGES as days (days)}
         <button type="button" class:on={range === days} aria-pressed={range === days} data-testid="usage-range-{days}" onclick={() => { range = days; }}>
-          {fill(strings.usage.days, { days: String(days) })}
+          <span class="ui-label">{fill(strings.usage.days, { days: String(days) })}</span>
         </button>
       {/each}
     </div>
     <div class="segmented" role="group" aria-label={strings.usage.metric}>
       {#each USAGE_METRICS as option (option)}
         <button type="button" class:on={metric === option} aria-pressed={metric === option} data-testid="usage-metric-{option}" onclick={() => { metric = option; }}>
-          {strings.usage.metrics[option]}
+          <span class="ui-label">{strings.usage.metrics[option]}</span>
         </button>
       {/each}
     </div>
+    <Menu items={providerItems} label={strings.usage.provider} placement="bottom" testid="usage-provider-filter" onpick={(id) => { provider = id || null; }}>
+      <span class="filter-name ui-label">{provider === null ? strings.usage.allProviders : providerName(provider)}</span><ChevronDown size={13} />
+    </Menu>
     <button type="button" class="quiet icon refresh" aria-label={strings.usage.refresh} title={strings.usage.refresh} data-testid="usage-refresh" onclick={refresh}>
       <RefreshCw size={15} strokeWidth={1.75} class={loading ? 'spinning' : ''} />
     </button>
@@ -153,18 +185,23 @@
   {/if}
 
   <div class="body settings-stack" class:stale={loading && view !== null} aria-busy={loading}>
-    {#if view === null}
+    {#if view === null && !failure}
       <section class="card"><p class="muted">{strings.usage.loading}</p></section>
-    {:else}
+    {:else if view !== null}
       <section class="card overview" id="settings-usage-overview" data-testid="usage-overview">
         <div class="hero">
           <span class="section-label">{fill(strings.usage.totalOf[metric], { days: String(range) })}</span>
-          <strong data-testid="usage-total">{formatMetric(metric, view.total.value)}</strong>
-          <small>{fill(strings.usage.summary, {
+          <strong data-testid="usage-total">{valueOf(view.total)}</strong>
+          <small>{fill(view.total.turns > 0 && view.total.reported === 0 ? strings.usage.summaryMissing : view.total.priced === 0 ? strings.usage.summaryNoPrice : strings.usage.summary, {
             turns: formatMetric('turns', view.total.turns),
             tokens: formatMetric('tokens', totalTokens(view.total.usage)),
-            cost: formatMetric('cost', view.total.usage.costUsdEquivalent ?? 0)
+            cost: money(view.total)
           })}</small>
+          {#if view.total.turns > 0}
+            <small class="coverage" data-testid="usage-coverage">{fill(strings.usage.coverage, {
+              reported: formatMetric('turns', view.total.reported), priced: formatMetric('turns', view.total.priced), turns: formatMetric('turns', view.total.turns)
+            })}</small>
+          {/if}
         </div>
         {#if view.series.length > 0}
           <ul class="providers" data-testid="usage-providers">
@@ -173,9 +210,9 @@
               {@const share = view.total.value > 0 ? totals.value / view.total.value : 0}
               <li data-provider={serie.key}>
                 <span class="swatch" style:background={serie.color}></span>
-                <span class="provider">{providerName(serie.key)}</span>
-                <span class="value">{metric === 'cost' && totals.priced === 0 ? strings.usage.noPrice : formatMetric(metric, totals.value)}</span>
-                <span class="share" title={fill(strings.usage.share, { percent: percent.format(share) })}>{percent.format(share)}</span>
+                <span class="provider"><ProviderLogo providerId={serie.key} size={14} /><span>{providerName(serie.key)}{#if totals.turns > 0}<small>{fill(strings.usage.coverage, { reported: formatMetric('turns', totals.reported), priced: formatMetric('turns', totals.priced), turns: formatMetric('turns', totals.turns) })}</small>{/if}</span></span>
+                <span class="value" class:muted={totals.turns === 0}>{totals.turns === 0 ? strings.usage.noActivity : valueOf(totals)}</span>
+                <span class="share" title={fill(strings.usage.share, { percent: percent.format(share) })}>{totals.turns > 0 && (metric === 'turns' || (metric === 'tokens' ? totals.reported : totals.priced) > 0) ? percent.format(share) : ''}</span>
                 <span class="bar"><span style:width="{share * 100}%" style:background={serie.color}></span></span>
               </li>
             {/each}
@@ -187,17 +224,21 @@
         <h2>{strings.usage.chart}</h2>
         {#if view.total.turns === 0}
           <p class="muted" data-testid="usage-empty">{fill(strings.usage.emptyRange, { days: String(range) })}</p>
+        {:else if metric === 'cost' && view.total.priced === 0}
+          <p class="muted" data-testid="usage-empty">{strings.usage.noPrice}</p>
+        {:else if metric === 'tokens' && view.total.reported === 0}
+          <p class="muted" data-testid="usage-empty">{strings.usage.noUsage}</p>
         {:else}
           <UsageChart
             buckets={view.buckets}
-            series={view.series.map((serie) => ({ key: serie.key, color: serie.color, label: providerName(serie.key) }))}
+            series={chartSeries.map((serie) => ({ key: serie.key, color: serie.color, label: providerName(serie.key) }))}
             {metric}
             days={range}
             label={fill(strings.usage.chartLabel, { metric: strings.usage.metrics[metric] })}
           />
           <ul class="legend" aria-hidden="true">
-            {#each view.series as serie (serie.key)}
-              <li><span class="swatch" style:background={serie.color}></span>{providerName(serie.key)}</li>
+            {#each chartSeries as serie (serie.key)}
+              <li><span class="swatch" style:background={serie.color}></span><span class="ui-label">{providerName(serie.key)}</span></li>
             {/each}
           </ul>
         {/if}
@@ -207,6 +248,9 @@
         {#if view.total.turns > view.total.reported}
           <p class="aside">{fill(strings.usage.unreported, { count: formatMetric('turns', view.total.turns - view.total.reported) })}</p>
         {/if}
+        {#if metric === 'cost' && view.total.priced > 0 && view.total.priced < view.total.turns}
+          <p class="aside" data-testid="usage-partial-cost">{fill(strings.usage.partialCost, { count: formatMetric('turns', view.total.turns - view.total.priced) })}</p>
+        {/if}
       </section>
 
       {#if view.total.turns > 0}
@@ -214,8 +258,8 @@
           <div class="card-head">
             <h2>{strings.usage.breakdown}</h2>
             <div class="segmented" role="group" aria-label={strings.usage.breakdown}>
-              <button type="button" class:on={breakdown === 'model'} aria-pressed={breakdown === 'model'} data-testid="usage-by-model" onclick={() => { breakdown = 'model'; }}>{strings.usage.byModel}</button>
-              <button type="button" class:on={breakdown === 'day'} aria-pressed={breakdown === 'day'} data-testid="usage-by-day" onclick={() => { breakdown = 'day'; }}>{strings.usage.byDay}</button>
+              <button type="button" class:on={breakdown === 'model'} aria-pressed={breakdown === 'model'} data-testid="usage-by-model" onclick={() => { breakdown = 'model'; }}><span class="ui-label">{strings.usage.byModel}</span></button>
+              <button type="button" class:on={breakdown === 'day'} aria-pressed={breakdown === 'day'} data-testid="usage-by-day" onclick={() => { breakdown = 'day'; }}><span class="ui-label">{strings.usage.byDay}</span></button>
             </div>
           </div>
           <div class="table" class:scroll={breakdown === 'day'}>
@@ -227,7 +271,7 @@
                     <tr>
                       <td class="who">
                         <span class="swatch" style:background={colorOf(row.providerId)}></span>
-                        <span><span class="model">{modelName(row.model, modelNames)}</span><small>{providerName(row.providerId)}</small></span>
+                        <span><span class="model">{modelName(row.model, modelNames, row.providerId)}</span><small>{providerName(row.providerId)}</small></span>
                       </td>
                       {@render numbers(row)}
                     </tr>
@@ -250,6 +294,7 @@
 
         <section class="card" id="settings-usage-threads">
           <h2>{strings.usage.threads}</h2>
+          {#if threads.length === 0}<p class="muted">{strings.usage.noRankedThreads}</p>{/if}
           <ol class="threads" data-testid="usage-threads">
             {#each threads as thread (thread.threadId)}
               <li>
@@ -287,6 +332,7 @@
 <style>
   .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: var(--settings-width); margin-bottom: 20px; }
   .refresh { margin-left: auto; width: var(--control); height: var(--control); padding: 0; }
+  .filter-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 190px; }
   .refresh :global(.spinning) { animation: spin 900ms linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .failure { max-width: var(--settings-width); margin: 0 0 12px; color: var(--color-danger); font-size: var(--text-sm); }
@@ -307,7 +353,9 @@
   .providers { display: grid; gap: 8px; margin: 16px 0 0; padding: 14px 0 0; list-style: none; border-top: 1px solid var(--color-border); }
   .providers li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 44px minmax(60px, 160px); align-items: center; gap: 10px; font-size: var(--text-sm); }
   .swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
-  .provider { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .provider { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .provider > span { display: grid; min-width: 0; overflow-wrap: anywhere; }
+  .provider small { color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .value { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
   .share { font-variant-numeric: tabular-nums; color: var(--color-muted-foreground); text-align: right; }
   .bar { display: block; height: 4px; border-radius: 2px; background: var(--color-surface-3); overflow: hidden; }

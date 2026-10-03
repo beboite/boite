@@ -99,10 +99,10 @@
 
 {#if store.owner}
   <section class="card" id="settings-worktrees" data-testid="worktrees-card">
-    <h2>{s.heading}<InfoTip topic={s.heading} text={s.intro} /></h2>
+    <h2 class="ui-label-box"><span class="ui-label">{s.heading}</span><InfoTip topic={s.heading} text={s.intro} /></h2>
     <WorktreeStorageSetting {store} />
     {#if lists === null}
-      <button type="button" data-testid="worktrees-show" disabled={busy || store.connection !== 'ready'} onclick={() => void load()}>{s.show}</button>
+      <button type="button" data-testid="worktrees-show" disabled={busy || store.connection !== 'ready'} onclick={() => void load()}><span class="ui-label">{s.show}</span></button>
     {:else if projects.length === 0}
       <p class="muted">{s.noProject}</p>
     {:else}
@@ -113,7 +113,7 @@
             <h3>{projectName(project)}</h3>
             {#if Array.isArray(list) && list.some(sweepable)}
               <button type="button" class="small" data-testid="worktrees-sweep" disabled={busy} onclick={() => void sweep(project, list)}
-                >{fill(s.sweep, { count: String(list.filter(sweepable).length) })}</button
+                ><span class="ui-label">{fill(s.sweep, { count: String(list.filter(sweepable).length) })}</span></button
               >
             {/if}
           </div>
@@ -126,7 +126,7 @@
               {#each list as entry (entry.path)}
                 <li data-path={entry.path}>
                   <span class="what">
-                    <span class="name" title={entry.path}>{entry.branch ?? folderName(entry.path)}</span>
+                    <span class="name ui-label" title={entry.path}>{entry.branch ?? folderName(entry.path)}</span>
                     <span class="flags">
                       {#each flags(entry) as flag (flag.text)}<span class="flag {flag.tone}">{flag.text}</span>{/each}
                     </span>
@@ -137,7 +137,7 @@
                     data-testid="worktrees-remove"
                     disabled={busy || heldByLive(entry)}
                     title={heldByLive(entry) ? s.heldHint : entry.path}
-                    onclick={() => void remove(project, entry)}>{s.remove}</button
+                    onclick={() => void remove(project, entry)}><span class="ui-label">{s.remove}</span></button
                   >
                 </li>
               {/each}
