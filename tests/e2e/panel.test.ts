@@ -92,6 +92,28 @@ test('the browser follows layout changes without measuring its slot on every idl
   await onStore(`store.panel.closeAll();`);
 });
 
+test('a browser keeps its live page and form across conversation switches and closes explicitly at both widths', async () => {
+  for (const narrow of [false, true]) {
+    await phone(narrow);
+    await onStore(`await store.open('t-trace'); store.panel.closeAll(); const surface = store.panel.open('browser'); globalThis.__persistentTab = surface.id;`);
+    await page.waitFor(`document.querySelector('iframe[data-browser-id="' + globalThis.__persistentTab + '"]')?.style.display === 'block'`);
+    await page.evaluate(`(() => { const frame = document.querySelector('iframe[data-browser-id="' + globalThis.__persistentTab + '"]'); globalThis.__persistentFrame = frame; frame.contentDocument.body.innerHTML = '<label>Draft <input id="persistent-draft" value="Keep this form"></label>'; frame.contentWindow.__pageState = 'preserved'; })()`);
+    await capture(narrow ? 'browser-persistent-phone-before.png' : 'browser-persistent-desktop-before.png');
+    await onStore(`const other = store.threads.find(t => t.id !== 't-trace' && !t.archived); await store.open(other.id); store.panel.open('browser');`);
+    await page.waitFor(`globalThis.__persistentFrame.style.display === 'none'`);
+    expect(await page.evaluate(`globalThis.__persistentFrame.isConnected && globalThis.__persistentFrame.contentWindow.__pageState === 'preserved'`)).toBe(true);
+    await onStore(`await store.open('t-trace'); store.panel.activate(globalThis.__persistentTab);`);
+    await page.waitFor(`globalThis.__persistentFrame.style.display === 'block'`);
+    expect(await page.evaluate(`document.querySelector('iframe[data-browser-id="' + globalThis.__persistentTab + '"]') === globalThis.__persistentFrame`)).toBe(true);
+    expect(await page.evaluate(`globalThis.__persistentFrame.contentDocument.querySelector('#persistent-draft').value`)).toBe('Keep this form');
+    await capture(narrow ? 'browser-persistent-phone-after.png' : 'browser-persistent-desktop-after.png');
+    await onStore(`store.panel.close(globalThis.__persistentTab);`);
+    await page.waitFor(`!globalThis.__persistentFrame.isConnected`);
+  }
+  await phone(false);
+  await onStore(`store.panel.closeAll();`);
+});
+
 test('the panel opens on its launcher, and the workbench surfaces fit both widths', async () => {
   // The layout is remembered per thread: this run starts on an empty strip.
   await onStore(`store.panel.closeAll();`);
