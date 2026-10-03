@@ -620,7 +620,7 @@ at most 200 paths, defaulting to 50, and report whether the walk was capped.
 
 ## README presentation
 
-The README opens with a vector wordmark and static, theme-aware screenshots.
+The README opens with the app logo and static, theme-aware screenshots.
 Its optional ten-second film follows one action: opening the launch-page diff
 beside a conversation. It keeps the real timing of the clicks, holds the diff
 for reading and fades from light to dark over 850 ms. Sample project data and
@@ -658,7 +658,6 @@ logs and verification JSON stay in the scratch directory. `--encode-only`
 reuses `capture.json` and its raw recording to regenerate the MP4/GIF without
 a browser. The former `--combine-only` option has been replaced.
 
-The header SVGs are hand-authored assets beside the screenshots. Check both
-GitHub themes and the phone README layout after changing the text or media.
-Inspect the film and every capture before replacing committed media; sample
-data must contain no personal information.
+Check both GitHub themes and the phone README layout after changing the text or
+media. Inspect the film and every capture before replacing committed media;
+sample data must contain no personal information.
