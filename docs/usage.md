@@ -195,7 +195,9 @@ them in SQLite:
   turns, unordered. The UI ranks them by the chosen measure.
 - An optional non-empty `providerId` filters execution providers before the
   thread ranking, including turns in conversations that later switched
-  providers. A removed or unused provider returns an empty history.
+  providers. Recorded turns remain available even after their provider is
+  removed or no longer configured. History is empty only when no recorded turns
+  match the requested provider and range.
   Legacy turns with no provider identity remain in the all-provider totals as
   "Unknown provider"; they have no individual filter option.
   If an older core returns rows or conversations from other providers for a
