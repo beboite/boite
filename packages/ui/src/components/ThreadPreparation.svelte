@@ -9,7 +9,7 @@
   let { store, visible }: { store: Store; visible: boolean } = $props();
   const focus = new ConversationFocus();
   let attentive = $state(false);
-  onMount(() => watchAttention((value) => { attentive = value; }));
+  onMount(() => watchAttention((value) => { attentive = value; }, (at) => focus.activity(at)));
   $effect(() => {
     const client = store.connection === 'ready' ? store.client : null;
     const thread = store.openThread;

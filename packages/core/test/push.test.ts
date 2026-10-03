@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, setSystemTime, test } from 'bun:test';
-import { ATTENTION_GRACE_MS, ATTENTION_LEASE_MS, type RpcEvents, type Turn, type TurnExecution } from '@boite/contracts';
+import { ATTENTION_LEASE_MS, type RpcEvents, type Turn, type TurnExecution } from '@boite/contracts';
 import { createECDH, randomBytes } from 'node:crypto';
 import { connect } from '../src/client.ts';
 import { validateSubscription } from '../src/push.ts';
@@ -135,7 +135,37 @@ test('a phone hears of a team\'s final answer and a persistent agent\'s failures
   ]);
 });
 
-test('no push about a thread someone is looking at, on the PC or the phone, nor a moment after', async () => {
+test('a reply that lands while its sender is on the thread reaches the phone once they leave', async () => {
+  const paired = session();
+  harness.core.push.subscribe(paired.id, subscription());
+  const deliveries: { threadId: string; tag: string }[] = [];
+  harness.core.push.send = async (_target, payload) => { deliveries.push(JSON.parse(payload)); };
+  const desktop = await harness.connect();
+  const phone = await connect(harness.url, paired.token);
+  try {
+    const { threadId } = await echoThread(harness, desktop);
+    let n = 0;
+    const thread = harness.core.journal.getThread(threadId)!;
+    const finish = () => harness.core.bus.emit('turn.finished', { id: `walk_${++n}`, threadId, status: 'done', queuedAt: 1, startedAt: 1, finishedAt: 2, usage: null, error: null, execution: { providerId: thread.providerId, accountId: thread.accountId, model: null, effort: null, permissionMode: thread.permissionMode, sessionId: null, sessionGeneration: 0, selectionVersion: 0 } });
+    const delivered = async (count: number) => { await waitFor(() => deliveries.length === count); await Bun.sleep(30); expect(deliveries).toHaveLength(count); };
+
+    // Sent from the PC, which then goes quiet: the reply came within seconds, and arrives once the PC says nobody is there.
+    await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
+    finish();
+    await delivered(0);
+    await desktop.call('threads.focus', { threadId, attentive: false, idleMs: 46_000 });
+    await delivered(1);
+    // Sent from the phone, then locked before it could say so: the reply arrives when its lease runs out.
+    await phone.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
+    finish();
+    await delivered(1);
+    setSystemTime(new Date(Date.now() + ATTENTION_LEASE_MS + 1));
+    harness.core.push.releaseHeld();
+    await delivered(2);
+  } finally { setSystemTime(); phone.close(); }
+});
+
+test('no push about a thread someone is looking at and uses, on the PC or the phone', async () => {
   const paired = session();
   harness.core.push.subscribe(paired.id, subscription());
   const deliveries: { threadId: string; tag: string }[] = [];
@@ -151,34 +181,43 @@ test('no push about a thread someone is looking at, on the PC or the phone, nor 
     const ask = (id: string) => harness.core.bus.emit('question.asked', { id: `ask_${++n}`, threadId: id, text: 'Which branch?' } as RpcEvents['question.asked']);
     const delivered = async (count: number) => { await waitFor(() => deliveries.length === count); await Bun.sleep(30); expect(deliveries).toHaveLength(count); };
 
-    // The phone in the foreground on the thread: nothing about it, still news about another one.
-    await phone.call('threads.focus', { threadId, attentive: true });
+    // The phone in the foreground on the thread: news about it waits, news about another one goes.
+    await phone.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
     finish(threadId); ask(threadId); finish(other.id);
     await delivered(1);
     expect(deliveries[0]!.threadId).toBe(other.id);
-    // Locked or in the background: a few seconds of grace, then push again.
-    await phone.call('threads.focus', { threadId, attentive: false });
-    finish(threadId);
-    const start = Date.now();
-    setSystemTime(new Date(start + ATTENTION_GRACE_MS + 1));
-    finish(threadId);
-    await delivered(2);
-    // The desktop window in front with the thread open; a desktop that only has it open does not count.
-    await desktop.call('threads.focus', { threadId, attentive: true });
+    // A touch on that screen afterwards shows it was seen: locking the phone then sends nothing.
+    await Bun.sleep(5);
+    await phone.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
+    await phone.call('threads.focus', { threadId, attentive: false, idleMs: 1_000 });
+    await delivered(1);
+    // The desktop window in front and used: the same. Use of another thread is not use of this one.
+    await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
     ask(threadId);
+    await Bun.sleep(5);
+    await phone.call('threads.focus', { threadId: other.id, attentive: true, idleMs: 0 });
+    await phone.call('threads.focus', { threadId: null });
+    await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
     await desktop.call('threads.focus', { threadId: other.id });
-    setSystemTime(new Date(start + 2 * ATTENTION_GRACE_MS + 2));
-    ask(threadId); ask(other.id);
-    await delivered(4);
-    // A report that never got out (a phone suspended mid-turn) stops silencing push once its lease ends.
-    await phone.call('threads.focus', { threadId, attentive: true });
-    setSystemTime(new Date(Date.now() + ATTENTION_LEASE_MS + 1));
+    await delivered(1);
+    // A window in front that nobody used for a while is not believed; one with the thread merely open does not count.
+    await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 60_000 });
+    ask(threadId);
+    await desktop.call('threads.focus', { threadId });
     finish(threadId);
-    await delivered(5);
+    await delivered(3);
+    // Looking away without having used the thread since sends what waited.
+    await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
+    finish(threadId);
+    await Bun.sleep(5);
+    await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 20 });
+    await delivered(3);
+    desktop.close();
+    await delivered(4);
     await expect(phone.call('threads.focus', { threadId, attentive: 'yes' as never })).rejects.toThrow('attentive');
-  } finally { setSystemTime(); phone.close(); }
+    await expect(phone.call('threads.focus', { threadId, idleMs: -1 })).rejects.toThrow('idleMs');
+  } finally { phone.close(); }
 });
-
 test('a notification carries the icon badge: the threads waiting on the user, the notified one included', async () => {
   const paired = session();
   harness.core.push.subscribe(paired.id, subscription());

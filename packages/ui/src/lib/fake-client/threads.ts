@@ -484,6 +484,9 @@ export function threadMethods(ctx: FakeContext) {
       if (params.attentive !== undefined && typeof params.attentive !== 'boolean') {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'attentive must be a boolean', data: { field: 'attentive', expected: 'boolean' } });
       }
+      if (params.idleMs !== undefined && (typeof params.idleMs !== 'number' || !Number.isFinite(params.idleMs) || params.idleMs < 0)) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'idleMs must be a nonnegative number of milliseconds', data: { field: 'idleMs', expected: 'a finite number >= 0' } });
+      }
       if (params.threadId !== null) ctx.thread(params.threadId);
       const reportsProtection = params.protectedThreadIds !== undefined || params.protectAllThreads !== undefined;
       if (!ctx.bus.protectionReported) {

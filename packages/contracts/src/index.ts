@@ -2991,8 +2991,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'threads.unsubscribe': { params: { threadId: ThreadId }; result: { ok: true } };
   /** The visible conversation and unsent input leases. Omitted leases remain; an empty list clears them.
    * A focus caller without an input report blocks automatic archive until it reports leases or disconnects.
-   * `attentive`: the user is looking at `threadId` now, so the core sends no push about it (`thread-focus.ts`). */
-  'threads.focus': { params: { threadId: ThreadId | null; protectedThreadIds?: ThreadId[]; protectAllThreads?: boolean; attentive?: boolean }; result: { ok: true } };
+   * `attentive`: the user is looking at `threadId` now, so the core holds push about it back (`thread-focus.ts`).
+   * `idleMs`: how long ago the user last used this page while it was attentive; use after an event drops its held push. */
+  'threads.focus': { params: { threadId: ThreadId | null; protectedThreadIds?: ThreadId[]; protectAllThreads?: boolean; attentive?: boolean; idleMs?: number }; result: { ok: true } };
 
   /** `attachments` are journalled with the prompt. Files become host paths; images use native provider payloads. */
   'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: Attachment[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };

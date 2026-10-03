@@ -1,9 +1,12 @@
 import { stat } from 'node:fs/promises';
-import { ATTENTION_GRACE_MS, ATTENTION_LEASE_MS, protectedThreadIdsError, type ThreadId } from '@boite/contracts';
+import { ATTENTION_IDLE_MS, ATTENTION_LEASE_MS, protectedThreadIdsError, type ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { assertDriverRunnable, getDriver, setThreadViewed } from '../drivers/index.ts';
 import { invalidParams } from '../errors.ts';
 import { logMessageOf } from '../log-errors.ts';
+
+/** A `threads.focus` report as push sees it: the thread shown, and when the user last used it while watching. */
+export interface AttentionReport { threadId: ThreadId | null; activeAt: number | null }
 
 /** One visible conversation per socket. Preparation never participates in turn admission. */
 export class ThreadFocus {
@@ -12,8 +15,9 @@ export class ThreadFocus {
   private readonly protectAll = new Set<string>();
   private readonly inputReports = new Set<string>();
   private readonly prepared = new Map<ThreadId, { key: string; pending: boolean }>();
-  /** Per connection, until when its user counts as looking at each thread (`ATTENTION_LEASE_MS`). */
-  private readonly attention = new Map<string, Map<ThreadId, number>>();
+  /** Per connection, the thread its user is looking at and until when the core believes it (`ATTENTION_LEASE_MS`). */
+  private readonly attention = new Map<string, { threadId: ThreadId; until: number }>();
+  private readonly attentionListeners = new Set<(report: AttentionReport) => void>();
   private readonly unlisten: () => void;
   private closed = false;
 
@@ -33,12 +37,15 @@ export class ThreadFocus {
     });
   }
 
-  set(connectionId: string, threadId: ThreadId | null, protectedThreadIds?: ThreadId[], protectAllThreads?: boolean, attentive?: boolean): void {
+  set(connectionId: string, threadId: ThreadId | null, protectedThreadIds?: ThreadId[], protectAllThreads?: boolean, attentive?: boolean, idleMs?: number): void {
     if (threadId !== null && (typeof threadId !== 'string' || threadId.length === 0)) {
       throw invalidParams('threadId must be a nonempty thread id or null', { field: 'threadId' });
     }
     if (attentive !== undefined && typeof attentive !== 'boolean') {
       throw invalidParams('attentive must be a boolean', { field: 'attentive', expected: 'boolean' });
+    }
+    if (idleMs !== undefined && (typeof idleMs !== 'number' || !Number.isFinite(idleMs) || idleMs < 0)) {
+      throw invalidParams('idleMs must be a nonnegative number of milliseconds', { field: 'idleMs', expected: 'a finite number >= 0' });
     }
     const protectionError = protectedThreadIdsError(protectedThreadIds);
     if (protectionError) throw invalidParams(protectionError, { field: 'protectedThreadIds', expected: 'at most 256 nonempty thread ids' });
@@ -60,7 +67,7 @@ export class ThreadFocus {
     }
     if (protectAllThreads === true) this.protectAll.add(connectionId);
     else if (protectAllThreads === false) this.protectAll.delete(connectionId);
-    this.attend(connectionId, attentive === true ? threadId : null);
+    this.attend(connectionId, threadId, attentive === true, idleMs);
     const previous = this.viewers.get(connectionId);
     if (threadId === null) this.viewers.delete(connectionId);
     else this.viewers.set(connectionId, threadId);
@@ -81,31 +88,39 @@ export class ThreadFocus {
   }
 
   /**
-   * Whether someone is looking at the thread on one of their clients, or was a
-   * few seconds ago: push about it would only repeat what the screen shows.
+   * Until when someone counts as looking at the thread on one of their
+   * clients, or 0: push about it would only repeat what the screen shows.
    */
-  attended(threadId: ThreadId): boolean {
+  attendedUntil(threadId: ThreadId): number {
     const now = Date.now();
-    let attended = false;
-    for (const [connectionId, leases] of this.attention) {
-      for (const [id, until] of leases) if (until <= now) leases.delete(id);
-      if (!leases.size) this.attention.delete(connectionId);
-      else if (leases.has(threadId)) attended = true;
+    let until = 0;
+    for (const [connectionId, lease] of this.attention) {
+      if (lease.until <= now) this.attention.delete(connectionId);
+      else if (lease.threadId === threadId) until = Math.max(until, lease.until);
     }
-    return attended;
+    return until;
   }
 
-  /** The thread looked at gets a fresh lease; the ones looked away from keep a short grace. */
-  private attend(connectionId: string, threadId: ThreadId | null): void {
+  attended(threadId: ThreadId): boolean { return this.attendedUntil(threadId) > 0; }
+
+  /** Hears every report once the core has taken it in, and every disconnection as a report of nothing. */
+  onAttention(listener: (report: AttentionReport) => void): () => void {
+    this.attentionListeners.add(listener);
+    return () => this.attentionListeners.delete(listener);
+  }
+
+  /**
+   * An attentive report renews the connection's lease; any other ends it at
+   * once. A page left alone past `ATTENTION_IDLE_MS` is not believed, whatever
+   * it says.
+   */
+  private attend(connectionId: string, threadId: ThreadId | null, attentive: boolean, idleMs: number | undefined): void {
     const now = Date.now();
-    const leases = this.attention.get(connectionId) ?? new Map<ThreadId, number>();
-    for (const [id, until] of leases) {
-      if (until <= now) leases.delete(id);
-      else if (id !== threadId) leases.set(id, Math.min(until, now + ATTENTION_GRACE_MS));
-    }
-    if (threadId !== null) leases.set(threadId, now + ATTENTION_LEASE_MS);
-    if (leases.size) this.attention.set(connectionId, leases);
-    else this.attention.delete(connectionId);
+    if (attentive && threadId !== null && (idleMs === undefined || idleMs < ATTENTION_IDLE_MS)) {
+      this.attention.set(connectionId, { threadId, until: now + ATTENTION_LEASE_MS });
+    } else this.attention.delete(connectionId);
+    const report = { threadId, activeAt: idleMs === undefined || threadId === null ? null : now - idleMs };
+    for (const listener of this.attentionListeners) listener(report);
   }
 
   hasProtectedInput(threadId: ThreadId): boolean {
@@ -164,5 +179,6 @@ export class ThreadFocus {
     this.inputReports.clear();
     this.prepared.clear();
     this.attention.clear();
+    this.attentionListeners.clear();
   }
 }

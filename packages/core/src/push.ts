@@ -4,6 +4,7 @@ import type { PushPayload, RpcEvents, RpcParams } from '@boite/contracts';
 import type { PushSubscription } from 'web-push';
 import type { Core } from './core.ts';
 import { invalidParams, refused } from './errors.ts';
+import type { AttentionReport } from './threads/focus.ts';
 
 type Subscription = RpcParams<'push.subscribe'>;
 type Keys = { publicKey: string; privateKey: string };
@@ -37,8 +38,13 @@ export class PushStore {
   private pending = new Set<Promise<unknown>>();
   private closed = false;
   private keysPromise: Promise<Keys> | null = null;
+  /** By tag, the pushes held back while their thread is watched (`notify`). */
+  private readonly held = new Map<string, { threadId: string; text: Pick<PushPayload, 'body' | 'label'>; at: number }>();
+  private heldTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly offAttention: () => void;
 
   constructor(private readonly core: Core) {
+    this.offAttention = core.threads.focus.onAttention(report => this.attention(report));
     this.off = core.bus.onAny((name, payload) => {
       if (name === 'sessions.updated' && (payload as RpcEvents['sessions.updated']).state === 'revoked') {
         this.remove((payload as RpcEvents['sessions.updated']).sessionId);
@@ -145,9 +151,47 @@ export class PushStore {
     return ids.size;
   }
 
+  /**
+   * The thread is on a screen someone is looking at, on any of their devices:
+   * push would only interrupt. It waits instead. Using that screen after the
+   * news arrived shows it was seen and drops it; looking away, a page going
+   * quiet or a lease nobody renews sends it.
+   */
   private notify(threadId: string, text: Pick<PushPayload, 'body' | 'label'>, tag: string) {
-    // The thread is on a screen someone is looking at: on any of their devices, push would only interrupt.
-    if (this.closed || this.core.threads.focus.attended(threadId)) return;
+    if (this.closed) return;
+    if (this.core.threads.focus.attended(threadId)) {
+      this.held.set(tag, { threadId, text, at: Date.now() });
+      this.releaseHeld();
+    } else this.deliverAll(threadId, text, tag);
+  }
+
+  /** What a report says of the held pushes: use of their thread since they arrived drops them, then any no longer watched go. */
+  private attention({ threadId, activeAt }: AttentionReport) {
+    if (threadId !== null && activeAt !== null) {
+      for (const [tag, held] of this.held) if (held.threadId === threadId && activeAt >= held.at) this.held.delete(tag);
+    }
+    this.releaseHeld();
+  }
+
+  /** Sends the held pushes nobody is watching any more and wakes up when the next lease ends. Public for tests that move the clock. */
+  releaseHeld() {
+    clearTimeout(this.heldTimer);
+    this.heldTimer = undefined;
+    if (this.closed) return;
+    let next = Infinity;
+    for (const [tag, held] of this.held) {
+      const until = this.core.threads.focus.attendedUntil(held.threadId);
+      if (until > 0) { next = Math.min(next, until); continue; }
+      this.held.delete(tag);
+      this.deliverAll(held.threadId, held.text, tag);
+    }
+    if (next !== Infinity) {
+      this.heldTimer = setTimeout(() => this.releaseHeld(), Math.max(0, next - Date.now()) + 50);
+      this.heldTimer.unref?.();
+    }
+  }
+
+  private deliverAll(threadId: string, text: Pick<PushPayload, 'body' | 'label'>, tag: string) {
     const title = this.core.journal.getThread(threadId)?.title ?? 'Boite';
     const badge = this.badge(threadId);
     for (const sessionId of Object.keys(this.subscriptions())) {
@@ -197,6 +241,9 @@ export class PushStore {
   async close() {
     this.closed = true;
     this.off();
+    this.offAttention();
+    clearTimeout(this.heldTimer);
+    this.held.clear();
     await Promise.allSettled([...this.pending]);
   }
 }

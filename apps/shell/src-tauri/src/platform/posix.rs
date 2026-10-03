@@ -46,6 +46,12 @@ pub(crate) fn appimage_scrub(appdir: &std::path::Path, data_dirs: Option<std::ff
     changes
 }
 
+/// The OS gives no session-wide idle time the shell can read everywhere here.
+pub(crate) fn idle_ms() -> Option<u64> { None }
+
+pub(crate) fn foreground(window: &tauri::Window) -> bool {
+    window.is_focused().unwrap_or(false)
+}
 #[cfg(test)]
 mod tests {
     use super::*;

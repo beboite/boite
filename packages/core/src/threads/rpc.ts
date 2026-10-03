@@ -126,7 +126,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     return { ok: true } as const;
   });
   core.router.register('threads.focus', (params, ctx) => {
-    core.threads.focus.set(ctx.connection.id, params.threadId, params.protectedThreadIds, params.protectAllThreads, params.attentive);
+    core.threads.focus.set(ctx.connection.id, params.threadId, params.protectedThreadIds, params.protectAllThreads, params.attentive, params.idleMs);
     return { ok: true } as const;
   });
   core.router.register('turns.start', async (params) => {
