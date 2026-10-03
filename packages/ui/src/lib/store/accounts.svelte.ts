@@ -119,6 +119,19 @@ export class Accounts {
     } catch (error) { if (this.ctx.currentClient(client, generation)) this.ctx.fail(error); return false; }
   }
 
+  /** How many conversations a removal would leave without an account; null when the machine did not answer. */
+  async accountThreads(accountId: string): Promise<number | null> {
+    const client = this.ctx.client;
+    if (!client) return null;
+    const generation = this.ctx.clientGeneration;
+    try {
+      return (await client.call('accounts.threads', { accountId })).count;
+    } catch (error) {
+      if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
+      return null;
+    }
+  }
+
   async removeAccount(accountId: string): Promise<void> {
     const client = this.ctx.client;
     if (!client) return;
