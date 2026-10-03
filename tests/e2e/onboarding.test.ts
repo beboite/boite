@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 import { startDevUi } from './lib/ui.ts';
+import { mobileAction } from './lib/mobile.ts';
 let server: { close(): Promise<void> };
 let page: BrowserPage;
 const PALETTE_CHORD = `document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', code: 'KeyK', ctrlKey: true, bubbles: true, cancelable: true }))`;
@@ -198,7 +199,7 @@ test('demo selectors look actionable and animations pause, resume and replay', a
   expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-animation]').getAnimations({subtree:true}).some(a => a.playState === 'running')`)).toBe(true);
 }, 20_000);
 
-test('agent update notices wait until the tour closes without dismissing pending updates', async () => {
+test('pending agent updates remain in Machines after the tour closes', async () => {
   await page.evaluate(`localStorage.removeItem('boite.onboarding')`);
   const url = await page.evaluate<string>(`(() => { const url = new URL(location.href); url.searchParams.set('updates', '1'); return url.href; })()`);
   await page.navigate(url);
@@ -208,15 +209,19 @@ test('agent update notices wait until the tour closes without dismissing pending
   await capture('tour-pending-updates-phone.png');
   await page.click('[data-testid=onboarding-skip]');
   await page.waitFor(`!document.querySelector('[data-testid=onboarding]')`);
-  await page.waitFor(`document.querySelectorAll('[data-testid=harness-update-notice]').length === 2`);
-  expect(await page.evaluate(`document.querySelectorAll('[data-testid=harness-update-run]').length`)).toBe(2);
+  expect(await page.evaluate(`document.querySelector('[data-testid=harness-update-notices]') === null`)).toBe(true);
+  await mobileAction(page, 'mobile-settings');
+  await page.waitFor(`document.querySelector('[data-testid=settings-tab-machines]')`);
+  await page.click('[data-testid=settings-tab-machines]');
+  await page.waitFor(`document.querySelectorAll('[data-testid=harness-update-row-run]').length === 2`);
+  expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.harnessUpdates.filter(update => update.pending).length`)).toBe(2);
 }, 20_000);
 
-test('an unavailable onboarding chunk does not hide agent update notices or block the app', async () => {
+test('an unavailable onboarding chunk keeps agent updates accessible in Machines', async () => {
   // Compile the lazy Settings styles before the isolated browser tests the
   // missing tour chunk. Cold Vite transforms are not application startup.
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
-  await page.click('[data-testid=nav-settings]');
+  if (!await page.evaluate(`!!document.querySelector('[data-testid=settings]')`)) await page.click('[data-testid=nav-settings]');
   await page.waitFor(`document.querySelector('[data-testid=settings]')`, 30_000);
   const offline = await BrowserPage.launch({ url: 'about:blank', showTour: true });
   try {
@@ -225,10 +230,13 @@ test('an unavailable onboarding chunk does not hide agent update notices or bloc
     const origin = await page.evaluate<string>('location.origin');
     await offline.navigate(`${origin}/?fake=1&updates=1`);
     await offline.waitFor(`document.querySelector('[data-testid=nav-settings]')`);
-    await offline.waitFor(`document.querySelectorAll('[data-testid=harness-update-notice]').length === 2`);
     expect(await offline.evaluate(`document.querySelector('[data-testid=onboarding]') === null`)).toBe(true);
+    expect(await offline.evaluate(`document.querySelector('[data-testid=harness-update-notices]') === null`)).toBe(true);
+    expect(await offline.evaluate(`document.querySelector('[data-testid=nav-app-update]') === null`)).toBe(true);
     await offline.click('[data-testid=nav-settings]');
-    await offline.waitFor(`document.querySelector('[data-testid=settings]')`);
+    await offline.waitFor(`document.querySelector('[data-testid=settings-tab-machines]')`);
+    await offline.click('[data-testid=settings-tab-machines]');
+    await offline.waitFor(`document.querySelector('[data-testid=machines-page]') && document.querySelectorAll('[data-testid=harness-update-row-run]').length === 2`);
   } finally {
     await offline.close();
   }

@@ -280,6 +280,7 @@ export class Core {
     this.#stopDeletionRetention = scheduleThreadDeletionRetention(this);
     // The journal is open and no socket is accepted yet: whatever a dead core
     // left running or queued is closed here, or nothing ever would.
+    this.threads.agentState.backgroundHistory.interruptLive();
     this.threads.recoverStuckTurns();
     this.threads.cards.restoreAsyncQuestions();
     queueMicrotask(() => this.threads.titles.recover());
@@ -381,6 +382,9 @@ export class Core {
     await this.push.close();
     await this.plugins.close();
     this.providers.installs.stop();
+    if (!this.journal.isClosed()) {
+      for (const threadId of this.threads.agentState.background.keys()) this.threads.agentState.cancelBackground(threadId);
+    }
     shutdownDrivers();
     await this.accounts.closeLogins();
     await this.terminals.closeAll();

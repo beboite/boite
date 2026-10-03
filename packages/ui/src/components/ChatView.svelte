@@ -12,6 +12,9 @@
   import AgentDock from './AgentDock.svelte';
   import Menu from './Menu.svelte';
   import MessageList from './MessageList.svelte';
+  import ThreadRecovery from './ThreadRecovery.svelte';
+  import BackgroundHistory from './BackgroundHistory.svelte';
+  import ForkReturn from './ForkReturn.svelte';
   import ProjectTile from './ProjectTile.svelte';
   import DoneThreadNotice from './DoneThreadNotice.svelte';
 
@@ -86,8 +89,7 @@
   </div>
 {:else}
   <section class="chat" data-testid="chat">
-
-
+    {#if thread?.forkOrigin}{#key thread.id}<ForkReturn {store} {thread} />{/key}{/if}
     {#if thread}
       <!-- One timeline per thread: the heights it measured and the ids that
            already played the rise belong to that thread alone, and kept across
@@ -136,6 +138,8 @@
     {/if}
 
     {#if thread}<AgentDock {store} threadId={thread.id} />{/if}
+    {#if thread?.backgroundHistory?.length}<BackgroundHistory tasks={thread.backgroundHistory} />{/if}
+    {#if thread}<ThreadRecovery {store} />{/if}
     {#if !thread?.agentSessionId}
       {#if store.openProject?.missing === true}<FolderGoneNotice {store} project={store.openProject} />{/if}
       {#if thread?.archived}<DoneThreadNotice {store} threadId={thread.id} />{:else}<Composer {store} centered={!thread} />{/if}

@@ -114,11 +114,14 @@
   /** A path set by hand wins over the list, so no row is the one in use. */
   const active = $derived(config && !config.modelPath ? config.model : null);
   const current = $derived(status?.models.find((model) => model.id === config?.model));
+  const mainModels = $derived(status?.models.filter((model) => !model.legacy) ?? []);
+  const legacyModels = $derived(status?.models.filter((model) => model.legacy && (model.installed || model.id === config?.model || model.id === status?.downloading)) ?? []);
   const fetching = $derived(status?.models.find((model) => model.id === status?.downloading));
   const modelName = $derived(config?.modelPath ? config.modelPath.split(/[\\/]/).at(-1) ?? '' : current?.name ?? config?.model ?? '');
   const meta = (model: SpeechModel): string => [
     model.bytes ? `${megabytes(model.bytes)} ${strings.units.megabytes}` : '',
     model.tier ? strings.speech.tiers[model.tier] : model.host ?? '',
+    model.streaming ? strings.speech.streaming : model.backend === 'whistle' ? strings.speech.whistleLanguages : '',
   ].filter(Boolean).join(' · ');
   /** What the top line says: one state, at most one action. */
   const stage = $derived.by((): 'ready' | 'downloading' | 'failed' | 'broken' | 'local' | 'api' => {
@@ -131,6 +134,22 @@
   });
   const tone = $derived(stage === 'ready' ? 'ok' : stage === 'failed' || stage === 'broken' ? 'bad' : stage === 'downloading' ? 'busy' : '');
 </script>
+
+{#snippet modelRow(model: SpeechModel)}
+  <div class="switch-row model" data-testid="voice-model-{model.id}">
+    <button type="button" role="radio" class="pick" aria-checked={active === model.id} disabled={busy || status?.downloading === model.id} onclick={() => pick(model)}>
+      <span class="radio" aria-hidden="true"></span>
+      <span class="text">{model.name}<span class="hint">{meta(model)}</span></span>
+    </button>
+    {#if status?.downloading === model.id}
+      <LoaderCircle size={16} class="spinner" aria-label={strings.speech.downloading} />
+    {:else if model.installed}
+      <button type="button" class="icon ghost" title={fill(strings.speech.remove, { model: model.name })} aria-label={fill(strings.speech.remove, { model: model.name })} data-testid="voice-model-remove-{model.id}" disabled={busy} onclick={() => void manage('speech.uninstall', { model: model.id })}><Trash2 size={15} /></button>
+    {:else}
+      <button type="button" class="quiet small" data-testid="voice-model-download-{model.id}" disabled={busy || status?.installing} onclick={() => void manage('speech.install', { model: model.id })}><Download size={14} />{strings.speech.download}</button>
+    {/if}
+  </div>
+{/snippet}
 
 <div class="page" data-testid="voice-settings">
   <header>
@@ -161,6 +180,7 @@
         <div class="text">
           {#if stage === 'ready'}
             {status.engine === 'local' ? fill(strings.speech.readyLocal, { model: modelName }) : fill(strings.speech.readyApi, { provider: provider(config.apiProvider) })}
+            {#if status.streaming}<span class="hint">{strings.speech.streamingHint}</span>{/if}
             {#if status.engine === 'local' && status.runtimeOutdated}<span class="hint">{strings.speech.updateHint}</span>{/if}
           {:else if stage === 'downloading'}
             {fill(strings.speech.downloadingModel, { model: fetching?.name ?? '' })}
@@ -215,20 +235,8 @@
         {#if status.models}
         <h2>{strings.speech.model}<InfoTip topic={strings.speech.model} text={strings.speech.modelHint} /></h2>
         <div class="models" role="radiogroup" aria-label={strings.speech.model}>
-          {#each status.models as model (model.id)}
-            <div class="switch-row model" data-testid="voice-model-{model.id}">
-              <button type="button" role="radio" class="pick" aria-checked={active === model.id} disabled={busy || status.downloading === model.id} onclick={() => pick(model)}>
-                <span class="radio" aria-hidden="true"></span>
-                <span class="text">{model.name}<span class="hint">{meta(model)}</span></span>
-              </button>
-              {#if status.downloading === model.id}
-                <LoaderCircle size={16} class="spinner" aria-label={strings.speech.downloading} />
-              {:else if model.installed}
-                <button type="button" class="icon ghost" title={fill(strings.speech.remove, { model: model.name })} aria-label={fill(strings.speech.remove, { model: model.name })} data-testid="voice-model-remove-{model.id}" disabled={busy} onclick={() => void manage('speech.uninstall', { model: model.id })}><Trash2 size={15} /></button>
-              {:else}
-                <button type="button" class="quiet small" data-testid="voice-model-download-{model.id}" disabled={busy || status.installing} onclick={() => void manage('speech.install', { model: model.id })}><Download size={14} />{strings.speech.download}</button>
-              {/if}
-            </div>
+          {#each mainModels as model (model.id)}
+            {@render modelRow(model)}
           {/each}
         </div>
         <form class="switch-row link" onsubmit={addLink}>
@@ -239,8 +247,15 @@
           </div>
         </form>
         {/if}
-        <details class="disclosure">
+        <details class="disclosure" open={legacyModels.some((model) => model.id === active)}>
           <summary>{strings.speech.advanced}</summary>
+          {#if legacyModels.length}
+            <div class="models" role="radiogroup" aria-label={strings.speech.advanced}>
+              {#each legacyModels as model (model.id)}
+                {@render modelRow(model)}
+              {/each}
+            </div>
+          {/if}
           <div class="paths">
             <label>{strings.speech.executable}<input data-testid="voice-executable" bind:value={config.executable} spellcheck="false" placeholder={status.canInstallRuntime ? '' : 'whisper-cli'} /></label>
             <label>{strings.speech.modelPath}<input data-testid="voice-model-path" bind:value={config.modelPath} spellcheck="false" /></label>

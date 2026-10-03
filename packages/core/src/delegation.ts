@@ -8,6 +8,8 @@ import { newId } from './ids.ts';
 import { assertDriverRunnable } from './drivers/index.ts';
 import { withLoad } from './threads/records.ts';
 import { nativeAgents } from './native-agents.ts';
+import { delegatedResultPage, DelegationWaits } from './delegation/results.ts';
+import type { Connection } from './router.ts';
 
 interface AgentRow { thread_id: string; root_id: string; request_id: string; fingerprint: string; profile_id: string; task: string }
 interface LetterRow { data: string; fingerprint: string }
@@ -33,6 +35,7 @@ export type ChildRoute = Omit<DelegationProfile, 'model'> & { model: string | nu
 
 /** A family of ordinary threads. No extra orchestrator model or provider process. */
 export class Delegation {
+  readonly waits: DelegationWaits;
   private closed = false;
   private readonly delivering = new Set<string>();
   private readonly jobs = new Set<Promise<void>>();
@@ -44,6 +47,7 @@ export class Delegation {
   private readonly timer: ReturnType<typeof setInterval>;
 
   constructor(private readonly core: Core) {
+    this.waits = new DelegationWaits(core, threadId => this.rows(threadId).map(row => this.member(row)));
     // Restart preserves relationships/results, but never restarts paid work: a team
     // with mail still to deliver or a child turn cut short waits for its owner.
     // A team with nothing pending has nothing to restart and stays usable.
@@ -150,7 +154,8 @@ export class Delegation {
   }
   private member(row: AgentRow): DelegatedAgent {
     const lastTurn = this.lastTurn(row.thread_id);
-    return { thread: this.core.threads.require(row.thread_id), profileId: row.profile_id, task: row.task, lastTurn, result: this.result(lastTurn) };
+    return { thread: this.core.threads.require(row.thread_id), profileId: row.profile_id, task: row.task, lastTurn, result: this.result(lastTurn),
+      ...(lastTurn && !['queued', 'running'].includes(lastTurn.status) ? { resultRef: { agentId: row.thread_id, turnId: lastTurn.id }, settlement: 'result_available' as const } : lastTurn === null ? { settlement: 'settled' as const } : {}) };
   }
   get(threadId: string): DelegationView {
     const root = this.root(threadId);
@@ -165,8 +170,10 @@ export class Delegation {
     const letters = (threadId === root.id
       ? this.core.journal.db.query('SELECT data FROM delegation_messages WHERE root_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 100').all(root.id)
       : this.core.journal.db.query('SELECT data FROM delegation_messages WHERE root_id = ? AND (sender_id = ? OR recipient_id = ?) ORDER BY created_at DESC, rowid DESC LIMIT 100').all(root.id, threadId, threadId)) as LetterRow[];
-    return { rootThreadId: root.id, config: this.config(root.id), agents, nativeAgents: nativeAgents(this.core.journal, threadId, this.core.threads.agentState.background.get(threadId), this.core.procs.liveOf(threadId)), messages: letters.reverse().map(row => JSON.parse(row.data) as AgentLetter), turnsUsed: this.used(root.id), usage };
+    return { rootThreadId: root.id, settlement: agents.some(agent => agent.lastTurn && ['queued', 'running'].includes(agent.lastTurn.status)) ? 'waiting_for_children' : 'settled', config: this.config(root.id), agents, nativeAgents: nativeAgents(this.core.journal, threadId, this.core.threads.agentState.background.get(threadId), this.core.procs.liveOf(threadId)), messages: letters.reverse().map(row => JSON.parse(row.data) as AgentLetter), turnsUsed: this.used(root.id), usage };
   }
+  resultPage(params: RpcParams<'delegation.result'>) { return delegatedResultPage(this.core, params); }
+  wait(params: RpcParams<'delegation.wait'>, connection?: Connection) { return this.waits.wait(params, connection); }
   private saveConfig(rootId: string, config: DelegationConfig): void { this.core.journal.setSetting(`delegation:${rootId}`, config); }
   configure(threadId: string, value: DelegationConfig): DelegationView {
     const thread = this.core.threads.require(threadId);
@@ -522,7 +529,7 @@ ${workflows}\n`;
     this.core.journal.db.query('DELETE FROM delegated_agents WHERE thread_id = ? OR root_id = ?').run(threadId, threadId);
     this.core.journal.db.query('DELETE FROM delegation_messages WHERE root_id = ? OR sender_id = ? OR recipient_id = ?').run(threadId, threadId, threadId);
   }
-  beginClose(): void { this.closed = true; clearInterval(this.timer); this.off(); this.summaries.clear(); this.pendingChanges.clear(); this.nativeActive.clear(); }
+  beginClose(): void { this.waits.close(); this.closed = true; clearInterval(this.timer); this.off(); this.summaries.clear(); this.pendingChanges.clear(); this.nativeActive.clear(); }
   async close(): Promise<void> {
     this.beginClose();
     // Driver cancellation releases an in-flight steer. Do not wait here before

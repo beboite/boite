@@ -1,10 +1,12 @@
 import { expect, test } from 'bun:test';
 import { existsSync, readdirSync } from 'node:fs';
 import { startTestCore, waitFor } from './harness.ts';
+import { DEFAULT_SPEECH } from '../src/speech.ts';
 
 test.skipIf(process.env.BOITE_E2E_SPEECH_LOCAL !== '1')('Whisper downloads verified artifacts, transcribes speech and removes its files', async () => {
   const harness = await startTestCore();
   try {
+    harness.core.speech.configure({ ...DEFAULT_SPEECH, model: 'small-q5_1' });
     harness.core.speech.install();
     await waitFor(() => !harness.core.speech.status().installing, 600_000);
     expect(harness.core.speech.status().error).toBeNull();

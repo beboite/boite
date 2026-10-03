@@ -103,6 +103,7 @@ export class RestartHandoff {
       if (this.resumable(run.turnId, run.threadId, 'running')) this.entries.set(run.turnId, { turnId: run.turnId, threadId: run.threadId, was: 'running' });
     }
     for (const waiting of state.queued) {
+      if (waiting.queueHold) continue;
       if (this.resumable(waiting.turnId, waiting.threadId, 'queued')) this.entries.set(waiting.turnId, { turnId: waiting.turnId, threadId: waiting.threadId, was: 'queued' });
     }
     this.save();
@@ -141,7 +142,7 @@ export class RestartHandoff {
 
   /** Whether a queued turn of the previous core can go back in line as it is. */
   requeues(turn: Turn): boolean {
-    return turn.status === 'queued' && this.inheritedTurns().get(turn.id) === 'queued' && this.resumable(turn.id, turn.threadId, 'queued');
+    return turn.status === 'queued' && !turn.queueHold && this.inheritedTurns().get(turn.id) === 'queued' && this.resumable(turn.id, turn.threadId, 'queued');
   }
 
   /**

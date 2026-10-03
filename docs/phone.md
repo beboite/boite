@@ -47,7 +47,7 @@ binds `0.0.0.0` instead, and `--host` takes a specific address:
 bun packages/core/src/main.ts --lan
 ```
 
-Settings, Machines and devices, Listen on LAN saves `listenOnLan`. The core
+Settings, Machines and updates, Listen on LAN saves `listenOnLan`. The core
 reads it at startup; enabling it binds `0.0.0.0`. Explicit `--host` or `--lan`
 flags take precedence. A running core never rebinds, so changing the switch
 requires a restart. The startup log names the address and its source.

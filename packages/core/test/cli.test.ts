@@ -467,3 +467,14 @@ test('an answer the running turn refuses to take is held for the next prompt', a
     restore();
   }
 });
+
+test('journal-check uses owner auth without a thread and refuses agent fallback', async () => {
+  writeFileSync(join(harness.dataDir,'core.json'),JSON.stringify({port:harness.server.port,host:'127.0.0.1',token:harness.token}),{mode:0o600});
+  let out='', err='';
+  const code = await runCli(['journal-check','--data-dir',harness.dataDir,'--limit','1','--json'],{
+    cwd,env:{},out:text=>{out+=text;},err:text=>{err+=text;}
+  });
+  expect(code).toBe(0); expect(err).toBe(''); expect(JSON.parse(out).checked).toBeLessThanOrEqual(1);
+  const scoped = await boite(['journal-check','--json']);
+  expect(scoped.code).toBe(1); expect(scoped.err).toContain('owner-only outside');
+});
