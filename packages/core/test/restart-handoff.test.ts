@@ -351,7 +351,7 @@ test('a handoff older than an hour resumes nothing', async () => {
     HANDOFF.maxAgeMs = -1;
     next = startNext(h);
     const core = next.core;
-    expect(core.journal.getTurn(queued.id)).toMatchObject({ status: 'error', error: CRASH_WHILE_QUEUED });
+    expect(core.journal.getTurn(queued.id)).toMatchObject({ status: 'queued', queueHold: { reason: 'core-restarted' } });
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(core.journal.listTurns(busy.threadId)).toHaveLength(1);
   } finally { await (next ?? h).stop(); if (next) await h.stop().catch(() => undefined); }

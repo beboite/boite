@@ -11,7 +11,7 @@ interface PendingLoad {
 export function lazyDriver(
   protocol: Protocol,
   load: () => Promise<Driver>,
-  options: { titles?: boolean; prepare?: boolean; sideQuestion?: boolean } = {},
+  options: { titles?: boolean; prepare?: boolean; sideQuestion?: boolean; forkSession?: boolean } = {},
 ): Driver {
   let loaded: Driver | null = null;
   let loading: Promise<Driver> | null = null;
@@ -69,6 +69,12 @@ export function lazyDriver(
   return {
     protocol,
     // Capability checks run before the first module import.
+    ...(options.forkSession ? {
+      forkSession: (ctx, checkpoint) => defer({ threadId: ctx.thread.id }, driver => {
+        if (!driver.forkSession) throw new Error(`${protocol} has no native fork implementation`);
+        return driver.forkSession(ctx, checkpoint);
+      }).result,
+    } : {}),
     ...(options.titles ? {
       title: ctx => defer({ threadId: ctx.thread.id }, driver => driver.title?.(ctx) ?? null, () => null).result,
     } : {}),

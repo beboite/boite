@@ -4,7 +4,7 @@ import type { MemoryStatus } from '@boite/contracts';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
 import { workspace } from '../lib/workspace.svelte';
-import HarnessUpdateNotices from './HarnessUpdateNotices.svelte';
+import MachinesPage from './MachinesPage.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
 const clients: FakeClient[] = [];
@@ -28,7 +28,7 @@ async function machine(id = 'one') {
 
 test('memory pressure and process stops never create a persistent global notice', async () => {
   const { client } = await machine();
-  mounted = mount(HarnessUpdateNotices, { target: document.body }); await settle();
+  mounted = mount(MachinesPage, { target: document.body, props: { mobile: true } }); await settle();
   expect(document.querySelector('[data-testid=memory-banner]')).toBeNull();
   client.emitMemory({ threadId: null, kind: 'pressure', state: 'critical', at: 1 }); await settle();
   expect(document.querySelector('[data-testid=memory-banner]')).toBeNull();
@@ -40,7 +40,7 @@ test('memory pressure and process stops never create a persistent global notice'
 
 test('pressure belongs to its machine and disconnected machines show no stale warning', async () => {
   const first = await machine('first'); const second = await machine('second');
-  mounted = mount(HarnessUpdateNotices, { target: document.body }); await settle();
+  mounted = mount(MachinesPage, { target: document.body, props: { mobile: true } }); await settle();
   second.client.emitMemory({ threadId: null, kind: 'pressure', state: 'critical', at: 1 });
   first.client.emitMemory({ threadId: null, kind: 'pressure', state: 'ok', at: 1 }); await settle();
   expect(second.store.memoryState).toBe('critical');

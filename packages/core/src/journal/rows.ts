@@ -20,6 +20,7 @@ export interface ProjectIconRow {
 }
 
 export interface ThreadRow {
+  fork_origin?: string | null;
   parent_thread_id: string | null;
   last_user_message_at?: number | null;
   id: string;
@@ -62,6 +63,7 @@ export interface TurnRow {
   error: string | null;
   execution: string | null;
   checkpoint?: string | null;
+  queue_hold?: string | null;
 }
 
 export interface MessageRow {
@@ -112,6 +114,7 @@ export function toProject(row: ProjectRow): Project {
 
 export function toThread(row: ThreadRow): ThreadSummary {
   return {
+    ...(row.fork_origin ? { forkOrigin: parseJson<ThreadSummary['forkOrigin']>(row.fork_origin, `threads.fork_origin of ${row.id}`) } : {}),
     ...(row.parent_thread_id ? { parentThreadId: row.parent_thread_id } : {}),
     lastUserMessageAt: row.last_user_message_at ?? null,
     id: row.id,
@@ -157,6 +160,7 @@ export function toTurn(row: TurnRow): Turn {
     error: row.error,
     ...(row.execution === null ? {} : { execution: parseJson<NonNullable<Turn['execution']>>(row.execution, `turns.execution of ${row.id}`) }),
     ...(row.checkpoint ? { checkpoint: parseJson<NonNullable<Turn['checkpoint']>>(row.checkpoint, `turns.checkpoint of ${row.id}`) } : {}),
+    ...(row.queue_hold ? { queueHold: parseJson<NonNullable<Turn['queueHold']>>(row.queue_hold, `turns.queue_hold of ${row.id}`) } : {}),
   };
 }
 

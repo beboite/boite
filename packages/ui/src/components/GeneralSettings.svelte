@@ -7,8 +7,6 @@
   import WorktreesCard from './WorktreesCard.svelte';
   import BrowserProfilesCard from './BrowserProfilesCard.svelte';
   import { browserBridge } from '../lib/browser-bridge';
-  import AppUpdateContent from './AppUpdateContent.svelte';
-  import { showAppUpdateUi } from '../lib/app-update.svelte';
   import { strings } from '../lib/strings';
   import { openTour } from '../lib/onboarding.svelte';
   import type { Store } from '../lib/store.svelte';
@@ -80,10 +78,4 @@
   </section>
 
   <TelemetrySettings {store} />
-  {#if showAppUpdateUi()}
-    <section class="card" id="settings-updates" data-testid="app-update-card">
-      <h2>{strings.appUpdate.heading}</h2>
-      <AppUpdateContent beforeInstall={() => undefined} />
-    </section>
-  {/if}
 </div>

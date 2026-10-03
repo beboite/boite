@@ -8,7 +8,6 @@
   import TerminalDrawer from './components/TerminalDrawer.svelte';
   import UndoToast from './components/UndoToast.svelte';
   import NotificationCard from './components/NotificationCard.svelte';
-  import HarnessUpdateNotices from './components/HarnessUpdateNotices.svelte';
   import ChatView from './components/ChatView.svelte';
 
   import ConfirmDialog from './components/ConfirmDialog.svelte';
@@ -28,6 +27,7 @@
   import { closeTabs } from './lib/panel-close';
   import { strings } from './lib/strings';
   import { experimentOn } from './lib/experiments.svelte';
+  import { installWhipEscape } from './lib/whip.svelte';
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
   import type { Store } from './lib/store.svelte';
@@ -165,6 +165,8 @@
     if (store.connectDialog) need('ConnectFlow');
     if (tour) need('Onboarding');
   });
+
+  onMount(installWhipEscape);
 
   onMount(() => {
     const stopViewport = startViewport();
@@ -640,7 +642,6 @@
     </div>
   {/if}
 
-  {#if !(tour && deferred.Onboarding)}<HarnessUpdateNotices />{/if}
 
   {#if toast.shown}
     <div

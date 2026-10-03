@@ -2,6 +2,7 @@
   import { onDestroy } from 'svelte';
   import { Clock, Minimize2 } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
+  import type { ThreadCapabilities } from '@boite/contracts';
   import { strings } from '../lib/strings';
   import { contextPercent, contextLevel } from '../lib/tokens';
   import { count, time } from '../lib/format';
@@ -18,9 +19,32 @@
   const context = $derived(thread?.context ?? null);
   const percent = $derived(context ? contextPercent(context) : null);
   const protocol = $derived(thread ? store.providerOf(thread.providerId)?.protocol : null);
+  let capabilities = $state<ThreadCapabilities | null>(null);
+  let capabilityFailed = $state(false);
+  let capabilityPending = $state(false);
+  $effect(() => {
+    const id = thread?.id;
+    const revision = thread?.selectionVersion;
+    const status = thread?.status;
+    const session = thread?.sessionId;
+    const commands = thread?.commands;
+    // Recheck controls only while their menu is visible, on a new runtime state.
+    void revision; void status; void session; void commands;
+    capabilities = null;
+    capabilityFailed = false;
+    capabilityPending = false;
+    if (!popup.open || !id || store.connection !== 'ready') return;
+    capabilityPending = true;
+    let current = true;
+    void store.threadCapabilities(id).then(value => { if (current) capabilities = value; })
+      .catch(() => { if (current) capabilityFailed = true; })
+      .finally(() => { if (current) capabilityPending = false; });
+    return () => { current = false; };
+  });
   const supported = $derived(protocol !== 'agy' && (protocol !== 'acp' || thread?.commands?.some(command => command.name === 'compact')));
   const reason = $derived(submitting || store.busy ? strings.composer.compactBusy : !thread?.sessionId
-    ? strings.composer.compactNoSession : !supported ? strings.composer.compactUnavailable : null);
+    ? strings.composer.compactNoSession : capabilityPending ? strings.app.loading
+    : store.connection !== 'ready' || capabilityFailed || (capabilities ? !capabilities.compaction.available : !supported) ? strings.composer.compactUnavailable : null);
   const exact = (n: number) => count(n);
   const segments = $derived(context?.breakdown ? [
     {name: strings.thread.contextInput, count: context.breakdown.input, kind: 'input'},

@@ -1,18 +1,17 @@
 # Desktop updates
 
-The sidebar footer shows an update icon when the app or a remote server has
-an update available or in progress. Its popup
-names the release and how long ago it was published, links to its changelog on
-GitHub, and offers installation with a restart confirmation. Release channel
-options show the installed version and let you switch channels.
+Settings, Machines and updates groups desktop, server and agent updates in its
+Updates section. Connections, pairing and synchronization follow below. The
+desktop card belongs to this computer, even while another machine's
+conversation is open.
+It names the release and its age, links to the changelog on GitHub and offers
+installation with a restart confirmation. Channel options show the installed
+version and let you switch channels.
 
-A dot marks an update ready to install. Hide reminder clears that dot for the
-version and channel, including after restarting the app. The icon stays
-available for installation; a different release lights the dot again.
-The settings navigation keeps the same icon at its foot.
-When the app is current, the icon is hidden. Settings, General keeps the manual
-check and channel controls available. Remote server entries open the owning
-machine's update card; see [server updates](server.md#updating-from-the-app).
+Manual checks and channel controls remain in Machines and updates when
+everything is current. Each remote machine has its own
+[server update card](server.md#updating-from-the-app) and owner-only
+[agent update controls](agent-updates.md).
 
 ## Boite and Boite Nightly
 
@@ -41,8 +40,8 @@ silently moved.
 ## Download and restart
 
 The first automatic check starts eight seconds after the desktop UI mounts,
-then repeats every six hours. The popup's Check for updates button checks at
-once; it stays in the popup during a check, disabled, and only makes way for
+then repeats every six hours. The card's Check for updates button checks at
+once; it stays in the card during a check, disabled, and only makes way for
 the download progress and the install action. Checks and downloads run one at
 a time. A ready update is kept until installation or
 a channel change, without downloading the same version every six hours.

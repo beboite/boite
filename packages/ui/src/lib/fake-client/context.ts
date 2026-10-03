@@ -396,9 +396,25 @@ export class FakeContext {
     return structuredClone(summary);
   }
 
-  setBackground(thread: Thread, tasks: BackgroundTask[]): void {
+  setBackground(thread: Thread, tasks: BackgroundTask[], ended: 'no-longer-reported' | 'session-ended' = 'no-longer-reported'): void {
+    const at = this.now();
+    const history = thread.backgroundHistory ??= [];
+    const parentTurnId = thread.turns.at(-1)?.id ?? null;
+    for (const task of history) {
+      if (task.state === 'running' && !tasks.some(next => next.id === task.id)) {
+        Object.assign(task, { state: ended === 'session-ended' ? 'cancelled' : 'ended', reason: ended, observedAt: at, finishedAt: at });
+      }
+    }
+    for (const task of tasks) {
+      const prior = history.find(entry => entry.id === task.id && entry.providerId === thread.providerId
+        && entry.sessionGeneration === (thread.sessionGeneration ?? 0) && (entry.state === 'running' || entry.parentTurnId === parentTurnId));
+      if (prior) { if (prior.state === 'running') Object.assign(prior, task, { observedAt: at }); }
+      else history.push({ ...task, threadId: thread.id, providerId: thread.providerId, sessionGeneration: thread.sessionGeneration ?? 0,
+        parentTurnId, state: 'running', observedAt: at, finishedAt: null, reason: null });
+    }
+    thread.backgroundHistory = history.slice(-100);
     thread.background = tasks;
-    this.emit('thread.background', { threadId: thread.id, tasks: structuredClone(tasks) });
+    this.emit('thread.background', { threadId: thread.id, tasks: structuredClone(tasks), history: structuredClone(thread.backgroundHistory) });
     this.emit('thread.updated', structuredClone(toSummary(thread)));
   }
 

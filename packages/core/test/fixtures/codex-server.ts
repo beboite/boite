@@ -35,6 +35,7 @@ let threadCounter = 0;
 let turnCounter = 0;
 let itemCounter = 0;
 let threadId = '';
+let forkBoundary = '';
 let planEnabled = false;
 let experimentalApi = false;
 /** The thread was opened `ephemeral`, the way the core asks for a title. */
@@ -576,6 +577,24 @@ function handle(method: string, raw: unknown): unknown {
       if (slow > 0) return Bun.sleep(slow).then(() => opened);
       return opened;
     }
+    case 'thread/turns/list': {
+      log(`thread/turns/list threadId=${textOf(params['threadId'])} limit=${params['limit']} sortDirection=${textOf(params['sortDirection'])}`);
+      if (process.env['CODEX_FAKE_FORK_NO_LIST'] === '1') throw new Error('unknown method thread/turns/list');
+      if (process.env['CODEX_FAKE_FORK_VERIFY_ERROR'] === '1') throw Object.assign(new Error('verification failed internally'), { code: -32603 });
+      return { data: [{ id: process.env['CODEX_FAKE_FORK_IGNORE_CUT'] === '1' ? 'later-native-turn' : forkBoundary }], nextCursor: null };
+    }
+    case 'thread/fork': {
+      log(`thread/fork threadId=${textOf(params['threadId'])} lastTurnId=${textOf(params['lastTurnId'])} cwd=${textOf(params['cwd'])} model=${textOf(params['model'])} approvalPolicy=${textOf(params['approvalPolicy'])} sandbox=${textOf(params['sandbox'])} excludeTurns=${params['excludeTurns'] === true} planEnabled=${(params['config'] as Record<string, unknown> | undefined)?.['tools.update_plan.enabled'] === true} accountHome=${process.env['CODEX_HOME'] ?? ''}`);
+      if (process.env['CODEX_FAKE_FORK_ERROR'] === '1') throw new Error('native fork refused');
+      forkBoundary = textOf(params['lastTurnId']);
+      threadId = process.env['CODEX_FAKE_FORK_SAME'] === '1' ? textOf(params['threadId']) : `codex-fork-${crypto.randomUUID()}`;
+      const answer = { thread: threadRecord(), model: textOf(params['model']), modelProvider: 'fake' };
+      return answer;
+    }
+    case 'thread/archive':
+      log(`thread/archive ${textOf(params['threadId'])}`);
+      if (process.env['CODEX_FAKE_FORK_ARCHIVE_ERROR'] === '1') throw new Error('archive refused');
+      return {};
     case 'thread/resume': {
       planEnabled = (params['config'] as Record<string, unknown> | undefined)?.['tools.update_plan.enabled'] === true;
       ephemeral = false;
@@ -664,7 +683,7 @@ process.stdin.on('data', (chunk: string) => {
         .then(() => handle(method, params))
         .then(
           (result) => send({ id, result }),
-          (error: unknown) => send({ id, error: { code: -32601, message: (error as Error).message } }),
+          (error: unknown) => send({ id, error: { code: (error as { code?: number }).code ?? -32601, message: (error as Error).message } }),
         );
       continue;
     }

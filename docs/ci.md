@@ -108,15 +108,21 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 588,000 |
 | UI files, excluding `.br` and `.gz` copies | 3,980,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 2,816,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,376,000 |
 
-The total JavaScript measure excludes native binaries and source maps. Its
-limit was set from a 2,559,701-byte build on 2026-10-01. The UI total measured
-3,949,936 bytes on 2026-10-03 with Recent's Done and Working groups, read-only
-completed threads and project picker tiles, 26,440 bytes above the 2026-10-02
-build after banked reset controls and speed switching. The total limit retains
-30,064 bytes of headroom; the entry-chunk limit is unchanged. Reproduce with
-`bun run build:ui && bun run build:core && bun scripts/ci/budgets.ts`.
+The total JavaScript measure excludes native binaries and source maps. On
+2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
+UI bytes. The orchestration additions measured 3,228,444 and 3,943,301 bytes:
+the core gains 533,240 bytes, mostly the official MCP SDK and its validation
+dependency, loaded only by `boite mcp`; the UI gains 10,992 bytes for recovery,
+task history, capabilities and fork return. The entry sizes stayed below their
+unchanged limits. These are build sizes, not startup or memory measurements.
+
+Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
+before integrating these orchestration additions. The combined build measured
+3,961,330 UI bytes and 3,239,585 emitted core JavaScript bytes on the same day.
+Reproduce it with `bun run build:ui && bun run build:core && bun scripts/ci/budgets.ts`.
+
 Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
 

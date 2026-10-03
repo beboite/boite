@@ -1,3 +1,4 @@
+import { inspectJournal } from '../src/journal/integrity.ts';
 import { mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
@@ -81,6 +82,11 @@ test('a transcript is listed from its head, imported whole, and never twice', as
   expect(answer.parts[2]).toEqual({ type: 'text', text: 'Two files. Hello.' });
   expect(JSON.stringify(thread.messages)).not.toContain('Explored');
   expect(thread.messages[3]!.parts).toEqual([{ type: 'text', text: 'Bye.' }]);
+
+  expect(inspectJournal(harness.core.journal, { limit: 500 }).issues).toEqual([]);
+  const fork = await client.call('threads.fork', { threadId: summary.id, messageId: thread.messages.at(-1)!.id });
+  expect(harness.core.threads.get(fork.id).turns).toHaveLength(2);
+  expect(inspectJournal(harness.core.journal, { limit: 500 }).issues).toEqual([]);
 
   const again = await client.call('imports.list', { projectId });
   expect(again[0]!.threadId).toBe(summary.id);

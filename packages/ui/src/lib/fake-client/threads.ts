@@ -4,6 +4,7 @@ import { protectedThreadIdsError } from '@boite/contracts';
 /** Threads and their messages: create, read, select, archive, and the turn entry points. */
 import { DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
 import { steerUser } from './user-steering';
+import { recoverTurn } from './recovery';
 import { RpcFailure } from '../client';
 import { checkCwd, checkEffort, checkModel, checkRunnable, defaultModel } from './checks';
 import { writeTitle } from './titles';
@@ -32,6 +33,7 @@ function writeFakeFork(ctx: FakeContext, source: Thread, kept: Message[], placed
     id: turnIds.get(turn.id) ?? turn.id,
     threadId: id,
     status: turn.status === 'queued' || turn.status === 'running' ? 'stopped' : turn.status,
+    queueHold: null,
     startedAt: turn.startedAt ?? turn.queuedAt,
     finishedAt: turn.finishedAt ?? now,
     usage: null,
@@ -41,6 +43,7 @@ function writeFakeFork(ctx: FakeContext, source: Thread, kept: Message[], placed
     providerId: source.providerId, accountId: source.accountId, model: source.model, effort: source.effort, speed: source.speed ?? null,
     cwd: placed?.path ?? source.cwd, branch: placed?.branch ?? source.branch, branchNamingPending: placed?.namingPending ?? false, permissionMode: source.permissionMode,
     status: 'idle', unread: false, archived: false, pinned: false,
+    forkOrigin: { threadId: source.id, messageId: kept.at(-1)?.id ?? null, turnId: kept.at(-1)?.turnId ?? null, mode: 'seeded' },
     sessionId: null, sessionGeneration: 1, selectionVersion: 0, load: null, context: null,
     createdAt: now, updatedAt: now, messages, turns, commands: [], messagesBefore: null,
   };
@@ -139,7 +142,7 @@ export async function putAway(ctx: FakeContext, thread: Thread): Promise<void> {
     pending.resolve(null);
   }
   ctx.heldAnswers.delete(thread.id);
-  if ((thread.background?.length ?? 0) > 0) ctx.setBackground(thread, []);
+  if ((thread.background?.length ?? 0) > 0) ctx.setBackground(thread, [], 'session-ended');
   closeTerminal(ctx, `terminal:${thread.id}`);
 }
 
@@ -362,6 +365,7 @@ export function threadMethods(ctx: FakeContext) {
         if (!account || !provider?.available || account.status === 'unauthenticated') {
           throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the selected account is unavailable' });
         }
+        if (thread.background?.length) ctx.setBackground(thread, [], 'session-ended');
         thread.accountId = account.id;
         thread.providerId = account.providerId;
         thread.model = params.model === undefined ? defaultModel(provider) : params.model;
@@ -658,11 +662,12 @@ export function threadMethods(ctx: FakeContext) {
       const stopped = await ctx.stopTurn(params.threadId) || childrenStopped > 0;
       // As the core: Stop on an idle thread ends what it still runs in the background.
       if (!stopped && (thread.background?.length ?? 0) > 0) {
-        ctx.setBackground(thread, []);
+        ctx.setBackground(thread, [], 'session-ended');
         return { stopped: true };
       }
       return { stopped };
     },
+    'turns.recover': params => recoverTurn(ctx, params),
     'agent.where': async (params) => {
       const thread = ctx.thread(params.threadId);
       const project = ctx.projects.find((one) => one.id === thread.projectId);

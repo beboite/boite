@@ -1,5 +1,6 @@
 import type { AgentCommand, BackgroundTask, ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
+import { BackgroundHistory, type BackgroundOwner } from './background-history.ts';
 import { saveThread, withLoad } from './records.ts';
 
 /**
@@ -13,21 +14,57 @@ export class AgentState {
    * next turn, and nothing here is worth a journal row.
    */
   readonly commands = new Map<ThreadId, AgentCommand[]>();
-  /** What each thread's agent still runs in the background. Memory only, like `commands`. */
+  /** Live native handles remain in memory; observed identities have separate durable history. */
   readonly background = new Map<ThreadId, BackgroundTask[]>();
 
-  constructor(private readonly core: Core) {}
+  readonly backgroundHistory: BackgroundHistory;
+
+  constructor(private readonly core: Core) {
+    this.backgroundHistory = new BackgroundHistory(core.journal);
+  }
 
   /** What the agent still runs in the background, told to the clients when it changed. */
-  noteBackground(threadId: ThreadId, list: BackgroundTask[]): void {
+  noteBackground(threadId: ThreadId, list: BackgroundTask[], owner?: BackgroundOwner): void {
+    const thread = this.core.journal.getThread(threadId);
+    if (thread === null) return;
+    const identity = owner ?? { providerId: thread.providerId, sessionGeneration: thread.sessionGeneration ?? 0, parentTurnId: null };
+    if (thread.providerId !== identity.providerId || (thread.sessionGeneration ?? 0) !== identity.sessionGeneration) return;
     const before = this.background.get(threadId) ?? [];
     if (JSON.stringify(before) === JSON.stringify(list)) return;
+    if (!this.backgroundHistory.observe(threadId, list, identity)) return;
+    const liveIds = new Set(this.backgroundHistory.running(threadId, identity).map(task => task.id));
+    list = list.filter(task => liveIds.has(task.id));
     if (list.length === 0) this.background.delete(threadId);
     else this.background.set(threadId, list);
-    this.core.bus.emit('thread.background', { threadId, tasks: list });
+    this.core.bus.emit('thread.background', { threadId, tasks: list, history: this.backgroundHistory.list(threadId) });
     // Every client's sidebar hears it too: a row whose turn ended still says the agent is at work.
+    this.core.bus.emit('thread.updated', withLoad(this.core, thread));
+  }
+
+  /** Native task notifications keep the original turn owner, even on a reused session. */
+  finishBackground(threadId: ThreadId, taskId: string, owner: BackgroundOwner, state: 'completed' | 'error' | 'cancelled'): void {
+    if (!this.backgroundHistory.finish(threadId, taskId, owner, state)) return;
+    const remaining = new Set(this.backgroundHistory.running(threadId, owner).map(task => task.id));
+    const list = (this.background.get(threadId) ?? []).filter(task => task.id !== taskId || remaining.has(task.id));
+    if (list.length) this.background.set(threadId, list);
+    else this.background.delete(threadId);
+    this.publishBackground(threadId, list);
+  }
+
+  cancelBackground(threadId: ThreadId): void {
     const thread = this.core.journal.getThread(threadId);
-    if (thread !== null) this.core.bus.emit('thread.updated', withLoad(this.core, thread));
+    if (!thread) return;
+    const owner = { providerId: thread.providerId, sessionGeneration: thread.sessionGeneration ?? 0, parentTurnId: null };
+    if (!this.background.has(threadId) && this.backgroundHistory.running(threadId, owner).length === 0) return;
+    this.backgroundHistory.cancelSession(threadId, owner);
+    this.background.delete(threadId);
+    this.publishBackground(threadId, []);
+  }
+
+  private publishBackground(threadId: ThreadId, tasks: BackgroundTask[]): void {
+    this.core.bus.emit('thread.background', { threadId, tasks, history: this.backgroundHistory.list(threadId) });
+    const thread = this.core.journal.getThread(threadId);
+    if (thread) this.core.bus.emit('thread.updated', withLoad(this.core, thread));
   }
 
   /**

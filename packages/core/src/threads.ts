@@ -52,6 +52,7 @@ import { threadSnapshot } from './threads/snapshot.ts';
 import { checkEffort, checkModel, checkSpeed, checkStoredEffort, checkStoredSpeed, defaultModel } from './threads/selection.ts';
 import { TurnContexts } from './threads/turn-context.ts';
 import { TurnRunner } from './threads/turn-runner.ts';
+import { markQueuedStopped } from './threads/turn-settlement.ts';
 import { ThreadFocus } from './threads/focus.ts';
 import { ProgressState } from './threads/progress.ts';
 
@@ -421,6 +422,7 @@ export class ThreadStore {
       next.selectionVersion = (thread.selectionVersion ?? 0) + 1;
     }
     if (switched) {
+      this.agentState.cancelBackground(thread.id);
       if (!['queued', 'running', 'waiting'].includes(thread.status)) {
         this.releaseAgent(thread.id);
         this.agentState.noteBackground(thread.id, []);
@@ -766,6 +768,7 @@ export class ThreadStore {
    * its exit, and with no `turn.finished` to follow nothing else would sweep it.
    */
   releaseAgent(threadId: ThreadId): void {
+    this.agentState.cancelBackground(threadId);
     releaseThread(threadId);
     this.core.procs.sweepSoon(threadId);
   }
@@ -805,22 +808,16 @@ export class ThreadStore {
   }
 
   markQueuedStopped(turnId: TurnId): void {
-    const turn = this.core.journal.getTurn(turnId);
-    if (turn === null) return;
-    const next: Turn = { ...turn, status: 'stopped', finishedAt: Date.now() };
-    this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
-      this.core.journal.append({ type: 'turn.stopped', threadId: turn.threadId, version: 1, payload: next }, () => {
-        this.core.journal.putTurn(next);
-      });
-      this.core.bus.emit('turn.finished', next);
-      this.setStatus(turn.threadId, 'idle');
-    })());
-    if (turn.execution?.operation === 'coordination') this.core.coordination.queuedCancelled(turn.threadId);
+    markQueuedStopped(this.core, turnId);
   }
 
   /** Closes the turns a stopped core left `running` or `queued` (`threads/recovery.ts`). */
   recoverStuckTurns(): number {
     return this.recovery.recoverStuckTurns();
+  }
+
+  recoverTurn(params: RpcParams<'turns.recover'>): Turn {
+    return this.recovery.recover(params);
   }
 
   runTurn(turnId: TurnId, threadId: ThreadId): Promise<void> {

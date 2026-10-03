@@ -27,6 +27,10 @@ interface RpcHandlers {
   fault?(reason: string): void;
 }
 
+export class CodexRpcError extends Error {
+  constructor(message: string, readonly code: number | null) { super(message); }
+}
+
 /**
  * One line of JSON per message, both ways. Requests carry an id and are
  * answered by it, notifications carry none, and a request the server sends is
@@ -76,7 +80,8 @@ export class CodexRpc {
     const error = message['error'];
     if (error !== undefined && error !== null) {
       const text = (error as { message?: unknown }).message;
-      entry.reject(new Error(typeof text === 'string' ? text : JSON.stringify(error)));
+      const code = (error as { code?: unknown }).code;
+      entry.reject(new CodexRpcError(typeof text === 'string' ? text : JSON.stringify(error), typeof code === 'number' ? code : null));
       return;
     }
     entry.resolve(message['result']);
