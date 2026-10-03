@@ -80,6 +80,23 @@ function browserOrigin(value: unknown): string | null {
  */
 export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck {
   const next: Partial<Settings> = { ...patch };
+  if (patch.subscriptionProxy !== undefined && patch.subscriptionProxy !== null) {
+    const proxy = patch.subscriptionProxy;
+    if (typeof proxy !== 'object' || typeof proxy.enabled !== 'boolean' || !['douane', 'cliproxyapi'].includes(proxy.kind)) {
+      return { ok: false, field: 'subscriptionProxy', message: 'subscriptionProxy must name douane or cliproxyapi and an enabled boolean' };
+    }
+    const address = (value: unknown, dashboard: boolean): string | null => {
+      if (typeof value !== 'string' || value.length > 2048 || /[\u0000-\u001f]/.test(value)) return null;
+      try {
+        const url = new URL(value.trim());
+        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || (!dashboard && url.hash)) return null;
+        return `${url.origin}${dashboard ? url.pathname : url.pathname.replace(/\/$/, '')}${dashboard ? url.hash : ''}`;
+      } catch { return null; }
+    };
+    const baseUrl = address(proxy.baseUrl, false), dashboardUrl = address(proxy.dashboardUrl, true);
+    if (!baseUrl || !dashboardUrl) return { ok: false, field: 'subscriptionProxy', message: 'subscriptionProxy URLs must be HTTP or HTTPS addresses without credentials or query; only the dashboard may have a fragment' };
+    next.subscriptionProxy = { enabled: proxy.enabled, kind: proxy.kind, baseUrl, dashboardUrl };
+  }
   // Older clients and saved settings may still carry the retired launch limits.
   Reflect.deleteProperty(next, 'maxConcurrentTurns');
   Reflect.deleteProperty(next, 'perAccountConcurrency');

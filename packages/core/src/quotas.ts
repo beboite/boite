@@ -11,6 +11,7 @@ import { claudeQuotaDetails, claudeUsageAgent, codexQuotaDetails } from './quota
 import { consumeClaudeReset, QuotaResetStore, type QuotaResetConsumer } from './quota-resets.ts';
 import { ANTIGRAVITY_QUOTA_ID, readExtraQuota } from './quota-readers.ts';
 import type { ProbeContext } from './drivers/types.ts';
+import { activeSubscriptionProxy } from './subscription-proxy.ts';
 
 export { claudeUsageAgent } from './quota-details.ts';
 
@@ -210,7 +211,9 @@ export class QuotaStore {
   }
   private base(account: Account): AccountQuota {
     const preferences = object(this.core.journal.getSetting('quota-accounts'));
-    const supported = this.isMuse(account) || ['claude', 'codex', 'grok', 'opencode'].includes(account.providerId) || account.id === ANTIGRAVITY_QUOTA_ID;
+    const provider = this.core.providers.get(account.providerId);
+    const proxied = provider && activeSubscriptionProxy(this.core, provider);
+    const supported = !proxied && (this.isMuse(account) || ['claude', 'codex', 'grok', 'opencode'].includes(account.providerId) || account.id === ANTIGRAVITY_QUOTA_ID);
     const enabled = account.id === ANTIGRAVITY_QUOTA_ID ? preferences[account.id] === true : preferences[account.id] !== false;
     return { accountId: account.id, providerId: account.providerId, providerName: account.providerId === 'opencode' ? 'OpenCode Go' : this.core.providers.get(account.providerId)?.name ?? account.providerId,
       label: account.label, enabled, status: !supported ? 'unsupported' : !enabled ? 'disabled' : 'unavailable', windows: [], checkedAt: null, error: null };
