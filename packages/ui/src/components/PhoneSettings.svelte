@@ -12,8 +12,11 @@
   const capable = secure && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   let standalone = $state(installed());
   let publicUrl = $state(untrack(() => store.settings?.publicUrl ?? ''));
-  // The field follows the saved value, which the Tailscale switch can change too.
-  $effect(() => { publicUrl = store.settings?.publicUrl ?? ''; });
+  // The field follows the saved value, which the Tailscale switch can change
+  // too. Any other setting replaces the settings object without touching it:
+  // an address being typed stays.
+  const savedUrl = $derived(store.settings?.publicUrl ?? '');
+  $effect(() => { publicUrl = savedUrl; });
   let key = $state('');
   let subscribed = $state(false);
   let busy = $state(false);
