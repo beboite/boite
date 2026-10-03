@@ -32,7 +32,7 @@ export class SettingsStore {
     return { ...DEFAULT_SETTINGS, ...patch };
   }
 
-  set(patch: Partial<Settings>): Settings {
+  set(patch: Partial<Settings>, persistPrivate?: () => void): Settings {
     // Shared with the in-memory client: a pasted address is stored as its bare origin.
     const checked = checkSettingsPatch(patch);
     if (!checked.ok) throw invalidParams(checked.message, { field: checked.field });
@@ -55,11 +55,22 @@ export class SettingsStore {
     }
     const next: Settings = { ...this.get(), ...checked.patch };
     this.core.journal.append({ type: 'settings.changed', threadId: null, version: 1, payload: next }, () => {
+      // Private credentials share the transaction, never its public event payload.
+      persistPrivate?.();
       this.core.journal.setSetting('settings', next);
     });
     this.core.scheduler.onSettingsChanged();
     this.core.procs.applySettings(next);
     this.core.bus.emit('settings.updated', next);
+    if (checked.patch.subscriptionProxy !== undefined) {
+      for (const account of this.core.accounts.list()) {
+        const provider = this.core.providers.get(account.providerId);
+        if (provider && ['claude-sdk', 'codex-appserver'].includes(provider.protocol)) {
+          this.core.journal.deleteSetting(`account-auth-rejected:${account.id}`);
+          this.core.accounts.check(account.id, true);
+        }
+      }
+    }
     return next;
   }
 }

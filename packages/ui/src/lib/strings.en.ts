@@ -1,5 +1,18 @@
 /** Every user-facing string of the UI. No literal UI text lives anywhere else. */
 export const strings = {
+  subscriptionProxy: {
+    heading: 'Subscription proxy',
+    enable: 'Use a subscription proxy',
+    hint: 'Claude and Codex use this machine\'s gateway. Limits opens its dashboard inside Boite. Other agents keep their own configuration.',
+    baseUrl: 'API URL', dashboardUrl: 'Limits dashboard URL', key: 'API key (optional)',
+    keyHint: 'Leave empty to keep the saved key. This is the proxy\'s API key, not its dashboard management key.',
+    clearKey: 'Remove saved key', save: 'Save proxy', saved: 'Proxy saved',
+    configure: 'Configure proxy', native: 'Show account limits',
+    showDashboard: 'Show proxy dashboard',
+    openDashboard: 'Open dashboard',
+    signInHint: 'Sign in with Open dashboard, then reload here. If the page stays blank, this dashboard may block embedded views.',
+    mixedContent: 'This page uses HTTPS. Set an HTTPS dashboard URL to view it here, or open the HTTP dashboard separately.',
+  },
   remoteBrowser: {
     display: 'Display', resolution: 'Page resolution', fitPhone: 'Fit this screen', phone: 'Phone', tablet: 'Tablet', rotate: 'Rotate', width: 'Width', height: 'Height', apply: 'Apply', sharedSize: 'Resolution also changes the shared tab on the PC.', restoreSize: 'Use the PC panel size', previewZoom: 'Preview zoom (this device only)', fit: 'Fit', panHint: 'Drag to pan the preview. Use the arrows to scroll the page.',
     open: 'Open live browser', experimental: 'Experimental browser sharing', enable: 'Enable on this device',
@@ -240,7 +253,7 @@ export const strings = {
     clearSearch: 'Clear search', draftTitle: 'What would you like to do?', draftHint: 'Start a task, ask a question, or pick up your work.',
     pairTitle: 'Your Boite, on your phone',
     pairBody: 'Connect to your computer to find your projects, conversations and agents here.',
-    pairStep: 'On your computer, open Settings → Machines and devices and create a pairing code.',
+    pairStep: 'On your computer, open Settings → Machines and updates and create a pairing code.',
     pairInstalled: 'Just installed Boite? Pair it here too: the iPhone app keeps its connection separately from the browser.',
     pairPrivacy: 'Scan from this app. The code is single-use and expires after 10 minutes.',
     pairingRequired: 'Pair this app',
@@ -261,10 +274,12 @@ export const strings = {
     heading: 'Machines', local: 'This PC', projects: 'Projects', recent: 'Recent',
     dynamic: 'All machines', recentHint: 'Most recent user message first',
     intro: 'Each machine runs its own agents on its own files.',
+    connections: 'Connections and devices',
+    updatesHint: 'Boite and agent versions, grouped by machine.',
     label: 'Machine name', icon: 'Machine icon', icons: { desktop: 'Desktop', laptop: 'Laptop', server: 'Server', rack: 'Server rack', cloud: 'Cloud', cpu: 'Processor' }, link: 'Pairing link', add: 'Add machine', adding: 'Connecting', connect: 'Connect',
-    addHint: 'On the other machine, open Settings, Machines and devices, make a pairing link and paste it here. Full control there lets this machine manage its accounts and settings.',
+    addHint: 'On the other machine, open Settings, Machines and updates, make a pairing link and paste it here. Full control there lets this machine manage its accounts and settings.',
     scan: 'Scan a QR code', pasteLink: 'Paste a pairing link', scanTitle: 'Scan the pairing code',
-    scanHint: 'On the other machine, open Settings, Machines and devices, create a pairing link and point the camera at its QR code.',
+    scanHint: 'On the other machine, open Settings, Machines and updates, create a pairing link and point the camera at its QR code.',
     scanStarting: 'Starting the camera', scanClose: 'Close the camera',
     scanErrors: {
       insecure: 'The camera needs an HTTPS address. Open Boite through its HTTPS address, or paste the pairing link.',
@@ -730,6 +745,11 @@ export const strings = {
   },
 
   thread: {
+    recoveryTitle: 'Prompt saved before restart',
+    recoveryBody: 'This prompt has not been sent to the agent. Resume it with its saved model and account, or remove it from the queue.',
+    recoveryTarget: 'Saved selection: {model} · {account}',
+    recoveryResume: 'Resume prompt',
+    recoveryDiscard: 'Remove from queue',
     contextDetails: 'Context',
     contextInput: 'Input',
     contextCache: 'Cached input',
@@ -811,6 +831,13 @@ export const strings = {
     finishedAt: 'done {time}',
     /** `{what}` is a list of `backgroundOne` and `backgroundMany` joined by `backgroundJoin`. */
     backgroundRunning: '{what} still running',
+    backgroundHistory: 'Native task history ({count})',
+    forkOrigin: 'Forked from', forkReturn: 'Send conclusions back', forkSummary: 'Conclusions for the original conversation',
+    forkReturned: 'Conclusions sent to the original conversation', forkSourceUnavailable: 'Original conversation unavailable',
+    forkNative: 'Native context preserved', forkSeeded: 'Visible history copied',
+    backgroundState: { running: 'Running', completed: 'Completed', error: 'Failed', cancelled: 'Interrupted', ended: 'No longer reported' },
+    backgroundRestarted: 'Interrupted by a core restart',
+    backgroundSessionEnded: 'Agent session ended',
     backgroundJoin: ', ',
     backgroundOne: { shell: '{count} shell', agent: '{count} agent', monitor: '{count} monitor', workflow: '{count} workflow', other: '{count} task' },
     backgroundMany: { shell: '{count} shells', agent: '{count} agents', monitor: '{count} monitors', workflow: '{count} workflows', other: '{count} tasks' },
@@ -1520,7 +1547,7 @@ export const strings = {
     tabs: {
       home: 'Home',
       general: 'General',
-      machines: 'Machines and devices',
+      machines: 'Machines and updates',
       advanced: 'Advanced',
       appearance: 'Appearance',
       keyboard: 'Keyboard',

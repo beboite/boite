@@ -3,7 +3,7 @@
   import type { Message, Turn } from '@boite/contracts';
   import { bytes } from '../lib/format';
   import { decodedBytes } from '../lib/attachments';
-  import { decodeBase64, saveAttachment } from '../lib/attachment-save';
+  import { browserDownload, decodeBase64, saveAttachment } from '../lib/attachment-save';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { claudeKeywords, promptCommand, promptSegments, promptText } from '../lib/message-display';
@@ -48,12 +48,15 @@
 
   /** In the shell the link saves the file into Downloads and opens it; a browser downloads it. */
   async function openFile(event: MouseEvent, part: FilePart): Promise<void> {
-    if (window.__TAURI_INTERNALS__ === undefined) return;
+    if (window.__TAURI_INTERNALS__ === undefined && !part.dataDeferred) return;
     event.preventDefault();
+    const owner = store, threadId = message.threadId, messageId = message.id, index = message.parts.indexOf(part);
     try {
-      await saveAttachment(part.name ?? strings.composer.attachAlt, decodeBase64(part.data), true);
+      const data = part.dataDeferred ? await owner.loadMessageAttachment(threadId, messageId, index) : part.data;
+      if (window.__TAURI_INTERNALS__ === undefined) browserDownload(`data:application/octet-stream;base64,${data}`, part.name ?? strings.composer.attachAlt);
+      else await saveAttachment(part.name ?? strings.composer.attachAlt, decodeBase64(data), true);
     } catch (error) {
-      store.error = error instanceof Error ? error.message : String(error);
+      owner.error = error instanceof Error ? error.message : String(error);
     }
   }
 
@@ -76,9 +79,9 @@
         : claudeKeywords(store.providerOf(store.openThread?.providerId ?? '')?.protocol, store.openThread?.model)}
       <p class="user-text" data-testid="text-part">{#if part.previewReferences?.length}<PreviewReferences text={prompt} references={part.previewReferences} {store} threadId={message.threadId} {keywords} />{:else}{#each promptSegments(prompt, promptCommand(prompt), keywords) as segment, at (at)}{#if segment.kind === 'command'}<span class="command">{segment.text}</span>{:else if segment.kind === 'plain'}{segment.text}{:else}<span class="keyword-{segment.kind}" data-testid="keyword-highlight">{segment.text}</span>{/if}{/each}{/if}</p>
     {:else if part.type === 'file'}
-      <a class="file-attachment" data-testid="file-part" href="data:application/octet-stream;base64,{part.data}" download={part.name ?? strings.composer.attachAlt} onclick={(event) => openFile(event, part)}>
+      <a class="file-attachment" data-testid="file-part" href={part.dataDeferred ? '#' : `data:application/octet-stream;base64,${part.data}`} download={part.name ?? strings.composer.attachAlt} onclick={(event) => openFile(event, part)}>
         <FileText size={20} strokeWidth={1.5} />
-        <span><span>{part.name ?? strings.composer.attachAlt}</span><small>{bytes(decodedBytes(part.data))}</small></span>
+        <span><span>{part.name ?? strings.composer.attachAlt}</span><small>{bytes(part.bytes ?? decodedBytes(part.data))}</small></span>
       </a>
     {/if}
   {/each}

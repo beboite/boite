@@ -33,9 +33,53 @@ test('a quiet revalidation retains message objects', async ({ ready }) => {
   await store.open('t-long');
   const thread = store.openThread!;
   const messages = thread.messages;
+  const asked = vi.spyOn(client, 'call');
   await store.open('t-long', false);
   expect(store.openThread).toBe(thread);
   expect(store.openThread!.messages).toBe(messages);
+  expect(asked.mock.calls.map(([method]) => method)).toEqual(['threads.get']);
+  const snapshot = await asked.mock.results[0]!.value;
+  expect(snapshot.messages).toEqual([]);
+  expect(snapshot.messagesUnchanged).toBe(true);
+  asked.mockRestore();
+});
+
+test('a core without snapshot support keeps the original opening protocol', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0 });
+  delete store.core!.features;
+  const asked = vi.spyOn(client, 'call');
+  await store.open('t-trace');
+  expect(asked.mock.calls.map(([method]) => method).slice(0, 4)).toEqual(['threads.subscribe', 'threads.get', 'permissions.list', 'questions.list']);
+  expect(store.openThread!.messages.length).toBeGreaterThan(0);
+  expect(client.coreSubscribers).toEqual(['t-trace']);
+  asked.mockRestore();
+});
+
+test('a cached attachment remains downloadable after reconnecting to an older core', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0 });
+  await store.open('t-trace');
+  delete store.core!.features;
+  const message = store.openThread!.messages[0]!, partIndex = message.parts.length;
+  const data = btoa('original attachment');
+  message.parts.push({ type: 'file', name: 'fixture.bin', mimeType: 'application/octet-stream', data: '', bytes: 19, dataDeferred: true });
+  const call = client.call.bind(client);
+  const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'messages.attachment') throw new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: 'older core' });
+    const result = await call(method, params);
+    if (method === 'messages.list' || method === 'threads.get') {
+      const original = (result as { messages: import('@boite/contracts').Message[] }).messages.find(row => row.id === message.id);
+      original?.parts.push({ type: 'file', name: 'fixture.bin', mimeType: 'application/octet-stream', data });
+    }
+    return result;
+  });
+  try {
+    const loading = store.loadMessageAttachment('t-trace', message.id, partIndex);
+    expect(store.loadMessageAttachment('t-trace', message.id, partIndex)).toBe(loading);
+    expect(await loading).toBe(data);
+    expect(message.parts[partIndex]).toMatchObject({ data });
+    expect(message.parts[partIndex]).not.toHaveProperty('dataDeferred');
+    expect(spy.mock.calls.map(([method]) => method)).toEqual(['messages.attachment', 'messages.list']);
+  } finally { spy.mockRestore(); }
 });
 
 test('revalidation refreshes JSON input when an array becomes an object with numeric keys', async ({ ready }) => {
@@ -45,6 +89,7 @@ test('revalidation refreshes JSON input when an array becomes an object with num
   const part = message.parts.find(part => part.type === 'tool')!;
   if (part.type !== 'tool') throw new Error('fixture needs a tool');
   part.input = ['file'];
+  delete store.openThread!.messagesSync;
   const call = client.call.bind(client);
   const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
     const result = await call(method, params);

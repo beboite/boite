@@ -370,6 +370,10 @@ export class WsClient implements ObservableClient {
     return this.#send(socket, method, params).then((value) => {
       if (method === 'threads.subscribe') {
         this.#subscribed.add((params as RpcParams<'threads.subscribe'>).threadId);
+      } else if (method === 'threads.get' && (value as RpcResult<'threads.get'>).opened) {
+        const request = params as RpcParams<'threads.get'>;
+        this.#subscribed.add(request.threadId);
+        if (request.open?.previous && request.open.previous !== request.threadId) this.#subscribed.delete(request.open.previous);
       }
       return value;
     });
@@ -415,7 +419,7 @@ export class WsClient implements ObservableClient {
         // A call that never answers is the first sign of a half-open socket:
         // ask once, and replace the socket if nothing at all comes back.
         if (method !== 'hello') this.#suspect(socket);
-      }, 120_000);
+      }, method === 'delegation.wait' ? Math.min(3_600_000, Math.max(0, (params as RpcParams<'delegation.wait'>).timeoutMs ?? 600_000)) + 5000 : 120_000);
       const pending: Pending = {
         method,
         resolve: (value) => { clearTimeout(timer); resolve(value as RpcResult<M>); },

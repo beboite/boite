@@ -3,6 +3,7 @@ import { messageOf, unavailable } from '../../errors.ts';
 import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import { titleRequest } from '../../titles.ts';
 import type { TitleContext } from '../types.ts';
+import { subscriptionProxyCodexArgs } from '../../subscription-proxy.ts';
 import { imageInputsOf, textOf } from './mapping.ts';
 import type { CodexThreadOpened, CodexTurnRecord, Timer } from './protocol.ts';
 import { AGENT_OWN_MODEL, CLIENT_NAME, STDERR_MAX } from './protocol.ts';
@@ -26,7 +27,7 @@ export async function titleTurn(ctx: TitleContext): Promise<string | null> {
   }
 
   let lastStderr = '';
-  const child = ctx.spawnChild(executable, profile?.launch?.args ?? [], {
+  const child = ctx.spawnChild(executable, subscriptionProxyCodexArgs(profile?.launch?.args ?? [], ctx.accountEnv), {
     cwd: ctx.thread.cwd,
     env: { ...process.env, ...ctx.accountEnv },
   });

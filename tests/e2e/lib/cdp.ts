@@ -217,7 +217,7 @@ export class BrowserPage {
 
     let page: BrowserPage | null = null;
     try {
-      const target = await waitForPageTarget(port, '', proc);
+      const target = await waitForPageTarget(port, '', proc, true);
       const socket = await openSocket(target);
       page = new BrowserPage(socket, proc, ownsUserDataDir ? userDataDir : null);
       open.add(page);
@@ -249,12 +249,10 @@ export class BrowserPage {
 
   /**
    * Drives a page that something else launched, such as the shell's WebView2
-   * started with `--remote-debugging-port`. Waits for a navigated page unless
-   * the caller names a target, so a startup blank cannot win discovery order.
-   * Closing it kills nothing.
+   * started with `--remote-debugging-port`. Closing it kills nothing.
    */
   static async attach(port: number, urlIncludes = ''): Promise<BrowserPage> {
-    const socket = await openSocket(await waitForPageTarget(port, urlIncludes, undefined, urlIncludes === ''));
+    const socket = await openSocket(await waitForPageTarget(port, urlIncludes));
     const page = new BrowserPage(socket, null, null);
     await page.send('Page.enable', {});
     await page.send('Runtime.enable', {});
@@ -496,7 +494,7 @@ export class BrowserPage {
   }
 }
 
-async function waitForPageTarget(port: number, urlIncludes = '', proc?: Subprocess, skipStartupBlank = false): Promise<TargetInfo> {
+async function waitForPageTarget(port: number, urlIncludes = '', proc?: Subprocess, allowBlank = false): Promise<TargetInfo> {
   const deadline = Date.now() + CONNECT_TIMEOUT_MS;
   let last = 'the debugging port never answered';
   for (;;) {
@@ -505,10 +503,14 @@ async function waitForPageTarget(port: number, urlIncludes = '', proc?: Subproce
       const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(1_000) });
       const targets = (await response.json()) as TargetInfo[];
       const page = targets.find(
-        (target) => target.type === 'page' && (!skipStartupBlank || target.url !== 'about:blank') && target.url.includes(urlIncludes) && typeof target.webSocketDebuggerUrl === 'string',
+        (target) => target.type === 'page' && target.url.includes(urlIncludes)
+          // A launched browser navigates its blank page itself. An attached
+          // shell must expose a committed page before scripts or reloads run.
+          && (allowBlank || urlIncludes !== '' || (target.url !== '' && !target.url.startsWith('about:blank')))
+          && typeof target.webSocketDebuggerUrl === 'string',
       );
       if (page !== undefined) return page;
-      last = `no page target among ${targets.length}`;
+      last = `no matching page target among ${targets.length}: ${JSON.stringify(targets.slice(0, 8).map(target => ({ type: target.type, url: target.url.slice(0, 200) })))}`;
     } catch (error) {
       last = error instanceof Error ? error.message : String(error);
     }

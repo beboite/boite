@@ -17,6 +17,17 @@ export async function stopTurn(ctx: FakeContext, threadId: ThreadId): Promise<bo
   pauseActivity(ctx, ctx.thread(threadId));
   const running = ctx.inFlight.get(threadId);
   let stopped = running !== undefined;
+  const thread = ctx.thread(threadId);
+  const held = thread.turns.find(turn => turn.status === 'queued' && turn.queueHold);
+  if (held) {
+    Object.assign(held, { status: 'stopped', queueHold: null, finishedAt: ctx.now() });
+    thread.status = 'idle';
+    ctx.scheduler.queued = ctx.scheduler.queued.filter(entry => entry.turnId !== held.id);
+    ctx.emit('scheduler.updated', structuredClone(ctx.scheduler));
+    ctx.emit('turn.finished', structuredClone(held));
+    ctx.touch(thread);
+    stopped = true;
+  }
   if (running) running.cancelled = true;
   for (const [requestId, pending] of [...ctx.pendingPermissions]) {
     if (pending.request.threadId !== threadId) continue;
@@ -73,7 +84,7 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
     id: `turn-${++ctx.seq}`, threadId, status: 'running', queuedAt: at,
     startedAt: at, finishedAt: null, usage: null, error: null, execution
   };
-  if (queuedTurn) Object.assign(turn, { status: 'running', startedAt: at, execution });
+  if (queuedTurn) Object.assign(turn, { status: 'running', startedAt: at, execution: queuedTurn.execution ?? execution, queueHold: null });
   else thread.turns.push(turn);
 
   const user: Message = {
@@ -100,13 +111,11 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
     if (thread.activity.goal?.status === 'complete') thread.activity.goal.dismissed = true;
     ctx.publishActivity(thread);
   }
-  thread.messages.push(user);
-  ctx.emitToThread(threadId, 'message.started', structuredClone(user));
-  ctx.emitToThread(threadId, 'message.completed', {
-    threadId,
-    messageId: user.id,
-    state: 'complete'
-  });
+  if (!queuedTurn || !thread.messages.some(message => message.turnId === turn.id && message.role === 'user')) {
+    thread.messages.push(user);
+    ctx.emitToThread(threadId, 'message.started', structuredClone(user));
+    ctx.emitToThread(threadId, 'message.completed', { threadId, messageId: user.id, state: 'complete' });
+  }
 
   thread.status = 'running';
   thread.progress = { turnId: turn.id, phase: 'starting', detail: null, at };
@@ -327,6 +336,7 @@ async function stream(
 }
 
 function pushScheduler(ctx: FakeContext, turn: Turn, phase: 'running' | 'finished'): void {
+  ctx.scheduler.queued = ctx.scheduler.queued.filter(entry => entry.turnId !== turn.id);
   if (phase === 'running') {
     ctx.scheduler.running = [
       ...ctx.scheduler.running,

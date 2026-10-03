@@ -1,5 +1,6 @@
 import type { AccountId, SchedulerState, ThreadId, Timestamp, Turn, TurnId } from '@boite/contracts';
 import type { Core } from './core.ts';
+import { logMessageOf } from './log-errors.ts';
 
 interface Entry {
   turnId: TurnId;
@@ -7,6 +8,7 @@ interface Entry {
   accountId: AccountId;
   queuedAt: Timestamp;
   reportedQueued: boolean;
+  queueHold?: Turn['queueHold'];
 }
 
 interface RunningEntry extends Entry {
@@ -34,7 +36,8 @@ export class Scheduler {
   }
 
   enqueue(turn: Turn, accountId: AccountId): void {
-    const entry = { turnId: turn.id, threadId: turn.threadId, accountId, queuedAt: turn.queuedAt, reportedQueued: false };
+    if (this.running.get(turn.threadId)?.turnId === turn.id) return;
+    const entry = { turnId: turn.id, threadId: turn.threadId, accountId, queuedAt: turn.queuedAt, reportedQueued: false, queueHold: turn.queueHold };
     this.queue.set(turn.id, entry);
     this.pump([entry]);
     this.emitUpdated();
@@ -52,6 +55,7 @@ export class Scheduler {
         threadId: entry.threadId,
         position: index,
         queuedAt: entry.queuedAt,
+        ...(entry.queueHold ? { queueHold: entry.queueHold } : {}),
       })),
     };
   }
@@ -66,9 +70,9 @@ export class Scheduler {
 
     for (const entry of this.queue.values()) {
       if (entry.threadId !== threadId) continue;
-      this.queue.delete(entry.turnId);
       this.recordQueued(entry);
       this.core.threads.markQueuedStopped(entry.turnId);
+      this.queue.delete(entry.turnId);
       this.emitUpdated();
       return true;
     }
@@ -86,7 +90,7 @@ export class Scheduler {
     // Settings and completions repump held entries; enqueue checks only its new turn.
     // Broad Map iteration still follows a reentrant start's additions and removals.
     for (const entry of entries) {
-      if (!this.core.delegation.canRun(entry.threadId)
+      if (entry.queueHold || !this.core.delegation.canRun(entry.threadId)
         || this.core.plugins.blocksAccount(entry.accountId)
         || this.running.has(entry.threadId)) continue;
       this.queue.delete(entry.turnId);
@@ -96,7 +100,9 @@ export class Scheduler {
 
   private start(entry: Entry): void {
     this.recordQueued(entry);
-    const done = this.core.threads.runTurn(entry.turnId, entry.threadId).finally(() => {
+    const done = this.core.threads.runTurn(entry.turnId, entry.threadId).catch(error => {
+      if (!this.core.journal.isClosed()) this.core.log('error', `turn finalization failed: ${logMessageOf(error)}`, { source: 'scheduler', event: 'turn.finalization-failed', threadId: entry.threadId, turnId: entry.turnId });
+    }).finally(() => {
       this.running.delete(entry.threadId);
       if (this.core.journal.isClosed()) return;
       this.pump();
@@ -111,7 +117,7 @@ export class Scheduler {
       // A restart handoff carries its queued turns to the next core as they are.
       for (const entry of this.queue.values()) {
         this.recordQueued(entry);
-        if (!this.core.threads.handoff.keepsQueued(entry.turnId)) this.core.threads.markQueuedStopped(entry.turnId);
+        if (!entry.queueHold && !this.core.threads.handoff.keepsQueued(entry.turnId)) this.core.threads.markQueuedStopped(entry.turnId);
       }
     }
     this.queue.clear();

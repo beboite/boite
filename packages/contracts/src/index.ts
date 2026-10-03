@@ -299,6 +299,32 @@ export interface ProviderCapabilities {
   resume: boolean;
 }
 
+/** Stable reasons for an unavailable thread control; clients localize these codes. */
+export type ThreadCapabilityReason = 'unsupported' | 'provider-unavailable' | 'account-unavailable' | 'archived' | 'agent-session' | 'busy' | 'not-running' | 'no-session' | 'no-command' | 'no-checkpoint' | 'selection-changed' | 'awaiting-input' | 'no-request' | 'no-history' | 'stopping' | 'updating' | 'plugins-blocked';
+export interface ThreadCapability {
+  supported: boolean;
+  available: boolean;
+  reason: ThreadCapabilityReason | null;
+}
+/** Point-in-time runtime facts. Native history availability means at least one eligible
+ * boundary exists; fork/rewind still validate the requested message and worktree. */
+export interface ThreadCapabilities {
+  threadId: ThreadId;
+  providerId: ProviderId;
+  protocol: Protocol | null;
+  selectionVersion: number;
+  steering: ThreadCapability;
+  compaction: ThreadCapability;
+  images: ThreadCapability;
+  plan: ThreadCapability;
+  approvals: ThreadCapability;
+  questions: ThreadCapability;
+  fork: { native: ThreadCapability; seeded: ThreadCapability };
+  rewind: { native: ThreadCapability; seeded: ThreadCapability };
+  sessionPreparation: ThreadCapability;
+  backgroundObservations: ThreadCapability;
+}
+
 export interface ProviderDescriptor {
   id: ProviderId;
   schemaVersion: 1;
@@ -697,7 +723,39 @@ export interface ThreadArchiveReason {
   archivedAt: Timestamp;
 }
 
+/** Provenance of a copied conversation; native history and seeded history remain distinct. */
+export const JOURNAL_INSPECTION_TABLES = ['threads', 'turns', 'messages', 'turn_requests', 'background_observations', 'coordination_letters'] as const;
+export type JournalInspectionTable = typeof JOURNAL_INSPECTION_TABLES[number];
+export interface JournalInspectionCursor { table: JournalInspectionTable; afterRowid: number }
+export interface JournalInspectionIssue {
+  table: JournalInspectionTable;
+  rowId: number;
+  code: 'missing-thread' | 'missing-turn' | 'turn-thread-mismatch' | 'terminal-streaming-message' | 'invalid-queue-hold'
+    | 'oversized-json' | 'malformed-json' | 'invalid-fork-origin' | 'fork-origin-owner-mismatch'
+    | 'invalid-background-observation' | 'background-owner-mismatch' | 'background-parent-mismatch'
+    | 'request-message-mismatch' | 'invalid-letter-owner';
+  field: string;
+  /** Fixed diagnostic expectation, never stored text, IDs, payloads or credentials. */
+  expected: string;
+}
+export interface JournalInspection {
+  issues: JournalInspectionIssue[];
+  checked: number;
+  cursor: JournalInspectionCursor | null;
+  /** Further rows remain. Concurrent pages do not form an atomic global integrity proof. */
+  truncated: boolean;
+}
+
+export interface ForkOrigin {
+  threadId: ThreadId;
+  messageId: MessageId | null;
+  turnId: TurnId | null;
+  mode: 'native' | 'seeded';
+}
+
 export interface ThreadSummary {
+  forkOrigin?: ForkOrigin;
+
   /** Durable explanation for an automatic archive; absent for manual archives and restored conversations. */
   archiveReason?: ThreadArchiveReason;
   /** Core-owned delegation relationship. Absent on ordinary conversations. */
@@ -863,6 +921,8 @@ export interface Turn {
   finishedAt: Timestamp | null;
   usage: Usage | null;
   error: string | null;
+  /** An unsent prompt retained across an unexpected restart, awaiting an explicit decision. */
+  queueHold?: { reason: 'core-restarted'; since: Timestamp } | null;
   /** Absent only for turns saved before execution snapshots were introduced. */
   execution?: TurnExecution;
   /**
@@ -1002,7 +1062,7 @@ export type MessagePart =
   | { type: 'text'; text: string; complete?: boolean; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number }; moved?: MoveNotice; startedBy?: ThreadLink; started?: ThreadLink }
   /** An image the user sent with the prompt, journalled with the message. */
   | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null }
-  | { type: 'file'; mimeType: string; data: string; name: string | null }
+  | { type: 'file'; mimeType: string; data: string; name: string | null; dataDeferred?: true; bytes?: number }
   /** An immutable published file; resolve its bytes with artifacts.read, never as a disk path. */
   | { type: 'artifact'; id: string; mimeType: string; bytes: number; name: string }
   /** The model's reasoning as the provider streams it, folded in the UI. */
@@ -1132,6 +1192,10 @@ export interface Thread extends ThreadSummary {
    * within the message count and serialized byte limits.
    */
   messagesFrom?: MessageId;
+  /** Opaque proof of the complete resume tail, including deferred tool output. Never persisted. */
+  messagesSync?: MessageSync;
+  /** The requested tail still matches messagesSync; reuse it instead of replacing it with messages. */
+  messagesUnchanged?: true;
   /** A bounded tail within the serialized page budget, oldest first. Older messages come from `messages.list`. */
   messages: Message[];
   /**
@@ -1145,6 +1209,8 @@ export interface Thread extends ThreadSummary {
    * memory like `commands`; missing on older cores.
    */
   background?: BackgroundTask[];
+  /** Durable native task observations, including terminal observations after restart. */
+  backgroundHistory?: BackgroundTaskObservation[];
   /**
    * The oldest message `messages` carries, when the thread has older ones behind
    * it; null when this page is the whole thread. It is the cursor `messages.list`
@@ -1153,6 +1219,16 @@ export interface Thread extends ThreadSummary {
   messagesBefore: MessageId | null;
   /** The turns `messages` refers to, plus any still queued or running; never the whole history. */
   turns: Turn[];
+}
+
+export interface MessageSync {
+  from: MessageId;
+  hash: string;
+}
+
+/** An opt-in opening reads requests and changes this socket's subscription in the same RPC. */
+export interface ThreadSnapshot extends Thread {
+  opened?: { permissions?: PermissionRequest[]; questions?: QuestionRequest[] };
 }
 
 /** What `threads.rewind` answers: the thread after the cut and the removed message, ready for the composer. */
@@ -1242,6 +1318,18 @@ export interface BackgroundTask {
   startedAt: Timestamp;
 }
 
+/** Observed native provider work; separate from Boite delegated child threads. */
+export interface BackgroundTaskObservation extends BackgroundTask {
+  threadId: ThreadId;
+  providerId: ProviderId;
+  sessionGeneration: number;
+  parentTurnId: TurnId | null;
+  state: 'running' | 'completed' | 'error' | 'cancelled' | 'ended';
+  observedAt: Timestamp;
+  finishedAt: Timestamp | null;
+  reason: 'provider-reported' | 'no-longer-reported' | 'session-ended' | 'core-restarted' | null;
+}
+
 // ---------------------------------------------------------------------------
 // Trace: every process a thread launched, with what it cost.
 // ---------------------------------------------------------------------------
@@ -1321,7 +1409,7 @@ export interface TraceCapability {
 
 export interface SchedulerState {
   running: { turnId: TurnId; threadId: ThreadId; startedAt: Timestamp }[];
-  queued: { turnId: TurnId; threadId: ThreadId; position: number; queuedAt: Timestamp }[];
+  queued: { turnId: TurnId; threadId: ThreadId; position: number; queuedAt: Timestamp; queueHold?: Turn['queueHold'] }[];
 }
 
 export type MemoryState = 'ok' | 'critical';
@@ -1367,6 +1455,8 @@ export interface DeletedThreadSummary extends ThreadSummary {
 }
 
 export interface Settings {
+  /** Routes Claude and Codex through this machine's optional subscription gateway. */
+  subscriptionProxy?: SubscriptionProxy | null;
   /** Subscription priority shared by this core's clients and tray. Account ids stay on their owning machine. */
   quotaOrder?: AccountId[];
   /** Days after deletion before history is purged. 0 keeps it indefinitely. Missing means 30. */
@@ -1443,6 +1533,15 @@ export interface Settings {
    * or missing: never, each agent keeps its own behaviour. Missing on older cores.
    */
   autoCompact?: AutoCompact | null;
+}
+
+export interface SubscriptionProxy {
+  enabled: boolean;
+  kind: 'douane' | 'cliproxyapi';
+  /** HTTP(S) API root, with or without its /v1 suffix. */
+  baseUrl: string;
+  /** User-facing quotas page, opened inside Boite. Never contains a token. */
+  dashboardUrl: string;
 }
 
 export type WorktreeStorage =
@@ -1655,6 +1754,8 @@ export interface CoreInfo {
   /** SHA-256 of the loaded JavaScript entry bundle, captured before serving requests. */
   bundleHash?: string;
   protocolVersion: typeof PROTOCOL_VERSION;
+  /** Optional optimizations. Their absence keeps older cores and clients interoperable. */
+  features?: { threadSnapshots?: boolean };
   os: Os;
   /** The install this core belongs to. `--channel` on its command line decides. */
   channel: Channel;
@@ -2110,6 +2211,22 @@ export const DEFAULT_DELEGATION_CONFIG: DelegationConfig = {
 };
 /** The profile every conversation has without configuring one: its own harness, account, model and effort. */
 export const CONVERSATION_PROFILE_ID = 'conversation';
+export interface DelegationResultRef { agentId: ThreadId; turnId: TurnId }
+export type DelegationSettlement = 'result_available' | 'waiting_for_children' | 'settled';
+export interface DelegationWaitResult {
+  /** Single-child completion exposes its result; a whole finished team is settled. */
+  state: DelegationSettlement;
+  timedOut: boolean;
+  agents: DelegatedAgent[];
+}
+export interface DelegationResultPage {
+  resultRef: DelegationResultRef;
+  text: string;
+  /** Offsets count Unicode code points; text contains at most 16000 UTF-16 units. */
+  offset: number;
+  nextOffset: number | null;
+  total: number;
+}
 export interface DelegatedAgent {
   thread: ThreadSummary;
   profileId: string;
@@ -2117,9 +2234,14 @@ export interface DelegatedAgent {
   lastTurn: Turn | null;
   /** Bounded final answer, without tool payloads or a summarization model call. */
   result: string | null;
+  resultRef?: DelegationResultRef;
+  /** A child's terminal result availability, not ownership of nested children. */
+  settlement?: 'result_available' | 'settled';
 }
 export interface DelegationView {
   rootThreadId: ThreadId;
+  /** This parent's direct children only. Native tasks have separate lifecycle. */
+  settlement?: 'waiting_for_children' | 'settled';
   config: DelegationConfig;
   agents: DelegatedAgent[];
   /** Provider children and traced CLI agents, including earlier message pages and process history. */
@@ -2356,6 +2478,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   /** Owner-only project policy; absent policy defaults to enabled. */
   'projects.setAutoArchiveMergedPr': { params: { projectId: ProjectId; enabled: boolean }; result: Project };
   /** Owner-only, private bounded diagnostic history, including earlier runs. */
+  'journal.inspect': { params: { cursor?: JournalInspectionCursor | null; limit?: number }; result: JournalInspection };
   'core.logs': { params: CoreLogsQuery; result: CoreLogRecord[] };
   'core.shutdown': { params: Record<string, never>; result: { ok: true } };
   'core.updateStatus': { params: { refresh?: boolean }; result: ServerUpdateStatus };
@@ -2367,6 +2490,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'delegation.spawn': { params: { threadId: ThreadId; profileId: string; task: string; title?: string; requestId: string }; result: DelegatedAgent };
   'delegation.send': { params: { threadId: ThreadId; toThreadId: ThreadId; text: string; requestId: string }; result: AgentLetter };
   'delegation.stop': { params: { threadId: ThreadId; agentId?: ThreadId }; result: { stopped: number } };
+  'delegation.result': { params: { threadId: ThreadId; agentId: ThreadId; turnId: TurnId; offset?: number; limit?: number }; result: DelegationResultPage };
+  'delegation.wait': { params: { threadId: ThreadId; agentId?: ThreadId; timeoutMs?: number }; result: DelegationWaitResult };
   'brain.status': { params: Record<string, never>; result: BrainStatus };
   'brain.configure': { params: BrainConfig; result: BrainStatus };
   /** Fetch, fast-forward and push existing commits. Never stage, stash, reset or force. */
@@ -2777,6 +2902,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
     };
     result: ThreadSummary;
   };
+  /** Supported operations and their current availability for this thread. */
+  'threads.capabilities': { params: { threadId: ThreadId }; result: ThreadCapabilities };
   /**
    * The thread with its last `MESSAGE_PAGE` messages and the cursor for what is
    * behind them. Opening a thousand-message thread costs one page, not the lot.
@@ -2790,7 +2917,16 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * with more than a page's count or serialized byte budget behind it, is
    * answered with the full page, without `messagesFrom`.
    */
-  'threads.get': { params: { threadId: ThreadId; after?: MessageId; limit?: number; compactTools?: boolean }; result: Thread };
+  'threads.get': {
+    params: {
+      threadId: ThreadId; after?: MessageId; limit?: number; compactTools?: boolean; compactFiles?: boolean;
+      /** Request a resume proof, or reuse a proof previously supplied by this core. */
+      sync?: true | MessageSync;
+      /** Subscribe after a successful snapshot, optionally replacing the previous subscription and acknowledging unread content. */
+      open?: { previous?: ThreadId; requests?: boolean; markRead?: boolean };
+    };
+    result: ThreadSnapshot;
+  };
   /**
    * One page of older messages, oldest first inside the page: what was written
    * before `before`, at most `limit` (`MESSAGE_PAGE` by default, `MESSAGE_PAGE_MAX`
@@ -2802,13 +2938,18 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * a `before` that is not a message of that thread is refused by name.
    */
   'messages.list': {
-    params: { threadId: ThreadId; before: MessageId; limit?: number; compactTools?: boolean };
+    params: { threadId: ThreadId; before: MessageId; limit?: number; compactTools?: boolean; compactFiles?: boolean };
     result: { messages: Message[]; before: MessageId | null; turns?: Turn[] };
   };
   /** The full output of a tool already visible in this conversation. No filesystem path is accepted. */
   'messages.toolOutput': {
     params: { threadId: ThreadId; messageId: MessageId; toolId: string };
     result: { output: string | null };
+  };
+  /** Read one journalled attachment on demand. No filesystem path or executable is accepted. */
+  'messages.attachment': {
+    params: { threadId: ThreadId; messageId: MessageId; partIndex: number };
+    result: { data: string };
   };
   'threads.update': {
     params: {
@@ -2860,6 +3001,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * same folder. Refused while the named message is still streaming, and on a
    * persistent agent session.
    */
+  'threads.mergeBack': { params: { threadId: ThreadId; summary: string; requestId: string }; result: AgentLetter };
   'threads.fork': { params: { threadId: ThreadId; messageId: MessageId; worktree?: boolean }; result: ThreadSummary };
   /**
    * Move a thread to another project of the same core. Its folder becomes the
@@ -2922,6 +3064,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   /** Sends user input into the active turn; false leaves it queued for a later boundary or turn. */
   'turns.steer': { params: { threadId: ThreadId; turnId: TurnId; prompt: string; attachments?: Attachment[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId: string }; result: { accepted: boolean } };
   'turns.stop': { params: { threadId: ThreadId }; result: { stopped: boolean } };
+  /** Resume or discard exactly one unsent prompt held after restart, retaining its execution selection. */
+  'turns.recover': { params: { threadId: ThreadId; turnId: TurnId; action: 'resume' | 'discard' }; result: Turn };
 
   /**
    * The requests still unanswered, in the order they were created; every thread
@@ -2991,6 +3135,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'telemetry.export': { params: Record<string, never>; result: Record<string, unknown> };
   'telemetry.retryForget': { params: Record<string, never>; result: TelemetryState };
   'settings.get': { params: Record<string, never>; result: Settings };
+  'subscriptionProxy.key': { params: { key: string | null }; result: { configured: boolean } };
+  /** Owner-only, atomic configuration and optional private-key update; an omitted key keeps it. */
+  'subscriptionProxy.configure': { params: { subscriptionProxy: SubscriptionProxy; key?: string | null }; result: Settings };
   'settings.set': { params: Partial<Settings>; result: Settings };
   /** The keybindings file as last read: the path, the entries it names, and what it got wrong. */
   'keybindings.get': { params: Record<string, never>; result: Keybindings };
@@ -3058,7 +3205,7 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserR
   'thread.commands': { threadId: ThreadId; commands: AgentCommand[] };
   /** What the agent still runs in the background, whole, each time it changes. */
   'thread.btw': { threadId: ThreadId; requestId: string; answer: string | null; error: string | null };
-  'thread.background': { threadId: ThreadId; tasks: BackgroundTask[] };
+  'thread.background': { threadId: ThreadId; tasks: BackgroundTask[]; history?: BackgroundTaskObservation[] };
 
   'turn.started': Turn;
   /** A small broadcast lets queued input advance even when its conversation is off screen. */
@@ -3257,3 +3404,6 @@ export function supportsSideQuestions(protocol: Protocol): boolean {
 }
 
 export { sideQuestionSnapshot } from './side-question-snapshot.ts';
+export { deriveThreadCapabilities, protocolSupportsSteering, type ThreadCapabilitySnapshot } from './thread-capabilities.ts';
+export { resumeAnchor, snapshotOptionsProblem } from './thread-sync.ts';
+export { previewFileData } from './file-preview.ts';

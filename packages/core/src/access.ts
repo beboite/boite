@@ -48,6 +48,7 @@ export function mayReceiveEvent(name: RpcEventName, connection: Connection): boo
  * of these methods changes the owner's trust, routes or permissions.
  */
 export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMethodName, string>([
+  ['threads.capabilities', 'read implemented controls of its own conversation without probing or starting a runtime'],
   ['threads.pullRequests', 'read the pull requests attached to its own conversation'],
   ['threads.linkPullRequest', 'attach a verified GitHub PR to its own conversation; does not publish or modify the PR'],
   ['threads.unlinkPullRequest', 'remove a conversation link without changing the GitHub PR'],
@@ -60,6 +61,8 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['agents.task.submit', 'submission by the current assignment generation, never final approval'],
   ['agents.artifact.add', 'versioned results from the current mission and working directory'],
   ['agents.decision.request', 'durable requests for a human decision without an idle provider process'],
+  ['delegation.result', 'bounded assistant-text pages from an exact terminal turn of its direct delegated child'],
+  ['delegation.wait', 'event-driven completion of its direct children; timeout/disconnect never stops their work'],
   ['delegation.get', 'its own team summaries, approved profiles and usage'],
   ['delegation.spawn', 'one direct child on an owner-approved route'],
   ['delegation.send', 'messages only between this parent and its direct children'],
@@ -75,6 +78,7 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['workflows.templates.save', 'keeping a new plan for its own project, never replacing a saved one; a template runs only through workflows.start'],
   ['collaboration.get', 'its own coordination inbox, never other conversations'],
   ['collaboration.directory', 'opted-in contacts in this project and explicitly trusted machines'],
+  ['threads.mergeBack', 'returning bounded conclusions only from this authenticated fork to its recorded origin, under existing coordination permissions'],
   ['collaboration.send', 'authenticated delivery as this thread to a separately authorized recipient'],
   ['collaboration.search', 'contacts it may already reach, found by their title, project, branch, model, resources or chat'],
   ['collaboration.read', 'the conversation of a contact it may already reach, text and tool names only; the user wants agents to help with each other'],

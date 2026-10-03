@@ -5,8 +5,10 @@ import { invalidParams, refused } from '../errors.ts';
 import type { ProviderProbe } from '../providers/probe.ts';
 import { defaultModel, needsModelDiscovery } from './selection.ts';
 import { LinkedPullRequests } from '../linked-pull-requests.ts';
+import { threadCapabilities } from './capabilities.ts';
 import { steerUser } from './user-steering.ts';
 import { readToolOutput } from './records.ts';
+import { readMessageAttachment } from './attachment-read.ts';
 
 /**
  * A turn in a folder that is gone is refused by that folder. An archived
@@ -51,6 +53,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     core.threads.sideQuestions.cancel(params.threadId, params.requestId);
     return { ok: true };
   });
+  core.router.register('threads.capabilities', params => threadCapabilities(core, params.threadId));
   const pullRequests = core.pullRequests;
   const linked = new LinkedPullRequests(core, (threadId, url) => pullRequests.detail(threadId, url));
   core.router.register('threads.pullRequestReview', async p => {
@@ -70,6 +73,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     return core.threads.compact(params.threadId, params.expectedSelectionVersion);
   });
   core.router.register('threads.rewind', (params) => core.threads.rewind(params.threadId, params.messageId));
+  core.router.register('threads.mergeBack', params => core.threads.branching.mergeBack(params));
   core.router.register('threads.fork', (params) => core.threads.fork(params.threadId, params.messageId, params.worktree === true));
   core.router.register('threads.list', (params) => core.threads.list(params));
   core.router.register('threads.create', async (params) => {
@@ -80,9 +84,19 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     await discover(provider.id, params.accountId, params.model ?? defaultModel(provider), params.effort ?? null, params.speed ?? null);
     return params.worktree === undefined ? core.threads.create(params) : core.threads.createInWorktree(params);
   });
-  core.router.register('threads.get', (params) => core.threads.get(params.threadId, params.after, params));
+  core.router.register('threads.get', (params, ctx) => {
+    const thread = core.threads.get(params.threadId, params.after, params);
+    if (!params.open) return thread;
+    ctx.connection.subscriptions.add(params.threadId);
+    if (params.open.previous && params.open.previous !== params.threadId) ctx.connection.subscriptions.delete(params.open.previous);
+    if (params.open.markRead) { core.threads.markRead(params.threadId); thread.unread = false; }
+    return { ...thread, opened: params.open.requests === false ? {} : {
+      permissions: core.threads.listPermissions(params.threadId), questions: core.threads.listQuestions(params.threadId)
+    } };
+  });
   core.router.register('messages.list', (params) => core.threads.messages(params));
   core.router.register('messages.toolOutput', (params) => readToolOutput(core, params));
+  core.router.register('messages.attachment', params => readMessageAttachment(core, params));
   core.router.register('threads.update', async (params) => {
     const thread = core.threads.require(params.threadId);
     const version = thread.selectionVersion ?? 0;
@@ -136,6 +150,10 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
   core.router.register('turns.stop', (params) => {
     core.activity.pauseAll(params.threadId);
     return { stopped: core.threads.stopTurn(params.threadId) };
+  });
+  core.router.register('turns.recover', async params => {
+    if (params.action === 'resume') await requireCwd(core, params.threadId);
+    return core.threads.recoverTurn(params);
   });
   core.router.register('turns.steer', params => steerUser(core, core.threads, params));
   core.router.register('permissions.list', (params) => core.threads.listPermissions(params.threadId));

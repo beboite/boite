@@ -10,9 +10,9 @@
   import { browserDownload, decodeBase64, saveAttachment, saveAttachmentUrl } from '../lib/attachment-save';
   import ImageViewer from './ImageViewer.svelte';
 
-  let { file, store, threadId, messageId, path, line, onclose }: {
+  let { file, store, threadId, messageId, partIndex, path, line, onclose }: {
     file?: Extract<MessagePart, { type: 'file' | 'artifact' }>; store?: Store; threadId?: string; messageId?: string;
-    path?: string; line?: number; onclose?: () => void;
+    partIndex?: number; path?: string; line?: number; onclose?: () => void;
   } = $props();
   let url = $state('');
   let mime = $state('');
@@ -76,6 +76,7 @@
   /** The name or the icon: take the file out and open it. */
   async function launch(): Promise<void> {
     if (directory && !image) return open();
+    if (file?.type === 'file' && file.dataDeferred) await load();
     if (!url) return;
     if (image) { imageRequested = true; viewing = true; return; }
     if (await save(true)) return;
@@ -87,6 +88,12 @@
   }
 
   function download(event: MouseEvent): void {
+    if (loading || saving) { event.preventDefault(); return; }
+    if (file?.type === 'file' && file.dataDeferred) {
+      event.preventDefault();
+      void load().then(async () => { if (!disposed && url && !(await save(false))) browserDownload(url, name); });
+      return;
+    }
     if (window.__TAURI_INTERNALS__ === undefined) {
       if (file?.type === 'artifact') {
         event.preventDefault();
@@ -112,11 +119,15 @@
       loading = true;
       error = ''; previewError = false; attempt++;
       if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = ''; }
+      if (file?.type === 'file') { url = ''; body = null; }
       try {
         if (file?.type === 'artifact') {
           await loadArtifact();
         } else if (file) {
-          body = decodeBase64(file.data);
+          if (file.dataDeferred && (!store || !threadId || !messageId || partIndex === undefined)) throw new Error(strings.artifacts.failed);
+          const data = file.dataDeferred ? await store!.loadMessageAttachment(threadId!, messageId!, partIndex!) : file.data;
+          if (disposed) return;
+          body = decodeBase64(data);
           mime = file.mimeType;
           if (mime === 'application/pdf' && new TextDecoder().decode(body.subarray(0, 5)) !== '%PDF-') mime = 'application/octet-stream';
           size = body.length;
@@ -153,7 +164,8 @@
   }
 
   onMount(() => {
-    void load();
+    if (file?.type === 'file' && file.dataDeferred) { mime = file.mimeType; size = file.bytes ?? 0; }
+    else void load();
     const renewal = file?.type === 'artifact' ? setInterval(() => {
       void loadArtifact().catch(() => {}); // A transient disconnect can retry on the next interval.
     }, FILE_TICKET_TTL_MS / 2) : null;
@@ -183,16 +195,16 @@
     </div>
   {/if}
   <div class="file-row">
-    <button type="button" class="identity" onclick={launch} disabled={opening || saving || (!url && !directory)} title={saved || name}
+    <button type="button" class="identity" onclick={launch} disabled={opening || saving || loading || (!url && !directory && !(file?.type === 'file' && file.dataDeferred))} title={saved || name}
       aria-label={fill(strings.chat.openFile, { name })} data-testid="artifact-launch">
       {#if image}<Image size={18} />{:else if video}<Film size={18} />{:else if audio}<Music2 size={18} />{:else}<FileText size={20} />{/if}
       <span class="label"><span class="filename">{name}</span><small>{loading ? strings.artifacts.loading : saving ? strings.artifacts.saving : saved ? strings.artifacts.saved : [bytes(size), dimensions, duration ? millis(duration * 1000) : ''].filter(Boolean).join(' · ')}</small></span>
     </button>
     {#if directory}<button class="ghost small" type="button" onclick={open} disabled={opening} data-testid="artifact-open">{strings.artifacts.open}</button>{/if}
-    {#if url}
+    {#if url || (file?.type === 'file' && file.dataDeferred)}
       {#if deferredImage}<button class="ghost small" type="button" onclick={() => imageRequested = true} data-testid="artifact-load-image">{strings.artifacts.loadImage}</button>
       {:else if rich && previewable && !inlineMedia}<button class="ghost small" type="button" onclick={() => expanded = !expanded} aria-expanded={expanded} data-testid="artifact-preview">{strings.artifacts.preview}</button>{/if}
-      <a class="ghost small download" href={url} download={name} onclick={download} data-testid="artifact-download" aria-label={strings.artifacts.download} aria-disabled={saving} title={strings.artifacts.download}>{#if saved}<Check size={16} />{:else}<Download size={16} />{/if}</a>
+      <a class="ghost small download" href={url || '#'} download={name} onclick={download} data-testid="artifact-download" aria-label={strings.artifacts.download} aria-disabled={saving || loading} title={strings.artifacts.download}>{#if saved}<Check size={16} />{:else}<Download size={16} />{/if}</a>
     {/if}
     {#if onclose}<button class="ghost small icon" type="button" onclick={onclose} aria-label={strings.artifacts.close}><X size={16} /></button>{/if}
   </div>

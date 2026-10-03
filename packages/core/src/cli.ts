@@ -32,6 +32,7 @@ export interface CliIo {
 
 export const USAGE = `usage: boite <command> [args] [--json]
 
+  mcp                            serve bounded thread-scoped tools over MCP stdio
   where                          this thread, project, cwd, branch
   thread move <project>          move this thread to another project (name,
                                  id or folder) when this turn ends
@@ -54,6 +55,7 @@ export const USAGE = `usage: boite <command> [args] [--json]
   status                         git status of the working directory
   server check|update|cancel      check or update this server, or cancel the
                                  pending update; no thread needed as owner
+  journal-check [table rowid]     bounded read-only journal diagnostics, owner only
   logs [--limit <n>] [--level info|warn|error]
                                  recent private diagnostics, owner only;
                                  --thread filters one conversation
@@ -92,6 +94,9 @@ export const USAGE = `usage: boite <command> [args] [--json]
   delegate spawn <profile> <brief>
   delegate send <thread-id> <text>
   delegate stop [thread-id]      stop one child, or pause the whole team
+  delegate wait [thread-id]      await children (--timeout <s>, default 600, max 3600)
+  delegate result <child> <turn> [offset]
+                                 read a bounded page of full assistant text
   workflow help                  the plan format, with an example
   workflow check|run <plan>      validate, or start, a JSON plan (file or inline)
   workflow list|show [run-id]    runs of this thread, or one run's steps and results
@@ -142,7 +147,7 @@ function targetOf(parsed: Parsed, env: CliIo['env']): Target {
     }
     return { url, token, threadId: own };
   }
-  const threadId = parsed.thread ?? own ?? (['server', 'logs'].includes(parsed.positional[0] ?? '') ? '' : undefined);
+  const threadId = parsed.thread ?? own ?? (['server', 'logs', 'journal-check'].includes(parsed.positional[0] ?? '') ? '' : undefined);
   if (threadId === undefined) {
     throw new Error(`not inside a Boite thread (${AGENT_ENV.threadId} is not set); pass --thread <id>`);
   }
@@ -217,6 +222,14 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
   };
 
   const commands: Record<string, () => Promise<void>> = {
+    'journal-check': async () => {
+      if (rest.length !== 0 && rest.length !== 2) throw new Usage('journal-check expects no arguments or a cursor table and rowid');
+      const cursor = rest.length ? { table: rest[0] as import('@boite/contracts').JournalInspectionTable, afterRowid: Number(rest[1]) } : null;
+      const result = await client.call('journal.inspect', { cursor, limit: parsed.limit ?? 100 });
+      print([`checked: ${result.checked}; issues: ${result.issues.length}; more: ${result.truncated ? 'yes' : 'no'}`,
+        ...result.issues.map(issue => `${issue.table} row ${issue.rowId}: ${issue.code} (${issue.field}: ${issue.expected})`),
+        ...(result.cursor ? [`next: boite journal-check ${result.cursor.table} ${result.cursor.afterRowid}`] : [])], result);
+    },
     pr: async () => {
       const action = rest[0] ?? 'list';
       if (!['list', 'refresh', 'link', 'unlink'].includes(action) || rest.length > (action === 'link' || action === 'unlink' ? 2 : 1)) throw new Usage('pr expects list, refresh, link <url> or unlink <url>');
@@ -259,7 +272,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       print([`attached: ${rest[0]}`, `message: ${message.id}`], message);
     },
     delegate: async () => {
-      const action = want(0, 'profiles, list, spawn, send or stop');
+      const action = want(0, 'profiles, list, spawn, send, stop, wait or result');
       if (action === 'profiles' || action === 'list') {
         const view = await client.call('delegation.get', { threadId });
         print([
@@ -269,7 +282,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
           ...(action === 'profiles'
             ? [...(view.config.profiles.some(p => p.id === CONVERSATION_PROFILE_ID) ? [] : [`${CONVERSATION_PROFILE_ID} "This conversation's model"`]), ...view.config.profiles.map(p => `${p.id} ${JSON.stringify(p.name)} ${p.providerId}/${p.model} effort=${p.effort ?? 'default'}`)]
             : view.agents.map(a => `${a.thread.id} ${a.thread.status} ${a.thread.providerId}/${a.thread.model} ${JSON.stringify(a.thread.title)}${a.result ? ` result=${JSON.stringify(a.result)}` : ''}`)),
-          'Results arrive automatically. Do not poll repeatedly or wait inside a running tool.',
+          'Results arrive automatically. Use delegate wait to await completion without polling.',
         ], view);
       } else if (action === 'spawn') {
         const profileId = want(1, 'a profile id from delegate profiles');
@@ -281,10 +294,17 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         const body = requiredText(rest, 2, 'delegate send needs message text', false);
         const letter = await client.call('delegation.send', { threadId, toThreadId, text: body, requestId: parsed.requestId ?? crypto.randomUUID() });
         print([`id: ${letter.id}`, `status: ${letter.status}`, 'Queued messages are not an acknowledgement or consent.'], letter);
+      } else if (action === 'wait') {
+        const result = await client.call('delegation.wait', { threadId, ...(rest[1] ? { agentId: rest[1] } : {}), ...(parsed.timeout === undefined ? {} : { timeoutMs: Math.round(parsed.timeout * 1000) }) });
+        print([`state: ${result.state}`, `timed out: ${result.timedOut}`, ...result.agents.map(agent => `${agent.thread.id} ${agent.lastTurn?.status ?? 'idle'}${agent.resultRef ? ` result turn=${agent.resultRef.turnId}` : ''}`)], result);
+      } else if (action === 'result') {
+        const agentId = want(1, 'a child thread id'), turnId = want(2, 'the result turn id');
+        const result = await client.call('delegation.result', { threadId, agentId, turnId, ...(rest[3] === undefined ? {} : { offset: Number(rest[3]) }) });
+        print([result.text, `next offset: ${result.nextOffset ?? 'complete'}`, `total: ${result.total}`], result);
       } else if (action === 'stop') {
         const result = await client.call('delegation.stop', { threadId, ...(rest[1] ? { agentId: rest[1] } : {}) });
         print([`stopped: ${result.stopped}`], result);
-      } else throw new Usage('delegate expects profiles, list, spawn, send or stop');
+      } else throw new Usage('delegate expects profiles, list, spawn, send, stop, wait or result');
     },
     agents: async () => {
       try {
@@ -467,6 +487,10 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 
   let client: CoreClient | null = null;
   try {
+    if (parsed.positional[0] === 'journal-check' && (io.env[AGENT_ENV.coreUrl] || io.env[AGENT_ENV.token] || io.env[AGENT_ENV.threadId])) throw new Error('boite journal-check is owner-only outside the agent environment');
+    if (parsed.positional[0] === 'mcp' && (!io.env[AGENT_ENV.coreUrl] || !io.env[AGENT_ENV.token] || !io.env[AGENT_ENV.threadId])) {
+      throw new Error('boite mcp requires the thread-bound agent environment; owner credential fallback is disabled');
+    }
     const target = targetOf(parsed, io.env);
     try {
       // An agent waiting for an answer holds its call up to five minutes.
@@ -475,7 +499,11 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     } catch (error) {
       throw new Error(`no core answers at ${target.url}: ${(error as Error).message}`);
     }
-    await run(parsed, io, client, target.threadId, print);
+    if (parsed.positional[0] === 'mcp') {
+      if (parsed.positional.length !== 1 || parsed.json) throw new Usage('boite mcp takes no positional arguments or --json');
+      const { runBoiteMcp } = await import('./mcp/server.ts');
+      await runBoiteMcp(client, target.threadId, io.err, () => connect(target.url, target.token, { client: { name: 'mcp-wait', version: CORE_VERSION }, requestTimeoutMs: 3_605_000 }));
+    } else await run(parsed, io, client, target.threadId, print);
     return 0;
   } catch (error) {
     if (error instanceof Usage) {

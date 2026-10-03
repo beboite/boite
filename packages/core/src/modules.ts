@@ -1,3 +1,4 @@
+import { registerJournalInspection } from './journal/integrity.ts';
 import type { Core } from './core.ts';
 import { registerPersistentAgents } from './agents/store.ts';
 import { registerAccountMethods } from './accounts.ts';
@@ -12,6 +13,7 @@ import { registerUpdateMethods } from './providers/updates.ts';
 import { registerSchedulerMethods } from './scheduler.ts';
 import { registerSessionMethods } from './sessions.ts';
 import { registerSettingsMethods } from './settings.ts';
+import { registerSubscriptionProxy } from './subscription-proxy.ts';
 import { registerThreadMethods } from './threads/rpc.ts';
 import { registerTraceMethods } from './trace.ts';
 import { registerUsageMethods } from './usage.ts';
@@ -25,11 +27,14 @@ import { registerWorktreeMethods } from './worktree-sweep.ts';
 
 /** Adding a module is one file plus one line here. `hello` is the server's own. */
 export function registerModules(core: Core): void {
+  registerJournalInspection(core);
   core.router.register('core.logs', params => core.logs.query(params));
   core.router.register('core.updateStatus', params => core.serverUpdates.status(params.refresh));
   core.router.register('core.updateInstall', params => core.serverUpdates.install(params.version));
   core.router.register('core.updateCancel', () => core.serverUpdates.cancel());
   registerPersistentAgents(core);
+  core.router.register('delegation.result', params => core.delegation.resultPage(params));
+  core.router.register('delegation.wait', (params, ctx) => core.delegation.wait(params, ctx.connection));
   core.router.register('delegation.get', params => core.delegation.get(params.threadId));
   core.router.register('delegation.configure', params => core.delegation.configure(params.threadId, params.config));
   core.router.register('delegation.spawn', params => core.delegation.spawn(params));
@@ -67,6 +72,7 @@ export function registerModules(core: Core): void {
   registerTraceMethods(core);
   registerUsageMethods(core);
   registerSettingsMethods(core);
+  registerSubscriptionProxy(core);
   registerKeybindingMethods(core);
   registerSessionMethods(core);
   registerImportMethods(core);

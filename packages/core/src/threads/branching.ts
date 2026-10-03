@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import type {
+  AgentLetter,
   Attachment,
   Message,
   MessageId,
@@ -13,7 +15,10 @@ import type {
 } from '@boite/contracts';
 import { threadActive } from '@boite/contracts';
 import type { Core } from '../core.ts';
-import { refused } from '../errors.ts';
+import { getDriver } from '../drivers/index.ts';
+import { NativeForkUnsupported } from '../drivers/native-fork.ts';
+import type { ForkedSession } from '../drivers/types.ts';
+import { invalidParams, refused } from '../errors.ts';
 import { newId } from '../ids.ts';
 import type { ThreadStore } from '../threads.ts';
 import { MOVE_NOTE_PREFIX, moveNote } from './move.ts';
@@ -68,9 +73,38 @@ export class ThreadBranching {
     // A live follow-up can cut inside a turn; its final checkpoint is then too late.
     const kept = this.core.journal.listMessagePage(threadId, { beforeRowid: rowid, limit: 1 }).messages[0] ?? null;
     const removed = this.core.journal.messageIdsFrom(threadId, rowid);
-    return this.threads.codeCheckpoints.rewind(thread, removed.turnIds, messageId, files => {
+    const keptIsBoundary = kept !== null && this.lastTurnMessage(threadId, kept.turnId)?.id === kept.id;
+    const movedBeforeSetup = firstMove(removed.messageIds.map(id => this.core.journal.getMessage(id)));
+    const checkpoint = keptIsBoundary && movedBeforeSetup === null ? this.nativeForkCheckpoint(thread, kept!.turnId) : null;
+    let native: ForkedSession | null = null;
+    try {
+      if (checkpoint) {
+        const provider = this.core.providers.require(thread.providerId);
+        const account = this.core.accounts.require(thread.accountId);
+        const ctx = this.threads.contexts.makeSessionContext({ ...thread, sessionId: null, sessionResumeAt: null }, provider, account);
+        try { native = await getDriver(provider.protocol).forkSession!(ctx, checkpoint); }
+        catch (error) { if (!(error instanceof NativeForkUnsupported)) throw error; }
+        const current = this.threads.require(threadId);
+        if (current.updatedAt !== thread.updatedAt || current.selectionVersion !== thread.selectionVersion
+          || current.sessionId !== thread.sessionId || current.sessionGeneration !== thread.sessionGeneration
+          || current.providerId !== thread.providerId || current.accountId !== thread.accountId || current.cwd !== thread.cwd
+          || this.core.journal.messageRowid(threadId, messageId) !== rowid
+          || JSON.stringify(this.core.journal.getMessage(messageId)) !== JSON.stringify(message)
+          || this.lastTurnMessage(threadId, kept!.turnId)?.id !== kept!.id
+          || JSON.stringify(this.nativeForkCheckpoint(current, kept!.turnId)) !== JSON.stringify(checkpoint)) {
+          throw refused('the source thread changed while preparing its rewind; retry the edit', { threadId, expected: 'the unchanged source boundary' });
+        }
+      }
+      const result = await this.threads.codeCheckpoints.rewind(thread, removed.turnIds, messageId, files => {
       const current = this.threads.require(threadId);
-      if (current.archived || current.cwd !== thread.cwd || threadActive(current.status) || current.updatedAt !== thread.updatedAt || this.core.journal.messageRowid(threadId, messageId) !== rowid) {
+      if (current.archived || current.cwd !== thread.cwd || threadActive(current.status) || current.updatedAt !== thread.updatedAt
+        || current.selectionVersion !== thread.selectionVersion || current.sessionId !== thread.sessionId
+        || current.sessionGeneration !== thread.sessionGeneration || current.providerId !== thread.providerId
+        || current.accountId !== thread.accountId
+        || (checkpoint && (JSON.stringify(this.nativeForkCheckpoint(current, kept!.turnId)) !== JSON.stringify(checkpoint)
+          || this.lastTurnMessage(threadId, kept!.turnId)?.id !== kept!.id))
+        || JSON.stringify(this.core.journal.getMessage(messageId)) !== JSON.stringify(message)
+        || this.core.journal.messageRowid(threadId, messageId) !== rowid) {
         throw refused('this thread changed while restoring files; retry the edit', { field: 'threadId', threadId, expected: 'the unchanged idle thread' });
       }
       // The thread moved after the kept turn: its checkpoint belongs to the old
@@ -79,7 +113,8 @@ export class ThreadBranching {
       // to where the thread is now, however many moves came between.
       const moved = firstMove(removed.messageIds.map((id) => this.core.journal.getMessage(id)));
       const note = moved === null ? undefined : this.noteSince(thread, moved.from);
-      const plan = kept === null || moved !== null ? fresh() : this.resumable(thread, kept.turnId, thread.cwd) ?? fresh();
+      const plan: SessionPlan = native ? { sessionId: native.sessionId, sessionResumeAt: null, session: 'native' }
+        : kept === null || moved !== null ? fresh() : this.resumable(thread, kept.turnId, thread.cwd) ?? fresh();
       const next: ThreadSummary = {
         ...thread,
         sessionId: plan.sessionId,
@@ -126,7 +161,13 @@ export class ThreadBranching {
       this.core.bus.emit('thread.updated', withLoad(this.core, this.threads.require(threadId)));
       const content = contentOf(message);
       return { thread: this.threads.get(threadId), ...content, session: plan.session, files };
-    });
+      });
+      await native?.release().catch(cleanup => this.core.log('error', `native rewind process cleanup failed: ${String(cleanup)}`, { threadId }));
+      return result;
+    } catch (error) {
+      if (native) await native.discard().catch(cleanup => this.core.log('error', `native rewind cleanup failed: ${String(cleanup)}`, { threadId }));
+      throw error;
+    }
   }
 
   /**
@@ -159,26 +200,57 @@ export class ThreadBranching {
     const title = `${source.title}${FORK_TITLE_SUFFIX}`;
     const placed = worktree ? await this.core.worktrees.add(id, project) : null;
     try {
-      return this.writeFork(source, target, rowid, { id, title, cwd: placed?.path ?? source.cwd, branch: placed?.branch ?? source.branch, branchNamingPending: placed?.namingPending ?? false });
+      return await this.writeFork(source, target, rowid, { id, title, cwd: placed?.path ?? source.cwd, branch: placed?.branch ?? source.branch, branchNamingPending: placed?.namingPending ?? false });
     } catch (error) {
       if (placed !== null) await this.core.worktrees.remove(id, project, placed);
       throw error;
     }
   }
 
-  private writeFork(source: ThreadSummary, target: Message, rowid: number, placed: { id: ThreadId; title: string; cwd: string; branch: string | null; branchNamingPending: boolean }): ThreadSummary {
+  private async writeFork(source: ThreadSummary, target: Message, rowid: number, placed: { id: ThreadId; title: string; cwd: string; branch: string | null; branchNamingPending: boolean }): Promise<ThreadSummary> {
     const messages: Message[] = [];
     for (const message of this.core.journal.walkMessages(source.id)) {
       messages.push(message);
       if (message.id === target.id) break;
     }
     const lastOfTurn = [...this.core.journal.walkTurnMessages(source.id, target.turnId)].at(-1)?.id === target.id;
-    // The transcript lives under the folder the agent ran in: a worktree is
-    // another folder, so it starts fresh with the history instead.
-    const plan = lastOfTurn && placed.cwd === source.cwd ? this.resumable(source, target.turnId, placed.cwd) : null;
-    return this.persistFork(source, messages, [...new Set(messages.map(message => message.turnId))].flatMap(id => {
-      const turn = this.core.journal.getTurn(id); return turn ? [turn] : [];
-    }), placed, plan, { threadId: source.id, messageId: target.id, rowid });
+    // Codex can fork into the target cwd. Claude transcript cuts stay in their original folder.
+    const checkpoint = lastOfTurn ? this.nativeForkCheckpoint(source, target.turnId) : null;
+    let native: ForkedSession | null = null;
+    let plan = lastOfTurn && placed.cwd === source.cwd ? this.resumable(source, target.turnId, placed.cwd) : null;
+    try {
+      if (checkpoint) {
+        const provider = this.core.providers.require(source.providerId);
+        const account = this.core.accounts.require(source.accountId);
+        const targetThread = { ...source, id: placed.id, cwd: placed.cwd, sessionId: null, sessionResumeAt: null };
+        const ctx = this.threads.contexts.makeSessionContext(targetThread, provider, account);
+        try { native = await getDriver(provider.protocol).forkSession!(ctx, checkpoint); }
+        catch (error) { if (!(error instanceof NativeForkUnsupported)) throw error; }
+        if (native) plan = { sessionId: native.sessionId, sessionResumeAt: null, session: 'native' };
+      }
+      const current = this.threads.require(source.id);
+      // Seeded snapshots may outlive changes to the source's next selection.
+      // Native cuts require the unchanged session, including a prepared cut
+      // discarded by an unsupported-verification fallback.
+      const preparedNative = checkpoint !== null || plan !== null;
+      if (this.core.journal.messageRowid(source.id, target.id) !== rowid
+        || JSON.stringify(this.core.journal.getMessage(target.id)) !== JSON.stringify(target)
+        || (preparedNative && (current.updatedAt !== source.updatedAt || current.selectionVersion !== source.selectionVersion
+        || current.sessionId !== source.sessionId || current.sessionGeneration !== source.sessionGeneration
+        || current.providerId !== source.providerId || current.accountId !== source.accountId || current.cwd !== source.cwd
+        || (checkpoint && JSON.stringify(this.nativeForkCheckpoint(current, target.turnId)) !== JSON.stringify(checkpoint))))) {
+        throw refused('the source thread changed while preparing its fork; retry the fork', { threadId: source.id, expected: 'the unchanged source boundary' });
+      }
+      const result = this.persistFork(source, messages, [...new Set(messages.map(message => message.turnId))].flatMap(id => {
+        const turn = this.core.journal.getTurn(id); return turn ? [turn] : [];
+      }), placed, plan, { threadId: source.id, messageId: target.id, turnId: target.turnId, rowid });
+      await native?.release().catch(cleanup => this.core.log('error', `native fork process cleanup failed: ${String(cleanup)}`, { threadId: placed.id }));
+      return result;
+    } catch (error) {
+      if (native) await native.discard().catch(cleanup => this.core.log('error', `native fork cleanup failed: ${String(cleanup)}`, { threadId: placed.id }));
+      if (this.core.journal.getThread(placed.id) === null) this.core.agents.forget(placed.id);
+      throw error;
+    }
   }
 
   /** A side answer forks the bounded snapshot it actually saw, including an unfinished main turn. */
@@ -195,13 +267,15 @@ export class ThreadBranching {
     ];
     return this.persistFork(source, [...snapshot, ...exchange], [...turns.map(turn => ({ ...turn, checkpoint: null })), sideTurn], {
       id: newId('thr_'), title: `${source.title}${FORK_TITLE_SUFFIX}`, cwd: source.cwd, branch: source.branch, branchNamingPending: false,
-    }, null, { threadId: source.id, sideQuestion: true });
+    }, null, { threadId: source.id, messageId: snapshot.at(-1)?.id ?? null, turnId: snapshot.at(-1)?.turnId ?? null, sideQuestion: true });
   }
 
   private persistFork(source: ThreadSummary, messages: Message[], originals: Turn[], placed: { id: ThreadId; title: string; cwd: string; branch: string | null; branchNamingPending: boolean }, plan: SessionPlan | null, from: Record<string, unknown>): ThreadSummary {
     const now = Date.now();
     const thread: ThreadSummary = {
       id: placed.id,
+      forkOrigin: { threadId: source.id, messageId: typeof from['messageId'] === 'string' ? from['messageId'] : null,
+        turnId: typeof from['turnId'] === 'string' ? from['turnId'] : null, mode: plan?.session ?? 'seeded' },
       projectId: source.projectId,
       title: placed.title,
       titleSource: source.titleSource,
@@ -246,6 +320,7 @@ export class ThreadBranching {
         // Still running on the source: here it is over, and whatever it does
         // next belongs to the source alone.
         status: inFlight ? 'stopped' : original.status,
+        queueHold: null,
         startedAt: original.startedAt ?? original.queuedAt,
         finishedAt: original.finishedAt ?? now,
         // What the turn spent is the source's; counting it twice would double the usage history.
@@ -277,12 +352,83 @@ export class ThreadBranching {
     return row;
   }
 
+  /** Return user-supplied conclusions as one durable coordination letter, never a Git merge. */
+  async mergeBack(params: { threadId: ThreadId; summary: string; requestId: string }): Promise<AgentLetter> {
+    const fork = this.threads.require(params.threadId);
+    const origin = fork.forkOrigin;
+    if (!origin || origin.threadId === fork.id) throw refused('threadId: expected a fork with a distinct recorded source', { threadId: fork.id });
+    const source = this.core.journal.getThread(origin.threadId);
+    if (!source) throw refused('fork source no longer exists', { threadId: origin.threadId, expected: 'an existing source thread' });
+    if (source.archived) throw refused('fork source is archived', { threadId: source.id, expected: 'an unarchived source thread' });
+    if (typeof params.summary !== 'string' || !params.summary.trim() || params.summary.length > 4000) throw invalidParams('summary: expected 1 to 4000 characters');
+    if (typeof params.requestId !== 'string' || !params.requestId.trim() || params.requestId.length > 128) throw invalidParams('requestId: expected 1 to 128 characters');
+    const requestId = `fork-return:${createHash('sha256').update(params.requestId).digest('hex')}`;
+    const to = { coreId: this.core.coordination.identity().coreId, threadId: source.id };
+    const fingerprint = createHash('sha256').update(JSON.stringify([to, params.summary, null])).digest('hex');
+    const existing = this.core.journal.db.query('SELECT data,fingerprint FROM coordination_letters WHERE thread_id = ? AND request_id = ?').get(fork.id, requestId) as { data: string; fingerprint: string } | null;
+    if (existing) {
+      if (existing.fingerprint !== fingerprint) throw refused('requestId already used for different content');
+      // A response-loss retry after restart returns its receipt even when delivery is now paused.
+      return JSON.parse(existing.data) as AgentLetter;
+    }
+    if (fork.archived) throw refused('fork is archived', { threadId: fork.id, expected: 'an unarchived fork' });
+    const sender = this.core.coordination.config(fork.id), recipient = this.core.coordination.config(source.id);
+    if (sender.mode === 'off' || sender.paused || recipient.mode === 'off') throw refused('fork return requires enabled coordination on both threads and an unpaused sender');
+    if (fork.projectId !== source.projectId && !(sender.remote && recipient.remote)) throw refused('both threads must enable coordination across projects');
+    // Coordination authenticates both actual threads and keeps their existing permission and wake policy.
+    return await this.core.coordination.send({ threadId: fork.id, to, text: params.summary, requestId });
+  }
+
+  /** Indexed metadata existence checks: no provider load or transcript hydration. */
+  nativeForkAvailable(thread: ThreadSummary): boolean {
+    const provider = this.core.providers.require(thread.providerId);
+    const codex = getDriver(provider.protocol).forkSession !== undefined;
+    if (!codex && provider.protocol !== 'claude-sdk') return false;
+    if (codex && (threadActive(thread.status) || this.threads.runner.handles.has(thread.id) || thread.sessionId === null)) return false;
+    const nativeConditions = codex
+      ? "AND t.status = 'done' AND json_extract(t.checkpoint, '$.sessionId') = ? AND json_extract(t.execution, '$.sessionGeneration') = ?"
+      : "AND t.status IN ('done','stopped','error') AND (SELECT COUNT(*) FROM messages u WHERE u.thread_id = t.thread_id AND u.turn_id = t.id AND u.role = 'user') <= 1";
+    return this.core.journal.db.query(`SELECT 1 FROM turns t WHERE t.thread_id = ?
+      AND json_extract(t.checkpoint, '$.sessionId') IS NOT NULL AND length(json_extract(t.checkpoint, '$.entry')) > 0
+      AND json_extract(t.execution, '$.providerId') = ? AND json_extract(t.execution, '$.accountId') = ?
+      ${nativeConditions}
+      AND (SELECT state FROM messages m WHERE m.thread_id = t.thread_id AND m.turn_id = t.id ORDER BY rowid DESC LIMIT 1) = 'complete'
+      LIMIT 1`).get(thread.id, thread.providerId, thread.accountId, ...(codex ? [thread.sessionId!, thread.sessionGeneration ?? 0] : [])) !== null;
+  }
+
+  nativeRewindAvailable(thread: ThreadSummary): boolean {
+    return this.nativeForkAvailable(thread);
+  }
+
+  private lastTurnMessage(threadId: ThreadId, turnId: TurnId): { id: string; state: string } | null {
+    return this.core.journal.db.query('SELECT id,state FROM messages WHERE thread_id = ? AND turn_id = ? ORDER BY rowid DESC LIMIT 1').get(threadId, turnId) as { id: string; state: string } | null;
+  }
+
+  private nativeForkCheckpoint(thread: ThreadSummary, turnId: TurnId): { sessionId: string; entry: string } | null {
+    const provider = this.core.providers.require(thread.providerId);
+    if (!getDriver(provider.protocol).forkSession || threadActive(thread.status) || this.threads.runner.handles.has(thread.id)) return null;
+    const turn = this.core.journal.getTurn(turnId);
+    if (turn?.status !== 'done' || !turn.checkpoint || turn.checkpoint.sessionId !== thread.sessionId) return null;
+    if (turn.execution?.providerId !== thread.providerId || turn.execution.accountId !== thread.accountId
+      || turn.execution.sessionGeneration !== (thread.sessionGeneration ?? 0)) return null;
+    const last = this.lastTurnMessage(thread.id, turnId);
+    if (!last || last.state !== 'complete') return null;
+    // Move notices name a different native cwd; a session from that folder cannot be adopted here.
+    let past = false;
+    for (const message of this.core.journal.walkMessages(thread.id)) {
+      if (message.id === last.id) past = true;
+      else if (past && firstMove([message]) !== null) return null;
+    }
+    return turn.checkpoint;
+  }
+
   /**
    * The session plan that resumes `turnId`'s own checkpoint: the turn's session
    * cut at its last entry. Null when the turn left none, ran on another account
    * or provider, or is still under way.
    */
   private resumable(thread: ThreadSummary, turnId: TurnId, cwd: string): SessionPlan | null {
+    if (this.core.providers.require(thread.providerId).protocol !== 'claude-sdk') return null;
     const turn = this.core.journal.getTurn(turnId);
     const checkpoint = turn?.checkpoint ?? null;
     if (turn === null || checkpoint === null || cwd !== thread.cwd) return null;

@@ -12,6 +12,18 @@
 import type { Translation } from './i18n.svelte';
 
 export const fr: Translation = {
+  subscriptionProxy: {
+    heading: 'Proxy d\'abonnements', enable: 'Utiliser un proxy d\'abonnements',
+    hint: 'Claude et Codex utilisent la passerelle de cette machine. Limites ouvre son tableau de bord dans Boite. Les autres agents gardent leur configuration.',
+    baseUrl: 'URL de l\'API', dashboardUrl: 'URL du tableau de bord des limites', key: 'Clé API (facultative)',
+    keyHint: 'Laissez vide pour garder la clé enregistrée. Utilisez la clé API du proxy, pas sa clé de gestion du tableau de bord.',
+    clearKey: 'Retirer la clé enregistrée', save: 'Enregistrer le proxy', saved: 'Proxy enregistré',
+    configure: 'Configurer le proxy', native: 'Voir les limites des comptes',
+    showDashboard: 'Voir le tableau du proxy',
+    openDashboard: 'Ouvrir le tableau',
+    signInHint: 'Connectez-vous avec Ouvrir le tableau, puis rechargez ici. Si la page reste vide, ce tableau peut refuser les vues intégrées.',
+    mixedContent: "Cette page utilise HTTPS. Configurez une URL de tableau HTTPS pour l'afficher ici, ou ouvrez le tableau HTTP séparément.",
+  },
   remoteBrowser: {
     display: 'Affichage', resolution: 'Résolution de la page', fitPhone: 'Adapter à cet écran', phone: 'Téléphone', tablet: 'Tablette', rotate: 'Pivoter', width: 'Largeur', height: 'Hauteur', apply: 'Appliquer', sharedSize: 'La résolution change aussi l’onglet partagé sur le PC.', restoreSize: 'Reprendre la taille du panneau PC', previewZoom: 'Zoom de l’aperçu (cet appareil seulement)', fit: 'Ajuster', panHint: 'Glissez pour déplacer l’aperçu. Utilisez les flèches pour défiler dans la page.',
     open: 'Ouvrir le navigateur en direct', experimental: 'Partage du navigateur expérimental', enable: 'Activer sur cet appareil',
@@ -249,7 +261,7 @@ export const fr: Translation = {
     clearSearch: 'Effacer la recherche', draftTitle: 'Que voulez-vous faire ?', draftHint: 'Lancez une tâche, posez une question ou reprenez votre travail.',
     pairTitle: 'Votre Boite, sur votre téléphone',
     pairBody: 'Connectez votre ordinateur pour retrouver ici vos projets, vos conversations et vos agents.',
-    pairStep: 'Sur votre ordinateur, ouvrez Réglages → Machines et appareils et créez un code d’appairage.',
+    pairStep: 'Sur votre ordinateur, ouvrez Réglages → Machines et mises à jour et créez un code d’appairage.',
     pairInstalled: 'Vous venez d’installer Boite ? Associez-la ici aussi : sur iPhone, l’application garde sa connexion séparément du navigateur.',
     pairPrivacy: 'Scannez depuis cette application. Le code est à usage unique et expire après 10 minutes.',
     pairingRequired: 'Associer cette application',
@@ -270,10 +282,12 @@ export const fr: Translation = {
     heading: 'Machines', local: 'Ce PC', projects: 'Projets', recent: 'Récent',
     dynamic: 'Toutes les machines', recentHint: 'Message le plus récent en premier',
     intro: 'Chaque machine exécute ses propres agents sur ses propres fichiers.',
+    connections: 'Connexions et appareils',
+    updatesHint: 'Les versions de Boite et des agents, regroupées par machine.',
     label: 'Nom de la machine', icon: 'Icône de la machine', icons: { desktop: 'Ordinateur fixe', laptop: 'Portable', server: 'Serveur', rack: 'Baie', cloud: 'Cloud', cpu: 'Processeur' }, link: "Lien d'appairage", add: 'Ajouter une machine', adding: 'Connexion', connect: 'Connecter',
-    addHint: 'Sur l\'autre machine, ouvrez Réglages, Machines et appareils, créez un lien d\'appairage et collez-le ici. Le contrôle total, là-bas, laisse cette machine gérer ses comptes et ses réglages.',
+    addHint: 'Sur l\'autre machine, ouvrez Réglages, Machines et mises à jour, créez un lien d\'appairage et collez-le ici. Le contrôle total, là-bas, laisse cette machine gérer ses comptes et ses réglages.',
     scan: 'Scanner un QR code', pasteLink: "Coller un lien d'appairage", scanTitle: "Scannez le code d'appairage",
-    scanHint: "Sur l'autre machine, ouvrez Réglages, Machines et appareils, créez un lien d'appairage et visez son QR code avec la caméra.",
+    scanHint: "Sur l'autre machine, ouvrez Réglages, Machines et mises à jour, créez un lien d'appairage et visez son QR code avec la caméra.",
     scanStarting: 'Démarrage de la caméra', scanClose: 'Fermer la caméra',
     scanErrors: {
       insecure: "La caméra demande une adresse HTTPS. Ouvrez Boite par son adresse HTTPS, ou collez le lien d'appairage.",
@@ -713,6 +727,11 @@ export const fr: Translation = {
   },
 
   thread: {
+    recoveryTitle: 'Message conservé avant le redémarrage',
+    recoveryBody: "Ce message n'a pas été envoyé à l'agent. Reprenez-le avec son modèle et son compte enregistrés, ou retirez-le de la file.",
+    recoveryTarget: 'Sélection enregistrée : {model} · {account}',
+    recoveryResume: 'Reprendre le message',
+    recoveryDiscard: 'Retirer de la file',
     contextDetails: 'Contexte',
     contextInput: 'Entrée',
     contextCache: 'Entrée en cache',
@@ -788,6 +807,13 @@ export const fr: Translation = {
     findNext: 'Résultat suivant (Entrée)',
     finishedAt: 'fini à {time}',
     backgroundRunning: '{what} encore en cours',
+    backgroundHistory: 'Historique des tâches natives ({count})',
+    forkOrigin: 'Dérivé de', forkReturn: 'Renvoyer les conclusions', forkSummary: "Conclusions pour la conversation d'origine",
+    forkReturned: "Conclusions envoyées à la conversation d'origine", forkSourceUnavailable: "Conversation d'origine indisponible",
+    forkNative: 'Contexte natif conservé', forkSeeded: 'Historique visible copié',
+    backgroundState: { running: 'En cours', completed: 'Terminée', error: 'Échec', cancelled: 'Interrompue', ended: "Plus signalée par l'agent" },
+    backgroundRestarted: 'Interrompue par un redémarrage du core',
+    backgroundSessionEnded: "Session de l'agent terminée",
     backgroundJoin: ', ',
     backgroundOne: { shell: '{count} shell', agent: '{count} agent', monitor: '{count} moniteur', workflow: '{count} workflow', other: '{count} tâche' },
     backgroundMany: { shell: '{count} shells', agent: '{count} agents', monitor: '{count} moniteurs', workflow: '{count} workflows', other: '{count} tâches' },
@@ -1460,7 +1486,7 @@ export const fr: Translation = {
     tabs: {
       home: 'Accueil',
       general: 'Général',
-      machines: 'Machines et appareils',
+      machines: 'Machines et mises à jour',
       advanced: 'Avancé',
       appearance: 'Apparence',
       keyboard: 'Clavier',

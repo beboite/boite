@@ -28,6 +28,7 @@ function attached(remote: boolean): { connection: ServerConnection; sent: Sent[]
   const sent: Sent[] = [];
   const connection = new ServerConnection(harness.core, remote);
   connection.attach({
+    getBufferedAmount: () => 0,
     send: (frame: string, compress?: boolean) => { sent.push({ frame: JSON.parse(frame), compressed: compress }); return frame.length; },
     close: () => undefined,
   } as unknown as Parameters<ServerConnection['attach']>[0]);
@@ -77,6 +78,17 @@ describe('what a remote client is sent', () => {
       'message.delta', 'turn.finished', 'message.delta', 'response 7',
     ]);
     connection.close(1000, 'done');
+  });
+
+  test('pacing flushes bounded distinct parts before the next frame', () => {
+    const { connection, sent } = attached(true);
+    for (let index = 0; index < 1025; index++) connection.sendEvent('message.delta', delta('x', `msg_${index}`));
+    expect(sent).toHaveLength(1024);
+    connection.sendResponse({ jsonrpc: '2.0', id: 1, result: 'ok' });
+    expect(sent).toHaveLength(1026);
+    expect(sent[1024]!.frame.params?.text).toBe('x');
+    expect(sent[1025]!.frame.id).toBe(1);
+    connection.close(1000);
   });
 
   test('closing drops what was held', async () => {
