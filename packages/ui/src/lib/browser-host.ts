@@ -47,7 +47,7 @@ export function hostBrowser(store: Store, threadId: string): () => void {
         if (!(remote ? remoteOn() : agentOn())) throw new Error(remote ? 'browser sharing is no longer enabled on this desktop' : 'agent browser control is off on this desktop');
         if (remote) {
           const surface = panel.active;
-          if (!surface || surface.kind !== 'browser' || (request.tabId && request.tabId !== surface.id)) throw new Error('open a browser tab in this conversation on the desktop first');
+          if (!panel.isOpen || !surface || surface.kind !== 'browser' || (request.tabId && request.tabId !== surface.id)) throw new Error('open a browser tab in this conversation on the desktop first');
           const revision = consentRevision;
           const assertCurrent = () => {
             if (!current() || revision !== consentRevision || panel.active?.id !== surface.id) throw new Error('the shared browser conversation or tab changed');
@@ -93,12 +93,15 @@ export function hostBrowser(store: Store, threadId: string): () => void {
       await client.call('browser.complete', { requestId: request.requestId, ...(error ? { error } : { result }) }).catch(() => {});
     })();
   });
-  // Paired devices show the conversation's browser tab while it exists: the
-  // core hears at once when the agent opens or closes one.
+  // Paired devices show the conversation's browser tab while its view exists:
+  // the panel open on a browser tab. A tab kept from an earlier session, or
+  // behind a shut panel, has no view to capture. The core hears at once when
+  // the agent opens or closes one.
   let live = false;
+  const shared = () => isExperimentEnabled('remote-browser') && panel.isOpen && panel.active?.kind === 'browser';
   const renew = () => {
     const agent = isExperimentEnabled('agent-browser-control'), remote = isExperimentEnabled('remote-browser');
-    live = remote && panel.surfaces.some(s => s.kind === 'browser');
+    live = shared();
     if (!stopped && store.client === client && store.machineId === machine && store.openThread?.id === threadId) {
       void client.call('browser.host', agent || remote ? { threadId, enabled: true, allowAgentControl: agent, remote, live } : { threadId, enabled: false }).catch(() => {});
     }
@@ -107,7 +110,7 @@ export function hostBrowser(store: Store, threadId: string): () => void {
   // its cleanup would release the host while the agent's open waits.
   untrack(renew);
   const timer = setInterval(renew, 10000);
-  const watch = setInterval(() => { if (live !== (isExperimentEnabled('remote-browser') && panel.surfaces.some(s => s.kind === 'browser'))) renew(); }, 1000);
+  const watch = setInterval(() => { if (live !== shared()) renew(); }, 1000);
   const offExperiments = subscribeExperiments(() => { consentRevision++; renew(); });
   return () => {
     stopped = true; clearInterval(timer); clearInterval(watch); off(); offExperiments();

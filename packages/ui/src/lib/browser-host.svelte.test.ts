@@ -156,6 +156,13 @@ test('sharing alone hosts the browser for viewers but not for the agent, and sca
   expect(shot).toMatchObject({ format: 'jpeg', quality: 75 });
   expect(shot).not.toHaveProperty('clip');
   expect(panel.active?.id).toBe(surface.id);
+  // A shut panel draws no view: viewers hear the tab is gone, and a frame asks for the panel.
+  panel.hide();
+  await vi.waitFor(() => expect(client.call).toHaveBeenLastCalledWith('browser.host', { threadId: 'remote-thread', enabled: true, allowAgentControl: false, remote: true, live: false }), { timeout: 2500 });
+  requested({ threadId: 'remote-thread', requestId: 'shut', action: { kind: 'remote-frame' } });
+  await vi.waitFor(() => expect(completed.get('shut')?.error).toContain('open a browser tab'));
+  panel.activate(surface.id);
+  await vi.waitFor(() => expect(client.call).toHaveBeenLastCalledWith('browser.host', { threadId: 'remote-thread', enabled: true, allowAgentControl: false, remote: true, live: true }), { timeout: 2500 });
   // Paired devices hear within a second that the conversation has no browser tab left.
   panel.close(surface.id);
   await vi.waitFor(() => expect(client.call).toHaveBeenLastCalledWith('browser.host', { threadId: 'remote-thread', enabled: true, allowAgentControl: false, remote: true, live: false }), { timeout: 2500 });
