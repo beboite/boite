@@ -34,6 +34,8 @@
   import { setZoom, stepZoom, wantedZoom, ZOOM_DEFAULT, zoomKey } from './lib/zoom';
   import { appName, appUpdater } from './lib/app-update.svelte';
   import MobileNavigation from './components/MobileNavigation.svelte';
+  import MobileConnect from './components/MobileConnect.svelte';
+  import { attentionCount, syncAppBadge } from './lib/badge';
   import { startViewport } from './lib/viewport';
   import { WsClient } from './lib/client';
   import { listenForInstall } from './lib/pwa';
@@ -53,6 +55,9 @@
   let mobileScreen = $state<'chat' | 'threads' | 'activity'>('chat');
   const mobileRecovery = $derived(!inShell && (store.pairingRequired || (!store.core && store.connection !== 'ready'))
     && !workspace.machines.some(machine => machine.store.connection === 'ready'));
+  // Wider than a phone (an iPhone on its side, a tablet, a desktop browser)
+  // a lost or revoked pairing gets the same screen rather than a stale page.
+  const wideRecovery = $derived(!narrow.current && mobileRecovery && store.pairingRequired && store.page !== 'settings');
   let documentVisible = $state(!document.hidden);
   // What the first screen does not draw stays out of the first chunk: the right
   // panel and its six surfaces, the palette and the two dialogs were a third of
@@ -244,7 +249,7 @@
     const error = store.error;
     // Missing/revoked phone credentials have a persistent recovery screen.
     // Keep other errors (including a failed pairing attempt) visible.
-    const pairingNotice = !inShell && narrow.current && store.pairingRequired
+    const pairingNotice = !inShell && (narrow.current || wideRecovery) && store.pairingRequired
       && (error === strings.errors.unpaired || error === strings.errors.revoked);
     if (!error || pairingNotice) {
       toast.hide();
@@ -301,12 +306,14 @@
 
   // What wants the user rides the document title, so the taskbar and a browser
   // tab say "(2) Boite" while the window is somewhere behind: the threads of
-  // every connected machine that wait on an answer or finished unread.
+  // every connected machine that wait on an answer or finished unread. The
+  // installed app's icon badge carries the same count.
   $effect(() => {
     const stores = workspace.machines.length ? workspace.machines.map((machine) => machine.store) : [store];
-    const count = stores.reduce((sum, owner) => sum + owner.threads.filter((t) => !t.archived && (t.unread || t.status === 'waiting')).length, 0);
+    const count = attentionCount(stores);
     const name = appName();
     document.title = count > 0 ? `(${count}) ${name}` : name;
+    if (!inShell) syncAppBadge(count);
   });
 
   onMount(() => {
@@ -528,6 +535,8 @@
   <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && (mobileScreen !== 'chat' || mobileRecovery)} class:panel-maximized={rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
     {#if !store.booted}
       <p class="empty boot">{strings.app.loading}</p>
+    {:else if wideRecovery}
+      <div class="wide-recovery" data-testid="wide-recovery"><MobileConnect {store} onpaired={() => {}} /></div>
     {:else if store.connection === 'closed' && !store.core}
       <Sidebar {store} />
       <!-- The notice gives way to Settings: the two cards side by side left
@@ -708,6 +717,7 @@
     margin: auto;
   }
 
+  .wide-recovery { flex: 1; min-width: 0; display: flex; overflow-y: auto; padding: 16px 24px; }
   .notice {
     flex: 1;
     min-width: 0;

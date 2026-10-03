@@ -1990,6 +1990,46 @@ test('a pairing link can be closed and a fresh one created', async ({ app: _app 
   expect(store.pairing!.grant).not.toBe(first);
 });
 
+test('a phone link comes with a code; an owner link is drawn only once confirmed, with a code and five minutes', async ({ app: _app }) => {
+  store.showSettings('machines');
+  await waitFor(() => document.querySelector('[data-testid=pairing-mint]') !== null);
+  query<HTMLButtonElement>('[data-testid=pairing-mint]').click();
+  await waitFor(() => document.querySelector('[data-testid=pairing-code]') !== null);
+  expect(query('[data-testid=pairing-code]').textContent).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+  expect(document.querySelector('[data-testid=pairing-owner-qr]')).toBeNull();
+
+  query<HTMLInputElement>('[data-testid=pairing-owner]').click();
+  query<HTMLButtonElement>('[data-testid=pairing-mint]').click();
+  await waitFor(() => store.pairing?.role === 'owner');
+  expect(document.querySelector('[data-testid=pairing-qr]')).toBeNull();
+  expect(document.querySelector('[data-testid=pairing-code]')).toBeNull();
+  query<HTMLButtonElement>('[data-testid=pairing-owner-qr]').click();
+  await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') !== null);
+  query<HTMLButtonElement>('[data-testid=confirm-ok]').click();
+  await waitFor(() => document.querySelector('[data-testid=pairing-qr]') !== null);
+  expect(store.pairing?.role).toBe('owner');
+  expect(store.pairing!.expiresAt - Date.now()).toBeLessThanOrEqual(5 * 60 * 1000);
+  expect(document.querySelector('[data-testid=pairing-code]')).not.toBeNull();
+  expect(document.querySelector('[data-testid=pairing-owner-qr]')).toBeNull();
+});
+
+test('the Tailscale switch serves the core over HTTPS, pairing links follow it, and off undoes both', async ({ app: _app }) => {
+  store.showSettings('machines');
+  await waitFor(() => document.querySelector('[data-testid=tailscale-access][data-state=off]') !== null);
+  expect(query('[data-testid=tailscale-state]').textContent).toContain('https://boite-pc.tail0d6070.ts.net');
+  query<HTMLButtonElement>('[data-testid=tailscale-enable]').click();
+  await waitFor(() => document.querySelector('[data-testid=tailscale-access][data-state=on]') !== null);
+  expect(store.settings?.publicUrl).toBe('https://boite-pc.tail0d6070.ts.net');
+  // Turning it on mints the phone's link through the new address.
+  await waitFor(() => store.pairing?.url.startsWith('https://boite-pc.tail0d6070.ts.net/?grant=') === true);
+  expect(document.querySelector('[data-testid=pairing-lan-hint]')).toBeNull();
+
+  query<HTMLButtonElement>('[data-testid=tailscale-disable]').click();
+  await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') !== null);
+  query<HTMLButtonElement>('[data-testid=confirm-ok]').click();
+  await waitFor(() => document.querySelector('[data-testid=tailscale-access][data-state=off]') !== null);
+  expect(store.settings?.publicUrl ?? null).toBeNull();
+});
 test('a new isolated account is signed out, and a thread on it offers the sign-in', async ({ app: _app }) => {
   const client = store.client!;
   const account = await client.call('accounts.add', { providerId: 'claude', label: 'Work', useDefaultLocation: false });

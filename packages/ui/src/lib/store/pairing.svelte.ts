@@ -10,12 +10,13 @@ export class Pairing {
 
   constructor(private readonly ctx: StoreContext) {}
 
-  async mintPairing(role: PairingRole = 'device'): Promise<void> {
+  /** `short`: an owner link a phone may scan, with a code, for five minutes. */
+  async mintPairing(role: PairingRole = 'device', short = false): Promise<void> {
     const client = this.ctx.client;
     if (!client) return;
     const revision = ++this.revision;
     try {
-      const grant = await client.call('pairing.grant', { role });
+      const grant = await client.call('pairing.grant', short ? { role, short } : { role });
       if (revision === this.revision && client === this.ctx.client) this.pairing = grant;
     } catch (error) {
       if (revision === this.revision && client === this.ctx.client) this.ctx.fail(error);
