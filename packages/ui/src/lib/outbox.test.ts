@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { unansweredFailure } from './client';
 import { FakeClient } from './fake-client';
 import { Store } from './store.svelte';
 import { readDraftJournal, writeDraftJournal } from './draft-journal';
@@ -91,6 +92,27 @@ test('a prompt the machine already took before the answer was lost is not sent t
   const prompts = await userPrompts(next.client, thread);
   expect(prompts.filter(parts => parts.includes('Written in the tunnel'))).toHaveLength(1);
   expect(prompts.filter(parts => parts.includes('And one more'))).toHaveLength(1);
+});
+
+test('a prompt the machine took but never answered is asked again under its id, not handed back to resend', async () => {
+  // iOS freezes a page sent to the background: back on screen, the call's
+  // 120 s timer fires at once while the core already holds the prompt.
+  const phone = await machine('one');
+  await phone.connect();
+  const thread = phone.store.threads.find(row => row.status === 'idle')!.id;
+  await phone.store.open(thread);
+  const original = vi.mocked(phone.client.call).getMockImplementation()!;
+  let lose = true;
+  vi.mocked(phone.client.call).mockImplementation(async (method, params) => {
+    const result = await original(method, params);
+    if (method === 'turns.start' && lose) { lose = false; throw unansweredFailure('turns.start'); }
+    return result;
+  });
+  // Accepted: the composer clears the box instead of offering the text again.
+  expect(await phone.store.send('It works', thread)).toBe(true);
+  expect(phone.starts).toHaveLength(2);
+  expect(phone.starts[1]!.clientRequestId).toBe(phone.starts[0]!.clientRequestId);
+  expect((await userPrompts(phone.client, thread)).filter(parts => parts.includes('It works'))).toHaveLength(1);
 });
 
 test('a refused outbox prompt stays with its reason and is not sent again until asked', async () => {
