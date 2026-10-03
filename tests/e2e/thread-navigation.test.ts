@@ -63,10 +63,19 @@ test('closing an image and dragging chat text or a thread link preserves the con
     await capture(page, 'thread-selection-after.png');
     expect(await page.evaluate('window.getSelection().toString().length > 0')).toBe(true);
     expect(await page.evaluate(`${state}.openThread.id`)).toBe('t-trace');
+    await page.evaluate(`(() => {
+      window.__fileOpens = [];
+      window.__TAURI_INTERNALS__ = { invoke: async (command, args) => { if (command === 'open_local_file') window.__fileOpens.push(args); } };
+      ${state}.localCore = true;
+    })()`);
     await page.evaluate('window.getSelection().removeAllRanges()');
     await drag(page, 'a[data-file-path="build/game.exe"]');
-    expect(await page.evaluate(`document.querySelectorAll('${id('chat-file')}').length`)).toBe(1);
+    expect(await page.evaluate('window.__fileOpens.length')).toBe(0);
     expect(await page.evaluate(`${state}.openThread.id`)).toBe('t-trace');
+    await page.click('a[data-file-path="build/game.exe"]');
+    await page.waitFor('window.__fileOpens.length === 1');
+    expect(await page.evaluate('window.__fileOpens[0].path')).toBe('build/game.exe');
+    await page.evaluate(`delete window.__TAURI_INTERNALS__; ${state}.localCore = false;`);
     await page.evaluate('window.getSelection().removeAllRanges()');
     await drag(page, id('spawn-marker-open'));
     expect(await page.evaluate(`${state}.openThread.id`)).toBe('t-trace');

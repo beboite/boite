@@ -46,6 +46,40 @@ test.each(['archive', 'removeThread'] as const)('%s in the background preserves 
   expect(store.draft).toBeNull();
 });
 
+test.each([['archive', false], ['removeThread', false], ['removeThread', true]] as const)('%s yields to newer uncached navigation (target rejected: %s)', async (action, rejected) => {
+  const store = await ready();
+  await store.open('t-trace');
+  store.threads = store.threads.filter(thread => thread.id !== 't-descriptors');
+  const call = store.client!.call.bind(store.client);
+  let releaseMutation!: () => void, releaseOpen!: () => void;
+  const mutationGate = new Promise<void>(resolve => { releaseMutation = resolve; });
+  const openGate = new Promise<void>(resolve => { releaseOpen = resolve; });
+  vi.spyOn(store.client!, 'call').mockImplementation(async (method, params) => {
+    if (method === (action === 'archive' ? 'threads.archive' : 'threads.remove')) await mutationGate;
+    const value = await call(method, params);
+    if (method === 'threads.get' && (params as { threadId: string }).threadId === 't-descriptors') {
+      await openGate;
+      if (rejected) throw new RpcFailure({ code: RpcErrorCode.NotFound, message: 'Replacement unavailable' });
+    }
+    return value;
+  });
+  const mutation = store[action]('t-trace');
+  const opening = store.open('t-descriptors');
+  try {
+    expect(store.openThread?.id).toBe('t-trace');
+    releaseMutation(); await mutation;
+    releaseOpen(); await opening;
+    if (rejected) {
+      expect(store.openThread).toBeNull();
+      expect(store.draft?.projectId).toBe('p-boite');
+      expect(store.error).toBe('Replacement unavailable');
+    } else {
+      expect(store.openThread?.id).toBe('t-descriptors');
+      expect(store.draft).toBeNull();
+    }
+  } finally { releaseMutation(); releaseOpen(); await Promise.all([mutation, opening]); }
+});
+
 test('deleting a just-archived thread removes its undo offer and reopening skips it', async () => {
   const store = await ready();
   expect(await archiveThread(store, 't-trace')).toBe(true);

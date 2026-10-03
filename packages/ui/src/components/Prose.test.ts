@@ -80,7 +80,13 @@ test('dragging across a game path never launches it, and the next click still do
   link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
   await vi.dynamicImportSettled();
   expect(invoke).not.toHaveBeenCalled();
+  link.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 10 }));
+  link.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0, clientX: 10, clientY: 10 }));
+  link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+  await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
+  await vi.dynamicImportSettled();
   link.click();
+  await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
   await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('open_local_file', { directory: 'C:/project', path: 'build/game.exe' }, undefined));
 });
 

@@ -25,6 +25,7 @@ storeTest('removing the newest thread ranks a project by its surviving conversat
   expect(view.sorted(entries).map(entry => entry.project.id)).toEqual(['p-notes', 'p-boite']);
   store.threads.push(old);
   view.toggle(entries);
+  expect(view.order).toBe('manual');
   store.threads.find(thread => thread.id === 'old')!.lastUserMessageAt = 3000;
   expect(view.sorted(entries).map(entry => entry.project.id)).toEqual(['p-notes', 'p-boite']);
 });
