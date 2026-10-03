@@ -19,6 +19,9 @@ export const fr: Translation = {
     keyHint: 'Laissez vide pour garder la clé enregistrée. Utilisez la clé API du proxy, pas sa clé de gestion du tableau de bord.',
     clearKey: 'Retirer la clé enregistrée', save: 'Enregistrer le proxy', saved: 'Proxy enregistré',
     configure: 'Configurer le proxy', native: 'Voir les limites des comptes',
+    openDashboard: 'Ouvrir le tableau',
+    signInHint: 'Connectez-vous avec Ouvrir le tableau, puis rechargez ici. Si la page reste vide, ce tableau peut refuser les vues intégrées.',
+    mixedContent: "Cette page utilise HTTPS. Configurez une URL de tableau HTTPS pour l'afficher ici, ou ouvrez le tableau HTTP séparément.",
   },
   remoteBrowser: {
     display: 'Affichage', resolution: 'Résolution de la page', fitPhone: 'Adapter à cet écran', phone: 'Téléphone', tablet: 'Tablette', rotate: 'Pivoter', width: 'Largeur', height: 'Hauteur', apply: 'Appliquer', sharedSize: 'La résolution change aussi l’onglet partagé sur le PC.', restoreSize: 'Reprendre la taille du panneau PC', previewZoom: 'Zoom de l’aperçu (cet appareil seulement)', fit: 'Ajuster', panHint: 'Glissez pour déplacer l’aperçu. Utilisez les flèches pour défiler dans la page.',

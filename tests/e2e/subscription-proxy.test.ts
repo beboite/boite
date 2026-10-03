@@ -2,6 +2,8 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 import { startDevUi } from './lib/ui.ts';
+import { pairingUrlOf, startCore } from './lib/core.ts';
+import { connect } from '../../packages/core/src/client.ts';
 
 let server: { close(): Promise<void> };
 let gateway: ReturnType<typeof Bun.serve>;
@@ -75,3 +77,36 @@ test('phone Limits opens the same gateway and disabling it restores the native p
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   expect(page.errors()).toEqual([]);
 }, 30_000);
+
+test('production desktop and phone embed the dashboard through the real core without the fake bridge', async () => {
+  const core = await startCore();
+  const client = await connect(core.url, core.token);
+  let browser: BrowserPage | undefined;
+  try {
+    await client.call('settings.set', { subscriptionProxy: { enabled: true, kind: 'douane', baseUrl: dashboard, dashboardUrl: `${dashboard}/admin/#quotas` } });
+    browser = await BrowserPage.launch({ url: pairingUrlOf(core), windowSize: { width: 1280, height: 900 } });
+    const profileKey = JSON.stringify([client.core.hostname, client.core.dataDir, client.core.channel]);
+    await browser.evaluate(`localStorage.setItem('boite.machine-profiles', ${JSON.stringify(JSON.stringify({ [profileKey]: { label: 'Test core' } }))})`);
+    await browser.reload();
+    await browser.click('[data-testid=nav-settings]');
+    await browser.click('[data-testid=settings-tab-limits]');
+    await browser.waitFor(`document.querySelector('[data-testid=subscription-proxy-slot] > iframe')?.src === ${JSON.stringify(`${dashboard}/admin/#quotas`)}`);
+    expect(await browser.evaluate('new URLSearchParams(location.search).get("fake")')).toBeNull();
+    expect(await browser.text('[data-testid=subscription-proxy-browser-hint]')).toContain('Sign in');
+    await browser.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
+    const tree = await browser.send('Page.getFrameTree', {}) as { frameTree: { childFrames: { frame: { id: string; url: string } }[] } };
+    const child = tree.frameTree.childFrames.find(entry => entry.frame.url.startsWith(dashboard))!;
+    const world = await browser.send('Page.createIsolatedWorld', { frameId: child.frame.id }) as { executionContextId: number };
+    const content = await browser.send('Runtime.evaluate', { contextId: world.executionContextId, expression: 'document.querySelector("h1")?.textContent', returnByValue: true }) as { result: { value: string } };
+    expect(content.result.value).toBe('Subscription quotas');
+    await browser.screenshot(join(process.env.BOITE_CAPTURE_DIR ?? join(import.meta.dir, '.artifacts'), 'boite-proxy-production-desktop.png'));
+    await browser.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await browser.waitFor('document.querySelector("[data-testid=mobile-settings-detail]")');
+    expect(await browser.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    await browser.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
+    await browser.screenshot(join(process.env.BOITE_CAPTURE_DIR ?? join(import.meta.dir, '.artifacts'), 'boite-proxy-production-phone.png'));
+    await browser.click('[data-testid=subscription-proxy-configure]');
+    await browser.waitFor('document.querySelector("[data-testid=subscription-proxy-slot] > iframe") === null');
+    expect(browser.errors()).toEqual([]);
+  } finally { await browser?.close(); client.close(); await core.stop(); }
+}, 60_000);

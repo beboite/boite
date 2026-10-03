@@ -8,6 +8,9 @@ export const strings = {
     keyHint: 'Leave empty to keep the saved key. This is the proxy\'s API key, not its dashboard management key.',
     clearKey: 'Remove saved key', save: 'Save proxy', saved: 'Proxy saved',
     configure: 'Configure proxy', native: 'Show account limits',
+    openDashboard: 'Open dashboard',
+    signInHint: 'Sign in with Open dashboard, then reload here. If the page stays blank, this dashboard may block embedded views.',
+    mixedContent: 'This page uses HTTPS. Set an HTTPS dashboard URL to view it here, or open the HTTP dashboard separately.',
   },
   remoteBrowser: {
     display: 'Display', resolution: 'Page resolution', fitPhone: 'Fit this screen', phone: 'Phone', tablet: 'Tablet', rotate: 'Rotate', width: 'Width', height: 'Height', apply: 'Apply', sharedSize: 'Resolution also changes the shared tab on the PC.', restoreSize: 'Use the PC panel size', previewZoom: 'Preview zoom (this device only)', fit: 'Fit', panHint: 'Drag to pan the preview. Use the arrows to scroll the page.',

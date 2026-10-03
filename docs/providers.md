@@ -13,6 +13,10 @@ Douane's default dashboard path is `/admin/#quotas`; CLIProxyAPI uses
 Boite instead of the account popup. Desktop uses the shell's existing browser
 view, and browsers and phones use an iframe. The dashboard must permit embedding
 and its configured URL must be reachable from the device displaying it.
+HTTPS browser sessions require an HTTPS dashboard URL; Boite shows this before
+creating a blocked HTTP frame. Open dashboard provides a separate sign-in page,
+then Reload retries the embedded view. Some gateways refuse framing or restrict
+cross-site cookies; those dashboards remain available through Open dashboard.
 
 An optional API key stays on the core and is supplied through the agent's
 environment, never a URL or process argument. Leave the key field empty to keep
