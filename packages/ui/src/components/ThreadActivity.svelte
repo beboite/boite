@@ -159,7 +159,7 @@
                   docked
                   answer={null}
                   pending
-                  submit={(optionIds, text) => store.answerQuestion(question.threadId, question.id, optionIds, text)}
+                  submit={(optionIds, text, attachments) => store.answerQuestion(question.threadId, question.id, optionIds, text, attachments)}
                   skip={() => store.skipQuestion(question.threadId, question.id)}
                 />
               </div>

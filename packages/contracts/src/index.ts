@@ -1204,6 +1204,19 @@ export interface QuestionOption {
 export interface QuestionAnswer {
   optionIds: string[];
   text?: string;
+  /**
+   * The files given with the answer, as the card lists them. Their bytes are
+   * not kept here: the core wrote them to its disk and told the agent the paths.
+   */
+  attachments?: AnswerAttachment[];
+}
+
+/** A file given with an answer: what the card shows once it is answered. */
+export interface AnswerAttachment {
+  kind: Attachment['kind'];
+  mimeType: string;
+  name: string | null;
+  bytes: number;
 }
 
 /**
@@ -2942,9 +2955,12 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   /**
    * One answer. `optionIds` are ids the question listed and `text` the free
    * field it allowed. A question that is not pending is refused, naming the id.
+   * `attachments` (only where the free field is allowed, a turn's caps) are
+   * written to the core's disk and reach the agent as paths after the text, on
+   * every protocol: none carries an image inside an answer.
    */
   'questions.answer': {
-    params: { threadId: ThreadId; questionId: RequestId; optionIds: string[]; text?: string };
+    params: { threadId: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; attachments?: Attachment[] };
     result: { ok: true };
   };
   /** Resolve a pending question without an answer, a steer or a new user message. */
@@ -3240,7 +3256,7 @@ export const PAIRING_ROLES: readonly PairingRole[] = ['device', 'owner'];
 export const CLIENT_NAMES = ['shell', 'pwa', 'cli', 'test', 'bench'] as const;
 export type ClientName = (typeof CLIENT_NAMES)[number];
 
-export { attachmentError } from './attachment-validation.ts';
+export { attachmentError, answerAttachmentError } from './attachment-validation.ts';
 export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, checkSettingsPatch, type AutoCompact, type AutoCompactMoment, type SettingsPatchCheck } from './settings-validation.ts';
 import type { AutoCompact } from './settings-validation.ts';
 export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';

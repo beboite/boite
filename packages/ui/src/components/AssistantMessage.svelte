@@ -108,8 +108,8 @@
           async={part.async === true}
           answer={part.answer ?? null}
           pending={store.pendingQuestions.some((q) => q.id === part.questionId)}
-          submit={(optionIds, text) =>
-            store.answerQuestion(message.threadId, part.questionId, optionIds, text)}
+          submit={(optionIds, text, attachments) =>
+            store.answerQuestion(message.threadId, part.questionId, optionIds, text, attachments)}
           skip={() => store.skipQuestion(message.threadId, part.questionId)}
         />
       {:else if part.type === 'compaction'}

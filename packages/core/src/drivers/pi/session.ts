@@ -20,6 +20,7 @@ import { AGENT_OWN_MODEL, EXIT_GRACE_MS, STDERR_MAX, UI_DIALOGS, UI_NOTICES } fr
 import type { PiAssistantMessage, PiCommand, PiUsage } from './protocol.ts';
 import { dataOf, PiPeer } from './rpc.ts';
 import type { PiTurn } from './turn.ts';
+import { answerText } from '../../attachments.ts';
 
 type Timer = ReturnType<typeof setTimeout>;
 
@@ -721,7 +722,7 @@ export class PiSession {
     }
     if (answer === null) { peer.answer({ type: 'extension_ui_response', id, cancelled: true }); return; }
     turn.part(index, { type: 'question', questionId: ticket.questionId, ...ask, answer });
-    const value = method === 'select' ? options.find((option) => option.id === answer.optionIds[0])?.label : answer.text ?? '';
+    const value = method === 'select' ? options.find((option) => option.id === answer.optionIds[0])?.label : answerText(answer);
     peer.answer(method === 'confirm'
       ? { type: 'extension_ui_response', id, confirmed: answer.optionIds[0] === 'yes' }
       : { type: 'extension_ui_response', id, value });

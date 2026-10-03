@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import type { QuestionAnswer } from '@boite/contracts';
+import type { Attachment, QuestionAnswer } from '@boite/contracts';
 import QuestionCard from './QuestionCard.svelte';
 
 let running: Record<string, unknown> | null = null;
@@ -298,4 +298,99 @@ test('a send that failed gives the card back, and a second press sends again', a
   await new Promise((resolve) => setTimeout(resolve, 0));
   flushSync();
   expect(submit().disabled).toBe(true);
+});
+
+async function settle(until: () => boolean): Promise<void> {
+  for (let tries = 0; tries < 100 && !until(); tries += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    flushSync();
+  }
+}
+
+test('a photo goes with the answer: picked, pasted or dropped, shown, removable, and alone enough to answer', async () => {
+  const sent: { optionIds: string[]; text: string; attachments: Attachment[] }[] = [];
+  running = mount(QuestionCard, {
+    target: document.body,
+    props: {
+      text: 'Which layout?',
+      options: OPTIONS,
+      allowText: true,
+      multiple: false,
+      answer: null,
+      pending: true,
+      submit: (optionIds: string[], text: string, attachments: Attachment[]) => sent.push({ optionIds, text, attachments })
+    }
+  });
+  flushSync();
+  expect(submit().disabled).toBe(true);
+  const picker = query<HTMLInputElement>('[data-testid=question-file]');
+  Object.defineProperty(picker, 'files', { configurable: true, value: [new File(['png'], 'mockup.png', { type: 'image/png' })] });
+  picker.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle(() => document.querySelectorAll('[data-testid=question-file-item]').length === 1);
+  expect(query<HTMLImageElement>('[data-testid=question-file-item] img').alt).toBe('mockup.png');
+  // A file alone answers the question.
+  expect(submit().disabled).toBe(false);
+
+  const field = query<HTMLInputElement>('[data-testid=question-text-input]');
+  const paste = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+  const pasted = new File(['log'], 'trace.txt', { type: 'text/plain' });
+  Object.defineProperty(paste, 'clipboardData', { value: { items: [{ kind: 'file', getAsFile: () => pasted }] } });
+  field.dispatchEvent(paste);
+  expect(paste.defaultPrevented).toBe(true);
+  await settle(() => document.querySelectorAll('[data-testid=question-file-item]').length === 2);
+
+  const drop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
+  const dropped = new File(['b'], 'second.png', { type: 'image/png' });
+  const list = Object.assign([dropped], { item: (at: number) => [dropped][at] ?? null });
+  Object.setPrototypeOf(list, FileList.prototype);
+  Object.defineProperty(drop, 'dataTransfer', { value: { files: list, items: [{ kind: 'file' }] } });
+  query('[data-testid=question-card]').dispatchEvent(drop);
+  expect(drop.defaultPrevented).toBe(true);
+  await settle(() => document.querySelectorAll('[data-testid=question-file-item]').length === 3);
+
+  query<HTMLButtonElement>('[data-testid=question-file-remove]').click();
+  flushSync();
+  expect(Array.from(document.querySelectorAll('[data-testid=question-file-item]')).map((item) => item.getAttribute('title'))).toEqual(['trace.txt', 'second.png']);
+
+  submit().click();
+  flushSync();
+  expect(sent).toHaveLength(1);
+  expect(sent[0]!.optionIds).toEqual([]);
+  expect(sent[0]!.attachments.map((one) => [one.kind, one.mimeType, one.name])).toEqual([
+    ['file', 'text/plain', 'trace.txt'],
+    ['image', 'image/png', 'second.png']
+  ]);
+});
+
+test('a question without a free field takes no files', () => {
+  running = mount(QuestionCard, {
+    target: document.body,
+    props: { text: 'Allow?', options: OPTIONS, allowText: false, multiple: false, answer: null, pending: true, submit: () => undefined }
+  });
+  flushSync();
+  expect(document.querySelector('[data-testid=question-attach]')).toBeNull();
+  const drop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
+  Object.defineProperty(drop, 'dataTransfer', { value: { files: [new File(['x'], 'x.png', { type: 'image/png' })], items: [] } });
+  query('[data-testid=question-card]').dispatchEvent(drop);
+  expect(drop.defaultPrevented).toBe(false);
+});
+
+test('an answer given with files lists them, and a files-only answer says how many', () => {
+  const answer: QuestionAnswer = {
+    optionIds: [],
+    attachments: [
+      { kind: 'image', mimeType: 'image/jpeg', name: 'IMG_0042.jpg', bytes: 420_000 },
+      { kind: 'file', mimeType: 'text/plain', name: 'trace.txt', bytes: 3 }
+    ]
+  };
+  running = mount(QuestionCard, {
+    target: document.body,
+    props: { text: 'Which layout?', options: OPTIONS, allowText: true, multiple: false, answer, pending: false, submit: () => undefined }
+  });
+  flushSync();
+  expect(query('[data-testid=question-answer]').textContent).toBe('2 files');
+  expect(query('[data-testid=question-answer-files]').getAttribute('title')).toBe('IMG_0042.jpg, trace.txt');
+  query<HTMLButtonElement>('[data-testid=question-toggle]').click();
+  flushSync();
+  expect(query('.answer-detail').textContent).toContain('Files given: IMG_0042.jpg, trace.txt');
 });

@@ -23,6 +23,7 @@ import type {
 } from './protocol.ts';
 import { AGENT_OWN_MODEL, COMMAND_TOOL_NAME, EFFORTS, MODE_POSTURE } from './protocol.ts';
 import { MspError } from './rpc.ts';
+import { answerText } from '../../attachments.ts';
 
 // ---------------------------------------------------------------------------
 // Mapping helpers
@@ -190,7 +191,7 @@ export function answerOf(questionId: string, answer: QuestionAnswer, options: Qu
   const labels = answer.optionIds
     .map((id) => options.find((option) => option.id === id)?.label)
     .filter((label): label is string => label !== undefined);
-  const text = answer.text?.trim() ?? '';
+  const text = answerText(answer).trim();
   const out: MuseAnswer = { questionId };
   if (labels.length > 0) {
     if (multiple) out.selectedLabels = labels;

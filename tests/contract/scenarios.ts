@@ -259,6 +259,15 @@ export const SCENARIOS: Record<string, Scenario> = {
     await refusedWith(env.call('questions.answer', { threadId, questionId, optionIds: [] }), RpcErrorCode.Refused);
     await stillPending(env, threadId, questionId);
   },
+  'questions.answer refuses a malformed file and takes a file alone as the answer': async (env) => {
+    const { threadId, questionId } = await asked(env);
+    const shot = { kind: 'image' as const, mimeType: 'image/png' as const, data: 'aGVsbG8=', name: 'shot.png' };
+    await refusedWith(env.call('questions.answer', { threadId, questionId, optionIds: [], attachments: [{ ...shot, data: 'not base64!' }] }), RpcErrorCode.Refused);
+    await stillPending(env, threadId, questionId);
+    await env.call('questions.answer', { threadId, questionId, optionIds: [], attachments: [shot] });
+    const pending = await env.call('questions.list', { threadId });
+    check(!pending.some((request) => request.id === questionId), 'a question answered with a file is still pending');
+  },
   'questions.answer takes a valid answer and the question goes': async (env) => {
     const { threadId, questionId } = await asked(env);
     await env.call('questions.answer', { threadId, questionId, optionIds: ['2'] });

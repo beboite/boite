@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { ImageAttachment, MessagePart, RpcEvents, ToolDocument } from '@boite/contracts';
+import type { ImageAttachment, MessagePart, QuestionAnswer, RpcEvents, ToolDocument } from '@boite/contracts';
 import { echoThread, scriptedClaude, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -309,8 +309,8 @@ describe('echo driver', () => {
       client.call('turns.start', { threadId, prompt: 'x', attachments: [image({ data: 'A'.repeat(7 * 1048576), name: null })] }),
     ).rejects.toThrow('attachment 1: 5.3 MB is over the 5 MB a file may weigh');
     await expect(
-      client.call('turns.start', { threadId, prompt: 'x', attachments: Array.from({ length: 9 }, () => image({})) }),
-    ).rejects.toThrow('a turn carries at most 8 attachments, this one has 9');
+      client.call('turns.start', { threadId, prompt: 'x', attachments: Array.from({ length: 21 }, () => image({})) }),
+    ).rejects.toThrow('a turn carries at most 20 attachments, this one has 21');
     // Three phone photos under the per-file cap still make a frame the socket would not carry.
     const photo = 'A'.repeat(4_893_356);
     await expect(
@@ -425,6 +425,43 @@ describe('echo driver', () => {
       answer: { optionIds: ['short'], text: 'one line please' },
     });
     expect(assistant?.parts[1]).toEqual({ type: 'text', text: 'answered short one line please' });
+  });
+
+  test('an answer carries files: the card lists them, the agent reads their paths', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    await client.call('threads.subscribe', { threadId });
+    const asked = client.next('question.asked', (request) => request.threadId === threadId, 10000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'question' });
+    const question = await asked;
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    const shot = { kind: 'image' as const, mimeType: 'image/png' as const, data: png, name: 'screen.png' };
+
+    await expect(client.call('questions.answer', {
+      threadId, questionId: question.id, optionIds: [], attachments: [{ ...shot, data: 'data:image/png;base64,abcd' }],
+    })).rejects.toThrow('screen.png: the attachment data is not base64');
+    await expect(client.call('questions.answer', {
+      threadId, questionId: question.id, optionIds: [], attachments: Array.from({ length: 21 }, () => shot),
+    })).rejects.toThrow('at most 20 attachments');
+
+    const answered = client.next('question.answered', (event) => event.questionId === question.id, 10000);
+    // A file alone answers: the screenshot is the answer.
+    await client.call('questions.answer', { threadId, questionId: question.id, optionIds: [], attachments: [shot] });
+    const expected: QuestionAnswer = { optionIds: [], attachments: [{ kind: 'image', mimeType: 'image/png', name: 'screen.png', bytes: 70 }] };
+    expect((await answered).answer).toEqual(expected);
+    expect((await finished).status).toBe('done');
+
+    const thread = await client.call('threads.get', { threadId });
+    const assistant = thread.messages[thread.messages.length - 1];
+    // The card keeps the list, never the bytes nor the paths.
+    expect(assistant?.parts[0]).toMatchObject({ type: 'question', answer: expected });
+    const echoed = assistant?.parts[1];
+    expect(echoed?.type === 'text' ? echoed.text : '').toContain('Attached files available on this machine');
+    const reference = JSON.parse((echoed?.type === 'text' ? echoed.text : '').split('\n').at(-1)!) as { path: string; bytes: number };
+    expect(reference.bytes).toBe(70);
+    expect(reference.path.startsWith(harness.dataDir)).toBe(true);
+    expect(Buffer.from(await Bun.file(reference.path).arrayBuffer()).toString('base64')).toBe(png);
   });
 
   test('skipping a blocking question resumes the turn without a user answer', async () => {
