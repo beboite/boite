@@ -4,7 +4,7 @@
   import { bytes } from '../lib/format';
   import { decodedBytes } from '../lib/attachments';
   import { browserDownload, decodeBase64, saveAttachment } from '../lib/attachment-save';
-  import { galleryFrom, media, type MediaItem } from '../lib/media-gallery';
+  import { galleryFrom, media, viewerHost, type Gallery, type MediaItem } from '../lib/media-gallery';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { claudeKeywords, promptCommand, promptSegments, promptText } from '../lib/message-display';
@@ -59,7 +59,12 @@
   }
 
   const images = $derived(imagesOf(message));
-  let viewing = $state<{ items: MediaItem[]; index: number } | null>(null);
+  /** The timeline's viewer; outside one (a test, a preview) the message shows its own. */
+  const host = viewerHost();
+  let viewing = $state<Gallery | null>(null);
+  function show(gallery: Gallery): void {
+    if (host) host.open(gallery); else viewing = gallery;
+  }
 
   /** The picture as the viewer shows it, under a name a saved copy can keep. */
   function viewed(image: ImagePart, at: number): MediaItem {
@@ -106,7 +111,7 @@
           class="shot"
           title={image.alt ?? strings.chat.imagePart}
           use:media={() => viewed(image, at)}
-          onclick={(event) => viewing = galleryFrom(event.currentTarget, viewed(image, at))}
+          onclick={(event) => show(galleryFrom(event.currentTarget, viewed(image, at)))}
           data-testid="image-open"
         >
           <img

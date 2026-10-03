@@ -12,6 +12,8 @@
   import { agentMailFor, groupAgentMail, withAgentMail } from '../lib/agent-mail';
   import DelegationActivity from './DelegationActivity.svelte';
   import UserMessage from './UserMessage.svelte';
+  import ImageViewer from './ImageViewer.svelte';
+  import { provideViewerHost, type Gallery } from '../lib/media-gallery';
   import AssistantMessage from './AssistantMessage.svelte';
   import MoveMarker from './MoveMarker.svelte';
   import SpawnMarker from './SpawnMarker.svelte';
@@ -36,6 +38,21 @@
     threadId,
     messages
   }: { store: Store; threadId: string; messages: Message[] } = $props();
+  /**
+   * The open viewer belongs to the list, not to the row it was opened from: a
+   * running turn moves the window of rows, and the row leaving it must not
+   * close the viewer. Object URLs of rows gone meanwhile wait for it to close.
+   */
+  let viewing = $state<Gallery | null>(null);
+  const held = new Set<string>();
+  function releaseHeld(): void {
+    for (const url of held) if (!viewing?.items.some(item => item.src === url)) { URL.revokeObjectURL(url); held.delete(url); }
+  }
+  provideViewerHost({
+    open: (gallery) => { viewing = gallery; releaseHeld(); },
+    release: (url) => { held.add(url); releaseHeld(); }
+  });
+  onDestroy(() => { viewing = null; releaseHeld(); });
   /** The find bar is its own chunk, fetched the first time it opens. A failed fetch tries again on the next open. */
   let FindBar = $state.raw<typeof import('./FindBar.svelte').default>();
   $effect(() => {
@@ -785,6 +802,7 @@
     </button>
   {/if}
 </div>
+{#if viewing}<ImageViewer items={viewing.items} index={viewing.index} onclose={() => { viewing = null; releaseHeld(); }} />{/if}
 
 <style>
   .timeline-wrap {

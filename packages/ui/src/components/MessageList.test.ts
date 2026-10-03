@@ -445,6 +445,42 @@ test('a long thread renders a window of messages and carries the rest in the spa
   expect(below?.style.height).toBe(`${(500 - 262) * ESTIMATE}px`);
 });
 
+test('a viewer opened from a row stays open, its files readable, once the rows leave the window', async () => {
+  const create = URL.createObjectURL, revoke = URL.revokeObjectURL;
+  onTestFinished(() => { URL.createObjectURL = create; URL.revokeObjectURL = revoke; });
+  const revoked: string[] = [];
+  URL.createObjectURL = () => 'blob:capture';
+  URL.revokeObjectURL = (url: string) => { revoked.push(url); };
+  const messages = thread(500);
+  messages[250] = { id: 'm-250', threadId: 't-long', turnId: 'turn-1', role: 'user', parts: [{ type: 'image', mimeType: 'image/png', data: btoa('png'), alt: 'shot.png' }], state: 'complete', createdAt: 250 };
+  messages[251] = { ...messages[251]!, parts: [{ type: 'file', name: 'capture.png', mimeType: 'image/png', data: btoa('png bytes') }] };
+  stubLayout(messages.length * ESTIMATE);
+  const owner = { ...store, openThread: null, composerStates: {}, busy: false } as unknown as Store;
+  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: 't-long', messages } });
+  await settle();
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  timeline.scrollTop = 20_000;
+  timeline.dispatchEvent(new Event('scroll'));
+  await settle();
+  document.querySelector<HTMLButtonElement>('[data-testid=image-open]')!.click();
+  flushSync();
+  const shown = () => document.querySelector<HTMLImageElement>('[data-testid=image-viewer] img')?.getAttribute('src');
+  expect(shown()).toMatch(/^data:image\/png/);
+  // Both rows leave the window, as they do above a running turn.
+  timeline.scrollTop = 0;
+  timeline.dispatchEvent(new Event('scroll'));
+  await settle();
+  expect(shownIds()).not.toContain('m-250');
+  expect(shownIds()).not.toContain('m-251');
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  flushSync();
+  expect(shown()).toBe('blob:capture');
+  expect(revoked).toEqual([]);
+  document.querySelector<HTMLButtonElement>('[data-testid=image-viewer-close]')!.click();
+  flushSync();
+  expect(document.querySelector('[data-testid=image-viewer]')).toBeNull();
+  expect(revoked).toEqual(['blob:capture']);
+});
 test('scrolled up, the way to the bottom shows with nothing new below, and takes the reader there', async () => {
   const messages = thread(200);
   stubLayout(messages.length * ESTIMATE);

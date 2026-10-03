@@ -8,7 +8,7 @@
   import { bytes, millis } from '../lib/format';
   import { localFileDirectory, openLocalFile } from '../lib/local-files';
   import { browserDownload, decodeBase64, saveAttachment, saveAttachmentUrl } from '../lib/attachment-save';
-  import { galleryFrom, media, type MediaItem } from '../lib/media-gallery';
+  import { galleryFrom, media, viewerHost, type Gallery, type MediaItem } from '../lib/media-gallery';
   import { videoPlayable } from '../lib/video-support';
   import ImageViewer from './ImageViewer.svelte';
 
@@ -24,8 +24,9 @@
   let loading = $state(false);
   let expanded = $state(false);
   let opening = $state(false);
-  /** The viewer, open on this file and the media around it in the thread. */
-  let viewing = $state<{ items: MediaItem[]; index: number } | null>(null);
+  /** The timeline's viewer; outside one (a file opened from a link) this file shows its own. */
+  const host = viewerHost();
+  let viewing = $state<Gallery | null>(null);
   let shot = $state<HTMLElement | undefined>(undefined);
   let clip = $state<HTMLElement | undefined>(undefined);
   let imageRequested = $state(false);
@@ -176,7 +177,8 @@
     // The viewer has its own player: the inline one stops so the two never play over each other.
     const inline = clip?.querySelector('video');
     if (inline && !inline.paused) inline.pause();
-    viewing = galleryFrom(from, { src: url, name, mimeType: mime, kind: image ? 'image' : 'video', save: saveForViewer });
+    const gallery = galleryFrom(from, { src: url, name, mimeType: mime, kind: image ? 'image' : 'video', save: saveForViewer });
+    if (host) host.open(gallery); else viewing = gallery;
   }
 
   function imageLoaded(event: Event) {
@@ -198,7 +200,7 @@
     }, FILE_TICKET_TTL_MS / 2) : null;
     const resume = () => { if (file?.type === 'artifact' && !document.hidden) void loadArtifact().catch(() => {}); };
     document.addEventListener('visibilitychange', resume);
-    return () => { disposed = true; document.removeEventListener('visibilitychange', resume); if (renewal) clearInterval(renewal); if (objectUrl) URL.revokeObjectURL(objectUrl); };
+    return () => { disposed = true; document.removeEventListener('visibilitychange', resume); if (renewal) clearInterval(renewal); if (objectUrl) { if (host) host.release(objectUrl); else URL.revokeObjectURL(objectUrl); } };
   });
 </script>
 

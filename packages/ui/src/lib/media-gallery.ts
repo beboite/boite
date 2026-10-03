@@ -6,6 +6,7 @@
  * gallery opens alone. Only what is on the page counts: the timeline keeps a
  * window of messages, and a picture it dropped has no URL to show anyway.
  */
+import { getContext, setContext } from 'svelte';
 import { browserDownload } from './attachment-save';
 
 export interface MediaItem {
@@ -42,6 +43,31 @@ export function galleryFrom(from: Element | null | undefined, own: MediaItem): {
     items.push(item);
   }
   return { items, index };
+}
+
+export type Gallery = { items: MediaItem[]; index: number };
+
+/**
+ * Who holds the open viewer. The timeline does, not the row a thumbnail sits
+ * in: the timeline drops rows that scroll out of its window, and the viewer
+ * must not close with them. A row's object URL outlives the row while the
+ * viewer shows it.
+ */
+export interface ViewerHost {
+  open(gallery: Gallery): void;
+  /** Revokes an object URL now, or once the viewer showing it closes. */
+  release(url: string): void;
+}
+
+const VIEWER_HOST = Symbol('viewer-host');
+
+export function provideViewerHost(host: ViewerHost): void {
+  setContext(VIEWER_HOST, host);
+}
+
+/** The timeline's viewer, or null outside one: the thumbnail then opens its own. */
+export function viewerHost(): ViewerHost | null {
+  return getContext<ViewerHost | undefined>(VIEWER_HOST) ?? null;
 }
 
 /** The item's own way to save, else a browser download. */
