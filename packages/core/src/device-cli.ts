@@ -35,7 +35,10 @@ export interface DeviceCliResult {
   value: unknown;
 }
 
-const quote = (arg: string) => (/[\s"]/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg);
+/** As the agent's shell reads it: a Windows path holds no quote, a POSIX one is single-quoted like terminals.ts. */
+const quote = (arg: string) => process.platform === 'win32'
+  ? (/\s/.test(arg) ? `"${arg}"` : arg)
+  : (/^[\w.:/=@-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`);
 
 function flag(rest: string[], name: string): string | undefined {
   const at = rest.indexOf(name);
