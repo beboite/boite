@@ -224,7 +224,7 @@ notarization, `APPLE_API_ISSUER`, `APPLE_API_KEY_ID` and
 `APPLE_API_PRIVATE_KEY` (the `.p8` contents). The CI then checks the stapled
 ticket and Gatekeeper's verdict on the bundle. Without all six, and on every
 pull request, the bundle is signed ad hoc and Gatekeeper asks once before the
-first start (README). Developer ID signing and notarization need the Apple
+first start ([installation notes](portability.md#installing-a-release)). Developer ID signing and notarization need the Apple
 Developer Program. Linux
 packages are built on Ubuntu 22.04, whose glibc 2.35 is the oldest a user can
 run them on.
