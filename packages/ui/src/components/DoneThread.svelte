@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { RotateCcw } from '@lucide/svelte';
+  import { ArchiveRestore } from '@lucide/svelte';
   import type { ThreadSummary } from '@boite/contracts';
   import type { ProjectEntry } from '../lib/project-view.svelte';
   import { restoreThread } from '../lib/archive';
@@ -35,7 +35,7 @@
   </button>
   <button type="button" class="ghost icon restore" data-testid="done-thread-restore" title={strings.sidebar.reopenThread}
     aria-label={fill(strings.sidebar.reopenNamedThread, { title: entry.thread.title })}
-    disabled={restoring || entry.machine.store.connection !== 'ready'} onclick={() => void restore()}><RotateCcw size={14} /></button>
+    disabled={restoring || entry.machine.store.connection !== 'ready'} onclick={() => void restore()}><ArchiveRestore size={14} /></button>
   {#if entry.thread.archiveReason?.type === 'pr-merged'}
     <a class="reason" data-testid="done-thread-merged" href={entry.thread.archiveReason.url} target="_blank" rel="noopener noreferrer">{fill(strings.settings.archived.mergedReason, { number: String(entry.thread.archiveReason.number) })}</a>
   {/if}
