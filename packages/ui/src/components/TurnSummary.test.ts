@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { BackgroundTask, Turn } from '@boite/contracts';
 import TurnSummary from './TurnSummary.svelte';
@@ -10,6 +10,7 @@ afterEach(() => {
   if (running) unmount(running, { outro: false });
   running = null;
   document.body.innerHTML = '';
+  vi.useRealTimers();
 });
 
 const STARTED = new Date(2026, 8, 24, 10, 26, 30).getTime();
@@ -27,6 +28,12 @@ function turn(overrides: Partial<Turn> = {}): Turn {
     ...overrides
   };
 }
+
+const compactExecution: NonNullable<Turn['execution']> = {
+  providerId: 'echo', accountId: 'echo', model: null, effort: null, speed: null,
+  permissionMode: 'default', sessionId: 'session', sessionGeneration: 0,
+  selectionVersion: 0, operation: 'compact', automatic: true,
+};
 
 function text(testid: string): string | null {
   return document.querySelector(`[data-testid=${testid}]`)?.textContent ?? null;
@@ -111,4 +118,48 @@ test('provider signals do not imply new execution progress or text', () => {
   expect(text('turn-progress')).toBe('Waiting for provider');
   expect(text('turn-last-activity')).toBe('No new activity for 1m 15s');
   expect(text('turn-provider-signal')).toBe('Provider signal 0s ago');
+});
+
+test('a compaction turn explains maintenance even before provider progress arrives', () => {
+  vi.useFakeTimers({ now: STARTED + 9_000 });
+  running = mount(TurnSummary, { target: document.body, props: {
+    turn: turn({ status: 'running', finishedAt: null, usage: null, execution: compactExecution }), typing: true, activeTool: true,
+  } });
+  flushSync();
+  const summary = document.querySelector('[data-testid=turn-summary]');
+  expect(summary?.getAttribute('aria-label')).toBe('Compacting conversation');
+  expect(text('compaction-hint')).toBe('Summarizing earlier messages to free up context.');
+  expect(text('compaction-elapsed')).toBe('Elapsed: 9s');
+  expect(document.querySelector('[data-testid=typing-indicator]')).toBeNull();
+  expect(document.querySelector('[data-testid=turn-elapsed]')).toBeNull();
+  expect(document.querySelector('[role=progressbar]')).toBeNull();
+  vi.advanceTimersByTime(2_000);
+  flushSync();
+  expect(text('compaction-elapsed')).toBe('Elapsed: 11s');
+});
+
+test('mid-turn compaction hides reply activity without labelling the whole turn as compaction time', () => {
+  running = mount(TurnSummary, { target: document.body, props: {
+    turn: turn({ status: 'running', finishedAt: null }), typing: true,
+    progress: { turnId: 'turn-1', phase: 'compacting', detail: null, at: Date.now(), providerAt: Date.now() + 1 },
+  } });
+  flushSync();
+  expect(text('compaction-hint')).not.toBeNull();
+  expect(document.querySelector('[data-testid=typing-indicator]')).toBeNull();
+  expect(document.querySelector('[data-testid=compaction-elapsed]')).toBeNull();
+  expect(document.querySelector('[data-testid=turn-last-activity]')).toBeNull();
+  expect(document.querySelector('[data-testid=turn-provider-signal]')).toBeNull();
+});
+
+test.each([
+  ['done', 'Context compacted', 'Compacted in 4m 41s'],
+  ['error', 'Compaction failed', 'Elapsed: 4m 41s'],
+  ['stopped', 'Compaction stopped', 'Elapsed: 4m 41s'],
+] as const)('a %s compaction reports its outcome without calling it work', (status, label, elapsed) => {
+  running = mount(TurnSummary, { target: document.body, props: {turn:turn({status,execution:compactExecution})} });
+  flushSync();
+  expect(document.querySelector('[data-testid=turn-summary]')?.getAttribute('aria-label')).toBe(label);
+  expect(text('turn-elapsed')).toBe(elapsed);
+  expect(text('compaction-hint')).toBeNull();
+  if (status !== 'done') expect(text('compaction-result')).toBe(label);
 });

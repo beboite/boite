@@ -49,6 +49,8 @@
   }
 
   const execution = $derived(store.openThread?.turns.find((turn) => turn.id === message.turnId)?.execution);
+  const compacting = $derived(execution?.operation === 'compact' ||
+    store.openThread?.progress?.turnId === message.turnId && store.openThread.progress.phase === 'compacting');
   const caretAt = $derived(message.state === 'streaming' ? lastTextIndex(message) : -1);
   const runs = $derived(memoryPartRuns(message.parts, memoryEvents));
   const isBackground = (toolId: string) => store.openThread?.background?.some((task) => task.toolId === toolId) ?? false;
@@ -80,7 +82,7 @@
         {@const shownText = message.role === 'system' ? promptText(part) : visibleAnswer(part.text)}
         {#if shownText.length > 0 || index === caretAt}
           <Prose text={shownText} live={index === caretAt && part.complete !== true} bubble={message.role === 'assistant'}
-            typing={latestInTurn && message.role === 'assistant' && store.connection === 'ready' && store.openThread?.status === 'running' && index === message.parts.length - 1 && index === caretAt && part.complete !== true} {store} {threadId} />
+            typing={!compacting && latestInTurn && message.role === 'assistant' && store.connection === 'ready' && store.openThread?.status === 'running' && index === message.parts.length - 1 && index === caretAt && part.complete !== true} {store} {threadId} />
         {/if}
 
       {:else if part.type === 'thinking' && (part.text.trim().length > 0 || part.startedAt !== undefined || (message.state === 'streaming' && index === message.parts.length - 1))}

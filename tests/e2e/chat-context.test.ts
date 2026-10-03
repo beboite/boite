@@ -125,3 +125,39 @@ test('context opens on hover, shows exact segments, and compaction needs its own
   await page.waitFor(`!document.querySelector('[data-testid="context-popup"]')`);
   expect(await page.evaluate(`window.__compactCalls`)).toBe(1);
 }, 30000);
+
+test('compaction explains maintenance on desktop and phone, then yields to normal work', async () => {
+  await update(`
+    window.__compactionAnswer = JSON.parse(JSON.stringify(thread.messages.find(m=>m.role==='assistant')));
+    const turn = thread.turns[0];
+    turn.status = 'running'; turn.startedAt = Date.now() - 9000; turn.finishedAt = null; turn.usage = null;
+    turn.execution = {...turn.execution, operation:'compact', automatic:true};
+    thread.status = 'running'; thread.background = [];
+    thread.messages = [{...thread.messages[0],role:'system',parts:[{type:'text',text:'Automatic compaction'}]}];
+    thread.progress = null;
+  `);
+  await page.waitFor(`document.querySelector('[data-testid="compaction-hint"]')`);
+  for (const phone of [false, true]) {
+    await page.send('Emulation.setDeviceMetricsOverride', {width:phone?390:1280,height:phone?844:900,deviceScaleFactor:1,mobile:phone});
+    expect(await page.evaluate(`document.querySelector('[data-testid="turn-summary"]').getAttribute('aria-label')`)).toBe('Compacting conversation');
+    expect(await page.evaluate(`document.querySelector('[data-testid="compaction-elapsed"]').textContent`)).toMatch(/^Elapsed: \d+s$/);
+    expect(await page.evaluate(`document.querySelector('[data-testid="typing-indicator"], [data-testid="turn-elapsed"], [role="progressbar"]') === null`)).toBe(true);
+    expect(await page.evaluate(`(() => {const r=document.querySelector('[data-testid="turn-summary"]').getBoundingClientRect(); return r.left>=0 && r.right<=innerWidth;})()`)).toBe(true);
+    await capture(phone ? 'compaction-phone' : 'compaction-desktop');
+  }
+  await update(`thread.turns[0].status='done'; thread.turns[0].finishedAt=thread.turns[0].startedAt+11000; thread.status='idle';`);
+  await page.waitFor(`!document.querySelector('[data-testid="compaction-hint"]')`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="turn-elapsed"]').textContent`)).toBe('Compacted in 11s');
+  await update(`
+    const turn=thread.turns[0]; delete turn.execution.operation; turn.status='running'; turn.startedAt=Date.now()-120000; turn.finishedAt=null; thread.status='running';
+    thread.progress={turnId:turn.id,phase:'compacting',detail:null,at:Date.now(),providerAt:Date.now()};
+    thread.messages[0].role='user'; thread.messages[0].parts=[{type:'text',text:'Continue checking the layout.'}];
+    thread.messages.push({...window.__compactionAnswer,state:'streaming',parts:[{type:'text',text:'A finished paragraph.\\n\\nAn unfinished paragraph'}]});
+  `);
+  await page.waitFor(`document.querySelector('[data-testid="compaction-hint"]')`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="typing-indicator"], [data-testid="compaction-elapsed"], [data-testid="turn-provider-signal"]') === null`)).toBe(true);
+  await update(`thread.progress.phase='working';`);
+  await page.waitFor(`!document.querySelector('[data-testid="compaction-hint"]') && document.querySelector('[data-testid="typing-indicator"]')`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="turn-elapsed"]').textContent`)).toMatch(/^Working for /);
+  await update(`thread.turns[0].status='done';thread.turns[0].finishedAt=Date.now();thread.messages.at(-1).state='complete';thread.status='idle';thread.progress=null;`);
+}, 30000);
