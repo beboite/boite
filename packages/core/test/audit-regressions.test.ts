@@ -112,6 +112,21 @@ const binaryInstall = (path: string): ProviderInstall => ({
   files: [{ path, bytes: 4 }],
 });
 
+test('a releases directory planted as a symlink is not unpacked into', async () => {
+  const data = outside('boite-install-root-');
+  const target = outside('boite-install-releases-');
+  writeFileSync(join(target, 'secret.txt'), 'keep');
+  const provider = join(data, 'agents', 'echo');
+  mkdirSync(provider, { recursive: true });
+  symlinkSync(target, join(provider, 'releases'), 'junction');
+  const part = join(data, 'payload.bin');
+  writeFileSync(part, 'leak');
+  const release = join(provider, 'releases', '1.0.0');
+  await expect(extractRelease(binaryInstall('secret.txt'), new AbortController().signal, part, release, data)).rejects.toThrow(/symlink/);
+  expect(existsSync(join(target, '1.0.0', 'secret.txt'))).toBe(false);
+  expect(readFileSync(join(target, 'secret.txt'), 'utf8')).toBe('keep');
+});
+
 test('a release directory planted as a symlink is not unpacked into', async () => {
   const data = outside('boite-install-');
   const target = outside('boite-install-outside-');
@@ -122,8 +137,22 @@ test('a release directory planted as a symlink is not unpacked into', async () =
   symlinkSync(target, release, 'junction');
   const part = join(data, 'payload.bin');
   writeFileSync(part, 'leak');
-  await expect(extractRelease(binaryInstall('secret.txt'), new AbortController().signal, part, release)).rejects.toThrow(/symlink/);
+  await expect(extractRelease(binaryInstall('secret.txt'), new AbortController().signal, part, release, data)).rejects.toThrow(/symlink/);
   expect(readFileSync(join(target, 'secret.txt'), 'utf8')).toBe('keep');
+});
+
+test('prune does not follow a provider directory that is a symlink', () => {
+  const data = outside('boite-prune-provider-');
+  const escaped = outside('boite-prune-provider-out-');
+  mkdirSync(join(escaped, 'releases', '0.9.0'), { recursive: true });
+  writeFileSync(join(escaped, 'releases', '0.9.0', 'secret.txt'), 'secret');
+  mkdirSync(join(escaped, 'live'));
+  symlinkSync(join(escaped, 'live'), join(escaped, 'current'), 'junction');
+  mkdirSync(join(data, 'agents'), { recursive: true });
+  symlinkSync(escaped, join(data, 'agents', 'echo'), 'junction');
+  new InstallManager(data).prune('echo');
+  expect(readFileSync(join(escaped, 'releases', '0.9.0', 'secret.txt'), 'utf8')).toBe('secret');
+  expect(existsSync(join(data, 'agents', 'echo'))).toBe(true);
 });
 
 test('prune removes a releases symlink and a child symlink without following either', () => {

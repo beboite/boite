@@ -15,7 +15,7 @@ import {
   resumableBytes,
 } from './install-download.ts';
 import { pointCurrent, readReleaseRecord, removeCurrent, writeReleaseRecord, type ReleaseRecord } from './install-release.ts';
-import { checkSizes, extractRelease, markExecutable } from './install-unpack.ts';
+import { checkSizes, extractRelease, markExecutable, reachesThroughLink } from './install-unpack.ts';
 
 /** Room left on the volume after the archive and the unpacked files, so nothing fills the disk. */
 export const FREE_SPACE_MARGIN = 256 * 1024 * 1024;
@@ -185,6 +185,12 @@ export class InstallManager {
   prune(providerId: ProviderId, keepDownload?: string | null): void {
     if (this.#running.has(providerId) || this.leaseCount(providerId) > 0) return;
     const root = providerAgentDir(this.dataDir, providerId);
+    // A junction at `agents/<id>` makes `releases/<version>` resolve outside
+    // the data directory. Removing those names would delete the target's files.
+    if (reachesThroughLink(this.dataDir, root)) {
+      this.#log('warn', `${root} is reached through a symlink; prune does not follow it`);
+      return;
+    }
     let current: string;
     try { current = realpathSync(this.currentDir(providerId)); }
     catch { return; }
@@ -384,7 +390,7 @@ export class InstallManager {
       });
       this.#move(running, providerId, { state: 'extracting', version: install.version, operationId: running.operationId });
       rmSync(releaseDir, { recursive: true, force: true });
-      await extractRelease(install, running.controller.signal, part, releaseDir);
+      await extractRelease(install, running.controller.signal, part, releaseDir, this.dataDir);
       checkSizes(install, releaseDir);
       markExecutable(install, releaseDir);
       writeReleaseRecord(releaseDir, install);

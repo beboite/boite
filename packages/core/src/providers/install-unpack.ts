@@ -1,5 +1,5 @@
 import { chmodSync, closeSync, constants, existsSync, lstatSync, mkdirSync, openSync, renameSync, writeSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { ProviderInstall } from '@boite/contracts';
 import { currentOs } from '../paths.ts';
 import { refused } from '../errors.ts';
@@ -7,6 +7,28 @@ import { refused } from '../errors.ts';
 /** Compressed bytes handed to the unzip at once, and how long it may hold the thread before yielding. */
 const EXTRACT_SLICE_BYTES = 16 * 1024;
 const EXTRACT_YIELD_MS = 10;
+
+/**
+ * True when any existing component between `root` and `target` is a symlink.
+ * `root` itself is the caller's trusted directory and is not inspected. A
+ * missing component stops the walk: nothing further down can have been planted.
+ */
+export function reachesThroughLink(root: string, target: string): boolean {
+  const from = resolve(root);
+  const rel = relative(from, resolve(target));
+  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return true;
+  let cursor = from;
+  for (const part of rel.split(sep)) {
+    if (part.length === 0) continue;
+    cursor = join(cursor, part);
+    try {
+      if (lstatSync(cursor).isSymbolicLink()) return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
 
 /** A zip member may not climb out of the directory it is unpacked into. */
 export function safeEntryPath(name: string): string | null {
@@ -28,7 +50,11 @@ export async function extractRelease(
   signal: AbortSignal,
   part: string,
   releaseDir: string,
+  root: string,
 ): Promise<void> {
+  // `mkdir` follows a symlink ancestor such as `releases` or the provider
+  // directory and would unpack outside `root`. The link itself is the refusal.
+  if (reachesThroughLink(root, releaseDir)) throw refused('the release directory is a symlink');
   const wanted = new Map(install.files.map((file) => [file.path.split('\\').join('/'), file]));
   try {
     mkdirSync(releaseDir, { recursive: true });

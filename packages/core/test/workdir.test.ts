@@ -5,13 +5,13 @@
  * temporary directory the harness removes.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { FILE_MAX_BYTES, FILE_ROUTE, FILE_TICKET_TTL_MS } from '@boite/contracts';
 import { connect, type CoreClient } from '../src/client.ts';
-import { languageOf, mediaOf, writeLandsInside } from '../src/workdir.ts';
+import { createExclusiveFile, languageOf, mediaOf, openHeldDirectory, writeLandsInside } from '../src/workdir.ts';
 import { echoThread, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -175,6 +175,32 @@ describe('files.read', () => {
     expect((await fetch(`${harness.url}${content.url}`)).status).toBe(404);
   });
 
+  test('a ticket keeps the opened file when its directory is swapped before the path is sampled again', async () => {
+    const folder = join(harness.dataDir, 'media');
+    const outside = mkdtempSync(join(tmpdir(), 'boite-ticket-mint-'));
+    const tickets = harness.core.fileTickets;
+    const original = tickets.mint.bind(tickets);
+    mkdirSync(folder);
+    writeFileSync(join(folder, 'asset.bin'), new Uint8Array([0, 1]));
+    writeFileSync(join(outside, 'asset.bin'), 'outside data');
+    tickets.mint = (path, mime, now, name, identity) => {
+      renameSync(folder, join(harness.dataDir, 'original-media'));
+      symlinkSync(outside, folder, 'junction');
+      return original(path, mime, now, name, identity);
+    };
+    try {
+      const content = await client.call('files.read', { threadId, path: 'media/asset.bin' });
+      if (content.kind === 'text') throw new Error('expected a file ticket');
+      expect((await fetch(`${harness.url}${content.url}`)).status).toBe(404);
+      expect(readFileSync(join(outside, 'asset.bin'), 'utf8')).toBe('outside data');
+    } finally {
+      tickets.mint = original;
+      rmSync(folder, { recursive: true, force: true });
+      rmSync(join(harness.dataDir, 'original-media'), { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
   test('a ticket cannot follow a directory replaced with an outside junction', async () => {
     const folder = join(harness.dataDir, 'media');
     const outside = mkdtempSync(join(tmpdir(), 'boite-ticket-outside-'));
@@ -224,6 +250,13 @@ describe('files.read', () => {
 });
 
 describe('files.write', () => {
+  test('an existing file is replaced and the previous tail is not left behind', async () => {
+    writeFileSync(join(harness.dataDir, 'note.txt'), 'ORIGINAL-CONTENT');
+    const written = await client.call('files.write', { threadId, path: 'note.txt', text: 'SHORT\n' });
+    expect(written.bytes).toBe(6);
+    expect(readFileSync(join(harness.dataDir, 'note.txt'), 'utf8')).toBe('SHORT\n');
+  });
+
   test('a new file lands inside the working directory and reads back as text', async () => {
     const written = await client.call('files.write', { threadId, path: 'notes/../saved.md', text: '# saved\n' });
     expect(written.bytes).toBe(8);
@@ -284,6 +317,33 @@ describe('files.write', () => {
       expect(message).toBe('files.write path is a link to nothing: dangling.txt');
       expect(existsSync(target)).toBe(false);
     } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test('a new file stays on the held directory inode when that directory is renamed onto an outside link', async () => {
+    if (process.platform !== 'linux') return;
+    const root = mkdtempSync(join(tmpdir(), 'boite-held-'));
+    const parent = join(root, 'sub');
+    const moved = join(root, 'sub-real');
+    const outside = mkdtempSync(join(tmpdir(), 'boite-held-out-'));
+    mkdirSync(parent);
+    const stats = statSync(parent);
+    const dir = await openHeldDirectory(parent, stats.dev, stats.ino, 'files.write path directory', 'sub');
+    try {
+      renameSync(parent, moved);
+      symlinkSync(outside, parent, 'junction');
+      const handle = await createExclusiveFile(dir, 'note.txt', join(parent, 'note.txt'));
+      try {
+        await handle.write(Buffer.from('inside-inode\n'));
+      } finally {
+        await handle.close();
+      }
+      expect(readFileSync(join(moved, 'note.txt'), 'utf8')).toBe('inside-inode\n');
+      expect(existsSync(join(outside, 'note.txt'))).toBe(false);
+    } finally {
+      await dir.close();
+      rmSync(root, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });
     }
   });

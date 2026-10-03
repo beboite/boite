@@ -17,7 +17,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { FILES_LIST_MAX, FILE_MAX_BYTES, FILE_ROUTE, FILE_TICKET_TTL_MS } from '@boite/contracts';
 import type { FileContent, FileEntry, ThreadId, Timestamp } from '@boite/contracts';
 import type { Core } from './core.ts';
-import { refused } from './errors.ts';
+import { refused, RpcFailure } from './errors.ts';
 import { newToken } from './ids.ts';
 
 /** How much of a file decides whether it is text: one NUL in there and it is not. */
@@ -103,6 +103,41 @@ async function writeAll(handle: FileHandle, data: Uint8Array): Promise<void> {
     if (bytesWritten <= 0) throw refused('the file write made no progress');
     offset += bytesWritten;
   }
+}
+
+/** Open the real directory checked a moment ago. The handle stays on that inode if its path is renamed. */
+export async function openHeldDirectory(real: string, dev: number, ino: number, what: string, path: string): Promise<FileHandle> {
+  let handle: FileHandle;
+  try {
+    handle = await open(real, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | NOFOLLOW);
+  } catch {
+    throw refused(`${what} changed while it was opened: ${path}`, { what, path });
+  }
+  try {
+    const stats = await handle.stat();
+    if (!stats.isDirectory() || stats.dev !== dev || stats.ino !== ino) {
+      throw refused(`${what} changed while it was opened: ${path}`, { what, path });
+    }
+    return handle;
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
+}
+
+/**
+ * Create `name` inside a directory the caller holds. On Linux the new file is
+ * opened through that inode, so renaming the directory onto an outside link
+ * cannot redirect it. Elsewhere the fallback path is opened after the inode
+ * check; a swap in that gap can still create the file outside.
+ */
+export async function createExclusiveFile(dir: FileHandle, name: string, fallbackPath: string): Promise<FileHandle> {
+  if (name.length === 0 || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) {
+    throw refused(`files.write path is not a file name: ${name}`, { what: 'files.write path', path: name });
+  }
+  const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW;
+  const target = process.platform === 'linux' ? `/proc/self/fd/${dir.fd}/${name}` : fallbackPath;
+  return open(target, flags, 0o666);
 }
 
 /** Open the real file checked a moment ago, and refuse a symlink swapped in since. */
@@ -263,6 +298,7 @@ export async function readFileContent(core: Core, cwd: string, path: string): Pr
   const modifiedAt = Math.round(found.stats.mtimeMs);
   const media = mediaOf(found.relative);
   const handle = await openChecked(found.real, constants.O_RDONLY, found.stats.dev, found.stats.ino, 'files.read path', path);
+  let ticketIdentity: string | null = null;
   try {
     if (found.stats.size <= FILE_MAX_BYTES && media.mime === 'application/octet-stream') {
       const data = Buffer.alloc(found.stats.size);
@@ -287,10 +323,15 @@ export async function readFileContent(core: Core, cwd: string, path: string): Pr
         };
       }
     }
+    const held = await handle.stat({ bigint: true });
+    ticketIdentity = `${found.real}|${held.dev}|${held.ino}|${held.size}|${held.mtimeNs}|${held.ctimeNs}`;
   } finally {
     await handle.close();
   }
-  const ticket = core.fileTickets.mint(found.real, media.mime, Date.now(), basename(found.absolute));
+  if (ticketIdentity === null) throw refused(`files.read path changed while it was opened: ${path}`, { what: 'files.read path', path });
+  // The identity comes from the handle, not a second walk. A parent swapped
+  // before mint would otherwise bind the ticket to the new file.
+  const ticket = core.fileTickets.mint(found.real, media.mime, Date.now(), basename(found.absolute), ticketIdentity);
   return {
     kind: media.kind,
     path: found.relative,
@@ -329,26 +370,38 @@ export async function writeFileText(
     }
     // The write follows a link: the real file has to be inside the working directory too.
     const inside = existingInside(cwd, path, 'file', 'files.write path');
-    const handle = await openChecked(inside.real, constants.O_WRONLY | constants.O_TRUNC, inside.stats.dev, inside.stats.ino, 'files.write path', path);
+    // Truncate only after the inode matches. Windows Bun 1.4.2 returns EINVAL
+    // for O_WRONLY|O_TRUNC on an ordinary file, and truncating first would
+    // also shorten a file the check then refuses.
+    const handle = await openChecked(inside.real, constants.O_WRONLY, inside.stats.dev, inside.stats.ino, 'files.write path', path);
     try {
+      await handle.truncate(0);
       await writeAll(handle, data);
     } finally {
       await handle.close();
     }
   } else {
-    // Create the name in the real parent. O_EXCL plus O_NOFOLLOW refuses a
-    // symlink that appears at that name between the check and the write.
-    const dest = join(parentInside.real, basename(found.absolute));
-    let handle: FileHandle;
+    // Create the name in the held parent inode. O_EXCL plus O_NOFOLLOW still
+    // refuses a symlink that appears at that name. On Linux the create goes
+    // through the directory fd, so a parent renamed onto an outside link
+    // cannot receive the bytes. Other platforms open the path after this
+    // inode check; a swap in that gap can still create the file outside.
+    const dir = await openHeldDirectory(parentInside.real, parentInside.stats.dev, parentInside.stats.ino, 'files.write path directory', path);
     try {
-      handle = await open(dest, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW, 0o666);
-    } catch {
-      throw refused(`files.write path changed while it was opened: ${path}`, { what: 'files.write path', path });
-    }
-    try {
-      await writeAll(handle, data);
+      let handle: FileHandle;
+      try {
+        handle = await createExclusiveFile(dir, basename(found.absolute), join(parentInside.real, basename(found.absolute)));
+      } catch (error) {
+        if (error instanceof RpcFailure) throw error;
+        throw refused(`files.write path changed while it was opened: ${path}`, { what: 'files.write path', path });
+      }
+      try {
+        await writeAll(handle, data);
+      } finally {
+        await handle.close();
+      }
     } finally {
-      await handle.close();
+      await dir.close();
     }
   }
   const stats = await stat(found.absolute);
@@ -379,10 +432,16 @@ function fileIdentity(path: string): string | null {
 export class FileTickets {
   private readonly held = new Map<string, FileTicketTarget & { expiresAt: number; identity: string | null }>();
 
-  mint(path: string, mime: string, now = Date.now(), name?: string): string {
+  mint(path: string, mime: string, now = Date.now(), name?: string, identity?: string): string {
     this.sweep(now);
     const ticket = newToken();
-    this.held.set(ticket, { path, mime, ...(name ? { name } : {}), expiresAt: now + FILE_TICKET_TTL_MS, identity: fileIdentity(path) });
+    this.held.set(ticket, {
+      path,
+      mime,
+      ...(name ? { name } : {}),
+      expiresAt: now + FILE_TICKET_TTL_MS,
+      identity: identity ?? fileIdentity(path),
+    });
     return ticket;
   }
 
