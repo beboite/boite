@@ -103,6 +103,28 @@ card mints one, `boite-core pair --owner` mints one on a machine with no window
 ([server.md](server.md)), and the Connection card of the other computer takes it
 pasted. A role anything but those two is refused by name.
 
+### Pairing codes, and an owner QR code
+
+A device link also comes with a code, `XXXX-XXXX` in Crockford base32, shown
+under the QR code. **Type a pairing code** on the installed app's pairing
+screen takes it, in any case, with or without the dash, `O` and `I`/`L` read as
+`0` and `1`. The code names the same one-time grant: the app sends it in `hello`
+as the grant, on the origin that served the page, with the same nonce retry.
+The installed iPhone app needs it because the Camera app hands a link to
+Safari, whose storage the home-screen app does not share.
+
+A code is good for five minutes at most, and once: using the link spends it,
+and a code typed after the link was used is refused like a wrong one, by name.
+Eight letters are 40 bits; ten wrong codes in a row drop every live code (the
+links keep working, a new link brings a new code), so guessing one is out of
+reach. The refusal never says whether a code existed.
+
+An owner link is pasted, not drawn, because a QR code on screen is a camera
+away from any phone in the room. **QR code for a phone** on an owner link draws one
+after a confirmation on the computer: that grant is minted `short`, lives five
+minutes instead of ten, is still single use, and carries a code too. Expiry,
+revocation and the nonce rule are unchanged for every grant.
+
 Session keys are stored hashed in the journal, so pairings survive restart
 without storing the recoverable key there. `sessions.list` shows
 every paired device with the client it said it was, its role and when it was last seen;
@@ -231,6 +253,36 @@ boite.example.com {
 }
 ```
 
+### Through Tailscale
+
+On a tailnet the phone is already on, Settings, Machines, Phone app has
+**HTTPS through Tailscale**. It reads the `tailscale` CLI (found on `PATH`, or
+where the installers put it on Windows, macOS and Linux; `BOITE_TAILSCALE_CLI`
+names another) and says which of these it found, with the way out of each:
+
+| State | Meaning | Offered |
+|---|---|---|
+| `missing` | no CLI | the download page |
+| `stopped` | the daemon does not answer or is not running | connect, then **Check again** |
+| `needs-login` | signed out | Tailscale's sign-in page |
+| `https-disabled` | MagicDNS or HTTPS certificates off for the tailnet | the admin DNS page |
+| `off` | ready, nothing served on 443 | **Enable HTTPS via Tailscale** |
+| `on` | 443 proxies to this core | **Pair a phone**, **Disable** |
+| `conflict` | 443 serves something else | **Replace…** after a confirmation |
+| `error` | the CLI refused (operator rights) or timed out | **Check again** |
+
+Enabling runs `tailscale serve --bg --https=443 http://127.0.0.1:<port>`, sets
+the public URL to `https://<machine>.<tailnet>.ts.net` (the origin gate already
+admits it) and mints a phone link through it. A tailnet that never allowed Serve
+answers with a consent page, offered as **Allow Serve**. Disabling runs
+`tailscale serve --https=443 off` and clears the public URL if it is still the
+tailnet one. Another target already on 443 is never replaced without the
+owner's confirmation. The CLI's own output never reaches a client, since a
+failing command can echo an auth key: failures are reduced to a label. The
+three methods, `tailscale.status`, `tailscale.enable` and `tailscale.disable`,
+are owner only. A machine with no window has `boite-core tailscale [status|on
+[--replace]|off]` ([server.md](server.md)).
+
 Replace the example hostname with a domain pointing at the proxy. Caddy needs
 access to the ports required for its certificate challenge and public HTTPS.
 Keep the core bound to loopback when the proxy is local. A private VPN still
@@ -251,11 +303,13 @@ or install the nightly APK ([android.md](android.md)).
 Open the installed icon and pair from inside Boite. On iPhone, installation
 does not copy the browser's localStorage, where Boite keeps its session key.
 The installed app therefore needs its own pairing even if Chrome or Safari
-was already connected. Its welcome screen offers **Scan a QR code** and
-**Paste a pairing link**. Create a fresh code on the computer and scan it with
-that button; using the iPhone Camera app opens the browser instead.
+was already connected. Its welcome screen offers **Scan a QR code**, **Type a
+pairing code** and **Paste a pairing link**. Create a fresh link on the computer
+and scan it with that button, or type the code under it; using the iPhone
+Camera app opens the browser instead, which the installed app's screen says.
 
-A missing or revoked key opens that recovery screen. A network outage offers
+A missing or revoked key opens that recovery screen, narrow or wide (an iPhone
+on its side), instead of a stale page. A network outage offers
 reconnection without discarding the saved key. The pairing form stays open
 while a replacement key is being exchanged, and a rejected link can be replaced
 without leaving the screen. After pairing, the saved session is reused on
@@ -343,6 +397,38 @@ Disabling removes the server subscription and unsubscribes the browser.
 Revocation deletes the subscription with the pairing. Push services returning
 404 or 410 retire the destination. Other delivery failures leave it subscribed
 and write a generic diagnostic without the provider's credential-bearing body.
+
+### The icon badge
+
+The installed app's icon carries the count the window title shows: the threads
+of every connected machine waiting on an answer or finished unread, archived
+ones aside (`lib/badge.ts`, through `navigator.setAppBadge`). A push carries
+the core's own count in `badge`, which the worker sets on the icon as it shows
+the notification; zero clears it, and the test notification leaves it alone.
+iOS (16.4 or later, installed app, notifications allowed) only runs the worker
+for a notification it shows, so with the app closed the badge moves only when
+one arrives.
+
+### iOS push, checked
+
+The path is: the installed app's Enable notifications asks the permission from
+the tap, subscribes with the core's VAPID key, and stores the subscription with
+`push.subscribe` against its pairing. A notification's payload is
+`{title, body, threadId, tag, badge}`; tapping it focuses an open window and
+posts it the thread, or, if the page refuses focus or none is open, opens
+`/?thread=<id>` on the worker's own origin.
+
+### One app, several machines
+
+An installed web app belongs to one origin, and a subscription is bound to the
+VAPID key of the core that served it. So one installed app receives the
+notifications of the machine it was installed from, not of the other machines
+it shows through that machine's UI; the Phone app section says so once
+subscribed. Today each machine whose notifications matter needs its own
+installed app, from its own HTTPS address (each one has its own icon and
+pairing). Doing it with one app would need the installing core to relay: the
+other cores send their events to it over coordination, and it pushes them
+with its own key.
 
 ## Experimental desktop browser control
 
