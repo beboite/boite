@@ -10,7 +10,8 @@ import type { RpcEventName, RpcMethodName } from './index.ts';
  * What a paired device reaches. Read this as the phone's screen: the sidebar,
  * a thread, the composer, the cards an agent raises, and the settings it only
  * displays. Model discovery may start the configured agent without a prompt.
- * Nothing here names a path or changes what the core trusts.
+ * Nothing here changes what the core trusts; the only paths a device names are
+ * read-only, inside a thread's working tree.
  */
 export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
   // A paired phone follows persistent work, talks to agents and answers its owner's decisions.
@@ -103,6 +104,14 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'questions.answer',
   // Paired phones can dismiss the same question cards as the owner's chat.
   'questions.skip',
+  // Read-only Changes and Files panels on the phone: the thread's own changes and files.
+  // The core runs git itself (no device command), refuses a diff against anything but
+  // HEAD (core access.ts), and holds every path to a thread whose real working directory
+  // is in its project or the core's worktrees (core workdir.ts). `files.write` stays the owner's.
+  'git.status', // The changed paths and their counts, what the Changes list draws.
+  'git.diff', // Both sides of one changed file against HEAD.
+  'files.list', // One directory of the thread's working tree, for the Files tree.
+  'files.read', // One file of it: text inline, anything else through a short-lived ticket.
   // Read-only screens.
   // Sanitized per-thread usage has no command lines, executable paths or account identifiers.
   'resources.usage',

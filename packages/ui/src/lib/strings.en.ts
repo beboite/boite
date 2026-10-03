@@ -1084,6 +1084,15 @@ export const strings = {
     queueNotAccepted: 'This turn did not accept the queued input. It remains queued and will be sent when the turn ends.',
     sendNowHint: 'Sends pending messages to the running agent without stopping it. Enter in the empty composer does the same.',
     retryQueuedHint: 'Sends all pending messages together again. Enter in the empty composer does the same.',
+    /** The outbox: messages written while the machine was away, kept on this device. */
+    outboxKept: 'Kept on this device and sent in order, once each',
+    outboxWaiting: 'Waiting for {machine}',
+    outboxNext: 'Goes out when the thread is free',
+    outboxSending: 'Sending…',
+    outboxFailed: 'Not sent: {reason}',
+    outboxRetry: 'Send again',
+    outboxSettings: 'The model and effort it was written with could not be set again.',
+    removeQueued: 'Remove this pending message',
     picker: 'Provider and model',
     models: 'Models',
     searchModels: 'Search models',
@@ -1181,6 +1190,11 @@ export const strings = {
     pick: 'Pick a file to see its diff',
     loading: 'Reading the working tree',
     renamedFrom: 'Renamed from {path}',
+    /** A narrow panel shows the list or one diff: the way back, and the steps between files. */
+    backToList: 'All changes',
+    previousFile: 'Previous file',
+    nextFile: 'Next file',
+    position: '{index} of {count}',
     status: {
       added: 'Added',
       modified: 'Modified',

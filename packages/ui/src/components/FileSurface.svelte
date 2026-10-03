@@ -263,6 +263,15 @@
     offset = node.scrollTop;
   });
 
+  // The same line in the read-only view a paired device gets.
+  let lineList = $state<HTMLOListElement | undefined>(undefined);
+  $effect(() => {
+    const line = highlight;
+    const list = lineList;
+    if (line === null || !list) return;
+    list.querySelector<HTMLElement>(`[data-line="${line}"]`)?.scrollIntoView?.({ block: 'center' });
+  });
+
   // The picture follows the panel's width: a fitted one is fitted again.
   $effect(() => {
     const node = viewport;
@@ -379,6 +388,19 @@
     {:else if readOnly}
       <p class="notice" data-testid="file-readonly">{strings.files.readOnly}</p>
     {/if}
+    {#if !store.owner}
+    <!-- A paired device only reads: no editor, and lines that wrap to the
+         panel's width, each under its own number, so a phone never scrolls sideways. -->
+    <ol class="lines mono" data-testid="file-lines" aria-label={strings.files.editorLabel} bind:this={lineList}>
+      {#each draft.split('\n') as text, index (index)}
+        <li class="line" class:on={index + 1 === highlight} data-testid="file-line" data-line={index + 1}>
+          <span class="line-number" aria-hidden="true">{index + 1}</span>
+          <!-- highlightCode escapes the file and emits only token spans. -->
+          <span class="line-text code-syntax">{#if colored?.[index] !== undefined}{@html colored[index]}{:else}{text}{/if}</span>
+        </li>
+      {/each}
+    </ol>
+    {:else}
     <div class="code" data-testid="file-editor" style="--line: {LINE}px; --pad: {PAD}px">
       <div class="gutter" aria-hidden="true">
         <div class="numbers" style="transform: translateY({-offset}px)">
@@ -417,6 +439,7 @@
       ></textarea>
       </div>
     </div>
+    {/if}
   {:else if content.kind === 'image'}
     <!-- The picture is placed by hand: `object-fit` would hide the numbers the
          zoom, the pan and the 1:1 button all work on. -->
@@ -634,6 +657,53 @@
 
   .text:focus-visible {
     outline: none;
+  }
+
+  /* ------------------------------------------------- the read-only line view */
+
+  .lines {
+    flex: 1;
+    min-height: 0;
+    margin: 0;
+    padding: 6px 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    list-style: none;
+    border-top: 1px solid var(--color-border);
+    background: var(--color-surface-2);
+    font-size: var(--text-xs);
+    line-height: 1.6;
+  }
+
+  .line {
+    display: flex;
+    align-items: flex-start;
+  }
+
+  .line.on {
+    background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+    box-shadow: inset 2px 0 0 var(--color-accent);
+  }
+
+  .line-number {
+    flex: none;
+    width: 44px;
+    padding-right: 8px;
+    text-align: right;
+    color: var(--color-subtle);
+    font-variant-numeric: tabular-nums;
+    user-select: none;
+  }
+
+  .line.on .line-number { color: var(--color-accent); font-weight: 600; }
+
+  .line-text {
+    flex: 1;
+    min-width: 0;
+    padding-right: 10px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    tab-size: 2;
   }
 
   /* ------------------------------------------------------------- the picture */

@@ -118,6 +118,15 @@ settings. Methods absent from the list remain owner-only, including newly
 added methods. A refusal names the method, such as
 `projects.add is for the owner only`.
 
+The Changes and Files panels are read-only on a paired device: `git.status`,
+`git.diff`, `files.list` and `files.read`, never `files.write`, Tasks or the
+trace. The core runs git itself, refuses a device diff against any revision but
+`HEAD`, and before every read checks that the thread's real working directory is
+inside its project or the core's worktree folder for it; each path is then held
+inside that directory, links included. At a phone's width the Changes panel shows
+the list, then one diff with Back and previous/next file; a file reads as wrapped,
+numbered lines with no editor.
+
 An owner holds the core token from `core.json` or an owner-paired session key.
 Only owners can choose arbitrary host paths, administer providers or change
 what the core trusts. [Machine routing](machines.md#isolation-and-tests) keeps
@@ -388,8 +397,10 @@ Safari, including keyboard, backgrounding and network handover.
 
 - What a phone gets with the core asleep is the app shell painting from disk, an
   empty chat, and "Connecting" in the sidebar footer until the socket comes
-  back on its own. No queued messages, no offline history: the journal is on the
-  core.
+  back on its own. No offline history: the journal is on the core. Prompts
+  written in a thread that was open before the connection went wait in the
+  device's outbox (`docs/machines.md`), and go out once it is back, even after
+  the PWA was closed in between; a new thread still needs the core.
 - Pairing is a link somebody carries over, by hand or by the QR code beside it,
   and it has to be opened within ten minutes. There is no discovery on the
   network.

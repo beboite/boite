@@ -15,8 +15,21 @@ import { secureId } from '../secure-id';
 import type { Choice } from '../store.svelte';
 import type { StoreContext } from './context';
 
-/** A prompt waiting behind a running turn, with what it was written with. */
-type QueuedPrompt = { text: string; attachments: Attachment[]; previewReferences?: PreviewReference[]; afterBoundary?: string };
+/**
+ * A prompt written while its machine could not be reached: the outbox. It goes
+ * out under one request id however often it is sent, so the core takes it once,
+ * even when a reload lost the answer to an earlier attempt. It keeps the model,
+ * effort and speed it was written with, and the reason the core refused it,
+ * which holds it and the prompts behind it until the user sends it again,
+ * edits it or removes it.
+ */
+export type OutboxRequest = { id: string; choice: Choice | null; queuedAt: number; failed?: string };
+
+/** A prompt waiting behind a running turn or for its machine, with what it was written with. */
+export type QueuedPrompt = { text: string; attachments: Attachment[]; previewReferences?: PreviewReference[]; afterBoundary?: string; request?: OutboxRequest };
+
+/** What became of one outbox prompt: taken, still to send, or refused with the core's reason. */
+export type Delivery = 'sent' | 'wait' | { failed: string };
 
 /** The refusal `turns.start` answers while the thread already runs a turn, or null for any other error. */
 function turnInFlight(error: unknown): TurnInFlightData | null {
@@ -63,12 +76,14 @@ export class Composer {
         const s = this.ctx.store;
         if (s.connection !== 'ready') return;
         for (const [threadId, state] of Object.entries(this.composerStates)) {
-          if (!state.queued.length || state.sending || state.paused) continue;
+          // A refused outbox prompt holds the ones behind it: they were written after it.
+          if (!state.queued.length || state.sending || state.paused || state.queued[0]!.request?.failed !== undefined) continue;
           const thread = s.openThread?.id === threadId ? s.openThread : s.threads.find(row => row.id === threadId);
           if (!thread || thread.archived || ['queued', 'waiting'].includes(thread.status)) continue;
           if (thread.status === 'running') {
             const boundary = this.inputBoundaries[threadId];
-            if (!boundary || state.queued[0]?.afterBoundary === boundary.boundary || this.blocked(threadId) || isActivityCommand(state.queued[0]!.text)) continue;
+            // An outbox prompt is a turn of its own, started once the running one ends.
+            if (!boundary || state.queued[0]!.request || state.queued[0]?.afterBoundary === boundary.boundary || this.blocked(threadId) || isActivityCommand(state.queued[0]!.text)) continue;
             untrack(() => {
               for (const entry of state.queued) entry.afterBoundary = boundary.boundary;
               void drainQueue(s, threadId, state, boundary.turnId);
@@ -92,6 +107,8 @@ export class Composer {
     const state = this.composerStates[threadId];
     const thread = s.openThread?.id === threadId ? s.openThread : s.threads.find(row => row.id === threadId);
     if (!state || !thread || state.sending || !state.queued.length || this.blocked(threadId) || thread.status === 'waiting' || thread.status === 'queued') return;
+    const head = state.queued[0]!.request;
+    if (head?.failed !== undefined || (head && thread.status === 'running')) return;
     state.paused = false;
     if (thread.status !== 'running') { await drainQueue(s, threadId, state); return; }
     const turnId = s.openThread?.id === threadId ? s.openThread.turns.findLast(turn => turn.status === 'running')?.id : this.inputBoundaries[threadId]?.turnId;
@@ -324,23 +341,73 @@ export class Composer {
     return true;
   }
 
+  /**
+   * Puts a prompt at the end of its thread's queue. With `outbox` it is one the
+   * machine could not take: it gets its request id, or keeps the one an
+   * interrupted send already used, and the choice it was written with, and the
+   * device's journal writes it at once rather than after the typing pause.
+   */
+  queuePrompt(threadId: string, entry: QueuedPrompt, outbox?: { choice: Choice | null; id?: string; head?: boolean }): void {
+    this.composerStates[threadId] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
+    const state = this.composerStates[threadId]!;
+    const queued: QueuedPrompt = outbox
+      ? { ...entry, request: { id: outbox.id ?? secureId(), choice: outbox.choice ? { ...outbox.choice } : null, queuedAt: Date.now() } }
+      : entry;
+    if (outbox?.head) state.queued.unshift(queued); else state.queued.push(queued);
+    if (outbox) { this.ctx.drafts.persist(threadId); void this.ctx.drafts.flush(); }
+  }
+
+  /** A refused outbox prompt goes again, under the same request id: its content has not changed. */
+  retryQueued(threadId: string, at: number): void {
+    const state = this.composerStates[threadId];
+    const entry = state?.queued[at];
+    if (!state || !entry?.request || state.sending) return;
+    const { failed: _failed, ...request } = entry.request;
+    entry.request = request;
+    state.paused = false;
+  }
+
+  /** Takes a pending prompt out of the queue, unless it is the one going out right now. */
+  removeQueued(threadId: string, at: number): void {
+    const state = this.composerStates[threadId];
+    if (!state || (state.sending && at === 0)) return;
+    state.queued.splice(at, 1);
+  }
+
+  /** One outbox prompt through the composer's own send path, under its request id and choice. */
+  deliver(threadId: string, entry: QueuedPrompt & { request: OutboxRequest }): Promise<Delivery> {
+    return this.start(entry.text, threadId, entry.attachments, entry.previewReferences ?? [], entry.request);
+  }
+
   async send(
     prompt: string,
     threadId = this.ctx.store.openThread?.id,
     attachments: Attachment[] = [],
     previewReferences: PreviewReference[] = []
   ): Promise<boolean> {
+    return (await this.start(prompt, threadId, attachments, previewReferences)) === 'sent';
+  }
+
+  private async start(prompt: string, threadId: string | undefined, attachments: Attachment[], previewReferences: PreviewReference[], request?: OutboxRequest): Promise<Delivery> {
     const s = this.ctx.store;
     const connection = this.ctx.connection;
-    if (attachments.some(unresolvedAssetId)) { s.error = strings.errors.draftAttachment; return false; }
+    if (attachments.some(unresolvedAssetId)) {
+      if (!request) s.error = strings.errors.draftAttachment;
+      return { failed: strings.errors.draftAttachment };
+    }
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
-    if (!client || !threadId || s.connection !== 'ready') return false;
-    if (prompt.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0) return false;
+    if (!client || !threadId || s.connection !== 'ready') return 'wait';
+    // An empty outbox entry has nothing to deliver; an empty prompt typed now is not sent.
+    if (prompt.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0) return request ? 'sent' : 'wait';
+    // Held outside the try: a send whose machine does not come back joins the outbox with them.
+    let sent: { id: string; prompt: string; attachments: Attachment[]; previewReferences: PreviewReference[]; selectionVersion: number } | undefined;
+    let target: Choice | null = null;
+    const unsettled = (): Delivery => !this.ctx.currentClient(client, clientGeneration) || s.connection !== 'ready' ? 'wait' : { failed: strings.composer.outboxSettings };
     try {
       // Reconnect snapshots must land before a new stream starts mutating the thread.
       await connection.reloading?.essential;
-      if (!this.ctx.currentClient(client, clientGeneration) || s.connection !== 'ready') return false;
+      if (!this.ctx.currentClient(client, clientGeneration) || s.connection !== 'ready') return 'wait';
       const activity = activityCommand(prompt);
       if (activity) {
         if (previewReferences.length) throw new Error(strings.previewComments.activityUnsupported);
@@ -352,56 +419,75 @@ export class Composer {
           throw error;
         });
         if (this.ctx.currentClient(client, clientGeneration) && s.openThread?.id === threadId) s.openThread.activity = accepted;
-        return true;
+        return 'sent';
       }
       const thread = s.openThread?.id === threadId ? s.openThread : s.threads.find(thread => thread.id === threadId);
       if (thread) {
         const current: Choice = { providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
           effort: thread.effort, permissionMode: thread.permissionMode, speed: thread.speed ?? null };
-        const target = s.composerChoice(current);
-        if (target.model !== current.model) {
+        // An outbox prompt goes out on the model, effort and speed it was written
+        // with, if the thread moved off them meanwhile; never on another agent.
+        const written = request?.choice && request.choice.providerId === current.providerId && request.choice.accountId === current.accountId ? request.choice : null;
+        target = written ? { ...current, model: written.model, effort: written.effort, speed: written.speed ?? null } : s.composerChoice(current);
+        if (target.model !== current.model || (written && (target.effort !== current.effort || target.speed !== current.speed))) {
           const revision = thread.selectionVersion ?? 0;
           const prepared = await s.prepareDraftChoice(target);
-          if (!prepared || !this.ctx.currentClient(client, clientGeneration)) return false;
+          if (!prepared || !this.ctx.currentClient(client, clientGeneration)) return unsettled();
           if (!(await s.update(threadId, { model: prepared.model, effort: prepared.effort, speed: prepared.speed ?? null,
-            expectedSelectionVersion: revision }))) return false;
-          if (!this.ctx.currentClient(client, clientGeneration)) return false;
+            expectedSelectionVersion: revision }))) return unsettled();
+          if (!this.ctx.currentClient(client, clientGeneration)) return 'wait';
         }
       }
       // The key is left out when there is nothing to carry: a turn with no
       // image sends the params it always sent.
-      let pending = this.pendingSends.get(threadId);
       const selectionVersion = (s.openThread?.id === threadId ? s.openThread : s.threads.find((thread) => thread.id === threadId))?.selectionVersion ?? 0;
-      if (!pending || pending.selectionVersion !== selectionVersion || pending.prompt !== prompt || JSON.stringify(pending.previewReferences) !== JSON.stringify(previewReferences) || pending.attachments.length !== attachments.length || pending.attachments.some((a, i) => a.kind !== attachments[i]?.kind || a.data !== attachments[i]?.data || a.mimeType !== attachments[i]?.mimeType || a.name !== attachments[i]?.name)) {
-        const bytes = crypto.getRandomValues(new Uint8Array(16));
-        pending = { id: Array.from(bytes, b => b.toString(16).padStart(2, '0')).join(''), prompt, attachments: [...attachments], previewReferences: JSON.parse(JSON.stringify(previewReferences)) as PreviewReference[], selectionVersion };
-        this.pendingSends.set(threadId, pending);
+      if (request) {
+        sent = { id: request.id, prompt, attachments: [...attachments], previewReferences: $state.snapshot(previewReferences), selectionVersion };
+      } else {
+        let pending = this.pendingSends.get(threadId);
+        if (!pending || pending.selectionVersion !== selectionVersion || pending.prompt !== prompt || JSON.stringify(pending.previewReferences) !== JSON.stringify(previewReferences) || pending.attachments.length !== attachments.length || pending.attachments.some((a, i) => a.kind !== attachments[i]?.kind || a.data !== attachments[i]?.data || a.mimeType !== attachments[i]?.mimeType || a.name !== attachments[i]?.name)) {
+          pending = { id: secureId(), prompt, attachments: [...attachments], previewReferences: JSON.parse(JSON.stringify(previewReferences)) as PreviewReference[], selectionVersion };
+          this.pendingSends.set(threadId, pending);
+        }
+        sent = pending;
       }
-      const sent = pending;
-      const start = () => client.call('turns.start', { threadId, prompt, clientRequestId: sent.id, expectedSelectionVersion: selectionVersion,
+      const ask = sent;
+      const start = () => client.call('turns.start', { threadId, prompt, clientRequestId: ask.id, expectedSelectionVersion: selectionVersion,
         ...(attachments.length > 0 ? { attachments } : {}), ...(previewReferences.length > 0 ? { previewReferences } : {}) });
       // A socket lost under the call loses its answer, maybe not the turn: the same request id asks once more, and the core answers with the turn it took.
       const accepted = await start().catch(async (error: unknown) => {
         if (!wasDropped(error) || !this.ctx.currentClient(client, clientGeneration) || !(await readyAgain(client)) || !this.ctx.currentClient(client, clientGeneration)) throw error;
         await connection.reloading?.essential;
-        if (!this.ctx.currentClient(client, clientGeneration) || this.pendingSends.get(threadId) !== sent) throw error;
+        if (!this.ctx.currentClient(client, clientGeneration) || (!request && this.pendingSends.get(threadId) !== ask)) throw error;
         return start();
       });
       if (this.ctx.currentClient(client, clientGeneration)) {
-        this.pendingSends.delete(threadId);
+        if (!request) this.pendingSends.delete(threadId);
         this.promptFocus = { threadId, turnId: accepted.id, after: null };
       }
-      return true;
+      return 'sent';
     } catch (error) {
       // A detached client's answer must not restore input or thread rows into its replacement.
-      if (!this.ctx.currentClient(client, clientGeneration)) return false;
+      if (!this.ctx.currentClient(client, clientGeneration)) return 'wait';
       const early = turnInFlight(error);
       if (early) {
-        this.holdBehind(early, { text: prompt, attachments, ...(previewReferences.length ? { previewReferences } : {}) });
-        return true;
+        this.markInFlight(early);
+        if (request) return 'wait';
+        this.composerStates[early.thread.id]!.queued.unshift({ text: prompt, attachments, ...(previewReferences.length ? { previewReferences } : {}) });
+        return 'sent';
+      }
+      // An outbox prompt waits for the machine; only the core's own refusal stops it.
+      if (request) return wasDropped(error) || s.connection !== 'ready' ? 'wait' : { failed: this.ctx.reason(error) };
+      // The machine did not come back in time: the prompt joins the outbox under
+      // the request id it already went out with, so a turn the core took before
+      // the socket went is answered, not started twice.
+      if (sent && wasDropped(error) && this.pendingSends.get(threadId) === sent) {
+        this.pendingSends.delete(threadId);
+        this.queuePrompt(threadId, { text: prompt, attachments, ...(previewReferences.length ? { previewReferences } : {}) }, { choice: target, id: sent.id, head: true });
+        return 'sent';
       }
       this.ctx.fail(error);
-      return false;
+      return { failed: this.ctx.reason(error) };
     }
   }
 
@@ -409,10 +495,11 @@ export class Composer {
    * The core was already running a turn this client had not seen yet: answers
    * held for an asynchronous question going out on their own, or the agent
    * resuming by itself, opened as the previous turn ended. The prompt is not
-   * wrong, only early. It goes back at the head of the thread's queue, and the
-   * row the core sent keeps the composer waiting until that turn is over.
+   * wrong, only early. It goes back at the head of the thread's queue (an
+   * outbox prompt never left it), and the row the core sent keeps the composer
+   * waiting until that turn is over.
    */
-  private holdBehind({ thread }: TurnInFlightData, entry: QueuedPrompt): void {
+  private markInFlight({ thread }: TurnInFlightData): void {
     const s = this.ctx.store;
     // The core refused because a turn is in flight, even when its row has not
     // moved off idle yet: waiting is what the composer must do.
@@ -420,7 +507,6 @@ export class Composer {
     this.ctx.threads.upsertThread(row);
     if (s.openThread?.id === row.id) Object.assign(s.openThread, row);
     this.composerStates[row.id] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
-    this.composerStates[row.id]!.queued.unshift(entry);
   }
 
   async stop(): Promise<void> {

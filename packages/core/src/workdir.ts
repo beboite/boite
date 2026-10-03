@@ -17,7 +17,9 @@ import { FILES_LIST_MAX, FILE_MAX_BYTES, FILE_ROUTE, FILE_TICKET_TTL_MS } from '
 import type { FileContent, FileEntry, ThreadId, Timestamp } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { refused } from './errors.ts';
+import type { RpcContext } from './router.ts';
 import { newToken } from './ids.ts';
+import { worktreeRoot } from './worktree.ts';
 
 /** How much of a file decides whether it is text: one NUL in there and it is not. */
 export const TEXT_PROBE_BYTES = 8000;
@@ -31,6 +33,24 @@ export interface InsidePath {
 /** The working directory of a thread that exists, which is what every path here is resolved against. */
 export function threadCwd(core: Core, threadId: ThreadId): string {
   return core.threads.require(threadId).cwd;
+}
+
+/**
+ * A paired device reads a thread's tree only where the core keeps its work: the
+ * thread's project, or the worktree folder the core makes for that project.
+ * `threads.create` already holds a device's cwd there, but an imported or
+ * owner-made thread may sit anywhere, and a link may have moved since: the
+ * real path is checked again on every read, before any git or file access.
+ */
+export function assertDeviceReadable(core: Core, threadId: ThreadId): void {
+  const thread = core.threads.require(threadId);
+  const project = thread.projectId === null ? null : core.projects.require(thread.projectId);
+  const where = realOf(thread.cwd);
+  // The in-project worktree folder is inside the project; a shared one is not.
+  const roots = project === null ? [] : [project.path, worktreeRoot(project.path, core.settings.get().worktreeStorage, project.id)];
+  if (!roots.some((root) => contains(realOf(root), where))) {
+    throw refused(`a paired device reads only inside the thread's project or its worktrees, not ${thread.cwd}`, { threadId });
+  }
 }
 
 function realOf(path: string): string {
@@ -349,9 +369,15 @@ export class FileTickets {
   }
 }
 
+/** The working directory a read is resolved against, held to the project for a paired device. */
+export function readCwd(core: Core, threadId: ThreadId, ctx: RpcContext): string {
+  if (ctx.connection.identity.principal === 'session') assertDeviceReadable(core, threadId);
+  return threadCwd(core, threadId);
+}
+
 export function registerWorkdirMethods(core: Core): void {
-  core.router.register('files.list', (params) => listDirectory(threadCwd(core, params.threadId), params.path));
-  core.router.register('files.read', (params) => readFileContent(core, threadCwd(core, params.threadId), params.path));
+  core.router.register('files.list', (params, ctx) => listDirectory(readCwd(core, params.threadId, ctx), params.path));
+  core.router.register('files.read', (params, ctx) => readFileContent(core, readCwd(core, params.threadId, ctx), params.path));
   // Owner only, absent from both permission maps: the agent already has its own
   // hands on the disk, and a paired phone has no business writing a file.
   core.router.register('files.write', (params) =>

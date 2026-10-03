@@ -9,13 +9,16 @@
     path,
     oldText,
     newText,
-    headless = false
+    headless = false,
+    grow = false
   }: {
     path: string;
     oldText: string;
     newText: string;
     /** Under a line that already names the file and counts the lines: no heading of its own. */
     headless?: boolean;
+    /** The only thing in a scrolling pane: the rows grow with it instead of scrolling in a box of their own. */
+    grow?: boolean;
   } = $props();
 
   /** Rows drawn before the show-all button: the box shows about fourteen. */
@@ -59,7 +62,7 @@
   }
 </script>
 
-<div class="diff code-syntax" data-testid="diff-view" data-path={path} data-language={language ?? 'text'} data-layout={split ? 'split' : 'unified'} bind:clientWidth={width}>
+<div class="diff code-syntax" class:grow data-testid="diff-view" data-path={path} data-language={language ?? 'text'} data-layout={split ? 'split' : 'unified'} bind:clientWidth={width}>
   {#if !headless}
     <div class="head">
       <span class="path mono" title={path}>{path}</span>
@@ -188,6 +191,12 @@
     /* Long lines wrap inside the row: the page never scrolls sideways. */
     overflow-x: hidden;
     padding: 4px 0;
+  }
+
+  /* One scroll for the page, not one inside another: what a finger can drag. */
+  .grow .rows {
+    max-height: none;
+    overflow-y: visible;
   }
 
   .row {

@@ -3,8 +3,9 @@
  *
  * The owner is the process holding the core token: the shell, the dev client,
  * anything that can read `core.json`. A paired device holds a session token it
- * got through a pairing link, and it is a guest: it reads the threads, answers
- * what an agent asks and sends prompts, and that is all.
+ * got through a pairing link, and it is a guest: it reads the threads and their
+ * working trees (never writing a file), answers what an agent asks and sends
+ * prompts, and that is all.
  *
  * An agent holds the per-thread token the core put in the environment of a
  * process its thread launched. It is the narrowest of the three: it reaches
@@ -30,6 +31,15 @@ export { AGENT_EVENTS, DEVICE_EVENTS, DEVICE_METHODS };
 
 export function isDeviceMethod(method: RpcMethodName): boolean {
   return DEVICE_METHODS.has(method);
+}
+
+/**
+ * The one diff a paired device asks for is the Changes panel's: the working
+ * tree against HEAD. Any other revision would let it walk the repository's
+ * history, which is the owner's to browse.
+ */
+export function deviceDiffRef(ref: unknown): boolean {
+  return ref === undefined || ref === '' || ref === 'HEAD';
 }
 
 export function mayReceiveEvent(name: RpcEventName, connection: Connection): boolean {
@@ -126,6 +136,9 @@ export function assertAllowed(method: RpcMethodName, connection: Connection, par
     return;
   }
   if (method === 'agents.message.send' && (params as { threadId?: unknown } | null | undefined)?.threadId !== undefined) throw refused('agents.message.send: paired devices must omit threadId and speak as the user');
+  if (method === 'git.diff' && !deviceDiffRef((params as { ref?: unknown } | null | undefined)?.ref)) {
+    throw refused('git.diff: paired devices compare the working tree with HEAD only', { method, principal: identity.principal });
+  }
   if (isDeviceMethod(method)) return;
   throw refused(`${method} is for the owner only`, { method, principal: identity.principal });
 }
