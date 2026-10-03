@@ -33,6 +33,21 @@ test('text and icons share a vertical centre across reading fonts, menus and pho
       expect(Math.abs(result.offset), `${font}: ${result.label}`).toBeLessThanOrEqual(0.8);
       expect(result.inkFits, `${font}: ${result.label} accents/descenders`).toBe(true);
     }
+    await page.evaluate(`(async () => {
+      const { setLocaleSetting } = await import('/src/lib/i18n.svelte.ts');
+      await setLocaleSetting('fr');
+      window.__alignmentEffort = __boiteTest.workspace.active.openThread.effort;
+      __boiteTest.workspace.active.openThread.effort = 'high';
+    })()`);
+    await page.waitFor(`document.querySelector('[data-testid="composer-effort"] .ui-label')?.textContent === 'Élevé'`);
+    for (const result of await labelOffsets(page, [['[data-testid="composer-effort"] svg', '[data-testid="composer-effort"] .ui-label']])) {
+      expect(Math.abs(result.inkOffset), `${font}: accented effort label`).toBeLessThanOrEqual(0.8);
+      expect(result.inkFits, `${font}: accented effort ink`).toBe(true);
+    }
+    await page.evaluate(`(async () => {
+      __boiteTest.workspace.active.openThread.effort = window.__alignmentEffort;
+      const { setLocaleSetting } = await import('/src/lib/i18n.svelte.ts'); await setLocaleSetting('en');
+    })()`);
     await page.evaluate(`__boiteTest.workspace.active.showSettings('accounts')`);
     await page.waitFor(`document.querySelector('[data-testid="settings"] h1.ui-label-box .ui-label')`);
     await page.waitFor(`document.querySelector('[data-testid="subscription-proxy-settings"] h2 .info-tip')`);

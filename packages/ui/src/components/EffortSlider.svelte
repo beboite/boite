@@ -42,6 +42,9 @@
   let index = $derived(preview ?? Math.max(0, levels.findIndex((level) => level.id === active)));
   let current = $derived(levels[index] ?? null);
   const selectedSpeed = $derived(speeds.find(entry => entry.id === speed));
+  const label = $derived(current ? levelName(current) : selectedSpeed ? levelName(selectedSpeed) : strings.composer.standardSpeed);
+  // An accent above a leading capital raises the label's visible centre.
+  const accentedCap = $derived(/^\p{Lu}[\u0300-\u0314]/u.test(label.normalize('NFD')));
   function cycleSpeed() { const next = speeds.findIndex(entry => entry.id === speed) + 1; onspeed(next >= speeds.length ? null : speeds[next]!.id); }
   let last = $derived(Math.max(0, levels.length - 1));
 
@@ -144,7 +147,7 @@
     {onkeydown}
   >
     <Brain size={14} strokeWidth={1.75} />
-    <span class="ui-label">{current ? levelName(current) : selectedSpeed ? levelName(selectedSpeed) : strings.composer.standardSpeed}</span>
+    <span class="ui-label" class:accented-cap={accentedCap}>{label}</span>
     <!-- A fast mode switched on stays in sight with the popover closed. -->
     {#if current && selectedSpeed}<span class="fast-mark" data-testid="effort-fast-mark" title={levelName(selectedSpeed)}><Zap size={12} fill="currentColor" /></span>{/if}
   </button>
@@ -208,6 +211,9 @@
 <style>
 .effort { position: relative; display: inline-flex; }
 .trigger { cursor: pointer; height: var(--control-sm); }
+@supports (text-box: trim-both cap alphabetic) {
+  .trigger .accented-cap { translate: 0 0.1em; }
+}
 .trigger:hover, .trigger[aria-expanded='true'] { background: var(--control-glaze) var(--color-control-hover); color: var(--color-foreground); }
 .fast-mark { display: inline-flex; margin-left: -2px; color: var(--color-accent); }
 .popover { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 40; width: 280px; padding: 10px 12px 12px; background: var(--color-surface-3); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-e2); animation: pop var(--dur-2) var(--ease-out-quint); transform-origin: bottom left; }
