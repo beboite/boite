@@ -9,6 +9,8 @@
   import { namedQuotas, quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
+  import SubscriptionProxyDashboard from './SubscriptionProxyDashboard.svelte';
+  import SubscriptionProxySettings from './SubscriptionProxySettings.svelte';
 
   /**
    * The subscription windows of every signed-in provider. The last reading
@@ -17,6 +19,8 @@
    * read: the one place monitoring is turned on or off.
    */
   let { store, showTitle = true }: { store: Store; showTitle?: boolean } = $props();
+  let native = $state(false);
+  const proxyEnabled = $derived(store.settings?.subscriptionProxy?.enabled);
 
   let reader = $derived(quotaReader(store.endpointUrl ?? 'here'));
   let rows = $derived(reader.rows === null ? null : shownQuotas(reader.rows, store.accounts));
@@ -29,7 +33,7 @@
     const current = reader;
     // A call before the socket is up is refused at once: read when it becomes
     // ready, and again after a reconnect. A failure shows on `reader.error`.
-    if (!client || !store.owner || store.connection !== 'ready') return;
+    if (!client || !store.owner || store.connection !== 'ready' || (proxyEnabled && !native)) return;
     const off = client.on('quotas.updated', (value) => current.accept(value));
     untrack(() => void current.read(client).catch(() => {}));
     return off;
@@ -47,6 +51,9 @@
 </script>
 
 <div class="page limits-page" data-testid="limits-page">
+  {#if proxyEnabled && !native}
+    <SubscriptionProxyDashboard {store} onNative={() => native = true} />
+  {:else}
   <header class="top">
     {#if showTitle}<h1><QuotaMachineScope {store} fallback={strings.usage.limits} /></h1>{/if}
     {#if store.owner}
@@ -55,6 +62,7 @@
       </button>
     {/if}
   </header>
+  {#if proxyEnabled}<div class="actions proxy-switch"><button type="button" class="ghost small" onclick={() => native = false} data-testid="subscription-proxy-show-dashboard"><span class="ui-label">{strings.subscriptionProxy.showDashboard}</span></button></div>{/if}
 
   {#if store.owner && reader.error}
     <div class="card failed" role="alert" data-testid="limits-error">
@@ -92,10 +100,13 @@
       {/each}
     </section>
   {/if}
+  {#if store.owner}<details class="disclosure"><summary><span class="ui-label">{strings.subscriptionProxy.configure}</span></summary><SubscriptionProxySettings {store} /></details>{/if}
+  {/if}
 </div>
 
 <style>
   .top { display: flex; align-items: center; gap: 8px; max-width: var(--settings-width); }
+  .proxy-switch { margin-bottom: 12px; }
   .refresh { flex: none; margin-left: auto; width: var(--control); height: var(--control); padding: 0; }
   .refresh :global(.spinning) { animation: spin 900ms linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }

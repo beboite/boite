@@ -4,6 +4,7 @@ import pkg from '../../../package.json';
 import { messageOf, unavailable } from '../../errors.ts';
 import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import type { ProbeContext } from '../types.ts';
+import { subscriptionProxyCodexArgs } from '../../subscription-proxy.ts';
 import type { CodexModel, CodexModelListResponse, Timer } from './protocol.ts';
 import { AGENT_OWN_MODEL, CLIENT_NAME, PROBE_MAX_PAGES, PROBE_TIMEOUT_MS, STDERR_MAX } from './protocol.ts';
 import { CodexRpc } from './rpc.ts';
@@ -102,7 +103,7 @@ export async function readModels(ctx: ProbeContext): Promise<ModelInfo[]> {
   }
 
   let lastStderr = '';
-  const child = ctx.spawnChild(executable, profile?.launch?.args ?? [], {
+  const child = ctx.spawnChild(executable, subscriptionProxyCodexArgs(profile?.launch?.args ?? [], ctx.accountEnv), {
     cwd: ctx.cwd,
     env: { ...process.env, ...ctx.accountEnv },
   });

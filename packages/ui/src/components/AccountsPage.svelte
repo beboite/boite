@@ -1,5 +1,6 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
+  import SubscriptionProxySettings from './SubscriptionProxySettings.svelte';
   import { onMount } from 'svelte';
   import { slide } from 'svelte/transition';
   import { ChevronRight, Plus, RefreshCw, Terminal } from '@lucide/svelte';
@@ -645,6 +646,7 @@
       {#each groups.rest as row (row.id)}{@render providerRow(row, groups.connected.length > 0)}{/each}
     </div>
   {/if}
+  {#if store.owner}<SubscriptionProxySettings {store} />{/if}
 </div>
 
 <style>

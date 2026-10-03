@@ -370,6 +370,10 @@ export class WsClient implements ObservableClient {
     return this.#send(socket, method, params).then((value) => {
       if (method === 'threads.subscribe') {
         this.#subscribed.add((params as RpcParams<'threads.subscribe'>).threadId);
+      } else if (method === 'threads.get' && (value as RpcResult<'threads.get'>).opened) {
+        const request = params as RpcParams<'threads.get'>;
+        this.#subscribed.add(request.threadId);
+        if (request.open?.previous && request.open.previous !== request.threadId) this.#subscribed.delete(request.open.previous);
       }
       return value;
     });

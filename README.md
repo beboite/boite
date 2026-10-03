@@ -1,75 +1,105 @@
+<p align="center">
+  <img src="apps/shell/src-tauri/icons-dev/128x128@2x.png" alt="boite" width="80" />
+</p>
 <h1 align="center">boite <sub>[bwat]</sub></h1>
-<p align="center">All your work and agents in one place</p>
-
+<p align="center">Your AI agents, in one workspace.</p>
 <p align="center">
-  <img src="apps/shell/src-tauri/icons-dev/128x128@2x.png" alt="boite logo" width="96" />
-</p>
-
-<p align="center">
-  <a href="docs/server.md">Headless server</a> ·
-  <a href="docs/updates.md">Updates and nightly</a> ·
-  <a href="docs/development.md">Build from source</a> ·
+  <a href="https://github.com/beboite/boite/releases">Download</a> ·
+  <a href="docs/server.md">Self-host</a> ·
   <a href="docs/README.md">Documentation</a> ·
-  <a href="LICENSE">MIT license</a>
+  <a href="CONTRIBUTING.md">Contribute</a>
 </p>
 
-boite is an open-source desktop app and self-hosted server for AI agents.
-Run Claude Code, Codex, Muse Code, OpenCode, Antigravity, Grok and pi in one chat interface,
-using their own protocols and your existing accounts.
+Run Claude Code, Codex, Muse Code, OpenCode, Antigravity, Grok and pi in a
+shared chat interface, with their own protocols and your existing accounts.
+Give each task a conversation, keep its files and changes beside the chat,
+and follow the work from your desktop or a paired phone.
 
-Keep a conversation per task. Switch models or accounts inside it, give it a
-Git worktree, and follow the same work from your desktop or a paired phone.
-The agents run on the computer that holds your project.
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce) and (prefers-color-scheme: light)" srcset="docs/media/boite-light.png" />
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/boite-dark.png" />
+    <img src="docs/media/boite.gif" alt="Boite walkthrough: projects, model selection, code changes and subagents" width="100%" />
+  </picture>
+</p>
+<p align="center">
+  <a href="docs/media/boite.mp4">Watch the 12-second walkthrough</a>
+</p>
 
-## What you can do
+The walkthrough uses staged sample data in the real Boite web interface.
+It follows one task from model selection to changes and subagents, with a
+smooth transition from light to dark mode. Boite fills the entire frame.
 
-- Manage projects and conversations without keeping an agent process alive for
-  every open thread.
-- Change providers mid-conversation with bounded context from the journal.
-- Read streaming answers, tool calls, reasoning and permission requests together.
-- Queue tasks with global and per-account concurrency limits.
-- Pair a phone with the web app, or connect the desktop to a headless server.
-- Download desktop updates in the background, read their release notes and
-  restart when ready. Switch between Boite and Boite Nightly in General settings.
-- Dictate prompts, attach files, browse project changes and manage tasks beside
-  the conversation.
-- On Windows, trace agent processes and their resource use, mute their audio and
-  stop their windows from taking focus.
+## From a task to its result
+
+- Keep projects and conversations together. Give a task its own Git worktree
+  when it needs an isolated branch.
+- Pick a provider, model and account for the task. Switch inside a conversation
+  with context carried from its journal.
+- Follow streamed answers, reasoning, tool calls and requests for your input.
+  Queue more work with global and per-account concurrency limits.
+- Inspect files, diffs, tasks and agent results in the panel beside the chat.
+  Open HTML and media delivered by an agent without losing the conversation.
+- Let agents delegate work and exchange messages. Follow their tasks and
+  results from the conversation's Subagents panel.
+- Pair a phone or connect to another machine. Read and steer work where it
+  runs, including a self-hosted headless server.
+
+Boite is open source and in beta. The desktop app and web client share a Bun
+core, which runs the agents and stores the conversation journal.
 
 ## Get started
 
-boite is in beta. Download it from
-[GitHub Releases](https://github.com/beboite/boite/releases):
+1. [Download a release](https://github.com/beboite/boite/releases) for your system.
+2. Install and sign in to the agents you want to use on the computer running
+   your projects. Connect them in Settings, Providers.
+3. Open a project folder, choose a model and start a conversation.
 
-| System | File |
-|---|---|
+| System | Download |
+| --- | --- |
 | Windows x64 | `Boite_<version>_x64-setup.exe` |
 | macOS 13+, Apple Silicon | `Boite_<version>_aarch64.dmg` |
 | macOS 13+, Intel | `Boite_<version>_x64.dmg` |
 | Linux x64 | `Boite_<version>_amd64.deb` or `Boite_<version>_amd64.AppImage` |
 | Linux ARM64 | `Boite_<version>_arm64.deb` or `Boite_<version>_aarch64.AppImage` |
 
-A macOS release built with the project's Apple Developer ID is signed and
-notarized and opens like any downloaded app. One built without it is signed ad
-hoc: after dragging it to Applications, run `xattr -cr /Applications/Boite.app`
-once, or open it and allow it under System Settings, Privacy & Security. Linux packages need glibc 2.35 or newer (Ubuntu
-22.04, Debian 12, Fedora 36 and later) with WebKitGTK 4.1. An AppImage also
-needs FUSE 2 (`libfuse2`); make the file executable before starting it.
+Choose a regular release for Boite or a nightly prerelease for boite (de nuit).
+Both update channels keep the same projects, accounts and conversations.
+Switch channels in General settings; signed updates download in the background
+and ask before restarting. See [desktop updates](docs/updates.md).
 
-Choose a regular
-release for Boite or a `nightly` prerelease for boite (de nuit). The nightly workflow
-publishes changed commits daily at 03:23 UTC after its checks pass.
+<details>
+<summary>macOS and Linux installation notes</summary>
 
-Both update channels keep the same projects, accounts and conversations. General
-settings lets you switch channels and shows download progress, release notes and
-the installed version. Updates are signed and download automatically; installing
-one asks before restarting. [Desktop updates](docs/updates.md) covers the details.
+A macOS build signed with the project's Apple Developer ID is notarized.
+For an ad hoc build, drag Boite to Applications, then run
+`xattr -cr /Applications/Boite.app` once, or allow it in System Settings,
+Privacy & Security.
 
-On Linux and macOS, process tracking is more limited than on Windows and the
-resource caps, focus guard and audio mute are not available;
-[platform readiness](docs/portability.md) lists the differences.
+Linux packages require glibc 2.35 or newer and WebKitGTK 4.1. AppImages also
+need FUSE 2 (`libfuse2`) and must be made executable.
 
-For a local build, install the Bun version named in `package.json`, then:
+Windows supports process tracing, resource caps, audio muting and focus guards.
+Linux and macOS have more limited process tracking and do not provide those
+caps or guards. See [platform readiness](docs/portability.md).
+
+</details>
+
+## Run it your way
+
+| You want to | Start here |
+| --- | --- |
+| Connect providers and manage accounts | [Providers](docs/providers.md) and [accounts](docs/accounts.md) |
+| Use Boite from a phone | [Pairing and phone access](docs/phone.md) |
+| Run agents on another computer | [Machines](docs/machines.md) |
+| Run a headless server or Docker container | [Self-hosting](docs/server.md) |
+| Coordinate agents and repeat a workflow | [Coordination](docs/coordination.md) and [workflows](docs/workflows.md) |
+| Understand what the app stores and runs | [Architecture](docs/architecture.md) |
+
+## Build from source
+
+Boite uses Bun, TypeScript, Svelte 5 and Tauri 2. Install the Bun version named
+in `package.json`, then:
 
 ```sh
 bun install --frozen-lockfile
@@ -77,42 +107,26 @@ bun run build:ui
 bun run dev:core
 ```
 
-In another terminal, create a one-time pairing link and open it in your browser:
+In another terminal, create a one-time owner pairing link and open it in your
+browser:
 
 ```sh
 bun packages/core/src/main.ts pair --owner
 ```
 
-Install and authenticate the agents you want to use on that computer. Configure
-them in Settings, Providers. See [accounts](docs/accounts.md) and
-[provider support](docs/providers.md).
+For UI development, run `bun run dev:ui`. Add `?fake=1` to the local URL to
+explore the interface with sample data and no agent calls.
 
-For building an installer, see [building and releasing](docs/releasing.md).
-For Docker, persistent storage and image updates, see the
-[boite-server guide](docs/server.md).
-
-## Development
-
-Built with Bun, TypeScript, Svelte 5 and Tauri 2. The core runs the agents and
-owns the journal; the desktop shell and web app use the same RPC contract.
-
-```sh
-bun run dev:ui       # append ?fake=1 to the URL for a UI without an agent
-bun run check
-bun run test
-```
-
-[Contributing](CONTRIBUTING.md) covers setup and checks.
-[Architecture](docs/architecture.md) explains the boundaries.
-[Development](docs/development.md) covers integration tests and hidden captures.
+[Contributing](CONTRIBUTING.md) covers checks and setup.
+[Development](docs/development.md) covers tests and captures, including how to
+re-record the walkthroughs. [Building and releasing](docs/releasing.md) covers
+desktop installers.
 
 ## Thanks
 
-Thanks to [T3 Code](https://github.com/pingdotgg/t3code) for the inspiration behind
-boite. We definitely took stuff from there, shoutout to them!
-
-This project also follows
-[Boite Legacy](https://github.com/beboite/boite-legacy), the earlier terminal-based app.
+Thanks to [T3 Code](https://github.com/pingdotgg/t3code) for the inspiration and
+code that helped shape Boite. This project follows
+[Boite Legacy](https://github.com/beboite/boite-legacy), the earlier terminal app.
 
 ## License
 

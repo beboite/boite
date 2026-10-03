@@ -56,7 +56,13 @@ test('text and icons share a vertical centre across reading fonts, menus and pho
     }
     await page.evaluate(`__boiteTest.workspace.active.showSettings('accounts')`);
     await page.waitFor(`document.querySelector('[data-testid="settings"] h1.ui-label-box .ui-label')`);
-    for (const result of await offsets([['[data-testid="settings"] h1 .info-tip', '[data-testid="settings"] h1 .ui-label']])) {
+    await page.waitFor(`document.querySelector('[data-testid="subscription-proxy-settings"] h2 .info-tip')`);
+    for (const result of await offsets([
+      ['[data-testid="settings"] h1 .info-tip', '[data-testid="settings"] h1 .ui-label'],
+      ['[data-testid="subscription-proxy-settings"] h2 .info-tip', '[data-testid="subscription-proxy-settings"] h2 .ui-label'],
+      ['[data-testid="subscription-proxy-settings"] form .info-tip', '[data-testid="subscription-proxy-settings"] form .ui-label-box .ui-label'],
+      ['[data-testid="subscription-proxy-save"]', '[data-testid="subscription-proxy-save"] .ui-label'],
+    ])) {
       expect(Math.abs(result.offset), `${font}: heading information icon`).toBeLessThanOrEqual(0.8);
     }
     await page.evaluate(`__boiteTest.workspace.active.showChat()`);

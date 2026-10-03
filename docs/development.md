@@ -630,3 +630,40 @@ The composer's `@` menu ranks project-relative paths from `projects.files`.
 plain names from the root `.gitignore`. Globs, negations and nested patterns
 are not interpreted, so some Git-ignored files can appear. Responses contain
 at most 200 paths, defaulting to 50, and report whether the walk was capped.
+
+## README walkthroughs
+
+The README's twelve-second film shows the real UI with public sample data.
+It covers the conversation, model selection, changes and subagents, with the
+desktop UI filling the frame. It uses no live providers.
+
+`scripts/readme/record.ts` starts an isolated Vite fixture, injects
+`scripts/readme/fixture.ts` through a recording-only plugin and fills the frame
+with `scripts/readme/stage.html`. These controls never enter a production build.
+The browser runs headless, muted and sandboxed; the recorder refuses software
+rendering and checks page errors and fullscreen bounds. It closes its own
+browser and server on success or failure.
+
+Install Playwright Core 1.63.0 in a separate tools directory and its recording
+encoder with `playwright-core install ffmpeg`. Supply a Chrome executable and
+a full FFmpeg build with H.264, VP8 decoding and GIF palette filters:
+
+```sh
+bun scripts/readme/record.ts \
+  --playwright /path/to/tools/node_modules/playwright-core/index.mjs \
+  --browser /path/to/chrome \
+  --ffmpeg /path/to/ffmpeg \
+  --scratch /tmp/boite-readme-recording
+```
+
+The recorder captures both themes with matching scene durations, then blends
+light into dark over 0.8 seconds while the diff view is settled. The default
+output is `docs/media`: one silent twelve-second 1600 by 1000 H.264 MP4, one
+matching GIF loop capped at 5 MiB and two static posters for readers who prefer
+reduced motion. `--inspect` checks both themes and captures each scene without
+encoding; `--output` changes the delivery directory. Scene captures, intermediate
+films, raw video, encoder logs and verification JSON stay in the scratch
+directory. `--combine-only` reuses the two intermediate MP4 files in that
+scratch directory to regenerate the combined MP4/GIF without a browser.
+Inspect the film and every scene before replacing the
+committed media; check that the sample data contains no personal information.

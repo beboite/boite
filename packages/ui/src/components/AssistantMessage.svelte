@@ -82,7 +82,7 @@
       {:else if part.type === 'thinking' && (part.text.trim().length > 0 || part.startedAt !== undefined || (message.state === 'streaming' && index === message.parts.length - 1))}
         <ThinkingPart text={part.text} live={message.state === 'streaming' && index === message.parts.length - 1 && part.finishedAt == null} startedAt={part.startedAt ?? null} finishedAt={part.finishedAt ?? null} />
       {:else if part.type === 'file' || part.type === 'artifact'}
-        <ChatFile file={part} {store} {threadId} messageId={message.id} />
+        <ChatFile file={part} {store} {threadId} messageId={message.id} partIndex={index} />
       {:else if part.type === 'tool' && planOf(part.name, part.input) !== null}
         <PlanCard {store} {threadId} plan={planOf(part.name, part.input) ?? ''} />
       {:else if part.type === 'permission'}
