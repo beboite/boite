@@ -34,7 +34,7 @@
     now: number;
     /** In a folded project: the card waits for the unfold to look up its pull request. */
     hidden?: boolean;
-    /** Recent's quick action puts finished work in its Done section. */
+    /** The quick action puts finished work in Done. */
     showDone?: boolean;
     /** Off under the project's own header, where the folder line would only repeat it. */
     showProject?: boolean;
@@ -60,7 +60,7 @@
   let prRevision = 0;
   async function refreshPr(manual = false) {
     const client = owner.client;
-    if (!client || !thread.branch || thread.branch === 'HEAD' || prLoading) return;
+    if (!client || !thread.branch || thread.branch === 'HEAD' || prLoading || (!manual && (hidden || owner.connection !== 'ready' || document.hidden))) return;
     const revision = prRevision;
     const requestedOwner = owner;
     prLoading = true;
@@ -80,12 +80,30 @@
     // A move or a different owning connection invalidates the old checkout's answer.
     const identity = { client: owner.client, id: thread.id, cwd: thread.cwd, branch: thread.branch };
     const ready = owner.connection === 'ready' && !hidden;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    async function poll() {
+      await refreshPr();
+      if (!stopped) timer = setTimeout(() => void poll(), 15_000);
+    }
+    const visible = () => { if (!document.hidden) void refreshPr(); };
     untrack(() => {
       pullRequest = null;
       prLoading = false;
-      if (ready && identity.client) void refreshPr();
+      if (ready && identity.client && identity.branch && identity.branch !== 'HEAD') void poll();
     });
-    return () => { prRevision++; };
+    document.addEventListener('visibilitychange', visible);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', visible);
+      prRevision++;
+    };
+  });
+  $effect(() => {
+    // A finished turn can have opened or merged a PR since its row first mounted.
+    const status = thread.status;
+    untrack(() => { void status; void refreshPr(); });
   });
   function rename() {
     title = thread.title;

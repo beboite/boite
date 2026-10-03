@@ -33,7 +33,7 @@ test('Done loads only when expanded and restores the owning machine when thread 
   const props = $state({ entries: entries(), now: Date.now() });
   mounted = mount(RecentDone, { target: document.body, props });
   await settle();
-  for (const call of calls) expect(call).not.toHaveBeenCalledWith('threads.list', { includeArchived: true });
+  for (const call of calls) expect(call.mock.calls.filter(([method]) => method === 'threads.list')).toHaveLength(0);
   click('[data-testid=recent-done-toggle]'); await settle();
   expect(document.querySelectorAll('[data-testid=done-thread]')).toHaveLength(4);
   click('[data-machine-id=first][data-thread-id=t-trace] [data-testid=done-thread-restore]'); await settle();
@@ -42,6 +42,21 @@ test('Done loads only when expanded and restores the owning machine when thread 
   props.entries = entries(); await settle();
   expect(document.querySelector('[data-machine-id=first][data-thread-id=t-trace]')).toBeNull();
   expect(document.querySelector('[data-machine-id=second][data-thread-id=t-trace]')).not.toBeNull();
+});
+
+test('a project counter loads only its project when externally expanded', async () => {
+  const source = await ready('first');
+  const call = vi.spyOn(source.client, 'call');
+  const props = $state({ entries: entries(), now: Date.now(), header: false, open: false });
+  mounted = mount(RecentDone, { target: document.body, props });
+  await settle();
+  expect(document.querySelector('[data-testid=recent-done-toggle]')).toBeNull();
+  expect(call.mock.calls.filter(([method]) => method === 'threads.list')).toHaveLength(0);
+  props.open = true; await settle();
+  expect(call).toHaveBeenCalledWith('threads.list', { projectId: 'p-boite', includeArchived: true });
+  expect(document.querySelectorAll('[data-testid=done-thread]')).toHaveLength(2);
+  props.open = false; await settle();
+  expect(document.querySelector('[data-testid=done-thread]')).toBeNull();
 });
 
 test('a late archive read for a previous project or machine never replaces the selected machine', async () => {

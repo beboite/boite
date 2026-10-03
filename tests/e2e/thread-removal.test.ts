@@ -34,30 +34,37 @@ for (const width of [1280, 390]) {
         await page.click('[data-testid=mobile-settings-archived]');
         await page.waitFor(`document.querySelectorAll('[data-testid=archived-list] li').length === 7`);
       } else {
-        await page.waitFor(`document.querySelector('[data-testid=archived-drawer-toggle]')`);
-        await page.click('[data-testid=archived-drawer-toggle]');
-        await page.waitFor(`document.querySelectorAll('[data-testid=archived-drawer] li').length === 7`);
+        await page.click('[data-testid=nav-settings]');
+        await page.click('[data-testid=settings-tab-general]');
+        await page.click('[data-testid=archived-show]');
+        await page.waitFor(`document.querySelectorAll('[data-testid=archived-list] li').length === 7`);
       }
       // A theme change can leave transitions pending inside closed disclosures.
       // Only wait for the archive surface whose layout this capture verifies.
-      const archives = width < 720 ? '[data-testid=archived-list]' : '[data-testid=archived-drawer]';
+      const archives = '[data-testid=archived-list]';
       await page.evaluate(`Promise.all([document.fonts.ready, ...document.querySelector('${archives}').getAnimations({subtree:true}).filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
       await page.screenshot(join(import.meta.dir, '.artifacts', `thread-archives-readable-${width}.png`));
-      expect(await page.evaluate(`Array.from(document.querySelectorAll('${width < 720 ? '[data-testid=archived-list]' : '[data-testid=archived-drawer]'} li')).every(row => {
+      expect(await page.evaluate(`Array.from(document.querySelectorAll('${archives} li')).every(row => {
         const title = row.querySelector('.title');
-        const action = row.querySelector('[data-testid=${width < 720 ? 'archived-restore' : 'archived-drawer-restore'}]');
+        const action = row.querySelector('[data-testid=archived-restore]');
         return title.getBoundingClientRect().bottom <= action.getBoundingClientRect().top && title.scrollWidth <= title.clientWidth;
       })`)).toBe(true);
       expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
       if (width >= 720) {
-        const drawer = '[data-testid=archived-drawer]';
-        await page.click(`${drawer} [data-testid=archived-drawer-delete]`);
+        const drawer = '[data-testid=archived-list]';
+        await page.click(`${drawer} [data-testid=archived-delete]`);
         await page.waitFor(`document.querySelectorAll('${drawer} li').length === 6`);
         expect(await page.evaluate(`document.querySelector('[data-testid=confirm-dialog]') === null`)).toBe(true);
         await page.click('[data-testid=undo-action]');
+        await page.waitFor(`globalThis.__boiteTest.workspace.active.page === 'chat'`);
+        await page.click('[data-testid=nav-settings]');
+        await page.click('[data-testid=settings-tab-general]');
+        await page.click('[data-testid=archived-show]');
         await page.waitFor(`document.querySelectorAll('${drawer} li').length === 7`);
-        await page.click(`${drawer} [data-testid=archived-drawer-restore]`);
-        await page.waitFor(`document.querySelectorAll('${drawer} li').length === 6`);
+        const restoredId = await page.evaluate<string>(`document.querySelector('${drawer} [data-testid=archived-restore]').closest('li').dataset.threadId`);
+        await page.click(`${drawer} [data-testid=archived-restore]`);
+        await page.waitFor(`document.querySelector('${drawer} [data-thread-id="${restoredId}"] [data-testid=archived-open]')`);
+        expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.client.call('threads.get', {threadId:${JSON.stringify(restoredId)}}).then(t => t.archived)`)).toBe(false);
       }
     } finally { await page.close(); }
   }, 60_000);
