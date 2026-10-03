@@ -26,7 +26,6 @@
   import ArchivedDrawer from './ArchivedDrawer.svelte';
   import ArchivedProjects from './ArchivedProjects.svelte';
   import LimitsGlance from './LimitsGlance.svelte';
-  import AppUpdateNotice from './AppUpdateNotice.svelte';
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
   import DraftRow from './DraftRow.svelte';
@@ -289,7 +288,6 @@
     {/if}
     {#if experimentOn('resident-agents')}<button class="ghost icon" aria-label={strings.agents.heading} title={strings.agents.heading} data-testid="nav-agents" onclick={() => store.showAgents()}><Bot size={16} /></button>{/if}
     {#if experimentOn('whip')}<WhipButton />{/if}
-    {#if store.page === 'chat'}<AppUpdateNotice />{/if}
     <button
       class="ghost icon"
       title={`${strings.sidebar.settings}${store.keyHint('settings')}`}
