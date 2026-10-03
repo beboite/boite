@@ -1,15 +1,19 @@
 # Desktop updates
 
-Settings, Machines manages desktop, server and agent updates. The desktop card
-belongs to this computer, even while another machine's conversation is open.
+Settings, Machines and updates groups desktop, server and agent updates in its
+Updates section. Connections, pairing and synchronization follow below. The
+desktop card belongs to this computer, even while another machine's
+conversation is open.
 It names the release and its age, links to the changelog on GitHub and offers
 installation with a restart confirmation. Channel options show the installed
 version and let you switch channels.
 
 The footer's download icon appears when an update is available or in progress.
-It opens Machines directly and keeps the selected machine and conversation.
+It opens the Updates section directly and keeps the selected machine and
+conversation.
 The settings navigation uses the same shortcut. Manual checks and channel
-controls remain in Machines when everything is current. Each remote machine
+controls remain in Machines and updates when everything is current. Each
+remote machine
 has its own [server update card](server.md#updating-from-the-app) and owner-only
 [agent update controls](agent-updates.md).
 

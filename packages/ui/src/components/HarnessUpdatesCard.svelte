@@ -34,7 +34,7 @@
 
 <div class="agent-updates" data-testid="harness-updates-card">
   <header>
-    <h3>{strings.harnessUpdates.heading}<InfoTip topic={strings.harnessUpdates.heading} text={strings.harnessUpdates.intro} /></h3>
+    <h4>{strings.harnessUpdates.heading}<InfoTip topic={strings.harnessUpdates.heading} text={strings.harnessUpdates.intro} /></h4>
     <button type="button" class="ghost small" data-testid="harness-updates-check" disabled={!connected || busy} onclick={() => void check()}>
       <RefreshCw size={13} />{busy ? strings.harnessUpdates.checking : strings.providerSettings.checkUpdates}
     </button>
@@ -83,7 +83,7 @@
 <style>
   .agent-updates { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-border); font-size: var(--text-sm); }
   header, .agent-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
-  h3 { display: inline-flex; align-items: center; margin: 0; font-size: var(--text-sm); font-weight: 500; }
+  h4 { display: inline-flex; align-items: center; margin: 0; font-size: var(--text-sm); font-weight: 500; }
   .agents { display: grid; gap: 12px; margin-top: 12px; }
   .agent-row { justify-content: flex-start; }
   .name { display: inline-flex; flex: 1; align-items: center; gap: 8px; min-width: 140px; }

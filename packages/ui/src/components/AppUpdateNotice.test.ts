@@ -32,6 +32,7 @@ test('the shortcut opens Machines directly without switching the selected core o
   document.querySelector<HTMLButtonElement>('[data-testid=nav-app-update]')!.click();
   expect(active.page).toBe('settings');
   expect(active.settingsTab).toBe('machines');
+  expect(active.settingsSection?.id).toBe('updates');
   expect(workspace.active).toBe(active);
   expect(document.querySelector('[data-testid=app-update-popover]')).toBeNull();
 });

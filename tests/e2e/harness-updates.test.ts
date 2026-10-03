@@ -7,8 +7,8 @@ let server: { close(): Promise<void> };
 let page: BrowserPage;
 let url: string;
 const id = (name: string) => `[data-testid="${name}"]`;
-const local = `${id('machine-card')}:first-child`;
-const remote = `${id('machine-card')}[data-machine-id="http://builder.test"]`;
+const local = `${id('machine-updates-card')}:first-child`;
+const remote = `${id('machine-updates-card')}[data-machine-id="http://builder.test"]`;
 const row = (card: string, provider: string) => `${card} ${id('machine-agent-update')}[data-provider-id="${provider}"]`;
 async function capture(name: string) {
   await page.evaluate('document.fonts.ready');
@@ -34,8 +34,15 @@ test('agent updates stay in Machines and Update and Skip target their own machin
   expect(await page.evaluate(`document.querySelector('${id('harness-update-notices')}') === null`)).toBe(true);
   await capture('harness-updates-chat');
   await machines();
+  expect((await page.text(id('settings-tab-machines'))).trim()).toBe('Machines and updates');
+  expect(await page.evaluate(`document.querySelectorAll('#settings-updates ${id('harness-updates-card')}').length`)).toBe(2);
+  expect(await page.evaluate(`document.querySelector('#settings-machines ${id('harness-updates-card')}') === null`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('${id('app-update-popover')}') === null`)).toBe(true);
   await capture('harness-updates-desktop');
+  await page.click('[data-settings-section="machines"]');
+  await page.waitFor(`document.getElementById('settings-machines').getBoundingClientRect().top < 150`);
+  await page.click(id('nav-app-update'));
+  await page.waitFor(`document.getElementById('settings-updates').getBoundingClientRect().top > 0 && document.getElementById('settings-updates').getBoundingClientRect().top < 150`);
 
   await page.click(`${row(local, 'claude')} ${id('harness-update-skip')}`);
   await page.waitFor(`document.querySelector('${row(local, 'claude')} ${id('harness-update-unskip')}')`);
@@ -49,6 +56,7 @@ test('agent updates stay in Machines and Update and Skip target their own machin
 
   await size(390);
   await page.waitFor(`document.querySelector('${id('machines-page')}')`);
+  expect((await page.text('.mobile-settings > header h1')).trim()).toBe('Machines and updates');
   await page.evaluate(`document.querySelector('${local}').scrollIntoView({block:'start'})`);
   await capture('harness-updates-phone');
   await page.click(`${row(local, 'claude')} ${id('harness-update-unskip')}`);

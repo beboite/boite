@@ -7,7 +7,7 @@ let server: { close(): Promise<void> };
 let page: BrowserPage;
 let base: string;
 const id = (name: string) => `[data-testid="${name}"]`;
-const card = `${id('machine-card')}[data-machine-id="http://builder.test"]`;
+const card = `${id('machine-updates-card')}[data-machine-id="http://builder.test"]`;
 const captureDir = process.env.BOITE_SERVER_UPDATE_CAPTURES ?? join(import.meta.dir, '.artifacts');
 
 beforeAll(async () => { const port = await freePort(); base = `http://127.0.0.1:${port}`; server = await startUi(port); }, 90_000);

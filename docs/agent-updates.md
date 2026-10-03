@@ -15,14 +15,15 @@ agents without a readable latest version.
 
 ## What the user sees
 
-Settings, Machines lists each machine's agents with their installed and
-available versions, Update and Skip. The footer's download shortcut opens
-Machines when an update is pending. Updates create no pinned chat notice.
+Settings, Machines and updates lists each machine's agents in the Updates
+section, with their installed and available versions, Update and Skip. The
+footer's download shortcut opens that section when an update is pending.
+Updates create no pinned chat notice.
 
 - Update releases the provider's warm processes and runs the update in the
   background. The row shows progress; the next turn starts the new version.
 - Skip stops offering that version. A later version is offered again.
-  The same row in Machines offers a skipped version again.
+  The same row in Machines and updates offers a skipped version again.
 - A failed update keeps the updater's error and Try
   again. Standard error takes priority over progress on standard output; an
   explicit error takes priority over npm's final log-file location.
@@ -140,8 +141,9 @@ machine's card, including when provider IDs match on different machines.
 
 With `autoUpdateHarnesses` enabled, a headless core checks ten minutes after
 startup and every six hours, postponing checks while work is active. Enable it
-under that machine's agents in Settings, Machines. Providers without a managed release
-use the self route as the core user. An unwritable npm prefix fails before the
+under that machine's agents in Settings, Machines and updates. Providers
+without a managed release use the self route as the core user. An unwritable
+npm prefix fails before the
 updater starts and names the directory; other updater permission failures
 appear on the update row.
 
@@ -170,7 +172,8 @@ The client treats that machine as having no updates and shows no error.
 
 - `providers.updates { refresh? }`: the list, answered from the last reading
   without running any agent. `refresh: true` reads every agent first. On a core
-  with no reading yet the list is empty; Settings, Machines asks for a refresh
+  with no reading yet the list is empty; Settings, Machines and updates asks
+  for a refresh
   when it opens on an empty list.
 - `providers.update { providerId }`: start one update.
 - `providers.updateSkip { providerId, version }`: skip a version, `null`

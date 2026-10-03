@@ -13,7 +13,7 @@
 
 {#if available}
   <button type="button" class="ghost icon update-trigger" title={strings.serverUpdate.updates}
-    aria-label={strings.serverUpdate.updates} onclick={() => workspace.active.showSettings('machines')}
+    aria-label={strings.serverUpdate.updates} onclick={() => workspace.active.showSettings('machines', 'updates')}
     data-testid="nav-app-update">
     <Download size={16} strokeWidth={1.75} />
     <span class="badge" data-testid="app-update-badge" aria-hidden="true"></span>

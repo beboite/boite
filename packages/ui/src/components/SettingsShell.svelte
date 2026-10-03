@@ -26,7 +26,6 @@
   import VoiceSettings from './VoiceSettings.svelte';
   import { providerGroups } from '../lib/provider-family';
 import { workspace } from '../lib/workspace.svelte';
-  import { showAppUpdateUi } from '../lib/app-update.svelte';
 
   let { store, onopenthread }: { store: Store; onopenthread?: () => void } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
@@ -88,8 +87,8 @@ import { workspace } from '../lib/workspace.svelte';
       { id: 'tasks', label: strings.protection.tasks }
     ],
     machines: [
-      { id: 'machines', label: strings.machines.heading },
-      ...(showAppUpdateUi() ? [{ id: 'updates', label: strings.appUpdate.heading }] : []),
+      { id: 'updates', label: strings.serverUpdate.updates },
+      { id: 'machines', label: strings.machines.connections },
       // MachinesPage draws the card only while this window owns two machines.
       ...(workspace.machines.filter((machine) => machine.store.owner).length > 1 ? [{ id: 'agent-links', label: strings.machines.agentLinks }] : []),
       { id: 'devices', label: strings.settings.pairing.heading },
@@ -108,7 +107,7 @@ import { workspace } from '../lib/workspace.svelte';
    * whose names are already in view, and a sub-entry there only repeats a
    * heading. The search still finds every section above.
    */
-  const LONG_PAGES: SettingsTab[] = ['keyboard', 'usage'];
+  const LONG_PAGES: SettingsTab[] = ['keyboard', 'usage', 'machines'];
   let toc = $derived<Partial<Record<SettingsTab, { id: string; label: string }[]>>>(
     Object.fromEntries(LONG_PAGES.map((id) => [id, children[id] ?? []]))
   );
@@ -140,9 +139,10 @@ import { workspace } from '../lib/workspace.svelte';
     ['appearance', 'buttons', strings.terminal.title],
     ['appearance', 'buttons', strings.rightPanel.trace],
     ['accounts', null, strings.settings.modelDefaults],
-    ['machines', 'machines', strings.harnessUpdates.auto],
-    ['machines', 'machines', strings.harnessUpdates.heading],
-    ['machines', 'machines', strings.serverUpdate.updates],
+    ['machines', 'updates', strings.appUpdate.heading],
+    ['machines', 'updates', strings.harnessUpdates.auto],
+    ['machines', 'updates', strings.harnessUpdates.heading],
+    ['machines', 'updates', strings.serverUpdate.updates],
     ['resources', 'quiet', strings.settings.focusGuard],
     ['resources', 'quiet', strings.settings.muteAgents],
     ['resources', 'limits', strings.settings.memoryProtection],
@@ -366,8 +366,11 @@ import { workspace } from '../lib/workspace.svelte';
   .tab {
     justify-content: flex-start;
     width: 100%;
-    height: var(--row);
-    padding: 0 10px;
+    min-height: var(--row);
+    height: auto;
+    padding: 6px 10px;
+    white-space: normal;
+    line-height: 1.35;
     color: var(--color-muted-foreground);
   }
 

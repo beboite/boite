@@ -6,7 +6,7 @@ composer and settings. It does not move the thread or its processes.
 
 ## Connecting a machine
 
-Open Machines from Settings. On the machine to add,
+Open Machines and updates from Settings. On the machine to add,
 mint a full-control pairing link in General, or run `boite-core pair --owner`.
 Paste the link into Add machine, optionally name it, then connect. A manual URL
 and token form is available under the pairing form.
@@ -125,9 +125,10 @@ worktree storage, network access, public URLs, browser origins and provider
 sign-ins stay on their own machine. Each owner machine card has a Settings for
 this machine button beside its synchronization control. It opens resource and
 execution settings for that core without changing the active conversation.
-Agent update checks, versions and the automatic update switch sit directly
-under that machine's card. Desktop and server updates also live in Machines;
-the footer's download shortcut opens this tab without switching cores.
+Agent update checks, versions and the automatic update switch sit under that
+machine in the Updates section of Machines and updates. Desktop and server
+updates share this section, above connections, pairing and synchronization.
+The footer's download shortcut opens it without switching cores.
 Checking synchronization leaves the machine list open. The button is available
 on desktop and phone; offline machines cannot be edited. The report names
 providers that still need signing in on the target

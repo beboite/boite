@@ -53,6 +53,9 @@ function input(selector: string, value: string) {
 
 test('sync stays on the list and the settings button edits the owning machine without changing the active conversation', async () => {
   const { source, target } = await setup();
+  expect(query('[data-testid="machines-page"] h1').textContent).toContain(strings.settings.tabs.machines);
+  expect(document.querySelectorAll('#settings-updates [data-testid="machine-updates-card"]')).toHaveLength(2);
+  expect(document.querySelector('#settings-machines [data-testid="harness-updates-card"]')).toBeNull();
   await source.store.open('t-trace');
   const thread = source.store.openThread;
   await source.store.client!.call('settings.set', { asyncQuestions: false, warmProcessMinutes: 9, agentMemoryBudgetPercent: 70 });
