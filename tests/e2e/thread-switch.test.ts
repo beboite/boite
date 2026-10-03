@@ -25,12 +25,16 @@ test('production desktop and phone restore cached reading before a slow core rep
     });
     harness.core.journal.putMessage({ id: 'other-message', threadId: other.id, turnId: 'other-turn', role: 'assistant', state: 'complete', createdAt: 1, parts: [{ type: 'text', text: 'The other conversation.' }] });
     const getsFinished = new Map<string, number>();
-    harness.core.router.register('threads.get', async params => {
-      const result = harness.core.threads.get(params.threadId, params.after, params);
-      await Bun.sleep(750);
-      getsFinished.set(params.threadId, (getsFinished.get(params.threadId) ?? 0) + 1);
+    const dispatch = harness.core.router.dispatch.bind(harness.core.router);
+    harness.core.router.dispatch = async (method, params, context) => {
+      const result = await dispatch(method, params, context);
+      if (method === 'threads.get') {
+        const id = (params as { threadId: string }).threadId;
+        await Bun.sleep(750);
+        getsFinished.set(id, (getsFinished.get(id) ?? 0) + 1);
+      }
       return result;
-    });
+    };
     page = await BrowserPage.launch({ url: `${harness.url}/?token=${harness.token}`, windowSize: { width: 1280, height: 900 } });
     await page.waitFor(`document.querySelector('[data-thread-id="${threadId}"]')`);
     const open = async (id: string, phone: boolean) => {
