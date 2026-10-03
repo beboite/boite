@@ -1,3 +1,4 @@
+import { journalRpcTrace } from './fixtures/journal-rpc-trace.ts';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -65,6 +66,7 @@ describe('historical journal inspection', () => {
 });
 
 test('inspection RPC is owner only for paired devices and scoped agents', async () => {
+  const trace = journalRpcTrace();
   let h: TestCore | undefined;
   const clients: CoreClient[] = [];
   const failures: Error[] = [];
@@ -98,11 +100,12 @@ test('inspection RPC is owner only for paired devices and scoped agents', async 
       catch (cause) { failures.push(new Error('journal.inspect authorization test failed during client cleanup', { cause })); }
     }
     if (h) {
-      console.info('journal.inspect authorization: isolated core cleanup started');
-      try { await h.stop(); console.info('journal.inspect authorization: isolated core cleanup finished'); }
+      try { await h.stop(); }
       catch (cause) { failures.push(new Error('journal.inspect authorization test failed during isolated core cleanup', { cause })); }
     }
+    trace.restore();
   }
+  if (failures.length) trace.printFailure();
   if (failures.length === 1) throw failures[0];
   if (failures.length > 1) throw new AggregateError(failures, 'journal.inspect authorization and cleanup failed');
 });
