@@ -603,9 +603,9 @@ at most 200 paths, defaulting to 50, and report whether the walk was capped.
 
 ## README walkthroughs
 
-The README's dark and light films show the real UI with public sample data.
-Each twelve-second film covers the conversation, model selection, changes and
-subagents, with the desktop UI filling the frame. They use no live providers.
+The README's twelve-second film shows the real UI with public sample data.
+It covers the conversation, model selection, changes and subagents, with the
+desktop UI filling the frame. It uses no live providers.
 
 `scripts/readme/record.ts` starts an isolated Vite fixture, injects
 `scripts/readme/fixture.ts` through a recording-only plugin and fills the frame
@@ -626,10 +626,14 @@ bun scripts/readme/record.ts \
   --scratch /tmp/boite-readme-recording
 ```
 
-The default output is `docs/media`: two silent 1600 by 1000 H.264 MP4 films,
-two twelve-second GIF loops capped at 5 MiB each and two static posters for
-readers who prefer reduced motion. `--inspect` checks both themes and captures
-each scene without encoding; `--output` changes the delivery directory.
-Scene captures, raw video, encoder logs and verification JSON stay in the
-scratch directory. Inspect the films and every scene before replacing the
+The recorder captures both themes with matching scene durations, then blends
+light into dark over 0.8 seconds while the diff view is settled. The default
+output is `docs/media`: one silent twelve-second 1600 by 1000 H.264 MP4, one
+matching GIF loop capped at 5 MiB and two static posters for readers who prefer
+reduced motion. `--inspect` checks both themes and captures each scene without
+encoding; `--output` changes the delivery directory. Scene captures, intermediate
+films, raw video, encoder logs and verification JSON stay in the scratch
+directory. `--combine-only` reuses the two intermediate MP4 files in that
+scratch directory to regenerate the combined MP4/GIF without a browser.
+Inspect the film and every scene before replacing the
 committed media; check that the sample data contains no personal information.

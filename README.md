@@ -19,20 +19,16 @@ and follow the work from your desktop or a paired phone.
   <picture>
     <source media="(prefers-reduced-motion: reduce) and (prefers-color-scheme: light)" srcset="docs/media/boite-light.png" />
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/boite-dark.png" />
-    <source media="(prefers-color-scheme: dark)" srcset="docs/media/boite-dark.gif" />
-    <source media="(prefers-color-scheme: light)" srcset="docs/media/boite-light.gif" />
-    <img src="docs/media/boite-dark.gif" alt="Boite walkthrough: projects, model selection, code changes and subagents" width="100%" />
+    <img src="docs/media/boite.gif" alt="Boite walkthrough: projects, model selection, code changes and subagents" width="100%" />
   </picture>
 </p>
 <p align="center">
-  Watch the 12-second walkthrough:
-  <a href="docs/media/boite-dark.mp4">Dark mode</a> ·
-  <a href="docs/media/boite-light.mp4">Light mode</a>
+  <a href="docs/media/boite.mp4">Watch the 12-second walkthrough</a>
 </p>
 
-The walkthroughs use staged sample data in the real Boite web interface.
-They show the same task in both themes, from choosing a model to reviewing
-changes and following subagents, with Boite filling the entire frame.
+The walkthrough uses staged sample data in the real Boite web interface.
+It follows one task from model selection to changes and subagents, with a
+smooth transition from light to dark mode. Boite fills the entire frame.
 
 ## From a task to its result
 

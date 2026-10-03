@@ -12,17 +12,20 @@ const arg = (name: string, fallback: string) => {
 };
 const root = resolve(import.meta.dir, '../..');
 const ui = join(root, 'packages/ui');
-const requireUi = createRequire(join(ui, 'package.json'));
-const { createServer } = await import(requireUi.resolve('vite'));
-const moduleName = arg('playwright', 'playwright-core');
-const { chromium } = await import(moduleName.startsWith('/') ? pathToFileURL(moduleName).href : moduleName);
 const output = resolve(arg('output', join(root, 'docs/media')));
 const scratch = resolve(arg('scratch', join(root, 'tests/e2e/.artifacts/readme')));
 const ffmpegArg = arg('ffmpeg', 'ffmpeg');
 const ffmpeg = Bun.which(ffmpegArg) ?? resolve(ffmpegArg);
 const inspect = Bun.argv.includes('--inspect');
+const combineOnly = Bun.argv.includes('--combine-only');
+if (inspect && combineOnly) throw new Error('Choose either --inspect or --combine-only');
 mkdirSync(output, { recursive: true }); mkdirSync(scratch, { recursive: true });
 
+if (!combineOnly) {
+const requireUi = createRequire(join(ui, 'package.json'));
+const { createServer } = await import(requireUi.resolve('vite'));
+const moduleName = arg('playwright', 'playwright-core');
+const { chromium } = await import(moduleName.startsWith('/') ? pathToFileURL(moduleName).href : moduleName);
 const server = await createServer({ root: ui, plugins: [fixtureBridge, {
   name: 'readme-film',
   transform(code: string, id: string) {
@@ -140,16 +143,24 @@ try {
         const raw = await video.path();
         // Fit every interaction into its allotted scene without cutting away clicks.
         const montage = scenes.map((scene, i) => `[0:v]trim=start=${lead + scene.start}:end=${lead + scene.end},setpts=(PTS-STARTPTS)*${scene.duration / (scene.end - scene.start)}[v${i}]`).join(';') + `;${scenes.map((_, i) => `[v${i}]`).join('')}concat=n=${scenes.length}:v=1:a=0,fps=30[film]`;
-        await encode(['-i', raw, '-filter_complex', montage, '-map', '[film]', '-t', '12', '-an', '-c:v', 'libx264', '-threads', '4', '-preset', 'slow', '-crf', '19', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', join(output, `boite-${theme}.mp4`)]);
-        const filters = 'fps=12,scale=800:-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3[gif]';
-        await encode(['-i', join(output, `boite-${theme}.mp4`), '-filter_complex', filters, '-map', '[gif]', '-loop', '0', join(output, `boite-${theme}.gif`)]);
-        if (statSync(join(output, `boite-${theme}.gif`)).size > 5 * 1024 * 1024) throw new Error('README GIF exceeds 5 MiB');
+        await encode(['-i', raw, '-filter_complex', montage, '-map', '[film]', '-t', '12', '-an', '-c:v', 'libx264', '-threads', '4', '-preset', 'slow', '-crf', '19', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', join(scratch, `boite-${theme}.mp4`)]);
       }
       await Bun.write(join(scratch, `${theme}-verification.json`), JSON.stringify({ renderer, errors, badRequests, fullscreen, recordingSeconds: seconds, filmSeconds: 12, scenes }, null, 2));
       console.log(`README_FILM_OK theme=${theme} fullscreen=1600x1000 seconds=12 errors=${errors.length} hardware=${renderer}`);
     } finally { await context.close(); }
   }
 } finally { await browser?.close(); await server.close(); }
+}
+
+if (!inspect) {
+  // Both films reach the same settled diff view before changing themes.
+  const fade = '[0:v]trim=end=8.4,setpts=PTS-STARTPTS,fps=30,settb=1/30[light];[1:v]trim=start=7.6,setpts=PTS-STARTPTS,fps=30,settb=1/30[dark];[light][dark]xfade=transition=fade:duration=0.8:offset=7.6[film]';
+  await encode(['-i', join(scratch, 'boite-light.mp4'), '-threads', '4', '-i', join(scratch, 'boite-dark.mp4'), '-filter_complex', fade, '-map', '[film]', '-t', '12', '-an', '-c:v', 'libx264', '-threads', '4', '-preset', 'slow', '-crf', '19', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', join(output, 'boite.mp4')]);
+  const filters = 'fps=12,scale=800:-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3[gif]';
+  await encode(['-i', join(output, 'boite.mp4'), '-filter_complex', filters, '-map', '[gif]', '-loop', '0', join(output, 'boite.gif')]);
+  if (statSync(join(output, 'boite.gif')).size > 5 * 1024 * 1024) throw new Error('README GIF exceeds 5 MiB');
+  console.log('README_COMBINED_OK fullscreen=1600x1000 seconds=12 fade=light-to-dark transition=7.6-8.4');
+}
 
 async function encode(args: string[]) {
   const proc = Bun.spawn([ffmpeg, '-y', '-threads', '4', '-filter_complex_threads', '2', ...args], { stdout: 'ignore', stderr: 'pipe' });
