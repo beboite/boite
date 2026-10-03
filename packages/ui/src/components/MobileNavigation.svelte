@@ -13,6 +13,7 @@
   import { hasUnsentDraft } from '../lib/composer-queue';
   import { mobileOverlay } from '../lib/mobile-history';
   import { archiveThread } from '../lib/archive';
+  import { canMarkDone, groupWorkingThread, markDone, recentPreferences } from '../lib/recent.svelte';
   import { canDeleteThread, deleteThread } from '../lib/thread-removal';
   import { projectMenu } from '../lib/project-menu';
   import { separator, type MenuItem } from '../lib/menu';
@@ -21,6 +22,8 @@
   import ThreadState from './ThreadState.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import ProjectViews from './ProjectViews.svelte';
+  import RecentGroup from './RecentGroup.svelte';
+  import RecentDone from './RecentDone.svelte';
   import { projectKey, projectView } from '../lib/project-view.svelte';
   import { compareThreads } from '../lib/thread-order';
 
@@ -69,6 +72,12 @@
     id: JSON.stringify([m.id, p.id]), label: projectName(p), hint: several ? m.label : '', projectTile: { project: p, store: m.store },
     active: m.store === store && p.id === project?.id
   }))), ...(store.owner ? [{ id: 'add-project', label: strings.sidebar.addProject, hint: '', active: false }] : [])]);
+  const inRecent = $derived(screen === 'threads' && workspace.view === 'recent');
+  const recentGroups = $derived(selected ? [selected] : groups);
+  let workingOpen = $state(false);
+  const groupWorking = $derived(inRecent && recentPreferences.groupWorking && !query);
+  const working = $derived(groupWorking ? rows.filter(row => groupWorkingThread(row.machine.store, row.thread)) : []);
+  const attention = $derived(groupWorking ? rows.filter(row => !groupWorkingThread(row.machine.store, row.thread)) : rows);
 
   /** The list a conversation was opened from: Back returns to it. The landing conversation has none, so Back leaves. */
   let from = $state<'threads' | 'activity' | null>(null);
@@ -91,7 +100,7 @@
       { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
       { id: 'retitle', label: retitling ? strings.sidebar.retitling : strings.sidebar.retitle, disabled: retitling },
       separator(),
-      { id: 'archive', label: strings.sidebar.archive },
+      { id: 'archive', label: inRecent ? strings.sidebar.markDone : strings.sidebar.archive, disabled: inRecent && !canMarkDone(owner, thread) },
       ...(canDeleteThread(owner, thread) ? [{ id: 'delete', label: strings.sidebar.delete, danger: true }] : [])
     ];
   }
@@ -99,7 +108,7 @@
   function rowAction(owner: Store, thread: ThreadSummary, action: string) {
     if (action === 'pin') void owner.pin(thread.id, !thread.pinned);
     else if (action === 'retitle') void owner.retitle(thread.id);
-    else if (action === 'archive') void archiveThread(owner, thread.id);
+    else if (action === 'archive') void (inRecent ? markDone(owner, thread) : archiveThread(owner, thread.id));
     else if (action === 'delete') void deleteThread(owner, thread);
   }
   async function pickProject(key: string) {
@@ -160,7 +169,7 @@
 </header>
 
 {#if narrow.current && store.page === 'chat' && (screen !== 'chat' || recover)}
-  <section class="mobile-list" bind:this={scrollRoot} onscroll={() => { if (scrollRoot) scrollPositions.set(listKey, scrollRoot.scrollTop); }} data-testid="mobile-list" aria-label={screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}>
+  <section class="mobile-list" class:recent={inRecent} bind:this={scrollRoot} onscroll={() => { if (scrollRoot) scrollPositions.set(listKey, scrollRoot.scrollTop); }} data-testid="mobile-list" aria-label={screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}>
     {#if recover && narrow.current}
       <MobileConnect {store} onpaired={() => show('threads')} />
     {:else}
@@ -170,7 +179,7 @@
       <div class="search"><Search size={17} /><input type="search" bind:value={search} aria-label={strings.mobile.search} placeholder={strings.mobile.search} data-testid="mobile-search" />{#if search}<button class="ghost icon" aria-label={strings.mobile.clearSearch} onclick={() => search = ''}><X size={16} /></button>{/if}</div>
     </div>
     {#snippet threadRow(row: typeof rows[number])}
-      <div class="row">
+      <div class="row" data-thread-id={row.thread.id} data-machine-id={row.machine.id}>
         <button class="ghost thread" class:offline={row.machine.store.connection !== 'ready'} data-testid="mobile-thread-{row.thread.id}" onclick={() => { show('chat'); void workspace.select(row.machine.store, row.thread.id); }}>
           <span class="summary"><span class="title"><span class="provider" data-testid="thread-provider" role="img" aria-label={agentLabel(row.machine.store, row.thread)}><ProviderLogo providerId={row.thread.providerId} size={13} /></span>{#if row.thread.pinned}<Pin size={12} />{/if}{row.thread.title}{#if hasUnsentDraft(row.machine.store.composerStates[row.thread.id])}<span class="draft" data-testid="thread-draft" title={strings.sidebar.unsentDraft} aria-label={strings.sidebar.unsentDraft}><PencilLine size={12} /></span>{/if}</span><span class="detail" title={row.thread.branch ?? undefined}>{[projectName(row.project), several ? row.machine.label : null, row.thread.branch].filter(Boolean).join(' · ')}</span></span>
           <ThreadState thread={row.thread} {now} />
@@ -203,11 +212,23 @@
         {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
       </WindowList>
     {:else}
-      <WindowList items={rows} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements(screen)}>
+      <WindowList items={attention} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements(screen)}>
         {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
       </WindowList>
+      {#if inRecent}
+        <div class="recent-folds">
+          {#if working.length > 0}
+            <RecentGroup kind="working" count={working.length} bind:open={workingOpen}>
+              <WindowList items={working} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements('recent-working')}>
+                {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
+              </WindowList>
+            </RecentGroup>
+          {/if}
+          <RecentDone entries={recentGroups} {scrollRoot} {now} {query} onopen={() => show('chat')} />
+        </div>
+      {/if}
     {/if}
-    {#if rows.length === 0 && (query || screen === 'activity' || workspace.view === 'recent' || groups.length === 0)}
+    {#if rows.length === 0 && (query || screen === 'activity' || workspace.view === 'recent' || groups.length === 0) && !(inRecent && !query && recentGroups.some(entry => entry.project.archivedThreads))}
       <div class="empty-state">
         <span class="empty-icon">{#if screen === 'activity'}<Activity size={24} />{:else}<MessageSquare size={24} />{/if}</span>
         <h2>{screen === 'activity' ? strings.mobile.emptyActivity : entries.length ? strings.mobile.noThreads : strings.mobile.emptyTitle}</h2>
@@ -279,5 +300,8 @@
     .empty-state p { color: var(--color-muted-foreground); line-height: 1.6; max-width: 280px; margin: 0 0 20px; }
     .mobile-header { grid-row: 1; grid-column: 1; }
     .mobile-list { grid-row: 2; grid-column: 1; position: relative; z-index: 1; min-height: 0; }
+    .mobile-list.recent { display: flex; flex-direction: column; }
+    .mobile-list.recent > :global(*) { flex-shrink: 0; }
+    .recent-folds { margin-top: auto; padding-top: 16px; }
   }
 </style>

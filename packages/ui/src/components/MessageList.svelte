@@ -1,14 +1,15 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { ArrowDown } from '@lucide/svelte';
-  import type { AgentLetter, Message, MoveNotice, ThreadLink } from '@boite/contracts';
+  import type { Message, MoveNotice, ThreadLink } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import MessageTurnSummary from './MessageTurnSummary.svelte';
   import TurnFiles from './TurnFiles.svelte';
   import { visibleTurnFiles } from '../lib/turn-files';
   import MessageOutline from './MessageOutline.svelte';
-  import ForwardedAgentMessage from './ForwardedAgentMessage.svelte';
+  import AgentMessageGroup from './AgentMessageGroup.svelte';
+  import { agentMailFor, groupAgentMail, withAgentMail } from '../lib/agent-mail';
   import DelegationActivity from './DelegationActivity.svelte';
   import UserMessage from './UserMessage.svelte';
   import AssistantMessage from './AssistantMessage.svelte';
@@ -25,7 +26,6 @@
   import { dockRoom } from '../lib/question-dock.svelte';
   import { glides } from '../lib/motion';
   import { BottomGlide, PointerHold, keysUp, typingKey, watchWheel, wheelsUp } from '../lib/timeline-follow';
-  import { workspace } from '../lib/workspace.svelte';
   import { MediaQuery } from 'svelte/reactivity';
 
   /** A phone has no room left of the bubbles for the outline rail: it is not drawn there. */
@@ -41,13 +41,8 @@
   $effect(() => {
     if (store.findOpen && !FindBar) void import('./FindBar.svelte').then((module) => { FindBar = module.default; }).catch(() => { store.findOpen = false; });
   });
-  const coordination = $derived(store.coordination?.self.threadId === threadId ? store.coordination : null);
   const delegation = $derived(store.delegation && (store.delegation.rootThreadId === threadId || store.delegation.agents.some(agent => agent.thread.id === threadId)) ? store.delegation : null);
-  const letters = $derived([
-    ...(coordination?.messages ?? []),
-    ...(delegation?.messages.filter(letter => letter.from.threadId === threadId || letter.to.threadId === threadId) ?? [])
-  ]);
-  const delegationLetterIds = $derived(new Set(delegation?.messages.map(letter => letter.id) ?? []));
+  const mail = $derived(agentMailFor(store, threadId));
   /** The thread's account is signed out: an error then carries the way back in. */
   const signedOut = $derived.by(() => {
     const thread = store.openThread;
@@ -55,43 +50,26 @@
     const account = store.accountOf(thread.accountId);
     return account?.status === 'unauthenticated' ? account : null;
   });
-  const letterRows = $derived.by(() => new Map(letters.map(letter => [`coordination:${letter.id}`, letter])));
   const team = $derived(delegation?.rootThreadId === threadId ? delegation.agents : []);
   const teamRowId = $derived(`delegation:${threadId}`);
   /** The runs this thread started, each a card where it began. */
   const workflowRows = $derived(new Map(store.workflowsOf(threadId).filter(run => run.rootThreadId === threadId).map(run => [`workflow:${run.id}`, run])));
-  const timeline = $derived.by(() => {
-    if (letters.length === 0 && team.length === 0 && workflowRows.size === 0 && memoryRows.size === 0) return messages;
-    const ids = new Set(letters.map(letter => letter.id));
-    const visible = messages.filter(message => !coordinationPlaceholder(message, ids));
-    const forwarded = letters.map((letter): Message => ({
-      id: `coordination:${letter.id}`,
-      threadId,
-      turnId: `coordination:${letter.id}`,
-      role: 'system',
-      parts: [],
-      state: 'complete',
-      createdAt: letter.createdAt
-    }));
+  const grouped = $derived.by(() => {
+    if (mail.length === 0 && team.length === 0 && workflowRows.size === 0 && memoryRows.size === 0) return { timeline: messages, groups: new Map() };
     const activity: Message[] = team.length ? [{
       id: teamRowId, threadId, turnId: teamRowId, role: 'system', parts: [], state: 'complete',
       createdAt: Math.min(...team.map(agent => agent.thread.createdAt))
     }] : [];
     const runs: Message[] = [...workflowRows].map(([id, run]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: run.createdAt }));
     const memory: Message[] = [...memoryRows].map(([id, event]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: event.at }));
-    return [...visible, ...forwarded, ...activity, ...runs, ...memory].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    const rows = [...withAgentMail(messages, mail, threadId), ...activity, ...runs, ...memory].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    return groupAgentMail(rows, mail);
   });
+  const timeline = $derived(grouped.timeline);
   const memoryPlacement = $derived(placeMemoryEvents(messages, store.openThread?.id === threadId ? store.openThread.memoryEvents ?? [] : store.delegationThread?.id === threadId ? store.delegationThread.memoryEvents ?? [] : []));
   const memoryRows = $derived(new Map(memoryPlacement.standalone.map((event, index) => [`memory:${event.at}:${event.kind}:${index}`, event])));
   const timelineOrder = $derived(timeline.map(message => message.id).join('\0'));
   const savedReading = untrack(() => store.readingPositions?.get(threadId));
-
-  function coordinationPlaceholder(message: Message, ids: Set<string>): boolean {
-    if (message.role !== 'system') return false;
-    return message.parts.some(part => part.type === 'text' &&
-      (part.text.startsWith('Boite agent coordination.') || part.text.startsWith('Boite delegation messages.')) &&
-      [...ids].some(id => part.text.includes(`"id":"${id}"`)));
-  }
 
   /** The core's line for a move the agent asked for itself (`boite thread move`), drawn as a marker, not a message. */
   function movedBy(message: Message): MoveNotice | null {
@@ -105,20 +83,6 @@
     if (message.role !== 'system') return null;
     for (const part of message.parts) if (part.type === 'text' && part.started) return part.started;
     return null;
-  }
-
-  function letterSelf(letter: AgentLetter): { coreId: string; threadId: string } | null {
-    if (delegationLetterIds.has(letter.id)) return { coreId: 'local', threadId };
-    return coordination?.self ?? null;
-  }
-
-  function letterProject(letter: AgentLetter): string | undefined {
-    const self = letterSelf(letter);
-    const address = letter.from.coreId === self?.coreId && letter.from.threadId === threadId ? letter.to : letter.from;
-    if (address.coreId !== self?.coreId) return undefined;
-    const thread = store.threads.find(thread => thread.id === address.threadId)
-      ?? delegation?.agents.find(agent => agent.thread.id === address.threadId)?.thread;
-    return store.projects.find(project => project.id === thread?.projectId)?.name;
   }
 
   /** How often the bottom message's height is allowed to speak to the pin. */
@@ -764,21 +728,20 @@
         <div class="spacer" data-testid="timeline-above" style="height: {view.above}px"></div>
       {/if}
       {#each rendered as message (message.id)}
-        {@const letter = letterRows.get(message.id)}
+        {@const group = grouped.groups.get(message.id)}
         {@const turn = store.openThread?.turns.find(turn => turn.id === message.turnId)}
         <article
           use:track={message.id}
           class="message {message.role}"
           data-testid="message"
-          data-role={letter ? 'agent-letter' : message.role}
+          data-role={group ? 'agent-mail' : message.role}
         >
           {#if message.id === teamRowId}
             <DelegationActivity {store} agents={team} />
           {:else if workflowRows.has(message.id)}
             <WorkflowActivity {store} run={workflowRows.get(message.id)!} />
-          {:else if letter && letterSelf(letter)}
-            {@const self = letterSelf(letter)!}
-            <ForwardedAgentMessage {letter} {self} projectName={letterProject(letter)} onopen={address => void workspace.openAgentThread(store, self, address)} />
+          {:else if group}
+            <AgentMessageGroup {store} {group} />
           {:else if memoryRows.has(message.id)}
             <MemoryRow event={memoryRows.get(message.id)!} onconfigure={store.owner ? () => store.showSettings('resources', 'limits') : undefined} />
           {:else if movedBy(message)}

@@ -13,16 +13,16 @@ import type { Store } from './store.svelte';
  * in Settings, bring the conversation back, not the work that was stopped.
  * Archived, the keyboard lands in the composer.
  */
-export async function archiveThread(store: Store, threadId: ThreadId): Promise<boolean> {
+export async function archiveThread(store: Store, threadId: ThreadId, options: { done?: boolean } = {}): Promise<boolean> {
   const title = (store.threads.find((t) => t.id === threadId) ?? store.openThread)?.title ?? '';
   const wasOpen = store.openThread?.id === threadId;
-  await store.archive(threadId);
+  await store.archive(threadId, options.done === true);
   // Refused, the row is still there and the banner says why: nothing to take back.
   if (store.threads.some((t) => t.id === threadId)) return false;
   const entry = { store, threadId, undoId: 0 };
   closed.push(entry);
   // The way back for a few seconds; the archived list in Settings keeps it after.
-  undo.offer(fill(strings.sidebar.archivedToast, { title }), async () => {
+  undo.offer(fill(options.done ? strings.sidebar.doneToast : strings.sidebar.archivedToast, { title }), async () => {
     await restoreThread(store, threadId);
     // The thread that was on screen comes back on screen.
     if (wasOpen) await workspace.select(store, threadId);

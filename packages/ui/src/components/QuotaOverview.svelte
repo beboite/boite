@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { ChevronDown, GripVertical, RotateCcw } from '@lucide/svelte';
+  import { ChevronDown, RotateCcw } from '@lucide/svelte';
   import type { AccountQuota } from '@boite/contracts';
   import ProviderLogo from './ProviderLogo.svelte';
   import QuotaExtras from './QuotaExtras.svelte';
@@ -19,6 +19,10 @@
   let dragging = $state<string | null>(null);
   let saving = $state(false);
   let pointer: number | null = null;
+  let candidate: string | null = null;
+  let pressedAt = { x: 0, y: 0 };
+  let suppressClick = false;
+  let clickTimer = 0;
   let original: string[] = [];
   let lastPoint = { x: 0, y: 0 };
   let scrolling = 0;
@@ -47,37 +51,52 @@
     }
     scrolling = requestAnimationFrame(scroll);
   }
-  onDestroy(() => cancelAnimationFrame(scrolling));
+  onDestroy(() => { cancelAnimationFrame(scrolling); clearTimeout(clickTimer); });
   function trackDrag(node: HTMLDivElement) {
     const end = (event: PointerEvent) => finish(event);
     const cancel = (event: PointerEvent) => finish(event, true);
-    node.addEventListener('pointermove', move);
-    node.addEventListener('pointerup', end);
-    node.addEventListener('pointercancel', cancel);
-    node.addEventListener('lostpointercapture', cancel);
+    const lost = (event: PointerEvent) => { if (event.target === node) cancel(event); };
+    const click = (event: MouseEvent) => {
+      if (!suppressClick) return;
+      suppressClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', cancel);
+    node.addEventListener('lostpointercapture', lost);
+    node.addEventListener('click', click, true);
     return { destroy() {
-      node.removeEventListener('pointermove', move);
-      node.removeEventListener('pointerup', end);
-      node.removeEventListener('pointercancel', cancel);
-      node.removeEventListener('lostpointercapture', cancel);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', cancel);
+      node.removeEventListener('lostpointercapture', lost);
+      node.removeEventListener('click', click, true);
     } };
   }
   function start(event: PointerEvent, id: string) {
-    if (event.button !== 0 || !event.isPrimary || saving) return;
-    event.preventDefault();
-    const handle = event.currentTarget as HTMLButtonElement;
-    handle.focus({ preventScroll: true });
-    // The list stays mounted while keyed rows move, so the capture survives reordering and scrolling.
-    overview.setPointerCapture(event.pointerId);
+    if (!onreorder || event.button !== 0 || !event.isPrimary || saving) return;
+    // Touch drags start on the name; swiping the bars keeps the list's native scrolling.
+    if (event.pointerType === 'touch' && !(event.target as Element).closest('.name')) return;
+    (event.currentTarget as HTMLButtonElement).focus({ preventScroll: true });
     pointer = event.pointerId;
-    dragging = id;
+    candidate = id;
     original = ordered.map((row) => row.accountId);
-    draft = [...original];
-    lastPoint = { x: event.clientX, y: event.clientY };
-    scrolling = requestAnimationFrame(scroll);
+    pressedAt = { x: event.clientX, y: event.clientY };
   }
   function move(event: PointerEvent) {
-    if (event.pointerId !== pointer || !dragging || !draft) return;
+    if (event.pointerId !== pointer || !candidate) return;
+    if (!dragging) {
+      if (Math.hypot(event.clientX - pressedAt.x, event.clientY - pressedAt.y) < 6) return;
+      // Capture only an actual drag, keeping a click or tap available for expanding details.
+      overview.setPointerCapture(event.pointerId);
+      dragging = candidate;
+      draft = [...original];
+      suppressClick = true;
+      scrolling = requestAnimationFrame(scroll);
+    }
+    event.preventDefault();
     lastPoint = { x: event.clientX, y: event.clientY };
     place(event.clientX, event.clientY);
   }
@@ -97,11 +116,15 @@
     cancelAnimationFrame(scrolling);
     const ids = draft;
     pointer = null;
+    candidate = null;
     dragging = null;
+    clearTimeout(clickTimer);
+    clickTimer = window.setTimeout(() => { suppressClick = false; }, 0);
     if (!cancel && ids && ids.some((id, index) => id !== original[index])) void save(ids);
     else draft = null;
   }
   function keyboard(event: KeyboardEvent, id: string) {
+    if (!onreorder) return;
     const ids = ordered.map((row) => row.accountId);
     const from = ids.indexOf(id);
     const to = event.key === 'ArrowUp' ? from - 1 : event.key === 'ArrowDown' ? from + 1 :
@@ -133,7 +156,11 @@
     {@const percent = credits?.kind === 'budget' ? Math.max(0, Math.min(100, credits.remaining! / credits.limit! * 100)) : null}
     <article data-testid="quota-provider" data-provider={row.providerId} data-account-id={row.accountId} class:expanded={expanded === row.accountId} class:dragging={dragging === row.accountId}>
       <div class="account-heading">
-        <button class="summary ghost" aria-expanded={expanded === row.accountId} aria-controls={`usage-${row.accountId}`} disabled={row.windows.length === 0} onclick={() => (expanded = expanded === row.accountId ? null : row.accountId)}>
+        <button class="summary ghost" class:reorderable={!!onreorder && !saving} data-testid={onreorder ? 'quota-reorder' : undefined}
+          aria-expanded={expanded === row.accountId} aria-controls={`usage-${row.accountId}`} aria-keyshortcuts={onreorder ? 'ArrowUp ArrowDown Home End' : undefined}
+          title={onreorder ? fill(strings.quotas.reorder, { name }) : undefined} disabled={saving || (row.windows.length === 0 && !onreorder)}
+          onpointerdown={(event) => start(event, row.accountId)} onkeydown={(event) => keyboard(event, row.accountId)}
+          onclick={() => { if (row.windows.length) expanded = expanded === row.accountId ? null : row.accountId; }}>
           <span class="logo" title={row.providerName}><ProviderLogo providerId={row.providerId} size={20} /></span>
           <span class="summary-content">
             <span class="headline">
@@ -163,10 +190,6 @@
             {/if}
           </span>
         </button>
-        {#if onreorder}
-          <button type="button" class="ghost reorder" data-testid="quota-reorder" aria-label={fill(strings.quotas.reorder, { name })} title={fill(strings.quotas.reorder, { name })} disabled={saving} aria-pressed={dragging === row.accountId}
-            onpointerdown={(event) => start(event, row.accountId)} onkeydown={(event) => keyboard(event, row.accountId)}><GripVertical size={16} /></button>
-        {/if}
       </div>
       {#if row.source === 'observation' && row.checkedAt !== null}<p class="caption">{fill(strings.quotas.observed, { time: exactTime(row.checkedAt) })}</p>{/if}
       {#if !paid}<div class="extras"><QuotaExtras {row} compact /></div>{/if}
@@ -203,8 +226,9 @@
   .amount.low { color: var(--color-live); }
   .headline > :global(svg) { flex: none; color: var(--color-subtle); transition: transform var(--dur-2); }
   .expanded .headline > :global(svg) { transform: rotate(180deg); }
-  .reorder { flex: none; width: 24px; min-width: 24px; padding: 4px 0 0; height: auto; min-height: 44px; align-items: start; color: var(--color-subtle); cursor: grab; touch-action: none; }
-  .reorder:active { cursor: grabbing; }
+  .summary.reorderable { cursor: grab; }
+  .summary.reorderable .name { touch-action: none; }
+  .dragging .summary { cursor: grabbing; }
   .meters { display: flex; flex-wrap: wrap; gap: 3px 8px; }
   .mini-window { flex: 1 1 84px; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px; align-items: center; }
   .mini-label { max-width: 48px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 400; }
@@ -234,6 +258,5 @@
   .empty p { margin: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .track[aria-busy='true'] { filter: saturate(0.15); }
   @keyframes rise { from { opacity: 0; transform: translateY(-4px); } }
-  @media (pointer: coarse) { .reorder { width: 44px; min-width: 44px; } }
   @media (prefers-reduced-motion: reduce) { .details { animation: none; } .track, .fill { transition: none; } }
 </style>

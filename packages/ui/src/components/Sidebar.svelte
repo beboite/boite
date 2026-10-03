@@ -4,7 +4,7 @@
   import WindowList from './WindowList.svelte';
   import WhipButton from './WhipButton.svelte';
   import { Bot, ChevronRight, Ellipsis, FolderX, GripVertical, LoaderCircle, Plus, Settings } from '@lucide/svelte';
-  import type { Project } from '@boite/contracts';
+  import type { Project, ThreadId } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { workspace, type Machine } from '../lib/workspace.svelte';
   import { experimentOn } from '../lib/experiments.svelte';
@@ -13,6 +13,7 @@
   import { projectName } from '../lib/format';
   import { compareThreads } from '../lib/thread-order';
   import { projectRollup } from '../lib/thread-state';
+  import { groupWorkingThread, recentPreferences } from '../lib/recent.svelte';
   import { moveThread, takesDrop, THREAD_DRAG_TYPE, threadDrag } from '../lib/thread-move.svelte';
   import { controlMenu } from '../lib/controls';
   import { sidebarRows } from '../lib/sidebar-rows.svelte';
@@ -20,6 +21,8 @@
   import { work } from '../lib/work-prefs.svelte';
   import { PROJECT_DRAG_TYPE, projectKey, projectView } from '../lib/project-view.svelte';
   import ProjectViews from './ProjectViews.svelte';
+  import RecentGroup from './RecentGroup.svelte';
+  import RecentDone from './RecentDone.svelte';
   import ArchivedDrawer from './ArchivedDrawer.svelte';
   import ArchivedProjects from './ArchivedProjects.svelte';
   import LimitsGlance from './LimitsGlance.svelte';
@@ -66,10 +69,14 @@
       )
       .sort((a, b) => compareThreads(a.thread, b.thread))
   );
+  let workingOpen = $state(false);
+  let doneRows = $state.raw<{ store: Store; threadId: ThreadId }[]>([]);
+  let working = $derived(recentPreferences.groupWorking ? recent.filter(({ machine, thread }) => groupWorkingThread(machine.store, thread)) : []);
+  let attention = $derived(recentPreferences.groupWorking ? recent.filter(({ machine, thread }) => !groupWorkingThread(machine.store, thread)) : recent);
   // Alt+1 to Alt+9 count the rows as drawn: this view, open projects only.
   $effect(() => {
     sidebarRows.list = (workspace.view === 'recent'
-      ? recent.map(({ machine, thread }) => ({ store: machine.store, threadId: thread.id }))
+      ? [...attention, ...(workingOpen ? working : [])].map(({ machine, thread }) => ({ store: machine.store, threadId: thread.id })).concat(doneRows)
       : groups.flatMap(({ machine, project }) =>
           machine.store.isCollapsed(project.id)
             ? []
@@ -168,7 +175,7 @@
   data-testid="sidebar"
 >
   <div class="views"><ProjectViews entries={groups} {store} /></div>
-  <div class="scroll" bind:this={scrollRoot} onscroll={() => { if (showRows && scrollRoot) savedScroll = scrollRoot.scrollTop; }}>
+  <div class="scroll" class:recent={workspace.view === 'recent'} bind:this={scrollRoot} onscroll={() => { if (showRows && scrollRoot) savedScroll = scrollRoot.scrollTop; }}>
     {#if showRows}
     {#if groups.length === 0}<p class="empty">{strings.sidebar.noProjects}</p>{/if}
     {#if workspace.view === 'recent'}
@@ -177,12 +184,22 @@
           <DraftRow owner={machine.store} {entry} />
         {/each}
       {/each}
-      <WindowList items={recent} keyOf={entry => JSON.stringify([entry.machine.id, entry.thread.id])} {scrollRoot} estimate={56} measurements={measurements('recent')}>
-        {#snippet row(entry)}<ThreadCard {...entry} {now} showProject={recentGroups.length > 1} showMachine={multi} />{/snippet}
+      <WindowList items={attention} keyOf={entry => JSON.stringify([entry.machine.id, entry.thread.id])} {scrollRoot} estimate={56} measurements={measurements('recent')}>
+        {#snippet row(entry)}<ThreadCard {...entry} {now} showProject={recentGroups.length > 1} showMachine={multi} showDone />{/snippet}
       </WindowList>
-      {#if groups.length > 0 && recent.length === 0}<p class="none">
+      {#if groups.length > 0 && recent.length === 0 && !recentGroups.some(entry => entry.project.archivedThreads)}<p class="none">
           {strings.sidebar.noThreads}
         </p>{/if}
+      <div class="recent-folds">
+        {#if working.length > 0}
+          <RecentGroup kind="working" count={working.length} bind:open={workingOpen}>
+            <WindowList items={working} keyOf={entry => JSON.stringify([entry.machine.id, entry.thread.id])} {scrollRoot} estimate={56} measurements={measurements('recent-working')}>
+              {#snippet row(entry)}<ThreadCard {...entry} {now} showProject={recentGroups.length > 1} showMachine={multi} showDone />{/snippet}
+            </WindowList>
+          </RecentGroup>
+        {/if}
+        <RecentDone entries={recentGroups} {scrollRoot} {now} onrows={rows => doneRows = rows} />
+      </div>
     {:else}
       {#each visible as machine (machine.id)}
         {#each machine.store.draftEntries.filter(entry => entry.projectId === null) as entry (entry.projectId)}
@@ -315,6 +332,9 @@
     overflow: auto;
     padding: 8px 6px;
   }
+  .scroll.recent { display: flex; flex-direction: column; }
+  .scroll.recent > :global(*) { flex-shrink: 0; }
+  .recent-folds { margin-top: auto; padding-top: 12px; }
   .project {
     margin-bottom: 10px;
     padding: 4px;

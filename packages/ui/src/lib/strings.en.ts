@@ -1,5 +1,18 @@
 /** Every user-facing string of the UI. No literal UI text lives anywhere else. */
 export const strings = {
+  subscriptionProxy: {
+    heading: 'Subscription proxy',
+    enable: 'Use a subscription proxy',
+    hint: 'Claude and Codex use this machine\'s gateway. Limits opens its dashboard inside Boite. Other agents keep their own configuration.',
+    baseUrl: 'API URL', dashboardUrl: 'Limits dashboard URL', key: 'API key (optional)',
+    keyHint: 'Leave empty to keep the saved key. This is the proxy\'s API key, not its dashboard management key.',
+    clearKey: 'Remove saved key', save: 'Save proxy', saved: 'Proxy saved',
+    configure: 'Configure proxy', native: 'Show account limits',
+    showDashboard: 'Show proxy dashboard',
+    openDashboard: 'Open dashboard',
+    signInHint: 'Sign in with Open dashboard, then reload here. If the page stays blank, this dashboard may block embedded views.',
+    mixedContent: 'This page uses HTTPS. Set an HTTPS dashboard URL to view it here, or open the HTTP dashboard separately.',
+  },
   remoteBrowser: {
     display: 'Display', resolution: 'Page resolution', fitPhone: 'Fit this screen', phone: 'Phone', tablet: 'Tablet', rotate: 'Rotate', width: 'Width', height: 'Height', apply: 'Apply', sharedSize: 'Resolution also changes the shared tab on the PC.', restoreSize: 'Use the PC panel size', previewZoom: 'Preview zoom (this device only)', fit: 'Fit', panHint: 'Drag to pan the preview. Use the arrows to scroll the page.',
     hostMissing: 'The PC is not showing this conversation’s browser yet.',
@@ -501,6 +514,15 @@ export const strings = {
   },
 
   sidebar: {
+    doneThreads: 'Done',
+    workingThreads: 'Working',
+    markDone: 'Mark done',
+    doneToast: 'Marked "{title}" done',
+    doneLoadFailed: 'Some completed threads could not be loaded.',
+    doneRetry: 'Try again',
+    reopenThread: 'Move to Recent',
+    reopenNamedThread: 'Move "{title}" to Recent',
+    doneNotice: 'This thread is done. Move it to Recent to continue.',
     allProjects: 'All projects',
     filterProject: 'Filter by project',
     recentOrder: 'Recent activity',
@@ -709,7 +731,6 @@ export const strings = {
     goalUsage: 'Use /goal followed by an objective.',
     loopUsage: 'Use /loop 2 prompt for two iterations, or /loop 5m prompt for a schedule. Choose 1 to 1000 iterations.',
     intervalError: 'Loop intervals must be between 1 second and 24 hours.',
-    noAttachments: 'Send images in a message before starting a goal or loop.',
     active: 'Active',
     paused: 'Paused',
     complete: 'Complete',
@@ -1009,6 +1030,14 @@ export const strings = {
     error: 'Error'
   },
 
+  agentMessages: {
+    heading: 'Messages', hint: 'Messages sent and received between agents.',
+    open: 'Open messages', filter: 'Filter agent messages',
+    all: 'All', sent: 'Sent', received: 'Received', empty: 'No messages here yet.',
+    forwardedOne: 'Forwarded 1 message', forwardedMany: 'Forwarded {count} messages',
+    receivedOne: 'Received 1 message', receivedMany: 'Received {count} messages',
+    issueOne: '1 message needs attention', issueMany: '{count} messages need attention'
+  },
   coordination: {
     options: 'Advanced settings',
     heading: 'Communication between conversations', off: 'Off', on: 'On',
@@ -1605,6 +1634,8 @@ export const strings = {
     devicesOne: '1 paired device',
     connectProvider: 'Connect a provider',
     conversations: 'Conversations',
+    groupWorkingThreads: 'Group working threads in Recent',
+    groupWorkingThreadsHint: 'Keep working and background threads in a collapsed group at the bottom of Recent. Pins, drafts, errors and threads that need you stay visible. This device only.',
     app: 'App',
     tourReplay: 'Replay the tour',
     execution: 'Agent execution',

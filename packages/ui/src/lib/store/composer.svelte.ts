@@ -267,7 +267,6 @@ export class Composer {
     choice = { ...choice };
     try {
       if (activityCommand(prompt) && previewReferences.length) throw new Error(strings.previewComments.activityUnsupported);
-      if (activityCommand(prompt) && attachments.length) throw new Error(strings.activity.noAttachments);
     } catch (error) { this.ctx.fail(error); return null; }
     if (s.draft && !s.openThread) {
       const draft = s.draft;
@@ -411,8 +410,7 @@ export class Composer {
       const activity = activityCommand(prompt);
       if (activity) {
         if (previewReferences.length) throw new Error(strings.previewComments.activityUnsupported);
-        if (attachments.length) throw new Error(strings.activity.noAttachments);
-        const accepted = await client.call('threads.activity.set', { threadId, ...activity }).catch((error: unknown) => {
+        const accepted = await client.call('threads.activity.set', { threadId, ...activity, ...(attachments.length ? { attachments } : {}) }).catch((error: unknown) => {
           if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) {
             throw new Error(strings.errors.activityUnsupported.replace('{machine}', s.core?.hostname ?? strings.app.name));
           }

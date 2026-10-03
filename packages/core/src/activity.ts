@@ -1,9 +1,11 @@
-import type { AgentTask, MessagePart, RpcParams, ThreadActivity, Turn } from '@boite/contracts';
+import type { AgentTask, Attachment, MessagePart, RpcParams, ThreadActivity, Turn } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, refused } from './errors.ts';
 import { activityResult } from './activity-prompt.ts';
+import { checkAttachmentArray, checkAttachments } from './threads/inputs.ts';
 
 const empty = (): ThreadActivity => ({ goal: null, loop: null, tasks: [] });
+type PendingAttachments = Partial<Record<'goal' | 'loop', Attachment[]>>;
 
 /** Activity survives reconnects; a restarted core requires an explicit resume. */
 export class ActivityStore {
@@ -43,6 +45,7 @@ export class ActivityStore {
         this.clearTimer(threadId);
         this.states.delete(threadId);
         core.journal.deleteSetting(`activity:${threadId}`);
+        core.journal.deleteSetting(`activity-input:${threadId}`);
       }
     });
   }
@@ -53,6 +56,10 @@ export class ActivityStore {
     const thread = this.core.journal.getThread(params.threadId);
     if (thread?.agentSessionId) throw refused('persistent agent sessions are scheduled through Agents, not thread goals or loops');
     if (!thread || thread.archived) throw refused('activity requires an existing, unarchived thread');
+    const attachments = params.attachments ?? [];
+    checkAttachmentArray(attachments);
+    if (attachments.length) checkAttachments(attachments, this.core.providers.require(thread.providerId));
+    if (attachments.length && Number(!!params.goal) + Number(!!params.loop) !== 1) throw invalidParams('attachments require exactly one new goal or loop');
     const state = this.get(params.threadId);
     if (params.goal !== undefined) {
       if (params.goal !== null && (typeof params.goal.objective !== 'string' || !params.goal.objective.trim())) throw invalidParams('goal.objective must be non-empty text');
@@ -62,10 +69,14 @@ export class ActivityStore {
       if (params.loop !== null) validateLoop(params.loop);
       state.loop = params.loop === null ? null : { prompt: params.loop.prompt.trim(), intervalMs: params.loop.intervalMs, maxIterations: params.loop.maxIterations ?? null, status: 'active', iterations: 0, nextRunAt: Date.now(), error: null, history: [] };
     }
+    const pending = this.pendingAttachments(params.threadId);
     for (const kind of ['goal', 'loop'] as const) if (params[kind] !== undefined) {
       const key = `${params.threadId}:${kind}`;
       this.generations.set(key, (this.generations.get(key) ?? 0) + 1);
+      if (params[kind] && attachments.length) pending[kind] = structuredClone(attachments);
+      else delete pending[kind];
     }
+    this.saveAttachments(params.threadId, pending);
     this.states.set(params.threadId, state);
     this.save(params.threadId);
     this.schedule(params.threadId, 0);
@@ -90,6 +101,9 @@ export class ActivityStore {
     if (params.action === 'remove' || params.action === 'complete') {
       const key = `${params.threadId}:${params.kind}`;
       this.generations.set(key, (this.generations.get(key) ?? 0) + 1);
+      const pending = this.pendingAttachments(params.threadId);
+      delete pending[params.kind];
+      this.saveAttachments(params.threadId, pending);
     }
     if (state.loop && state.loop.status !== 'active') state.loop.nextRunAt = null;
     if (params.kind === 'loop' && params.action === 'resume' && state.loop) state.loop.nextRunAt = Date.now();
@@ -207,7 +221,10 @@ export class ActivityStore {
     const prompt = `/${kind} ${kind === 'goal' ? state.goal!.objective : state.loop!.prompt}`;
     const iteration = state[kind]!.iterations + 1;
     try {
-      const turn = this.core.threads.startTurn(threadId, prompt, [], undefined, undefined, { kind, iteration });
+      const pending = this.pendingAttachments(threadId);
+      const turn = this.core.threads.startTurn(threadId, prompt, pending[kind] ?? [], undefined, undefined, { kind, iteration });
+      delete pending[kind];
+      this.saveAttachments(threadId, pending);
       this.ownTurns.set(turn.id, { kind, generation: this.generations.get(`${threadId}:${kind}`) ?? 0, iteration });
       // Drivers may synchronously report tasks while startTurn runs.
       const current = this.states.get(threadId)!;
@@ -229,6 +246,16 @@ export class ActivityStore {
   }
 
   private clearTimer(threadId: string): void { const timer = this.timers.get(threadId); if (timer) clearTimeout(timer); this.timers.delete(threadId); }
+
+  /** Pending uploads survive pause/restart without bloating activity snapshots sent to clients. */
+  private pendingAttachments(threadId: string): PendingAttachments {
+    return this.core.journal.getSetting(`activity-input:${threadId}`) as PendingAttachments | undefined ?? {};
+  }
+
+  private saveAttachments(threadId: string, pending: PendingAttachments): void {
+    if (Object.keys(pending).length) this.core.journal.setSetting(`activity-input:${threadId}`, pending);
+    else this.core.journal.deleteSetting(`activity-input:${threadId}`);
+  }
 
   pauseAll(threadId: string, error: string | null = null): void {
     const state = this.states.get(threadId);

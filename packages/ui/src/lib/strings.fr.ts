@@ -12,6 +12,18 @@
 import type { Translation } from './i18n.svelte';
 
 export const fr: Translation = {
+  subscriptionProxy: {
+    heading: 'Proxy d\'abonnements', enable: 'Utiliser un proxy d\'abonnements',
+    hint: 'Claude et Codex utilisent la passerelle de cette machine. Limites ouvre son tableau de bord dans Boite. Les autres agents gardent leur configuration.',
+    baseUrl: 'URL de l\'API', dashboardUrl: 'URL du tableau de bord des limites', key: 'Clé API (facultative)',
+    keyHint: 'Laissez vide pour garder la clé enregistrée. Utilisez la clé API du proxy, pas sa clé de gestion du tableau de bord.',
+    clearKey: 'Retirer la clé enregistrée', save: 'Enregistrer le proxy', saved: 'Proxy enregistré',
+    configure: 'Configurer le proxy', native: 'Voir les limites des comptes',
+    showDashboard: 'Voir le tableau du proxy',
+    openDashboard: 'Ouvrir le tableau',
+    signInHint: 'Connectez-vous avec Ouvrir le tableau, puis rechargez ici. Si la page reste vide, ce tableau peut refuser les vues intégrées.',
+    mixedContent: "Cette page utilise HTTPS. Configurez une URL de tableau HTTPS pour l'afficher ici, ou ouvrez le tableau HTTP séparément.",
+  },
   remoteBrowser: {
     display: 'Affichage', resolution: 'Résolution de la page', fitPhone: 'Adapter à cet écran', phone: 'Téléphone', tablet: 'Tablette', rotate: 'Pivoter', width: 'Largeur', height: 'Hauteur', apply: 'Appliquer', sharedSize: 'La résolution change aussi l’onglet partagé sur le PC.', restoreSize: 'Reprendre la taille du panneau PC', previewZoom: 'Zoom de l’aperçu (cet appareil seulement)', fit: 'Ajuster', panHint: 'Glissez pour déplacer l’aperçu. Utilisez les flèches pour défiler dans la page.',
     hostMissing: 'Le PC n’affiche pas encore le navigateur de cette conversation.',
@@ -507,6 +519,15 @@ export const fr: Translation = {
   },
 
   sidebar: {
+    doneThreads: 'Terminés',
+    workingThreads: 'En cours',
+    markDone: 'Marquer comme terminé',
+    doneToast: '« {title} » marqué comme terminé',
+    doneLoadFailed: "Certaines conversations terminées n'ont pas pu être chargées.",
+    doneRetry: 'Réessayer',
+    reopenThread: 'Remettre dans Récent',
+    reopenNamedThread: 'Remettre « {title} » dans Récent',
+    doneNotice: 'Cette conversation est terminée. Remettez-la dans Récent pour continuer.',
     allProjects: 'Tous les projets',
     filterProject: 'Filtrer par projet',
     recentOrder: 'Activité récente',
@@ -693,7 +714,6 @@ export const fr: Translation = {
     goalUsage: 'Utilisez /goal suivi d\'un objectif.',
     loopUsage: 'Utilisez /loop 2 prompt pour deux itérations, ou /loop 5m prompt pour un rythme. Entre 1 et 1000 itérations.',
     intervalError: "L'intervalle d'une boucle doit tenir entre 1 seconde et 24 heures.",
-    noAttachments: 'Envoyez les images dans un message avant de lancer un objectif ou une boucle.',
     active: 'Active',
     paused: 'En pause',
     complete: 'Terminée',
@@ -961,6 +981,14 @@ export const fr: Translation = {
     error: 'Erreur'
   },
 
+  agentMessages: {
+    heading: 'Messages', hint: 'Messages envoyés et reçus entre agents.',
+    open: 'Ouvrir les messages', filter: 'Filtrer les messages des agents',
+    all: 'Tous', sent: 'Envoyés', received: 'Reçus', empty: 'Aucun message ici pour le moment.',
+    forwardedOne: '1 message transmis', forwardedMany: '{count} messages transmis',
+    receivedOne: '1 message reçu', receivedMany: '{count} messages reçus',
+    issueOne: '1 message à vérifier', issueMany: '{count} messages à vérifier'
+  },
   coordination: {
     options: 'Réglages avancés',
     heading: 'Communication entre conversations', off: 'Désactivée', on: 'Activée',
@@ -1540,6 +1568,8 @@ export const fr: Translation = {
     devicesOne: '1 appareil appairé',
     connectProvider: 'Connecter un fournisseur',
     conversations: 'Conversations',
+    groupWorkingThreads: 'Regrouper les conversations en cours dans Récent',
+    groupWorkingThreadsHint: 'Range les conversations en cours et le travail en arrière-plan dans une section repliée en bas de Récent. Les épingles, brouillons, erreurs et demandes de réponse restent visibles. Cet appareil seulement.',
     app: 'Application',
     tourReplay: 'Revoir la présentation',
     execution: 'Exécution des agents',

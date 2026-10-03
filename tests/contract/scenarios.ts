@@ -145,6 +145,27 @@ async function unavailable(env: ContractEnv): Promise<{ provider: ProviderSummar
 }
 
 export const SCENARIOS: Record<string, Scenario> = {
+  'activity uploads are validated before mutation and accompany only the first iteration': async env => {
+    const setup = await echo(env);
+    const { id: threadId } = await thread(env, setup);
+    const image = { kind: 'image' as const, mimeType: 'image/png' as const, data: 'aW1hZ2U=', name: 'reference.png' };
+    const file = { kind: 'file' as const, mimeType: 'text/plain', data: 'bm90ZXM=', name: 'notes.txt' };
+    const loop = { prompt: 'Check the reference', intervalMs: 0, maxIterations: 2 };
+    await refusedWith(env.call('threads.activity.set', { threadId, loop, attachments: [{ ...image, data: 'invalid' }] }), RpcErrorCode.Refused);
+    await refusedWith(env.call('threads.activity.set', { threadId, loop, goal: { objective: 'Ambiguous target' }, attachments: [image] }), RpcErrorCode.InvalidParams);
+    await refusedWith(env.call('threads.activity.set', { threadId, attachments: [image] }), RpcErrorCode.InvalidParams);
+    const before = await env.call('threads.get', { threadId });
+    same(before.activity?.loop ?? null, null, 'loop after refused uploads');
+    same(before.activity?.goal ?? null, null, 'goal after refused uploads');
+    same(before.messages, [], 'messages after refused uploads');
+    await env.call('threads.activity.set', { threadId, loop, attachments: [image, file] });
+    await until('loop completion', async () => (await env.call('threads.get', { threadId })).activity?.loop?.status === 'complete');
+    const messages = (await env.call('threads.get', { threadId })).messages.filter(message => message.role === 'user');
+    same(messages.length, 2, 'iteration count');
+    same(messages[0]!.parts.filter(part => part.type === 'image'), [{ type: 'image', mimeType: image.mimeType, data: image.data, alt: image.name }], 'initial image');
+    same(messages[0]!.parts.filter(part => part.type === 'file'), [{ type: 'file', mimeType: file.mimeType, data: file.data, name: file.name }], 'initial file');
+    same(messages[1]!.parts.filter(part => part.type === 'image' || part.type === 'file'), [], 'uploads on the next iteration');
+  },
   'banked resets require confirmation and reject missing or unsupported accounts': async env => {
     const account = (await env.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
     const invalid = await refusedWith(env.call('quotas.reset', { accountId: account.id, confirmed: false } as unknown as RpcParams<'quotas.reset'>), RpcErrorCode.InvalidParams, ['field', 'expected']);
@@ -481,6 +502,20 @@ export const SCENARIOS: Record<string, Scenario> = {
     await until('the archive', () => updates.events.some((event) => (event.payload as ThreadSummary).archived));
     updates.stop();
     check(answer.archived, 'the answer is not archived');
+  },
+  'threads.archive onlyIfIdle refuses pending work and preserves restore': async (env) => {
+    const setup = await echo(env);
+    const created = await thread(env, setup);
+    await env.call('turns.start', { threadId: created.id, prompt: '[permission]' });
+    await until('the pending permission', async () => (await env.call('threads.get', { threadId: created.id })).status === 'waiting');
+    const data = await refusedWith(env.call('threads.archive', { threadId: created.id, onlyIfIdle: true }), RpcErrorCode.Refused, ['threadId', 'expected', 'activeThreadId']);
+    same(data.activeThreadId, created.id, 'the active family member');
+    const kept = await env.call('threads.get', { threadId: created.id });
+    check(!kept.archived && kept.status === 'waiting', 'Done interrupted pending work');
+    await env.call('turns.stop', { threadId: created.id });
+    await until('the stopped turn', async () => (await env.call('threads.get', { threadId: created.id })).status === 'idle');
+    check((await env.call('threads.archive', { threadId: created.id, onlyIfIdle: true })).archived, 'the idle thread was not put away');
+    check(!(await env.call('threads.archive', { threadId: created.id, archived: false })).archived, 'the completed thread was not restored');
   },
   'threads.remove hides conversations and undo restores history and the prior archive state': async (env) => {
     const setup = await echo(env);

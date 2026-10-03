@@ -8,6 +8,8 @@ import { turnProgressStats } from '../lib/turn-progress.svelte';
 import { findHits } from '../lib/find';
 import type { Store } from '../lib/store.svelte';
 import { workspace } from '../lib/workspace.svelte';
+import { RightPanelStore } from '../lib/right-panel.svelte';
+import AgentMessagesSurface from './AgentMessagesSurface.svelte';
 
 /**
  * jsdom has no layout, so the three numbers the window is computed from are
@@ -212,7 +214,7 @@ test.for([false, true])('the outline rail is left of the bubbles on a desktop an
   expect(document.querySelector('[data-testid=message-outline]') !== null).toBe(!phone);
 });
 
-test('agent letters join the timeline chronologically without exposing their delivery envelope', () => {
+test('agent exchange summaries retain chronology without exposing their letters or delivery envelopes', () => {
   stubLayout(400);
   const messages: Message[] = [
     { id: 'm-before', threadId: 't-short', turnId: 'turn-before', role: 'assistant', state: 'complete', createdAt: 10, parts: [{ type: 'text', text: 'Before coordination' }] },
@@ -248,18 +250,17 @@ test('agent letters join the timeline chronologically without exposing their del
   const rows = articles().map(node => node.textContent ?? '');
   expect(rows).toHaveLength(4);
   expect(rows[0]).toContain('Before coordination');
-  expect(rows[1]).toContain('Deployment agent');
-  expect(rows[1]).toContain('Build PC');
-  expect(rows[1]).toContain('Wait before restart.');
+  expect(rows[1]).toContain('Received 1 message');
   expect(rows[2]).toContain('After coordination');
-  expect(rows[3]).toContain('Restart postponed.');
+  expect(rows[3]).toContain('Forwarded 1 message');
   expect(document.body.textContent).not.toContain('Boite agent coordination');
   expect(document.body.textContent).not.toContain('Awaiting provider turn');
-  expect(document.querySelector('[data-letter-id="letter-in"]')?.getAttribute('data-direction')).toBe('incoming');
-  expect(document.querySelector('[data-letter-id="letter-out"]')?.getAttribute('data-direction')).toBe('outgoing');
+  expect(document.body.textContent).not.toContain('Wait before restart.');
+  expect(document.body.textContent).not.toContain('Restart postponed.');
+  expect(document.querySelectorAll('[data-testid=forwarded-agent-message]')).toHaveLength(0);
 });
 
-test('delegation letters use local family identity when coordination has another core identity', () => {
+test('delegation mail opens its messages tab with local family identity, without duplicating coordination mail', async () => {
   stubLayout(200);
   const letter: AgentLetter = {
     id: 'delegation-user', origin: 'user',
@@ -269,11 +270,15 @@ test('delegation letters use local family identity when coordination has another
   };
   const coordinated = {
     ...store,
+    openThread: { id: 't-short', turns: [] },
+    accountOf: () => undefined,
+    panel: new RightPanelStore().for('t-short'),
+    loadCoordination: vi.fn(),
     threads: [{ id: 't-child', projectId: 'p-team' }],
     projects: [{ id: 'p-team', name: 'Review project' }],
     coordination: {
       self: { coreId: 'real-core-id', threadId: 't-short' },
-      config: { mode: 'off', resources: '', remote: false, paused: false }, messages: [], sent: 0, sendLimit: 0, wakes: 0, wakeLimit: 0
+      config: { mode: 'off', resources: '', remote: false, paused: false }, messages: [letter], sent: 0, sendLimit: 0, wakes: 0, wakeLimit: 0
     },
     delegation: {
       rootThreadId: 't-short', config: DEFAULT_DELEGATION_CONFIG, agents: [], messages: [letter], turnsUsed: 0,
@@ -282,6 +287,14 @@ test('delegation letters use local family identity when coordination has another
   } as unknown as Store;
 
   running = mount(MessageList, { target: document.body, props: { store: coordinated, threadId: 't-short', messages: [] } });
+  flushSync();
+  expect(document.querySelectorAll('[data-testid=agent-message-summary]')).toHaveLength(1);
+  const summary = document.querySelector<HTMLButtonElement>('[data-testid=agent-message-summary]')!;
+  expect(summary.textContent).toContain('Forwarded 1 message');
+  summary.click();
+  expect(coordinated.panel.active).toMatchObject({ kind: 'messages', mailDirection: 'outgoing', letterId: letter.id });
+  await unmount(running); running = null;
+  running = mount(AgentMessagesSurface, { target: document.body, props: { store: coordinated, surface: coordinated.panel.active!, panel: coordinated.panel } });
   flushSync();
   const row = document.querySelector('[data-letter-id="delegation-user"]');
   expect(row?.getAttribute('data-direction')).toBe('outgoing');
@@ -293,6 +306,48 @@ test('delegation letters use local family identity when coordination has another
     row?.querySelector<HTMLButtonElement>('[data-testid=agent-letter-open]')?.click();
     expect(open).toHaveBeenCalledWith(coordinated, { coreId: 'local', threadId: 't-short' }, letter.to);
   } finally { open.mockRestore(); }
+});
+
+test('a burst of 33 agent messages stays in two counters as new mail arrives, and user messages split bursts', async ({ ready }) => {
+  stubLayout(400);
+  const { store: owner } = await ready({ delayMs: 0 });
+  await owner.open('t-trace');
+  const thread = owner.openThread!;
+  thread.memoryEvents = [];
+  thread.messages = [
+    { id: 'before', threadId: thread.id, turnId: 'before', role: 'assistant', state: 'complete', createdAt: 10, parts: [{ type: 'text', text: 'Work begins.' }] },
+    { id: 'divider', threadId: thread.id, turnId: 'divider', role: 'user', state: 'complete', createdAt: 50, parts: [{ type: 'text', text: 'Continue with the deployment.' }] }
+  ];
+  const self = { coreId: 'core-local', threadId: thread.id };
+  const peer = { coreId: 'core-remote', threadId: 'remote-agent' };
+  const letters: AgentLetter[] = Array.from({ length: 33 }, (_, index) => ({
+    id: `burst-${index}`, from: { ...(index < 13 ? self : peer), title: 'Agent', machine: 'PC', resources: '', status: 'idle', mode: 'brief' },
+    to: index < 13 ? peer : self, toTitle: 'Agent', text: `Private exchange ${index}`, replyTo: null,
+    createdAt: 20 + index / 10, expiresAt: 1000, status: index === 0 ? 'rejected' : 'delivered', error: index === 0 ? 'Recipient unavailable' : null
+  }));
+  owner.coordination = { self, config: { mode: 'brief', resources: '', remote: true, paused: false }, messages: letters, sent: 13, sendLimit: null, wakes: 0, wakeLimit: null };
+  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
+  flushSync();
+  const group = document.querySelector('[data-testid=agent-message-group]')!;
+  expect(group.textContent).toContain('Forwarded 13 messages');
+  expect(group.textContent).toContain('Received 20 messages');
+  expect(group.textContent).toContain('1 message needs attention');
+  expect(document.body.textContent).not.toContain('Private exchange');
+  expect(document.querySelectorAll('[data-testid=agent-message-group]')).toHaveLength(1);
+  expect(articles()).toHaveLength(3);
+  owner.coordination!.messages.push({ ...letters[32]!, id: 'extra', createdAt: 24 });
+  flushSync();
+  expect(document.querySelector('[data-testid=agent-message-group]')).toBe(group);
+  expect(group.textContent).toContain('Received 21 messages');
+  group.querySelector<HTMLButtonElement>('[data-direction=incoming]')!.click();
+  expect(owner.panel.active).toMatchObject({ kind: 'messages', mailDirection: 'incoming', letterId: 'burst-13' });
+  owner.coordination!.messages.push({ ...letters[32]!, id: 'after-prompt', createdAt: 60 });
+  flushSync();
+  expect(document.querySelectorAll('[data-testid=agent-message-group]')).toHaveLength(2);
+  expect(articles().map(article => article.textContent)).toEqual([
+    expect.stringContaining('Work begins.'), expect.stringContaining('Received 21 messages'),
+    expect.stringContaining('Continue with the deployment.'), expect.stringContaining('Received 1 message')
+  ]);
 });
 
 /** A store whose thread still has older messages behind the window. */

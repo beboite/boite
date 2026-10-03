@@ -407,6 +407,20 @@ describe('journal', () => {
     expect((journal.db.query('PRAGMA foreign_keys').get() as { foreign_keys: number }).foreign_keys).toBe(0);
   });
 
+  test('removing a project drops its todos and workflow templates and keeps another project and a global template', () => {
+    journal.putProject({ id: 'prj_gone', name: 'gone', path: dir, createdAt: 1 });
+    journal.putProject({ id: 'prj_keep', name: 'keep', path: dir, createdAt: 1 });
+    journal.setSetting('todos:prj_gone', [{ id: 'a' }]);
+    journal.setSetting('todos:prj_keep', [{ id: 'b' }]);
+    journal.db.query('INSERT INTO workflow_templates VALUES (?, ?, ?, ?, ?, ?)').run('tpl_gone', 'prj_gone', 'gone', 1, 1, '{}');
+    journal.db.query('INSERT INTO workflow_templates VALUES (?, ?, ?, ?, ?, ?)').run('tpl_global', null, 'global', 1, 1, '{}');
+    journal.deleteProject('prj_gone');
+    expect(journal.getSetting('todos:prj_gone')).toBeUndefined();
+    expect(journal.getSetting('todos:prj_keep')).toEqual([{ id: 'b' }]);
+    expect(journal.db.query('SELECT id FROM workflow_templates ORDER BY id').all()).toEqual([{ id: 'tpl_global' }]);
+    expect(journal.getProject('prj_keep')?.id).toBe('prj_keep');
+  });
+
   test('thread deletion commits delegated and workflow history without removal listeners, or rolls everything back', () => {
     const thread = { id: 'thr_gone', projectId: 'prj', title: 't', titleSource: 'prompt', providerId: 'echo', accountId: 'acc', model: null, effort: null, speed: null, cwd: dir, branch: null, permissionMode: 'default', status: 'idle', unread: false, archived: false, pinned: false, sessionId: null, load: null, context: null, createdAt: 1, updatedAt: 1 } as const;
     for (const id of ['gone', 'keep']) {
@@ -420,9 +434,13 @@ describe('journal', () => {
     const counts = () => ['threads', 'delegated_agents', 'delegation_messages', 'workflow_runs', 'workflow_steps', 'workflow_requests']
       .map(table => (journal.db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n);
     // Refuse the last delete to prove earlier dependent deletes cannot commit alone.
+    journal.setSetting('spawn-origin:thr_gone', { reported: false });
+    journal.setSetting('spawns:thr_gone', { at: 1 });
+    journal.setSetting('spawn-origin:thr_keep', { reported: true });
     journal.db.exec("CREATE TRIGGER interrupt_delete BEFORE DELETE ON threads BEGIN SELECT RAISE(ABORT, 'interrupted removal'); END");
     expect(() => journal.deleteThreads(['thr_gone'])).toThrow('interrupted removal');
     expect(counts()).toEqual([2, 2, 2, 2, 2, 2]);
+    expect(journal.getSetting('spawn-origin:thr_gone')).toEqual({ reported: false });
     journal.db.exec('DROP TRIGGER interrupt_delete');
     journal.deleteThreads(['thr_gone']);
     journal.close();
@@ -430,6 +448,9 @@ describe('journal', () => {
     expect(counts()).toEqual([1, 1, 1, 1, 1, 1]);
     expect(journal.getThread('thr_gone')).toBeNull();
     expect(journal.getThread('thr_keep')).not.toBeNull();
+    expect(journal.getSetting('spawn-origin:thr_gone')).toBeUndefined();
+    expect(journal.getSetting('spawns:thr_gone')).toBeUndefined();
+    expect(journal.getSetting('spawn-origin:thr_keep')).toEqual({ reported: true });
   });
 
   test('event retention deletes old events from the front and keeps the agents revision', () => {

@@ -3,6 +3,47 @@ import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp';
 import { startDevUi } from './lib/ui';
 
+test('goals and loops accept pasted images in existing threads and drafts on desktop and phone', async () => {
+  const port = await freePort();
+  const server = await startDevUi(port);
+  let page: BrowserPage | undefined;
+  try {
+    page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, windowSize: { width: 1280, height: 900 } });
+    for (const [kind, phone, draft] of [['goal', false, false], ['goal', true, true], ['loop', true, false], ['loop', false, true]] as const) {
+      await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 390 : 1280, height: phone ? 844 : 900, deviceScaleFactor: 1, mobile: phone });
+      await page.evaluate(`import('/src/lib/store.svelte.ts').then(async ({store}) => {
+        store.error = null;
+        ${draft ? 'store.startDraft(store.projects[0].id);' : "await store.open('t-trace');"}
+      })`);
+      await page.waitFor('document.querySelector("[data-testid=composer-input]")');
+      const prompt = kind === 'goal' ? '/goal Match the reference' : '/loop 2 Check the reference';
+      await page.type('[data-testid=composer-input]', prompt);
+      await page.evaluate(`(async () => {
+        const canvas = document.createElement('canvas'); canvas.width = 240; canvas.height = 120;
+        const ctx = canvas.getContext('2d');
+        const style = getComputedStyle(document.body);
+        ctx.fillStyle = style.backgroundColor; ctx.fillRect(0, 0, 240, 120);
+        ctx.fillStyle = style.color; ctx.font = '24px sans-serif'; ctx.fillText('Reference image', 20, 68);
+        const blob = await new Promise(resolve => canvas.toBlob(resolve));
+        const transfer = new DataTransfer(); transfer.items.add(new File([blob], 'reference.png', {type:'image/png'}));
+        document.querySelector('[data-testid=composer-input]').dispatchEvent(new ClipboardEvent('paste', {bubbles:true, cancelable:true, clipboardData:transfer}));
+      })()`);
+      await page.waitFor('document.querySelector("[data-testid=composer-attachment]")');
+      await page.click('[data-testid=composer-send]');
+      await page.waitFor(`import('/src/lib/store.svelte.ts').then(({store}) => store.openThread?.activity?.${kind}?.status === 'complete')`);
+      expect(await page.evaluate(`import('/src/lib/store.svelte.ts').then(({store}) => store.error)`)).toBeNull();
+      const parts = await page.evaluate<unknown[][]>(`import('/src/lib/store.svelte.ts').then(({store}) => store.openThread.messages.filter(m => m.role === 'user' && m.parts.some(p => p.type === 'text' && p.text.includes('the reference') && p.activity?.kind === '${kind}')).map(m => m.parts.filter(p => p.type === 'image')))`);
+      expect(parts).toHaveLength(kind === 'goal' ? 1 : 2);
+      expect(parts[0]).toHaveLength(1);
+      if (kind === 'loop') expect(parts[1]).toHaveLength(0);
+      await page.waitFor('Array.from(document.querySelectorAll("[data-testid=image-part]")).some(img => img.naturalWidth === 240)');
+      await page.evaluate('Array.from(document.querySelectorAll("[data-testid=image-part]")).at(-1).closest(".bubble").scrollIntoView({block:"start"})');
+      await page.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
+      await page.screenshot(join(import.meta.dir, '.artifacts', `image-${kind}-${phone ? 'phone' : 'desktop'}.png`));
+    }
+  } finally { await page?.close(); await server.close(); }
+}, 60_000);
+
 test('pasted images have linked references and a preview that leaves the composer usable', async () => {
   const port = await freePort();
   const server = await startDevUi(port);

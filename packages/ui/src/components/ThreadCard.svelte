@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
-  import { Ellipsis, Folder, FolderInput, GitBranch, GitPullRequest, PencilLine, Pin } from '@lucide/svelte';
+  import { Check, Ellipsis, Folder, FolderInput, GitBranch, GitPullRequest, PencilLine, Pin } from '@lucide/svelte';
   import type { Project, ThreadSummary } from '@boite/contracts';
   import type { Machine } from '../lib/workspace.svelte';
   import { workspace } from '../lib/workspace.svelte';
@@ -14,6 +14,7 @@
   import { lookupPullRequest } from '../lib/pull-request';
   import { agentLabel, projectName } from '../lib/format';
   import { hasUnsentDraft } from '../lib/composer-queue';
+  import { canMarkDone, markDone } from '../lib/recent.svelte';
   import MachineIcon from './MachineIcon.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import ThreadState from './ThreadState.svelte';
@@ -23,6 +24,7 @@
     thread,
     now,
     hidden = false,
+    showDone = false,
     showProject = true,
     showMachine = true
   }: {
@@ -32,6 +34,8 @@
     now: number;
     /** In a folded project: the card waits for the unfold to look up its pull request. */
     hidden?: boolean;
+    /** Recent's quick action puts finished work in its Done section. */
+    showDone?: boolean;
     /** Off under the project's own header, where the folder line would only repeat it. */
     showProject?: boolean;
     /** Off while only one machine is connected, and under a project header, which already shows it. */
@@ -50,6 +54,7 @@
   let agent = $derived(agentLabel(owner, thread));
   // A move asked for while the turn runs, until the turn ends and applies it.
   let pending = $derived(pendingLine(thread));
+  let doneAllowed = $derived(canMarkDone(owner, thread));
 
   let prLoading = $state(false);
   let prRevision = 0;
@@ -123,7 +128,7 @@
         // A sub-thread moves with its parent, which is the row the sidebar lists.
         ...(thread.parentThreadId ? [] : moveItems(owner, thread)),
         separator(),
-        { id: 'archive', label: strings.sidebar.archive },
+        { id: 'archive', label: showDone ? strings.sidebar.markDone : strings.sidebar.archive, disabled: showDone && !doneAllowed },
         ...(canDeleteThread(owner, thread) ? [{ id: 'delete', label: strings.sidebar.delete, danger: true }] : [])
       ],
       (action) => {
@@ -134,7 +139,7 @@
         if (action === 'pr') void refreshPr(true);
         if (action === 'copy') void owner.copy(thread.cwd);
         pickMoveItem(owner, thread, action);
-        if (action === 'archive') void archiveThread(owner, thread.id);
+        if (action === 'archive') void (showDone ? markDone(owner, thread) : archiveThread(owner, thread.id));
         if (action === 'delete') void deleteThread(owner, thread);
       }
     );
@@ -211,6 +216,8 @@
       {#if thread.branch}<span class="branch" data-testid="thread-branch" title={thread.branch}><GitBranch size={12} /><span>{thread.branch}</span></span>{/if}
     </div>
     {/if}
+    {#if showDone && doneAllowed}<button type="button" class="ghost small icon done" data-testid="thread-done"
+      aria-label={strings.sidebar.markDone} title={strings.sidebar.markDone} onclick={() => void markDone(owner, thread)}><Check size={14} /></button>{/if}
     <button
       type="button"
       class="ghost small icon actions"
@@ -378,6 +385,8 @@
     opacity: 0;
     background: var(--color-surface-2);
   }
+  .done { position: absolute; right: 32px; top: 5px; opacity: 0; background: var(--color-surface-2); color: var(--color-muted-foreground); }
+  .thread:hover .done, .thread:focus-within .done { opacity: 1; }
   .thread:hover .actions,
   .thread:focus-within .actions {
     opacity: 1;
@@ -391,11 +400,15 @@
   .thread:focus-within .headline :global(.when.state) {
     margin-right: 22px;
   }
+  .thread:has(.done):hover .headline :global(.when.state), .thread:has(.done):focus-within .headline :global(.when.state) { margin-right: 49px; }
+  .thread:has(.done):hover .headline :global(.when:not(.state)), .thread:has(.done):focus-within .headline :global(.when:not(.state)) { margin-right: 27px; }
   .rename {
     width: 100%;
     height: var(--row);
   }
   @media (max-width: 720px) {
+    .done { opacity: 1; }
+    .thread:has(.done) .headline :global(.when) { margin-right: 49px; }
     .actions {
       opacity: 1;
     }

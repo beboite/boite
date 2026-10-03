@@ -20,6 +20,7 @@
   import RemoteBrowser from './RemoteBrowser.svelte';
   import { remoteLive } from '../lib/remote-browser-watch.svelte';
   import DelegationSurface from './DelegationSurface.svelte';
+  import AgentMessagesSurface from './AgentMessagesSurface.svelte';
   import ChangesSurface from './ChangesSurface.svelte';
   import FileSurface from './FileSurface.svelte';
   import FilesSurface from './FilesSurface.svelte';
@@ -421,6 +422,8 @@
   <div class="body">
     {#if active?.kind === 'agents'}
       <DelegationSurface {store} surface={active} {panel} />
+    {:else if active?.kind === 'messages'}
+      <AgentMessagesSurface {store} surface={active} {panel} />
     {:else if active?.kind === 'trace'}
       <TraceSurface {store} />
     {:else if active?.kind === 'browser'}

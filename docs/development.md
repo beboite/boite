@@ -170,6 +170,23 @@ archive and restore. Project archive only hides the project; its existing turns
 continue. New work in it restores the project. Drafts cannot be archived.
 `Project.archivedThreads` counts archived top-level threads and updates clients.
 
+Recent keeps completed conversations in a collapsed Done section at the bottom.
+Mark done uses the persistent archive and its undo action; `threads.archive`
+with `onlyIfIdle: true` refuses pending work or input in the conversation's
+family before changing it. Done reads archived summaries only on expansion,
+respecting the project and machine filters. A completed conversation opens for
+reading with a Reopen thread button in place of the composer. Reopening keeps
+history without restarting work.
+
+Settings > General > Conversations offers Group working threads in Recent,
+stored on this device; phone settings offer the same switch under device
+preferences. It moves running, queued and background work to a second
+collapsed section above Done. Pins, unsent drafts, failures and requests for
+the user's answer remain visible. Phone search temporarily shows matching
+working conversations in the main list. Keyboard thread shortcuts follow the
+expanded rows in their displayed order. Merged-PR archiving feeds Done through
+the core check below; its PR link appears under the completed title.
+
 Deletion is owner-only and separate from archive. `threads.remove` stops the
 thread family and waits for processes before hiding it behind persistent
 markers. `threads.deleted` lists retained conversations and `threads.restore`

@@ -8,6 +8,7 @@ import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts'
 
 let h: TestCore;
 let restore: (() => void) | undefined;
+const image = { kind: 'image' as const, mimeType: 'image/png' as const, data: 'aW1hZ2U=', name: 'reference.png' };
 beforeEach(async () => { h = await startTestCore(); });
 afterEach(async () => { restore?.(); restore = undefined; await h.stop(); });
 
@@ -87,10 +88,12 @@ test('goal continues across turns, reports tasks and stops only on completion', 
   const client = await h.connect();
   const { threadId } = await echoThread(h, client);
   let count = 0;
+  const received: unknown[] = [];
   restore = setDriver('echo', {
     protocol: 'echo',
     startTurn(ctx) {
       count++;
+      received.push(ctx.attachments);
       expect(ctx.prompt).toContain('[BOITE_GOAL_COMPLETE]');
       ctx.tasks?.([{ id: '1', text: 'Verify result', status: count === 1 ? 'in_progress' : 'completed' }]);
       const id = ctx.emit.startMessage('assistant');
@@ -99,32 +102,37 @@ test('goal continues across turns, reports tasks and stops only on completion', 
       return { stop() {}, done: Promise.resolve({ status: 'done', sessionId: 'goal-session', usage: null }) };
     },
   });
-  await client.call('threads.activity.set', { threadId, goal: { objective: 'Verify the change' } });
+  await client.call('threads.activity.set', { threadId, goal: { objective: 'Verify the change' }, attachments: [image] });
   await waitFor(() => h.core.activity.get(threadId).goal?.status === 'complete');
   expect(count).toBe(2);
+  expect(received).toEqual([[image], []]);
   const thread = await client.call('threads.get', { threadId });
   expect(thread.activity?.tasks[0]?.status).toBe('completed');
   expect(thread.activity?.goal?.iterations).toBe(2);
   const prompt = thread.messages.find(message => message.role === 'user')?.parts[0];
   expect(prompt).toEqual({ type: 'text', text: '/goal Verify the change', activity: { kind: 'goal', iteration: 1 } });
+  expect(thread.messages.filter(message => message.role === 'user').map(message => message.parts.filter(part => part.type === 'image').length)).toEqual([1, 0]);
 });
 
 test('counted loops run consecutive iterations, retain each result and stop at the requested count', async () => {
   const client = await h.connect();
   const { threadId } = await echoThread(h, client);
   let count = 0;
+  const received: unknown[] = [];
   restore = setDriver('echo', { protocol: 'echo', startTurn(ctx) {
     count++;
+    received.push(ctx.attachments);
     expect(ctx.prompt).toContain(`Iteration ${count}.`);
     const id = ctx.emit.startMessage('assistant');
     ctx.emit.part(id, 0, { type: 'text', text: `pong ${count}` });
     ctx.emit.complete(id, 'complete');
     return { stop() {}, done: Promise.resolve({ status: 'done', sessionId: null, usage: null }) };
   } });
-  await client.call('threads.activity.set', { threadId, loop: { prompt: 'say pong', intervalMs: 0, maxIterations: 2 } });
+  await client.call('threads.activity.set', { threadId, loop: { prompt: 'say pong', intervalMs: 0, maxIterations: 2 }, attachments: [image] });
   await waitFor(() => h.core.activity.get(threadId).loop?.status === 'complete');
   const loop = h.core.activity.get(threadId).loop!;
   expect(count).toBe(2);
+  expect(received).toEqual([[image], []]);
   expect(loop.nextRunAt).toBeNull();
   expect(loop.history?.map(run => [run.iteration, run.status, run.summary])).toEqual([[1, 'done', 'pong 1'], [2, 'done', 'pong 2']]);
   await expect(client.call('threads.activity.control', { threadId, kind: 'loop', action: 'resume' })).rejects.toThrow('finished');
@@ -202,6 +210,41 @@ test('restart preserves tasks and pauses persisted active work', async () => {
     expect(restarted.activity.get('deleted')).toEqual({ goal: null, loop: null, tasks: [] });
     expect(restarted.activity.get('orphan')).toEqual({ goal: null, loop: null, tasks: [] });
   } finally { await restarted.close(); }
+});
+
+test('uploads waiting for the first goal turn survive restart and are consumed after resume', async () => {
+  const client = await h.connect();
+  const { threadId } = await echoThread(h, client);
+  const received: unknown[] = [];
+  restore = setDriver('echo', { protocol: 'echo', startTurn(ctx) {
+    received.push(ctx.attachments);
+    const id = ctx.emit.startMessage('assistant');
+    ctx.emit.part(id, 0, { type: 'text', text: '[BOITE_GOAL_COMPLETE]' });
+    ctx.emit.complete(id, 'complete');
+    return { stop() {}, done: Promise.resolve({ status: 'done', sessionId: null, usage: null }) };
+  } });
+  h.core.activity.set({ threadId, goal: { objective: 'Use the reference' }, attachments: [image] });
+  h.core.activity.close();
+  const restarted = new Core({ dataDir: h.dataDir, token: h.token });
+  try {
+    expect(restarted.activity.get(threadId).goal?.status).toBe('paused');
+    expect(received).toEqual([]);
+    restarted.activity.control({ threadId, kind: 'goal', action: 'resume' });
+    await waitFor(() => restarted.activity.get(threadId).goal?.status === 'complete');
+    expect(received).toEqual([[image]]);
+    expect(restarted.journal.getSetting(`activity-input:${threadId}`)).toBeUndefined();
+  } finally { await restarted.close(); }
+});
+
+test.each(['replace', 'remove', 'complete', 'delete'] as const)('%s discards uploads before an activity starts', async action => {
+  const client = await h.connect();
+  const { threadId } = await echoThread(h, client);
+  h.core.activity.set({ threadId, goal: { objective: 'Use the reference' }, attachments: [image] });
+  expect(h.core.journal.getSetting(`activity-input:${threadId}`)).toBeDefined();
+  if (action === 'replace') h.core.activity.set({ threadId, goal: { objective: 'New request without an image' } });
+  else if (action === 'delete') h.core.journal.deleteThreads([threadId]);
+  else h.core.activity.control({ threadId, kind: 'goal', action });
+  expect(h.core.journal.getSetting(`activity-input:${threadId}`)).toBeUndefined();
 });
 
 test('restart preserves thread JSON error precedence and recovery writes before a later corrupt activity row', async () => {

@@ -235,6 +235,17 @@ export class AcpTurn {
     this.part(this.takeIndex(), { type: 'error', message: reason });
   }
 
+  /**
+   * The agent no longer has this session. No error part: the runner starts a
+   * fresh session and sends the turn again, so the conversation shows the answer.
+   */
+  loseSession(reason: string): void {
+    if (this.status === 'error') return;
+    this.sessionLost = true;
+    this.status = 'error';
+    this.error = reason;
+  }
+
   // -- parts ----------------------------------------------------------------
 
   private message(): MessageId {

@@ -1397,6 +1397,8 @@ export interface DeletedThreadSummary extends ThreadSummary {
 }
 
 export interface Settings {
+  /** Routes Claude and Codex through this machine's optional subscription gateway. */
+  subscriptionProxy?: SubscriptionProxy | null;
   /** Subscription priority shared by this core's clients and tray. Account ids stay on their owning machine. */
   quotaOrder?: AccountId[];
   /** Days after deletion before history is purged. 0 keeps it indefinitely. Missing means 30. */
@@ -1480,6 +1482,15 @@ export interface Settings {
    * or missing: never, each agent keeps its own behaviour. Missing on older cores.
    */
   autoCompact?: AutoCompact | null;
+}
+
+export interface SubscriptionProxy {
+  enabled: boolean;
+  kind: 'douane' | 'cliproxyapi';
+  /** HTTP(S) API root, with or without its /v1 suffix. */
+  baseUrl: string;
+  /** User-facing quotas page, opened inside Boite. Never contains a token. */
+  dashboardUrl: string;
 }
 
 export type WorktreeStorage =
@@ -2492,7 +2503,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    */
   'speech.transcribe': { params: { requestId: string; revision: string; audio: string; preview?: boolean; language?: string }; result: { text: string; language?: string } };
   'speech.cancel': { params: { requestId: string }; result: { ok: true } };
-  'threads.activity.set': { params: { threadId: ThreadId; goal?: { objective: string } | null; loop?: { prompt: string; intervalMs: number; maxIterations?: number | null } | null }; result: ThreadActivity };
+  /** Attachments accompany the first turn of a single new goal or loop, then remain in its conversation history. */
+  'threads.activity.set': { params: { threadId: ThreadId; goal?: { objective: string } | null; loop?: { prompt: string; intervalMs: number; maxIterations?: number | null } | null; attachments?: Attachment[] }; result: ThreadActivity };
   'threads.activity.control': { params: { threadId: ThreadId; kind: 'goal' | 'loop'; action: 'pause' | 'resume' | 'remove' | 'complete' }; result: ThreadActivity };
   'quotas.list': { params: { refresh?: boolean; requestId?: string }; result: AccountQuota[] };
   'quotas.configure': { params: { accountId: AccountId; enabled: boolean }; result: AccountQuota[] };
@@ -2971,8 +2983,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * Put a thread away, or bring it back with `archived: false`. Archiving
    * stops its turn and its sub-threads' turns at once and answers; their
    * processes end once those turns have settled. Restoring restarts nothing.
+   * `onlyIfIdle: true` refuses active work in the family before changing it.
    */
-  'threads.archive': { params: { threadId: ThreadId; archived?: boolean }; result: ThreadSummary };
+  'threads.archive': { params: { threadId: ThreadId; archived?: boolean; onlyIfIdle?: boolean }; result: ThreadSummary };
   /**
    * Hide a conversation and its sub-threads after stopping their work. The
    * owner can restore their history across restarts until the configured
@@ -3071,6 +3084,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'telemetry.export': { params: Record<string, never>; result: Record<string, unknown> };
   'telemetry.retryForget': { params: Record<string, never>; result: TelemetryState };
   'settings.get': { params: Record<string, never>; result: Settings };
+  'subscriptionProxy.key': { params: { key: string | null }; result: { configured: boolean } };
+  /** Owner-only, atomic configuration and optional private-key update; an omitted key keeps it. */
+  'subscriptionProxy.configure': { params: { subscriptionProxy: SubscriptionProxy; key?: string | null }; result: Settings };
   'settings.set': { params: Partial<Settings>; result: Settings };
   /** The keybindings file as last read: the path, the entries it names, and what it got wrong. */
   'keybindings.get': { params: Record<string, never>; result: Keybindings };

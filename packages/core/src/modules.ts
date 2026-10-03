@@ -13,6 +13,7 @@ import { registerSchedulerMethods } from './scheduler.ts';
 import { registerSessionMethods } from './sessions.ts';
 import { registerTailscaleMethods } from './tailscale.ts';
 import { registerSettingsMethods } from './settings.ts';
+import { registerSubscriptionProxy } from './subscription-proxy.ts';
 import { registerThreadMethods } from './threads/rpc.ts';
 import { registerTraceMethods } from './trace.ts';
 import { registerUsageMethods } from './usage.ts';
@@ -68,6 +69,7 @@ export function registerModules(core: Core): void {
   registerTraceMethods(core);
   registerUsageMethods(core);
   registerSettingsMethods(core);
+  registerSubscriptionProxy(core);
   registerKeybindingMethods(core);
   registerSessionMethods(core);
   registerTailscaleMethods(core);

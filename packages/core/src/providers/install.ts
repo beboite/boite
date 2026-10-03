@@ -1,4 +1,4 @@
-import { readdirSync, realpathSync, rmSync, statfsSync } from 'node:fs';
+import { lstatSync, readdirSync, realpathSync, rmSync, statfsSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
 import type { ProviderId, ProviderInstall, ProviderInstallState } from '@boite/contracts';
 import { newId } from '../ids.ts';
@@ -15,7 +15,7 @@ import {
   resumableBytes,
 } from './install-download.ts';
 import { pointCurrent, readReleaseRecord, removeCurrent, writeReleaseRecord, type ReleaseRecord } from './install-release.ts';
-import { checkSizes, extractRelease, markExecutable } from './install-unpack.ts';
+import { checkSizes, extractRelease, markExecutable, reachesThroughLink } from './install-unpack.ts';
 
 /** Room left on the volume after the archive and the unpacked files, so nothing fills the disk. */
 export const FREE_SPACE_MARGIN = 256 * 1024 * 1024;
@@ -185,6 +185,12 @@ export class InstallManager {
   prune(providerId: ProviderId, keepDownload?: string | null): void {
     if (this.#running.has(providerId) || this.leaseCount(providerId) > 0) return;
     const root = providerAgentDir(this.dataDir, providerId);
+    // A junction at `agents/<id>` makes `releases/<version>` resolve outside
+    // the data directory. Removing those names would delete the target's files.
+    if (reachesThroughLink(this.dataDir, root)) {
+      this.#log('warn', `${root} is reached through a symlink; prune does not follow it`);
+      return;
+    }
     let current: string;
     try { current = realpathSync(this.currentDir(providerId)); }
     catch { return; }
@@ -193,11 +199,27 @@ export class InstallManager {
       try { rmSync(path, { recursive: true, force: true }); }
       catch (error) { this.#log('warn', `${path} could not be removed yet (${messageOf(error)}); the next prune tries again`); }
     };
-    for (const name of this.#list(join(root, 'releases'))) {
-      const dir = join(root, 'releases', name);
-      let target = dir;
-      try { target = realpathSync(dir); } catch { /* compared as it is */ }
-      if (!same(target, current)) remove(dir);
+    const releases = join(root, 'releases');
+    let releasesInfo: ReturnType<typeof lstatSync> | null = null;
+    try { releasesInfo = lstatSync(releases); } catch { /* nothing to prune */ }
+    // `readdir` of a symlink lists the target. Removing `releases/<name>`
+    // would then delete that target's children. Drop the link itself.
+    if (releasesInfo?.isSymbolicLink()) {
+      this.#log('warn', `${releases} is a symlink; prune removes the link and does not follow it`);
+      remove(releases);
+    } else if (releasesInfo !== null) {
+      for (const name of this.#list(releases)) {
+        const dir = join(releases, name);
+        let info: ReturnType<typeof lstatSync> | null = null;
+        try { info = lstatSync(dir); } catch { continue; }
+        if (info.isSymbolicLink()) {
+          remove(dir);
+          continue;
+        }
+        let target = dir;
+        try { target = realpathSync(dir); } catch { /* compared as it is */ }
+        if (!same(target, current)) remove(dir);
+      }
     }
     if (keepDownload === undefined) return;
     for (const name of this.#list(join(root, 'downloads'))) {
@@ -367,8 +389,11 @@ export class InstallManager {
         log: (level, message) => this.#log(level, message),
       });
       this.#move(running, providerId, { state: 'extracting', version: install.version, operationId: running.operationId });
+      // A junction at `releases` or the provider directory would make this
+      // delete the target's files, and the extract check would only refuse after.
+      if (reachesThroughLink(this.dataDir, releaseDir)) throw refused('the release directory is a symlink');
       rmSync(releaseDir, { recursive: true, force: true });
-      await extractRelease(install, running.controller.signal, part, releaseDir);
+      await extractRelease(install, running.controller.signal, part, releaseDir, this.dataDir);
       checkSizes(install, releaseDir);
       markExecutable(install, releaseDir);
       writeReleaseRecord(releaseDir, install);
@@ -396,7 +421,7 @@ export class InstallManager {
       // it got so far: the next install resumes there. A cancel, a wrong size or
       // a wrong digest starts over.
       if (!(error instanceof Dropped) && !(error instanceof Cancelled && error.keep)) dropPart(part);
-      rmSync(releaseDir, { recursive: true, force: true });
+      if (!reachesThroughLink(this.dataDir, releaseDir)) rmSync(releaseDir, { recursive: true, force: true });
       this.#running.delete(providerId);
       if (error instanceof Cancelled || (error as { name?: string } | null)?.name === 'InstallCancelled') {
         // Back to what is on disk: absent for a first install, the release that

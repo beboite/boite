@@ -6,6 +6,7 @@ import { tildePath } from '../../paths.ts';
 import { openAiCacheLife } from '../../prompt-cache.ts';
 import type { SpawnedChild } from '../../procs.ts';
 import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
+import { subscriptionProxyCodexArgs } from '../../subscription-proxy.ts';
 import type { QuestionAsk, SessionContext, TurnContext } from '../types.ts';
 import { exitWithin } from '../exit.ts';
 import {
@@ -375,6 +376,7 @@ export class CodexSession {
   }
 
   private spawn(ctx: SessionContext, executable: string, args: string[]): CodexRpc {
+    args = subscriptionProxyCodexArgs(args, ctx.accountEnv);
     if (ctx.thread.permissionMode === 'yolo') args = [...args, '--config', 'features.hooks=false'];
     const child = ctx.spawnChild(executable, args, {
       startup: true,

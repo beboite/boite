@@ -13,6 +13,7 @@ import { work, type ControlId } from './work-prefs.svelte';
  */
 export const CARDS: { kind: SurfaceKind; key: string }[] = [
   { kind: 'agents', key: 'A' },
+  { kind: 'messages', key: 'M' },
   { kind: 'browser', key: 'B' },
   { kind: 'changes', key: 'C' },
   { kind: 'files', key: 'F' },
@@ -37,6 +38,7 @@ export function offeredCards(): { kind: SurfaceKind; key: string }[] {
 /** The name of a kind, which a card, a tab and the new-surface menu all read. */
 export function kindName(kind: SurfaceKind): string {
   if (kind === 'agents') return strings.delegation.heading;
+  if (kind === 'messages') return strings.agentMessages.heading;
   if (kind === 'browser') return strings.rightPanel.browser;
   if (kind === 'changes') return strings.rightPanel.changes;
   if (kind === 'files') return strings.rightPanel.files;
@@ -47,6 +49,7 @@ export function kindName(kind: SurfaceKind): string {
 
 export function kindHint(kind: SurfaceKind): string {
   if (kind === 'agents') return strings.delegation.panelHint;
+  if (kind === 'messages') return strings.agentMessages.hint;
   if (kind === 'browser') return strings.rightPanel.browserHint;
   if (kind === 'changes') return strings.rightPanel.changesHint;
   if (kind === 'files') return strings.rightPanel.filesHint;
@@ -55,11 +58,12 @@ export function kindHint(kind: SurfaceKind): string {
 }
 
 /**
- * A page needs a webview. Changes and files are read-only on a paired device
- * (`DEVICE_METHODS`); tasks and the trace read what only the owner may ask for.
+ * A page needs a webview. Paired devices follow subagents and mail, and read
+ * changes and files read-only (`DEVICE_METHODS`); tasks and the trace read what
+ * only the owner may ask for.
  */
 export function available(kind: SurfaceKind, inShell: boolean, owner: boolean): boolean {
-  if (kind === 'agents' || kind === 'changes' || kind === 'files' || kind === 'file') return true;
+  if (kind === 'agents' || kind === 'messages' || kind === 'changes' || kind === 'files' || kind === 'file') return true;
   return kind === 'browser' ? inShell : owner;
 }
 

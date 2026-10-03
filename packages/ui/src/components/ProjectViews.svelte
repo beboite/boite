@@ -6,6 +6,7 @@
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import Menu from './Menu.svelte';
+  import ProjectTile from './ProjectTile.svelte';
 
   let { entries, store, prefix = '' }: { entries: ProjectEntry[]; store: Store; prefix?: string } = $props();
   const selected = $derived(projectView.selected(entries));
@@ -40,7 +41,7 @@
   {#if workspace.view === 'recent' && entries.length}
     <div class="filter">
       <Menu {items} onpick={key => projectView.pick(key)} label={strings.sidebar.filterProject} placement="bottom" variant="text" testid={`${prefix}project-filter`}>
-        <Folder size={13} /><span>{selected ? projectName(selected.project) : strings.sidebar.allProjects}</span>{#if selected && workspace.machines.length > 1}<span class="machine">{selected.machine.label}</span>{/if}<ChevronDown size={12} />
+        {#if selected}<ProjectTile project={selected.project} store={selected.machine.store} size={16} />{:else}<Folder size={13} />{/if}<span>{selected ? projectName(selected.project) : strings.sidebar.allProjects}</span>{#if selected && workspace.machines.length > 1}<span class="machine">{selected.machine.label}</span>{/if}<ChevronDown size={12} />
       </Menu>
     </div>
   {:else if entries.length}

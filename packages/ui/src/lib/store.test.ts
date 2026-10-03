@@ -1450,6 +1450,16 @@ describe('Store', () => {
     expect(store.pendingPermissions).toEqual([]);
   });
 
+  test('a permission denied without a new part still closes the card', async ({ store, client }) => {
+    await store.open('t-bench');
+    const message = store.openThread?.messages.find((row) => row.id === 'm-8');
+    const part = message?.parts.find((row) => row.type === 'permission');
+    expect(part).toMatchObject({ requestId: 'req-seed-1', decision: null });
+    client.clearRequestsOf('t-bench');
+    expect(store.pendingPermissions.map((row) => row.id)).not.toContain('req-seed-1');
+    expect(part).toMatchObject({ decision: 'deny' });
+  });
+
   test('a public address pasted from the address bar saves without an error', async ({ store }) => {
     await store.saveSettings({ publicUrl: 'https://boite.example.com/' });
     expect(store.error).toBeNull();
