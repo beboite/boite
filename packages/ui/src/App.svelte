@@ -276,7 +276,12 @@
     toastThreadId = store.errorThreadId;
     toastStore = store;
     toast.show();
-    if (owner.errorSeverity !== 'minor' || owner.errorThreadId) return;
+  });
+
+  $effect(() => {
+    const owner = store;
+    const error = owner.error;
+    if (!error || owner.errorSeverity !== 'minor' || owner.errorThreadId) return;
     const timer = setTimeout(() => {
       if (owner.error === error && owner.errorSeverity === 'minor') owner.error = null;
     }, 5_000);
