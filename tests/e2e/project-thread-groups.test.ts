@@ -15,12 +15,14 @@ for (const width of [1280, 390]) {
     const page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent&machines=1`, windowSize: { width, height: width < 720 ? 844 : 900 } });
     try {
       await page.waitFor('globalThis.__boiteTest?.workspace.machines.length === 2');
-      const [main, remote, empty] = await page.evaluate<[string, string, string]>(`(async () => {
+      const [main, remote, empty, busy] = await page.evaluate<[string, string, string, string]>(`(async () => {
         const [first, second] = globalThis.__boiteTest.workspace.machines;
         await first.store.archive('t-descriptors', true);
         const empty = await first.store.client.call('projects.add', {path:'/workspace/quiet', name:'quiet'});
+        const busy = await first.store.client.call('projects.add', {path:'/workspace/building', name:'building'});
         first.store.threads = first.store.threads.map(t => t.id === 't-scheduler' ? {...t, status:'running', pinned:false, unread:false} : t);
-        return [first.id, second.id, empty.id];
+        first.store.threads = [...first.store.threads, {...first.store.threads.find(t => t.id === 't-scheduler'), id:'t-building', projectId:busy.id}];
+        return [first.id, second.id, empty.id, busy.id];
       })()`);
       if (width < 720) await mobileAction(page, 'mobile-conversations');
       await page.click(id(width < 720 ? 'mobile-view-projects' : 'view-projects'));
@@ -33,6 +35,8 @@ for (const width of [1280, 390]) {
         await page.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
         await page.screenshot(join(import.meta.dir, '.artifacts', `project-groups-${name}-${width}.png`));
       };
+      await page.waitFor(`document.querySelector('${first}')`);
+      expect(await page.evaluate(`document.querySelector(${JSON.stringify(project(main, busy))}) === null`)).toBe(true);
       await page.waitFor(`document.querySelectorAll('${root} ${id(width < 720 ? 'mobile-project-group' : 'project')}').length === 3`);
       expect(await page.evaluate(`document.querySelector(${JSON.stringify(project(main, 'p-notes'))}) === null && document.querySelector(${JSON.stringify(project(main, empty))}) === null`)).toBe(true);
       expect(await page.evaluate(`document.querySelector('${root} ${id('other-projects-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
@@ -40,6 +44,15 @@ for (const width of [1280, 390]) {
       expect(await page.evaluate(`document.querySelector('${first} ${id('project-done-toggle')}').dataset.count`)).toBe('1');
       expect(await page.evaluate(`!!document.querySelector('${row(first, 't-bench')}') && !document.querySelector('${row(first, 't-scheduler')}')`)).toBe(true);
       await shot('folded');
+
+      // A project appears when work finishes and leaves when its only thread starts again.
+      const building = project(main, busy);
+      await page.evaluate(`(() => { const store = globalThis.__boiteTest.workspace.machines[0].store; store.threads = store.threads.map(t => t.id === 't-building' ? {...t, status:'idle', unread:true} : t); })()`);
+      await page.waitFor(`document.querySelector('${building}:not(.inactive)')`);
+      await page.waitFor(`(() => { document.querySelector('${building}')?.scrollIntoView({block:'center'}); return !!document.querySelector('${row(building, 't-building')}'); })()`);
+      expect(await page.evaluate(`!!document.querySelector('${row(building, 't-building')}')`)).toBe(true);
+      await page.evaluate(`(() => { const store = globalThis.__boiteTest.workspace.machines[0].store; store.threads = store.threads.map(t => t.id === 't-building' ? {...t, status:'running', unread:false} : t); })()`);
+      await page.waitFor(`!document.querySelector('${building}')`);
 
       await click(`${first} ${id('project-working-toggle')}`);
       await page.waitFor(`document.querySelector('${row(first, 't-scheduler')}')`);
@@ -92,6 +105,11 @@ for (const width of [1280, 390]) {
       }
 
       await click(`${root} ${id('other-projects-toggle')}`);
+      await page.waitFor(`document.querySelector('${building}.inactive')`);
+      expect(await page.evaluate(`document.querySelector('${building} ${id('project-working-toggle')}').dataset.count`)).toBe('1');
+      await click(`${building} ${id('project-working-toggle')}`);
+      await page.waitFor(`document.querySelector('${row(building, 't-building')}')`);
+      expect(await page.evaluate(`document.querySelector('${building} ${id('project-done-toggle')}').disabled`)).toBe(true);
       const finished = project(main, 'p-notes');
       await page.waitFor(`document.querySelector('${finished}')`);
       await click(`${finished} ${id('project-done-toggle')}`);

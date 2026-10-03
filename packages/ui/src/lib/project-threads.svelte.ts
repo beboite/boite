@@ -25,8 +25,9 @@ export class ProjectThreadView {
 
 export const projectThreadView = new ProjectThreadView();
 
+/** An ungrouped conversation or draft keeps its project in the main list. */
 export function activeProject(entry: ProjectEntry): boolean {
-  return entry.machine.store.threadsOf(entry.project.id).length > 0
+  return entry.machine.store.threadsOf(entry.project.id).some(thread => !groupWorkingThread(entry.machine.store, thread))
     || entry.machine.store.draftEntries.some(draft => draft.projectId === entry.project.id);
 }
 
