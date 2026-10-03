@@ -44,12 +44,45 @@ export function threadCwd(core: Core, threadId: ThreadId): string {
  */
 export function assertDeviceReadable(core: Core, threadId: ThreadId): void {
   const thread = core.threads.require(threadId);
-  const project = thread.projectId === null ? null : core.projects.require(thread.projectId);
   const where = realOf(thread.cwd);
+  if (!deviceRoots(core, threadId).some((root) => contains(root, where))) {
+    throw refused(`a paired device reads only inside the thread's project or its worktrees, not ${thread.cwd}`, { threadId });
+  }
+}
+
+function deviceRoots(core: Core, threadId: ThreadId): string[] {
+  const thread = core.threads.require(threadId);
+  const project = thread.projectId === null ? null : core.projects.require(thread.projectId);
   // The in-project worktree folder is inside the project; a shared one is not.
   const roots = project === null ? [] : [project.path, worktreeRoot(project.path, core.settings.get().worktreeStorage, project.id)];
-  if (!roots.some((root) => contains(realOf(root), where))) {
-    throw refused(`a paired device reads only inside the thread's project or its worktrees, not ${thread.cwd}`, { threadId });
+  return roots.map(realOf);
+}
+
+/** Folders that hold keys or tokens wherever they sit in a tree. */
+const DEVICE_SECRET_DIRS = new Set(['.git', '.ssh', '.gnupg', '.aws', '.azure', '.kube', '.docker']);
+/** Files that hold credentials; templates such as `.env.example` stay readable. */
+const DEVICE_SECRET_FILE =
+  /^(\.env(\.(?!example$|sample$|template$)[^.]+)*|\.netrc|_netrc|\.npmrc|\.pypirc|\.git-credentials|\.credentials\.json|credentials(\.json)?|id_(rsa|dsa|ecdsa|ed25519)(\.pub)?|.+\.(pem|key|p12|pfx|kdbx))$/i;
+
+/**
+ * Inside a readable tree, a paired device still leaves two things to the owner.
+ * The core's own data (journal, accounts, tokens) when a project contains it,
+ * which happens when a project is a home or desktop folder; a project or
+ * worktree folder kept under the data folder stays readable. And files that
+ * hold credentials, since a phone that is lost or borrowed should not carry a
+ * key away. A path outside the tree is left to the read itself to refuse.
+ */
+export function assertDeviceFile(core: Core, threadId: ThreadId, cwd: string, path: string | undefined): void {
+  const base = realOf(cwd);
+  const target = realOf(resolve(cwd, path ?? ''));
+  if (!contains(base, target)) return;
+  const data = realOf(core.dataDir);
+  if (contains(data, target) && !deviceRoots(core, threadId).some((root) => root !== data && contains(data, root) && contains(root, target))) {
+    throw refused(`a paired device does not read boite's data folder: ${path ?? ''}`, { threadId });
+  }
+  const parts = relative(base, target).split(sep).filter(Boolean);
+  if (parts.some((part) => DEVICE_SECRET_DIRS.has(part.toLowerCase())) || DEVICE_SECRET_FILE.test(basename(target))) {
+    throw refused(`a paired device does not read credential files; open ${path ?? ''} on the owner's machine`, { threadId });
   }
 }
 
@@ -370,14 +403,18 @@ export class FileTickets {
 }
 
 /** The working directory a read is resolved against, held to the project for a paired device. */
-export function readCwd(core: Core, threadId: ThreadId, ctx: RpcContext): string {
-  if (ctx.connection.identity.principal === 'session') assertDeviceReadable(core, threadId);
-  return threadCwd(core, threadId);
+export function readCwd(core: Core, threadId: ThreadId, ctx: RpcContext, path?: string): string {
+  const cwd = threadCwd(core, threadId);
+  if (ctx.connection.identity.principal === 'session') {
+    assertDeviceReadable(core, threadId);
+    assertDeviceFile(core, threadId, cwd, path);
+  }
+  return cwd;
 }
 
 export function registerWorkdirMethods(core: Core): void {
-  core.router.register('files.list', (params, ctx) => listDirectory(readCwd(core, params.threadId, ctx), params.path));
-  core.router.register('files.read', (params, ctx) => readFileContent(core, readCwd(core, params.threadId, ctx), params.path));
+  core.router.register('files.list', (params, ctx) => listDirectory(readCwd(core, params.threadId, ctx, params.path), params.path));
+  core.router.register('files.read', (params, ctx) => readFileContent(core, readCwd(core, params.threadId, ctx, params.path), params.path));
   // Owner only, absent from both permission maps: the agent already has its own
   // hands on the disk, and a paired phone has no business writing a file.
   core.router.register('files.write', (params) =>

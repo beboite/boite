@@ -5,7 +5,7 @@ import { gitDiff } from './git/diff.ts';
 import { notARepository, OUTSIDE_A_REPOSITORY } from './git/errors.ts';
 import { parseNumstat, parseStatus } from './git/porcelain.ts';
 import { git } from './git/read.ts';
-import { assertDeviceReadable, threadCwd } from './workdir.ts';
+import { assertDeviceFile, assertDeviceReadable, threadCwd } from './workdir.ts';
 export { gitDiff } from './git/diff.ts';
 export { parseBranchHeader, parseNumstat, parseStatus } from './git/porcelain.ts';
 
@@ -39,7 +39,10 @@ export function registerGitMethods(core: Core): void {
     return gitStatus(core, params.threadId);
   });
   core.router.register('git.diff', (params, ctx) => {
-    if (ctx.connection.identity.principal === 'session') assertDeviceReadable(core, params.threadId);
+    if (ctx.connection.identity.principal === 'session') {
+      assertDeviceReadable(core, params.threadId);
+      assertDeviceFile(core, params.threadId, threadCwd(core, params.threadId), params.path);
+    }
     return gitDiff(core, params);
   });
 }

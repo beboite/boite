@@ -356,6 +356,39 @@ describe('a paired device reads a thread\'s changes and files', () => {
     }
   });
 
+  test('it leaves credential files and the git folder to the owner', async () => {
+    const owner = await harness.connect();
+    const { root, threadId } = await repoThread(owner);
+    mkdirSync(join(root, '.ssh'));
+    for (const name of ['.env', '.env.local', '.env.example', 'id_ed25519', 'server.pem', '.ssh/config']) writeFileSync(join(root, name), 'token\n');
+    const phone = await pairedDevice();
+    try {
+      for (const path of ['.env', '.env.local', 'id_ed25519', 'server.pem', '.ssh/config', '.git/config']) {
+        await expect(phone.call('files.read', { threadId, path })).rejects.toThrow('credential files');
+      }
+      await expect(phone.call('files.list', { threadId, path: '.git' })).rejects.toThrow('credential files');
+      await expect(phone.call('git.diff', { threadId, path: '.env' })).rejects.toThrow('credential files');
+      expect(await phone.call('files.read', { threadId, path: '.env.example' })).toMatchObject({ kind: 'text' });
+      expect(await owner.call('files.read', { threadId, path: '.env' })).toMatchObject({ kind: 'text', text: 'token\n' });
+    } finally {
+      phone.close();
+    }
+  });
+
+  test('a project that holds boite\'s data folder does not open it to the device', async () => {
+    const owner = await harness.connect();
+    const { threadId } = await echoThread(harness, owner);
+    writeFileSync(join(harness.dataDir, 'notes.txt'), 'hello\n');
+    const phone = await pairedDevice();
+    try {
+      await expect(phone.call('files.read', { threadId, path: 'journal.db' })).rejects.toThrow('data folder');
+      await expect(phone.call('files.list', { threadId })).rejects.toThrow('data folder');
+      expect(await owner.call('files.read', { threadId, path: 'notes.txt' })).toMatchObject({ kind: 'text', text: 'hello\n' });
+    } finally {
+      phone.close();
+    }
+  });
+
   test('a link out of the project, swapped in after the thread was made, is not followed', async () => {
     const owner = await harness.connect();
     const outside = join(harness.dataDir, 'outside');
