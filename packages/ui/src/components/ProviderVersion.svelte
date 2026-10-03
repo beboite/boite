@@ -61,30 +61,30 @@
 {#if update && ((provider.available && update.current !== null) || update.state !== 'idle')}
   <span class="update" data-testid="provider-update" data-update-provider={provider.id} data-state={update.state}>
     {#if update.current !== null}
-      <span class="version" title={versionTitle(update)}>{offered(update) ? `${update.current} → ${update.latest}` : update.current}</span>
+      <span class="version ui-label" title={versionTitle(update)}>{offered(update) ? `${update.current} → ${update.latest}` : update.current}</span>
     {/if}
     {#if update.state === 'updating' || update.state === 'checking'}
-      <span class="note-inline live" role="status">{update.state === 'updating' ? strings.providerSettings.updating : strings.harnessUpdates.checking}</span>
+      <span class="note-inline live ui-label" role="status">{update.state === 'updating' ? strings.providerSettings.updating : strings.harnessUpdates.checking}</span>
     {:else if skippedNow(update) && update.latest !== null}
-      <span class="note-inline">{strings.harnessUpdates.skipped(update.latest)}</span>
+      <span class="note-inline ui-label">{strings.harnessUpdates.skipped(update.latest)}</span>
     {:else if answered}
-      <span class="note-inline" role="status" data-testid="harness-update-current">{strings.harnessUpdates.upToDate}</span>
+      <span class="note-inline ui-label" role="status" data-testid="harness-update-current">{strings.harnessUpdates.upToDate}</span>
     {/if}
     {#if skippedNow(update)}
-      <button type="button" class="quiet small" data-testid="harness-update-unskip" onclick={() => void store.skipHarnessUpdate(update.providerId, null)}>{strings.harnessUpdates.unskip}</button>
+      <button type="button" class="quiet small" data-testid="harness-update-unskip" onclick={() => void store.skipHarnessUpdate(update.providerId, null)}><span class="ui-label">{strings.harnessUpdates.unskip}</span></button>
     {:else if offered(update) && update.state !== 'updating'}
       <button type="button" class="small" class:primary={main} data-testid="harness-update-row-run" onclick={() => void store.updateHarness(update.providerId)}>
-        {update.state === 'failed' ? strings.harnessUpdates.retry : strings.harnessUpdates.update}
+        <span class="ui-label">{update.state === 'failed' ? strings.harnessUpdates.retry : strings.harnessUpdates.update}</span>
       </button>
     {:else if update.route === 'self' && update.latest === null && update.current !== null && update.state !== 'updating'}
-      <button type="button" class="quiet small" data-testid="harness-update-row-blind" onclick={() => runUpdater(update.providerId)}>{strings.harnessUpdates.runUpdater}</button>
+      <button type="button" class="quiet small" data-testid="harness-update-row-blind" onclick={() => runUpdater(update.providerId)}><span class="ui-label">{strings.harnessUpdates.runUpdater}</span></button>
     {/if}
   </span>
 {:else if provider.available && install?.state === 'installed' && !installing}
   <span class="update" data-testid="install-version">
-    <span class="version" title={strings.harnessUpdates.route.managed}>{updatable(store, provider) ? `${install.version} → ${install.available}` : install.version}</span>
+    <span class="version ui-label" title={strings.harnessUpdates.route.managed}>{updatable(store, provider) ? `${install.version} → ${install.available}` : install.version}</span>
     {#if updatable(store, provider)}
-      <button type="button" class="small" class:primary={main} data-testid="install-update" onclick={oninstall}>{strings.install.update}</button>
+      <button type="button" class="small" class:primary={main} data-testid="install-update" onclick={oninstall}><span class="ui-label">{strings.install.update}</span></button>
     {/if}
   </span>
 {/if}

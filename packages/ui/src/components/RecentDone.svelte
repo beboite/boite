@@ -66,12 +66,12 @@
 
 {#if count > 0}
   <RecentGroup kind="done" {count} bind:open>
-    {#if loading}<p class="hint" role="status">{strings.app.loading}</p>{/if}
-    {#if failed}<div class="hint" role="status">{strings.sidebar.doneLoadFailed}<button type="button" class="ghost small" data-testid="recent-done-retry" onclick={() => retry++}>{strings.sidebar.doneRetry}</button></div>{/if}
+    {#if loading}<p class="hint" role="status"><span class="ui-label">{strings.app.loading}</span></p>{/if}
+    {#if failed}<div class="hint" role="status"><span class="ui-label">{strings.sidebar.doneLoadFailed}</span><button type="button" class="ghost small" data-testid="recent-done-retry" onclick={() => retry++}><span class="ui-label">{strings.sidebar.doneRetry}</span></button></div>{/if}
     <WindowList items={rows} keyOf={entry => JSON.stringify([entry.machine.id, entry.thread.id])} {scrollRoot} estimate={60} {measurements}>
       {#snippet row(entry)}<DoneThread {entry} {now} showMachine={multi} {onopen} />{/snippet}
     </WindowList>
-    {#if !loading && !failed && !rows.length}<p class="hint">{strings.sidebar.noMatch}</p>{/if}
+    {#if !loading && !failed && !rows.length}<p class="hint"><span class="ui-label">{strings.sidebar.noMatch}</span></p>{/if}
   </RecentGroup>
 {/if}
 

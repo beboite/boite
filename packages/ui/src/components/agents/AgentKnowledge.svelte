@@ -44,14 +44,14 @@
       <label class="agent-field">{labels.name}<input required bind:value={title} /></label>
       {#if mode === 'resource'}
         <div class="agent-inline">
-          <Menu placement="bottom" label={labels.resources} items={(['instructions', 'url', 'directory'] as const).map(id => ({ id, label: labels[id], active: kind === id }))} onpick={id => { kind = id as AgentResource['kind']; }}>{labels[kind]}</Menu>
-          <Menu placement="bottom" label={labels.permissions} items={(['read', 'write'] as const).map(id => ({ id, label: labels[id], active: access === id }))} onpick={id => { access = id as AgentResource['access']; }}>{labels[access]}</Menu>
+          <Menu placement="bottom" label={labels.resources} items={(['instructions', 'url', 'directory'] as const).map(id => ({ id, label: labels[id], active: kind === id }))} onpick={id => { kind = id as AgentResource['kind']; }}><span class="ui-label">{labels[kind]}</span></Menu>
+          <Menu placement="bottom" label={labels.permissions} items={(['read', 'write'] as const).map(id => ({ id, label: labels[id], active: access === id }))} onpick={id => { access = id as AgentResource['access']; }}><span class="ui-label">{labels[access]}</span></Menu>
         </div>
         <p class="hint">{labels.resourceHint}</p>
       {/if}
       <label class="agent-field">{labels.text}<textarea required bind:value={text} rows="3"></textarea></label>
       {#if mode === 'memory'}<label class="agent-field">{labels.expiresAt}<input type="datetime-local" bind:value={expiry} /></label>{/if}
-      <div class="agent-form-actions"><button class="primary" disabled={view.pending}>{labels.save}</button><button type="button" class="ghost" onclick={() => { mode = null; }}>{labels.cancel}</button></div>
+      <div class="agent-form-actions"><button class="primary" disabled={view.pending}><span class="ui-label">{labels.save}</span></button><button type="button" class="ghost" onclick={() => { mode = null; }}><span class="ui-label">{labels.cancel}</span></button></div>
     </form>
   {/if}
 {/snippet}
@@ -61,26 +61,26 @@
     <label class="agents-search boxed"><Search size={14} strokeWidth={1.75} /><input type="search" bind:value={query} aria-label={labels.searchKnowledge} placeholder={labels.searchKnowledge} /></label>
   {/if}
   <section class="card">
-    <div class="agent-card-head"><h2>{labels.memories}</h2>{#if view.store.owner && mode !== 'memory'}<button type="button" class="small" data-testid="agent-memory-add" onclick={() => edit(null, 'memory')}>{labels.addMemory}</button>{/if}</div>
+    <div class="agent-card-head"><h2>{labels.memories}</h2>{#if view.store.owner && mode !== 'memory'}<button type="button" class="small" data-testid="agent-memory-add" onclick={() => edit(null, 'memory')}><span class="ui-label">{labels.addMemory}</span></button>{/if}</div>
     <!-- Oldest first: earlier memories load above the list. -->
-    {#if view.hasOlder(key, 'memory')}<button type="button" class="ghost small agent-older" disabled={view.loadingOlder === key} onclick={() => void view.loadOlder(key, history, scoped)} data-testid="agent-memories-older">{labels.loadEarlier}</button>{/if}
+    {#if view.hasOlder(key, 'memory')}<button type="button" class="ghost small agent-older" disabled={view.loadingOlder === key} onclick={() => void view.loadOlder(key, history, scoped)} data-testid="agent-memories-older"><span class="ui-label">{labels.loadEarlier}</span></button>{/if}
     {#each memories as memory (memory.id)}
       <details class="agent-record">
         <summary>{memory.title}{#if memory.expiresAt && memory.expiresAt <= Date.now()}<span class="muted"> · {labels.expired}</span>{/if}</summary>
         <p class="agent-prewrap">{memory.text}</p>
         <p class="hint">{labels.sources}: {memory.sourceScopes.length ? memory.sourceScopes.map(s => `${s.kind}/${s.id}`).join(', ') : labels.ownerMemory}</p>
-        {#if view.store.owner}<div class="agent-form-actions"><button type="button" class="small" onclick={() => edit(memory, 'memory')}>{labels.edit}</button><button type="button" class="ghost small" disabled={view.pending} onclick={() => void expire(memory)}>{labels.expireMemory}</button></div>{/if}
+        {#if view.store.owner}<div class="agent-form-actions"><button type="button" class="small" onclick={() => edit(memory, 'memory')}><span class="ui-label">{labels.edit}</span></button><button type="button" class="ghost small" disabled={view.pending} onclick={() => void expire(memory)}><span class="ui-label">{labels.expireMemory}</span></button></div>{/if}
       </details>
     {:else}{#if mode !== 'memory'}<p class="hint">{labels.empty}</p>{/if}{/each}
     {@render editor('memory')}
   </section>
   <section class="card">
-    <div class="agent-card-head"><h2>{labels.resources}</h2>{#if view.store.owner && mode !== 'resource'}<button type="button" class="small" onclick={() => edit(null, 'resource')}>{labels.addResource}</button>{/if}</div>
+    <div class="agent-card-head"><h2>{labels.resources}</h2>{#if view.store.owner && mode !== 'resource'}<button type="button" class="small" onclick={() => edit(null, 'resource')}><span class="ui-label">{labels.addResource}</span></button>{/if}</div>
     {#each resources as resource (resource.id)}
       <details class="agent-record">
         <summary>{resource.name}<span class="muted"> · {labels[resource.access]}</span></summary>
         <p class="agent-prewrap">{resource.value}</p>
-        {#if view.store.owner}<button type="button" class="small" onclick={() => edit(resource, 'resource')}>{labels.edit}</button>{/if}
+        {#if view.store.owner}<button type="button" class="small" onclick={() => edit(resource, 'resource')}><span class="ui-label">{labels.edit}</span></button>{/if}
       </details>
     {:else}{#if mode !== 'resource'}<p class="hint">{labels.empty}</p>{/if}{/each}
     {@render editor('resource')}

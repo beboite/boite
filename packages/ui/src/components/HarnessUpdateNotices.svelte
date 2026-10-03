@@ -58,10 +58,10 @@
         </div>
         <div class="actions">
           <button type="button" class="quiet small" data-testid="harness-update-skip" onclick={() => void notice.store.skipHarnessUpdate(update.providerId, update.latest)}>
-            {strings.harnessUpdates.skip}
+            <span class="ui-label">{strings.harnessUpdates.skip}</span>
           </button>
           <button type="button" class="primary small" data-testid="harness-update-run" onclick={() => void notice.store.updateHarness(update.providerId)}>
-            {update.state === 'failed' ? strings.harnessUpdates.retry : strings.harnessUpdates.update}
+            <span class="ui-label">{update.state === 'failed' ? strings.harnessUpdates.retry : strings.harnessUpdates.update}</span>
           </button>
         </div>
       </article>

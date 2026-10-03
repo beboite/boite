@@ -109,21 +109,21 @@
       <div class="connection-top">
         <div class="folder-mark"><Brain size={24} strokeWidth={1.5} /></div>
         <div class="folder-info"><h2>{folderName}</h2><code>{status.config.path}</code></div>
-        <button class="primary sync-button" disabled={busy || !status.git?.upstream || status.git.dirty} onclick={() => void run('sync')} data-testid="brain-sync"><RefreshCw size={15} />{busy ? t.working : t.sync}</button>
+        <button class="primary sync-button" disabled={busy || !status.git?.upstream || status.git.dirty} onclick={() => void run('sync')} data-testid="brain-sync"><RefreshCw size={15} /><span class="ui-label">{busy ? t.working : t.sync}</span></button>
       </div>
       <div class="sync-state" role="status" data-testid="brain-last-sync">
-        {#if status.git?.dirty}<span class="warning">{t.dirty}</span>
-        {:else if !status.git}<span>{t.noGit}</span>
-        {:else if !status.git.upstream}<span>{t.noUpstream}</span>
-        {:else if status.git.ahead || status.git.behind}<span>{t.counts.replace('{ahead}', String(status.git.ahead)).replace('{behind}', String(status.git.behind))}</span>
-        {:else}<Check size={14} /><span>{status.lastSync ? `${t.lastSync} ${new Date(status.lastSync).toLocaleString(formatLocale())}` : t.never}</span>{/if}
+        {#if status.git?.dirty}<span class="warning ui-label">{t.dirty}</span>
+        {:else if !status.git}<span class="ui-label">{t.noGit}</span>
+        {:else if !status.git.upstream}<span class="ui-label">{t.noUpstream}</span>
+        {:else if status.git.ahead || status.git.behind}<span class="ui-label">{t.counts.replace('{ahead}', String(status.git.ahead)).replace('{behind}', String(status.git.behind))}</span>
+        {:else}<Check size={14} /><span class="ui-label">{status.lastSync ? `${t.lastSync} ${new Date(status.lastSync).toLocaleString(formatLocale())}` : t.never}</span>{/if}
       </div>
       <div class="connection-bottom">
-        <label class="sharing"><input type="checkbox" role="switch" checked={status.config.enabled} onchange={event => { event.currentTarget.checked = status!.config.enabled; void run('toggle'); }} disabled={busy} data-testid="brain-enabled" /><span>{t.enabled}</span></label>
-        <button class="ghost small" disabled={busy} onclick={() => { editing = !editing; path = status!.config.path!; folders = null; }} data-testid="brain-change">{editing ? t.cancel : t.change}</button>
+        <label class="sharing"><input type="checkbox" role="switch" checked={status.config.enabled} onchange={event => { event.currentTarget.checked = status!.config.enabled; void run('toggle'); }} disabled={busy} data-testid="brain-enabled" /><span class="ui-label">{t.enabled}</span></label>
+        <button class="ghost small" disabled={busy} onclick={() => { editing = !editing; path = status!.config.path!; folders = null; }} data-testid="brain-change"><span class="ui-label">{editing ? t.cancel : t.change}</span></button>
       </div>
       <div class="global-instructions">
-        <label class="sharing"><input type="checkbox" role="switch" checked={status.config.globalInstructions ?? false} disabled={busy || !status.config.enabled} data-testid="brain-global" onchange={event => { event.currentTarget.checked = status!.config.globalInstructions ?? false; void run('global'); }} /><span>{t.globalInstructions}</span></label>
+        <label class="sharing"><input type="checkbox" role="switch" checked={status.config.globalInstructions ?? false} disabled={busy || !status.config.enabled} data-testid="brain-global" onchange={event => { event.currentTarget.checked = status!.config.globalInstructions ?? false; void run('global'); }} /><span class="ui-label">{t.globalInstructions}</span></label>
         {#if status.links?.length}
           <details class="global-links" data-testid="brain-links" open={status.links.some(link => link.state === 'blocked')}>
             <summary>{t.globalDetails}<span>{status.links.filter(link => link.state !== 'blocked').length}/{status.links.length}</span></summary>
@@ -135,17 +135,17 @@
         {/if}
       </div>
       <div class="boite-guide">
-        <label class="sharing"><input type="checkbox" role="switch" checked={status.config.boiteGuide !== false} disabled={busy || !status.config.enabled} data-testid="brain-guide" onchange={event => { event.currentTarget.checked = status!.config.boiteGuide !== false; void run('guide'); }} /><span>{t.boiteGuide}</span></label>
+        <label class="sharing"><input type="checkbox" role="switch" checked={status.config.boiteGuide !== false} disabled={busy || !status.config.enabled} data-testid="brain-guide" onchange={event => { event.currentTarget.checked = status!.config.boiteGuide !== false; void run('guide'); }} /><span class="ui-label">{t.boiteGuide}</span></label>
         <p>{t.boiteGuideHint}</p>
       </div>
       {#if status.git?.upstream || status.config.autoPull}
         <div class="automation">
           <h3>{t.autoPull}</h3>
-          <label class="sharing"><input type="checkbox" role="switch" checked={autoPull.onStartup} disabled={busy} data-testid="brain-startup" onchange={event => { event.currentTarget.checked = autoPull.onStartup; void run('auto', { ...autoPull, onStartup: !autoPull.onStartup }); }} /><span>{t.onStartup}</span></label>
+          <label class="sharing"><input type="checkbox" role="switch" checked={autoPull.onStartup} disabled={busy} data-testid="brain-startup" onchange={event => { event.currentTarget.checked = autoPull.onStartup; void run('auto', { ...autoPull, onStartup: !autoPull.onStartup }); }} /><span class="ui-label">{t.onStartup}</span></label>
           <div class="interval-row">
-            <label class="sharing"><input type="checkbox" role="switch" checked={autoPull.intervalMinutes > 0} disabled={busy} data-testid="brain-periodic" onchange={event => { event.currentTarget.checked = autoPull.intervalMinutes > 0; void run('auto', { ...autoPull, intervalMinutes: autoPull.intervalMinutes ? 0 : 15 }); }} /><span>{t.periodic}</span></label>
+            <label class="sharing"><input type="checkbox" role="switch" checked={autoPull.intervalMinutes > 0} disabled={busy} data-testid="brain-periodic" onchange={event => { event.currentTarget.checked = autoPull.intervalMinutes > 0; void run('auto', { ...autoPull, intervalMinutes: autoPull.intervalMinutes ? 0 : 15 }); }} /><span class="ui-label">{t.periodic}</span></label>
             {#if autoPull.intervalMinutes > 0}
-              <label class="interval-value"><input type="number" min="1" max="1440" step="1" value={autoPull.intervalMinutes} aria-label={t.interval} disabled={busy} data-testid="brain-interval" onchange={event => { const input = event.currentTarget; const minutes = input.valueAsNumber; input.value = String(autoPull.intervalMinutes); if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) { error = t.intervalHint; return; } void run('auto', { ...autoPull, intervalMinutes: minutes }); }} /><span>{t.minutes}</span></label>
+              <label class="interval-value"><input type="number" min="1" max="1440" step="1" value={autoPull.intervalMinutes} aria-label={t.interval} disabled={busy} data-testid="brain-interval" onchange={event => { const input = event.currentTarget; const minutes = input.valueAsNumber; input.value = String(autoPull.intervalMinutes); if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) { error = t.intervalHint; return; } void run('auto', { ...autoPull, intervalMinutes: minutes }); }} /><span class="ui-label">{t.minutes}</span></label>
             {/if}
           </div>
         </div>
@@ -156,16 +156,16 @@
     <form class="folder-form" id={status.config.path ? undefined : 'settings-brain-folder'} onsubmit={event => { event.preventDefault(); void run('save'); }}>
       {#if !status.config.path}<Brain size={32} strokeWidth={1.5} /><h2>{t.empty}</h2><p>{t.emptyHint}</p>{/if}
       <label for="brain-path">{t.folder}</label>
-      <div class="path-row"><input id="brain-path" data-testid="brain-path" bind:value={path} placeholder={t.pathHint} disabled={busy} /><button type="button" disabled={busy} data-testid="brain-browse" onclick={() => void choose()}><Folder size={15} />{t.browse}</button></div>
+      <div class="path-row"><input id="brain-path" data-testid="brain-path" bind:value={path} placeholder={t.pathHint} disabled={busy} /><button type="button" disabled={busy} data-testid="brain-browse" onclick={() => void choose()}><Folder size={15} /><span class="ui-label">{t.browse}</span></button></div>
       {#if folders}
         <div class="folders" data-testid="brain-folders">
           <code>{folders.path}</code>
-          {#if folders.parent}<button type="button" class="ghost" disabled={busy} onclick={() => void browse(folders!.parent!)}><ArrowUp size={15} />{strings.connection.parent}</button>{/if}
-          {#each folders.directories as directory (directory.path)}<button type="button" class="ghost folder" disabled={busy} onclick={() => void browse(directory.path)}><Folder size={15} />{directory.name}</button>{/each}
-          <button type="button" disabled={busy} onclick={() => { path = folders!.path; folders = null; }}>{t.useFolder}</button>
+          {#if folders.parent}<button type="button" class="ghost" disabled={busy} onclick={() => void browse(folders!.parent!)}><ArrowUp size={15} /><span class="ui-label">{strings.connection.parent}</span></button>{/if}
+          {#each folders.directories as directory (directory.path)}<button type="button" class="ghost folder" disabled={busy} onclick={() => void browse(directory.path)}><Folder size={15} /><span class="ui-label">{directory.name}</span></button>{/each}
+          <button type="button" disabled={busy} onclick={() => { path = folders!.path; folders = null; }}><span class="ui-label">{t.useFolder}</span></button>
         </div>
       {/if}
-      <div class="form-actions"><button class="primary" type="submit" disabled={busy || !path.trim()} data-testid="brain-save">{status.config.path ? t.saveChanges : t.save}</button>{#if status.config.path}<button type="button" class="ghost" disabled={busy} onclick={() => void run('disconnect')} data-testid="brain-disconnect">{t.disconnect}</button>{/if}</div>
+      <div class="form-actions"><button class="primary" type="submit" disabled={busy || !path.trim()} data-testid="brain-save"><span class="ui-label">{status.config.path ? t.saveChanges : t.save}</span></button>{#if status.config.path}<button type="button" class="ghost" disabled={busy} onclick={() => void run('disconnect')} data-testid="brain-disconnect"><span class="ui-label">{t.disconnect}</span></button>{/if}</div>
     </form>
   {/if}
   {#if status?.config.path}
@@ -173,7 +173,7 @@
       <div class="catalog-nav">
         <div class="categories" role="group" aria-label={t.detected}>
           {#each kinds as kind (kind)}
-            <button class="ghost category" class:active={selected === kind} aria-pressed={selected === kind} onclick={() => selected = kind} data-testid="brain-category-{kind}">{t[kind]}<span>{status.entries.filter(entry => entry.kind === kind).length}</span></button>
+            <button class="ghost category" class:active={selected === kind} aria-pressed={selected === kind} onclick={() => selected = kind} data-testid="brain-category-{kind}"><span class="ui-label">{t[kind]}</span><span class="ui-label">{status.entries.filter(entry => entry.kind === kind).length}</span></button>
           {/each}
         </div>
         <button class="ghost icon" disabled={busy} onclick={() => void run('refresh')} aria-label={t.refresh} data-testid="brain-refresh"><RefreshCw size={15} /></button>

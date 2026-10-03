@@ -144,7 +144,7 @@
     {onkeydown}
   >
     <Brain size={14} strokeWidth={1.75} />
-    {current ? levelName(current) : selectedSpeed ? levelName(selectedSpeed) : strings.composer.standardSpeed}
+    <span class="ui-label">{current ? levelName(current) : selectedSpeed ? levelName(selectedSpeed) : strings.composer.standardSpeed}</span>
     <!-- A fast mode switched on stays in sight with the popover closed. -->
     {#if current && selectedSpeed}<span class="fast-mark" data-testid="effort-fast-mark" title={levelName(selectedSpeed)}><Zap size={12} fill="currentColor" /></span>{/if}
   </button>
@@ -166,10 +166,10 @@
         {#if speeds.length > 0}
           <button type="button" class="speed" class:active={!!selectedSpeed} data-testid="effort-speed" aria-label={strings.composer.speed} aria-pressed={!!selectedSpeed} title={selectedSpeed?.description ?? (selectedSpeed ? levelName(selectedSpeed) : strings.composer.standardSpeed)} onclick={cycleSpeed}>
             <Zap size={14} fill={selectedSpeed ? 'currentColor' : 'none'} />
-            {#if selectedSpeed}<span data-testid="effort-speed-label">{levelName(selectedSpeed)}</span>{/if}
+            {#if selectedSpeed}<span class="ui-label" data-testid="effort-speed-label">{levelName(selectedSpeed)}</span>{/if}
           </button>
         {/if}
-        <span class="level">{current ? levelName(current) : strings.composer.standardSpeed}</span>
+        <span class="level ui-label">{current ? levelName(current) : strings.composer.standardSpeed}</span>
       </div>
 
       {#if levels.length > 0}

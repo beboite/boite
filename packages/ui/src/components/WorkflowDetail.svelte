@@ -58,7 +58,7 @@
       </small>
     </div>
     {#if canRetry}
-      <button type="button" class="quiet small" data-testid="workflow-retry-step" onclick={() => void store.controlWorkflow(run, 'retry', node.id)}><RotateCcw size={13} strokeWidth={1.75} />{strings.workflow.retry}</button>
+      <button type="button" class="quiet small" data-testid="workflow-retry-step" onclick={() => void store.controlWorkflow(run, 'retry', node.id)}><RotateCcw size={13} strokeWidth={1.75} /><span class="ui-label">{strings.workflow.retry}</span></button>
     {/if}
   </header>
 
@@ -78,7 +78,7 @@
         {#each node.instances as inst (inst.key)}
           <button type="button" class="instance" class:chosen={inst.key === instance?.key} role="option" aria-selected={inst.key === instance?.key} data-testid="workflow-instance" onclick={() => (picked = inst.key)}>
             <WorkflowMark status={inst.status} />
-            <span class="label">{inst.label || inst.key}</span>
+            <span class="label ui-label">{inst.label || inst.key}</span>
             {#if inst.startedAt !== null}<span class="time"><AgentElapsed startedAt={inst.startedAt} finishedAt={inst.finishedAt} active={inst.status === 'running'} /></span>{/if}
           </button>
         {/each}
@@ -99,7 +99,7 @@
       {#if instance.threadId}
         <div class="conversation-head">
           <p class="section-label">{strings.workflow.conversation}</p>
-          <button type="button" class="quiet small" data-testid="workflow-open-thread" onclick={() => void openThread(instance.threadId!)}>{strings.workflow.openThread}</button>
+          <button type="button" class="quiet small" data-testid="workflow-open-thread" onclick={() => void openThread(instance.threadId!)}><span class="ui-label">{strings.workflow.openThread}</span></button>
         </div>
         {#if store.delegationThread?.id === instance.threadId}
           <div class="transcript"><DelegationTranscript messages={store.delegationThread.messages} /></div>

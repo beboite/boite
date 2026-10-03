@@ -132,7 +132,7 @@
             {#if pair.reachable}<small>{strings.machines.agentLinkReachable}</small>
             {:else if pair.failure || agentAutoLink.failureOf(pair.a, pair.b)}<small class="link-failure">{fill(strings.machines.autoLinkFailed, { reason: pair.failure ?? agentAutoLink.failureOf(pair.a, pair.b)! })}</small>{/if}
           </span>
-          <button class="quiet small" disabled={Boolean(busy) || pair.linkedA && pair.linkedB && pair.reachable} data-testid="agent-link" onclick={() => void link(pair.a, pair.b)}><Link2 size={13} />{strings.machines.linkAgents}</button>
+          <button class="quiet small" disabled={Boolean(busy) || pair.linkedA && pair.linkedB && pair.reachable} data-testid="agent-link" onclick={() => void link(pair.a, pair.b)}><Link2 size={13} /><span class="ui-label">{strings.machines.linkAgents}</span></button>
         </div>
       {/each}
     </div>
@@ -154,7 +154,7 @@
             <input type="checkbox" data-testid="agent-peer-read" checked={peer.readThreads === true} disabled={Boolean(busy) || peer.readThreads === undefined} onchange={event => void readAccess(machine, peer, event.currentTarget)} />
             <span>{fill(strings.machines.agentReadThreads, { source: peerLabel(peer), target: machine.label })}</span>
           </label>
-          {#if peer.readThreads === undefined}<small class="hint">{strings.machines.agentReadUpgrade}</small>{/if}
+          {#if peer.readThreads === undefined}<small class="hint ui-label">{strings.machines.agentReadUpgrade}</small>{/if}
         </div>
       {/each}
     {/each}

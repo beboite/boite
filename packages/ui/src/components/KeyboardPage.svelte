@@ -162,7 +162,7 @@
       <h1>{strings.settings.tabs.keyboard}<InfoTip topic={strings.settings.tabs.keyboard} text={strings.keyboard.intro} /></h1>
     </div>
     {#if anyCustom}
-      <button class="quiet small" data-testid="keybindings-reset-all" disabled={busy} onclick={() => void resetAll()}><RotateCcw size={14} />{strings.keyboard.resetAll}</button>
+      <button class="quiet small" data-testid="keybindings-reset-all" disabled={busy} onclick={() => void resetAll()}><RotateCcw size={14} /><span class="ui-label">{strings.keyboard.resetAll}</span></button>
     {/if}
   </header>
 
@@ -197,19 +197,19 @@
               {#if recording === row.id}
                 <span class="capture" data-testid="keybinding-capture" role="status">
                   {#if held.length > 0}
-                    {#each held as part, index (part)}{#if index > 0}<span class="plus">+</span>{/if}<kbd>{part}</kbd>{/each}<span class="plus">+</span>
+                    {#each held as part, index (part)}{#if index > 0}<span class="plus ui-label">+</span>{/if}<kbd><span class="ui-label">{part}</span></kbd>{/each}<span class="plus ui-label">+</span>
                   {:else}
-                    {strings.keyboard.record}
+                    <span class="ui-label">{strings.keyboard.record}</span>
                   {/if}
                 </span>
-                <button class="quiet small" onclick={stop}>{strings.common.cancel}</button>
+                <button class="quiet small" onclick={stop}><span class="ui-label">{strings.common.cancel}</span></button>
               {:else}
                 <button class="chord" data-testid="keybinding-edit" title={strings.keyboard.change} disabled={busy} onclick={() => start(row.id)}>
                   <span class="caps" data-testid="keybinding-key">
                     {#if row.parts === null}
-                      <span class="none">{strings.keyboard.none}</span>
+                      <span class="none ui-label">{strings.keyboard.none}</span>
                     {:else}
-                      {#each row.parts as part, index (index)}{#if index > 0}<span class="plus">+</span>{/if}<kbd>{part}</kbd>{/each}
+                      {#each row.parts as part, index (index)}{#if index > 0}<span class="plus ui-label">+</span>{/if}<kbd><span class="ui-label">{part}</span></kbd>{/each}
                     {/if}
                   </span>
                 </button>
@@ -226,14 +226,14 @@
             {#if conflict?.id === row.id}
               {@const chosen = parseChord(conflict.chord)}
               <div class="row-note" data-testid="keybinding-conflict">
-                <span>{strings.keyboard.conflict.replace('{chord}', chosen.ok ? chordParts(chosen.chord, mac).join('+') : conflict.chord).replace('{command}', commandLabel(conflict.other))}</span>
+                <span class="ui-label">{strings.keyboard.conflict.replace('{chord}', chosen.ok ? chordParts(chosen.chord, mac).join('+') : conflict.chord).replace('{command}', commandLabel(conflict.other))}</span>
                 <span class="note-actions">
-                  <button class="primary small" data-testid="keybinding-replace" onclick={() => void replace()}>{strings.keyboard.replace}</button>
-                  <button class="quiet small" onclick={() => (conflict = null)}>{strings.common.cancel}</button>
+                  <button class="primary small" data-testid="keybinding-replace" onclick={() => void replace()}><span class="ui-label">{strings.keyboard.replace}</span></button>
+                  <button class="quiet small" onclick={() => (conflict = null)}><span class="ui-label">{strings.common.cancel}</span></button>
                 </span>
               </div>
             {/if}
-            {#if problem?.id === row.id}<p class="row-note bad" role="alert">{problem.message}</p>{/if}
+            {#if problem?.id === row.id}<p class="row-note bad" role="alert"><span class="ui-label">{problem.message}</span></p>{/if}
           </div>
         {/each}
       </div>
@@ -244,13 +244,13 @@
 
   <section class="card file" id="settings-keybinding-file">
     <div class="file-text">
-      <span class="file-name">{strings.keyboard.file}<InfoTip topic={strings.keyboard.file} text={strings.keyboard.fileHint} /></span>
+      <span class="file-name"><span class="ui-label">{strings.keyboard.file}</span><InfoTip topic={strings.keyboard.file} text={strings.keyboard.fileHint} /></span>
       <span class="mono path" data-testid="keybindings-path">{store.keybindings?.path ?? ''}</span>
     </div>
     {#if store.pickerAvailable}
-      <button type="button" data-testid="keybindings-open" disabled={!store.keybindings} onclick={() => void openFile()}>{strings.keyboard.openFile}</button>
+      <button type="button" data-testid="keybindings-open" disabled={!store.keybindings} onclick={() => void openFile()}><span class="ui-label">{strings.keyboard.openFile}</span></button>
     {:else}
-      <button type="button" data-testid="keybindings-copy" disabled={!store.keybindings} onclick={() => void store.copy(store.keybindings?.path ?? '')}>{strings.keyboard.copyPath}</button>
+      <button type="button" data-testid="keybindings-copy" disabled={!store.keybindings} onclick={() => void store.copy(store.keybindings?.path ?? '')}><span class="ui-label">{strings.keyboard.copyPath}</span></button>
     {/if}
   </section>
 </div>

@@ -51,23 +51,23 @@
       use:panel.attach onanimationend={panel.end} use:floating={{ anchor: () => trigger ?? null, dismiss: close }}>
       <header><h2>{strings.composer.options}</h2><button class="icon ghost" aria-label={strings.common.close} onclick={close}><X size={19} /></button></header>
       {#if canAttach}
-        <button class="attachment" data-testid="composer-options-attach" onclick={() => { onattach(); close(); }}><Paperclip size={20} /><span>{strings.composer.attach}</span></button>
+        <button class="attachment" data-testid="composer-options-attach" onclick={() => { onattach(); close(); }}><Paperclip size={20} /><span class="ui-label">{strings.composer.attach}</span></button>
       {/if}
       {#if levels.length}
         <fieldset disabled={busy}><legend>{strings.composer.effortTitle}</legend><div class="choices">
-          {#each levels as level (level.id)}<label class:selected={effort === level.id}><input type="radio" name="mobile-effort" value={level.id} checked={effort === level.id} onchange={() => oneffort(level.id)} />{levelName(level)}</label>{/each}
+          {#each levels as level (level.id)}<label class:selected={effort === level.id}><input type="radio" name="mobile-effort" value={level.id} checked={effort === level.id} onchange={() => oneffort(level.id)} /><span class="ui-label">{levelName(level)}</span></label>{/each}
         </div></fieldset>
       {/if}
       {#if speeds.length}
         <fieldset disabled={busy}><legend>{strings.composer.speed}</legend><div class="choices">
-          {#each [{ id: null, label: strings.composer.standardSpeed }, ...speeds] as entry (entry.id)}<label class:selected={speed === entry.id}><input type="radio" name="mobile-speed" checked={speed === entry.id} onchange={() => onspeed(entry.id)} />{entry.label}</label>{/each}
+          {#each [{ id: null, label: strings.composer.standardSpeed }, ...speeds] as entry (entry.id)}<label class:selected={speed === entry.id}><input type="radio" name="mobile-speed" checked={speed === entry.id} onchange={() => onspeed(entry.id)} /><span class="ui-label">{entry.label}</span></label>{/each}
         </div></fieldset>
       {/if}
       {#if ordered.length > 0}<fieldset disabled={busy}><legend>{strings.composer.mode}</legend><div class="choices permissions">
-        {#each ordered as item (item)}<label class:selected={mode === item} title={modeHint(item)}><input type="radio" name="mobile-mode" value={item} checked={mode === item} onchange={() => onmode(item)} />{modeLabel(item)}</label>{/each}
+        {#each ordered as item (item)}<label class:selected={mode === item} title={modeHint(item)}><input type="radio" name="mobile-mode" value={item} checked={mode === item} onchange={() => onmode(item)} /><span class="ui-label">{modeLabel(item)}</span></label>{/each}
       </div><p class="hint">{modeHint(mode)}</p></fieldset>{/if}
       {#if worktree !== null}
-        <button class="worktree" aria-pressed={worktree} data-testid="composer-options-worktree" onclick={onworktree}><GitBranch size={19} /><span>{strings.composer.worktree}</span><span class="switch" class:on={worktree}></span></button>
+        <button class="worktree" aria-pressed={worktree} data-testid="composer-options-worktree" onclick={onworktree}><GitBranch size={19} /><span class="ui-label">{strings.composer.worktree}</span><span class="switch" class:on={worktree}></span></button>
       {/if}
     </div>
   {/if}

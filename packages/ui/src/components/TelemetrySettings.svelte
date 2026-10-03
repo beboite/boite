@@ -63,8 +63,8 @@
       </label>
       {#if consent.pendingDeletion}<p class="hint">{strings.telemetry.pending}</p>{/if}
       <div class="actions">
-        {#if consent.mode === 'enhanced'}<button disabled={busy} onclick={() => void dataAction('export')}>{strings.telemetry.export}</button>{/if}
-        {#if consent.pendingDeletion}<button disabled={busy} onclick={() => void dataAction('retryForget')}>{strings.telemetry.retry}</button>{/if}
+        {#if consent.mode === 'enhanced'}<button disabled={busy} onclick={() => void dataAction('export')}><span class="ui-label">{strings.telemetry.export}</span></button>{/if}
+        {#if consent.pendingDeletion}<button disabled={busy} onclick={() => void dataAction('retryForget')}><span class="ui-label">{strings.telemetry.retry}</span></button>{/if}
       </div>
     {/if}
     {#if error}<p role="alert">{error}</p>{/if}

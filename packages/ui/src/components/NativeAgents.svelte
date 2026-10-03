@@ -16,7 +16,7 @@
         <span class="identity"><strong>{agent.name ?? agent.task ?? fill(strings.delegation.profileName, { count: String(index + 1) })}</strong>{#if agent.model || agent.effort}<small>{agent.model ?? ''}{#if agent.model && agent.effort} · {/if}{agent.effort ?? ''}</small>{/if}</span>
         <span class="status" data-status={agent.status}>
           {#if agent.status === 'running'}<StatusMark status="running" />{/if}
-          {strings.delegation.nativeStatus[agent.status]}
+          <span class="ui-label">{strings.delegation.nativeStatus[agent.status]}</span>
           {#if source === 'process'}<AgentElapsed startedAt={agent.startedAt} finishedAt={agent.finishedAt ?? null} active={agent.status === 'running'} />{/if}
         </span>
       </summary>

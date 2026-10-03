@@ -25,9 +25,9 @@
     <span class="title">{agents.length === 1 ? strings.delegation.startedOne : fill(strings.delegation.startedMany, { count: String(agents.length) })}</span>
     <span class="progress" data-testid="delegation-progress">
       {#if progress.completed === agents.length}<CircleCheck size={13} />{:else}<UsersRound size={13} />{/if}
-      {fill(strings.delegation.completed, { done: String(progress.completed), total: String(agents.length) })}
-      {#if progress.failed}<span class="failed">· {fill(strings.delegation.failed, { count: String(progress.failed) })}</span>{/if}
-      {#if progress.stopped}<span>· {fill(strings.delegation.stopped, { count: String(progress.stopped) })}</span>{/if}
+      <span class="ui-label">{fill(strings.delegation.completed, { done: String(progress.completed), total: String(agents.length) })}</span>
+      {#if progress.failed}<span class="failed ui-label">· {fill(strings.delegation.failed, { count: String(progress.failed) })}</span>{/if}
+      {#if progress.stopped}<span class="ui-label">· {fill(strings.delegation.stopped, { count: String(progress.stopped) })}</span>{/if}
     </span>
   </span>
   <span class="timing">{#if progress.startedAt !== null}<AgentElapsed startedAt={progress.startedAt} finishedAt={progress.finishedAt} active={progress.active} />{/if}</span>

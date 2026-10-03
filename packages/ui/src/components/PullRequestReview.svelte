@@ -34,12 +34,12 @@
 </script>
 
 <section class="review" data-testid="pr-review">
-  <div class="actions"><button type="button" class="chip" onclick={onback}><ArrowLeft size={16} />{strings.prReview.back}</button><button type="button" class="chip" disabled={busy} aria-label={strings.prReview.refresh} onclick={() => void load()}><RefreshCw size={16} /></button><a class="chip" href={url} target="_blank" rel="noopener noreferrer"><ExternalLink size={15} />{strings.prReview.github}</a></div>
+  <div class="actions"><button type="button" class="chip" onclick={onback}><ArrowLeft size={16} /><span class="ui-label">{strings.prReview.back}</span></button><button type="button" class="chip" disabled={busy} aria-label={strings.prReview.refresh} onclick={() => void load()}><RefreshCw size={16} /></button><a class="chip" href={url} target="_blank" rel="noopener noreferrer"><ExternalLink size={15} />{strings.prReview.github}</a></div>
   {#if error}<p role="alert" class="error">{error}</p>{/if}
   {#if busy}<p role="status">{strings.prReview.loading}</p>{/if}
   {#if review}
     <h3>{review.title}</h3><p class="branches">{review.head} → {review.base} · {review.state}</p>
-    <nav aria-label={strings.prReview.open}>{#each (['overview', 'files', 'comments', 'checks'] as const) as choice}<button type="button" class="chip" class:active={tab === choice} aria-pressed={tab === choice} onclick={() => { tab = choice; }} data-testid={`pr-review-${choice}`}>{strings.prReview[choice]}{#if choice === 'files'} <span>{files.length}{hasMore ? '+' : ''}</span>{:else if choice === 'checks'} <span>{review.checks.length}</span>{:else if choice === 'comments'} <span>{review.comments.length + review.reviews.length}</span>{/if}</button>{/each}</nav>
+    <nav aria-label={strings.prReview.open}>{#each (['overview', 'files', 'comments', 'checks'] as const) as choice}<button type="button" class="chip" class:active={tab === choice} aria-pressed={tab === choice} onclick={() => { tab = choice; }} data-testid={`pr-review-${choice}`}><span class="ui-label">{strings.prReview[choice]}</span>{#if choice === 'files'} <span class="ui-label">{files.length}{hasMore ? '+' : ''}</span>{:else if choice === 'checks'} <span class="ui-label">{review.checks.length}</span>{:else if choice === 'comments'} <span class="ui-label">{review.comments.length + review.reviews.length}</span>{/if}</button>{/each}</nav>
     {#if review.truncated || shortened}<p class="notice" role="status">{strings.prReview.truncated}</p>{/if}
     {#if tab === 'overview'}<div class="prose">{@html renderMarkdown(review.body || strings.prReview.empty)}</div>
     {:else if tab === 'checks'}
@@ -57,7 +57,7 @@
           {/if}
         </article>
       {/each}
-      {#if hasMore}<button type="button" class="chip" disabled={busy} onclick={() => void more()}>{strings.prReview.more}</button>{/if}
+      {#if hasMore}<button type="button" class="chip" disabled={busy} onclick={() => void more()}><span class="ui-label">{strings.prReview.more}</span></button>{/if}
     {/if}
   {/if}
 </section>

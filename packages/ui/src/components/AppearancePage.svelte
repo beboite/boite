@@ -165,20 +165,20 @@
   <section class="card" id="settings-theme">
     <h2>{strings.settings.display}</h2>
     <div class="switch-row">
-      <span class="text">{strings.settings.language}</span>
+      <span class="text ui-label">{strings.settings.language}</span>
       <div class="segmented" role="group" aria-label={strings.settings.language}>
         <button type="button" class:on={locale === 'system'} aria-pressed={locale === 'system'} data-testid="locale-system" onclick={() => pickLocale('system')}>
-          {strings.settings.languageSystem}
+          <span class="ui-label">{strings.settings.languageSystem}</span>
         </button>
         {#each LOCALES as id (id)}
           <button type="button" class:on={locale === id} aria-pressed={locale === id} data-testid="locale-{id}" onclick={() => pickLocale(id)}>
-            {strings.settings.languageNames[id]}
+            <span class="ui-label">{strings.settings.languageNames[id]}</span>
           </button>
         {/each}
       </div>
     </div>
     <div class="switch-row">
-      <span class="text">{strings.settings.theme}</span>
+      <span class="text ui-label">{strings.settings.theme}</span>
       <div class="segmented" role="group" aria-label={strings.settings.theme}>
         {#each themes as option (option.id)}
           <button
@@ -188,23 +188,23 @@
             data-testid="theme-{option.id}"
             onclick={() => pickTheme(option.id)}
           >
-            {option.label}
+            <span class="ui-label">{option.label}</span>
           </button>
         {/each}
       </div>
     </div>
     <ThemeColors />
     <div class="switch-row">
-      <span class="text">{strings.settings.chatWidth}</span>
+      <span class="text ui-label">{strings.settings.chatWidth}</span>
       <div class="segmented" role="group" aria-label={strings.settings.chatWidth}>
         {#each widths as option (option.id)}
-          <button type="button" class:on={chatWidth === option.id} aria-pressed={chatWidth === option.id} data-testid="chat-width-{option.id}" onclick={() => pickChatWidth(option.id)}>{option.label}</button>
+          <button type="button" class:on={chatWidth === option.id} aria-pressed={chatWidth === option.id} data-testid="chat-width-{option.id}" onclick={() => pickChatWidth(option.id)}><span class="ui-label">{option.label}</span></button>
         {/each}
       </div>
     </div>
     {#if hasMaterial}
       <div class="switch-row">
-        <span class="text">
+        <span class="text ui-label">
           {strings.settings.material}
         </span>
         <div class="segmented" role="group" aria-label={strings.settings.material}>
@@ -216,7 +216,7 @@
               data-testid="glass-{option.id}"
               onclick={() => pickMaterial(option.id)}
             >
-              {option.label}
+              <span class="ui-label">{option.label}</span>
             </button>
           {/each}
         </div>
@@ -227,21 +227,21 @@
   <section class="card" id="settings-reading">
     <h2>{strings.settings.reading}</h2>
     <div class="switch-row faces-row">
-      <span class="text">{strings.settings.font}</span>
+      <span class="text ui-label">{strings.settings.font}</span>
       <div class="faces" role="group" aria-label={strings.settings.font}>
         {#each faces as face (face.id)}
           <button type="button" class="face" style:font-family="var(--face-{face.id})" aria-pressed={font === face.id} data-testid="font-{face.id}" onclick={() => pickFont(face.id)}>
-            <span class="face-name">{face.name}</span>
-            <span class="face-sample">{strings.settings.fontSample}</span>
+            <span class="face-name ui-label">{face.name}</span>
+            <span class="face-sample ui-label">{strings.settings.fontSample}</span>
           </button>
         {/each}
       </div>
     </div>
     <div class="switch-row">
-      <span class="text">{strings.settings.monoFont}</span>
+      <span class="text ui-label">{strings.settings.monoFont}</span>
       <div class="segmented monos" role="group" aria-label={strings.settings.monoFont}>
         {#each monos as option (option.id)}
-          <button type="button" class:on={mono === option.id} style:font-family="var(--face-mono-{option.id})" aria-pressed={mono === option.id} data-testid="font-mono-{option.id}" onclick={() => pickMono(option.id)}>{option.name}</button>
+          <button type="button" class:on={mono === option.id} style:font-family="var(--face-mono-{option.id})" aria-pressed={mono === option.id} data-testid="font-mono-{option.id}" onclick={() => pickMono(option.id)}><span class="ui-label">{option.name}</span></button>
         {/each}
       </div>
     </div>
@@ -250,7 +250,7 @@
         <span class="text">{strings.settings.zoom}<InfoTip topic={strings.settings.zoom} text={strings.settings.zoomHint} /></span>
         <div class="segmented zoom" role="group" aria-label={strings.settings.zoom}>
           <button type="button" aria-label={strings.settings.zoomOut} title={strings.settings.zoomOut} disabled={zoom <= smallest} data-testid="zoom-out" onclick={() => zoomTo(stepZoom(wantedZoom(), -1))}><Minus size={14} strokeWidth={2} /></button>
-          <button type="button" class="zoom-value" title={strings.settings.zoomReset} aria-label={strings.settings.zoomReset} data-testid="zoom-reset" onclick={() => zoomTo(ZOOM_DEFAULT)}>{percent(zoom * 100)}</button>
+          <button type="button" class="zoom-value" title={strings.settings.zoomReset} aria-label={strings.settings.zoomReset} data-testid="zoom-reset" onclick={() => zoomTo(ZOOM_DEFAULT)}><span class="ui-label">{percent(zoom * 100)}</span></button>
           <button type="button" aria-label={strings.settings.zoomIn} title={strings.settings.zoomIn} disabled={zoom >= largest} data-testid="zoom-in" onclick={() => zoomTo(stepZoom(wantedZoom(), 1))}><Plus size={14} strokeWidth={2} /></button>
         </div>
       </div>
@@ -262,18 +262,18 @@
   <section class="card" id="settings-workspace">
     <h2>{strings.settings.workspace}</h2>
     <div class="switch-row">
-      <span class="text">{strings.settings.startIn}</span>
+      <span class="text ui-label">{strings.settings.startIn}</span>
       <div class="segmented" role="group" aria-label={strings.settings.startIn}>
         {#each starts as option (option.id)}
-          <button type="button" class:on={work.current.startIn === option.id} aria-pressed={work.current.startIn === option.id} data-testid="start-in-{option.id}" onclick={() => work.setStartIn(option.id)}>{option.label}</button>
+          <button type="button" class:on={work.current.startIn === option.id} aria-pressed={work.current.startIn === option.id} data-testid="start-in-{option.id}" onclick={() => work.setStartIn(option.id)}><span class="ui-label">{option.label}</span></button>
         {/each}
       </div>
     </div>
     <div class="switch-row">
-      <span class="text">{strings.settings.panelStart}</span>
+      <span class="text ui-label">{strings.settings.panelStart}</span>
       <div class="segmented" role="group" aria-label={strings.settings.panelStart}>
         {#each panels as option (option.id)}
-          <button type="button" class:on={work.current.panel === option.id} aria-pressed={work.current.panel === option.id} data-testid="panel-start-{option.id}" onclick={() => work.setPanel(option.id)}>{option.label}</button>
+          <button type="button" class:on={work.current.panel === option.id} aria-pressed={work.current.panel === option.id} data-testid="panel-start-{option.id}" onclick={() => work.setPanel(option.id)}><span class="ui-label">{option.label}</span></button>
         {/each}
       </div>
     </div>
@@ -286,7 +286,7 @@
       <h2>{strings.controls.heading}<InfoTip topic={strings.controls.heading} text={strings.controls.headingHint} /></h2>
       <div class="segmented" role="group" aria-label={strings.controls.preset}>
         {#each presets as option (option.id)}
-          <button type="button" class:on={preset === option.id} aria-pressed={preset === option.id} data-testid="controls-preset-{option.id}" onclick={() => work.showPreset(option.id)}>{option.label}</button>
+          <button type="button" class:on={preset === option.id} aria-pressed={preset === option.id} data-testid="controls-preset-{option.id}" onclick={() => work.showPreset(option.id)}><span class="ui-label">{option.label}</span></button>
         {/each}
       </div>
     </div>
@@ -305,7 +305,7 @@
                   <Icon size={15} strokeWidth={1.75} />
                 {/if}
               </span>
-              <span class="name">{entry.label}</span>
+              <span class="name ui-label">{entry.label}</span>
               <input type="checkbox" role="switch" checked={shown} data-testid="control-{entry.id}" onchange={(event) => work.show(entry.id, event.currentTarget.checked)} />
             </label>
           {/each}

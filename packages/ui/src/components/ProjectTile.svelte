@@ -49,7 +49,7 @@
     ><svg viewBox="-2 -2 28 28" width={size - 2} height={size - 2} role="img" aria-label={glyph.title}><path d={glyph.path} fill={glyph.mono ? 'currentColor' : glyph.hex} /></svg></span
   >
 {:else}
-  <span class="tile letter" style:--tile={`${size}px`} data-testid="project-tile" data-kind="letter">{initial}</span>
+  <span class="tile letter" style:--tile={`${size}px`} data-testid="project-tile" data-kind="letter"><span class="ui-label">{initial}</span></span>
 {/if}
 
 <style>

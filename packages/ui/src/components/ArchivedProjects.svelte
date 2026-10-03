@@ -20,7 +20,7 @@
   <div class="archived" data-testid="archived-projects">
     <button class="ghost small toggle" aria-expanded={open} data-testid="archived-projects-toggle" onclick={() => { visited = true; open = !open; }}>
       <span class="caret" class:open><ChevronRight size={11} /></span>
-      {fill(strings.sidebar.archivedProjects, { count: String(entries.length) })}
+      <span class="ui-label">{fill(strings.sidebar.archivedProjects, { count: String(entries.length) })}</span>
     </button>
     <div class="motion-fold" class:expanded={open} inert={!open}><div>
       {#if visited}
@@ -31,13 +31,13 @@
               <span class="name" title={multi ? `${project.path} · ${machine.label}` : project.path}>{projectName(project)}</span>
               <span class="machine" title={machine.label}>
                 <MachineIcon icon={machine.icon} os={machine.store.core?.os} size={11} />
-                <span class="machine-name">{machine.label}</span>
+                <span class="machine-name ui-label">{machine.label}</span>
               </span>
             </div>
             <button
               class="ghost small"
               data-testid="archived-project-restore"
-              onclick={() => void machine.store.archiveProject(project.id, false)}>{strings.sidebar.restoreProject}</button
+              onclick={() => void machine.store.archiveProject(project.id, false)}><span class="ui-label">{strings.sidebar.restoreProject}</span></button
             >
           </li>
         {/each}

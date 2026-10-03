@@ -76,12 +76,12 @@
         {#if app}<AppUpdateContent beforeInstall={close} />{/if}
         {#each servers as machine (machine.id)}
           <button class="ghost server" data-testid="nav-server-update" onclick={() => { close(); void workspace.select(machine.store).then(() => machine.store.showSettings('machines')); }}>
-            <span>{machine.label}</span><span class="server-version">{machine.store.serverUpdater.snapshot?.version}</span>
+            <span class="ui-label">{machine.label}</span><span class="server-version ui-label">{machine.store.serverUpdater.snapshot?.version}</span>
           </button>
         {/each}
       </div>
       {#if appUpdater.announceReady}
-        <footer><button class="ghost small" onclick={() => { appUpdater.dismiss(); close(); }} data-testid="update-notice-dismiss">{strings.appUpdate.hideReminder}</button></footer>
+        <footer><button class="ghost small" onclick={() => { appUpdater.dismiss(); close(); }} data-testid="update-notice-dismiss"><span class="ui-label">{strings.appUpdate.hideReminder}</span></button></footer>
       {/if}
     </div>
   {/if}

@@ -95,8 +95,8 @@
 
 {#snippet actions()}
   <div class="agent-form-actions">
-    <button class="primary" type="submit" disabled={view.pending || !name.trim() || kind === 'profile' && creating && (!selection.accountId || !selection.model)} data-testid="agent-save">{creating ? labels.createAction : labels.save}</button>
-    {#if creating}<button type="button" class="ghost" onclick={oncancel}>{labels.cancel}</button>{/if}
+    <button class="primary" type="submit" disabled={view.pending || !name.trim() || kind === 'profile' && creating && (!selection.accountId || !selection.model)} data-testid="agent-save"><span class="ui-label">{creating ? labels.createAction : labels.save}</span></button>
+    {#if creating}<button type="button" class="ghost" onclick={oncancel}><span class="ui-label">{labels.cancel}</span></button>{/if}
   </div>
 {/snippet}
 
@@ -110,7 +110,7 @@
     {#if agentOptions.length}
       <div class="agent-checks">
         {#each agentOptions as agent (agent.id)}
-          <label class="agent-chip-check"><input type="checkbox" checked={memberIds.includes(agent.id)} onchange={() => { memberIds = toggle(memberIds, agent.id); }} />{agent.name}</label>
+          <label class="agent-chip-check"><input type="checkbox" checked={memberIds.includes(agent.id)} onchange={() => { memberIds = toggle(memberIds, agent.id); }} /><span class="ui-label">{agent.name}</span></label>
         {/each}
       </div>
     {:else}<p class="hint">{labels.noMembers}</p>{/if}
@@ -127,13 +127,13 @@
       <label class="agent-field">{labels.instructions}<textarea bind:value={instructions} rows="5" maxlength="32000"></textarea></label>
       {#if embedded}
         <div class="agent-field"><span>{labels.status}</span>
-          <Menu placement="bottom" label={labels.status} items={(['active', 'paused', 'archived'] as const).map(id => ({ id, label: labels[id], active: status === id }))} onpick={id => { status = id as AgentProfile['status']; }}>{labels[status]}</Menu>
+          <Menu placement="bottom" label={labels.status} items={(['active', 'paused', 'archived'] as const).map(id => ({ id, label: labels[id], active: status === id }))} onpick={id => { status = id as AgentProfile['status']; }}><span class="ui-label">{labels[status]}</span></Menu>
         </div>
       {/if}
     {:else if kind === 'group'}
       {@render members()}
       <div class="agent-field"><span class="agent-label">{labels.mode}<InfoTip topic={labels.mode} text={labels.modeHint} /></span>
-        <Menu placement="bottom" label={labels.mode} items={(['mentions', 'round', 'autonomous'] as const).map(id => ({ id, label: labels[id], active: mode === id }))} onpick={id => { mode = id as AgentGroup['mode']; }}>{labels[mode]}</Menu>
+        <Menu placement="bottom" label={labels.mode} items={(['mentions', 'round', 'autonomous'] as const).map(id => ({ id, label: labels[id], active: mode === id }))} onpick={id => { mode = id as AgentGroup['mode']; }}><span class="ui-label">{labels[mode]}</span></Menu>
       </div>
     {:else if kind === 'team'}
       <label class="agent-field">{labels.description}<textarea bind:value={description} rows="2"></textarea></label>
@@ -145,14 +145,14 @@
       <label class="agent-field">{labels.objective}<textarea required bind:value={objective} rows="4" maxlength="32000"></textarea></label>
       <label class="agent-field">{labels.expectedResult}<textarea bind:value={expectedResult} rows="2" maxlength="8000"></textarea></label>
       <div class="agent-field"><span>{labels.team}</span>
-        <Menu placement="bottom" label={labels.team} items={[{ id: '', label: labels.noTeam }, ...(view.snapshot?.teams.map(t => ({ id: t.id, label: t.name })) ?? [])]} onpick={id => { teamId = id || null; memberIds = memberIds.filter(a => !id || view.snapshot?.teams.find(t => t.id === id)?.members.some(m => m.agentId === a)); }}>{view.snapshot?.teams.find(t => t.id === teamId)?.name ?? labels.noTeam}</Menu>
+        <Menu placement="bottom" label={labels.team} items={[{ id: '', label: labels.noTeam }, ...(view.snapshot?.teams.map(t => ({ id: t.id, label: t.name })) ?? [])]} onpick={id => { teamId = id || null; memberIds = memberIds.filter(a => !id || view.snapshot?.teams.find(t => t.id === id)?.members.some(m => m.agentId === a)); }}><span class="ui-label">{view.snapshot?.teams.find(t => t.id === teamId)?.name ?? labels.noTeam}</span></Menu>
       </div>
       {@render members()}
     {/if}
 
   {#if kind === 'profile' && embedded}
       <fieldset class="agent-field"><legend>{labels.tools}</legend>
-        <div class="agent-checks">{#each TOOLS as tool (tool)}<label class="agent-chip-check"><input type="checkbox" checked={tools.includes(tool)} onchange={() => { tools = toggle(tools, tool); }} />{labels[tool]}</label>{/each}</div>
+        <div class="agent-checks">{#each TOOLS as tool (tool)}<label class="agent-chip-check"><input type="checkbox" checked={tools.includes(tool)} onchange={() => { tools = toggle(tools, tool); }} /><span class="ui-label">{labels[tool]}</span></label>{/each}</div>
       </fieldset>
       {#if provider?.protocol === 'agy'}{@render kebacc()}{/if}
     {/if}
@@ -167,7 +167,7 @@
         <div class="agent-inline">
           <ModelPicker store={view.store} choice={selection} onpick={patch => { selection = { ...selection, effort: null, ...patch }; }} />
           {#if effort?.levels.length}<EffortSlider levels={effort.levels} active={selection.effort ?? effort.default} onpick={id => { selection.effort = id; }} />{/if}
-          <Menu placement="bottom" label={labels.permissions} items={PERMISSIONS.map(id => ({ id, label: permissionLabels[id], active: selection.permissionMode === id }))} onpick={id => { selection.permissionMode = id as ExecutionSelection['permissionMode']; }}>{permissionLabels[selection.permissionMode]}</Menu>
+          <Menu placement="bottom" label={labels.permissions} items={PERMISSIONS.map(id => ({ id, label: permissionLabels[id], active: selection.permissionMode === id }))} onpick={id => { selection.permissionMode = id as ExecutionSelection['permissionMode']; }}><span class="ui-label">{permissionLabels[selection.permissionMode]}</span></Menu>
         </div>
         {#if provider?.capabilities.approvals === false}<p class="hint">{labels.noApprovals}</p>{/if}
       {:else}<p class="hint">{labels.noAccount}</p>{/if}
@@ -179,31 +179,31 @@
     <summary>{labels.advanced}</summary>
     {#if kind === 'profile'}
       <fieldset class="agent-field"><legend>{labels.tools}</legend>
-        <div class="agent-checks">{#each TOOLS as tool (tool)}<label class="agent-chip-check"><input type="checkbox" checked={tools.includes(tool)} onchange={() => { tools = toggle(tools, tool); }} />{labels[tool]}</label>{/each}</div>
+        <div class="agent-checks">{#each TOOLS as tool (tool)}<label class="agent-chip-check"><input type="checkbox" checked={tools.includes(tool)} onchange={() => { tools = toggle(tools, tool); }} /><span class="ui-label">{labels[tool]}</span></label>{/each}</div>
       </fieldset>
       {#if provider?.protocol === 'agy'}{@render kebacc()}{/if}
     {:else if kind === 'group'}
       <div class="agent-columns"><label class="agent-field">{labels.maxTurns}<input type="number" min="1" max="100" required bind:value={maxTurns} /></label><label class="agent-field">{labels.perAgent}<input type="number" min="1" max="20" required bind:value={perAgent} /></label></div>
     {:else if kind === 'team'}
       <div class="agent-field"><span>{labels.group}</span>
-        <Menu placement="bottom" label={labels.group} items={[{ id: '', label: labels.noGroup }, ...(view.snapshot?.groups.map(g => ({ id: g.id, label: g.name })) ?? [])]} onpick={id => { groupId = id || null; }}>{view.snapshot?.groups.find(g => g.id === groupId)?.name ?? labels.noGroup}</Menu>
+        <Menu placement="bottom" label={labels.group} items={[{ id: '', label: labels.noGroup }, ...(view.snapshot?.groups.map(g => ({ id: g.id, label: g.name })) ?? [])]} onpick={id => { groupId = id || null; }}><span class="ui-label">{view.snapshot?.groups.find(g => g.id === groupId)?.name ?? labels.noGroup}</span></Menu>
       </div>
       {#if view.store.projects.length}
-        <fieldset class="agent-field"><legend>{labels.project}</legend><div class="agent-checks">{#each view.store.projects as project (project.id)}<label class="agent-chip-check"><input type="checkbox" checked={projectIds.includes(project.id)} onchange={() => { projectIds = toggle(projectIds, project.id); }} />{project.name}</label>{/each}</div></fieldset>
+        <fieldset class="agent-field"><legend>{labels.project}</legend><div class="agent-checks">{#each view.store.projects as project (project.id)}<label class="agent-chip-check"><input type="checkbox" checked={projectIds.includes(project.id)} onchange={() => { projectIds = toggle(projectIds, project.id); }} /><span class="ui-label">{project.name}</span></label>{/each}</div></fieldset>
       {/if}
     {:else}
       <div class="agent-field"><span>{labels.project}</span>
-        <Menu placement="bottom" label={labels.project} items={[{ id: '', label: labels.noProject }, ...view.store.projects.map(p => ({ id: p.id, label: p.name }))]} onpick={id => { projectId = id || null; }}>{view.store.projects.find(p => p.id === projectId)?.name ?? labels.noProject}</Menu>
+        <Menu placement="bottom" label={labels.project} items={[{ id: '', label: labels.noProject }, ...view.store.projects.map(p => ({ id: p.id, label: p.name }))]} onpick={id => { projectId = id || null; }}><span class="ui-label">{view.store.projects.find(p => p.id === projectId)?.name ?? labels.noProject}</span></Menu>
       </div>
       <div class="agent-columns">
         <label class="agent-field">{labels.maxTurns}<input required type="number" min="1" max="1000" bind:value={maxTurns} /></label>
         <label class="agent-field">{labels.minutes}<input required type="number" min="1" max="1440" bind:value={minutes} /></label>
         <label class="agent-field">{labels.tokens}<input type="number" min="1" step="1" bind:value={tokens} /></label>
       </div>
-      {#if resourceOptions.length}<fieldset class="agent-field"><legend>{labels.resources}</legend><div class="agent-checks">{#each resourceOptions as resource (resource.id)}<label class="agent-chip-check"><input type="checkbox" checked={resourceIds.includes(resource.id)} onchange={() => { resourceIds = toggle(resourceIds, resource.id); }} />{resource.name} · {labels[resource.access]}</label>{/each}</div></fieldset>{/if}
+      {#if resourceOptions.length}<fieldset class="agent-field"><legend>{labels.resources}</legend><div class="agent-checks">{#each resourceOptions as resource (resource.id)}<label class="agent-chip-check"><input type="checkbox" checked={resourceIds.includes(resource.id)} onchange={() => { resourceIds = toggle(resourceIds, resource.id); }} /><span class="ui-label">{resource.name} · {labels[resource.access]}</span></label>{/each}</div></fieldset>{/if}
     {/if}
     {#if kind === 'group' || kind === 'team'}
-      <label class="switch-row"><span class="text">{labels.paused}</span><input type="checkbox" role="switch" bind:checked={paused} /></label>
+      <label class="switch-row"><span class="text ui-label">{labels.paused}</span><input type="checkbox" role="switch" bind:checked={paused} /></label>
     {/if}
   </details>
   {/if}

@@ -28,17 +28,17 @@
 <div class="server-update" data-testid="server-update-card">
   <div class="update-row">
     <div class="version">
-      <span>{strings.serverUpdate.heading}</span>
-      <span class="number">{state?.currentVersion ?? store.core?.version ?? ''}</span>
-      {#if state?.version && updater.offered}<span class="next"><ArrowRight size={12} aria-hidden="true" /><span class="number target" data-testid="server-update-target">{state.version}</span></span>{/if}
+      <span class="ui-label">{strings.serverUpdate.heading}</span>
+      <span class="number ui-label">{state?.currentVersion ?? store.core?.version ?? ''}</span>
+      {#if state?.version && updater.offered}<span class="next"><ArrowRight size={12} aria-hidden="true" /><span class="number target ui-label" data-testid="server-update-target">{state.version}</span></span>{/if}
     </div>
     {#if store.owner}
       {#if state?.mode === 'systemd' && updater.offered && !active}
-        <button class="primary small" disabled={!connected || updater.busy || updater.preparing} onclick={() => void updater.install(label)} data-testid="server-update-install"><CircleArrowDown size={14} />{strings.appUpdate.readyAction}</button>
+        <button class="primary small" disabled={!connected || updater.busy || updater.preparing} onclick={() => void updater.install(label)} data-testid="server-update-install"><CircleArrowDown size={14} /><span class="ui-label">{strings.appUpdate.readyAction}</span></button>
       {:else if active && state?.phase !== 'installing'}
-        <button class="small" disabled={!connected || updater.busy} onclick={() => void updater.cancel()} data-testid="server-update-cancel">{strings.common.cancel}</button>
+        <button class="small" disabled={!connected || updater.busy} onclick={() => void updater.cancel()} data-testid="server-update-cancel"><span class="ui-label">{strings.common.cancel}</span></button>
       {:else if state?.mode === 'systemd' && !active}
-        <button class="ghost small check" title={checked} disabled={!connected || updater.busy || state.phase === 'checking'} onclick={() => void updater.load(true)} data-testid="server-update-check"><RefreshCw size={13} class={updater.busy || state.phase === 'checking' ? 'spinning' : undefined} />{updater.busy || state.phase === 'checking' ? strings.appUpdate.checkingAction : strings.appUpdate.check}</button>
+        <button class="ghost small check" title={checked} disabled={!connected || updater.busy || state.phase === 'checking'} onclick={() => void updater.load(true)} data-testid="server-update-check"><RefreshCw size={13} class={updater.busy || state.phase === 'checking' ? 'spinning' : undefined} /><span class="ui-label">{updater.busy || state.phase === 'checking' ? strings.appUpdate.checkingAction : strings.appUpdate.check}</span></button>
       {/if}
     {/if}
   </div>
@@ -52,7 +52,7 @@
     {/if}
     {#if state.version && updater.offered}
       <div class="metadata">
-        <a class="release" href={`https://github.com/beboite/boite/releases/tag/v${encodeURIComponent(state.version)}`} target="_blank" rel="noopener noreferrer">{strings.serverUpdate.release}<ExternalLink size={12} /></a>
+        <a class="release" href={`https://github.com/beboite/boite/releases/tag/v${encodeURIComponent(state.version)}`} target="_blank" rel="noopener noreferrer"><span class="ui-label">{strings.serverUpdate.release}</span><ExternalLink size={12} /></a>
         <details class="update-details" data-testid="server-update-details">
           <summary data-testid="server-update-details-toggle">{strings.serverUpdate.details}</summary>
           <p>{strings.serverUpdate.timing}</p>
@@ -67,10 +67,10 @@
       <summary>{strings.serverUpdate.manualTitle}</summary>
       <p>{updater.legacy ? strings.serverUpdate.legacy : state?.mode === 'docker' ? strings.serverUpdate.docker : strings.serverUpdate.manual}</p>
       {#if state?.mode === 'docker'}<code>docker compose pull &amp;&amp; docker compose up -d</code>{/if}
-      <a class="release" href="https://github.com/beboite/boite/blob/main/docs/server.md" target="_blank" rel="noopener noreferrer">{strings.serverUpdate.guide}<ExternalLink size={12} /></a>
+      <a class="release" href="https://github.com/beboite/boite/blob/main/docs/server.md" target="_blank" rel="noopener noreferrer"><span class="ui-label">{strings.serverUpdate.guide}</span><ExternalLink size={12} /></a>
     </details>
   {/if}
-  {#if updater.error}<p class="error" role="alert">{updater.error}</p><button class="ghost small" disabled={!connected || updater.busy} onclick={() => void updater.load()}>{strings.appUpdate.retry}</button>{/if}
+  {#if updater.error}<p class="error" role="alert">{updater.error}</p><button class="ghost small" disabled={!connected || updater.busy} onclick={() => void updater.load()}><span class="ui-label">{strings.appUpdate.retry}</span></button>{/if}
 </div>
 
 <style>

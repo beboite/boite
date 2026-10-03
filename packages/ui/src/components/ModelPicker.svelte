@@ -297,7 +297,7 @@
     <!-- Nothing to pick from yet: the chip is the way to get something. -->
     <button type="button" class="chip trigger connect" data-testid="composer-connect" onclick={() => store.openConnect()}>
       <Plug size={14} strokeWidth={1.75} />
-      <span class="label">{strings.connect.button}</span>
+      <span class="label ui-label">{strings.connect.button}</span>
     </button>
   {:else}
   <button
@@ -317,7 +317,7 @@
     {:else}
       <Sparkles size={14} strokeWidth={1.75} />
     {/if}
-    <span class="label">{label}</span>
+    <span class="label ui-label">{label}</span>
     <ChevronDown size={12} strokeWidth={2} />
   </button>
   {/if}
@@ -358,9 +358,9 @@
             onclick={() => pickModel(model)}
           >
             <span class="mark"></span>
-            <span class="name">{model.name}</span>
+            <span class="name ui-label">{model.name}</span>
             {#if model.badge === 'new'}
-              <span class="badge">{strings.composer.newBadge}</span>
+              <span class="badge"><span class="ui-label">{strings.composer.newBadge}</span></span>
             {/if}
           </button>
           <button type="button" class="favorite-button" data-testid="model-favorite" data-favorite-model={model.id} aria-label={favorite(model) ? strings.composer.unfavorite : strings.composer.favorite} aria-pressed={favorite(model)} onclick={() => { if (shown && shownAccountId) store.toggleFavorite(shown.id, shownAccountId, model); }}><Star size={14} fill={favorite(model) ? 'currentColor' : 'none'} /></button>
@@ -368,7 +368,7 @@
         {/snippet}
 
         {#if favoritesOpen}
-          <div class="head"><span class="provider-name">{strings.composer.favorites}</span></div>
+          <div class="head"><span class="provider-name ui-label">{strings.composer.favorites}</span></div>
           <div class="model-list">
           {#each favorites as entry (`${entry.providerId}:${entry.accountId}:${entry.model.id}`)}
             <div class="model-entry">
@@ -381,7 +381,7 @@
           </div>
         {:else}
         <div class="head">
-          <span class="provider-name">{shown ? shown.name : strings.composer.models}</span>
+          <span class="provider-name ui-label">{shown ? shown.name : strings.composer.models}</span>
           <AccountSeats {shown} {seats} {shownAccountId} {choice} {locked} busy={disabled || pickPending} onpick={pickSeat} />
         </div>
         {#key `${shown?.id}:${shownAccountId}`}
@@ -401,7 +401,7 @@
               data-testid="picker-install-settings"
               onclick={openInstall}
             >
-              {strings.composer.installInSettings}
+              <span class="ui-label">{strings.composer.installInSettings}</span>
             </button>
           {/if}
         {:else if pending}
@@ -427,7 +427,7 @@
               {/each}
             {/each}
             {#if capped}
-              <button type="button" class="row fold small" data-row data-testid="picker-show-all" onclick={() => { expandedFor = shown?.id ?? null; searchBox?.focus(); }}>{fill(strings.composer.showAllModels, { count: String(filteredCurrent.length) })}</button>
+              <button type="button" class="row fold small" data-row data-testid="picker-show-all" onclick={() => { expandedFor = shown?.id ?? null; searchBox?.focus(); }}><span class="ui-label">{fill(strings.composer.showAllModels, { count: String(filteredCurrent.length) })}</span></button>
             {/if}
           {:else}
             {#each filteredCurrent as model (model.id)}
@@ -447,7 +447,7 @@
               aria-expanded={legacyOpen}
               onclick={() => legacy.toggle()}
             >
-              <span class="name muted">{strings.composer.legacyModels}</span>
+              <span class="name muted ui-label">{strings.composer.legacyModels}</span>
               <ChevronRight size={14} strokeWidth={2} />
             </button>
           {/if}
@@ -464,7 +464,7 @@
   {#if popover.shown && legacy.shown && !favoritesOpen && !pending && filteredLegacy.length > 0}
     <div class="popover legacy-menu" class:closing={legacy.closing} role="menu" tabindex="-1" data-testid="picker-legacy-menu" aria-label={strings.composer.legacyModels} use:legacy.attach onanimationend={legacy.end} use:floating={{ anchor: () => menu ?? null, side: 'right' }} {onkeydown}>
       <div class="column models">
-        <div class="head"><button type="button" class="icon small legacy-back" aria-label={strings.settings.back} onclick={() => legacy.hide()}><ChevronRight size={14} style="transform: rotate(180deg)" /></button><span class="provider-name">{strings.composer.legacyModels}</span></div>
+        <div class="head"><button type="button" class="icon small legacy-back" aria-label={strings.settings.back} onclick={() => legacy.hide()}><ChevronRight size={14} style="transform: rotate(180deg)" /></button><span class="provider-name ui-label">{strings.composer.legacyModels}</span></div>
                 {#each filteredLegacy as model (model.id)}
                   <div class="model-entry">
                   <button
@@ -478,7 +478,7 @@
                     onclick={() => pickModel(model)}
                   >
                     <span class="mark"></span>
-                    <span class="name">{model.name}</span>
+                    <span class="name ui-label">{model.name}</span>
                   </button>
                   <button type="button" class="favorite-button" tabindex={legacyOpen ? 0 : -1} aria-label={favorite(model) ? strings.composer.unfavorite : strings.composer.favorite} aria-pressed={favorite(model)} onclick={() => { if (shown && shownAccountId) store.toggleFavorite(shown.id, shownAccountId, model); }}><Star size={14} fill={favorite(model) ? 'currentColor' : 'none'} /></button>
                   </div>

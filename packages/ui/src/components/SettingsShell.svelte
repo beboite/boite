@@ -239,7 +239,7 @@ import { workspace } from '../lib/workspace.svelte';
   <nav aria-label={strings.settings.heading}>
     <button type="button" class="ghost back" data-testid="settings-back" onclick={() => store.showChat()}>
       <ArrowLeft size={15} strokeWidth={1.75} />
-      {strings.settings.back}
+      <span class="ui-label">{strings.settings.back}</span>
     </button>
     {#each tabs as entry, index (entry.id)}
       {@const Icon = entry.icon}
@@ -255,14 +255,14 @@ import { workspace } from '../lib/workspace.svelte';
         onclick={() => { selectedSection = ''; store.showSettings(entry.id); }}
       >
         <Icon size={15} strokeWidth={1.75} />
-        <span>{entry.label}</span>
+        <span class="ui-label">{entry.label}</span>
         {#if toc[entry.id]}<ChevronRight size={14} class={tab === entry.id ? 'expanded' : ''} />{/if}
       </button>
       {#if toc[entry.id]}
         <div class="subcategories" class:open={tab === entry.id} inert={tab !== entry.id}>
           <div>
             {#each toc[entry.id] ?? [] as child (child.id)}
-              <button class="ghost subsection" class:chosen={chosenSection === child.id} data-settings-section={child.id} title={child.label} onclick={() => jump(child.id)}>{child.label}</button>
+              <button class="ghost subsection" class:chosen={chosenSection === child.id} data-settings-section={child.id} title={child.label} onclick={() => jump(child.id)}><span class="ui-label">{child.label}</span></button>
             {/each}
           </div>
         </div>
@@ -275,7 +275,7 @@ import { workspace } from '../lib/workspace.svelte';
   {#if toc[tab]}
     <div class="mobile-subcategories">
       {#each toc[tab] ?? [] as child (child.id)}
-        <button class="ghost" class:active={chosenSection === child.id} data-settings-section={child.id} onclick={() => jump(child.id)}>{child.label}</button>
+        <button class="ghost" class:active={chosenSection === child.id} data-settings-section={child.id} onclick={() => jump(child.id)}><span class="ui-label">{child.label}</span></button>
       {/each}
     </div>
   {/if}

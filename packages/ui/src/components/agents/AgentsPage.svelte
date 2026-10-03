@@ -158,7 +158,7 @@
 {#snippet simpleHead(heading: string, tip?: string)}
   <header class="agents-detail-head">
     {#if narrow.current}{@render backButton(labels.list)}{/if}
-    <h2 class="agents-detail-heading">{heading}{#if tip}<InfoTip topic={heading} text={tip} />{/if}</h2>
+    <h2 class="agents-detail-heading"><span class="ui-label">{heading}</span>{#if tip}<InfoTip topic={heading} text={tip} />{/if}</h2>
   </header>
 {/snippet}
 
@@ -167,16 +167,16 @@
 
   <main class="agents-main framed">
     {#if view.error || view.loadError}
-      <div class="agent-error" role="alert">{view.error || view.loadError}<button type="button" class="ghost small" onclick={() => { view.error = ''; void view.refresh(); }}>{labels.retry}</button></div>
+      <div class="agent-error" role="alert"><span class="ui-label">{view.error || view.loadError}</span><button type="button" class="ghost small" onclick={() => { view.error = ''; void view.refresh(); }}><span class="ui-label">{labels.retry}</span></button></div>
     {/if}
-    {#if snapshot && store.connection !== 'ready'}<p class="agent-error" role="status">{labels.stale}</p>{/if}
+    {#if snapshot && store.connection !== 'ready'}<p class="agent-error" role="status"><span class="ui-label">{labels.stale}</span></p>{/if}
 
     {#if !snapshot}
       <p class="agent-empty">{view.error || view.loadError ? labels.offline : strings.app.loading}</p>
     {:else if creating}
       <header class="agents-detail-head">
         {#if narrow.current || creating.from}{@render backButton(creating.from ? labels.backToChat : labels.list)}{/if}
-        <h2 class="agents-detail-heading">{labels.newTitle[creating.kind]}</h2>
+        <h2 class="agents-detail-heading"><span class="ui-label">{labels.newTitle[creating.kind]}</span></h2>
       </header>
       <div class="agents-body">
         {#key creating}<AgentEditor {view} kind={creating.kind} preset={creating.preset} ondone={next => open(next, creating?.from ?? null)} oncancel={() => { creating = null; }} />{/key}
@@ -186,7 +186,7 @@
       <div class="agents-body">
         {#each attention.work as item (item.id)}<AgentWorkCard {view} work={item} />{/each}
         {#each attention.review as task (task.id)}
-          <button type="button" class="agent-link-row" onclick={() => open({ kind: 'mission', id: task.missionId })}>{task.title}<span class="agent-state" data-status="review">{labels.review}</span></button>
+          <button type="button" class="agent-link-row" onclick={() => open({ kind: 'mission', id: task.missionId })}><span class="ui-label">{task.title}</span><span class="agent-state ui-label" data-status="review">{labels.review}</span></button>
         {/each}
         {#if !attention.work.length && !attention.review.length}<p class="agent-empty">{labels.noAttention}</p>{/if}
       </div>
@@ -228,7 +228,7 @@
             <AgentMissions {view} {missions} onopen={id => open({ kind: 'mission', id }, selected)} oncreate={startMission} />
           {:else if current === 'activity'}
             {#each work as item (item.id)}<AgentWorkCard {view} work={item} />{:else}<p class="agent-empty">{labels.noWork}</p>{/each}
-            {#if workHistory && view.hasOlder(workKey, 'work')}<button type="button" class="ghost small agent-older" disabled={view.loadingOlder === workKey} onclick={() => void view.loadOlder(workKey, workHistory, work)} data-testid="agent-work-older">{labels.loadEarlier}</button>{/if}
+            {#if workHistory && view.hasOlder(workKey, 'work')}<button type="button" class="ghost small agent-older" disabled={view.loadingOlder === workKey} onclick={() => void view.loadOlder(workKey, workHistory, work)} data-testid="agent-work-older"><span class="ui-label">{labels.loadEarlier}</span></button>{/if}
           {:else if current === 'memory' && memoryScope}
             {#if profile}<AgentBrainEditor {view} agentId={profile.id} />{/if}
             <AgentKnowledge {view} scope={memoryScope} />
@@ -251,7 +251,7 @@
       <div class="agent-welcome" data-testid="agents-empty">
         <Bot size={32} strokeWidth={1.5} />
         <p>{labels.noAgents}</p>
-        {#if store.owner}<button type="button" class="primary" onclick={() => { creating = { kind: 'profile' }; }} data-testid="agents-first">{labels.createAgent}</button>{/if}
+        {#if store.owner}<button type="button" class="primary" onclick={() => { creating = { kind: 'profile' }; }} data-testid="agents-first"><span class="ui-label">{labels.createAgent}</span></button>{/if}
       </div>
     {/if}
   </main>

@@ -141,7 +141,7 @@
   <h2>{strings.settings.archived.heading}<InfoTip topic={strings.settings.archived.heading} text={strings.settings.archived.intro} /></h2>
   {#if threads === null}
     <button type="button" data-testid="archived-show" disabled={loading || store.connection !== 'ready'} onclick={() => void load()}>
-      {strings.settings.archived.show}
+      <span class="ui-label">{strings.settings.archived.show}</span>
     </button>
   {:else if threads.length === 0}
     <p class="muted" data-testid="archived-empty">{strings.settings.archived.empty}</p>
@@ -159,17 +159,17 @@
           <span class="subtle meta" title={exactTime(thread.updatedAt)}>{projectOf(thread)} · {ago(thread.updatedAt)}</span>
           {#if restored.includes(thread.id)}
             <button type="button" class="small" data-testid="archived-open" onclick={() => void workspace.select(store, thread.id)}>
-              {strings.settings.archived.open}
+              <span class="ui-label">{strings.settings.archived.open}</span>
             </button>
           {:else}
             <button type="button" class="small" data-testid="archived-restore" disabled={restoring !== null} onclick={() => void restore(thread)}>
-              <RotateCcw size={14} />{strings.settings.archived.restore}
+              <RotateCcw size={14} /><span class="ui-label">{strings.settings.archived.restore}</span>
             </button>
           {/if}
           {#if canDeleteThread(store, thread)}
             <button type="button" class="ghost small danger" data-testid="archived-delete"
               aria-label={strings.sidebar.delete} title={strings.sidebar.delete} disabled={restoring !== null}
-              onclick={() => void remove(thread)}><Trash2 size={14} />{strings.sidebar.delete}</button>
+              onclick={() => void remove(thread)}><Trash2 size={14} /><span class="ui-label">{strings.sidebar.delete}</span></button>
           {/if}
         </li>
       {/each}

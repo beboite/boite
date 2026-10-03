@@ -71,7 +71,7 @@
       <span class="text">
         <span>{strings.onboarding.label}</span>
       </span>
-      <button type="button" data-testid="settings-tour" onclick={() => { store.showChat(); openTour(); }}>{strings.settings.tourReplay}</button>
+      <button type="button" data-testid="settings-tour" onclick={() => { store.showChat(); openTour(); }}><span class="ui-label">{strings.settings.tourReplay}</span></button>
     </div>
   </section>
 

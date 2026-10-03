@@ -78,8 +78,8 @@
     <div class="body">
       {#if view === 'diagnostics'}
         <div class="actions">
-          <button type="button" class="chip" disabled={busy} onclick={() => void diagnostics()}><RefreshCw size={14} />{strings.browserTools.refresh}</button>
-          <button type="button" class="chip" disabled={busy} onclick={() => void diagnostics(true)}><Trash2 size={14} />{strings.browserTools.clear}</button>
+          <button type="button" class="chip" disabled={busy} onclick={() => void diagnostics()}><RefreshCw size={14} /><span class="ui-label">{strings.browserTools.refresh}</span></button>
+          <button type="button" class="chip" disabled={busy} onclick={() => void diagnostics(true)}><Trash2 size={14} /><span class="ui-label">{strings.browserTools.clear}</span></button>
         </div>
         <h3>{strings.browserTools.pageEvents}</h3>
         {#if report.dropped}<p class="muted">{fill(strings.browserTools.omitted, { count: String(report.dropped) })}</p>{/if}
@@ -95,7 +95,7 @@
         {#if toolsState.result.reason !== 'stopped'}<p role="status">{strings.browserTools[toolsState.result.reason === 'error' ? 'recordingError' : 'recordingLimit']}{toolsState.result.error ? ` ${toolsState.result.error}` : ''}</p>{/if}
         <div class="actions">
           <a class="chip" href={toolsState.url} download={`boite-browser-${toolsState.result.id}.webm`} data-testid="browser-recording-download"><Download size={14} />{strings.browserTools.download}</a>
-          <button type="button" class="chip" onclick={() => { void act({ kind: 'recording-discard', recordingId: toolsState.result!.id }); view = null; }}><Trash2 size={14} />{strings.browserTools.discard}</button>
+          <button type="button" class="chip" onclick={() => { void act({ kind: 'recording-discard', recordingId: toolsState.result!.id }); view = null; }}><Trash2 size={14} /><span class="ui-label">{strings.browserTools.discard}</span></button>
         </div>
       {/if}
     </div>

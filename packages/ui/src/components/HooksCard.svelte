@@ -152,8 +152,8 @@
           <details>
             <summary>
               <ProviderLogo providerId={provider.providerId} size={16} />
-              <span class="name">{provider.name}</span>
-              <span class="found">{found(provider)}</span>
+              <span class="name ui-label">{provider.name}</span>
+              <span class="found ui-label">{found(provider)}</span>
               {#if provider.reports}
                 <span class="counters" data-testid="hooks-counters">
                   {#each counters(provider) as counter, index (counter.kind)}{#if index > 0}{' '}<span class="dot" aria-hidden="true">·</span>{' '}{/if}<span class={counter.kind}>{counter.text}</span>{/each}
@@ -193,7 +193,7 @@
       </ol>
       {#if status.recent.length > SHOWN}
         <details class="disclosure more">
-          <summary>{fill(strings.hooks.more, { count: figure(status.recent.length - SHOWN) })}</summary>
+          <summary><span class="ui-label">{fill(strings.hooks.more, { count: figure(status.recent.length - SHOWN) })}</span></summary>
           <ol class="runs">
             {#each status.recent.slice(SHOWN) as run, index (`${run.at}:${index}`)}{@render runRow(run)}{/each}
           </ol>

@@ -790,6 +790,19 @@ a {
 /* Controls                                                                   */
 /* ------------------------------------------------------------------------- */
 
+/* Centre labels using the font's cap height and alphabetic baseline.
+   Apply to the text leaf: trimming does not propagate through flex or grid.
+   Padding keeps accents and descenders inside labels that truncate overflow;
+   the negative margins keep that extra ink room out of the row's layout.
+   Browsers without text-box retain the existing line-height alignment. */
+.ui-label {
+  display: block;
+  min-width: 0;
+  padding-block: 0.25em;
+  margin-block: -0.25em;
+  text-box: trim-both cap alphabetic;
+}
+
 button {
   display: inline-flex;
   align-items: center;

@@ -25,7 +25,7 @@
 
 <div class="trace-surface" data-testid="trace-panel">
   <div class="bar">
-    <span class="totals">{store.trace.length} {strings.trace.recorded} · {load?.processes ?? store.trace.filter(record => record.exitedAt === null).length} {strings.trace.active}</span>
+    <span class="totals ui-label">{store.trace.length} {strings.trace.recorded} · {load?.processes ?? store.trace.filter(record => record.exitedAt === null).length} {strings.trace.active}</span>
     <span class="spacer"></span>
     <button
       type="button"

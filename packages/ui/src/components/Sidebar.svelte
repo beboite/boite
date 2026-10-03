@@ -243,10 +243,10 @@
               onclick={() => owner.toggleProject(project.id)}
             >
               {#if projectView.order === 'manual'}<GripVertical size={12} />{/if}<span class="caret" class:collapsed><ChevronRight size={12} /></span><ProjectTile {project} store={owner}
-              /><span class="name" class:gone={project.missing === true}>{projectName(project)}</span
+              /><span class="name ui-label" class:gone={project.missing === true}>{projectName(project)}</span
               >{#if project.missing === true}<span class="missing" data-testid="project-missing" title={strings.sidebar.projectMissing} aria-label={strings.sidebar.projectMissing}><FolderX size={13} aria-hidden="true" /></span>{/if}{#if rollup}{@const label = fill(rollup.count === 1 ? strings.sidebar.rollupOne : strings.sidebar.rollupMany, { count: String(rollup.count), state: strings.sidebar.state[rollup.kind] })}<span
                   class="rollup {rollup.kind}" data-testid="project-rollup" data-state={rollup.kind} title={label} aria-label={label}
-                  >{#if rollup.kind === 'working'}<LoaderCircle size={11} class="spinner" aria-hidden="true" />{:else}<span class="dot" aria-hidden="true"></span>{/if}{#if rollup.count > 1}{rollup.count}{/if}</span
+                  >{#if rollup.kind === 'working'}<LoaderCircle size={11} class="spinner" aria-hidden="true" />{:else}<span class="dot" aria-hidden="true"></span>{/if}{#if rollup.count > 1}<span class="ui-label">{rollup.count}</span>{/if}</span
                 >{/if}{#if multi}<span class="host" data-testid="project-host" class:offline={owner.connection !== 'ready'}
                   title={`${machine.label} · ${strings.connection[owner.connection]}`} aria-label={machine.label}><MachineIcon icon={machine.icon} os={owner.core?.os} /></span>{/if}
             </button>

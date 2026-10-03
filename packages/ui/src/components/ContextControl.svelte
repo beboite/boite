@@ -71,7 +71,7 @@
     <svg viewBox="0 0 40 40" aria-hidden="true"><circle class="track" cx="20" cy="20" r="17" /><circle class="fill" cx="20" cy="20" r="17" pathLength="100" stroke-dasharray="{percent ?? 0} 100" /></svg>
     {#if cacheNow}
       <span class="cache-chip mono" data-testid="prompt-cache" data-state={cacheNow.kind} class:low={cacheNow.kind !== 'cold' && cacheNow.secondsLeft <= 300} aria-hidden="true">
-        <Clock size={13} strokeWidth={1.75} />{cacheNow.kind === 'cold' ? strings.thread.cacheCold : remaining(cacheNow.secondsLeft)}
+        <Clock size={13} strokeWidth={1.75} /><span class="ui-label">{cacheNow.kind === 'cold' ? strings.thread.cacheCold : remaining(cacheNow.secondsLeft)}</span>
       </span>
     {/if}
   </button>
@@ -90,7 +90,7 @@
         {#if !context.breakdown}<p class="note">{strings.thread.contextNoBreakdown}</p>{/if}
         <p class="note">{strings.thread.contextMeasured} · {time(context.at)}</p>
       {:else}<p class="note">{strings.thread.contextNoReading}</p>{/if}
-      <button type="button" class="compact" data-testid="context-compact" disabled={reason !== null} title={reason ?? strings.composer.compact} onclick={() => void compact()}><Minimize2 size={14} />{strings.composer.compact}</button>
+      <button type="button" class="compact" data-testid="context-compact" disabled={reason !== null} title={reason ?? strings.composer.compact} onclick={() => void compact()}><Minimize2 size={14} /><span class="ui-label">{strings.composer.compact}</span></button>
       {#if reason}<p class="note">{reason}</p>{/if}
       {#if cache && cacheNow}
         <div class="cache-detail" data-testid="prompt-cache-detail">

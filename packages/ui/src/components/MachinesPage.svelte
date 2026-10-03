@@ -73,13 +73,13 @@
             <input class="machine-name" data-testid="machine-rename" aria-label={strings.machines.label} value={machine.label} maxlength="80" onchange={(event) => { workspace.customize(machine.id, event.currentTarget.value, machine.icon); event.currentTarget.value = machine.label; }} />
             <span class="meta">
               <span class="dot" class:ready={machine.store.connection === 'ready'} aria-hidden="true"></span>
-              <span class="status" class:ready={machine.store.connection === 'ready'}>{machine.store.pairingRequired ? strings.mobile.pairingRequired : strings.connection[machine.store.connection]}</span>
-              <span class="address">{machine.store.localCore ? strings.machines.local : machine.id}</span>
+              <span class="status ui-label" class:ready={machine.store.connection === 'ready'}>{machine.store.pairingRequired ? strings.mobile.pairingRequired : strings.connection[machine.store.connection]}</span>
+              <span class="address ui-label">{machine.store.localCore ? strings.machines.local : machine.id}</span>
             </span>
           </div>
           <div class="actions">
             {#if machine.store.pairingRequired}
-              <button class="ghost small" data-testid="machine-repair" onclick={() => pairingForm?.startAdding()}><ScanLine size={15} />{strings.mobile.pairAgain}</button>
+              <button class="ghost small" data-testid="machine-repair" onclick={() => pairingForm?.startAdding()}><ScanLine size={15} /><span class="ui-label">{strings.mobile.pairAgain}</span></button>
             {:else if machine.store.connection === 'closed'}
               <button class="ghost icon-only" aria-label={strings.common.refresh} title={strings.common.refresh} onclick={() => void machine.store.connect()}><RefreshCw size={15} /></button>
             {/if}
@@ -89,7 +89,7 @@
             <!-- The machine already open has nowhere to go. -->
             {#if machine.store !== workspace.active}
               <button class="ghost small" data-testid="machine-open" onclick={() => void workspace.select(machine.store)}
-                >{strings.machines.open}<ArrowUpRight size={13} /></button
+                ><span class="ui-label">{strings.machines.open}</span><ArrowUpRight size={13} /></button
               >
             {/if}
           </div>
@@ -114,7 +114,7 @@
         {/if}
         {#if machine.store.owner && machine.store.core}
           <button class="ghost small machine-settings-button" data-testid="machine-settings-open" disabled={machine.store.connection !== 'ready' || !machine.store.settings} onclick={() => settingsId = machine.id}>
-            <Settings2 size={14} />{strings.machines.settings}
+            <Settings2 size={14} /><span class="ui-label">{strings.machines.settings}</span>
           </button>
         {/if}
         {#if sync.reports[machine.id]}
@@ -125,7 +125,7 @@
               {#if done.report.brain === 'absent'}<p>{strings.machines.syncBrainAbsent}</p>{/if}
               {#if done.report.providers.length > 0}
                 <p>{fill(strings.machines.syncProviders, { providers: done.report.providers.map((row) => row.name).join(', ') })}</p>
-                <button class="small" data-testid="machine-sync-providers" onclick={() => void openProviders(machine)}>{strings.machines.syncOpenProviders}</button>
+                <button class="small" data-testid="machine-sync-providers" onclick={() => void openProviders(machine)}><span class="ui-label">{strings.machines.syncOpenProviders}</span></button>
               {/if}
             </div>
           {/if}

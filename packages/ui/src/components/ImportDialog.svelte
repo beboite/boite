@@ -103,16 +103,16 @@
               data-session={session.sessionId}
               onclick={() => void store.importSession(session.accountId, session.sessionId)}
             >
-              <span class="title">{session.title}</span>
-              <span class="account">{accountLabel(session)}</span>
-              <span class="hint">{hintOf(session)}</span>
+              <span class="title ui-label">{session.title}</span>
+              <span class="account ui-label">{accountLabel(session)}</span>
+              <span class="hint ui-label">{hintOf(session)}</span>
             </button>
           {/each}
         {/if}
       </div>
       <div class="actions">
         <button type="button" class="ghost" data-testid="import-close" disabled={dialog.running !== null} onclick={() => store.closeImports()}>
-          {strings.imports.close}
+          <span class="ui-label">{strings.imports.close}</span>
         </button>
       </div>
     </div>

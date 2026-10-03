@@ -105,15 +105,15 @@
           <img src="./icons/icon.svg" alt="" width="42" height="42" />
           <h1>{strings.mobile.draftTitle}</h1>
           <p>{strings.mobile.draftHint}</p>
-          <span class="project-choice"><Menu items={projectItems} onpick={pickProject} variant="text" label={strings.thread.changeProject} testid="mobile-draft-project">{#if project}<ProjectTile {project} {store} />{:else}<FolderOpen size={15} />{/if}<span class="project-label">{project ? projectName(project) : strings.drafts.name}</span><ChevronDown size={14} /></Menu></span>
+          <span class="project-choice"><Menu items={projectItems} onpick={pickProject} variant="text" label={strings.thread.changeProject} testid="mobile-draft-project">{#if project}<ProjectTile {project} {store} />{:else}<FolderOpen size={15} />{/if}<span class="project-label ui-label">{project ? projectName(project) : strings.drafts.name}</span><ChevronDown size={14} /></Menu></span>
           {#if draftChoice}<small>{strings.thread.draftMode[draftChoice.permissionMode]}</small>{/if}
           {#if store.draft?.worktree}<small>{strings.thread.inWorktree}</small>{/if}
         </div>
         <h1 class="start" data-testid="draft-sentence">
-          <span>{strings.thread.start}</span>
-          {#if store.draft?.worktree}<span>{strings.thread.inWorktree}</span>{/if}
-          {#if draftChoice}<span>{strings.thread.draftMode[draftChoice.permissionMode]}</span>{/if}
-          <span>{strings.thread.inProject}</span>
+          <span class="ui-label">{strings.thread.start}</span>
+          {#if store.draft?.worktree}<span class="ui-label">{strings.thread.inWorktree}</span>{/if}
+          {#if draftChoice}<span class="ui-label">{strings.thread.draftMode[draftChoice.permissionMode]}</span>{/if}
+          <span class="ui-label">{strings.thread.inProject}</span>
           <!-- It opens upward, into the empty half of the column: under the
                heading it would land on the composer. -->
           <span class="project-choice"><Menu
@@ -124,12 +124,12 @@
             testid="draft-project"
           >
             {#if project}<ProjectTile {project} {store} />{:else}<FolderOpen size={15} />{/if}
-            <span class="project-label">{project ? projectName(project) : strings.drafts.name}</span>
+            <span class="project-label ui-label">{project ? projectName(project) : strings.drafts.name}</span>
             <ChevronDown size={14} strokeWidth={2} />
           </Menu></span>
           {#if draftChoice}
-            <span>{strings.thread.using} {modelLabel}</span>
-            {#if effortLabel}<span>{fill(strings.thread.onEffort, { effort: effortLabel })}</span>{/if}
+            <span class="ui-label">{strings.thread.using} {modelLabel}</span>
+            {#if effortLabel}<span class="ui-label">{fill(strings.thread.onEffort, { effort: effortLabel })}</span>{/if}
           {/if}
         </h1>
       </div>
@@ -150,7 +150,7 @@
         {#if store.draftInDrafts && store.owner}
           <button type="button" class="ghost small open-folder" data-testid="draft-open-folder" onclick={() => (store.projectPickerOpen = true)}>
             <FolderOpen size={14} strokeWidth={1.75} />
-            {strings.drafts.openFolder}
+            <span class="ui-label">{strings.drafts.openFolder}</span>
           </button>
         {/if}
       </div>

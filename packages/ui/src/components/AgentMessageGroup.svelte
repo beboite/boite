@@ -28,7 +28,7 @@
             ? entries.length === 1 ? strings.agentMessages.forwardedOne : strings.agentMessages.forwardedMany
             : entries.length === 1 ? strings.agentMessages.receivedOne : strings.agentMessages.receivedMany,
             { count: count(entries.length) })}</span>
-          {#if issues}<span class="issues" data-testid="agent-message-issues"><CircleAlert size={12} />{fill(issues === 1 ? strings.agentMessages.issueOne : strings.agentMessages.issueMany, { count: count(issues) })}</span>{/if}
+          {#if issues}<span class="issues" data-testid="agent-message-issues"><CircleAlert size={12} /><span class="ui-label">{fill(issues === 1 ? strings.agentMessages.issueOne : strings.agentMessages.issueMany, { count: count(issues) })}</span></span>{/if}
         </span>
         <ChevronRight size={14} strokeWidth={1.75} aria-hidden="true" />
       </button>

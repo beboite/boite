@@ -78,11 +78,11 @@
     </label>
     <div class="actions">
       <button type="button" class="primary" data-testid="pairing-mint" onclick={() => void store.mintPairing(ownerLink ? 'owner' : 'device')}>
-        {strings.settings.pairing.mint}
+        <span class="ui-label">{strings.settings.pairing.mint}</span>
       </button>
       {#if store.pairing}
-        <button type="button" onclick={() => void store.copy(store.pairing?.url ?? '')}>{strings.settings.pairing.copy}</button>
-        <button type="button" class="quiet" data-testid="pairing-close" onclick={() => store.closePairing()}>{strings.common.close}</button>
+        <button type="button" onclick={() => void store.copy(store.pairing?.url ?? '')}><span class="ui-label">{strings.settings.pairing.copy}</span></button>
+        <button type="button" class="quiet" data-testid="pairing-close" onclick={() => store.closePairing()}><span class="ui-label">{strings.common.close}</span></button>
       {/if}
     </div>
     {#if store.pairing}
@@ -119,7 +119,7 @@
           </span>
           <span class="subtle seen" title={exactTime(session.lastSeenAt)}>{fill(strings.settings.pairing.lastSeen, { when: ago(session.lastSeenAt) })}</span>
           {#if store.principal === 'owner'}
-            <button type="button" class="ghost small danger" onclick={() => void revoke(session)}>{strings.settings.pairing.revoke}</button>
+            <button type="button" class="ghost small danger" onclick={() => void revoke(session)}><span class="ui-label">{strings.settings.pairing.revoke}</span></button>
           {/if}
         </li>
       {/each}

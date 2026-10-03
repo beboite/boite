@@ -59,7 +59,7 @@
   {#if store.owner && reader.error}
     <div class="card failed" role="alert" data-testid="limits-error">
       <p>{fill(strings.quotas.readFailed, { error: reader.error })}</p>
-      <button type="button" class="ghost small" disabled={reader.loading} data-testid="limits-retry" onclick={refresh}>{strings.quotas.retry}</button>
+      <button type="button" class="ghost small" disabled={reader.loading} data-testid="limits-retry" onclick={refresh}><span class="ui-label">{strings.quotas.retry}</span></button>
     </div>
   {/if}
   {#if !store.owner}
@@ -72,7 +72,7 @@
     <!-- A failed read never passes for "no provider connected". -->
     {#if !reader.error}<div class="card empty" data-testid="limits-empty">
       <p>{strings.quotas.empty}</p>
-      <button type="button" onclick={() => store.showSettings('accounts')}>{strings.settings.connectProvider}</button>
+      <button type="button" onclick={() => store.showSettings('accounts')}><span class="ui-label">{strings.settings.connectProvider}</span></button>
     </div>{/if}
   {:else}
     {#if rows.length > 0}<UsageLimits {rows} {store} loading={reader.loading} completed={reader.completed} />{/if}

@@ -74,17 +74,17 @@
         <h2 id="phone-preferences">{strings.mobile.settingsDevice}</h2>
         <div class="rows">
           <button class="ghost row" data-testid="mobile-settings-phone" onclick={() => { phone = true; }}>
-            <Bell size={20} /><span>{strings.mobile.settingsPhone}</span><ChevronRight size={18} />
+            <Bell size={20} /><span class="ui-label">{strings.mobile.settingsPhone}</span><ChevronRight size={18} />
           </button>
           <button class="ghost row" data-testid="settings-tab-appearance" onclick={() => store.showSettings('appearance')}>
-            <Palette size={20} /><span>{strings.settings.tabs.appearance}</span><ChevronRight size={18} />
+            <Palette size={20} /><span class="ui-label">{strings.settings.tabs.appearance}</span><ChevronRight size={18} />
           </button>
           <button class="ghost row" data-testid="settings-tour" onclick={() => { store.showChat(); openTour(); }}>
-            <Compass size={20} /><span>{strings.onboarding.replay}</span><ChevronRight size={18} />
+            <Compass size={20} /><span class="ui-label">{strings.onboarding.replay}</span><ChevronRight size={18} />
           </button>
           <!-- Experiments are kept per device, so the phone turns its own on. -->
           <button class="ghost row" data-testid="settings-tab-experiments" onclick={() => store.showSettings('experiments')}>
-            <FlaskConical size={20} /><span>{strings.settings.tabs.experiments}</span><ChevronRight size={18} />
+            <FlaskConical size={20} /><span class="ui-label">{strings.settings.tabs.experiments}</span><ChevronRight size={18} />
           </button>
           <label for="{uid}-group-working" class="row">
             <ListFilter size={20} />
@@ -98,35 +98,35 @@
         <h2 id="remote-machines">{strings.machines.heading}</h2>
         <div class="rows">
           <button class="ghost row" data-testid="settings-tab-machines" onclick={() => store.showSettings('machines')}>
-            <Monitor size={20} /><span>{strings.connection.manage}</span><ChevronRight size={18} />
+            <Monitor size={20} /><span class="ui-label">{strings.connection.manage}</span><ChevronRight size={18} />
           </button>
-          {#if store.owner}<button class="ghost row" data-testid="settings-tab-brain" onclick={() => store.showSettings('brain')}><Brain size={20} /><span>{strings.brain.heading}</span><ChevronRight size={18} /></button>{/if}
+          {#if store.owner}<button class="ghost row" data-testid="settings-tab-brain" onclick={() => store.showSettings('brain')}><Brain size={20} /><span class="ui-label">{strings.brain.heading}</span><ChevronRight size={18} /></button>{/if}
           <button class="ghost row" data-testid="settings-tab-voice" onclick={() => store.showSettings('voice')}>
-            <Mic size={20} /><span>{strings.speech.heading}</span><ChevronRight size={18} />
+            <Mic size={20} /><span class="ui-label">{strings.speech.heading}</span><ChevronRight size={18} />
           </button>
           <button class="ghost row" data-testid="settings-tab-usage" onclick={() => store.showSettings('usage')}>
-            <Coins size={20} /><span>{strings.usage.heading}</span><ChevronRight size={18} />
+            <Coins size={20} /><span class="ui-label">{strings.usage.heading}</span><ChevronRight size={18} />
           </button>
           <button class="ghost row" data-testid="settings-tab-limits" onclick={() => store.showSettings('limits')}>
-            <Gauge size={20} /><span>{strings.usage.limits}</span><ChevronRight size={18} />
+            <Gauge size={20} /><span class="ui-label">{strings.usage.limits}</span><ChevronRight size={18} />
           </button>
           <button class="ghost row" data-testid="settings-tab-task-manager" onclick={() => store.showSettings('task-manager')}>
-            <Activity size={20} /><span>{strings.taskManager.title}</span><ChevronRight size={18} />
+            <Activity size={20} /><span class="ui-label">{strings.taskManager.title}</span><ChevronRight size={18} />
           </button>
           {#if store.owner}
             <button class="ghost row" data-testid="settings-tab-resources" onclick={() => store.showSettings('resources')}>
-              <ShieldCheck size={20} /><span>{strings.settings.tabs.resources}</span><ChevronRight size={18} />
+              <ShieldCheck size={20} /><span class="ui-label">{strings.settings.tabs.resources}</span><ChevronRight size={18} />
             </button>
           {/if}
           <button class="ghost row" data-testid="mobile-settings-archived" onclick={() => { archived = true; }}>
-            <ArchiveRestore size={20} /><span>{strings.settings.archived.heading}</span><ChevronRight size={18} />
+            <ArchiveRestore size={20} /><span class="ui-label">{strings.settings.archived.heading}</span><ChevronRight size={18} />
           </button>
           {#if store.owner}
             <button class="ghost row" data-testid="mobile-settings-worktrees" onclick={() => store.showSettings('general', 'worktrees')}>
-              <Monitor size={20} /><span>{strings.settings.worktrees.heading}</span><ChevronRight size={18} />
+              <Monitor size={20} /><span class="ui-label">{strings.settings.worktrees.heading}</span><ChevronRight size={18} />
             </button>
             <button class="ghost row" data-testid="mobile-settings-auto-compact" onclick={() => store.showSettings('advanced', 'auto-compact')}>
-              <Minimize2 size={20} /><span>{strings.settings.autoCompact}</span><ChevronRight size={18} />
+              <Minimize2 size={20} /><span class="ui-label">{strings.settings.autoCompact}</span><ChevronRight size={18} />
             </button>
           {/if}
         </div>

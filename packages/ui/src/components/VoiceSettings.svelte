@@ -135,7 +135,7 @@
 <div class="page" data-testid="voice-settings">
   <header>
     <h1>{strings.speech.heading}<InfoTip topic={strings.speech.heading} text={strings.speech.description} /></h1>
-    {#if saved}<span class="saved" role="status"><Check size={14} />{strings.speech.saved}</span>{/if}
+    {#if saved}<span class="saved" role="status"><Check size={14} /><span class="ui-label">{strings.speech.saved}</span></span>{/if}
   </header>
 
   <VoiceInputSettings />
@@ -176,15 +176,15 @@
           {/if}
         </div>
         {#if stage === 'downloading'}
-          <button type="button" class="quiet small" disabled={busy} data-testid="voice-install-cancel" onclick={() => void manage('speech.installCancel')}>{strings.common.cancel}</button>
+          <button type="button" class="quiet small" disabled={busy} data-testid="voice-install-cancel" onclick={() => void manage('speech.installCancel')}><span class="ui-label">{strings.common.cancel}</span></button>
         {:else if stage === 'broken'}
-          <button type="button" class="primary small" data-testid="voice-repair" disabled={busy} onclick={() => void apply()}>{strings.speech.repair}</button>
+          <button type="button" class="primary small" data-testid="voice-repair" disabled={busy} onclick={() => void apply()}><span class="ui-label">{strings.speech.repair}</span></button>
         {:else if stage === 'local' || stage === 'failed'}
           <button type="button" class="primary small" data-testid="voice-install" disabled={busy} onclick={() => void manage('speech.install')}>
-            <Download size={14} />{stage === 'failed' ? strings.speech.tryAgain : strings.speech.setUp}
+            <Download size={14} /><span class="ui-label">{stage === 'failed' ? strings.speech.tryAgain : strings.speech.setUp}</span>
           </button>
         {:else if stage === 'ready' && status.engine === 'local' && status.runtimeOutdated}
-          <button type="button" class="small" data-testid="voice-update" disabled={busy} onclick={() => void manage('speech.install')}>{strings.speech.update}</button>
+          <button type="button" class="small" data-testid="voice-update" disabled={busy} onclick={() => void manage('speech.install')}><span class="ui-label">{strings.speech.update}</span></button>
         {/if}
       </div>
       {#if stage === 'downloading'}<progress value={status.downloadedBytes} max={status.totalBytes || undefined}></progress>{/if}
@@ -199,8 +199,8 @@
       <div class="switch-row">
         <span class="text">{strings.speech.engine}<InfoTip topic={strings.speech.engine} text={strings.speech.engineHint} /></span>
         <div class="segmented" role="radiogroup" aria-label={strings.speech.engine}>
-          <button type="button" role="radio" class:on={config.engine === 'local'} aria-checked={config.engine === 'local'} data-testid="voice-local" disabled={busy} onclick={() => { if (config!.engine !== 'local') void apply({ engine: 'local' }); }}>{strings.speech.local}</button>
-          <button type="button" role="radio" class:on={config.engine === 'api'} aria-checked={config.engine === 'api'} data-testid="voice-api" disabled={busy} onclick={() => { if (config!.engine !== 'api') void apply({ engine: 'api' }); }}>{strings.speech.api}</button>
+          <button type="button" role="radio" class:on={config.engine === 'local'} aria-checked={config.engine === 'local'} data-testid="voice-local" disabled={busy} onclick={() => { if (config!.engine !== 'local') void apply({ engine: 'local' }); }}><span class="ui-label">{strings.speech.local}</span></button>
+          <button type="button" role="radio" class:on={config.engine === 'api'} aria-checked={config.engine === 'api'} data-testid="voice-api" disabled={busy} onclick={() => { if (config!.engine !== 'api') void apply({ engine: 'api' }); }}><span class="ui-label">{strings.speech.api}</span></button>
         </div>
       </div>
       <div class="switch-row">
@@ -226,7 +226,7 @@
               {:else if model.installed}
                 <button type="button" class="icon ghost" title={fill(strings.speech.remove, { model: model.name })} aria-label={fill(strings.speech.remove, { model: model.name })} data-testid="voice-model-remove-{model.id}" disabled={busy} onclick={() => void manage('speech.uninstall', { model: model.id })}><Trash2 size={15} /></button>
               {:else}
-                <button type="button" class="quiet small" data-testid="voice-model-download-{model.id}" disabled={busy || status.installing} onclick={() => void manage('speech.install', { model: model.id })}><Download size={14} />{strings.speech.download}</button>
+                <button type="button" class="quiet small" data-testid="voice-model-download-{model.id}" disabled={busy || status.installing} onclick={() => void manage('speech.install', { model: model.id })}><Download size={14} /><span class="ui-label">{strings.speech.download}</span></button>
               {/if}
             </div>
           {/each}
@@ -235,17 +235,17 @@
           <span class="text" id="voice-link-label">{strings.speech.link}<InfoTip topic={strings.speech.link} text={strings.speech.linkHint} /></span>
           <div class="field">
             <input type="url" inputmode="url" spellcheck="false" autocomplete="off" data-testid="voice-model-url" aria-labelledby="voice-link-label" placeholder={strings.speech.linkPlaceholder} bind:value={link} />
-            <button type="submit" class="small" data-testid="voice-model-add" disabled={busy || status.installing || !link.trim()}>{strings.speech.add}</button>
+            <button type="submit" class="small" data-testid="voice-model-add" disabled={busy || status.installing || !link.trim()}><span class="ui-label">{strings.speech.add}</span></button>
           </div>
         </form>
         {/if}
         <details class="disclosure">
-          <summary>{strings.speech.advanced}</summary>
+          <summary><span class="ui-label">{strings.speech.advanced}</span></summary>
           <div class="paths">
             <label>{strings.speech.executable}<input data-testid="voice-executable" bind:value={config.executable} spellcheck="false" placeholder={status.canInstallRuntime ? '' : 'whisper-cli'} /></label>
             <label>{strings.speech.modelPath}<input data-testid="voice-model-path" bind:value={config.modelPath} spellcheck="false" /></label>
             <div class="actions">
-              <button type="button" class="small" data-testid="voice-save-paths" disabled={busy} onclick={() => void apply()}>{strings.speech.savePaths}</button>
+              <button type="button" class="small" data-testid="voice-save-paths" disabled={busy} onclick={() => void apply()}><span class="ui-label">{strings.speech.savePaths}</span></button>
               <InfoTip topic={strings.speech.advanced} text={strings.speech.pathHint} />
             </div>
           </div>
@@ -257,7 +257,7 @@
           <span class="text">{strings.speech.provider}<InfoTip topic={strings.speech.provider} text={strings.speech.providerHint} /></span>
           <div class="segmented" role="radiogroup" aria-label={strings.speech.provider}>
             {#each PROVIDERS as id (id)}
-              <button type="button" role="radio" class:on={config.apiProvider === id} aria-checked={config.apiProvider === id} data-testid="voice-provider-{id}" disabled={busy} onclick={() => { if (config!.apiProvider !== id) void apply({ apiProvider: id }); }}>{provider(id)}</button>
+              <button type="button" role="radio" class:on={config.apiProvider === id} aria-checked={config.apiProvider === id} data-testid="voice-provider-{id}" disabled={busy} onclick={() => { if (config!.apiProvider !== id) void apply({ apiProvider: id }); }}><span class="ui-label">{provider(id)}</span></button>
             {/each}
           </div>
         </div>
@@ -271,12 +271,12 @@
               {:else}
                 <input type="password" autocomplete="new-password" data-testid="voice-openrouter-key" aria-labelledby="voice-openrouter-label" bind:value={openrouterKey} placeholder={set ? strings.speech.keyReplace : strings.speech.keyEmpty} />
               {/if}
-              {#if set}<button type="button" class="quiet small" data-testid="voice-{id}-remove" disabled={busy} onclick={() => void apply({}, id === 'groq' ? { groqKey: '' } : { openrouterKey: '' })}>{strings.speech.removeKey}</button>{/if}
+              {#if set}<button type="button" class="quiet small" data-testid="voice-{id}-remove" disabled={busy} onclick={() => void apply({}, id === 'groq' ? { groqKey: '' } : { openrouterKey: '' })}><span class="ui-label">{strings.speech.removeKey}</span></button>{/if}
             </div>
           </div>
         {/each}
         {#if groqKey.trim() || openrouterKey.trim()}
-          <div class="actions save"><button type="submit" class="primary small" data-testid="voice-save" disabled={busy}>{strings.speech.saveKeys}</button></div>
+          <div class="actions save"><button type="submit" class="primary small" data-testid="voice-save" disabled={busy}><span class="ui-label">{strings.speech.saveKeys}</span></button></div>
         {/if}
         <label class="switch-row">
           <span class="text">{strings.speech.fallback}<InfoTip topic={strings.speech.fallback} text={strings.speech.fallbackHint} /></span>

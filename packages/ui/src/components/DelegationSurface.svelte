@@ -99,10 +99,10 @@
   {:else}
     <header class="surface-head">
       <h2><UsersRound size={17} strokeWidth={1.75} />{strings.delegation.heading}</h2>
-      {#if view && (!config.enabled || config.paused)}<span class="state" data-testid="delegation-state">{config.enabled ? strings.delegation.paused : strings.delegation.off}</span>{/if}
+      {#if view && (!config.enabled || config.paused)}<span class="state" data-testid="delegation-state"><span class="ui-label">{config.enabled ? strings.delegation.paused : strings.delegation.off}</span></span>{/if}
       <span class="spacer"></span>
       {#if busy}
-        <button type="button" class="quiet small" data-testid="delegation-stop-all" onclick={() => void store.stopDelegatedAgent()}><Square size={11} fill="currentColor" />{strings.delegation.stopAll}</button>
+        <button type="button" class="quiet small" data-testid="delegation-stop-all" onclick={() => void store.stopDelegatedAgent()}><Square size={11} fill="currentColor" /><span class="ui-label">{strings.delegation.stopAll}</span></button>
       {/if}
       {#if store.owner && view}
         <button type="button" class="ghost small icon" class:on={settings} aria-label={strings.delegation.configure} title={strings.delegation.configure} aria-pressed={settings} data-testid="delegation-settings-toggle" onclick={() => (settings = !settings)}><Settings size={15} strokeWidth={1.75} /></button>
@@ -117,8 +117,8 @@
         </label>
 
         <div class="profiles-head">
-          <strong>{strings.delegation.profiles}</strong>
-          <button type="button" class="quiet small" data-testid="delegation-add-profile" disabled={store.delegationSaving} onclick={addProfile}><Plus size={14} />{strings.delegation.addProfile}</button>
+          <strong class="ui-label">{strings.delegation.profiles}</strong>
+          <button type="button" class="quiet small" data-testid="delegation-add-profile" disabled={store.delegationSaving} onclick={addProfile}><Plus size={14} /><span class="ui-label">{strings.delegation.addProfile}</span></button>
         </div>
         <div class="profiles">
           {#each config.profiles as profile (profile.id)}
@@ -137,7 +137,7 @@
 
         {#if config.enabled}
           <button type="button" class="quiet pause" onclick={() => save({ paused: !config.paused })}>
-            {#if config.paused}<Play size={14} />{strings.delegation.resume}{:else}<Pause size={14} />{strings.delegation.pause}{/if}
+            {#if config.paused}<Play size={14} /><span class="ui-label">{strings.delegation.resume}</span>{:else}<Pause size={14} /><span class="ui-label">{strings.delegation.pause}</span>{/if}
           </button>
         {/if}
       </div>
@@ -149,7 +149,7 @@
             <button type="button" class="member" data-testid="delegation-run" data-run-id={entry.id} onclick={() => showRun(entry.id)}>
               <WorkflowMark status={entry.status} run />
               <span class="member-main"><strong><Workflow size={13} strokeWidth={1.75} />{entry.name}</strong></span>
-              <span class="status">{strings.workflow.status[entry.status]}</span>
+              <span class="status ui-label">{strings.workflow.status[entry.status]}</span>
               <span class="member-usage">{fill(strings.workflow.steps, { done: String(progress.done), total: String(progress.total) })} · <AgentElapsed startedAt={entry.createdAt} finishedAt={entry.finishedAt} active={entry.status === 'running'} /></span>
             </button>
           {/each}
@@ -158,7 +158,7 @@
             <button type="button" class="member" class:selected={selected?.thread.id === agent.thread.id} data-testid="delegation-member" data-agent-id={agent.thread.id} onclick={() => void store.selectDelegatedAgent(agent.thread.id)}>
               <StatusMark status={agent.thread.status} />
               <span class="member-main"><strong>{agent.thread.title}</strong><small>{store.providerOf(agent.thread.providerId)?.name ?? agent.thread.providerId} · {agent.thread.model ?? strings.thread.defaultModel}</small></span>
-              <span class="status">{progress.status === 'done' ? strings.delegation.doneStatus : progress.status === 'stopped' ? strings.delegation.stoppedStatus : strings.threadStatus[agent.thread.status]}</span>
+              <span class="status ui-label">{progress.status === 'done' ? strings.delegation.doneStatus : progress.status === 'stopped' ? strings.delegation.stoppedStatus : strings.threadStatus[agent.thread.status]}</span>
               <span class="task">{agent.task}</span>
               <span class="member-usage"><AgentElapsed startedAt={progress.startedAt} finishedAt={progress.finishedAt} active={progress.active} />{#if agent.lastTurn?.usage} · {formatTokens(agent.lastTurn.usage.inputTokens + agent.lastTurn.usage.outputTokens + agent.lastTurn.usage.cacheReadTokens + agent.lastTurn.usage.cacheWriteTokens)} {strings.units.tokens}{/if}</span>
               {#if agent.result}<span class="result">{agent.result}</span>{/if}
@@ -171,8 +171,8 @@
             <header>
               <button type="button" class="ghost small icon back" aria-label={strings.delegation.backToTeam} onclick={() => void store.selectDelegatedAgent(null)}><ArrowLeft size={15} /></button>
               <div><strong>{selected.thread.title}</strong><small>{selected.task}</small></div>
-              <button type="button" class="quiet small" data-testid="delegation-open-thread" onclick={() => void openChild()}>{strings.delegation.openThread}</button>
-              {#if ['queued', 'running', 'waiting'].includes(selected.thread.status)}<button type="button" class="danger small" onclick={() => void store.stopDelegatedAgent(selected.thread.id)}><Square size={11} fill="currentColor" />{strings.delegation.stop}</button>{/if}
+              <button type="button" class="quiet small" data-testid="delegation-open-thread" onclick={() => void openChild()}><span class="ui-label">{strings.delegation.openThread}</span></button>
+              {#if ['queued', 'running', 'waiting'].includes(selected.thread.status)}<button type="button" class="danger small" onclick={() => void store.stopDelegatedAgent(selected.thread.id)}><Square size={11} fill="currentColor" /><span class="ui-label">{strings.delegation.stop}</span></button>{/if}
             </header>
             {#if store.delegationThread}
               <div class="transcript"><DelegationTranscript messages={store.delegationThread.messages} /></div>

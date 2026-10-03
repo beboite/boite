@@ -216,7 +216,7 @@
   {#if disclosure.shown && group}
     <div class="group-menu" class:closing={disclosure.closing} bind:this={groupMenu} use:disclosure.attach onanimationend={disclosure.end} role="dialog" aria-label={strings.chat.outline} tabindex="-1" onkeydown={groupKeys} style:top={`${groupPosition.top}px`} style:left={`${groupPosition.left}px`} data-testid="outline-group-menu">
       {#each prompts.slice(group.start, group.end + 1) as message, offset (message.id)}
-        <button onclick={() => { jump(message.id); disclosure.hide(); }} data-group-message={message.id}><span class="number">{group.start + offset + 1}</span><span>{messagePreview(message) || strings.chat.imagePart}</span></button>
+        <button onclick={() => { jump(message.id); disclosure.hide(); }} data-group-message={message.id}><span class="number ui-label">{group.start + offset + 1}</span><span class="ui-label">{messagePreview(message) || strings.chat.imagePart}</span></button>
       {/each}
     </div>
   {/if}

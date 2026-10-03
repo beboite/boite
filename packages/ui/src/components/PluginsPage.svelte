@@ -169,7 +169,7 @@
 
 {#snippet refusal(rejected: PluginRejected)}
   <div class="refusal" role="alert" data-testid="plugin-rejected" data-field={rejected.field}>
-    <p class="refusal-title"><ShieldAlert size={15} strokeWidth={1.75} />{t.refusedTitle}</p>
+    <p class="refusal-title"><ShieldAlert size={15} strokeWidth={1.75} /><span class="ui-label">{t.refusedTitle}</span></p>
     <dl class="facts">
       <dt>{t.refusedFile}</dt><dd class="mono">{rejected.file}</dd>
       <dt>{t.refusedField}</dt><dd class="mono">{rejected.field}</dd>
@@ -187,22 +187,22 @@
         <h3>{plugin.name}{#if plugin.version ?? plugin.availableVersion}<span class="version">v{plugin.version ?? plugin.availableVersion}</span>{/if}</h3>
         <p class="state">
           <span class="dot" class:ok={plugin.status === 'installed'} class:live={plugin.status === 'installing'}
-            class:bad={plugin.status === 'error' || plugin.status === 'rejected'}></span>{stateLine(plugin)}
+            class:bad={plugin.status === 'error' || plugin.status === 'rejected'}></span><span class="ui-label">{stateLine(plugin)}</span>
         </p>
       </div>
       <div class="act">
         {#if plugin.status === 'installing'}
-          <button class="quiet small" data-testid="plugin-cancel" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.cancel')}>{strings.common.cancel}</button>
+          <button class="quiet small" data-testid="plugin-cancel" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.cancel')}><span class="ui-label">{strings.common.cancel}</span></button>
         {:else if plugin.status === 'not-installed'}
-          <button class="primary small" data-testid="plugin-install" data-plugin={plugin.id} disabled={working || plugin.artifact === null} onclick={() => void change(plugin, 'plugins.install')}><Download size={14} />{t.install}</button>
+          <button class="primary small" data-testid="plugin-install" data-plugin={plugin.id} disabled={working || plugin.artifact === null} onclick={() => void change(plugin, 'plugins.install')}><Download size={14} /><span class="ui-label">{t.install}</span></button>
         {:else}
           {#if plugin.status === 'installed' && plugin.availableVersion && plugin.availableVersion !== plugin.version}
-            <button class="small" data-testid="plugin-update" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.install')}>{fill(t.update, { version: `v${plugin.availableVersion}` })}</button>
+            <button class="small" data-testid="plugin-update" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.install')}><span class="ui-label">{fill(t.update, { version: `v${plugin.availableVersion}` })}</span></button>
           {/if}
           {#if plugin.status === 'error' || (plugin.status === 'rejected' && plugin.origin === 'recommended')}
-            <button class="small" data-testid="plugin-retry" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.install')}><RefreshCw size={14} />{plugin.status === 'error' ? t.retry : t.reinstall}</button>
+            <button class="small" data-testid="plugin-retry" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.install')}><RefreshCw size={14} /><span class="ui-label">{plugin.status === 'error' ? t.retry : t.reinstall}</span></button>
           {/if}
-          <button class="ghost small" data-testid="plugin-uninstall" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.uninstall')}>{t.remove}</button>
+          <button class="ghost small" data-testid="plugin-uninstall" data-plugin={plugin.id} disabled={working} onclick={() => void change(plugin, 'plugins.uninstall')}><span class="ui-label">{t.remove}</span></button>
         {/if}
       </div>
     </div>
@@ -228,26 +228,26 @@
     {#if plugin.status === 'installed' && plugin.pools.length > 0}
       <div class="pools">
         <div class="pools-head">
-          <h4 class="section-label">{t.pools}<InfoTip topic={t.pools} text={t.cliScope} /></h4>
-          <button class="quiet small" data-testid="plugin-refresh" data-plugin={plugin.id} disabled={working} onclick={() => void loadPools(plugin.id, true)}><RefreshCw size={14} />{t.refresh}</button>
+          <h4 class="section-label"><span class="ui-label">{t.pools}</span><InfoTip topic={t.pools} text={t.cliScope} /></h4>
+          <button class="quiet small" data-testid="plugin-refresh" data-plugin={plugin.id} disabled={working} onclick={() => void loadPools(plugin.id, true)}><RefreshCw size={14} /><span class="ui-label">{t.refresh}</span></button>
         </div>
         {#each pools[plugin.id] ?? [] as pool (pool.provider)}
           <div class="pool" data-testid="plugin-pool" data-plugin={plugin.id} data-provider={pool.provider}>
             <div class="pool-head">
-              <h5>{providerName(pool.provider)}</h5>
-              <button class="quiet small" disabled={working} onclick={() => void accountAction(plugin, pool.provider, 'add')}>{t.add}</button>
+              <h5><span class="ui-label">{providerName(pool.provider)}</span></h5>
+              <button class="quiet small" disabled={working} onclick={() => void accountAction(plugin, pool.provider, 'add')}><span class="ui-label">{t.add}</span></button>
             </div>
             {#if pool.accounts.length === 0}<p class="hint">{t.empty}</p>{/if}
             {#each pool.accounts as account (account.email)}
               <div class="saved-account" class:active={account.active} data-testid="plugin-account" data-email={account.email}>
                 <div class="account-head">
-                  <strong>{account.email}</strong>
-                  {#if account.active}<span class="tag" data-testid="plugin-account-active">{t.active}</span>{/if}
+                  <strong class="ui-label">{account.email}</strong>
+                  {#if account.active}<span class="tag" data-testid="plugin-account-active"><span class="ui-label">{t.active}</span></span>{/if}
                   <span class="account-actions">
                     {#if !account.active}
-                      <button class="quiet small" disabled={working} data-testid="plugin-switch" onclick={() => void accountAction(plugin, pool.provider, 'switch', account.email)}>{t.switch}</button>
+                      <button class="quiet small" disabled={working} data-testid="plugin-switch" onclick={() => void accountAction(plugin, pool.provider, 'switch', account.email)}><span class="ui-label">{t.switch}</span></button>
                     {/if}
-                    <button class="ghost small" disabled={working} onclick={() => void accountAction(plugin, pool.provider, 'remove', account.email)}>{t.forget}</button>
+                    <button class="ghost small" disabled={working} onclick={() => void accountAction(plugin, pool.provider, 'remove', account.email)}><span class="ui-label">{t.forget}</span></button>
                   </span>
                 </div>
                 <QuotaList bare rows={[{ accountId: account.email, providerId: pool.provider, providerName: account.email, label: '', enabled: true,
@@ -267,7 +267,7 @@
   {#if error}<p class="bad" role="alert">{error}</p>{/if}
 
   <section aria-labelledby="plugins-installed" data-testid="plugins-installed">
-    <h2 id="plugins-installed" class="section-label">{t.installedHeading}</h2>
+    <h2 id="plugins-installed" class="section-label"><span class="ui-label">{t.installedHeading}</span></h2>
     {#if installed.length === 0}
       <p class="hint empty-note">{loaded ? t.installedEmpty : ''}</p>
     {:else}
@@ -278,7 +278,7 @@
   </section>
 
   <section aria-labelledby="plugins-recommended" data-testid="plugins-recommended">
-    <h2 id="plugins-recommended" class="section-label">{t.recommendedHeading}</h2>
+    <h2 id="plugins-recommended" class="section-label"><span class="ui-label">{t.recommendedHeading}</span></h2>
     {#if recommended.length === 0}
       <p class="hint empty-note">{loaded ? t.recommendedAllInstalled : ''}</p>
     {:else}
@@ -289,7 +289,7 @@
   </section>
 
   <section aria-labelledby="plugins-add" data-testid="plugins-add">
-    <h2 id="plugins-add" class="section-label">{t.addHeading}<InfoTip topic={t.addHeading} text={t.addHint} /></h2>
+    <h2 id="plugins-add" class="section-label"><span class="ui-label">{t.addHeading}</span><InfoTip topic={t.addHeading} text={t.addHint} /></h2>
     <div class="card add">
       <form onsubmit={inspect}>
         <label class="url">
@@ -301,7 +301,7 @@
           <span>{t.refLabel}</span>
           <input data-testid="plugin-ref" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder={t.refPlaceholder} bind:value={ref} />
         </label>
-        <button type="submit" data-testid="plugin-inspect" disabled={url.trim() === '' || inspecting}>{inspecting ? t.inspecting : t.inspect}</button>
+        <button type="submit" data-testid="plugin-inspect" disabled={url.trim() === '' || inspecting}><span class="ui-label">{inspecting ? t.inspecting : t.inspect}</span></button>
       </form>
       {#if inspectError}<p class="bad" role="alert" data-testid="plugin-inspect-error">{inspectError}</p>{/if}
       {#if preview}
@@ -311,7 +311,7 @@
               <span class="glyph" aria-hidden="true"><Puzzle size={16} strokeWidth={1.75} /></span>
               <div class="who">
                 <h3>{preview.manifest.name}<span class="version">v{preview.manifest.version}</span></h3>
-                <p class="state">{preview.manifest.description}</p>
+                <p class="state"><span class="ui-label">{preview.manifest.description}</span></p>
               </div>
             </div>
           {/if}
@@ -335,9 +335,9 @@
             <p class="trust"><TriangleAlert size={15} strokeWidth={1.75} />{t.trust}</p>
           {/if}
           <div class="act end">
-            <button class="quiet small" data-testid="plugin-dismiss" onclick={() => { preview = null; }}>{preview.rejected ? t.dismiss : strings.common.cancel}</button>
+            <button class="quiet small" data-testid="plugin-dismiss" onclick={() => { preview = null; }}><span class="ui-label">{preview.rejected ? t.dismiss : strings.common.cancel}</span></button>
             {#if preview.previewId && preview.manifest}
-              <button class="primary small" data-testid="plugin-add" disabled={adding} onclick={() => void add()}><Download size={14} />{fill(t.confirmAdd, { name: preview.manifest.name })}</button>
+              <button class="primary small" data-testid="plugin-add" disabled={adding} onclick={() => void add()}><Download size={14} /><span class="ui-label">{fill(t.confirmAdd, { name: preview.manifest.name })}</span></button>
             {/if}
           </div>
         </div>
@@ -397,6 +397,7 @@
   .commands li { padding-left: 2ch; text-indent: -2ch; }
 
   .pools { display: grid; gap: 10px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--color-border); }
+  .pools-head .section-label { display: flex; align-items: center; gap: 6px; }
   .pools-head, .pool-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   h4 { margin: 0; }
   h5 { margin: 0; font-size: var(--text-sm); font-weight: 600; }

@@ -131,17 +131,17 @@
       <div class="questions" data-testid="activity-questions" data-count={asked.length}>
         <div class="activity-row question-row">
           <MessageCircleQuestionMark size={16} />
-          <span class="kind">{strings.activity.question}</span>
+          <span class="kind ui-label">{strings.activity.question}</span>
           <button type="button" class="ghost objective question-toggle" aria-expanded={questionOpen}
             title={questionOpen ? strings.activity.questionFold : strings.activity.questionUnfold} data-testid="activity-question-toggle"
             onclick={() => (questionOpen = !questionOpen)}>
-            <span class="question-line">{questionOpen ? strings.chat.questionAsyncHeading : shown.text}</span>
+            <span class="question-line ui-label">{questionOpen ? strings.chat.questionAsyncHeading : shown.text}</span>
             <ChevronDown size={16} class={questionOpen ? 'turned' : ''} />
           </button>
           {#if asked.length > 1}
             <span class="pager">
               <button type="button" class="ghost small icon" aria-label={strings.activity.questionPrev} title={strings.activity.questionPrev} data-testid="activity-question-prev" onclick={() => page(-1)}><ChevronLeft size={16} /></button>
-              <span class="meta" data-testid="activity-question-index">{fill(strings.activity.questionOf, { index: String(at + 1), total: String(asked.length) })}</span>
+              <span class="meta ui-label" data-testid="activity-question-index">{fill(strings.activity.questionOf, { index: String(at + 1), total: String(asked.length) })}</span>
               <button type="button" class="ghost small icon" aria-label={strings.activity.questionNext} title={strings.activity.questionNext} data-testid="activity-question-next" onclick={() => page(1)}><ChevronRight size={16} /></button>
             </span>
           {/if}
@@ -173,11 +173,11 @@
       {#if entry}
         <div class="activity-row" class:finished={entry.status === 'complete'} data-testid="activity-{kind}">
           {#if kind === 'goal'}<Target size={16} />{:else}<Repeat size={16} />{/if}
-          <span class="kind">{kind === 'goal' ? strings.activity.goal : strings.activity.loop}</span>
+          <span class="kind ui-label">{kind === 'goal' ? strings.activity.goal : strings.activity.loop}</span>
           <span class="objective" title={'objective' in entry ? entry.objective : entry.prompt}>
             {#if 'objective' in entry}{entry.objective}{:else}{iteration(entry.iterations, entry.maxIterations)}{/if}
           </span>
-          <span class="meta status" class:live={entry.status === 'active'}>{strings.activity[entry.status]}</span>
+          <span class="meta status" class:live={entry.status === 'active'}><span class="ui-label">{strings.activity[entry.status]}</span></span>
           {#if entry.status !== 'complete'}
             <button type="button" class="ghost small icon" disabled={saving || store.connection !== 'ready'}
               aria-label={entry.status === 'active' ? strings.activity.pause : strings.activity.resume}
@@ -200,8 +200,8 @@
         onkeydown={(event) => { if (event.key === 'Escape') { expanded = false; event.stopPropagation(); } }}>
         <span class="toggle-line">
           <ListTodo size={16} />
-          <span class="current">{tasks.length ? current : strings.activity.history}</span>
-          {#if tasks.length}<span class="count">{fill(strings.activity.taskCount, { done: String(done), total: String(tasks.length) })}</span>{/if}
+          <span class="current ui-label">{tasks.length ? current : strings.activity.history}</span>
+          {#if tasks.length}<span class="count ui-label">{fill(strings.activity.taskCount, { done: String(done), total: String(tasks.length) })}</span>{/if}
           <ChevronDown size={16} class={expanded ? 'turned' : ''} />
         </span>
         <!-- Inside the toggle so its hover fill covers the bar and the card's air

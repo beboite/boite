@@ -104,10 +104,10 @@
       {/if}
       <div class="actions">
         <button type="button" class="ghost" data-cancel data-testid="confirm-cancel" onclick={() => confirm.answer(false)}>
-          {request.cancelLabel}
+          <span class="ui-label">{request.cancelLabel}</span>
         </button>
         {#if request.altLabel}
-          <button type="button" data-testid="confirm-alt" onclick={() => confirm.answer('alt')}>{request.altLabel}</button>
+          <button type="button" data-testid="confirm-alt" onclick={() => confirm.answer('alt')}><span class="ui-label">{request.altLabel}</span></button>
         {/if}
         <button
           type="button"
@@ -117,7 +117,7 @@
           data-testid="confirm-ok"
           onclick={() => confirm.answer(true)}
         >
-          {request.confirmLabel}
+          <span class="ui-label">{request.confirmLabel}</span>
         </button>
       </div>
     </div>

@@ -519,6 +519,14 @@ are inert. Settings pages use `--settings-width`, `--settings-padding` and
 `settings-stack`; explanatory text belongs in `InfoTip`, with visible hints
 reserved for current errors, counts or missing steps.
 
+For text beside icons, put `ui-label` on the text leaf inside the flex or grid
+row. The shared rule in `app.css` centres the font's cap height and alphabetic
+baseline with `text-box`; it keeps padding for accents and descenders when a
+label truncates. Trimming on the row itself does not reach its flex items.
+The existing line-height remains the fallback when a browser lacks `text-box`.
+`bun test tests/e2e/text-alignment.test.ts` measures this alignment across the
+eight reading fonts, desktop menus and phone controls.
+
 ### Window material
 
 Windows offers acrylic from build 22523, mica from 22000 and solid on every

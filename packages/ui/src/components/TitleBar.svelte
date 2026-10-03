@@ -124,16 +124,16 @@
     <div class="project-heading" data-testid="header-project" title={store.openProject.path}
       oncontextmenu={(event) => controlMenu(event, store, 'header.project')}>
       <ProjectTile project={store.openProject} {store} size={18} />
-      <span>{projectName(store.openProject)}</span>
+      <span class="ui-label">{projectName(store.openProject)}</span>
     </div>
   {/if}
   {#if threadHeader && (inShell || !mobile.current)}
     {#key store}<ThreadHeader {store} />{/key}
   {:else}
-    <span class="name">{store.page === 'agents' ? strings.agents.heading : heading}</span>
+    <span class="name ui-label">{store.page === 'agents' ? strings.agents.heading : heading}</span>
   {/if}
   {#if dev}
-    <span class="channel" title={strings.app.channelDevTitle} data-testid="titlebar-channel">{strings.app.channelDev}</span>
+    <span class="channel" title={strings.app.channelDevTitle} data-testid="titlebar-channel"><span class="ui-label">{strings.app.channelDev}</span></span>
   {/if}
   {#if inShell && !macShell}
   <!-- Windows' caption buttons: 46 px wide, the bar's full height, no gap and

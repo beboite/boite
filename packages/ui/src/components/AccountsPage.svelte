@@ -289,22 +289,22 @@
   {@const install = store.installOf(provider.id)}
   {#if step === 'install'}
     <button class="small" class:primary={main} data-testid="install-start" disabled={busy !== null} onclick={() => void startInstall(provider, true)}>
-      {install?.state === 'failed' ? strings.install.retry : strings.install.action}
+      <span class="ui-label">{install?.state === 'failed' ? strings.install.retry : strings.install.action}</span>
     </button>
   {:else if step === 'repair'}
-    <button class="small" class:primary={main} data-testid="install-repair" onclick={() => void repair(provider)}>{strings.install.repair}</button>
+    <button class="small" class:primary={main} data-testid="install-repair" onclick={() => void repair(provider)}><span class="ui-label">{strings.install.repair}</span></button>
   {:else if step === 'installing'}
-    <button class="quiet small" data-testid="install-cancel" onclick={() => void cancelInstall(provider)}>{strings.install.cancel}</button>
+    <button class="quiet small" data-testid="install-cancel" onclick={() => void cancelInstall(provider)}><span class="ui-label">{strings.install.cancel}</span></button>
     {#if chained[provider.id]}<InfoTip topic={strings.providerSettings.step.installing} text={strings.providerSettings.thenSignIn} />{/if}
   {:else if step === 'manual'}
     {#if setupUrls[provider.id]}
-      <a class="button" href={setupUrls[provider.id]} target="_blank" rel="noreferrer" data-testid="provider-setup">{strings.providerSettings.setup}</a>
+      <a class="button" href={setupUrls[provider.id]} target="_blank" rel="noreferrer" data-testid="provider-setup"><span class="ui-label">{strings.providerSettings.setup}</span></a>
     {/if}
   {:else if step === 'sign-in'}
-    <button class="small" class:primary={main} data-testid="provider-sign-in" disabled={busy !== null} onclick={() => void signIn(provider)}>{strings.accounts.login}</button>
+    <button class="small" class:primary={main} data-testid="provider-sign-in" disabled={busy !== null} onclick={() => void signIn(provider)}><span class="ui-label">{strings.accounts.login}</span></button>
   {/if}
   {#if step === 'manual' || step === 'external'}
-    <button class="quiet small" data-testid="providers-refresh" disabled={detecting} onclick={() => void detect()}>{strings.providerSettings.refresh}</button>
+    <button class="quiet small" data-testid="providers-refresh" disabled={detecting} onclick={() => void detect()}><span class="ui-label">{strings.providerSettings.refresh}</span></button>
     <InfoTip
       topic={provider.name}
       text={(step === 'manual' ? strings.providerSettings.manualHint : strings.providerSettings.externalHint).replace('{provider}', provider.name)}
@@ -349,7 +349,7 @@
       </div>
       <div class="code">
         <button type="button" class="quiet small" data-testid="account-login-terminal-close" onclick={() => void store.closeTerminal(`login:${account.id}`)}>
-          {strings.accounts.terminalDone}
+          <span class="ui-label">{strings.accounts.terminalDone}</span>
         </button>
         <InfoTip topic={strings.accounts.terminalDone} text={strings.accounts.terminalHint} />
       </div>
@@ -362,7 +362,7 @@
         {#if login.url}
           <div class="code">
             <a class="button primary" href={login.url} target="_blank" rel="noreferrer" data-testid="account-login-url">
-              {strings.accounts.loginOpen}
+              <span class="ui-label">{strings.accounts.loginOpen}</span>
             </a>
             <InfoTip topic={strings.accounts.loginOpen} text={strings.accounts.loginHint} />
           </div>
@@ -380,16 +380,16 @@
             value={codes[loginAccount.id] ?? ''}
             oninput={(event) => (codes = { ...codes, [loginAccount.id]: event.currentTarget.value })}
           />
-          <button type="submit" class="quiet small" data-testid="account-login-send">{strings.accounts.loginSend}</button>
+          <button type="submit" class="quiet small" data-testid="account-login-send"><span class="ui-label">{strings.accounts.loginSend}</span></button>
           {/if}
-          {#if provider.login && provider.login.kind === 'device'}<span class="hint">{strings.providerSettings.deviceHint}</span>{/if}
+          {#if provider.login && provider.login.kind === 'device'}<span class="hint"><span class="ui-label">{strings.providerSettings.deviceHint}</span></span>{/if}
           <button type="button" class="quiet small" data-testid="account-login-cancel" data-account-id={loginAccount.id} onclick={() => void store.cancelLogin(loginAccount.id)}>
-            {strings.accounts.loginCancel}
+            <span class="ui-label">{strings.accounts.loginCancel}</span>
           </button>
         </form>
       {:else}
         <p class="output bad" data-testid="account-login-output">{login.output}</p>
-        <button type="button" class="quiet small" data-testid="account-login-dismiss" onclick={() => store.dismissLogin(loginAccount.id)}>{strings.common.close}</button>
+        <button type="button" class="quiet small" data-testid="account-login-dismiss" onclick={() => store.dismissLogin(loginAccount.id)}><span class="ui-label">{strings.common.close}</span></button>
       {/if}
     </div>
   {/if}
@@ -404,7 +404,7 @@
   {@const account = modelAccount(provider)}
   {#if accounts.length > 0}
     <div class="section-head">
-      <span class="section-label">{strings.providerSettings.accounts}</span>
+      <span class="section-label"><span class="ui-label">{strings.providerSettings.accounts}</span></span>
     </div>
   {/if}
   {#each accounts as entry (entry.id)}
@@ -414,27 +414,27 @@
           {#if editing === entry.id}
             <form class="code rename" onsubmit={event => void rename(event, entry.id)}>
               <input aria-label={strings.providerSettings.accountName} data-testid="account-name" maxlength="100" bind:value={label} />
-              <button class="small" type="submit" disabled={saving || !label.trim()}>{strings.providerSettings.save}</button>
-              <button class="quiet small" type="button" disabled={saving} onclick={() => editing = null}>{strings.install.removeCancel}</button>
+              <button class="small" type="submit" disabled={saving || !label.trim()}><span class="ui-label">{strings.providerSettings.save}</span></button>
+              <button class="quiet small" type="button" disabled={saving} onclick={() => editing = null}><span class="ui-label">{strings.install.removeCancel}</span></button>
             </form>
           {:else}<h3>{entry.label}</h3>{/if}
-          {#if entry.identity}<p class="identity"><button type="button" class="private-email" class:revealed={revealed[entry.id]} aria-label={strings.providerSettings.revealEmail} aria-pressed={revealed[entry.id] === true} data-testid="account-email" onclick={() => revealed[entry.id] = !revealed[entry.id]}>{entry.identity}</button></p>{/if}
+          {#if entry.identity}<p class="identity"><button type="button" class="private-email" class:revealed={revealed[entry.id]} aria-label={strings.providerSettings.revealEmail} aria-pressed={revealed[entry.id] === true} data-testid="account-email" onclick={() => revealed[entry.id] = !revealed[entry.id]}><span class="ui-label">{entry.identity}</span></button></p>{/if}
           <p class="state">
-            <span class="kind">{entry.isolationDir === null ? strings.providerSettings.default : strings.providerSettings.isolated}</span>
+            <span class="kind ui-label">{entry.isolationDir === null ? strings.providerSettings.default : strings.providerSettings.isolated}</span>
             {#if entry.status !== 'ok'}
-              <span class:bad={entry.status !== 'unknown'}>· {strings.accounts.status[entry.status]}</span>
+              <span class="ui-label" class:bad={entry.status !== 'unknown'}>· {strings.accounts.status[entry.status]}</span>
             {/if}
           </p>
         </div>
         <div class="act">
           {#if provider.available && provider.login && (entry.isolationDir !== null || inTerminal(provider)) && !loggingIn(entry.id)}
             <button class="quiet small" data-testid="account-login" data-account-id={entry.id} onclick={() => void startLogin(provider, entry)}>
-              {entry.status === 'ok' ? strings.providerSettings.reconnect : strings.accounts.login}
+              <span class="ui-label">{entry.status === 'ok' ? strings.providerSettings.reconnect : strings.accounts.login}</span>
             </button>
           {/if}
-          <button class="quiet small" data-testid="account-rename" onclick={() => { editing = entry.id; label = entry.label; }}>{strings.providerSettings.rename}</button>
-          <button class="quiet small" disabled={checking !== null || loggingIn(entry.id)} data-testid="account-verify" onclick={() => void verify(entry)}>{checking === entry.id ? strings.providerSettings.checking : strings.providerSettings.check}</button>
-          <button class="quiet small" data-testid="account-remove" data-account-id={entry.id} onclick={() => void remove(entry)}>{strings.accounts.remove}</button>
+          <button class="quiet small" data-testid="account-rename" onclick={() => { editing = entry.id; label = entry.label; }}><span class="ui-label">{strings.providerSettings.rename}</span></button>
+          <button class="quiet small" disabled={checking !== null || loggingIn(entry.id)} data-testid="account-verify" onclick={() => void verify(entry)}><span class="ui-label">{checking === entry.id ? strings.providerSettings.checking : strings.providerSettings.check}</span></button>
+          <button class="quiet small" data-testid="account-remove" data-account-id={entry.id} onclick={() => void remove(entry)}><span class="ui-label">{strings.accounts.remove}</span></button>
         </div>
       </div>
       {#if verified[entry.id] !== undefined}<p class="hint" role="status">{entry.status === 'ok' ? strings.providerSettings.connectionOk : strings.accounts.status[entry.status]}</p>{/if}
@@ -444,11 +444,11 @@
   {#if provider.available && (provider.login || (!provider.alwaysIsolated && !accounts.some((entry) => entry.isolationDir === null)))}
     <div class="more">
       {#if provider.login}
-        <button class="quiet small" data-testid="account-add" disabled={busy !== null} onclick={() => void signIn(provider, true)}><Plus size={14} />{strings.providerSettings.addAccount}</button>
+        <button class="quiet small" data-testid="account-add" disabled={busy !== null} onclick={() => void signIn(provider, true)}><Plus size={14} /><span class="ui-label">{strings.providerSettings.addAccount}</span></button>
       {/if}
       {#if !provider.alwaysIsolated && !accounts.some((entry) => entry.isolationDir === null)}
         <button class="quiet small" data-testid="account-use-cli" onclick={() => void store.addAccount({ providerId: provider.id, label: nextAccountLabel(provider, accounts), useDefaultLocation: true })}>
-          <Terminal size={14} />{strings.providerSettings.useCli}
+          <Terminal size={14} /><span class="ui-label">{strings.providerSettings.useCli}</span>
         </button>
       {/if}
     </div>
@@ -459,7 +459,7 @@
     {@const info = store.modelsOf(provider.id, account.id).find((entry) => entry.id === model)}
     {@const effort = store.defaultEffortOf(provider.id, account.id, model)}
     <div class="section-head">
-      <span class="section-label">{strings.providerSettings.defaultModel}<InfoTip topic={strings.providerSettings.defaultModel} text={strings.settings.modelDefaultsHint} /></span>
+      <span class="section-label"><span class="ui-label">{strings.providerSettings.defaultModel}</span><InfoTip topic={strings.providerSettings.defaultModel} text={strings.settings.modelDefaultsHint} /></span>
     </div>
     <div class="default-model" data-testid="model-default" data-default-provider={provider.id}>
       <ModelPicker
@@ -476,22 +476,22 @@
       {#if info?.effort?.levels.length}
         <EffortSlider levels={info.effort.levels} active={effort} onpick={(level) => model && store.setModelDefault(provider.id, account.id, model, level)} />
       {:else if effort}
-        <span class="pending-effort">{effort}</span>
+        <span class="pending-effort"><span class="ui-label">{effort}</span></span>
       {/if}
     </div>
   {/if}
 
   {#if install?.state === 'installed' || provider.executable}
-    <div class="section-head"><span class="section-label">{strings.providerSettings.installation}</span></div>
+    <div class="section-head"><span class="section-label"><span class="ui-label">{strings.providerSettings.installation}</span></span></div>
     <dl class="facts">
       {#if install?.state === 'installed'}
         <div class="fact">
           <dt>{strings.providerSettings.version}</dt>
           <dd class="managed">
-            <span data-testid="install-status">{updatable(store, provider)
+            <span class="ui-label" data-testid="install-status">{updatable(store, provider)
               ? strings.install.updateAvailable.replace('{installed}', install.version).replace('{available}', install.available)
               : strings.install.upToDate.replace('{version}', install.version)}</span>
-            <button class="quiet small" data-testid="install-remove" onclick={() => void uninstall(provider)}>{strings.install.remove}</button>
+            <button class="quiet small" data-testid="install-remove" onclick={() => void uninstall(provider)}><span class="ui-label">{strings.install.remove}</span></button>
           </dd>
         </div>
       {/if}
@@ -537,7 +537,7 @@
             <span class="name">{row.name}</span>
             <span class="state" class:bad={install?.state === 'failed' && step === 'install'} data-testid="provider-state">
               <span class="dot" class:ok={step === 'ready'} class:live={step === 'installing' || step === 'signing-in'}></span>
-              {stateText(lead, step)}
+              <span class="ui-label">{stateText(lead, step)}</span>
             </span>
           </span>
         </button>
@@ -549,7 +549,7 @@
             <span class="name">{row.name}</span>
             <span class="state" class:bad={install?.state === 'failed' && step === 'install'} data-testid="provider-state">
               <span class="dot" class:ok={step === 'ready'} class:live={step === 'installing' || step === 'signing-in'}></span>
-              {stateText(lead, step)}
+              <span class="ui-label">{stateText(lead, step)}</span>
             </span>
           </span>
         </div>
@@ -577,7 +577,7 @@
                   <span class="member-name">{member.name}</span>
                   <span class="state" data-testid="provider-state">
                     <span class="dot" class:ok={memberStep === 'ready'} class:live={memberStep === 'installing' || memberStep === 'signing-in'}></span>
-                    {stateText(member, memberStep)}
+                    <span class="ui-label">{stateText(member, memberStep)}</span>
                   </span>
                 </span>
                 {#if member.id !== lead.id}
@@ -611,7 +611,7 @@
       <!-- Agent updates for this machine: two controls, the versions are on the rows. -->
       <div class="updates">
         <label class="auto" for="{uid}-auto">
-          <span id="{uid}-auto-name">{strings.providerSettings.autoUpdate}</span>
+          <span class="ui-label" id="{uid}-auto-name">{strings.providerSettings.autoUpdate}</span>
           <InfoTip topic={strings.providerSettings.autoUpdate} text="{strings.harnessUpdates.intro} {strings.harnessUpdates.autoHint}." />
           <input
             id="{uid}-auto"
@@ -625,7 +625,7 @@
           />
         </label>
         <button type="button" class="quiet small" data-testid="harness-updates-check" disabled={updatesBusy} onclick={() => void checkUpdates()}>
-          <RefreshCw size={13} />{updatesBusy ? strings.harnessUpdates.checking : strings.providerSettings.checkUpdates}
+          <RefreshCw size={13} /><span class="ui-label">{updatesBusy ? strings.harnessUpdates.checking : strings.providerSettings.checkUpdates}</span>
         </button>
       </div>
     {/if}

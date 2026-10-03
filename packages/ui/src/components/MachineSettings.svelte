@@ -14,7 +14,7 @@
 
 <div class="machine-settings" data-testid="machine-settings" data-machine-id={machine.id}>
   <header>
-    <button class="ghost back" data-testid="machine-settings-back" onclick={onback}><ArrowLeft size={15} />{strings.machines.heading}</button>
+    <button class="ghost back" data-testid="machine-settings-back" onclick={onback}><ArrowLeft size={15} /><span class="ui-label">{strings.machines.heading}</span></button>
     <h1>{machine.label}</h1>
     <p>{strings.machines.settingsHint}</p>
     {#if source}<p class="synced" data-testid="machine-settings-source">{fill(strings.machines.synced, { source })}</p>{/if}
