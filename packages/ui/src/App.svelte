@@ -315,7 +315,7 @@
 
   // The same for a push: the service worker shows the core's generic notices
   // in the words this page left it, written again when the language changes.
-  (() => {
+  $effect(() => {
     if (inShell) return;
     void storeNotificationWords(notificationWords());
   });

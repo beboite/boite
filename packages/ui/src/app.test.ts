@@ -155,6 +155,18 @@ test('the app mounts against the fake core, lists the seeded threads and opens t
   expect(store.openThread?.id).toBe('t-descriptors');
 });
 
+test('the page leaves the service worker its notification words on boot', async () => {
+  const put = vi.fn(async (_path: string, _response: Response) => {});
+  vi.stubGlobal('caches', { open: vi.fn(async () => ({ put })) });
+  try {
+    await mountOnFake();
+    await waitFor(() => put.mock.calls.length > 0);
+    const [path, response] = put.mock.calls[0]!;
+    expect(path).toBe('/notification-words');
+    expect(await response.json()).toMatchObject({ done: expect.any(String), needsYou: expect.any(String) });
+  } finally { vi.unstubAllGlobals(); }
+});
+
 test('the app opens on a new thread in the project last worked in', async () => {
   await mountOnFake('/?fake=1&open=landing');
   await waitFor(() => store.draft !== null);
