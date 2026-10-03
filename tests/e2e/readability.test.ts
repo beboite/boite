@@ -258,7 +258,7 @@ test('in forced colors a focused text field still shows where the keyboard is', 
   }
 }, 30_000);
 
-test('PR links belong to a thread branch and disappear after a move to a plain folder', async () => {
+test('PR links appear during work without remounting and disappear after a move to a plain folder', async () => {
   const origin = await page.evaluate<string>('location.origin');
   await page.send('Emulation.setDeviceMetricsOverride', { width:1300, height:850, deviceScaleFactor:1, mobile:false });
   await page.navigate(`${origin}/?fake=1&open=recent`);
@@ -286,6 +286,30 @@ test('PR links belong to a thread branch and disappear after a move to a plain f
   await page.waitFor(`document.querySelector('${id('sidebar')} ${id('thread-project')}')`);
   expect(await prBeforeBranch(id('sidebar'))).toBe(true);
   await capture('pr-links-recent');
+  await page.evaluate(`(() => {
+    const store = globalThis.__boiteTest.workspace.active, client = store.client;
+    window.__prOriginal = client.call.bind(client);
+    window.__publishedPr = null;
+    window.__prRow = document.querySelector('[data-thread-id="t-trace"]');
+    client.call = (method, params) => method === 'threads.pullRequest' && params.threadId === 't-trace'
+      ? Promise.resolve(window.__publishedPr) : window.__prOriginal(method, params);
+    const summary = store.threads.find(thread => thread.id === 't-trace');
+    summary.branch = 'boite/publish-live-pr'; summary.status = 'running';
+  })()`);
+  const livePr = `.thread:has([data-thread-id="t-trace"]) ${id('thread-pr')}`;
+  await page.waitFor(`!document.querySelector('${livePr}') && document.querySelector('[data-thread-id="t-trace"][data-status="running"]')`);
+  await page.evaluate(`window.__publishedPr = { number:185, url:'https://github.com/example/repo/pull/185', state:'OPEN' }`);
+  await page.waitFor(`document.querySelector('${livePr}')?.textContent.includes('#185')`, 25_000);
+  expect(await page.evaluate(`document.querySelector('[data-thread-id="t-trace"]') === window.__prRow`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('[data-thread-id="t-trace"]').dataset.status`)).toBe('running');
+  expect(await prBeforeBranch(id('sidebar'))).toBe(true);
+  await capture('pr-live-desktop');
+  await page.evaluate(`(() => {
+    const store = globalThis.__boiteTest.workspace.active;
+    store.client.call = window.__prOriginal;
+    const summary = store.threads.find(thread => thread.id === 't-trace');
+    summary.status = 'idle';
+  })()`);
   await page.click(id('view-projects'));
   await page.send('Emulation.setDeviceMetricsOverride', { width:390, height:844, deviceScaleFactor:1, mobile:true });
   await mobileAction(page, 'mobile-conversations');
@@ -299,4 +323,4 @@ test('PR links belong to a thread branch and disappear after a move to a plain f
   await page.waitFor(`document.querySelector('[data-thread-id="t-trace"]') && !document.querySelector('.thread:has([data-thread-id="t-trace"]) ${id('thread-pr')}')`);
   expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.threads.find(thread => thread.id === 't-trace').branch`)).toBeNull();
   expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.client.call('threads.pullRequest', { threadId: 't-trace' })`)).toBeNull();
-}, 30_000);
+}, 45_000);

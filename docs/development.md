@@ -201,6 +201,13 @@ main list. Expansion follows the owning project between desktop and phone for
 the current session. Phone search exposes matching
 working conversations even when their counter is closed.
 
+Visible desktop thread rows read their PR again every 15 seconds, on a turn's
+status change and when the app becomes visible. Folded rows and hidden windows
+skip background reads; a failed read keeps the last successful link. The core
+shares a 15-second PR list cache across a repository's worktrees and reads each
+worktree's own HEAD, so an agent's branch rename or switch does not lose its PR.
+Shared project-directory threads never inherit that directory's current branch.
+
 Deletion is owner-only and separate from archive. `threads.remove` stops the
 thread family and waits for processes before hiding it behind persistent
 markers. `threads.deleted` lists retained conversations and `threads.restore`
