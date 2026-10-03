@@ -71,6 +71,8 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
   // test asked for them: a version check or a probe would start the user's CLIs.
   const live = HOST_AGENT_OPT_INS.some(name => process.env[name] === '1');
   process.env.BOITE_HOST_AGENTS = live ? '1' : '0';
+  // A group never reads this machine's Tailscale state: tests give loopback addresses only.
+  process.env.BOITE_TAILNET = '0';
   // A shell the tests open must not write what they type into the user's own
   // PowerShell or bash history: cmd and sh keep none.
   process.env.BOITE_TERMINAL_SHELL = process.platform === 'win32' ? (process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe') : '/bin/sh';

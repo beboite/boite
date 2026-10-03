@@ -14,12 +14,15 @@ import {
 } from './endpoint';
 import { strings } from './strings';
 import { AutoSettingsSync } from './auto-settings-sync.svelte';
+import { GroupLinks } from './group-links.svelte';
 
 export interface Machine {
   id: string;
   label: string;
   store: Store;
   icon?: MachineIconName;
+  /** Set when the group brought this machine here: its id in the roster. Such a machine goes when the group drops it. */
+  coreId?: string;
 }
 
 export function isThisPC(machine: Machine): boolean {
@@ -62,6 +65,16 @@ export class Workspace {
   view = $state<'projects' | 'recent'>('projects');
   error = $state<string | null>(null);
   readonly settingsSync = new AutoSettingsSync(() => this.machines, profileKey);
+  /** Connects the other machines of a group and drops the ones that left it. */
+  readonly groups = new GroupLinks(this);
+  /** The store of the core this page booted on: never removed, whatever a group says. */
+  readonly primary: Store = store;
+  /**
+   * Every machine this device remembers is in the list, connected or not. Until
+   * then a member of the group may only look missing, and asking for a ticket
+   * to it would make a second key for a machine this device already holds one for.
+   */
+  settled = $state(false);
   #generation = 0;
   #lifecycle = 0;
 
@@ -97,6 +110,13 @@ export class Workspace {
     const machine = { id: remote.machineId, label: 'Builder', store: remote };
     this.restoreProfile(machine);
     this.machines = [...this.machines, machine];
+    // The two fake machines are one group, so the group card has members to show.
+    if (store.client && remote.client && (await store.client.call('group.get', {})) === null) {
+      await store.client.call('group.create', { name: 'Home' });
+      const { invite } = await store.client.call('group.invite', {});
+      await remote.client.call('group.join', { invite });
+      await Promise.all([store.loadGroup(), remote.loadGroup()]);
+    }
   }
 
   async #connectShellLocal(lifecycle: number): Promise<void> {
@@ -125,6 +145,15 @@ export class Workspace {
    * another remembered machine that served the page opens once that one is in.
    */
   async boot(thread: string | null = null): Promise<void> {
+    this.settled = false;
+    try {
+      await this.#boot(thread);
+    } finally {
+      this.settled = true;
+    }
+  }
+
+  async #boot(thread: string | null): Promise<void> {
     const lifecycle = ++this.#lifecycle;
     const generation = this.#generation;
     store.visible = true;
@@ -232,8 +261,8 @@ export class Workspace {
     machine.label = label?.trim() || machine.store.core?.hostname || host;
     this.restoreProfile(machine);
     this.#distinct(machine);
-    // Grant credentials are persisted by WsClient's onSession, never the grant itself.
-    if (!endpoint.grant && !endpoint.local)
+    // Grant and ticket credentials are persisted by WsClient's onSession, never the grant itself.
+    if (!endpoint.grant && !endpoint.ticket && !endpoint.local)
       upsertEnvironment({ url: machine.id, token: endpoint.token, paired: endpoint.paired ?? false, label: machine.label });
     else {
       const saved = readEnvironments().find((e) => e.url === machine.id);
@@ -246,22 +275,25 @@ export class Workspace {
     }
   }
 
-  async add(endpoint: Endpoint, label?: string): Promise<boolean> {
+  /**
+   * `quiet` is a connection nobody asked for by hand, a machine the group
+   * names: a failure writes no error under the add form, and a machine that
+   * was only tried is not left in the list.
+   */
+  async add(endpoint: Endpoint, label?: string, quiet = false): Promise<boolean> {
     const lifecycle = this.#lifecycle;
     const identity = endpointIdentity(endpoint);
-    if (!identity) {
-      this.error = strings.machines.invalidUrl;
+    const fail = (message: string): false => {
+      if (!quiet) this.error = message;
       return false;
-    }
+    };
+    if (!identity) return fail(strings.machines.invalidUrl);
     const { id, host } = identity;
     const existing = this.machines.find((m) => m.id === id);
     // Only a machine that answered is a duplicate. One still retrying holds a
     // key its core refuses, and on a phone that machine is the page's own,
     // which cannot be removed: the new link has to be able to replace the key.
-    if (existing && existing.store.connection === 'ready') {
-      this.error = strings.machines.duplicate;
-      return false;
-    }
+    if (existing && existing.store.connection === 'ready') return fail(strings.machines.duplicate);
     const target = existing?.store ?? new Store();
     target.client?.close();
     target.detach();
@@ -275,6 +307,7 @@ export class Workspace {
     // Read back from the list: the name the core reports is written through the
     // reactive entry, or a card already drawn under the address keeps showing it.
     const machine = existing ?? this.machines.find((m) => m.store === target)!;
+    if (endpoint.coreId !== undefined) machine.coreId = endpoint.coreId;
     const connecting = target.connectEndpoint({ ...endpoint, url: id });
     const client = target.client;
     await connecting;
@@ -288,12 +321,17 @@ export class Workspace {
       return false;
     }
     if (target.connection !== 'ready') {
-      this.error = `${machine.label}: ${target.error ?? strings.connection.closed}`;
-      return false;
+      // A ticket that opened nothing leaves no key to retry with: the group asks for another.
+      if (endpoint.ticket !== undefined && !existing) {
+        target.client?.close();
+        target.detach();
+        this.machines = this.machines.filter((m) => m.store !== target);
+      }
+      return fail(`${machine.label}: ${target.error ?? strings.connection.closed}`);
     }
     if (this.#discardAlias(machine)) return true;
     this.#rememberConnected(machine, endpoint, label, host);
-    this.error = null;
+    if (!quiet) this.error = null;
     return true;
   }
 

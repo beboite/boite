@@ -42,6 +42,7 @@ import { SpeechStore } from './speech.ts';
 import { Telemetry } from './telemetry.ts';
 import { HarnessUpdates } from './providers/updates.ts';
 import { Coordination } from './coordination.ts';
+import { GroupStore, type NetworkSink } from './group.ts';
 import { Delegation } from './delegation.ts';
 import { Workflows } from './workflows.ts';
 import { BrainStore } from './brain.ts';
@@ -145,6 +146,8 @@ export class Core {
   readonly updates: HarnessUpdates;
   readonly serverUpdates: ServerUpdates;
   readonly coordination: Coordination;
+  /** The machines this core trusts as one owner's, and what it hands their clients. */
+  readonly group: GroupStore;
   readonly delegation: Delegation;
   readonly workflows: Workflows;
   readonly brain: BrainStore;
@@ -165,6 +168,9 @@ export class Core {
     closeSession: () => undefined,
     closeAgents: () => undefined,
   };
+
+  /** The server answers on one more address when a group asks; a core with no server answers on none. */
+  network: NetworkSink = { also: () => false };
 
   private endpoint = { host: '127.0.0.1', port: 0 };
   #onShutdown: (() => void) | undefined;
@@ -261,6 +267,7 @@ export class Core {
     this.updates = new HarnessUpdates(this);
     this.serverUpdates = new ServerUpdates(this, options.serverUpdates);
     this.coordination = new Coordination(this);
+    this.group = new GroupStore(this);
     this.delegation = new Delegation(this);
     this.workflows = new Workflows(this);
     this.brain = new BrainStore(this);
@@ -295,6 +302,11 @@ export class Core {
     this.endpoint = { host, port };
   }
 
+  /** What the server bound, a wildcard included. */
+  boundEndpoint(): { host: string; port: number } {
+    return { ...this.endpoint };
+  }
+
   displayHost(): string {
     return this.endpoint.host === '0.0.0.0' ? '127.0.0.1' : this.endpoint.host;
   }
@@ -309,6 +321,10 @@ export class Core {
    * phone is the phone.
    */
   reachableUrl(): string {
+    // A machine of a group gives the address the group gives for it: its
+    // tailnet name when it has one, which a phone on the tailnet reaches from anywhere.
+    const grouped = this.group.ownAddress();
+    if (grouped !== null) return grouped;
     const everywhere = this.endpoint.host === '0.0.0.0' || this.endpoint.host === '::';
     const lan = everywhere ? lanAddress() : null;
     return lan === null ? this.baseUrl() : `http://${lan}:${this.endpoint.port}`;
@@ -348,6 +364,7 @@ export class Core {
     this.workflows.beginClose();
     this.coordination.beginClose();
     void this.mergedPrArchive.close();
+    this.group.beginClose();
     this.activity.close();
     this.threads.autoCompact.close();
     this.#drainPromise = this.agentRuntime.close().then(() => this.scheduler.drain(timeoutMs));
@@ -378,6 +395,7 @@ export class Core {
     await this.drain();
     await this.delegation.close();
     await this.coordination.close();
+    await this.group.close();
     await this.speech.close();
     await this.push.close();
     await this.plugins.close();

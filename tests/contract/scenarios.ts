@@ -8,6 +8,7 @@
  * text: the words may change, the refusal may not.
  */
 import {
+  GROUP_INVITE_PREFIX,
   RpcErrorCode,
   type Account,
   type Project,
@@ -611,6 +612,42 @@ export const SCENARIOS: Record<string, Scenario> = {
       .filter((event) => event.name === 'project.removed' || (event.payload as { id?: string; threadId?: string }).id === created.id || (event.payload as { threadId?: string }).threadId === created.id)
       .map((event) => (event.name === 'thread.updated' ? `thread.updated archived=${(event.payload as ThreadSummary).archived}` : event.name));
     same(order.filter((entry, index) => index === 0 || entry !== order[index - 1]), ['thread.updated archived=true', 'thread.removed', 'project.removed'], 'the events');
+  },
+  'a group is created, invites, refuses what names the wrong machine, and is left': async (env) => {
+    same(await env.call('group.get', {}), null, 'the group before any');
+    await refusedWith(env.call('group.invite', {}), RpcErrorCode.Refused);
+    await refusedWith(env.call('group.leave', {}), RpcErrorCode.Refused);
+    await refusedWith(env.call('group.ticket', { coreId: 'f'.repeat(64) }), RpcErrorCode.Refused);
+    await refusedWith(env.call('group.create', { name: '   ' }), RpcErrorCode.InvalidParams, ['field']);
+    await refusedWith(env.call('group.join', { invite: 'http://127.0.0.1:1/?grant=abc' }), RpcErrorCode.InvalidParams, ['field']);
+
+    const events = record(env, ['group.updated']);
+    const group = await env.call('group.create', { name: ' Home ' });
+    same(group.name, 'Home', 'the trimmed name');
+    same(group.cores.map((core) => core.coreId), [group.self], 'the members');
+    same(group.devices, [], 'the devices');
+    check(group.cores[0]!.addresses.length > 0, 'the only member gives no address');
+    same(await env.call('group.get', {}), group, 'the group read back');
+    await until('group.updated after create', () => events.events.length >= 1);
+    await refusedWith(env.call('group.create', { name: 'Other' }), RpcErrorCode.Refused);
+
+    const { invite, expiresAt } = await env.call('group.invite', {});
+    check(invite.startsWith(GROUP_INVITE_PREFIX), `the invitation does not start with ${GROUP_INVITE_PREFIX}`);
+    // The in-memory core keeps a clock of its own: the date is read as a date, not against this one.
+    check(Number.isSafeInteger(expiresAt) && expiresAt > 0, 'the invitation has no expiry');
+    // A member joins nothing, not even its own invitation.
+    await refusedWith(env.call('group.join', { invite }), RpcErrorCode.Refused);
+    same((await refusedWith(env.call('group.ticket', { coreId: group.self }), RpcErrorCode.Refused, ['field'])).field, 'coreId', 'the ticket refusal');
+    same((await refusedWith(env.call('group.remove', { coreId: group.self }), RpcErrorCode.Refused, ['field'])).field, 'coreId', 'removing itself');
+    same((await refusedWith(env.call('group.remove', { coreId: 'f'.repeat(64) }), RpcErrorCode.Refused, ['field'])).field, 'coreId', 'removing a stranger');
+
+    const seen = events.events.length;
+    same(await env.call('group.leave', {}), { ok: true }, 'leaving');
+    same(await env.call('group.get', {}), null, 'the group after leaving');
+    await until('group.updated after leave', () => events.events.length > seen);
+    events.stop();
+    // The invitation it minted names this machine: pasted here, it is refused by field.
+    same((await refusedWith(env.call('group.join', { invite }), RpcErrorCode.Refused, ['field'])).field, 'invite', 'joining its own invitation');
   },
 };
 

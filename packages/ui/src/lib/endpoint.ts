@@ -9,6 +9,10 @@ export interface Endpoint {
    * back is what gets stored in its place.
    */
   grant?: string;
+  /** A group ticket, spent like a grant: another machine of the core's group vouched for this client. */
+  ticket?: string;
+  /** The group member this endpoint is, when the group led here. */
+  coreId?: string;
   /**
    * The token is the session key a pairing link became, not a core token. In
    * the shell this is what lets a stored endpoint win over the core the shell
@@ -80,6 +84,8 @@ export interface StoredEnvironment {
   label: string;
   token: string;
   paired: boolean;
+  /** Set when the group connected this core: its id in the roster, so it is found again offline and dropped when it leaves. */
+  coreId?: string;
 }
 
 export const ENVIRONMENTS_STORAGE_KEY = 'boite.envs';
@@ -159,15 +165,18 @@ export function upsertEnvironment(entry: {
   token: string;
   paired: boolean;
   label?: string;
+  coreId?: string;
 }): StoredEnvironment[] {
   const url = normalise(entry.url);
   const list = readEnvironments();
   const at = list.findIndex((env) => env.url === url);
   const label = entry.label ?? list[at]?.label ?? defaultEnvironmentLabel(url);
+  const coreId = entry.coreId ?? list[at]?.coreId;
+  const next: StoredEnvironment = { url, label, token: entry.token, paired: entry.paired, ...(typeof coreId === 'string' ? { coreId } : {}) };
   if (at === -1) {
-    list.push({ url, label, token: entry.token, paired: entry.paired });
+    list.push(next);
   } else {
-    list[at] = { url, label, token: entry.token, paired: entry.paired };
+    list[at] = next;
   }
   storeEnvironments(list);
   return list;

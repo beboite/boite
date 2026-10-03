@@ -275,6 +275,10 @@ export function listen(ctx: StoreContext, client: Client): void {
   on('sessions.updated', () => {
     if (s.page === 'settings') void s.loadSessions();
   });
+  // The machines of the group decide which machines this client connects to: read on every change.
+  on('group.updated', () => {
+    void s.loadGroup();
+  });
   on('providers.installProgress', ({ providerId, ...state }) => {
     s.installStates = { ...s.installStates, [providerId]: state as ProviderInstallState };
   });

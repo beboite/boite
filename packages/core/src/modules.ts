@@ -22,6 +22,7 @@ import { registerPushMethods } from './push.ts';
 import { registerSpeechMethods } from './speech.ts';
 import { registerTelemetry } from './telemetry.ts';
 import { registerCoordination } from './coordination.ts';
+import { registerGroupMethods } from './group.ts';
 import { registerTerminalMethods } from './terminals.ts';
 import { registerWorkflowMethods } from './workflows.ts';
 import { registerWorktreeMethods } from './worktree-sweep.ts';
@@ -48,6 +49,7 @@ export function registerModules(core: Core): void {
   registerHookMethods(core);
   registerTelemetry(core);
   registerCoordination(core);
+  registerGroupMethods(core);
   registerSpeechMethods(core);
   registerPushMethods(core);
   core.router.register('threads.activity.set', (params) => core.activity.set(params));

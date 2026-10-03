@@ -582,7 +582,8 @@ of a black frame; a video that fails while loading also offers it.
   the PWA was closed in between; a new thread still needs the core.
 - Pairing is a link somebody carries over, by hand or by the QR code beside it,
   and it has to be opened within ten minutes. There is no discovery on the
-  network.
+  network. One pairing is enough for the machines of a [group](groups.md): the
+  phone is handed a key by each of the others.
 - There is no iOS package. On Android, the nightly APK opens one core's page
   full screen ([android.md](android.md)); otherwise the phone runs the installed
   web app.

@@ -222,6 +222,18 @@ export class Store {
   closePairing() { return this.#ctx.pairing.closePairing(); }
   loadSessions(...args: Parameters<Pairing['loadSessions']>) { return this.#ctx.pairing.loadSessions(...args); }
   revokeSession(...args: Parameters<Pairing['revokeSession']>) { return this.#ctx.pairing.revokeSession(...args); }
+  get group() { return this.#ctx.pairing.group; }
+  set group(value) { this.#ctx.pairing.group = value; }
+  get groupKnown() { return this.#ctx.pairing.groupKnown; }
+  set groupKnown(value) { this.#ctx.pairing.groupKnown = value; }
+  get groupInvite() { return this.#ctx.pairing.groupInvite; }
+  set groupInvite(value) { this.#ctx.pairing.groupInvite = value; }
+  loadGroup(...args: Parameters<Pairing['loadGroup']>) { return this.#ctx.pairing.loadGroup(...args); }
+  createGroup(...args: Parameters<Pairing['createGroup']>) { return this.#ctx.pairing.createGroup(...args); }
+  joinGroup(...args: Parameters<Pairing['joinGroup']>) { return this.#ctx.pairing.joinGroup(...args); }
+  leaveGroup(...args: Parameters<Pairing['leaveGroup']>) { return this.#ctx.pairing.leaveGroup(...args); }
+  removeFromGroup(...args: Parameters<Pairing['removeFromGroup']>) { return this.#ctx.pairing.removeFromGroup(...args); }
+  inviteToGroup(...args: Parameters<Pairing['inviteToGroup']>) { return this.#ctx.pairing.inviteToGroup(...args); }
 
   // -------------------------------------------------------------------------
   // Layout, navigation and notifications: store/layout.svelte.ts

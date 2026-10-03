@@ -6,6 +6,7 @@
   import { confirm } from '../lib/confirm.svelte';
   import { fill, strings } from '../lib/strings';
   import MachineIcon from './MachineIcon.svelte';
+  import GroupCard from './GroupCard.svelte';
   import RemoteCoordination from './RemoteCoordination.svelte';
   import PairingCard from './PairingCard.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
@@ -94,6 +95,8 @@
   <section class="connections-section" id="settings-machines" aria-labelledby="connections-heading">
     <h2 class="section-heading ui-label-box" id="connections-heading"><Monitor size={16} /><span class="ui-label">{strings.machines.connections}</span></h2>
     <PairMachine {mobile} bind:this={pairingForm} />
+
+    <GroupCard store={workspace.active} {mobile} />
 
     <div class="machines">
       {#each workspace.machines as machine (machine.id)}

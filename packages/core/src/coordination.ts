@@ -5,6 +5,7 @@ import { defaultCoordinationConfig } from '@boite/contracts';
 import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscript, CoordinationBridgeResponse, CoordinationConfig, CoordinationPeer, CoordinationView, RpcParams } from '@boite/contracts';
 import { checkMatchExtras, checkTranscript, searchContacts, searchWords, transcript } from './coordination-lookup.ts';
 import { CoordinationBridge } from './coordination-bridge.ts';
+import { boundedBody, MAX_BODY, PeerGone, PeerRefusal, post, ROUTE, settle, type Answer } from './coordination-wire.ts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unavailable } from './errors.ts';
 
@@ -21,12 +22,11 @@ export const SWEEP_PROBES = [
   // An uncertain letter is never replayed. Only an outgoing one is asked about again, until it expires.
   "SELECT 1 FROM coordination_letters WHERE status = 'uncertain' AND direction = 'out' AND created_at > ? AND json_extract(data, '$.expiresAt') > ? LIMIT 1",
 ] as const;
-const MAX_BODY = 262_144;
-const ROUTE = '/agent-messages';
 /** The longest `collaboration.wait`: a CLI call stays under its five-minute RPC deadline. */
 export const WAIT_MAX_MS = 300_000;
 type Row = { data: string; fingerprint: string | null };
-type Envelope = { from: string; to: string; at: number; nonce: string; operation: 'directory' | 'deliver' | 'receipt' | 'search' | 'read'; payload: unknown };
+type Operation = 'directory' | 'deliver' | 'receipt' | 'search' | 'read' | 'group.sync';
+type Envelope = { from: string; to: string; at: number; nonce: string; operation: Operation; payload: unknown };
 
 function text(value: unknown, field: string, max = 4000): string {
   if (typeof value !== 'string' || !value.trim() || value.length > max) throw invalidParams(`${field}: expected 1 to ${max} characters`);
@@ -44,25 +44,6 @@ export function coordinationUrl(raw: string): string {
   if (url.username || url.password || url.search || url.hash || url.pathname !== '/') throw invalidParams('peer.url: expected an origin without credentials, path, query or fragment');
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(url.hostname))) throw invalidParams('peer.url: HTTPS required between machines; HTTP allowed only on numeric loopback');
   return url.origin;
-}
-
-async function boundedBody(body: ReadableStream<Uint8Array> | null): Promise<string> {
-  if (!body) throw invalidParams('message body required');
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('peer body timed out')), 5000); });
-  try {
-    while (true) {
-      const chunk = await Promise.race([reader.read(), timeout]);
-      if (chunk.done) break;
-      size += chunk.value.length;
-      if (size > MAX_BODY) throw invalidParams('message body exceeds 262144 bytes');
-      chunks.push(chunk.value);
-    }
-    return Buffer.concat(chunks).toString('utf8');
-  } finally { clearTimeout(timer); await reader.cancel().catch(() => undefined); reader.releaseLock(); }
 }
 
 /** Untrusted agent text stays data. The core supplies every identity and permission boundary. */
@@ -144,7 +125,19 @@ export class Coordination {
     return { coreId: this.coreId, name: this.core.info().hostname ?? 'Boite', url: coordinationUrl(this.core.settings.get().publicUrl || this.core.baseUrl()), publicKey: this.publicKey };
   }
   private self(threadId: string): AgentAddress { this.identityKey(); return { coreId: this.coreId, threadId }; }
+  /** This core's identity without an address: what a group lists and signs with. */
+  card(): { coreId: string; publicKey: string } { this.identityKey(); return { coreId: this.coreId, publicKey: this.publicKey }; }
+  signature(input: Buffer): Buffer { this.identityKey(); return sign(null, input, this.key!); }
+  /** The links the owner made by hand, each with its own permissions. A group's members are trusted too, and listed by the group. */
   peers(): CoordinationPeer[] { return (this.core.journal.getSetting('coordination:peers') as CoordinationPeer[] | undefined) ?? []; }
+  /**
+   * Every machine a letter may cross to: the hand-made links first, so the
+   * permissions the owner set on one win, then the members of this core's group.
+   */
+  private trusted(): CoordinationPeer[] {
+    const manual = this.peers();
+    return [...manual, ...this.core.group.peers().filter(peer => !manual.some(known => known.coreId === peer.coreId))];
+  }
   async check(coreId: string): Promise<{ ok: true }> {
     const peer = this.peers().find(p => p.coreId === coreId);
     if (!peer) throw refused('machine is not trusted for coordination');
@@ -178,6 +171,8 @@ export class Coordination {
   untrust(coreId: string): { ok: true } {
     this.bridge.revoke(coreId);
     this.core.journal.setSetting('coordination:peers', this.peers().filter(p => p.coreId !== coreId));
+    // Still a member of this core's group: its letters keep crossing.
+    if (this.trusted().some(p => p.coreId === coreId)) return { ok: true };
     const queued = this.rows("status = 'uncertain'").map(row => JSON.parse(row.data) as AgentLetter)
       .filter(letter => letter.error === 'Queued for provider delivery' && (letter.from.coreId === coreId || letter.to.coreId === coreId));
     for (const threadId of new Set(queued.map(letter => letter.to.threadId))) this.core.threads.stopQueuedCoordination(threadId);
@@ -312,16 +307,16 @@ export class Coordination {
     const agents = this.localReach(threadId).filter(a => a.threadId !== threadId);
     const unavailable: string[] = [];
     if (config.remote) {
-      const found = await Promise.all(this.peers().map(async peer => {
+      const found = await Promise.all(this.trusted().map(async peer => {
         try {
           const remote = await this.exchange(peer, 'directory', {}) as AgentContact[];
-          if (!this.peers().some(p => p.coreId === peer.coreId)) throw new Error('peer revoked');
+          if (!this.trusted().some(p => p.coreId === peer.coreId)) throw new Error('peer revoked');
           if (!Array.isArray(remote) || remote.length > 100) throw new Error('invalid remote directory');
           return { peer, contacts: remote.map(a => this.checkContact(a, peer)) };
         } catch { return { peer, contacts: null }; }
       }));
       for (const result of found) {
-        if (result.contacts === null || !this.peers().some(peer => peer.coreId === result.peer.coreId)) unavailable.push(result.peer.name);
+        if (result.contacts === null || !this.trusted().some(peer => peer.coreId === result.peer.coreId)) unavailable.push(result.peer.name);
         else agents.push(...result.contacts);
       }
     }
@@ -347,20 +342,20 @@ export class Coordination {
     };
   }
   /** Every contact this thread may reach on each trusted machine, in parallel; a machine that fails is named, not fatal. */
-  private async remoteAll<T>(threadId: string, operation: 'search' | 'read', payload: unknown, check: (answer: unknown, peer: CoordinationPeer) => T, peers = this.peers()): Promise<{ results: T[]; unavailable: string[] }> {
+  private async remoteAll<T>(threadId: string, operation: 'search' | 'read', payload: unknown, check: (answer: unknown, peer: CoordinationPeer) => T, peers = this.trusted()): Promise<{ results: T[]; unavailable: string[] }> {
     const config = this.config(threadId);
     if (!config.remote || config.mode === 'off') return { results: [], unavailable: [] };
     const found = await Promise.all(peers.map(async peer => {
       try {
         const answer = await this.exchange(peer, operation, payload);
-        if (!this.peers().some(p => p.coreId === peer.coreId)) throw new Error('peer revoked');
+        if (!this.trusted().some(p => p.coreId === peer.coreId)) throw new Error('peer revoked');
         return { peer, result: check(answer, peer), failed: null };
       } catch (error) { return { peer, result: null, failed: error instanceof PeerRefusal ? `${peer.name} (${error.message})` : peer.name }; }
     }));
     this.checkLookupAccess(threadId, true);
     // A peer that answered early may have been revoked while another one was pending.
     for (const entry of found) {
-      if (!this.peers().some(peer => peer.coreId === entry.peer.coreId)) {
+      if (!this.trusted().some(peer => peer.coreId === entry.peer.coreId)) {
         entry.result = null;
         entry.failed = entry.peer.name;
       }
@@ -380,7 +375,7 @@ export class Coordination {
     });
     this.checkLookupAccess(threadId, config.remote);
     const reachable = new Set(this.localReach(threadId).map(contact => contact.threadId));
-    const trusted = new Set(this.peers().map(peer => peer.coreId));
+    const trusted = new Set(this.trusted().map(peer => peer.coreId));
     const remoteMatches = remote.results.flat();
     return {
       matches: [...matches.filter(match => reachable.has(match.threadId)), ...remoteMatches.filter(match => trusted.has(match.coreId))],
@@ -399,7 +394,7 @@ export class Coordination {
       if (!contact) throw refused(`target: ${to.threadId} is not a contact this thread may reach; see boite agents list`);
       return { contact, ...transcript(this.core.journal.db, to.threadId, limit, before) };
     }
-    const peer = this.peers().find(p => p.coreId === to.coreId);
+    const peer = this.trusted().find(p => p.coreId === to.coreId);
     if (!peer) throw refused('target.coreId: not this core nor a machine trusted for coordination');
     if (!config.remote) throw refused('cross-machine coordination is disabled for this thread');
     const { results, unavailable } = await this.remoteAll(threadId, 'read', { threadId: to.threadId, limit, ...(before === undefined ? {} : { before }) }, (answer, from) => {
@@ -409,7 +404,7 @@ export class Coordination {
       return { contact, ...checkTranscript(answer) };
     }, [peer]);
     this.checkLookupAccess(threadId, true);
-    if (!this.peers().some(current => current.coreId === peer.coreId)) throw refused('target.coreId: machine permission revoked');
+    if (!this.trusted().some(current => current.coreId === peer.coreId)) throw refused('target.coreId: machine permission revoked');
     if (!results[0]) throw refused(`${unavailable[0] ?? peer.name} did not answer the read`);
     return results[0];
   }
@@ -477,7 +472,7 @@ export class Coordination {
       toMachine = target.machine;
     } else {
       if (!config.remote) throw refused('cross-machine coordination is disabled for this thread');
-      const peer = this.peers().find(p => p.coreId === to.coreId);
+      const peer = this.trusted().find(p => p.coreId === to.coreId);
       if (!peer) throw refused('destination machine is not trusted for coordination');
       // No directory round trip on send: a disconnected recipient can receive after reconnect.
       toTitle = to.threadId;
@@ -576,7 +571,7 @@ export class Coordination {
     if (!thread || thread.archived) return false;
     const recipient = this.config(letter.to.threadId);
     if (recipient.mode === 'off' || recipient.paused) return false;
-    if (letter.from.coreId !== this.self('').coreId) return recipient.remote && this.peers().some(peer => peer.coreId === letter.from.coreId);
+    if (letter.from.coreId !== this.self('').coreId) return recipient.remote && this.trusted().some(peer => peer.coreId === letter.from.coreId);
     const sender = this.config(letter.from.threadId);
     if (sender.mode === 'off') return false;
     return this.inProject(letter) || (recipient.remote && sender.remote);
@@ -708,13 +703,13 @@ export class Coordination {
       const sender = this.core.journal.getThread(letter.from.threadId);
       if (!sender || sender.archived) { this.update(letter, 'rejected', 'Thread archived or removed'); return; }
       const config = this.config(letter.from.threadId);
-      const peer = this.peers().find(p => p.coreId === letter.to.coreId);
+      const peer = this.trusted().find(p => p.coreId === letter.to.coreId);
       if (!peer || !config.remote || config.mode === 'off') { this.update(letter, 'rejected', 'Machine permission revoked'); return; }
       if (config.paused && letter.status === 'queued') return;
       try {
         const answer = await this.exchange(peer, letter.status === 'queued' ? 'deliver' : 'receipt', letter.status === 'queued' ? letter : { id: letter.id, fromThreadId: letter.from.threadId }) as AgentLetter;
         if (this.closed) return;
-        if (!this.peers().some(p => p.coreId === peer.coreId) || !this.config(letter.from.threadId).remote) { this.update(letter, 'rejected', 'Machine permission revoked'); return; }
+        if (!this.trusted().some(p => p.coreId === peer.coreId) || !this.config(letter.from.threadId).remote) { this.update(letter, 'rejected', 'Machine permission revoked'); return; }
         if (!answer || answer.id !== letter.id || !same(answer.from, letter.from) || !same(answer.to, letter.to) || !['received', 'delivered', 'uncertain', 'expired', 'rejected'].includes(answer.status)) throw new Error('invalid delivery receipt');
         const title = text(answer.toTitle, 'receipt.toTitle', 200);
         const error = answer.error === null ? null : text(answer.error, 'receipt.error', 4000);
@@ -728,30 +723,45 @@ export class Coordination {
       }
   }
 
-  private async exchange(peer: CoordinationPeer, operation: Envelope['operation'], payload: unknown): Promise<unknown> {
+  /** One signed request to a member of this core's group. */
+  request(peer: CoordinationPeer, operation: Operation, payload: unknown): Promise<unknown> { return this.exchange(peer, operation, payload); }
+
+  /**
+   * A member of a group answers on several addresses and this core cannot know
+   * which one reaches it today, so the same signed request goes to each and
+   * the first verified reply counts; the peer handles one of them and refuses
+   * the nonce it has already seen. When none answers, the owner's app relays,
+   * if it holds both machines.
+   */
+  private async exchange(peer: CoordinationPeer, operation: Operation, payload: unknown): Promise<unknown> {
     this.identityKey();
     const nonce = randomUUID();
     const body = JSON.stringify({ from: this.coreId, to: peer.coreId, at: Date.now(), nonce, operation, payload } satisfies Envelope);
     const signature = sign(null, Buffer.from(body), this.key!).toString('base64');
-    let status: number, raw: string, responseSignature: string;
-    if (this.bridge.available(peer.coreId) || peer.viaClient) {
+    const relayed = async (): Promise<Answer> => {
       const response = await this.bridge.request(peer.coreId, { fromCoreId: this.coreId, toCoreId: peer.coreId, body, signature });
-      ({ status, body: raw, signature: responseSignature } = response);
-    } else {
-      const response = await fetch(`${peer.url}${ROUTE}`, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(5000), headers: { 'content-type': 'application/json', 'x-boite-peer': this.coreId, 'x-boite-signature': signature }, body });
-      status = response.status; raw = await boundedBody(response.body); responseSignature = response.headers.get('x-boite-signature') ?? '';
+      return settle(null, peer.publicKey, nonce, response.status, response.body, response.signature);
+    };
+    const routes = this.core.group.routes(peer.coreId);
+    let answer: Answer;
+    if (routes === null) answer = this.bridge.available(peer.coreId) || peer.viaClient ? await relayed() : await post(peer.url, this.coreId, peer.publicKey, body, signature, nonce);
+    else {
+      try { answer = await Promise.any(routes.map(url => post(url, this.coreId, peer.publicKey, body, signature, nonce))); }
+      catch (error) {
+        if (this.bridge.available(peer.coreId)) answer = await relayed();
+        else throw error instanceof AggregateError ? error.errors[0] ?? new Error('peer unreachable') : error;
+      }
     }
-    if (!responseSignature && status === 403) throw new Error('destination refused this core; reconnect the agent link in Machines');
-    if (!verify(null, Buffer.from(raw), peer.publicKey, Buffer.from(responseSignature, 'base64'))) throw new Error('invalid peer response signature');
-    const reply = JSON.parse(raw) as { nonce: string; result?: unknown; error?: string };
-    if (reply.nonce !== nonce) throw new Error('peer response nonce mismatch');
-    if (reply.error && status === 400) throw new PeerRefusal(reply.error);
-    if (status < 200 || status >= 300) throw new Error('peer request failed');
-    return reply.result;
+    if (answer.url !== null) this.core.group.reached(peer.coreId, answer.url);
+    if (answer.gone) throw new PeerGone('removed from the group');
+    if (answer.refusal !== undefined) throw new PeerRefusal(answer.refusal);
+    return answer.result;
   }
   async http(request: Request): Promise<Response> {
     if (this.closed || request.method !== 'POST' || request.headers.has('origin')) return new Response('forbidden', { status: 403 });
-    const peer = this.peers().find(p => p.coreId === request.headers.get('x-boite-peer'));
+    const id = request.headers.get('x-boite-peer');
+    // A machine its group removed still signs with a key this core knows, so it can be told and leave.
+    const peer = this.trusted().find(p => p.coreId === id) ?? this.core.group.removedPeer(id);
     if (!peer) return new Response('unknown peer', { status: 403 });
     const now = Date.now();
     let envelope: Envelope;
@@ -770,6 +780,9 @@ export class Coordination {
       if (this.nonces.has(key)) throw new Error('replayed request');
       this.nonces.set(key, now);
     } catch { return new Response('invalid signed message', { status: 403 }); }
+    if (this.core.group.removedPeer(peer.coreId) !== null && (envelope.operation === 'group.sync' || !this.trusted().some(p => p.coreId === peer.coreId))) {
+      return this.signed({ nonce: envelope.nonce, error: 'this machine was removed from the group' }, 410);
+    }
     // Reading an unsigned body cannot hold an update. Admission may have won
     // during that await, so authenticated processing must enter the same gate.
     if (this.closed || this.core.stopping) return new Response('the core is stopping', { status: 503 });
@@ -779,7 +792,7 @@ export class Coordination {
       let status = 200;
       try {
         // A revoke while the body streamed wins before any data is read or changed.
-        const currentPeer = this.peers().find(p => p.coreId === peer.coreId);
+        const currentPeer = this.trusted().find(p => p.coreId === peer.coreId);
         if (!currentPeer) throw refused('peer permission revoked');
         if (envelope.operation === 'directory') result = this.localDirectory();
         else if (envelope.operation === 'deliver') result = this.receive(envelope.payload as AgentLetter, peer);
@@ -802,15 +815,18 @@ export class Coordination {
           const letter = this.find(text(payload?.id, 'receipt.id', 100), 'in');
           if (!letter || letter.from.coreId !== peer.coreId || letter.from.threadId !== payload.fromThreadId) throw refused('unknown receipt');
           result = letter;
-        } else throw invalidParams('operation: expected directory, deliver, receipt, search or read');
+        } else if (envelope.operation === 'group.sync') result = this.core.group.receive(peer, envelope.payload);
+        else throw invalidParams('operation: expected directory, deliver, receipt, search, read or group.sync');
       } catch (reason) {
         status = reason instanceof RpcFailure ? 400 : 500;
         error = reason instanceof RpcFailure ? reason.message : 'Machine could not process the request';
       }
-      const raw = JSON.stringify({ nonce: envelope.nonce, result, error });
-      this.identityKey();
-      return new Response(raw, { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-boite-signature': sign(null, Buffer.from(raw), this.key!).toString('base64') } });
+      return this.signed({ nonce: envelope.nonce, result, error }, status);
     });
+  }
+  private signed(reply: { nonce: string; result?: unknown; error?: string | undefined }, status: number): Response {
+    const raw = JSON.stringify(reply);
+    return new Response(raw, { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-boite-signature': this.signature(Buffer.from(raw)).toString('base64') } });
   }
   /** The owner app forwards the original signed envelope, without changing any peer permission. */
   async forward(params: RpcParams<'collaboration.bridge.forward'>): Promise<CoordinationBridgeResponse> {
@@ -832,7 +848,6 @@ export class Coordination {
   }
   async close(): Promise<void> { this.beginClose(); await Promise.allSettled([...this.pending]); }
 }
-class PeerRefusal extends Error {}
 
 export function registerCoordination(core: Core): void {
   core.router.register('collaboration.get', p => core.coordination.get(p.threadId));

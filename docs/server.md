@@ -297,6 +297,10 @@ start.
 
 stderr also gives the link's typing code, for an installed phone app.
 
+A server that belongs with your other machines joins their [group](groups.md)
+instead, with `boite-core group join <invitation>`: the desktop app of every
+member then drives it, and it needs no link per desktop.
+
 To reach the core from a phone over HTTPS through Tailscale:
 
 ```bash

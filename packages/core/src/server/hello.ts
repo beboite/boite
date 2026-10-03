@@ -16,7 +16,7 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
     return;
   }
   const params = rawParams as
-    | { token?: unknown; grant?: unknown; nonce?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown } }
+    | { token?: unknown; grant?: unknown; ticket?: unknown; nonce?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown } }
     | undefined;
   const refuse = (message: string, reason: string): void => {
     connection.sendResponse({ jsonrpc: '2.0', id, error: { code: RpcErrorCode.Unauthorized, message } });
@@ -24,6 +24,7 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
   };
   const token = typeof params?.token === 'string' ? params.token : null;
   const grant = typeof params?.grant === 'string' ? params.grant : null;
+  const ticket = typeof params?.ticket === 'string' ? params.ticket : null;
   const client = {
     name: typeof params?.client?.name === 'string' ? params.client.name : 'unknown',
     version: typeof params?.client?.version === 'string' ? params.client.version : '',
@@ -47,17 +48,29 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
       return;
     }
   }
-  if (grant !== null && token === null) {
-    // Check the protocol before consuming a one-shot grant.
-    if (params?.protocolVersion !== PROTOCOL_VERSION) {
-      connection.sendResponse({
-        jsonrpc: '2.0', id, error: {
-          code: RpcErrorCode.InvalidParams, message: `protocolVersion must be ${PROTOCOL_VERSION}`,
-        }
-      });
-      connection.close(RpcCloseCode.ProtocolMismatch, 'protocol version mismatch');
+  const wrongProtocol = (): boolean => {
+    if (params?.protocolVersion === PROTOCOL_VERSION) return false;
+    connection.sendResponse({
+      jsonrpc: '2.0', id, error: {
+        code: RpcErrorCode.InvalidParams, message: `protocolVersion must be ${PROTOCOL_VERSION}`,
+      }
+    });
+    connection.close(RpcCloseCode.ProtocolMismatch, 'protocol version mismatch');
+    return true;
+  };
+  if (ticket !== null && token === null && grant === null) {
+    // Like a grant, a ticket is spent once: the protocol is checked first.
+    if (wrongProtocol()) return;
+    try {
+      session = core.group.admit(ticket, client);
+    } catch (error) {
+      refuse(messageOf(error), 'bad ticket');
       return;
     }
+    identity = { principal: principalOf(session.role), sessionId: session.id, threadId: null };
+  } else if (grant !== null && token === null && ticket === null) {
+    // Check the protocol before consuming a one-shot grant.
+    if (wrongProtocol()) return;
     try {
       const nonce = typeof params?.nonce === 'string' ? params.nonce : null;
       session = core.sessions.exchange(grant, client, Date.now(), nonce);
@@ -66,23 +79,15 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
       return;
     }
     identity = { principal: principalOf(session.role), sessionId: session.id, threadId: null };
-  } else if (token !== null && grant === null) {
+  } else if (token !== null && grant === null && ticket === null) {
     const found = authenticateToken(core, token);
     if (found === null) { refuse('the token is wrong', 'bad token'); return; }
     identity = found;
   } else {
-    refuse('hello takes a token or a grant, one of the two', 'bad hello');
+    refuse('hello takes a token, a grant or a group ticket, one of the three', 'bad hello');
     return;
   }
-  if (params?.protocolVersion !== PROTOCOL_VERSION) {
-    connection.sendResponse({
-      jsonrpc: '2.0', id, error: {
-        code: RpcErrorCode.InvalidParams, message: `protocolVersion must be ${PROTOCOL_VERSION}`,
-      }
-    });
-    connection.close(RpcCloseCode.ProtocolMismatch, 'protocol version mismatch');
-    return;
-  }
+  if (wrongProtocol()) return;
   connection.identity = identity;
   connection.authenticated = true;
   connection.sendResponse({

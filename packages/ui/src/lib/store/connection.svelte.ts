@@ -228,18 +228,19 @@ export class Connection {
     const url = endpoint.url;
     const repairing = this.pairingRequired && this.endpointUrl === url;
     this.ctx.store.machineId = endpoint.local ? 'local' : url;
-    const paired = endpoint.paired === true || endpoint.grant !== undefined;
+    const paired = endpoint.paired === true || endpoint.grant !== undefined || endpoint.ticket !== undefined;
     this.endpointUrl = url;
     this.paired = paired;
     // Keep the recovery form mounted during a new handshake with this machine.
     this.pairingRequired = repairing;
     this.ctx.store.error = null;
     this.localCore = endpoint.local === true;
-    this.#keyless = endpoint.token === '' && endpoint.grant === undefined;
+    this.#keyless = endpoint.token === '' && endpoint.grant === undefined && endpoint.ticket === undefined;
     const client = new WsClient({
       url,
       token: endpoint.token,
       ...(endpoint.grant === undefined ? {} : { grant: endpoint.grant }),
+      ...(endpoint.ticket === undefined ? {} : { ticket: endpoint.ticket }),
       paired,
       // The session a grant became is this device's own credential: kept
       // where the next load reads it, so the link is opened once, ever.
@@ -248,7 +249,7 @@ export class Connection {
       onSession: (session) => {
         if (this.ctx.client !== client) return;
         if (rememberActive) storeEndpoint({ url, token: session.token, paired: true });
-        this.environments = upsertEnvironment({ url, token: session.token, paired: true });
+        this.environments = upsertEnvironment({ url, token: session.token, paired: true, ...(endpoint.coreId === undefined ? {} : { coreId: endpoint.coreId }) });
       },
       onUnauthorized: (error) => {
         if (this.ctx.client === client && !this.localCore) this.#authenticationFailed(error);
@@ -282,6 +283,9 @@ export class Connection {
     s.draft = null;
     s.closePairing();
     s.sessions = [];
+    s.group = null;
+    s.groupKnown = false;
+    s.groupInvite = null;
     s.projects = [];
     s.threads = [];
     // What the next core answers replaces these; one that cannot answer must not show the last one's.
@@ -516,6 +520,8 @@ export class Connection {
       await Promise.all([essential, ...secondary]);
       if (!current()) return;
       void s.loadHarnessUpdates();
+      // Beside the lists, not among them: the machines of the group are connected once it answers.
+      void s.loadGroup();
       void s.refreshMemory();
       if (open && reopened && s.openThread?.id === open.id) {
         await this.ctx.delegation.refreshDelegated(client);

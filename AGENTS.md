@@ -117,6 +117,8 @@ and assertions when making the suite faster.
 - [Phone](docs/phone.md), [Android app](docs/android.md) and [server](docs/server.md):
   pairing, the APK and deployment.
 - [Machines](docs/machines.md): connections, browser origins and thread views.
+- [Groups](docs/groups.md): the roster of one owner's machines, invitations, tickets and the
+  addresses a member gives.
 - [Trace](docs/trace.md): process events, resource caps and Windows guards.
 - [Performance](docs/performance.md): what a remote client is sent, startup
   order and the benches behind every number.

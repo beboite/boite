@@ -38,6 +38,9 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'speech.streamFinish',
   // Its own pairing, so a phone can show itself in the device list.
   'sessions.list',
+  // The machines of the group and a ticket to each: a phone paired with one member reaches the others at its own role, never more.
+  'group.get',
+  'group.ticket',
   // Each authenticated pairing manages only its own push destination.
   'push.status',
   'push.subscribe',
@@ -153,6 +156,7 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'permission.requested', 'permission.resolved', 'question.asked', 'question.answered',
   'scheduler.updated', 'accounts.updated', 'accounts.removed',
   'settings.updated', 'keybindings.updated', 'sessions.updated',
+  'group.updated', // Invalidation only; group.get applies the device read policy.
   'providers.updated', 'providers.installProgress', 'providers.probed',
 ]);
 

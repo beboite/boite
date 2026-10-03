@@ -71,6 +71,7 @@ export class SettingsStore {
         }
       }
     }
+    this.core.group.settingsChanged();
     return next;
   }
 }
