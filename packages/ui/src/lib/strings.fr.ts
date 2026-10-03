@@ -613,6 +613,7 @@ export const fr: Translation = {
     position: '{index} sur {total}',
     share: 'Partager ou enregistrer',
     shareFailed: 'Impossible de partager {name}.',
+    shareReady: '{name} est prêt : touchez Partager à nouveau.',
     answerAttach: 'Joindre une photo ou un fichier',
     answerFiles: 'Fichiers joints : {names}',
     answerFileCount: '{count} fichiers'

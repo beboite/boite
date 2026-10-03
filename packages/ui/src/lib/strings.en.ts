@@ -627,6 +627,7 @@ export const strings = {
     position: '{index} of {total}',
     share: 'Share or save',
     shareFailed: '{name} could not be shared.',
+    shareReady: '{name} is ready: tap Share again.',
     answerAttach: 'Attach a photo or a file',
     answerFiles: 'Files given: {names}',
     answerFileCount: '{count} files'

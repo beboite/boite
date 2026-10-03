@@ -593,6 +593,18 @@ that do today. A question is
 not a permission mode and is never gated by one: an agent whose approvals are
 off can still ask.
 
+An answer can carry files when the question has a free field, as T3 Code's
+question attachments do: a screenshot of the bug, a mockup. The card takes
+them by its paperclip, a paste or a drop, with the composer's caps and image
+reduction, and a file alone is a valid answer. No protocol carries an image in
+a question's answer (Claude's `AskUserQuestion` takes strings, Codex's
+`requestUserInput` and Muse's `userInput` take text, pi's dialogs a value), so
+the core writes each file under `<dataDir>/attachments/` like a prompt's files
+and appends their paths to the answer text, with the note prompts use; the
+agent reads them with its own tools (Read, `view_image`). The journalled answer
+and the card keep only each file's kind, type, name and size, never its bytes
+or path. ACP and Antigravity questions offer options only, so they take no files.
+
 ## Stdio transport failures
 
 Codex, Muse and pi use `drivers/stdio.ts` for request lifetime and newline

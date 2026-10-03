@@ -217,6 +217,21 @@ A browser under the floor fails to parse the app, so `main.ts` never runs. An
 inline script in `index.html` notices on `load` and writes one sentence in the
 page instead: this browser cannot start Boite, and the versions it needs.
 
+## Pictures and videos
+
+Screenshots and photos shrink before they leave the phone: 2048 px on the long
+edge, JPEG or PNG, HEIC converted to JPEG by Safari. A turn takes twenty
+files ([development.md](development.md#file-attachments)). A question card's
+paperclip takes them too.
+
+A picture or a video in the thread opens full screen (`ImageViewer.svelte`).
+Pinch or double-tap to zoom, drag a zoomed picture to pan, swipe sideways to
+the thread's other pictures and videos, and drag down to close. Share opens
+the system sheet with the file itself, so Save Image or Save to Files keeps it;
+where the browser has no share sheet, the file downloads. A remote file is
+fetched on the first tap, which may come too late for iOS to open the sheet:
+the viewer then says the file is ready, and the next tap shares it.
+
 ## HTTPS and installation
 
 HTTP on a LAN opens the chat, but service workers and push need a secure origin.
