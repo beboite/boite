@@ -118,6 +118,15 @@ settings. Methods absent from the list remain owner-only, including newly
 added methods. A refusal names the method, such as
 `projects.add is for the owner only`.
 
+The Changes and Files panels are read-only on a paired device: `git.status`,
+`git.diff`, `files.list` and `files.read`, never `files.write`, Tasks or the
+trace. The core runs git itself, refuses a device diff against any revision but
+`HEAD`, and before every read checks that the thread's real working directory is
+inside its project or the core's worktree folder for it; each path is then held
+inside that directory, links included. At a phone's width the Changes panel shows
+the list, then one diff with Back and previous/next file; a file reads as wrapped,
+numbered lines with no editor.
+
 An owner holds the core token from `core.json` or an owner-paired session key.
 Only owners can choose arbitrary host paths, administer providers or change
 what the core trusts. [Machine routing](machines.md#isolation-and-tests) keeps

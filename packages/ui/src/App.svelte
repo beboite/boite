@@ -476,9 +476,8 @@
       case 'changes':
       case 'files':
       case 'tasks': {
-        // Each of these reads the working directory or the project's todos,
-        // which the core refuses to a paired device.
-        if (!store.openThread || !store.owner) return;
+        // A paired device reads the working tree, not the project's todos.
+        if (!store.openThread || (command === 'tasks' && !store.owner)) return;
         event.preventDefault();
         // The panel lives in the chat: from the settings the key brings the chat
         // back with the surface open, rather than toggling what nobody sees.

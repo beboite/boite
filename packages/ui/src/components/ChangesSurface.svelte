@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowDown, ArrowUp, GitBranch, RefreshCw } from '@lucide/svelte';
+  import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, GitBranch, RefreshCw } from '@lucide/svelte';
   import type { GitChange, GitDiff, GitStatus } from '@boite/contracts';
   import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
   import { fill, strings } from '../lib/strings';
@@ -57,6 +57,23 @@
     panel.update(surface.id, { path: change.path });
   }
 
+  /** Under this width the list and a diff do not share the panel: a phone sees one, then the other. */
+  const NARROW_MAX = 600;
+  let width = $state(0);
+  let narrow = $derived(width > 0 && width < NARROW_MAX);
+  let changes = $derived(status?.changes ?? []);
+  /** Where the selected file stands in the list, -1 when it is not (or no longer) in it. */
+  let at = $derived(selected === null ? -1 : changes.findIndex((change) => change.path === selected));
+
+  function step(by: number): void {
+    const next = changes[at + by];
+    if (next) select(next);
+  }
+
+  function back(): void {
+    panel.update(surface.id, { path: undefined });
+  }
+
   // On mount, and again on every turn that ends: the working tree is what the
   // agent is changing, so the list is stale the moment a turn finishes.
   $effect(() => {
@@ -83,7 +100,7 @@
   });
 </script>
 
-<div class="changes-surface" data-testid="changes-panel">
+<div class="changes-surface" class:narrow class:reading={narrow && selected !== null} data-testid="changes-panel" bind:clientWidth={width}>
   <div class="panel-toolbar">
     <span class="branch" title={[status?.branch ?? strings.changes.noBranch, status?.upstream].filter(Boolean).join(' → ')}>
       <GitBranch size={13} strokeWidth={1.75} />
@@ -160,6 +177,25 @@
     </div>
 
     <div class="detail">
+      {#if narrow && selected !== null}
+        <nav class="pager" aria-label={strings.rightPanel.changes} data-testid="changes-pager">
+          <button type="button" class="ghost small back" data-testid="changes-back" onclick={back}>
+            <ChevronLeft size={16} strokeWidth={1.75} /><span>{strings.changes.backToList}</span>
+          </button>
+          <span class="spacer"></span>
+          {#if at >= 0}
+            <span class="position" data-testid="changes-position">{fill(strings.changes.position, { index: String(at + 1), count: String(changes.length) })}</span>
+          {/if}
+          <button type="button" class="ghost small icon" data-testid="changes-previous" disabled={at <= 0}
+            title={strings.changes.previousFile} aria-label={strings.changes.previousFile} onclick={() => step(-1)}>
+            <ChevronLeft size={16} strokeWidth={1.75} />
+          </button>
+          <button type="button" class="ghost small icon" data-testid="changes-next" disabled={at < 0 || at >= changes.length - 1}
+            title={strings.changes.nextFile} aria-label={strings.changes.nextFile} onclick={() => step(1)}>
+            <ChevronRight size={16} strokeWidth={1.75} />
+          </button>
+        </nav>
+      {/if}
       {#if selected === null}
         <p class="empty">{strings.changes.pick}</p>
       {:else if diff === null}
@@ -170,7 +206,7 @@
         {#if diff.truncated}
           <p class="notice" data-testid="changes-truncated">{strings.changes.truncated}</p>
         {/if}
-        <DiffView path={diff.path} oldText={diff.oldText ?? ''} newText={diff.newText ?? ''} />
+        <DiffView path={diff.path} oldText={diff.oldText ?? ''} newText={diff.newText ?? ''} grow />
       {/if}
     </div>
   </div>
@@ -253,6 +289,42 @@
       padding-top: 6px;
     }
   }
+
+  /* A phone's width: the list fills the panel until a row is picked, then the
+     diff does, under a bar that steps back to the list or on to the next file. */
+  .narrow .list {
+    flex: 1;
+    max-height: none;
+  }
+
+  .narrow .detail {
+    display: none;
+    padding: 0 8px 12px;
+    border-top: none;
+  }
+
+  .narrow.reading .list { display: none; }
+  .narrow.reading .detail { display: block; }
+
+  .pager {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0 -8px 8px;
+    padding: 4px 4px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface);
+  }
+
+  /* Fingers, not a pointer: every step of the pager and every row is a full target. */
+  .pager button { min-height: 44px; }
+  .pager .icon { min-width: 44px; }
+  .back { display: inline-flex; align-items: center; gap: 2px; }
+  .position { color: var(--color-muted-foreground); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+  .narrow .row { height: auto; min-height: 44px; }
 
   .row {
     display: flex;

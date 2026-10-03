@@ -1181,6 +1181,11 @@ export const strings = {
     pick: 'Pick a file to see its diff',
     loading: 'Reading the working tree',
     renamedFrom: 'Renamed from {path}',
+    /** A narrow panel shows the list or one diff: the way back, and the steps between files. */
+    backToList: 'All changes',
+    previousFile: 'Previous file',
+    nextFile: 'Next file',
+    position: '{index} of {count}',
     status: {
       added: 'Added',
       modified: 'Modified',

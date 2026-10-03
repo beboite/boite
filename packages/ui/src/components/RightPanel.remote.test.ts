@@ -49,8 +49,10 @@ test('a paired web session reaches remote setup from the panel without owner cap
   const calls = vi.spyOn(client, 'call'), create = vi.spyOn(browserBridge, 'create');
   vi.useFakeTimers(); await showPanel();
   expect(button('launch-browser').disabled).toBe(false);
-  expect(button('launch-files').disabled).toBe(true);
-  expect(button('launch-changes').disabled).toBe(true);
+  // Changes and files are read-only on a phone; tasks and the trace stay the owner's.
+  expect(button('launch-files').disabled).toBe(false);
+  expect(button('launch-changes').disabled).toBe(false);
+  expect(button('launch-tasks').disabled).toBe(true);
   button('launch-browser').click(); await settle();
   expect(store.panel.active?.kind).toBe('browser');
   expect(document.querySelector<HTMLDialogElement>('[data-testid=remote-browser-dialog]')?.open).toBe(true);

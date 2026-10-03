@@ -53,9 +53,12 @@ export function kindHint(kind: SurfaceKind): string {
   return strings.rightPanel.traceHint;
 }
 
-/** A page needs a webview; everything else reads what only the owner may ask for. */
+/**
+ * A page needs a webview. Changes and files are read-only on a paired device
+ * (`DEVICE_METHODS`); tasks and the trace read what only the owner may ask for.
+ */
 export function available(kind: SurfaceKind, inShell: boolean, owner: boolean): boolean {
-  if (kind === 'agents') return true;
+  if (kind === 'agents' || kind === 'changes' || kind === 'files' || kind === 'file') return true;
   return kind === 'browser' ? inShell : owner;
 }
 
