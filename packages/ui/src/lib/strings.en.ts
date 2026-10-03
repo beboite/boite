@@ -875,7 +875,6 @@ export const strings = {
     workingFor: 'Working for {time}',
     workedFor: 'Worked for {time}',
     compacting: 'Compacting conversation',
-    compactionHint: 'Summarizing earlier messages to free up context.',
     compactionElapsed: 'Elapsed: {time}',
     compactedFor: 'Compacted in {time}',
     compactionFailed: 'Compaction failed',

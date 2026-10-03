@@ -76,7 +76,6 @@
       <LoaderCircle size={18} class="spinner compaction-icon" aria-hidden="true" />
       <div class="compaction-copy">
         <span class="compaction-title ui-label">{strings.chat.compacting}</span>
-        <p data-testid="compaction-hint">{strings.chat.compactionHint}</p>
         <!-- Provider activity timestamps do not tell us when a mid-turn compaction began. -->
         {#if compactOperation && spent !== null}
           <span class="compaction-elapsed ui-label" data-testid="compaction-elapsed">{fill(strings.chat.compactionElapsed, { time: elapsed(spent) })}</span>
@@ -129,7 +128,6 @@
   .summary.compacting { align-self: flex-start; align-items: flex-start; flex-wrap: nowrap; gap: 10px; max-width: 520px; box-sizing: border-box; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-2); }
   .compaction-copy { min-width: 0; }
   .compaction-title { display: block; color: var(--color-foreground); font-size: var(--text-sm); font-weight: 500; }
-  .compaction-copy p { margin: 5px 0 0; color: var(--color-muted-foreground); line-height: 1.5; }
   .compaction-elapsed { display: block; margin-top: 8px; color: var(--color-muted-foreground); }
   .summary :global(.compaction-icon) { flex: none; margin-top: 1px; }
   .dot { opacity: .6; }

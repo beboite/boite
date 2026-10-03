@@ -126,7 +126,7 @@ test('context opens on hover, shows exact segments, and compaction needs its own
   expect(await page.evaluate(`window.__compactCalls`)).toBe(1);
 }, 30000);
 
-test('compaction explains maintenance on desktop and phone, then yields to normal work', async () => {
+test('compaction stays distinct on desktop and phone, then yields to normal work', async () => {
   await update(`
     window.__compactionAnswer = JSON.parse(JSON.stringify(thread.messages.find(m=>m.role==='assistant')));
     const turn = thread.turns[0];
@@ -136,7 +136,7 @@ test('compaction explains maintenance on desktop and phone, then yields to norma
     thread.messages = [{...thread.messages[0],role:'system',parts:[{type:'text',text:'Automatic compaction'}]}];
     thread.progress = null;
   `);
-  await page.waitFor(`document.querySelector('[data-testid="compaction-hint"]')`);
+  await page.waitFor(`document.querySelector('[data-testid="turn-summary"].compacting')`);
   for (const phone of [false, true]) {
     await page.send('Emulation.setDeviceMetricsOverride', {width:phone?390:1280,height:phone?844:900,deviceScaleFactor:1,mobile:phone});
     expect(await page.evaluate(`document.querySelector('[data-testid="turn-summary"]').getAttribute('aria-label')`)).toBe('Compacting conversation');
@@ -146,7 +146,7 @@ test('compaction explains maintenance on desktop and phone, then yields to norma
     await capture(phone ? 'compaction-phone' : 'compaction-desktop');
   }
   await update(`thread.turns[0].status='done'; thread.turns[0].finishedAt=thread.turns[0].startedAt+11000; thread.status='idle';`);
-  await page.waitFor(`!document.querySelector('[data-testid="compaction-hint"]')`);
+  await page.waitFor(`!document.querySelector('[data-testid="turn-summary"].compacting')`);
   expect(await page.evaluate(`document.querySelector('[data-testid="turn-elapsed"]').textContent`)).toBe('Compacted in 11s');
   await update(`
     const turn=thread.turns[0]; delete turn.execution.operation; turn.status='running'; turn.startedAt=Date.now()-120000; turn.finishedAt=null; thread.status='running';
@@ -154,10 +154,10 @@ test('compaction explains maintenance on desktop and phone, then yields to norma
     thread.messages[0].role='user'; thread.messages[0].parts=[{type:'text',text:'Continue checking the layout.'}];
     thread.messages.push({...window.__compactionAnswer,state:'streaming',parts:[{type:'text',text:'A finished paragraph.\\n\\nAn unfinished paragraph'}]});
   `);
-  await page.waitFor(`document.querySelector('[data-testid="compaction-hint"]')`);
+  await page.waitFor(`document.querySelector('[data-testid="turn-summary"].compacting')`);
   expect(await page.evaluate(`document.querySelector('[data-testid="typing-indicator"], [data-testid="compaction-elapsed"], [data-testid="turn-provider-signal"]') === null`)).toBe(true);
   await update(`thread.progress.phase='working';`);
-  await page.waitFor(`!document.querySelector('[data-testid="compaction-hint"]') && document.querySelector('[data-testid="typing-indicator"]')`);
+  await page.waitFor(`!document.querySelector('[data-testid="turn-summary"].compacting') && document.querySelector('[data-testid="typing-indicator"]')`);
   expect(await page.evaluate(`document.querySelector('[data-testid="turn-elapsed"]').textContent`)).toMatch(/^Working for /);
   await update(`thread.turns[0].status='done';thread.turns[0].finishedAt=Date.now();thread.messages.at(-1).state='complete';thread.status='idle';thread.progress=null;`);
 }, 30000);

@@ -852,7 +852,6 @@ export const fr: Translation = {
     workingFor: 'Travaille depuis {time}',
     workedFor: 'A travaillé {time}',
     compacting: 'Compaction en cours',
-    compactionHint: "L'agent résume les anciens messages pour libérer du contexte.",
     compactionElapsed: 'Temps écoulé : {time}',
     compactedFor: 'Contexte compacté en {time}',
     compactionFailed: 'Échec de la compaction',

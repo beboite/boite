@@ -120,7 +120,7 @@ test('provider signals do not imply new execution progress or text', () => {
   expect(text('turn-provider-signal')).toBe('Provider signal 0s ago');
 });
 
-test('a compaction turn explains maintenance even before provider progress arrives', () => {
+test('a compaction turn identifies maintenance even before provider progress arrives', () => {
   vi.useFakeTimers({ now: STARTED + 9_000 });
   running = mount(TurnSummary, { target: document.body, props: {
     turn: turn({ status: 'running', finishedAt: null, usage: null, execution: compactExecution }), typing: true, activeTool: true,
@@ -128,7 +128,6 @@ test('a compaction turn explains maintenance even before provider progress arriv
   flushSync();
   const summary = document.querySelector('[data-testid=turn-summary]');
   expect(summary?.getAttribute('aria-label')).toBe('Compacting conversation');
-  expect(text('compaction-hint')).toBe('Summarizing earlier messages to free up context.');
   expect(text('compaction-elapsed')).toBe('Elapsed: 9s');
   expect(document.querySelector('[data-testid=typing-indicator]')).toBeNull();
   expect(document.querySelector('[data-testid=turn-elapsed]')).toBeNull();
@@ -144,7 +143,7 @@ test('mid-turn compaction hides reply activity without labelling the whole turn 
     progress: { turnId: 'turn-1', phase: 'compacting', detail: null, at: Date.now(), providerAt: Date.now() + 1 },
   } });
   flushSync();
-  expect(text('compaction-hint')).not.toBeNull();
+  expect(document.querySelector('[data-testid=turn-summary]')?.getAttribute('aria-label')).toBe('Compacting conversation');
   expect(document.querySelector('[data-testid=typing-indicator]')).toBeNull();
   expect(document.querySelector('[data-testid=compaction-elapsed]')).toBeNull();
   expect(document.querySelector('[data-testid=turn-last-activity]')).toBeNull();
@@ -160,6 +159,5 @@ test.each([
   flushSync();
   expect(document.querySelector('[data-testid=turn-summary]')?.getAttribute('aria-label')).toBe(label);
   expect(text('turn-elapsed')).toBe(elapsed);
-  expect(text('compaction-hint')).toBeNull();
   if (status !== 'done') expect(text('compaction-result')).toBe(label);
 });
