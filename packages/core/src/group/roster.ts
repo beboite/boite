@@ -4,7 +4,8 @@
  * Every member holds the whole roster and they exchange it whole. An entry
  * carries a revision; the higher one wins, and at the same revision a removal
  * wins, so two members that changed things apart end on the same roster
- * whichever order they hear of each other in. A removed entry stays as a
+ * whichever order they hear of each other in. A device's removal is final and
+ * wins at any revision. A removed entry stays as a
  * tombstone: without it, a member that was offline during the removal would
  * bring the entry back on its return.
  */
@@ -174,18 +175,23 @@ export function digestOf(roster: Roster): string {
   return createHash('sha256').update(JSON.stringify(sorted(roster))).digest('hex');
 }
 
-/** Whether `a` replaces `b`: the later revision, then the removal, then a fixed order so both sides agree. */
-function wins(a: { rev: number; removed?: true }, b: { rev: number; removed?: true }): boolean {
+/**
+ * Whether `a` replaces `b`: the later revision, then the removal, then a fixed
+ * order so both sides agree. Where a removal is `final`, it wins whatever the
+ * revisions say.
+ */
+function wins(a: { rev: number; removed?: true }, b: { rev: number; removed?: true }, final: boolean): boolean {
+  if (final && (a.removed === true) !== (b.removed === true)) return a.removed === true;
   if (a.rev !== b.rev) return a.rev > b.rev;
   if ((a.removed === true) !== (b.removed === true)) return a.removed === true;
   return JSON.stringify(a) > JSON.stringify(b);
 }
 
-function mergeEntries<T extends { rev: number; removed?: true }>(local: T[], remote: T[], key: (entry: T) => string, max: number): T[] {
+function mergeEntries<T extends { rev: number; removed?: true }>(local: T[], remote: T[], key: (entry: T) => string, max: number, final: boolean): T[] {
   const merged = new Map(local.map((entry) => [key(entry), entry] as const));
   for (const entry of remote) {
     const known = merged.get(key(entry));
-    if (known === undefined || wins(entry, known)) merged.set(key(entry), entry);
+    if (known === undefined || wins(entry, known, final)) merged.set(key(entry), entry);
   }
   const all = [...merged.values()];
   if (all.length <= max) return all;
@@ -204,7 +210,10 @@ export function mergeRosters(local: Roster, remote: Roster): Roster {
   return sorted({
     id: local.id,
     name: local.name,
-    cores: mergeEntries(local.cores, remote.cores, (core) => core.coreId, CORE_ENTRIES_MAX),
-    devices: mergeEntries(local.devices, remote.devices, (device) => device.id, DEVICE_ENTRIES_MAX),
+    // A machine may leave and join again, so its entry follows revisions. A device
+    // is one pairing: revoked, it never comes back under the same id, and the
+    // member that revokes it may not have heard of it yet.
+    cores: mergeEntries(local.cores, remote.cores, (core) => core.coreId, CORE_ENTRIES_MAX, false),
+    devices: mergeEntries(local.devices, remote.devices, (device) => device.id, DEVICE_ENTRIES_MAX, true),
   });
 }

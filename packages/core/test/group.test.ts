@@ -52,6 +52,11 @@ test('rosters merge to the same result in either order, and a removal survives a
   const tie = mergeRosters({ ...base, cores: [entry('a', 5)] }, { ...base, cores: [entry('a', 5, { removed: true })] });
   expect(tie.cores[0]?.removed).toBe(true);
   expect(digestOf(mergeRosters(one, one))).toBe(digestOf(one));
+  // A device's removal is final: it wins over a later word of the device, in either order.
+  const live: Roster = { ...base, devices: [{ id: 'd', name: 'phone', role: 'device', rev: 9 }] };
+  const revoked: Roster = { ...base, devices: [{ id: 'd', name: 'device', role: 'device', rev: 2, removed: true }] };
+  expect(mergeRosters(live, revoked).devices[0]?.removed).toBe(true);
+  expect(digestOf(mergeRosters(live, revoked))).toBe(digestOf(mergeRosters(revoked, live)));
 });
 
 test('a device stops counting once the machine it paired with leaves', () => {
@@ -239,13 +244,16 @@ test('a phone paired with one member reaches the others as a device, and one rev
   onB.close();
 });
 
-test('revoking a device on another member reaches its home machine', async () => {
+test('revoking a device on another member reaches its home machine, even before that member heard of the device', async () => {
   const a = await machine();
   const b = await machine();
   await a.core.group.create('Home');
   await join(a, b);
   const phone = await connect(a.url, '', { grant: a.core.sessions.grant().grant });
   const onB = await connect(b.url, '', { ticket: (await phone.call('group.ticket', { coreId: id(b) })).ticket });
+  // The ticket may have reached b before the roster that lists the device: b forgets the entry, as if it had.
+  const held = b.core.group as unknown as { roster: Roster };
+  held.roster = { ...held.roster, devices: [] };
   b.core.sessions.revoke(onB.session!.id);
   await waitFor(() => a.core.sessions.list(null).length === 0);
   await expect(connect(a.url, phone.session!.token)).rejects.toThrow('token is wrong');

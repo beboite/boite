@@ -121,7 +121,9 @@ public key, so it survives a change of name or address.
 public key, addresses) and the devices paired with them. It is one settings
 row in the journal. An entry carries a revision; when two rosters meet, the
 higher revision wins, a removal wins at the same revision, and a removed entry
-stays as a tombstone so a member that was off cannot bring it back. Members
+stays as a tombstone so a member that was off cannot bring it back. A revoked
+device is final at any revision, because the member that revokes it may hold
+its ticket before the roster that lists it. Members
 exchange the roster whole through the signed endpoint coordination already
 uses (`POST /agent-messages`, operation `group.sync`): the receiver merges and
 answers with the result, which leaves both equal after one round trip. A

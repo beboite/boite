@@ -304,9 +304,13 @@ export class GroupStore {
     if (member?.startsWith('core:')) return;
     const deviceId = member === undefined ? `${this.selfId()}:${sessionId}` : member.slice('device:'.length);
     const entry = roster.devices.find((device) => device.id === deviceId);
-    if (entry === undefined || entry.removed) return;
-    const removed: DeviceEntry = { ...entry, rev: clockOf(roster) + 1, removed: true };
-    this.commit({ ...roster, devices: roster.devices.map((device) => (device === entry ? removed : device)) });
+    if (entry?.removed) return;
+    // A session paired here that never asked for a ticket is no device of the group.
+    if (entry === undefined && member === undefined) return;
+    // A ticket can be exchanged here before the roster that lists its device arrives:
+    // the removal is written anyway, and wins over that entry when it comes.
+    const removed: DeviceEntry = { id: deviceId, name: entry?.name ?? 'device', role: entry?.role ?? 'device', rev: clockOf(roster) + 1, removed: true };
+    this.commit({ ...roster, devices: [...roster.devices.filter((device) => device.id !== deviceId), removed] });
   }
 
   private absorb(theirs: Roster): void {
