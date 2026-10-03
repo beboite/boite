@@ -1,5 +1,5 @@
 import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, type Attachment, type ProviderSummary } from '@boite/contracts';
-import { acceptAttachments, attachedBytes, readAttachmentFile } from './attachments';
+import { acceptAttachments, attachedBytes, isImageMimeType, readAttachmentFile } from './attachments';
 import { bytes } from './format';
 import { IMAGE_SOURCE_MAX_BYTES, isReducible, prepareImage, type ImageCodec } from './image-prepare';
 import { fill, strings } from './strings';
@@ -31,11 +31,12 @@ export async function gatherAttachments(files: File[], holder: Holder): Promise<
       refuse(fill(strings.composer.attachTooMany, { name: file.name, max: String(ATTACHMENTS_PER_TURN) }));
       break;
     }
-    const image = isReducible(file);
-    if (image && holder.noImages !== null) {
+    if (holder.noImages !== null && isImageMimeType(file.type)) {
       refuse(fill(strings.composer.attachNoImages, { provider: holder.noImages.provider }));
       continue;
     }
+    // Without image input nothing becomes an image: a HEIC, BMP or TIFF goes as the file it is.
+    const image = holder.noImages === null && isReducible(file);
     let ready = file;
     if (image) {
       const prepared = await prepareImage(file, holder.codec);

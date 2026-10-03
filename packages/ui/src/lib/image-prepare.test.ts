@@ -175,6 +175,15 @@ describe('gatherAttachments', () => {
     expect(fake.encoded).toEqual([]);
   });
 
+  test('a provider without images still takes HEIC, BMP and TIFF as plain files', async () => {
+    const fake = codec({ width: 100, height: 100 }, { 'image/jpeg': 10 });
+    const target = holder([], { provider: 'Antigravity' }, fake.codec);
+    const refused = await gatherAttachments([file('IMG_0042.HEIC', 'image/heic', 10), file('scan.bmp', 'image/bmp', 10), file('scan.tiff', 'image/tiff', 10)], target.holder);
+    expect(refused).toBeNull();
+    expect(target.list).toMatchObject([{ kind: 'file', name: 'IMG_0042.HEIC' }, { kind: 'file', name: 'scan.bmp' }, { kind: 'file', name: 'scan.tiff' }]);
+    expect(fake.encoded).toEqual([]);
+  });
+
   test('a source over 50 MB says so, with its weight', async () => {
     const target = holder();
     const refused = await gatherAttachments([file('pano.jpg', 'image/jpeg', IMAGE_SOURCE_MAX_BYTES + 1)], target.holder);
