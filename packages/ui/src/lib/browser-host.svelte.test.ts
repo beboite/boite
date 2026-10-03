@@ -3,6 +3,7 @@ import { flushSync } from 'svelte';
 import type { RpcEvents, RpcParams, Settings } from '@boite/contracts';
 import { browserProfiles } from './browser-profiles.svelte';
 import { hostBrowser } from './browser-host';
+import { watchBrowserHosts } from './browser-hosts.svelte';
 import { writeExperiments } from './experiments';
 import type { Store } from './store.svelte';
 import { browserBridge } from './browser-bridge';
@@ -79,6 +80,55 @@ test('an agent lists the profiles and opens a tab in the one it names, the defau
     await vi.waitFor(() => expect((completed.get('status')?.result?.value as { tabs: { profile: string; profileName: string }[] }).tabs.map(tab => [tab.profile, tab.profileName]))
       .toEqual([[pro.id, 'Pro'], [pro.id, 'Pro'], ['private', browserProfiles.name('private')]]));
   } finally { browserProfiles.source = null; }
+});
+
+test('an agent can open and navigate its browser after the desktop selects another conversation', async () => {
+  vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
+  writeExperiments(['agent-browser-control']);
+  let requested: (request: RpcEvents['browser.requested']) => void = () => {};
+  const client = { call: vi.fn(async (..._args: unknown[]) => ({})), on: vi.fn((_name: string, callback: typeof requested) => { requested = callback; return () => {}; }) };
+  const store = { client, owner: true, machineId: 'test', openThread: { id: 'remote-thread' }, threadKey: (id: string) => id } as unknown as Store;
+  const create = vi.fn(), navigate = vi.fn();
+  Object.assign(browserBridge, { create, navigate, isReady: () => true });
+  stop = hostBrowser(store, 'remote-thread');
+  store.openThread = { id: 'other-thread' } as Store['openThread'];
+  requested({ threadId: 'remote-thread', requestId: 'background-open', action: { kind: 'open', url: 'https://example.test' } });
+  await vi.waitFor(() => expect(client.call).toHaveBeenCalledWith('browser.complete', expect.objectContaining({ requestId: 'background-open', result: expect.objectContaining({ url: 'https://example.test' }) })));
+  const id = rightPanel.for('remote-thread').active!.id;
+  requested({ threadId: 'remote-thread', requestId: 'background-nav', tabId: id, action: { kind: 'navigate', url: 'https://example.test/next' } });
+  await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith(id, 'https://example.test/next'));
+  expect(store.openThread?.id).toBe('other-thread');
+  expect(create).toHaveBeenCalledWith(id, 'https://example.test', undefined);
+});
+
+test('hosting survives thread and machine switches, then releases on archive, disconnect and consent withdrawal', () => {
+  vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
+  writeExperiments(['agent-browser-control']);
+  const makeStore = (machineId: string) => {
+    const client = { call: vi.fn(async (..._args: unknown[]) => ({})), on: vi.fn(() => vi.fn()) };
+    const state = $state({ connection: 'ready', openThread: { id: 'one', archived: false }, threads: [{ id: 'one', archived: false }, { id: 'two', archived: false }] });
+    const store = { client, owner: true, machineId, threadKey: (id: string) => `${machineId}/${id}`,
+      get connection() { return state.connection; }, get threads() { return state.threads; }, get openThread() { return state.openThread; } } as unknown as Store;
+    return { store, state, client };
+  };
+  const first = makeStore('first'), second = makeStore('second');
+  stop = watchBrowserHosts(() => [first.store, second.store]);
+  flushSync();
+  expect(first.client.call).toHaveBeenCalledWith('browser.host', expect.objectContaining({ threadId: 'one', enabled: true }));
+  first.state.openThread = { id: 'two', archived: false }; flushSync();
+  expect(first.client.call).toHaveBeenCalledWith('browser.host', expect.objectContaining({ threadId: 'two', enabled: true }));
+  expect(first.client.call).not.toHaveBeenCalledWith('browser.host', { threadId: 'one', enabled: false });
+  expect(second.client.call).not.toHaveBeenCalledWith('browser.host', { threadId: 'one', enabled: false });
+  first.state.threads = first.state.threads.filter(thread => thread.id !== 'one'); flushSync();
+  expect(first.client.call).toHaveBeenCalledWith('browser.host', { threadId: 'one', enabled: false });
+  expect(second.client.call).not.toHaveBeenCalledWith('browser.host', { threadId: 'one', enabled: false });
+  first.state.connection = 'disconnected'; flushSync();
+  expect(first.client.call).toHaveBeenCalledWith('browser.host', { threadId: 'two', enabled: false });
+  first.state.connection = 'ready'; flushSync();
+  expect(first.client.call).toHaveBeenLastCalledWith('browser.host', expect.objectContaining({ threadId: 'two', enabled: true }));
+  writeExperiments([]); flushSync();
+  expect(first.client.call).toHaveBeenLastCalledWith('browser.host', { threadId: 'two', enabled: false });
+  expect(second.client.call).toHaveBeenLastCalledWith('browser.host', { threadId: 'one', enabled: false });
 });
 
 test('remote keys waiting for page validation cannot cross a consent or active-tab change', async () => {

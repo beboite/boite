@@ -1,0 +1,42 @@
+[[permission]]
+identifier = "allow-shell"
+description = "Allows the local main UI to invoke the desktop shell commands."
+commands.allow = [
+  "core_endpoint",
+  "open_local_file",
+  "open_chat_file",
+  "save_attachment",
+  "save_attachment_url",
+  "shell_ready",
+  "whip_window",
+  "quit_shell",
+  "notify",
+  "user_presence",
+  "close_behavior",
+  "app_update_status",
+  "app_update_check",
+  "app_update_download",
+  "app_update_install",
+  "app_update_cancel_install",
+  "quota_window",
+  "window_material",
+  "window_material_supported",
+  "tray_labels",
+  "browser_create",
+  "browser_navigate",
+  "browser_back",
+  "browser_forward",
+  "browser_reload",
+  "browser_set_bounds",
+  "browser_set_zoom",
+  "browser_annotate",
+  "browser_highlight",
+  "browser_destroy",
+  "browser_profile_delete",
+  "browser_protocol",
+]
+
+[[permission]]
+identifier = "allow-quota-ui"
+description = "Allows the local quota popup to connect to the core and use its tray controls."
+commands.allow = ["core_endpoint", "quota_window"]

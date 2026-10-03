@@ -21,6 +21,18 @@ beforeEach(async () => {
 });
 afterEach(async () => { try { opened.agent?.close(); opened.owner?.close(); await opened.harness?.stop(); } finally { trace?.restore(); } });
 
+browserTest('a desktop keeps hosting a background conversation after switching its chat subscription', async () => {
+  await owner.call('threads.subscribe', { threadId });
+  await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: true });
+  await owner.call('threads.unsubscribe', { threadId });
+  await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: true });
+  const waiting = owner.next('browser.requested', r => r.threadId === threadId);
+  const result = agent.call('browser.command', { threadId, action: { kind: 'evaluate', expression: 'document.title' } });
+  const request = await waiting;
+  await owner.call('browser.complete', { requestId: request.requestId, result: { value: 'Background page' } });
+  expect(await result).toEqual({ value: 'Background page' });
+});
+
 browserTest('an agent controls only its conversation; only the registered owner socket can answer', async () => {
   await expect(agent.call('browser.command', { threadId, action: { kind: 'snapshot' } })).rejects.toThrow('desktop app');
   await owner.call('threads.subscribe', { threadId });

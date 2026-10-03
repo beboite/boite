@@ -5,6 +5,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(test)]
 use std::sync::Mutex;
 mod attachments;
+#[cfg(test)]
+mod acl;
 mod attachment_download;
 mod browser;
 mod browser_control;
