@@ -29,7 +29,7 @@
   import DraftRow from './DraftRow.svelte';
   import ProjectTile from './ProjectTile.svelte';
   import { projectKey, projectView, type ProjectEntry } from '../lib/project-view.svelte';
-  import { activeProject, projectThreadLists, projectThreadView } from '../lib/project-threads.svelte';
+  import { activeProject, projectThreadView } from '../lib/project-threads.svelte';
   import { workingThread } from '../lib/recent.svelte';
   import { compareThreads } from '../lib/thread-order';
 
@@ -199,10 +199,8 @@
         {@const groupRows = rows.filter(row => row.machine.id === group.machine.id && row.thread.projectId === group.project.id)}
         {@const workingOpen = projectThreadView.isOpen(group, 'working')}
         {@const doneOpen = !!group.project.archivedThreads && projectThreadView.isOpen(group, 'done')}
-        {@const lists = projectThreadLists(group, groupRows.map(row => row.thread), workingOpen)}
         {@const workingRows = groupRows.filter(row => workingThread(row.thread))}
-        {@const attentionIds = new Set(lists.attention.map(thread => thread.id))}
-        {@const attentionRows = query ? groupRows : groupRows.filter(row => attentionIds.has(row.thread.id))}
+        {@const attentionRows = query ? groupRows : groupRows.filter(row => workingOpen ? !workingThread(row.thread) : !groupWorkingThread(group.machine.store, row.thread))}
         {@const controls = `mobile-project-${encodeURIComponent(projectKey(group))}`}
         {@const draft = group.machine.store.draftEntries.find(entry => entry.projectId === group.project.id)}
         {#if !query || groupRows.length > 0 || (doneOpen && group.project.archivedThreads)}
@@ -312,8 +310,7 @@
     p { font-size: var(--text-sm); }
     .project-group { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); margin-bottom: 12px; overflow: hidden; }
     .project-heading { display: flex; align-items: center; padding: 8px 12px; gap: 8px; background: var(--color-surface-2); color: var(--color-muted-foreground); border-bottom: 1px solid var(--color-border); }
-    .project-heading h2 { margin: 0; }
-    .project-heading h2 { flex: 1; min-width: 0; font-size: var(--text-sm); overflow-wrap: anywhere; }
+    .project-heading h2 { margin: 0; flex: 1; min-width: 0; font-size: var(--text-sm); overflow-wrap: anywhere; }
     .group-label { margin: 0; padding: 8px 12px; border-top: 1px solid var(--color-border); color: var(--color-subtle); font-size: var(--text-xs); }
     .project-heading span { display: block; font-size: var(--text-xs); font-weight: 400; color: var(--color-muted-foreground); }
     .row { display: flex; align-items: center; border-bottom: 1px solid var(--color-border); padding-right: 4px; }

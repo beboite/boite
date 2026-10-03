@@ -17,9 +17,10 @@ export class ProjectThreadView {
 
   toggle(entry: ProjectEntry, kind: ProjectThreadKind, collapsed = false): void {
     const key = projectKey(entry);
+    const open = this[kind].includes(key);
     if (collapsed) entry.machine.store.toggleProject(entry.project.id);
-    if (collapsed && this.isOpen(entry, kind)) return;
-    this[kind] = this[kind].includes(key) ? this[kind].filter(value => value !== key) : [...this[kind], key];
+    if (collapsed && open) return;
+    this[kind] = open ? this[kind].filter(value => value !== key) : [...this[kind], key];
   }
 }
 
@@ -27,8 +28,9 @@ export const projectThreadView = new ProjectThreadView();
 
 /** An ungrouped conversation or draft keeps its project in the main list. */
 export function activeProject(entry: ProjectEntry): boolean {
-  return entry.machine.store.threadsOf(entry.project.id).some(thread => !groupWorkingThread(entry.machine.store, thread))
-    || entry.machine.store.draftEntries.some(draft => draft.projectId === entry.project.id);
+  const store = entry.machine.store;
+  return store.threadsOf(entry.project.id).some(thread => !groupWorkingThread(store, thread))
+    || store.draftEntries.some(draft => draft.projectId === entry.project.id);
 }
 
 /** Protected working rows stay visible while folded and appear only once when unfolded. */

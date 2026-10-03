@@ -6,13 +6,12 @@
   import { fill, strings } from '../lib/strings';
 
   let { entry, working, controls, collapsed = false, searching = false }: { entry: ProjectEntry; working: number; controls: string; collapsed?: boolean; searching?: boolean } = $props();
-  const done = $derived(entry.project.archivedThreads ?? 0);
   const kinds = ['working', 'done'] as const;
 </script>
 
 <div class="counters">
   {#each kinds as kind (kind)}
-    {@const total = kind === 'working' ? working : done}
+    {@const total = kind === 'working' ? working : entry.project.archivedThreads ?? 0}
     {@const open = total > 0 && !collapsed && !(kind === 'working' && searching) && projectThreadView.isOpen(entry, kind)}
     {@const label = fill(kind === 'working' ? strings.sidebar.projectWorkingThreads : strings.sidebar.projectDoneThreads, { count: String(total), project: projectName(entry.project) })}
     <button type="button" class="ghost counter {kind}" class:active={open} data-testid="project-{kind}-toggle" data-count={total}

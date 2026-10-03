@@ -465,10 +465,10 @@ export const strings = {
   sidebar: {
     doneThreads: 'Done',
     workingThreads: 'Working',
-    projectWorkingThreads: '{count} working threads in {project}',
-    projectDoneThreads: '{count} done threads in {project}',
+    projectWorkingThreads: '{project}: {count} working',
+    projectDoneThreads: '{project}: {count} done',
     otherProjects: 'Other projects',
-    noActiveProjects: 'No conversations need attention. Open Other projects to see working and completed threads.',
+    noActiveProjects: 'No conversations need attention.',
     markDone: 'Mark done',
     doneToast: 'Marked "{title}" done',
     doneLoadFailed: 'Some completed threads could not be loaded.',

@@ -351,7 +351,6 @@
 </aside>
 
 <style>
-  .sidebar { container: sidebar / inline-size; }
   @container sidebar (max-width: 240px) {
     .sidebar .head { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
     .head .toggle { grid-column: 1; grid-row: 1; }
@@ -359,6 +358,7 @@
     .head :global(.counters) { grid-column: 1 / -1; grid-row: 2; justify-content: flex-end; margin-bottom: 4px; }
   }
   .sidebar {
+    container: sidebar / inline-size;
     position: relative;
     width: var(--sidebar-width);
     flex: none;
