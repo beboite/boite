@@ -20,7 +20,12 @@ pub(crate) fn default_data_dir(channel: Channel) -> Result<PathBuf, String> {
 
 #[cfg(all(not(windows), not(target_os = "macos")))]
 pub(crate) fn default_data_dir(channel: Channel) -> Result<PathBuf, String> {
-    let legacy = std::env::var_os("HOME").map(|home| PathBuf::from(home)
+    default_data_dir_with_home(channel, dirs::home_dir)
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
+fn default_data_dir_with_home(channel: Channel, system_home: impl FnOnce() -> Option<PathBuf>) -> Result<PathBuf, String> {
+    let legacy = std::env::var_os("HOME").map(PathBuf::from).or_else(system_home).map(|home| home
         .join(".local").join("share").join(channel.data_dir_name()));
     if let Some(data_home) = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).filter(|path| path.is_absolute()) {
         let directory = data_home.join(channel.data_dir_name());
@@ -30,7 +35,7 @@ pub(crate) fn default_data_dir(channel: Channel) -> Result<PathBuf, String> {
         }
         return Ok(directory);
     }
-    legacy.ok_or_else(|| "HOME is not set, so the data directory cannot be found".to_string())
+    legacy.ok_or_else(|| "The user home cannot be found, so the data directory cannot be found".to_string())
 }
 
 #[cfg(all(test, target_os = "linux"))]
@@ -59,6 +64,13 @@ mod tests {
         std::fs::write(fallback.join("journal.db"), []).unwrap();
         std::env::set_var("XDG_DATA_HOME", &data_home);
         let kept = default_data_dir(Channel::Stable).unwrap();
+        std::env::remove_var("HOME");
+        let recovered = default_data_dir_with_home(Channel::Stable, || Some(home.clone())).unwrap();
+        std::env::set_var("XDG_DATA_HOME", "relative/data");
+        let system_fallback = default_data_dir(Channel::Stable).unwrap();
+        let expected_system_fallback = dirs::home_dir().unwrap().join(".local/share/boite2");
+        std::env::set_var("HOME", &home);
+        std::env::set_var("XDG_DATA_HOME", &data_home);
         std::fs::create_dir_all(data_home.join("boite2")).unwrap();
         std::fs::write(data_home.join("boite2/journal.db"), []).unwrap();
         let selected = default_data_dir(Channel::Stable).unwrap();
@@ -76,6 +88,8 @@ mod tests {
         assert_eq!(relative, fallback);
         assert_eq!(empty, fallback);
         assert_eq!(kept, fallback);
+        assert_eq!(recovered, fallback);
+        assert_eq!(system_fallback, expected_system_fallback);
         assert_eq!(selected, data_home.join("boite2"));
     }
 }

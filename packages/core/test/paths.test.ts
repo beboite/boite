@@ -4,8 +4,8 @@ import { defaultDataDir } from '../src/paths.ts';
 
 test('Linux uses an absolute XDG data home, preserving spaces and both channels', () => {
   const env = { XDG_DATA_HOME: "/tmp/Boite's données" };
-  expect(defaultDataDir('stable', 'linux', env, '/home/test')).toBe("/tmp/Boite's données/boite2");
-  expect(defaultDataDir('dev', 'linux', env, '/home/test')).toBe("/tmp/Boite's données/boite2-dev");
+  expect(defaultDataDir('stable', 'linux', env, '/home/test', () => false)).toBe("/tmp/Boite's données/boite2");
+  expect(defaultDataDir('dev', 'linux', env, '/home/test', () => false)).toBe("/tmp/Boite's données/boite2-dev");
 });
 
 test('Linux ignores unset, empty and relative XDG data homes', () => {

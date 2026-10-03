@@ -408,7 +408,7 @@ jobs:
             notarized=0
           fi
           # shellcheck disable=SC2086 # BUNDLE_CONFIGS holds several arguments.
-          bun apps/shell/scripts/tauri.ts build $BUNDLE_CONFIGS --bundles app,dmg
+          bun apps/shell/scripts/tauri.ts build $BUNDLE_CONFIGS --bundles app,dmg --verbose
           cp -R apps/shell/src-tauri/target/release/bundle/macos/Boite.app "$RUNNER_TEMP/Boite.app"
           # Dictation: without both, macOS refuses or kills the microphone request.
           plutil -extract NSMicrophoneUsageDescription raw "$RUNNER_TEMP/Boite.app/Contents/Info.plist"

@@ -39,6 +39,7 @@ tauri = { version = "2", features = ["test"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+dirs = "6"
 
 # The Job Object that ties the core's life to this process. Only the calls in
 # `src/platform/` are asked for.
