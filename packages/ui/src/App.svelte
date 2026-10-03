@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { hostBrowser } from './lib/browser-host';
   import { browserBridge } from './lib/browser-bridge';
@@ -155,6 +155,12 @@
 
   $effect(() => {
     if (terminalShown) need('TerminalView');
+  });
+
+  // A drawer left open before a reload or a reconnect opens again, with its tabs and splits.
+  $effect(() => {
+    const open = store.openThread;
+    if (open !== null && store.owner && store.connection === 'ready') untrack(() => store.restoreTerminal(open.id));
   });
 
   // Asked for before the idle prefetch got to it: fetch it now.

@@ -311,6 +311,17 @@ export class Store {
   writeTerminal(...args: Parameters<Terminals['writeTerminal']>) { return this.#ctx.terminals.writeTerminal(...args); }
   resizeTerminal(...args: Parameters<Terminals['resizeTerminal']>) { return this.#ctx.terminals.resizeTerminal(...args); }
   closeTerminal(...args: Parameters<Terminals['closeTerminal']>) { return this.#ctx.terminals.closeTerminal(...args); }
+  terminalLayout(...args: Parameters<Terminals['terminalLayout']>) { return this.#ctx.terminals.terminalLayout(...args); }
+  terminalsMultiple(...args: Parameters<Terminals['terminalsMultiple']>) { return this.#ctx.terminals.terminalsMultiple(...args); }
+  restoreTerminal(...args: Parameters<Terminals['restoreTerminal']>) { return this.#ctx.terminals.restoreTerminal(...args); }
+  newTerminal(...args: Parameters<Terminals['newTerminal']>) { return this.#ctx.terminals.newTerminal(...args); }
+  splitTerminal(...args: Parameters<Terminals['splitTerminal']>) { return this.#ctx.terminals.splitTerminal(...args); }
+  focusTerminal(...args: Parameters<Terminals['focusTerminal']>) { return this.#ctx.terminals.focusTerminal(...args); }
+  resizeTerminalPanes(...args: Parameters<Terminals['resizeTerminalPanes']>) { return this.#ctx.terminals.resizeTerminalPanes(...args); }
+  closeTerminalTab(...args: Parameters<Terminals['closeTerminalTab']>) { return this.#ctx.terminals.closeTerminalTab(...args); }
+  terminalExited(...args: Parameters<Terminals['terminalExited']>) { return this.#ctx.terminals.terminalExited(...args); }
+  focusShell(...args: Parameters<Terminals['focusShell']>) { return this.#ctx.terminals.focusShell(...args); }
+  terminalCommand(...args: Parameters<Terminals['terminalCommand']>) { return this.#ctx.terminals.terminalCommand(...args); }
 
   // -------------------------------------------------------------------------
   // Models and the composer's choice: store/models.svelte.ts

@@ -59,6 +59,8 @@ export function listen(ctx: StoreContext, client: Client): void {
 
   // Rows are patched in place: a load tick on one running thread must not
   // hand the sidebar a new array and re-render every other row.
+  // A shell that ended leaves its tab or split, shown or not.
+  on('terminal.exited', ({ id }) => ctx.terminals.shellEnded(id));
   on('thread.created', (summary) => threads.upsertThread(summary));
   on('thread.updated', (summary) => {
     threads.upsertThread(summary);

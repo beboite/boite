@@ -1626,6 +1626,10 @@ export const KEYBINDING_COMMANDS = [
   'archive',
   'import-session',
   'terminal',
+  'terminal-new',
+  'terminal-split',
+  'terminal-split-vertical',
+  'terminal-close',
   'reopen-thread',
   'copy-answer',
   'find',
@@ -2450,9 +2454,37 @@ export interface HooksStatus {
   recent: HookRun[];
 }
 
+/** The most shells one thread runs at once. */
+export const MAX_THREAD_TERMINALS = 16;
+/** What a client names a thread's further shells by. */
+export const THREAD_TERMINAL_KEY = /^[a-z0-9-]{1,32}$/;
+
+/**
+ * The id of a thread's shell: `terminal:<threadId>` for its first, the one a
+ * thread had before it could have several, `terminal:<threadId>:<terminalId>`
+ * for the others.
+ */
+export function threadTerminalId(threadId: ThreadId, terminalId?: string): string {
+  return terminalId === undefined ? `terminal:${threadId}` : `terminal:${threadId}:${terminalId}`;
+}
+
+/** Whether this shell id is one of the thread's: its first, or one named after it. */
+export function isThreadTerminal(threadId: ThreadId, id: string): boolean {
+  const first = threadTerminalId(threadId);
+  return id === first || (id.startsWith(`${first}:`) && THREAD_TERMINAL_KEY.test(id.slice(first.length + 1)));
+}
+
+/** One of a thread's running shells, as `terminals.list` reports them. */
+export interface ThreadTerminal {
+  id: string;
+  /** Absent for the thread's first shell. */
+  terminalId?: string;
+  cwd: string;
+}
+
 /**
  * A shell the core runs in a pseudo-terminal. Its id names what it belongs to:
- * `terminal:<threadId>` for a thread's, `login:<accountId>` for a sign-in.
+ * `threadTerminalId` for a thread's, `login:<accountId>` for a sign-in.
  */
 export interface TerminalState {
   id: string;
@@ -2956,8 +2988,14 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    */
   'accounts.loginTerminal': { params: { accountId: AccountId; cols: number; rows: number }; result: TerminalState };
 
-  /** Attach to the thread's shell, starting one in the thread's working directory when none runs. */
-  'terminals.open': { params: { threadId: ThreadId; cols: number; rows: number }; result: TerminalState };
+  /**
+   * Attach to one of the thread's shells, starting it in the thread's working
+   * directory when it does not run. Without `terminalId`, the thread's first
+   * shell; with one (`THREAD_TERMINAL_KEY`), another, up to `MAX_THREAD_TERMINALS`.
+   */
+  'terminals.open': { params: { threadId: ThreadId; cols: number; rows: number; terminalId?: string }; result: TerminalState };
+  /** The thread's running shells, in the order they started. */
+  'terminals.list': { params: { threadId: ThreadId }; result: ThreadTerminal[] };
   /** Keystrokes, as the terminal emulator encodes them. */
   'terminals.write': { params: { id: string; data: string }; result: { ok: true } };
   'terminals.resize': { params: { id: string; cols: number; rows: number }; result: { ok: true } };
