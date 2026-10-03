@@ -31,7 +31,11 @@ test('the starting thread shows the thread it started and the answer that came b
   await page.waitFor(`!!document.querySelector('[data-testid="thread-row"][data-thread-id="${callerId}"]')`);
   await page.click(`[data-testid="thread-row"][data-thread-id="${callerId}"]`);
   await page.waitFor('document.querySelector("[data-testid=spawn-marker][data-direction=to]")?.textContent.includes("Blog post for 2.4")');
+  await page.waitFor(`document.querySelector('[data-testid=agent-message-summary][data-direction=incoming]')`, 15_000);
+  await page.click('[data-testid=agent-message-summary][data-direction=incoming]');
   await page.waitFor(`[...document.querySelectorAll('[data-testid=forwarded-agent-message][data-direction=incoming]')].some(el => el.textContent.includes('Blog post for 2.4: done'))`, 15_000);
+  await page.click('[data-testid=panel-close]');
+  await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
   expect(await page.text('[data-testid=spawn-marker][data-direction=to]')).toContain('Website');
   await page.waitFor('document.getAnimations().every(animation => animation.playState !== "running" || animation.effect?.getTiming().iterations === Infinity)');
   await page.evaluate('document.querySelector("[data-testid=spawn-marker][data-direction=to]").scrollIntoView({ block: "start" })');

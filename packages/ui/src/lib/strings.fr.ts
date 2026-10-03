@@ -910,6 +910,14 @@ export const fr: Translation = {
     error: 'Erreur'
   },
 
+  agentMessages: {
+    heading: 'Messages', hint: 'Messages envoyés et reçus entre agents.',
+    open: 'Ouvrir les messages', filter: 'Filtrer les messages des agents',
+    all: 'Tous', sent: 'Envoyés', received: 'Reçus', empty: 'Aucun message ici pour le moment.',
+    forwardedOne: '1 message transmis', forwardedMany: '{count} messages transmis',
+    receivedOne: '1 message reçu', receivedMany: '{count} messages reçus',
+    issueOne: '1 message à vérifier', issueMany: '{count} messages à vérifier'
+  },
   coordination: {
     options: 'Réglages avancés',
     heading: 'Communication entre conversations', off: 'Désactivée', on: 'Activée',

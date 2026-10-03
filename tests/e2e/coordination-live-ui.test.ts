@@ -4,7 +4,7 @@ import { connect, type CoreClient } from '../../packages/core/src/client.ts';
 import { BrowserPage } from './lib/cdp.ts';
 import { pairingUrlOf, startCore, type RunningCore } from './lib/core.ts';
 
-test('a signed message from another core appears as a forwarded bubble and survives reload', async () => {
+test('signed agent mail opens from a compact summary and survives reload in its messages tab', async () => {
   const cores: RunningCore[] = [];
   const clients: CoreClient[] = [];
   let page: BrowserPage | undefined;
@@ -52,6 +52,11 @@ test('a signed message from another core appears as a forwarded bubble and survi
       requestId: 'browser-forwarded-message',
     });
     const selector = `[data-testid="forwarded-agent-message"][data-letter-id="${letter.id}"]`;
+    const summary = '[data-testid=agent-message-summary][data-direction=incoming]';
+    await page.waitFor(`document.querySelector(${JSON.stringify(summary)})`, 15000);
+    expect(await page.text(summary)).toContain('Received 1 message');
+    expect(await page.evaluate(`document.querySelector(${JSON.stringify(selector)}) === null`)).toBe(true);
+    await page.click(summary);
     await page.waitFor(`document.querySelector(${JSON.stringify(selector)})`, 15000);
     const checkBubble = async () => {
       const text = await page!.evaluate<string>(`document.querySelector(${JSON.stringify(selector)}).textContent`);
@@ -64,14 +69,17 @@ test('a signed message from another core appears as a forwarded bubble and survi
       expect(await page!.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
       expect(text).not.toContain('Boite agent coordination.');
       expect(await page!.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`)).toBe(1);
-      expect(await page!.evaluate(`document.querySelector(${JSON.stringify(selector)}).closest('[data-role="user"]') === null`)).toBe(true);
+      expect(await page!.evaluate(`document.querySelector(${JSON.stringify(selector)}).closest('[data-testid="agent-messages-surface"]') !== null`)).toBe(true);
     };
     await checkBubble();
+    await page.click('[data-testid=panel-close]');
+    await page.waitFor('!document.querySelector("[data-testid=right-panel]")');
     await page.click('[data-testid=thread-menu-trigger]');
     await page.click('[data-value=coordination]');
     await page.waitFor('document.querySelector("[data-testid=coordination-mode-on]").getAttribute("aria-checked") === "true"');
     await page.waitFor('document.querySelector("[data-testid=coordination-dialog]").open');
     await page.click('[data-testid=coordination-close]');
+    await page.click(summary);
     await page.evaluate("document.documentElement.dataset.theme = 'dark'");
     await page.evaluate('document.fonts.ready.then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))');
     await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-real-cores.png'));
@@ -80,12 +88,16 @@ test('a signed message from another core appears as a forwarded bubble and survi
     await page.evaluate('document.fonts.ready.then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))');
     await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-real-cores-phone.png'));
     await page.click(`${selector} [data-testid=agent-letter-open]`);
+    await page.waitFor('document.querySelector("[data-testid=agent-message-summary][data-direction=outgoing]")');
+    await page.waitFor('!document.querySelector("[data-testid=right-panel]")');
+    await page.click('[data-testid=agent-message-summary][data-direction=outgoing]');
     await page.waitFor(`document.querySelector(${JSON.stringify(selector)})?.dataset.direction === 'outgoing'`);
     expect(await page.text(`${selector} [data-testid=agent-letter-project]`)).toBe('Infrastructure');
     expect(await page.text(selector)).toContain('Maintenance agent');
     await page.evaluate('document.fonts.ready');
     await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-outgoing-phone.png'));
     await page.click(`${selector} [data-testid=agent-letter-open]`);
+    await page.waitFor(`document.querySelector(${JSON.stringify(summary)})`);
     await page.waitFor(`document.querySelector(${JSON.stringify(selector)})?.dataset.direction === 'incoming'`);
     await checkBubble();
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
@@ -93,6 +105,8 @@ test('a signed message from another core appears as a forwarded bubble and survi
     await page.click(`[data-testid="thread-row"][data-thread-id="${threads[0]!.id}"]`);
     await page.waitFor(`document.querySelector(${JSON.stringify(selector)})`, 15000);
     await checkBubble();
+    expect(await page.evaluate('document.querySelectorAll("[data-testid=panel-tab][data-kind=messages]").length')).toBe(1);
+    expect(page.errors()).toEqual([]);
   } finally {
     await page?.close();
     for (const client of clients) client.close();
