@@ -79,7 +79,7 @@ export function fakeWorktree(projectPath: string, _title: string, branch?: strin
 }
 
 export function toSummary(thread: Thread): ThreadSummary {
-  const { memoryEvents: _memoryEvents, messages: _messages, turns: _turns, commands: _commands, background: _background, backgroundHistory: _history, activity: _activity, messagesBefore: _before, messagesFrom: _from, ...rest } = thread;
+  const { memoryEvents: _memoryEvents, messages: _messages, turns: _turns, commands: _commands, background: _background, backgroundHistory: _history, activity: _activity, messagesBefore: _before, messagesFrom: _from, messagesSync: _sync, messagesUnchanged: _unchanged, ...rest } = thread;
   const busy = thread.status === 'running' || thread.status === 'waiting';
   const started = thread.turns.filter(turn => turn.status === 'running' && turn.startedAt !== null).map(turn => turn.startedAt as number);
   const tasks = thread.background ?? [];

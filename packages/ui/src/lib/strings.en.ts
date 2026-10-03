@@ -1,5 +1,18 @@
 /** Every user-facing string of the UI. No literal UI text lives anywhere else. */
 export const strings = {
+  subscriptionProxy: {
+    heading: 'Subscription proxy',
+    enable: 'Use a subscription proxy',
+    hint: 'Claude and Codex use this machine\'s gateway. Limits opens its dashboard inside Boite. Other agents keep their own configuration.',
+    baseUrl: 'API URL', dashboardUrl: 'Limits dashboard URL', key: 'API key (optional)',
+    keyHint: 'Leave empty to keep the saved key. This is the proxy\'s API key, not its dashboard management key.',
+    clearKey: 'Remove saved key', save: 'Save proxy', saved: 'Proxy saved',
+    configure: 'Configure proxy', native: 'Show account limits',
+    showDashboard: 'Show proxy dashboard',
+    openDashboard: 'Open dashboard',
+    signInHint: 'Sign in with Open dashboard, then reload here. If the page stays blank, this dashboard may block embedded views.',
+    mixedContent: 'This page uses HTTPS. Set an HTTPS dashboard URL to view it here, or open the HTTP dashboard separately.',
+  },
   remoteBrowser: {
     display: 'Display', resolution: 'Page resolution', fitPhone: 'Fit this screen', phone: 'Phone', tablet: 'Tablet', rotate: 'Rotate', width: 'Width', height: 'Height', apply: 'Apply', sharedSize: 'Resolution also changes the shared tab on the PC.', restoreSize: 'Use the PC panel size', previewZoom: 'Preview zoom (this device only)', fit: 'Fit', panHint: 'Drag to pan the preview. Use the arrows to scroll the page.',
     open: 'Open live browser', experimental: 'Experimental browser sharing', enable: 'Enable on this device',
@@ -469,9 +482,9 @@ export const strings = {
     doneToast: 'Marked "{title}" done',
     doneLoadFailed: 'Some completed threads could not be loaded.',
     doneRetry: 'Try again',
-    reopenThread: 'Reopen thread',
-    reopenNamedThread: 'Reopen "{title}"',
-    doneNotice: 'This thread is done. Reopen it to continue.',
+    reopenThread: 'Move to Recent',
+    reopenNamedThread: 'Move "{title}" to Recent',
+    doneNotice: 'This thread is done. Move it to Recent to continue.',
     allProjects: 'All projects',
     filterProject: 'Filter by project',
     recentOrder: 'Recent activity',

@@ -7,6 +7,7 @@ import { newId } from './ids.ts';
 import { invalidParams, messageOf, notFound, refused } from './errors.ts';
 import { runAcpLogin, type AcpLoginRun } from './drivers/acp/login.ts';
 import { probeThreadId } from './providers/probe.ts';
+import { activeSubscriptionProxy, subscriptionProxyEnv } from './subscription-proxy.ts';
 import { agentEnv, hostAgentsEnabled, launchPrefix, profileFor, resolveExecutable } from './providers/resolve.ts';
 import { browserNoopPath, browserNoopScript, currentOs, homePath } from './paths.ts';
 import { ISOLATION_DEFAULTS, shareProfile, unshareProfile, type ShareProblem } from './profile-share.ts';
@@ -229,6 +230,7 @@ export class AccountStore {
   private async verifyConnection(accountId: AccountId): Promise<Account> {
     const account = this.require(accountId);
     const provider = this.core.providers.require(account.providerId);
+    if (activeSubscriptionProxy(this.core, provider)) return this.check(accountId);
     if (provider.protocol !== 'codex-appserver' && provider.protocol !== 'claude-sdk') return this.check(accountId);
     const profile = profileFor(provider);
     const executable = profile ? resolveExecutable(profile) : null;
@@ -295,7 +297,7 @@ export class AccountStore {
     for (const [key, value] of Object.entries(env)) {
       env[key] = isolationDir === null ? value : value.split('{isolationDir}').join(isolationDir);
     }
-    return env;
+    return { ...env, ...subscriptionProxyEnv(this.core, provider) };
   }
 
   /**
@@ -726,6 +728,7 @@ export class AccountStore {
   }
 
   private sessionStatus(account: Pick<Account, 'isolationDir'>, provider: ProviderDescriptor): Account['status'] {
+    if (activeSubscriptionProxy(this.core, provider)) return 'ok';
     if (provider.auth.kind === 'none') return 'ok';
     // A profile may say where the login lives on its OS, or, with an empty list,
     // that it can live outside any file there: then a file still proves a login

@@ -12,6 +12,18 @@
 import type { Translation } from './i18n.svelte';
 
 export const fr: Translation = {
+  subscriptionProxy: {
+    heading: 'Proxy d\'abonnements', enable: 'Utiliser un proxy d\'abonnements',
+    hint: 'Claude et Codex utilisent la passerelle de cette machine. Limites ouvre son tableau de bord dans Boite. Les autres agents gardent leur configuration.',
+    baseUrl: 'URL de l\'API', dashboardUrl: 'URL du tableau de bord des limites', key: 'Clé API (facultative)',
+    keyHint: 'Laissez vide pour garder la clé enregistrée. Utilisez la clé API du proxy, pas sa clé de gestion du tableau de bord.',
+    clearKey: 'Retirer la clé enregistrée', save: 'Enregistrer le proxy', saved: 'Proxy enregistré',
+    configure: 'Configurer le proxy', native: 'Voir les limites des comptes',
+    showDashboard: 'Voir le tableau du proxy',
+    openDashboard: 'Ouvrir le tableau',
+    signInHint: 'Connectez-vous avec Ouvrir le tableau, puis rechargez ici. Si la page reste vide, ce tableau peut refuser les vues intégrées.',
+    mixedContent: "Cette page utilise HTTPS. Configurez une URL de tableau HTTPS pour l'afficher ici, ou ouvrez le tableau HTTP séparément.",
+  },
   remoteBrowser: {
     display: 'Affichage', resolution: 'Résolution de la page', fitPhone: 'Adapter à cet écran', phone: 'Téléphone', tablet: 'Tablette', rotate: 'Pivoter', width: 'Largeur', height: 'Hauteur', apply: 'Appliquer', sharedSize: 'La résolution change aussi l’onglet partagé sur le PC.', restoreSize: 'Reprendre la taille du panneau PC', previewZoom: 'Zoom de l’aperçu (cet appareil seulement)', fit: 'Ajuster', panHint: 'Glissez pour déplacer l’aperçu. Utilisez les flèches pour défiler dans la page.',
     open: 'Ouvrir le navigateur en direct', experimental: 'Partage du navigateur expérimental', enable: 'Activer sur cet appareil',
@@ -475,9 +487,9 @@ export const fr: Translation = {
     doneToast: '« {title} » marqué comme terminé',
     doneLoadFailed: "Certaines conversations terminées n'ont pas pu être chargées.",
     doneRetry: 'Réessayer',
-    reopenThread: 'Rouvrir la conversation',
-    reopenNamedThread: 'Rouvrir « {title} »',
-    doneNotice: 'Cette conversation est terminée. Rouvrez-la pour continuer.',
+    reopenThread: 'Remettre dans Récent',
+    reopenNamedThread: 'Remettre « {title} » dans Récent',
+    doneNotice: 'Cette conversation est terminée. Remettez-la dans Récent pour continuer.',
     allProjects: 'Tous les projets',
     filterProject: 'Filtrer par projet',
     recentOrder: 'Activité récente',

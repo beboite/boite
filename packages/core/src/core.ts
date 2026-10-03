@@ -319,6 +319,7 @@ export class Core {
       version: this.version,
       ...(this.bundleHash ? { bundleHash: this.bundleHash } : {}),
       protocolVersion: PROTOCOL_VERSION,
+      features: { threadSnapshots: true },
       hostname: hostname(),
       os: currentOs(),
       channel: this.channel,

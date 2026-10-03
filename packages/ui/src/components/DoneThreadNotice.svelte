@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { RotateCcw } from '@lucide/svelte';
+  import { ArchiveRestore } from '@lucide/svelte';
   import type { ThreadId } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { restoreThread } from '../lib/archive';
@@ -22,7 +22,7 @@
 
 <div class="done-notice" data-testid="done-thread-notice">
   <span>{strings.sidebar.doneNotice}</span>
-  <button type="button" class="small" data-testid="done-thread-reopen" disabled={restoring || store.connection !== 'ready'} onclick={() => void reopen()}><RotateCcw size={14} />{strings.sidebar.reopenThread}</button>
+  <button type="button" class="small" data-testid="done-thread-reopen" disabled={restoring || store.connection !== 'ready'} onclick={() => void reopen()}><ArchiveRestore size={14} />{strings.sidebar.reopenThread}</button>
 </div>
 
 <style>

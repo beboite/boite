@@ -10,7 +10,7 @@ import type {
   ThreadSummary
 } from '@boite/contracts';
 import { readingCacheBytes, READING_CACHE_BYTES } from '../reading-cache';
-import { INITIAL_MESSAGE_PAGE, MESSAGE_PAGE_MAX, previewToolOutputs } from '@boite/contracts';
+import { INITIAL_MESSAGE_PAGE, MESSAGE_PAGE_MAX, previewToolOutputs, previewFileData } from '@boite/contracts';
 import { forgetArchivedThread } from '../archive-history';
 import { rightPanel } from '../right-panel.svelte';
 import { blockedMoveParents, lastIndexById, mergeResumed, patchRow, reconcileThread, resumeRequest, threadsByProject } from '../thread-rows';
@@ -24,7 +24,7 @@ export type RewoundMessage = Omit<ThreadRewind, 'thread'>;
 
 /** The row part of a thread, without what only an open thread carries. */
 function summaryOf(thread: Thread): ThreadSummary {
-  const { memoryEvents: _memoryEvents, messages: _messages, turns: _turns, commands: _commands, background: _background, backgroundHistory: _history, activity: _activity, messagesBefore: _before, messagesFrom: _from, ...summary } = thread;
+  const { memoryEvents: _memoryEvents, messages: _messages, turns: _turns, commands: _commands, background: _background, backgroundHistory: _history, activity: _activity, messagesBefore: _before, messagesFrom: _from, messagesSync: _sync, messagesUnchanged: _unchanged, ...summary } = thread;
   return summary;
 }
 
@@ -94,7 +94,8 @@ export class Threads {
     // Keep more small visits within the same 16 MiB budget. An expanded tool
     // gives its full output back to the core before it enters this cache.
     this.readingThreads.delete(thread.id);
-    const messages = previewToolOutputs(thread.messages);
+    const previews = previewToolOutputs(thread.messages);
+    const messages = this.ctx.store.core?.features?.threadSnapshots ? previewFileData(previews) : previews;
     const snapshot = messages.every((message, index) => message === thread.messages[index]) ? thread : { ...thread, messages };
     const bytes = readingCacheBytes(messages);
     if (bytes <= READING_CACHE_BYTES) this.readingThreads.set(thread.id, snapshot);
@@ -215,6 +216,7 @@ export class Threads {
     this.readingThreads.delete(thread.id);
     for (const held of this.threadSnapshots(thread.id)) {
       delete held.messagesFrom;
+      delete held.messagesSync;
       Object.assign(held, structuredClone(thread));
     }
   }
@@ -278,6 +280,9 @@ export class Threads {
     if (s.connection !== 'ready') { this.loadingThreadId = null; this.#openOffline(threadId, navigate); return; }
     const newest = (): boolean => this.ctx.currentNavigation(client, generation);
     const retire = async (): Promise<void> => {
+      if (client === this.ctx.client && this.#openTarget === null && this.subscribedThreadId && this.subscribedThreadId !== threadId) {
+        await client.call('threads.subscribe', { threadId: this.subscribedThreadId }).catch(() => undefined);
+      }
       if (client !== this.ctx.client || (this.subscribedThreadId !== threadId && delegation.delegationSubscribedThreadId !== threadId && (this.#openTarget !== threadId || newest()))) {
         await client.call('threads.unsubscribe', { threadId }).catch(() => undefined);
       }
@@ -302,27 +307,35 @@ export class Threads {
       // must run it: on a 150 ms link, five calls awaited one after the other
       // were three quarters of a second before the last card was right, and the
       // messages waited behind a subscribe and an unsubscribe they do not need.
-      const subscribed = client.call('threads.subscribe', { threadId });
+      const bundled = s.core?.features?.threadSnapshots === true;
+      const subscribed = bundled ? null : client.call('threads.subscribe', { threadId });
       // A thread already in hand, open or among the recent ones, asks only for
       // what it cannot vouch for: a reconnect on a long conversation used to
       // download its last 120 messages again for the two that were new.
-      const fetched = client.call('threads.get', { ...resumeRequest(threadId, held), limit: held ? MESSAGE_PAGE_MAX : INITIAL_MESSAGE_PAGE, compactTools: true });
+      const resume = resumeRequest(threadId, held);
+      const fetched = client.call('threads.get', { ...resume, limit: held ? MESSAGE_PAGE_MAX : INITIAL_MESSAGE_PAGE, compactTools: true,
+        ...(bundled ? {
+          compactFiles: true,
+          sync: held?.messagesSync && held.messagesSync.from === resume.after ? held.messagesSync : true,
+          open: { ...(previous && previous !== threadId && previous !== delegation.delegationSubscribedThreadId ? { previous } : {}), ...(options.requests === false ? { requests: false } : {}), markRead: true }
+        } : {})
+      });
       if (options.requests !== false) {
-        permissionRead = this.ctx.requests.permissionRead(client, threadId);
-        questionRead = this.ctx.requests.questionRead(client, threadId);
+        permissionRead = this.ctx.requests.permissionRead(client, threadId, bundled ? () => fetched.then(thread => thread.opened?.permissions ?? []) : undefined);
+        questionRead = this.ctx.requests.questionRead(client, threadId, bundled ? () => fetched.then(thread => thread.opened?.questions ?? []) : undefined);
       }
       const permissionsAsked = permissionRead?.promise ?? Promise.resolve([]);
       const questionsAsked = questionRead?.promise ?? Promise.resolve([]);
       // A run that a newer click overtakes returns early and never awaits these.
       for (const asked of [fetched, permissionsAsked, questionsAsked]) asked.catch(() => undefined);
-      await subscribed;
+      await (subscribed ?? fetched);
       if (!newest()) {
         // A newer click took over while this one was in flight. Its own thread
         // is the one the socket keeps, so this subscription goes back.
         await retire();
         return;
       }
-      const thread = await fetched;
+      const { opened: _opened, ...thread } = await fetched;
       if (!newest()) { await retire(); return; }
       const metadata = summaryRead.apply([summaryOf(thread)], this.threads).find(row => row.id === threadId);
       if (metadata) Object.assign(thread, metadata);
@@ -330,7 +343,7 @@ export class Threads {
       this.subscribedThreadId = threadId;
       // A thread already left that the core will not let go of costs a few
       // events, not the open of this one.
-      const unsubscribed: Promise<unknown> = previous && previous !== threadId && previous !== delegation.delegationSubscribedThreadId
+      const unsubscribed: Promise<unknown> = !bundled && previous && previous !== threadId && previous !== delegation.delegationSubscribedThreadId
         ? client.call('threads.unsubscribe', { threadId: previous }).catch(() => undefined)
         : Promise.resolve();
       const cached = held ?? this.readingThreads.get(threadId);
@@ -475,7 +488,7 @@ export class Threads {
     const navigation = this.openGeneration;
     const current = () => generation === this.#olderGeneration && this.ctx.currentNavigation(client, navigation);
     try {
-      const page = await client.call('messages.list', { threadId: open.id, before: cursor, compactTools: true });
+      const page = await client.call('messages.list', { threadId: open.id, before: cursor, compactTools: true, ...(this.ctx.store.core?.features?.threadSnapshots ? { compactFiles: true } : {}) });
       const still = this.openThread;
       if (!current() || !still || still.id !== open.id || still.messagesBefore !== cursor) return 0;
       const known = new Set(still.messages.map((m) => m.id));
@@ -506,22 +519,7 @@ export class Threads {
     const loading = client.call('messages.toolOutput', { threadId, messageId, toolId }).catch(async error => {
       if (!(error instanceof RpcFailure) || error.code !== RpcErrorCode.MethodNotFound) throw error;
       if (this.ctx.client !== client || generation !== this.#toolOutputVisit) return { output: null };
-      // Older connected cores return full parts through their existing history
-      // methods. Prefer one message before its known successor, else walk back
-      // from a resumed tail if new work has overtaken the cached last message.
-      const thread = [...this.threadSnapshots(threadId)].find(held => held.messages.some(message => message.id === messageId));
-      const next = thread?.messages[lastIndexById(thread.messages, messageId) + 1]?.id;
-      const page = next
-        ? await client.call('messages.list', { threadId, before: next, limit: 1 })
-        : await client.call('threads.get', { threadId, after: messageId });
-      let message = page.messages.find(message => message.id === messageId);
-      let before = 'before' in page ? page.before : page.messagesBefore;
-      while (!message && before && this.ctx.client === client && generation === this.#toolOutputVisit) {
-        const older = await client.call('messages.list', { threadId, before, limit: MESSAGE_PAGE_MAX });
-        message = older.messages.find(message => message.id === messageId);
-        if (older.before === before) break;
-        before = older.before;
-      }
+      const message = await this.#fullMessage(client, threadId, messageId, generation);
       const part = message?.parts.find(part => part.type === 'tool' && part.toolId === toolId);
       if (part?.type !== 'tool') throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `tool ${toolId} is not a tool of message ${messageId}` });
       return { output: part.output };
@@ -785,7 +783,7 @@ export class Threads {
   }
 
   threadSnapshots(threadId: ThreadId): Set<Thread> {
-    return new Set([this.openThread, this.ctx.store.delegationThread].filter((thread): thread is Thread => thread?.id === threadId));
+    return new Set([this.openThread, this.ctx.store.delegationThread].filter((thread): thread is Thread => !!thread && thread.id === threadId));
   }
 
   messages(threadId: ThreadId, messageId: string): Set<Message> {
@@ -795,6 +793,58 @@ export class Threads {
       if (message) messages.add(message);
     }
     return messages;
+  }
+
+  invalidateSync(threadId: ThreadId): void {
+    for (const thread of this.threadSnapshots(threadId)) delete thread.messagesSync;
+  }
+
+  #attachments = new Map<string, { client: NonNullable<StoreContext['client']>; visit: number; promise: Promise<string> }>();
+
+  /** Share duplicate downloads and hydrate only the visit that requested the bytes. */
+  loadMessageAttachment(threadId: ThreadId, messageId: string, partIndex: number): Promise<string> {
+    const client = this.ctx.client;
+    if (!client) return Promise.reject(new Error(strings.connection.unavailable));
+    const visit = this.#toolOutputVisit, generation = this.ctx.clientGeneration;
+    const key = JSON.stringify([threadId, messageId, partIndex]);
+    const held = this.#attachments.get(key);
+    if (held?.client === client && held.visit === visit) return held.promise;
+    const promise = client.call('messages.attachment', { threadId, messageId, partIndex }).catch(async error => {
+      if (!(error instanceof RpcFailure) || error.code !== RpcErrorCode.MethodNotFound) throw error;
+      const message = await this.#fullMessage(client, threadId, messageId, visit);
+      const part = message?.parts[partIndex];
+      if (part?.type !== 'file' && part?.type !== 'image') throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `part ${partIndex} is not an attachment of message ${messageId}` });
+      return { data: part.data };
+    }).then(({ data }) => {
+      if (this.ctx.currentClient(client, generation) && this.#toolOutputVisit === visit) {
+        for (const message of this.messages(threadId, messageId)) {
+          const part = message.parts[partIndex];
+          if (part?.type === 'file' && part.dataDeferred) { part.data = data; delete part.dataDeferred; }
+        }
+      }
+      return data;
+    }).finally(() => { if (this.#attachments.get(key)?.promise === promise) this.#attachments.delete(key); });
+    this.#attachments.set(key, { client, visit, promise });
+    return promise;
+  }
+
+  /** Older cores expose full parts only through history pages. */
+  async #fullMessage(client: NonNullable<StoreContext['client']>, threadId: ThreadId, messageId: MessageId, visit: number): Promise<Message | undefined> {
+    if (this.ctx.client !== client || visit !== this.#toolOutputVisit) return undefined;
+    const thread = [...this.threadSnapshots(threadId)].find(held => held.messages.some(message => message.id === messageId));
+    const next = thread?.messages[lastIndexById(thread.messages, messageId) + 1]?.id;
+    const page = next
+      ? await client.call('messages.list', { threadId, before: next, limit: 1 })
+      : await client.call('threads.get', { threadId, after: messageId });
+    let message = page.messages.find(message => message.id === messageId);
+    let before = 'before' in page ? page.before : page.messagesBefore;
+    while (!message && before && this.ctx.client === client && visit === this.#toolOutputVisit) {
+      const older = await client.call('messages.list', { threadId, before, limit: MESSAGE_PAGE_MAX });
+      message = older.messages.find(message => message.id === messageId);
+      if (older.before === before) break;
+      before = older.before;
+    }
+    return message;
   }
 
   upsertTurn(threadId: ThreadId, turn: Thread['turns'][number]): void {
