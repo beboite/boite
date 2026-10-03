@@ -18,8 +18,8 @@
     aria-controls={uid} onclick={() => open = !open}>
     <span class="caret" class:expanded={open}><ChevronRight size={12} aria-hidden="true" /></span>
     {#if kind === 'done'}<CheckCheck size={14} aria-hidden="true" />{:else}<LoaderCircle size={14} aria-hidden="true" />{/if}
-    <span class="label">{kind === 'done' ? strings.sidebar.doneThreads : strings.sidebar.workingThreads}</span>
-    <span class="count">{formatCount(count)}</span>
+    <span class="label ui-label">{kind === 'done' ? strings.sidebar.doneThreads : strings.sidebar.workingThreads}</span>
+    <span class="count ui-label">{formatCount(count)}</span>
   </button>
   <div id={uid} hidden={!open}>
     {#if open}{@render children()}{/if}

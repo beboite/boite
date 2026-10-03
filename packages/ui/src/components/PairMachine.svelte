@@ -98,9 +98,9 @@
     {#if mobile || !open}
       <div class="head-actions">
         <!-- A phone has a camera and the other machine draws a code: no link to copy across. -->
-        {#if mobile}<button class="primary add-open" data-testid="machine-scan" disabled={busy} onclick={() => void startScanning()}><ScanLine size={15} />{strings.machines.scan}</button>{/if}
-        {#if mobile && codeOrigin}<button class="add-open" data-testid="machine-code-open" aria-expanded={codeOpen} onclick={toggleCode}><KeyRound size={15} />{strings.machines.typeCode}</button>{/if}
-        {#if !open}<button class:primary={!mobile} class="add-open" data-testid="machine-add-open" onclick={startAdding}><Plus size={15} />{mobile ? strings.machines.pasteLink : strings.machines.add}</button>{/if}
+        {#if mobile}<button class="primary add-open" data-testid="machine-scan" disabled={busy} onclick={() => void startScanning()}><ScanLine size={15} /><span class="ui-label">{strings.machines.scan}</span></button>{/if}
+        {#if mobile && codeOrigin}<button class="add-open" data-testid="machine-code-open" aria-expanded={codeOpen} onclick={toggleCode}><KeyRound size={15} /><span class="ui-label">{strings.machines.typeCode}</span></button>{/if}
+        {#if !open}<button class:primary={!mobile} class="add-open" data-testid="machine-add-open" onclick={startAdding}><Plus size={15} /><span class="ui-label">{mobile ? strings.machines.pasteLink : strings.machines.add}</span></button>{/if}
       </div>
     {/if}
   {#if codeOpen && codeOrigin}
@@ -126,7 +126,7 @@
     <div>
       <section class="card add" data-testid="machine-add-card" aria-label={strings.machines.add}>
         <div class="add-head">
-          <h2>{strings.machines.add}<InfoTip topic={strings.machines.add} text={strings.machines.addHint} /></h2>
+          <h2 class="ui-label-box"><span class="ui-label">{strings.machines.add}</span><InfoTip topic={strings.machines.add} text={strings.machines.addHint} /></h2>
           {#if workspace.machines.length > 0}
             <button class="ghost icon-only" data-testid="machine-add-close" aria-label={strings.common.cancel} title={strings.common.cancel} onclick={stopAdding}><X size={15} /></button>
           {/if}
@@ -151,11 +151,11 @@
               : fill(strings.machines.linkReaches, { host: target.host })}</p>
           {/if}
           <button type="submit" class="primary" data-testid="machine-add" disabled={busy || !link.trim()}
-            ><Plus size={14} />{busy ? strings.machines.adding : strings.machines.connect}</button
+            ><Plus size={14} /><span class="ui-label">{busy ? strings.machines.adding : strings.machines.connect}</span></button
           >
         </form>
         <details class="disclosure">
-          <summary>{strings.machines.manual}</summary>
+          <summary><span class="ui-label">{strings.machines.manual}</span></summary>
           <form
             onsubmit={(e) => {
               e.preventDefault();
@@ -165,7 +165,7 @@
             <label>{strings.settings.coreUrl}<input bind:value={url} data-testid="machine-url" autocomplete="off" spellcheck="false" /></label>
             <label>{strings.settings.token}<input bind:value={token} data-testid="machine-token" type="password" autocomplete="off" /></label>
             <button class="primary" disabled={busy || !url.trim() || !token}
-              >{busy ? strings.machines.adding : strings.machines.connect}</button
+              ><span class="ui-label">{busy ? strings.machines.adding : strings.machines.connect}</span></button
             >
           </form>
         </details>

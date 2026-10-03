@@ -112,7 +112,7 @@
         <!-- One machine names no machine: the folder is the only choice left. -->
         {#if available.length > 1}
           <div class="field-label">{strings.connection.machine}</div>
-          <Menu items={machines} onpick={id => void machine(id)} label={strings.connection.machine} placement="bottom" testid="project-machine"><Monitor size={15} />{machineName}<ChevronDown size={13} /></Menu>
+          <Menu items={machines} onpick={id => void machine(id)} label={strings.connection.machine} placement="bottom" testid="project-machine"><Monitor size={15} /><span class="ui-label">{machineName}</span><ChevronDown size={13} /></Menu>
         {/if}
         <label for="project-folder">{strings.connection.folder}</label>
         <form onsubmit={e => { e.preventDefault(); void browse(path); }} data-testid="add-project-form">
@@ -121,13 +121,13 @@
           {#if selected.pickerAvailable}<button type="button" class="ghost icon" data-testid="pick-project" disabled={busy} aria-label={strings.connection.nativeBrowse} title={strings.connection.nativeBrowse} onclick={() => void native()}><FolderOpen size={17} /></button>{/if}
         </form>
         <div class="folders" aria-busy={busy}>
-          {#if parent}<button type="button" class="ghost folder" disabled={busy} onclick={() => void browse(parent!)}><ArrowUp size={15} />{strings.connection.parent}</button>{/if}
-          {#each directories as directory (directory.path)}<button type="button" class="ghost folder" disabled={busy} onclick={() => void browse(directory.path)}><Folder size={15} /><span>{directory.name}</span><ChevronRight size={13} /></button>{/each}
+          {#if parent}<button type="button" class="ghost folder" disabled={busy} onclick={() => void browse(parent!)}><ArrowUp size={15} /><span class="ui-label">{strings.connection.parent}</span></button>{/if}
+          {#each directories as directory (directory.path)}<button type="button" class="ghost folder" disabled={busy} onclick={() => void browse(directory.path)}><Folder size={15} /><span class="ui-label">{directory.name}</span><ChevronRight size={13} /></button>{/each}
           {#if !busy && directories.length === 0 && !error}<p class="muted">{strings.connection.emptyFolder}</p>{/if}
         </div>
         {#if error}<p class="error" role="alert">{error}</p>{/if}
       </div>
-      <footer><button type="button" class="ghost" data-testid="project-cancel" onclick={close}>{strings.common.cancel}</button><button type="button" class="primary" data-testid="project-add" disabled={busy || !path.trim() || !selected.owner || selected.connection !== 'ready'} onclick={() => void open()}><FolderOpen size={15} />{strings.firstRun.add}</button></footer>
+      <footer><button type="button" class="ghost" data-testid="project-cancel" onclick={close}><span class="ui-label">{strings.common.cancel}</span></button><button type="button" class="primary" data-testid="project-add" disabled={busy || !path.trim() || !selected.owner || selected.connection !== 'ready'} onclick={() => void open()}><FolderOpen size={15} /><span class="ui-label">{strings.firstRun.add}</span></button></footer>
     </div>
   </div>
 {/if}

@@ -25,12 +25,12 @@
   <aside class="recovery" data-testid="thread-recovery" aria-label={strings.thread.recoveryTitle}>
     <PauseCircle size={18} aria-hidden="true" />
     <div class="body">
-      <p class="title">{strings.thread.recoveryTitle}</p>
+      <p class="title ui-label-box"><span class="ui-label">{strings.thread.recoveryTitle}</span></p>
       <p>{strings.thread.recoveryBody}</p>
       {#if target}<p class="target">{target}</p>{/if}
       <div class="actions">
-        <button class="small primary" disabled={pending || store.connection !== 'ready'} onclick={() => recover('resume')}>{strings.thread.recoveryResume}</button>
-        <button class="small ghost" disabled={pending || store.connection !== 'ready'} onclick={() => recover('discard')}>{strings.thread.recoveryDiscard}</button>
+        <button class="small primary" disabled={pending || store.connection !== 'ready'} onclick={() => recover('resume')}><span class="ui-label">{strings.thread.recoveryResume}</span></button>
+        <button class="small ghost" disabled={pending || store.connection !== 'ready'} onclick={() => recover('discard')}><span class="ui-label">{strings.thread.recoveryDiscard}</span></button>
       </div>
     </div>
   </aside>
@@ -38,10 +38,10 @@
 
 <style>
   .recovery { display: flex; gap: 10px; margin: 8px 16px; padding: 12px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
-  .recovery > :global(svg) { flex: none; color: var(--color-muted-foreground); margin-top: 2px; }
+  .recovery > :global(svg) { flex: none; color: var(--color-muted-foreground); font-size: var(--text-sm); margin-top: calc((1lh - 18px) / 2); }
   .body { min-width: 0; }
   p { margin: 0; font-size: var(--text-sm); }
-  .title { font-weight: 600; margin-bottom: 4px; }
+  .title { display: flex; font-weight: 600; margin-bottom: 4px; }
   .target { color: var(--color-muted-foreground); margin-top: 6px; overflow-wrap: anywhere; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 </style>

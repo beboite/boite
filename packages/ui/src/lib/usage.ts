@@ -11,10 +11,10 @@ export type UsageRange = (typeof USAGE_RANGES)[number];
 
 /**
  * The provider stack, bottom first. Fixed, so a provider keeps its colour and
- * its place whatever the range shows. Two spare slots take any other provider,
- * the rest fold into one grey series.
+ * its place whatever the range shows. Additional providers keep their own
+ * series, reusing palette colours when necessary.
  */
-export const PROVIDER_ORDER = ['claude', 'codex', 'opencode', 'grok', 'antigravity', 'pi'] as const;
+export const PROVIDER_ORDER = ['claude', 'codex', 'opencode', 'grok', 'antigravity', 'pi', 'antigravity-cli', 'muse'] as const;
 const SPARE_SLOTS = ['var(--series-7)', 'var(--series-8)'];
 export const OTHER = 'other';
 
@@ -91,6 +91,15 @@ export function formatMetric(metric: UsageMetric, value: number): string {
   return dollars(value, 2, 2);
 }
 
+/** A missing report is unknown, while a day without turns really is zero. */
+export function reportedValue(metric: UsageMetric, value: number, coverage: { turns: number; reported: number; priced: number }): string {
+  if (coverage.turns > 0) {
+    if (metric === 'cost' && coverage.priced === 0) return strings.usage.noPrice;
+    if (metric === 'tokens' && coverage.reported === 0) return strings.usage.noUsage;
+  }
+  return formatMetric(metric, value);
+}
+
 /** A shorter label for an axis: `2M` rather than `2.0M`, `$2.5`, `$1.5k`. */
 export function formatTick(metric: UsageMetric, value: number): string {
   if (metric === 'tokens') return formatMetric(metric, value).replace(/\.0(?=[kMB]$)/, '');
@@ -118,6 +127,9 @@ export interface UsageBucket {
   values: Record<string, number>;
   total: number;
   turns: number;
+  reported: number;
+  priced: number;
+  coverage: Record<string, { turns: number; reported: number; priced: number }>;
 }
 
 export interface ModelRow extends UsageTotals {
@@ -167,22 +179,22 @@ export function seriesFor(providerIds: Iterable<string>): { series: UsageSeries[
   });
   const known = new Set<string>(PROVIDER_ORDER);
   const others = [...present].filter((providerId) => !known.has(providerId)).sort();
-  const spare = others.slice(0, SPARE_SLOTS.length);
-  spare.forEach((providerId, index) => series.push({ key: providerId, color: SPARE_SLOTS[index]!, providerIds: [providerId] }));
-  const folded = others.slice(SPARE_SLOTS.length);
-  if (folded.length > 0) series.push({ key: OTHER, color: 'var(--series-other)', providerIds: folded });
+  others.forEach((providerId, index) => series.push({ key: providerId, color: SPARE_SLOTS[index % SPARE_SLOTS.length]!, providerIds: [providerId] }));
   const keys = new Map(series.flatMap((entry) => entry.providerIds.map((providerId) => [providerId, entry.key] as const)));
   return { series, keyOf: (providerId) => keys.get(providerId) ?? OTHER };
 }
 
-export function summarize(history: UsageHistory, metric: UsageMetric): UsageView {
-  const { series, keyOf } = seriesFor(history.rows.map((row) => row.providerId));
+export function summarize(history: UsageHistory, metric: UsageMetric, providerIds: Iterable<string> = []): UsageView {
+  const { series, keyOf } = seriesFor([...providerIds, ...history.rows.map((row) => row.providerId)]);
   const buckets: UsageBucket[] = history.edges.slice(0, -1).map((start, index) => ({
     start,
     end: history.edges[index + 1]!,
     values: Object.fromEntries(series.map((entry) => [entry.key, 0])),
     total: 0,
     turns: 0,
+    reported: 0,
+    priced: 0,
+    coverage: Object.fromEntries(series.map((entry) => [entry.key, { turns: 0, reported: 0, priced: 0 }])),
   }));
   const bySeries: UsageView['bySeries'] = Object.fromEntries(series.map((entry) => [entry.key, { ...emptyTotals(), value: 0 }]));
   const total = { ...emptyTotals(), value: 0 };
@@ -198,6 +210,12 @@ export function summarize(history: UsageHistory, metric: UsageMetric): UsageView
     bucket.values[key] = (bucket.values[key] ?? 0) + value;
     bucket.total += value;
     bucket.turns += row.turns;
+    bucket.reported += row.reported;
+    bucket.priced += row.priced;
+    const coverage = bucket.coverage[key]!;
+    coverage.turns += row.turns;
+    coverage.reported += row.reported;
+    coverage.priced += row.priced;
     const serie = bySeries[key]!;
     addTotals(serie, row.turns, row.reported, row.priced, row.usage);
     serie.value += value;
@@ -238,7 +256,7 @@ export function topThreads(threads: UsageHistoryThread[], metric: UsageMetric, l
 }
 
 /** A readable name for a model id, from the provider's catalogue when it has one. */
-export function modelName(model: string | null, names: Map<string, string>): string {
+export function modelName(model: string | null, names: Map<string, string>, providerId?: string): string {
   if (model === null) return strings.usage.defaultModel;
-  return names.get(model) ?? model;
+  return names.get(providerId === undefined ? model : `${providerId}\u0000${model}`) ?? model;
 }

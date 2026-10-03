@@ -12,7 +12,7 @@
   <span class="icon" aria-hidden="true"><TriangleAlert size={16} /></span>
   <div class="content">
     {#if event.kind === 'killed'}
-      <div class="heading"><span class="title">{events.length > 1 ? strings.resources.killCount(events.length) : strings.resources.killTitle}</span></div>
+      <div class="heading"><span class="title ui-label">{events.length > 1 ? strings.resources.killCount(events.length) : strings.resources.killTitle}</span></div>
       <p>{text}</p>
       {#if events.length > 1}
         <details class="process-list">
@@ -25,7 +25,7 @@
         <div class="details"><span class="process">{event.exe?.split(/[\\/]/).pop() ?? strings.resources.unknown}</span>{#if event.bytes !== undefined}<span class="size">{bytes(event.bytes)}</span>{/if}</div>
       {/if}
     {:else}<p>{text}</p>{/if}
-    {#if onconfigure}<button type="button" class="quiet small configure" onclick={onconfigure}>{strings.resources.memorySettings}</button>{/if}
+    {#if onconfigure}<button type="button" class="quiet small configure" onclick={onconfigure}><span class="ui-label">{strings.resources.memorySettings}</span></button>{/if}
   </div>
 </div>
 

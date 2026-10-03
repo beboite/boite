@@ -40,6 +40,7 @@ export class SpeechRecorder {
   private heard = false;
   private lastVoice = 0;
   private previewedVoice = 0;
+  private streamed = 0;
   private flush: (() => void) | null = null;
   private deadline: ReturnType<typeof setTimeout> | null = null;
 
@@ -95,15 +96,25 @@ export class SpeechRecorder {
     } finally { this.dispose(); }
   }
   /** A bounded, provisional window; final decoding still sees the entire recording. */
-  async snapshot(): Promise<Uint8Array | null> {
+  async snapshot(windowSeconds = 12): Promise<Uint8Array | null> {
     const context = this.context;
     if (!context || this.disposed || this.lastVoice <= this.previewedVoice || this.samples < context.sampleRate * 0.4) return null;
     this.previewedVoice = this.lastVoice;
-    return this.render(Math.max(0, this.samples - Math.floor(context.sampleRate * 12)), this.samples, context.sampleRate);
+    return this.render(Math.max(0, this.samples - Math.floor(context.sampleRate * windowSeconds)), this.samples, context.sampleRate);
+  }
+  /** Incremental engines receive silence too, to preserve timing and drain their lookahead. */
+  async takeChunk(): Promise<Uint8Array | null> {
+    const context = this.context;
+    if (!context || this.disposed || this.samples - this.streamed < context.sampleRate * 0.1) return null;
+    const start = this.streamed;
+    const end = Math.min(this.samples, start + Math.floor(context.sampleRate));
+    const wav = await this.render(start, end, context.sampleRate);
+    this.streamed = end;
+    return wav;
   }
   private async render(start: number, end: number, sampleRate: number): Promise<Uint8Array> {
       const count = end - start;
-      const length = Math.min(16000 * SPEECH_MAX_SECONDS, Math.floor(count * 16000 / sampleRate));
+      const length = Math.min(16000 * SPEECH_MAX_SECONDS, Math.floor(end * 16000 / sampleRate) - Math.floor(start * 16000 / sampleRate));
       const offline = new OfflineAudioContext(1, length, 16000);
       const buffer = offline.createBuffer(1, count, sampleRate);
       const data = buffer.getChannelData(0);

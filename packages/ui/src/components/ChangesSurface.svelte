@@ -104,16 +104,16 @@
   <div class="panel-toolbar">
     <span class="branch" title={[status?.branch ?? strings.changes.noBranch, status?.upstream].filter(Boolean).join(' → ')}>
       <GitBranch size={13} strokeWidth={1.75} />
-      <span class="branch-name">{status?.branch ?? strings.changes.noBranch}</span>
+      <span class="branch-name ui-label">{status?.branch ?? strings.changes.noBranch}</span>
     </span>
     {#if status && status.ahead > 0}
       <span class="track" title={fill(strings.changes.ahead, { count: String(status.ahead) })}>
-        <ArrowUp size={13} strokeWidth={1.75} />{status.ahead}
+        <ArrowUp size={13} strokeWidth={1.75} /><span class="ui-label">{status.ahead}</span>
       </span>
     {/if}
     {#if status && status.behind > 0}
       <span class="track" title={fill(strings.changes.behind, { count: String(status.behind) })}>
-        <ArrowDown size={13} strokeWidth={1.75} />{status.behind}
+        <ArrowDown size={13} strokeWidth={1.75} /><span class="ui-label">{status.behind}</span>
       </span>
     {/if}
     <span class="spacer"></span>
@@ -158,19 +158,19 @@
           onclick={() => select(change)}
         >
           <span class="mark" data-status={change.status} title={strings.changes.status[change.status]}>
-            {LETTERS[change.status]}
+            <span class="ui-label">{LETTERS[change.status]}</span>
           </span>
           <span class="path">
             <span class="dir">{directory(change.path)}</span><span class="base">{base(change.path)}</span>
           </span>
           {#if change.staged}
-            <span class="staged" title={strings.changes.staged}>{strings.changes.stagedShort}</span>
+            <span class="staged ui-label-box" title={strings.changes.staged}><span class="ui-label">{strings.changes.stagedShort}</span></span>
           {/if}
           {#if change.additions !== null && change.additions > 0}
-            <span class="count added">+{change.additions}</span>
+            <span class="count added ui-label">+{change.additions}</span>
           {/if}
           {#if change.deletions !== null && change.deletions > 0}
-            <span class="count removed">-{change.deletions}</span>
+            <span class="count removed ui-label">-{change.deletions}</span>
           {/if}
         </button>
       {/each}

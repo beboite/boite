@@ -26,7 +26,7 @@
   {#if cards.length === 0}
     <div class="none" data-testid="launcher-none">
       <p>{strings.controls.allHidden}</p>
-      <button type="button" data-testid="launcher-customize" onclick={oncustomize}>{strings.controls.customize}</button>
+      <button type="button" data-testid="launcher-customize" onclick={oncustomize}><span class="ui-label">{strings.controls.customize}</span></button>
     </div>
   {/if}
   <div class="cards">
@@ -43,9 +43,9 @@
         oncontextmenu={(event) => onmenu(event, card.kind)}
       >
         <SurfaceIcon kind={card.kind} size={16} />
-        <span class="card-name">{kindName(card.kind)}</span>
+        <span class="card-name ui-label">{kindName(card.kind)}</span>
         <span class="card-hint">{available(card.kind) ? kindHint(card.kind) : unavailable(card.kind)}</span>
-        <span class="kbd">{card.key}</span>
+        <span class="kbd ui-label">{card.key}</span>
       </button>
     {/each}
   </div>

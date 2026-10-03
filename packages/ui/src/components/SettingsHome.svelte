@@ -111,8 +111,8 @@
       <div class="card flush results" data-testid="settings-search-results">
         {#each results as entry, index (`${entry.tab}:${entry.section}:${entry.label}`)}
           <button type="button" class="ghost result" class:active={index === Math.min(active, results.length - 1)} data-testid="settings-search-result" onpointermove={() => (active = index)} onclick={() => onopen(entry)}>
-            <span class="label">{entry.label}</span>
-            {#if entry.trail}<span class="trail">{entry.trail}</span>{/if}
+            <span class="label ui-label">{entry.label}</span>
+            {#if entry.trail}<span class="trail ui-label">{entry.trail}</span>{/if}
             <ChevronRight size={15} />
           </button>
         {/each}

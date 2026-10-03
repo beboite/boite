@@ -71,7 +71,7 @@
   <div class="drawer" data-testid="archived-drawer">
     <button class="ghost small toggle" aria-expanded={open} data-testid="archived-drawer-toggle" onclick={() => (open = !open)}>
       <span class="caret" class:open><ChevronRight size={11} /></span>
-      {count === 1 ? strings.sidebar.archivedThreadsOne : fill(strings.sidebar.archivedThreadsMany, { count: String(count) })}
+      <span class="ui-label">{count === 1 ? strings.sidebar.archivedThreadsOne : fill(strings.sidebar.archivedThreadsMany, { count: String(count) })}</span>
     </button>
     <div class="motion-fold" class:expanded={open && threads !== null} inert={!open}><div>
     {#if threads}
@@ -90,12 +90,12 @@
               class="ghost small"
               data-testid="archived-drawer-restore"
               disabled={restoring !== null}
-              onclick={() => void restore(thread)}><RotateCcw size={13} />{strings.sidebar.restoreThread}</button
+              onclick={() => void restore(thread)}><RotateCcw size={13} /><span class="ui-label">{strings.sidebar.restoreThread}</span></button
             >
             {#if canDeleteThread(store, thread)}
               <button class="ghost small danger" data-testid="archived-drawer-delete"
                 aria-label={strings.sidebar.delete} title={strings.sidebar.delete} disabled={restoring !== null}
-                onclick={() => void remove(thread)}><Trash2 size={13} />{strings.sidebar.delete}</button>
+                onclick={() => void remove(thread)}><Trash2 size={13} /><span class="ui-label">{strings.sidebar.delete}</span></button>
             {/if}
           </li>
         {/each}

@@ -97,8 +97,8 @@
         <!-- Waiting in the dock above the composer: here only a line that brings it up. -->
         <button type="button" class="ghost docked-question" data-testid="question-docked" title={strings.chat.questionOpen} onclick={() => showDockedQuestion(part.questionId)}>
           <MessageCircleQuestionMark size={15} strokeWidth={1.75} />
-          <span class="docked-text">{part.text}</span>
-          <span class="docked-hint">{strings.chat.questionDocked}</span>
+          <span class="docked-text ui-label">{part.text}</span>
+          <span class="docked-hint ui-label">{strings.chat.questionDocked}</span>
         </button>
       {:else if part.type === 'question'}
         {@const asked = store.pendingQuestions.find((q) => q.id === part.questionId)}
@@ -141,10 +141,10 @@
         </p>
       {:else if part.type === 'error'}
         <div class="error" data-testid="error-part">
-          <span class="section-label error-head"><CircleAlert size={13} strokeWidth={2} />{strings.chat.error}</span>
+          <span class="section-label error-head"><CircleAlert size={13} strokeWidth={2} /><span class="ui-label">{strings.chat.error}</span></span>
           <p>{part.message}</p>
           {#if signedOut && store.owner}
-            <button type="button" class="quiet small reconnect" data-testid="error-reconnect" onclick={() => store.openConnect(signedOut.providerId, signedOut.id)}>{strings.connect.reconnect}</button>
+            <button type="button" class="quiet small reconnect" data-testid="error-reconnect" onclick={() => store.openConnect(signedOut.providerId, signedOut.id)}><span class="ui-label">{strings.connect.reconnect}</span></button>
           {/if}
         </div>
       {/if}

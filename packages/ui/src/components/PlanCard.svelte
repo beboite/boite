@@ -59,20 +59,20 @@
 <section class="plan" data-testid="plan-card">
   <div class="head">
     <NotebookPen size={15} strokeWidth={1.75} />
-    <span class="title">{strings.chat.plan}</span>
+    <span class="title ui-label">{strings.chat.plan}</span>
   </div>
   <div class="body"><Prose text={plan} {store} {threadId} /></div>
   <div class="actions">
     <button type="button" class="ghost small" data-testid="plan-copy" onclick={() => void copy()}>
-      {#if copied}<Check size={14} />{strings.chat.copied}{:else}<Copy size={14} />{strings.chat.copy}{/if}
+      {#if copied}<Check size={14} /><span class="ui-label">{strings.chat.copied}</span>{:else}<Copy size={14} /><span class="ui-label">{strings.chat.copy}</span>{/if}
     </button>
     <button type="button" class="ghost small" data-testid="plan-download" onclick={download}>
-      <Download size={14} />{strings.chat.planDownload}
+      <Download size={14} /><span class="ui-label">{strings.chat.planDownload}</span>
     </button>
     {#if store.owner}
       <button type="button" class="ghost small" data-testid="plan-save" disabled={saving || saved !== null || store.connection !== 'ready'}
         title={saved ? fill(strings.chat.planSaved, { name: saved }) : strings.chat.planSaveHint} onclick={() => void save()}>
-        {#if saved}<Check size={14} /><span class="saved">{fill(strings.chat.planSaved, { name: saved })}</span>{:else}<FolderDown size={14} />{strings.chat.planSave}{/if}
+        {#if saved}<Check size={14} /><span class="saved ui-label">{fill(strings.chat.planSaved, { name: saved })}</span>{:else}<FolderDown size={14} /><span class="ui-label">{strings.chat.planSave}</span>{/if}
       </button>
     {/if}
   </div>

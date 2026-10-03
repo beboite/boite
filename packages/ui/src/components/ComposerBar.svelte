@@ -199,7 +199,7 @@
   <div class="chips">
     <ModelPicker {store} {choice} disabled={picking} onpick={pick} />
     {#if signedOut && store.owner}
-      <button type="button" class="chip signed-out" data-testid="composer-reconnect" title={fill(strings.connect.signedOut, { provider: provider?.name ?? '' })} onclick={() => store.openConnect(signedOut.providerId, signedOut.id)}>{strings.connect.reconnect}</button>
+      <button type="button" class="chip signed-out" data-testid="composer-reconnect" title={fill(strings.connect.signedOut, { provider: provider?.name ?? '' })} onclick={() => store.openConnect(signedOut.providerId, signedOut.id)}><span class="ui-label">{strings.connect.reconnect}</span></button>
     {/if}
 
     <div class="desktop-options">
@@ -211,7 +211,7 @@
       <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode" align="end" variant="ghost">
         {@const ModeIcon = modeIcon(displayedMode)}
         <span class="mode-icon"><ModeIcon size={14} strokeWidth={1.75} /></span>
-        {modeLabel(displayedMode, provider)}
+        <span class="ui-label">{modeLabel(displayedMode, provider)}</span>
       </Menu>
     {/if}
 
@@ -228,7 +228,7 @@
         onclick={() => store.setDraftWorktree(!store.draft?.worktree)}
       >
         <GitBranch size={14} strokeWidth={1.75} />
-        {strings.composer.worktree}
+        <span class="ui-label">{strings.composer.worktree}</span>
       </button>
     {/if}
     </div>

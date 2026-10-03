@@ -14,7 +14,7 @@
 <button class="ghost draft" class:active data-testid="draft-row" data-project-id={entry.projectId ?? ''}
   aria-current={active ? 'page' : undefined} title={entry.text || strings.sidebar.draft} onclick={open}>
   {#if entry.text}<PencilLine size={14} aria-hidden="true" />{:else}<span class="mark" aria-hidden="true"></span>{/if}
-  <span class="title">{entry.text || strings.sidebar.draft}</span>
+  <span class="title ui-label">{entry.text || strings.sidebar.draft}</span>
 </button>
 
 <style>

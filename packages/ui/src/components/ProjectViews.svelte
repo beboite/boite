@@ -30,10 +30,10 @@
 <div class="project-views">
   <div class="toolbar">
     <button class="ghost small view" class:chosen={workspace.view === 'projects'} aria-pressed={workspace.view === 'projects'} title={`${mode}. ${strings.sidebar.toggleOrder}`} data-testid={`${prefix}view-projects`} data-order={projectView.order} onclick={projects}>
-      <Folder size={13} />{strings.machines.projects}
+      <Folder size={13} /><span class="ui-label">{strings.machines.projects}</span>
     </button>
     <button class="ghost small view" class:chosen={workspace.view === 'recent'} aria-pressed={workspace.view === 'recent'} title={strings.machines.recentHint} data-testid={`${prefix}view-recent`} onclick={() => workspace.setView('recent')}>
-      <List size={14} />{strings.machines.recent}
+      <List size={14} /><span class="ui-label">{strings.machines.recent}</span>
     </button>
 
   </div>
@@ -41,12 +41,12 @@
   {#if workspace.view === 'recent' && entries.length}
     <div class="filter">
       <Menu {items} onpick={key => projectView.pick(key)} label={strings.sidebar.filterProject} placement="bottom" variant="text" testid={`${prefix}project-filter`}>
-        {#if selected}<ProjectTile project={selected.project} store={selected.machine.store} size={16} />{:else}<Folder size={13} />{/if}<span>{selected ? projectName(selected.project) : strings.sidebar.allProjects}</span>{#if selected && workspace.machines.length > 1}<span class="machine">{selected.machine.label}</span>{/if}<ChevronDown size={12} />
+        {#if selected}<ProjectTile project={selected.project} store={selected.machine.store} size={16} />{:else}<Folder size={13} />{/if}<span class="ui-label">{selected ? projectName(selected.project) : strings.sidebar.allProjects}</span>{#if selected && workspace.machines.length > 1}<span class="machine ui-label">{selected.machine.label}</span>{/if}<ChevronDown size={12} />
       </Menu>
     </div>
   {:else if entries.length}
     <button class="ghost order" title={strings.sidebar.toggleOrder} onclick={() => projectView.toggle(entries)}>
-      {#if projectView.order === 'manual'}<GripVertical size={12} />{:else}<ArrowDownWideNarrow size={12} />{/if}{mode}
+      {#if projectView.order === 'manual'}<GripVertical size={12} />{:else}<ArrowDownWideNarrow size={12} />{/if}<span class="ui-label">{mode}</span>
     </button>
   {/if}
     <div class="actions">

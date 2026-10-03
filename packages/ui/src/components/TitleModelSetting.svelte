@@ -69,11 +69,11 @@
 </script>
 
 <div class="switch-row">
-  <span class="text">
-    <span>{strings.settings.titleModel}</span><InfoTip topic={strings.settings.titleModel} text={strings.settings.titleModelHint} />
+  <span class="text ui-label-box">
+    <span class="ui-label">{strings.settings.titleModel}</span><InfoTip topic={strings.settings.titleModel} text={strings.settings.titleModelHint} />
   </span>
   <Menu {items} onpick={pick} label={strings.settings.titleModel} placement="bottom" align="end" testid="setting-title-model">
-    <span class="current">{current}</span><ChevronDown size={13} />
+    <span class="current ui-label">{current}</span><ChevronDown size={13} />
   </Menu>
 </div>
 

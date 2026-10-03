@@ -34,7 +34,7 @@
     now: number;
     /** In a folded project: the card waits for the unfold to look up its pull request. */
     hidden?: boolean;
-    /** Recent's quick action puts finished work in its Done section. */
+    /** The quick action puts finished work in Done. */
     showDone?: boolean;
     /** Off under the project's own header, where the folder line would only repeat it. */
     showProject?: boolean;
@@ -60,7 +60,7 @@
   let prRevision = 0;
   async function refreshPr(manual = false) {
     const client = owner.client;
-    if (!client || !thread.branch || thread.branch === 'HEAD' || prLoading) return;
+    if (!client || !thread.branch || thread.branch === 'HEAD' || prLoading || (!manual && (hidden || owner.connection !== 'ready' || document.hidden))) return;
     const revision = prRevision;
     const requestedOwner = owner;
     prLoading = true;
@@ -80,12 +80,30 @@
     // A move or a different owning connection invalidates the old checkout's answer.
     const identity = { client: owner.client, id: thread.id, cwd: thread.cwd, branch: thread.branch };
     const ready = owner.connection === 'ready' && !hidden;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    async function poll() {
+      await refreshPr();
+      if (!stopped) timer = setTimeout(() => void poll(), 15_000);
+    }
+    const visible = () => { if (!document.hidden) void refreshPr(); };
     untrack(() => {
       pullRequest = null;
       prLoading = false;
-      if (ready && identity.client) void refreshPr();
+      if (ready && identity.client && identity.branch && identity.branch !== 'HEAD') void poll();
     });
-    return () => { prRevision++; };
+    document.addEventListener('visibilitychange', visible);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', visible);
+      prRevision++;
+    };
+  });
+  $effect(() => {
+    // A finished turn can have opened or merged a PR since its row first mounted.
+    const status = thread.status;
+    untrack(() => { void status; void refreshPr(); });
   });
   function rename() {
     title = thread.title;
@@ -196,24 +214,24 @@
         <span class="provider" data-testid="thread-provider" title={agent} aria-label={agent}>
           <ProviderLogo providerId={thread.providerId} size={12} />
         </span>
-        <span class="title">{thread.title}</span>
+        <span class="title ui-label">{thread.title}</span>
         {#if draft}<span class="draft" data-testid="thread-draft" title={strings.sidebar.unsentDraft} aria-label={strings.sidebar.unsentDraft}><PencilLine size={12} /></span>{/if}
         {#if thread.pinned}<Pin size={12} />{/if}
         <ThreadState {thread} {now} />
       </span>
       {#if pending}
-        <span class="pending" data-testid="thread-pending" title={pending}><FolderInput size={12} /><span>{pending}</span></span>
+        <span class="pending" data-testid="thread-pending" title={pending}><FolderInput size={12} /><span class="ui-label">{pending}</span></span>
       {/if}
     </button>
     {#if meta}
     <div class="metadata">
-      {#if showProject}<span class="project-name" data-testid="thread-project" title={project.path}><Folder size={12} /><span>{projectName(project)}</span></span>{/if}
+      {#if showProject}<span class="project-name" data-testid="thread-project" title={project.path}><Folder size={12} /><span class="ui-label">{projectName(project)}</span></span>{/if}
       {#if pullRequest}
         <a class="pr-link" data-testid="thread-pr" href={pullRequest.url} target="_blank" rel="noopener noreferrer"
-          title={pullRequest.url} aria-label={`#${pullRequest.number}`}><GitPullRequest size={12} />#{pullRequest.number}</a>
+          title={pullRequest.url} aria-label={`#${pullRequest.number}`}><GitPullRequest size={12} /><span class="ui-label">#{pullRequest.number}</span></a>
       {/if}
       <!-- Only on a card that already has a second line: a branch alone would double every worktree row. -->
-      {#if thread.branch}<span class="branch" data-testid="thread-branch" title={thread.branch}><GitBranch size={12} /><span>{thread.branch}</span></span>{/if}
+      {#if thread.branch}<span class="branch" data-testid="thread-branch" title={thread.branch}><GitBranch size={12} /><span class="ui-label">{thread.branch}</span></span>{/if}
     </div>
     {/if}
     {#if showDone && doneAllowed}<button type="button" class="ghost small icon done" data-testid="thread-done"
@@ -274,6 +292,7 @@
   .headline {
     display: flex;
     align-items: center;
+    min-height: 1lh; /* Keep the row stable when machine glyphs appear. */
     gap: 8px;
     min-width: 0;
   }

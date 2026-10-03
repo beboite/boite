@@ -27,6 +27,10 @@ export const recentPreferences = new RecentPreferences();
 /** Pins, pending input, failures and questions stay in the user's attention list. */
 export function groupWorkingThread(store: Store, thread: ThreadSummary): boolean {
   if (thread.pinned || hasUnsentDraft(store.composerStates[thread.id])) return false;
+  return workingThread(thread);
+}
+
+export function workingThread(thread: ThreadSummary): boolean {
   const state = threadState(thread);
   return state === 'working' || state === 'queued' || state === 'monitoring' || state === 'background';
 }

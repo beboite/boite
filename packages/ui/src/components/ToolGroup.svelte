@@ -72,7 +72,7 @@
       onclick={() => (open = !open)}
     >
       <span class="glyph"><Glyph size={15} strokeWidth={1.75} /></span>
-      <span class="label" class:shimmer={live !== undefined} data-testid="tool-group-label">{label}</span>
+      <span class="label ui-label" class:shimmer={live !== undefined} data-testid="tool-group-label">{label}</span>
       {#if busy}
         <span class="pulse" aria-hidden="true"></span>
       {/if}
@@ -80,7 +80,7 @@
         <span class="spinner" aria-hidden="true"></span>
       {/if}
       {#if issues}
-        <span class="status" data-testid="tool-group-issues" title={issueLabel}><TriangleAlert size={12} strokeWidth={1.75} /><span>{issues}</span></span>
+        <span class="status" data-testid="tool-group-issues" title={issueLabel}><TriangleAlert size={12} strokeWidth={1.75} /><span class="ui-label">{issues}</span></span>
       {/if}
       <span class="caret" class:open aria-hidden="true"><ChevronRight size={12} strokeWidth={2} /></span>
     </button>

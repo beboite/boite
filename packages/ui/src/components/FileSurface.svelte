@@ -306,7 +306,7 @@
       >
         <Minus size={13} strokeWidth={1.75} />
       </button>
-      <span class="percent" data-testid="file-zoom">{Math.round(scale * 100)}%</span>
+      <span class="percent ui-label" data-testid="file-zoom">{Math.round(scale * 100)}%</span>
       <button
         type="button"
         class="ghost small icon"
@@ -338,16 +338,16 @@
         <Scan size={13} strokeWidth={1.75} />
       </button>
       {#if natural}
-        <span class="meta" data-testid="file-natural">
+        <span class="meta ui-label" data-testid="file-natural">
           {fill(strings.files.natural, { width: String(natural.width), height: String(natural.height) })}
         </span>
       {/if}
     {/if}
 
     {#if content?.kind === 'text' && (content.language || language)}
-      <span class="meta" data-testid="file-language">{content.language ?? language}</span>
+      <span class="meta ui-label" data-testid="file-language">{content.language ?? language}</span>
     {/if}
-    <span class="meta" data-testid="file-size">{bytes(content?.bytes ?? null)}</span>
+    <span class="meta ui-label" data-testid="file-size">{bytes(content?.bytes ?? null)}</span>
 
     {#if content?.kind === 'text'}
       <button
@@ -371,7 +371,7 @@
         onclick={() => void save()}
       >
         <Save size={13} strokeWidth={1.75} />
-        {saving ? strings.files.saving : strings.files.save}
+        <span class="ui-label">{saving ? strings.files.saving : strings.files.save}</span>
       </button>
     {/if}
   </div>
@@ -480,7 +480,7 @@
       <p class="meta mono">{content.mime}</p>
       <a class="download" href={content.url} download={baseName(content.path)} data-testid="file-download">
         <Download size={13} strokeWidth={1.75} />
-        {strings.files.download}
+        <span class="ui-label">{strings.files.download}</span>
       </a>
     </div>
   {/if}

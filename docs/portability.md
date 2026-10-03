@@ -4,6 +4,23 @@ The native CI matrix builds Linux x64/ARM64 and macOS Intel/Apple Silicon.
 Passing it proves installation startup and a local agent turn. It does not
 prove every desktop interaction or real provider login.
 
+## Installing a release
+
+[Desktop downloads](https://github.com/beboite/boite/releases) include Windows
+x64, macOS Intel and Apple Silicon, and Linux x64 and ARM64.
+
+On macOS 13 or newer, drag Boite to Applications. Developer ID releases are
+notarized. For an ad hoc build, allow the app in System Settings, Privacy &
+Security, or clear its quarantine attribute once:
+
+```sh
+xattr -cr /Applications/Boite.app
+```
+
+Linux packages need glibc 2.35 or newer and WebKitGTK 4.1. AppImages also need
+FUSE 2 (`libfuse2`) and must be made executable. The Debian package declares
+its system dependencies.
+
 ## Installation and agent execution
 
 `scripts/ci/desktop-smoke.ts` starts the installed Debian package, extracted
@@ -38,7 +55,7 @@ Three portability regressions have dedicated coverage:
 | CLI discovery | Desktop startup adds common installation directories. It does not source shell configuration or discover arbitrary Node version-manager directories. A CLI available only in an interactive shell may remain unavailable. |
 | Provider installation | Install and login capabilities depend on each descriptor's OS profile. The bundled echo fixture does not prove a real provider's authentication or update command. See [providers](providers.md). |
 | Linux data directory | The current default is `~/.local/share/boite2`, created and kept at mode 0700 because the journal holds every conversation; it does not honor `XDG_DATA_HOME`. Use `BOITE_DATA_DIR` for a different location. Both shell and core must keep using the same directory. |
-| macOS distribution | Releases are signed with a Developer ID and notarized once the Apple secrets exist; until then they are signed ad hoc, and Gatekeeper refuses the first start until the user clears the quarantine attribute or allows it in System Settings (README). See [releasing](releasing.md#signed-update-artifacts). |
+| macOS distribution | Releases are signed with a Developer ID and notarized once the Apple secrets exist; until then they are signed ad hoc, and Gatekeeper refuses the first start until the user clears the quarantine attribute or allows it in System Settings. See [installation notes](#installing-a-release) and [releasing](releasing.md#signed-update-artifacts). |
 | Native webviews | Portable smoke tests fetch the UI over HTTP. They do not drive WebKitGTK or WKWebView interactions, clipboard, native dialogs, browser-panel navigation or tray behavior. |
 | Older systems | Linux packages are built and smoke-tested on Ubuntu 22.04, so glibc 2.35 is their floor; older distributions cannot start them. No runner tests macOS 13, the declared minimum. |
 

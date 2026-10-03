@@ -144,12 +144,12 @@
             onclick={beginRename}
             oncontextmenu={openTitleMenu}
           >
-            {thread.title}
+            <span class="ui-label">{thread.title}</span>
           </button>
           <!-- A small chevron exposes thread actions; on phones it also holds the title. -->
           <span class="title-menu">
             <Menu items={mobile.current ? phoneItems : desktopItems} onpick={titleAction} label={strings.sidebar.threadMenu} placement="bottom" variant="text" testid="thread-menu-trigger">
-              <span class="title-text">{thread.title}</span><ChevronDown size={14} />
+              <span class="title-text ui-label">{thread.title}</span><ChevronDown size={14} />
             </Menu>
           </span>
         {/if}
@@ -157,12 +157,12 @@
         {#if pending}
           <!-- A move asked for while the turn runs. A phone keeps only the mark; its sidebar row carries the words. -->
           <span class="pending" data-testid="thread-pending" title={pending} aria-label={pending}>
-            <FolderInput size={13} strokeWidth={1.75} /><span class="pending-text">{pending}</span>
+            <FolderInput size={13} strokeWidth={1.75} /><span class="pending-text ui-label">{pending}</span>
           </span>
         {/if}
       {:else}
         <span class="draft-mark"></span>
-        <span class="title draft" data-testid="thread-title">{strings.sidebar.draft}</span>
+        <span class="title draft" data-testid="thread-title"><span class="ui-label">{strings.sidebar.draft}</span></span>
       {/if}
 
       <span class="spacer"></span>
@@ -170,14 +170,14 @@
       {#if thread?.parentThreadId}
         <button type="button" class="chip parent" data-testid="delegation-back-parent" onclick={() => void store.open(thread!.parentThreadId!)}>
           <ArrowLeft size={13} strokeWidth={1.75} />
-          {strings.delegation.parent}
+          <span class="ui-label">{strings.delegation.parent}</span>
         </button>
       {/if}
       {#if thread?.branch && work.shows('header.branch')}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <span class="chip path branch mono" title="{thread.branch}: {strings.thread.branchHint}: {thread.cwd}" data-testid="thread-branch" oncontextmenu={(event) => controlMenu(event, store, 'header.branch')}>
           <GitBranch size={13} strokeWidth={1.75} />
-          <span class="branch-name">{thread.branch}</span>
+          <span class="branch-name ui-label">{thread.branch}</span>
         </span>
       {/if}
       <!-- The shell is the owner's: a phone reaches it by this button, not by Ctrl+J. -->
@@ -233,9 +233,11 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    display: block;
-    line-height: var(--control);
+    display: flex;
+    align-items: center;
   }
+
+  .title > .ui-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .title.draft {
     color: var(--color-muted-foreground);

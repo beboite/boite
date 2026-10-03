@@ -143,7 +143,7 @@
   {#if rows.length === 0}
     <div class="empty" data-testid="quota-empty">
       <p>{strings.quotas.empty}</p>
-      <button class="small" onclick={connect}>{strings.settings.connectProvider}</button>
+      <button class="small" onclick={connect}><span class="ui-label">{strings.settings.connectProvider}</span></button>
     </div>
   {/if}
   {#each ordered as row (row.accountId)}
@@ -164,21 +164,21 @@
           <span class="logo" title={row.providerName}><ProviderLogo providerId={row.providerId} size={20} /></span>
           <span class="summary-content">
             <span class="headline">
-              <span class="name" title={name}>{name}</span>
-              {#if !paid}<span class="amount" class:low={used !== null && used >= 80}>{used === null ? strings.quotas.noReading : `${Math.round(remaining(used))}%`}</span>{/if}
+              <span class="name ui-label" title={name}>{name}</span>
+              {#if !paid}<span class="amount ui-label" class:low={used !== null && used >= 80}>{used === null ? strings.quotas.noReading : `${Math.round(remaining(used))}%`}</span>{/if}
               {#if row.windows.length}<ChevronDown size={12} />{/if}
             </span>
             {#if paid && credits}
               <span class="paid" data-testid="quota-credits">
-                <span class="paid-label">{credits.enabled === true ? strings.quotas.usingCredits : strings.quotas.creditRemaining}</span>
-                <strong class="paid-amount">{credits.kind === 'balance' ? fill(strings.quotas.creditBalance, { count: creditBalance(credits.remaining!) }) : percent! < 0.1 ? `<${tenth(0.1)}%` : `${tenth(percent!)}%`}</strong>
+                <span class="paid-label ui-label">{credits.enabled === true ? strings.quotas.usingCredits : strings.quotas.creditRemaining}</span>
+                <strong class="paid-amount ui-label">{credits.kind === 'balance' ? fill(strings.quotas.creditBalance, { count: creditBalance(credits.remaining!) }) : percent! < 0.1 ? `<${tenth(0.1)}%` : `${tenth(percent!)}%`}</strong>
                 {#if percent !== null}<span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-busy={loading && !completed.includes(row.accountId)} aria-label={strings.quotas.budgetRemaining}><span class="fill" style:width="{percent}%"></span></span>{/if}
               </span>
             {:else if row.windows.length && expanded !== row.accountId}
               <span class="meters" class:stale>
                 {#each row.windows as limit (limit.id)}
                   <span class="mini-window" title={`${quotaWindowName(limit.label)}: ${left(limit.usedPercent)}`}>
-                    <span class="mini-label">{miniName(limit.label)}</span>
+                    <span class="mini-label ui-label">{miniName(limit.label)}</span>
                     <span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={remaining(limit.usedPercent)} aria-busy={loading && !completed.includes(row.accountId)} class:low={limit.usedPercent >= 80} class:drained={limit.usedPercent >= 100} aria-label={`${name} ${quotaWindowName(limit.label)}: ${left(limit.usedPercent)}`}><span class="fill" style:width="{remaining(limit.usedPercent)}%"></span></span>
                   </span>
                 {/each}
@@ -186,7 +186,7 @@
             {/if}
             {#if stale}<span class="caption">{strings.quotas.stale}</span>
             {:else if resets.length && expanded !== row.accountId}
-              <span class="caption reset" title={fill(strings.quotas.resets, { time: exactTime(Math.min(...resets)) })}><RotateCcw size={12} aria-hidden="true" />{quotaResetTime(Math.min(...resets))}</span>
+              <span class="caption reset" title={fill(strings.quotas.resets, { time: exactTime(Math.min(...resets)) })}><RotateCcw size={12} aria-hidden="true" /><span class="ui-label">{quotaResetTime(Math.min(...resets))}</span></span>
             {/if}
           </span>
         </button>
@@ -201,7 +201,7 @@
               <span class="window-name">{quotaWindowName(limit.label)}</span>
               <span class="window-left">{left(limit.usedPercent)}</span>
               <span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={remaining(limit.usedPercent)} aria-label={`${name} ${quotaWindowName(limit.label)}`} aria-busy={loading && !completed.includes(row.accountId)} class:low={limit.usedPercent >= 80} class:drained={limit.usedPercent >= 100}><span class="fill" style:width="{remaining(limit.usedPercent)}%"></span></span>
-              {#if limit.resetsAt !== null}<span class="caption reset" title={fill(strings.quotas.resets, { time: exactTime(limit.resetsAt) })}><RotateCcw size={13} aria-hidden="true" />{quotaResetTime(limit.resetsAt)}</span>{/if}
+              {#if limit.resetsAt !== null}<span class="caption reset" title={fill(strings.quotas.resets, { time: exactTime(limit.resetsAt) })}><RotateCcw size={13} aria-hidden="true" /><span class="ui-label">{quotaResetTime(limit.resetsAt)}</span></span>{/if}
             </div>
           {/each}
         </div>

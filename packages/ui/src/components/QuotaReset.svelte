@@ -70,7 +70,7 @@
     {#if available}
       <button type="button" class="ghost small" data-testid="quota-use-reset" data-account-id={row.accountId}
         disabled={disabled || busy || !store.owner || store.connection !== 'ready'} aria-busy={sending} onclick={() => void reset()}>
-        {sending ? strings.quotas.resetUsing : strings.quotas.useReset}
+        <span class="ui-label">{sending ? strings.quotas.resetUsing : strings.quotas.useReset}</span>
       </button>
     {/if}
   {/snippet}

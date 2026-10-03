@@ -583,17 +583,25 @@ test('the reasoning slider sets the effort of the picked model, and the chip fol
   expect(store.openThread?.effort).toBe('xhigh');
 });
 
-test('a right click on a thread row opens the context menu, and Archive removes the row', async ({ app: _app }) => {
+test('project completion keeps pending work open, while header Archive can stop it', async ({ app: _app }) => {
   await waitFor(() => document.querySelectorAll('[data-testid=thread-row]').length === 4);
 
   const row = query<HTMLButtonElement>('[data-thread-id="t-bench"]');
   row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 60 }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
   const labels = Array.from(document.querySelectorAll('[data-testid=context-menu] [data-row]')).map((el) => el.textContent?.trim());
-  expect(labels).toEqual(['Open', 'Rename', 'Regenerate title', 'Pin', 'Refresh pull request', 'Copy path', 'Move to project', 'Archive', 'Delete']);
+  expect(labels).toEqual(['Open', 'Rename', 'Regenerate title', 'Pin', 'Refresh pull request', 'Copy path', 'Move to project', 'Mark done', 'Delete']);
   expect(query('[data-testid=context-menu] [data-value=copy]').getAttribute('title')).toBe('C:\\src\\boite');
   // t-bench waits on a permission: its turn still runs, and a move would wait for it to end.
   expect(query<HTMLButtonElement>('[data-testid=context-menu] [data-value=move]').disabled).toBe(false);
+  expect(query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archive]').disabled).toBe(true);
+  press('Escape');
+  await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
+  row.click();
+  await waitFor(() => store.openThread?.id === 't-bench');
+  query('[data-testid=thread-title]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 60 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
+  expect(query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archive]').disabled).toBe(false);
 
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archive]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);

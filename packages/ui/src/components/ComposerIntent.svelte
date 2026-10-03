@@ -18,7 +18,7 @@
 {#if editing}
   <div class="intent" data-testid="composer-editing">
     <Pencil size={13} />
-    <span>{strings.composer.editing}</span>
+    <span class="ui-label">{strings.composer.editing}</span>
     <button type="button" class="ghost small icon" data-testid="composer-editing-cancel" title={strings.composer.editingCancel} aria-label={strings.composer.editingCancel} onclick={oncancel}><X size={13} /></button>
   </div>
 {:else if reply}

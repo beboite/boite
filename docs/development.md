@@ -75,6 +75,9 @@ its generated tsconfig makes Vite reload the page and can reset a fixture mid-te
 Fake browser fixtures do not always need a development server.
 `tests/e2e/lib/ui.ts` selects a prebuilt fixture from `BOITE_E2E_FAKE_UI`, builds
 one per test process with `BOITE_E2E_PREBUILT_UI=1`, or falls back to Vite.
+Both modes expose the fixture workspace through `globalThis.__boiteTest`, so
+tests that only need the Store can use the prebuilt bundle. Close each scenario's
+browsers in `afterEach` to release their rendering resources before the next test.
 Pages importing `/src/...` call `startDevUi` directly. That server warms their
 reachable modules before browser interactions. Fixture bundles enable the fake
 client separately from the production assets staged in installers.
@@ -175,7 +178,7 @@ Mark done uses the persistent archive and its undo action; `threads.archive`
 with `onlyIfIdle: true` refuses pending work or input in the conversation's
 family before changing it. Done reads archived summaries only on expansion,
 respecting the project and machine filters. A completed conversation opens for
-reading with a Reopen thread button in place of the composer. Reopening keeps
+reading with a Move to Recent button in place of the composer. Reopening keeps
 history without restarting work.
 
 Settings > General > Conversations offers Group working threads in Recent,
@@ -186,6 +189,27 @@ the user's answer remain visible. Phone search temporarily shows matching
 working conversations in the main list. Keyboard thread shortcuts follow the
 expanded rows in their displayed order. Merged-PR archiving feeds Done through
 the core check below; its PR link appears under the completed title.
+
+Projects shows projects with a conversation at rest, a question, a failure or a
+draft. Each project header has separate Working and Done counters that toggle
+their lists, both closed by
+default. Working includes running, queued and background work. Pins and unsent
+drafts stay visible while Working is folded and appear once when expanded;
+questions and failures stay in the main list. Done reads only that project's
+archived summaries when expanded, with the same reading and restore actions as
+Recent. Other projects holds empty projects and projects whose conversations
+are all working or archived, in a closed section below the attention list. When
+work finishes, a question arrives or a draft starts, its project returns to the
+main list. Expansion follows the owning project between desktop and phone for
+the current session. Phone search exposes matching
+working conversations even when their counter is closed.
+
+Visible desktop thread rows read their PR again every 15 seconds, on a turn's
+status change and when the app becomes visible. Folded rows and hidden windows
+skip background reads; a failed read keeps the last successful link. The core
+shares a 15-second PR list cache across a repository's worktrees and reads each
+worktree's own HEAD, so an agent's branch rename or switch does not lose its PR.
+Shared project-directory threads never inherit that directory's current branch.
 
 Deletion is owner-only and separate from archive. `threads.remove` stops the
 thread family and waits for processes before hiding it behind persistent
@@ -394,6 +418,14 @@ reports early exit or the CDP deadline and saves the last 16 KiB of stderr.
 Screenshots go to the ignored `tests/e2e/.artifacts/`. Open desktop and phone
 captures before claiming a visual change is verified.
 
+Run capture scripts and browser suites sequentially in one checkout. Concurrent
+Vite development servers can invalidate their shared optimized dependencies
+and return HTTP 504 for a module that another page is loading.
+
+An unfiltered `BrowserPage.attach` waits past startup `about:blank` targets
+before choosing a navigated page. Pass `about:blank` explicitly when that is
+the intended target. `cdp.test.ts` checks both discovery and explicit selection.
+
 Condition waits pass their remaining deadline to each CDP evaluation. Timeout
 diagnostics get at most 250 ms. A wait after `page.close()` fails immediately.
 `browser-deadlines.test.ts` covers unfulfilled promises and busy renderers.
@@ -519,6 +551,16 @@ are inert. Settings pages use `--settings-width`, `--settings-padding` and
 `settings-stack`; explanatory text belongs in `InfoTip`, with visible hints
 reserved for current errors, counts or missing steps.
 
+For text beside icons, put `ui-label` on the text leaf inside the flex or grid
+row. The shared rule in `app.css` centres the font's cap height and alphabetic
+baseline with `text-box`; it keeps padding for accents and descenders when a
+label truncates. Use `ui-label-box` on padded badges or inline icon rows to
+preserve their original line-height and centre the label. Trimming on the row
+itself does not reach its flex items.
+The existing line-height remains the fallback when a browser lacks `text-box`.
+`bun test tests/e2e/text-alignment.test.ts` measures this alignment across the
+eight reading fonts, desktop menus and phone controls.
+
 ### Window material
 
 Windows offers acrylic from build 22523, mica from 22000 and solid on every
@@ -633,22 +675,25 @@ plain names from the root `.gitignore`. Globs, negations and nested patterns
 are not interpreted, so some Git-ignored files can appear. Responses contain
 at most 200 paths, defaulting to 50, and report whether the walk was capped.
 
-## README walkthroughs
+## README presentation
 
-The README's twelve-second film shows the real UI with public sample data.
-It covers the conversation, model selection, changes and subagents, with the
-desktop UI filling the frame. It uses no live providers.
+The README opens with the app logo and static, theme-aware screenshots.
+Its optional ten-second film follows one action: opening the launch-page diff
+beside a conversation. It keeps the real timing of the clicks, holds the diff
+for reading and fades from light to dark over 850 ms. Sample project data and
+recording controls never enter a production build; no live providers run.
 
 `scripts/readme/record.ts` starts an isolated Vite fixture, injects
 `scripts/readme/fixture.ts` through a recording-only plugin and fills the frame
-with `scripts/readme/stage.html`. These controls never enter a production build.
-The browser runs headless, muted and sandboxed; the recorder refuses software
-rendering and checks page errors and fullscreen bounds. It closes its own
-browser and server on success or failure.
+with `scripts/readme/stage.html`. The browser runs headless, muted and sandboxed.
+The recorder refuses software rendering, checks page errors and fullscreen
+bounds, captures desktop and 390-pixel phone views, and closes its own browser
+and server on success or failure.
 
 Install Playwright Core 1.63.0 in a separate tools directory and its recording
-encoder with `playwright-core install ffmpeg`. Supply a Chrome executable and
-a full FFmpeg build with H.264, VP8 decoding and GIF palette filters:
+encoder with `playwright-core install ffmpeg`. Supply a Chrome executable with
+View Transitions and a full FFmpeg build with H.264, VP8 decoding and GIF
+palette filters:
 
 ```sh
 bun scripts/readme/record.ts \
@@ -658,14 +703,18 @@ bun scripts/readme/record.ts \
   --scratch /tmp/boite-readme-recording
 ```
 
-The recorder captures both themes with matching scene durations, then blends
-light into dark over 0.8 seconds while the diff view is settled. The default
-output is `docs/media`: one silent twelve-second 1600 by 1000 H.264 MP4, one
-matching GIF loop capped at 5 MiB and two static posters for readers who prefer
-reduced motion. `--inspect` checks both themes and captures each scene without
-encoding; `--output` changes the delivery directory. Scene captures, intermediate
-films, raw video, encoder logs and verification JSON stay in the scratch
-directory. `--combine-only` reuses the two intermediate MP4 files in that
-scratch directory to regenerate the combined MP4/GIF without a browser.
-Inspect the film and every scene before replacing the
-committed media; check that the sample data contains no personal information.
+The default output is `docs/media`: one silent ten-second 1280 by 800 H.264 MP4,
+a matching 960-pixel GIF at 15 fps capped at 5 MiB, and two 2560 by 1600 static
+screenshots. The single browser recording changes the theme in place through
+a recording-only View Transition. There is no scene acceleration or blending
+of separately timed captures.
+
+`--inspect` exercises the same flow and captures both themes without encoding;
+`--output` changes the delivery directory. Raw video, phone captures, encoder
+logs and verification JSON stay in the scratch directory. `--encode-only`
+reuses `capture.json` and its raw recording to regenerate the MP4/GIF without
+a browser. The former `--combine-only` option has been replaced.
+
+Check both GitHub themes and the phone README layout after changing the text or
+media. Inspect the film and every capture before replacing committed media;
+sample data must contain no personal information.

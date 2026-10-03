@@ -195,34 +195,34 @@
     <button type="button" class="chip" disabled={!usable} aria-label={strings.remoteBrowser.forward} onclick={() => void input({ kind: 'history', direction: 'forward' })}><ArrowRight size={17} /></button>
     <button type="button" class="chip" disabled={!usable} aria-label={strings.remoteBrowser.reload} onclick={() => void input({ kind: 'reload' })}><RotateCw size={16} /></button>
     <input bind:value={address} data-testid="remote-browser-address" type="text" inputmode="url" enterkeyhint="go" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="4096" aria-label={strings.remoteBrowser.address} placeholder={strings.remoteBrowser.address} onfocus={e => { editingAddress = true; e.currentTarget.select(); }} onblur={() => { editingAddress = false; }} />
-    <button type="submit" class="chip go" disabled={!usable || !address.trim()}>{strings.remoteBrowser.go}</button>
+    <button type="submit" class="chip go" disabled={!usable || !address.trim()}><span class="ui-label">{strings.remoteBrowser.go}</span></button>
   </form>
-  <div class="toolbar"><span class="state" data-testid="remote-browser-state" class:live={frame && !paused && !error}>{paused ? strings.remoteBrowser.paused : hostMissing ? strings.remoteBrowser.waiting : error ? strings.remoteBrowser.reconnecting : frame ? strings.remoteBrowser.live : strings.remoteBrowser.waiting}</span>
-    <button type="button" class="chip" data-testid="remote-browser-display" aria-expanded={displaySettings} onclick={() => { displaySettings = !displaySettings; if (frame) { viewportWidth = frame.width; viewportHeight = frame.height; } }}>{strings.remoteBrowser.display}</button>
-    <button type="button" class="chip" onclick={() => { paused = !paused; }}>{#if paused}<Play size={15} />{:else}<Pause size={15} />{/if}{paused ? strings.remoteBrowser.resume : strings.remoteBrowser.pause}</button></div>
+  <div class="toolbar"><span class="state ui-label" data-testid="remote-browser-state" class:live={frame && !paused && !error}>{paused ? strings.remoteBrowser.paused : hostMissing ? strings.remoteBrowser.waiting : error ? strings.remoteBrowser.reconnecting : frame ? strings.remoteBrowser.live : strings.remoteBrowser.waiting}</span>
+    <button type="button" class="chip" data-testid="remote-browser-display" aria-expanded={displaySettings} onclick={() => { displaySettings = !displaySettings; if (frame) { viewportWidth = frame.width; viewportHeight = frame.height; } }}><span class="ui-label">{strings.remoteBrowser.display}</span></button>
+    <button type="button" class="chip" onclick={() => { paused = !paused; }}>{#if paused}<Play size={15} />{:else}<Pause size={15} />{/if}<span class="ui-label">{paused ? strings.remoteBrowser.resume : strings.remoteBrowser.pause}</span></button></div>
   {#if error}<div class="error" class:notice={hostMissing} role="status" data-testid="remote-browser-error"><p>{error}</p></div>{/if}
   <div class="viewer">
   {#if displaySettings}
     <section class="display-settings" aria-label={strings.remoteBrowser.display}>
       <strong>{strings.remoteBrowser.resolution} {frame ? `${frame.width} × ${frame.height}` : ''}</strong>
       <div class="options">
-        <button class="chip" disabled={!usable} onclick={() => resize(areaWidth, areaHeight)}>{strings.remoteBrowser.fitPhone}</button>
-        <button class="chip" disabled={!usable} onclick={() => resize(393, 700)}>{strings.remoteBrowser.phone}</button>
-        <button class="chip" disabled={!usable} onclick={() => resize(768, 1024)}>{strings.remoteBrowser.tablet}</button>
-        <button class="chip" disabled={!usable} onclick={() => resize(1366, 768)}>PC</button>
-        <button class="chip" disabled={!usable || !frame} onclick={() => frame && resize(frame.height, frame.width)}>{strings.remoteBrowser.rotate}</button>
+        <button class="chip" disabled={!usable} onclick={() => resize(areaWidth, areaHeight)}><span class="ui-label">{strings.remoteBrowser.fitPhone}</span></button>
+        <button class="chip" disabled={!usable} onclick={() => resize(393, 700)}><span class="ui-label">{strings.remoteBrowser.phone}</span></button>
+        <button class="chip" disabled={!usable} onclick={() => resize(768, 1024)}><span class="ui-label">{strings.remoteBrowser.tablet}</span></button>
+        <button class="chip" disabled={!usable} onclick={() => resize(1366, 768)}><span class="ui-label">PC</span></button>
+        <button class="chip" disabled={!usable || !frame} onclick={() => frame && resize(frame.height, frame.width)}><span class="ui-label">{strings.remoteBrowser.rotate}</span></button>
       </div>
       <form onsubmit={e => { e.preventDefault(); if (validSize) resize(viewportWidth!, viewportHeight!); }}>
         <label>{strings.remoteBrowser.width}<input type="number" min="240" max="3840" step="1" required bind:value={viewportWidth} /></label>
         <label>{strings.remoteBrowser.height}<input type="number" min="240" max="3840" step="1" required bind:value={viewportHeight} /></label>
-        <button class="chip" type="submit" disabled={!usable || !validSize}>{strings.remoteBrowser.apply}</button>
+        <button class="chip" type="submit" disabled={!usable || !validSize}><span class="ui-label">{strings.remoteBrowser.apply}</span></button>
       </form>
       <small>{strings.remoteBrowser.sharedSize}</small>
-      <button class="chip" disabled={!usable} onclick={() => void input({ kind: 'reset-viewport' })}>{strings.remoteBrowser.restoreSize}</button>
+      <button class="chip" disabled={!usable} onclick={() => void input({ kind: 'reset-viewport' })}><span class="ui-label">{strings.remoteBrowser.restoreSize}</span></button>
       <strong>{strings.remoteBrowser.previewZoom}</strong>
       <div class="options">
-        <button class="chip" aria-pressed={zoom === 0} onclick={() => { zoom = 0; displaySettings = false; }}>{strings.remoteBrowser.fit}</button>
-        {#each [1, 1.5, 2] as scale}<button class="chip" aria-pressed={zoom === scale} onclick={() => { zoom = scale; displaySettings = false; }}>{scale * 100}%</button>{/each}
+        <button class="chip" aria-pressed={zoom === 0} onclick={() => { zoom = 0; displaySettings = false; }}><span class="ui-label">{strings.remoteBrowser.fit}</span></button>
+        {#each [1, 1.5, 2] as scale}<button class="chip" aria-pressed={zoom === scale} onclick={() => { zoom = scale; displaySettings = false; }}><span class="ui-label">{scale * 100}%</span></button>{/each}
       </div>
     </section>
   {/if}
@@ -236,7 +236,7 @@
   </div>
   <footer>
     <div class="keys"><button type="button" class="chip" disabled={!usable} onclick={() => void input({ kind: 'scroll', x: 0, y: -500 })} aria-label={strings.remoteBrowser.scrollUp}><ArrowUp size={17} /></button><button type="button" class="chip" disabled={!usable} onclick={() => void input({ kind: 'scroll', x: 0, y: 500 })} aria-label={strings.remoteBrowser.scrollDown}><ArrowDown size={17} /></button>
-      {#each (['Tab', 'Enter', 'Escape', 'Backspace'] as const) as key}<button type="button" class="chip" disabled={!usable} onclick={() => void input({ kind: 'key', key })}>{key === 'Backspace' ? '⌫' : key === 'Escape' ? 'Esc' : key}</button>{/each}
+      {#each (['Tab', 'Enter', 'Escape', 'Backspace'] as const) as key}<button type="button" class="chip" disabled={!usable} onclick={() => void input({ kind: 'key', key })}><span class="ui-label">{key === 'Backspace' ? '⌫' : key === 'Escape' ? 'Esc' : key}</span></button>{/each}
     </div>
     <form onsubmit={e => { e.preventDefault(); void sendText(false); }}><input bind:value={text} data-testid="remote-browser-text" maxlength="2000" enterkeyhint="send" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label={strings.remoteBrowser.text} placeholder={strings.remoteBrowser.text} onkeydown={textKey} /><button type="submit" class="chip" disabled={!usable || !text} aria-label={strings.remoteBrowser.send}><Send size={17} /></button></form>
     <small>{zoom ? strings.remoteBrowser.panHint : strings.remoteBrowser.gesture}</small>

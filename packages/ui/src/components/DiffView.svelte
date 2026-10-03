@@ -65,12 +65,12 @@
 <div class="diff code-syntax" class:grow data-testid="diff-view" data-path={path} data-language={language ?? 'text'} data-layout={split ? 'split' : 'unified'} bind:clientWidth={width}>
   {#if !headless}
     <div class="head">
-      <span class="path mono" title={path}>{path}</span>
+      <span class="path mono ui-label" title={path}>{path}</span>
       {#if counts.added > 0}
-        <span class="count added">{fill(strings.chat.diffAdded, { count: String(counts.added) })}</span>
+        <span class="count added ui-label">{fill(strings.chat.diffAdded, { count: String(counts.added) })}</span>
       {/if}
       {#if counts.removed > 0}
-        <span class="count removed">{fill(strings.chat.diffRemoved, { count: String(counts.removed) })}</span>
+        <span class="count removed ui-label">{fill(strings.chat.diffRemoved, { count: String(counts.removed) })}</span>
       {/if}
       <button type="button" class="ghost small icon toggle" data-testid="diff-whitespace" aria-pressed={diffPrefs.ignoreWhitespace}
         title={strings.chat.diffIgnoreWhitespace} aria-label={strings.chat.diffIgnoreWhitespace}
@@ -111,7 +111,7 @@
     {/if}
     {#if shown.length < rows.length}
       <button type="button" class="ghost small more" data-testid="diff-show-all" onclick={() => (expanded = true)}>
-        {fill(strings.chat.diffShowAll, { count: String(rows.length) })}
+        <span class="ui-label">{fill(strings.chat.diffShowAll, { count: String(rows.length) })}</span>
       </button>
     {/if}
   </div>

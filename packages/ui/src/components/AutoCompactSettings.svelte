@@ -83,7 +83,7 @@
           <label for="{uid}-{moment.id}" class="option" class:on>
             <span class="icon"><Icon size={18} strokeWidth={1.75} /></span>
             <span class="words">
-              <span class="name" id="{uid}-{moment.id}-name">{moment.name}{#if moment.recommended}<span class="badge">{strings.settings.autoCompactRecommended}</span>{/if}</span>
+              <span class="name" id="{uid}-{moment.id}-name"><span class="ui-label">{moment.name}</span>{#if moment.recommended}<span class="badge ui-label-box"><span class="ui-label">{strings.settings.autoCompactRecommended}</span></span>{/if}</span>
               <span class="hint">{moment.hint}</span>
             </span>
             <input id="{uid}-{moment.id}" aria-labelledby="{uid}-{moment.id}-name" type="checkbox" role="switch" data-testid="auto-compact-{moment.id}"
@@ -97,14 +97,14 @@
         <div class="option" class:on={rule.tokens !== null}>
           <span class="icon"><Ruler size={18} strokeWidth={1.75} /></span>
           <span class="words">
-            <label for="{uid}-threshold" class="name" id="{uid}-threshold-name">{strings.settings.autoCompactThreshold}</label>
+            <label for="{uid}-threshold" class="name" id="{uid}-threshold-name"><span class="ui-label">{strings.settings.autoCompactThreshold}</span></label>
             <span class="hint">{rule.tokens === null ? strings.settings.autoCompactThresholdOff : strings.settings.autoCompactThresholdHint}</span>
             {#if rule.tokens !== null}
               <span class="size">
                 <span class="presets" role="group" aria-label={strings.settings.autoCompactThreshold}>
                   {#each PRESETS as preset (preset)}
                     <button type="button" class="chip" class:picked={tokens === preset} aria-pressed={tokens === preset} disabled={saving} data-testid="auto-compact-preset-{preset}"
-                      onclick={() => { dirty = true; void saveTokens(preset); }}>{formatTokens(preset)}</button>
+                      onclick={() => { dirty = true; void saveTokens(preset); }}><span class="ui-label">{formatTokens(preset)}</span></button>
                   {/each}
                 </span>
                 <span class="field">
@@ -112,7 +112,7 @@
                     data-testid="auto-compact-tokens" aria-label={strings.settings.autoCompactThreshold} aria-invalid={!valid}
                     aria-describedby={valid ? undefined : `${uid}-tokens-error`} disabled={saving} bind:value={tokens}
                     oninput={() => { dirty = true; }} onchange={() => void saveTokens()} />
-                  <span class="unit">{strings.settings.autoCompactUnit}</span>
+                  <span class="unit ui-label">{strings.settings.autoCompactUnit}</span>
                 </span>
               </span>
               {#if !valid}

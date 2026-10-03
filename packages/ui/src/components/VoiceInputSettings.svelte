@@ -82,13 +82,13 @@
     <span class="text">{strings.speech.microphone}<span class="hint">{strings.speech.microphoneHint}</span></span>
     <div class="picker">
       <Menu items={inputs} onpick={pick} label={strings.speech.microphone} placement="bottom" align="end" testid="voice-microphone">
-        <Mic size={15} /><span class="selected">{selected}</span><ChevronDown size={14} />
+        <Mic size={15} /><span class="selected ui-label">{selected}</span><ChevronDown size={14} />
       </Menu>
     </div>
   </div>
   <div class="test-row">
     <button type="button" data-testid="voice-microphone-test" disabled={!voice.current.enabled} onclick={() => phase === 'idle' ? void start() : stop()}>
-      {phase === 'idle' ? strings.speech.testMicrophone : strings.speech.stopMicrophoneTest}
+      <span class="ui-label">{phase === 'idle' ? strings.speech.testMicrophone : strings.speech.stopMicrophoneTest}</span>
     </button>
     <meter min="0" max="1" value={level} aria-label={strings.speech.inputLevel} data-testid="voice-microphone-level"></meter>
   </div>

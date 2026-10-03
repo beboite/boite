@@ -19,9 +19,9 @@
 <section class="card" data-testid="agent-missions">
   <div class="agent-card-head">
     <h2>{labels.missions}</h2>
-    {#if view.store.owner}<button type="button" class="ghost small" onclick={oncreate} data-testid="agent-mission-new"><Plus size={14} strokeWidth={1.75} />{labels.newTitle.mission}</button>{/if}
+    {#if view.store.owner}<button type="button" class="ghost small" onclick={oncreate} data-testid="agent-mission-new"><Plus size={14} strokeWidth={1.75} /><span class="ui-label">{labels.newTitle.mission}</span></button>{/if}
   </div>
   {#each sorted as mission (mission.id)}
-    <button type="button" class="agent-link-row" onclick={() => onopen(mission.id)} data-testid="agent-mission-{mission.id}">{mission.title}<span class="agent-state" data-status={mission.status}>{labels[mission.status]}</span></button>
+    <button type="button" class="agent-link-row" onclick={() => onopen(mission.id)} data-testid="agent-mission-{mission.id}"><span class="ui-label">{mission.title}</span><span class="agent-state ui-label" data-status={mission.status}>{labels[mission.status]}</span></button>
   {:else}<p class="hint">{labels.noMissions}</p>{/each}
 </section>

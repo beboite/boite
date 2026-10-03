@@ -52,10 +52,10 @@
         title={strings.composer.editQueued}
         {disabled}
         onclick={() => onrestore(at)}>
-        <span class="queued-text">{entry.text || strings.composer.attachAlt}</span>
+        <span class="queued-text ui-label">{entry.text || strings.composer.attachAlt}</span>
         {#if entry.attachments.length || entry.previewReferences?.length}
           <span class="queued-extras">
-            {#if entry.attachments.length}<span>{entry.attachments.length} <Paperclip size={12} /></span>{/if}
+            {#if entry.attachments.length}<span><span class="ui-label">{entry.attachments.length}</span> <Paperclip size={12} /></span>{/if}
             {#if entry.previewReferences?.length}<span>@{entry.previewReferences.length}</span>{/if}
           </span>
         {/if}
@@ -65,7 +65,7 @@
           {#if entry.request?.failed !== undefined}
             <span class="queued-error" data-testid="composer-outbox-failed">{fill(strings.composer.outboxFailed, { reason: entry.request.failed })}</span>
             {#if onretry}
-              <button type="button" class="ghost small" data-testid="composer-outbox-retry" disabled={sending} onclick={() => onretry(at)}>{strings.composer.outboxRetry}</button>
+              <button type="button" class="ghost small" data-testid="composer-outbox-retry" disabled={sending} onclick={() => onretry(at)}><span class="ui-label">{strings.composer.outboxRetry}</span></button>
             {/if}
           {:else if entry.request}
             <span class="queued-pending" data-testid="composer-outbox-pending"><Clock size={12} />{sending && at === 0 ? strings.composer.outboxSending
@@ -81,11 +81,11 @@
     </div>
   {/each}
   <div class="queued-foot">
-    <span>{outbox ? strings.composer.outboxKept : paused ? strings.composer.queuedPaused : strings.composer.queued}</span>
+    <span class="ui-label">{outbox ? strings.composer.outboxKept : paused ? strings.composer.queuedPaused : strings.composer.queued}</span>
     {#if sendNow}
       <button type="button" class="ghost small" data-testid="composer-send-now"
         title={sendNow === 'steer' ? strings.composer.sendNowHint : strings.composer.retryQueuedHint}
-        onclick={onsendnow}>{strings.composer.sendNow}</button>
+        onclick={onsendnow}><span class="ui-label">{strings.composer.sendNow}</span></button>
     {/if}
   </div>
 </div>

@@ -1,6 +1,7 @@
 import { pullRequestAddress, type LinkedPullRequest, type ThreadSummary } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { dirname, join, normalize, resolve } from 'node:path';
 import { messageOf, refused } from './errors.ts';
 import { GIT_PROBE_TIMEOUT_MS, hasGitMarker } from './projects.ts';
@@ -135,7 +136,8 @@ export function parseMergedPrProof(text: string, expected: Omit<MergedPrProof, '
 
 /** Pull requests one `gh pr list` call brings back for a repository. */
 export const LIST_LIMIT = 200;
-const LIST_TTL_MS = 60_000;
+const LIST_TTL_MS = 15_000;
+const PROOF_TTL_MS = 60_000;
 /** A repository's remotes rarely change: they are read once per five minutes. */
 const REMOTES_TTL_MS = 5 * 60_000;
 const TIMEOUT_MS = 10_000;
@@ -162,7 +164,7 @@ function unavailable(error: unknown): boolean {
  * The pull request of each thread's branch, answered from one `gh pr list` per
  * repository: forty threads in one checkout, or in forty worktrees of it,
  * make one gh call, not forty. Every process runs two at a time at most, and
- * stops after ten seconds. Results and failures are kept a minute; `refresh`
+ * stops after ten seconds. Results and failures are kept fifteen seconds; `refresh`
  * drops what is kept for that repository, tries a missing gh again and
  * reports why gh cannot answer.
  */
@@ -248,7 +250,7 @@ export class PullRequests {
   async #read(thread: ThreadSummary, refresh: boolean): Promise<PullRequest> {
     // A shared checkout's current branch belongs to no particular thread.
     // Only a branch associated with this thread can identify its pull request.
-    const branch = thread.branch;
+    let branch = thread.branch;
     if (!branch || branch === 'HEAD') return null;
     // Off the event loop and under one deadline: a folder on a share whose
     // host is gone answers nothing for 21 s.
@@ -261,6 +263,16 @@ export class PullRequests {
       const parent = dirname(root);
       if (parent === root) return null;
       root = parent;
+    }
+    // An agent can rename or switch its private worktree branch without changing
+    // the recorded starting branch. Read its own HEAD, without a Git process per row.
+    const marker = join(root, '.git');
+    if (statSync(marker).isFile()) {
+      const pointer = /^gitdir:\s*(.+?)\s*$/m.exec(await readFile(marker, 'utf8'))?.[1];
+      if (!pointer) throw new Error(`${marker} must contain a gitdir path`);
+      const head = await readFile(resolve(root, pointer, 'HEAD'), 'utf8');
+      branch = /^ref: refs\/heads\/(.+)\s*$/m.exec(head)?.[1]?.trim() ?? null;
+      if (!branch) return null;
     }
     // Kept per repository: the worktrees of one repository share what is kept.
     const repository = repositoryOf(root);
@@ -315,7 +327,7 @@ export class PullRequests {
     let entry = this.#proofs.get(key);
     if (!entry || entry.until <= Date.now()) {
       const controller = new AbortController();
-      entry = { until: Date.now() + LIST_TTL_MS, controller, consumers: 0, settled: false, value: load(controller.signal) };
+      entry = { until: Date.now() + PROOF_TTL_MS, controller, consumers: 0, settled: false, value: load(controller.signal) };
       const held = entry;
       void held.value.then(() => { held.settled = true; }, () => { held.settled = true; });
       this.#proofs.set(key, held);

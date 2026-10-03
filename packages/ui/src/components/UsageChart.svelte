@@ -1,7 +1,7 @@
 <script lang="ts">
   import { strings } from '../lib/strings';
   import { formatLocale } from '../lib/i18n.svelte';
-  import { formatMetric, formatTick, niceScale, type UsageBucket, type UsageMetric } from '../lib/usage';
+  import { formatTick, niceScale, reportedValue, type UsageBucket, type UsageMetric } from '../lib/usage';
 
   type Serie = { key: string; color: string; label: string };
   let { buckets, series, metric, label, days }: { buckets: UsageBucket[]; series: Serie[]; metric: UsageMetric; label: string; days: number } = $props();
@@ -106,8 +106,8 @@
   let valueText = $derived.by(() => {
     const bucket = buckets[active ?? buckets.length - 1];
     if (bucket === undefined) return '';
-    const lines = [...series].reverse().map((serie) => `${serie.label} ${formatMetric(metric, bucket.values[serie.key] ?? 0)}`);
-    return `${fullDay.format(bucket.start)}: ${strings.usage.total} ${formatMetric(metric, bucket.total)}, ${lines.join(', ')}`;
+    const lines = [...series].reverse().map((serie) => `${serie.label} ${reportedValue(metric, bucket.values[serie.key] ?? 0, bucket.coverage[serie.key]!)}`);
+    return `${fullDay.format(bucket.start)}: ${strings.usage.total} ${reportedValue(metric, bucket.total, bucket)}, ${lines.join(', ')}`;
   });
   let tipWidth = $state(0);
   /** Beside the column, on whichever side has room, never past the chart's edges. */
@@ -170,11 +170,11 @@
         {#each [...series].reverse() as serie (serie.key)}
           <li class:zero={(tip.values[serie.key] ?? 0) === 0}>
             <span class="key" style:background={serie.color}></span>
-            <span class="value">{formatMetric(metric, tip.values[serie.key] ?? 0)}</span>
+            <span class="value">{reportedValue(metric, tip.values[serie.key] ?? 0, tip.coverage[serie.key]!)}</span>
             <span class="name">{serie.label}</span>
           </li>
         {/each}
-        <li class="sum"><span class="key"></span><span class="value">{formatMetric(metric, tip.total)}</span><span class="name">{strings.usage.total}</span></li>
+        <li class="sum"><span class="key"></span><span class="value">{reportedValue(metric, tip.total, tip)}</span><span class="name">{strings.usage.total}</span></li>
       </ul>
     </div>
   {/if}
@@ -195,6 +195,8 @@
     top: 0;
     z-index: 2;
     min-width: 168px;
+    width: max-content;
+    max-width: calc(100% - 20px);
     padding: 8px 10px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
@@ -206,11 +208,11 @@
   }
   .tooltip strong { display: block; margin-bottom: 6px; font-weight: 600; }
   ul { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
-  li { display: grid; grid-template-columns: 12px auto 1fr; align-items: center; gap: 8px; }
+  li { display: grid; grid-template-columns: 12px minmax(52px, auto) minmax(0, 1fr); align-items: center; gap: 8px; }
   li.zero { color: var(--color-subtle); }
   .key { width: 12px; height: 3px; border-radius: 2px; }
   .value { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; min-width: 52px; }
   li.zero .value { font-weight: 400; }
-  .name { color: var(--color-muted-foreground); white-space: nowrap; }
+  .name { color: var(--color-muted-foreground); overflow-wrap: anywhere; }
   .sum { margin-top: 3px; padding-top: 5px; border-top: 1px solid var(--color-border); }
 </style>

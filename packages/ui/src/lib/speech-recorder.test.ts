@@ -68,6 +68,12 @@ test('preview bounds audio to the latest twelve seconds while finish keeps the f
     expect(preview.length).toBe(44 + 12 * 16000 * 2);
     expect(new DataView(preview.buffer).getInt16(44, true)).toBe(Math.round(0.03 * 32767));
     expect(await recorder.snapshot()).toBeNull();
+    // Batch preview and incremental uploads have independent cursors.
+    const chunks: Uint8Array[] = [];
+    for (;;) { const chunk = await recorder.takeChunk(); if (!chunk) break; chunks.push(chunk); }
+    expect(chunks).toHaveLength(14);
+    expect(chunks.reduce((sum, chunk) => sum + chunk.length - 44, 0)).toBe(14 * 16000 * 2);
+    expect(new DataView(chunks[13]!.buffer).getInt16(44, true)).toBe(Math.round(0.14 * 32767));
     const full = await recorder.stop();
     expect(full.length).toBe(44 + 14 * 16000 * 2);
     expect(new DataView(full.buffer).getInt16(44, true)).toBe(Math.round(0.01 * 32767));

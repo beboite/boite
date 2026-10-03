@@ -31,11 +31,11 @@
     <button type="button" class="quiet activity" data-testid="active-subagents" onclick={open}>
       <StatusMark status="running" />
       <span class="counts">
-        {#if count > 0}<span>{fill(count === 1 ? strings.delegation.activeOne : strings.delegation.activeMany, { count: String(count) })}</span>{/if}
-        {#if count > 0 && runs.length > 0}<span aria-hidden="true">·</span>{/if}
-        {#if runs.length > 0}<span>{fill(runs.length === 1 ? strings.workflow.activeOne : strings.workflow.activeMany, { count: String(runs.length) })}</span>{/if}
+        {#if count > 0}<span class="ui-label">{fill(count === 1 ? strings.delegation.activeOne : strings.delegation.activeMany, { count: String(count) })}</span>{/if}
+        {#if count > 0 && runs.length > 0}<span class="ui-label" aria-hidden="true">·</span>{/if}
+        {#if runs.length > 0}<span class="ui-label">{fill(runs.length === 1 ? strings.workflow.activeOne : strings.workflow.activeMany, { count: String(runs.length) })}</span>{/if}
       </span>
-      <span aria-hidden="true">·</span>
+      <span class="ui-label" aria-hidden="true">·</span>
       <AgentElapsed {startedAt} finishedAt={null} active />
       <ChevronRight size={13} strokeWidth={1.75} />
     </button>

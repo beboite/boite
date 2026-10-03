@@ -3,7 +3,7 @@
   import WindowList from './WindowList.svelte';
   import MobileMenu from './MobileMenu.svelte';
   import ThreadHeader from './ThreadHeader.svelte';
-  import { Activity, ArrowLeft, ChevronDown, Ellipsis, FolderCog, MessageSquare, Monitor, PencilLine, Pin, Plus, Search, X } from '@lucide/svelte';
+  import { Activity, ArrowLeft, ChevronDown, Ellipsis, FolderCog, MessageSquare, PencilLine, Pin, Plus, Search, X } from '@lucide/svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import MobileConnect from './MobileConnect.svelte';
   import type { Store } from '../lib/store.svelte';
@@ -24,7 +24,13 @@
   import ProjectViews from './ProjectViews.svelte';
   import RecentGroup from './RecentGroup.svelte';
   import RecentDone from './RecentDone.svelte';
-  import { projectKey, projectView } from '../lib/project-view.svelte';
+  import ProjectThreadCounters from './ProjectThreadCounters.svelte';
+  import OtherProjects from './OtherProjects.svelte';
+  import DraftRow from './DraftRow.svelte';
+  import ProjectTile from './ProjectTile.svelte';
+  import { projectKey, projectView, type ProjectEntry } from '../lib/project-view.svelte';
+  import { activeProject, projectThreadView } from '../lib/project-threads.svelte';
+  import { workingThread } from '../lib/recent.svelte';
   import { compareThreads } from '../lib/thread-order';
 
   let { store, recover = false, screen = $bindable('chat') }: { store: Store; recover?: boolean; screen: 'chat' | 'threads' | 'activity' } = $props();
@@ -54,6 +60,9 @@
   let project = $derived(store.openProject ?? store.projects.find(p => p.archived !== true));
   let actionProject = $derived(store.openProject);
   let groups = $derived(projectView.sorted(machines.flatMap(machine => machine.store.projects.filter(project => !project.archived).map(project => ({ machine, project })))));
+  let activeGroups = $derived(groups.filter(activeProject));
+  let otherGroups = $derived(groups.filter(entry => !activeProject(entry)));
+  let shownGroups = $derived(query ? groups : [...activeGroups, ...(projectThreadView.otherOpen ? otherGroups : [])]);
   let selected = $derived(projectView.selected(groups));
   let draftOwner = $derived(screen === 'threads' && workspace.view === 'recent' && selected ? selected.machine.store : store);
   let entries = $derived(machines.flatMap(machine => {
@@ -100,7 +109,7 @@
       { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
       { id: 'retitle', label: retitling ? strings.sidebar.retitling : strings.sidebar.retitle, disabled: retitling },
       separator(),
-      { id: 'archive', label: inRecent ? strings.sidebar.markDone : strings.sidebar.archive, disabled: inRecent && !canMarkDone(owner, thread) },
+      { id: 'archive', label: screen === 'threads' ? strings.sidebar.markDone : strings.sidebar.archive, disabled: screen === 'threads' && !canMarkDone(owner, thread) },
       ...(canDeleteThread(owner, thread) ? [{ id: 'delete', label: strings.sidebar.delete, danger: true }] : [])
     ];
   }
@@ -108,7 +117,7 @@
   function rowAction(owner: Store, thread: ThreadSummary, action: string) {
     if (action === 'pin') void owner.pin(thread.id, !thread.pinned);
     else if (action === 'retitle') void owner.retitle(thread.id);
-    else if (action === 'archive') void (inRecent ? markDone(owner, thread) : archiveThread(owner, thread.id));
+    else if (action === 'archive') void (screen === 'threads' ? markDone(owner, thread) : archiveThread(owner, thread.id));
     else if (action === 'delete') void deleteThread(owner, thread);
   }
   async function pickProject(key: string) {
@@ -126,12 +135,12 @@
   }
   function openProjectMenu(event: MouseEvent) {
     if (!actionProject) return;
-    const entry = groups.find(group => group.machine.store === store && group.project.id === actionProject.id);
+    const entry = shownGroups.find(group => group.machine.store === store && group.project.id === actionProject.id);
     const key = entry ? projectKey(entry) : null;
     projectMenu(event, store, actionProject, projectView.order === 'manual' && key !== null ? {
-      up: projectKey(groups[0]!) !== key,
-      down: projectKey(groups[groups.length - 1]!) !== key,
-      move: direction => projectView.step(groups, key, direction)
+      up: projectKey(shownGroups[0]!) !== key,
+      down: projectKey(shownGroups[shownGroups.length - 1]!) !== key,
+      move: direction => projectView.step(shownGroups, key, direction)
     } : undefined);
   }
 </script>
@@ -152,11 +161,11 @@
     {#if screen === 'threads' && store.page === 'chat'}
       <span class="machine">{place}</span>
       <Menu items={projects} onpick={pickProject} label={strings.mobile.project} placement="bottom" variant="text" testid="mobile-project">
-        {store.draftInDrafts && !store.openThread ? strings.drafts.name : project ? projectName(project) : strings.mobile.project}<ChevronDown size={14} />
+        <span class="ui-label">{store.draftInDrafts && !store.openThread ? strings.drafts.name : project ? projectName(project) : strings.mobile.project}</span><ChevronDown size={14} />
       </Menu>
     {:else}
       <strong>{store.page === 'settings' ? strings.settings.heading : store.page === 'agents' ? strings.agents.heading : 'Boite'}</strong>
-      <button class="ghost connection" data-testid="mobile-connection" onclick={() => store.showSettings('machines')}><span class="dot" class:ready={store.connection === 'ready'}></span><span>{place}</span><ChevronDown size={12} /></button>
+      <button class="ghost connection" data-testid="mobile-connection" onclick={() => store.showSettings('machines')}><span class="dot" class:ready={store.connection === 'ready'}></span><span class="ui-label">{place}</span><ChevronDown size={12} /></button>
     {/if}
   </div>
   {/if}
@@ -188,26 +197,53 @@
       </div>
     {/snippet}
     {#if screen === 'threads' && workspace.view === 'projects'}
-      {#each groups as group (projectKey(group))}
+      {#snippet projectRows(projects: ProjectEntry[])}
+      {#each projects as group (projectKey(group))}
         {@const groupRows = rows.filter(row => row.machine.id === group.machine.id && row.thread.projectId === group.project.id)}
-        {#if !query || groupRows.length > 0}
-        <section class="project-group" data-testid="mobile-project-group" data-project-id={group.project.id} data-machine-id={group.machine.id}>
+        {@const workingOpen = projectThreadView.isOpen(group, 'working')}
+        {@const doneOpen = !!group.project.archivedThreads && projectThreadView.isOpen(group, 'done')}
+        {@const workingRows = groupRows.filter(row => workingThread(row.thread))}
+        {@const attentionRows = query ? groupRows : groupRows.filter(row => workingOpen ? !workingThread(row.thread) : !groupWorkingThread(group.machine.store, row.thread))}
+        {@const controls = `mobile-project-${encodeURIComponent(projectKey(group))}`}
+        {@const draft = group.machine.store.draftEntries.find(entry => entry.projectId === group.project.id)}
+        {#if !query || groupRows.length > 0 || (doneOpen && group.project.archivedThreads)}
+        <section class="project-group" class:inactive={!activeProject(group)} data-testid="mobile-project-group" data-project-id={group.project.id} data-machine-id={group.machine.id}>
           <div class="project-heading">
-            <Monitor size={14} /><h2>{projectName(group.project)}{#if several}<span>{group.machine.label}</span>{/if}</h2>
+            <ProjectTile project={group.project} store={group.machine.store} /><h2>{projectName(group.project)}{#if several}<span>{group.machine.label}</span>{/if}</h2>
+            <ProjectThreadCounters entry={group} working={group.machine.store.threadsOf(group.project.id).filter(workingThread).length} {controls} searching={!!query} />
             {#if projectView.order === 'manual'}
               <Menu items={[
-                { id: 'up', label: strings.sidebar.moveProjectUp, disabled: projectKey(groups[0]!) === projectKey(group) },
-                { id: 'down', label: strings.sidebar.moveProjectDown, disabled: projectKey(groups[groups.length - 1]!) === projectKey(group) }
-              ]} onpick={action => projectView.step(groups, projectKey(group), action === 'up' ? -1 : 1)} label={strings.sidebar.customOrder} placement="bottom" variant="ghost" testid="mobile-project-order"><Ellipsis size={18} /></Menu>
+                { id: 'up', label: strings.sidebar.moveProjectUp, disabled: projectKey(shownGroups[0]!) === projectKey(group) },
+                { id: 'down', label: strings.sidebar.moveProjectDown, disabled: projectKey(shownGroups[shownGroups.length - 1]!) === projectKey(group) }
+              ]} onpick={action => projectView.step(shownGroups, projectKey(group), action === 'up' ? -1 : 1)} label={strings.sidebar.customOrder} placement="bottom" variant="ghost" testid="mobile-project-order"><Ellipsis size={18} /></Menu>
             {/if}
           </div>
-          <WindowList items={groupRows} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements(projectKey(group))}>
+          {#if draft && !query}<DraftRow owner={group.machine.store} entry={draft} />{/if}
+          <WindowList items={attentionRows} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements(projectKey(group))}>
             {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
           </WindowList>
-          {#if groupRows.length === 0}<p class="empty">{strings.sidebar.noThreads}</p>{/if}
+          <div id="{controls}-working" hidden={!workingOpen || !!query || workingRows.length === 0} data-testid="project-working">
+            {#if workingOpen && !query && workingRows.length > 0}
+              <p class="group-label">{strings.sidebar.workingThreads}</p>
+              <WindowList items={workingRows} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements(`${projectKey(group)}:working`)}>
+                {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
+              </WindowList>
+            {/if}
+          </div>
+          <div id="{controls}-done" hidden={!doneOpen} data-testid="project-done">
+            {#if doneOpen}<p class="group-label">{strings.sidebar.doneThreads}</p>{/if}
+            <RecentDone entries={[group]} {scrollRoot} {now} {query} open={doneOpen} header={false} onopen={() => show('chat')} />
+          </div>
+          {#if groupRows.length === 0 && !group.project.archivedThreads && !draft}<p class="empty">{strings.sidebar.noThreads}</p>{/if}
         </section>
         {/if}
       {/each}
+      {/snippet}
+      {@render projectRows(query ? groups : activeGroups)}
+      {#if !query}
+        {#if groups.length > 0 && activeGroups.length === 0}<p class="empty">{strings.sidebar.noActiveProjects}</p>{/if}
+        <OtherProjects count={otherGroups.length}>{@render projectRows(otherGroups)}</OtherProjects>
+      {/if}
       <WindowList items={rows.filter(row => row.thread.projectId === null)} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements('unassigned')}>
         {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
       </WindowList>
@@ -233,7 +269,7 @@
         <span class="empty-icon">{#if screen === 'activity'}<Activity size={24} />{:else}<MessageSquare size={24} />{/if}</span>
         <h2>{screen === 'activity' ? strings.mobile.emptyActivity : entries.length ? strings.mobile.noThreads : strings.mobile.emptyTitle}</h2>
         <p>{screen === 'activity' ? strings.mobile.noActivity : entries.length ? strings.mobile.search : strings.mobile.emptyBody}</p>
-        {#if screen === 'threads' && !entries.length}<button class="primary" data-testid="mobile-first-thread" disabled={draftOwner.connection !== 'ready'} onclick={newThread}><Plus size={16} />{strings.sidebar.newThread}</button>{/if}
+        {#if screen === 'threads' && !entries.length}<button class="primary" data-testid="mobile-first-thread" disabled={draftOwner.connection !== 'ready'} onclick={newThread}><Plus size={16} /><span class="ui-label">{strings.sidebar.newThread}</span></button>{/if}
       </div>
     {/if}
     {/if}
@@ -278,8 +314,8 @@
     p { font-size: var(--text-sm); }
     .project-group { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); margin-bottom: 12px; overflow: hidden; }
     .project-heading { display: flex; align-items: center; padding: 8px 12px; gap: 8px; background: var(--color-surface-2); color: var(--color-muted-foreground); border-bottom: 1px solid var(--color-border); }
-    .project-heading h2 { margin: 0; }
-    .project-heading h2 { flex: 1; min-width: 0; font-size: var(--text-sm); overflow-wrap: anywhere; }
+    .project-heading h2 { margin: 0; flex: 1; min-width: 0; font-size: var(--text-sm); overflow-wrap: anywhere; }
+    .group-label { margin: 0; padding: 8px 12px; border-top: 1px solid var(--color-border); color: var(--color-subtle); font-size: var(--text-xs); }
     .project-heading span { display: block; font-size: var(--text-xs); font-weight: 400; color: var(--color-muted-foreground); }
     .row { display: flex; align-items: center; border-bottom: 1px solid var(--color-border); padding-right: 4px; }
     .row:last-child { border-bottom: 0; }

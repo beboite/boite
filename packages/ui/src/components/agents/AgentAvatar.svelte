@@ -24,14 +24,14 @@
 <span class="agent-avatar" data-kind={kind} style:--size="{size}px" style:--tint={kind === 'mission' ? null : tintOf(id)} aria-hidden="true">
   {#if grouped && members.length >= 2}
     {#each members.slice(0, 2) as member, slot (member.id)}
-      <span class="agent-avatar-stack" data-slot={slot} style:--tint={tintOf(member.id)}>{avatarText(member.name, member.avatar)}</span>
+      <span class="agent-avatar-stack" data-slot={slot} style:--tint={tintOf(member.id)}><span class="ui-label">{avatarText(member.name, member.avatar)}</span></span>
     {/each}
   {:else if grouped}
     <Users size={Math.round(size * 0.45)} strokeWidth={1.75} />
   {:else if kind === 'mission'}
     <Target size={Math.round(size * 0.45)} strokeWidth={1.75} />
   {:else}
-    {avatarText(name, avatar)}
+    <span class="ui-label">{avatarText(name, avatar)}</span>
   {/if}
   {#if status === 'running' || status === 'waiting'}<i data-status={status}></i>{/if}
 </span>

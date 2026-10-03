@@ -301,11 +301,11 @@
 <div class="viewer" class:shareable bind:this={dialog} use:portal role="dialog" aria-modal="true" aria-label={item.name || strings.media.viewer} data-testid="image-viewer">
   <div class="shade" style:opacity={1 - fade}></div>
   <div class="toolbar" style:opacity={1 - fade}>
-    <span class="name" title={item.name}>{item.name}</span>
+    <span class="name ui-label" title={item.name}>{item.name}</span>
     {#if items.length > 1}<span class="position" data-testid="image-viewer-position">{fill(strings.media.position, { index: String(index + 1), total: String(items.length) })}</span>{/if}
     {#if isImage}
       <button type="button" class="ghost icon zoom" onclick={() => zoomTo(view.scale - 0.5)} disabled={view.scale <= 1} aria-label={strings.artifacts.zoomOut} title={strings.artifacts.zoomOut}><Minus size={17} /></button>
-      <button type="button" class="ghost small fit zoom" onclick={() => zoomTo(1)} aria-label={strings.artifacts.fitImage} title={strings.artifacts.fitImage}><Maximize2 size={16} /><span>{Math.round(view.scale * 100)}%</span></button>
+      <button type="button" class="ghost small fit zoom" onclick={() => zoomTo(1)} aria-label={strings.artifacts.fitImage} title={strings.artifacts.fitImage}><Maximize2 size={16} /><span class="ui-label">{Math.round(view.scale * 100)}%</span></button>
       <button type="button" class="ghost icon zoom" onclick={() => zoomTo(view.scale + 0.5)} disabled={view.scale >= MAX_SCALE} aria-label={strings.artifacts.zoomIn} title={strings.artifacts.zoomIn}><Plus size={17} /></button>
     {/if}
     {#if shareable}<button type="button" class="ghost icon" onclick={share} aria-label={strings.media.share} title={strings.media.share} data-testid="image-viewer-share"><Share size={17} /></button>{/if}

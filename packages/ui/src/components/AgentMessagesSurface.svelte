@@ -40,8 +40,8 @@
       <button type="button" class="ghost small" class:active={direction === filter} aria-pressed={direction === filter}
         data-testid="agent-messages-filter" data-direction={filter}
         onclick={() => panel.update(surface.id, { mailDirection: filter === 'all' ? undefined : filter, letterId: undefined })}>
-        {filter === 'all' ? strings.agentMessages.all : filter === 'outgoing' ? strings.agentMessages.sent : strings.agentMessages.received}
-        <span class="count">{count(mail.filter(entry => filter === 'all' || entry.direction === filter).length)}</span>
+        <span class="ui-label">{filter === 'all' ? strings.agentMessages.all : filter === 'outgoing' ? strings.agentMessages.sent : strings.agentMessages.received}</span>
+        <span class="count ui-label">{count(mail.filter(entry => filter === 'all' || entry.direction === filter).length)}</span>
       </button>
     {/each}
   </div>

@@ -214,7 +214,7 @@
   <div class="panel-toolbar">
     <span class="root" title={store.openThread?.cwd ?? ''} data-testid="files-root">
       <FolderTree size={13} strokeWidth={1.75} />
-      {rootName}
+      <span class="ui-label">{rootName}</span>
     </span>
     <span class="spacer"></span>
     <input
@@ -296,9 +296,9 @@
             <File size={13} strokeWidth={1.75} />
           {/if}
         </span>
-        <span class="name">{row.entry.name}</span>
+        <span class="name ui-label">{row.entry.name}</span>
         {#if row.entry.kind === 'file'}
-          <span class="size" data-testid="files-size">{bytes(row.entry.bytes)}</span>
+          <span class="size ui-label" data-testid="files-size">{bytes(row.entry.bytes)}</span>
         {/if}
       </button>
     {/each}

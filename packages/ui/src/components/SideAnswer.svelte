@@ -37,7 +37,7 @@
     {:else}<Prose text={answer} {store} {threadId} />{/if}
   </div>
   {#if answer !== null && !error && store.openThread?.projectId && !store.openThread.agentSessionId}
-    <footer><button type="button" class="ghost" data-testid="btw-fork" disabled={forking} aria-busy={forking} aria-label={forking ? strings.btw.forking : strings.btw.fork} onclick={fork}><CornerUpRight size={14} />{strings.btw.fork}</button></footer>
+    <footer><button type="button" class="ghost" data-testid="btw-fork" disabled={forking} aria-busy={forking} aria-label={forking ? strings.btw.forking : strings.btw.fork} onclick={fork}><CornerUpRight size={14} /><span class="ui-label">{strings.btw.fork}</span></button></footer>
   {/if}
 </section>
 

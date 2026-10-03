@@ -28,12 +28,12 @@
       if (event.key === 'Escape' && !saving) { event.preventDefault(); event.stopPropagation(); void close(); }
     }} />
     <div class="actions">
-      <button type="submit" class="small" data-testid="account-save" disabled={saving || !label.trim()}>{strings.providerSettings.save}</button>
-      <button type="button" class="quiet small" data-testid="account-cancel" disabled={saving} onclick={() => void close()}>{strings.common.cancel}</button>
+      <button type="submit" class="small" data-testid="account-save" disabled={saving || !label.trim()}><span class="ui-label">{strings.providerSettings.save}</span></button>
+      <button type="button" class="quiet small" data-testid="account-cancel" disabled={saving} onclick={() => void close()}><span class="ui-label">{strings.common.cancel}</span></button>
     </div>
   </form>
 {:else}
-  <button type="button" class="quiet small" bind:this={trigger} data-testid="account-rename" onclick={() => { label = account.label; editing = true; }}>{strings.providerSettings.rename}</button>
+  <button type="button" class="quiet small" bind:this={trigger} data-testid="account-rename" onclick={() => { label = account.label; editing = true; }}><span class="ui-label">{strings.providerSettings.rename}</span></button>
 {/if}
 
 <style>
