@@ -1,5 +1,5 @@
 /** A thread's goal, loop and task list, and the timer that runs them. */
-import { RpcErrorCode, type AgentTask, type Thread, type ThreadActivity, type Turn } from '@boite/contracts';
+import { attachmentError, RpcErrorCode, type AgentTask, type Thread, type ThreadActivity, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { refusal } from './shared';
 import type { FakeContext, FakeMethods } from './context';
@@ -33,7 +33,9 @@ function scheduleActivity(ctx: FakeContext, threadId: string, delay = 0): void {
       return;
     }
     try {
-      const turn = ctx.startTurn(threadId, kind === 'goal' ? activity.goal!.objective : activity.loop!.prompt, [], undefined, kind);
+      const key = `${threadId}:${kind}`;
+      const turn = ctx.startTurn(threadId, kind === 'goal' ? activity.goal!.objective : activity.loop!.prompt, ctx.activityAttachments.get(key) ?? [], undefined, kind);
+      ctx.activityAttachments.delete(key);
       ctx.activityTurns.set(turn.id, { kind, generation: ctx.activityGenerations.get(`${threadId}:${kind}`) ?? 0 });
       activity[kind]!.iterations++;
       if (kind === 'loop') {
@@ -83,6 +85,15 @@ export function activityMethods(ctx: FakeContext) {
       if (ctx.thread(params.threadId).agentSessionId) throw refusal('persistent agent sessions use missions instead of conversation loops');
       const thread = ctx.thread(params.threadId);
       if (thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'activity requires an unarchived thread' });
+      const attachments = params.attachments ?? [];
+      if (!Array.isArray(attachments)) throw refusal('attachments must be an array');
+      if (attachments.length) {
+        const provider = ctx.providers.find(provider => provider.id === thread.providerId);
+        if (!provider) throw ctx.notFound('provider', thread.providerId);
+        const error = attachmentError(attachments, provider);
+        if (error) throw new RpcFailure({ code: RpcErrorCode.Refused, ...error });
+      }
+      if (attachments.length && Number(!!params.goal) + Number(!!params.loop) !== 1) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'attachments require exactly one new goal or loop' });
       const activity = structuredClone(thread.activity ?? { goal: null, loop: null, tasks: [] });
       if (params.goal !== undefined) {
         if (params.goal !== null && !params.goal.objective?.trim()) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'goal.objective must be non-empty text' });
@@ -95,6 +106,8 @@ export function activityMethods(ctx: FakeContext) {
       for (const kind of ['goal', 'loop'] as const) if (params[kind] !== undefined) {
         const key = `${thread.id}:${kind}`;
         ctx.activityGenerations.set(key, (ctx.activityGenerations.get(key) ?? 0) + 1);
+        if (params[kind] && attachments.length) ctx.activityAttachments.set(key, JSON.parse(JSON.stringify(attachments)));
+        else ctx.activityAttachments.delete(key);
       }
       thread.activity = activity;
       ctx.publishActivity(thread);
@@ -115,6 +128,7 @@ export function activityMethods(ctx: FakeContext) {
       if (params.action === 'remove' || params.action === 'complete') {
         const key = `${thread.id}:${params.kind}`;
         ctx.activityGenerations.set(key, (ctx.activityGenerations.get(key) ?? 0) + 1);
+        ctx.activityAttachments.delete(key);
       }
       if (activity.loop && activity.loop.status !== 'active') activity.loop.nextRunAt = null;
       if (params.kind === 'loop' && params.action === 'resume' && activity.loop) activity.loop.nextRunAt = Date.now();

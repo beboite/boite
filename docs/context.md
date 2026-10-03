@@ -163,8 +163,13 @@ as "2 iterations" or "2 itérations" in the prompt is also recognized.
 `/loop 5m <prompt>` explicitly schedules repetition, with the delay counted
 after each finished turn. Intervals use `s`, `m` or `h`, from one second to
 24 hours. A loop without a count or interval is refused; there is no default timer.
-Both commands belong to Boite and work with every driver. Goals and loops can
-coexist with the agent's task list above the composer. The compact overlay shows
+Both commands belong to Boite and work with every driver. They carry
+images and files on their first turn, subject to the provider's usual
+attachment limits. Later iterations use the conversation history without
+resending the uploads. Pending attachments survive a pause or core restart
+before the first turn; replacing or removing the activity discards them.
+Goals and loops can coexist with the agent's task list above the composer.
+The compact overlay shows
 the current task and progress. Only a click expands it; updates and disclosure
 do not resize the timeline. An asynchronous question (`boite ask`, or Codex's
 `delivery: "async"`) waits on top of that overlay with the same answer controls

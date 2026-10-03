@@ -651,7 +651,6 @@ export const fr: Translation = {
     goalUsage: 'Utilisez /goal suivi d\'un objectif.',
     loopUsage: 'Utilisez /loop 2 prompt pour deux itérations, ou /loop 5m prompt pour un rythme. Entre 1 et 1000 itérations.',
     intervalError: "L'intervalle d'une boucle doit tenir entre 1 seconde et 24 heures.",
-    noAttachments: 'Envoyez les images dans un message avant de lancer un objectif ou une boucle.',
     active: 'Active',
     paused: 'En pause',
     complete: 'Terminée',
@@ -918,6 +917,14 @@ export const fr: Translation = {
     error: 'Erreur'
   },
 
+  agentMessages: {
+    heading: 'Messages', hint: 'Messages envoyés et reçus entre agents.',
+    open: 'Ouvrir les messages', filter: 'Filtrer les messages des agents',
+    all: 'Tous', sent: 'Envoyés', received: 'Reçus', empty: 'Aucun message ici pour le moment.',
+    forwardedOne: '1 message transmis', forwardedMany: '{count} messages transmis',
+    receivedOne: '1 message reçu', receivedMany: '{count} messages reçus',
+    issueOne: '1 message à vérifier', issueMany: '{count} messages à vérifier'
+  },
   coordination: {
     options: 'Réglages avancés',
     heading: 'Communication entre conversations', off: 'Désactivée', on: 'Activée',

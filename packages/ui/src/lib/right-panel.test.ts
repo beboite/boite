@@ -85,6 +85,19 @@ describe('the right panel', () => {
     expect(second.id).toMatch(/^browser:[a-f0-9]{32}$/);
   });
 
+  test('exchange summaries reuse one messages tab and retain their filter and destination after reload', () => {
+    const { bound } = panel();
+    bound.openMessages('incoming-first', 'incoming');
+    bound.open('files');
+    bound.openMessages('outgoing-next', 'outgoing');
+    expect(bound.surfaces.map(surface => surface.kind)).toEqual(['messages', 'files']);
+    expect(bound.active).toMatchObject({ kind: 'messages', letterId: 'outgoing-next', mailDirection: 'outgoing' });
+    expect(new RightPanelStore().for('t-1').active).toMatchObject({ kind: 'messages', letterId: 'outgoing-next', mailDirection: 'outgoing' });
+    bound.close('messages');
+    expect(bound.active?.kind).toBe('files');
+    expect(bound.surfaces.some(surface => surface.kind === 'messages')).toBe(false);
+  });
+
   test('closing the active surface activates the one on its left', () => {
     const { bound } = panel();
 

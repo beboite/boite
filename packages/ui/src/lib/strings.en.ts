@@ -667,7 +667,6 @@ export const strings = {
     goalUsage: 'Use /goal followed by an objective.',
     loopUsage: 'Use /loop 2 prompt for two iterations, or /loop 5m prompt for a schedule. Choose 1 to 1000 iterations.',
     intervalError: 'Loop intervals must be between 1 second and 24 hours.',
-    noAttachments: 'Send images in a message before starting a goal or loop.',
     active: 'Active',
     paused: 'Paused',
     complete: 'Complete',
@@ -965,6 +964,14 @@ export const strings = {
     error: 'Error'
   },
 
+  agentMessages: {
+    heading: 'Messages', hint: 'Messages sent and received between agents.',
+    open: 'Open messages', filter: 'Filter agent messages',
+    all: 'All', sent: 'Sent', received: 'Received', empty: 'No messages here yet.',
+    forwardedOne: 'Forwarded 1 message', forwardedMany: 'Forwarded {count} messages',
+    receivedOne: 'Received 1 message', receivedMany: 'Received {count} messages',
+    issueOne: '1 message needs attention', issueMany: '{count} messages need attention'
+  },
   coordination: {
     options: 'Advanced settings',
     heading: 'Communication between conversations', off: 'Off', on: 'On',
