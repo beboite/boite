@@ -3,6 +3,7 @@ import type { Core } from '../core.ts';
 import type { TurnResult } from '../drivers/types.ts';
 import { logMessageOf } from '../log-errors.ts';
 import { promptCacheOf } from '../prompt-cache.ts';
+import { setThreadStatus } from './records.ts';
 
 interface Settlement {
   queued: Turn;
@@ -13,6 +14,21 @@ interface Settlement {
   started: boolean;
 }
 interface Completion { next: ThreadSummary | null; sameSession: boolean; threadOwned: boolean }
+
+/** Finish an admitted turn before provider execution, including a held prompt. */
+export function markQueuedStopped(core: Core, turnId: TurnId): void {
+  const turn = core.journal.getTurn(turnId);
+  if (turn === null) return;
+  const next: Turn = { ...turn, status: 'stopped', queueHold: null, finishedAt: Date.now() };
+  core.bus.afterCommit(() => core.journal.db.transaction(() => {
+    core.journal.append({ type: 'turn.stopped', threadId: turn.threadId, version: 1, payload: next }, () => {
+      core.journal.putTurn(next);
+    });
+    core.bus.emit('turn.finished', next);
+    setThreadStatus(core, turn.threadId, 'idle');
+  })());
+  if (turn.execution?.operation === 'coordination') core.coordination.queuedCancelled(turn.threadId);
+}
 
 /** Compare the durable execution identity before writing a late provider result. */
 function ownsTurn(owned: Turn | null, { queued, running, started }: Settlement): boolean {
