@@ -445,8 +445,21 @@ describe('plugin git ignores the caller gitconfig', () => {
     const empty = (): ReadableStream<Uint8Array> => new ReadableStream({ start(controller) { controller.close(); } });
     harness.core.procs.spawn = (threadId, command, args, opts) => {
       seen.push({ args: [...args], env: { ...(opts?.env ?? {}) } });
+      const record: SpawnedProcess['record'] = {
+        pid: 0,
+        parentPid: null,
+        threadId,
+        exe: command,
+        commandLine: [command, ...args].join(' '),
+        startedAt: 0,
+        exitedAt: null,
+        exitCode: null,
+        cpuMs: null,
+        peakMemoryBytes: null,
+        ioBytes: null,
+      };
       return {
-        record: { pid: 0, threadId, command, args } as SpawnedProcess['record'],
+        record,
         proc: { stdout: empty(), stderr: empty(), pid: 0 } as SpawnedProcess['proc'],
         exited: Promise.resolve(args.includes('init') ? 0 : 1),
       };
@@ -459,6 +472,7 @@ describe('plugin git ignores the caller gitconfig', () => {
         expect(call.args).toContain(allowFile ? 'protocol.file.allow=always' : 'protocol.file.allow=never');
         expect(call.args).toContain('core.fsmonitor=');
         expect(call.env.GIT_CONFIG_COUNT).toBe('0');
+        expect(call.env.GIT_CONFIG_PARAMETERS).toBe('');
         expect(call.env.GIT_CONFIG_NOSYSTEM).toBe('1');
         expect(call.env.GIT_CONFIG_GLOBAL).toBe(emptyConfig);
         expect(call.env.GIT_CONFIG_SYSTEM).toBe(emptyConfig);

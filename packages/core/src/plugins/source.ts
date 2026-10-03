@@ -124,9 +124,12 @@ export async function fetchManifest(
           GCM_INTERACTIVE: 'never',
           GIT_ASKPASS: '',
           SSH_ASKPASS: '',
-          // `spawn` overlays this on the process environment, so a count of 0
-          // drops `GIT_CONFIG_KEY_*` pairs the user exported.
+          // `spawn` overlays this on the process environment and cannot delete
+          // a key. A count of 0 drops `GIT_CONFIG_KEY_*` pairs. An empty
+          // `GIT_CONFIG_PARAMETERS` is the other channel: an inherited
+          // `insteadOf` there still rewrites the URL under the flags above.
           GIT_CONFIG_COUNT: '0',
+          GIT_CONFIG_PARAMETERS: '',
           GIT_CONFIG_NOSYSTEM: '1',
           GIT_CONFIG_GLOBAL: EMPTY_GIT_CONFIG,
           GIT_CONFIG_SYSTEM: EMPTY_GIT_CONFIG,
