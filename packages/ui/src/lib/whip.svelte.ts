@@ -12,3 +12,15 @@ class Whip {
 }
 
 export const whip = new Whip();
+
+/** The control must release even while its heavy overlay is still loading. */
+export function installWhipEscape(): () => void {
+  const onKey = (event: KeyboardEvent) => {
+    if (event.key !== 'Escape' || !whip.held) return;
+    whip.held = false;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+  window.addEventListener('keydown', onKey, true);
+  return () => window.removeEventListener('keydown', onKey, true);
+}
