@@ -71,7 +71,7 @@
   <section class="card" data-testid="deleted-threads">
     <h2>{strings.settings.deleted.heading}</h2>
     <form class="retention" onsubmit={(event) => { event.preventDefault(); void saveRetention(); }}>
-      <label for="{uid}-days">{strings.settings.deleted.retentionLabel}<InfoTip topic={strings.settings.deleted.retentionLabel} text={strings.settings.deleted.retentionHint} /></label>
+      <label class="ui-label-box" for="{uid}-days"><span class="ui-label">{strings.settings.deleted.retentionLabel}</span><InfoTip topic={strings.settings.deleted.retentionLabel} text={strings.settings.deleted.retentionHint} /></label>
       <div class="retention-actions">
         <input id="{uid}-days" type="number" min="0" max="3650" step="1" bind:value={days} oninput={() => { dirty = true; }} aria-invalid={!valid} aria-describedby={valid ? undefined : `${uid}-error`} data-testid="deleted-retention-days" />
         <button type="submit" disabled={!valid || !dirty || saving || !store.settings || store.connection !== 'ready'} data-testid="deleted-retention-save"><span class="ui-label">{strings.settings.save}</span></button>

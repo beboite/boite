@@ -77,7 +77,7 @@
   {:else}
     {#if rows.length > 0}<UsageLimits {rows} {store} loading={reader.loading} completed={reader.completed} />{/if}
     <section class="card tracked" data-testid="limits-tracked">
-      <h2>{strings.quotas.tracked}<InfoTip topic={strings.quotas.tracked} text={strings.quotas.trackedHint} /></h2>
+      <h2 class="ui-label-box"><span class="ui-label">{strings.quotas.tracked}</span><InfoTip topic={strings.quotas.tracked} text={strings.quotas.trackedHint} /></h2>
       {#each tracked as row (row.accountId)}
         {@const account = row.accountId.startsWith('quota:') ? strings.quotas.cliSource : row.label}
         {@const entry = store.accounts?.find((entry) => entry.id === row.accountId)}

@@ -177,7 +177,7 @@
           <span class="objective" title={'objective' in entry ? entry.objective : entry.prompt}>
             {#if 'objective' in entry}{entry.objective}{:else}{iteration(entry.iterations, entry.maxIterations)}{/if}
           </span>
-          <span class="meta status" class:live={entry.status === 'active'}><span class="ui-label">{strings.activity[entry.status]}</span></span>
+          <span class="meta status ui-label-box" class:live={entry.status === 'active'}><span class="ui-label">{strings.activity[entry.status]}</span></span>
           {#if entry.status !== 'complete'}
             <button type="button" class="ghost small icon" disabled={saving || store.connection !== 'ready'}
               aria-label={entry.status === 'active' ? strings.activity.pause : strings.activity.resume}

@@ -34,7 +34,7 @@
 </script>
 
 <section class="review" data-testid="pr-review">
-  <div class="actions"><button type="button" class="chip" onclick={onback}><ArrowLeft size={16} /><span class="ui-label">{strings.prReview.back}</span></button><button type="button" class="chip" disabled={busy} aria-label={strings.prReview.refresh} onclick={() => void load()}><RefreshCw size={16} /></button><a class="chip" href={url} target="_blank" rel="noopener noreferrer"><ExternalLink size={15} />{strings.prReview.github}</a></div>
+  <div class="actions"><button type="button" class="chip" onclick={onback}><ArrowLeft size={16} /><span class="ui-label">{strings.prReview.back}</span></button><button type="button" class="chip" disabled={busy} aria-label={strings.prReview.refresh} onclick={() => void load()}><RefreshCw size={16} /></button><a class="chip" href={url} target="_blank" rel="noopener noreferrer"><ExternalLink size={15} /><span class="ui-label">{strings.prReview.github}</span></a></div>
   {#if error}<p role="alert" class="error">{error}</p>{/if}
   {#if busy}<p role="status">{strings.prReview.loading}</p>{/if}
   {#if review}

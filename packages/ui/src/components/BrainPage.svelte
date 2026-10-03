@@ -97,7 +97,7 @@
 </script>
 
 <div class="page" data-testid="brain-page" aria-busy={busy}>
-  <header><div><h1>{t.heading}<InfoTip topic={t.heading} text={t.description} /></h1></div></header>
+  <header><div><h1 class="ui-label-box"><span class="ui-label">{t.heading}</span><InfoTip topic={t.heading} text={t.description} /></h1></div></header>
   {#if error}<p class="error" role="alert" data-testid="brain-error">{error}</p>{/if}
   {#if status && !status.config.path}
     {#each status.links ?? [] as link (link.path)}
@@ -182,14 +182,14 @@
       {#each entries as entry (entry.path)}
         {@const Icon = icons[entry.kind]}
         <details class="entry" data-testid="brain-entry">
-          <summary><Icon size={17} strokeWidth={1.5} /><span>{entry.name}</span>{#if entry.error}<span class="error-indicator" aria-label={entry.error}>!</span>{/if}<ChevronRight size={14} class="chevron" /></summary>
+          <summary><Icon size={17} strokeWidth={1.5} /><span class="ui-label">{entry.name}</span>{#if entry.error}<span class="error-indicator" aria-label={entry.error}>!</span>{/if}<ChevronRight size={14} class="chevron" /></summary>
           <div class="entry-details">{#if entry.description}<p>{entry.description}</p>{/if}<code>{entry.path}</code>{#if entry.error}<p class="error">{entry.error}</p>{/if}</div>
         </details>
       {/each}
       {#if !entries.length}<p class="empty-category">{t.noEntries}</p>{/if}
       {#if selected === 'plugin'}<p class="catalog-hint">{t.pluginHint}</p>{/if}
     </section>
-    {#if status.git}<details class="git-details"><summary><GitBranch size={14} />{t.details}</summary><div><code>{status.git.branch}{#if status.git.upstream} → {status.git.upstream}{/if}</code><p>{t.counts.replace('{ahead}', String(status.git.ahead)).replace('{behind}', String(status.git.behind))}</p></div></details>{/if}
+    {#if status.git}<details class="git-details"><summary><GitBranch size={14} /><span class="ui-label">{t.details}</span></summary><div><code>{status.git.branch}{#if status.git.upstream} → {status.git.upstream}{/if}</code><p>{t.counts.replace('{ahead}', String(status.git.ahead)).replace('{behind}', String(status.git.behind))}</p></div></details>{/if}
   {/if}
   <!-- The agents' own hooks are theirs, not the brain folder's: the card shows with or without one. -->
   <HooksCard {store} />

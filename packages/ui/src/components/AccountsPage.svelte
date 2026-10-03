@@ -476,7 +476,7 @@
       {#if info?.effort?.levels.length}
         <EffortSlider levels={info.effort.levels} active={effort} onpick={(level) => model && store.setModelDefault(provider.id, account.id, model, level)} />
       {:else if effort}
-        <span class="pending-effort"><span class="ui-label">{effort}</span></span>
+        <span class="pending-effort ui-label-box"><span class="ui-label">{effort}</span></span>
       {/if}
     </div>
   {/if}
@@ -605,7 +605,7 @@
 <div class="page" data-testid="accounts-page">
   <header>
     <div>
-      <h1>{strings.providerSettings.heading}<InfoTip topic={strings.providerSettings.heading} text={strings.providerSettings.intro} /></h1>
+      <h1 class="ui-label-box"><span class="ui-label">{strings.providerSettings.heading}</span><InfoTip topic={strings.providerSettings.heading} text={strings.providerSettings.intro} /></h1>
     </div>
     {#if store.owner}
       <!-- Agent updates for this machine: two controls, the versions are on the rows. -->

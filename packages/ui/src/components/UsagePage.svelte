@@ -125,7 +125,7 @@
 
 <div class="page usage" data-testid="usage-page">
   <header>
-    <div><h1>{strings.usage.heading}<InfoTip topic={strings.usage.heading} text={`${strings.usage.intro} ${strings.usage.note}`} /></h1></div>
+    <div><h1 class="ui-label-box"><span class="ui-label">{strings.usage.heading}</span><InfoTip topic={strings.usage.heading} text={`${strings.usage.intro} ${strings.usage.note}`} /></h1></div>
   </header>
 
   <div class="filters">

@@ -37,7 +37,7 @@
       <span class="queued-text ui-label">{entry.text || strings.composer.attachAlt}</span>
       {#if entry.attachments.length || entry.previewReferences?.length}
         <span class="queued-extras">
-          {#if entry.attachments.length}<span>{entry.attachments.length} <Paperclip size={12} /></span>{/if}
+          {#if entry.attachments.length}<span><span class="ui-label">{entry.attachments.length}</span> <Paperclip size={12} /></span>{/if}
           {#if entry.previewReferences?.length}<span>@{entry.previewReferences.length}</span>{/if}
         </span>
       {/if}

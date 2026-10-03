@@ -360,7 +360,7 @@
             <span class="mark"></span>
             <span class="name ui-label">{model.name}</span>
             {#if model.badge === 'new'}
-              <span class="badge"><span class="ui-label">{strings.composer.newBadge}</span></span>
+              <span class="badge ui-label-box"><span class="ui-label">{strings.composer.newBadge}</span></span>
             {/if}
           </button>
           <button type="button" class="favorite-button" data-testid="model-favorite" data-favorite-model={model.id} aria-label={favorite(model) ? strings.composer.unfavorite : strings.composer.favorite} aria-pressed={favorite(model)} onclick={() => { if (shown && shownAccountId) store.toggleFavorite(shown.id, shownAccountId, model); }}><Star size={14} fill={favorite(model) ? 'currentColor' : 'none'} /></button>

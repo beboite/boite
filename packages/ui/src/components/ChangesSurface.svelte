@@ -147,7 +147,7 @@
             <span class="dir">{directory(change.path)}</span><span class="base">{base(change.path)}</span>
           </span>
           {#if change.staged}
-            <span class="staged" title={strings.changes.staged}><span class="ui-label">{strings.changes.stagedShort}</span></span>
+            <span class="staged ui-label-box" title={strings.changes.staged}><span class="ui-label">{strings.changes.stagedShort}</span></span>
           {/if}
           {#if change.additions !== null && change.additions > 0}
             <span class="count added ui-label">+{change.additions}</span>

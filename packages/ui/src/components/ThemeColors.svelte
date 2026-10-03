@@ -107,7 +107,7 @@
   </div>
   {#if ratio < 4.5}
   <div class="contrast" data-testid="theme-contrast">
-    <span>{fill(strings.settings.colors.contrastLow, { ratio: tenth(ratio) })}<InfoTip topic={strings.settings.colors.contrast} text={strings.settings.colors.contrastHint} /></span>
+    <span class="ui-label-box"><span class="ui-label">{fill(strings.settings.colors.contrastLow, { ratio: tenth(ratio) })}</span><InfoTip topic={strings.settings.colors.contrast} text={strings.settings.colors.contrastHint} /></span>
     <button type="button" class="small" onclick={improveContrast} data-testid="colors-contrast-fix"><span class="ui-label">{strings.settings.colors.improveContrast}</span></button>
   </div>
   {/if}

@@ -50,7 +50,7 @@
 <div class="page machines-page" data-testid="machines-page">
   <header class="head">
     <div>
-      <h1>{mobile ? strings.machines.heading : strings.settings.tabs.machines}<InfoTip topic={strings.machines.heading} text={strings.machines.intro} /></h1>
+      <h1 class="ui-label-box"><span class="ui-label">{mobile ? strings.machines.heading : strings.settings.tabs.machines}</span><InfoTip topic={strings.machines.heading} text={strings.machines.intro} /></h1>
     </div>
 
   </header>
@@ -104,10 +104,10 @@
           </div>
         </div>
         {#if sync.enabled(machine) || canSync(machine)}
-          <label class="sync-option">
+          <label class="sync-option ui-label-box">
             <input type="checkbox" data-testid="machine-sync" checked={sync.enabled(machine)}
               onchange={(event) => sync.set(machine, event.currentTarget.checked ? source : null)} />
-            <span>{fill(strings.machines.syncFrom, { source: sync.source(machine)?.label ?? source?.label ?? '' })}</span>
+            <span class="ui-label">{fill(strings.machines.syncFrom, { source: sync.source(machine)?.label ?? source?.label ?? '' })}</span>
             <InfoTip topic={strings.machines.syncConfirm} text={strings.machines.syncHint} />
           </label>
           {#if sync.busy[machine.id]}<p class="sync-progress" role="status">{strings.machines.syncing}</p>{/if}

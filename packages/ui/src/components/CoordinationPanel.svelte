@@ -51,9 +51,9 @@
 <details class="coordination disclosure" class:expanded open={expanded} data-testid="coordination-panel" ontoggle={toggleSettings}>
   <summary>
     <Network size={14} strokeWidth={1.75} />
-    <span>{strings.coordination.heading}</span>
-    <span class="mode" data-mode={config.mode}>{modeLabel(config.mode)}</span>
-    {#if config.paused}<span class="paused">{strings.coordination.paused}</span>{/if}
+    <span class="ui-label">{strings.coordination.heading}</span>
+    <span class="mode ui-label-box" data-mode={config.mode}><span class="ui-label">{modeLabel(config.mode)}</span></span>
+    {#if config.paused}<span class="paused ui-label-box"><span class="ui-label">{strings.coordination.paused}</span></span>{/if}
   </summary>
 
   <div class="body">

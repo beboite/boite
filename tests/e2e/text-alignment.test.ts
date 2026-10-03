@@ -14,7 +14,7 @@ afterAll(async () => { await page?.close(); await server?.close(); });
 
 /** Measure the cap-height centre, rather than the font's invisible ascent/descent box. */
 async function offsets(pairs: [string, string][]) {
-  return page.evaluate<{ label: string; offset: number }[]>(`(() => {
+  return page.evaluate<{ label: string; offset: number; inkFits: boolean }[]>(`(() => {
     const ctx = document.createElement('canvas').getContext('2d');
     return ${JSON.stringify(pairs)}.map(([control, label]) => {
       const parent = document.querySelector(control), el = document.querySelector(label);
@@ -24,9 +24,12 @@ async function offsets(pairs: [string, string][]) {
       const range = document.createRange(); range.selectNodeContents(node || el);
       const text = range.getBoundingClientRect(), box = parent.getBoundingClientRect(), style = getComputedStyle(node.parentElement);
       ctx.font = style.fontWeight + ' ' + style.fontSize + ' ' + style.fontFamily;
-      const cap = ctx.measureText('H');
+      const cap = ctx.measureText('H'), ink = ctx.measureText('Égj'), inkBox = node.parentElement.getBoundingClientRect();
       const baseline = text.top + (text.height - cap.fontBoundingBoxAscent - cap.fontBoundingBoxDescent) / 2 + cap.fontBoundingBoxAscent;
-      return { label, offset: baseline - cap.actualBoundingBoxAscent / 2 - box.top - box.height / 2 };
+      return {
+        label, offset: baseline - cap.actualBoundingBoxAscent / 2 - box.top - box.height / 2,
+        inkFits: baseline - ink.actualBoundingBoxAscent >= inkBox.top - 0.1 && baseline + ink.actualBoundingBoxDescent <= inkBox.bottom + 0.1,
+      };
     });
   })()`);
 }
@@ -47,7 +50,16 @@ test('text and icons share a vertical centre across reading fonts, menus and pho
       await document.fonts.load('600 14px ' + style.fontFamily);
       await document.fonts.ready;
     })()`);
-    for (const result of await offsets(pairs)) expect(Math.abs(result.offset), `${font}: ${result.label}`).toBeLessThanOrEqual(0.8);
+    for (const result of await offsets(pairs)) {
+      expect(Math.abs(result.offset), `${font}: ${result.label}`).toBeLessThanOrEqual(0.8);
+      expect(result.inkFits, `${font}: ${result.label} accents/descenders`).toBe(true);
+    }
+    await page.evaluate(`__boiteTest.workspace.active.showSettings('accounts')`);
+    await page.waitFor(`document.querySelector('[data-testid="settings"] h1.ui-label-box .ui-label')`);
+    for (const result of await offsets([['[data-testid="settings"] h1 .info-tip', '[data-testid="settings"] h1 .ui-label']])) {
+      expect(Math.abs(result.offset), `${font}: heading information icon`).toBeLessThanOrEqual(0.8);
+    }
+    await page.evaluate(`__boiteTest.workspace.active.showChat()`);
   }
   await page.click('[data-testid="composer-mode"]');
   await page.waitFor(`document.querySelector('[data-testid="composer-mode"]')?.getAttribute('aria-expanded') === 'true'`);
@@ -59,6 +71,7 @@ test('text and icons share a vertical centre across reading fonts, menus and pho
   for (const result of await offsets([['[data-testid="settings-tab-general"]', '[data-testid="settings-tab-general"] > span']])) expect(Math.abs(result.offset)).toBeLessThanOrEqual(0.8);
   await page.evaluate(`__boiteTest.workspace.active.showSettings('task-manager')`);
   await page.waitFor(`document.querySelector('[data-testid="task-manager"] .live .ui-label')`);
+  for (const result of await offsets([['[data-testid="task-manager"] dt', '[data-testid="task-manager"] dt .ui-label']])) expect(Math.abs(result.offset)).toBeLessThanOrEqual(0.8);
   // A new text span must not inherit the status dot's width or background.
   expect(await page.evaluate(`(() => {
     const label = document.querySelector('[data-testid="task-manager"] .live .ui-label');

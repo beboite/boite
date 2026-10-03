@@ -247,7 +247,7 @@
     </div>
     {#if zoomable}
       <div class="switch-row">
-        <span class="text">{strings.settings.zoom}<InfoTip topic={strings.settings.zoom} text={strings.settings.zoomHint} /></span>
+        <span class="text ui-label-box"><span class="ui-label">{strings.settings.zoom}</span><InfoTip topic={strings.settings.zoom} text={strings.settings.zoomHint} /></span>
         <div class="segmented zoom" role="group" aria-label={strings.settings.zoom}>
           <button type="button" aria-label={strings.settings.zoomOut} title={strings.settings.zoomOut} disabled={zoom <= smallest} data-testid="zoom-out" onclick={() => zoomTo(stepZoom(wantedZoom(), -1))}><Minus size={14} strokeWidth={2} /></button>
           <button type="button" class="zoom-value" title={strings.settings.zoomReset} aria-label={strings.settings.zoomReset} data-testid="zoom-reset" onclick={() => zoomTo(ZOOM_DEFAULT)}><span class="ui-label">{percent(zoom * 100)}</span></button>
@@ -283,7 +283,7 @@
        own right click hides it and leads here; this is the only way back. -->
   <section class="card" id="settings-buttons" data-testid="settings-buttons">
     <div class="card-head">
-      <h2>{strings.controls.heading}<InfoTip topic={strings.controls.heading} text={strings.controls.headingHint} /></h2>
+      <h2 class="ui-label-box"><span class="ui-label">{strings.controls.heading}</span><InfoTip topic={strings.controls.heading} text={strings.controls.headingHint} /></h2>
       <div class="segmented" role="group" aria-label={strings.controls.preset}>
         {#each presets as option (option.id)}
           <button type="button" class:on={preset === option.id} aria-pressed={preset === option.id} data-testid="controls-preset-{option.id}" onclick={() => work.showPreset(option.id)}><span class="ui-label">{option.label}</span></button>

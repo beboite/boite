@@ -159,7 +159,7 @@
 <div class="page" data-testid="keyboard-page">
   <header class="top">
     <div>
-      <h1>{strings.settings.tabs.keyboard}<InfoTip topic={strings.settings.tabs.keyboard} text={strings.keyboard.intro} /></h1>
+      <h1 class="ui-label-box"><span class="ui-label">{strings.settings.tabs.keyboard}</span><InfoTip topic={strings.settings.tabs.keyboard} text={strings.keyboard.intro} /></h1>
     </div>
     {#if anyCustom}
       <button class="quiet small" data-testid="keybindings-reset-all" disabled={busy} onclick={() => void resetAll()}><RotateCcw size={14} /><span class="ui-label">{strings.keyboard.resetAll}</span></button>

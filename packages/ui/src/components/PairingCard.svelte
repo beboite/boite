@@ -60,19 +60,19 @@
 </script>
 
 <section class="card" id="settings-devices" data-testid="pairing-card">
-  <h2>{strings.settings.pairing.heading}<InfoTip topic={strings.settings.pairing.heading} text={strings.settings.pairing.intro} /></h2>
+  <h2 class="ui-label-box"><span class="ui-label">{strings.settings.pairing.heading}</span><InfoTip topic={strings.settings.pairing.heading} text={strings.settings.pairing.intro} /></h2>
   {#if store.principal === 'owner'}
     <label for="{uid}-listen-on-lan" class="switch-row">
-      <span class="text">
-        <span id="{uid}-listen-on-lan-name">{strings.settings.listenOnLan}</span><InfoTip topic={strings.settings.listenOnLan} text={strings.settings.listenOnLanHint} />
+      <span class="text ui-label-box">
+        <span class="ui-label" id="{uid}-listen-on-lan-name">{strings.settings.listenOnLan}</span><InfoTip topic={strings.settings.listenOnLan} text={strings.settings.listenOnLanHint} />
       </span>
       <input id="{uid}-listen-on-lan" aria-labelledby="{uid}-listen-on-lan-name" type="checkbox" role="switch" data-testid="setting-listen-on-lan"
         checked={store.settings?.listenOnLan ?? false} disabled={!store.settings}
         onchange={(event) => void toggleLan(event.currentTarget)} />
     </label>
     <label for="{uid}-pairing-owner" class="switch-row">
-      <span class="text">
-        <span id="{uid}-pairing-owner-name">{strings.settings.pairing.owner}</span><InfoTip topic={strings.settings.pairing.owner} text={strings.settings.pairing.ownerHint} />
+      <span class="text ui-label-box">
+        <span class="ui-label" id="{uid}-pairing-owner-name">{strings.settings.pairing.owner}</span><InfoTip topic={strings.settings.pairing.owner} text={strings.settings.pairing.ownerHint} />
       </span>
       <input id="{uid}-pairing-owner" aria-labelledby="{uid}-pairing-owner-name" type="checkbox" role="switch" data-testid="pairing-owner" bind:checked={ownerLink} />
     </label>

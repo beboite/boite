@@ -138,7 +138,7 @@
 </script>
 
 <section class="card" id="settings-archived" data-testid="archived-threads">
-  <h2>{strings.settings.archived.heading}<InfoTip topic={strings.settings.archived.heading} text={strings.settings.archived.intro} /></h2>
+  <h2 class="ui-label-box"><span class="ui-label">{strings.settings.archived.heading}</span><InfoTip topic={strings.settings.archived.heading} text={strings.settings.archived.intro} /></h2>
   {#if threads === null}
     <button type="button" data-testid="archived-show" disabled={loading || store.connection !== 'ready'} onclick={() => void load()}>
       <span class="ui-label">{strings.settings.archived.show}</span>

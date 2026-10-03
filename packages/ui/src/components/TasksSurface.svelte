@@ -59,7 +59,7 @@
             <Target size={13} strokeWidth={1.75} />
             <span class="text ui-label" title={activity.goal.objective}>{activity.goal.objective}</span>
             <span class="meta ui-label">{fill(strings.tasks.iterations, { count: String(activity.goal.iterations) })}</span>
-            <span class="state" class:live={activity.goal.status === 'active'}><span class="ui-label">{strings.activity[activity.goal.status]}</span></span>
+            <span class="state ui-label-box" class:live={activity.goal.status === 'active'}><span class="ui-label">{strings.activity[activity.goal.status]}</span></span>
           </div>
         {/if}
         {#if activity?.loop}
@@ -71,7 +71,7 @@
             {:else}
               <span class="meta ui-label">{fill(strings.tasks.iterations, { count: String(activity.loop.iterations) })}</span>
             {/if}
-            <span class="state" class:live={activity.loop.status === 'active'}><span class="ui-label">{strings.activity[activity.loop.status]}</span></span>
+            <span class="state ui-label-box" class:live={activity.loop.status === 'active'}><span class="ui-label">{strings.activity[activity.loop.status]}</span></span>
           </div>
         {/if}
         {#if !activity?.goal && !activity?.loop}

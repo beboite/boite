@@ -134,7 +134,7 @@
 
 <div class="page" data-testid="voice-settings">
   <header>
-    <h1>{strings.speech.heading}<InfoTip topic={strings.speech.heading} text={strings.speech.description} /></h1>
+    <h1 class="ui-label-box"><span class="ui-label">{strings.speech.heading}</span><InfoTip topic={strings.speech.heading} text={strings.speech.description} /></h1>
     {#if saved}<span class="saved" role="status"><Check size={14} /><span class="ui-label">{strings.speech.saved}</span></span>{/if}
   </header>
 
@@ -197,14 +197,14 @@
 
     <section class="card">
       <div class="switch-row">
-        <span class="text">{strings.speech.engine}<InfoTip topic={strings.speech.engine} text={strings.speech.engineHint} /></span>
+        <span class="text ui-label-box"><span class="ui-label">{strings.speech.engine}</span><InfoTip topic={strings.speech.engine} text={strings.speech.engineHint} /></span>
         <div class="segmented" role="radiogroup" aria-label={strings.speech.engine}>
           <button type="button" role="radio" class:on={config.engine === 'local'} aria-checked={config.engine === 'local'} data-testid="voice-local" disabled={busy} onclick={() => { if (config!.engine !== 'local') void apply({ engine: 'local' }); }}><span class="ui-label">{strings.speech.local}</span></button>
           <button type="button" role="radio" class:on={config.engine === 'api'} aria-checked={config.engine === 'api'} data-testid="voice-api" disabled={busy} onclick={() => { if (config!.engine !== 'api') void apply({ engine: 'api' }); }}><span class="ui-label">{strings.speech.api}</span></button>
         </div>
       </div>
       <div class="switch-row">
-        <span class="text" id="voice-language-label">{strings.speech.language}<InfoTip topic={strings.speech.language} text={strings.speech.languageHint} /></span>
+        <span class="text ui-label-box" id="voice-language-label"><span class="ui-label">{strings.speech.language}</span><InfoTip topic={strings.speech.language} text={strings.speech.languageHint} /></span>
         <input class="language" data-testid="voice-language" maxlength="2" pattern={'[a-z]{2}|'} value={config.language} placeholder="auto" aria-labelledby="voice-language-label" spellcheck="false"
           onchange={(event) => { const value = event.currentTarget.value.trim().toLowerCase(); if (value !== config!.language && /^([a-z]{2})?$/.test(value)) void apply({ language: value }); }} />
       </div>
@@ -213,7 +213,7 @@
     {#if config.engine === 'local'}
       <section class="card" data-testid="voice-models">
         {#if status.models}
-        <h2>{strings.speech.model}<InfoTip topic={strings.speech.model} text={strings.speech.modelHint} /></h2>
+        <h2 class="ui-label-box"><span class="ui-label">{strings.speech.model}</span><InfoTip topic={strings.speech.model} text={strings.speech.modelHint} /></h2>
         <div class="models" role="radiogroup" aria-label={strings.speech.model}>
           {#each status.models as model (model.id)}
             <div class="switch-row model" data-testid="voice-model-{model.id}">
@@ -232,7 +232,7 @@
           {/each}
         </div>
         <form class="switch-row link" onsubmit={addLink}>
-          <span class="text" id="voice-link-label">{strings.speech.link}<InfoTip topic={strings.speech.link} text={strings.speech.linkHint} /></span>
+          <span class="text ui-label-box" id="voice-link-label"><span class="ui-label">{strings.speech.link}</span><InfoTip topic={strings.speech.link} text={strings.speech.linkHint} /></span>
           <div class="field">
             <input type="url" inputmode="url" spellcheck="false" autocomplete="off" data-testid="voice-model-url" aria-labelledby="voice-link-label" placeholder={strings.speech.linkPlaceholder} bind:value={link} />
             <button type="submit" class="small" data-testid="voice-model-add" disabled={busy || status.installing || !link.trim()}><span class="ui-label">{strings.speech.add}</span></button>
@@ -254,7 +254,7 @@
     {:else}
       <form class="card" onsubmit={saveKeys}>
         <div class="switch-row">
-          <span class="text">{strings.speech.provider}<InfoTip topic={strings.speech.provider} text={strings.speech.providerHint} /></span>
+          <span class="text ui-label-box"><span class="ui-label">{strings.speech.provider}</span><InfoTip topic={strings.speech.provider} text={strings.speech.providerHint} /></span>
           <div class="segmented" role="radiogroup" aria-label={strings.speech.provider}>
             {#each PROVIDERS as id (id)}
               <button type="button" role="radio" class:on={config.apiProvider === id} aria-checked={config.apiProvider === id} data-testid="voice-provider-{id}" disabled={busy} onclick={() => { if (config!.apiProvider !== id) void apply({ apiProvider: id }); }}><span class="ui-label">{provider(id)}</span></button>
@@ -279,7 +279,7 @@
           <div class="actions save"><button type="submit" class="primary small" data-testid="voice-save" disabled={busy}><span class="ui-label">{strings.speech.saveKeys}</span></button></div>
         {/if}
         <label class="switch-row">
-          <span class="text">{strings.speech.fallback}<InfoTip topic={strings.speech.fallback} text={strings.speech.fallbackHint} /></span>
+          <span class="text ui-label-box"><span class="ui-label">{strings.speech.fallback}</span><InfoTip topic={strings.speech.fallback} text={strings.speech.fallbackHint} /></span>
           <input type="checkbox" role="switch" data-testid="voice-fallback" checked={config.fallback} disabled={busy} onchange={(event) => void apply({ fallback: event.currentTarget.checked })} />
         </label>
       </form>

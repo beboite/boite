@@ -242,7 +242,7 @@
               <div class="saved-account" class:active={account.active} data-testid="plugin-account" data-email={account.email}>
                 <div class="account-head">
                   <strong class="ui-label">{account.email}</strong>
-                  {#if account.active}<span class="tag" data-testid="plugin-account-active"><span class="ui-label">{t.active}</span></span>{/if}
+                  {#if account.active}<span class="tag ui-label-box" data-testid="plugin-account-active"><span class="ui-label">{t.active}</span></span>{/if}
                   <span class="account-actions">
                     {#if !account.active}
                       <button class="quiet small" disabled={working} data-testid="plugin-switch" onclick={() => void accountAction(plugin, pool.provider, 'switch', account.email)}><span class="ui-label">{t.switch}</span></button>
@@ -263,7 +263,7 @@
 {/snippet}
 
 <div class="page" data-testid="plugins-page">
-  <header><div><h1>{t.heading}<InfoTip topic={t.heading} text={t.intro} /></h1></div></header>
+  <header><div><h1 class="ui-label-box"><span class="ui-label">{t.heading}</span><InfoTip topic={t.heading} text={t.intro} /></h1></div></header>
   {#if error}<p class="bad" role="alert">{error}</p>{/if}
 
   <section aria-labelledby="plugins-installed" data-testid="plugins-installed">

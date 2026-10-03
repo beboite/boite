@@ -99,7 +99,7 @@
 
 {#if store.owner}
   <section class="card" id="settings-worktrees" data-testid="worktrees-card">
-    <h2>{s.heading}<InfoTip topic={s.heading} text={s.intro} /></h2>
+    <h2 class="ui-label-box"><span class="ui-label">{s.heading}</span><InfoTip topic={s.heading} text={s.intro} /></h2>
     <WorktreeStorageSetting {store} />
     {#if lists === null}
       <button type="button" data-testid="worktrees-show" disabled={busy || store.connection !== 'ready'} onclick={() => void load()}><span class="ui-label">{s.show}</span></button>

@@ -50,7 +50,7 @@
   </header>
 
   <section class="card" id="settings-quiet">
-    <h2>{strings.protection.quiet}<InfoTip topic={strings.protection.quiet} text={strings.protection.windows} /></h2>
+    <h2 class="ui-label-box"><span class="ui-label">{strings.protection.quiet}</span><InfoTip topic={strings.protection.quiet} text={strings.protection.windows} /></h2>
     <label for="{uid}-focus-guard" class="switch-row">
       <span class="text"><span id="{uid}-focus-guard-name">{strings.settings.focusGuard}</span></span>
       <input id="{uid}-focus-guard" aria-labelledby="{uid}-focus-guard-name" type="checkbox" role="switch" data-testid="setting-focus-guard" checked={store.settings?.focusGuard ?? true} onchange={(event) => void store.saveSettings({focusGuard: event.currentTarget.checked})} />
@@ -60,7 +60,7 @@
       <input id="{uid}-mute-agents" aria-labelledby="{uid}-mute-agents-name" type="checkbox" role="switch" data-testid="setting-mute-agents" checked={store.settings?.muteAgents ?? true} onchange={(event) => void store.saveSettings({muteAgents: event.currentTarget.checked})} />
     </label>
     <label for="{uid}-reap-orphans" class="switch-row">
-      <span class="text"><span id="{uid}-reap-orphans-name">{strings.settings.reapOrphans}</span><InfoTip topic={strings.settings.reapOrphans} text={strings.settings.reapOrphansHint} /></span>
+      <span class="text ui-label-box"><span class="ui-label" id="{uid}-reap-orphans-name">{strings.settings.reapOrphans}</span><InfoTip topic={strings.settings.reapOrphans} text={strings.settings.reapOrphansHint} /></span>
       <input id="{uid}-reap-orphans" aria-labelledby="{uid}-reap-orphans-name" type="checkbox" role="switch" data-testid="setting-reap-orphans" checked={store.settings?.reapOrphans ?? true} onchange={(event) => void store.saveSettings({reapOrphans: event.currentTarget.checked})} />
     </label>
   </section>
@@ -68,7 +68,7 @@
   <section class="card" id="settings-limits">
     <h2>{strings.protection.limits}</h2>
     <label for="{uid}-memory-protection" class="switch-row">
-      <span class="text"><span id="{uid}-memory-protection-name">{strings.settings.memoryProtection}</span><InfoTip topic={strings.settings.memoryProtection} text={strings.settings.memoryProtectionHint} /></span>
+      <span class="text ui-label-box"><span class="ui-label" id="{uid}-memory-protection-name">{strings.settings.memoryProtection}</span><InfoTip topic={strings.settings.memoryProtection} text={strings.settings.memoryProtectionHint} /></span>
       <input id="{uid}-memory-protection" aria-labelledby="{uid}-memory-protection-name" type="checkbox" role="switch" data-testid="setting-memory-protection" checked={memoryEnabled} onchange={async (event) => {
         const input = event.currentTarget;
         if (!await store.saveSettings({ memoryProtection: input.checked })) input.checked = memoryEnabled;

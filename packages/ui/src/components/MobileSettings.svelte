@@ -88,7 +88,7 @@
           </button>
           <label for="{uid}-group-working" class="row">
             <ListFilter size={20} />
-            <span><span id="{uid}-group-working-name">{strings.settings.groupWorkingThreads}</span><InfoTip topic={strings.settings.groupWorkingThreads} text={strings.settings.groupWorkingThreadsHint} /></span>
+            <span class="ui-label-box"><span class="ui-label" id="{uid}-group-working-name">{strings.settings.groupWorkingThreads}</span><InfoTip topic={strings.settings.groupWorkingThreads} text={strings.settings.groupWorkingThreadsHint} /></span>
             <input id="{uid}-group-working" aria-labelledby="{uid}-group-working-name" type="checkbox" role="switch" data-testid="setting-group-working-threads"
               checked={recentPreferences.groupWorking} onchange={event => recentPreferences.setGroupWorking(event.currentTarget.checked)} />
           </label>

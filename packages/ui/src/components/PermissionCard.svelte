@@ -65,7 +65,7 @@
   {/if}
   {#if request}
     <details class="technical">
-      <summary><ChevronRight size={12} strokeWidth={2} />{strings.chat.permissionTechnical}</summary>
+      <summary><ChevronRight size={12} strokeWidth={2} /><span class="ui-label">{strings.chat.permissionTechnical}</span></summary>
       <p class="tool mono">{toolName}</p>
       <pre class="mono" data-testid="permission-input">{json(request.input)}</pre>
     </details>

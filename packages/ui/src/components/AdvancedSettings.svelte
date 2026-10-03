@@ -37,7 +37,7 @@
 
   {#if store.owner}
     <section class="card" id="settings-origins" data-testid="browser-origins">
-      <h2>{strings.machines.browserOrigins}<InfoTip topic={strings.machines.browserOrigins} text={strings.machines.browserOriginsHint} /></h2>
+      <h2 class="ui-label-box"><span class="ui-label">{strings.machines.browserOrigins}</span><InfoTip topic={strings.machines.browserOrigins} text={strings.machines.browserOriginsHint} /></h2>
       <textarea bind:value={origins} oninput={() => (dirty = true)} aria-label={strings.machines.browserOrigins} rows="3" spellcheck="false" placeholder="https://boite.example.com"></textarea>
       <button type="button" disabled={!store.settings || origins.trim() === saved} onclick={saveOrigins}><span class="ui-label">{strings.settings.save}</span></button>
     </section>

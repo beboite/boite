@@ -98,8 +98,8 @@
     <WorkflowRunPane {store} {run} onback={() => showRun(undefined)} />
   {:else}
     <header class="surface-head">
-      <h2><UsersRound size={17} strokeWidth={1.75} />{strings.delegation.heading}</h2>
-      {#if view && (!config.enabled || config.paused)}<span class="state" data-testid="delegation-state"><span class="ui-label">{config.enabled ? strings.delegation.paused : strings.delegation.off}</span></span>{/if}
+      <h2><UsersRound size={17} strokeWidth={1.75} /><span class="ui-label">{strings.delegation.heading}</span></h2>
+      {#if view && (!config.enabled || config.paused)}<span class="state ui-label-box" data-testid="delegation-state"><span class="ui-label">{config.enabled ? strings.delegation.paused : strings.delegation.off}</span></span>{/if}
       <span class="spacer"></span>
       {#if busy}
         <button type="button" class="quiet small" data-testid="delegation-stop-all" onclick={() => void store.stopDelegatedAgent()}><Square size={11} fill="currentColor" /><span class="ui-label">{strings.delegation.stopAll}</span></button>
@@ -148,7 +148,7 @@
             {@const progress = runProgress(entry)}
             <button type="button" class="member" data-testid="delegation-run" data-run-id={entry.id} onclick={() => showRun(entry.id)}>
               <WorkflowMark status={entry.status} run />
-              <span class="member-main"><strong><Workflow size={13} strokeWidth={1.75} />{entry.name}</strong></span>
+              <span class="member-main"><strong class="workflow-name"><Workflow size={13} strokeWidth={1.75} /><span class="ui-label">{entry.name}</span></strong></span>
               <span class="status ui-label">{strings.workflow.status[entry.status]}</span>
               <span class="member-usage">{fill(strings.workflow.steps, { done: String(progress.done), total: String(progress.total) })} · <AgentElapsed startedAt={entry.createdAt} finishedAt={entry.finishedAt} active={entry.status === 'running'} /></span>
             </button>
@@ -219,7 +219,9 @@
   .member:hover, .member.selected { background: var(--color-hover); border-color: var(--color-border); }
   .member-main strong, .member-main small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .member-main strong { font-size: var(--text-sm); }
-  .member-main strong :global(svg) { margin-right: 5px; vertical-align: -2px; }
+  .member-main .workflow-name { display: flex; align-items: center; gap: 5px; }
+  .workflow-name :global(svg) { flex: none; }
+  .workflow-name .ui-label { overflow: hidden; text-overflow: ellipsis; }
   .member-main small, .status, .member-usage { color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .task, .result { grid-column: 2 / -1; font-size: var(--text-xs); line-height: 1.4; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
   .task { color: var(--color-muted-foreground); line-clamp: 2; -webkit-line-clamp: 2; }

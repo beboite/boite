@@ -798,9 +798,16 @@ a {
 .ui-label {
   display: block;
   min-width: 0;
-  padding-block: 0.25em;
-  margin-block: -0.25em;
+  padding-block: 0.5em;
+  margin-block: -0.5em;
   text-box: trim-both cap alphabetic;
+}
+
+/* Label containers keep their line-height and centre icons or padded badges. */
+.ui-label-box {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 1lh;
 }
 
 button {

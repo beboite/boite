@@ -130,13 +130,13 @@
         <span class="status ui-label">{strings.threadStatus[entry.status]}</span>
       </div>
       <dl class="metrics">
-        <div><dt><Cpu size={14} />{strings.trace.cpu}</dt><dd data-testid="task-manager-cpu">{available(entry, 'cpu') ? cpu(entry.load.cpuPercent) : strings.resources.unknown}</dd></div>
-        <div><dt><MemoryStick size={14} />{strings.resources.memory}</dt><dd data-testid="task-manager-memory">{available(entry, 'memory') ? bytes(entry.load.memoryBytes) : strings.resources.unknown}</dd></div>
+        <div><dt><Cpu size={14} /><span class="ui-label">{strings.trace.cpu}</span></dt><dd data-testid="task-manager-cpu">{available(entry, 'cpu') ? cpu(entry.load.cpuPercent) : strings.resources.unknown}</dd></div>
+        <div><dt><MemoryStick size={14} /><span class="ui-label">{strings.resources.memory}</span></dt><dd data-testid="task-manager-memory">{available(entry, 'memory') ? bytes(entry.load.memoryBytes) : strings.resources.unknown}</dd></div>
         {#each ['disk', 'network'] as kind}
           {@const usage = entry[kind as 'disk' | 'network']}
           <div class="transfer" data-testid="task-manager-{kind}">
-            <dt>{#if kind === 'disk'}<HardDrive size={14} />{:else}<Network size={14} />{/if}{kind === 'disk' ? strings.taskManager.disk : strings.taskManager.network}<InfoTip topic={kind === 'disk' ? strings.taskManager.disk : strings.taskManager.network} text={hint(usage)} /></dt>
-            <dd>{#if usage.coverage === 'unavailable'}<span class="unavailable">{strings.resources.unknown}</span>{:else}<span title={kind === 'disk' ? strings.taskManager.read : strings.taskManager.download}><ArrowDown size={12} />{speed(usage.readBytesPerSecond)}</span><span title={kind === 'disk' ? strings.taskManager.write : strings.taskManager.upload}><ArrowUp size={12} />{speed(usage.writeBytesPerSecond)}</span>{/if}</dd>
+            <dt class="ui-label-box">{#if kind === 'disk'}<HardDrive size={14} />{:else}<Network size={14} />{/if}<span class="ui-label">{kind === 'disk' ? strings.taskManager.disk : strings.taskManager.network}</span><InfoTip topic={kind === 'disk' ? strings.taskManager.disk : strings.taskManager.network} text={hint(usage)} /></dt>
+            <dd>{#if usage.coverage === 'unavailable'}<span class="unavailable">{strings.resources.unknown}</span>{:else}<span title={kind === 'disk' ? strings.taskManager.read : strings.taskManager.download}><ArrowDown size={12} /><span class="ui-label">{speed(usage.readBytesPerSecond)}</span></span><span title={kind === 'disk' ? strings.taskManager.write : strings.taskManager.upload}><ArrowUp size={12} /><span class="ui-label">{speed(usage.writeBytesPerSecond)}</span></span>{/if}</dd>
             {#if usage.readBytes !== null && usage.writeBytes !== null}<small>{strings.taskManager.observed}: {bytes(usage.readBytes + usage.writeBytes)}</small>{/if}
           </div>
         {/each}

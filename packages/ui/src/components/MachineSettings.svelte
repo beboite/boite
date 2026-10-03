@@ -27,7 +27,7 @@
     <section class="card">
       <h2>{strings.harnessUpdates.heading}</h2>
       <label class="switch-row" for="{uid}-auto-update">
-        <span>{strings.providerSettings.autoUpdate}<InfoTip topic={strings.providerSettings.autoUpdate} text={strings.harnessUpdates.autoHint} /></span>
+        <span class="ui-label-box"><span class="ui-label">{strings.providerSettings.autoUpdate}</span><InfoTip topic={strings.providerSettings.autoUpdate} text={strings.harnessUpdates.autoHint} /></span>
         <input id="{uid}-auto-update" type="checkbox" role="switch" data-testid="setting-auto-update-harnesses"
           checked={store.settings?.autoUpdateHarnesses ?? false}
           onchange={async (event) => {

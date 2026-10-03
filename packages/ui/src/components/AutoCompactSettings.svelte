@@ -83,7 +83,7 @@
           <label for="{uid}-{moment.id}" class="option" class:on>
             <span class="icon"><Icon size={18} strokeWidth={1.75} /></span>
             <span class="words">
-              <span class="name" id="{uid}-{moment.id}-name"><span class="ui-label">{moment.name}</span>{#if moment.recommended}<span class="badge"><span class="ui-label">{strings.settings.autoCompactRecommended}</span></span>{/if}</span>
+              <span class="name" id="{uid}-{moment.id}-name"><span class="ui-label">{moment.name}</span>{#if moment.recommended}<span class="badge ui-label-box"><span class="ui-label">{strings.settings.autoCompactRecommended}</span></span>{/if}</span>
               <span class="hint">{moment.hint}</span>
             </span>
             <input id="{uid}-{moment.id}" aria-labelledby="{uid}-{moment.id}-name" type="checkbox" role="switch" data-testid="auto-compact-{moment.id}"

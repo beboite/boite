@@ -116,7 +116,7 @@
 
 <section class="card remote" id="settings-agent-links" data-testid="agent-links">
   <header>
-    <div><h2>{strings.machines.agentLinks}<InfoTip topic={strings.machines.agentLinks} text={`${strings.machines.agentLinksHint} ${strings.machines.publicIdentityHint}`} /></h2></div>
+    <div><h2 class="ui-label-box"><span class="ui-label">{strings.machines.agentLinks}</span><InfoTip topic={strings.machines.agentLinks} text={`${strings.machines.agentLinksHint} ${strings.machines.publicIdentityHint}`} /></h2></div>
     <button class="ghost icon-only" aria-label={strings.machines.agentLinksRefresh} title={strings.machines.agentLinksRefresh} disabled={Boolean(busy)} onclick={() => void refresh()}><RefreshCw size={15} /></button>
   </header>
 

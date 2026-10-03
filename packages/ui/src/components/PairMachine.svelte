@@ -69,7 +69,7 @@
     <div>
       <section class="card add" data-testid="machine-add-card" aria-label={strings.machines.add}>
         <div class="add-head">
-          <h2>{strings.machines.add}<InfoTip topic={strings.machines.add} text={strings.machines.addHint} /></h2>
+          <h2 class="ui-label-box"><span class="ui-label">{strings.machines.add}</span><InfoTip topic={strings.machines.add} text={strings.machines.addHint} /></h2>
           {#if workspace.machines.length > 0}
             <button class="ghost icon-only" data-testid="machine-add-close" aria-label={strings.common.cancel} title={strings.common.cancel} onclick={stopAdding}><X size={15} /></button>
           {/if}

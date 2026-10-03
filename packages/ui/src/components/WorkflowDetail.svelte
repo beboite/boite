@@ -50,7 +50,7 @@
   <header>
     <button type="button" class="ghost small icon" aria-label={strings.workflow.back} title={strings.workflow.back} data-testid="workflow-back" onclick={onback}><ArrowLeft size={15} strokeWidth={1.75} /></button>
     <div class="title">
-      <strong><WorkflowMark status={node.status} />{node.title}</strong>
+      <strong><WorkflowMark status={node.status} /><span class="ui-label">{node.title}</span></strong>
       <small>
         {strings.workflow.stepStatus[node.status]}
         {#if route}· <ProviderLogo providerId={route.providerId} size={12} /> {route.model || route.profile}{/if}
@@ -119,6 +119,7 @@
   header { flex: none; min-height: 48px; padding: 7px 12px 7px 9px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--color-border); }
   .title { flex: 1; min-width: 0; }
   .title strong { display: flex; align-items: center; gap: 7px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--text-sm); font-weight: 600; }
+  .title strong .ui-label { overflow: hidden; text-overflow: ellipsis; }
   .title small { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .body { flex: 1; min-height: 0; padding: 12px 16px 18px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
   .facts { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; color: var(--color-muted-foreground); font-size: var(--text-sm); }

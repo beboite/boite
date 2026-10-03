@@ -133,7 +133,7 @@
     <span class="name ui-label">{store.page === 'agents' ? strings.agents.heading : heading}</span>
   {/if}
   {#if dev}
-    <span class="channel" title={strings.app.channelDevTitle} data-testid="titlebar-channel"><span class="ui-label">{strings.app.channelDev}</span></span>
+    <span class="channel ui-label-box" title={strings.app.channelDevTitle} data-testid="titlebar-channel"><span class="ui-label">{strings.app.channelDev}</span></span>
   {/if}
   {#if inShell && !macShell}
   <!-- Windows' caption buttons: 46 px wide, the bar's full height, no gap and

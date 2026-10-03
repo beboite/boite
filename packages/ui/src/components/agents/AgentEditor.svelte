@@ -132,7 +132,7 @@
       {/if}
     {:else if kind === 'group'}
       {@render members()}
-      <div class="agent-field"><span class="agent-label">{labels.mode}<InfoTip topic={labels.mode} text={labels.modeHint} /></span>
+      <div class="agent-field"><span class="agent-label ui-label-box"><span class="ui-label">{labels.mode}</span><InfoTip topic={labels.mode} text={labels.modeHint} /></span>
         <Menu placement="bottom" label={labels.mode} items={(['mentions', 'round', 'autonomous'] as const).map(id => ({ id, label: labels[id], active: mode === id }))} onpick={id => { mode = id as AgentGroup['mode']; }}><span class="ui-label">{labels[mode]}</span></Menu>
       </div>
     {:else if kind === 'team'}

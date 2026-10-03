@@ -136,7 +136,7 @@
 {/snippet}
 
 <section class="card hooks" id="settings-hooks" data-testid="hooks-card" aria-busy={loading}>
-  <h2>{strings.hooks.heading}<InfoTip topic={strings.hooks.heading} text={strings.hooks.description} /></h2>
+  <h2 class="ui-label-box"><span class="ui-label">{strings.hooks.heading}</span><InfoTip topic={strings.hooks.heading} text={strings.hooks.description} /></h2>
   {#if status || error}
     <button type="button" class="ghost small icon refresh" aria-label={strings.hooks.refresh} title={strings.hooks.refresh} disabled={loading} onclick={() => void load()} data-testid="hooks-refresh"><RefreshCw size={14} strokeWidth={1.75} /></button>
   {/if}
