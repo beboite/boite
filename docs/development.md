@@ -75,6 +75,9 @@ its generated tsconfig makes Vite reload the page and can reset a fixture mid-te
 Fake browser fixtures do not always need a development server.
 `tests/e2e/lib/ui.ts` selects a prebuilt fixture from `BOITE_E2E_FAKE_UI`, builds
 one per test process with `BOITE_E2E_PREBUILT_UI=1`, or falls back to Vite.
+Both modes expose the fixture workspace through `globalThis.__boiteTest`, so
+tests that only need the Store can use the prebuilt bundle. Close each scenario's
+browsers in `afterEach` to release their rendering resources before the next test.
 Pages importing `/src/...` call `startDevUi` directly. That server warms their
 reachable modules before browser interactions. Fixture bundles enable the fake
 client separately from the production assets staged in installers.
