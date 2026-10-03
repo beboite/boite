@@ -40,6 +40,36 @@ afterEach(async () => {
   document.body.innerHTML = ''; localStorage.clear();
 });
 
+test('a new frame replaces the shown one only once decoded, and the next is asked for without a fixed pause', async () => {
+  client = new FakeClient({ delayMs: 0 }); store = new Store(); store.attach(client); await store.connect();
+  const original = client.call.bind(client), requests: number[] = [];
+  vi.spyOn(client, 'call').mockImplementation(((method: string, params: unknown) => {
+    if (method !== 'browser.remoteFrame') return original(method as never, params as never);
+    requests.push(Date.now());
+    return new Promise<unknown>(resolve => setTimeout(() => resolve({ id: `f${requests.length}`, tabId: 'tab', title: 'Desktop', width: 760, height: 900, at: Date.now(), base64: requests.length === 1 ? 'AAAA' : 'BBBB' }), 400));
+  }) as typeof client.call);
+  const decodes: (() => void)[] = [], decode = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'decode');
+  HTMLImageElement.prototype.decode = () => new Promise<void>(resolve => decodes.push(resolve));
+  vi.useFakeTimers();
+  try {
+    app = mount(RemoteBrowser, { target: document.body, props: { store, threadId: 't-trace' } }); await settle();
+    await vi.advanceTimersByTimeAsync(401); await settle();
+    expect(decodes).toHaveLength(1);
+    expect(document.querySelector('[data-testid=remote-browser-frame]')).toBeNull();
+    decodes[0]!(); await settle();
+    expect(document.querySelector<HTMLImageElement>('[data-testid=remote-browser-frame]')!.src).toContain('AAAA');
+    // The frame took longer than the frame interval: the next request leaves at once.
+    await vi.advanceTimersByTimeAsync(1); await settle();
+    expect(requests).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(400); await settle();
+    expect(document.querySelector<HTMLImageElement>('[data-testid=remote-browser-frame]')!.src).toContain('AAAA');
+    decodes[1]!(); await settle();
+    expect(document.querySelector<HTMLImageElement>('[data-testid=remote-browser-frame]')!.src).toContain('BBBB');
+  } finally {
+    if (decode) Object.defineProperty(HTMLImageElement.prototype, 'decode', decode); else delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
+  }
+});
+
 test('visibility changes do not flood the host; leaving the panel stops the stream', async () => {
   client = new FakeClient({ delayMs: 0 }); store = new Store(); store.attach(client); await store.connect();
   const original = client.call.bind(client), requests: number[] = [];
@@ -57,7 +87,7 @@ test('visibility changes do not flood the host; leaving the panel stops the stre
   expect(requests).toHaveLength(1);
   await vi.advanceTimersByTimeAsync(750); await settle();
   expect(requests.length).toBeGreaterThan(1);
-  expect(requests.every((at, i) => i === 0 || at - requests[i - 1]! >= 300)).toBe(true);
+  expect(requests.every((at, i) => i === 0 || at - requests[i - 1]! >= 250)).toBe(true);
   await unmount(app); app = undefined;
   const beforeClose = requests.length;
   await vi.advanceTimersByTimeAsync(2000); await settle();

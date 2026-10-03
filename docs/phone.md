@@ -518,10 +518,11 @@ Navigation keys and scroll buttons remain available without a hardware
 keyboard. When the desktop shows another surface of its panel, or another
 conversation, the view waits for it.
 
-The phone requests JPEG frames while the view is shown and the app visible:
-about three a second while the page moves, slower on a still page or a slow
-link, sized to the phone's screen (at most twice its CSS width) and lighter
-when frames take long to arrive. The desktop captures its tab as shown and
+The phone requests JPEG frames while the view is shown and the app visible,
+one at a time: the next as soon as the last has arrived, at most four a second
+while the page moves, slower on a still page or a slow link, sized to the
+phone's screen (at most twice its CSS width) and lighter when frames take long
+to arrive. Each frame is decoded before it replaces the one shown. The desktop captures its tab as shown and
 shrinks the image itself: asking Chromium for a smaller capture redraws the
 live tab at that size and made it flash on the PC each time the phone's
 keyboard shrank the preview. A lost desktop is retried with a growing pause up

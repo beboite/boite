@@ -5,7 +5,7 @@
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
   import { normalizeUrl } from '../lib/browser-bridge';
-  import { dragScroll, frameMaxWidth, framePoint, frameQuality, nextPollDelay } from '../lib/remote-browser-view';
+  import { dragScroll, FRAME_INTERVAL, frameMaxWidth, framePoint, frameQuality, nextPollDelay } from '../lib/remote-browser-view';
   /** The PC's browser tab of this conversation, watched and driven from a paired device's panel. */
   let { store, threadId }: { store: Store; threadId: string } = $props();
   let paused = $state(false), busy = $state(false), error = $state(''), text = $state('');
@@ -31,6 +31,11 @@
   const usable = $derived(!!frame && frameClient === store.client && !paused && !busy && !error && store.connection === 'ready');
   const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
   function stop() { generation++; clearTimeout(timer); }
+  async function decoded(base64: string): Promise<void> {
+    const image = new Image();
+    image.src = `data:image/jpeg;base64,${base64}`;
+    if (typeof image.decode === 'function') await image.decode().catch(() => {});
+  }
   async function poll(run: number): Promise<void> {
     if (!alive || run !== generation || paused || document.hidden) return;
     if (pending || busy) { timer = setTimeout(() => void poll(run), 100); return; }
@@ -41,6 +46,8 @@
       if (!client || client.state !== 'ready') throw new Error(strings.remoteBrowser.reconnecting);
       const maxWidth = frameMaxWidth(frame ? frame.width * previewScale : areaWidth, window.devicePixelRatio), quality = frameQuality(roundTrip);
       const next = await client.call('browser.remoteFrame', { threadId, ...(maxWidth ? { maxWidth } : {}), ...(quality !== 55 ? { quality } : {}) });
+      // Decoded off the main thread before it replaces the shown frame: a drag stays smooth and Safari never paints a half-loaded image.
+      if (next.base64 !== frame?.base64) await decoded(next.base64);
       if (!alive || run !== generation) return;
       if (client === store.client) {
         roundTrip = performance.now() - started; failures = 0;
@@ -68,7 +75,7 @@
     stop();
     if (!paused && !document.hidden) {
       const run = generation;
-      timer = setTimeout(() => void poll(run), Math.max(0, 300 - (Date.now() - requestedAt)));
+      timer = setTimeout(() => void poll(run), Math.max(0, FRAME_INTERVAL - (Date.now() - requestedAt)));
     }
   }
   /** After an input the page moves: the next frame comes at full rate, without dropping one in flight. */
@@ -77,7 +84,7 @@
     if (pending || paused || document.hidden) return;
     clearTimeout(timer);
     const run = generation;
-    timer = setTimeout(() => void poll(run), Math.max(60, 250 - (Date.now() - requestedAt)));
+    timer = setTimeout(() => void poll(run), Math.max(60, FRAME_INTERVAL - (Date.now() - requestedAt)));
   }
   onMount(() => {
     const visibility = () => { if (document.hidden) { stop(); fresh = false; } else resume(); };

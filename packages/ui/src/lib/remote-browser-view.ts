@@ -43,13 +43,19 @@ export interface PollState {
   failures: number;
 }
 
+/** The shortest gap between two frame requests: the core refuses them closer than 220 ms. */
+export const FRAME_INTERVAL = 250;
+
 /**
- * The wait before the next frame. A moving page refreshes about three times a
- * second, a still one slows down, a slow link is not asked for more than it
- * carries, and a lost desktop is retried with a growing pause.
+ * The wait after a frame arrives before asking for the next. One request is in
+ * flight at a time, so a slow link is never asked for more than it carries. A
+ * moving page asks again as soon as the last frame took FRAME_INTERVAL, with
+ * no fixed pause added to the trip: about four frames a second instead of two
+ * (bench/remote-browser-frames.ts, docs/performance.md). A still
+ * page slows down and a lost desktop is retried with a growing pause.
  */
 export function nextPollDelay({ roundTrip, unchanged, failures }: PollState): number {
   if (failures > 0) return Math.min(8000, 1200 * 2 ** Math.min(3, failures - 1));
-  const base = roundTrip > 600 ? 500 : 300;
-  return unchanged >= 10 ? Math.max(base, 1500) : unchanged >= 3 ? Math.max(base, 800) : base;
+  const interval = unchanged >= 10 ? 1500 : unchanged >= 3 ? 800 : FRAME_INTERVAL;
+  return Math.max(0, Math.round(interval - roundTrip));
 }

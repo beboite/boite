@@ -148,7 +148,7 @@ test('sharing alone hosts the browser for viewers but not for the agent, and sca
   await vi.waitFor(() => expect(completed.get('frame')?.result?.frame?.url).toBe('https://example.test/'));
   const shot = protocol.mock.calls.find(call => call[1] === 'Page.captureScreenshot')![2];
   // 2000 pixels for an 800-pixel viewer: captured whole, shrunk on the PC (browser-remote-host.test.ts).
-  expect(shot).toMatchObject({ format: 'jpeg', quality: 90 });
+  expect(shot).toMatchObject({ format: 'jpeg', quality: 75 });
   expect(shot).not.toHaveProperty('clip');
   expect(panel.active?.id).toBe(surface.id);
   // Paired devices hear within a second that the conversation has no browser tab left.

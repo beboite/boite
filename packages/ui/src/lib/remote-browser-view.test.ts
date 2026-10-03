@@ -33,10 +33,10 @@ test('frames are sized to the screen and lightened on a slow link', () => {
   expect([frameQuality(120), frameQuality(700), frameQuality(2500)]).toEqual([55, 45, 35]);
 });
 
-test('polling slows on a still page and backs off while the desktop is away', () => {
-  expect(nextPollDelay({ roundTrip: 100, unchanged: 0, failures: 0 })).toBe(300);
-  expect(nextPollDelay({ roundTrip: 900, unchanged: 0, failures: 0 })).toBe(500);
-  expect(nextPollDelay({ roundTrip: 100, unchanged: 3, failures: 0 })).toBe(800);
-  expect(nextPollDelay({ roundTrip: 100, unchanged: 12, failures: 0 })).toBe(1500);
+test('a moving page asks again once a frame interval has passed, slows when still and backs off while the desktop is away', () => {
+  expect(nextPollDelay({ roundTrip: 100, unchanged: 0, failures: 0 })).toBe(150);
+  expect(nextPollDelay({ roundTrip: 900, unchanged: 0, failures: 0 })).toBe(0);
+  expect(nextPollDelay({ roundTrip: 100, unchanged: 3, failures: 0 })).toBe(700);
+  expect(nextPollDelay({ roundTrip: 100, unchanged: 12, failures: 0 })).toBe(1400);
   expect([1, 2, 3, 4, 9].map(failures => nextPollDelay({ roundTrip: 0, unchanged: 0, failures }))).toEqual([1200, 2400, 4800, 8000, 8000]);
 });

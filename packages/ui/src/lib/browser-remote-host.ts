@@ -61,8 +61,10 @@ export async function captureRemoteBrowser(id: string, assertCurrent: () => void
   const page = await evaluate(pageInfo) as Page;
   const quality = options.quality ?? 55;
   // Never a clip: the visible viewport, at the scroll position, is what a plain capture takes.
+  // An image shrunk here is captured at q75, not q90: a third fewer bytes to carry and decode
+  // for the same frame once shrunk (docs/performance.md, the desktop browser on a phone).
   const shrink = remoteWidth(page.width * (page.dpr > 0 ? page.dpr : 1), options.maxWidth);
-  const shot = await protocol('Page.captureScreenshot', { format: 'jpeg', quality: shrink ? 90 : quality, captureBeyondViewport: false });
+  const shot = await protocol('Page.captureScreenshot', { format: 'jpeg', quality: shrink ? Math.max(75, quality) : quality, captureBeyondViewport: false });
   if (!samePage(page, await evaluate(pageInfo) as Page)) throw new Error('the page changed during capture; retry');
   const base64 = shrink ? await shrinkFrame(String(shot.data), shrink, quality) : String(shot.data);
   check();
