@@ -360,15 +360,17 @@ describe('a paired device reads a thread\'s changes and files', () => {
     const owner = await harness.connect();
     const { root, threadId } = await repoThread(owner);
     mkdirSync(join(root, '.ssh'));
-    for (const name of ['.env', '.env.local', '.env.example', 'id_ed25519', 'server.pem', '.ssh/config']) writeFileSync(join(root, name), 'token\n');
+    const secrets = ['.env', '.env.local', '.envrc', '.dev.vars', 'id_ed25519', 'server.pem', '.pgpass', '.htpasswd', 'terraform.tfvars', 'terraform.tfstate', 'release.jks', 'debug.keystore'];
+    for (const name of [...secrets, '.env.example', 'terraform.tfvars.example', '.ssh/config']) writeFileSync(join(root, name), 'token\n');
     const phone = await pairedDevice();
     try {
-      for (const path of ['.env', '.env.local', 'id_ed25519', 'server.pem', '.ssh/config', '.git/config']) {
+      for (const path of [...secrets, '.ssh/config', '.git/config']) {
         await expect(phone.call('files.read', { threadId, path })).rejects.toThrow('credential files');
       }
       await expect(phone.call('files.list', { threadId, path: '.git' })).rejects.toThrow('credential files');
       await expect(phone.call('git.diff', { threadId, path: '.env' })).rejects.toThrow('credential files');
       expect(await phone.call('files.read', { threadId, path: '.env.example' })).toMatchObject({ kind: 'text' });
+      expect(await phone.call('files.read', { threadId, path: 'terraform.tfvars.example' })).toMatchObject({ kind: 'text' });
       expect(await owner.call('files.read', { threadId, path: '.env' })).toMatchObject({ kind: 'text', text: 'token\n' });
     } finally {
       phone.close();

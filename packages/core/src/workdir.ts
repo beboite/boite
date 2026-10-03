@@ -63,7 +63,7 @@ function deviceRoots(core: Core, threadId: ThreadId): string[] {
 const DEVICE_SECRET_DIRS = new Set(['.git', '.ssh', '.gnupg', '.aws', '.azure', '.kube', '.docker']);
 /** Files that hold credentials; templates such as `.env.example` stay readable. */
 const DEVICE_SECRET_FILE =
-  /^(\.env(\.(?!example$|sample$|template$)[^.]+)*|\.netrc|_netrc|\.npmrc|\.pypirc|\.git-credentials|\.credentials\.json|credentials(\.json)?|id_(rsa|dsa|ecdsa|ed25519)(\.pub)?|.+\.(pem|key|p12|pfx|kdbx))$/i;
+  /^(\.env(\.(?!example$|sample$|template$)[^.]+)*|\.envrc|\.dev\.vars|\.netrc|_netrc|\.npmrc|\.pypirc|\.pgpass|\.htpasswd|\.git-credentials|\.credentials\.json|credentials(\.json)?|id_(rsa|dsa|ecdsa|ed25519)(\.pub)?|.+\.(tfvars|tfstate|tfstate\.backup)|.+\.(pem|key|p12|pfx|jks|keystore|kdbx))$/i;
 
 /**
  * Inside a readable tree, a paired device still leaves two things to the owner.

@@ -145,7 +145,13 @@ The Changes and Files panels are read-only on a paired device: `git.status`,
 trace. The core runs git itself, refuses a device diff against any revision but
 `HEAD`, and before every read checks that the thread's real working directory is
 inside its project or the core's worktree folder for it; each path is then held
-inside that directory, links included. At a phone's width the Changes panel shows
+inside that directory, links included. Inside it a device still cannot read
+boite's data folder, folders such as `.git`, `.ssh` and `.aws`, or files that
+hold credentials (`.env`, `.envrc`, `.netrc`, `.pgpass`, Terraform variables and
+state, private keys, Java keystores; `workdir.ts` has the list). No list of
+names covers everything: a project that is a home folder also exposes `.config`,
+where many tools keep their tokens, so make a narrower folder the project when a
+phone is paired. At a phone's width the Changes panel shows
 the list, then one diff with Back and previous/next file; a file reads as wrapped,
 numbered lines with no editor.
 
