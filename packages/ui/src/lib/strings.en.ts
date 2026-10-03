@@ -1449,6 +1449,7 @@ export const strings = {
     provider: 'Provider',
     allProviders: 'All providers',
     unknownProvider: 'Unknown provider',
+    filterUnsupported: 'This machine did not filter usage by provider. Update Boite on it and retry.',
     noActivity: 'No turns',
     noUsage: 'Not reported',
     coverage: 'Tokens {reported}/{turns} turns · Cost {priced}/{turns}',

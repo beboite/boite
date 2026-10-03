@@ -1390,6 +1390,7 @@ export const fr: Translation = {
     provider: 'Fournisseur',
     allProviders: 'Tous les fournisseurs',
     unknownProvider: 'Fournisseur inconnu',
+    filterUnsupported: 'Cette machine ne filtre pas la consommation par fournisseur. Mettez Boite à jour dessus, puis réessayez.',
     noActivity: 'Aucun tour',
     noUsage: 'Non rapporté',
     coverage: 'Jetons {reported}/{turns} tours · Coût {priced}/{turns}',

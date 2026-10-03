@@ -82,3 +82,16 @@ test('legacy turns without a provider keep their totals without duplicating the 
   await settle();
   expect(document.querySelectorAll('[data-testid=usage-provider-filter-menu] [data-row]')).toHaveLength(1);
 });
+
+test('an older core that ignores the provider filter is reported instead of displaying unfiltered totals', async () => {
+  const call = vi.fn(async (_method: string, params: { edges: number[] }) => history(params.edges, 'selected-provider'));
+  mounted = mount(UsagePage, { target: document.body, props: { store: store(call) } });
+  await settle();
+  call.mockImplementationOnce(async (_method, params) => history(params.edges, 'another-provider'));
+  click('[data-testid=usage-provider-filter]');
+  await settle();
+  click('[data-testid=usage-provider-filter-menu] [data-value=selected-provider]');
+  await settle();
+  expect(document.querySelector('[role=alert]')?.textContent).toContain('did not filter usage');
+  expect(document.querySelector('[data-testid=usage-total]')).toBeNull();
+});

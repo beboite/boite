@@ -198,6 +198,9 @@ them in SQLite:
   providers. A removed or unused provider returns an empty history.
   Legacy turns with no provider identity remain in the all-provider totals as
   "Unknown provider"; they have no individual filter option.
+  If an older core returns other providers for a filtered request, the page
+  reports the unsupported filter and asks for an update instead of showing
+  those totals as filtered usage.
 
 The query reads the `turns_by_finished` index on `turns (finished_at)`, created
 on open when the journal lacks it. `EXPLAIN QUERY PLAN` shows
@@ -261,7 +264,8 @@ added on top, and the uninstalled mode (`?fake=1&uninstalled=1`) starts empty.
   order, unused and custom providers, reporting coverage, provider-scoped model
   names, the summaries and the fake ledger.
 - `packages/ui/src/components/UsagePage.test.ts`: read failures and retry,
-  stale responses after range or machine changes, and legacy provider identities.
+  stale responses after range or machine changes, legacy provider identities,
+  and older cores that ignore the provider filter.
 - `tests/e2e/usage.test.ts`: the page at 1280x800 and 390x844 in both themes,
   the tooltip staying inside the chart, keyboard reading, the three ranges, the
   phone entry, the limits tab on both widths and the device's Limits note.
