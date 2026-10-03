@@ -58,6 +58,14 @@ interface Located extends MobileDevice {
   serial?: string;
 }
 
+/** A boot under way. `life` is the device's when it started; `serial` is set once adb sees the emulator. */
+interface Boot {
+  device: Located;
+  life: number;
+  serial?: string;
+  promise: Promise<Located>;
+}
+
 interface Capture {
   at: number;
   png: Promise<{ bytes: Uint8Array; width: number; height: number }>;
@@ -79,7 +87,9 @@ export class MobileDevices {
   /** The serial or UDID each open device answers to, once known. */
   readonly #targets = new Map<string, Located>();
   /** One boot per device, shared by every conversation that opens it meanwhile. */
-  readonly #boots = new Map<string, Promise<Located>>();
+  readonly #boots = new Map<string, Boot>();
+  /** Advanced by each shutdown: a boot that started before it settles no session. */
+  readonly #lives = new Map<string, number>();
   readonly #emulators = new Map<string, { kill(): void }>();
   readonly #captures = new Map<string, Capture>();
   #closed = false;
@@ -135,12 +145,16 @@ export class MobileDevices {
     open.set(device.id, session);
     this.#sessions.set(threadId, open);
     this.#changed(threadId);
-    void this.#boot(device).then(
+    const boot = this.#boot(device);
+    void boot.promise.then(
       (target) => {
+        if (!this.#alive(boot)) return;
         this.#targets.set(device.id, target);
         this.#settle(device.id, { state: 'ready' });
       },
-      (error: unknown) => this.#settle(device.id, { state: 'failed', error: error instanceof Error ? error.message : String(error) }),
+      (error: unknown) => {
+        if (this.#alive(boot)) this.#settle(device.id, { state: 'failed', error: error instanceof Error ? error.message : String(error) });
+      },
     );
     return { session: { ...session } };
   }
@@ -183,10 +197,14 @@ export class MobileDevices {
   async close(params: RpcParams<'devices.close'>, connection?: Connection): Promise<RpcResult<'devices.close'>> {
     this.#host(params.hostId);
     const deviceId = this.#only(params.threadId, params.deviceId, connection);
-    const target = this.#targets.get(deviceId);
     if (params.shutdown === true) {
-      if (target?.kind === 'physical') throw refused('a connected phone is not powered off from Boite; close it without shutdown', { deviceId });
+      // A device still booting is powered off through the serial or UDID its boot knows.
+      const boot = this.#boots.get(deviceId);
+      const target = this.#targets.get(deviceId) ?? (boot?.serial ? { ...boot.device, serial: boot.serial } : undefined);
+      if ((target ?? boot?.device)?.kind === 'physical') throw refused('a connected phone is not powered off from Boite; close it without shutdown', { deviceId });
       if (target) await this.#shutdown(target);
+      this.#lives.set(deviceId, (this.#lives.get(deviceId) ?? 0) + 1);
+      this.#boots.delete(deviceId);
       this.#emulators.get(deviceId)?.kill();
       for (const [threadId, open] of this.#sessions) if (open.delete(deviceId)) this.#changed(threadId);
       this.#forget(deviceId);
@@ -279,15 +297,23 @@ export class MobileDevices {
 
   // --- boot ---
 
-  #boot(device: Located): Promise<Located> {
+  #boot(device: Located): Boot {
     const pending = this.#boots.get(device.id);
     if (pending) return pending;
-    const boot = (device.platform === 'android' ? this.#bootAndroid(device) : this.#bootIos(device)).finally(() => this.#boots.delete(device.id));
+    const boot = { device, life: this.#lives.get(device.id) ?? 0, serial: device.serial } as Boot;
+    boot.promise = (device.platform === 'android' ? this.#bootAndroid(boot) : this.#bootIos(device)).finally(() => {
+      if (this.#boots.get(device.id) === boot) this.#boots.delete(device.id);
+    });
     this.#boots.set(device.id, boot);
     return boot;
   }
 
-  async #bootAndroid(device: Located): Promise<Located> {
+  #alive(boot: Boot): boolean {
+    return (this.#lives.get(boot.device.id) ?? 0) === boot.life;
+  }
+
+  async #bootAndroid(boot: Boot): Promise<Located> {
+    const { device } = boot;
     const tools = this.#adb();
     const deadline = Date.now() + this.#bootTimeoutMs;
     let serial = device.serial;
@@ -299,23 +325,25 @@ export class MobileDevices {
       let tail = '';
       void new Response(child.proc.stdout).text().catch(() => '');
       void new Response(child.proc.stderr).text().then((err) => { tail = err.trim().slice(-400); }, () => undefined);
+      const handle = { kill: () => child.proc.kill() };
       void child.exited.then((code) => {
         exited = `the emulator exited with code ${code}${tail ? `: ${tail}` : ''}`;
-        this.#emulators.delete(device.id);
+        if (this.#emulators.get(device.id) === handle) this.#emulators.delete(device.id);
       });
-      this.#emulators.set(device.id, { kill: () => child.proc.kill() });
+      this.#emulators.set(device.id, handle);
     }
     while (Date.now() < deadline) {
       if (this.#closed) throw refused('the core is shutting down');
+      if (!this.#alive(boot)) throw refused(`${device.name} was powered off while starting`, { deviceId: device.id });
       if (exited && !serial) throw refused(exited);
-      if (!serial) serial = await this.#emulatorSerial(tools.adb, device.id);
+      if (!serial) boot.serial = serial = await this.#emulatorSerial(tools.adb, device.id);
       if (serial) {
         const prop = await this.#run(tools.adb, ['-s', serial, 'shell', 'getprop', 'sys.boot_completed'], COMMAND_TIMEOUT_MS);
         if (text(prop.stdout).trim() === '1') return { ...device, serial, state: 'running' };
       }
       await Bun.sleep(this.#pollMs);
     }
-    this.#emulators.get(device.id)?.kill();
+    if (this.#alive(boot)) this.#emulators.get(device.id)?.kill();
     throw refused(`${device.name} did not finish booting within ${Math.round(this.#bootTimeoutMs / 1000)} seconds`, { deviceId: device.id });
   }
 

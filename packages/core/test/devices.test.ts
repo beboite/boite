@@ -198,6 +198,21 @@ describe('the Device panel over RPC', () => {
     expect((await agent.call('devices.list', { threadId })).devices.find((d) => d.id === 'Pixel_8')?.state).toBe('stopped');
   });
 
+  test('powering off a device still booting stops it, and its old boot readies nothing', async () => {
+    const sdk = fakeSdk({ avds: ['Pixel_8'], bootMs: 1500 });
+    sdkEnv = linux({ ANDROID_HOME: sdk.root });
+    await agent.call('devices.open', { threadId, deviceId: 'Pixel_8' });
+    const deadline = Date.now() + 5000;
+    while (!sdk.calls().some((call) => call.startsWith('adb -s emulator-5554 shell getprop')) && Date.now() < deadline) await Bun.sleep(20);
+    await agent.call('devices.close', { threadId, shutdown: true });
+    expect(sdk.calls()).toContain('adb -s emulator-5554 emu kill');
+    expect(sdk.state().running).toEqual({});
+    // Opened again at once: a boot of its own, not the retired one that would wait on a gone serial.
+    await agent.call('devices.open', { threadId, deviceId: 'Pixel_8' });
+    expect((await ready('Pixel_8')).state).toBe('ready');
+    expect(sdk.calls().filter((call) => call.startsWith('emulator -avd'))).toHaveLength(2);
+  });
+
   test('an emulator that cannot start fails its session with the reason', async () => {
     const sdk = fakeSdk({ avds: ['Pixel_8'], emulatorFails: 'PANIC: Missing emulator engine program for x86 CPU.' });
     sdkEnv = linux({ ANDROID_HOME: sdk.root });
