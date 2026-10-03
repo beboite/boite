@@ -324,3 +324,37 @@ test('PR links appear during work without remounting and disappear after a move 
   expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.threads.find(thread => thread.id === 't-trace').branch`)).toBeNull();
   expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.client.call('threads.pullRequest', { threadId: 't-trace' })`)).toBeNull();
 }, 45_000);
+
+test('hidden reasoning and protocol text leave no extra gap before tools on desktop and phone', async () => {
+  await page.navigate(await page.evaluate<string>('location.origin + "/?fake=1&open=recent"'));
+  await page.waitFor(`document.querySelector('[data-thread-id="t-trace"]')`);
+  await page.click('[data-thread-id="t-trace"]');
+  await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread?.id === 't-trace'`);
+  await update(`
+    thread.status = 'idle'; thread.memoryEvents = [];
+    const m = thread.messages.at(-1); m.state = 'complete';
+    thread.messages = [thread.messages[0], m];
+    m.parts = [
+      {type:'thinking',text:'',startedAt:1000,finishedAt:2000},
+      {type:'thinking',text:''},
+      {type:'text',text:'[BOITE_GOAL_COMPLETE]'},
+      {type:'tool',toolId:'gap-search',name:'Grep',input:{pattern:'padding'},output:'src/app.css:12',status:'done'},
+      {type:'tool',toolId:'gap-command',name:'Bash',input:{command:'git status --short'},output:'',status:'done'}
+    ];
+  `);
+  for (const width of [1300, 390]) {
+    await page.send('Emulation.setDeviceMetricsOverride', {width,height:850,deviceScaleFactor:1,mobile:width<720});
+    await page.waitFor(`getComputedStyle(document.querySelector('${id('thinking-part')}')).visibility === 'visible'`);
+    await page.waitFor(`document.querySelector('${id('thinking-elapsed')}')?.textContent === '1s'`);
+    await capture(`thinking-gap-${width}`);
+    const gap = await page.evaluate<number>(`(() => {
+      const thought = document.querySelector('${id('thinking-part')}');
+      const tools = document.querySelector('${id('tool-group')}');
+      return tools.getBoundingClientRect().top - thought.getBoundingClientRect().bottom;
+    })()`);
+    expect(gap).toBe(12);
+    expect(await page.evaluate(`document.querySelector('${id('thinking-part')}').closest('.parts').children.length`)).toBe(2);
+    expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  }
+  await page.send('Emulation.setDeviceMetricsOverride', {width:1300,height:850,deviceScaleFactor:1,mobile:false});
+}, 30_000);

@@ -32,3 +32,22 @@ test('path detection handles long slash sequences without repeated backtracking'
   expect(fileLike(`-/${'!/'.repeat(10000)} `)).toBe(false);
   expect(fileLike('src/nested/file.ts:12')).toBe(true);
 });
+
+test('numeric ratios and dates remain text instead of automatic file links', () => {
+  const source = '- 56/102 binaries processed.\n- 139 015/173 043 archive entries extracted.\n- 20 174 resources examined.';
+  expect(renderMarkdown(source, true)).toBe('<ul><li>56/102 binaries processed.</li><li>139 015/173 043 archive entries extracted.</li><li>20 174 resources examined.</li></ul>');
+  expect(renderMarkdown('**56/102** and ~~1/2~~', true)).toBe('<p><strong>56/102</strong> and <del>1/2</del></p>');
+  for (const value of ['1/2', '2026/10/03', '1.5/2.0', '/102']) {
+    expect(renderMarkdown(`${value}, then continue.`, true)).toBe(`<p>${value}, then continue.</p>`);
+    expect(renderMarkdown(`(${value}), then continue.`, true)).toBe(`<p>(${value}), then continue.</p>`);
+    expect(fileLike(value)).toBe(false);
+    expect(renderMarkdown('`' + value + '`', true)).toBe(`<p><code>${value}</code></p>`);
+  }
+});
+
+test('numeric directories and explicit links to numeric files remain clickable', () => {
+  const html = renderMarkdown('2026/10/report.json /123/report.json `123/report.json` [numeric file](/123)', true);
+  for (const path of ['2026/10/report.json', '/123/report.json', '123/report.json', '/123']) {
+    expect(html).toContain(`data-file-path="${path}"`);
+  }
+});
