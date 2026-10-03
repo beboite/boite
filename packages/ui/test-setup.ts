@@ -10,6 +10,10 @@ vi.stubGlobal('ResizeObserver', class {
   disconnect() {}
 });
 
+// Nor a canvas: say so quietly, as a browser without one would, instead of
+// jsdom's "not implemented" on every image attached.
+HTMLCanvasElement.prototype.getContext = (() => null) as typeof HTMLCanvasElement.prototype.getContext;
+
 // jsdom has no Web Animations either, so a Svelte transition ends at once here.
 if (typeof Element.prototype.animate !== 'function') {
   Element.prototype.animate = function animate() {

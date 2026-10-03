@@ -7,6 +7,7 @@ import { FakeClient } from '../lib/fake-client';
 import { RpcFailure } from '../lib/client';
 import { defaultPrefs, PREFS_STORAGE_KEY, STASH_STORAGE_KEY } from '../lib/prefs';
 import { store } from '../lib/store.svelte';
+import { repliesOf } from '../lib/question-reply.svelte';
 import { closeTour } from '../lib/onboarding.svelte';
 import { freshWork, work, WORK_STORAGE_KEY } from '../lib/work-prefs.svelte';
 
@@ -119,6 +120,8 @@ afterEach(() => {
   running = null;
   document.body.innerHTML = '';
   window.localStorage.clear();
+  // Each test's fake numbers its questions from one again, on the same store.
+  Object.assign(repliesOf(store), { picks: {}, ignored: {}, docked: null, chosen: null });
   // The device's work record is module state: the next test starts with no record.
   work.load();
   vi.restoreAllMocks();
@@ -685,15 +688,59 @@ test('a thread of a machine that dropped still opens and queues its prompts unti
   press('Enter');
   await waitFor(() => input().value === '' && store.composerStates[other.id]?.queued.length === 1);
   expect(query('[data-testid=composer-queued]').textContent).toContain('Run this once you are back');
+  // It sits in the outbox, says what it waits for, and already holds its request id.
+  expect(query('[data-testid=composer-outbox-pending]').textContent).toContain('Waiting for');
+  const id = store.composerStates[other.id]!.queued[0]!.request!.id;
   expect(rpc).not.toHaveBeenCalled();
   await fake.restore();
   const start = () => rpc.mock.calls.find(([method]) => method === 'turns.start')?.[1] as { threadId: string; prompt: string } | undefined;
   await waitFor(() => start() !== undefined && store.composerStates[other.id]?.queued.length === 0);
   const started = start();
-  expect(started).toMatchObject({ threadId: other.id, prompt: 'Run this once you are back' });
+  expect(started).toMatchObject({ threadId: other.id, prompt: 'Run this once you are back', clientRequestId: id });
   // What the offline open skipped is read once the machine is back.
   const asked = (method: string) => rpc.mock.calls.some(([name, params]) => name === method && (params as { threadId?: string }).threadId === other.id);
   await waitFor(() => asked('threads.get') && asked('collaboration.get') && asked('workflows.list') && asked('delegation.get'));
+});
+
+test('an outbox prompt the core refuses shows why, holds the next one, and goes again on Send again', async ({ app: _app }) => {
+  await store.open('t-descriptors');
+  await waitFor(() => !store.busy);
+  const fake = store.client as FakeClient;
+  const original = fake.call.bind(fake);
+  const starts: { prompt: string; clientRequestId: string }[] = [];
+  let refuse = true;
+  vi.spyOn(fake, 'call').mockImplementation(async (method, params) => {
+    if (method === 'turns.start') {
+      starts.push(params as { prompt: string; clientRequestId: string });
+      if (refuse) { refuse = false; throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'The account is signed out' }); }
+    }
+    return original(method, params);
+  });
+  fake.drop();
+  await waitFor(() => input().placeholder.includes('offline'));
+  for (const prompt of ['First while away', 'Second while away', 'Third while away']) {
+    await type(prompt);
+    press('Enter');
+    await waitFor(() => input().value === '');
+  }
+  expect(store.composerStates['t-descriptors']!.queued.map(entry => entry.text)).toEqual(['First while away', 'Second while away', 'Third while away']);
+  await fake.restore();
+  await waitFor(() => document.querySelector('[data-testid=composer-outbox-failed]') !== null);
+  expect(query('[data-testid=composer-outbox-failed]').textContent).toContain('The account is signed out');
+  // The refused head holds the ones written after it.
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(starts.map(start => start.prompt)).toEqual(['First while away']);
+  // The last one is cancelled; Send again sends the first under the same id, then the second.
+  document.querySelectorAll<HTMLButtonElement>('[data-testid=composer-queued-remove]')[2]!.click();
+  await waitFor(() => store.composerStates['t-descriptors']!.queued.length === 2);
+  query<HTMLButtonElement>('[data-testid=composer-outbox-retry]').click();
+  await waitFor(() => store.composerStates['t-descriptors']!.queued.length === 0 && !store.busy);
+  expect(starts.map(start => start.prompt)).toEqual(['First while away', 'First while away', 'Second while away']);
+  expect(starts[1]!.clientRequestId).toBe(starts[0]!.clientRequestId);
+  expect(starts[2]!.clientRequestId).not.toBe(starts[0]!.clientRequestId);
+  const sent = store.openThread!.messages.filter(message => message.role === 'user').map(message => JSON.stringify(message.parts));
+  expect(sent.filter(parts => parts.includes('while away'))).toHaveLength(2);
+  expect(sent.some(parts => parts.includes('Third while away'))).toBe(false);
 });
 
 test('Enter in the emptied composer holds pending input behind an approval', async ({ app: _app }) => {
@@ -771,6 +818,9 @@ test('all queued prompts run together on their thread without reopening it', asy
   await store.send('question');
   await waitFor(() => store.openThread?.status === 'waiting');
   const question = store.pendingQuestions.find(item => item.threadId === 't-trace')!;
+  // The composer would answer the question: set it aside to queue ordinary prompts.
+  await waitFor(() => document.querySelector('[data-testid=composer-reply-ignore]') !== null);
+  query<HTMLButtonElement>('[data-testid=composer-reply-ignore]').click();
   await type('first queued prompt');
   press('Enter');
   await type('second queued prompt');
@@ -873,6 +923,7 @@ test('a pasted image becomes a chip, comes off again, and rides the prompt', asy
   expect(query<HTMLImageElement>('[data-testid=composer-attachment] img').getAttribute('src')).toBe(
     `data:image/png;base64,${PIXEL}`
   );
+  input().focus();
   query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
   expect(document.activeElement).toBe(input());
@@ -930,6 +981,122 @@ test('a pasted image becomes a chip, comes off again, and rides the prompt', asy
   // What went out left the composer, text and picture together.
   expect(input().value).toBe('');
   expect(document.querySelector('[data-testid=composer-attachments]')).toBeNull();
+});
+
+function pendingCard(): HTMLElement {
+  return query('[data-testid=question-card][data-state=pending]');
+}
+
+test('a waiting question takes the composer as its free answer, with the card pick and a photo', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
+  await type('one question please');
+  press('Enter');
+  await waitFor(() => document.querySelector('[data-testid=composer-reply]') !== null);
+  expect(input().placeholder).toBe('Your answer…');
+  expect(query('[data-testid=composer-send]').getAttribute('aria-label')).toBe('Send the answer');
+  expect(pendingCard().querySelector('[data-testid=question-reply-hint]')).not.toBeNull();
+
+  // Ignore gives the composer back to ordinary messages; the card offers it again.
+  query<HTMLButtonElement>('[data-testid=composer-reply-ignore]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-reply]') === null);
+  expect(input().placeholder).not.toBe('Your answer…');
+  pendingCard().querySelector<HTMLButtonElement>('[data-testid=question-write]')!.click();
+  await waitFor(() => document.querySelector('[data-testid=composer-reply]') !== null);
+
+  pendingCard().querySelector<HTMLButtonElement>('[data-option=short]')!.click();
+  await type('one line please');
+  paste(pngFile('mockup.png'));
+  await waitFor(() => chips().length === 1);
+  const call = vi.spyOn(store.client!, 'call');
+  input().focus();
+  press('Enter');
+  await waitFor(() => document.querySelector('[data-testid=question-card][data-state=pending]') === null);
+  const answered = call.mock.calls.find(([method]) => method === 'questions.answer')?.[1] as
+    { optionIds: string[]; text: string; attachments?: { kind: string; name?: string }[] };
+  // The pasted photo keeps its reference in the text, as it does in a prompt.
+  expect(answered).toMatchObject({ optionIds: ['short'], text: 'one line please [Image 1]' });
+  expect(answered.attachments?.map((file) => [file.kind, file.name])).toEqual([['image', 'mockup.png']]);
+  // The answer left the composer, which writes ordinary messages again.
+  expect(input().value).toBe('');
+  expect(chips()).toHaveLength(0);
+  await waitFor(() => !store.busy && document.querySelector('[data-testid=composer-reply]') === null);
+  expect(input().placeholder).not.toBe('Your answer…');
+  expect(call.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(0);
+});
+
+test('an ignored async question stays docked while an ordinary message goes out as a turn', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await send('check this [ask]');
+  await waitFor(() => document.querySelector('[data-testid=composer-reply]') !== null);
+  const asked = store.pendingQuestions.find((question) => question.threadId === 't-trace')!;
+  expect(query('[data-testid=composer-reply]').dataset.question).toBe(asked.id);
+  query<HTMLButtonElement>('[data-testid=composer-reply-ignore]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-reply]') === null);
+  await send('something else entirely');
+  const prompt = store.openThread!.messages.filter((message) => message.role === 'user').at(-1)!;
+  expect(prompt.parts).toEqual([{ type: 'text', text: 'something else entirely' }]);
+  expect(store.pendingQuestions.map((question) => question.id)).toContain(asked.id);
+  expect(document.querySelector('[data-testid=activity-question]')).not.toBeNull();
+});
+
+/**
+ * On a phone the focus is the keyboard: a press that moved it closed the
+ * keyboard (Send took two taps), and removing a chip focused the box and opened it.
+ */
+test('the composer buttons keep the focus where it was, and a removed chip opens no keyboard', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
+  paste(pngFile());
+  await waitFor(() => chips().length === 1);
+  const pressed = (selector: string) => {
+    const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    query(selector).dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  for (const selector of ['[data-testid=composer-send]', '[data-testid=composer-attachment-remove]', '[data-testid=composer-image-open]']) {
+    expect(pressed(selector), selector).toBe(true);
+  }
+
+  // Keyboard closed: neither the preview nor the removal focuses the box. Each
+  // press starts from an empty focus and is checked before anything else runs:
+  // on a loaded runner, another close path can hand the focus back to the
+  // composer later, which says nothing about the press.
+  const focus = vi.spyOn(input(), 'focus');
+  const nothingFocused = () => { (document.activeElement as HTMLElement | null)?.blur(); focus.mockClear(); };
+  nothingFocused();
+  query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
+  expect(focus).not.toHaveBeenCalled();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
+  // Nothing has the focus, so Escape reaches the app: it closes the preview first.
+  nothingFocused();
+  document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  expect(focus).not.toHaveBeenCalled();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') === null);
+  nothingFocused();
+  query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
+  expect(focus).not.toHaveBeenCalled();
+  await waitFor(() => chips().length === 0);
+  focus.mockRestore();
+
+  // Keyboard open: it stays open through the removal.
+  paste(pngFile());
+  await waitFor(() => chips().length === 1);
+  input().focus();
+  const blur = vi.fn();
+  input().addEventListener('blur', blur);
+  query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
+  await waitFor(() => chips().length === 0);
+  expect(document.activeElement).toBe(input());
+  expect(blur).not.toHaveBeenCalled();
+
+  // A keyboard user's remove button goes with its chip: the focus comes back to the box.
+  paste(pngFile());
+  await waitFor(() => chips().length === 1);
+  query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').focus();
+  query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
+  await waitFor(() => chips().length === 0);
+  expect(document.activeElement).toBe(input());
 });
 
 test('image references follow the caret, mixed attachments and removal without losing browser references', async ({ app: _app }) => {
@@ -1059,7 +1226,8 @@ test('a file read uses the original provider even if the user switches threads',
   vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader, blob: Blob) {
     release = () => original.call(this, blob);
   });
-  paste(pngFile());
+  // A GIF is read as it is, so the read is the wait (a PNG is refused before it).
+  paste(new File([Uint8Array.from(atob(PIXEL), (character) => character.charCodeAt(0))], 'loop.gif', { type: 'image/gif' }));
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace');
   release();

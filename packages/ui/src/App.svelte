@@ -2,6 +2,9 @@
   import { onMount } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { hostBrowser } from './lib/browser-host';
+  import { browserBridge } from './lib/browser-bridge';
+  import { watchRemoteBrowser } from './lib/remote-browser-watch.svelte';
+  import { browserProfiles } from './lib/browser-profiles.svelte';
   import TerminalDrawer from './components/TerminalDrawer.svelte';
   import UndoToast from './components/UndoToast.svelte';
   import NotificationCard from './components/NotificationCard.svelte';
@@ -20,7 +23,7 @@
   import { startGlass } from './lib/glass';
   import { installExternalLinks } from './lib/links';
   import { isQuitChord, QUIT_HOLD_MS, QuitHold } from './lib/quit-hold';
-  import { onNotificationOpen } from './lib/notify';
+  import { notificationWords, onNotificationOpen, storeNotificationWords } from './lib/notify';
   import { closeTabs } from './lib/panel-close';
   import { strings } from './lib/strings';
   import { experimentOn } from './lib/experiments.svelte';
@@ -34,6 +37,8 @@
   import { setZoom, stepZoom, wantedZoom, ZOOM_DEFAULT, zoomKey } from './lib/zoom';
   import { appName, appUpdater } from './lib/app-update.svelte';
   import MobileNavigation from './components/MobileNavigation.svelte';
+  import MobileConnect from './components/MobileConnect.svelte';
+  import { attentionCount, syncAppBadge } from './lib/badge';
   import { startViewport } from './lib/viewport';
   import { WsClient } from './lib/client';
   import { listenForInstall } from './lib/pwa';
@@ -45,14 +50,23 @@
   $effect(() => {
     const threadId = store.openThread?.id;
     void store.connection;
-    if (experimentOn('agent-browser-control') && threadId && store.owner && store.client?.state === 'ready') return hostBrowser(store, threadId);
+    if ((experimentOn('agent-browser-control') || experimentOn('remote-browser')) && threadId && store.owner && store.client?.state === 'ready') return hostBrowser(store, threadId);
   });
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
+  // Away from the PC, the agent's browser tab shows up by itself in its conversation.
+  $effect(() => {
+    const threadId = store.openThread?.id;
+    void store.connection;
+    if (!inShell && !browserBridge.paints && threadId && store.client?.state === 'ready') return watchRemoteBrowser(store, threadId);
+  });
   const narrow = new MediaQuery('(max-width: 720px)');
   let appRoot = $state<HTMLDivElement | undefined>(undefined);
   let mobileScreen = $state<'chat' | 'threads' | 'activity'>('chat');
   const mobileRecovery = $derived(!inShell && (store.pairingRequired || (!store.core && store.connection !== 'ready'))
     && !workspace.machines.some(machine => machine.store.connection === 'ready'));
+  // Wider than a phone (an iPhone on its side, a tablet, a desktop browser)
+  // a lost or revoked pairing gets the same screen rather than a stale page.
+  const wideRecovery = $derived(!narrow.current && mobileRecovery && store.pairingRequired && store.page !== 'settings');
   let documentVisible = $state(!document.hidden);
   // What the first screen does not draw stays out of the first chunk: the right
   // panel and its six surfaces, the palette and the two dialogs were a third of
@@ -107,6 +121,11 @@
     if (!store.booted || !experimentOn('whip') || WhipOverlay) return;
     void import('./components/WhipOverlay.svelte').then(module => { WhipOverlay = module.default; })
       .catch(error => { store.error = String(error); });
+  });
+  // Browser profiles live on this computer, whichever machine is in view: they
+  // are kept by the core this shell started (lib/browser-profiles.svelte.ts).
+  $effect(() => {
+    browserProfiles.source = workspace.machines.find((machine) => machine.store.localCore)?.store ?? store;
   });
   let SettingsShell = $state<typeof import('./components/SettingsShell.svelte').default>();
   let AgentsPage = $state<typeof import('./components/agents/AgentsPage.svelte').default>();
@@ -246,7 +265,7 @@
     const error = store.error;
     // Missing/revoked phone credentials have a persistent recovery screen.
     // Keep other errors (including a failed pairing attempt) visible.
-    const pairingNotice = !inShell && narrow.current && store.pairingRequired
+    const pairingNotice = !inShell && (narrow.current || wideRecovery) && store.pairingRequired
       && (error === strings.errors.unpaired || error === strings.errors.revoked);
     if (!error || pairingNotice) {
       toast.hide();
@@ -294,6 +313,13 @@
       });
   });
 
+  // The same for a push: the service worker shows the core's generic notices
+  // in the words this page left it, written again when the language changes.
+  (() => {
+    if (inShell) return;
+    void storeNotificationWords(notificationWords());
+  });
+
   // Every http(s) link the UI shows goes to the system browser, once, from here.
   $effect(() => {
     const root = appRoot;
@@ -303,12 +329,14 @@
 
   // What wants the user rides the document title, so the taskbar and a browser
   // tab say "(2) Boite" while the window is somewhere behind: the threads of
-  // every connected machine that wait on an answer or finished unread.
+  // every connected machine that wait on an answer or finished unread. The
+  // installed app's icon badge carries the same count.
   $effect(() => {
     const stores = workspace.machines.length ? workspace.machines.map((machine) => machine.store) : [store];
-    const count = stores.reduce((sum, owner) => sum + owner.threads.filter((t) => !t.archived && (t.unread || t.status === 'waiting')).length, 0);
+    const count = attentionCount(stores);
     const name = appName();
     document.title = count > 0 ? `(${count}) ${name}` : name;
+    if (!inShell) syncAppBadge(count);
   });
 
   onMount(() => {
@@ -478,9 +506,8 @@
       case 'changes':
       case 'files':
       case 'tasks': {
-        // Each of these reads the working directory or the project's todos,
-        // which the core refuses to a paired device.
-        if (!store.openThread || !store.owner) return;
+        // A paired device reads the working tree, not the project's todos.
+        if (!store.openThread || (command === 'tasks' && !store.owner)) return;
         event.preventDefault();
         // The panel lives in the chat: from the settings the key brings the chat
         // back with the surface open, rather than toggling what nobody sees.
@@ -530,6 +557,8 @@
   <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && (mobileScreen !== 'chat' || mobileRecovery)} class:panel-maximized={rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
     {#if !store.booted}
       <p class="empty boot">{strings.app.loading}</p>
+    {:else if wideRecovery}
+      <div class="wide-recovery" data-testid="wide-recovery"><MobileConnect {store} onpaired={() => {}} /></div>
     {:else if store.connection === 'closed' && !store.core}
       <Sidebar {store} />
       <!-- The notice gives way to Settings: the two cards side by side left
@@ -709,6 +738,7 @@
     margin: auto;
   }
 
+  .wide-recovery { flex: 1; min-width: 0; display: flex; overflow-y: auto; padding: 16px 24px; }
   .notice {
     flex: 1;
     min-width: 0;

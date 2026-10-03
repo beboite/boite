@@ -58,7 +58,9 @@ test('mail shows its age and exact timestamp, updates the age and follows the ap
   const time = document.querySelector<HTMLTimeElement>('[data-testid="agent-letter-age"]');
   expect(time).not.toBeNull();
   expect(time!.dateTime).toBe('2026-10-02T11:58:00.000Z');
-  expect(time!.title).toContain('11:58');
+  // The title is in the machine's time zone and clock, whatever it is.
+  const at = new Date(letter.createdAt);
+  expect(time!.title).toMatch(new RegExp(`\\b(${at.getHours()}|${at.getHours() % 12 || 12}):58\\b`));
   expect(time!.textContent).toBe('2 min. ago');
 
   await vi.advanceTimersByTimeAsync(60_000);

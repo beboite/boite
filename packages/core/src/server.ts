@@ -484,6 +484,8 @@ export function startServer(options: ServerOptions): RunningServer {
       // A panel request is for the clients watching that thread: a second
       // window on another thread must not have its panel taken over.
       name.startsWith('panel.') ||
+      // Whether that thread's shared browser tab exists.
+      name === 'browser.remoteChanged' ||
       // Every grandchild's record, command line included: only that thread's
       // trace panel reads it.
       name.startsWith('process.');

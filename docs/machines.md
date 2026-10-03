@@ -57,8 +57,10 @@ error at once. The failure carries `data.transport: 'dropped'`, the store waits
 up to 15 seconds for the connection to come back, then sends `turns.start`
 once more with the same `clientRequestId`. The core answers with the turn it
 already took, or starts it if the first request never arrived, and the
-composer clears as for any sent prompt. Only a refused retry, or a connection
-that does not come back in time, shows the error and keeps the text.
+composer clears as for any sent prompt. A refused retry shows the error and
+keeps the text. A connection that does not come back in time moves the prompt
+into the thread's outbox (below) under that same `clientRequestId`, so the core
+can still take it only once.
 
 Retries wait 1, 2, 4, 8, then 10 seconds, each 20 % longer or shorter at random
 so the clients of a restarted core do not all return at once. An attempt gets
@@ -203,11 +205,24 @@ commands run at once, each with a ten-second deadline through `procs` as
 When a machine drops, its cards stay listed, greyed, and still open. The client
 asks nothing of the core then: it shows the timeline it last read for that
 thread, or an empty one for a thread it never opened. Sending in such a thread
-puts the prompt in the thread's queue, which the device keeps with the unsent
-drafts, and the composer says the machine is offline. When the machine is back,
-the reconnect reopens the thread, reads its team, workflows and coordination,
-and the queue goes out as one turn, or waits behind a turn the core was still
-running. A new thread needs the core, so a
+puts the prompt in the thread's outbox, and the composer says the machine is
+offline. When the machine is back, the reconnect reopens the thread, reads its
+team, workflows and coordination, then sends the outbox.
+
+The outbox is the thread's queue with a request on each entry
+(`OutboxRequest` in `store/composer.svelte.ts`): a `clientRequestId` drawn when
+the prompt is written, and the model, effort and speed it was written with.
+The drafts journal keeps it per machine with the unsent text, in IndexedDB
+and its localStorage backup, attachments included, so it survives closing the
+app. Each entry is its own turn and goes through the composer's own send path,
+in order, never steered into a running turn. The core answers a
+`clientRequestId` it already took with that turn, so an entry whose answer was
+lost is not sent twice. A refusal from the core marks the entry as failed with
+its reason and holds the entries written after it; Send again retries it under
+the same id, and the cross removes it. A tap takes it back into the box, and
+sending it from there draws a new id. A thread that moved to another model
+meanwhile is put back on the written one first; a choice for another agent or
+account is ignored. A new thread needs the core, so a
 draft keeps its text until the machine returns. A machine offline since the app
 started has no cards to open: the client keeps no copy of the thread list.
 

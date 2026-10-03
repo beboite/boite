@@ -9,7 +9,9 @@ import { secureId } from './secure-id';
 
 import type { PanelSurface } from '@boite/contracts';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+import { DEFAULT_BROWSER_PROFILE } from '@boite/contracts';
 import { browserBridge } from './browser-bridge';
+import { browserProfiles } from './browser-profiles.svelte';
 import { work } from './work-prefs.svelte';
 import { ZOOM_STEPS } from './zoom';
 
@@ -40,6 +42,11 @@ export interface Surface {
   title?: string;
   /** A browser tab's current address. */
   url?: string;
+  /**
+   * The browser profile the tab opened in, for good: its id, or `private`.
+   * Absent means `default`, the profile every tab used before there were others.
+   */
+  profile?: string;
   /** A browser tab's zoom, one rung of `ZOOM_STEPS`. Absent means 1. */
   zoom?: number;
   /**
@@ -122,7 +129,7 @@ function parse(raw: string): Record<string, PanelState> {
     const surfaces: Surface[] = [];
     for (const surface of raws) {
       if (typeof surface !== 'object' || surface === null) continue;
-      const { title, url, zoom, path, line, runId, mailDirection, letterId } = surface as Surface;
+      const { title, url, profile, zoom, path, line, runId, mailDirection, letterId } = surface as Surface;
       // A layout stored while workflows had a tab of their own: that tab is the subagents tab now.
       const merged = (surface as { kind?: unknown }).kind === 'workflow';
       const kind = merged ? 'agents' : (surface as Surface).kind;
@@ -140,6 +147,7 @@ function parse(raw: string): Record<string, PanelState> {
         kind,
         ...(typeof title === 'string' ? { title } : {}),
         ...(typeof url === 'string' ? { url } : {}),
+        ...(kind === 'browser' && typeof profile === 'string' && profile !== DEFAULT_BROWSER_PROFILE ? { profile } : {}),
         ...stored,
         ...(typeof path === 'string' ? { path } : {}),
         ...(typeof line === 'number' && Number.isFinite(line) ? { line } : {}),
@@ -267,6 +275,24 @@ export class RightPanelStore {
     this.#forget(Object.keys(this.threads).filter((key) => key !== '' && stale(key)));
   }
 
+  /** A deleted profile's tabs close in every thread, their views with them. */
+  closeProfile(profile: string): void {
+    const kept: Record<string, PanelState> = {};
+    let changed = false;
+    for (const [key, state] of Object.entries(this.threads)) {
+      const gone = state.surfaces.filter((surface) => surface.kind === 'browser' && surface.profile === profile);
+      if (gone.length === 0) { kept[key] = state; continue; }
+      changed = true;
+      for (const surface of gone) browserBridge.destroy(surface.id);
+      const surfaces = state.surfaces.filter((surface) => !gone.includes(surface));
+      const active = surfaces.some((surface) => surface.id === state.activeSurfaceId) ? state.activeSurfaceId : (surfaces[surfaces.length - 1]?.id ?? null);
+      kept[key] = { isOpen: state.isOpen && surfaces.length > 0, activeSurfaceId: active, surfaces };
+    }
+    if (!changed) return;
+    this.threads = kept;
+    this.save();
+  }
+
   #forget(keys: string[]): void {
     const kept = { ...this.threads };
     let changed = false;
@@ -336,8 +362,11 @@ export class BoundPanel {
     this.#root.save();
   }
 
-  /** Opens a surface of that kind, or activates the one a singleton kind already has. */
-  open(kind: SurfaceKind, url?: string): Surface {
+  /**
+   * Opens a surface of that kind, or activates the one a singleton kind already
+   * has. A browser tab opens in `profile`, else in the default profile.
+   */
+  open(kind: SurfaceKind, url?: string, profile?: string): Surface {
     const current = this.state;
     if (SINGLETON_KINDS.includes(kind)) {
       const existing = current.surfaces.find((surface) => surface.kind === kind);
@@ -346,7 +375,13 @@ export class BoundPanel {
         return existing;
       }
     }
-    const surface: Surface = { id: surfaceId(kind), kind, ...(url === undefined ? {} : { url }) };
+    const chosen = kind === 'browser' ? (profile ?? browserProfiles.defaultId) : DEFAULT_BROWSER_PROFILE;
+    const surface: Surface = {
+      id: surfaceId(kind),
+      kind,
+      ...(url === undefined ? {} : { url }),
+      ...(chosen === DEFAULT_BROWSER_PROFILE ? {} : { profile: chosen })
+    };
     this.#write({
       isOpen: true,
       activeSurfaceId: surface.id,

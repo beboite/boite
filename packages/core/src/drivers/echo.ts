@@ -1,5 +1,6 @@
 import type { ImageAttachment, AgentCommand, MessageId, ToolDocument, Usage } from '@boite/contracts';
 import { newId } from '../ids.ts';
+import { answerText } from '../attachments.ts';
 import type { Driver, TitleContext, TurnContext, TurnHandle, TurnResult } from './types.ts';
 
 const CHUNK_SIZE = 16;
@@ -474,7 +475,7 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
         });
         // The answer echoed back, which is what a test and a capture read.
         if (answer === null) await writeText('question cancelled');
-        else await writeText(`answered ${[...answer.optionIds, answer.text ?? ''].filter((p) => p.length > 0).join(' ')}`);
+        else await writeText(`answered ${[...answer.optionIds, answerText(answer)].filter((p) => p.length > 0).join(' ')}`);
         break;
       }
       case 'spawn': {

@@ -491,6 +491,10 @@ export class Store {
   submit(...args: Parameters<Composer['submit']>) { return this.#ctx.composer.submit(...args); }
   submitAndDraft(...args: Parameters<Composer['submitAndDraft']>) { return this.#ctx.composer.submitAndDraft(...args); }
   send(...args: Parameters<Composer['send']>) { return this.#ctx.composer.send(...args); }
+  queuePrompt(...args: Parameters<Composer['queuePrompt']>) { return this.#ctx.composer.queuePrompt(...args); }
+  deliverQueued(...args: Parameters<Composer['deliver']>) { return this.#ctx.composer.deliver(...args); }
+  retryQueued(...args: Parameters<Composer['retryQueued']>) { return this.#ctx.composer.retryQueued(...args); }
+  removeQueued(...args: Parameters<Composer['removeQueued']>) { return this.#ctx.composer.removeQueued(...args); }
   get inputBoundaries() { return this.#ctx.composer.inputBoundaries; }
   get promptFocus() { return this.#ctx.composer.promptFocus; }
   steer(...args: Parameters<Composer['steer']>) { return this.#ctx.composer.steer(...args); }

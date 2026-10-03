@@ -3,6 +3,7 @@
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
   import { dockRoom, questionDock } from '../lib/question-dock.svelte';
+  import { replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
   import QuestionCard from './QuestionCard.svelte';
 
   let { store, reserveInComposer = false, onroom }: {
@@ -46,6 +47,8 @@
     shownId = questionDock.focus;
     questionOpen = true;
   });
+  // The composer answers the question on screen when the agent stopped for none.
+  $effect(() => { repliesOf(store).docked = shown?.id ?? null; });
   function page(step: -1 | 1) {
     const next = asked[(at + step + asked.length) % asked.length];
     if (next) shownId = next.id;
@@ -149,6 +152,7 @@
         <div class="task-disclosure" class:open={questionOpen} inert={!questionOpen}>
           <div class="task-clip">
             {#each asked as question (question.id)}
+              {@const reply = replyOf(store, question.id)}
               <div hidden={question.id !== shown.id} data-testid="activity-question" data-question={question.id}>
                 <QuestionCard
                   text={question.text}
@@ -159,8 +163,12 @@
                   docked
                   answer={null}
                   pending
-                  submit={(optionIds, text) => store.answerQuestion(question.threadId, question.id, optionIds, text)}
+                  bind:picked={() => repliesOf(store).picks[question.id] ?? [], (ids) => (repliesOf(store).picks[question.id] = ids)}
+                  replying={reply.replying}
+                  drafted={reply.drafted}
+                  submit={() => sendAnswer(store, question)}
                   skip={() => store.skipQuestion(question.threadId, question.id)}
+                  onwrite={() => writeAnswer(store, question.id)}
                 />
               </div>
             {/each}

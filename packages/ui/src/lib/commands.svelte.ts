@@ -70,11 +70,11 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
     items.push(row('panel', strings.palette.panel, 'browser surface'));
     // Following subagents and workflow runs is open to a paired device.
     items.push({ id: 'subagents', kind: 'command', label: strings.palette.subagents, keywords: 'subagent agent team workflow steps graph plan run' });
-    // The three read the working directory or the project's todos, which
-    // `packages/core/src/access.ts` refuses to a paired device.
+    // A paired device reads the working tree (`DEVICE_METHODS`), never the
+    // project's todos, the trace or a terminal.
+    items.push(row('changes', strings.palette.changes, 'git diff working tree'));
+    items.push(row('files', strings.palette.files, 'tree directory explorer'));
     if (store.owner) {
-      items.push(row('changes', strings.palette.changes, 'git diff working tree'));
-      items.push(row('files', strings.palette.files, 'tree directory explorer'));
       items.push(row('tasks', strings.palette.tasks, 'todo goal loop'));
       // A button put away in Appearance stays here: the palette is the way back to it.
       items.push(row('trace', strings.palette.trace, 'processes load'));

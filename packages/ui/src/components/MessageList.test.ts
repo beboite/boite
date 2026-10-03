@@ -1,4 +1,4 @@
-import { afterEach, expect, vi } from 'vitest';
+import { afterEach, expect, onTestFinished, vi } from 'vitest';
 import { test } from '../test/fake-client';
 import { flushSync, mount, unmount } from 'svelte';
 import { DEFAULT_DELEGATION_CONFIG, type AgentLetter, type Message } from '@boite/contracts';
@@ -193,6 +193,25 @@ test('system coordination messages show their display text outside the user bubb
   expect(document.querySelector('[data-testid="message"]')?.textContent).toContain('Agent coordination');
   expect(document.querySelector('[data-testid="message"]')?.textContent).not.toContain('Internal delivery envelope');
   expect(document.querySelector('.bubble')).toBeNull();
+});
+
+test.for([false, true])('the outline rail is left of the bubbles on a desktop and not drawn on a phone (phone: %s)', async (phone, { createStore }) => {
+  const { store: owner, client } = createStore({ delayMs: 0 });
+  owner.attach(client);
+  await owner.connect();
+  stubLayout(400);
+  const query = vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
+    media, matches: phone && media === '(max-width: 720px)', onchange: null, addListener() {}, removeListener() {}
+  }));
+  onTestFinished(() => query.mockRestore());
+  const messages: Message[] = ['first', 'second'].map((text, index) => ({
+    id: `m-${text}`, threadId: 't-trace', turnId: `turn-${index}`, role: 'user', state: 'complete', createdAt: index,
+    parts: [{ type: 'text', text }]
+  }));
+  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: 't-trace', messages } });
+  flushSync();
+  expect(document.querySelectorAll('[data-testid=message]')).toHaveLength(2);
+  expect(document.querySelector('[data-testid=message-outline]') !== null).toBe(!phone);
 });
 
 test('agent exchange summaries retain chronology without exposing their letters or delivery envelopes', () => {

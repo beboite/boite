@@ -57,6 +57,22 @@
     });
     if (ok) await store.revokeSession(session.id);
   }
+
+  /**
+   * An owner link is pasted on a computer, never drawn: a QR code is a camera
+   * away from any phone in the room. The owner's own phone may still get one,
+   * after saying so here, and that one lives five minutes instead of ten.
+   */
+  async function ownerQr() {
+    const ok = await confirm.ask({
+      title: strings.settings.pairing.ownerQrTitle,
+      body: strings.settings.pairing.ownerQrBody,
+      confirmLabel: strings.settings.pairing.ownerQrConfirm,
+      cancelLabel: strings.common.cancel,
+      danger: true
+    });
+    if (ok) await store.mintPairing('owner', true);
+  }
 </script>
 
 <section class="card" id="settings-devices" data-testid="pairing-card">
@@ -82,21 +98,32 @@
       </button>
       {#if store.pairing}
         <button type="button" onclick={() => void store.copy(store.pairing?.url ?? '')}>{strings.settings.pairing.copy}</button>
+        {#if store.pairing.role === 'owner' && !store.pairing.code}
+          <button type="button" data-testid="pairing-owner-qr" onclick={() => void ownerQr()}>{strings.settings.pairing.ownerQr}</button>
+        {/if}
         <button type="button" class="quiet" data-testid="pairing-close" onclick={() => store.closePairing()}>{strings.common.close}</button>
       {/if}
     </div>
     {#if store.pairing}
       <div class="minted">
         <!-- A computer takes the link pasted, so its QR code would only be
-             a camera away from the wrong device. -->
-        {#if qr && store.pairing.role !== 'owner'}
+             a camera away from the wrong device: an owner link is drawn only
+             once confirmed for a phone, which gives it a code. -->
+        {#if qr && (store.pairing.role !== 'owner' || store.pairing.code)}
           <div class="qr" data-testid="pairing-qr" aria-label={strings.settings.pairing.qr}>{@html qr}</div>
         {/if}
         <div class="minted-text">
           <p class="mono link" data-testid="pairing-link">{store.pairing.url}</p>
-          <p class="hint">{store.pairing.role === 'owner' ? strings.settings.pairing.pasteOwner : strings.settings.pairing.scan}</p>
+          <p class="hint">{store.pairing.role !== 'owner' ? strings.settings.pairing.scan : store.pairing.code ? strings.settings.pairing.ownerScan : strings.settings.pairing.pasteOwner}</p>
           <p class="hint">{fill(strings.settings.pairing.expires, { time: time(store.pairing.expiresAt) })}</p>
-          {#if store.pairing.role !== 'owner' && store.settings && !store.settings.listenOnLan}
+          {#if store.pairing.code}
+            <div class="code-row">
+              <span class="hint">{strings.settings.pairing.code}</span>
+              <span class="mono code" data-testid="pairing-code">{store.pairing.code}</span>
+            </div>
+            {#if store.pairing.codeExpiresAt}<p class="hint">{fill(strings.settings.pairing.codeExpires, { time: time(store.pairing.codeExpiresAt) })}</p>{/if}
+          {/if}
+          {#if store.pairing.role !== 'owner' && store.settings && !store.settings.listenOnLan && !store.settings.publicUrl}
             <p class="hint warn" data-testid="pairing-lan-hint">{strings.settings.pairing.lanHint}</p>
           {/if}
         </div>
@@ -154,6 +181,17 @@
     user-select: all;
   }
   .hint { margin: 0; }
+  .code-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .code {
+    padding: 4px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-2);
+    font-size: var(--text-base);
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    user-select: all;
+  }
   .warn { color: var(--color-live); }
   h3 { font-size: var(--text-sm); font-weight: 600; color: var(--color-muted-foreground); margin: 20px 0 8px; }
   .devices { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }

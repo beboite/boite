@@ -104,7 +104,7 @@ test('large snapshots stay out of JSON, seek over HTTP, renew, survive restart a
   try {
     const downloaded = await phone.call('artifacts.read', params);
     expect(Buffer.from(await (await fetch(new URL(downloaded.url, url))).arrayBuffer())).toEqual(bytes);
-    await expect(phone.call('files.read', { threadId, path: 'journal.db' })).rejects.toThrow('owner only');
+    await expect(phone.call('files.read', { threadId, path: 'journal.db' })).rejects.toThrow('data folder');
   } finally { phone.close(); }
   // Reopen the persisted journal with a fresh ticket store, as a new core does.
   const reopened = new Journal(join(harness.dataDir, 'journal.db'));

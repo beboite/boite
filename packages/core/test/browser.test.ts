@@ -122,3 +122,43 @@ browserTest('disabling sharing while a frame is in flight does not deliver it to
     expect((await image as Error).message).toContain('experiment');
   } finally { phone.close(); }
 });
+
+test('a share-only desktop serves a paired viewer, never the agent, and tells its viewers when the tab comes and goes', async () => {
+  const { grant } = await owner.call('pairing.grant', {});
+  const phone = await connect(harness.url, '', { grant });
+  try {
+    await expect(phone.call('browser.remoteStatus', { threadId })).rejects.toThrow('subscribe');
+    await owner.call('threads.subscribe', { threadId }); await phone.call('threads.subscribe', { threadId });
+    expect(await phone.call('browser.remoteStatus', { threadId })).toEqual({ live: false });
+    // Sharing alone shows nothing: the panel needs a browser tab.
+    await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: false, remote: true });
+    expect(await phone.call('browser.remoteStatus', { threadId })).toEqual({ live: false });
+    await expect(owner.call('browser.host', { threadId, enabled: true, remote: true, live: 'yes' as never })).rejects.toThrow('live must be booleans');
+    const shown = phone.next('browser.remoteChanged', e => e.threadId === threadId);
+    await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: false, remote: true, live: true });
+    expect(await shown).toEqual({ threadId, live: true });
+    expect(await phone.call('browser.remoteStatus', { threadId })).toEqual({ live: true });
+    await expect(agent.call('browser.command', { threadId, action: { kind: 'snapshot' } })).rejects.toThrow('Agent browser control');
+    await expect(phone.call('browser.remoteFrame', { threadId, quality: 95 })).rejects.toThrow('quality');
+    const waiting = owner.next('browser.requested', r => r.action.kind === 'remote-frame');
+    const image = phone.call('browser.remoteFrame', { threadId, maxWidth: 780, quality: 40 });
+    const request = await waiting;
+    expect(request.action).toEqual({ kind: 'remote-frame', maxWidth: 780, quality: 40 });
+    await owner.call('browser.complete', { requestId: request.requestId, result: { frame: { id: 'f', tabId: 'browser:test', width: 800, height: 600, title: 'Docs', base64: 'aGVsbG8=', at: 0, url: 'https://example.com/a' } } });
+    expect((await image).url).toBe('https://example.com/a');
+    await expect(phone.call('browser.remoteInput', { threadId, frameId: 'f', input: { kind: 'navigate', url: 'javascript:alert(1)' } })).rejects.toThrow('HTTP');
+    const navWaiting = owner.next('browser.requested', r => r.action.kind === 'remote-input');
+    const nav = phone.call('browser.remoteInput', { threadId, frameId: 'f', input: { kind: 'history', direction: 'back' } });
+    await owner.call('browser.complete', { requestId: (await navWaiting).requestId, result: {} });
+    expect(await nav).toEqual({ ok: true });
+    // Withdrawing consent hides the tab, and so does the desktop going away.
+    const hidden = phone.next('browser.remoteChanged', e => e.threadId === threadId);
+    await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: true, remote: false, live: true });
+    expect(await hidden).toEqual({ threadId, live: false });
+    await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: false, remote: true, live: true });
+    expect(await phone.call('browser.remoteStatus', { threadId })).toEqual({ live: true });
+    const gone = phone.next('browser.remoteChanged', e => e.threadId === threadId);
+    owner.close();
+    expect(await gone).toEqual({ threadId, live: false });
+  } finally { phone.close(); }
+});

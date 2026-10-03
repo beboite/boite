@@ -3,7 +3,8 @@
  * tabs and the new-surface menu all read their names, hints and availability here.
  */
 import { baseName, type Surface, type SurfaceKind } from './right-panel.svelte';
-import { strings } from './strings';
+import { browserProfiles } from './browser-profiles.svelte';
+import { fill, strings } from './strings';
 import { work, type ControlId } from './work-prefs.svelte';
 
 /**
@@ -56,14 +57,18 @@ export function kindHint(kind: SurfaceKind): string {
   return strings.rightPanel.traceHint;
 }
 
-/** Paired devices can follow subagents and mail; file and process surfaces require the owner. */
+/**
+ * A page needs a webview. Paired devices follow subagents and mail, and read
+ * changes and files read-only (`DEVICE_METHODS`); tasks and the trace read what
+ * only the owner may ask for.
+ */
 export function available(kind: SurfaceKind, inShell: boolean, owner: boolean): boolean {
-  if (kind === 'agents' || kind === 'messages') return true;
+  if (kind === 'agents' || kind === 'messages' || kind === 'changes' || kind === 'files' || kind === 'file') return true;
   return kind === 'browser' ? inShell : owner;
 }
 
 export function unavailable(kind: SurfaceKind): string {
-  return kind === 'browser' ? strings.rightPanel.desktopOnly : strings.rightPanel.ownerOnly;
+  return kind === 'browser' ? strings.rightPanel.browserAbsent : strings.rightPanel.ownerOnly;
 }
 
 export function label(surface: Surface): string {
@@ -82,5 +87,8 @@ export function label(surface: Surface): string {
 }
 
 export function tooltip(surface: Surface): string {
+  if (surface.kind === 'browser' && surface.profile !== undefined) {
+    return `${label(surface)} · ${fill(strings.browserProfiles.profile, { name: browserProfiles.name(surface.profile) })}`;
+  }
   return surface.kind === 'file' && surface.path ? surface.path : label(surface);
 }

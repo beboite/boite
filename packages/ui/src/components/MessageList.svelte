@@ -26,6 +26,10 @@
   import { dockRoom } from '../lib/question-dock.svelte';
   import { glides } from '../lib/motion';
   import { BottomGlide, PointerHold, keysUp, typingKey, watchWheel, wheelsUp } from '../lib/timeline-follow';
+  import { MediaQuery } from 'svelte/reactivity';
+
+  /** A phone has no room left of the bubbles for the outline rail: it is not drawn there. */
+  const narrow = new MediaQuery('(max-width: 720px)');
 
   let {
     store,
@@ -671,13 +675,6 @@
     for (const message of messages) result.set(message.turnId, message.id);
     return result;
   });
-  /**
-   * The images a user message carries, shown at their natural size once
-   * clicked: `message.id:index` per picture, so the pair survives the window
-   * dropping the message and building it again.
-   */
-  let expanded = $state<string[]>([]);
-
   /** Everything the agent wrote in a turn, its tool cards left out: what the turn's copy button takes. */
   function answerOf(turnId: string): string {
     return turnAnswer(messages, turnId);
@@ -711,20 +708,17 @@
     if (!sent) store.restoreDraft(threadId, rewound.prompt, rewound.attachments, rewound.previewReferences);
   }
 
-  function toggleImage(id: string): void {
-    expanded = expanded.includes(id) ? expanded.filter((entry) => entry !== id) : [...expanded, id];
-  }
 </script>
 
 <div class="timeline-wrap" style:--dock-room="{dockRoom.height}px" style:--dock-clearance="{dockRoom.clearance}px">
   {#if store.findOpen && FindBar}
     <FindBar {messages} {viewport} request={store.findRequest} jump={(id) => jumpToMessage(id)} onclose={() => (store.findOpen = false)} />
   {/if}
-  <MessageOutline {messages} active={activePrompt} jump={id => void jumpToMessage(id)}
-    hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = 0; pinned = false; pullOlder(viewport); } }} />
+  {#if !narrow.current}<MessageOutline {messages} active={activePrompt} jump={id => void jumpToMessage(id)}
+    hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = 0; pinned = false; pullOlder(viewport); } }} />{/if}
   <!-- Input releases restored and navigation anchors; programmatic corrections keep them. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="timeline" bind:this={viewport} use:watchWheel={onwheel} {onscroll} ontouchstart={press} onpointerdown={press} onkeydown={releaseNavigation} style:padding-top="{20 + promptLead}px" style:overflow-anchor={timeline.at(-1)?.state === 'streaming' ? 'none' : undefined} data-testid="timeline">
+  <div class="timeline" bind:this={viewport} use:watchWheel={onwheel} {onscroll} ontouchstart={press} onpointerdown={press} onkeydown={releaseNavigation} style:padding-top="{20 + promptLead}px" style:overflow-anchor={timeline.at(-1)?.state === 'streaming' ? 'none' : undefined} data-testid="timeline" data-media-gallery>
     <div class="column">
       <!-- paging: the one line the top of the list shows while a page is in flight. -->
       {#if store.loadingOlder}
@@ -755,7 +749,7 @@
           {:else if startedFrom(message)}
             <SpawnMarker {store} link={startedFrom(message)!} direction="to" />
           {:else if message.role === 'user'}
-            <UserMessage {store} {message} {turn} {progress} {expanded} ontoggle={toggleImage} edit={atRest ? () => editMessage(message) : undefined} />
+            <UserMessage {store} {message} {turn} {progress} edit={atRest ? () => editMessage(message) : undefined} />
           {:else}
             <AssistantMessage {store} {threadId} {message} {signedOut} showModel={firstAssistantInTurn.get(message.turnId) === message.id} memoryEvents={memoryPlacement.inline.get(message.id) ?? []} />
           {/if}

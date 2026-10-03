@@ -186,3 +186,38 @@ test('a revoked response queued by the old client cannot mark its replacement as
   expect(store.pairingRequired).toBe(false);
   expect(store.error).toBe('socket error');
 });
+
+test('the installed app pairs from a typed code, and says to scan from here rather than the camera', async () => {
+  const store = await refused(new RpcFailure({ code: RpcErrorCode.Unauthorized, message: 'Missing credential' }));
+  Object.defineProperty(navigator, 'standalone', { value: true, configurable: true });
+  try {
+    const onpaired = vi.fn();
+    const pair = vi.spyOn(workspace, 'pair').mockResolvedValue(true);
+    mounted = mount(MobileConnect, { target: document.body, props: { store, onpaired } });
+    flushSync();
+    expect(document.querySelector('[data-testid=mobile-pair-hint]')?.textContent).toBe(strings.mobile.scanInApp);
+    // Scan stays the first thing offered; the code is the second way in.
+    const buttons = [...document.querySelectorAll<HTMLButtonElement>('.pair-machine button')].map((button) => button.dataset['testid']);
+    expect(buttons.indexOf('machine-scan')).toBeLessThan(buttons.indexOf('machine-code-open'));
+    document.querySelector<HTMLButtonElement>('[data-testid=machine-code-open]')!.click();
+    flushSync();
+    const input = document.querySelector<HTMLInputElement>('[data-testid=machine-code]')!;
+    expect(input.getAttribute('autocapitalize')).toBe('characters');
+    const type = (value: string) => {
+      input.value = value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      flushSync();
+      document.querySelector<HTMLButtonElement>('[data-testid=machine-code-submit]')!.click();
+      flushSync();
+    };
+    type('K7QM-22');
+    expect(document.querySelector('[data-testid=machine-code-form] [role=alert]')?.textContent).toBe(strings.machines.codeInvalid);
+    expect(pair).not.toHaveBeenCalled();
+    type(' k7qm-2222 ');
+    await vi.waitFor(() => expect(onpaired).toHaveBeenCalledOnce());
+    expect(pair).toHaveBeenCalledWith(`${location.origin}/?grant=K7QM2222`, '');
+    expect(document.querySelector('[data-testid=machine-code-form]')).toBeNull();
+  } finally {
+    delete (navigator as { standalone?: boolean }).standalone;
+  }
+});

@@ -1,4 +1,4 @@
-import type { ProviderInstallState, RpcEventName } from '@boite/contracts';
+import { lastAgentText, requestExcerpt, type ProviderInstallState, type RpcEventName, type ThreadId, type TurnId } from '@boite/contracts';
 import type { Client, EventHandler } from '../client';
 import { finishNotifies } from '../notify';
 import { resetPullRequestSupport } from '../pull-request';
@@ -131,9 +131,20 @@ export function listen(ctx: StoreContext, client: Client): void {
     // A stop is the user's own doing, and a delegated agent's result or a
     // persistent agent's routine work is not news of its own.
     if (!finishNotifies(s.threads, turn)) return;
-    if (turn.status === 'done') layout.notify('done', turn.threadId, null);
-    else if (turn.status === 'error') layout.notify('error', turn.threadId, turn.error);
+    // The start of the reply, as the core's push says it. An error's own text
+    // is often a stack or a provider's JSON: the thread shows it, not the toast.
+    if (turn.status === 'done') layout.notify('done', turn.threadId, () => lastReply(turn.threadId, turn.id));
+    else if (turn.status === 'error') layout.notify('error', turn.threadId, null);
   });
+
+  /** What the agent last wrote in the turn: from the thread on screen, else a short read of its tail. */
+  const lastReply = async (threadId: ThreadId, turnId: TurnId): Promise<string | null> => {
+    const held = [...threads.threadSnapshots(threadId)];
+    if (held.length) return lastAgentText(held[0]!.messages.filter(message => message.turnId === turnId));
+    if (!current()) return null;
+    const thread = await client.call('threads.get', { threadId, limit: 4, compactTools: true });
+    return lastAgentText(thread.messages.filter(message => message.turnId === turnId));
+  };
 
   on('message.started', (message) => {
     threads.invalidateSync(message.threadId);
@@ -171,7 +182,7 @@ export function listen(ctx: StoreContext, client: Client): void {
 
   on('permission.requested', (request) => {
     requests.mergePermissions([request], 'one');
-    layout.notify('needs-you', request.threadId, null);
+    layout.notify('needs-you', request.threadId, requestExcerpt(request) || null);
   });
   on('permission.resolved', ({ requestId, threadId, decision }) => {
     threads.invalidateSync(threadId);
@@ -188,7 +199,7 @@ export function listen(ctx: StoreContext, client: Client): void {
 
   on('question.asked', (request) => {
     requests.mergeQuestions([request], 'one');
-    layout.notify('needs-you', request.threadId, null);
+    layout.notify('needs-you', request.threadId, requestExcerpt(request) || null);
   });
   on('question.answered', ({ questionId }) => {
     requests.resolveQuestion(questionId);

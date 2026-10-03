@@ -1,12 +1,12 @@
 import { createHash, ECDH } from 'node:crypto';
-import { notifiesOnFinish } from '@boite/contracts';
-import type { RpcEvents, RpcParams } from '@boite/contracts';
+import { lastAgentText, notifiesOnFinish, requestExcerpt } from '@boite/contracts';
+import type { PushPayload, RpcEvents, RpcParams } from '@boite/contracts';
 import type { PushSubscription } from 'web-push';
 import type { Core } from './core.ts';
 import { invalidParams, refused } from './errors.ts';
+import type { AttentionReport } from './threads/focus.ts';
 
 type Subscription = RpcParams<'push.subscribe'>;
-type Payload = { title: string; body: string; threadId: string | null; tag: string };
 type Keys = { publicKey: string; privateKey: string };
 const SUBSCRIPTIONS = 'web-push.subscriptions';
 const KEYS = 'web-push.keys';
@@ -38,22 +38,41 @@ export class PushStore {
   private pending = new Set<Promise<unknown>>();
   private closed = false;
   private keysPromise: Promise<Keys> | null = null;
+  /** By tag, the pushes held back while their thread is watched (`notify`). */
+  private readonly held = new Map<string, { threadId: string; text: Pick<PushPayload, 'body' | 'label'>; at: number }>();
+  private heldTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly offAttention: () => void;
 
   constructor(private readonly core: Core) {
+    this.offAttention = core.threads.focus.onAttention(report => this.attention(report));
     this.off = core.bus.onAny((name, payload) => {
       if (name === 'sessions.updated' && (payload as RpcEvents['sessions.updated']).state === 'revoked') {
         this.remove((payload as RpcEvents['sessions.updated']).sessionId);
       } else if (name === 'permission.requested' || name === 'question.asked') {
         const request = payload as RpcEvents['permission.requested'] | RpcEvents['question.asked'];
-        this.notify(request.threadId, 'Needs your answer', `request-${request.id}`);
+        const text = requestExcerpt(request);
+        this.notify(request.threadId, text ? { body: text } : { body: 'Needs your answer', label: 'needsYou' }, `request-${request.id}`);
       } else if (name === 'turn.finished') {
         const turn = payload as RpcEvents['turn.finished'];
         if (this.closed || this.core.journal.isClosed() || (turn.status !== 'done' && turn.status !== 'error')) return;
         const thread = this.core.journal.getThread(turn.threadId);
         if (thread === null || !notifiesOnFinish(thread, turn, this.activeChildren(thread.id))) return;
-        this.notify(turn.threadId, turn.status === 'done' ? 'Done' : 'The agent encountered an error', `turn-${turn.id}`);
+        // The reply is the news; an error's own message is often a stack or a
+        // provider's JSON, so the phone says only that the turn failed.
+        const reply = turn.status === 'done' ? this.lastReply(turn.threadId, turn.id) : null;
+        this.notify(turn.threadId, reply ? { body: reply }
+          : turn.status === 'done' ? { body: 'Done', label: 'done' } : { body: 'The agent encountered an error', label: 'failed' }, `turn-${turn.id}`);
       }
     });
+  }
+
+  /** The start of what the agent last wrote in the turn, one line. */
+  private lastReply(threadId: string, turnId: string): string | null {
+    for (const message of this.core.journal.walkAgentMessagesBackwards(threadId, turnId)) {
+      const text = lastAgentText([message]);
+      if (text) return text;
+    }
+    return null;
   }
 
   /** The parent's delegated agents with a turn still under way. */
@@ -117,11 +136,66 @@ export class PushStore {
 
   unsubscribe(sessionId: string | null) { return this.remove(this.requireSession(sessionId)); }
 
-  private notify(threadId: string, body: string, tag: string) {
+  /**
+   * What the app icon's badge says: the threads waiting for the user, the
+   * same count the window title shows. The thread being notified about counts
+   * even when its row has not caught up with the event yet.
+   */
+  badge(threadId: string | null = null): number {
+    if (this.core.journal.isClosed()) return 0;
+    const rows = this.core.journal.db
+      .query("SELECT id FROM threads WHERE archived = 0 AND (unread != 0 OR status = 'waiting')")
+      .all() as { id: string }[];
+    const ids = new Set(rows.map((row) => row.id));
+    if (threadId !== null && this.core.journal.getThread(threadId)?.archived === false) ids.add(threadId);
+    return ids.size;
+  }
+
+  /**
+   * The thread is on a screen someone is looking at, on any of their devices:
+   * push would only interrupt. It waits instead. Using that screen after the
+   * news arrived shows it was seen and drops it; looking away, a page going
+   * quiet or a lease nobody renews sends it.
+   */
+  private notify(threadId: string, text: Pick<PushPayload, 'body' | 'label'>, tag: string) {
     if (this.closed) return;
+    if (this.core.threads.focus.attended(threadId)) {
+      this.held.set(tag, { threadId, text, at: Date.now() });
+      this.releaseHeld();
+    } else this.deliverAll(threadId, text, tag);
+  }
+
+  /** What a report says of the held pushes: use of their thread since they arrived drops them, then any no longer watched go. */
+  private attention({ threadId, activeAt }: AttentionReport) {
+    if (threadId !== null && activeAt !== null) {
+      for (const [tag, held] of this.held) if (held.threadId === threadId && activeAt >= held.at) this.held.delete(tag);
+    }
+    this.releaseHeld();
+  }
+
+  /** Sends the held pushes nobody is watching any more and wakes up when the next lease ends. Public for tests that move the clock. */
+  releaseHeld() {
+    clearTimeout(this.heldTimer);
+    this.heldTimer = undefined;
+    if (this.closed) return;
+    let next = Infinity;
+    for (const [tag, held] of this.held) {
+      const until = this.core.threads.focus.attendedUntil(held.threadId);
+      if (until > 0) { next = Math.min(next, until); continue; }
+      this.held.delete(tag);
+      this.deliverAll(held.threadId, held.text, tag);
+    }
+    if (next !== Infinity) {
+      this.heldTimer = setTimeout(() => this.releaseHeld(), Math.max(0, next - Date.now()) + 50);
+      this.heldTimer.unref?.();
+    }
+  }
+
+  private deliverAll(threadId: string, text: Pick<PushPayload, 'body' | 'label'>, tag: string) {
     const title = this.core.journal.getThread(threadId)?.title ?? 'Boite';
+    const badge = this.badge(threadId);
     for (const sessionId of Object.keys(this.subscriptions())) {
-      this.track(this.deliver(sessionId, { title, body, threadId, tag }).catch(() => {
+      this.track(this.deliver(sessionId, { title, ...text, threadId, tag, badge }).catch(() => {
         this.core.log('warn', 'Web Push delivery failed; the conversation remains available in Boite');
       }));
     }
@@ -142,7 +216,7 @@ export class PushStore {
     });
   };
 
-  private async deliver(sessionId: string, payload: Payload): Promise<void> {
+  private async deliver(sessionId: string, payload: PushPayload): Promise<void> {
     const keys = await this.keys();
     if (this.closed || !this.core.journal.getSession(sessionId)) return;
     const subscription = this.subscriptions()[sessionId];
@@ -160,13 +234,16 @@ export class PushStore {
   async test(sessionId: string | null) {
     const id = this.requireSession(sessionId);
     if (!this.subscriptions()[id]) throw refused('Enable notifications on this device first');
-    await this.track(this.deliver(id, { title: 'Boite', body: 'Notifications are connected', threadId: null, tag: 'test' }));
+    await this.track(this.deliver(id, { title: 'Boite', body: 'Notifications are connected', label: 'connected', threadId: null, tag: 'test' }));
     return { ok: true } as const;
   }
 
   async close() {
     this.closed = true;
     this.off();
+    this.offAttention();
+    clearTimeout(this.heldTimer);
+    this.held.clear();
     await Promise.allSettled([...this.pending]);
   }
 }

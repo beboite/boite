@@ -412,9 +412,26 @@ The total UI budget increases from 3,880,000 to 3,920,000 bytes, leaving
 36,405 bytes of headroom. The entry and core limits stay unchanged. This
 records the feature cost; it does not claim a size or startup improvement.
 
+## The desktop browser on a phone
+
+A paired phone watching the desktop's browser tab
+([phone](phone.md#the-desktop-browser-on-a-phone)) waited a fixed 300 ms after
+each frame, on top of the trip itself: two frames a second on a quick link. It
+now asks again as soon as a frame arrives, never closer than 250 ms to the last
+request, with one request in flight. The desktop captures the tab at q75
+instead of q90 before shrinking it to the phone's width: the frame sent is the
+same size, and the capture to shrink is a third smaller. Through a scratch core
+on 2026-10-03, a moving page went from 2.0 to 4.0 frames a second with 80 ms
+of added latency, and from 1.6 to 3.3 with 200 ms
+([results](../bench/results/2026-10-03-remote-browser-frames.md)). The
+desktop's capture and shrink take 100 to 140 ms a frame. The phone decodes each
+frame before showing it, so a frame never appears half loaded; that decoding
+was not measured on an iPhone.
+
 ## Benches
 
 ```sh
+bun bench/remote-browser-frames.ts --rtt 0,80,200   # frames a second a phone gets from the desktop's browser tab
 bun run build:ui
 bun run bench/bandwidth.ts --rtt 150          # bytes and time per scenario behind a delayed relay
 bun run bench/bandwidth.ts --core <other checkout>/packages/core/src/main.ts --sequence sequential
@@ -441,7 +458,12 @@ filters off, `--ui` measures another checkout. `--trace` counts the layouts of
 each window and those a script forced, numbers that hold on a busy machine;
 `--profile <dir>` writes a CPU profile per scenario.
 
-Results: [bench/results/2026-09-19-wire-and-startup.md](../bench/results/2026-09-19-wire-and-startup.md),
+`bench/remote-browser-frames.ts` starts a scratch core and headless Chrome, plays
+a desktop host that captures and shrinks frames as the shell does, and a paired
+phone client that polls on the viewer's schedule behind an added latency.
+
+Results: [bench/results/2026-10-03-remote-browser-frames.md](../bench/results/2026-10-03-remote-browser-frames.md),
+[bench/results/2026-09-19-wire-and-startup.md](../bench/results/2026-09-19-wire-and-startup.md),
 [bench/results/2026-09-30-ui-frames.md](../bench/results/2026-09-30-ui-frames.md),
 [bench/results/2026-09-30-typing-and-scroll.md](../bench/results/2026-09-30-typing-and-scroll.md).
 

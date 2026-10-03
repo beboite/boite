@@ -342,7 +342,7 @@ test(
 );
 
 test(
-  'a question is asked inline, answered from the card, and the answer comes back',
+  'a question is asked inline, answered from the card and the composer, and the answer comes back',
   async () => {
     await page.type(testid('composer-input'), 'now question please');
     await clickWhenEnabled(testid('composer-send'));
@@ -354,7 +354,9 @@ test(
     ).toBe(true);
 
     await page.click(`${testid('question-option')}[data-option=short]`);
-    await page.type(testid('question-text-input'), 'one line please');
+    // The composer is the question's free field: Enter there sends the pick with the text.
+    await page.waitFor(`document.querySelector('${testid('composer-reply')}')`, 30_000);
+    await page.type(testid('composer-input'), 'one line please');
     await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
 

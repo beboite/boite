@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { ChevronRight, MessageCircleQuestionMark } from '@lucide/svelte';
+  import { ChevronRight, MessageCircleQuestionMark, Paperclip } from '@lucide/svelte';
   import type { QuestionAnswer, QuestionOption } from '@boite/contracts';
-  import { strings } from '../lib/strings';
+  import { keepFocus } from '../lib/focus';
+  import { fill, strings } from '../lib/strings';
 
   let {
     text,
@@ -12,8 +13,12 @@
     docked = false,
     answer,
     pending,
+    picked = $bindable([]),
+    drafted = false,
+    replying = false,
     submit,
-    skip
+    skip,
+    onwrite
   }: {
     text: string;
     options: QuestionOption[];
@@ -26,20 +31,26 @@
     answer: QuestionAnswer | null;
     /** False on a card whose turn ended before anyone answered: nothing to press. */
     pending: boolean;
+    /** The options picked, held outside so the composer's Send can take them (`lib/question-reply.svelte.ts`). */
+    picked?: string[];
+    /** The composer holds text or files for this answer: Answer needs no option then. */
+    drafted?: boolean;
+    /** The composer is this question's free field: the card says so instead of offering it. */
+    replying?: boolean;
     /** False when the answer did not reach the core: the card is given back to answer again. */
-    submit: (optionIds: string[], text: string) => unknown;
+    submit: (optionIds: string[]) => unknown;
     /** Resolve without sending an answer. A failure leaves the card usable. */
     skip?: () => unknown;
+    /** Hands the composer to this question, when another one or an ordinary message has it. */
+    onwrite?: () => void;
   } = $props();
 
-  let picked = $state<string[]>([]);
-  let typed = $state('');
   let sent = $state(false);
   let open = $state(false);
   let built = $state(false);
   $effect(() => { if (open) built = true; });
 
-  const ready = $derived(picked.length > 0 || typed.trim().length > 0);
+  const ready = $derived(picked.length > 0 || drafted);
 
   function toggle(id: string): void {
     if (multiple) {
@@ -52,7 +63,7 @@
   async function send(): Promise<void> {
     if (!pending || !ready || sent) return;
     sent = true;
-    if ((await submit(picked, typed.trim())) === false) sent = false;
+    if ((await submit(picked)) === false) sent = false;
   }
 
   async function pass(): Promise<void> {
@@ -60,13 +71,18 @@
     sent = true;
     if ((await skip()) === false) sent = false;
   }
-
-  /** What the folded card says: the labels picked, then whatever was typed. */
+  /** What the folded card says: the labels picked, then whatever was typed, else how many files went. */
   function summary(given: QuestionAnswer): string {
     const labels = given.optionIds.map((id) => options.find((one) => one.id === id)?.label ?? id);
     const written = given.text ?? '';
     if (labels.length > 0 && written.length > 0) return `${labels.join(', ')}: ${written}`;
-    return labels.length > 0 ? labels.join(', ') : written;
+    const said = labels.length > 0 ? labels.join(', ') : written;
+    const count = given.attachments?.length ?? 0;
+    return said.length > 0 || count === 0 ? said : fill(strings.media.answerFileCount, { count: String(count) });
+  }
+
+  function fileNames(given: QuestionAnswer): string {
+    return (given.attachments ?? []).map((file) => file.name ?? strings.composer.attachUnnamed).join(', ');
   }
 </script>
 
@@ -78,12 +94,16 @@
   data-testid="question-card"
   data-async={async ? 'true' : undefined}
   data-state={answer !== null ? 'answered' : pending ? 'pending' : 'cancelled'}
+  role="group"
 >
   {#if answer !== null}
     <button type="button" class="ghost answered-row" data-testid="question-toggle" aria-expanded={open} onclick={() => (open = !open)}>
       <span class="glyph"><MessageCircleQuestionMark size={15} strokeWidth={1.75} /></span>
       <span class="verdict" data-testid="question-verdict">{strings.chat.questionAnswered}</span>
       <span class="given" data-testid="question-answer" title={summary(answer)}>{summary(answer)}</span>
+      {#if answer.attachments?.length}
+        <span class="given-files" data-testid="question-answer-files" title={fileNames(answer)}><Paperclip size={12} strokeWidth={2} />{answer.attachments.length}</span>
+      {/if}
       <span class="caret" class:open aria-hidden="true"><ChevronRight size={12} strokeWidth={2} /></span>
     </button>
     <div class="fold" class:open inert={!open}>
@@ -92,6 +112,9 @@
           <div class="answer-detail">
             <p class="prompt" data-testid="question-text">{text}</p>
             <p>{summary(answer)}</p>
+            {#if answer.attachments?.length}
+              <p class="muted">{fill(strings.media.answerFiles, { names: fileNames(answer) })}</p>
+            {/if}
           </div>
         {/if}
       </div>
@@ -121,6 +144,7 @@
             data-testid="question-option"
             data-option={option.id}
             disabled={!pending || sent}
+            onmousedown={keepFocus}
             onclick={() => toggle(option.id)}
           >
             <span class="box" class:round={!multiple}></span>
@@ -135,35 +159,24 @@
       </div>
     {/if}
 
-    {#if allowText}
-      <label class="field">
-        <span class="muted section-label">{strings.chat.questionTextLabel}</span>
-        <input
-          type="text"
-          bind:value={typed}
-          onkeydown={(event) => {
-            if (event.key !== 'Enter' || event.isComposing) return;
-            event.preventDefault();
-            event.stopPropagation();
-            void send();
-          }}
-          placeholder={strings.chat.questionTextPlaceholder}
-          data-testid="question-text-input"
-          disabled={!pending || sent}
-        />
-      </label>
+    {#if pending && replying}
+      <p class="muted description" data-testid="question-reply-hint">{strings.chat.questionReplying}</p>
     {/if}
 
     {#if pending}
       <div class="actions">
         {#if skip}
-          <button type="button" class="ghost" data-testid="question-skip" disabled={sent} onclick={pass}>{strings.chat.questionSkip}</button>
+          <button type="button" class="ghost" data-testid="question-skip" disabled={sent} onmousedown={keepFocus} onclick={pass}>{strings.chat.questionSkip}</button>
+        {/if}
+        {#if allowText && !replying && onwrite}
+          <button type="button" class="ghost" data-testid="question-write" disabled={sent} onclick={onwrite}>{strings.chat.questionWrite}</button>
         {/if}
         <button
           type="button"
           class="primary"
           data-testid="question-submit"
           disabled={!ready || sent}
+          onmousedown={keepFocus}
           onclick={send}
         >
           {strings.chat.questionAnswer}
@@ -351,25 +364,7 @@
     font-size: var(--text-sm);
   }
 
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-
-  input {
-    padding: 6px 8px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    background: var(--color-surface-2);
-    color: inherit;
-    font: inherit;
-  }
-
-  input:focus-visible {
-    outline: none;
-    border-color: var(--color-live);
-  }
+  .given-files { display: inline-flex; align-items: center; gap: 2px; flex: none; font-size: var(--text-xs); color: var(--color-muted-foreground); }
 
   .actions {
     display: flex;

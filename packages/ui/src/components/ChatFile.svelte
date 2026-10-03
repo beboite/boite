@@ -8,6 +8,8 @@
   import { bytes, millis } from '../lib/format';
   import { localFileDirectory, openLocalFile } from '../lib/local-files';
   import { browserDownload, decodeBase64, saveAttachment, saveAttachmentUrl } from '../lib/attachment-save';
+  import { galleryFrom, media, type MediaItem } from '../lib/media-gallery';
+  import { videoPlayable } from '../lib/video-support';
   import ImageViewer from './ImageViewer.svelte';
 
   let { file, store, threadId, messageId, partIndex, path, line, onclose }: {
@@ -22,7 +24,10 @@
   let loading = $state(false);
   let expanded = $state(false);
   let opening = $state(false);
-  let viewing = $state(false);
+  /** The viewer, open on this file and the media around it in the thread. */
+  let viewing = $state<{ items: MediaItem[]; index: number } | null>(null);
+  let shot = $state<HTMLElement | undefined>(undefined);
+  let clip = $state<HTMLElement | undefined>(undefined);
   let imageRequested = $state(false);
   /** Where the shell saved the file, shown in place of its size. */
   let saved = $state('');
@@ -42,6 +47,8 @@
   const pdf = $derived(mime === 'application/pdf');
   const audio = $derived(mime.startsWith('audio/'));
   const video = $derived(mime.startsWith('video/'));
+  // A WebM on an iPhone without WebM support: offer the download rather than a black frame.
+  const unplayable = $derived(video && !videoPlayable(mime));
   const deferredImage = $derived(image && size > ATTACHMENT_MAX_BYTES && !imageRequested);
   const inlineMedia = $derived(!!file && ((image && !deferredImage) || video || audio));
   const showPreview = $derived(inlineMedia || (expanded && rich));
@@ -78,7 +85,7 @@
     if (directory && !image) return open();
     if (file?.type === 'file' && file.dataDeferred) await load();
     if (!url) return;
-    if (image) { imageRequested = true; viewing = true; return; }
+    if (image) { imageRequested = true; view(shot); return; }
     if (await save(true)) return;
     if (file) {
       if (file.type === 'artifact') await loadArtifact();
@@ -152,6 +159,26 @@
       finally { if (!disposed) loading = false; }
   }
 
+  /** What the viewer shows for this file; null for what it cannot show, or a large picture not asked for yet. */
+  function mediaItem(): MediaItem | null {
+    if (!url || !(image || video) || deferredImage) return null;
+    return { src: url, name, mimeType: mime, kind: image ? 'image' : 'video', save: saveForViewer };
+  }
+
+  function saveForViewer(): void {
+    if (window.__TAURI_INTERNALS__ !== undefined) { void save(false); return; }
+    if (file?.type === 'artifact') void loadArtifact().then(() => browserDownload(url, name)).catch(reason => error = String(reason));
+    else browserDownload(url, name);
+  }
+
+  function view(from: HTMLElement | undefined): void {
+    if (!url || !(image || video)) return;
+    // The viewer has its own player: the inline one stops so the two never play over each other.
+    const inline = clip?.querySelector('video');
+    if (inline && !inline.paused) inline.pause();
+    viewing = galleryFrom(from, { src: url, name, mimeType: mime, kind: image ? 'image' : 'video', save: saveForViewer });
+  }
+
   function imageLoaded(event: Event) {
     const element = event.currentTarget as HTMLImageElement;
     dimensions = `${element.naturalWidth} × ${element.naturalHeight}`;
@@ -178,16 +205,21 @@
 <section class="chat-file" class:inline-media={inlineMedia} data-testid="chat-file" aria-busy={loading || saving}>
   {#if showPreview && url}
     <div class="preview" data-testid="artifact-content">
-      {#if previewError}
-        <div class="media-fallback" role="status"><FileText size={28} /><p>{strings.artifacts.mediaFailed}</p><button type="button" class="ghost small" onclick={load}><RefreshCw size={14} />{strings.artifacts.retry}</button></div>
+      {#if previewError || unplayable}
+        <div class="media-fallback" role="status" data-testid="media-fallback">{#if video}<Film size={28} />{:else}<FileText size={28} />{/if}<p>{video ? strings.artifacts.videoFailed : strings.artifacts.mediaFailed}</p>
+          <div class="fallback-actions">
+            {#if video}<a class="ghost small download-label" href={url} download={name} onclick={download} data-testid="media-fallback-download"><Download size={14} />{strings.artifacts.download}</a>{/if}
+            {#if !unplayable}<button type="button" class="ghost small" onclick={load}><RefreshCw size={14} />{strings.artifacts.retry}</button>{/if}
+          </div>
+        </div>
       {:else}
         {#key attempt}
           {#if text !== null}<pre>{#if line}<span class="line">{`${path}:${line}\n`}</span>{/if}{text}</pre>
-          {:else if image}<button type="button" class="shot" onclick={() => viewing = true} title={strings.artifacts.enlarge} aria-label={strings.artifacts.enlarge} data-testid="artifact-enlarge"><img src={url} alt={name} loading="lazy" decoding="async" onload={imageLoaded} onerror={() => previewError = true} /><span class="enlarge"><Maximize2 size={16} /></span></button>
+          {:else if image}<button type="button" class="shot" bind:this={shot} use:media={mediaItem} onclick={() => view(shot)} title={strings.artifacts.enlarge} aria-label={strings.artifacts.enlarge} data-testid="artifact-enlarge"><img src={url} alt={name} loading="lazy" decoding="async" onload={imageLoaded} onerror={() => previewError = true} /><span class="enlarge"><Maximize2 size={16} /></span></button>
           {:else if pdf && file}
             <!-- Only signature-checked PDF content reaches the built-in viewer. -->
             <iframe title={name} src={url} referrerpolicy="no-referrer"></iframe>
-          {:else if video}<video src={url} aria-label={name} controls playsinline preload="metadata" onloadedmetadata={mediaLoaded} onerror={() => previewError = true}><track kind="captions" /></video>
+          {:else if video}<div class="clip" bind:this={clip} use:media={mediaItem}><video src={url} aria-label={name} controls playsinline preload="metadata" onloadedmetadata={mediaLoaded} onerror={() => previewError = true}><track kind="captions" /></video><button type="button" class="enlarge" onclick={() => view(clip)} title={strings.artifacts.enlarge} aria-label={strings.artifacts.enlarge} data-testid="video-enlarge"><Maximize2 size={16} /></button></div>
           {:else if audio}<audio src={url} aria-label={name} controls preload="metadata" onloadedmetadata={mediaLoaded} onerror={() => previewError = true}></audio>
           {:else}<p>{directory ? strings.artifacts.openLocal : strings.artifacts.unavailable}</p>{/if}
         {/key}
@@ -210,7 +242,7 @@
   </div>
   {#if error}<div class="error" role="alert"><p>{error}</p><button type="button" class="ghost small" onclick={load} disabled={loading}>{strings.artifacts.retry}</button></div>{/if}
 </section>
-{#if viewing && url}<ImageViewer src={url} alt={name} ondownload={() => { if (window.__TAURI_INTERNALS__ === undefined) browserDownload(url, name); else void save(false); }} onclose={() => viewing = false} />{/if}
+{#if viewing}<ImageViewer items={viewing.items} index={viewing.index} onclose={() => viewing = null} />{/if}
 
 <style>
   .chat-file { margin-block: 10px; max-width: 100%; min-width: 0; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); overflow: hidden; display: flex; flex-direction: column; }
@@ -226,9 +258,13 @@
   .shot { position: relative; display: block; width: 100%; height: auto; padding: 0; border: 0; border-radius: 0; background: none; cursor: zoom-in; }
   .shot:hover:not(:disabled) { background: none; }
   .enlarge { position: absolute; right: 10px; top: 10px; display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--radius-sm); background: var(--color-surface); box-shadow: var(--shadow-e1); opacity: 0; transition: opacity var(--dur-1); }
-  .shot:hover .enlarge, .shot:focus-visible .enlarge { opacity: 1; }
+  .shot:hover .enlarge, .shot:focus-visible .enlarge, .clip:hover .enlarge, .clip .enlarge:focus-visible { opacity: 1; }
+  .clip { position: relative; }
+  .clip .enlarge { padding: 0; border: 0; color: inherit; }
   small, .line { color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .download { display: inline-flex; align-items: center; justify-content: center; min-height: var(--control); }
+  .fallback-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+  .download-label { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding-inline: 12px; color: var(--color-foreground); text-decoration: none; }
   .preview { order: 1; border-top: 1px solid var(--color-border); background: var(--color-surface-2); }
   .inline-media .preview { order: 0; border-top: 0; border-bottom: 1px solid var(--color-border); }
   .media-fallback { min-height: 150px; max-width: 360px; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 20px; text-align: center; color: var(--color-muted-foreground); }

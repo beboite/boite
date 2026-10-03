@@ -2,14 +2,15 @@ import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES
 import type { ProviderDescriptor } from './index.ts';
 
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
-function refused(message: string, data?: Record<string, unknown>) { return { message, ...(data ? { data } : {}) }; }
+type Refusal = { message: string; data?: Record<string, unknown> };
+function refused(message: string, data?: Record<string, unknown>): Refusal { return { message, ...(data ? { data } : {}) }; }
 function decodedBytes(data: string): number {
   const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0;
   return Math.floor(data.length * 3 / 4) - padding;
 }
 
 /** Pure validation shared by the core and its in-memory client. */
-export function attachmentError(attachments: unknown, provider: Pick<ProviderDescriptor, 'id' | 'name' | 'capabilities'>): { message: string; data?: Record<string, unknown> } | null {
+export function attachmentError(attachments: unknown, provider: Pick<ProviderDescriptor, 'id' | 'name' | 'capabilities'>): Refusal | null {
   if (!Array.isArray(attachments)) return refused('attachments must be an array');
   for (const [index, attachment] of attachments.entries()) {
     if (!attachment || typeof attachment !== 'object') return refused(`attachment ${index + 1}: expected an object`);
@@ -18,6 +19,23 @@ export function attachmentError(attachments: unknown, provider: Pick<ProviderDes
   if (!provider.capabilities.images && attachments.some(a => a?.kind === 'image')) {
     return refused(`${provider.name} takes no images: send the prompt without them`, { providerId: provider.id });
   }
+  return shapeError(attachments);
+}
+
+/**
+ * The files of a question's answer. They reach the agent as paths on the
+ * core's machine, whatever its protocol, so no provider capability gates an
+ * image here; the caps are a turn's.
+ */
+export function answerAttachmentError(attachments: unknown): Refusal | null {
+  if (!Array.isArray(attachments)) return refused('attachments must be an array');
+  for (const [index, attachment] of attachments.entries()) {
+    if (!attachment || typeof attachment !== 'object') return refused(`attachment ${index + 1}: expected an object`);
+  }
+  return shapeError(attachments);
+}
+
+function shapeError(attachments: Record<string, unknown>[]): Refusal | null {
   if (attachments.length > ATTACHMENTS_PER_TURN) {
     return refused(`a turn carries at most ${ATTACHMENTS_PER_TURN} attachments, this one has ${attachments.length}`, {
       count: attachments.length,
@@ -27,7 +45,7 @@ export function attachmentError(attachments: unknown, provider: Pick<ProviderDes
   let total = 0;
   for (const [index, attachment] of attachments.entries()) {
     if (attachment.name !== null && (typeof attachment.name !== 'string' || attachment.name.length > 255)) return refused(`attachment ${index + 1}: name must be null or a string of at most 255 characters`);
-    const label = attachment.name ?? `attachment ${index + 1}`;
+    const label = (attachment.name as string | null) ?? `attachment ${index + 1}`;
     if (attachment.kind !== 'image' && attachment.kind !== 'file') {
       return refused(`${label}: expected an image or file attachment`, { index });
     }

@@ -26,9 +26,10 @@ export function sameProcess(a: ProcessRecord, b: ProcessRecord): boolean {
 
 /**
  * The workbench: the open thread's trace, its working tree, its files, the
- * project's todos and the machine's resources. Every one of these is
- * owner-only in `packages/core/src/access.ts`, so each is gated on
- * `store.owner` the way `trace.get` is rather than thrown at a phone.
+ * project's todos and the machine's resources. A paired device reads the
+ * working tree and its files (`DEVICE_METHODS`); everything else here, and
+ * every write, is owner-only in `packages/core/src/access.ts`, so it is gated
+ * on `store.owner` the way `trace.get` is rather than thrown at a phone.
  *
  * The three `files.*` calls answer a `FileAnswer` rather than raising the
  * app's toast: a refused path or a file that vanished under the editor is
@@ -118,7 +119,7 @@ export class Workbench {
   async gitStatus(threadId: ThreadId): Promise<GitStatus | null> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
-    if (!client || !this.ctx.store.owner) return null;
+    if (!client) return null;
     try {
       const result = await client.call('git.status', { threadId });
       return this.ctx.currentClient(client, clientGeneration) ? result : null;
@@ -131,7 +132,7 @@ export class Workbench {
   async gitDiff(threadId: ThreadId, path: string, ref?: string): Promise<GitDiff | null> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
-    if (!client || !this.ctx.store.owner) return null;
+    if (!client) return null;
     try {
       const result = await client.call('git.diff', { threadId, path, ...(ref === undefined ? {} : { ref }) });
       return this.ctx.currentClient(client, clientGeneration) ? result : null;
@@ -144,7 +145,7 @@ export class Workbench {
   async listFiles(threadId: ThreadId, path?: string): Promise<FileAnswer<FileEntry[]>> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
-    if (!client || !this.ctx.store.owner) return { ok: false, error: strings.rightPanel.ownerOnly };
+    if (!client) return { ok: false, error: strings.errors.noEndpoint };
     try {
       const value = await client.call('files.list', { threadId, ...(path === undefined ? {} : { path }) });
       if (!this.ctx.currentClient(client, clientGeneration)) return { ok: false, error: strings.errors.noEndpoint };
@@ -158,7 +159,7 @@ export class Workbench {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
     const s = this.ctx.store;
-    if (!client || !s.owner) return { ok: false, error: strings.rightPanel.ownerOnly };
+    if (!client) return { ok: false, error: strings.errors.noEndpoint };
     try {
       const value = await client.call('files.read', { threadId, path });
       if (!this.ctx.currentClient(client, clientGeneration)) return { ok: false, error: strings.errors.noEndpoint };

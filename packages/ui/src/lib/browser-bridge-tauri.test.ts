@@ -28,6 +28,20 @@ test('fixed viewport fits after panel resize and clearing it restores the whole 
   expect(bridge.viewport('page')).toBeNull();
 });
 
+test('a tab opens in its profile and deleting a profile asks the shell directly', async () => {
+  invoke.mockResolvedValue(undefined);
+  const bridge = new TauriBridge();
+  bridge.create('work', 'https://example.test', 'p-0123456789ab');
+  bridge.create('plain', 'https://example.test');
+  await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+  expect(invoke).toHaveBeenNthCalledWith(1, 'browser_create', { id: 'work', url: 'https://example.test', profile: 'p-0123456789ab' });
+  expect(invoke).toHaveBeenNthCalledWith(2, 'browser_create', { id: 'plain', url: 'https://example.test' });
+  await bridge.deleteProfile('p-0123456789ab');
+  expect(invoke).toHaveBeenLastCalledWith('browser_profile_delete', { profile: 'p-0123456789ab' });
+  invoke.mockRejectedValueOnce('the profile is busy');
+  await expect(bridge.deleteProfile('p-0123456789ab')).rejects.toBe('the profile is busy');
+});
+
 test('destroy and recreate of the same id wait for the earlier native commands', async () => {
   let finishCreate!: () => void;
   let finishDestroy!: () => void;

@@ -42,7 +42,10 @@ export interface BrowserBridge {
   protocol?(id: string, method: string, params: Record<string, unknown>): Promise<unknown>;
   viewport?(id: string): { width: number; height: number } | null;
   isReady(id: string): boolean;
-  create(id: string, url: string): void;
+  /** `profile` is a profile id or `private`; absent opens the default profile. Fixed for the view's life. */
+  create(id: string, url: string, profile?: string): void;
+  /** Erases a profile's cookies, storage and sign-ins on this computer. Only the shell has any. */
+  deleteProfile?(profile: string): Promise<void>;
   navigate(id: string, url: string): void;
   back(id: string): void;
   forward(id: string): void;
@@ -105,10 +108,12 @@ export class FakeBridge implements BrowserBridge {
   #loaded = new Set<string>();
   isReady(id: string): boolean { return this.#loaded.has(id); }
 
-  create(id: string, url: string): void {
+  create(id: string, url: string, profile?: string): void {
     if (this.#views.has(id)) return;
     const frame = document.createElement('iframe');
     frame.dataset.browserId = id;
+    // An iframe shares the document's cookies: the profile is only recorded.
+    if (profile !== undefined) frame.dataset.browserProfile = profile;
     frame.setAttribute('title', 'Browser surface');
     frame.style.cssText =
       'position:fixed;border:0;background:#101014;z-index:35;display:none;color-scheme:dark;';

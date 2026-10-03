@@ -457,7 +457,9 @@ test('every phone control on the chat, the panel, the list and Appearance takes 
   await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   try {
     await page.navigate(`${origin}/?fake=1&open=recent&long=1`);
-    await page.waitFor(`document.querySelector('[data-testid=message-marker]')`);
+    await page.waitFor(`document.querySelector('[data-testid=message-actions]')`);
+    // A phone has no room for the message rail.
+    expect(await page.evaluate(`document.querySelector('[data-testid=message-marker]') === null`)).toBe(true);
     expect(await page.evaluate(`matchMedia('(pointer: coarse)').matches`)).toBe(true);
     await capture('mobile-message-actions-touch.png');
     expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);

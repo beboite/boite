@@ -351,6 +351,11 @@
     font-size: var(--text-sm);
   }
 
+  /* Under 16px Safari zooms the page into the field on focus. */
+  @media (max-width: 720px) {
+    .filter { font-size: var(--text-md); }
+  }
+
   .tree {
     flex: 1;
     min-height: 0;

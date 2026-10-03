@@ -1,6 +1,6 @@
 import type { AgentsRpcMethods, AgentsRpcEvents } from './agents';
 import type { WorkflowsRpcMethods, WorkflowsRpcEvents } from './workflows';
-import type { BrowserRpcMethods, BrowserRpcEvents } from './browser';
+import type { BrowserRpcMethods, BrowserRpcEvents, BrowserProfile } from './browser';
 import type { PullRequestsRpcMethods, PullRequestsRpcEvents } from './pull-requests';
 export * from './pull-requests';
 export * from './browser';
@@ -1135,6 +1135,23 @@ export const MESSAGE_PAGE = 120;
 /** The first paint needs a small tail; older history uses the ordinary page size. */
 export const INITIAL_MESSAGE_PAGE = 40;
 export { previewToolOutputs, TOOL_OUTPUT_INLINE_CHARS, TOOL_OUTPUT_PREVIEW_CHARS } from './message-preview';
+export { lastAgentText, notificationExcerpt, requestExcerpt, NOTIFICATION_TEXT_CHARS } from './notification-text';
+/**
+ * The core's generic notification body, named so a phone can show it in the
+ * language it speaks: the service worker looks the label up in the words the
+ * page left it, and falls back on the English body.
+ */
+export type NotificationLabel = 'done' | 'failed' | 'needsYou' | 'connected';
+/** A Web Push payload, as the core sends it and the service worker reads it. */
+export interface PushPayload {
+  title: string;
+  body: string;
+  threadId: string | null;
+  tag: string;
+  label?: NotificationLabel;
+  /** The app icon's count after this notification. */
+  badge?: number;
+}
 /** The most `messages.list` will ever hand back in one call, whatever `limit` says. */
 export const MESSAGE_PAGE_MAX = 200;
 /**
@@ -1280,6 +1297,19 @@ export interface QuestionOption {
 export interface QuestionAnswer {
   optionIds: string[];
   text?: string;
+  /**
+   * The files given with the answer, as the card lists them. Their bytes are
+   * not kept here: the core wrote them to its disk and told the agent the paths.
+   */
+  attachments?: AnswerAttachment[];
+}
+
+/** A file given with an answer: what the card shows once it is answered. */
+export interface AnswerAttachment {
+  kind: Attachment['kind'];
+  mimeType: string;
+  name: string | null;
+  bytes: number;
 }
 
 /**
@@ -1465,6 +1495,13 @@ export interface Settings {
   worktreeStorage?: WorktreeStorage;
   /** Exact browser origins allowed to connect alongside the shell and this core's own origin. */
   browserOrigins?: string[];
+  /**
+   * The browser profiles the user made on this machine's desktop, each its own
+   * cookies and logins. The built-in `default` and `private` are not listed.
+   */
+  browserProfiles?: BrowserProfile[];
+  /** The profile a new browser tab opens in. Missing or unknown means `default`; never `private`. */
+  browserDefaultProfile?: string;
   /** HTTPS origin served by the reverse proxy, used in phone pairing links. */
   publicUrl?: string | null;
   /** Minutes a Claude process stays warm after a turn. 0 releases it at once. */
@@ -2031,6 +2068,41 @@ export interface PairingGrant {
   grant: string;
   role: PairingRole;
   expiresAt: Timestamp;
+  /**
+   * The same grant as a short code to type, `XXXX-XXXX`, for an installed
+   * iPhone app that cannot open the link (the camera hands it to Safari, which
+   * keeps its own storage). Valid until `codeExpiresAt`, once, like the grant.
+   */
+  code?: string;
+  codeExpiresAt?: Timestamp;
+}
+
+/**
+ * Where `tailscale serve` stands for this core. `missing`: no CLI. `stopped`
+ * and `needs-login`: Tailscale is off or signed out. `https-disabled`: the
+ * tailnet has no HTTPS certificates (admin console, DNS page). `off`: ready,
+ * nothing served on 443. `on`: 443 proxies to this core. `conflict`: 443
+ * already proxies to something else, left alone unless asked to replace it.
+ * `error`: the CLI answered something unreadable, `detail` says which step.
+ */
+export type TailscaleState = 'missing' | 'stopped' | 'needs-login' | 'https-disabled' | 'off' | 'on' | 'conflict' | 'error';
+
+export interface TailscaleStatus {
+  state: TailscaleState;
+  /** MagicDNS name of this machine, without the trailing dot; null when unknown. */
+  dnsName: string | null;
+  /** `https://<dnsName>` once HTTPS can be served, null otherwise. */
+  url: string | null;
+  /** What 443 proxies to now, when something does. */
+  servedTarget: string | null;
+  /** The local address `tailscale serve` should proxy to. */
+  target: string;
+  /** True when settings.publicUrl is `url`. */
+  publicUrlMatches: boolean;
+  /** A safe label for an error or a refusal, never raw CLI output. */
+  detail?: 'not-logged-in' | 'permission-denied' | 'timeout' | 'serve-consent' | 'unknown';
+  /** A Tailscale page to open to fix the state (login, enabling serve). */
+  actionUrl?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -2698,7 +2770,13 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'files.write': { params: { threadId: ThreadId; path: string; text: string }; result: { bytes: number; modifiedAt: Timestamp } };
 
   /** A fresh one-time pairing link, `device` unless the role says otherwise. Owner only. */
-  'pairing.grant': { params: { role?: PairingRole }; result: PairingGrant };
+  'pairing.grant': { params: { role?: PairingRole; short?: boolean }; result: PairingGrant };
+  /** Tailscale CLI and `tailscale serve` state for this core. Owner only. */
+  'tailscale.status': { params: Record<string, never>; result: TailscaleStatus };
+  /** Serve this core on https://<MagicDNS name> and make it the public URL. `replace` takes 443 from another target. Owner only. */
+  'tailscale.enable': { params: { replace?: boolean }; result: TailscaleStatus };
+  /** Stop serving this core through Tailscale and clear the public URL it set. Owner only. */
+  'tailscale.disable': { params: Record<string, never>; result: TailscaleStatus };
   /** Every paired client still able to connect. */
   'sessions.list': { params: Record<string, never>; result: PairedSession[] };
   /** Forget a paired client: its sockets close and its token opens nothing any more. Owner only. */
@@ -3069,8 +3147,10 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'threads.subscribe': { params: { threadId: ThreadId }; result: { ok: true } };
   'threads.unsubscribe': { params: { threadId: ThreadId }; result: { ok: true } };
   /** The visible conversation and unsent input leases. Omitted leases remain; an empty list clears them.
-   * A focus caller without an input report blocks automatic archive until it reports leases or disconnects. */
-  'threads.focus': { params: { threadId: ThreadId | null; protectedThreadIds?: ThreadId[]; protectAllThreads?: boolean }; result: { ok: true } };
+   * A focus caller without an input report blocks automatic archive until it reports leases or disconnects.
+   * `attentive`: the user is looking at `threadId` now, so the core holds push about it back (`thread-focus.ts`).
+   * `idleMs`: how long ago the user last used this page while it was attentive; use after an event drops its held push. */
+  'threads.focus': { params: { threadId: ThreadId | null; protectedThreadIds?: ThreadId[]; protectAllThreads?: boolean; attentive?: boolean; idleMs?: number }; result: { ok: true } };
 
   /** `attachments` are journalled with the prompt. Files become host paths; images use native provider payloads. */
   'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: Attachment[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };
@@ -3101,9 +3181,12 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   /**
    * One answer. `optionIds` are ids the question listed and `text` the free
    * field it allowed. A question that is not pending is refused, naming the id.
+   * `attachments` (only where the free field is allowed, a turn's caps) are
+   * written to the core's disk and reach the agent as paths after the text, on
+   * every protocol: none carries an image inside an answer.
    */
   'questions.answer': {
-    params: { threadId: ThreadId; questionId: RequestId; optionIds: string[]; text?: string };
+    params: { threadId: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; attachments?: Attachment[] };
     result: { ok: true };
   };
   /** Resolve a pending question without an answer, a steer or a new user message. */
@@ -3398,11 +3481,26 @@ export const GRANT_QUERY_PARAM = 'grant';
 export const GRANT_TTL_MS = 10 * 60 * 1000;
 /** Every role `pairing.grant` takes; anything else is refused by name. */
 export const PAIRING_ROLES: readonly PairingRole[] = ['device', 'owner'];
+/** How long a typed pairing code and a short owner grant stay valid. */
+export const PAIRING_CODE_TTL_MS = 5 * 60 * 1000;
+/** Letters of a pairing code: Crockford base32, no I, L, O or U to misread. */
+export const PAIRING_CODE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+/**
+ * A typed or pasted pairing code in its canonical 8-letter form, or null when
+ * it cannot be one. Case, spaces and dashes are ignored; O reads as 0, I and L as 1.
+ */
+export function normalizePairingCode(text: string): string | null {
+  const code = text.toUpperCase().replace(/[\s-]+/g, '').replace(/O/g, '0').replace(/[IL]/g, '1');
+  if (code.length !== 8) return null;
+  for (const letter of code) if (!PAIRING_CODE_ALPHABET.includes(letter)) return null;
+  return code;
+}
 
 export const CLIENT_NAMES = ['shell', 'pwa', 'cli', 'test', 'bench'] as const;
 export type ClientName = (typeof CLIENT_NAMES)[number];
 
-export { attachmentError } from './attachment-validation.ts';
+export { attachmentError, answerAttachmentError } from './attachment-validation.ts';
 export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, checkSettingsPatch, type AutoCompact, type AutoCompactMoment, type SettingsPatchCheck } from './settings-validation.ts';
 import type { AutoCompact } from './settings-validation.ts';
 export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';

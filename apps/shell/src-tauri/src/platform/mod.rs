@@ -23,17 +23,21 @@ pub(crate) mod dwm;
 #[cfg(windows)]
 pub(crate) mod windows;
 #[cfg(windows)]
-pub(crate) use windows::{alert, before_webview, notify, prepare_command};
+pub(crate) use windows::{alert, before_webview, foreground, idle_ms, notify, prepare_command};
 #[cfg(not(windows))]
 mod posix;
 #[cfg(not(windows))]
-pub(crate) use posix::{alert, before_webview, notify, prepare_command};
+pub(crate) use posix::{alert, before_webview, foreground, idle_ms, notify, prepare_command};
 
 pub(crate) mod appbars;
 #[cfg(windows)]
 pub(crate) mod browser_control;
 #[cfg(windows)]
 pub(crate) mod browser_diagnostics;
+#[cfg(windows)]
+pub(crate) mod browser_page;
+#[cfg(windows)]
+pub(crate) mod webview_profiles;
 
 pub(crate) fn open_file(path: &std::path::Path) -> Result<(), String> {
     tauri_plugin_opener::open_path(path, None::<&str>)

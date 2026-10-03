@@ -7,7 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, symlinkSync } from 'node:fs';
+import { mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RpcMethodName } from '@boite/contracts';
 import { connect } from '../src/client.ts';
@@ -298,6 +298,133 @@ describe('the access gate', () => {
     } finally {
       phone.close();
     }
+  });
+});
+
+/** The fixture's own git identity: the machine's config is not the test's business. */
+function git(cwd: string, ...args: string[]): void {
+  const run = Bun.spawnSync({
+    cmd: ['git', ...args], cwd, stdout: 'pipe', stderr: 'pipe', windowsHide: true,
+    env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@boite.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@boite.invalid' },
+  });
+  if (!run.success) throw new Error(`git ${args.join(' ')} failed: ${run.stderr.toString()}`);
+}
+
+/** A repository with one committed file changed since, and a thread working in `cwd` (the root by default). */
+async function repoThread(owner: Awaited<ReturnType<TestCore['connect']>>, cwd?: (root: string) => string): Promise<{ root: string; threadId: string }> {
+  const root = join(harness.dataDir, 'repo');
+  mkdirSync(root);
+  git(root, 'init', '-q');
+  writeFileSync(join(root, 'a.txt'), 'one\n');
+  git(root, 'add', '.');
+  git(root, 'commit', '-qm', 'first');
+  writeFileSync(join(root, 'a.txt'), 'two\n');
+  const project = await owner.call('projects.add', { path: root, name: 'repo' });
+  const account = (await owner.call('accounts.list', {})).find((entry) => entry.providerId === 'echo');
+  const thread = await owner.call('threads.create', {
+    projectId: project.id, providerId: 'echo', accountId: account?.id ?? '', title: 'repo', ...(cwd ? { cwd: cwd(root) } : {}),
+  });
+  return { root, threadId: thread.id };
+}
+
+describe('a paired device reads a thread\'s changes and files', () => {
+  test('it reads the status, a diff, a directory and a file, and writes nothing', async () => {
+    const owner = await harness.connect();
+    const { root, threadId } = await repoThread(owner);
+    writeFileSync(join(harness.dataDir, 'outside.txt'), 'secret\n');
+    const phone = await pairedDevice();
+    try {
+      expect((await phone.call('git.status', { threadId })).changes.map((change) => change.path)).toEqual(['a.txt']);
+      expect(await phone.call('git.diff', { threadId, path: 'a.txt' })).toMatchObject({ oldText: 'one\n', newText: 'two\n' });
+      expect(await phone.call('git.diff', { threadId, path: 'a.txt', ref: 'HEAD' })).toMatchObject({ newText: 'two\n' });
+      expect((await phone.call('files.list', { threadId })).map((entry) => entry.name)).toContain('a.txt');
+      expect(await phone.call('files.read', { threadId, path: 'a.txt' })).toMatchObject({ kind: 'text', text: 'two\n' });
+
+      // No writing, no history beyond HEAD, nothing outside the working tree.
+      await expect(phone.call('files.write', { threadId, path: 'a.txt', text: 'from the phone' })).rejects.toThrow('files.write is for the owner only');
+      await expect(phone.call('git.diff', { threadId, path: 'a.txt', ref: 'HEAD~1' })).rejects.toThrow('HEAD only');
+      await expect(phone.call('git.diff', { threadId, path: 'a.txt', ref: '--output=x' })).rejects.toThrow('HEAD only');
+      await expect(phone.call('files.read', { threadId, path: '../outside.txt' })).rejects.toThrow('leaves the thread\'s working directory');
+      await expect(phone.call('files.read', { threadId, path: join(harness.dataDir, 'outside.txt') })).rejects.toThrow('leaves the thread\'s working directory');
+      await expect(phone.call('files.list', { threadId, path: '..' })).rejects.toThrow('leaves the thread\'s working directory');
+      await expect(phone.call('git.diff', { threadId, path: '../outside.txt' })).rejects.toThrow('leaves the thread\'s working directory');
+      expect(readFileSync(join(root, 'a.txt'), 'utf8')).toBe('two\n');
+      // The owner still diffs against any revision.
+      expect(await owner.call('git.diff', { threadId, path: 'a.txt', ref: 'HEAD' })).toMatchObject({ oldText: 'one\n' });
+    } finally {
+      phone.close();
+    }
+  });
+
+  test('it leaves credential files and the git folder to the owner', async () => {
+    const owner = await harness.connect();
+    const { root, threadId } = await repoThread(owner);
+    mkdirSync(join(root, '.ssh'));
+    for (const name of ['.env', '.env.local', '.env.example', 'id_ed25519', 'server.pem', '.ssh/config']) writeFileSync(join(root, name), 'token\n');
+    const phone = await pairedDevice();
+    try {
+      for (const path of ['.env', '.env.local', 'id_ed25519', 'server.pem', '.ssh/config', '.git/config']) {
+        await expect(phone.call('files.read', { threadId, path })).rejects.toThrow('credential files');
+      }
+      await expect(phone.call('files.list', { threadId, path: '.git' })).rejects.toThrow('credential files');
+      await expect(phone.call('git.diff', { threadId, path: '.env' })).rejects.toThrow('credential files');
+      expect(await phone.call('files.read', { threadId, path: '.env.example' })).toMatchObject({ kind: 'text' });
+      expect(await owner.call('files.read', { threadId, path: '.env' })).toMatchObject({ kind: 'text', text: 'token\n' });
+    } finally {
+      phone.close();
+    }
+  });
+
+  test('a project that holds boite\'s data folder does not open it to the device', async () => {
+    const owner = await harness.connect();
+    const { threadId } = await echoThread(harness, owner);
+    writeFileSync(join(harness.dataDir, 'notes.txt'), 'hello\n');
+    const phone = await pairedDevice();
+    try {
+      await expect(phone.call('files.read', { threadId, path: 'journal.db' })).rejects.toThrow('data folder');
+      await expect(phone.call('files.list', { threadId })).rejects.toThrow('data folder');
+      expect(await owner.call('files.read', { threadId, path: 'notes.txt' })).toMatchObject({ kind: 'text', text: 'hello\n' });
+    } finally {
+      phone.close();
+    }
+  });
+
+  test('a link out of the project, swapped in after the thread was made, is not followed', async () => {
+    const owner = await harness.connect();
+    const outside = join(harness.dataDir, 'outside');
+    mkdirSync(outside);
+    writeFileSync(join(outside, 'secret.txt'), 'secret\n');
+    const { root, threadId } = await repoThread(owner, (root) => {
+      mkdirSync(join(root, 'nested'));
+      symlinkSync(join(root, 'nested'), join(root, 'link'), process.platform === 'win32' ? 'junction' : 'dir');
+      return join(root, 'link');
+    });
+    const phone = await pairedDevice();
+    try {
+      expect(await phone.call('files.list', { threadId })).toEqual([]);
+      unlinkSync(join(root, 'link'));
+      symlinkSync(outside, join(root, 'link'), process.platform === 'win32' ? 'junction' : 'dir');
+      for (const attempt of [
+        () => phone.call('files.list', { threadId }),
+        () => phone.call('files.read', { threadId, path: 'secret.txt' }),
+        () => phone.call('git.status', { threadId }),
+        () => phone.call('git.diff', { threadId, path: 'secret.txt' }),
+      ]) {
+        await expect(attempt()).rejects.toThrow('a paired device reads only inside the thread\'s project or its worktrees');
+      }
+      // The owner's own read is not changed by this guard.
+      expect((await owner.call('files.list', { threadId })).map((entry) => entry.name)).toEqual(['secret.txt']);
+    } finally {
+      phone.close();
+    }
+  });
+
+  test('the gate holds a device to diffs against HEAD and leaves writing to the owner', () => {
+    const owner: Connection = { ...deviceConnection(), identity: { principal: 'owner', sessionId: null, threadId: null } };
+    expect(() => assertAllowed('git.diff', owner, { threadId: 't', path: 'a', ref: 'HEAD~3' })).not.toThrow();
+    expect(() => assertAllowed('git.diff', deviceConnection(), { threadId: 't', path: 'a' })).not.toThrow();
+    expect(() => assertAllowed('git.diff', deviceConnection(), { threadId: 't', path: 'a', ref: 'main' })).toThrow('HEAD only');
+    expect(() => assertAllowed('files.write', deviceConnection(), { threadId: 't', path: 'a', text: '' })).toThrow('owner only');
   });
 });
 

@@ -4,6 +4,7 @@
   import { bytes } from '../lib/format';
   import { decodedBytes } from '../lib/attachments';
   import { browserDownload, decodeBase64, saveAttachment } from '../lib/attachment-save';
+  import { galleryFrom, media, type MediaItem } from '../lib/media-gallery';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { claudeKeywords, promptCommand, promptSegments, promptText } from '../lib/message-display';
@@ -11,28 +12,25 @@
   import PreviewReferences from './PreviewReferences.svelte';
   import MessageActions from './MessageActions.svelte';
   import MoveMarker from './MoveMarker.svelte';
+  import ImageViewer from './ImageViewer.svelte';
   import SpawnMarker from './SpawnMarker.svelte';
 
   /**
    * A prompt in the timeline: its bubble, the pictures and files it was sent
-   * with, and the two receipts under it. `expanded` belongs to the list, so a
-   * picture opened stays open when the window drops the message and builds it again.
+   * with, and the two receipts under it. A picture opens in the viewer, with
+   * the thread's other pictures and videos a swipe away.
    */
   let {
     store,
     message,
     turn,
     progress,
-    expanded,
-    ontoggle,
     edit
   }: {
     store: Store;
     message: Message;
     turn: Turn | undefined;
     progress: TurnProgress;
-    expanded: string[];
-    ontoggle: (id: string) => void;
     /** Rewinds the thread to before this prompt and puts it back in the composer. */
     edit?: () => void;
   } = $props();
@@ -61,6 +59,21 @@
   }
 
   const images = $derived(imagesOf(message));
+  let viewing = $state<{ items: MediaItem[]; index: number } | null>(null);
+
+  /** The picture as the viewer shows it, under a name a saved copy can keep. */
+  function viewed(image: ImagePart, at: number): MediaItem {
+    const extension = image.mimeType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'png';
+    const name = image.alt || `image-${at + 1}.${extension}`;
+    const src = `data:${image.mimeType};base64,${image.data}`;
+    return {
+      src, name, mimeType: image.mimeType, kind: 'image',
+      save: () => {
+        if (window.__TAURI_INTERNALS__ === undefined) { browserDownload(src, name); return; }
+        saveAttachment(name, decodeBase64(image.data), false).catch((error: unknown) => { store.error = error instanceof Error ? error.message : String(error); });
+      }
+    };
+  }
   const copyText = $derived(message.parts.flatMap((part) => part.type === 'text' ? [promptText(part)] : []).join('\n\n'));
   /** The move this prompt told the agent about, first thing the core put before its words. */
   const moved = $derived(message.parts.flatMap((part) => (part.type === 'text' && part.moved ? [part.moved] : []))[0]);
@@ -88,13 +101,13 @@
   {#if images.length > 0}
     <div class="images">
       {#each images as image, at (at)}
-        {@const id = `${message.id}:${at}`}
         <button
           type="button"
           class="shot"
-          class:full={expanded.includes(id)}
           title={image.alt ?? strings.chat.imagePart}
-          onclick={() => ontoggle(id)}
+          use:media={() => viewed(image, at)}
+          onclick={(event) => viewing = galleryFrom(event.currentTarget, viewed(image, at))}
+          data-testid="image-open"
         >
           <img
             data-testid="image-part"
@@ -106,6 +119,7 @@
     </div>
   {/if}
 </div>
+{#if viewing}<ImageViewer items={viewing.items} index={viewing.index} onclose={() => viewing = null} />{/if}
 <div class="receipts" data-testid="message-receipts">
   <MessageActions text={copyText} at={message.createdAt} {edit} />
   <span class="tick" data-testid="receipt-accepted" class:received={!!turn} title={strings.chat.accepted} aria-label={strings.chat.accepted}><Check size={12} /></span>
@@ -176,12 +190,4 @@
     object-fit: contain;
   }
 
-  /* Clicked once, the picture is worth its own size instead of a thumbnail. */
-  .shot.full {
-    cursor: zoom-out;
-  }
-
-  .shot.full img {
-    max-height: none;
-  }
 </style>

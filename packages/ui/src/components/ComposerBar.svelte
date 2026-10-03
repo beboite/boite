@@ -17,6 +17,7 @@
   import { work } from '../lib/work-prefs.svelte';
   import { voice, VOICE_STORAGE_KEY } from '../lib/voice-prefs.svelte';
   import { controlMenu } from '../lib/controls';
+  import { keepFocus } from '../lib/focus';
   import { contextLevel, contextPercent } from '../lib/tokens';
   import { speedControl } from '../lib/model-speeds';
 
@@ -32,6 +33,7 @@
     key,
     provider,
     canSend,
+    sendLabel = strings.composer.send,
     choice = $bindable(),
     picking = $bindable(),
     dictating = $bindable(),
@@ -45,6 +47,8 @@
     key: string;
     provider: ProviderSummary | null | undefined;
     canSend: boolean;
+    /** What Send does, when it answers a question rather than sending a message. */
+    sendLabel?: string;
     choice: Choice | null;
     picking: boolean;
     dictating: boolean;
@@ -237,7 +241,7 @@
     <div class="context-control" oncontextmenu={(event) => controlMenu(event, store, 'header.context')}><ContextControl {store} /></div>
   {/if}
   {#if store.busy}
-    <button type="button" class="icon stop" data-testid="composer-stop" title={strings.composer.stop} aria-label={strings.composer.stop} onclick={() => void store.stop()}>
+    <button type="button" class="icon stop" data-testid="composer-stop" title={strings.composer.stop} aria-label={strings.composer.stop} onmousedown={keepFocus} onclick={() => void store.stop()}>
       <Square size={12} strokeWidth={2.5} />
     </button>
   {/if}
@@ -276,9 +280,10 @@
     type="button"
     class="primary icon send"
     data-testid="composer-send"
-    title={strings.composer.send}
-    aria-label={strings.composer.send}
+    title={sendLabel}
+    aria-label={sendLabel}
     disabled={!canSend}
+    onmousedown={keepFocus}
     onclick={() => onsubmit()}
   >
     <ArrowUp size={16} strokeWidth={2.25} />
