@@ -154,7 +154,9 @@ test('a paired device sees nothing without a group, and only the members in one'
   draw(phone);
   await settle();
   expect(phone.owner).toBe(false);
-  expect(document.body.innerHTML.replaceAll(/<!--.*?-->/g, '').trim()).toBe('');
+  // Nothing drawn: no element, only the anchors Svelte leaves for its blocks.
+  expect(document.body.childElementCount).toBe(0);
+  expect(document.body.textContent?.trim()).toBe('');
 
   // The core the phone is paired with joins as its owner would; the phone only reads the roster.
   expect(await host.createGroup('Home')).toBe(true);

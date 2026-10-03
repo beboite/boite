@@ -74,6 +74,17 @@ function origin(host: string, port: number): string {
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost']);
 
+/** The public address as an origin. The setting stores one already; anything else is not an address to give. */
+function publicOrigin(publicUrl: string | null | undefined): string | null {
+  if (!publicUrl) return null;
+  try {
+    const url = new URL(publicUrl);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The origins another machine dials, best first: the public HTTPS address a
  * phone needs, the tailnet name, the tailnet address, the LAN address. A core
@@ -88,7 +99,8 @@ export function advertisedAddresses(
   const { host, port } = listening;
   const everywhere = host === '0.0.0.0' || host === '::';
   const addresses: string[] = [];
-  if (listening.publicUrl) addresses.push(listening.publicUrl.replace(/\/+$/, ''));
+  const published = publicOrigin(listening.publicUrl);
+  if (published !== null) addresses.push(published);
   if (tailnet !== null && (everywhere || listening.tailnet || host === tailnet.ip)) {
     if (tailnet.name !== null) addresses.push(origin(tailnet.name, port));
     addresses.push(origin(tailnet.ip, port));
