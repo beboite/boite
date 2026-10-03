@@ -105,7 +105,9 @@ test('an open viewer follows a replacement client without reusing old frames or 
   resolveOld(frame('Obsolete desktop')); await settle();
   expect(document.querySelector('[data-testid=remote-browser-frame]')).toBeNull();
   await vi.advanceTimersByTimeAsync(1800); await settle();
-  expect(nextCalls).toHaveBeenCalledExactlyOnceWith('browser.remoteFrame', { threadId: 't-trace' });
+  // A moving page is polled several times a second; every request goes to the replacement.
+  expect(nextCalls).toHaveBeenCalledWith('browser.remoteFrame', { threadId: 't-trace' });
+  expect(nextCalls.mock.calls.every(([method]) => method === 'browser.remoteFrame')).toBe(true);
   expect(document.querySelector('[data-testid=remote-browser-dialog] header small')?.textContent).toBe('Replacement desktop');
   document.querySelector<HTMLButtonElement>('.screen')!.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0, clientX: 80, clientY: 80 }));
   await settle();

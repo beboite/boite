@@ -9,6 +9,7 @@
   import { localFileDirectory, openLocalFile } from '../lib/local-files';
   import { browserDownload, decodeBase64, saveAttachment, saveAttachmentUrl } from '../lib/attachment-save';
   import { galleryFrom, media, type MediaItem } from '../lib/media-gallery';
+  import { videoPlayable } from '../lib/video-support';
   import ImageViewer from './ImageViewer.svelte';
 
   let { file, store, threadId, messageId, path, line, onclose }: {
@@ -46,6 +47,8 @@
   const pdf = $derived(mime === 'application/pdf');
   const audio = $derived(mime.startsWith('audio/'));
   const video = $derived(mime.startsWith('video/'));
+  // A WebM on an iPhone without WebM support: offer the download rather than a black frame.
+  const unplayable = $derived(video && !videoPlayable(mime));
   const deferredImage = $derived(image && size > ATTACHMENT_MAX_BYTES && !imageRequested);
   const inlineMedia = $derived(!!file && ((image && !deferredImage) || video || audio));
   const showPreview = $derived(inlineMedia || (expanded && rich));
@@ -190,8 +193,13 @@
 <section class="chat-file" class:inline-media={inlineMedia} data-testid="chat-file" aria-busy={loading || saving}>
   {#if showPreview && url}
     <div class="preview" data-testid="artifact-content">
-      {#if previewError}
-        <div class="media-fallback" role="status"><FileText size={28} /><p>{strings.artifacts.mediaFailed}</p><button type="button" class="ghost small" onclick={load}><RefreshCw size={14} />{strings.artifacts.retry}</button></div>
+      {#if previewError || unplayable}
+        <div class="media-fallback" role="status" data-testid="media-fallback">{#if video}<Film size={28} />{:else}<FileText size={28} />{/if}<p>{video ? strings.artifacts.videoFailed : strings.artifacts.mediaFailed}</p>
+          <div class="fallback-actions">
+            {#if video}<a class="ghost small download-label" href={url} download={name} onclick={download} data-testid="media-fallback-download"><Download size={14} />{strings.artifacts.download}</a>{/if}
+            {#if !unplayable}<button type="button" class="ghost small" onclick={load}><RefreshCw size={14} />{strings.artifacts.retry}</button>{/if}
+          </div>
+        </div>
       {:else}
         {#key attempt}
           {#if text !== null}<pre>{#if line}<span class="line">{`${path}:${line}\n`}</span>{/if}{text}</pre>
@@ -243,6 +251,8 @@
   .clip .enlarge { padding: 0; border: 0; color: inherit; }
   small, .line { color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .download { display: inline-flex; align-items: center; justify-content: center; min-height: var(--control); }
+  .fallback-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+  .download-label { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding-inline: 12px; color: var(--color-foreground); text-decoration: none; }
   .preview { order: 1; border-top: 1px solid var(--color-border); background: var(--color-surface-2); }
   .inline-media .preview { order: 0; border-top: 0; border-bottom: 1px solid var(--color-border); }
   .media-fallback { min-height: 150px; max-width: 360px; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 20px; text-align: center; color: var(--color-muted-foreground); }

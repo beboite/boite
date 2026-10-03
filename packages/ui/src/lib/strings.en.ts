@@ -4,11 +4,13 @@ export const strings = {
     display: 'Display', resolution: 'Page resolution', fitPhone: 'Fit this screen', phone: 'Phone', tablet: 'Tablet', rotate: 'Rotate', width: 'Width', height: 'Height', apply: 'Apply', sharedSize: 'Resolution also changes the shared tab on the PC.', restoreSize: 'Use the PC panel size', previewZoom: 'Preview zoom (this device only)', fit: 'Fit', panHint: 'Drag to pan the preview. Use the arrows to scroll the page.',
     open: 'Open live browser', experimental: 'Experimental browser sharing', enable: 'Enable on this device',
     hint: 'View and control the browser tab shared by your PC, inside Boite.',
-    hostMissing: 'The PC is not sharing a browser for this conversation yet. Open the same conversation and a browser tab in Boite on the PC, with both browser experiments enabled.',
+    hostMissing: 'The PC is not showing this conversation’s browser yet.', asking: 'Asking the PC to open this conversation’s browser…', noAnswer: 'The PC has not opened it. Check that Boite is open on the PC, then ask again.', askPc: 'Open on the PC',
+    noDesktop: 'No PC is sharing its browser. On the PC, keep Boite open and enable Live browser on other devices in Settings > Experiments.',
+    address: 'Address', go: 'Go', back: 'Back', forward: 'Forward', reload: 'Reload', badAddress: 'Enter a web address (http or https).',
     title: 'Live desktop browser', waiting: 'Waiting for the desktop', live: 'Live', paused: 'Paused', reconnecting: 'Reconnecting', pause: 'Pause', resume: 'Resume',
-    help: 'On your desktop, enable Agent browser control and Live browser on other devices in Experiments, then open this conversation and a browser tab. The PC must stay awake.',
+    help: 'On the PC, enable Live browser on other devices in Settings > Experiments and keep Boite open. Watching from here opens this conversation’s browser tab there. The PC must stay awake.',
     interact: 'Tap or swipe the shared page', image: 'Live view of the desktop browser', scrollUp: 'Scroll up', scrollDown: 'Scroll down',
-    text: 'Tap a page field, then type here', send: 'Send text to the page', gesture: 'Tap to click. Swipe to scroll. Pause stops the stream.'
+    text: 'Tap a page field, then type here', send: 'Send text to the page', gesture: 'Tap to click. Drag to scroll. Return sends the text and Enter; ⌫ on an empty field erases in the page.'
   },
   prReview: { open: 'Read in Boite', back: 'Linked pull requests', files: 'Files', comments: 'Comments', checks: 'Checks', overview: 'Overview', loading: 'Loading review…', empty: 'Nothing to display.', more: 'Load more files', unavailable: 'GitHub did not provide a text diff for this file.', truncated: 'Some content was shortened. Open GitHub to read it in full.', github: 'Open on GitHub', refresh: 'Refresh review', viewed: 'Viewed', changed: 'Changed', fileCount: '{count} files loaded', readOnly: 'Reading this review does not publish comments or merge the PR.' },
   agents: {
@@ -104,7 +106,7 @@ export const strings = {
   activityUnsupported: 'Element references cannot be used with /goal or /loop. Send a regular message or remove the references.',
   stashUnsupported: 'This draft contains element references and cannot be stashed. Send it or remove the references first.'
 },
-  artifacts: { loadImage: 'Load image', retry: 'Try again', mediaFailed: 'This media could not be previewed. Try again or download the file to open it.', saving: 'Saving', zoomIn: 'Zoom in', zoomOut: 'Zoom out', fitImage: 'Fit image', open: 'Open', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', closeImage: 'Close image', enlarge: 'View full size', saved: 'Saved in Downloads', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
+  artifacts: { loadImage: 'Load image', retry: 'Try again', mediaFailed: 'This media could not be previewed. Try again or download the file to open it.', videoFailed: 'This device cannot play this video. Download it to watch it in another app.', saving: 'Saving', zoomIn: 'Zoom in', zoomOut: 'Zoom out', fitImage: 'Fit image', open: 'Open', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', closeImage: 'Close image', enlarge: 'View full size', saved: 'Saved in Downloads', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
 
   brain: {
     heading: 'Brain', description: 'Your agents share the same instructions and skills.',
@@ -1335,7 +1337,7 @@ export const strings = {
     system: 'Follow system appearance', light: 'Light page', dark: 'Dark page', diagnostics: 'Page diagnostics and actions',
     startRecording: 'Record this browser tab', stopRecording: 'Stop recording', reviewRecording: 'Recorded video',
     refresh: 'Refresh', clear: 'Clear', pageEvents: 'Page events', actions: 'Actions', noEvents: 'No page events captured.', noActions: 'No actions recorded yet.',
-    omitted: '{count} older or oversized events omitted.', recorded: '{seconds} seconds · {mb} MB · silent WebM',
+    omitted: '{count} older or oversized events omitted.', recorded: '{seconds} seconds · {mb} MB · silent {format}',
     recordingError: 'Recording stopped after an error.', recordingLimit: 'Recording stopped at the duration or size limit.',
     download: 'Download video', discard: 'Discard video',
   },
@@ -1852,7 +1854,7 @@ export const strings = {
   },
 
   experiments: {
-    remoteBrowser: { title: 'Live browser on other devices', hint: 'On the desktop, share the open conversation’s browser with paired devices. On a phone, watch and control that page. Enable this experiment on both devices and Agent browser control on the desktop.' },
+    remoteBrowser: { title: 'Live browser on other devices', hint: 'On the desktop, share a conversation’s browser with paired devices and open its tab when one asks. On a phone, watch and control that page. Enable this experiment on both devices; agents do not get browser control from it.' },
     prReview: { title: 'Review pull requests', hint: 'Read linked GitHub pull requests, file diffs, comments and check results inside Boite, including on phones.' },
     recordingIndicators: { title: 'Show actions in recordings', hint: 'Add click markers and navigation keys to browser recordings. Typed text and password input are never shown as key labels.' },
     openChatLinks: { title: 'Open chat links in their apps', hint: 'On this desktop, clicking a local file or folder opens its default app, including shortcuts and files outside the project. Only links from this computer are opened.' },

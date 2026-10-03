@@ -1,6 +1,7 @@
 import { test, expect } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { BROWSER_RECORDING_TYPES } from '../../packages/contracts/src/index.ts';
 import { startBrowserSession } from './lib/browser-session.ts';
 import { connect } from '../../packages/core/src/client.ts';
 const executable = process.env.BOITE_E2E_SHELL_EXE;
@@ -47,7 +48,7 @@ test.skipIf(process.platform !== 'win32' || !executable)('a paired phone sees an
     expect(result.bytes).toBeGreaterThan(1000); expect(result.reason).toBe('stopped');
     const chunks: Buffer[] = []; let offset = 0;
     for (;;) { const r = (await command({ kind: 'recording-read', recordingId: result.id, offset })).value as { base64: string; nextOffset: number; done: boolean }; chunks.push(Buffer.from(r.base64, 'base64')); offset = r.nextOffset; if (r.done) break; }
-    writeFileSync(join(captures, 'recording-indicators.webm'), Buffer.concat(chunks));
+    writeFileSync(join(captures, `recording-indicators.${BROWSER_RECORDING_TYPES[result.mime]}`), Buffer.concat(chunks));
     expect((await command({ kind: 'evaluate', expression: "Object.keys(globalThis).filter(k=>k.startsWith('__boiteInput_')).length" })).value).toBe(0);
     await page.waitFor("document.querySelector('[data-testid=browser-recording-preview]')?.readyState >= 2");
     // Decode the saved clip: collecting an event alone did not prove that the
