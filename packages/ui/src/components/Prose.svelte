@@ -98,8 +98,7 @@
   {#each blocks as block, index (index)}
     <!-- A streaming answer shows finished paragraphs only (`ParagraphScan`): every block here is final and kept. -->
     <div class="paragraph" data-testid="paragraph">{@html renderBlock(block, rich)}</div>
-  {/each}
-  {#if typing}<TypingIndicator />{/if}
+  {/each}{#if typing}<TypingIndicator />{/if}
 </div>
 {#if selected && rich}
   {#key `${threadId}:${selected.path}:${selected.line}`}
