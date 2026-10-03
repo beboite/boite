@@ -1642,6 +1642,8 @@ describe('native Codex fork', () => {
     expect(wire).toContain(`accountHome=${isolated.isolationDir}`);
     expect(wire).toContain('excludeTurns=true planEnabled=true');
     expect(fakeLog()).toContain(`thread/turns/list threadId=${fork.sessionId} limit=1 sortDirection=desc`);
+    // Windows may retain the trace row until its usage event or the 1 s fallback.
+    await waitFor(() => harness!.core.procs.liveCount(fork.id) === 0);
     expect(harness!.core.procs.liveCount(fork.id)).toBe(0);
     expect(harness!.core.threads.get(fork.id).messages).toHaveLength(2);
     await client.call('threads.subscribe', { threadId: fork.id });
@@ -1815,8 +1817,10 @@ describe('native Codex rewind', () => {
     expect({ ...harness!.core.threads.get(threadId), load: null }).toEqual({ ...before, load: null });
     expect(fakeLog()).toContain('thread/archive codex-fork-');
     expect(fakeLog()).not.toContain(`thread/archive ${before.sessionId}`);
-    // Fork release awaits the child exit callback, after procs and lease
-    // listeners ran, so the setup fork must already be gone on return.
+    // Child exit releases the lease; Windows trace usage arrives separately.
+    // Wait for both while preserving the retained source process and its lease.
+    await waitFor(() => harness!.core.procs.liveCount(threadId) === sourcePids.length
+      && harness!.core.providers.installs.leaseCount('codex-fake') === sourceLeases);
     expect(harness!.core.procs.liveOf(threadId).map(process => process.pid)).toEqual(sourcePids);
     expect(harness!.core.providers.installs.leaseCount('codex-fake')).toBe(sourceLeases);
   });
