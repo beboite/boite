@@ -30,6 +30,7 @@ test('disabled mode retains the native glance; saving the proxy opens its embedd
   await page.click('[data-testid="nav-settings"]');
   await page.click('[data-testid="settings-tab-accounts"]');
   await page.waitFor('document.querySelector("[data-testid=subscription-proxy-settings]")');
+  expect(await page.evaluate('document.querySelector("[data-testid=subscription-proxy-url]").value')).toBe('http://127.0.0.1:8787');
   await page.click('[data-testid="subscription-proxy-enabled"]');
   await page.type('[data-testid="subscription-proxy-url"]', dashboard);
   await page.type('[data-testid="subscription-proxy-dashboard"]', `${dashboard}/admin/#quotas`);

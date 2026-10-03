@@ -6,7 +6,7 @@
   import InfoTip from './InfoTip.svelte';
 
   let { store }: { store: Store } = $props();
-  let config = $state<SubscriptionProxy>({ enabled: false, kind: 'douane', baseUrl: 'http://127.0.0.1:7878', dashboardUrl: 'http://127.0.0.1:7878/admin/#quotas' });
+  let config = $state<SubscriptionProxy>({ enabled: false, kind: 'douane', baseUrl: 'http://127.0.0.1:8787', dashboardUrl: 'http://127.0.0.1:8787/admin/#quotas' });
   let key = $state('');
   let clearKey = $state(false);
   let busy = $state(false);
@@ -18,8 +18,8 @@
   });
 
   function choose(kind: SubscriptionProxy['kind']) {
-    const oldDefault = config.kind === 'douane' ? 'http://127.0.0.1:7878' : 'http://127.0.0.1:8317';
-    const baseUrl = config.baseUrl === oldDefault ? (kind === 'douane' ? 'http://127.0.0.1:7878' : 'http://127.0.0.1:8317') : config.baseUrl;
+    const oldDefault = config.kind === 'douane' ? 'http://127.0.0.1:8787' : 'http://127.0.0.1:8317';
+    const baseUrl = config.baseUrl === oldDefault ? (kind === 'douane' ? 'http://127.0.0.1:8787' : 'http://127.0.0.1:8317') : config.baseUrl;
     config = { ...config, kind, baseUrl, dashboardUrl: `${baseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, '')}${kind === 'douane' ? '/admin/#quotas' : '/management.html#/quota'}` };
     result = '';
   }
