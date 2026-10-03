@@ -499,6 +499,10 @@ describe('acp driver', () => {
     await client.call('turns.start', { threadId, prompt: '[question]' });
     const request = await requested;
     expect(request.options.map((option) => option.id)).toEqual(['yes', 'no']);
+    // No free field, so no file either: ACP's answer is an option id.
+    await expect(client.call('questions.answer', {
+      threadId, questionId: request.id, optionIds: ['no'], attachments: [{ kind: 'file', mimeType: 'text/plain', data: 'aGk=', name: 'a.txt' }],
+    })).rejects.toThrow('the question takes no files');
     await client.call('questions.answer', { threadId, questionId: request.id, optionIds: ['no'] });
     expect((await finished).status).toBe('done');
     const thread = await client.call('threads.get', { threadId });

@@ -2,6 +2,7 @@ import type { ImageAttachment, NativeAgentUpdate, QuestionAnswer, QuestionOption
 import type { SessionContext, TurnContext } from '../types.ts';
 import type { CodexItem, CodexQuestion, CodexThreadOpened, CodexTokenUsage, ToolView } from './protocol.ts';
 import { AGENT_OWN_MODEL, COMMAND_TOOL_NAME, FILE_CHANGE_TOOL_NAME, SLEEP_TOOL_NAME } from './protocol.ts';
+import { answerText } from '../../attachments.ts';
 
 // ---------------------------------------------------------------------------
 // Mapping helpers
@@ -64,7 +65,7 @@ export function answerTextOf(answer: QuestionAnswer, options: QuestionOption[]):
   const picked = answer.optionIds
     .map((id) => options.find((option) => option.id === id)?.label ?? id)
     .join(', ');
-  const text = answer.text ?? '';
+  const text = answerText(answer);
   if (picked.length > 0 && text.length > 0) return `${picked}: ${text}`;
   return picked.length > 0 ? picked : text;
 }

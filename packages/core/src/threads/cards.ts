@@ -1,16 +1,19 @@
-import type {
-  Message,
-  MessageId,
-  MessagePart,
-  PermissionRequest,
-  ProviderDescriptor,
-  QuestionAnswer,
-  QuestionRequest,
-  RequestId,
-  ThreadId,
-  ThreadSummary,
-  Turn,
+import {
+  answerAttachmentError,
+  type Attachment,
+  type Message,
+  type MessageId,
+  type MessagePart,
+  type PermissionRequest,
+  type ProviderDescriptor,
+  type QuestionAnswer,
+  type QuestionRequest,
+  type RequestId,
+  type ThreadId,
+  type ThreadSummary,
+  type Turn,
 } from '@boite/contracts';
+import { answerText, attachToAnswer } from '../attachments.ts';
 import type { Core } from '../core.ts';
 import type { PermissionTicket, QuestionAsk, QuestionTicket } from '../drivers/types.ts';
 import { notFound, refused } from '../errors.ts';
@@ -120,6 +123,7 @@ export class ThreadCards {
     questionId: RequestId;
     optionIds: string[];
     text?: string;
+    attachments?: Attachment[];
   }): void {
     const pending = this.questions.get(params.questionId);
     if (pending === undefined) throw notFound(`unknown question ${params.questionId}`, params);
@@ -148,11 +152,18 @@ export class ThreadCards {
     if (text.length > 0 && !request.allowText) {
       throw refused('the question takes no free text', { questionId: request.id });
     }
-    if (params.optionIds.length === 0 && text.length === 0) {
+    const files = params.attachments ?? [];
+    if (files.length > 0 && !request.allowText) {
+      throw refused('the question takes no files', { questionId: request.id });
+    }
+    const badFiles = answerAttachmentError(files);
+    if (badFiles !== null) throw refused(badFiles.message, { questionId: request.id, ...badFiles.data });
+    if (params.optionIds.length === 0 && text.length === 0 && files.length === 0) {
       throw refused('an answer needs an option or some text', { questionId: request.id });
     }
 
     const answer: QuestionAnswer = text.length > 0 ? { optionIds: params.optionIds, text } : { optionIds: params.optionIds };
+    if (files.length > 0) answer.attachments = attachToAnswer(this.core.dataDir, answer, files);
     this.questions.delete(request.id);
     this.core.journal.append(
       {
@@ -378,5 +389,5 @@ export const ASK_INSTRUCTIONS = '\n\nBoite: to ask the user something without st
 /** What the agent reads for an answer: the labels picked, then what the user typed. */
 function answerTextOf(request: QuestionRequest, answer: QuestionAnswer): string {
   const labels = answer.optionIds.map(id => request.options.find(option => option.id === id)?.label ?? id);
-  return [labels.join(', '), answer.text ?? ''].filter(line => line.length > 0).join('\n');
+  return [labels.join(', '), answerText(answer)].filter(line => line.length > 0).join('\n');
 }

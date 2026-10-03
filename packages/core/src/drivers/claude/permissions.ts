@@ -1,5 +1,6 @@
 import type { CanUseTool, HookInput, HookJSONOutput, PermissionResult } from '@anthropic-ai/claude-agent-sdk';
 import type { QuestionAnswer } from '@boite/contracts';
+import { answerText } from '../../attachments.ts';
 import type { TurnContext } from '../types.ts';
 import type { ClaudeTurn } from './turn.ts';
 
@@ -141,7 +142,8 @@ async function askUser(turn: ClaudeTurn, input: Record<string, unknown>): Promis
     if (answer === null) return { behavior: 'deny', message: DENIED };
     turn.part(index, { type: 'question', questionId: ticket.questionId, ...ask, answer });
     const labels = answer.optionIds.map(id => options.find(option => option.id === id)?.label ?? id);
-    answers[question.question] = [...labels, ...(answer.text ? [answer.text] : [])].join(', ');
+    const text = answerText(answer);
+    answers[question.question] = [...labels, ...(text ? [text] : [])].join(', ');
   }
   return { behavior: 'allow', updatedInput: { ...input, answers } };
 }

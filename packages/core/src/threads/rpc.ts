@@ -155,6 +155,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
       questionId: params.questionId,
       optionIds: params.optionIds,
       ...(params.text === undefined ? {} : { text: params.text }),
+      ...(params.attachments === undefined ? {} : { attachments: params.attachments }),
     });
     return { ok: true } as const;
   });

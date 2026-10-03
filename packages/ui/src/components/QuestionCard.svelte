@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { ChevronRight, MessageCircleQuestionMark } from '@lucide/svelte';
-  import type { QuestionAnswer, QuestionOption } from '@boite/contracts';
-  import { strings } from '../lib/strings';
+  import { ChevronRight, FileText, MessageCircleQuestionMark, Paperclip, X } from '@lucide/svelte';
+  import type { Attachment, QuestionAnswer, QuestionOption } from '@boite/contracts';
+  import { gatherAttachments } from '../lib/composer-attachments';
+  import { fill, strings } from '../lib/strings';
 
   let {
     text,
@@ -26,8 +27,12 @@
     answer: QuestionAnswer | null;
     /** False on a card whose turn ended before anyone answered: nothing to press. */
     pending: boolean;
-    /** False when the answer did not reach the core: the card is given back to answer again. */
-    submit: (optionIds: string[], text: string) => unknown;
+    /**
+     * False when the answer did not reach the core: the card is given back to
+     * answer again. `attachments` only where the free field is allowed: the
+     * core hands them to the agent as paths.
+     */
+    submit: (optionIds: string[], text: string, attachments: Attachment[]) => unknown;
     /** Resolve without sending an answer. A failure leaves the card usable. */
     skip?: () => unknown;
   } = $props();
@@ -39,7 +44,57 @@
   let built = $state(false);
   $effect(() => { if (open) built = true; });
 
-  const ready = $derived(picked.length > 0 || typed.trim().length > 0);
+  /** Photos and files given with the answer, read and reduced as the composer's are. */
+  let files = $state<Attachment[]>([]);
+  let reading = $state(0);
+  let fileError = $state<string | null>(null);
+  let picker = $state<HTMLInputElement>();
+  const inputId = $props.id();
+
+  const ready = $derived((picked.length > 0 || typed.trim().length > 0 || files.length > 0) && reading === 0);
+
+  async function take(incoming: File[]): Promise<void> {
+    if (incoming.length === 0 || !allowText || !pending || sent) return;
+    reading += 1;
+    fileError = null;
+    try {
+      fileError = await gatherAttachments(incoming, {
+        held: () => files,
+        add: (attachment) => { files = [...files, attachment]; },
+        noImages: null
+      });
+    } finally { reading -= 1; }
+  }
+
+  function filesOf(list: FileList | DataTransferItemList | null | undefined): File[] {
+    if (!list) return [];
+    if (list instanceof FileList) return Array.from(list);
+    return Array.from(list).filter((item) => item.kind === 'file').map((item) => item.getAsFile()).filter((file): file is File => file !== null);
+  }
+
+  function onpaste(event: ClipboardEvent): void {
+    const pasted = filesOf(event.clipboardData?.items);
+    if (pasted.length === 0) return;
+    event.preventDefault();
+    void take(pasted);
+  }
+
+  function ondragover(event: DragEvent): void {
+    if (!allowText || !pending || answer !== null) return;
+    if (!Array.from(event.dataTransfer?.items ?? []).some((item) => item.kind === 'file')) return;
+    event.preventDefault();
+    // The composer under the card would take the drop otherwise.
+    event.stopPropagation();
+  }
+
+  function ondrop(event: DragEvent): void {
+    if (!allowText || !pending || answer !== null) return;
+    const dropped = filesOf(event.dataTransfer?.files);
+    if (dropped.length === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void take(dropped);
+  }
 
   function toggle(id: string): void {
     if (multiple) {
@@ -52,7 +107,7 @@
   async function send(): Promise<void> {
     if (!pending || !ready || sent) return;
     sent = true;
-    if ((await submit(picked, typed.trim())) === false) sent = false;
+    if ((await submit(picked, typed.trim(), files)) === false) sent = false;
   }
 
   async function pass(): Promise<void> {
@@ -61,12 +116,18 @@
     if ((await skip()) === false) sent = false;
   }
 
-  /** What the folded card says: the labels picked, then whatever was typed. */
+  /** What the folded card says: the labels picked, then whatever was typed, else how many files went. */
   function summary(given: QuestionAnswer): string {
     const labels = given.optionIds.map((id) => options.find((one) => one.id === id)?.label ?? id);
     const written = given.text ?? '';
     if (labels.length > 0 && written.length > 0) return `${labels.join(', ')}: ${written}`;
-    return labels.length > 0 ? labels.join(', ') : written;
+    const said = labels.length > 0 ? labels.join(', ') : written;
+    const count = given.attachments?.length ?? 0;
+    return said.length > 0 || count === 0 ? said : fill(strings.media.answerFileCount, { count: String(count) });
+  }
+
+  function fileNames(given: QuestionAnswer): string {
+    return (given.attachments ?? []).map((file) => file.name ?? strings.composer.attachUnnamed).join(', ');
   }
 </script>
 
@@ -78,12 +139,18 @@
   data-testid="question-card"
   data-async={async ? 'true' : undefined}
   data-state={answer !== null ? 'answered' : pending ? 'pending' : 'cancelled'}
+  role="group"
+  {ondragover}
+  {ondrop}
 >
   {#if answer !== null}
     <button type="button" class="ghost answered-row" data-testid="question-toggle" aria-expanded={open} onclick={() => (open = !open)}>
       <span class="glyph"><MessageCircleQuestionMark size={15} strokeWidth={1.75} /></span>
       <span class="verdict" data-testid="question-verdict">{strings.chat.questionAnswered}</span>
       <span class="given" data-testid="question-answer" title={summary(answer)}>{summary(answer)}</span>
+      {#if answer.attachments?.length}
+        <span class="given-files" data-testid="question-answer-files" title={fileNames(answer)}><Paperclip size={12} strokeWidth={2} />{answer.attachments.length}</span>
+      {/if}
       <span class="caret" class:open aria-hidden="true"><ChevronRight size={12} strokeWidth={2} /></span>
     </button>
     <div class="fold" class:open inert={!open}>
@@ -92,6 +159,9 @@
           <div class="answer-detail">
             <p class="prompt" data-testid="question-text">{text}</p>
             <p>{summary(answer)}</p>
+            {#if answer.attachments?.length}
+              <p class="muted">{fill(strings.media.answerFiles, { names: fileNames(answer) })}</p>
+            {/if}
           </div>
         {/if}
       </div>
@@ -136,22 +206,76 @@
     {/if}
 
     {#if allowText}
-      <label class="field">
-        <span class="muted section-label">{strings.chat.questionTextLabel}</span>
-        <input
-          type="text"
-          bind:value={typed}
-          onkeydown={(event) => {
-            if (event.key !== 'Enter' || event.isComposing) return;
-            event.preventDefault();
-            event.stopPropagation();
-            void send();
-          }}
-          placeholder={strings.chat.questionTextPlaceholder}
-          data-testid="question-text-input"
-          disabled={!pending || sent}
-        />
-      </label>
+      <div class="field">
+        <label class="muted section-label" for={inputId}>{strings.chat.questionTextLabel}</label>
+        <div class="entry">
+          <input
+            id={inputId}
+            type="text"
+            bind:value={typed}
+            {onpaste}
+            onkeydown={(event) => {
+              if (event.key !== 'Enter' || event.isComposing) return;
+              event.preventDefault();
+              event.stopPropagation();
+              void send();
+            }}
+            placeholder={strings.chat.questionTextPlaceholder}
+            data-testid="question-text-input"
+            disabled={!pending || sent}
+          />
+          {#if pending}
+            <button
+              type="button"
+              class="icon attach"
+              data-testid="question-attach"
+              title={strings.media.answerAttach}
+              aria-label={strings.media.answerAttach}
+              disabled={sent}
+              onclick={() => picker?.click()}
+            ><Paperclip size={15} strokeWidth={1.75} /></button>
+            <input
+              bind:this={picker}
+              type="file"
+              multiple
+              hidden
+              data-testid="question-file"
+              onchange={(event) => {
+                const input = event.currentTarget;
+                const chosen = Array.from(input.files ?? []);
+                input.value = '';
+                void take(chosen);
+              }}
+            />
+          {/if}
+        </div>
+        {#if files.length > 0}
+          <ul class="files" data-testid="question-files">
+            {#each files as file, at (file)}
+              {@const label = file.name ?? strings.composer.attachAlt}
+              <li class="file" class:document={file.kind === 'file'} data-testid="question-file-item" title={label}>
+                {#if file.kind === 'image'}
+                  <img src="data:{file.mimeType};base64,{file.data}" alt={label} />
+                {:else}
+                  <FileText size={16} strokeWidth={1.5} /><span>{label}</span>
+                {/if}
+                <button
+                  type="button"
+                  class="icon small remove"
+                  data-testid="question-file-remove"
+                  title={fill(strings.composer.attachRemove, { name: label })}
+                  aria-label={fill(strings.composer.attachRemove, { name: label })}
+                  disabled={sent}
+                  onclick={() => { files = files.filter((_, index) => index !== at); }}
+                ><X size={12} strokeWidth={2.25} /></button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        {#if fileError}
+          <p class="file-error" role="alert" data-testid="question-file-error">{fileError}</p>
+        {/if}
+      </div>
     {/if}
 
     {#if pending}
@@ -369,6 +493,26 @@
   input:focus-visible {
     outline: none;
     border-color: var(--color-live);
+  }
+
+  .entry { display: flex; align-items: center; gap: 4px; }
+  .entry input { flex: 1; min-width: 0; }
+  .attach { flex: none; color: var(--color-muted-foreground); }
+  .attach:hover:not(:disabled) { color: var(--color-foreground); }
+  .given-files { display: inline-flex; align-items: center; gap: 2px; flex: none; font-size: var(--text-xs); color: var(--color-muted-foreground); }
+
+  /* What goes with the answer: thumbnails the size of a fingertip, each with its own way out. */
+  .files { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 0; padding: 0; list-style: none; }
+  .file { position: relative; width: 56px; height: 56px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-2); overflow: hidden; animation: pop var(--dur-2) var(--ease-out-quint); }
+  .file img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .file.document { width: min(200px, 100%); display: flex; align-items: center; gap: 6px; padding: 0 30px 0 8px; font-size: var(--text-sm); }
+  .file.document span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file .remove { position: absolute; top: 2px; right: 2px; width: 22px; height: 22px; padding: 0; border: none; border-radius: var(--radius-sm); background: var(--color-scrim); color: var(--color-foreground); }
+  .file .remove:hover:not(:disabled) { background: var(--color-danger); color: var(--color-on-danger); }
+  .file-error { margin: 2px 0 0; font-size: var(--text-sm); color: var(--color-danger); }
+  @media (max-width: 720px) {
+    .attach { width: var(--control-touch); height: var(--control-touch); }
+    .file .remove { width: 28px; height: 28px; }
   }
 
   .actions {
