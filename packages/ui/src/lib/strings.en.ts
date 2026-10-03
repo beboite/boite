@@ -468,7 +468,7 @@ export const strings = {
     projectWorkingThreads: '{count} working threads in {project}',
     projectDoneThreads: '{count} done threads in {project}',
     otherProjects: 'Other projects',
-    noActiveProjects: 'No open threads. Start a thread or open Other projects.',
+    noActiveProjects: 'No conversations need attention. Open Other projects to see working and completed threads.',
     markDone: 'Mark done',
     doneToast: 'Marked "{title}" done',
     doneLoadFailed: 'Some completed threads could not be loaded.',

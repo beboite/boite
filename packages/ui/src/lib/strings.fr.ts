@@ -474,7 +474,7 @@ export const fr: Translation = {
     projectWorkingThreads: '{count} conversations en cours dans {project}',
     projectDoneThreads: '{count} conversations terminées dans {project}',
     otherProjects: 'Autres projets',
-    noActiveProjects: 'Aucune conversation ouverte. Créez-en une ou ouvrez Autres projets.',
+    noActiveProjects: 'Aucune conversation à traiter. Ouvrez Autres projets pour voir les conversations au travail ou terminées.',
     markDone: 'Marquer comme terminé',
     doneToast: '« {title} » marqué comme terminé',
     doneLoadFailed: "Certaines conversations terminées n'ont pas pu être chargées.",
