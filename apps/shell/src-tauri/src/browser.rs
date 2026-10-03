@@ -15,11 +15,15 @@
 //! A surface reaches http, https and about, and nothing else. The command
 //! refuses another scheme by name before the webview is touched, and the
 //! navigation handler refuses it again for a link the page itself followed.
+//! A page's new windows are tabs or popups, as `popups` explains.
 
+mod popups;
+
+use popups::{close_popups, new_window};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
-use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
+use tauri::webview::{PageLoadEvent, WebviewBuilder};
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Position, Rect, Runtime, Size, Url,
     Webview, WebviewUrl,
@@ -318,7 +322,9 @@ pub fn close_all<R: Runtime>(app: &AppHandle<R>) {
             eprintln!("[shell] the browser surface {label} could not be closed: {error}");
         }
     }
+    close_popups(app, None);
 }
+
 
 /// A webview label is not free-form: `tauri_runtime::window::is_label_valid`
 /// takes letters, digits, `-`, `/`, `:` and `_` and panics on the rest, so an
@@ -583,23 +589,10 @@ pub async fn browser_create(
         );
     });
 
-    // A page asking for a window of its own gets none: the request comes back
-    // to the UI, which opens another tab in the same panel.
     let handle = app.clone();
     let surface = id.clone();
-    builder = builder.on_new_window(move |url, _features| {
-        if checked_url(&surface, url.as_str()).is_err() {
-            return NewWindowResponse::Deny;
-        }
-        announce(
-            &handle,
-            Event::NewWindow {
-                id: surface.clone(),
-                url: url.to_string(),
-            },
-        );
-        NewWindowResponse::Deny
-    });
+    let private = profile == Profile::Private;
+    builder = builder.on_new_window(move |url, features| new_window(&handle, &surface, private, url, features));
 
     let view = window
         .add_child(
@@ -612,6 +605,10 @@ pub async fn browser_create(
         .map_err(|error| format!("the browser surface {id:?} could not be parked: {error}"))?;
     #[cfg(windows)]
     {
+        if let Err(error) = crate::platform::browser_page::surface(&view).await {
+            let _ = view.close();
+            return Err(format!("the browser surface {id:?} could not be cleared of the app's scripts: {error}"));
+        }
         if let Err(error) = crate::platform::browser_diagnostics::attach(view.clone(), id.clone()).await {
             crate::platform::browser_diagnostics::remove(&id); let _ = view.close(); return Err(error);
         }
@@ -811,6 +808,7 @@ pub async fn browser_destroy(app: AppHandle, webview: Webview, id: String) -> Re
     cancel_pick(&id);
     if let Ok(mut highlights) = HIGHLIGHTS.lock() { highlights.remove(&id); }
     surfaces().want(&label_of(&id)?, false);
+    close_popups(&app, Some(&id));
     view_of(&app, &id)?
         .close()
         .map_err(|error| format!("the browser surface {id:?} could not be closed: {error}"))
