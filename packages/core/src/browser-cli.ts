@@ -5,8 +5,10 @@ import type { CoreClient } from './client.ts';
 import type { CliIo } from './cli.ts';
 
 export const BROWSER_HELP = `boite browser <command> [args] [tab-id] [--json]
-  status                         list this conversation's browser tabs
-  open <http-url>                 open a tab and return its id
+  status                         list this conversation's browser tabs and their profiles
+  profiles                       list the desktop's browser profiles and the default one
+  open <http-url> [--profile <name>] open a tab, in the default profile unless named
+                                 (a profile name or id, default, or private: kept nowhere)
   navigate <http-url> [tab-id]    navigate an existing tab
   snapshot [tab-id]              page text and unique CSS selectors
   click <selector> [tab-id]      click one visible element
@@ -34,7 +36,16 @@ of the generated PNG in cwd. Use boite attach <file.png|file.webm> to show it in
 export async function browserCommand(args: string[], io: CliIo, client: CoreClient, threadId: string): Promise<unknown> {
   const [command = 'status', ...rest] = args;
   if (command === 'help') return { help: BROWSER_HELP };
-  let output: string | undefined;
+  let output: string | undefined, profile: string | undefined;
+  if (command === 'open') {
+    const at = rest.indexOf('--profile');
+    if (at !== -1) {
+      profile = rest[at + 1];
+      if (!profile || profile.startsWith('--')) throw new Error('browser open --profile needs a profile name, default or private');
+      rest.splice(at, 2);
+      if (rest.includes('--profile')) throw new Error('browser open accepts one --profile');
+    }
+  }
   if (command === 'screenshot') {
     const at = rest.indexOf('--output');
     if (at !== -1) {
@@ -56,8 +67,9 @@ export async function browserCommand(args: string[], io: CliIo, client: CoreClie
       const orientation = rest[1] === 'portrait' || rest[1] === 'landscape' ? rest[1] : undefined;
       action = { kind: 'preset', preset, ...(orientation ? { orientation } : {}) }; count = orientation ? 2 : 1; break;
     }
-    case 'status': case 'snapshot': case 'screenshot': case 'close': case 'reset-viewport': action = { kind: command }; break;
-    case 'open': case 'navigate': action = { kind: command, url: need(0) }; count = 1; break;
+    case 'status': case 'profiles': case 'snapshot': case 'screenshot': case 'close': case 'reset-viewport': action = { kind: command }; break;
+    case 'open': action = { kind: command, url: need(0), ...(profile === undefined ? {} : { profile }) }; count = 1; break;
+    case 'navigate': action = { kind: command, url: need(0) }; count = 1; break;
     case 'click': action = { kind: command, selector: need(0) }; count = 1; break;
     case 'type': action = { kind: command, selector: need(0), text: need(1) }; count = 2; break;
     case 'evaluate': action = { kind: command, expression: need(0) }; count = 1; break;

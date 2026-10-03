@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import type { RpcEvents, RpcParams } from '@boite/contracts';
+import type { RpcEvents, RpcParams, Settings } from '@boite/contracts';
+import { browserProfiles } from './browser-profiles.svelte';
 import { hostBrowser } from './browser-host';
 import { writeExperiments } from './experiments';
 import type { Store } from './store.svelte';
@@ -35,6 +36,44 @@ test('the desktop grants no browser access by default and stops dispatching as s
   stop(); stop = undefined;
   expect(client.call).toHaveBeenCalledWith('browser.host', { threadId: 'thread', enabled: false });
   expect(off).toHaveBeenCalledOnce();
+});
+
+test('an agent lists the profiles and opens a tab in the one it names, the default one otherwise', async () => {
+  vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
+  writeExperiments(['agent-browser-control']);
+  const pro = { id: 'p-0123456789ab', name: 'Pro' };
+  browserProfiles.source = { settings: { browserProfiles: [pro], browserDefaultProfile: pro.id } as Settings, saveSettings: async () => true };
+  let requested: (request: RpcEvents['browser.requested']) => void = () => {};
+  const completed = new Map<string, RpcParams<'browser.complete'>>();
+  const client = {
+    call: vi.fn(async (method: string, params: unknown) => {
+      if (method === 'browser.complete') { const reply = params as RpcParams<'browser.complete'>; completed.set(reply.requestId, reply); }
+      return {};
+    }),
+    on: vi.fn((_name: string, callback: typeof requested) => { requested = callback; return () => {}; }),
+  };
+  const store = { client, owner: true, machineId: 'test', openThread: { id: 'remote-thread' }, threadKey: (id: string) => id } as unknown as Store;
+  const panel = rightPanel.for('remote-thread');
+  const create = vi.fn();
+  Object.assign(browserBridge, { create, isReady: () => true, navigate: vi.fn() });
+  try {
+    stop = hostBrowser(store, 'remote-thread');
+    requested({ threadId: 'remote-thread', requestId: 'list', action: { kind: 'profiles' } });
+    await vi.waitFor(() => expect(completed.get('list')?.result?.value).toEqual({ default: pro.id, profiles: [
+      { id: 'default', name: browserProfiles.name('default'), kept: true }, { ...pro, kept: true }, { id: 'private', name: browserProfiles.name('private'), kept: false }
+    ] }));
+    for (const [requestId, profile, expected] of [['named', 'pro', pro.id], ['unnamed', undefined, pro.id], ['private', 'private', 'private']] as const) {
+      requested({ threadId: 'remote-thread', requestId, action: { kind: 'open', url: 'https://tripo.ai', ...(profile ? { profile } : {}) } });
+      await vi.waitFor(() => expect(completed.get(requestId)?.result?.profile).toBe(expected));
+      expect(create).toHaveBeenLastCalledWith(panel.active?.id, 'https://tripo.ai', expected);
+    }
+    requested({ threadId: 'remote-thread', requestId: 'unknown', action: { kind: 'open', url: 'https://tripo.ai', profile: 'Perso' } });
+    await vi.waitFor(() => expect(completed.get('unknown')?.error).toContain('no browser profile is named Perso'));
+    expect(panel.surfaces).toHaveLength(3);
+    requested({ threadId: 'remote-thread', requestId: 'status', action: { kind: 'status' } });
+    await vi.waitFor(() => expect((completed.get('status')?.result?.value as { tabs: { profile: string; profileName: string }[] }).tabs.map(tab => [tab.profile, tab.profileName]))
+      .toEqual([[pro.id, 'Pro'], [pro.id, 'Pro'], ['private', browserProfiles.name('private')]]));
+  } finally { browserProfiles.source = null; }
 });
 
 test('remote keys waiting for page validation cannot cross a consent or active-tab change', async () => {

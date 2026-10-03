@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { hostBrowser } from './lib/browser-host';
+  import { browserProfiles } from './lib/browser-profiles.svelte';
   import TerminalDrawer from './components/TerminalDrawer.svelte';
   import UndoToast from './components/UndoToast.svelte';
   import NotificationCard from './components/NotificationCard.svelte';
@@ -107,6 +108,11 @@
     if (!store.booted || !experimentOn('whip') || WhipOverlay) return;
     void import('./components/WhipOverlay.svelte').then(module => { WhipOverlay = module.default; })
       .catch(error => { store.error = String(error); });
+  });
+  // Browser profiles live on this computer, whichever machine is in view: they
+  // are kept by the core this shell started (lib/browser-profiles.svelte.ts).
+  $effect(() => {
+    browserProfiles.source = workspace.machines.find((machine) => machine.store.localCore)?.store ?? store;
   });
   let SettingsShell = $state<typeof import('./components/SettingsShell.svelte').default>();
   let AgentsPage = $state<typeof import('./components/agents/AgentsPage.svelte').default>();

@@ -20,8 +20,12 @@ On Windows, enable **Agent browser control** in Settings > Experiments on the
 hosting desktop, keep the conversation open in Boite and run `boite browser help`.
 The switch is off by default. It lets the agent read and act in this conversation's
 browser tabs, including signed-in sites and JavaScript execution. It uses the
-browser's existing profile; this is not an isolated automation session.
-`boite browser open http://localhost:3000` opens a tab and returns its id.
+desktop's browser profiles; this is not an isolated automation session.
+`boite browser open http://localhost:3000` opens a tab in the default profile and
+returns its id. `boite browser profiles` lists the profiles the user made in
+Settings > General > Browser profiles, and `open <url> --profile Pro` opens the tab in one of them,
+by name or id. `--profile private` opens a private tab that keeps nothing once
+the last private tab closes. `status` names each tab's profile.
 `snapshot` returns page text and unique CSS selectors; `click`, `type`, `press`,
 `scroll` and `evaluate` interact with that tab. Add its id as the last argument
 to target it explicitly. The agent cannot select a tab from another conversation.

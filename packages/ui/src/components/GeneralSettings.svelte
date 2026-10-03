@@ -5,6 +5,8 @@
   import TelemetrySettings from './TelemetrySettings.svelte';
   import ArchivedThreads from './ArchivedThreads.svelte';
   import WorktreesCard from './WorktreesCard.svelte';
+  import BrowserProfilesCard from './BrowserProfilesCard.svelte';
+  import { browserBridge } from '../lib/browser-bridge';
   import AppUpdateContent from './AppUpdateContent.svelte';
   import { showAppUpdateUi } from '../lib/app-update.svelte';
   import { strings } from '../lib/strings';
@@ -55,6 +57,8 @@
 
   <ArchivedThreads {store} />
   <WorktreesCard {store} />
+  <!-- Only a window that shows pages has profiles to keep them in. -->
+  {#if browserBridge.paints}<BrowserProfilesCard />{/if}
 
   <section class="card" id="settings-app">
     <h2>{strings.settings.app}</h2>
