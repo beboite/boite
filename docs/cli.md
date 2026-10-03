@@ -108,9 +108,11 @@ history records operation names, not typed values or evaluated code.
 
 `recording-start` and `recording-stop` save a silent video in the working
 directory: H.264 MP4 where the engine encodes it (WebView2 does), which iPhones
-play, else WebM. Its extension follows the format. Recording runs at up to 8
-frames per second and 1920 × 1080, and stops at three minutes or the 50 MiB
-transfer limit. Run `boite attach <video.mp4>` to show it in chat. Closing the tab discards an unfinished recording.
+play, else WebM. Its extension follows the format. The shell streams the page's
+own frames (`Page.startScreencast`) and paces them to 30 frames per second, or
+60 when chosen in the browser tools menu, up to 1920 × 1080. There is no time
+limit; a recording stops at 200 MB, which the desktop keeps in memory and sends
+in 4 MB chunks. There is no sound, as in T3 Code. Run `boite attach <video.mp4>` to show it in chat. Closing the tab discards an unfinished recording.
 
 Automation uses WebView2's native devtools channel, without a debugging port.
 Only the owner UI can register a host or answer its requests. The agent token

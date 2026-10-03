@@ -1383,8 +1383,9 @@ export const strings = {
     system: 'Follow system appearance', light: 'Light page', dark: 'Dark page', diagnostics: 'Page diagnostics and actions',
     startRecording: 'Record this browser tab', stopRecording: 'Stop recording', reviewRecording: 'Recorded video',
     refresh: 'Refresh', clear: 'Clear', pageEvents: 'Page events', actions: 'Actions', noEvents: 'No page events captured.', noActions: 'No actions recorded yet.',
-    omitted: '{count} older or oversized events omitted.', recorded: '{seconds} seconds · {mb} MB · silent {format}',
-    recordingError: 'Recording stopped after an error.', recordingLimit: 'Recording stopped at the duration or size limit.',
+    omitted: '{count} older or oversized events omitted.', recorded: '{seconds} seconds · {fps} fps · {mb} MB · silent {format}',
+    recordingError: 'Recording stopped after an error.', recordingLimit: 'Recording stopped at the 200 MB size limit.',
+    frameRate: 'Record at {rate} frames per second',
     download: 'Download video', discard: 'Discard video',
   },
   browser: {

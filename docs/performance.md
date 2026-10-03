@@ -442,6 +442,35 @@ desktop's capture and shrink take 100 to 140 ms a frame. The phone decodes each
 frame before showing it, so a frame never appears half loaded; that decoding
 was not measured on an iPhone.
 
+## Browser recordings
+
+A recording used to ask the tab for a screenshot every 125 ms and wait for
+it: 6.5 frames a second, at three minutes and 50 MiB at most. The shell now
+subscribes to the page's screencast and acknowledges each frame on a worker
+thread at the chosen rate, so Chromium never sends faster than 30 or 60 frames
+a second and never more than two at once. The JPEG reaches the UI as raw bytes
+over a Tauri channel, without base64 or the core. The UI decodes only the
+newest frame, draws it on a canvas and asks the MediaRecorder for exactly that
+frame. WebView2's H.264 encoder takes about 0.7 s to start once per process
+and drops what it receives meanwhile, so the first recording starts it on a
+64 × 64 canvas before the page's first frame is committed.
+
+`tests/e2e/browser-recording.test.ts` records an animated page through the
+shell's CLI and counts the frames with ffprobe. With `BOITE_E2E_SHELL_EXE` set
+to a release shell on 2026-10-04 (Windows 11, other agents' builds running):
+
+| Requested | Length | Measured | Frame gap median / p95 / max | Size | Shell tree CPU, page alone |
+|---|---|---|---|---|---|
+| 30 fps | 10 s | 30.0 fps | 31 / 40 / 43 ms | 8.2 MiB/min | 68 %, 33 % of one core |
+| 60 fps | 10 s | 60.0 fps | 19 / 21 / 25 ms | 14.8 MiB/min | 106 %, 33 % |
+| 30 fps | 120 s | 30.0 fps | 31 / 42 / 50 ms | 8.1 MiB/min | 79 %, 35 % |
+| 60 fps | 240 s | 58.2 fps | 18 / 25 / 1033 ms | 14.4 MiB/min | 100 %, 38 % |
+
+The 240 s take's 58 MiB stopped and downloaded in 12.2 s. Its slow frames
+came between 145 and 190 s, while the machine was loaded at 60 to 100 %.
+`BOITE_RECORDING_SECONDS`, `BOITE_RECORDING_FPS` and `BOITE_RECORDING_KEEP`
+set the length, the rate and a folder that keeps the video.
+
 ## Benches
 
 ```sh

@@ -5,17 +5,35 @@ interface Mark { x?: number; y?: number; key?: string; at: number }
 interface InputFrame { width: number; height: number; marks: Mark[] }
 export interface RecordingRect { x: number; y: number; width: number; height: number }
 
-/** The page collector retains coordinates and navigation keys only, never typed text. */
+/** How often the page's marks are read: they last 900 ms, so a few reads per mark. */
+const READ_MS = 100;
+
+/**
+ * The page collector retains coordinates and navigation keys only, never typed text.
+ * Marks are read beside the frames, never per frame: a frame draws the last read.
+ */
 export class RecordingIndicators {
   private key = `__boiteInput_${crypto.randomUUID().replaceAll('-', '')}`;
   private stopped = false;
+  private frame: InputFrame | null = null;
+  private timer: ReturnType<typeof setTimeout> | undefined;
   constructor(private id: string) {}
+  start(): void {
+    const read = async () => {
+      if (this.stopped) return;
+      try { this.frame = await this.read(); } catch { this.frame = null; }
+      if (!this.stopped) this.timer = setTimeout(() => void read(), READ_MS);
+    };
+    void read();
+  }
+  /** Whether a mark is still on screen, so a still page keeps being redrawn while it fades. */
+  active(): boolean { return !!this.frame?.marks.some(mark => Date.now() - mark.at <= 900); }
   private async evaluate(expression: string): Promise<unknown> {
     const result = await browserBridge.protocol!(this.id, 'Runtime.evaluate', { expression, returnByValue: true }) as { result?: { value?: unknown } };
     return result.result?.value;
   }
-  async draw(ctx: CanvasRenderingContext2D, rect: RecordingRect): Promise<void> {
-    if (this.stopped || !isExperimentEnabled('recording-indicators')) return;
+  private async read(): Promise<InputFrame | null> {
+    if (!isExperimentEnabled('recording-indicators')) return null;
     const frame = await this.evaluate(`(() => {
       const key = ${JSON.stringify(this.key)};
       if (!globalThis[key]) {
@@ -34,8 +52,12 @@ export class RecordingIndicators {
       const state = globalThis[key];
       return { width: innerWidth, height: innerHeight, marks: state.marks.filter(m => Date.now() - m.at < 900) };
     })()`) as InputFrame | undefined;
-    if (this.stopped) { this.dispose(); return; }
-    if (!frame || !Number.isFinite(frame.width) || !frame.width || !frame.height || !Array.isArray(frame.marks)) return;
+    if (this.stopped) { this.dispose(); return null; }
+    return frame && Number.isFinite(frame.width) && frame.width && frame.height && Array.isArray(frame.marks) ? frame : null;
+  }
+  draw(ctx: CanvasRenderingContext2D, rect: RecordingRect): void {
+    const frame = this.frame;
+    if (this.stopped || !frame) return;
     const style = getComputedStyle(document.documentElement);
     ctx.save();
     ctx.strokeStyle = style.getPropertyValue('--color-accent').trim() || 'white';
@@ -60,7 +82,7 @@ export class RecordingIndicators {
     ctx.restore();
   }
   dispose(): void {
-    this.stopped = true;
+    this.stopped = true; clearTimeout(this.timer); this.frame = null;
     void this.evaluate(`globalThis[${JSON.stringify(this.key)}]?.close()`).catch(() => {});
   }
 }

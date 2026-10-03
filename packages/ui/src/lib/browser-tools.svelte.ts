@@ -5,6 +5,7 @@ import { automateBrowser } from './browser-automation';
 import { BrowserRecorder } from './browser-recording';
 import { RecordingIndicators } from './recording-indicators';
 import { isExperimentEnabled } from './experiments';
+import { recordingFrameRate } from './recording-frame-rate';
 
 interface TabTools { preset: BrowserPreset | null; orientation: 'portrait' | 'landscape'; colorScheme: 'system' | 'light' | 'dark'; recording: boolean; result: BrowserRecording | null; url: string | null }
 const states = new SvelteMap<string, TabTools>();
@@ -19,9 +20,13 @@ async function protocol(id: string, method: string, params: Record<string, unkno
 function recorder(id: string, indicators = false): BrowserRecorder {
   let value = recorders.get(id);
   if (!value) {
-    value = new BrowserRecorder(async () => {
-      const reply = await protocol(id, 'Page.captureScreenshot', { format: 'jpeg', quality: 80, captureBeyondViewport: false }) as { data: string };
-      return reply.data;
+    const stream = browserBridge.screencast?.bind(browserBridge);
+    value = new BrowserRecorder({
+      capture: async () => {
+        const reply = await protocol(id, 'Page.captureScreenshot', { format: 'jpeg', quality: 80, captureBeyondViewport: false }) as { data: string };
+        return reply.data;
+      },
+      ...(stream ? { stream: (frameRate: number, frame: (jpeg: ArrayBuffer) => void) => stream(id, frameRate, frame) } : {}),
     }, (recording, result) => patch(id, { recording, result, url: recorders.get(id)?.url ?? null }), indicators ? new RecordingIndicators(id) : undefined);
     recorders.set(id, value);
   }
@@ -70,7 +75,7 @@ export async function runBrowserAction(id: string, action: BrowserAction): Promi
       case 'recording-start': {
         if (action.indicators && !isExperimentEnabled('recording-indicators')) throw new Error('enable the recording-indicators experiment on this desktop first');
         if (!browserTools(id).recording && !browserTools(id).result) { recorders.get(id)?.dispose(); recorders.delete(id); }
-        await recorder(id, action.indicators !== false && isExperimentEnabled('recording-indicators')).start(); break;
+        await recorder(id, action.indicators !== false && isExperimentEnabled('recording-indicators')).start(recordingFrameRate()); break;
       }
       case 'recording-stop': return { tabId: id, recording: await recorder(id).stop() };
       case 'recording-read': value = await recorder(id).read(action.recordingId, action.offset); break;

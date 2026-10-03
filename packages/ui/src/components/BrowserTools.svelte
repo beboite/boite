@@ -1,15 +1,17 @@
 <script lang="ts">
-  import { BROWSER_PRESETS, BROWSER_RECORDING_TYPES, type BrowserAction, type BrowserDiagnostics, type BrowserPreset } from '@boite/contracts';
+  import { BROWSER_PRESETS, BROWSER_RECORDING_FRAME_RATES, BROWSER_RECORDING_TYPES, type BrowserAction, type BrowserDiagnostics, type BrowserPreset, type BrowserRecordingFrameRate } from '@boite/contracts';
   import { MonitorSmartphone, Circle, Square, X, Download, RefreshCw, Trash2 } from '@lucide/svelte';
   import { browserTools, runBrowserAction } from '../lib/browser-tools.svelte';
   import { strings, fill } from '../lib/strings';
   import { separator, type MenuItem } from '../lib/menu';
   import { focusedElement, restoreFocus } from '../lib/focus';
   import { mobileOverlay } from '../lib/mobile-history';
+  import { recordingFrameRate, setRecordingFrameRate } from '../lib/recording-frame-rate';
   import Menu from './Menu.svelte';
   let { id, onerror }: { id: string; onerror: (message: string) => void } = $props();
   const toolsState = $derived(browserTools(id));
   let busy = $state(false);
+  let frameRate = $state(recordingFrameRate());
   let view = $state<'diagnostics' | 'recording' | null>(null);
   let dialog = $state<HTMLDialogElement>();
   let report = $state<BrowserDiagnostics>({ entries: [], dropped: 0, history: [] });
@@ -49,6 +51,8 @@
     ...(['system', 'light', 'dark'] as const).map(value => ({ id: `appearance:${value}`, label: strings.browserTools[value], active: toolsState.colorScheme === value })),
     separator('before-diagnostics'),
     { id: 'diagnostics', label: strings.browserTools.diagnostics },
+    separator('frame-rate'),
+    ...BROWSER_RECORDING_FRAME_RATES.map(rate => ({ id: `fps:${rate}`, label: fill(strings.browserTools.frameRate, { rate: String(rate) }), active: frameRate === rate })),
     ...(toolsState.result ? [{ id: 'recording', label: strings.browserTools.reviewRecording }] : []),
   ]);
   function pick(value: string) {
@@ -57,6 +61,7 @@
     else if (value.startsWith('appearance:')) void act({ kind: 'appearance', colorScheme: value.slice(11) as 'system' | 'dark' | 'light' });
     else if (value === 'rotate' && toolsState.preset) void act({ kind: 'preset', preset: toolsState.preset, orientation: toolsState.orientation === 'portrait' ? 'landscape' : 'portrait' });
     else if (value === 'diagnostics') void diagnostics();
+    else if (value.startsWith('fps:')) { frameRate = Number(value.slice(4)) as BrowserRecordingFrameRate; setRecordingFrameRate(frameRate); }
     else if (value === 'recording') view = 'recording';
   }
 </script>
@@ -91,7 +96,7 @@
       {:else if toolsState.result && toolsState.url}
         <!-- svelte-ignore a11y_media_has_caption -->
         <video controls src={toolsState.url} data-testid="browser-recording-preview"></video>
-        <p class="muted">{fill(strings.browserTools.recorded, { seconds: String(Math.round(toolsState.result.durationMs / 1000)), mb: (toolsState.result.bytes / 1024 / 1024).toFixed(1), format: BROWSER_RECORDING_TYPES[toolsState.result.mime].toUpperCase() })}</p>
+        <p class="muted">{fill(strings.browserTools.recorded, { seconds: String(Math.round(toolsState.result.durationMs / 1000)), fps: String(toolsState.result.frameRate ?? 30), mb: (toolsState.result.bytes / 1024 / 1024).toFixed(1), format: BROWSER_RECORDING_TYPES[toolsState.result.mime].toUpperCase() })}</p>
         {#if toolsState.result.reason !== 'stopped'}<p role="status">{strings.browserTools[toolsState.result.reason === 'error' ? 'recordingError' : 'recordingLimit']}{toolsState.result.error ? ` ${toolsState.result.error}` : ''}</p>{/if}
         <div class="actions">
           <a class="chip" href={toolsState.url} download={`boite-browser-${toolsState.result.id}.${BROWSER_RECORDING_TYPES[toolsState.result.mime]}`} data-testid="browser-recording-download"><Download size={14} /><span class="ui-label">{strings.browserTools.download}</span></a>

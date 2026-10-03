@@ -1319,8 +1319,9 @@ export const fr: Translation = {
     system: 'Apparence du système', light: 'Page claire', dark: 'Page sombre', diagnostics: 'Diagnostics et actions de la page',
     startRecording: 'Enregistrer cet onglet', stopRecording: 'Arrêter la vidéo', reviewRecording: 'Vidéo enregistrée',
     refresh: 'Actualiser', clear: 'Effacer', pageEvents: 'Événements de la page', actions: 'Actions', noEvents: 'Aucun événement capturé.', noActions: 'Aucune action enregistrée pour le moment.',
-    omitted: '{count} événements anciens ou trop volumineux omis.', recorded: '{seconds} secondes · {mb} Mo · {format} sans son',
-    recordingError: 'Enregistrement arrêté après une erreur.', recordingLimit: 'Enregistrement arrêté à la limite de durée ou de taille.',
+    omitted: '{count} événements anciens ou trop volumineux omis.', recorded: '{seconds} secondes · {fps} i/s · {mb} Mo · {format} sans son',
+    recordingError: 'Enregistrement arrêté après une erreur.', recordingLimit: 'Enregistrement arrêté à la limite de 200 Mo.',
+    frameRate: 'Enregistrer à {rate} images par seconde',
     download: 'Télécharger la vidéo', discard: 'Supprimer la vidéo',
   },
   browser: {

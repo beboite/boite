@@ -40,7 +40,20 @@ export interface BrowserReply {
 /** Recordings are MP4 (H.264) where the engine encodes it, which iPhones play, else WebM. */
 export const BROWSER_RECORDING_TYPES = { 'video/mp4': 'mp4', 'video/webm': 'webm' } as const;
 export type BrowserRecordingMime = keyof typeof BROWSER_RECORDING_TYPES;
-export interface BrowserRecording { id: string; mime: BrowserRecordingMime; bytes: number; durationMs: number; reason: 'stopped' | 'duration' | 'size' | 'error'; error?: string }
+/**
+ * A recording has no duration limit, only this size. The renderer holds the
+ * video in memory until the agent downloads it in base64 chunks, so the cap
+ * bounds that memory and the transfer; it is four times T3 Code's 50 MiB upload.
+ */
+export const BROWSER_RECORDING_MAX_BYTES = 200 * 1024 * 1024;
+/** One `recording-read` reply: 5.6 MB of base64, well inside one RPC frame, 50 reads at the cap. */
+export const BROWSER_RECORDING_CHUNK_BYTES = 4 * 1024 * 1024;
+/** The frame rates a desktop records at, as in T3 Code; the first is the default. */
+export const BROWSER_RECORDING_FRAME_RATES = [30, 60] as const;
+export type BrowserRecordingFrameRate = typeof BROWSER_RECORDING_FRAME_RATES[number];
+export const DEFAULT_BROWSER_RECORDING_FRAME_RATE: BrowserRecordingFrameRate = 30;
+/** `frameRate` is the rate requested, `frames` the page frames the video received. */
+export interface BrowserRecording { id: string; mime: BrowserRecordingMime; bytes: number; durationMs: number; frameRate?: BrowserRecordingFrameRate; frames?: number; reason: 'stopped' | 'size' | 'error'; error?: string }
 export interface BrowserDiagnostic { at: number; kind: 'console' | 'exception' | 'network'; level: string; text: string; url?: string }
 export interface BrowserHistoryEntry { at: number; action: string; ok: boolean; durationMs: number; error?: string }
 export interface BrowserDiagnostics { entries: BrowserDiagnostic[]; dropped: number; history: BrowserHistoryEntry[] }
@@ -97,7 +110,7 @@ export function browserActionError(action: BrowserAction): string | null {
     case 'remote-input': return text(action.frameId, 80) ? remoteBrowserInputError(action.input) : 'remote input needs a frame id';
     case 'recording-discard': case 'recording-read':
       if (!text(action.recordingId, 80) || !/^[a-zA-Z0-9-]+$/.test(action.recordingId)) return 'recordingId must come from recording-stop';
-      return action.kind === 'recording-discard' || (Number.isSafeInteger(action.offset) && action.offset >= 0 && action.offset <= 50 * 1024 * 1024) ? null : 'recording offset must be an integer within 50 MB';
+      return action.kind === 'recording-discard' || (Number.isSafeInteger(action.offset) && action.offset >= 0 && action.offset <= BROWSER_RECORDING_MAX_BYTES) ? null : 'recording offset must be an integer within 200 MB';
     case 'status': case 'profiles': case 'snapshot': case 'screenshot': case 'close': case 'reset-viewport': return null;
     case 'open': case 'navigate': {
       if (action.kind === 'open' && action.profile !== undefined && !text(action.profile, BROWSER_PROFILE_NAME_MAX)) return `browser profile must be a profile name or id of 1 to ${BROWSER_PROFILE_NAME_MAX} characters, default or private`;

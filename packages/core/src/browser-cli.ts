@@ -1,6 +1,6 @@
 import { writeFileSync, openSync, writeSync, closeSync, renameSync, unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { browserActionError, BROWSER_PRESETS, BROWSER_RECORDING_TYPES, type BrowserAction, type BrowserPreset } from '@boite/contracts';
+import { browserActionError, BROWSER_PRESETS, BROWSER_RECORDING_CHUNK_BYTES, BROWSER_RECORDING_MAX_BYTES, BROWSER_RECORDING_TYPES, type BrowserAction, type BrowserPreset } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
 import type { CliIo } from './cli.ts';
 
@@ -22,7 +22,8 @@ export const BROWSER_HELP = `boite browser <command> [args] [tab-id] [--json]
   appearance system|light|dark [tab-id]     emulate page color scheme
   diagnostics [tab-id]           console, JavaScript/network errors and actions
   diagnostics-clear [tab-id]     clear captured diagnostics and action history
-  recording-start [tab-id]       record this page (silent MP4, else WebM; up to 3 min/50 MB)
+  recording-start [tab-id]       record this page (silent MP4, else WebM; 30 or 60 fps as
+                                 set on the desktop; no time limit, up to 200 MB)
   recording-stop [tab-id]        stop and save the video in cwd
   screenshot [tab-id] [--output <path>] save a PNG (default: unique name in cwd)
   close [tab-id]                 close the tab
@@ -90,14 +91,14 @@ export async function browserCommand(args: string[], io: CliIo, client: CoreClie
   const result = await client.call('browser.command', { threadId, action, ...(rest[count] ? { tabId: rest[count] } : {}) });
   if (result.recording) {
     const recording = result.recording;
-    if (!result.tabId || !Object.hasOwn(BROWSER_RECORDING_TYPES, recording.mime) || !Number.isSafeInteger(recording.bytes) || recording.bytes <= 0 || recording.bytes > 50 * 1024 * 1024) throw new Error('browser returned an invalid recording');
+    if (!result.tabId || !Object.hasOwn(BROWSER_RECORDING_TYPES, recording.mime) || !Number.isSafeInteger(recording.bytes) || recording.bytes <= 0 || recording.bytes > BROWSER_RECORDING_MAX_BYTES) throw new Error('browser returned an invalid recording');
     const path = resolve(io.cwd, `boite-browser-${crypto.randomUUID()}.${BROWSER_RECORDING_TYPES[recording.mime]}`), partial = path + '.part';
     const fd = openSync(partial, 'wx'); let offset = 0, complete = false;
     try {
       while (offset < recording.bytes) {
         const reply = await client.call('browser.command', { threadId, tabId: result.tabId, action: { kind: 'recording-read', recordingId: recording.id, offset } });
         const chunk = reply.value as { base64?: string; nextOffset?: number; done?: boolean };
-        if (typeof chunk?.base64 !== 'string' || chunk.base64.length > 700_000) throw new Error('invalid recording chunk');
+        if (typeof chunk?.base64 !== 'string' || chunk.base64.length > Math.ceil(BROWSER_RECORDING_CHUNK_BYTES / 3) * 4) throw new Error('invalid recording chunk');
         const bytes = Buffer.from(chunk.base64, 'base64');
         if (!bytes.length || chunk.nextOffset !== offset + bytes.length || chunk.nextOffset > recording.bytes || chunk.done !== (chunk.nextOffset === recording.bytes)) throw new Error('invalid recording chunk offset');
         if (offset === 0 && !recordingMagic(recording.mime, bytes)) throw new Error(`recording is not ${BROWSER_RECORDING_TYPES[recording.mime].toUpperCase()}`);

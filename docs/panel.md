@@ -13,8 +13,9 @@ On Windows, the browser's screen menu selects phone, tablet and desktop
 viewport sizes, portrait or landscape orientation, and the page's light or
 dark appearance. It also opens diagnostics with console messages, exceptions,
 failed requests and recent automation actions. These tools remain inside
-Boite. The recording button captures the page; stopping opens a video player
-with download and discard actions. The [CLI](cli.md) exposes the same tools
+Boite. The recording button captures the page at 30 frames per second, or 60
+chosen in the same menu; stopping opens a video player with download and
+discard actions. The [CLI](cli.md) exposes the same tools
 to agents, including recording and attaching the result to chat.
 
 ## Floating panel and browser overlays

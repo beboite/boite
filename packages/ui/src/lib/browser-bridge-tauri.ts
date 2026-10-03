@@ -81,6 +81,19 @@ export class TauriBridge implements BrowserBridge {
     return result;
   }
 
+  /** Frames cross as raw bytes on a channel: no base64, no JSON, no request per frame. */
+  async screencast(id: string, frameRate: number, frame: (jpeg: ArrayBuffer) => void): Promise<() => Promise<void>> {
+    if (!this.#live.has(id)) throw new Error('the browser tab is closed');
+    const invoke = await this.#ready();
+    const { Channel } = await import('@tauri-apps/api/core');
+    const channel = new Channel<ArrayBuffer>(frame);
+    await invoke('browser_screencast_start', { id, frameRate, channel });
+    return async () => {
+      channel.onmessage = () => {};
+      await invoke('browser_screencast_stop', { id });
+    };
+  }
+
   #handlers = new Set<(event: BrowserEvent) => void>();
   #queues = new Map<string, Promise<void>>();
   #bounds = new Map<string, string>();
