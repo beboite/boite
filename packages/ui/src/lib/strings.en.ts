@@ -658,7 +658,6 @@ export const strings = {
     goalUsage: 'Use /goal followed by an objective.',
     loopUsage: 'Use /loop 2 prompt for two iterations, or /loop 5m prompt for a schedule. Choose 1 to 1000 iterations.',
     intervalError: 'Loop intervals must be between 1 second and 24 hours.',
-    noAttachments: 'Send images in a message before starting a goal or loop.',
     active: 'Active',
     paused: 'Paused',
     complete: 'Complete',
