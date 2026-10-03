@@ -55,6 +55,7 @@ export class ClaudeSession {
   private readonly waiting: ClaudeTurn[] = [];
   /** What the CLI runs in the background, as its last `background_tasks_changed` said. */
   private background: BackgroundTask[] = [];
+  private readonly backgroundFinishers = new Map<string, NonNullable<SessionContext['backgroundFinished']>[]>();
   /** `task_started` by task id: the tool call that launched it and when. */
   private readonly launched = new Map<string, { toolId: string | null; startedAt: number }>();
   /** What the CLI wrote with no turn attached, replayed into the turn the core opens for it. */
@@ -450,12 +451,27 @@ export class ClaudeSession {
    * for itself) are not work anyone waits on.
    */
   private noteTasks(message: Extract<SDKMessage, { type: 'system' }>): void {
+    if (this.ended || this.closing) return;
+    if (message.subtype === 'task_notification') {
+      const owners = this.backgroundFinishers.get(message.task_id);
+      const finish = owners?.shift();
+      const state = message.status === 'completed' ? 'completed' : message.status === 'failed' ? 'error' : 'cancelled';
+      finish?.(message.task_id, state);
+      if (!owners?.length) this.backgroundFinishers.delete(message.task_id);
+      return;
+    }
     if (message.subtype === 'task_started') {
+      if (this.ctx.backgroundFinished) {
+        const owners = this.backgroundFinishers.get(message.task_id) ?? [];
+        if (owners.at(-1) !== this.ctx.backgroundFinished) owners.push(this.ctx.backgroundFinished);
+        this.backgroundFinishers.set(message.task_id, owners);
+      }
       this.launched.set(message.task_id, { toolId: message.tool_use_id ?? null, startedAt: Date.now() });
       return;
     }
     if (message.subtype !== 'background_tasks_changed') return;
     const next = message.tasks.filter(task => task.ambient !== true).map((task): BackgroundTask => {
+      if (!this.backgroundFinishers.has(task.task_id) && this.ctx.backgroundFinished) this.backgroundFinishers.set(task.task_id, [this.ctx.backgroundFinished]);
       const known = this.launched.get(task.task_id) ?? this.background.find(entry => entry.id === task.task_id);
       return {
         id: task.task_id,
@@ -523,6 +539,7 @@ export class ClaudeSession {
     this.woken = false;
     this.foreignResults = 0;
     this.replayResult = false;
+    this.backgroundFinishers.clear();
     // The CLI no longer tracks what it ran in the background. The command itself
     // can outlive it (Windows kills no tree): the registry's orphan sweep, which
     // the core schedules when it releases the thread, stops that.

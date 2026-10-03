@@ -1,5 +1,6 @@
 import type { ThreadId } from '@boite/contracts';
 import { sessionKey } from './codex/mapping.ts';
+import { forkSession } from './codex/fork.ts';
 import { readModels } from './codex/models.ts';
 import { CodexSession } from './codex/session.ts';
 import { titleTurn } from './codex/title.ts';
@@ -38,6 +39,7 @@ export function createCodexDriver(): Driver {
 
   return {
     protocol: 'codex-appserver',
+    forkSession,
 
     probe: (context) => probes.probe(context),
     probedModels: (providerId, accountId) => probes.models(providerId, accountId),

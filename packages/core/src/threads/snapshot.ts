@@ -44,6 +44,7 @@ export function threadSnapshot(core: Core, thread: ThreadSummary, after: string 
     memoryEvents: readMemoryEvents(core.journal, thread.id),
     commands: state.commands.get(thread.id) ?? [],
     background: state.background.get(thread.id) ?? [],
+    backgroundHistory: state.backgroundHistory.list(thread.id),
     activity: core.activity.get(thread.id),
     messagesBefore: page.before,
     turns,

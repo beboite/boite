@@ -18,7 +18,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'agents.history', // Older records of the kinds agents.snapshot already shows the device.
   'agents.runtime.get', 'agents.brain.get', // Read the same identity settings and memory shown on its host.
   // Follow and steer an owner-enabled team from the phone, without changing routes or limits.
-  'delegation.get', 'delegation.send', 'delegation.stop',
+  // Bounded child results and event-driven waits expose the same family read scope as delegation.get.
+  'delegation.get', 'delegation.result', 'delegation.wait', 'delegation.send', 'delegation.stop',
   // Follow a workflow, pause or stop it; resume and retry spend budget and stay the owner's (checked in workflows.control).
   'workflows.list', 'workflows.get', 'workflows.control', 'workflows.templates.list',
   // Coordination is visible with the conversation; only the owner enables it.
@@ -60,6 +61,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'browser.remoteFrame', 'browser.remoteInput', // Only the subscribed conversation's owner-enabled shared page; no scripts, host paths or navigation RPCs.
   'threads.create',
   'threads.get',
+  'threads.capabilities', // Read-only controls for the conversation already visible; never prepares or probes a runtime.
   // A phone can manage continued prompts in the same thread it can already send to.
   'threads.activity.set',
   'threads.activity.control',
@@ -78,6 +80,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // which a device already reaches, and names no path either.
   'threads.rewind',
   'threads.fork',
+  'threads.mergeBack', // A paired owner can return bounded conclusions to the recorded fork source.
   'threads.archive',
   // Moving a thread from the sidebar or its menu. The device names a project it
   // already lists, never a path: the core picks the folder or makes the
@@ -97,6 +100,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // Paired phones can send the same user follow-ups as the owner's composer.
   'turns.steer',
   'turns.stop',
+  // A paired phone can resume or discard the same retained prompt as the owner.
+  'turns.recover',
   // The point of carrying the phone: answering the agent from anywhere.
   'permissions.list',
   'permissions.answer',

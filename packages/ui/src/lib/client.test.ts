@@ -846,3 +846,22 @@ test('a permanent protocol rejection closes the client without reconnecting', as
     vi.useRealTimers();
   }
 });
+
+test('delegation wait keeps its bounded server deadline beyond ordinary RPC timeouts', async () => {
+  vi.useFakeTimers();
+  const { client, socket } = connected();
+  try {
+    socket.open();
+    socket.receive({ id: socket.frame(0).id, result: { core: CORE, principal: 'owner' } });
+    await client.connect();
+    let answered = false;
+    const wait = client.call('delegation.wait', { threadId: 'parent' }).then(result => { answered = true; return result; });
+    await vi.advanceTimersByTimeAsync(120_001);
+    expect(answered).toBe(false);
+    expect(socket.closed).toBe(false);
+    expect(socket.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'delegation.wait']);
+    socket.receive({ id: socket.frame(1).id, result: { state: 'settled', timedOut: false, agents: [] } });
+    expect((await wait).state).toBe('settled');
+    expect(vi.getTimerCount()).toBe(0);
+  } finally { client.close(); vi.useRealTimers(); }
+});

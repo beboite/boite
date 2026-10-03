@@ -46,6 +46,7 @@ export class TurnContexts {
   /** Setup only: no journalled turn, no consumed deferred input and no message sink. */
   makeSessionContext(thread: ThreadSummary, provider: ProviderDescriptor, account: Account): SessionContext {
     const threadId = thread.id;
+    const backgroundOwner = { providerId: provider.id, sessionGeneration: thread.sessionGeneration ?? 0, parentTurnId: null };
     const current = (): boolean => this.core.journal.getThread(threadId)?.selectionVersion === thread.selectionVersion;
     return {
       thread, provider, account,
@@ -59,6 +60,8 @@ export class TurnContexts {
       commands: list => { if (current()) this.threads.agentState.noteCommands(threadId, list); },
       context: use => { if (current()) this.threads.agentState.noteContext(threadId, use); },
       hook: report => this.core.hooks.record({ providerId: provider.id, accountId: account.id, threadId }, report),
+      background: list => this.threads.agentState.noteBackground(threadId, list, backgroundOwner),
+      backgroundFinished: (id, state) => this.threads.agentState.finishBackground(threadId, id, backgroundOwner, state),
       spawnChild: this.leasedSpawnChild(threadId, provider),
       finishStartup: () => this.core.procs.finishStartup(threadId),
     };
@@ -72,6 +75,7 @@ export class TurnContexts {
     carried: CarriedInput = {},
   ): TurnContext {
     const threadId = thread.id;
+    const backgroundOwner = { providerId: provider.id, sessionGeneration: thread.sessionGeneration ?? 0, parentTurnId: turn.id };
     const env = this.core.accounts.accountEnv(account, provider);
     // When each tool card first showed up and when it stopped running, by slot.
     const toolTimes = new Map<string, { startedAt: number; finishedAt: number | null }>();
@@ -297,9 +301,8 @@ export class TurnContexts {
       hook: (report) => {
         this.core.hooks.record({ providerId: provider.id, accountId: account.id, threadId }, report);
       },
-      background: (list) => {
-        if ((this.core.journal.getThread(threadId)?.sessionGeneration ?? 0) === (thread.sessionGeneration ?? 0)) this.threads.agentState.noteBackground(threadId, list);
-      },
+      background: list => this.threads.agentState.noteBackground(threadId, list, backgroundOwner),
+      backgroundFinished: (id, state) => this.threads.agentState.finishBackground(threadId, id, backgroundOwner, state),
       wake: (text) => this.threads.deferred.wake(threadId, text),
       requestPermission: (toolName: string, input: unknown, description: string | null): PermissionTicket =>
         this.threads.cards.requestPermission(thread, turn, toolName, input, description),

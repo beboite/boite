@@ -745,6 +745,11 @@ export const strings = {
   },
 
   thread: {
+    recoveryTitle: 'Prompt saved before restart',
+    recoveryBody: 'This prompt has not been sent to the agent. Resume it with its saved model and account, or remove it from the queue.',
+    recoveryTarget: 'Saved selection: {model} · {account}',
+    recoveryResume: 'Resume prompt',
+    recoveryDiscard: 'Remove from queue',
     contextDetails: 'Context',
     contextInput: 'Input',
     contextCache: 'Cached input',
@@ -826,6 +831,13 @@ export const strings = {
     finishedAt: 'done {time}',
     /** `{what}` is a list of `backgroundOne` and `backgroundMany` joined by `backgroundJoin`. */
     backgroundRunning: '{what} still running',
+    backgroundHistory: 'Native task history ({count})',
+    forkOrigin: 'Forked from', forkReturn: 'Send conclusions back', forkSummary: 'Conclusions for the original conversation',
+    forkReturned: 'Conclusions sent to the original conversation', forkSourceUnavailable: 'Original conversation unavailable',
+    forkNative: 'Native context preserved', forkSeeded: 'Visible history copied',
+    backgroundState: { running: 'Running', completed: 'Completed', error: 'Failed', cancelled: 'Interrupted', ended: 'No longer reported' },
+    backgroundRestarted: 'Interrupted by a core restart',
+    backgroundSessionEnded: 'Agent session ended',
     backgroundJoin: ', ',
     backgroundOne: { shell: '{count} shell', agent: '{count} agent', monitor: '{count} monitor', workflow: '{count} workflow', other: '{count} task' },
     backgroundMany: { shell: '{count} shells', agent: '{count} agents', monitor: '{count} monitors', workflow: '{count} workflows', other: '{count} tasks' },
