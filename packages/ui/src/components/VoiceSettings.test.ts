@@ -9,7 +9,7 @@ let mounted: ReturnType<typeof mount> | undefined;
 afterEach(async () => { if (mounted) await unmount(mounted); mounted = undefined; document.body.innerHTML = ''; });
 
 const settle = async () => { for (let i = 0; i < 20; i++) { await Promise.resolve(); flushSync(); } };
-const models = (installed: string[] = []) => SPEECH_CATALOGUE.map(entry => ({ id: entry.id, kind: 'catalogue' as const, name: entry.name, bytes: entry.bytes, tier: entry.tier, installed: installed.includes(entry.id) }));
+const models = (installed: string[] = []) => SPEECH_CATALOGUE.map(entry => ({ id: entry.id, kind: 'catalogue' as const, name: entry.name, bytes: entry.bytes, tier: entry.tier, legacy: entry.legacy, installed: installed.includes(entry.id) }));
 const status = (patch: Partial<SpeechStatus> = {}): SpeechStatus => ({
   revision: 'r1', engine: 'local', ready: false, localReady: false, groqKeySet: false, openrouterKeySet: false,
   installing: false, downloadedBytes: 0, totalBytes: 198279932, error: null, canInstallRuntime: true,
@@ -85,6 +85,9 @@ test('a model already here is used at once, one that is not downloads, and a lin
   expect(text('voice-status')).toContain('Ready, Whisper Small on this machine');
   expect(document.querySelector('[data-testid="voice-model-small-q5_1"] [role=radio]')?.getAttribute('aria-checked')).toBe('true');
   expect(text('voice-model-base-q5_1')).toContain('60 MB · Small download');
+  expect(document.querySelector('[data-testid="voice-model-small-q5_1"]')?.closest('details')?.open).toBe(true);
+  expect(document.querySelector('[data-testid="voice-model-base-q5_1"]')?.closest('details')).not.toBeNull();
+  expect(document.querySelectorAll('[aria-label="Model"] > .model')).toHaveLength(3);
 
   document.querySelector<HTMLButtonElement>('[data-testid="voice-model-base-q5_1"] [role=radio]')!.click();
   await settle();
@@ -153,4 +156,24 @@ test('a status poll that succeeds keeps the error of a failed action, and a hidd
     hidden.mockRestore();
     vi.useRealTimers();
   }
+});
+
+test('new configurations offer three main choices including Whisper Turbo', async () => {
+  const call = vi.fn(async (method: string) => {
+    if (method === 'speech.status') return status({ ready: true, localReady: true, models: models(['nemotron-streaming']) });
+    if (method === 'speech.config') return { ...config, model: 'nemotron-streaming' };
+    if (method === 'speech.install') return status({ installing: true, downloading: 'large-v3-turbo-q5_0' });
+    throw new Error(method);
+  });
+  show(call);
+  await settle();
+  const choices = document.querySelectorAll('[aria-label="Model"] > .model');
+  expect([...choices].map(row => row.textContent)).toEqual([
+    expect.stringContaining('Whistle'), expect.stringContaining('Nemotron 3.5 Streaming'), expect.stringContaining('Whisper Large v3 Turbo'),
+  ]);
+  expect(document.querySelector('[data-testid="voice-model-base-q5_1"]')).toBeNull();
+  expect(document.querySelector('[data-testid="voice-model-small-q5_1"]')).toBeNull();
+  click('voice-model-download-large-v3-turbo-q5_0');
+  await settle();
+  expect(call).toHaveBeenCalledWith('speech.install', { model: 'large-v3-turbo-q5_0' });
 });

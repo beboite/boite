@@ -1966,6 +1966,8 @@ export interface SpeechModel {
   installed: boolean;
   backend?: SpeechBackend;
   streaming?: boolean;
+  /** Earlier catalogue choices kept for saved configurations, under Advanced. */
+  legacy?: boolean;
 }
 export interface SpeechStatus {
   revision: string;

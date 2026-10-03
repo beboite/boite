@@ -128,7 +128,7 @@ export class SpeechModels {
   list(): SpeechModel[] {
     const models: SpeechModel[] = SPEECH_CATALOGUE.map(entry => ({
       id: entry.id, kind: 'catalogue', name: entry.name, bytes: entry.bytes, tier: entry.tier, installed: this.installed(entry.id),
-      ...(entry.backend ? { backend: entry.backend } : {}), ...(entry.streaming ? { streaming: true } : {}),
+      ...(entry.backend ? { backend: entry.backend } : {}), ...(entry.streaming ? { streaming: true } : {}), ...(entry.legacy ? { legacy: true } : {}),
     }));
     if (!existsSync(this.customDir)) return models;
     const records = readdirSync(this.customDir)

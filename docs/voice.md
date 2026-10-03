@@ -68,7 +68,7 @@ read local paths.
   Nemotron downloads sherpa-onnx 1.13.8 on Windows x64, Linux x64/ARM64 and macOS
   x64/ARM64. Whistle downloads Needle on Windows x64/ARM64, Linux x64/ARM64 and
   macOS ARM64. Whisper downloads its pinned CPU runtime v1.9.2 on Windows x64;
-  other platforms use `whisper-cli` on PATH or the executable in Local paths.
+  other platforms use `whisper-cli` on PATH or the executable under Advanced.
   A model path set by hand always uses Whisper. Paths refer to the core,
   never the phone. See [Models](#models) and [Resident server](#resident-server).
 - API supports Groq `whisper-large-v3-turbo` and OpenRouter
@@ -79,16 +79,20 @@ read local paths.
 
 ## Models
 
-The Model card offers two newer engines and the existing Whisper models.
+The Model card offers three main choices: Nemotron Streaming, Whistle and
+Whisper Large v3 Turbo. Previously selected or installed Whisper Base and
+Small remain under Advanced, which opens when one is selected. Their files,
+saved selections and removal controls remain available; new configurations
+do not offer them as main choices.
 Each artifact is pinned by immutable revision or version, size and SHA-256:
 
 | Model | File | Size |
 | --- | --- | --- |
 | Nemotron 3.5 Streaming (default) | Encoder, decoder, joiner and tokens | 682 MB |
 | Whistle | `whistle.cact` | 17 MB |
-| Whisper Base | `ggml-base-q5_1.bin` | 60 MB |
-| Whisper Small | `ggml-small-q5_1.bin` | 190 MB |
 | Whisper Large v3 Turbo | `ggml-large-v3-turbo-q5_0.bin` | 574 MB |
+
+The earlier Base and Small models weigh 60 MB and 190 MB respectively.
 
 Nemotron supports French and incremental decoding with a 560 ms acoustic
 window. Its native decoder runs in a separate traced process, limited to four
@@ -119,7 +123,7 @@ with the reason in Voice settings, and leaves no entry behind. The link is
 downloaded under `<dataDir>/speech/custom/`, named `custom-` plus the first 12
 hex digits of the URL's SHA-256, and resumes like the catalogue models.
 
-A model path set by hand in Local paths wins over the list, which then shows
+A model path set by hand under Advanced wins over the list, which then shows
 no model in use.
 
 `speech.install {model}` or `speech.install {url}` starts a download,

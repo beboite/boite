@@ -6,7 +6,7 @@ import type { FakeContext, FakeMethods } from './context';
 
 /** The catalogue as the fake core first holds it, with the default model installed. */
 export function fakeSpeechModels(): SpeechModel[] {
-  return SPEECH_CATALOGUE.map(entry => ({ id: entry.id, kind: 'catalogue', name: entry.name, bytes: entry.bytes, tier: entry.tier, installed: entry.id === SPEECH_DEFAULT_MODEL, ...(entry.backend ? { backend: entry.backend } : {}), ...(entry.streaming ? { streaming: true } : {}) }));
+  return SPEECH_CATALOGUE.map(entry => ({ id: entry.id, kind: 'catalogue', name: entry.name, bytes: entry.bytes, tier: entry.tier, installed: entry.id === SPEECH_DEFAULT_MODEL, ...(entry.backend ? { backend: entry.backend } : {}), ...(entry.streaming ? { streaming: true } : {}), ...(entry.legacy ? { legacy: true } : {}) }));
 }
 
 /** What a fake link weighs once its server answers: a large-v3-turbo at q8_0. */

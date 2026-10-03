@@ -62,8 +62,12 @@ test('Whistle splits long audio, keeps the final samples, joins overlapping word
 
 test('new configuration defaults to streaming while explicitly selected Whisper stays selected', () => {
   expect(harness.core.speech.get().model).toBe('nemotron-streaming');
+  expect(harness.core.speech.status().models.filter(model => !model.legacy).map(model => model.id)).toEqual([
+    'whistle', 'nemotron-streaming', 'large-v3-turbo-q5_0',
+  ]);
   harness.core.speech.configure({ ...DEFAULT_SPEECH, model: 'small-q5_1' });
   expect(harness.core.speech.get().model).toBe('small-q5_1');
+  expect(harness.core.speech.status().models.find(model => model.id === 'small-q5_1')?.legacy).toBe(true);
 });
 
 test('installing another native engine keeps the already installed engine ready for dictation', async () => {
