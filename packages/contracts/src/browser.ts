@@ -1,15 +1,17 @@
-import { remoteBrowserInputError, type RemoteBrowserFrame, type RemoteBrowserInput } from './browser-remote';
+import { remoteBrowserInputError, remoteFrameOptionsError, type RemoteBrowserFrame, type RemoteBrowserInput, type RemoteFrameOptions } from './browser-remote';
 /** Browser automation targets only the desktop hosting this conversation. */
 export type BrowserAction =
   | { kind: 'status' }
-  | { kind: 'open'; url: string }
+  | { kind: 'profiles' }
+  /** `profile` is a profile's name or id, `default` or `private`; absent opens the default profile. */
+  | { kind: 'open'; url: string; profile?: string }
   | { kind: 'navigate'; url: string }
   | { kind: 'snapshot' }
   | { kind: 'diagnostics'; clear?: boolean }
   | { kind: 'preset'; preset: BrowserPreset; orientation?: 'portrait' | 'landscape' }
   | { kind: 'appearance'; colorScheme: 'light' | 'dark' | 'system' }
   | { kind: 'recording-start'; indicators?: boolean }
-  | { kind: 'remote-frame' }
+  | ({ kind: 'remote-frame' } & RemoteFrameOptions)
   | { kind: 'remote-input'; frameId: string; input: RemoteBrowserInput }
   | { kind: 'recording-stop' }
   | { kind: 'recording-read'; recordingId: string; offset: number }
@@ -26,6 +28,8 @@ export type BrowserAction =
 
 export interface BrowserReply {
   tabId?: string;
+  /** The profile id the tab opened in, on `open`. */
+  profile?: string;
   url?: string;
   title?: string;
   value?: unknown;
@@ -33,7 +37,10 @@ export interface BrowserReply {
   recording?: BrowserRecording;
   frame?: RemoteBrowserFrame;
 }
-export interface BrowserRecording { id: string; mime: string; bytes: number; durationMs: number; reason: 'stopped' | 'duration' | 'size' | 'error'; error?: string }
+/** Recordings are MP4 (H.264) where the engine encodes it, which iPhones play, else WebM. */
+export const BROWSER_RECORDING_TYPES = { 'video/mp4': 'mp4', 'video/webm': 'webm' } as const;
+export type BrowserRecordingMime = keyof typeof BROWSER_RECORDING_TYPES;
+export interface BrowserRecording { id: string; mime: BrowserRecordingMime; bytes: number; durationMs: number; reason: 'stopped' | 'duration' | 'size' | 'error'; error?: string }
 export interface BrowserDiagnostic { at: number; kind: 'console' | 'exception' | 'network'; level: string; text: string; url?: string }
 export interface BrowserHistoryEntry { at: number; action: string; ok: boolean; durationMs: number; error?: string }
 export interface BrowserDiagnostics { entries: BrowserDiagnostic[]; dropped: number; history: BrowserHistoryEntry[] }
@@ -55,15 +62,25 @@ export function browserPresetSize(preset: BrowserPreset, orientation?: 'portrait
   return orientation === 'portrait' ? { width: short, height: long } : { width: long, height: short };
 }
 export interface BrowserRpcMethods {
-  /** Only the owner can grant this; enabled hosts must explicitly consent to agent control. */
-  'browser.host': { params: { threadId: string; enabled: boolean; allowAgentControl?: boolean; remote?: boolean }; result: { ok: true } };
-  'browser.remoteFrame': { params: { threadId: string }; result: RemoteBrowserFrame };
+  /**
+   * Only the owner can grant this. An enabled host consents to agent control,
+   * to sharing with paired devices (`remote`), or both; agents reach it only
+   * with `allowAgentControl`. `live` says the conversation's panel on that
+   * desktop has a browser tab, which paired devices then show
+   * (`browser.remoteChanged`).
+   */
+  'browser.host': { params: { threadId: string; enabled: boolean; allowAgentControl?: boolean; remote?: boolean; live?: boolean }; result: { ok: true } };
+  'browser.remoteFrame': { params: { threadId: string } & RemoteFrameOptions; result: RemoteBrowserFrame };
+  /** Whether a desktop shares a browser tab of this conversation now: a viewer shows it without asking. */
+  'browser.remoteStatus': { params: { threadId: string }; result: { live: boolean } };
   'browser.remoteInput': { params: { threadId: string; frameId: string; input: RemoteBrowserInput }; result: { ok: true } };
   'browser.command': { params: { threadId: string; tabId?: string; action: BrowserAction }; result: BrowserReply };
   'browser.complete': { params: { requestId: string; result?: BrowserReply; error?: string }; result: { ok: true } };
 }
 export interface BrowserRpcEvents {
   'browser.requested': { threadId: string; requestId: string; tabId?: string; action: BrowserAction };
+  /** For the clients subscribed to the conversation: its shared browser tab appeared or went away. */
+  'browser.remoteChanged': { threadId: string; live: boolean };
 }
 
 /** Shared by the real core, fake transport and desktop before executing input. */
@@ -75,13 +92,15 @@ export function browserActionError(action: BrowserAction): string | null {
     case 'preset': return Object.hasOwn(BROWSER_PRESETS, action.preset) && (action.orientation === undefined || ['portrait', 'landscape'].includes(action.orientation)) ? null : 'unknown browser preset or orientation';
     case 'appearance': return ['light', 'dark', 'system'].includes(action.colorScheme) ? null : 'appearance must be light, dark or system';
     case 'recording-start': return action.indicators === undefined || typeof action.indicators === 'boolean' ? null : 'recording indicators must be a boolean';
-    case 'recording-stop': case 'remote-frame': return null;
+    case 'recording-stop': return null;
+    case 'remote-frame': return remoteFrameOptionsError(action);
     case 'remote-input': return text(action.frameId, 80) ? remoteBrowserInputError(action.input) : 'remote input needs a frame id';
     case 'recording-discard': case 'recording-read':
       if (!text(action.recordingId, 80) || !/^[a-zA-Z0-9-]+$/.test(action.recordingId)) return 'recordingId must come from recording-stop';
       return action.kind === 'recording-discard' || (Number.isSafeInteger(action.offset) && action.offset >= 0 && action.offset <= 50 * 1024 * 1024) ? null : 'recording offset must be an integer within 50 MB';
-    case 'status': case 'snapshot': case 'screenshot': case 'close': case 'reset-viewport': return null;
+    case 'status': case 'profiles': case 'snapshot': case 'screenshot': case 'close': case 'reset-viewport': return null;
     case 'open': case 'navigate': {
+      if (action.kind === 'open' && action.profile !== undefined && !text(action.profile, BROWSER_PROFILE_NAME_MAX)) return `browser profile must be a profile name or id of 1 to ${BROWSER_PROFILE_NAME_MAX} characters, default or private`;
       if (text(action.url, 16384) && /^https?:\/\/[^\s/?#]+(?:[/?#][^\s]*)?$/i.test(action.url)) return null;
       return 'browser url must be an absolute HTTP or HTTPS address';
     }
@@ -93,4 +112,40 @@ export function browserActionError(action: BrowserAction): string | null {
     case 'resize': return [action.width, action.height].every(n => Number.isInteger(n) && n >= 240 && n <= 3840) ? null : 'browser dimensions must be integers between 240 and 3840';
     default: return 'unknown browser action';
   }
+}
+
+/**
+ * Browser profiles: each keeps its own cookies, storage and logins on the
+ * desktop that shows the browser. `default` is the session every tab used
+ * before profiles existed, `private` an InPrivate session nothing is kept
+ * from. Neither is stored: `Settings.browserProfiles` lists the ones the user
+ * made, and an id names a WebView2 profile folder, so it is never reused.
+ */
+export const DEFAULT_BROWSER_PROFILE = 'default';
+export const PRIVATE_BROWSER_PROFILE = 'private';
+export const BROWSER_PROFILES_MAX = 32;
+export const BROWSER_PROFILE_NAME_MAX = 40;
+export interface BrowserProfile { id: string; name: string }
+
+/** The shell checks the same rule before it opens a profile folder. */
+export function browserProfileIdError(id: unknown): string | null {
+  if (typeof id !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(id)) return 'a browser profile id is 1 to 40 lowercase letters, digits and `-`, starting with a letter or digit';
+  return id === DEFAULT_BROWSER_PROFILE || id === PRIVATE_BROWSER_PROFILE ? `${id} is a built-in browser profile` : null;
+}
+
+/** The profiles a settings snapshot names, and the one a tab opens in when nobody chooses. */
+export function browserProfilesOf(settings: { browserProfiles?: BrowserProfile[]; browserDefaultProfile?: string } | null | undefined): { profiles: BrowserProfile[]; defaultId: string } {
+  const profiles = settings?.browserProfiles ?? [];
+  const wanted = settings?.browserDefaultProfile;
+  return { profiles, defaultId: wanted !== undefined && profiles.some(profile => profile.id === wanted) ? wanted : DEFAULT_BROWSER_PROFILE };
+}
+
+/**
+ * The profile id an agent or a person names: `default`, `private`, an id, or
+ * a name in any case. Null when nothing matches.
+ */
+export function findBrowserProfile(profiles: readonly BrowserProfile[], wanted: string): string | null {
+  const key = wanted.trim().toLowerCase();
+  if (key === DEFAULT_BROWSER_PROFILE || key === PRIVATE_BROWSER_PROFILE) return key;
+  return (profiles.find(profile => profile.id === key) ?? profiles.find(profile => profile.name.toLowerCase() === key))?.id ?? null;
 }

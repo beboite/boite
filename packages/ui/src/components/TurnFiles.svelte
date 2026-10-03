@@ -20,7 +20,7 @@
   /** Folded by default: the count and the lines added and removed say enough until the list is wanted. */
   let open = $state(false);
   let lines = $derived(turnLineCounts(diffs, cwd));
-  let repository = $derived(store.owner && store.openProject?.repository === true);
+  let repository = $derived(store.openProject?.repository === true);
   let tree = $derived(turnFileTree(files));
   let expanded = $state<Record<string, boolean>>({});
   let allExpanded = $state(false);
@@ -37,9 +37,9 @@
     deleted: () => strings.chat.fileDeleted
   } satisfies Record<TurnFile['change'], () => string>;
 
-  /** A paired device cannot read files, so its rows stay plain text instead of opening a refusal. */
+  /** A paired device reads files too (read-only); a deleted one has nothing left to open. */
   function openable(file: TurnFile): boolean {
-    return store.owner && file.relative !== null && file.change !== 'deleted';
+    return file.relative !== null && file.change !== 'deleted';
   }
 
   async function reveal(file: TurnFile): Promise<void> {

@@ -52,6 +52,27 @@ pub(crate) fn notify(app: AppHandle, title: String, body: String, thread_id: Str
         .map_err(|error| format!("the toast {title:?} was refused: {error}"))
 }
 
+/// How long the interactive session has gone without a key or a mouse move.
+/// The lock screen gives no input to this session, so a locked PC counts up.
+pub(crate) fn idle_ms() -> Option<u64> {
+    use windows_sys::Win32::System::SystemInformation::GetTickCount;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+    let mut info = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+    // SAFETY: cbSize names the structure the call fills, which outlives it.
+    if unsafe { GetLastInputInfo(&mut info) } == 0 { return None; }
+    // SAFETY: no arguments. Both clocks wrap after 49.7 days, the difference does not.
+    Some(u64::from(unsafe { GetTickCount() }.wrapping_sub(info.dwTime)))
+}
+
+/// Whether the window in front belongs to `window`: itself or a dialog it owns.
+/// A webview's own focus can stay true behind other windows; this cannot.
+pub(crate) fn foreground(window: &tauri::Window) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GetForegroundWindow, GA_ROOTOWNER};
+    let Ok(hwnd) = window.hwnd() else { return false };
+    // SAFETY: neither call takes a pointer it keeps; a null foreground (the lock screen) is handled.
+    let front = unsafe { GetForegroundWindow() };
+    !front.is_null() && unsafe { GetAncestor(front, GA_ROOTOWNER) } == hwnd.0
+}
 #[cfg(test)]
 mod tests {
     use super::toast_app_id;

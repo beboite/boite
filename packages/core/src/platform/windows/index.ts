@@ -4,8 +4,10 @@ import { resolveMemoryLimits } from '../../memory-limits.ts';
 import { machineMemory } from './memory.ts';
 import * as jobs from './jobs.ts';
 import * as guard from './guard.ts';
+import { findTailscaleCli } from '../tailscale.ts';
 
 export const platform: ProcessPlatform = {
+  tailscaleCli: () => findTailscaleCli('windows'),
   retain(events, protections) {
     jobs.retainJobs(events);
     guard.retainGuard(protections);

@@ -12,6 +12,21 @@ export function focusComposer(): boolean {
   return true;
 }
 
+/**
+ * The mousedown of a button beside the composer's box. A press moves the focus
+ * there, and on a phone that blur closes the keyboard: Send then took a first
+ * tap to close it and a second to send, and the keyboard dropped and came back
+ * around removing an attachment. Prevented, the box keeps the focus it had.
+ */
+export function keepFocus(event: MouseEvent): void {
+  event.preventDefault();
+}
+
+/** True when the focus is inside `root`, the case a keyboard user is in. */
+export function focusWithin(root: Element | null | undefined): boolean {
+  return !!root && document.activeElement instanceof Element && root.contains(document.activeElement);
+}
+
 /** What had the focus before an overlay took it, or null when that was nothing worth coming back to. */
 export function focusedElement(): HTMLElement | null {
   const active = document.activeElement;

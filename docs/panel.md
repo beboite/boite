@@ -7,7 +7,7 @@ starts with the panel closed, without changing the stored desktop layout.
 `lib/right-panel.svelte.ts` owns layout and `RightPanel.svelte` renders it;
 `lib/surface-labels.ts` defines labels and availability.
 
-## Browser tools and linked pull requests
+## Browser tools
 
 On Windows, the browser's screen menu selects phone, tablet and desktop
 viewport sizes, portrait or landscape orientation, and the page's light or
@@ -16,11 +16,6 @@ failed requests and recent automation actions. These tools remain inside
 Boite. The recording button captures the page; stopping opens a video player
 with download and discard actions. The [CLI](cli.md) exposes the same tools
 to agents, including recording and attaching the result to chat.
-
-The conversation header lists explicitly linked pull requests, their current
-states and branch dependencies. The owner can add, refresh or remove links.
-Removing a link does not close its PR. A failed GitHub refresh keeps the last
-known state and displays the error.
 
 ## Floating panel and browser overlays
 
@@ -73,7 +68,6 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 | Subagents | one     | the thread's workflow runs and subagents in one list, a run's graph, a subagent's conversation, see [delegation.md](delegation.md) and [workflows.md](workflows.md) |
 | Trace    | one      | the thread's processes, see [trace.md](trace.md)                              |
 
-Browser tabs share the shell's webview profile, so logins survive restart.
 The iframe bridge belongs to browser test fixtures; ordinary web clients have
 no native Browser surface. [Portability](portability.md#remaining-gaps) records
 the Linux shell's system-browser fallback.
@@ -85,6 +79,62 @@ use HTTPS. Loading and navigation failures appear in the toolbar. A page zoom
 other than 100% has a reset button.
 `lib/browser-bounds.ts` observes layout changes and follows finite layout
 animations, rather than measuring the page slot on every idle frame.
+
+### Browser profiles
+
+A browser tab opens in a profile and keeps it. Each profile has its own cookies,
+storage and logins, kept across restarts. **Default** is the profile every tab
+used before there were others, so earlier logins stay there. Settings > General >
+Browser profiles adds, renames and deletes the others, and chooses the one new
+tabs open in. The profile button in the address bar names the tab's profile
+(only its icon on a narrow bar). Its menu, like the panel's **+** menu, opens a
+new tab in another profile, or a private tab. A private tab is chosen per tab,
+never as the default. Private tabs share one session that keeps nothing once
+the last of them closes.
+
+The profiles belong to the desktop that shows the browser: they are stored in
+the settings of the core its shell started, and a phone has no Browser surface
+to choose them. Deleting a profile closes its tabs in every conversation and
+erases what it kept. On Windows each profile is a WebView2 profile of the
+shell's single browser process (`src/platform/webview_profiles.rs`): the
+debugging port is unchanged, and WebView2 removes a deleted profile's folder
+when that process exits, which is why an id is never reused. macOS keeps each
+profile in a WebKit data store, which needs macOS 14. The Linux shell has no
+built-in browser. `tests/e2e/browser-profiles.test.ts` checks separate cookies,
+their survival across a restart and deletion in the real shell.
+
+The agent's `boite browser profiles` and `open <url> --profile <name>` are
+described in the [CLI](cli.md).
+
+### Sign-in popups and new windows
+
+A page that calls `window.open` with a size or a position, as "Sign in with
+Google" and most sign-in buttons do, gets a real popup window
+(`apps/shell/src-tauri/src/browser/popups.rs`). The popup opens in the tab's
+profile, or in the private session, and keeps `window.opener`: the sign-in
+answers the page through it and closes itself. Its title starts with the
+host it shows, since it has no address bar. Closing the tab closes its
+popups. A `target="_blank"` link, or `window.open` without a size, opens a tab
+in the same panel and profile instead, and that tab has no opener. So does a
+sized `window.open` while the tab already holds three popups: WebView2 has no
+popup blocker. Popups are
+desktop windows: an agent's browser commands and the phone's remote view see
+the tab, not its popups.
+
+Surfaces and popups show other sites without the app's bridge. On Windows
+`src/platform/browser_page.rs` turns off WebView2's `chrome.webview`, and removes
+the scripts Tauri and its plugins added to the webview (`__TAURI_INTERNALS__`,
+`ipc`, the opener plugin's link handler) before the first page loads. That
+handler used to swallow every `target="_blank"` link. macOS still injects
+Tauri's scripts into a surface.
+
+The browser keeps WebView2's own user agent. On Google's sign-in pages the
+runtime already reports Chrome there, in the header and in
+`navigator.userAgentData`. Edge's user agent would double the "Microsoft Edge"
+brand. A DevTools override changes the headers of cross-site frames but not
+their `navigator.userAgentData`, and that mismatch is the kind bot checks such as
+Turnstile reject. `tests/e2e/browser-profiles.test.ts` checks the popup's opener,
+profile and missing bridge, and the `_blank` tab.
 
 ### Local HTML artifacts
 
@@ -184,11 +234,16 @@ machine therefore reads and edits text there, and shows no picture or video
 from it; a browser opened on that core's own address shows them.
 
 The reads (`git.*`, `files.list`, `files.read`, `todos.list`, the tasks) are
-the owner's and the thread's own agent's. `files.write`, `todos.remove` and a
-todo's `done` are the owner's alone, and `todos.updated` goes to the owner and
-to the agents of that project. A paired phone has the Panel button too, and its
-menu offers Subagents and Messages. The Messages tab uses the same coordination
-and delegation reads as the chat and fills the screen on a phone.
+the owner's and the thread's own agent's. A paired phone also reads `git.status`,
+`git.diff` against `HEAD` only, `files.list` and `files.read`, on a thread whose
+real working directory is inside its project or the core's worktree folder
+([phone.md](phone.md#what-a-paired-device-may-call)). `files.write`,
+`todos.remove` and a todo's `done` are the owner's alone, and `todos.updated`
+goes to the owner and to the agents of that project. A paired phone has the
+Panel button too, and its menu offers Changes, Files (read-only, no Save),
+Subagents and Messages; Tasks and the trace stay the owner's. The Messages tab
+uses the same coordination and delegation reads as the chat and fills the
+screen on a phone.
 
 ## What the agent can ask
 

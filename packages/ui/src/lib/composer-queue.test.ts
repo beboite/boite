@@ -1,4 +1,5 @@
 import { expect, test, vi } from 'vitest';
+import { ATTACHMENTS_PER_TURN } from '@boite/contracts';
 import type { Store } from './store.svelte';
 import { drainQueue, type ComposerState } from './composer-queue';
 
@@ -58,11 +59,11 @@ test('goals and loops keep their own queue entries and cannot consume neighborin
 
 test('individually valid files stay split across turns when their combined count exceeds the turn limit', async () => {
   const draft = state();
-  draft.queued = Array.from({ length: 9 }, (_, index) => ({ text: `file ${index}`, attachments: [attachment] }));
+  draft.queued = Array.from({ length: ATTACHMENTS_PER_TURN + 1 }, (_, index) => ({ text: `file ${index}`, attachments: [attachment] }));
   const send = vi.fn<Store['send']>(async () => true);
   await drainQueue({ send } as unknown as Store, 'thread', draft);
-  expect(send.mock.calls[0]?.[2]).toHaveLength(8);
-  expect(draft.queued.map(entry => entry.text)).toEqual(['file 8']);
+  expect(send.mock.calls[0]?.[2]).toHaveLength(ATTACHMENTS_PER_TURN);
+  expect(draft.queued.map(entry => entry.text)).toEqual([`file ${ATTACHMENTS_PER_TURN}`]);
   await drainQueue({ send } as unknown as Store, 'thread', draft);
   expect(send.mock.calls[1]?.[2]).toHaveLength(1);
   expect(draft.queued).toEqual([]);

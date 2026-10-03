@@ -520,6 +520,12 @@ export function threadMethods(ctx: FakeContext) {
       if (params.protectAllThreads !== undefined && typeof params.protectAllThreads !== 'boolean') {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'protectAllThreads must be a boolean', data: { field: 'protectAllThreads', expected: 'boolean' } });
       }
+      if (params.attentive !== undefined && typeof params.attentive !== 'boolean') {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'attentive must be a boolean', data: { field: 'attentive', expected: 'boolean' } });
+      }
+      if (params.idleMs !== undefined && (typeof params.idleMs !== 'number' || !Number.isFinite(params.idleMs) || params.idleMs < 0)) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'idleMs must be a nonnegative number of milliseconds', data: { field: 'idleMs', expected: 'a finite number >= 0' } });
+      }
       if (params.threadId !== null) ctx.thread(params.threadId);
       const reportsProtection = params.protectedThreadIds !== undefined || params.protectAllThreads !== undefined;
       if (!ctx.bus.protectionReported) {
@@ -530,6 +536,7 @@ export function threadMethods(ctx: FakeContext) {
       if (params.protectedThreadIds !== undefined) ctx.bus.protectedThreadIds = new Set(params.protectedThreadIds);
       if (params.protectAllThreads !== undefined) ctx.bus.protectAllThreads = params.protectAllThreads;
       ctx.bus.focusedThreadId = params.threadId;
+      // No push here: being looked at silences only the real core's Web Push.
       return { ok: true };
     },
     'turns.start': async (params) => {

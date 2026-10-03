@@ -1,4 +1,4 @@
-import type { PermissionRequest, QuestionRequest, RequestId, ThreadId } from '@boite/contracts';
+import type { Attachment, PermissionRequest, QuestionRequest, RequestId, ThreadId } from '@boite/contracts';
 import { mergeRequests, requestsOf, type RequestScope } from '../requests';
 import type { StoreContext } from './context';
 import type { Client } from '../client';
@@ -84,7 +84,8 @@ export class Requests {
     threadId: ThreadId,
     questionId: string,
     optionIds: string[],
-    text?: string
+    text?: string,
+    attachments: Attachment[] = []
   ): Promise<boolean> {
     const client = this.ctx.client;
     const generation = this.ctx.clientGeneration;
@@ -94,7 +95,8 @@ export class Requests {
         threadId,
         questionId,
         optionIds,
-        ...(text === undefined || text.length === 0 ? {} : { text })
+        ...(text === undefined || text.length === 0 ? {} : { text }),
+        ...(attachments.length === 0 ? {} : { attachments })
       });
       if (!this.ctx.currentClient(client, generation)) return false;
       this.resolveQuestion(questionId);

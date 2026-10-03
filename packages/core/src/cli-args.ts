@@ -64,6 +64,7 @@ export function parse(argv: string[]): Parsed {
       parsed.channel = channel;
     } else if (arg === '--help' || arg === '-h') throw new Usage('');
     else if (arg === '--output' && parsed.positional[0] === 'browser' && parsed.positional[1] === 'screenshot') parsed.positional.push(arg, next());
+    else if (arg === '--profile' && parsed.positional[0] === 'browser' && parsed.positional[1] === 'open') parsed.positional.push(arg, next());
     else if (arg.startsWith('--')) throw new Usage(`unknown flag ${arg}`);
     else parsed.positional.push(arg);
   }

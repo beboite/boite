@@ -21,6 +21,9 @@ const RPC_PATH = '/rpc';
 const ASSETS_PREFIX = '/assets/';
 /** How long a navigation waits on the core before the cached shell is served instead. */
 const SHELL_PATIENCE_MS = 2500;
+/** Notification words in the user's language, written by the page; outside the `boite-ui-` caches `activate` deletes. */
+const WORDS_CACHE = 'boite-notify';
+const WORDS_PATH = '/notification-words';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -117,14 +120,42 @@ self.addEventListener('push', (event) => {
     let payload = {};
     try { payload = event.data?.json() ?? {}; } catch { /* Show a generic notification for an empty push. */ }
     const threadId = typeof payload.threadId === 'string' ? payload.threadId : null;
+    const body = (typeof payload.label === 'string' && await notificationWord(payload.label)) || (typeof payload.body === 'string' ? payload.body : '');
     await self.registration.showNotification(typeof payload.title === 'string' ? payload.title : 'Boite', {
-      body: typeof payload.body === 'string' ? payload.body : '',
+      body,
       icon: '/icons/icon-192.png', badge: '/icons/icon-192.png',
       tag: threadId ? `thread-${threadId}` : typeof payload.tag === 'string' ? payload.tag : 'boite-update',
       data: { threadId }
     });
+    // The icon's count of threads waiting for the user, as the core counted it when it sent this.
+    await setBadge(payload.badge);
   })());
 });
+
+/**
+ * The core's generic bodies are English; `label` names one, and the page left
+ * the words for it in the language the app speaks (`storeNotificationWords`).
+ * Null sends the push back to the core's own body.
+ */
+async function notificationWord(label) {
+  try {
+    const stored = await (await caches.open(WORDS_CACHE)).match(WORDS_PATH);
+    const words = stored ? await stored.json() : null;
+    return typeof words?.[label] === 'string' && words[label] ? words[label] : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Set the app badge where the platform has one (iOS 16.4+ home-screen apps, desktop Chromium); a failure costs nothing. */
+async function setBadge(count) {
+  const nav = self.navigator;
+  if (!nav || typeof count !== 'number' || !Number.isFinite(count) || count < 0) return;
+  try {
+    if (count === 0) await nav.clearAppBadge?.();
+    else await nav.setAppBadge?.(Math.floor(count));
+  } catch { /* No badge permission: the notification itself still shows. */ }
+}
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
@@ -134,8 +165,11 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const existing = windows.find(client => new URL(client.url).origin === url.origin);
-    if (existing) { existing.postMessage({ type: 'boite.open-thread', threadId: typeof threadId === 'string' ? threadId : null }); await existing.focus(); }
-    else await self.clients.openWindow(url.href);
+    if (existing) {
+      existing.postMessage({ type: 'boite.open-thread', threadId: typeof threadId === 'string' ? threadId : null });
+      // iOS can refuse to focus a suspended home-screen app; opening the URL then reaches the thread.
+      try { await existing.focus(); } catch { await self.clients.openWindow(url.href); }
+    } else await self.clients.openWindow(url.href);
   })());
 });
 

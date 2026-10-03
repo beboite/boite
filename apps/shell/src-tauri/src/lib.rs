@@ -16,6 +16,7 @@ mod local_core;
 mod local_files;
 mod material;
 mod platform;
+mod presence;
 mod quota_window;
 mod resident;
 mod update_stop;
@@ -140,6 +141,7 @@ pub fn run() {
             whip::whip_window,
             tray::quit_shell,
             notify,
+            presence::user_presence,
             closing::close_behavior,
             updater::app_update_status,
             updater::app_update_check,
@@ -160,6 +162,7 @@ pub fn run() {
             browser::browser_annotate,
             browser::browser_highlight,
             browser::browser_destroy,
+            browser::browser_profile_delete,
             browser_control::browser_protocol,
         ])
         .setup(move |app| {

@@ -838,7 +838,7 @@ export class ThreadStore {
     return this.cards.listQuestions(threadId);
   }
 
-  answerQuestion(params: { threadId: ThreadId; questionId: RequestId; optionIds: string[]; text?: string }): void {
+  answerQuestion(params: { threadId: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; attachments?: Attachment[] }): void {
     this.cards.answerQuestion(params);
   }
 

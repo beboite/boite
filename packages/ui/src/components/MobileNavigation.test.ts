@@ -46,3 +46,27 @@ test('selecting a conversation beyond the first mobile window finishes loading i
   expect(store.openThread?.messages).toEqual(history.messages);
   expect(store.loadingThreadId).toBeNull();
 });
+
+test('the logo goes back to the conversations, as Back does in a conversation', async () => {
+  vi.spyOn(window, 'matchMedia').mockImplementation(media => Object.assign(new EventTarget(), {
+    media, matches: true, onchange: null, addListener() {}, removeListener() {}
+  }));
+  client = new FakeClient({ delayMs: 0 });
+  store = new Store(); store.attach(client); await store.connect();
+  workspace.machines = [{ id: 'local', label: 'Local', store }]; workspace.active = store;
+  mounted = mount(MobileNavigation, { target: document.body, props: { store, screen: 'activity' } });
+  await settle();
+  const list = () => document.querySelector('[data-testid=mobile-list]')?.getAttribute('aria-label');
+  expect(list()).toBe('Activity');
+  document.querySelector<HTMLButtonElement>('[data-testid=mobile-home]')!.click(); await settle();
+  expect(list()).toBe('Conversations');
+  store.showSettings('machines'); await settle();
+  expect(list()).toBeUndefined();
+  document.querySelector<HTMLButtonElement>('[data-testid=mobile-home]')!.click(); await settle();
+  expect(store.page).toBe('chat');
+  expect(list()).toBe('Conversations');
+  await unmount(mounted); document.body.innerHTML = '';
+  mounted = mount(MobileNavigation, { target: document.body, props: { store, screen: 'chat' } }); await settle();
+  expect(document.querySelector('[data-testid=mobile-home]')).toBeNull();
+  expect(document.querySelector('[data-testid=mobile-back]')).not.toBeNull();
+});

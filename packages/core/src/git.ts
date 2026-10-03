@@ -5,7 +5,7 @@ import { gitDiff } from './git/diff.ts';
 import { notARepository, OUTSIDE_A_REPOSITORY } from './git/errors.ts';
 import { parseNumstat, parseStatus } from './git/porcelain.ts';
 import { git } from './git/read.ts';
-import { threadCwd } from './workdir.ts';
+import { assertDeviceFile, assertDeviceReadable, threadCwd } from './workdir.ts';
 export { gitDiff } from './git/diff.ts';
 export { parseBranchHeader, parseNumstat, parseStatus } from './git/porcelain.ts';
 
@@ -33,6 +33,16 @@ export async function gitStatus(core: Core, threadId: ThreadId): Promise<GitStat
 }
 
 export function registerGitMethods(core: Core): void {
-  core.router.register('git.status', (params) => gitStatus(core, params.threadId));
-  core.router.register('git.diff', (params) => gitDiff(core, params));
+  // A paired device reads only a thread that lives in its project or the core's worktrees.
+  core.router.register('git.status', (params, ctx) => {
+    if (ctx.connection.identity.principal === 'session') assertDeviceReadable(core, params.threadId);
+    return gitStatus(core, params.threadId);
+  });
+  core.router.register('git.diff', (params, ctx) => {
+    if (ctx.connection.identity.principal === 'session') {
+      assertDeviceReadable(core, params.threadId);
+      assertDeviceFile(core, params.threadId, threadCwd(core, params.threadId), params.path);
+    }
+    return gitDiff(core, params);
+  });
 }

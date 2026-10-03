@@ -11,7 +11,7 @@ import {
 import { uptime } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import type { Channel, PairingGrant, PairingRole, Settings } from '@boite/contracts';
+import type { Channel, PairingGrant, PairingRole, Settings, TailscaleStatus } from '@boite/contracts';
 import { connect } from './client.ts';
 import type { Core } from './core.ts';
 import { CORE_VERSION } from './version.ts';
@@ -238,8 +238,53 @@ export function resolveHost(flags: Flags, settings: Settings): string {
  * computer of the user's own, which then drives this core as its owner.
  */
 export async function pair(argv: string[]): Promise<PairingGrant> {
-  const flags = parseFlags(argv);
   const role: PairingRole = argv.includes('--owner') ? 'owner' : 'device';
+  const client = await ownerClient(argv);
+  try {
+    return await client.call('pairing.grant', { role });
+  } finally {
+    client.close();
+  }
+}
+
+/**
+ * `boite-core tailscale [status|on|off] [--replace]`: the Tailscale HTTPS
+ * switch of Settings, for a machine with no window. `on` refuses to take 443
+ * from another target unless `--replace` says so.
+ */
+export async function tailscale(argv: string[]): Promise<TailscaleStatus> {
+  const action = argv[0] && !argv[0].startsWith('--') ? argv[0] : 'status';
+  if (!['status', 'on', 'off'].includes(action)) throw new Error(`tailscale takes status, on or off, got ${action}`);
+  const client = await ownerClient(argv);
+  try {
+    if (action === 'on') return await client.call('tailscale.enable', { replace: argv.includes('--replace') });
+    if (action === 'off') return await client.call('tailscale.disable', {});
+    return await client.call('tailscale.status', {});
+  } finally {
+    client.close();
+  }
+}
+
+/** One line per state, for `boite-core tailscale`. */
+export function describeTailscale(status: TailscaleStatus): string {
+  const lines: Record<TailscaleStatus['state'], string> = {
+    missing: 'Tailscale is not installed on this machine.',
+    stopped: 'Tailscale is installed but not connected. Connect it, then try again.',
+    'needs-login': 'Tailscale is signed out. Sign in, then try again.',
+    'https-disabled': 'HTTPS certificates are off for this tailnet. Turn on MagicDNS and HTTPS in the admin console (DNS page).',
+    off: `Ready: ${status.url} is not served. Run "boite-core tailscale on".`,
+    on: `Serving ${status.url} -> ${status.target}.${status.publicUrlMatches ? ' Pairing links use it.' : ''}`,
+    conflict: `${status.url} already serves ${status.servedTarget}. "boite-core tailscale on --replace" takes it over.`,
+    error: 'The tailscale CLI did not answer as expected.',
+  };
+  const detail = status.detail ? ` (${status.detail})` : '';
+  const action = status.actionUrl ? `\nOpen ${status.actionUrl}` : '';
+  return `${lines[status.state]}${detail}${action}`;
+}
+
+/** A connection to the core already running on this data directory, as its owner, with the token `core.json` holds. */
+async function ownerClient(argv: string[]): Promise<Awaited<ReturnType<typeof connect>>> {
+  const flags = parseFlags(argv);
   const dataDir = resolveDataDir(flags.dataDir, flags.channel);
   const file = join(dataDir, 'core.json');
   if (!existsSync(file)) {
@@ -257,16 +302,10 @@ export async function pair(argv: string[]): Promise<PairingGrant> {
   const bound = state.host ?? '127.0.0.1';
   const host = bound === '0.0.0.0' || bound === '::' ? '127.0.0.1' : bound;
   const url = `http://${host.includes(':') ? `[${host}]` : host}:${state.port}`;
-  let client: Awaited<ReturnType<typeof connect>>;
   try {
-    client = await connect(url, state.token, { client: { name: 'cli', version: CORE_VERSION } });
+    return await connect(url, state.token, { client: { name: 'cli', version: CORE_VERSION } });
   } catch (error) {
     throw new Error(`no core answers at ${url}, the address ${file} names: ${(error as Error).message}`);
-  }
-  try {
-    return await client.call('pairing.grant', { role });
-  } finally {
-    client.close();
   }
 }
 
@@ -327,10 +366,26 @@ export function main(argv: string[]): void {
         process.stderr.write(
           `pairing link for the ${grant.role} role, good for one use until ${new Date(grant.expiresAt).toISOString()}\n`,
         );
+        if (grant.code && grant.codeExpiresAt) {
+          process.stderr.write(`or type the code ${grant.code} in the installed app, until ${new Date(grant.codeExpiresAt).toISOString()}\n`);
+        }
         process.exit(0);
       },
       (error: unknown) => {
         process.stderr.write(`boite-core pair: ${error instanceof Error ? error.message : String(error)}\n`);
+        process.exit(1);
+      },
+    );
+    return;
+  }
+  if (argv[0] === 'tailscale') {
+    tailscale(argv.slice(1)).then(
+      (status) => {
+        process.stdout.write(`${describeTailscale(status)}\n`);
+        process.exit(status.state === 'on' || status.state === 'off' ? 0 : 2);
+      },
+      (error: unknown) => {
+        process.stderr.write(`boite-core tailscale: ${error instanceof Error ? error.message : String(error)}\n`);
         process.exit(1);
       },
     );

@@ -15,11 +15,15 @@
 //! A surface reaches http, https and about, and nothing else. The command
 //! refuses another scheme by name before the webview is touched, and the
 //! navigation handler refuses it again for a link the page itself followed.
+//! A page's new windows are tabs or popups, as `popups` explains.
 
+mod popups;
+
+use popups::{close_popups, new_window};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
-use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
+use tauri::webview::{PageLoadEvent, WebviewBuilder};
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Position, Rect, Runtime, Size, Url,
     Webview, WebviewUrl,
@@ -318,7 +322,9 @@ pub fn close_all<R: Runtime>(app: &AppHandle<R>) {
             eprintln!("[shell] the browser surface {label} could not be closed: {error}");
         }
     }
+    close_popups(app, None);
 }
+
 
 /// A webview label is not free-form: `tauri_runtime::window::is_label_valid`
 /// takes letters, digits, `-`, `/`, `:` and `_` and panics on the rest, so an
@@ -362,6 +368,50 @@ fn checked_url(id: &str, raw: &str) -> Result<Url, String> {
     Ok(url)
 }
 
+/// Where a surface keeps its cookies and storage. `Default` is the profile the
+/// main webview runs on, the one every surface used before profiles existed,
+/// so the sign-ins made there stay. `Private` is WebView2's InPrivate session,
+/// which forgets everything once its last surface closes.
+#[derive(Debug, PartialEq)]
+enum Profile {
+    Default,
+    Private,
+    Named(String),
+}
+
+/// The profile a surface asked for, or a refusal naming it. Named profiles
+/// are ids the UI generated: the same rule as `browserProfileIdError` in
+/// `packages/contracts/src/browser.ts`, which also keeps them valid WebView2
+/// profile names and folder names.
+fn profile_of(id: &str, raw: Option<&str>) -> Result<Profile, String> {
+    match raw {
+        None | Some("default") => Ok(Profile::Default),
+        Some("private") => Ok(Profile::Private),
+        Some(name) => {
+            let mut chars = name.chars();
+            let first = chars.next().is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+            if first && name.len() <= 40 && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+                Ok(Profile::Named(name.to_owned()))
+            } else {
+                Err(format!(
+                    "the browser surface {id:?} was given the profile {name:?}: a profile is default, private, or an id of at most 40 lowercase letters, digits and `-`"
+                ))
+            }
+        }
+    }
+}
+
+/// macOS keys a data store by 16 bytes. A profile id maps to the same ones on
+/// every run, so its store persists.
+#[cfg(target_os = "macos")]
+fn data_store_of(profile: &str) -> [u8; 16] {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(format!("boite-browser-profile:{profile}").as_bytes());
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes
+}
+
 // ---------------------------------------------------------------------------
 // The commands. Every one of them names the surface and the reason when it
 // fails, and none of them is a silent no-op.
@@ -383,9 +433,11 @@ pub async fn browser_create(
     webview: Webview,
     id: String,
     url: String,
+    profile: Option<String>,
 ) -> Result<(), String> {
     only_main(&webview)?;
     let label = label_of(&id)?;
+    let profile = profile_of(&id, profile.as_deref())?;
     if app.get_webview(&label).is_some() {
         return Err(format!(
             "the browser surface {id:?} is already open in this shell: destroy it before creating it again"
@@ -408,11 +460,28 @@ pub async fn browser_create(
     // data folder is a second WebView2 browser process: another hundred
     // megabytes idle, and it cannot bind the `--remote-debugging-port` the
     // first one already holds, which is the port the end to end suite drives.
+    // Profiles other than the default one live inside that same folder and
+    // process: see `platform/webview_profiles.rs`.
     if let Some(directory) = crate::window::webview_profile() {
         builder = builder.data_directory(directory);
     }
     if let Some(args) = crate::window::test_browser_args() {
         builder = builder.additional_browser_args(&args);
+    }
+    match &profile {
+        Profile::Default => {}
+        Profile::Private => builder = builder.incognito(true),
+        #[cfg(windows)]
+        Profile::Named(name) => {
+            let environment = crate::platform::webview_profiles::environment(&app, name).await?;
+            builder = builder.with_environment(environment.0);
+        }
+        #[cfg(target_os = "macos")]
+        Profile::Named(name) => builder = builder.data_store_identifier(data_store_of(name)),
+        #[cfg(not(any(windows, target_os = "macos")))]
+        Profile::Named(name) => {
+            return Err(format!("the browser surface {id:?} cannot open the profile {name:?}: browser profiles need Windows or macOS"));
+        }
     }
 
     let handle = app.clone();
@@ -520,23 +589,10 @@ pub async fn browser_create(
         );
     });
 
-    // A page asking for a window of its own gets none: the request comes back
-    // to the UI, which opens another tab in the same panel.
     let handle = app.clone();
     let surface = id.clone();
-    builder = builder.on_new_window(move |url, _features| {
-        if checked_url(&surface, url.as_str()).is_err() {
-            return NewWindowResponse::Deny;
-        }
-        announce(
-            &handle,
-            Event::NewWindow {
-                id: surface.clone(),
-                url: url.to_string(),
-            },
-        );
-        NewWindowResponse::Deny
-    });
+    let private = profile == Profile::Private;
+    builder = builder.on_new_window(move |url, features| new_window(&handle, &surface, private, url, features));
 
     let view = window
         .add_child(
@@ -549,6 +605,10 @@ pub async fn browser_create(
         .map_err(|error| format!("the browser surface {id:?} could not be parked: {error}"))?;
     #[cfg(windows)]
     {
+        if let Err(error) = crate::platform::browser_page::surface(&view).await {
+            let _ = view.close();
+            return Err(format!("the browser surface {id:?} could not be cleared of the app's scripts: {error}"));
+        }
         if let Err(error) = crate::platform::browser_diagnostics::attach(view.clone(), id.clone()).await {
             crate::platform::browser_diagnostics::remove(&id); let _ = view.close(); return Err(error);
         }
@@ -573,6 +633,27 @@ pub async fn browser_navigate(
     view_of(&app, &id)?
         .navigate(target)
         .map_err(|error| format!("the browser surface {id:?} could not open {url:?}: {error}"))
+}
+
+/// Deletes a named profile's cookies, storage and cache. The UI closes the
+/// profile's surfaces first; the default profile and the private session are
+/// refused, the first because it is the main webview's own.
+#[tauri::command]
+pub async fn browser_profile_delete(app: AppHandle, webview: Webview, profile: String) -> Result<(), String> {
+    only_main(&webview)?;
+    let Profile::Named(name) = profile_of("profile-delete", Some(&profile))? else {
+        return Err(format!("the browser profile {profile:?} cannot be deleted: only a profile created in Settings can"));
+    };
+    #[cfg(windows)]
+    return crate::platform::webview_profiles::delete(&app, &name).await;
+    #[cfg(target_os = "macos")]
+    return app.remove_data_store(data_store_of(&name)).await
+        .map_err(|error| format!("the browser profile {name:?} could not be deleted: {error}"));
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = app;
+        Err(format!("the browser profile {name:?} cannot be deleted: browser profiles need Windows or macOS"))
+    }
 }
 
 /// Tauri 2.11 gives a webview no history call, so the page's own history is
@@ -727,6 +808,7 @@ pub async fn browser_destroy(app: AppHandle, webview: Webview, id: String) -> Re
     cancel_pick(&id);
     if let Ok(mut highlights) = HIGHLIGHTS.lock() { highlights.remove(&id); }
     surfaces().want(&label_of(&id)?, false);
+    close_popups(&app, Some(&id));
     view_of(&app, &id)?
         .close()
         .map_err(|error| format!("the browser surface {id:?} could not be closed: {error}"))
@@ -734,7 +816,19 @@ pub async fn browser_destroy(app: AppHandle, webview: Webview, id: String) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::{checked_url, label_of, read_selection, Surfaces, LABEL_PREFIX, MAIN_LABEL, MAX_SELECTION_CALLBACK_BYTES, PICKS};
+    use super::{checked_url, label_of, profile_of, read_selection, Profile, Surfaces, LABEL_PREFIX, MAIN_LABEL, MAX_SELECTION_CALLBACK_BYTES, PICKS};
+
+    #[test]
+    fn a_profile_is_the_default_the_private_session_or_a_safe_folder_name() {
+        assert_eq!(profile_of("a", None), Ok(Profile::Default));
+        assert_eq!(profile_of("a", Some("default")), Ok(Profile::Default));
+        assert_eq!(profile_of("a", Some("private")), Ok(Profile::Private));
+        assert_eq!(profile_of("a", Some("p-1a2b")), Ok(Profile::Named("p-1a2b".into())));
+        for bad in ["", "-p", "P-1", "p_1", "p/1", "../x", "p 1", &"p".repeat(41)] {
+            let error = profile_of("a", Some(bad)).unwrap_err();
+            assert!(error.contains("lowercase letters"), "{bad:?}: {error}");
+        }
+    }
 
     #[test]
     fn a_parked_window_shows_nothing_and_brings_back_only_the_surfaces_the_ui_wanted() {

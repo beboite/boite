@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Plus, ScanLine, X } from '@lucide/svelte';
+  import { KeyRound, Plus, ScanLine, X } from '@lucide/svelte';
+  import { normalizePairingCode } from '@boite/contracts';
   import { workspace } from '../lib/workspace.svelte';
   import { parsePairingLink } from '../lib/endpoint';
   import { fill, strings } from '../lib/strings';
@@ -27,6 +28,42 @@
     link = text;
     adding = true;
     await add();
+  }
+
+  /**
+   * A code typed in the installed app pairs it with the core that serves this
+   * page. The camera app would hand a link to Safari, whose storage the
+   * home-screen app does not share; a code typed here stays here.
+   */
+  const codeOrigin = window.__TAURI_INTERNALS__ === undefined && /^https?:$/.test(location.protocol) ? location.origin : null;
+  let codeOpen = $state(false);
+  let code = $state('');
+  let codeError = $state('');
+  let codeInput = $state<HTMLInputElement | null>(null);
+  function toggleCode() {
+    workspace.error = null;
+    codeError = '';
+    codeOpen = !codeOpen;
+    if (codeOpen) requestAnimationFrame(() => codeInput?.focus());
+  }
+  async function pairCode() {
+    if (busy || !codeOrigin) return;
+    const canonical = normalizePairingCode(code);
+    if (!canonical) {
+      codeError = strings.machines.codeInvalid;
+      return;
+    }
+    codeError = '';
+    busy = true;
+    try {
+      if (await workspace.pair(`${codeOrigin}/?grant=${canonical}`, '')) {
+        code = '';
+        codeOpen = false;
+        onpaired?.();
+      }
+    } finally {
+      busy = false;
+    }
   }
 
   let target = $derived(workspace.linkTarget(link));
@@ -62,9 +99,29 @@
       <div class="head-actions">
         <!-- A phone has a camera and the other machine draws a code: no link to copy across. -->
         {#if mobile}<button class="primary add-open" data-testid="machine-scan" disabled={busy} onclick={() => void startScanning()}><ScanLine size={15} /><span class="ui-label">{strings.machines.scan}</span></button>{/if}
+        {#if mobile && codeOrigin}<button class="add-open" data-testid="machine-code-open" aria-expanded={codeOpen} onclick={toggleCode}><KeyRound size={15} /><span class="ui-label">{strings.machines.typeCode}</span></button>{/if}
         {#if !open}<button class:primary={!mobile} class="add-open" data-testid="machine-add-open" onclick={startAdding}><Plus size={15} /><span class="ui-label">{mobile ? strings.machines.pasteLink : strings.machines.add}</span></button>{/if}
       </div>
     {/if}
+  {#if codeOpen && codeOrigin}
+    <form class="card code-form" data-testid="machine-code-form" onsubmit={(e) => { e.preventDefault(); void pairCode(); }}>
+      <label>{strings.machines.codeLabel}<input
+          bind:this={codeInput}
+          bind:value={code}
+          data-testid="machine-code"
+          type="text"
+          inputmode="text"
+          autocapitalize="characters"
+          autocomplete="off"
+          spellcheck="false"
+          maxlength="16"
+          placeholder={strings.machines.codePlaceholder}
+        /></label>
+      <p class="code-hint">{strings.machines.codeHint}</p>
+      <button type="submit" class="primary" data-testid="machine-code-submit" disabled={busy || !code.trim()}>{busy ? strings.machines.adding : strings.machines.connect}</button>
+      {#if codeError || workspace.error}<p class="error" role="alert">{codeError || workspace.error}</p>{/if}
+    </form>
+  {/if}
   <div class="reveal" class:open inert={!open}>
     <div>
       <section class="card add" data-testid="machine-add-card" aria-label={strings.machines.add}>
@@ -143,5 +200,8 @@
   .mobile .add-open { width: 100%; min-height: var(--touch-target); }
   .mobile .add { padding: 16px; }
   .mobile form > button { width: 100%; }
+  .code-form { padding: 16px; margin: 0 0 12px; }
+  .code-form input { font-family: var(--font-mono); font-size: var(--text-base); letter-spacing: 1.5px; text-transform: uppercase; }
+  .code-hint { margin: 0; font-size: var(--text-xs); color: var(--color-muted-foreground); }
   @media (prefers-reduced-motion: reduce) { .reveal { transition: none; } }
 </style>

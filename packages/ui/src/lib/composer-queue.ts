@@ -14,6 +14,7 @@ export type ComposerState = NonNullable<Store['composerStates'][string]>;
  */
 export async function drainQueue(store: Store, threadId: string, state: ComposerState, turnId?: string): Promise<void> {
   if (state.sending || state.queued.length === 0) return;
+  if (state.queued[0]!.request) { await deliverQueued(store, threadId, state); return; }
   let count = 1;
   let files = state.queued[0]!.attachments.length;
   let bytes = attachedBytes(state.queued[0]!.attachments);
@@ -23,7 +24,7 @@ export async function drainQueue(store: Store, threadId: string, state: Composer
       const next = state.queued[count]!;
       const weight = attachedBytes(next.attachments);
       const refs = next.previewReferences?.length ?? 0;
-      if (isActivityCommand(next.text) || files + next.attachments.length > ATTACHMENTS_PER_TURN || bytes + weight > ATTACHMENTS_TOTAL_MAX_BYTES || references + refs > PREVIEW_REFERENCES_PER_TURN) break;
+      if (next.request || isActivityCommand(next.text) || files + next.attachments.length > ATTACHMENTS_PER_TURN || bytes + weight > ATTACHMENTS_TOTAL_MAX_BYTES || references + refs > PREVIEW_REFERENCES_PER_TURN) break;
       files += next.attachments.length;
       bytes += weight;
       references += refs;
@@ -67,6 +68,26 @@ export async function drainQueue(store: Store, threadId: string, state: Composer
         state.previewReferences = back.previewReferences ?? [];
       }
     }
+    state.sending = false;
+  }
+}
+
+/**
+ * The outbox prompt at the head of the queue, alone and under its own request
+ * id: taken, it leaves the queue; refused, it stays with the core's reason and
+ * holds the rest; otherwise it waits for the machine or the running turn.
+ */
+async function deliverQueued(store: Store, threadId: string, state: ComposerState): Promise<void> {
+  const entry = state.queued[0]!;
+  const request = entry.request!;
+  state.sending = true;
+  try {
+    const outcome = await store.deliverQueued(threadId, { ...entry, request });
+    const at = state.queued.indexOf(entry);
+    if (at < 0) return;
+    if (outcome === 'sent') state.queued.splice(at, 1);
+    else if (outcome !== 'wait') entry.request = { ...request, failed: outcome.failed };
+  } finally {
     state.sending = false;
   }
 }

@@ -1,18 +1,49 @@
-/** Pairing grants, paired sessions and the Web Push the fake refuses. */
-import { RpcErrorCode } from '@boite/contracts';
+/** Pairing grants, paired sessions, the Tailscale switch and the Web Push the fake refuses. */
+import { PAIRING_CODE_TTL_MS, RpcErrorCode, type TailscaleStatus } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import type { FakeContext, FakeMethods } from './context';
 
+/** A tailnet ready to serve the fake core: nothing on 443 yet. */
+function fakeTailscale(): TailscaleStatus {
+  const dnsName = 'boite-pc.tail0d6070.ts.net';
+  return { state: 'off', dnsName, url: `https://${dnsName}`, servedTarget: null, target: 'http://127.0.0.1:8777', publicUrlMatches: false };
+}
+
 export function pairingMethods(ctx: FakeContext) {
+  let tailscale = fakeTailscale();
+  const setPublicUrl = (publicUrl: string | null) => {
+    ctx.settings = { ...ctx.settings, publicUrl };
+    ctx.emit('settings.updated', structuredClone(ctx.settings));
+  };
   return {
     'pairing.grant': async (params) => {
-      const grant = `fake-grant-${++ctx.seq}`;
+      const seq = ++ctx.seq;
+      const grant = `fake-grant-${seq}`;
+      const role = params?.role ?? 'device';
+      const short = role === 'owner' && params?.short === true;
+      const expiresAt = ctx.now() + (short ? PAIRING_CODE_TTL_MS : 10 * 60 * 1000);
+      const origin = ctx.settings.publicUrl ?? 'http://192.168.1.20:8777';
       return {
-        url: `http://192.168.1.20:8777/?grant=${grant}`,
+        url: `${origin}/?grant=${grant}`,
         grant,
-        role: params?.role ?? 'device',
-        expiresAt: ctx.now() + 10 * 60 * 1000
+        role,
+        expiresAt,
+        ...(role === 'device' || short ? { code: `K7QM-${String(seq).padStart(4, '2')}`, codeExpiresAt: Math.min(expiresAt, ctx.now() + PAIRING_CODE_TTL_MS) } : {})
       };
+    },
+    'tailscale.status': async () => ({ ...tailscale, publicUrlMatches: ctx.settings.publicUrl === tailscale.url }),
+    'tailscale.enable': async (params) => {
+      if (tailscale.state === 'conflict' && params?.replace !== true) return tailscale;
+      if (tailscale.state === 'off' || tailscale.state === 'conflict') tailscale = { ...tailscale, state: 'on', servedTarget: tailscale.target };
+      if (tailscale.state === 'on') setPublicUrl(tailscale.url);
+      return { ...tailscale, publicUrlMatches: tailscale.state === 'on' };
+    },
+    'tailscale.disable': async () => {
+      if (tailscale.state === 'on') {
+        tailscale = { ...tailscale, state: 'off', servedTarget: null };
+        if (ctx.settings.publicUrl === tailscale.url) setPublicUrl(null);
+      }
+      return { ...tailscale, publicUrlMatches: false };
     },
     'sessions.list': async (params) => {
       return structuredClone(ctx.sessions);

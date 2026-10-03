@@ -1,6 +1,8 @@
 import {
   RpcErrorCode,
+  answerAttachmentError,
   type Account,
+  type Attachment,
   type ModelInfo,
   type ProviderSummary,
   type QuestionRequest,
@@ -21,7 +23,7 @@ function refused(message: string, data?: Record<string, unknown>): RpcFailure {
 /** The core's `answerQuestion` checks, in its order; the question stays pending when one refuses. */
 export function checkAnswer(
   request: QuestionRequest,
-  params: { threadId: string; optionIds: string[]; text?: string },
+  params: { threadId: string; optionIds: string[]; text?: string; attachments?: Attachment[] },
 ): void {
   if (request.threadId !== params.threadId) {
     throw refused('the question belongs to another thread', {
@@ -40,7 +42,11 @@ export function checkAnswer(
   }
   const text = params.text ?? '';
   if (text.length > 0 && !request.allowText) throw refused('the question takes no free text', { questionId: request.id });
-  if (params.optionIds.length === 0 && text.length === 0) {
+  const files = params.attachments ?? [];
+  if (files.length > 0 && !request.allowText) throw refused('the question takes no files', { questionId: request.id });
+  const badFiles = answerAttachmentError(files);
+  if (badFiles !== null) throw refused(badFiles.message, { questionId: request.id, ...badFiles.data });
+  if (params.optionIds.length === 0 && text.length === 0 && files.length === 0) {
     throw refused('an answer needs an option or some text', { questionId: request.id });
   }
 }

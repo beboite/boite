@@ -76,6 +76,8 @@ export interface GuardStatus {
 /** OS services used by the shared process registry. No native imports here. */
 export interface ProcessPlatform {
   serverUpdates?: ServerUpdatePlatform;
+  /** Absolute path of the tailscale CLI, or null when it is not installed. */
+  tailscaleCli?(): string | null;
   retain(jobs: ProcessEventSink, guards: GuardEventSink): void;
   /** Resolves once nothing native is left holding the user's state: hooks, muted sessions. */
   release(): Promise<void>;

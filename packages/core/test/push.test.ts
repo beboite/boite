@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
-import type { RpcEvents, Turn, TurnExecution } from '@boite/contracts';
+import { afterEach, beforeEach, expect, setSystemTime, test } from 'bun:test';
+import { ATTENTION_LEASE_MS, notificationExcerpt, type RpcEvents, type Turn, type TurnExecution } from '@boite/contracts';
 import { createECDH, randomBytes } from 'node:crypto';
 import { connect } from '../src/client.ts';
 import { validateSubscription } from '../src/push.ts';
@@ -84,9 +84,12 @@ test('a recreated push store retains its keys and delivers completed turns to th
     expect(await restarted.status(paired.id)).toEqual({ ...before, subscribed: true });
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
-    await client.call('turns.start', { threadId, prompt: 'Notify the phone' });
+    // The body is the start of the reply, as one line of plain text cut at a word.
+    await client.call('turns.start', { threadId, prompt: '## Build\n\nThe **build** passed: see [the log](https://example.test/log) and `bun test`.\n\n' + 'More details follow here. '.repeat(10) });
     await waitFor(() => deliveries.length > 0);
-    expect(deliveries).toEqual([expect.objectContaining({ threadId, body: 'Done' })]);
+    const body = 'Build · The build passed: see the log and bun test. More details follow here. More details follow here. More details follow here. More…';
+    expect(deliveries).toEqual([expect.objectContaining({ threadId, body })]);
+    expect(deliveries[0]).not.toHaveProperty('label');
     harness.core.sessions.revoke(paired.id);
     expect(harness.core.journal.getSetting('web-push.subscriptions')).toEqual({});
   } finally { await restarted.close(); }
@@ -95,7 +98,7 @@ test('a recreated push store retains its keys and delivers completed turns to th
 test('a phone hears of a team\'s final answer and a persistent agent\'s failures, not of every turn under them', async () => {
   const paired = session();
   harness.core.push.subscribe(paired.id, subscription());
-  const deliveries: { threadId: string; body: string }[] = [];
+  const deliveries: { threadId: string; body: string; label?: string }[] = [];
   harness.core.push.send = async (_target, payload) => { deliveries.push(JSON.parse(payload)); };
   const client = await harness.connect();
   const { threadId: rootId } = await echoThread(harness, client);
@@ -116,7 +119,7 @@ test('a phone hears of a team\'s final answer and a persistent agent\'s failures
   finish(rootId, 'done', 'compact');
   finish(agent.id, 'done');
   // A child blocked on a question still reaches the phone.
-  harness.core.bus.emit('question.asked', { id: 'push_question', threadId: child.id } as RpcEvents['question.asked']);
+  harness.core.bus.emit('question.asked', { id: 'push_question', threadId: child.id, text: 'Which `branch` should I use?' } as RpcEvents['question.asked']);
   await waitFor(() => deliveries.length === 1);
 
   harness.core.journal.putThread({ ...child, status: 'idle' });
@@ -124,13 +127,124 @@ test('a phone hears of a team\'s final answer and a persistent agent\'s failures
   finish(agent.id, 'error');
   await waitFor(() => deliveries.length === 3);
   await Bun.sleep(50);
-  expect(deliveries.map(({ threadId, body }) => ({ threadId, body }))).toEqual([
-    { threadId: child.id, body: 'Needs your answer' },
-    { threadId: rootId, body: 'Done' },
-    { threadId: agent.id, body: 'The agent encountered an error' },
+  // A turn with no reply to quote, and a failure, say so through a label the phone translates.
+  expect(deliveries.map(({ threadId, body, label }) => ({ threadId, body, label }))).toEqual([
+    { threadId: child.id, body: 'Which branch should I use?', label: undefined },
+    { threadId: rootId, body: 'Done', label: 'done' },
+    { threadId: agent.id, body: 'The agent encountered an error', label: 'failed' },
   ]);
 });
 
+test('a reply that lands while its sender is on the thread reaches the phone once they leave', async () => {
+  const paired = session();
+  harness.core.push.subscribe(paired.id, subscription());
+  const deliveries: { threadId: string; tag: string }[] = [];
+  harness.core.push.send = async (_target, payload) => { deliveries.push(JSON.parse(payload)); };
+  const desktop = await harness.connect();
+  const phone = await connect(harness.url, paired.token);
+  try {
+    const { threadId } = await echoThread(harness, desktop);
+    let n = 0;
+    const thread = harness.core.journal.getThread(threadId)!;
+    const finish = () => harness.core.bus.emit('turn.finished', { id: `walk_${++n}`, threadId, status: 'done', queuedAt: 1, startedAt: 1, finishedAt: 2, usage: null, error: null, execution: { providerId: thread.providerId, accountId: thread.accountId, model: null, effort: null, permissionMode: thread.permissionMode, sessionId: null, sessionGeneration: 0, selectionVersion: 0 } });
+    const delivered = async (count: number) => { await waitFor(() => deliveries.length === count); await Bun.sleep(30); expect(deliveries).toHaveLength(count); };
+
+    // Sent from the PC, which then goes quiet: the reply came within seconds, and arrives once the PC says nobody is there.
+    await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
+    finish();
+    await delivered(0);
+    await desktop.call('threads.focus', { threadId, attentive: false, idleMs: 46_000 });
+    await delivered(1);
+    // Sent from the phone, then locked before it could say so: the reply arrives when its lease runs out.
+    await phone.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
+    finish();
+    await delivered(1);
+    setSystemTime(new Date(Date.now() + ATTENTION_LEASE_MS + 1));
+    harness.core.push.releaseHeld();
+    await delivered(2);
+  } finally { setSystemTime(); phone.close(); }
+});
+
+test('no push about a thread someone is looking at and uses, on the PC or the phone', async () => {
+  const paired = session();
+  harness.core.push.subscribe(paired.id, subscription());
+  const deliveries: { threadId: string; tag: string }[] = [];
+  harness.core.push.send = async (_target, payload) => { deliveries.push(JSON.parse(payload)); };
+  const desktop = await harness.connect();
+  const phone = await connect(harness.url, paired.token);
+  try {
+    const { threadId } = await echoThread(harness, desktop);
+    const other = { ...harness.core.journal.getThread(threadId)!, id: 'push_other' };
+    harness.core.journal.putThread(other);
+    let n = 0;
+    const finish = (id: string) => harness.core.bus.emit('turn.finished', { id: `attention_${++n}`, threadId: id, status: 'done', queuedAt: 1, startedAt: 1, finishedAt: 2, usage: null, error: null, execution: { providerId: other.providerId, accountId: other.accountId, model: null, effort: null, permissionMode: other.permissionMode, sessionId: null, sessionGeneration: 0, selectionVersion: 0 } });
+    const ask = (id: string) => harness.core.bus.emit('question.asked', { id: `ask_${++n}`, threadId: id, text: 'Which branch?' } as RpcEvents['question.asked']);
+    const delivered = async (count: number) => { await waitFor(() => deliveries.length === count); await Bun.sleep(30); expect(deliveries).toHaveLength(count); };
+
+    // The phone in the foreground on the thread: news about it waits, news about another one goes.
+    await phone.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
+    finish(threadId); ask(threadId); finish(other.id);
+    await delivered(1);
+    expect(deliveries[0]!.threadId).toBe(other.id);
+    // A touch on that screen afterwards shows it was seen: locking the phone then sends nothing.
+    await Bun.sleep(5);
+    await phone.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
+    await phone.call('threads.focus', { threadId, attentive: false, idleMs: 1_000 });
+    await delivered(1);
+    // The desktop window in front and used: the same. Use of another thread is not use of this one.
+    await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
+    ask(threadId);
+    await Bun.sleep(5);
+    await phone.call('threads.focus', { threadId: other.id, attentive: true, idleMs: 0 });
+    await phone.call('threads.focus', { threadId: null });
+    await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
+    await desktop.call('threads.focus', { threadId: other.id });
+    await delivered(1);
+    // A window in front that nobody used for a while is not believed; one with the thread merely open does not count.
+    await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 60_000 });
+    ask(threadId);
+    await desktop.call('threads.focus', { threadId });
+    finish(threadId);
+    await delivered(3);
+    // Looking away without having used the thread since sends what waited.
+    await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 0 });
+    finish(threadId);
+    await Bun.sleep(5);
+    await desktop.call('threads.focus', { threadId, attentive: true, idleMs: 20 });
+    await delivered(3);
+    desktop.close();
+    await delivered(4);
+    await expect(phone.call('threads.focus', { threadId, attentive: 'yes' as never })).rejects.toThrow('attentive');
+    await expect(phone.call('threads.focus', { threadId, idleMs: -1 })).rejects.toThrow('idleMs');
+  } finally { phone.close(); }
+});
+test('a notification carries the icon badge: the threads waiting on the user, the notified one included', async () => {
+  const paired = session();
+  harness.core.push.subscribe(paired.id, subscription());
+  const deliveries: { threadId: string; badge?: number }[] = [];
+  harness.core.push.send = async (_target, payload) => { deliveries.push(JSON.parse(payload)); };
+  const client = await harness.connect();
+  const { threadId } = await echoThread(harness, client);
+  const base = harness.core.journal.getThread(threadId)!;
+  harness.core.journal.putThread({ ...base, unread: false, status: 'idle' });
+  harness.core.journal.putThread({ ...base, id: 'badge_waiting', unread: false, status: 'waiting' });
+  harness.core.journal.putThread({ ...base, id: 'badge_unread', unread: true, status: 'idle' });
+  harness.core.journal.putThread({ ...base, id: 'badge_archived', unread: true, status: 'waiting', archived: true });
+  expect(harness.core.push.badge()).toBe(2);
+  expect(harness.core.push.badge(threadId)).toBe(3);
+  expect(harness.core.push.badge('badge_waiting')).toBe(2);
+  expect(harness.core.push.badge('badge_archived')).toBe(2);
+
+  harness.core.bus.emit('question.asked', { id: 'badge_question', threadId } as RpcEvents['question.asked']);
+  await waitFor(() => deliveries.length === 1);
+  expect(deliveries[0]).toMatchObject({ threadId, badge: 3 });
+
+  // The test notification leaves the badge as it is.
+  const sent: Record<string, unknown>[] = [];
+  harness.core.push.send = async (_target, payload) => { sent.push(JSON.parse(payload)); };
+  await harness.core.push.test(paired.id);
+  expect(sent[0]).not.toHaveProperty('badge');
+});
 test('public HTTPS origin is validated, used for QR links and accepted by the socket', async () => {
   const owner = await harness.connect();
   for (const publicUrl of ['http://phone.test', 'https://phone.test/path', 'https://user:pass@phone.test', 'https://phone.test?token=x']) {
@@ -146,4 +260,21 @@ test('public HTTPS origin is validated, used for QR links and accepted by the so
   socket.close();
   await owner.call('settings.set', { publicUrl: null });
   expect(new URL((await owner.call('pairing.grant', {})).url).origin).toBe(harness.url);
+});
+
+test('a notification reads code fences as their content, in linear time on many fences', () => {
+  expect(notificationExcerpt('Done:\n```ts\nconst x = 1;\n```\nThen `y`.')).toBe('Done: const x = 1; Then y.');
+  expect(notificationExcerpt('Run ```sh\nbun test')).toBe('Run bun test');
+  const started = performance.now();
+  notificationExcerpt('```'.repeat(50_000));
+  expect(performance.now() - started).toBeLessThan(500);
+});
+
+test('a notification of one very long line is read in bounded time', () => {
+  // Emphasis and link patterns backtrack on these: 120 000 characters took seconds.
+  for (const line of [' *a'.repeat(40_000), '[a'.repeat(40_000)]) {
+    const started = performance.now();
+    expect(notificationExcerpt(line).length).toBeLessThanOrEqual(141);
+    expect(performance.now() - started).toBeLessThan(500);
+  }
 });

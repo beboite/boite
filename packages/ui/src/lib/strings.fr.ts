@@ -26,15 +26,12 @@ export const fr: Translation = {
   },
   remoteBrowser: {
     display: 'Affichage', resolution: 'Résolution de la page', fitPhone: 'Adapter à cet écran', phone: 'Téléphone', tablet: 'Tablette', rotate: 'Pivoter', width: 'Largeur', height: 'Hauteur', apply: 'Appliquer', sharedSize: 'La résolution change aussi l’onglet partagé sur le PC.', restoreSize: 'Reprendre la taille du panneau PC', previewZoom: 'Zoom de l’aperçu (cet appareil seulement)', fit: 'Ajuster', panHint: 'Glissez pour déplacer l’aperçu. Utilisez les flèches pour défiler dans la page.',
-    open: 'Ouvrir le navigateur en direct', experimental: 'Partage du navigateur expérimental', enable: 'Activer sur cet appareil',
-    hint: 'Affichez et contrôlez l’onglet navigateur partagé par votre PC, dans Boite.',
-    hostMissing: 'Le PC ne partage pas encore de navigateur pour cette conversation. Ouvrez la même conversation et un onglet navigateur dans Boite sur le PC, avec les deux expérimentations du navigateur activées.',
+    hostMissing: 'Le PC n’affiche pas encore le navigateur de cette conversation.',
+    address: 'Adresse', go: 'Aller', back: 'Précédent', forward: 'Suivant', reload: 'Recharger', badAddress: 'Saisissez une adresse web (http ou https).',
     title: 'Navigateur du PC en direct', waiting: 'En attente du PC', live: 'En direct', paused: 'En pause', reconnecting: 'Reconnexion', pause: 'Pause', resume: 'Reprendre',
-    help: 'Sur le PC, activez Contrôle du navigateur par les agents et Navigateur en direct à distance dans Expérimentations, puis ouvrez cette conversation et un onglet navigateur. Le PC doit rester éveillé.',
     interact: 'Toucher ou faire défiler la page partagée', image: 'Vue en direct du navigateur du PC', scrollUp: 'Défiler vers le haut', scrollDown: 'Défiler vers le bas',
-    text: 'Touchez un champ de la page, puis écrivez ici', send: 'Envoyer le texte à la page', gesture: 'Touchez pour cliquer. Glissez pour défiler. Pause arrête le direct.'
+    text: 'Touchez un champ de la page, puis écrivez ici', send: 'Envoyer le texte à la page', gesture: 'Touchez pour cliquer. Glissez pour défiler. Retour envoie le texte puis Entrée ; ⌫ sur un champ vide efface dans la page.'
   },
-  prReview: { open: 'Lire dans Boite', back: 'PR liées', files: 'Fichiers', comments: 'Commentaires', checks: 'Tests', overview: 'Aperçu', loading: 'Chargement de la revue…', empty: 'Rien à afficher.', more: 'Charger d’autres fichiers', unavailable: 'GitHub ne fournit pas de différence texte pour ce fichier.', truncated: 'Une partie du contenu a été raccourcie. Ouvrez GitHub pour la lire en entier.', github: 'Ouvrir sur GitHub', refresh: 'Actualiser la revue', viewed: 'Lu', changed: 'Modifié', fileCount: '{count} fichiers chargés', readOnly: 'La lecture ne publie aucun commentaire et ne fusionne pas la PR.' },
   agents: {
     runtime: "Modèles et limites",
     brain: "Cerveau",
@@ -128,7 +125,7 @@ export const fr: Translation = {
   activityUnsupported: 'Les références ne sont pas disponibles avec /goal ou /loop. Envoyez un message ordinaire ou retirez les références.',
   stashUnsupported: 'Ce brouillon contient des références et ne peut pas être mis de côté. Envoyez-le ou retirez les références.'
 },
-  artifacts: { loadImage: 'Charger', retry: 'Réessayer', mediaFailed: 'Impossible d’afficher ce média. Réessayez ou téléchargez le fichier pour l’ouvrir.', saving: 'Enregistrement', zoomIn: 'Agrandir', zoomOut: 'Réduire', fitImage: 'Ajuster l’image', open: 'Ouvrir', openLocal: 'Ouvrez ce fichier dans son application par défaut.', preview: 'Aperçu', download: 'Télécharger', close: 'Fermer l’aperçu', closeImage: 'Fermer l’image', enlarge: 'Voir en grand', saved: 'Enregistré dans Téléchargements', loading: 'Chargement du fichier', unavailable: 'Ce fichier ne peut pas être affiché ici. Téléchargez-le pour l’ouvrir.', failed: 'Impossible d’ouvrir ce fichier', ownerOnly: 'Les liens vers les fichiers locaux nécessitent une connexion propriétaire. Demandez à l’agent de joindre le fichier pour le partager avec cet appareil.' },
+  artifacts: { loadImage: 'Charger', retry: 'Réessayer', mediaFailed: 'Impossible d’afficher ce média. Réessayez ou téléchargez le fichier pour l’ouvrir.', videoFailed: 'Cet appareil ne lit pas cette vidéo. Téléchargez-la pour la regarder dans une autre app.', saving: 'Enregistrement', zoomIn: 'Agrandir', zoomOut: 'Réduire', fitImage: 'Ajuster l’image', open: 'Ouvrir', openLocal: 'Ouvrez ce fichier dans son application par défaut.', preview: 'Aperçu', download: 'Télécharger', close: 'Fermer l’aperçu', closeImage: 'Fermer l’image', enlarge: 'Voir en grand', saved: 'Enregistré dans Téléchargements', loading: 'Chargement du fichier', unavailable: 'Ce fichier ne peut pas être affiché ici. Téléchargez-le pour l’ouvrir.', failed: 'Impossible d’ouvrir ce fichier', ownerOnly: 'Les liens vers les fichiers locaux nécessitent une connexion propriétaire. Demandez à l’agent de joindre le fichier pour le partager avec cet appareil.' },
 
   brain: {
     heading: 'Brain', description: 'Les mêmes instructions et skills pour tous vos agents.',
@@ -257,7 +254,43 @@ export const fr: Translation = {
     enable: 'Activer les notifications', disable: 'Désactiver les notifications', test: 'Envoyer une notification de test',
     enabled: 'Notifications activées pour cet appareil.', testSent: 'Le service push a accepté la notification de test.',
     denied: "Les notifications ont été refusées. Vous pouvez changer ça dans les réglages du navigateur ou de l'appareil.",
-    subscriptionFailed: "Le navigateur n'a pas renvoyé un abonnement push complet."
+    subscriptionFailed: "Le navigateur n'a pas renvoyé un abonnement push complet.",
+    multiMachine: "Les notifications viennent de la machine depuis laquelle cette application a été installée. Pour une autre machine, ouvrez son propre lien d'appairage dans Safari et ajoutez-la à l'écran d'accueil comme une application à part.",
+    tailscale: {
+      heading: 'HTTPS via Tailscale',
+      hint: "Tailscale donne à cette machine une adresse HTTPS sur votre tailnet. Boite s'y sert lui-même avec tailscale serve, et les nouveaux liens d'appairage l'utilisent. Un téléphone doit avoir Tailscale connecté pour l'atteindre.",
+      checking: 'Vérification de Tailscale…',
+      missing: "Tailscale n'est pas installé sur cette machine.",
+      download: 'Obtenir Tailscale',
+      stopped: "Tailscale est installé mais pas connecté. Ouvrez Tailscale et connectez-le, puis vérifiez à nouveau.",
+      needsLogin: 'Tailscale est déconnecté de votre compte sur cette machine. Connectez-vous, puis vérifiez à nouveau.',
+      signIn: 'Se connecter à Tailscale',
+      httpsDisabled: "Les certificats HTTPS sont désactivés sur votre tailnet. Dans la console d'administration Tailscale, page DNS, activez MagicDNS et HTTPS Certificates, puis vérifiez à nouveau.",
+      openAdmin: "Ouvrir la console d'administration",
+      off: 'Prêt : ce cœur peut être servi sur {url}.',
+      on: 'Ce cœur est servi sur {url}.',
+      onPublic: "Les nouveaux liens d'appairage utilisent cette adresse.",
+      conflict: "{url} sert déjà {target}. Boite n'y touche pas, sauf si vous le remplacez.",
+      error: "La commande tailscale n'a pas répondu comme prévu.",
+      enable: "Activer l'accès HTTPS via Tailscale",
+      disable: 'Désactiver',
+      replace: 'Remplacer…',
+      refresh: 'Vérifier à nouveau',
+      pair: 'Associer un téléphone',
+      approve: 'Autoriser Serve',
+      replaceTitle: 'Remplacer ce que sert {url} ?',
+      replaceBody: "Tailscale sert actuellement {target} à cette adresse. La remplacer la fait pointer vers Boite, et ce qui l'utilisait n'y est plus joignable.",
+      replaceConfirm: 'Remplacer',
+      disableTitle: 'Ne plus servir Boite via Tailscale ?',
+      disableBody: "Les téléphones associés via {url} ne peuvent plus joindre ce cœur tant qu'il n'est pas servi à nouveau. Leurs clés restent valides.",
+      details: {
+        'permission-denied': 'Tailscale a refusé la modification. Sous Linux, lancez une fois sudo tailscale set --operator=$USER, puis réessayez.',
+        'serve-consent': "Votre tailnet n'autorise pas encore Serve. Ouvrez le lien, approuvez, puis réessayez.",
+        'not-logged-in': 'Tailscale est déconnecté. Connectez-vous, puis réessayez.',
+        timeout: "Tailscale n'a pas répondu à temps. Réessayez.",
+        unknown: 'Tailscale a refusé la modification. Lancez tailscale serve status sur cette machine pour savoir pourquoi.'
+      }
+    }
   },
   mobile: {
     clearSearch: 'Effacer la recherche', draftTitle: 'Que voulez-vous faire ?', draftHint: 'Lancez une tâche, posez une question ou reprenez votre travail.',
@@ -265,7 +298,8 @@ export const fr: Translation = {
     pairBody: 'Connectez votre ordinateur pour retrouver ici vos projets, vos conversations et vos agents.',
     pairStep: 'Sur votre ordinateur, ouvrez Réglages → Machines et mises à jour et créez un code d’appairage.',
     pairInstalled: 'Vous venez d’installer Boite ? Associez-la ici aussi : sur iPhone, l’application garde sa connexion séparément du navigateur.',
-    pairPrivacy: 'Scannez depuis cette application. Le code est à usage unique et expire après 10 minutes.',
+    pairPrivacy: 'Scannez depuis cette application, ou tapez le code affiché sous le QR code. Chacun ne sert qu’une fois et expire en quelques minutes.',
+    scanInApp: "Utilisez le bouton Scanner ici plutôt que l'app Appareil photo : celle-ci ouvre le lien dans Safari, qui garde son propre appairage.",
     pairingRequired: 'Associer cette application',
     offlineTitle: 'En attente de votre ordinateur',
     offlineBody: 'Gardez Boite ouverte sur votre ordinateur et vérifiez votre connexion. Si vous utilisez Tailscale, gardez-le connecté sur les deux appareils.',
@@ -289,6 +323,9 @@ export const fr: Translation = {
     label: 'Nom de la machine', icon: 'Icône de la machine', icons: { desktop: 'Ordinateur fixe', laptop: 'Portable', server: 'Serveur', rack: 'Baie', cloud: 'Cloud', cpu: 'Processeur' }, link: "Lien d'appairage", add: 'Ajouter une machine', adding: 'Connexion', connect: 'Connecter',
     addHint: 'Sur l\'autre machine, ouvrez Réglages, Machines et mises à jour, créez un lien d\'appairage et collez-le ici. Le contrôle total, là-bas, laisse cette machine gérer ses comptes et ses réglages.',
     scan: 'Scanner un QR code', pasteLink: "Coller un lien d'appairage", scanTitle: "Scannez le code d'appairage",
+    typeCode: "Taper un code d'appairage", codeLabel: "Code d'appairage", codePlaceholder: 'ABCD-EFGH',
+    codeHint: 'Le code de 8 caractères affiché sous le QR code sur votre ordinateur.',
+    codeInvalid: "Un code d'appairage compte 8 lettres et chiffres, comme ABCD-EFGH.",
     scanHint: "Sur l'autre machine, ouvrez Réglages, Machines et mises à jour, créez un lien d'appairage et visez son QR code avec la caméra.",
     scanStarting: 'Démarrage de la caméra', scanClose: 'Fermer la caméra',
     scanErrors: {
@@ -634,6 +671,18 @@ export const fr: Translation = {
     close: 'Fermer'
   },
 
+  media: {
+    sourceTooLarge: '{name} pèse {size} : Boite réduit les images de {max} au plus, elle a donc été laissée de côté.',
+    viewer: 'Visionneuse',
+    previous: 'Précédente',
+    next: 'Suivante',
+    position: '{index} sur {total}',
+    share: 'Partager ou enregistrer',
+    shareFailed: 'Impossible de partager {name}.',
+    shareReady: '{name} est prêt : touchez Partager à nouveau.',
+    answerFiles: 'Fichiers joints : {names}',
+    answerFileCount: '{count} fichiers'
+  },
   btw: {
     fork: 'Fork', forking: 'Création du fork',
     title: 'Question de côté', description: "Poser une question de côté sans interrompre l'agent",
@@ -706,7 +755,8 @@ export const fr: Translation = {
     done: 'Terminé',
     failed: 'Échec',
     openThread: 'Ouvrir la conversation',
-    needsYou: 'Attend votre réponse'
+    needsYou: 'Attend votre réponse',
+    connected: 'Les notifications fonctionnent'
   },
 
   permissionMode: {
@@ -917,12 +967,12 @@ export const fr: Translation = {
     questionHeading: 'Vous demande',
     questionAsyncHeading: 'Vous demande, sans attendre',
     questionAsyncHint: 'L\'agent continue. Sans réponse, il poursuit avec un choix par défaut.',
-    questionTextLabel: 'Votre propre réponse',
-    questionTextPlaceholder: 'Écrivez une réponse',
     questionAnswer: 'Répondre',
     questionAnswered: 'Répondu',
     questionCancelled: 'Cette question n’attend plus de réponse',
     questionSkip: 'Passer',
+    questionReplying: 'Écrivez votre réponse dans le champ de message en bas, avec photos ou fichiers si besoin.',
+    questionWrite: 'Répondre par écrit',
     questionDocked: 'Attend votre réponse au-dessus du champ de message',
     questionOpen: 'Y répondre',
     streaming: 'écrit',
@@ -1061,6 +1111,11 @@ export const fr: Translation = {
     editingQueued: 'Envoyez ou retirez les messages en attente avant de remplacer un message envoyé.',
     filesUnavailable: "Les messages ont été rembobinés, mais cette modification n'a pas de sauvegarde complète des fichiers. Le code n'a pas pu être restauré.",
     editingCancel: 'Arrêter la modification (Échap)',
+    replying: 'Réponse à : {question}',
+    replyPlaceholder: 'Votre réponse…',
+    replySend: 'Envoyer la réponse',
+    replyIgnore: 'Ignorer',
+    replyIgnoreHint: 'Laisser la question en attente et écrire un message normal',
     switchTitle: 'Passer une conversation de {tokens} jetons à {provider} ?',
     switchBody: "{provider} démarre une nouvelle session et reçoit des extraits du début et des échanges les plus récents, environ 20 000 jetons. Le reste lui est inaccessible. Compacter avant ne change rien.",
     switchConfirm: "Changer d'agent",
@@ -1084,6 +1139,14 @@ export const fr: Translation = {
     queueNotAccepted: "Ce tour n'a pas accepté le message. Il reste en attente et sera envoyé à la fin du tour.",
     sendNowHint: "Transmet les messages à l'agent en cours sans l'arrêter. Entrée dans le champ vide fait de même.",
     retryQueuedHint: 'Renvoie tous les messages en attente ensemble. Entrée dans le champ vide fait de même.',
+    outboxKept: "Gardés sur cet appareil, envoyés dans l'ordre, une seule fois chacun",
+    outboxWaiting: 'En attente de {machine}',
+    outboxNext: 'Part dès que le fil est libre',
+    outboxSending: 'Envoi…',
+    outboxFailed: 'Non envoyé : {reason}',
+    outboxRetry: 'Renvoyer',
+    outboxSettings: "Le modèle et l'effort choisis à l'écriture n'ont pas pu être rétablis.",
+    removeQueued: 'Retirer ce message en attente',
     picker: 'Fournisseur et modèle',
     models: 'Modèles',
     searchModels: 'Rechercher un modèle',
@@ -1157,7 +1220,7 @@ export const fr: Translation = {
     file: 'Fichier',
     tasks: 'Tâches',
     tasksHint: "L'objectif, les tâches de l'agent et les todos du projet",
-    desktopOnly: "Seulement dans l'application de bureau",
+    browserAbsent: 'S’ouvre quand un agent utilise le navigateur',
     ownerOnly: "Seulement dans l'application du propriétaire",
     launcher: 'Ouvrir une surface dans ce panneau',
     untitled: 'Navigateur'
@@ -1177,6 +1240,10 @@ export const fr: Translation = {
     pick: 'Choisissez un fichier pour voir son diff',
     loading: 'Lecture de la copie de travail',
     renamedFrom: 'Renommé depuis {path}',
+    backToList: 'Toutes les modifications',
+    previousFile: 'Fichier précédent',
+    nextFile: 'Fichier suivant',
+    position: '{index} sur {count}',
     status: {
       added: 'Ajouté',
       modified: 'Modifié',
@@ -1247,18 +1314,12 @@ export const fr: Translation = {
     binary: 'Rien ici ne se lit comme du texte.'
   },
 
-  pullRequests: {
-    title: 'PR de la conversation', hint: 'Les PR liées sont affichées dans leur ordre de dépendance. Le rattachement ne modifie rien sur GitHub.',
-    refresh: 'Actualiser', empty: 'Aucune PR rattachée pour le moment.', url: 'Adresse de la PR', link: 'Rattacher', unlink: 'Détacher la PR n°{number}',
-    dependsOn: 'Dépend de la PR n°{number}', stale: 'Actualisation impossible. Dernier état connu affiché.',
-    OPEN: 'Ouverte', CLOSED: 'Fermée', MERGED: 'Fusionnée', draft: 'Brouillon',
-  },
   browserTools: {
     title: 'Outils de test du navigateur', desktop: 'Ordinateur', laptop: 'Portable', portrait: 'Portrait', landscape: 'Paysage',
     system: 'Apparence du système', light: 'Page claire', dark: 'Page sombre', diagnostics: 'Diagnostics et actions de la page',
     startRecording: 'Enregistrer cet onglet', stopRecording: 'Arrêter la vidéo', reviewRecording: 'Vidéo enregistrée',
     refresh: 'Actualiser', clear: 'Effacer', pageEvents: 'Événements de la page', actions: 'Actions', noEvents: 'Aucun événement capturé.', noActions: 'Aucune action enregistrée pour le moment.',
-    omitted: '{count} événements anciens ou trop volumineux omis.', recorded: '{seconds} secondes · {mb} Mo · WebM sans son',
+    omitted: '{count} événements anciens ou trop volumineux omis.', recorded: '{seconds} secondes · {mb} Mo · {format} sans son',
     recordingError: 'Enregistrement arrêté après une erreur.', recordingLimit: 'Enregistrement arrêté à la limite de durée ou de taille.',
     download: 'Télécharger la vidéo', discard: 'Supprimer la vidéo',
   },
@@ -1280,6 +1341,30 @@ export const fr: Translation = {
     openExternal: 'Ouvrir dans le navigateur du système',
     slotEmpty: "La page s'affiche ici dès que la coque fournit la vue web",
     slotLinux: "Le navigateur intégré n'est pas encore disponible dans l'app Linux. Ouvrez la page dans votre navigateur."
+  },
+
+  browserProfiles: {
+    heading: 'Profils du navigateur',
+    hint: "Chaque profil garde ses propres cookies, son stockage et ses connexions dans le navigateur intégré, y compris après un redémarrage. Un onglet privé ne garde rien une fois le dernier onglet privé fermé.",
+    default: 'Par défaut',
+    private: 'Privé',
+    profile: 'Profil du navigateur : {name}',
+    newTabIn: 'Nouvel onglet dans {name}',
+    newPrivateTab: 'Nouvel onglet privé',
+    manage: 'Gérer les profils du navigateur',
+    isDefault: 'Ouvre les nouveaux onglets',
+    makeDefault: 'Y ouvrir les nouveaux onglets',
+    rename: 'Renommer',
+    renameLabel: 'Nouveau nom pour {name}',
+    delete: 'Supprimer',
+    addLabel: 'Nom du nouveau profil',
+    addPlaceholder: 'Pro, Perso…',
+    add: 'Ajouter un profil',
+    invalidName: "Choisissez un nom de 1 à 40 caractères qu'aucun autre profil n'utilise, autre que Default ou Private.",
+    tooMany: '{count} profils de navigateur au plus.',
+    deleteTitle: 'Supprimer le profil {name} ?',
+    deleteBody: 'Ses onglets ouverts se ferment, et ses cookies, son stockage et ses connexions sont effacés de cet ordinateur. Impossible de revenir en arrière.',
+    deleteFailed: "Le profil a été retiré, mais ses données n'ont pas pu être effacées : {reason}"
   },
 
   terminal: {
@@ -1727,7 +1812,14 @@ export const fr: Translation = {
       ownerHint:
         'Pour un autre de vos ordinateurs : sa clé pilote ce cœur comme vous le faites. Laissez désactivé pour un téléphone.',
       ownerTag: 'contrôle total',
-      pasteOwner: "Collez-le dans Réglages, Général, sur l'autre ordinateur."
+      pasteOwner: "Collez-le dans Réglages, Général, sur l'autre ordinateur.",
+      code: "Ou tapez ce code dans l'application installée",
+      codeExpires: "Le code ne sert qu'une fois, jusqu'à {time}.",
+      ownerQr: 'QR code pour un téléphone',
+      ownerQrTitle: 'Donner le contrôle total à un téléphone ?',
+      ownerQrBody: "Quiconque scanne ce QR code ou tape son code dans les 5 prochaines minutes pilote ce cœur comme vous : agents, fichiers, comptes et réglages. Ne le montrez qu'à votre propre téléphone, et révoquez l'appareil ci-dessous en cas de doute.",
+      ownerQrConfirm: 'Afficher le code',
+      ownerScan: "Scannez-le depuis l'application Boite de votre téléphone, ou tapez-y le code. Il ne sert qu'une fois, dans les 5 minutes."
     }
   },
 
@@ -1774,8 +1866,7 @@ export const fr: Translation = {
   },
 
   experiments: {
-    remoteBrowser: { title: 'Navigateur en direct à distance', hint: 'Sur le PC, partager le navigateur de la conversation ouverte avec les appareils associés. Sur le téléphone, voir et piloter cette page. Activez cette option sur les deux appareils et le contrôle du navigateur par les agents sur le PC.' },
-    prReview: { title: 'Revue des pull requests', hint: 'Lire les PR GitHub liées, les modifications, les commentaires et les résultats des tests dans Boite, y compris sur téléphone.' },
+    remoteBrowser: { title: 'Navigateur en direct à distance', hint: 'Sur le PC, laisser les appareils associés voir et piloter l’onglet navigateur d’une conversation, comme celui qu’un agent a ouvert. Il apparaît de lui-même dans cette conversation sur le téléphone. Cette option ne donne pas le contrôle du navigateur aux agents.' },
     recordingIndicators: { title: 'Actions visibles dans les vidéos', hint: 'Ajouter des repères de clics et les touches de navigation aux enregistrements. Le texte saisi et les mots de passe ne sont jamais affichés comme libellés de touches.' },
     openChatLinks: { title: 'Ouvrir les liens du chat dans leurs applications', hint: 'Sur ce bureau, un clic sur un fichier ou dossier local ouvre son application, y compris les raccourcis et les fichiers hors du projet. Seuls les liens de cet ordinateur sont ouverts.' },
     whip: {

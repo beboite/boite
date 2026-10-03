@@ -942,9 +942,12 @@ test.for(['back', 'gone'])('a start the socket dropped is asked once more when t
   await store.open(thread.id);
   const accepted = await store.send('Survive the reconnect', thread.id);
   if (outcome === 'gone') {
-    expect(accepted).toBe(false);
+    // The machine did not come back: the prompt waits in the outbox under the
+    // request id it already went out with, so the core can only take it once.
+    expect(accepted).toBe(true);
     expect(requests).toHaveLength(1);
-    expect(store.error).toContain('connection closed');
+    expect(store.error).toBeNull();
+    expect(store.composerStates[thread.id]?.queued).toMatchObject([{ text: 'Survive the reconnect', request: { id: requests[0] } }]);
     return;
   }
   expect(accepted).toBe(true);
@@ -1049,9 +1052,11 @@ describe('Store', () => {
       const { store, client } = await ready();
       await store.open('t-descriptors');
 
-      await client.call('turns.start', { threadId: 't-trace', prompt: 'quietly' });
+      // The thread is not on screen: its reply is read from the core, as the push quotes it.
+      await client.call('turns.start', { threadId: 't-trace', prompt: '## Result\n\nThe trace tab is **finished**, see `trace.ts`.' });
       await client.settled();
-      expect(sent).toEqual([{ title: 'Finish the trace tab', body: 'Done', threadId: 't-trace', coreThreadId: 't-trace' }]);
+      await vi.waitFor(() => expect(sent).toHaveLength(1));
+      expect(sent).toEqual([{ title: 'Finish the trace tab', body: 'Result · The trace tab is finished, see trace.ts.', threadId: 't-trace', coreThreadId: 't-trace' }]);
 
       await store.send('in front of me');
       await client.settled();

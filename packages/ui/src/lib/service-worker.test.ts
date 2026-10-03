@@ -18,9 +18,11 @@ function worker(code = source, cacheNames = ['boite-ui-v1', 'another-app']) {
   const cache = { put, match: vi.fn().mockResolvedValue(cached), addAll: vi.fn().mockResolvedValue(undefined) };
   const caches = { open: vi.fn().mockResolvedValue(cache), keys: vi.fn().mockResolvedValue(cacheNames), delete: vi.fn().mockResolvedValue(true) };
   const fetch = vi.fn().mockResolvedValue(new Response('current shell'));
+  const setAppBadge = vi.fn().mockResolvedValue(undefined);
+  const clearAppBadge = vi.fn().mockResolvedValue(undefined);
   runInNewContext(code, { URL, fetch, caches, setTimeout, clearTimeout, self: {
     addEventListener: (name: string, listener: (event: any) => void) => listeners.set(name, listener),
-    location: { origin: 'https://boite.test' }, registration: { showNotification: notification },
+    navigator: { setAppBadge, clearAppBadge }, location: { origin: 'https://boite.test' }, registration: { showNotification: notification },
     clients: { matchAll, openWindow, claim: vi.fn().mockResolvedValue(undefined) }, skipWaiting: vi.fn().mockResolvedValue(undefined)
   } });
   async function emit(name: string, input: Record<string, unknown> = {}) {
@@ -28,7 +30,7 @@ function worker(code = source, cacheNames = ['boite-ui-v1', 'another-app']) {
     listeners.get(name)!({ ...input, waitUntil: (p: Promise<unknown>) => { task = p; }, respondWith: (p: Promise<unknown>) => { task = p; } });
     return await task;
   }
-  return { emit, notification, openWindow, navigate, postMessage, focus, matchAll, put, cache, caches, fetch };
+  return { emit, notification, openWindow, navigate, postMessage, focus, matchAll, put, cache, caches, fetch, setAppBadge, clearAppBadge };
 }
 
 test('a push displays a notification and clicking it opens only a same-origin thread URL', async () => {
@@ -44,6 +46,35 @@ test('a push displays a notification and clicking it opens only a same-origin th
   sw.matchAll.mockResolvedValue([]);
   await sw.emit('notificationclick', { notification: { close, data: { threadId: 'thread-2' } } });
   expect(sw.openWindow).toHaveBeenCalledWith('https://boite.test/?thread=thread-2');
+});
+
+test('a push sets the icon badge to the count it carries, clears it at zero and leaves it without one', async () => {
+  const sw = worker();
+  await sw.emit('push', { data: { json: () => ({ title: 'Review', body: 'Done', threadId: 't1', tag: 'turn-1', badge: 3 }) } });
+  expect(sw.setAppBadge).toHaveBeenCalledExactlyOnceWith(3);
+  await sw.emit('push', { data: { json: () => ({ title: 'Review', body: 'Done', threadId: 't1', tag: 'turn-2', badge: 0 }) } });
+  expect(sw.clearAppBadge).toHaveBeenCalledOnce();
+  await sw.emit('push', { data: { json: () => ({ title: 'Boite', body: 'Notifications are connected', threadId: null, tag: 'test' }) } });
+  expect(sw.setAppBadge).toHaveBeenCalledOnce();
+  sw.setAppBadge.mockRejectedValue(new Error('NotAllowedError'));
+  await sw.emit('push', { data: { json: () => ({ title: 'Review', body: 'Done', threadId: 't1', tag: 'turn-3', badge: 2 }) } });
+  expect(sw.notification).toHaveBeenCalledTimes(4);
+});
+
+test('a labelled push speaks the words the page left, and the core body stands in for missing ones', async () => {
+  const sw = worker();
+  sw.cache.match.mockImplementation(async (key: string) => key === '/notification-words' ? new Response(JSON.stringify({ done: 'Terminé' })) : undefined);
+  await sw.emit('push', { data: { json: () => ({ title: 'Review', body: 'Done', label: 'done', threadId: 't1', tag: 'turn-1' }) } });
+  expect(sw.notification).toHaveBeenLastCalledWith('Review', expect.objectContaining({ body: 'Terminé' }));
+  await sw.emit('push', { data: { json: () => ({ title: 'Review', body: 'The agent encountered an error', label: 'failed', threadId: 't1', tag: 'turn-2' }) } });
+  expect(sw.notification).toHaveBeenLastCalledWith('Review', expect.objectContaining({ body: 'The agent encountered an error' }));
+});
+
+test('a window that refuses focus gets the thread opened instead', async () => {
+  const sw = worker();
+  sw.focus.mockRejectedValue(new Error('not allowed'));
+  await sw.emit('notificationclick', { notification: { close: vi.fn(), data: { threadId: 't1' } } });
+  expect(sw.openWindow).toHaveBeenCalledWith('https://boite.test/?thread=t1');
 });
 
 test('the current navigation replaces the offline shell and a failed core uses the cached shell', async () => {

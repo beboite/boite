@@ -17,12 +17,12 @@
  * the dedicated Agents interface.
  */
 
-export type ExperimentId = 'theme-grain' | 'session-import' | 'prompt-cache' | 'chat-artifacts' | 'open-chat-links' | 'agent-browser-control' | 'preview-comments' | 'resident-agents' | 'whip' | 'remote-browser' | 'pr-review' | 'recording-indicators';
+export type ExperimentId = 'theme-grain' | 'session-import' | 'prompt-cache' | 'chat-artifacts' | 'open-chat-links' | 'agent-browser-control' | 'preview-comments' | 'resident-agents' | 'whip' | 'remote-browser' | 'recording-indicators';
 
 export const EXPERIMENTS_STORAGE_KEY = 'boite.experiments';
 
 /** Every experiment this build ships, in the order the page lists them. */
-export const EXPERIMENT_IDS: ExperimentId[] = ['theme-grain', 'session-import', 'prompt-cache', 'chat-artifacts', 'open-chat-links', 'agent-browser-control', 'preview-comments', 'resident-agents', 'whip', 'remote-browser', 'pr-review', 'recording-indicators'];
+export const EXPERIMENT_IDS: ExperimentId[] = ['theme-grain', 'session-import', 'prompt-cache', 'chat-artifacts', 'open-chat-links', 'agent-browser-control', 'preview-comments', 'resident-agents', 'whip', 'remote-browser', 'recording-indicators'];
 
 type Listener = (enabled: ExperimentId[]) => void;
 

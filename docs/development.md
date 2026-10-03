@@ -646,12 +646,27 @@ zoom; plain browsers keep their native shortcut behavior.
 
 ### File attachments
 
-Desktop and paired devices can pick, paste or drop files. A turn accepts eight
+Desktop and paired devices can pick, paste or drop files. A turn accepts twenty
 attachments, at most 5 MB each and 10 MB together. Base64 travels in
 `turns.start`; the client rejects a frame above the 16 MB RPC limit before send.
-PNG, JPEG, GIF and WebP use native image input. Other files, including PDFs and
-archives, use `kind: 'file'` and host paths in the prompt. Provider tools decide
-which formats they can read. Boite neither extracts archives nor executes uploads.
+The total cannot grow without a separate upload channel: the journal keeps a
+message's attachments inline, and `threads.get` cannot page a message heavier
+than its 12 MB page. PNG, JPEG, GIF and WebP use native image input. Other
+files, including PDFs and archives, use `kind: 'file'` and host paths in the
+prompt. Provider tools decide which formats they can read. Boite neither
+extracts archives nor executes uploads.
+
+Before those caps, the client brings an image to 2048 px on its long edge
+(`lib/image-prepare.ts`): JPEG at 0.85, or PNG when that is lighter or the
+picture uses transparency. An image already within 2048 px and 512 KB goes as
+it is, and a GIF or an SVG is never redrawn. HEIC and HEIF become JPEG where the
+browser decodes them (Safari does); elsewhere they travel as a plain file. A
+source over 50 MB is refused before decoding, since a phone's canvas would not
+hold it. So twenty iPhone screenshots, 2 to 4 MB each as PNG, fit one turn at
+around 400 KB each.
+
+An answer to a question with a free field takes the composer's files the same
+way (`questions.answer` `attachments`); see [Providers](providers.md).
 
 The core validates bytes and writes sanitized, content-addressed copies under
 `<dataDir>/attachments/`. Copies survive resume and are currently not removed

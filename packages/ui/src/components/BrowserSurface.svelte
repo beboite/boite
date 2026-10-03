@@ -1,7 +1,11 @@
 <script lang="ts">
   import { secureId } from '../lib/secure-id';
   import { untrack } from 'svelte';
-  import { ArrowLeft, ArrowRight, ExternalLink, RotateCw, MousePointer2, PictureInPicture2 } from '@lucide/svelte';
+  import { ArrowLeft, ArrowRight, ExternalLink, RotateCw, MousePointer2, PictureInPicture2, UserRound, VenetianMask } from '@lucide/svelte';
+  import { DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE } from '@boite/contracts';
+  import { browserProfiles } from '../lib/browser-profiles.svelte';
+  import { separator, type MenuItem } from '../lib/menu';
+  import Menu from './Menu.svelte';
   import { rightPanel } from '../lib/right-panel.svelte';
   import { browserBridge, normalizeUrl } from '../lib/browser-bridge';
   import { linuxShell } from '../lib/shell-platform';
@@ -111,6 +115,25 @@
   let url = $derived(surface.url ?? '');
   let shown = $derived(draft ?? url);
   let zoom = $derived(surface.zoom ?? ZOOM_DEFAULT);
+  let profile = $derived(surface.profile ?? DEFAULT_BROWSER_PROFILE);
+  let profileName = $derived(browserProfiles.name(profile));
+
+  /** Another tab in any profile, from the profile this one shows. */
+  let profileMenu = $derived<MenuItem[]>([
+    ...[DEFAULT_BROWSER_PROFILE, ...browserProfiles.list.map((one) => one.id)].map((one) => ({
+      id: one,
+      label: fill(strings.browserProfiles.newTabIn, { name: browserProfiles.name(one) }),
+      active: one === profile
+    })),
+    { id: PRIVATE_BROWSER_PROFILE, label: strings.browserProfiles.newPrivateTab, active: profile === PRIVATE_BROWSER_PROFILE },
+    separator(),
+    { id: 'manage', label: strings.browserProfiles.manage, icon: 'settings' }
+  ]);
+
+  function pickProfile(id: string): void {
+    if (id === 'manage') store.showSettings('general', 'browser-profiles');
+    else panel.open('browser', undefined, id);
+  }
 
   // The page is not a child of this tree: the slot is measured and the bridge
   // parks its view over that rectangle, which is what a Tauri child webview does.
@@ -124,7 +147,7 @@
     const surfaceId = id;
     if (!node) return;
     untrack(() => {
-      browserBridge.create(surfaceId, surface.url ?? '');
+      browserBridge.create(surfaceId, surface.url ?? '', surface.profile);
       // The tab remembered a zoom; the view it is about to get has not.
       if (zoom !== ZOOM_DEFAULT) browserBridge.setZoom(surfaceId, zoom);
     });
@@ -212,6 +235,13 @@
     >
       <RotateCw size={13} strokeWidth={1.75} class={loading ? 'spin' : ''} />
     </button>
+
+    <span class="profile" class:named={profile !== DEFAULT_BROWSER_PROFILE} class:private={profile === PRIVATE_BROWSER_PROFILE} data-testid="browser-profile" data-profile={profile}>
+      <Menu items={profileMenu} onpick={pickProfile} placement="bottom" variant="ghost" label={fill(strings.browserProfiles.profile, { name: profileName })} testid="browser-profile-menu">
+        {#if profile === PRIVATE_BROWSER_PROFILE}<VenetianMask size={14} strokeWidth={1.75} />{:else}<UserRound size={14} strokeWidth={1.75} />{/if}
+        {#if profile !== DEFAULT_BROWSER_PROFILE}<span class="profile-name">{profileName}</span>{/if}
+      </Menu>
+    </span>
 
     <form class="address" onsubmit={submit}>
       <input
@@ -302,6 +332,7 @@
   }
 
   .chrome {
+    container-type: inline-size;
     display: flex;
     align-items: center;
     gap: 4px;
@@ -372,6 +403,16 @@
 
   .loading { position: absolute; top: 42px; left: 0; right: 0; height: 2px; z-index: 1; background: var(--color-accent); }
   .problem { margin: 0; padding: 8px 12px; color: var(--color-danger); font-size: var(--text-sm); overflow-wrap: anywhere; }
+  .profile { flex: none; display: flex; min-width: 0; max-width: 40%; }
+  .profile :global(.trigger) { gap: 4px; min-width: 0; }
+  .profile.named :global(.trigger) { width: auto; padding: 0 8px; color: var(--color-accent); background: var(--color-accent-soft); }
+  .profile.private :global(.trigger) { color: var(--color-foreground); background: var(--color-surface-2); }
+  .profile-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); font-weight: 500; }
+  /* A narrow bar keeps the address: the badge shows its icon and colour, its label names the profile. */
+  @container (max-width: 480px) {
+    .profile-name { display: none; }
+    .profile.named :global(.trigger) { padding: 0 6px; }
+  }
   .zoom { flex: none; font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
   .chrome :global(.spin) { animation: reload-spin 1s linear infinite; }
   @keyframes reload-spin { to { transform: rotate(360deg); } }
