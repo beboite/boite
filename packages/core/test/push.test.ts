@@ -269,3 +269,12 @@ test('a notification reads code fences as their content, in linear time on many 
   notificationExcerpt('```'.repeat(50_000));
   expect(performance.now() - started).toBeLessThan(500);
 });
+
+test('a notification of one very long line is read in bounded time', () => {
+  // Emphasis and link patterns backtrack on these: 120 000 characters took seconds.
+  for (const line of [' *a'.repeat(40_000), '[a'.repeat(40_000)]) {
+    const started = performance.now();
+    expect(notificationExcerpt(line).length).toBeLessThanOrEqual(141);
+    expect(performance.now() - started).toBeLessThan(500);
+  }
+});

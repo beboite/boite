@@ -2,6 +2,8 @@ import type { Message, PermissionRequest, QuestionRequest } from './index';
 
 /** About two lines on a phone's lock screen. */
 export const NOTIFICATION_TEXT_CHARS = 140;
+/** Only this much is read: the replaces below backtrack on one long line, and 140 characters survive. */
+const NOTIFICATION_SOURCE_CHARS = 4000;
 const BREAK = ' ';
 
 /**
@@ -10,7 +12,7 @@ const BREAK = ' ';
  * to the words a reader would see.
  */
 export function notificationExcerpt(markdown: string, max = NOTIFICATION_TEXT_CHARS): string {
-  const plain = unfence(String(markdown ?? ''))
+  const plain = unfence(String(markdown ?? '').slice(0, NOTIFICATION_SOURCE_CHARS))
     // A paragraph, a heading or a list item ends where the next one starts.
     .replace(/\n\s*\n|\n(?=\s{0,3}(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>))/g, `${BREAK}\n`)
     .replace(/<[^>\n]+>/g, ' ')
