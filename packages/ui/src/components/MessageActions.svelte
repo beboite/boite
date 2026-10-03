@@ -82,21 +82,22 @@
     display: inline-flex;
     align-items: center;
     gap: 2px;
-    opacity: 0;
-    transition: opacity var(--dur-2);
   }
 
-  :global(.message:hover) .message-actions,
-  .message-actions:focus-within {
+  .act { opacity: 0; transition: opacity var(--dur-2); }
+
+  :global(.message:hover) .act,
+  .message-actions:focus-within .act {
     opacity: 1;
   }
 
   /* A finger has no hover: the buttons stay. */
   @media (hover: none) {
-    .message-actions { opacity: 1; }
+    .act { opacity: 1; }
   }
 
   .stamp {
+    order: 1;
     margin: 0 4px;
     font-size: var(--text-xs);
     color: var(--color-muted-foreground);

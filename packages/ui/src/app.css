@@ -215,6 +215,7 @@
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
+  --radius-full: 999px;
   /* A framed card's corner, and the frame between two cards and the window edge. */
   --radius-frame: 10px;
   --frame-gap: 8px;
@@ -293,6 +294,10 @@
   --activity-indent: calc(var(--activity-padding) + var(--activity-glyph) + var(--activity-gap));
   --chat-part-gap: 4px;
   --chat-block-gap: 12px;
+  --chat-message-gap: 20px;
+  --radius-chat-bubble: 18px;
+  --color-chat-reply: var(--color-surface-2);
+  --color-chat-reply-edge: var(--color-border);
   /* The timeline's left margin, which the message outline rail sits in. */
   --outline-room: 38px;
   --settings-width: 880px;
@@ -302,6 +307,8 @@
   --dur-2: 150ms;
   --dur-3: 220ms;
   --dur-whip: 360ms;
+  --dur-typing: 1100ms;
+  --dur-typing-step: 140ms;
   --z-whip: 100;
   --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
 

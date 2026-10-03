@@ -802,6 +802,7 @@ export const strings = {
     responseStarted: 'Agent activity received',
     working: 'Working',
     writing: 'Writing',
+    preparingReply: 'Preparing a reply',
     stopped: 'Stopped',
     inputTokens: '{count} input tokens',
     outputTokens: '{count} output tokens',

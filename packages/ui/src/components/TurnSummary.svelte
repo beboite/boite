@@ -7,12 +7,17 @@
   import { formatLocale } from '../lib/i18n.svelte';
   import { backgroundLabel } from '../lib/background';
   import type { Snippet } from 'svelte';
-  let { turn, progress, waiting = false, activeTool = false, background = [], stop, actions }: {
+  import TypingIndicator from './TypingIndicator.svelte';
+  let { turn, progress, waiting = false, activeTool = false, activeContent = false, typing = false, background = [], stop, actions }: {
     turn: Turn;
     progress?: ThreadProgress | null;
     waiting?: boolean;
     /** The message already shows the running tool's activity row. */
     activeTool?: boolean;
+    /** Streaming text or reasoning already shows that the agent is working. */
+    activeContent?: boolean;
+    /** No text or reasoning is currently showing its own live activity. */
+    typing?: boolean;
     /** What the agent still runs in the background; only the thread's last turn is handed it. */
     background?: BackgroundTask[];
     /** Ends the agent process and its background work. */
@@ -23,6 +28,7 @@
   let hidden = $state(document.hidden);
   let now = $state(Date.now());
   const running = $derived(turn.status === 'running');
+  const preparing = $derived(running && typing && !waiting && !activeTool);
   const label = $derived(turn.status === 'done' ? strings.notify.done : turn.status === 'error' ? strings.notify.failed : turn.status === 'stopped' ? strings.chat.stopped : waiting ? strings.notify.needsYou : strings.chat.working);
   const spent = $derived(turn.startedAt === null ? null : Math.max(0, (turn.finishedAt ?? now) - turn.startedAt));
   const usage = $derived(turn.usage);
@@ -48,9 +54,12 @@
 </script>
 
 <svelte:document onvisibilitychange={() => hidden = document.hidden} />
+{#if preparing}
+  <div class="reply-pending"><TypingIndicator bubble label={strings.chat.preparingReply} /></div>
+{/if}
 {#if turn.status !== 'queued' && !(running && activeTool && !waiting && background.length === 0 && !observed)}
-  <div class="summary" class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
-    {#if turn.status === 'done'}<Check size={14} />{:else if turn.status === 'error'}<CircleAlert size={14} />{:else if turn.status === 'stopped'}<Square size={12} />{:else}<LoaderCircle size={16} class="spinner" />{/if}
+  <div class="summary" class:preparing class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
+    {#if turn.status === 'done'}<Check size={14} />{:else if turn.status === 'error'}<CircleAlert size={14} />{:else if turn.status === 'stopped'}<Square size={12} />{:else if !preparing && !activeContent}<LoaderCircle size={16} class="spinner" />{/if}
     {#if spent !== null}
       <span data-testid="turn-elapsed">{fill(running ? strings.chat.workingFor : strings.chat.workedFor, { time: elapsed(spent) })}</span>
     {/if}
@@ -90,6 +99,8 @@
 <style>
   .summary { display: flex; flex-wrap: wrap; align-self: stretch; align-items: center; gap: 4px 6px; margin: 12px 0 0 4px; font-size: var(--text-xs); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; }
   .summary[data-status='running'] { color: var(--color-accent); }
+  .reply-pending { align-self: flex-start; margin: var(--chat-block-gap) 0 0 var(--activity-padding); }
+  .summary.preparing { margin-top: 6px; color: var(--color-muted-foreground); }
   .summary[data-status='error'] { color: var(--color-danger); }
   .dot { opacity: .6; }
   [data-testid='turn-progress'] { min-width: 0; overflow-wrap: anywhere; }

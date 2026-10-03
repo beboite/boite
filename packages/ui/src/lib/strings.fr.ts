@@ -781,6 +781,7 @@ export const fr: Translation = {
     responseStarted: 'Activité reçue',
     working: 'Travaille',
     writing: 'Écrit',
+    preparingReply: 'Prépare sa réponse',
     stopped: 'Arrêté',
     inputTokens: '{count} jetons en entrée',
     outputTokens: '{count} jetons en sortie',
