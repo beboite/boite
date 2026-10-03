@@ -35,6 +35,8 @@ pub(crate) mod browser_control;
 #[cfg(windows)]
 pub(crate) mod browser_diagnostics;
 #[cfg(windows)]
+pub(crate) mod browser_page;
+#[cfg(windows)]
 pub(crate) mod webview_profiles;
 
 pub(crate) fn open_file(path: &std::path::Path) -> Result<(), String> {

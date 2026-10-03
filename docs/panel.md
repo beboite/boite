@@ -109,6 +109,34 @@ their survival across a restart and deletion in the real shell.
 
 The agent's `boite browser profiles` and `open <url> --profile <name>` are
 described in the [CLI](cli.md).
+
+### Sign-in popups and new windows
+
+A page that calls `window.open` with a size or a position, as "Sign in with
+Google" and most sign-in buttons do, gets a real popup window
+(`apps/shell/src-tauri/src/browser/popups.rs`). The popup opens in the tab's
+profile, or in the private session, and keeps `window.opener`: the sign-in
+answers the page through it and closes itself. Closing the tab closes its
+popups. A `target="_blank"` link, or `window.open` without a size, opens a tab
+in the same panel and profile instead, and that tab has no opener. Popups are
+desktop windows: an agent's browser commands and the phone's remote view see
+the tab, not its popups.
+
+Surfaces and popups show other sites without the app's bridge. On Windows
+`src/platform/browser_page.rs` turns off WebView2's `chrome.webview`, and removes
+the scripts Tauri and its plugins added to the webview (`__TAURI_INTERNALS__`,
+`ipc`, the opener plugin's link handler) before the first page loads. That
+handler used to swallow every `target="_blank"` link. macOS still injects
+Tauri's scripts into a surface.
+
+The browser keeps WebView2's own user agent. On Google's sign-in pages the
+runtime already reports Chrome there, in the header and in
+`navigator.userAgentData`. Edge's user agent would double the "Microsoft Edge"
+brand. A DevTools override changes the headers of cross-site frames but not
+their `navigator.userAgentData`, and that mismatch is the kind bot checks such as
+Turnstile reject. `tests/e2e/browser-profiles.test.ts` checks the popup's opener,
+profile and missing bridge, and the `_blank` tab.
+
 ### Local HTML artifacts
 
 `boite preview reports/index.html` opens a generated page in the integrated

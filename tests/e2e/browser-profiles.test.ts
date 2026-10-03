@@ -24,6 +24,8 @@ test.skipIf(process.platform !== 'win32' || !executable)('browser profiles keep 
     const who = url.searchParams.get('who');
     const headers: Record<string, string> = { 'content-type': 'text/html;charset=utf-8' };
     if (who) headers['set-cookie'] = `who=${who}; Max-Age=86400; Path=/; SameSite=Lax`;
+    // A sign-in popup: it answers its opener with what it sees, then closes.
+    if (url.pathname === '/answer') return new Response(`<!doctype html><script>opener.postMessage({ cookie: document.cookie, bridge: [typeof window.__TAURI_INTERNALS__, typeof window.ipc, typeof window.chrome?.webview] }, '*'); close()</script>`, { headers });
     return new Response(`<!doctype html><html lang="fr"><meta charset="utf-8"><title>Cookie ${who ?? ''}</title><style>body{font:20px system-ui;padding:40px}</style><h1>Profil</h1><p id="who"></p><script>document.querySelector('#who').textContent=document.cookie||'aucun cookie'</script></html>`, { headers });
   } });
   let shell: ReturnType<typeof Bun.spawn> | undefined;
@@ -96,6 +98,28 @@ test.skipIf(process.platform !== 'win32' || !executable)('browser profiles keep 
     // The panel reopens its tabs after the restart: none of them may set a cookie again.
     for (const tab of [work, hidden]) await command(tab.tabId, { kind: 'navigate', url: site.url.href });
     console.log('Three profiles hold three cookies');
+
+    // "Sign in with Google" opens a sized window and waits for it to answer
+    // through `window.opener`: the popup shares the tab's profile, and neither
+    // finds the app's bridge. A `target="_blank"` link opens a tab.
+    const bare = ['undefined', 'undefined', 'undefined'];
+    expect((await command(work.tabId, { kind: 'evaluate', expression: '[typeof window.__TAURI_INTERNALS__, typeof window.ipc, typeof window.chrome?.webview]' })).value).toEqual(bare);
+    await command(work.tabId, { kind: 'evaluate', expression: `window.answer = null; addEventListener('message', event => { window.answer = event.data; }); window.signin = open('/answer', 'signin', 'width=480,height=600'); true` });
+    let answer: unknown = null;
+    for (let i = 0; i < 100 && !answer; i++) { await Bun.sleep(100); answer = (await command(work.tabId, { kind: 'evaluate', expression: 'window.answer' })).value; }
+    expect(answer).toEqual({ cookie: 'who=pro', bridge: bare });
+    for (let i = 0; i < 50 && !(await command(work.tabId, { kind: 'evaluate', expression: 'window.signin.closed' })).value; i++) await Bun.sleep(100);
+    expect((await command(work.tabId, { kind: 'evaluate', expression: 'window.signin.closed' })).value).toBe(true);
+    const tabs = async () => ((await client!.call('browser.command', { threadId: thread.id, action: { kind: 'status' } })).value as { tabs: { tabId: string; profile: string; url?: string }[] }).tabs;
+    const before = (await tabs()).length;
+    await command(work.tabId, { kind: 'evaluate', expression: `const link = Object.assign(document.createElement('a'), { id: 'blank', target: '_blank', href: '/blank', textContent: 'blank' }); document.body.append(link); true` });
+    await command(work.tabId, { kind: 'click', selector: '#blank' });
+    for (let i = 0; i < 50 && (await tabs()).length === before; i++) await Bun.sleep(100);
+    const blank = (await tabs()).at(-1)!;
+    expect((await tabs()).length).toBe(before + 1);
+    expect(blank.profile).toBe(pro.id);
+    await command(blank.tabId, { kind: 'close' });
+    console.log('A sign-in popup answered its opener in the same profile');
 
     await page!.click(`[data-surface-id="${work.tabId}"][role=tab]`);
     await page!.waitFor(`document.querySelector('[data-testid=browser-profile]')?.dataset.profile === ${JSON.stringify(pro.id)}`);
