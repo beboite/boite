@@ -1,5 +1,6 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
+  import SubscriptionProxySettings from './SubscriptionProxySettings.svelte';
   import { onMount } from 'svelte';
   import { slide } from 'svelte/transition';
   import { ChevronRight, Plus, RefreshCw, Terminal } from '@lucide/svelte';
@@ -603,6 +604,7 @@
 {/snippet}
 
 <div class="page" data-testid="accounts-page">
+  {#if store.owner}<SubscriptionProxySettings {store} />{/if}
   <header>
     <div>
       <h1>{strings.providerSettings.heading}<InfoTip topic={strings.providerSettings.heading} text={strings.providerSettings.intro} /></h1>

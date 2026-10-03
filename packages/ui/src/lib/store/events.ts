@@ -235,6 +235,9 @@ export function listen(ctx: StoreContext, client: Client): void {
   });
   on('settings.updated', (settings) => {
     ctx.metadataRevision.settings++;
+    if (JSON.stringify(s.settings?.subscriptionProxy) !== JSON.stringify(settings.subscriptionProxy)) {
+      for (const account of s.accounts) models.dropProbes(account.id);
+    }
     s.settings = settings;
     void s.refreshMemory();
   });

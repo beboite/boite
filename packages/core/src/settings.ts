@@ -60,6 +60,15 @@ export class SettingsStore {
     this.core.scheduler.onSettingsChanged();
     this.core.procs.applySettings(next);
     this.core.bus.emit('settings.updated', next);
+    if (checked.patch.subscriptionProxy !== undefined) {
+      for (const account of this.core.accounts.list()) {
+        const provider = this.core.providers.get(account.providerId);
+        if (provider && ['claude-sdk', 'codex-appserver'].includes(provider.protocol)) {
+          this.core.journal.deleteSetting(`account-auth-rejected:${account.id}`);
+          this.core.accounts.check(account.id, true);
+        }
+      }
+    }
     return next;
   }
 }

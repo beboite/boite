@@ -1367,6 +1367,8 @@ export interface DeletedThreadSummary extends ThreadSummary {
 }
 
 export interface Settings {
+  /** Routes Claude and Codex through this machine's optional subscription gateway. */
+  subscriptionProxy?: SubscriptionProxy | null;
   /** Subscription priority shared by this core's clients and tray. Account ids stay on their owning machine. */
   quotaOrder?: AccountId[];
   /** Days after deletion before history is purged. 0 keeps it indefinitely. Missing means 30. */
@@ -1443,6 +1445,15 @@ export interface Settings {
    * or missing: never, each agent keeps its own behaviour. Missing on older cores.
    */
   autoCompact?: AutoCompact | null;
+}
+
+export interface SubscriptionProxy {
+  enabled: boolean;
+  kind: 'douane' | 'cliproxyapi';
+  /** HTTP(S) API root, with or without its /v1 suffix. */
+  baseUrl: string;
+  /** User-facing quotas page, opened inside Boite. Never contains a token. */
+  dashboardUrl: string;
 }
 
 export type WorktreeStorage =
@@ -2988,6 +2999,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'telemetry.export': { params: Record<string, never>; result: Record<string, unknown> };
   'telemetry.retryForget': { params: Record<string, never>; result: TelemetryState };
   'settings.get': { params: Record<string, never>; result: Settings };
+  'subscriptionProxy.key': { params: { key: string | null }; result: { configured: boolean } };
   'settings.set': { params: Partial<Settings>; result: Settings };
   /** The keybindings file as last read: the path, the entries it names, and what it got wrong. */
   'keybindings.get': { params: Record<string, never>; result: Keybindings };

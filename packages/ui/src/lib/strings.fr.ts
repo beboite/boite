@@ -12,6 +12,14 @@
 import type { Translation } from './i18n.svelte';
 
 export const fr: Translation = {
+  subscriptionProxy: {
+    heading: 'Proxy d\'abonnements', enable: 'Utiliser un proxy d\'abonnements',
+    hint: 'Claude et Codex utilisent la passerelle de cette machine. Limites ouvre son tableau de bord dans Boite. Les autres agents gardent leur configuration.',
+    baseUrl: 'URL de l\'API', dashboardUrl: 'URL du tableau de bord des limites', key: 'Clé API (facultative)',
+    keyHint: 'Laissez vide pour garder la clé enregistrée. Utilisez la clé API du proxy, pas sa clé de gestion du tableau de bord.',
+    clearKey: 'Retirer la clé enregistrée', save: 'Enregistrer le proxy', saved: 'Proxy enregistré',
+    configure: 'Configurer le proxy', native: 'Voir les limites des comptes',
+  },
   remoteBrowser: {
     display: 'Affichage', resolution: 'Résolution de la page', fitPhone: 'Adapter à cet écran', phone: 'Téléphone', tablet: 'Tablette', rotate: 'Pivoter', width: 'Largeur', height: 'Hauteur', apply: 'Appliquer', sharedSize: 'La résolution change aussi l’onglet partagé sur le PC.', restoreSize: 'Reprendre la taille du panneau PC', previewZoom: 'Zoom de l’aperçu (cet appareil seulement)', fit: 'Ajuster', panHint: 'Glissez pour déplacer l’aperçu. Utilisez les flèches pour défiler dans la page.',
     open: 'Ouvrir le navigateur en direct', experimental: 'Partage du navigateur expérimental', enable: 'Activer sur cet appareil',

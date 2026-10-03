@@ -5,6 +5,10 @@ import type { FakeContext, FakeMethods } from './context';
 
 export function settingsMethods(ctx: FakeContext) {
   return {
+    'subscriptionProxy.key': async ({ key }) => {
+      if (key !== null && (typeof key !== 'string' || key.length > 4096 || !key.trim() || /[\u0000-\u0020\u007f]/.test(key))) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'subscriptionProxy.key must be null or a non-empty token without whitespace' });
+      return { configured: key !== null };
+    },
     'scheduler.get': async (params) => {
       return structuredClone(ctx.scheduler);
     },

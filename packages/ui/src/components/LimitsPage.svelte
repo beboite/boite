@@ -9,6 +9,8 @@
   import { namedQuotas, quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
+  import SubscriptionProxyDashboard from './SubscriptionProxyDashboard.svelte';
+  import SubscriptionProxySettings from './SubscriptionProxySettings.svelte';
 
   /**
    * The subscription windows of every signed-in provider. The last reading
@@ -29,7 +31,7 @@
     const current = reader;
     // A call before the socket is up is refused at once: read when it becomes
     // ready, and again after a reconnect. A failure shows on `reader.error`.
-    if (!client || !store.owner || store.connection !== 'ready') return;
+    if (!client || !store.owner || store.connection !== 'ready' || store.settings?.subscriptionProxy?.enabled) return;
     const off = client.on('quotas.updated', (value) => current.accept(value));
     untrack(() => void current.read(client).catch(() => {}));
     return off;
@@ -47,6 +49,9 @@
 </script>
 
 <div class="page limits-page" data-testid="limits-page">
+  {#if store.settings?.subscriptionProxy?.enabled}
+    <SubscriptionProxyDashboard {store} />
+  {:else}
   <header class="top">
     {#if showTitle}<h1><QuotaMachineScope {store} fallback={strings.usage.limits} /></h1>{/if}
     {#if store.owner}
@@ -91,6 +96,8 @@
         </div>
       {/each}
     </section>
+  {/if}
+  {#if store.owner}<details class="disclosure"><summary>{strings.subscriptionProxy.configure}</summary><SubscriptionProxySettings {store} /></details>{/if}
   {/if}
 </div>
 

@@ -70,9 +70,14 @@
     popover.hide();
     store.showSettings(tab);
   }
+
+  function open() {
+    if (store.settings?.subscriptionProxy?.enabled) { page('limits'); return; }
+    if (popover.open) close(); else popover.show();
+  }
 </script>
 
-<button type="button" class="ghost icon" bind:this={trigger} aria-label={strings.quotas.glance} title={strings.quotas.glance} aria-haspopup="dialog" aria-expanded={popover.open} data-testid="nav-limits" onclick={() => (popover.open ? close() : popover.show())}><Gauge size={16} /></button>
+<button type="button" class="ghost icon" bind:this={trigger} aria-label={strings.quotas.glance} title={strings.quotas.glance} aria-haspopup="dialog" aria-expanded={popover.open} data-testid="nav-limits" onclick={open}><Gauge size={16} /></button>
 
 {#if popover.shown}
   <div class="glance" class:closing={popover.closing} bind:this={content} role="dialog" tabindex="-1" aria-label={strings.quotas.glance} data-testid="limits-glance" {onkeydown}
