@@ -1,17 +1,38 @@
-import { BROWSER_RECORDING_CHUNK_BYTES, BROWSER_RECORDING_MAX_BYTES, DEFAULT_BROWSER_RECORDING_FRAME_RATE, type BrowserRecording, type BrowserRecordingFrameRate, type BrowserRecordingMime } from '@boite/contracts';
+import { BROWSER_RECORDING_CHUNK_BYTES, BROWSER_RECORDING_CODECS, BROWSER_RECORDING_CODEC_LABELS, BROWSER_RECORDING_MAX_BYTES, DEFAULT_BROWSER_RECORDING_CODEC, DEFAULT_BROWSER_RECORDING_FRAME_RATE, type BrowserRecording, type BrowserRecordingCodec, type BrowserRecordingFrameRate } from '@boite/contracts';
 import type { RecordingRect } from './recording-indicators';
 
 /**
- * H.264 in MP4 first: Safari on an iPhone plays it everywhere, WebM only on
- * recent iOS. Plain `video/mp4` is not listed, since it may carry VP9.
+ * The MediaRecorder types tried for each codec, all MP4. Plain `video/mp4` is
+ * not listed, since the engine would pick the codec. WebView2 154 on Windows
+ * encodes H.264 and AV1 into MP4 but not HEVC, even where the GPU has an HEVC
+ * encoder (checked 2026-10-04).
  */
-const RECORDING_TYPES: [string, BrowserRecordingMime][] = [
-  ['video/mp4;codecs=avc1.640028', 'video/mp4'], ['video/mp4;codecs=avc1.4d0028', 'video/mp4'], ['video/mp4;codecs=avc1.42E01E', 'video/mp4'], ['video/mp4;codecs=avc1', 'video/mp4'],
-  ['video/webm;codecs=vp9', 'video/webm'], ['video/webm;codecs=vp8', 'video/webm'], ['video/webm', 'video/webm'],
-];
-export function pickRecordingType(supported: (type: string) => boolean): { type: string; mime: BrowserRecordingMime } | null {
-  const found = RECORDING_TYPES.find(([type]) => supported(type));
-  return found ? { type: found[0], mime: found[1] } : null;
+const CODEC_TYPES: Record<BrowserRecordingCodec, string[]> = {
+  h264: ['video/mp4;codecs=avc1.640028', 'video/mp4;codecs=avc1.4d0028', 'video/mp4;codecs=avc1.42E01E', 'video/mp4;codecs=avc1'],
+  hevc: ['video/mp4;codecs=hvc1.1.6.L123.B0', 'video/mp4;codecs=hev1.1.6.L123.B0', 'video/mp4;codecs=hvc1', 'video/mp4;codecs=hev1'],
+  av1: ['video/mp4;codecs=av01', 'video/mp4;codecs=av01.0.08M.08'],
+};
+/** The type each codec records with on this engine, or null for a codec it cannot encode. */
+export function recordingCodecTypes(supported: (type: string) => boolean): Record<BrowserRecordingCodec, string | null> {
+  return Object.fromEntries(BROWSER_RECORDING_CODECS.map(codec => [codec, CODEC_TYPES[codec].find(type => supported(type)) ?? null])) as Record<BrowserRecordingCodec, string | null>;
+}
+/** The codecs this desktop records, for its menu; none where MediaRecorder is missing. */
+export function supportedRecordingCodecs(): Record<BrowserRecordingCodec, string | null> {
+  return recordingCodecTypes(type => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type));
+}
+/** The codec a MediaRecorder type names, to report the one actually encoded. */
+export function recordingTypeCodec(type: string): BrowserRecordingCodec | null {
+  const codecs = /codecs=([^;]*)/i.exec(type)?.[1]?.toLowerCase() ?? '';
+  return /\bavc[13]/.test(codecs) ? 'h264' : /\b(hvc1|hev1)/.test(codecs) ? 'hevc' : /\bav01/.test(codecs) ? 'av1' : null;
+}
+/** The MP4 type of a recording in this codec, at the profile it records, to ask a player before loading it. */
+export function recordingVideoType(codec: BrowserRecordingCodec | undefined): string {
+  return codec ? `video/mp4;codecs=${{ h264: 'avc1.640028', hevc: 'hvc1.1.6.L123.B0', av1: 'av01.0.08M.08' }[codec]}` : 'video/mp4';
+}
+/** Why a codec cannot record here, naming the ones that can; never a reason to switch codec. */
+export function unsupportedCodecError(codec: BrowserRecordingCodec, types: Record<BrowserRecordingCodec, string | null>): string {
+  const available = BROWSER_RECORDING_CODECS.filter(other => types[other]).map(other => BROWSER_RECORDING_CODEC_LABELS[other]);
+  return `${BROWSER_RECORDING_CODEC_LABELS[codec]} recording is not available on this desktop: its browser engine does not encode ${BROWSER_RECORDING_CODEC_LABELS[codec]} into MP4. ${available.length ? `It records ${available.join(', ')}.` : 'It records no MP4 codec.'}`;
 }
 /**
  * T3 Code's budget: encoder defaults blur page text, so the bitrate follows the
@@ -31,9 +52,10 @@ const IDLE_MS = 1000;
 /**
  * WebView2 starts its H.264 encoder once per process, about 0.7 s after the
  * first frame, and drops the frames that arrive meanwhile: the first take of a
- * session lost 20 of them, later takes none (measured 2026-10-04). A throwaway
- * recording of a tiny canvas pays that before the first take; the muxer writes
- * its first bytes once the encoder runs.
+ * session lost 20 of them, later takes none (measured 2026-10-04). Its software
+ * AV1 encoder froze the first 1 to 2.6 s of a take. A throwaway recording of a
+ * tiny canvas pays that before the first take; the muxer writes its first bytes
+ * once the encoder runs, about 3.4 s later for AV1.
  */
 const warmed = new Map<string, Promise<void>>();
 function warmEncoder(type: string): Promise<void> {
@@ -49,7 +71,7 @@ function warmEncoder(type: string): Promise<void> {
         let ready = false;
         recorder.ondataavailable = event => { if (event.data.size) ready = true; };
         recorder.start();
-        for (let i = 0, until = performance.now() + 3000; !ready && performance.now() < until; i++) {
+        for (let i = 0, until = performance.now() + 5000; !ready && performance.now() < until; i++) {
           ctx.fillStyle = i % 2 ? 'black' : 'white'; ctx.fillRect(0, 0, 64, 64);
           track.requestFrame(); recorder.requestData();
           await new Promise(resolve => setTimeout(resolve, 33));
@@ -93,14 +115,14 @@ export class BrowserRecorder {
   url: string | null = null;
   constructor(private source: RecordingSource, private changed: (active: boolean, result: BrowserRecording | null) => void, private indicators?: RecordingOverlay) {}
 
-  async start(frameRate: BrowserRecordingFrameRate = DEFAULT_BROWSER_RECORDING_FRAME_RATE): Promise<void> {
+  async start(frameRate: BrowserRecordingFrameRate = DEFAULT_BROWSER_RECORDING_FRAME_RATE, codec: BrowserRecordingCodec = DEFAULT_BROWSER_RECORDING_CODEC): Promise<void> {
     if (this.starting || this.finalizing || this.recorder?.state === 'recording') throw new Error('a browser recording is already running');
     if (this.disposed) throw new Error('the browser tab is closed');
     if (this.blob) throw new Error('download or discard the previous recording first');
     this.starting = true;
     try {
-      const format = typeof MediaRecorder === 'undefined' ? null : pickRecordingType(type => MediaRecorder.isTypeSupported(type));
-      if (!format) throw new Error('this browser does not support MP4 or WebM recording');
+      const types = supportedRecordingCodecs(), type = types[codec];
+      if (!type) throw new Error(unsupportedCodecError(codec, types));
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('could not capture the browser canvas');
@@ -131,7 +153,7 @@ export class BrowserRecorder {
         })();
       };
       this.frames = 0;
-      const warming = format.mime === 'video/mp4' ? warmEncoder(format.type) : Promise.resolve();
+      const warming = warmEncoder(type);
       if (this.source.stream) {
         try { this.stopStream = await this.source.stream(frameRate, jpeg => show(new Blob([jpeg], { type: 'image/jpeg' }))); }
         catch { this.stopStream = null; }
@@ -150,7 +172,7 @@ export class BrowserRecorder {
       const track = this.stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack;
       if (typeof track.requestFrame === 'function') commit = () => track.requestFrame();
       else { this.stream.getTracks().forEach(track => track.stop()); this.stream = canvas.captureStream(frameRate); }
-      const recorder = new MediaRecorder(this.stream, { mimeType: format.type, videoBitsPerSecond: recordingBitrate(canvas.width, canvas.height, frameRate) });
+      const recorder = new MediaRecorder(this.stream, { mimeType: type, videoBitsPerSecond: recordingBitrate(canvas.width, canvas.height, frameRate) });
       this.recorder = recorder; this.chunks = []; this.size = 0; this.reason = 'stopped'; this.error = undefined;
       this.finish = new Promise<BrowserRecording>((resolve) => {
         recorder.ondataavailable = event => {
@@ -162,21 +184,16 @@ export class BrowserRecorder {
           }
         };
         recorder.onerror = () => { this.reason = 'error'; this.error = 'The browser encoder failed'; void this.stop(); };
-        recorder.onstop = async () => {
+        recorder.onstop = () => {
           this.finalizing = true;
           this.cleanup();
           page?.close(); page = null;
-          const result: BrowserRecording = { id: crypto.randomUUID(), mime: format.mime, bytes: this.size, durationMs: Math.max(0, Date.now() - this.started), frameRate, frames: this.frames, reason: this.reason, ...(this.error ? { error: this.error } : {}) };
-          let blob = new Blob(this.chunks, { type: result.mime });
+          // The codec reported is the one the engine says it encoded, never the one asked for.
+          const encoded = recordingTypeCodec(recorder.mimeType ?? '') ?? codec;
+          const result: BrowserRecording = { id: crypto.randomUUID(), mime: 'video/mp4', bytes: this.size, durationMs: Math.max(0, Date.now() - this.started), frameRate, frames: this.frames, codec: encoded, reason: this.reason, ...(this.error ? { error: this.error } : {}) };
+          if (encoded !== codec) { result.reason = 'error'; result.error = `The browser encoded ${BROWSER_RECORDING_CODEC_LABELS[encoded]} instead of ${BROWSER_RECORDING_CODEC_LABELS[codec]}`; }
+          const blob = new Blob(this.chunks, { type: result.mime });
           this.chunks = [];
-          try {
-            // A recorded MP4 already states its duration; a recorded WebM does not.
-            if (!this.disposed && result.mime === 'video/webm') {
-              const { fixWebmDuration } = await import('@fix-webm-duration/fix');
-              blob = await fixWebmDuration(blob, result.durationMs, { logger: false });
-            }
-          }
-          catch { result.reason = 'error'; result.error = 'Could not finalize the recording duration'; }
           result.bytes = blob.size;
           if (!this.disposed) {
             this.blob = blob;

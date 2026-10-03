@@ -395,8 +395,8 @@ preview changes. Totals exclude precompressed `.br` and `.gz` copies, as
 | Browser tools and remote review | 478,371 bytes | 3,835,773 bytes |
 
 The added dialogs, browser controls, recording encoder support and translations
-add 84,415 bytes (2.25%) to the complete UI. The WebM duration parser loads only
-when finalizing a recording. The total UI budget increases by 84,000 bytes to
+add 84,415 bytes (2.25%) to the complete UI. The WebM duration parser, removed
+since recordings became MP4 only, loaded only when finalizing a recording. The total UI budget increases by 84,000 bytes to
 3,880,000, leaving about 44 KB of headroom; entry and core budgets are unchanged.
 
 ### Phone navigation and remote viewport controls
@@ -452,8 +452,10 @@ a second and never more than two at once. The JPEG reaches the UI as raw bytes
 over a Tauri channel, without base64 or the core. The UI decodes only the
 newest frame, draws it on a canvas and asks the MediaRecorder for exactly that
 frame. WebView2's H.264 encoder takes about 0.7 s to start once per process
-and drops what it receives meanwhile, so the first recording starts it on a
-64 × 64 canvas before the page's first frame is committed.
+and drops what it receives meanwhile; its software AV1 encoder froze the first
+1.1 to 2.6 s of a take. The first recording in each codec therefore starts its
+encoder on a 64 × 64 canvas before the page's first frame is committed; the
+start still answers within a second.
 
 `tests/e2e/browser-recording.test.ts` records an animated page through the
 shell's CLI and counts the frames with ffprobe. With `BOITE_E2E_SHELL_EXE` set
@@ -468,8 +470,38 @@ to a release shell on 2026-10-04 (Windows 11, other agents' builds running):
 
 The 240 s take's 58 MiB stopped and downloaded in 12.2 s. Its slow frames
 came between 145 and 190 s, while the machine was loaded at 60 to 100 %.
-`BOITE_RECORDING_SECONDS`, `BOITE_RECORDING_FPS` and `BOITE_RECORDING_KEEP`
-set the length, the rate and a folder that keeps the video.
+
+The same test per codec, 30 s takes of the 358 × 748 page on 2026-10-04
+(Windows 11, Edge WebView2 154, Radeon RX 6750 XT):
+
+| Codec | Requested | Measured | Frame gap median / p95 / max | Size | Shell tree CPU, page alone |
+|---|---|---|---|---|---|
+| H.264 | 30 fps | 30.0 fps | 32 / 39 / 78 ms | 8.1 MiB/min | 67 %, 36 % of one core |
+| H.264 | 60 fps | 59.9 fps | 19 / 23 / 55 ms | 14.8 MiB/min | 99 %, 82 % |
+| AV1 | 30 fps | 30.0 fps | 32 / 41 / 52 ms | 4.4 MiB/min | 70 %, 35 % |
+| AV1 | 60 fps | 58.7 fps | 18 / 24 / 108 ms | 7.5 MiB/min | 112 %, 34 % |
+| HEVC | 30 or 60 | refused | | | |
+
+AV1 is half the size of H.264 for about 15 points more CPU at 60 fps; WebView2
+encodes it in software. Every file decoded whole with ffmpeg and played in the
+review dialog and in chat. WebView2 154 reports no HEVC for MediaRecorder in
+MP4, `hvc1` or `hev1`, even with its `PlatformHEVCEncoderSupport` feature on,
+so HEVC is greyed out in the menu and refused by the CLI. An HEVC MP4 made by
+ffmpeg's `hevc_amf` encoder played in chat on this PC; an MPEG-4 Part 2 MP4
+showed the chat's download fallback. Encoding HEVC would need WebCodecs, which
+reports it only behind that feature, and an MP4 muxer in the UI.
+
+A noise page at 1920 × 1080 and 60 fps grows 88 MiB a minute: H.264 stopped
+by itself after 62.8 s at 92.3 MiB, below the 100 MB cap that leaves room for
+the container. The file decoded whole, the dialog played it and gave the
+reason, and the CLI result's `note` named the limit. Stopping and downloading
+took 8.4 s.
+
+`BOITE_RECORDING_SECONDS`, `BOITE_RECORDING_FPS`, `BOITE_RECORDING_CODEC` and
+`BOITE_RECORDING_KEEP` set the length, the rate, the codec and a folder that
+keeps the video. `BOITE_RECORDING_PRESET` sizes the page,
+`BOITE_RECORDING_NOISE=1` records noise to reach the cap, and
+`BOITE_RECORDING_PLAY` lists other videos (`;`-separated) to play in chat.
 
 ## Benches
 

@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { BROWSER_RECORDING_MAX_BYTES } from '@boite/contracts';
-import { BrowserRecorder, pickRecordingType, recordingBitrate, recordingSize } from './browser-recording';
+import { BrowserRecorder, recordingBitrate, recordingCodecTypes, recordingSize, recordingTypeCodec } from './browser-recording';
 
-test('recordings prefer H.264 MP4, which iPhones play, and fall back to WebM', () => {
-  // WebView2 and recent Chromium encode H.264 into MP4.
-  expect(pickRecordingType(type => type.startsWith('video/mp4;codecs=avc1') || type.startsWith('video/webm'))).toEqual({ type: 'video/mp4;codecs=avc1.640028', mime: 'video/mp4' });
-  expect(pickRecordingType(type => type === 'video/mp4;codecs=avc1.42E01E' || type === 'video/webm')).toEqual({ type: 'video/mp4;codecs=avc1.42E01E', mime: 'video/mp4' });
-  // An MP4 that might carry VP9 is not taken for H.264.
-  expect(pickRecordingType(type => type === 'video/mp4' || type === 'video/webm;codecs=vp8')).toEqual({ type: 'video/webm;codecs=vp8', mime: 'video/webm' });
-  expect(pickRecordingType(type => type === 'video/webm')).toEqual({ type: 'video/webm', mime: 'video/webm' });
-  expect(pickRecordingType(() => false)).toBeNull();
+test('each codec records into MP4 with the first type the engine encodes, and none stands in for another', () => {
+  // What WebView2 154 answered on 2026-10-04: H.264 and AV1, no HEVC, WebM.
+  const webview2 = (type: string) => /avc1|av01/.test(type) || type.startsWith('video/webm');
+  expect(recordingCodecTypes(webview2)).toEqual({ h264: 'video/mp4;codecs=avc1.640028', hevc: null, av1: 'video/mp4;codecs=av01' });
+  expect(recordingCodecTypes(type => type === 'video/mp4;codecs=avc1.42E01E' || type === 'video/mp4;codecs=hvc1')).toEqual({ h264: 'video/mp4;codecs=avc1.42E01E', hevc: 'video/mp4;codecs=hvc1', av1: null });
+  // An MP4 whose codec the engine would pick is no codec, and WebM is not offered.
+  expect(recordingCodecTypes(type => type === 'video/mp4' || type.startsWith('video/webm'))).toEqual({ h264: null, hevc: null, av1: null });
+  expect(['video/mp4;codecs=avc1.64001f', 'video/mp4;codecs=hev1.1.6.L93.B0', 'video/mp4;codecs=av01.0.08M.08', 'video/webm;codecs=vp9', 'video/mp4'].map(recordingTypeCodec)).toEqual(['h264', 'hevc', 'av1', null, null]);
 });
 
 test('the bitrate follows the pixels and frames recorded, as in T3 Code, within 2.5 and 50 Mbit/s', () => {
@@ -23,13 +23,14 @@ test('the bitrate follows the pixels and frames recorded, as in T3 Code, within 
 });
 
 class FakeRecorder {
-  static isTypeSupported = (type: string) => type === 'video/mp4;codecs=avc1.640028';
+  static isTypeSupported = (type: string) => type === 'video/mp4;codecs=avc1.640028' || type === 'video/mp4;codecs=av01';
   static instances: FakeRecorder[] = [];
   state: RecordingState = 'inactive';
+  mimeType: string;
   ondataavailable: ((event: { data: Blob }) => void) | null = null;
   onstop: (() => void) | null = null;
   onerror: (() => void) | null = null;
-  constructor(readonly stream: MediaStream, readonly options: MediaRecorderOptions) { FakeRecorder.instances.push(this); }
+  constructor(readonly stream: MediaStream, readonly options: MediaRecorderOptions) { this.mimeType = options.mimeType ?? ''; FakeRecorder.instances.push(this); }
   start() { this.state = 'recording'; }
   requestData() { this.ondataavailable?.({ data: new Blob(['ftyp']) }); }
   stop() { this.state = 'inactive'; queueMicrotask(() => this.onstop?.()); }
@@ -72,11 +73,32 @@ test('a recording streams at the desktop rate and commits only the newest page f
   await vi.waitFor(() => expect(track.requestFrame).toHaveBeenCalledTimes(3));
   const result = await recorder.stop();
   expect(stop).toHaveBeenCalledOnce();
-  expect(result).toMatchObject({ mime: 'video/mp4', frameRate: 60, frames: 3, reason: 'stopped' });
+  expect(result).toMatchObject({ mime: 'video/mp4', frameRate: 60, frames: 3, codec: 'h264', reason: 'stopped' });
   expect(source.capture).not.toHaveBeenCalled();
 });
 
-test('a recording has no time limit and stops before 200 MB', async () => {
+test('a codec the engine cannot encode is refused with the ones it can, and a chosen one is recorded and reported', async () => {
+  const { source } = streamed();
+  const recorder = new BrowserRecorder(source, () => {});
+  await expect(recorder.start(30, 'hevc')).rejects.toThrow('HEVC recording is not available on this desktop: its browser engine does not encode HEVC into MP4. It records H.264, AV1.');
+  // Nothing was recorded in another codec meanwhile.
+  expect(FakeRecorder.instances).toEqual([]);
+  expect(source.stream).not.toHaveBeenCalled();
+  await recorder.start(30, 'av1');
+  // The first AV1 take warms its encoder, then records, both in AV1.
+  expect(FakeRecorder.instances.map(instance => instance.options.mimeType)).toEqual(['video/mp4;codecs=av01', 'video/mp4;codecs=av01']);
+  expect(await recorder.stop()).toMatchObject({ mime: 'video/mp4', codec: 'av1', reason: 'stopped' });
+});
+
+test('an engine that encodes another codec than the one asked reports it and the error', async () => {
+  const { source } = streamed();
+  const recorder = new BrowserRecorder(source, () => {});
+  await recorder.start(30, 'h264');
+  FakeRecorder.instances.at(-1)!.mimeType = 'video/mp4;codecs=av01';
+  expect(await recorder.stop()).toMatchObject({ codec: 'av1', reason: 'error', error: 'The browser encoded AV1 instead of H.264' });
+});
+
+test('a recording has no time limit and stops before 100 MB', async () => {
   const { source, stop } = streamed();
   const recorder = new BrowserRecorder(source, () => {});
   await recorder.start();

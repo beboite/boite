@@ -5,7 +5,7 @@ import { automateBrowser } from './browser-automation';
 import { BrowserRecorder } from './browser-recording';
 import { RecordingIndicators } from './recording-indicators';
 import { isExperimentEnabled } from './experiments';
-import { recordingFrameRate } from './recording-frame-rate';
+import { recordingCodec, recordingFrameRate } from './recording-settings';
 
 interface TabTools { preset: BrowserPreset | null; orientation: 'portrait' | 'landscape'; colorScheme: 'system' | 'light' | 'dark'; recording: boolean; result: BrowserRecording | null; url: string | null }
 const states = new SvelteMap<string, TabTools>();
@@ -75,7 +75,7 @@ export async function runBrowserAction(id: string, action: BrowserAction): Promi
       case 'recording-start': {
         if (action.indicators && !isExperimentEnabled('recording-indicators')) throw new Error('enable the recording-indicators experiment on this desktop first');
         if (!browserTools(id).recording && !browserTools(id).result) { recorders.get(id)?.dispose(); recorders.delete(id); }
-        await recorder(id, action.indicators !== false && isExperimentEnabled('recording-indicators')).start(recordingFrameRate()); break;
+        await recorder(id, action.indicators !== false && isExperimentEnabled('recording-indicators')).start(action.frameRate ?? recordingFrameRate(), action.codec ?? recordingCodec()); break;
       }
       case 'recording-stop': return { tabId: id, recording: await recorder(id).stop() };
       case 'recording-read': value = await recorder(id).read(action.recordingId, action.offset); break;

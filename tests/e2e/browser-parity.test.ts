@@ -56,7 +56,7 @@ test.skipIf(process.platform !== 'win32' || !executable)('native presets, appear
     })).toBe(0);
     const recorded = JSON.parse(lines.join('')) as { path: string; mime: string; bytes: number; durationMs: number };
     expect(recorded.bytes).toBeGreaterThan(1000); expect(recorded.durationMs).toBeGreaterThan(1000);
-    // WebView2 encodes H.264 into MP4, which iPhones play; WebM is the fallback.
+    // WebView2 encodes H.264 into MP4, which iPhones play; a desktop from before codecs made WebM without it.
     const extension = recorded.mime === 'video/mp4' ? 'mp4' : 'webm';
     expect(recorded.path.endsWith(`.${extension}`)).toBe(true);
     const bytes = readFileSync(recorded.path);

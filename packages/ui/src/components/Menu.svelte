@@ -270,13 +270,14 @@
     transform-origin: top right;
   }
 
-  /* A one-line item is as tall as a context menu row; a hint below grows it. */
+  /* A one-line item is as tall as a context menu row; a hint below grows it.
+     Labels are trimmed to their capitals, so the gap keeps descenders off the hint. */
   .item {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
     justify-content: center;
-    gap: 0;
+    gap: 4px;
     height: auto;
     min-height: var(--control);
     padding: 4px 8px;

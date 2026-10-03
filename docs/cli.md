@@ -106,13 +106,20 @@ and 100 actions. Network URLs omit credentials, queries and fragments. Action
 history records operation names, not typed values or evaluated code.
 `diagnostics-clear` clears both buffers.
 
-`recording-start` and `recording-stop` save a silent video in the working
-directory: H.264 MP4 where the engine encodes it (WebView2 does), which iPhones
-play, else WebM. Its extension follows the format. The shell streams the page's
-own frames (`Page.startScreencast`) and paces them to 30 frames per second, or
-60 when chosen in the browser tools menu, up to 1920 × 1080. There is no time
-limit; a recording stops at 200 MB, which the desktop keeps in memory and sends
-in 4 MB chunks. There is no sound, as in T3 Code. Run `boite attach <video.mp4>` to show it in chat. Closing the tab discards an unfinished recording.
+`recording-start` and `recording-stop` save a silent MP4 in the working
+directory. The shell streams the page's own frames (`Page.startScreencast`)
+and paces them to 30 frames per second, or 60, up to 1920 × 1080. The codec is
+H.264, HEVC or AV1. `recording-start --fps 60 --codec av1` overrides the rate
+and codec chosen in the desktop's browser tools menu, which default to 30 and
+H.264. A codec the desktop's engine cannot encode into MP4 is refused with the
+codecs it can; nothing records in another one. WebView2 encodes H.264 and AV1,
+not HEVC. The result's `codec` names the codec written.
+
+There is no time limit; a recording stops by itself at 100 MB (about 12 minutes
+at 30 fps, 6 at 60), which the desktop keeps in memory and sends in 4 MB chunks.
+The saved video is complete up to that point, and the result's `note` says
+why it ended. There is no sound, as in T3 Code. Run `boite attach <video.mp4>`
+to show it in chat. Closing the tab discards an unfinished recording.
 
 Automation uses WebView2's native devtools channel, without a debugging port.
 Only the owner UI can register a host or answer its requests. The agent token
