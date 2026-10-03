@@ -84,6 +84,44 @@ afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
 for (const phone of [false, true]) {
   const name = phone ? 'phone' : 'desktop';
+  test(`conversation, activity and composer share one horizontal center on ${name}`, async () => {
+    await page.send('Emulation.setTouchEmulationEnabled', { enabled: phone });
+    try {
+      for (const width of phone ? [390] : [1280, 1800]) {
+        await page.send('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: phone });
+        await page.navigate(url);
+        await page.waitFor(`document.querySelector('${timeline}')`);
+        await page.evaluate(`window.__boiteTest.workspace.active.openThread.activity = { goal: null, loop: null, tasks: [{ id: 'layout', text: 'Verify conversation alignment', status: 'completed' }] }`);
+        await page.waitFor(`document.querySelector('[data-testid=thread-activity]')`);
+        for (const collapsed of phone ? [false] : [false, true]) {
+          await page.evaluate(`window.__boiteTest.workspace.active.sidebarCollapsed = ${collapsed}`);
+          for (const mode of ['comfortable', 'wide', 'full']) {
+            await page.evaluate(`document.documentElement.dataset.chatWidth = '${mode}'`);
+            await settled();
+            const offsets = await page.evaluate<number[]>(`(() => {
+              const chat = document.querySelector('[data-testid=chat]').getBoundingClientRect();
+              const center = chat.left + chat.width / 2;
+              return ['${timeline} .column', '[data-testid=thread-activity]', '[data-testid=composer]'].map(selector => {
+                const box = document.querySelector(selector).getBoundingClientRect();
+                return Math.abs(box.left + box.width / 2 - center);
+              });
+            })()`);
+            if (width === (phone ? 390 : 1280) && !collapsed && mode === 'comfortable') {
+              await page.screenshot(join(artifacts, `chat-centering-${name}.png`));
+              console.log(`CHAT_CENTER ${name} offsets=${offsets.join(',')}`);
+            }
+            expect(Math.max(...offsets)).toBeLessThan(1);
+            expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+          }
+        }
+      }
+      expect(page.errors()).toEqual([]);
+    } finally {
+      await page.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+      await page.evaluate(`document.documentElement.removeAttribute('data-chat-width')`);
+    }
+  }, 30_000);
+
   for (const history of ['empty', 'short', 'windowed']) {
     test(`a sent prompt rises smoothly and its response takes the reserved space on ${name}, ${history} history`, async () => {
       await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 390 : 1280, height: 844, deviceScaleFactor: 1, mobile: phone });

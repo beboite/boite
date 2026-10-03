@@ -293,7 +293,7 @@
   --activity-indent: calc(var(--activity-padding) + var(--activity-glyph) + var(--activity-gap));
   --chat-part-gap: 4px;
   --chat-block-gap: 12px;
-  /* The timeline's left margin, which the message outline rail sits in. */
+  /* Balanced timeline margins, with room for the message outline rail. */
   --outline-room: 38px;
   --settings-width: 880px;
   --settings-padding: 24px;
