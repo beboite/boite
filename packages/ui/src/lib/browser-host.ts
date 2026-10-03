@@ -13,13 +13,22 @@ const agentOn = () => experimentOn('agent-browser-control');
 const remoteOn = () => experimentOn('remote-browser');
 
 /**
+ * Whether this desktop shows the browser of the machine's conversations
+ * itself: the owner's Windows shell. Watching that browser remotely from here
+ * would only show its own window back.
+ */
+export function hostsBrowser(store: Pick<Store, 'owner'>): boolean {
+  return store.owner && !!browserBridge.protocol && /Windows/.test(navigator.userAgent);
+}
+
+/**
  * Captures the owning Store/client; a machine switch cannot redirect a command.
  * Either consent hosts the browser: agent control, or sharing it with paired
  * devices. Each kind of request still needs its own.
  */
 export function hostBrowser(store: Store, threadId: string): () => void {
   const client = store.client;
-  if (!(agentOn() || remoteOn()) || !client || !store.owner || !browserBridge.protocol || !/Windows/.test(navigator.userAgent)) return () => {};
+  if (!(agentOn() || remoteOn()) || !client || !hostsBrowser(store)) return () => {};
   const machine = store.machineId;
   const panel = rightPanel.for(store.threadKey(threadId));
   let stopped = false;

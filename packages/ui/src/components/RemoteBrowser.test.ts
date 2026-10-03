@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
 import { EXPERIMENTS_STORAGE_KEY, readExperiments, writeExperiments } from '../lib/experiments';
+import { browserBridge } from '../lib/browser-bridge';
 import RemoteBrowser from './RemoteBrowser.svelte';
 
 let app: ReturnType<typeof mount> | undefined, client: FakeClient, store: Store;
@@ -265,4 +266,27 @@ test('a still page is polled slowly, and a phone back from the background resume
   window.dispatchEvent(new Event('pageshow'));
   await vi.advanceTimersByTimeAsync(1); await settle();
   expect(requests).toHaveLength(idle + 1);
+});
+
+test('the desktop that hosts the browser offers no remote view of it; a paired device still does', async () => {
+  (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+  vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Edg/140');
+  const bridge = browserBridge as { protocol?: unknown };
+  const protocol = bridge.protocol;
+  bridge.protocol = vi.fn();
+  try {
+    writeExperiments(['remote-browser']);
+    client = new FakeClient({ delayMs: 0 }); store = new Store(); store.attach(client); await store.connect();
+    expect(store.owner).toBe(true);
+    app = mount(RemoteBrowser, { target: document.body, props: { store, threadId: 't-trace' } }); await settle();
+    expect(document.querySelector('[data-testid=remote-browser-open]')).toBeNull();
+    await unmount(app); app = undefined; store.detach(); client.close();
+    // The same shell connected to another machine as a paired device watches that machine's PC.
+    client = new FakeClient({ delayMs: 0, principal: 'session' }); store = new Store(); store.attach(client); await store.connect();
+    app = mount(RemoteBrowser, { target: document.body, props: { store, threadId: 't-trace' } }); await settle();
+    expect(document.querySelector('[data-testid=remote-browser-open]')).not.toBeNull();
+  } finally {
+    bridge.protocol = protocol;
+    delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  }
 });

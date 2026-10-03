@@ -9,6 +9,7 @@
   import { focusedElement, restoreFocus } from '../lib/focus';
   import { mobileOverlay } from '../lib/mobile-history';
   import { normalizeUrl } from '../lib/browser-bridge';
+  import { hostsBrowser } from '../lib/browser-host';
   import { dragScroll, frameMaxWidth, framePoint, frameQuality, nextPollDelay } from '../lib/remote-browser-view';
   let { store, threadId, surface = false }: { store: Store; threadId: string; surface?: boolean } = $props();
   let shown = $state(untrack(() => surface)), paused = $state(false), busy = $state(false), error = $state(''), text = $state('');
@@ -215,7 +216,7 @@
 
 {#if surface}
   <div class="surface-launcher"><MonitorPlay size={28} /><h2>{strings.remoteBrowser.title}</h2><p>{strings.remoteBrowser.hint}</p><button type="button" class="primary" data-testid="remote-browser-open" onclick={() => { shown = true; paused = false; }}>{strings.remoteBrowser.open}</button></div>
-{:else if enabled || !inShell}
+{:else if (enabled || !inShell) && !hostsBrowser(store)}
   <button type="button" class="ghost small launcher" data-testid="remote-browser-open" title={strings.remoteBrowser.title} aria-label={strings.remoteBrowser.title} onclick={() => { shown = true; paused = false; }}><MonitorPlay size={16} /><span>{strings.rightPanel.browser}</span></button>
 {/if}
 {#if shown}
