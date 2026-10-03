@@ -353,6 +353,11 @@ The native shell cases require their executable and adjacent files;
 `BOITE_E2E_SKIP_SHELL=1` explicitly selects a partial core/browser run.
 It does not establish native macOS or Linux WebView coverage.
 
+Windows process usage reaches the registry through a completion-port event,
+or a one-second fallback after the child exits (`procs.ts`). Cleanup assertions
+must wait for both the expected PID set and install leases before checking them;
+the child exit callback alone does not establish that the trace row was removed.
+
 ### Contract scenarios
 
 `tests/contract/scenarios.ts` drives RPC results and events through the same
@@ -596,6 +601,17 @@ call stands alone and opens its diff. Codex exit codes determine command status;
 output text and stderr do not. Answered questions expand read-only. Turn receipts
 mean core acceptance and first assistant activity, not a protocol read receipt.
 Animations pause when hidden and respect reduced motion.
+
+Replies use a neutral bubble, with sent prompts aligned to the right. Timestamps
+stay visible; message actions appear on hover or keyboard focus and stay
+available on touch screens. Phone bubbles use more of the conversation width.
+
+Three animated dots cover the wait before the first assistant part and text
+whose unfinished paragraph is still buffered. Streaming text owns its dots;
+active reasoning and tools show their own activity. Queued turns, disconnected
+clients, blocking questions and finished turns do not show typing. The dots
+pause on hidden pages and become static under reduced motion.
+`tests/e2e/chat-context.test.ts` checks these transitions and phone layout.
 
 Received agent mail appears on the right with the user accent; sent agent mail
 appears on the left with a neutral surface. Owner prompts keep the user style.

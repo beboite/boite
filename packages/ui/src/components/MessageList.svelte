@@ -757,13 +757,14 @@
           {:else if message.role === 'user'}
             <UserMessage {store} {message} {turn} {progress} {expanded} ontoggle={toggleImage} edit={atRest ? () => editMessage(message) : undefined} />
           {:else}
-            <AssistantMessage {store} {threadId} {message} {signedOut} showModel={firstAssistantInTurn.get(message.turnId) === message.id} memoryEvents={memoryPlacement.inline.get(message.id) ?? []} />
+            <AssistantMessage {store} {threadId} {message} {signedOut} showModel={firstAssistantInTurn.get(message.turnId) === message.id}
+              latestInTurn={lastInTurn.get(message.turnId) === message.id} memoryEvents={memoryPlacement.inline.get(message.id) ?? []} />
           {/if}
           {#if turn && lastInTurn.get(turn.id) === message.id && filesByTurn.has(turn.id)}
             <TurnFiles {store} {...filesByTurn.get(turn.id)!} />
           {/if}
           {#if turn && lastInTurn.get(turn.id) === message.id}
-            <MessageTurnSummary {store} {threadId} {turn} {message}>
+            <MessageTurnSummary {store} {threadId} {turn} {message} {messages}>
               {#snippet actions()}
                 <MessageActions
                   text={() => answerOf(turn.id)}
@@ -814,7 +815,7 @@
   .column {
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: var(--chat-message-gap);
     width: 100%;
     max-width: var(--content);
     margin: 0 auto;
