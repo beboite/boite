@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { Database } from 'bun:sqlite';
 import { Journal } from '../src/journal.ts';
 import { inspectJournal } from '../src/journal/integrity.ts';
-import { connect } from '../src/client.ts';
-import { startTestCore } from './harness.ts';
+import { connect, type CoreClient } from '../src/client.ts';
+import { startTestCore, type TestCore } from './harness.ts';
 describe('historical journal inspection', () => {
   let dir: string, journal: Journal;
   beforeEach(() => {
@@ -65,12 +65,38 @@ describe('historical journal inspection', () => {
 });
 
 test('inspection RPC is owner only for paired devices and scoped agents', async () => {
-  const h = await startTestCore(); const owner = await h.connect();
-  const grant = await owner.call('pairing.grant',{}); const phone = await connect(h.url,'',{grant:grant.grant});
-  const agent = await connect(h.url,h.core.agents.tokenFor('synthetic-agent'));
+  let h: TestCore | undefined;
+  const clients: CoreClient[] = [];
+  let phase = 'start isolated core';
+  const open = async (token: string, options: Parameters<typeof connect>[2] = {}): Promise<CoreClient> => {
+    const client = await connect(h!.url, token, { ...options, requestTimeoutMs: 5000 });
+    clients.push(client);
+    return client;
+  };
   try {
-    expect((await owner.call('journal.inspect',{limit:1})).checked).toBeLessThanOrEqual(1);
-    await expect(phone.call('journal.inspect',{})).rejects.toThrow('owner');
-    await expect(agent.call('journal.inspect',{})).rejects.toThrow('agent');
-  } finally { phone.close(); agent.close(); await h.stop(); }
+    h = await startTestCore();
+    phase = 'connect owner';
+    const owner = await open(h.token);
+    phase = 'grant paired device';
+    const grant = await owner.call('pairing.grant', {});
+    phase = 'connect paired device';
+    const phone = await open('', { grant: grant.grant });
+    phase = 'connect scoped agent';
+    const agent = await open(h.core.agents.tokenFor('synthetic-agent'));
+    phase = 'inspect as owner';
+    expect((await owner.call('journal.inspect', { limit: 1 })).checked).toBeLessThanOrEqual(1);
+    phase = 'refuse paired device inspection';
+    await expect(phone.call('journal.inspect', {})).rejects.toThrow('owner');
+    phase = 'refuse scoped agent inspection';
+    await expect(agent.call('journal.inspect', {})).rejects.toThrow('agent');
+  } catch (cause) {
+    throw new Error(`journal.inspect authorization test failed during ${phase}`, { cause });
+  } finally {
+    for (const client of clients) client.close();
+    if (h) {
+      console.info('journal.inspect authorization: isolated core cleanup started');
+      try { await h.stop(); console.info('journal.inspect authorization: isolated core cleanup finished'); }
+      catch (cause) { throw new Error('journal.inspect authorization test failed during isolated core cleanup', { cause }); }
+    }
+  }
 });
