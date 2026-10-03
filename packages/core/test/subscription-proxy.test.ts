@@ -36,6 +36,8 @@ test('real RPC discovers gateway models, separates the key and restores native a
   const owner = await harness.connect();
   const claude = await owner.call('accounts.add', { providerId: 'claude', label: 'Proxy Claude' });
   const codex = await owner.call('accounts.add', { providerId: 'codex', label: 'Proxy Codex' });
+  // Native login detection differs by platform; disabling restores the original status.
+  const nativeClaudeStatus = harness.core.accounts.require(claude.id).status;
   const key = 'subscription-proxy-test-token';
   await owner.call('subscriptionProxy.key', { key });
   const proxy = config(`http://127.0.0.1:${gateway.port}/v1`);
@@ -71,7 +73,7 @@ test('real RPC discovers gateway models, separates the key and restores native a
   await owner.call('settings.set', { subscriptionProxy: { ...proxy, enabled: false } });
   expect(subscriptionProxyEnv(harness.core, harness.core.providers.require('codex'))).toEqual({});
   expect(probedModelsOf('codex-appserver', 'codex', codex.id)).toBeNull();
-  expect(harness.core.accounts.require(claude.id).status).toBe('unauthenticated');
+  expect(harness.core.accounts.require(claude.id).status).toBe(nativeClaudeStatus);
 });
 
 test('legacy CLIProxy catalogs select native families and malformed gateway errors cannot echo the key', async () => {
