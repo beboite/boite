@@ -57,7 +57,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'threads.pullRequest', // Read-only branch metadata shown on the same phone thread cards.
   'threads.pullRequests', // Read-only conversation links, including dependency order, on phones.
   'threads.pullRequestReview', 'threads.pullRequestFiles', // Bounded read-only data for PRs the owner already linked.
-  'browser.remoteFrame', 'browser.remoteInput', // Only the subscribed conversation's owner-enabled shared page; no scripts, host paths or navigation RPCs.
+  'browser.remoteFrame', 'browser.remoteInput', // Only the subscribed conversation's owner-enabled shared page; no scripts or host paths.
+  'browser.remoteOpen', // Asks an owner desktop that already shares its browser to show this subscribed conversation's tab.
   'threads.create',
   'threads.get',
   // A phone can manage continued prompts in the same thread it can already send to.

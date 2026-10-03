@@ -111,3 +111,45 @@ test('disabling sharing while a frame is in flight does not deliver it to a pair
     expect((await image as Error).message).toContain('experiment');
   } finally { phone.close(); }
 });
+
+test('a share-only desktop serves a paired viewer, never the agent, and opens the tab when the viewer asks', async () => {
+  const { grant } = await owner.call('pairing.grant', {});
+  const phone = await connect(harness.url, '', { grant });
+  const other = await harness.connect();
+  try {
+    await owner.call('threads.subscribe', { threadId }); await phone.call('threads.subscribe', { threadId });
+    await expect(phone.call('browser.remoteReady', { enabled: true })).rejects.toThrow('owner');
+    await expect(phone.call('browser.remoteOpen', { threadId })).rejects.toThrow('No desktop is sharing');
+    await other.call('browser.remoteReady', { enabled: true });
+    await owner.call('browser.remoteReady', { enabled: true });
+    // No host yet: the desktop that renewed last is asked.
+    const asked = owner.next('browser.remoteOpenRequested', e => e.threadId === threadId);
+    await phone.call('browser.remoteOpen', { threadId });
+    await asked;
+    await expect(phone.call('browser.remoteOpen', { threadId })).rejects.toThrow('wait before asking');
+    await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: false, remote: true });
+    await expect(agent.call('browser.command', { threadId, action: { kind: 'snapshot' } })).rejects.toThrow('Agent browser control');
+    await expect(phone.call('browser.remoteFrame', { threadId, quality: 95 })).rejects.toThrow('quality');
+    const waiting = owner.next('browser.requested', r => r.action.kind === 'remote-frame');
+    const image = phone.call('browser.remoteFrame', { threadId, maxWidth: 780, quality: 40 });
+    const request = await waiting;
+    expect(request.action).toEqual({ kind: 'remote-frame', maxWidth: 780, quality: 40 });
+    await owner.call('browser.complete', { requestId: request.requestId, result: { frame: { id: 'f', tabId: 'browser:test', width: 800, height: 600, title: 'Docs', base64: 'aGVsbG8=', at: 0, url: 'https://example.com/a' } } });
+    expect((await image).url).toBe('https://example.com/a');
+    await expect(phone.call('browser.remoteInput', { threadId, frameId: 'f', input: { kind: 'navigate', url: 'javascript:alert(1)' } })).rejects.toThrow('HTTP');
+    const navWaiting = owner.next('browser.requested', r => r.action.kind === 'remote-input');
+    const nav = phone.call('browser.remoteInput', { threadId, frameId: 'f', input: { kind: 'history', direction: 'back' } });
+    await owner.call('browser.complete', { requestId: (await navWaiting).requestId, result: {} });
+    expect(await nav).toEqual({ ok: true });
+    // Once the conversation has a sharing host, that desktop is the one asked, and a dropped desktop is forgotten.
+    await other.call('browser.remoteReady', { enabled: true });
+    await new Promise(resolve => setTimeout(resolve, 2100));
+    const again = owner.next('browser.remoteOpenRequested', e => e.threadId === threadId);
+    await phone.call('browser.remoteOpen', { threadId });
+    await again;
+    owner.close(); other.close();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    await expect(phone.call('browser.remoteOpen', { threadId })).rejects.toThrow('No desktop is sharing');
+  } finally { phone.close(); other.close(); }
+}, 15000);

@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { hostBrowser } from './lib/browser-host';
+  import { shareBrowserOnRequest } from './lib/browser-remote-open';
   import TerminalDrawer from './components/TerminalDrawer.svelte';
   import UndoToast from './components/UndoToast.svelte';
   import NotificationCard from './components/NotificationCard.svelte';
@@ -45,7 +46,11 @@
   $effect(() => {
     const threadId = store.openThread?.id;
     void store.connection;
-    if (experimentOn('agent-browser-control') && threadId && store.owner && store.client?.state === 'ready') return hostBrowser(store, threadId);
+    if ((experimentOn('agent-browser-control') || experimentOn('remote-browser')) && threadId && store.owner && store.client?.state === 'ready') return hostBrowser(store, threadId);
+  });
+  $effect(() => {
+    void store.connection;
+    if (experimentOn('remote-browser') && store.owner && store.client?.state === 'ready') return shareBrowserOnRequest(store);
   });
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   const narrow = new MediaQuery('(max-width: 720px)');

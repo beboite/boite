@@ -1,4 +1,4 @@
-import { remoteBrowserInputError, type RemoteBrowserFrame, type RemoteBrowserInput } from './browser-remote';
+import { remoteBrowserInputError, remoteFrameOptionsError, type RemoteBrowserFrame, type RemoteBrowserInput, type RemoteFrameOptions } from './browser-remote';
 /** Browser automation targets only the desktop hosting this conversation. */
 export type BrowserAction =
   | { kind: 'status' }
@@ -9,7 +9,7 @@ export type BrowserAction =
   | { kind: 'preset'; preset: BrowserPreset; orientation?: 'portrait' | 'landscape' }
   | { kind: 'appearance'; colorScheme: 'light' | 'dark' | 'system' }
   | { kind: 'recording-start'; indicators?: boolean }
-  | { kind: 'remote-frame' }
+  | ({ kind: 'remote-frame' } & RemoteFrameOptions)
   | { kind: 'remote-input'; frameId: string; input: RemoteBrowserInput }
   | { kind: 'recording-stop' }
   | { kind: 'recording-read'; recordingId: string; offset: number }
@@ -33,7 +33,10 @@ export interface BrowserReply {
   recording?: BrowserRecording;
   frame?: RemoteBrowserFrame;
 }
-export interface BrowserRecording { id: string; mime: string; bytes: number; durationMs: number; reason: 'stopped' | 'duration' | 'size' | 'error'; error?: string }
+/** Recordings are MP4 (H.264) where the engine encodes it, which iPhones play, else WebM. */
+export const BROWSER_RECORDING_TYPES = { 'video/mp4': 'mp4', 'video/webm': 'webm' } as const;
+export type BrowserRecordingMime = keyof typeof BROWSER_RECORDING_TYPES;
+export interface BrowserRecording { id: string; mime: BrowserRecordingMime; bytes: number; durationMs: number; reason: 'stopped' | 'duration' | 'size' | 'error'; error?: string }
 export interface BrowserDiagnostic { at: number; kind: 'console' | 'exception' | 'network'; level: string; text: string; url?: string }
 export interface BrowserHistoryEntry { at: number; action: string; ok: boolean; durationMs: number; error?: string }
 export interface BrowserDiagnostics { entries: BrowserDiagnostic[]; dropped: number; history: BrowserHistoryEntry[] }
@@ -55,15 +58,24 @@ export function browserPresetSize(preset: BrowserPreset, orientation?: 'portrait
   return orientation === 'portrait' ? { width: short, height: long } : { width: long, height: short };
 }
 export interface BrowserRpcMethods {
-  /** Only the owner can grant this; enabled hosts must explicitly consent to agent control. */
+  /**
+   * Only the owner can grant this. An enabled host consents to agent control,
+   * to sharing with paired devices (emote), or both; agents reach it only with
+   * llowAgentControl.
+   */
   'browser.host': { params: { threadId: string; enabled: boolean; allowAgentControl?: boolean; remote?: boolean }; result: { ok: true } };
-  'browser.remoteFrame': { params: { threadId: string }; result: RemoteBrowserFrame };
+  'browser.remoteFrame': { params: { threadId: string } & RemoteFrameOptions; result: RemoteBrowserFrame };
+  /** An owner desktop that shares its browser announces it can open a conversation's tab on request. */
+  'browser.remoteReady': { params: { enabled: boolean }; result: { ok: true } };
+  /** A viewer asks the sharing desktop to open this conversation and a browser tab. */
+  'browser.remoteOpen': { params: { threadId: string }; result: { ok: true } };
   'browser.remoteInput': { params: { threadId: string; frameId: string; input: RemoteBrowserInput }; result: { ok: true } };
   'browser.command': { params: { threadId: string; tabId?: string; action: BrowserAction }; result: BrowserReply };
   'browser.complete': { params: { requestId: string; result?: BrowserReply; error?: string }; result: { ok: true } };
 }
 export interface BrowserRpcEvents {
   'browser.requested': { threadId: string; requestId: string; tabId?: string; action: BrowserAction };
+  'browser.remoteOpenRequested': { threadId: string };
 }
 
 /** Shared by the real core, fake transport and desktop before executing input. */
@@ -75,7 +87,8 @@ export function browserActionError(action: BrowserAction): string | null {
     case 'preset': return Object.hasOwn(BROWSER_PRESETS, action.preset) && (action.orientation === undefined || ['portrait', 'landscape'].includes(action.orientation)) ? null : 'unknown browser preset or orientation';
     case 'appearance': return ['light', 'dark', 'system'].includes(action.colorScheme) ? null : 'appearance must be light, dark or system';
     case 'recording-start': return action.indicators === undefined || typeof action.indicators === 'boolean' ? null : 'recording indicators must be a boolean';
-    case 'recording-stop': case 'remote-frame': return null;
+    case 'recording-stop': return null;
+    case 'remote-frame': return remoteFrameOptionsError(action);
     case 'remote-input': return text(action.frameId, 80) ? remoteBrowserInputError(action.input) : 'remote input needs a frame id';
     case 'recording-discard': case 'recording-read':
       if (!text(action.recordingId, 80) || !/^[a-zA-Z0-9-]+$/.test(action.recordingId)) return 'recordingId must come from recording-stop';

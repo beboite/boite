@@ -83,3 +83,31 @@ test('remote keys waiting for page validation cannot cross a consent or active-t
   await vi.waitFor(() => expect(completed.get('allowed')?.result?.value).toEqual({ ok: true }));
   expect(protocol.mock.calls.map(call => call[1])).toEqual(['Runtime.evaluate', 'Input.dispatchKeyEvent', 'Input.dispatchKeyEvent']);
 });
+
+test('sharing alone hosts the browser for viewers but not for the agent, and scales frames to the viewer', async () => {
+  vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
+  writeExperiments(['remote-browser']);
+  let requested: (request: RpcEvents['browser.requested']) => void = () => {};
+  const completed = new Map<string, RpcParams<'browser.complete'>>();
+  const client = {
+    call: vi.fn(async (method: string, params: unknown) => {
+      if (method === 'browser.complete') { const reply = params as RpcParams<'browser.complete'>; completed.set(reply.requestId, reply); }
+      return {};
+    }),
+    on: vi.fn((_name: string, callback: typeof requested) => { requested = callback; return () => {}; }),
+  };
+  const store = { client, owner: true, machineId: 'test', openThread: { id: 'remote-thread' }, threadKey: (id: string) => id } as unknown as Store;
+  const panel = rightPanel.for('remote-thread'), surface = panel.open('browser', 'https://example.test');
+  const page = { width: 1000, height: 700, title: 'Fixture', href: 'https://example.test/', origin: 1, dpr: 2, left: 0, top: 350 };
+  const protocol = vi.mocked(browserBridge.protocol!);
+  protocol.mockImplementation(async (_id, method) => method === 'Page.captureScreenshot' ? { data: '/9j/2Q==' } : { result: { value: page } });
+  stop = hostBrowser(store, 'remote-thread');
+  expect(client.call).toHaveBeenCalledWith('browser.host', { threadId: 'remote-thread', enabled: true, allowAgentControl: false, remote: true });
+  requested({ threadId: 'remote-thread', requestId: 'agent', action: { kind: 'snapshot' } });
+  await vi.waitFor(() => expect(completed.get('agent')?.error).toContain('agent browser control is off'));
+  requested({ threadId: 'remote-thread', requestId: 'frame', action: { kind: 'remote-frame', maxWidth: 800, quality: 40 } });
+  await vi.waitFor(() => expect(completed.get('frame')?.result?.frame?.url).toBe('https://example.test/'));
+  const shot = protocol.mock.calls.find(call => call[1] === 'Page.captureScreenshot')![2];
+  expect(shot).toMatchObject({ quality: 40, clip: { x: 0, y: 350, width: 1000, height: 700, scale: 0.4 } });
+  expect(panel.active?.id).toBe(surface.id);
+});
