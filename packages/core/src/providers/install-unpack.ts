@@ -1,5 +1,5 @@
-import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, renameSync, writeSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { chmodSync, closeSync, constants, existsSync, lstatSync, mkdirSync, openSync, renameSync, writeSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { ProviderInstall } from '@boite/contracts';
 import { currentOs } from '../paths.ts';
 import { refused } from '../errors.ts';
@@ -7,6 +7,28 @@ import { refused } from '../errors.ts';
 /** Compressed bytes handed to the unzip at once, and how long it may hold the thread before yielding. */
 const EXTRACT_SLICE_BYTES = 16 * 1024;
 const EXTRACT_YIELD_MS = 10;
+
+/**
+ * True when any existing component between `root` and `target` is a symlink.
+ * `root` itself is the caller's trusted directory and is not inspected. A
+ * missing component stops the walk: nothing further down can have been planted.
+ */
+export function reachesThroughLink(root: string, target: string): boolean {
+  const from = resolve(root);
+  const rel = relative(from, resolve(target));
+  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return true;
+  let cursor = from;
+  for (const part of rel.split(sep)) {
+    if (part.length === 0) continue;
+    cursor = join(cursor, part);
+    try {
+      if (lstatSync(cursor).isSymbolicLink()) return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
 
 /** A zip member may not climb out of the directory it is unpacked into. */
 export function safeEntryPath(name: string): string | null {
@@ -28,9 +50,22 @@ export async function extractRelease(
   signal: AbortSignal,
   part: string,
   releaseDir: string,
+  root: string,
 ): Promise<void> {
+  // `mkdir` follows a symlink ancestor such as `releases` or the provider
+  // directory and would unpack outside `root`. The link itself is the refusal.
+  if (reachesThroughLink(root, releaseDir)) throw refused('the release directory is a symlink');
   const wanted = new Map(install.files.map((file) => [file.path.split('\\').join('/'), file]));
-  mkdirSync(releaseDir, { recursive: true });
+  try {
+    mkdirSync(releaseDir, { recursive: true });
+  } catch (error) {
+    // A symlink to an existing directory can make mkdir fail with EEXIST
+    // after it has already followed the link. The lstat below still refuses it.
+    if (!existsSync(releaseDir)) throw error;
+  }
+  // `mkdir` follows a symlink to a directory. A release name planted as a
+  // link in the data directory would unpack outside the provider tree.
+  if (lstatSync(releaseDir).isSymbolicLink()) throw refused('the release directory is a symlink');
   if (install.format === 'binary') {
     if (signal.aborted) throw signal.reason;
     const file = install.files[0];
@@ -63,7 +98,17 @@ export async function extractRelease(
 
     const target = join(releaseDir, safe);
     mkdirSync(dirname(target), { recursive: true });
-    const handle = openSync(target, 'w');
+    if (lstatSync(dirname(target)).isSymbolicLink() || (existsSync(target) && lstatSync(target).isSymbolicLink())) {
+      failure = refused(`refusing to unpack ${safe} through a symlink`, { entry: file.name });
+      return;
+    }
+    let handle: number;
+    try {
+      handle = openSync(target, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0), 0o600);
+    } catch (error) {
+      failure = error instanceof Error ? error : refused(String(error), { entry: file.name });
+      return;
+    }
     open.set(safe, handle);
     file.ondata = (error, chunk, final): void => {
       if (error !== null && error !== undefined) {

@@ -233,8 +233,9 @@ export class AcpSession {
     } catch (error) {
       if (turn.isStopped) {
         turn.stopNow();
+      } else if (error instanceof LoadRefused && error.lost) {
+        turn.loseSession(error.message);
       } else if (error instanceof LoadRefused) {
-        turn.sessionLost = error.lost;
         turn.fail(error.message);
       } else {
         // An agent that exits while it starts takes the connection with it,

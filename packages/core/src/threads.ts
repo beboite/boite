@@ -476,12 +476,14 @@ export class ThreadStore {
     const project = thread?.projectId ? this.core.journal.getProject(thread.projectId) : null;
     if (!thread || !project || repositoryOf(thread.cwd) !== proof.checkoutRepository || repositoryOf(project.path) !== proof.checkoutRepository) return null;
     if (!thread || thread.updatedAt !== expected.updatedAt || thread.cwd !== expected.cwd || thread.branch !== proof.branch || thread.projectId !== expected.projectId || state.generation !== generation || state.dismissed?.includes(proof.url) || !this.core.mergedPrArchive.eligible(thread)) return null;
-    return this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
+    const archivedThread = this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
       this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, binding: proof, reason: { type: 'pr-merged', number: proof.number, url: proof.url, archivedAt: Date.now() } });
       const saved = this.save({ ...thread, archived: true }, 'thread.archived');
       if (thread.projectId !== null) this.core.projects.announce(thread.projectId);
       return saved;
     })());
+    if (archivedThread) this.core.fileTickets.forgetUnder(thread.cwd);
+    return archivedThread;
   }
 
   archive(threadId: ThreadId, archived: boolean): ThreadSummary {
@@ -504,6 +506,7 @@ export class ThreadStore {
       // Nobody answers a card on a thread put away, and no turn should start from one.
       this.cards.clearQuestionsOf(threadId, true);
       this.deferred.deferredAnswers.delete(threadId);
+      this.deferred.consumed.delete(threadId);
       this.deferred.pendingWakes.delete(threadId);
       void this.core.terminals.close(threadTerminalId(threadId));
     }
@@ -520,6 +523,7 @@ export class ThreadStore {
     })());
     // A removal waits for the same stops itself before it hides the family.
     if (archived && !this.removing.has(threadId)) void this.endArchivedWork(threadId);
+    if (archived) this.core.fileTickets.forgetUnder(thread.cwd);
     return saved;
   }
 

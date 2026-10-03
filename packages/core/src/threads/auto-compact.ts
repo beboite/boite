@@ -110,7 +110,7 @@ export class AutoCompaction {
    * iteration is lost or pauses its owner.
    */
   private expected(threadId: ThreadId): boolean {
-    if (this.threads.deferred.pendingWakes.has(threadId) || this.threads.deferred.deferredAnswers.has(threadId)) return true;
+    if (this.threads.deferred.pendingWakes.has(threadId) || this.threads.deferred.deferredAnswers.has(threadId) || this.threads.deferred.consumed.has(threadId)) return true;
     const activity = this.core.activity.get(threadId);
     if (activity.goal?.status === 'active' || activity.loop?.status === 'active') return true;
     try {
