@@ -1329,12 +1329,6 @@ export const strings = {
     binary: 'Nothing here reads as text.'
   },
 
-  pullRequests: {
-    title: 'Conversation pull requests', hint: 'Linked PRs are shown in dependency order. Linking does not change anything on GitHub.',
-    refresh: 'Refresh', empty: 'No pull requests linked yet.', url: 'Pull request URL', link: 'Link PR', unlink: 'Unlink PR #{number}',
-    dependsOn: 'Depends on #{number}', stale: 'Could not refresh. Showing the last known state.',
-    OPEN: 'Open', CLOSED: 'Closed', MERGED: 'Merged', draft: 'Draft',
-  },
   browserTools: {
     title: 'Browser testing tools', desktop: 'Desktop', laptop: 'Laptop', portrait: 'Portrait', landscape: 'Landscape',
     system: 'Follow system appearance', light: 'Light page', dark: 'Dark page', diagnostics: 'Page diagnostics and actions',
