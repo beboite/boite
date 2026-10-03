@@ -6,7 +6,7 @@ mod tests {
 
     #[test]
     fn shell_commands_are_granted_to_the_main_ui_only() {
-        let mut context: tauri::Context<tauri::test::MockRuntime> = tauri::generate_context!();
+        let mut context: tauri::Context<tauri::test::MockRuntime> = crate::shell_context();
         let authority = context.runtime_authority_mut();
         let handlers = include_str!("lib.rs").split("tauri::generate_handler![").nth(1).unwrap().split("])").next().unwrap();
         for handler in handlers.split(',').map(str::trim).filter(|s| !s.is_empty()) {
@@ -20,7 +20,7 @@ mod tests {
 
     #[test]
     fn quota_popup_can_connect_and_listen_without_browser_control() {
-        let mut context: tauri::Context<tauri::test::MockRuntime> = tauri::generate_context!();
+        let mut context: tauri::Context<tauri::test::MockRuntime> = crate::shell_context();
         let authority = context.runtime_authority_mut();
         for command in ["core_endpoint", "quota_window", "plugin:event|listen", "plugin:event|unlisten"] {
             assert!(authority.resolve_access(command, "quotas", "quotas", &Origin::Local).is_some(), "quota popup cannot invoke {command}");
