@@ -1,9 +1,9 @@
 import type { ThreadId } from '@boite/contracts';
 import { DIFF_MAX_BYTES } from '@boite/contracts';
+import { constants, existsSync } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
-import { open } from 'node:fs/promises';
+import { lstat, open, readlink } from 'node:fs/promises';
 import type { Core } from '../core.ts';
-import { existsSync } from 'node:fs';
 import { folderGone, messageOf, refused } from '../errors.ts';
 
 /**
@@ -26,11 +26,12 @@ export const GIT_READ_TIMEOUT_MS = 30_000;
  * A git that only reads. `GIT_OPTIONAL_LOCKS=0` keeps `git status` from
  * refreshing the index under `index.lock`, which made an agent's own
  * `git add` or `git commit` in the same checkout fail; it reaches any git
- * that git starts itself, too.
+ * that git starts itself, too. `core.fsmonitor=` on the command line wins
+ * over the user's gitconfig, so a monitor hook there cannot run during a read.
  */
 function spawnRead(core: Core, threadId: ThreadId, cwd: string, args: string[], needs: string) {
   try {
-    return core.procs.spawn(threadId, 'git', args, { cwd, env: { GIT_OPTIONAL_LOCKS: '0' } });
+    return core.procs.spawn(threadId, 'git', ['-c', 'core.fsmonitor=', ...args], { cwd, env: { GIT_OPTIONAL_LOCKS: '0' } });
   } catch (error) {
     // A spawn in a folder that is gone fails with the same ENOENT as a git that is not installed.
     if (!existsSync(cwd)) throw folderGone(cwd, { threadId, field: 'cwd' });
@@ -104,17 +105,29 @@ interface DiffSide {
 }
 
 export async function readTreeSide(path: string): Promise<DiffSide> {
+  let info;
+  try { info = await lstat(path); } catch { return { data: null, tooBig: false }; }
+  // A symlink's diff is the link text. Opening it would follow a swap to a
+  // file outside the worktree and put those bytes in the panel.
+  if (info.isSymbolicLink()) {
+    try {
+      const link = Buffer.from(await readlink(path));
+      return { data: link, tooBig: link.length > SIDE_CEILING_BYTES };
+    } catch { return { data: null, tooBig: false }; }
+  }
+  if (!info.isFile()) return { data: null, tooBig: false };
   let current: Uint8Array | null = null;
   let newSideTooBig = false;
   // Size before read, on the handle rather than the path. A multi-gigabyte
   // working-tree file used to be loaded whole and only cut to DIFF_MAX_BYTES
   // afterwards, so one `git.diff` on a big log could take the core down; and a
   // path replaced between a `stat` and a `readFile` would have escaped the
-  // ceiling the stat approved. Only what the diff can show is read, from the
+  // ceiling the stat approved. `O_NOFOLLOW` refuses a name swapped for a
+  // symlink after that check. Only what the diff can show is read, from the
   // one file the size was taken from.
   let handle: FileHandle | null = null;
   try {
-    handle = await open(path, 'r');
+    handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     const size = (await handle.stat()).size;
     if (size > SIDE_CEILING_BYTES) {
       newSideTooBig = true;

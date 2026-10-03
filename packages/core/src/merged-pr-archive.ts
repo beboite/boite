@@ -60,7 +60,7 @@ export class MergedPrArchive {
     if (core.threads.sideQuestions.active(thread.id) || core.threads.runner.handles.has(thread.id) || core.threads.runner.steering.has(thread.id) || core.threads.agentState.background.get(thread.id)?.length || core.threads.moves.pendingOf(thread.id)) return false;
     if (busy.has(thread.id)) return false;
     if (core.procs.liveCount(thread.id) || core.procs.liveCount(`terminal:${thread.id}`) || core.threads.cards.listPermissions(thread.id).length || [...core.threads.cards.questions.values()].some(entry => entry.request.threadId === thread.id) || [...core.threads.cards.asyncCards.values()].some(entry => entry.threadId === thread.id)) return false;
-    if (core.threads.deferred.deferredAnswers.get(thread.id)?.length || core.threads.deferred.pendingWakes.has(thread.id)) return false;
+    if (core.threads.deferred.deferredAnswers.get(thread.id)?.length || core.threads.deferred.consumed.has(thread.id) || core.threads.deferred.pendingWakes.has(thread.id)) return false;
     const activity = core.activity.get(thread.id);
     if ((activity.goal && activity.goal.status !== 'complete') || (activity.loop && activity.loop.status !== 'complete') || core.workflows.active(thread.id)) return false;
     if (core.journal.db.query("SELECT 1 FROM workflow_runs WHERE root_id = ? AND status IN ('done', 'failed') AND json_extract(data, '$.delivered') IS NOT 1 LIMIT 1").get(thread.id)) return false;

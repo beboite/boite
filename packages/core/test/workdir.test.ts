@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { FILE_MAX_BYTES, FILE_ROUTE, FILE_TICKET_TTL_MS } from '@boite/contracts';
-import type { CoreClient } from '../src/client.ts';
+import { connect, type CoreClient } from '../src/client.ts';
 import { languageOf, mediaOf, writeLandsInside } from '../src/workdir.ts';
 import { echoThread, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -192,6 +192,35 @@ describe('files.read', () => {
       rmSync(outside, { recursive: true, force: true });
     }
   });
+
+  test('revoking a session drops every ticket, and archiving drops the ones under that directory', async () => {
+    writeFileSync(join(harness.dataDir, 'shot.png'), picture());
+    const first = await client.call('files.read', { threadId, path: 'shot.png' });
+    if (first.kind === 'text') throw new Error('expected a file ticket');
+    const { grant } = await client.call('pairing.grant', {});
+    const phone = await connect(harness.url, '', { grant, client: { name: 'phone', version: 'test' } });
+    try {
+      const sessions = await client.call('sessions.list', {});
+      const paired = sessions.find((session) => session.client.name === 'phone');
+      if (paired === undefined) throw new Error('paired phone missing');
+      await client.call('sessions.revoke', { sessionId: paired.id });
+    } finally {
+      phone.close();
+    }
+    expect((await fetch(`${harness.url}${first.url}`)).status).toBe(404);
+
+    const second = await client.call('files.read', { threadId, path: 'shot.png' });
+    if (second.kind === 'text') throw new Error('expected a file ticket');
+    await client.call('threads.archive', { threadId });
+    expect((await fetch(`${harness.url}${second.url}`)).status).toBe(404);
+  });
+
+  test('a file link inside the working directory reads the file it names', async () => {
+    writeFileSync(join(harness.dataDir, 'real.txt'), 'target text\n');
+    if (!linked(join(harness.dataDir, 'real.txt'), join(harness.dataDir, 'link.txt'))) return;
+    const content = await client.call('files.read', { threadId, path: 'link.txt' });
+    expect(content).toMatchObject({ kind: 'text', path: 'link.txt', text: 'target text\n' });
+  });
 });
 
 describe('files.write', () => {
@@ -257,6 +286,15 @@ describe('files.write', () => {
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
+  });
+
+  test('a directory junction inside the working directory is where the new file lands', async () => {
+    const real = join(harness.dataDir, 'realdir');
+    mkdirSync(real);
+    symlinkSync(real, join(harness.dataDir, 'junction'), 'junction');
+    const written = await client.call('files.write', { threadId, path: 'junction/note.txt', text: 'landed\n' });
+    expect(written.bytes).toBe(7);
+    expect(readFileSync(join(real, 'note.txt'), 'utf8')).toBe('landed\n');
   });
 });
 

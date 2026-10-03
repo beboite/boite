@@ -1,4 +1,4 @@
-import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, renameSync, writeSync } from 'node:fs';
+import { chmodSync, closeSync, constants, existsSync, lstatSync, mkdirSync, openSync, renameSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { ProviderInstall } from '@boite/contracts';
 import { currentOs } from '../paths.ts';
@@ -30,7 +30,16 @@ export async function extractRelease(
   releaseDir: string,
 ): Promise<void> {
   const wanted = new Map(install.files.map((file) => [file.path.split('\\').join('/'), file]));
-  mkdirSync(releaseDir, { recursive: true });
+  try {
+    mkdirSync(releaseDir, { recursive: true });
+  } catch (error) {
+    // A symlink to an existing directory can make mkdir fail with EEXIST
+    // after it has already followed the link. The lstat below still refuses it.
+    if (!existsSync(releaseDir)) throw error;
+  }
+  // `mkdir` follows a symlink to a directory. A release name planted as a
+  // link in the data directory would unpack outside the provider tree.
+  if (lstatSync(releaseDir).isSymbolicLink()) throw refused('the release directory is a symlink');
   if (install.format === 'binary') {
     if (signal.aborted) throw signal.reason;
     const file = install.files[0];
@@ -63,7 +72,17 @@ export async function extractRelease(
 
     const target = join(releaseDir, safe);
     mkdirSync(dirname(target), { recursive: true });
-    const handle = openSync(target, 'w');
+    if (lstatSync(dirname(target)).isSymbolicLink() || (existsSync(target) && lstatSync(target).isSymbolicLink())) {
+      failure = refused(`refusing to unpack ${safe} through a symlink`, { entry: file.name });
+      return;
+    }
+    let handle: number;
+    try {
+      handle = openSync(target, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0), 0o600);
+    } catch (error) {
+      failure = error instanceof Error ? error : refused(String(error), { entry: file.name });
+      return;
+    }
     open.set(safe, handle);
     file.ondata = (error, chunk, final): void => {
       if (error !== null && error !== undefined) {

@@ -1,4 +1,4 @@
-import { readdirSync, realpathSync, rmSync, statfsSync } from 'node:fs';
+import { lstatSync, readdirSync, realpathSync, rmSync, statfsSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
 import type { ProviderId, ProviderInstall, ProviderInstallState } from '@boite/contracts';
 import { newId } from '../ids.ts';
@@ -193,11 +193,27 @@ export class InstallManager {
       try { rmSync(path, { recursive: true, force: true }); }
       catch (error) { this.#log('warn', `${path} could not be removed yet (${messageOf(error)}); the next prune tries again`); }
     };
-    for (const name of this.#list(join(root, 'releases'))) {
-      const dir = join(root, 'releases', name);
-      let target = dir;
-      try { target = realpathSync(dir); } catch { /* compared as it is */ }
-      if (!same(target, current)) remove(dir);
+    const releases = join(root, 'releases');
+    let releasesInfo: ReturnType<typeof lstatSync> | null = null;
+    try { releasesInfo = lstatSync(releases); } catch { /* nothing to prune */ }
+    // `readdir` of a symlink lists the target. Removing `releases/<name>`
+    // would then delete that target's children. Drop the link itself.
+    if (releasesInfo?.isSymbolicLink()) {
+      this.#log('warn', `${releases} is a symlink; prune removes the link and does not follow it`);
+      remove(releases);
+    } else if (releasesInfo !== null) {
+      for (const name of this.#list(releases)) {
+        const dir = join(releases, name);
+        let info: ReturnType<typeof lstatSync> | null = null;
+        try { info = lstatSync(dir); } catch { continue; }
+        if (info.isSymbolicLink()) {
+          remove(dir);
+          continue;
+        }
+        let target = dir;
+        try { target = realpathSync(dir); } catch { /* compared as it is */ }
+        if (!same(target, current)) remove(dir);
+      }
     }
     if (keepDownload === undefined) return;
     for (const name of this.#list(join(root, 'downloads'))) {

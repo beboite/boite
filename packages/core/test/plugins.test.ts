@@ -6,6 +6,8 @@ import { PLUGIN_MANIFEST_FILE, type Account } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
 import { RECOMMENDED, parsePluginPool, verifyPluginDownload } from '../src/plugins.ts';
+import { fetchManifest } from '../src/plugins/source.ts';
+import type { SpawnedProcess } from '../src/procs.ts';
 import { platformKey } from '../src/plugins/manifest.ts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 
@@ -433,5 +435,39 @@ describe('plugins from a git URL', () => {
       await expect(device.call('plugins.install', { id: 'kebacc-switcher' })).rejects.toThrow('plugins.install is for the owner only');
       await expect(device.call('plugins.list', {})).rejects.toThrow('plugins.list is for the owner only');
     } finally { device.close(); }
+  });
+});
+
+describe('plugin git ignores the caller gitconfig', () => {
+  test('every git is pinned to https, with ext and the inherited config turned off', async () => {
+    harness = await startTestCore();
+    const seen: { args: string[]; env: Record<string, string | undefined> }[] = [];
+    const empty = (): ReadableStream<Uint8Array> => new ReadableStream({ start(controller) { controller.close(); } });
+    harness.core.procs.spawn = (threadId, command, args, opts) => {
+      seen.push({ args: [...args], env: { ...(opts?.env ?? {}) } });
+      return {
+        record: { pid: 0, threadId, command, args } as SpawnedProcess['record'],
+        proc: { stdout: empty(), stderr: empty(), pid: 0 } as SpawnedProcess['proc'],
+        exited: Promise.resolve(args.includes('init') ? 0 : 1),
+      };
+    };
+    const emptyConfig = process.platform === 'win32' ? 'NUL' : '/dev/null';
+    const assertPinned = (allowFile: boolean): void => {
+      expect(seen.length).toBeGreaterThan(0);
+      for (const call of seen) {
+        expect(call.args).toContain('protocol.ext.allow=never');
+        expect(call.args).toContain(allowFile ? 'protocol.file.allow=always' : 'protocol.file.allow=never');
+        expect(call.args).toContain('core.fsmonitor=');
+        expect(call.env.GIT_CONFIG_COUNT).toBe('0');
+        expect(call.env.GIT_CONFIG_NOSYSTEM).toBe('1');
+        expect(call.env.GIT_CONFIG_GLOBAL).toBe(emptyConfig);
+        expect(call.env.GIT_CONFIG_SYSTEM).toBe(emptyConfig);
+      }
+    };
+    await expect(fetchManifest(harness.core, 'https://example.invalid/plugin.git', 'HEAD')).rejects.toThrow(/could not fetch/);
+    assertPinned(false);
+    seen.length = 0;
+    await expect(fetchManifest(harness.core, harness.dataDir, 'HEAD', { allowLocal: true })).rejects.toThrow(/could not fetch/);
+    assertPinned(true);
   });
 });
