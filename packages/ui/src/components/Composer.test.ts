@@ -1236,22 +1236,18 @@ test.for([true, false])('an image pasted during a pending send preserves only un
   }
 });
 
-test('a file read uses the original provider even if the user switches threads', async () => {
+test('an image the provider cannot read is refused before it is read, whatever thread opens next', async () => {
   window.localStorage.setItem(PREFS_STORAGE_KEY, JSON.stringify({ ...defaultPrefs(), providerId: 'opencode', accountId: 'a-opencode', model: 'default' }));
   await mountOnFake();
   store.startDraft();
   await waitFor(() => store.draft !== null && store.defaultChoice()?.providerId === 'opencode');
-  const original = FileReader.prototype.readAsDataURL;
-  let release!: () => void;
-  vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader, blob: Blob) {
-    release = () => original.call(this, blob);
-  });
-  // A GIF is read as it is, so the read is the wait (a PNG is refused before it).
+  const read = vi.spyOn(FileReader.prototype, 'readAsDataURL');
+  // The image is refused before it is read: nothing is left to land in the next thread.
   paste(new File([Uint8Array.from(atob(PIXEL), (character) => character.charCodeAt(0))], 'loop.gif', { type: 'image/gif' }));
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace');
-  release();
   await waitFor(() => store.error !== null);
+  expect(read).not.toHaveBeenCalled();
   expect(store.error).toBe('OpenCode takes no images: send the prompt without them.');
   expect(Object.values(store.composerStates).every(state => state.attachments.length === 0)).toBe(true);
 });

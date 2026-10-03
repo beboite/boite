@@ -56,10 +56,6 @@ export async function gatherAttachments(files: File[], holder: Holder): Promise<
     }
     try {
       const attachment = await readAttachmentFile(ready);
-      if (attachment.kind === 'image' && holder.noImages !== null) {
-        refuse(fill(strings.composer.attachNoImages, { provider: holder.noImages.provider }));
-        continue;
-      }
       const result = acceptAttachments(holder.held(), [attachment]);
       if (result.refused !== null) refuse(result.refused);
       else holder.add(attachment);
