@@ -21,9 +21,10 @@ import type { StoreContext } from './context';
  * even when a reload lost the answer to an earlier attempt. It keeps the model,
  * effort and speed it was written with, and the reason the core refused it,
  * which holds it and the prompts behind it until the user sends it again,
- * edits it or removes it.
+ * edits it or removes it. `sent` marks one that went out at least once: only
+ * such a prompt may already have been taken by the core.
  */
-export type OutboxRequest = { id: string; choice: Choice | null; queuedAt: number; failed?: string };
+export type OutboxRequest = { id: string; choice: Choice | null; queuedAt: number; failed?: string; sent?: true };
 
 /** A prompt waiting behind a running turn or for its machine, with what it was written with. */
 export type QueuedPrompt = { text: string; attachments: Attachment[]; previewReferences?: PreviewReference[]; afterBoundary?: string; request?: OutboxRequest };
@@ -62,6 +63,8 @@ export class Composer {
   /** Only this client's accepted input asks the timeline to reveal a prompt. */
   promptFocus = $state<{ threadId: string; turnId: string; after: string | null } | null>(null);
   private steerRequests = new Map<string, { content: string; id: string; generation: number }>();
+  /** Outbox prompts already asked about while their thread ran, on this connection. */
+  private probed = new Set<string>();
 
   previewUndo = new Map<string, { text: string; references: PreviewReference[] }[]>();
   composerInsertions = new Map<string, (start: number, end: number, text: string) => void>();
@@ -74,16 +77,23 @@ export class Composer {
     return $effect.root(() => {
       $effect(() => {
         const s = this.ctx.store;
-        if (s.connection !== 'ready') return;
+        if (s.connection !== 'ready') { this.probed.clear(); return; }
         for (const [threadId, state] of Object.entries(this.composerStates)) {
           // A refused outbox prompt holds the ones behind it: they were written after it.
           if (!state.queued.length || state.sending || state.paused || state.queued[0]!.request?.failed !== undefined) continue;
           const thread = s.openThread?.id === threadId ? s.openThread : s.threads.find(row => row.id === threadId);
           if (!thread || thread.archived || ['queued', 'waiting'].includes(thread.status)) continue;
           if (thread.status === 'running') {
-            const boundary = this.inputBoundaries[threadId];
             // An outbox prompt is a turn of its own, started once the running one ends.
-            if (!boundary || state.queued[0]!.request || state.queued[0]?.afterBoundary === boundary.boundary || this.blocked(threadId) || isActivityCommand(state.queued[0]!.text)) continue;
+            // It is asked once per connection all the same: after a reload the running
+            // turn may be the one it started, and the core answers its id with that turn.
+            const head = state.queued[0]!.request;
+            if (head) {
+              if (head.sent && !this.probed.has(head.id)) { this.probed.add(head.id); untrack(() => void drainQueue(s, threadId, state)); }
+              continue;
+            }
+            const boundary = this.inputBoundaries[threadId];
+            if (!boundary ||state.queued[0]?.afterBoundary === boundary.boundary || this.blocked(threadId) || isActivityCommand(state.queued[0]!.text)) continue;
             untrack(() => {
               for (const entry of state.queued) entry.afterBoundary = boundary.boundary;
               void drainQueue(s, threadId, state, boundary.turnId);
@@ -350,7 +360,7 @@ export class Composer {
     this.composerStates[threadId] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
     const state = this.composerStates[threadId]!;
     const queued: QueuedPrompt = outbox
-      ? { ...entry, request: { id: outbox.id ?? secureId(), choice: outbox.choice ? { ...outbox.choice } : null, queuedAt: Date.now() } }
+      ? { ...entry, request: { id: outbox.id ?? secureId(), choice: outbox.choice ? { ...outbox.choice } : null, queuedAt: Date.now(), ...(outbox.id ? { sent: true as const } : {}) } }
       : entry;
     if (outbox?.head) state.queued.unshift(queued); else state.queued.push(queued);
     if (outbox) { this.ctx.drafts.persist(threadId); void this.ctx.drafts.flush(); }
@@ -366,6 +376,25 @@ export class Composer {
     state.paused = false;
   }
 
+  /**
+   * Takes a pending prompt out of the queue to put it back in the box. An outbox
+   * prompt lends its request id to the send that follows, if its words are
+   * unchanged: the core may already have taken it, and answers that id with the
+   * turn it started rather than starting a second one.
+   */
+  restoreQueued(threadId: string, at: number): QueuedPrompt | undefined {
+    const state = this.composerStates[threadId];
+    if (!state || state.sending) return undefined;
+    const [entry] = state.queued.splice(at, 1);
+    if (entry?.request) {
+      const s = this.ctx.store;
+      const thread = s.openThread?.id === threadId ? s.openThread : s.threads.find(row => row.id === threadId);
+      this.pendingSends.set(threadId, { id: entry.request.id, prompt: entry.text, attachments: [...entry.attachments],
+        previewReferences: $state.snapshot(entry.previewReferences ?? []), selectionVersion: thread?.selectionVersion ?? 0 });
+    }
+    return entry;
+  }
+
   /** Takes a pending prompt out of the queue, unless it is the one going out right now. */
   removeQueued(threadId: string, at: number): void {
     const state = this.composerStates[threadId];
@@ -375,6 +404,11 @@ export class Composer {
 
   /** One outbox prompt through the composer's own send path, under its request id and choice. */
   deliver(threadId: string, entry: QueuedPrompt & { request: OutboxRequest }): Promise<Delivery> {
+    const queued = this.composerStates[threadId]?.queued.find(item => item.request?.id === entry.request.id);
+    if (queued?.request && !queued.request.sent) {
+      queued.request = { ...queued.request, sent: true };
+      this.ctx.drafts.persist(threadId); void this.ctx.drafts.flush();
+    }
     return this.start(entry.text, threadId, entry.attachments, entry.previewReferences ?? [], entry.request);
   }
 

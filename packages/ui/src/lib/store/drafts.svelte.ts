@@ -348,13 +348,13 @@ function savedInput(input: Input, assetId: (bytes: string) => string) {
       ...(item.request ? { request: $state.snapshot(item.request) } : {}) })) };
 }
 
-/** An outbox prompt's request id, choice and refusal, or nothing for a stored value that is not one. */
+/** An outbox prompt's request id, choice, refusal and whether it went out, or nothing for a stored value that is not one. */
 function outboxRequest(value: unknown): OutboxRequest | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const raw = value as Partial<OutboxRequest>;
   if (typeof raw.id !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(raw.id)) return undefined;
   const choice = raw.choice && typeof raw.choice === 'object' && typeof raw.choice.providerId === 'string' && typeof raw.choice.accountId === 'string' ? raw.choice : null;
-  return { id: raw.id, choice, queuedAt: typeof raw.queuedAt === 'number' ? raw.queuedAt : 0, ...(typeof raw.failed === 'string' ? { failed: raw.failed } : {}) };
+  return { id: raw.id, choice, queuedAt: typeof raw.queuedAt === 'number' ? raw.queuedAt : 0, ...(typeof raw.failed === 'string' ? { failed: raw.failed } : {}), ...(raw.sent === true ? { sent: true as const } : {}) };
 }
 
 function references(value: unknown): PreviewReference[] {

@@ -12,10 +12,10 @@ const stores: Store[] = [];
 const clients: FakeClient[] = [];
 
 /** A Store on `machine` whose client records every start, connected only when asked. */
-async function machine(id: string, before?: (client: FakeClient) => Promise<void>) {
+async function machine(id: string, before?: (client: FakeClient) => Promise<void>, delayMs = 0) {
   const store = new Store();
   store.machineId = id;
-  const client = new FakeClient({ delayMs: 0 });
+  const client = new FakeClient({ delayMs });
   clients.push(client);
   if (before) { await client.connect(); await before(client); }
   const original = client.call.bind(client);
@@ -39,14 +39,14 @@ afterEach(() => {
 });
 
 /** Two prompts written while the machine was away, then the app closed. */
-async function writtenAway(threadId?: string) {
+async function writtenAway(threadId?: string, interrupted?: string) {
   const first = await machine('one');
   await first.connect();
   const thread = threadId ?? first.store.threads.find(row => row.status === 'idle')!.id;
   await first.store.open(thread);
   first.client.drop();
   expect(first.store.connection).not.toBe('ready');
-  first.store.queuePrompt(thread, { text: 'Written in the tunnel', attachments: [{ kind: 'file', mimeType: 'text/plain', name: 'note.txt', data: 'aGVsbG8=' }] }, { choice: null });
+  first.store.queuePrompt(thread, { text: 'Written in the tunnel', attachments: [{ kind: 'file', mimeType: 'text/plain', name: 'note.txt', data: 'aGVsbG8=' }] }, { choice: null, ...(interrupted ? { id: interrupted } : {}) });
   first.store.queuePrompt(thread, { text: 'And one more', attachments: [] }, { choice: null });
   const ids = first.store.composerStates[thread]!.queued.map(entry => entry.request!.id);
   expect(new Set(ids).size).toBe(2);
@@ -138,4 +138,42 @@ test('a refused outbox prompt stays with its reason and is not sent again until 
   const prompts = await userPrompts(next.client, thread);
   expect(prompts.filter(parts => parts.includes('Written in the tunnel'))).toHaveLength(1);
   expect(prompts.filter(parts => parts.includes('And one more'))).toHaveLength(1);
+});
+
+test('an outbox prompt the machine took is answered while its turn still runs', async () => {
+  // A send whose answer never came joins the outbox under the id it went out with.
+  const { thread, ids } = await writtenAway(undefined, 'interrupted-send');
+  // Slow enough that the turn it started is still running when the phone is back.
+  const next = await machine('one', async client => {
+    await client.call('turns.start', { threadId: thread, prompt: 'Written in the tunnel', clientRequestId: ids[0]!,
+      attachments: [{ kind: 'file', mimeType: 'text/plain', name: 'note.txt', data: 'aGVsbG8=' }] });
+  }, 150);
+  await next.connect();
+  await vi.waitFor(() => expect(next.store.composerStates[thread]?.queued.map(entry => entry.text)).toEqual(['And one more']), { timeout: 5000 });
+  expect(next.store.threads.find(row => row.id === thread)?.status).toBe('running');
+  expect(next.starts[0]!.clientRequestId).toBe(ids[0]);
+  await vi.waitFor(() => expect(next.store.composerStates[thread]?.queued).toHaveLength(0), { timeout: 10000 });
+  const prompts = await userPrompts(next.client, thread);
+  expect(prompts.filter(parts => parts.includes('Written in the tunnel'))).toHaveLength(1);
+  expect(prompts.filter(parts => parts.includes('And one more'))).toHaveLength(1);
+}, 15000);
+
+test('an outbox prompt put back in the box and sent unchanged keeps its request id', async () => {
+  const phone = await machine('one');
+  await phone.connect();
+  const thread = phone.store.threads.find(row => row.status === 'idle')!.id;
+  await phone.store.open(thread);
+  phone.client.drop();
+  phone.store.queuePrompt(thread, { text: 'Written in the tunnel', attachments: [] }, { choice: null });
+  const id = phone.store.composerStates[thread]!.queued[0]!.request!.id;
+  const entry = phone.store.restoreQueued(thread, 0)!;
+  expect(phone.store.composerStates[thread]!.queued).toHaveLength(0);
+  await phone.client.restore();
+  await vi.waitFor(() => expect(phone.store.connection).toBe('ready'));
+  // The core took it before the answer was lost.
+  await phone.client.call('turns.start', { threadId: thread, prompt: entry.text, clientRequestId: id });
+  await phone.client.settled();
+  expect(await phone.store.send(entry.text, thread)).toBe(true);
+  expect(phone.starts.map(start => start.clientRequestId)).toEqual([id, id]);
+  expect((await userPrompts(phone.client, thread)).filter(parts => parts.includes('Written in the tunnel'))).toHaveLength(1);
 });

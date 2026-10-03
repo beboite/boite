@@ -567,7 +567,7 @@
   function restoreQueued(at: number) {
     const state = composer;
     if (!state || state.sending || text.length > 0 || attachments.length > 0 || previewReferences.length > 0) return;
-    const entry = state.queued.splice(at, 1)[0];
+    const entry = store.restoreQueued(key, at);
     if (!entry) return;
     state.attachments = entry.attachments;
     recall = null;
