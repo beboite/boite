@@ -10,8 +10,7 @@ const BREAK = ' ';
  * to the words a reader would see.
  */
 export function notificationExcerpt(markdown: string, max = NOTIFICATION_TEXT_CHARS): string {
-  const plain = String(markdown ?? '')
-    .replace(/```[^\n]*\n([\s\S]*?)(```|$)/g, ' $1 ')
+  const plain = unfence(String(markdown ?? ''))
     // A paragraph, a heading or a list item ends where the next one starts.
     .replace(/\n\s*\n|\n(?=\s{0,3}(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>))/g, `${BREAK}\n`)
     .replace(/<[^>\n]+>/g, ' ')
@@ -32,6 +31,24 @@ export function notificationExcerpt(markdown: string, max = NOTIFICATION_TEXT_CH
   const space = cut.lastIndexOf(' ');
   // A single very long word is cut where it is rather than dropped whole.
   return `${(space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:.–-]+$/, '')}…`;
+}
+
+/**
+ * Code fences replaced by their content, an unclosed one running to the end.
+ * Scanned by hand: a regular expression for this backtracks on many fences.
+ */
+function unfence(text: string): string {
+  let out = '';
+  let at = 0;
+  for (;;) {
+    const open = text.indexOf('```', at);
+    const line = open < 0 ? -1 : text.indexOf('\n', open + 3);
+    if (line < 0) return out + text.slice(at);
+    const close = text.indexOf('```', line + 1);
+    const end = close < 0 ? text.length : close;
+    out += `${text.slice(at, open)} ${text.slice(line + 1, end)} `;
+    at = close < 0 ? text.length : close + 3;
+  }
 }
 
 /** What the agent last wrote in `messages`, read from the end: the reply a notification quotes. */

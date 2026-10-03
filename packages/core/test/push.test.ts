@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, setSystemTime, test } from 'bun:test';
-import { ATTENTION_LEASE_MS, type RpcEvents, type Turn, type TurnExecution } from '@boite/contracts';
+import { ATTENTION_LEASE_MS, notificationExcerpt, type RpcEvents, type Turn, type TurnExecution } from '@boite/contracts';
 import { createECDH, randomBytes } from 'node:crypto';
 import { connect } from '../src/client.ts';
 import { validateSubscription } from '../src/push.ts';
@@ -260,4 +260,12 @@ test('public HTTPS origin is validated, used for QR links and accepted by the so
   socket.close();
   await owner.call('settings.set', { publicUrl: null });
   expect(new URL((await owner.call('pairing.grant', {})).url).origin).toBe(harness.url);
+});
+
+test('a notification reads code fences as their content, in linear time on many fences', () => {
+  expect(notificationExcerpt('Done:\n```ts\nconst x = 1;\n```\nThen `y`.')).toBe('Done: const x = 1; Then y.');
+  expect(notificationExcerpt('Run ```sh\nbun test')).toBe('Run bun test');
+  const started = performance.now();
+  notificationExcerpt('```'.repeat(50_000));
+  expect(performance.now() - started).toBeLessThan(500);
 });

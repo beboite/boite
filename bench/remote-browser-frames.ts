@@ -52,7 +52,7 @@ try {
   await new Promise(r => ws.addEventListener('open', r));
   closers.push(() => ws.close());
   let id = 0; const waiting = new Map<number, (v: any) => void>();
-  ws.addEventListener('message', e => { const m = JSON.parse(String(e.data)); if (m.id) waiting.get(m.id)?.(m.result ?? m.error); });
+  ws.addEventListener('message', e => { const m = JSON.parse(String(e.data)); const done = typeof m.id === 'number' ? waiting.get(m.id) : undefined; if (typeof done === 'function') { waiting.delete(m.id); done(m.result ?? m.error); } });
   const send = (method: string, params: object = {}) => new Promise<any>(r => { const n = ++id; waiting.set(n, r); ws.send(JSON.stringify({ id: n, method, params })); });
   await send('Page.navigate', { url: 'data:text/html;charset=utf-8,' + encodeURIComponent(page) });
   await Bun.sleep(800);
