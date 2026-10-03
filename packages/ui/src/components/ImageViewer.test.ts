@@ -132,7 +132,8 @@ function shareSheet(result: () => Promise<void> = async () => {}) {
 
 test('Share hands an attachment to the system sheet straight from the tap', async () => {
   const share = shareSheet();
-  globalThis.fetch = vi.fn(async () => new Response(new Blob(['png'], { type: 'image/png' })));
+  // A text body: Node 20's Response calls stream() on a jsdom Blob, which jsdom lacks.
+  globalThis.fetch = vi.fn(async () => new Response('png', { headers: { 'content-type': 'image/png' } }));
   open([item('shot.png')]);
   // Read ahead while the picture shows, so the tap itself opens the sheet.
   await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
@@ -145,7 +146,7 @@ test('Share hands an attachment to the system sheet straight from the tap', asyn
 
 test('a file fetched too late for the tap is kept for the next one, and a dismissed sheet says nothing', async () => {
   const share = shareSheet(async () => { throw new DOMException('no gesture', 'NotAllowedError'); });
-  globalThis.fetch = vi.fn(async () => new Response(new Blob(['mp4'], { type: 'video/mp4' })));
+  globalThis.fetch = vi.fn(async () => new Response('mp4', { headers: { 'content-type': 'video/mp4' } }));
   open([item('clip', 'video', 'https://core.example/file/clip')]);
   // A remote file is not read ahead: it may be large.
   expect(fetch).not.toHaveBeenCalled();

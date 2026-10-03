@@ -55,9 +55,9 @@ test('sidebar shortcuts preserve the prompt and file edits, and toggle both pane
   await chord();
   await page.waitFor(`!document.querySelector('${id('file-dirty')}')`);
   expect(await page.evaluate(`document.querySelector('${id('sidebar-toggle')}').getAttribute('aria-expanded')`)).toBe('true');
-  // A read-only editor cannot save, so Ctrl+S still reaches the thread sidebar.
+  // A paired device reads the file without an editor, so Ctrl+S still reaches the thread sidebar.
   await page.evaluate(`__boiteTest.workspace.active.principal = 'session'`);
-  await page.waitFor(`document.querySelector('${id('file-text')}').readOnly`);
+  await page.waitFor(`document.querySelector('${id('file-lines')}') && !document.querySelector('${id('file-text')}')`);
   await chord();
   await page.waitFor(`document.querySelector('${id('sidebar-toggle')}').getAttribute('aria-expanded') === 'false'`);
   await chord();
