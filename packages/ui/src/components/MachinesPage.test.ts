@@ -97,6 +97,13 @@ test('sync stays on the list and the settings button edits the owning machine wi
   flushSync();
   expect(query<HTMLInputElement>('[data-machine-id="target"] [data-testid="machine-sync"]').checked).toBe(true);
   expect(workspace.active).toBe(source.store);
+  query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-settings-open"]').click();
+  flushSync();
+  source.store.showSettings('machines', 'updates');
+  flushSync();
+  expect(document.querySelector('[data-testid="machine-settings"]')).toBeNull();
+  expect(document.querySelector('#settings-updates')).not.toBeNull();
+  expect(source.store.openThread).toBe(thread);
 });
 
 test('offline and paired machines cannot be edited and a removed target never falls back to the active machine', async () => {

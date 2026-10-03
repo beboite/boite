@@ -22,6 +22,13 @@
   const settingsMachine = $derived(workspace.machines.find(machine => machine.id === settingsId && machine.store.owner));
   let source = $derived(workspace.machines.find(machine => machine.store === workspace.active) ?? null);
   const sync = workspace.settingsSync;
+  $effect(() => {
+    const section = workspace.active.settingsSection;
+    if (workspace.active.settingsTab === 'machines' && section) {
+      void section.request;
+      settingsId = null;
+    }
+  });
   const canSync = (machine: Machine): boolean => source !== null && source !== machine
     && source.store.owner && machine.store.owner && sync.canEnable(source, machine);
 

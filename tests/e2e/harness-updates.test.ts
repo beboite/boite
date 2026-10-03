@@ -54,6 +54,17 @@ test('agent updates stay in Machines and Update and Skip target their own machin
   await page.waitFor(`document.querySelector('${remote} ${id('setting-auto-update-harnesses')}').checked`);
   expect(await page.evaluate(`document.querySelector('${local} ${id('setting-auto-update-harnesses')}').checked`)).toBe(false);
 
+  const active = await page.evaluate('window.__boiteTest.workspace.active.machineId');
+  for (const navigation of [id('nav-app-update'), '[data-settings-section="updates"]']) {
+    await page.click('[data-settings-section="machines"]');
+    await page.click(`${id('machine-card')}[data-machine-id="http://builder.test"] ${id('machine-settings-open')}`);
+    await page.waitFor(`document.querySelector('${id('machine-settings')}')`);
+    await page.click(navigation);
+    await page.waitFor(`document.querySelector('${id('machines-page')}') && !document.querySelector('${id('machine-settings')}')`);
+    expect(await page.evaluate('window.__boiteTest.workspace.active.machineId')).toBe(active);
+  }
+  await capture('harness-updates-from-machine-settings');
+
   await size(390);
   await page.waitFor(`document.querySelector('${id('machines-page')}')`);
   expect((await page.text('.mobile-settings > header h1')).trim()).toBe('Machines and updates');

@@ -177,6 +177,10 @@ import { workspace } from '../lib/workspace.svelte';
   const motion = (): ScrollBehavior => (window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth');
 
   function jump(id: string) {
+    if (tab === 'machines') {
+      store.showSettings('machines', id);
+      return;
+    }
     store.settingsSection = null;
     selectedSection = id;
     const target = document.getElementById(`settings-${id}`);
@@ -253,7 +257,7 @@ import { workspace } from '../lib/workspace.svelte';
         data-testid="settings-tab-{entry.id}"
         aria-current={tab === entry.id ? 'page' : undefined}
         aria-expanded={toc[entry.id] ? tab === entry.id : undefined}
-        onclick={() => { selectedSection = ''; store.showSettings(entry.id); }}
+        onclick={() => { selectedSection = ''; store.showSettings(entry.id, entry.id === 'machines' ? 'updates' : undefined); }}
       >
         <Icon size={15} strokeWidth={1.75} />
         <span>{entry.label}</span>
