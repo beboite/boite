@@ -437,6 +437,32 @@ describe('the right panel', () => {
     destroy.mockRestore();
   });
 
+  test('background pages update their owning tabs and open new windows in the same profile', () => {
+    const root = new RightPanelStore();
+    const background = root.for('machine-one/thread'), foreground = root.for('machine-two/thread');
+    const opener = background.open('browser', 'https://example.test', PRIVATE_BROWSER_PROFILE);
+    foreground.open('trace');
+    const create = vi.spyOn(browserBridge, 'create').mockImplementation(() => {});
+    const destroy = vi.spyOn(browserBridge, 'destroy').mockImplementation(() => {});
+    try {
+      root.browserEvent({ type: 'url', id: opener.id, url: 'https://example.test/next' });
+      root.browserEvent({ type: 'title', id: opener.id, title: 'Background title' });
+      root.browserEvent({ type: 'new-window', id: opener.id, url: 'https://example.test/popup' });
+      expect(background.surfaces[0]).toMatchObject({ title: 'Background title', url: 'https://example.test/next' });
+      const popup = background.active!;
+      expect(popup.profile).toBe(PRIVATE_BROWSER_PROFILE);
+      expect(create).toHaveBeenCalledWith(popup.id, popup.url, PRIVATE_BROWSER_PROFILE);
+      expect(foreground.surfaces.map(s => s.kind)).toEqual(['trace']);
+      background.hide();
+      expect(destroy).not.toHaveBeenCalled();
+      background.closeOthers(opener.id);
+      expect(destroy).toHaveBeenCalledExactlyOnceWith(popup.id);
+      destroy.mockClear();
+      background.closeAll();
+      expect(destroy).toHaveBeenCalledExactlyOnceWith(opener.id);
+    } finally { create.mockRestore(); destroy.mockRestore(); }
+  });
+
   test('a prune drops the layouts it names, with their browser views, and writes once', () => {
     const root = new RightPanelStore();
     const gone = root.for('t-gone').open('browser');

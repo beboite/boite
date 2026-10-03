@@ -17,6 +17,8 @@ for (const width of [1280, 390]) {
       await page.waitFor('globalThis.__boiteTest?.workspace.machines.length === 2');
       const [main, remote, empty, busy] = await page.evaluate<[string, string, string, string]>(`(async () => {
         const [first, second] = globalThis.__boiteTest.workspace.machines;
+        // Archive in the background so the finished project has no active draft.
+        await first.store.open('t-trace');
         await first.store.archive('t-descriptors', true);
         const empty = await first.store.client.call('projects.add', {path:'/workspace/quiet', name:'quiet'});
         const busy = await first.store.client.call('projects.add', {path:'/workspace/building', name:'building'});

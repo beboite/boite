@@ -26,7 +26,8 @@ export class BrowserControl {
   host({ threadId, enabled, allowAgentControl, remote = false, live = false }: RpcParams<'browser.host'>, connection: Connection): { ok: true } {
     if (typeof enabled !== 'boolean' || typeof remote !== 'boolean' || typeof live !== 'boolean') throw refused('browser.host enabled, remote and live must be booleans');
     const thread = this.core.threads.require(threadId);
-    if (enabled && (thread.archived || !connection.subscriptions.has(threadId))) throw refused('browser.host needs a subscribed, active conversation');
+    // Hosting has its own lifetime; selecting another chat drops its message subscription.
+    if (enabled && thread.archived) throw refused('browser.host needs an active conversation');
     const previous = this.hosts.get(threadId);
     if (enabled && allowAgentControl !== true && !remote) {
       if (previous?.connection.id === connection.id) this.release(threadId);
@@ -49,7 +50,7 @@ export class BrowserControl {
   /** A browser tab of this conversation that paired devices may watch now. */
   private live(threadId: string): boolean {
     const host = this.hosts.get(threadId);
-    return !!host && host.expires >= Date.now() && host.remote && host.live && host.connection.subscriptions.has(threadId);
+    return !!host && host.expires >= Date.now() && host.remote && host.live;
   }
 
   /** Tells the conversation's viewers when its shared tab appears or goes away. */
@@ -68,7 +69,7 @@ export class BrowserControl {
   private shared(threadId: string, connection: Connection): Host {
     if (this.core.threads.require(threadId).archived || !connection.subscriptions.has(threadId)) throw refused('subscribe to the active conversation before watching its browser');
     const host = this.hosts.get(threadId);
-    if (!host || host.expires < Date.now() || !host.connection.subscriptions.has(threadId)) throw refused('Open this conversation in the Boite desktop app to share its browser.');
+    if (!host || host.expires < Date.now()) throw refused('Open this conversation in the Boite desktop app to share its browser.');
     if (!host.remote) throw refused('Enable the remote-browser experiment on the hosting desktop first.');
     return host;
   }
@@ -125,7 +126,7 @@ export class BrowserControl {
     if (problem) throw refused(problem);
     if (tabId !== undefined && (typeof tabId !== 'string' || !/^browser:[a-zA-Z0-9:-]{1,100}$/.test(tabId))) throw refused('browser tabId must come from browser status or open');
     const host = this.hosts.get(threadId);
-    if (!host || host.expires < Date.now() || !host.connection.subscriptions.has(threadId)) {
+    if (!host || host.expires < Date.now()) {
       this.release(threadId);
       throw refused('Open this conversation in the Boite desktop app and enable Agent browser control in Settings > Experiments.');
     }

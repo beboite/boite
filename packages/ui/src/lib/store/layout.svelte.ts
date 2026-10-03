@@ -65,7 +65,7 @@ export class Layout {
       await navigator.clipboard.writeText(text);
     } catch {
       if (this.ctx.client === client && this.ctx.clientGeneration === clientGeneration && this.ctx.threads.openGeneration === navigation)
-        this.ctx.store.error = strings.errors.clipboard;
+        this.ctx.store.reportError(strings.errors.clipboard, 'minor');
     }
   }
 

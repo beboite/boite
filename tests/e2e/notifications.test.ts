@@ -12,7 +12,33 @@ beforeAll(async () => {
   await page.waitFor(`document.querySelector('[data-thread-id]')`);
 }, 90000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+test('minor errors disappear after five seconds on desktop and phone', async () => {
+  for (const viewport of [{width:1300,height:850,mobile:false}, {width:390,height:844,mobile:true}]) {
+    await page.send('Emulation.setDeviceMetricsOverride',{...viewport,deviceScaleFactor:1});
+    await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
+    await page.evaluate(`(async () => {
+      const {workspace} = await import('/src/lib/workspace.svelte.ts');
+      workspace.active.reportError('og.jpg: file does not exist (os error 2)', 'minor');
+      window.__minorErrorAt = performance.now();
+    })()`);
+    await page.waitFor(`document.querySelector('[data-testid="error-toast"]')?.textContent.includes('og.jpg')`);
+    await page.screenshot(join(import.meta.dir,'.artifacts', viewport.mobile ? 'minor-error-phone-before.png' : 'minor-error-desktop-before.png'));
+    await page.evaluate(`new Promise(resolve => setTimeout(resolve, Math.max(0, 4000 - (performance.now() - window.__minorErrorAt))))`);
+    // Crossing the phone breakpoint must not give the same error a second lifetime.
+    await page.send('Emulation.setDeviceMetricsOverride', {width:viewport.mobile ? 1300 : 390,height:844,mobile:!viewport.mobile,deviceScaleFactor:1});
+    await page.evaluate(`new Promise(resolve => setTimeout(resolve, Math.max(0, 4500 - (performance.now() - window.__minorErrorAt))))`);
+    expect(await page.evaluate(`document.querySelector('[data-testid="error-toast"]')?.classList.contains('closing')`)).toBe(false);
+    await page.waitFor(`!document.querySelector('[data-testid="error-toast"]')`, 3_000);
+    expect(await page.evaluate(`performance.now() - window.__minorErrorAt`)).toBeLessThan(7_000);
+    expect(await page.evaluate(`window.__boiteTest.workspace.active.error`)).toBeNull();
+    await page.send('Emulation.setDeviceMetricsOverride',{...viewport,deviceScaleFactor:1});
+    await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
+    await page.screenshot(join(import.meta.dir,'.artifacts', viewport.mobile ? 'minor-error-phone-after.png' : 'minor-error-desktop-after.png'));
+  }
+}, 20_000);
+
 test('notification stays readable and can be dismissed', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride',{width:1300,height:850,deviceScaleFactor:1,mobile:false});
   await page.evaluate(`(async () => { const {workspace} = await import('/src/lib/workspace.svelte.ts'); workspace.active.error = 'Could not connect to the build machine. Check the connection in Settings and try again. The current conversation is saved.'; })()`);
   await page.waitFor(`document.querySelector('[data-testid="error-toast"]')`);
   // Errors remain visible beyond the ordinary toast lifetime.

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { hostBrowser } from './lib/browser-host';
+  import { watchBrowserHosts } from './lib/browser-hosts.svelte';
   import { browserBridge } from './lib/browser-bridge';
   import { watchRemoteBrowser } from './lib/remote-browser-watch.svelte';
   import { browserProfiles } from './lib/browser-profiles.svelte';
@@ -47,11 +47,7 @@
   import ThreadPreparation from './components/ThreadPreparation.svelte';
 
   let store = $derived(workspace.active);
-  $effect(() => {
-    const threadId = store.openThread?.id;
-    void store.connection;
-    if ((experimentOn('agent-browser-control') || experimentOn('remote-browser')) && threadId && store.owner && store.client?.state === 'ready') return hostBrowser(store, threadId);
-  });
+  onMount(() => watchBrowserHosts(() => workspace.machines.map(machine => machine.store)));
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   // Away from the PC, the agent's browser tab shows up by itself in its conversation.
   $effect(() => {
@@ -262,7 +258,8 @@
     : null;
 
   $effect(() => {
-    const error = store.error;
+    const owner = store;
+    const error = owner.error;
     // Missing/revoked phone credentials have a persistent recovery screen.
     // Keep other errors (including a failed pairing attempt) visible.
     const pairingNotice = !inShell && (narrow.current || wideRecovery) && store.pairingRequired
@@ -275,6 +272,16 @@
     toastThreadId = store.errorThreadId;
     toastStore = store;
     toast.show();
+  });
+
+  $effect(() => {
+    const owner = store;
+    const error = owner.error;
+    if (!error || owner.errorSeverity !== 'minor' || owner.errorThreadId) return;
+    const timer = setTimeout(() => {
+      if (owner.error === error && owner.errorSeverity === 'minor') owner.error = null;
+    }, 5_000);
+    return () => clearTimeout(timer);
   });
 
   $effect(() => {

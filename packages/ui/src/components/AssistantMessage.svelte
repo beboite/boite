@@ -49,6 +49,8 @@
   }
 
   const execution = $derived(store.openThread?.turns.find((turn) => turn.id === message.turnId)?.execution);
+  const compacting = $derived(execution?.operation === 'compact' ||
+    store.openThread?.progress?.turnId === message.turnId && store.openThread.progress.phase === 'compacting');
   const caretAt = $derived(message.state === 'streaming' ? lastTextIndex(message) : -1);
   const runs = $derived(memoryPartRuns(message.parts, memoryEvents));
   const isBackground = (toolId: string) => store.openThread?.background?.some((task) => task.toolId === toolId) ?? false;
@@ -81,7 +83,7 @@
     <div class="part" data-kind={part.type}>
       {#if part.type === 'text'}
         <Prose text={shownText} live={index === caretAt && part.complete !== true} bubble={message.role === 'assistant'}
-          typing={latestInTurn && message.role === 'assistant' && store.connection === 'ready' && store.openThread?.status === 'running' && index === message.parts.length - 1 && index === caretAt && part.complete !== true} {store} {threadId} />
+          typing={!compacting && latestInTurn && message.role === 'assistant' && store.connection === 'ready' && store.openThread?.status === 'running' && index === message.parts.length - 1 && index === caretAt && part.complete !== true} {store} {threadId} />
 
       {:else if part.type === 'thinking'}
         <ThinkingPart text={part.text} live={message.state === 'streaming' && index === message.parts.length - 1 && part.finishedAt == null} startedAt={part.startedAt ?? null} finishedAt={part.finishedAt ?? null} />

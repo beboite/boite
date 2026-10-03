@@ -37,6 +37,16 @@ page.
 
 ## Thread and tab lifetime
 
+Switching conversations or machines and hiding the panel parks browser pages
+without destroying them. Their forms, navigation history and recordings remain
+in memory. With Agent browser control enabled, a conversation opened once on
+the Windows desktop keeps its browser host while Boite stays connected, so its
+agent can continue working in the background. Closing tabs, archiving the
+conversation or quitting the shell releases their pages. Reloading the UI
+recreates pages from their stored addresses, without preserving live DOM state.
+Remote viewers still follow the conversation and tab currently shown on the
+desktop.
+
 Manual archive here or project removal clears the thread's panel and destroys
 its browser views. After the layout has been cleared, restoring the thread starts
 with a fresh panel. If another client archives the open thread, it stays on
