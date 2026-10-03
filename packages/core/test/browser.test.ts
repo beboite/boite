@@ -112,22 +112,21 @@ test('disabling sharing while a frame is in flight does not deliver it to a pair
   } finally { phone.close(); }
 });
 
-test('a share-only desktop serves a paired viewer, never the agent, and opens the tab when the viewer asks', async () => {
+test('a share-only desktop serves a paired viewer, never the agent, and tells its viewers when the tab comes and goes', async () => {
   const { grant } = await owner.call('pairing.grant', {});
   const phone = await connect(harness.url, '', { grant });
-  const other = await harness.connect();
   try {
+    await expect(phone.call('browser.remoteStatus', { threadId })).rejects.toThrow('subscribe');
     await owner.call('threads.subscribe', { threadId }); await phone.call('threads.subscribe', { threadId });
-    await expect(phone.call('browser.remoteReady', { enabled: true })).rejects.toThrow('owner');
-    await expect(phone.call('browser.remoteOpen', { threadId })).rejects.toThrow('No desktop is sharing');
-    await other.call('browser.remoteReady', { enabled: true });
-    await owner.call('browser.remoteReady', { enabled: true });
-    // No host yet: the desktop that renewed last is asked.
-    const asked = owner.next('browser.remoteOpenRequested', e => e.threadId === threadId);
-    await phone.call('browser.remoteOpen', { threadId });
-    await asked;
-    await expect(phone.call('browser.remoteOpen', { threadId })).rejects.toThrow('wait before asking');
+    expect(await phone.call('browser.remoteStatus', { threadId })).toEqual({ live: false });
+    // Sharing alone shows nothing: the panel needs a browser tab.
     await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: false, remote: true });
+    expect(await phone.call('browser.remoteStatus', { threadId })).toEqual({ live: false });
+    await expect(owner.call('browser.host', { threadId, enabled: true, remote: true, live: 'yes' as never })).rejects.toThrow('live must be booleans');
+    const shown = phone.next('browser.remoteChanged', e => e.threadId === threadId);
+    await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: false, remote: true, live: true });
+    expect(await shown).toEqual({ threadId, live: true });
+    expect(await phone.call('browser.remoteStatus', { threadId })).toEqual({ live: true });
     await expect(agent.call('browser.command', { threadId, action: { kind: 'snapshot' } })).rejects.toThrow('Agent browser control');
     await expect(phone.call('browser.remoteFrame', { threadId, quality: 95 })).rejects.toThrow('quality');
     const waiting = owner.next('browser.requested', r => r.action.kind === 'remote-frame');
@@ -141,15 +140,14 @@ test('a share-only desktop serves a paired viewer, never the agent, and opens th
     const nav = phone.call('browser.remoteInput', { threadId, frameId: 'f', input: { kind: 'history', direction: 'back' } });
     await owner.call('browser.complete', { requestId: (await navWaiting).requestId, result: {} });
     expect(await nav).toEqual({ ok: true });
-    // Once the conversation has a sharing host, that desktop is the one asked, and a dropped desktop is forgotten.
-    await other.call('browser.remoteReady', { enabled: true });
-    await new Promise(resolve => setTimeout(resolve, 2100));
-    const again = owner.next('browser.remoteOpenRequested', e => e.threadId === threadId);
-    await phone.call('browser.remoteOpen', { threadId });
-    await again;
-    owner.close(); other.close();
-    await new Promise(resolve => setTimeout(resolve, 100));
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    await expect(phone.call('browser.remoteOpen', { threadId })).rejects.toThrow('No desktop is sharing');
-  } finally { phone.close(); other.close(); }
-}, 15000);
+    // Withdrawing consent hides the tab, and so does the desktop going away.
+    const hidden = phone.next('browser.remoteChanged', e => e.threadId === threadId);
+    await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: true, remote: false, live: true });
+    expect(await hidden).toEqual({ threadId, live: false });
+    await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: false, remote: true, live: true });
+    expect(await phone.call('browser.remoteStatus', { threadId })).toEqual({ live: true });
+    const gone = phone.next('browser.remoteChanged', e => e.threadId === threadId);
+    owner.close();
+    expect(await gone).toEqual({ threadId, live: false });
+  } finally { phone.close(); }
+});

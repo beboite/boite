@@ -2,14 +2,13 @@ import { browserActionError, remoteBrowserInputError, remoteFrameOptionsError, R
 import { refusal } from './shared';
 import type { FakeContext, FakeMethods } from './context';
 
-type Methods = 'browser.host' | 'browser.command' | 'browser.complete' | 'browser.remoteFrame' | 'browser.remoteInput' | 'browser.remoteReady' | 'browser.remoteOpen';
+type Methods = 'browser.host' | 'browser.command' | 'browser.complete' | 'browser.remoteFrame' | 'browser.remoteInput' | 'browser.remoteStatus';
 
 /** Mirrors packages/core/src/browser.ts for one client that is both the desktop and the viewer. */
 export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
-  const hosts = new Map<string, { expires: number; agent: boolean }>();
+  const hosts = new Map<string, { expires: number; agent: boolean; live: boolean }>();
   const shared = new Set<string>(), frames = new Map<string, RemoteBrowserFrame[]>();
-  const requestedAt = new Map<string, number>(), opened = new Map<string, number>();
-  let readyUntil = 0;
+  const requestedAt = new Map<string, number>(), announced = new Set<string>();
   const pending = new Map<string, { threadId: string; capture: boolean; resolve(value: BrowserReply): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
   const settle = (threadId: string | undefined, all: boolean, reason: string) => {
     for (const [id, item] of pending) if ((!threadId || item.threadId === threadId) && (all || !item.capture)) {
@@ -17,13 +16,21 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
     }
   };
   const release = (threadId?: string) => {
-    if (threadId) { hosts.delete(threadId); shared.delete(threadId); frames.delete(threadId); requestedAt.delete(threadId); } else { hosts.clear(); shared.clear(); frames.clear(); requestedAt.clear(); readyUntil = 0; }
+    if (threadId) { hosts.delete(threadId); shared.delete(threadId); frames.delete(threadId); requestedAt.delete(threadId); } else { hosts.clear(); shared.clear(); frames.clear(); requestedAt.clear(); }
+    for (const id of threadId ? [threadId] : [...announced]) changed(id);
     settle(threadId, true, 'the browser host left this conversation');
   };
   ctx.bus.onState(state => { if (state !== 'ready') release(); });
   ctx.bus.on('thread.updated', thread => { if (thread.archived) release(thread.id); });
   ctx.bus.on('thread.removed', ({ threadId }) => release(threadId));
   const live = (threadId: string) => (hosts.get(threadId)?.expires ?? 0) >= Date.now();
+  const showing = (threadId: string) => live(threadId) && shared.has(threadId) && !!hosts.get(threadId)?.live;
+  function changed(threadId: string) {
+    const now = showing(threadId);
+    if (now === announced.has(threadId)) return;
+    if (now) announced.add(threadId); else announced.delete(threadId);
+    ctx.emitToThread(threadId, 'browser.remoteChanged', { threadId, live: now });
+  }
   const allowed = (threadId: string) => {
     if (ctx.thread(threadId).archived || !ctx.bus.subscribed.has(threadId)) throw refusal('subscribe to the active conversation before watching its browser');
     if (!live(threadId)) throw refusal('Open this conversation in the Boite desktop app to share its browser.');
@@ -75,21 +82,12 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       if (input.kind === 'tap' && (input.width !== frame.width || input.height !== frame.height)) throw refusal('the browser viewport changed; refresh before tapping');
       await dispatch({ threadId, tabId: frame.tabId, action: { kind: 'remote-input', frameId, input } }); return { ok: true };
     },
-    'browser.remoteReady': async ({ enabled }) => {
-      if (typeof enabled !== 'boolean') throw refusal('browser.remoteReady enabled must be a boolean');
-      readyUntil = enabled ? Date.now() + 35000 : 0;
-      return { ok: true };
-    },
-    'browser.remoteOpen': async ({ threadId }) => {
+    'browser.remoteStatus': async ({ threadId }) => {
       if (ctx.thread(threadId).archived || !ctx.bus.subscribed.has(threadId)) throw refusal('subscribe to the active conversation before watching its browser');
-      if (Date.now() - (opened.get(threadId) ?? 0) < 2000) throw refusal('wait before asking the desktop again');
-      if (readyUntil < Date.now()) throw refusal('No desktop is sharing its browser. Open Boite on the PC with Live browser on other devices enabled.');
-      opened.set(threadId, Date.now());
-      ctx.bus.deliver('browser.remoteOpenRequested', { threadId });
-      return { ok: true };
+      return { live: showing(threadId) };
     },
-    'browser.host': async ({ threadId, enabled, allowAgentControl, remote = false }) => {
-      if (typeof enabled !== 'boolean' || typeof remote !== 'boolean') throw refusal('browser.host enabled and remote must be booleans');
+    'browser.host': async ({ threadId, enabled, allowAgentControl, remote = false, live: tab = false }) => {
+      if (typeof enabled !== 'boolean' || typeof remote !== 'boolean' || typeof tab !== 'boolean') throw refusal('browser.host enabled, remote and live must be booleans');
       const thread = ctx.thread(threadId);
       if (enabled && (thread.archived || !ctx.bus.subscribed.has(threadId))) throw refusal('browser.host needs a subscribed, active conversation');
       if (enabled && allowAgentControl !== true && !remote) {
@@ -99,8 +97,9 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       if (!enabled) { release(threadId); return { ok: true }; }
       const agent = allowAgentControl === true;
       if (hosts.get(threadId)?.agent && !agent) settle(threadId, false, 'agent browser control was turned off on the desktop');
-      hosts.set(threadId, { expires: Date.now() + 35000, agent });
+      hosts.set(threadId, { expires: Date.now() + 35000, agent, live: tab });
       if (remote) shared.add(threadId); else { shared.delete(threadId); frames.delete(threadId); requestedAt.delete(threadId); }
+      changed(threadId);
       return { ok: true };
     },
     'browser.command': async params => {

@@ -24,11 +24,11 @@ test('the desktop grants no browser access by default and stops dispatching as s
   expect(client.call).not.toHaveBeenCalled();
   writeExperiments(['agent-browser-control']);
   stop = hostBrowser(store, 'thread');
-  expect(client.call).toHaveBeenCalledWith('browser.host', { threadId: 'thread', enabled: true, allowAgentControl: true, remote: false });
+  expect(client.call).toHaveBeenCalledWith('browser.host', { threadId: 'thread', enabled: true, allowAgentControl: true, remote: false, live: false });
   writeExperiments(['agent-browser-control', 'remote-browser']);
-  expect(client.call).toHaveBeenLastCalledWith('browser.host', { threadId: 'thread', enabled: true, allowAgentControl: true, remote: true });
+  expect(client.call).toHaveBeenLastCalledWith('browser.host', { threadId: 'thread', enabled: true, allowAgentControl: true, remote: true, live: false });
   writeExperiments(['agent-browser-control']);
-  expect(client.call).toHaveBeenLastCalledWith('browser.host', { threadId: 'thread', enabled: true, allowAgentControl: true, remote: false });
+  expect(client.call).toHaveBeenLastCalledWith('browser.host', { threadId: 'thread', enabled: true, allowAgentControl: true, remote: false, live: false });
   writeExperiments([]);
   requested({ threadId: 'thread', requestId: 'late', action: { kind: 'screenshot' } });
   await vi.waitFor(() => expect(client.call).toHaveBeenCalledWith('browser.complete', { requestId: 'late', error: 'the browser conversation is no longer open' }));
@@ -141,7 +141,7 @@ test('sharing alone hosts the browser for viewers but not for the agent, and sca
   const protocol = vi.mocked(browserBridge.protocol!);
   protocol.mockImplementation(async (_id, method) => method === 'Page.captureScreenshot' ? { data: '/9j/2Q==' } : { result: { value: page } });
   stop = hostBrowser(store, 'remote-thread');
-  expect(client.call).toHaveBeenCalledWith('browser.host', { threadId: 'remote-thread', enabled: true, allowAgentControl: false, remote: true });
+  expect(client.call).toHaveBeenCalledWith('browser.host', { threadId: 'remote-thread', enabled: true, allowAgentControl: false, remote: true, live: true });
   requested({ threadId: 'remote-thread', requestId: 'agent', action: { kind: 'snapshot' } });
   await vi.waitFor(() => expect(completed.get('agent')?.error).toContain('agent browser control is off'));
   requested({ threadId: 'remote-thread', requestId: 'frame', action: { kind: 'remote-frame', maxWidth: 800, quality: 40 } });
@@ -151,4 +151,7 @@ test('sharing alone hosts the browser for viewers but not for the agent, and sca
   expect(shot).toMatchObject({ format: 'jpeg', quality: 90 });
   expect(shot).not.toHaveProperty('clip');
   expect(panel.active?.id).toBe(surface.id);
+  // Paired devices hear within a second that the conversation has no browser tab left.
+  panel.close(surface.id);
+  await vi.waitFor(() => expect(client.call).toHaveBeenLastCalledWith('browser.host', { threadId: 'remote-thread', enabled: true, allowAgentControl: false, remote: true, live: false }), { timeout: 2500 });
 });

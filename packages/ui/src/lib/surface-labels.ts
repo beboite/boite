@@ -64,7 +64,7 @@ export function available(kind: SurfaceKind, inShell: boolean, owner: boolean): 
 }
 
 export function unavailable(kind: SurfaceKind): string {
-  return kind === 'browser' ? strings.rightPanel.desktopOnly : strings.rightPanel.ownerOnly;
+  return kind === 'browser' ? strings.rightPanel.browserAbsent : strings.rightPanel.ownerOnly;
 }
 
 export function label(surface: Surface): string {

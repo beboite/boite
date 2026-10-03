@@ -14,13 +14,9 @@ import type { Translation } from './i18n.svelte';
 export const fr: Translation = {
   remoteBrowser: {
     display: 'Affichage', resolution: 'Résolution de la page', fitPhone: 'Adapter à cet écran', phone: 'Téléphone', tablet: 'Tablette', rotate: 'Pivoter', width: 'Largeur', height: 'Hauteur', apply: 'Appliquer', sharedSize: 'La résolution change aussi l’onglet partagé sur le PC.', restoreSize: 'Reprendre la taille du panneau PC', previewZoom: 'Zoom de l’aperçu (cet appareil seulement)', fit: 'Ajuster', panHint: 'Glissez pour déplacer l’aperçu. Utilisez les flèches pour défiler dans la page.',
-    open: 'Ouvrir le navigateur en direct', experimental: 'Partage du navigateur expérimental', enable: 'Activer sur cet appareil',
-    hint: 'Affichez et contrôlez l’onglet navigateur partagé par votre PC, dans Boite.',
-    hostMissing: 'Le PC n’affiche pas encore le navigateur de cette conversation.', asking: 'Demande au PC d’ouvrir le navigateur de cette conversation…', noAnswer: 'Le PC ne l’a pas ouvert. Vérifiez que Boite est ouvert sur le PC, puis redemandez.', askPc: 'Ouvrir sur le PC',
-    noDesktop: 'Aucun PC ne partage son navigateur. Sur le PC, gardez Boite ouvert et activez Navigateur en direct à distance dans Réglages > Expérimentations.',
+    hostMissing: 'Le PC n’affiche pas encore le navigateur de cette conversation.',
     address: 'Adresse', go: 'Aller', back: 'Précédent', forward: 'Suivant', reload: 'Recharger', badAddress: 'Saisissez une adresse web (http ou https).',
     title: 'Navigateur du PC en direct', waiting: 'En attente du PC', live: 'En direct', paused: 'En pause', reconnecting: 'Reconnexion', pause: 'Pause', resume: 'Reprendre',
-    help: 'Sur le PC, activez Navigateur en direct à distance dans Réglages > Expérimentations et gardez Boite ouvert. Regarder d’ici y ouvre l’onglet navigateur de cette conversation. Le PC doit rester éveillé.',
     interact: 'Toucher ou faire défiler la page partagée', image: 'Vue en direct du navigateur du PC', scrollUp: 'Défiler vers le haut', scrollDown: 'Défiler vers le bas',
     text: 'Touchez un champ de la page, puis écrivez ici', send: 'Envoyer le texte à la page', gesture: 'Touchez pour cliquer. Glissez pour défiler. Retour envoie le texte puis Entrée ; ⌫ sur un champ vide efface dans la page.'
   },
@@ -1176,7 +1172,7 @@ export const fr: Translation = {
     file: 'Fichier',
     tasks: 'Tâches',
     tasksHint: "L'objectif, les tâches de l'agent et les todos du projet",
-    desktopOnly: "Seulement dans l'application de bureau",
+    browserAbsent: 'S’ouvre quand un agent utilise le navigateur',
     ownerOnly: "Seulement dans l'application du propriétaire",
     launcher: 'Ouvrir une surface dans ce panneau',
     untitled: 'Navigateur'
@@ -1815,7 +1811,7 @@ export const fr: Translation = {
   },
 
   experiments: {
-    remoteBrowser: { title: 'Navigateur en direct à distance', hint: 'Sur le PC, partager le navigateur d’une conversation avec les appareils associés et ouvrir son onglet quand l’un d’eux le demande. Sur le téléphone, voir et piloter cette page. Activez cette option sur les deux appareils ; elle ne donne pas le contrôle du navigateur aux agents.' },
+    remoteBrowser: { title: 'Navigateur en direct à distance', hint: 'Sur le PC, laisser les appareils associés voir et piloter l’onglet navigateur d’une conversation, comme celui qu’un agent a ouvert. Il apparaît de lui-même dans cette conversation sur le téléphone. Cette option ne donne pas le contrôle du navigateur aux agents.' },
     prReview: { title: 'Revue des pull requests', hint: 'Lire les PR GitHub liées, les modifications, les commentaires et les résultats des tests dans Boite, y compris sur téléphone.' },
     recordingIndicators: { title: 'Actions visibles dans les vidéos', hint: 'Ajouter des repères de clics et les touches de navigation aux enregistrements. Le texte saisi et les mots de passe ne sont jamais affichés comme libellés de touches.' },
     openChatLinks: { title: 'Ouvrir les liens du chat dans leurs applications', hint: 'Sur ce bureau, un clic sur un fichier ou dossier local ouvre son application, y compris les raccourcis et les fichiers hors du projet. Seuls les liens de cet ordinateur sont ouverts.' },

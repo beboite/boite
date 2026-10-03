@@ -1,19 +1,15 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { MonitorPlay, X, Pause, Play, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, RotateCw, Send } from '@lucide/svelte';
+  import { Pause, Play, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, RotateCw, Send } from '@lucide/svelte';
   import type { RemoteBrowserFrame, RemoteBrowserInput } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
-  import { experimentOn } from '../lib/experiments.svelte';
-  import { setExperiment } from '../lib/experiments';
-  import { focusedElement, restoreFocus } from '../lib/focus';
-  import { mobileOverlay } from '../lib/mobile-history';
   import { normalizeUrl } from '../lib/browser-bridge';
-  import { hostsBrowser } from '../lib/browser-host';
   import { dragScroll, frameMaxWidth, framePoint, frameQuality, nextPollDelay } from '../lib/remote-browser-view';
-  let { store, threadId, surface = false }: { store: Store; threadId: string; surface?: boolean } = $props();
-  let shown = $state(untrack(() => surface)), paused = $state(false), busy = $state(false), error = $state(''), text = $state('');
-  let frame = $state.raw<RemoteBrowserFrame | null>(null), dialog = $state<HTMLDialogElement>(), picture = $state<HTMLImageElement>();
+  /** The PC's browser tab of this conversation, watched and driven from a paired device's panel. */
+  let { store, threadId }: { store: Store; threadId: string } = $props();
+  let paused = $state(false), busy = $state(false), error = $state(''), text = $state('');
+  let frame = $state.raw<RemoteBrowserFrame | null>(null), picture = $state<HTMLImageElement>();
   // Core timestamps use another device's clock. Retain local age for each frame,
   // including one held by an in-progress pointer gesture.
   const receivedAt = new WeakMap<RemoteBrowserFrame, number>();
@@ -27,21 +23,16 @@
   let frameClient = $state.raw<Store['client']>(null);
   let displaySettings = $state(false), viewportWidth = $state<number | undefined>(393), viewportHeight = $state<number | undefined>(700);
   let areaWidth = $state(0), areaHeight = $state(0), zoom = $state(0);
-  // The PC is not showing this conversation's browser: ask it once per opening, then on demand.
-  let hostMissing = $state(false), asking = $state(false), asked = $state(false), notice = $state(''), askedAt = 0;
-  /** How long a PC that accepted the request may take to show the tab before the viewer says it did not. */
-  const ANSWER_MS = 15_000;
+  /** The PC is not showing this conversation's browser tab right now: wait for it, it is not a broken link. */
+  let hostMissing = $state(false);
   let address = $state(''), editingAddress = false, fresh = $state(true);
   const previewScale = $derived(frame ? (zoom || Math.min(areaWidth / frame.width, areaHeight / frame.height)) : 1);
   const validSize = $derived([viewportWidth, viewportHeight].every(n => typeof n === 'number' && Number.isInteger(n) && n >= 240 && n <= 3840));
-  const enabled = $derived(experimentOn('remote-browser'));
-  const inShell = window.__TAURI_INTERNALS__ !== undefined;
-  let wasEnabled = untrack(() => enabled);
   const usable = $derived(!!frame && frameClient === store.client && !paused && !busy && !error && store.connection === 'ready');
   const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
   function stop() { generation++; clearTimeout(timer); }
   async function poll(run: number): Promise<void> {
-    if (!alive || run !== generation || !shown || paused || document.hidden || !enabled) return;
+    if (!alive || run !== generation || paused || document.hidden) return;
     if (pending || busy) { timer = setTimeout(() => void poll(run), 100); return; }
     pending = true; requestedAt = Date.now();
     const client = store.client, started = performance.now();
@@ -54,8 +45,7 @@
       if (client === store.client) {
         roundTrip = performance.now() - started; failures = 0;
         unchanged = frame && next.base64 === frame.base64 && next.width === frame.width && next.height === frame.height ? unchanged + 1 : 0;
-        receivedAt.set(next, performance.now()); frameClient = client; frame = next; error = ''; fresh = true;
-        hostMissing = false; notice = '';
+        receivedAt.set(next, performance.now()); frameClient = client; frame = next; error = ''; fresh = true; hostMissing = false;
         if (!editingAddress) address = next.url ?? '';
       }
       else { frame = null; frameClient = null; error = strings.remoteBrowser.reconnecting; }
@@ -67,9 +57,7 @@
         else {
           failures++;
           hostMissing = /Open this conversation|open a browser tab|remote-browser experiment|browser host left/.test(reason);
-          if (hostMissing && notice && Date.now() - askedAt > ANSWER_MS) notice = strings.remoteBrowser.noAnswer;
-          error = hostMissing ? notice || strings.remoteBrowser.hostMissing : reason;
-          if (hostMissing && !asked) void ask();
+          error = hostMissing ? strings.remoteBrowser.hostMissing : reason;
         }
       }
     }
@@ -78,7 +66,7 @@
   }
   function resume() {
     stop();
-    if (shown && !paused && enabled && !document.hidden) {
+    if (!paused && !document.hidden) {
       const run = generation;
       timer = setTimeout(() => void poll(run), Math.max(0, 300 - (Date.now() - requestedAt)));
     }
@@ -86,22 +74,10 @@
   /** After an input the page moves: the next frame comes at full rate, without dropping one in flight. */
   function kick() {
     unchanged = 0;
-    if (pending || !shown || paused || !enabled || document.hidden) return;
+    if (pending || paused || document.hidden) return;
     clearTimeout(timer);
     const run = generation;
     timer = setTimeout(() => void poll(run), Math.max(60, 250 - (Date.now() - requestedAt)));
-  }
-  /** Asks the PC to show this conversation and a browser tab: away from the PC, nobody else can. */
-  async function ask(): Promise<void> {
-    const client = store.client;
-    if (!client || client.state !== 'ready' || asking) return;
-    asked = true; asking = true;
-    try {
-      await client.call('browser.remoteOpen', { threadId });
-      if (alive && client === store.client) { askedAt = Date.now(); notice = strings.remoteBrowser.asking; if (hostMissing) error = notice; failures = 0; kick(); }
-    } catch (cause) {
-      if (alive && client === store.client) error = /No desktop is sharing/.test(message(cause)) ? strings.remoteBrowser.noDesktop : message(cause);
-    } finally { asking = false; }
   }
   onMount(() => {
     const visibility = () => { if (document.hidden) { stop(); fresh = false; } else resume(); };
@@ -115,16 +91,8 @@
     };
   });
   $effect(() => {
-    if (!enabled) { if (wasEnabled) shown = false; frame = null; text = ''; }
-    wasEnabled = enabled;
     const ready = store.connection === 'ready';
-    if (shown && !paused && enabled) untrack(() => { if (ready) failures = 0; resume(); }); else untrack(stop);
-  });
-  $effect(() => {
-    if (!shown || !dialog) return;
-    const node = dialog, previous = focusedElement(); node.showModal();
-    const release = mobileOverlay(() => { shown = false; });
-    return () => { release(); node.close(); text = ''; asked = false; notice = ''; restoreFocus(previous); };
+    if (!paused) untrack(() => { if (ready) failures = 0; resume(); }); else untrack(stop);
   });
   async function input(value: RemoteBrowserInput, target = frame): Promise<boolean> {
     const client = store.client;
@@ -214,81 +182,62 @@
   }
 </script>
 
-{#if surface}
-  <div class="surface-launcher"><MonitorPlay size={28} /><h2>{strings.remoteBrowser.title}</h2><p>{strings.remoteBrowser.hint}</p><button type="button" class="primary" data-testid="remote-browser-open" onclick={() => { shown = true; paused = false; }}>{strings.remoteBrowser.open}</button></div>
-{:else if (enabled || !inShell) && !hostsBrowser(store)}
-  <button type="button" class="ghost small launcher" data-testid="remote-browser-open" title={strings.remoteBrowser.title} aria-label={strings.remoteBrowser.title} onclick={() => { shown = true; paused = false; }}><MonitorPlay size={16} /><span>{strings.rightPanel.browser}</span></button>
-{/if}
-{#if shown}
-  <dialog bind:this={dialog} data-testid="remote-browser-dialog" aria-label={strings.remoteBrowser.title} onkeydown={e => e.stopPropagation()} oncancel={e => { e.preventDefault(); shown = false; }}>
-    <header><div><h2>{strings.remoteBrowser.title}</h2><small>{frame?.title || strings.remoteBrowser.waiting}</small></div><button type="button" class="ghost icon" aria-label={strings.imports.close} onclick={() => { shown = false; }}><X size={18} /></button></header>
-    {#if !enabled}
-      <section class="setup" data-testid="remote-browser-setup"><MonitorPlay size={32} /><h2>{strings.remoteBrowser.experimental}</h2><p>{strings.remoteBrowser.hint}</p><p>{strings.remoteBrowser.help}</p><button type="button" class="primary" data-testid="remote-browser-enable" onclick={() => setExperiment('remote-browser', true)}>{strings.remoteBrowser.enable}</button></section>
-    {:else}
-    <form class="nav" data-testid="remote-browser-nav" onsubmit={go}>
-      <button type="button" class="chip" disabled={!usable} aria-label={strings.remoteBrowser.back} onclick={() => void input({ kind: 'history', direction: 'back' })}><ArrowLeft size={17} /></button>
-      <button type="button" class="chip" disabled={!usable} aria-label={strings.remoteBrowser.forward} onclick={() => void input({ kind: 'history', direction: 'forward' })}><ArrowRight size={17} /></button>
-      <button type="button" class="chip" disabled={!usable} aria-label={strings.remoteBrowser.reload} onclick={() => void input({ kind: 'reload' })}><RotateCw size={16} /></button>
-      <input bind:value={address} data-testid="remote-browser-address" type="text" inputmode="url" enterkeyhint="go" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="4096" aria-label={strings.remoteBrowser.address} placeholder={strings.remoteBrowser.address} onfocus={e => { editingAddress = true; e.currentTarget.select(); }} onblur={() => { editingAddress = false; }} />
-      <button type="submit" class="chip go" disabled={!usable || !address.trim()}>{strings.remoteBrowser.go}</button>
-    </form>
-    <div class="toolbar"><span class="state" class:live={frame && !paused && !error}>{paused ? strings.remoteBrowser.paused : error && (hostMissing || asking || notice || error === strings.remoteBrowser.noDesktop) ? strings.remoteBrowser.waiting : error ? strings.remoteBrowser.reconnecting : frame ? strings.remoteBrowser.live : strings.remoteBrowser.waiting}</span>
-      <button type="button" class="chip" data-testid="remote-browser-display" aria-expanded={displaySettings} onclick={() => { displaySettings = !displaySettings; if (frame) { viewportWidth = frame.width; viewportHeight = frame.height; } }}>{strings.remoteBrowser.display}</button>
-      <button type="button" class="chip" onclick={() => { paused = !paused; }}>{#if paused}<Play size={15} />{:else}<Pause size={15} />{/if}{paused ? strings.remoteBrowser.resume : strings.remoteBrowser.pause}</button></div>
-    {#if error}<div class="error" class:notice={error === notice} role="status" data-testid="remote-browser-error"><p>{error}</p>{#if hostMissing}<button type="button" class="chip" data-testid="remote-browser-ask" disabled={asking} onclick={() => void ask()}>{strings.remoteBrowser.askPc}</button>{/if}</div>{/if}
-    <div class="viewer">
-    {#if displaySettings}
-      <section class="display-settings" aria-label={strings.remoteBrowser.display}>
-        <strong>{strings.remoteBrowser.resolution} {frame ? `${frame.width} × ${frame.height}` : ''}</strong>
-        <div class="options">
-          <button class="chip" disabled={!usable} onclick={() => resize(areaWidth, areaHeight)}>{strings.remoteBrowser.fitPhone}</button>
-          <button class="chip" disabled={!usable} onclick={() => resize(393, 700)}>{strings.remoteBrowser.phone}</button>
-          <button class="chip" disabled={!usable} onclick={() => resize(768, 1024)}>{strings.remoteBrowser.tablet}</button>
-          <button class="chip" disabled={!usable} onclick={() => resize(1366, 768)}>PC</button>
-          <button class="chip" disabled={!usable || !frame} onclick={() => frame && resize(frame.height, frame.width)}>{strings.remoteBrowser.rotate}</button>
-        </div>
-        <form onsubmit={e => { e.preventDefault(); if (validSize) resize(viewportWidth!, viewportHeight!); }}>
-          <label>{strings.remoteBrowser.width}<input type="number" min="240" max="3840" step="1" required bind:value={viewportWidth} /></label>
-          <label>{strings.remoteBrowser.height}<input type="number" min="240" max="3840" step="1" required bind:value={viewportHeight} /></label>
-          <button class="chip" type="submit" disabled={!usable || !validSize}>{strings.remoteBrowser.apply}</button>
-        </form>
-        <small>{strings.remoteBrowser.sharedSize}</small>
-        <button class="chip" disabled={!usable} onclick={() => void input({ kind: 'reset-viewport' })}>{strings.remoteBrowser.restoreSize}</button>
-        <strong>{strings.remoteBrowser.previewZoom}</strong>
-        <div class="options">
-          <button class="chip" aria-pressed={zoom === 0} onclick={() => { zoom = 0; displaySettings = false; }}>{strings.remoteBrowser.fit}</button>
-          {#each [1, 1.5, 2] as scale}<button class="chip" aria-pressed={zoom === scale} onclick={() => { zoom = scale; displaySettings = false; }}>{scale * 100}%</button>{/each}
-        </div>
-      </section>
-    {/if}
-    <div class="screen-area" class:zoomed={zoom > 0} bind:clientWidth={areaWidth} bind:clientHeight={areaHeight}>
-      {#if frame}
-        <button type="button" class="screen" style:width={`${frame.width * previewScale}px`} style:height={`${frame.height * previewScale}px`} class:stale={paused || error || !fresh} aria-label={strings.remoteBrowser.interact} disabled={!usable} onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={() => { pointer = undefined; }} oncontextmenu={e => e.preventDefault()}>
-          <img bind:this={picture} src={`data:image/jpeg;base64,${frame.base64}`} alt={strings.remoteBrowser.image} draggable="false" data-testid="remote-browser-frame" />
-        </button>
-      {:else}<p class="empty">{strings.remoteBrowser.help}</p>{/if}
-    </div>
-    </div>
-    <footer>
-      <div class="keys"><button type="button" class="chip" disabled={!usable} onclick={() => void input({ kind: 'scroll', x: 0, y: -500 })} aria-label={strings.remoteBrowser.scrollUp}><ArrowUp size={17} /></button><button type="button" class="chip" disabled={!usable} onclick={() => void input({ kind: 'scroll', x: 0, y: 500 })} aria-label={strings.remoteBrowser.scrollDown}><ArrowDown size={17} /></button>
-        {#each (['Tab', 'Enter', 'Escape', 'Backspace'] as const) as key}<button type="button" class="chip" disabled={!usable} onclick={() => void input({ kind: 'key', key })}>{key === 'Backspace' ? '⌫' : key === 'Escape' ? 'Esc' : key}</button>{/each}
+<section class="remote" data-testid="remote-browser" aria-label={strings.remoteBrowser.title}>
+  <form class="nav" data-testid="remote-browser-nav" onsubmit={go}>
+    <button type="button" class="chip" disabled={!usable} aria-label={strings.remoteBrowser.back} onclick={() => void input({ kind: 'history', direction: 'back' })}><ArrowLeft size={17} /></button>
+    <button type="button" class="chip" disabled={!usable} aria-label={strings.remoteBrowser.forward} onclick={() => void input({ kind: 'history', direction: 'forward' })}><ArrowRight size={17} /></button>
+    <button type="button" class="chip" disabled={!usable} aria-label={strings.remoteBrowser.reload} onclick={() => void input({ kind: 'reload' })}><RotateCw size={16} /></button>
+    <input bind:value={address} data-testid="remote-browser-address" type="text" inputmode="url" enterkeyhint="go" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="4096" aria-label={strings.remoteBrowser.address} placeholder={strings.remoteBrowser.address} onfocus={e => { editingAddress = true; e.currentTarget.select(); }} onblur={() => { editingAddress = false; }} />
+    <button type="submit" class="chip go" disabled={!usable || !address.trim()}>{strings.remoteBrowser.go}</button>
+  </form>
+  <div class="toolbar"><span class="state" data-testid="remote-browser-state" class:live={frame && !paused && !error}>{paused ? strings.remoteBrowser.paused : hostMissing ? strings.remoteBrowser.waiting : error ? strings.remoteBrowser.reconnecting : frame ? strings.remoteBrowser.live : strings.remoteBrowser.waiting}</span>
+    <button type="button" class="chip" data-testid="remote-browser-display" aria-expanded={displaySettings} onclick={() => { displaySettings = !displaySettings; if (frame) { viewportWidth = frame.width; viewportHeight = frame.height; } }}>{strings.remoteBrowser.display}</button>
+    <button type="button" class="chip" onclick={() => { paused = !paused; }}>{#if paused}<Play size={15} />{:else}<Pause size={15} />{/if}{paused ? strings.remoteBrowser.resume : strings.remoteBrowser.pause}</button></div>
+  {#if error}<div class="error" class:notice={hostMissing} role="status" data-testid="remote-browser-error"><p>{error}</p></div>{/if}
+  <div class="viewer">
+  {#if displaySettings}
+    <section class="display-settings" aria-label={strings.remoteBrowser.display}>
+      <strong>{strings.remoteBrowser.resolution} {frame ? `${frame.width} × ${frame.height}` : ''}</strong>
+      <div class="options">
+        <button class="chip" disabled={!usable} onclick={() => resize(areaWidth, areaHeight)}>{strings.remoteBrowser.fitPhone}</button>
+        <button class="chip" disabled={!usable} onclick={() => resize(393, 700)}>{strings.remoteBrowser.phone}</button>
+        <button class="chip" disabled={!usable} onclick={() => resize(768, 1024)}>{strings.remoteBrowser.tablet}</button>
+        <button class="chip" disabled={!usable} onclick={() => resize(1366, 768)}>PC</button>
+        <button class="chip" disabled={!usable || !frame} onclick={() => frame && resize(frame.height, frame.width)}>{strings.remoteBrowser.rotate}</button>
       </div>
-      <form onsubmit={e => { e.preventDefault(); void sendText(false); }}><input bind:value={text} data-testid="remote-browser-text" maxlength="2000" enterkeyhint="send" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label={strings.remoteBrowser.text} placeholder={strings.remoteBrowser.text} onkeydown={textKey} /><button type="submit" class="chip" disabled={!usable || !text} aria-label={strings.remoteBrowser.send}><Send size={17} /></button></form>
-      <small>{zoom ? strings.remoteBrowser.panHint : strings.remoteBrowser.gesture}</small>
-    </footer>
-    {/if}
-  </dialog>
-{/if}
+      <form onsubmit={e => { e.preventDefault(); if (validSize) resize(viewportWidth!, viewportHeight!); }}>
+        <label>{strings.remoteBrowser.width}<input type="number" min="240" max="3840" step="1" required bind:value={viewportWidth} /></label>
+        <label>{strings.remoteBrowser.height}<input type="number" min="240" max="3840" step="1" required bind:value={viewportHeight} /></label>
+        <button class="chip" type="submit" disabled={!usable || !validSize}>{strings.remoteBrowser.apply}</button>
+      </form>
+      <small>{strings.remoteBrowser.sharedSize}</small>
+      <button class="chip" disabled={!usable} onclick={() => void input({ kind: 'reset-viewport' })}>{strings.remoteBrowser.restoreSize}</button>
+      <strong>{strings.remoteBrowser.previewZoom}</strong>
+      <div class="options">
+        <button class="chip" aria-pressed={zoom === 0} onclick={() => { zoom = 0; displaySettings = false; }}>{strings.remoteBrowser.fit}</button>
+        {#each [1, 1.5, 2] as scale}<button class="chip" aria-pressed={zoom === scale} onclick={() => { zoom = scale; displaySettings = false; }}>{scale * 100}%</button>{/each}
+      </div>
+    </section>
+  {/if}
+  <div class="screen-area" class:zoomed={zoom > 0} bind:clientWidth={areaWidth} bind:clientHeight={areaHeight}>
+    {#if frame}
+      <button type="button" class="screen" style:width={`${frame.width * previewScale}px`} style:height={`${frame.height * previewScale}px`} class:stale={paused || error || !fresh} aria-label={strings.remoteBrowser.interact} disabled={!usable} onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={() => { pointer = undefined; }} oncontextmenu={e => e.preventDefault()}>
+        <img bind:this={picture} src={`data:image/jpeg;base64,${frame.base64}`} alt={strings.remoteBrowser.image} draggable="false" data-testid="remote-browser-frame" />
+      </button>
+    {:else}<p class="empty">{strings.remoteBrowser.waiting}</p>{/if}
+  </div>
+  </div>
+  <footer>
+    <div class="keys"><button type="button" class="chip" disabled={!usable} onclick={() => void input({ kind: 'scroll', x: 0, y: -500 })} aria-label={strings.remoteBrowser.scrollUp}><ArrowUp size={17} /></button><button type="button" class="chip" disabled={!usable} onclick={() => void input({ kind: 'scroll', x: 0, y: 500 })} aria-label={strings.remoteBrowser.scrollDown}><ArrowDown size={17} /></button>
+      {#each (['Tab', 'Enter', 'Escape', 'Backspace'] as const) as key}<button type="button" class="chip" disabled={!usable} onclick={() => void input({ kind: 'key', key })}>{key === 'Backspace' ? '⌫' : key === 'Escape' ? 'Esc' : key}</button>{/each}
+    </div>
+    <form onsubmit={e => { e.preventDefault(); void sendText(false); }}><input bind:value={text} data-testid="remote-browser-text" maxlength="2000" enterkeyhint="send" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label={strings.remoteBrowser.text} placeholder={strings.remoteBrowser.text} onkeydown={textKey} /><button type="submit" class="chip" disabled={!usable || !text} aria-label={strings.remoteBrowser.send}><Send size={17} /></button></form>
+    <small>{zoom ? strings.remoteBrowser.panHint : strings.remoteBrowser.gesture}</small>
+  </footer>
+</section>
 
 <style>
-  .launcher { gap: 6px; }
-  .launcher span { display: none; }
-  .setup, .surface-launcher { margin: auto; max-width: 480px; padding: 28px 24px; display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
-  .setup p, .surface-launcher p { margin: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.6; }
-  .setup button, .surface-launcher button { min-height: var(--touch-target); }
-  dialog { width: min(1100px, calc(100vw - 24px)); height: min(850px, calc(100dvh - 24px)); padding: 0; margin: auto; border: 1px solid var(--color-edge); border-radius: var(--radius-xl); color: var(--color-foreground); background: var(--color-surface); box-shadow: var(--shadow-e3); }
-  dialog[open] { display: flex; flex-direction: column; } dialog::backdrop { background: var(--color-scrim); }
-  header { display: flex; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--color-border); } header div { flex: 1; min-width: 0; } h2 { margin: 0 0 4px; font-size: var(--text-md); } header small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .remote { flex: 1; min-height: 0; height: 100%; display: flex; flex-direction: column; }
   small, .empty { color: var(--color-muted-foreground); font-size: var(--text-sm); } .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 16px 8px; } .state { font-size: var(--text-sm); } .live { color: var(--color-accent); }
   .nav { padding: 8px 16px; gap: 6px; align-items: center; } .nav .chip { flex: none; } .nav .go { padding-inline: 12px; }
   .viewer { position: relative; flex: 1; min-height: 80px; overflow: hidden; }
@@ -301,6 +250,6 @@
   .options [aria-pressed=true] { color: var(--color-accent); border-color: var(--color-accent); }
   .screen { width: 100%; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; touch-action: none; cursor: crosshair; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; } .screen:disabled { opacity: 1; } .screen.stale { opacity: .55; } img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; -webkit-user-select: none; user-select: none; }
   footer { padding: 10px 16px max(12px, env(safe-area-inset-bottom)); display: grid; gap: 8px; } .keys { display: flex; gap: 6px; flex-wrap: wrap; } .chip { min-height: 44px; min-width: 44px; justify-content: center; } form { display: flex; gap: 8px; } input { min-width: 0; flex: 1; font-size: 16px; min-height: 44px; }
-  .error { display: flex; align-items: center; gap: 8px; padding: 0 16px 8px; } .error p { flex: 1; margin: 0; font-size: var(--text-sm); color: var(--color-danger); max-height: 90px; overflow: auto; overflow-wrap: anywhere; } .error.notice p { color: var(--color-muted-foreground); } .error .chip { flex: none; } .empty { padding: 24px; }
-  @media (max-width: 720px) { .launcher span { display: inline; } .launcher { min-height: var(--touch-target); } dialog { position: fixed; inset: var(--app-top, 0px) 0 auto; margin: 0; width: 100%; max-width: 100%; height: var(--app-height, 100dvh); max-height: var(--app-height, 100dvh); border: 0; border-radius: 0; } header { padding-top: max(12px, env(safe-area-inset-top)); } footer small { display: none; } .nav, .toolbar, footer { padding-inline: 12px; } .nav { gap: 4px; } }
+  .error { display: flex; align-items: center; gap: 8px; padding: 0 16px 8px; } .error p { flex: 1; margin: 0; font-size: var(--text-sm); color: var(--color-danger); max-height: 90px; overflow: auto; overflow-wrap: anywhere; } .error.notice p { color: var(--color-muted-foreground); } .empty { margin: auto; padding: 24px; }
+  @media (max-width: 720px) { footer small { display: none; } .nav, .toolbar, footer { padding-inline: 12px; } .nav { gap: 4px; } }
 </style>

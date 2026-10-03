@@ -67,19 +67,22 @@ export interface BrowserRpcMethods {
    * to sharing with paired devices (emote), or both; agents reach it only with
    * llowAgentControl.
    */
-  'browser.host': { params: { threadId: string; enabled: boolean; allowAgentControl?: boolean; remote?: boolean }; result: { ok: true } };
+  /**
+   * `live` says the conversation's panel on that desktop has a browser tab,
+   * which paired devices then show (`browser.remoteChanged`).
+   */
+  'browser.host': { params: { threadId: string; enabled: boolean; allowAgentControl?: boolean; remote?: boolean; live?: boolean }; result: { ok: true } };
   'browser.remoteFrame': { params: { threadId: string } & RemoteFrameOptions; result: RemoteBrowserFrame };
-  /** An owner desktop that shares its browser announces it can open a conversation's tab on request. */
-  'browser.remoteReady': { params: { enabled: boolean }; result: { ok: true } };
-  /** A viewer asks the sharing desktop to open this conversation and a browser tab. */
-  'browser.remoteOpen': { params: { threadId: string }; result: { ok: true } };
+  /** Whether a desktop shares a browser tab of this conversation now: a viewer shows it without asking. */
+  'browser.remoteStatus': { params: { threadId: string }; result: { live: boolean } };
   'browser.remoteInput': { params: { threadId: string; frameId: string; input: RemoteBrowserInput }; result: { ok: true } };
   'browser.command': { params: { threadId: string; tabId?: string; action: BrowserAction }; result: BrowserReply };
   'browser.complete': { params: { requestId: string; result?: BrowserReply; error?: string }; result: { ok: true } };
 }
 export interface BrowserRpcEvents {
   'browser.requested': { threadId: string; requestId: string; tabId?: string; action: BrowserAction };
-  'browser.remoteOpenRequested': { threadId: string };
+  /** For the clients subscribed to the conversation: its shared browser tab appeared or went away. */
+  'browser.remoteChanged': { threadId: string; live: boolean };
 }
 
 /** Shared by the real core, fake transport and desktop before executing input. */

@@ -2,13 +2,9 @@
 export const strings = {
   remoteBrowser: {
     display: 'Display', resolution: 'Page resolution', fitPhone: 'Fit this screen', phone: 'Phone', tablet: 'Tablet', rotate: 'Rotate', width: 'Width', height: 'Height', apply: 'Apply', sharedSize: 'Resolution also changes the shared tab on the PC.', restoreSize: 'Use the PC panel size', previewZoom: 'Preview zoom (this device only)', fit: 'Fit', panHint: 'Drag to pan the preview. Use the arrows to scroll the page.',
-    open: 'Open live browser', experimental: 'Experimental browser sharing', enable: 'Enable on this device',
-    hint: 'View and control the browser tab shared by your PC, inside Boite.',
-    hostMissing: 'The PC is not showing this conversation’s browser yet.', asking: 'Asking the PC to open this conversation’s browser…', noAnswer: 'The PC has not opened it. Check that Boite is open on the PC, then ask again.', askPc: 'Open on the PC',
-    noDesktop: 'No PC is sharing its browser. On the PC, keep Boite open and enable Live browser on other devices in Settings > Experiments.',
+    hostMissing: 'The PC is not showing this conversation’s browser yet.',
     address: 'Address', go: 'Go', back: 'Back', forward: 'Forward', reload: 'Reload', badAddress: 'Enter a web address (http or https).',
     title: 'Live desktop browser', waiting: 'Waiting for the desktop', live: 'Live', paused: 'Paused', reconnecting: 'Reconnecting', pause: 'Pause', resume: 'Resume',
-    help: 'On the PC, enable Live browser on other devices in Settings > Experiments and keep Boite open. Watching from here opens this conversation’s browser tab there. The PC must stay awake.',
     interact: 'Tap or swipe the shared page', image: 'Live view of the desktop browser', scrollUp: 'Scroll up', scrollDown: 'Scroll down',
     text: 'Tap a page field, then type here', send: 'Send text to the page', gesture: 'Tap to click. Drag to scroll. Return sends the text and Enter; ⌫ on an empty field erases in the page.'
   },
@@ -1232,7 +1228,7 @@ export const strings = {
     file: 'File',
     tasks: 'Tasks',
     tasksHint: "The goal, the agent's tasks and the project's todos",
-    desktopOnly: 'Only in the desktop app',
+    browserAbsent: 'Opens when an agent uses the browser',
     ownerOnly: "Only in the owner's app",
     launcher: 'Open a surface in this panel',
     untitled: 'Browser'
@@ -1885,7 +1881,7 @@ export const strings = {
   },
 
   experiments: {
-    remoteBrowser: { title: 'Live browser on other devices', hint: 'On the desktop, share a conversation’s browser with paired devices and open its tab when one asks. On a phone, watch and control that page. Enable this experiment on both devices; agents do not get browser control from it.' },
+    remoteBrowser: { title: 'Live browser on other devices', hint: 'On the desktop, let paired devices watch and drive a conversation’s browser tab, such as the one an agent opened. It appears by itself in that conversation on the phone. Agents do not get browser control from it.' },
     prReview: { title: 'Review pull requests', hint: 'Read linked GitHub pull requests, file diffs, comments and check results inside Boite, including on phones.' },
     recordingIndicators: { title: 'Show actions in recordings', hint: 'Add click markers and navigation keys to browser recordings. Typed text and password input are never shown as key labels.' },
     openChatLinks: { title: 'Open chat links in their apps', hint: 'On this desktop, clicking a local file or folder opens its default app, including shortcuts and files outside the project. Only links from this computer are opened.' },

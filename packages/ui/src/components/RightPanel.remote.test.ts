@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import type { RemoteBrowserFrame } from '@boite/contracts';
 import { browserBridge } from '../lib/browser-bridge';
 import { writeExperiments } from '../lib/experiments';
+import { watchRemoteBrowser } from '../lib/remote-browser-watch.svelte';
 import { FakeClient } from '../lib/fake-client';
 import { rightPanel } from '../lib/right-panel.svelte';
 import { Store } from '../lib/store.svelte';
@@ -42,23 +43,47 @@ async function showPanel(): Promise<void> {
   await settle();
 }
 
-test('a paired web session reaches remote setup from the panel without owner capabilities', async () => {
+test('an agent tab on the PC shows up by itself on a paired phone and goes away with it', async () => {
   const client = await phone();
   expect(store.owner).toBe(false);
   expect(browserBridge.paints).toBe(false);
-  const calls = vi.spyOn(client, 'call'), create = vi.spyOn(browserBridge, 'create');
+  let changed: ((event: { threadId: string; live: boolean }) => void) | undefined;
+  const on = client.on.bind(client);
+  vi.spyOn(client, 'on').mockImplementation(((name: string, handler: never) => {
+    if (name === 'browser.remoteChanged') changed = handler;
+    return on(name as never, handler);
+  }) as typeof client.on);
+  const original = client.call.bind(client), create = vi.spyOn(browserBridge, 'create');
+  vi.spyOn(client, 'call').mockImplementation(((method: string, params: unknown) => {
+    if (method === 'browser.remoteStatus') return Promise.resolve({ live: true });
+    if (method === 'browser.remoteFrame') return Promise.resolve(frame('Agent page'));
+    return original(method as never, params as never);
+  }) as typeof client.call);
   vi.useFakeTimers(); await showPanel();
-  expect(button('launch-browser').disabled).toBe(false);
+  // Nothing to open by hand: without an agent tab the card says the browser lives on the desktop.
+  expect(button('launch-browser').disabled).toBe(true);
   // Changes and files are read-only on a phone; tasks and the trace stay the owner's.
   expect(button('launch-files').disabled).toBe(false);
   expect(button('launch-changes').disabled).toBe(false);
   expect(button('launch-tasks').disabled).toBe(true);
+  const stop = watchRemoteBrowser(store, 't-trace'); await settle();
+  expect(store.panel.active?.kind).toBe('browser');
+  await vi.advanceTimersByTimeAsync(1); await settle();
+  expect(document.querySelector('[data-testid=remote-browser-frame]')).not.toBeNull();
+  // A tab the user closed stays closed for this agent tab, and the card brings it back.
+  store.panel.close(store.panel.active!.id); await settle();
+  changed!({ threadId: 't-trace', live: true }); await settle();
+  expect(store.panel.surfaces).toHaveLength(0);
+  expect(button('launch-browser').disabled).toBe(false);
   button('launch-browser').click(); await settle();
   expect(store.panel.active?.kind).toBe('browser');
-  expect(document.querySelector<HTMLDialogElement>('[data-testid=remote-browser-dialog]')?.open).toBe(true);
-  expect(document.querySelector('[data-testid=remote-browser-setup]')).not.toBeNull();
-  await vi.advanceTimersByTimeAsync(2000); await settle();
-  expect(calls).not.toHaveBeenCalled();
+  // The agent closes its tab: the view leaves; the next tab shows up again.
+  changed!({ threadId: 't-trace', live: false }); await settle();
+  expect(store.panel.surfaces).toHaveLength(0);
+  expect(button('launch-browser').disabled).toBe(true);
+  changed!({ threadId: 't-trace', live: true }); await settle();
+  expect(store.panel.active?.kind).toBe('browser');
+  stop();
   expect(create).not.toHaveBeenCalled();
 });
 
@@ -70,7 +95,7 @@ test('the remote browser launcher requires a conversation', async () => {
   expect(button('launch-browser').disabled).toBe(true);
   button('launch-browser').click(); await settle();
   expect(store.panel.surfaces).toHaveLength(0);
-  expect(document.querySelector('[data-testid=remote-browser-dialog]')).toBeNull();
+  expect(document.querySelector('[data-testid=remote-browser]')).toBeNull();
   expect(calls).not.toHaveBeenCalled();
 });
 
@@ -90,7 +115,7 @@ test('an open viewer follows a replacement client without reusing old frames or 
     if (method !== 'browser.remoteFrame') return originalNext(method as never, params as never);
     return Promise.resolve(frame('Replacement desktop'));
   }) as typeof nextClient.call);
-  vi.useFakeTimers(); writeExperiments(['remote-browser']); store.panel.open('browser'); await showPanel();
+  vi.useFakeTimers(); store.panel.open('browser'); await showPanel();
   await vi.advanceTimersByTimeAsync(1); await settle();
   expect(oldCalls).toHaveBeenCalledExactlyOnceWith('browser.remoteFrame', { threadId: 't-trace' });
   const screen = document.querySelector<HTMLButtonElement>('.screen')!;
@@ -100,7 +125,7 @@ test('an open viewer follows a replacement client without reusing old frames or 
   expect(captures).toBe(2);
 
   store.attach(nextClient); await settle();
-  document.querySelector<HTMLButtonElement>('[data-testid=remote-browser-dialog] .keys button')!.click(); await settle();
+  document.querySelector<HTMLButtonElement>('.keys button')!.click(); await settle();
   expect(nextCalls).not.toHaveBeenCalled();
   resolveOld(frame('Obsolete desktop')); await settle();
   expect(document.querySelector('[data-testid=remote-browser-frame]')).toBeNull();
@@ -108,18 +133,14 @@ test('an open viewer follows a replacement client without reusing old frames or 
   // A moving page is polled several times a second; every request goes to the replacement.
   expect(nextCalls).toHaveBeenCalledWith('browser.remoteFrame', { threadId: 't-trace' });
   expect(nextCalls.mock.calls.every(([method]) => method === 'browser.remoteFrame')).toBe(true);
-  expect(document.querySelector('[data-testid=remote-browser-dialog] header small')?.textContent).toBe('Replacement desktop');
+  expect(document.querySelector('[data-testid=remote-browser-frame]')).not.toBeNull();
   document.querySelector<HTMLButtonElement>('.screen')!.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0, clientX: 80, clientY: 80 }));
   await settle();
   expect(nextCalls.mock.calls.filter(([method]) => method === 'browser.remoteInput')).toHaveLength(0);
-  document.querySelector<HTMLButtonElement>('[data-testid=remote-browser-dialog] .keys button')!.click(); await settle();
+  document.querySelector<HTMLButtonElement>('.keys button')!.click(); await settle();
   expect(nextCalls).toHaveBeenCalledWith('browser.remoteInput', { threadId: 't-trace', frameId: 'Replacement desktop', input: { kind: 'scroll', x: 0, y: -500 } });
   await vi.advanceTimersByTimeAsync(700); await settle();
   expect(oldCalls.mock.calls.filter(([method]) => method === 'browser.remoteFrame')).toHaveLength(2);
 
-  writeExperiments([]); await settle();
-  const beforeDisable = nextCalls.mock.calls.length;
-  await vi.advanceTimersByTimeAsync(2000); await settle();
-  expect(document.querySelector('[data-testid=remote-browser-dialog]')).toBeNull();
-  expect(nextCalls).toHaveBeenCalledTimes(beforeDisable);
+
 });

@@ -59,7 +59,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'threads.pullRequests', // Read-only conversation links, including dependency order, on phones.
   'threads.pullRequestReview', 'threads.pullRequestFiles', // Bounded read-only data for PRs the owner already linked.
   'browser.remoteFrame', 'browser.remoteInput', // Only the subscribed conversation's owner-enabled shared page; no scripts or host paths.
-  'browser.remoteOpen', // Asks an owner desktop that already shares its browser to show this subscribed conversation's tab.
+  'browser.remoteStatus', // Only whether the subscribed conversation has an owner-shared browser tab; no address or content.
   'threads.create',
   'threads.get',
   // A phone can manage continued prompts in the same thread it can already send to.
@@ -128,6 +128,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
 /** Push events must not bypass the read permissions enforced on RPC calls. */
 export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'threads.pullRequestsChanged', // Links already readable on the subscribed conversation.
+  'browser.remoteChanged', // Whether the subscribed conversation's shared browser tab exists, as browser.remoteStatus says.
   'agents.changed', // Invalidation only; agents.snapshot applies the device read policy.
   // Team invalidation contains only the subscribed root ID; delegation.get enforces its read scope.
   'delegation.changed',

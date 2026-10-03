@@ -49,19 +49,18 @@ test('fake remote resize shares the bounded contract and routes to the captured 
   } finally { client.close(); }
 });
 
-test('a share-only desktop serves viewers, refuses the agent and opens the tab on request', async () => {
+test('a share-only desktop serves viewers, refuses the agent and says when its tab comes and goes', async () => {
   const client = new FakeClient({ delayMs: 0 }), threadId = 't-trace';
-  const requests: RpcEvents['browser.requested'][] = [], opens: string[] = [];
+  const requests: RpcEvents['browser.requested'][] = [], changes: boolean[] = [];
   client.on('browser.requested', request => requests.push(request));
-  client.on('browser.remoteOpenRequested', ({ threadId }) => opens.push(threadId));
+  client.on('browser.remoteChanged', ({ live }) => changes.push(live));
   try {
     await client.connect(); await client.call('threads.subscribe', { threadId });
-    await expect(client.call('browser.remoteOpen', { threadId })).rejects.toThrow('No desktop is sharing');
-    await client.call('browser.remoteReady', { enabled: true });
-    await client.call('browser.remoteOpen', { threadId });
-    expect(opens).toEqual([threadId]);
-    await expect(client.call('browser.remoteOpen', { threadId })).rejects.toThrow('wait before asking');
+    expect(await client.call('browser.remoteStatus', { threadId })).toEqual({ live: false });
     await client.call('browser.host', { threadId, enabled: true, allowAgentControl: false, remote: true });
+    expect(await client.call('browser.remoteStatus', { threadId })).toEqual({ live: false });
+    await client.call('browser.host', { threadId, enabled: true, allowAgentControl: false, remote: true, live: true });
+    expect(await client.call('browser.remoteStatus', { threadId })).toEqual({ live: true });
     await expect(client.call('browser.command', { threadId, action: { kind: 'status' } })).rejects.toThrow('Agent browser control');
     await expect(client.call('browser.remoteFrame', { threadId, maxWidth: 99 })).rejects.toThrow('maxWidth');
     const image = client.call('browser.remoteFrame', { threadId, maxWidth: 780, quality: 40 });
@@ -69,5 +68,7 @@ test('a share-only desktop serves viewers, refuses the agent and opens the tab o
     expect(requests[0]!.action).toEqual({ kind: 'remote-frame', maxWidth: 780, quality: 40 });
     await client.call('browser.complete', { requestId: requests[0]!.requestId, result: { frame: { id: 'f', tabId: 'browser:test', width: 800, height: 600, title: 'Docs', base64: 'aGVsbG8=', at: 0, url: 'https://example.com/a' } } });
     expect((await image).url).toBe('https://example.com/a');
+    await client.call('browser.host', { threadId, enabled: false });
+    expect(changes).toEqual([true, false]);
   } finally { client.close(); }
 });

@@ -62,12 +62,12 @@ export function hostBrowser(store: Store, threadId: string): () => void {
           if (action.kind === 'open') {
             const profile = action.profile === undefined ? browserProfiles.defaultId : browserProfiles.find(action.profile);
             if (profile === null) throw new Error(`no browser profile is named ${action.profile}; browser profiles lists them`);
-            panel.open('browser', action.url, profile);
+            panel.open('browser', action.url, profile); renew();
           }
           const surface = action.kind === 'open' ? panel.active : request.tabId ? panel.surfaces.find(s => s.id === request.tabId) : panel.active;
           if (!surface || surface.kind !== 'browser') throw new Error('no browser tab in this conversation; use browser open, or pass a tabId from browser status');
           if (action.kind === 'close') {
-            browserBridge.destroy(surface.id); panel.close(surface.id);
+            browserBridge.destroy(surface.id); panel.close(surface.id); renew();
             result = { tabId: surface.id, value: { closed: true } };
           } else {
             panel.activate(surface.id);
@@ -93,17 +93,22 @@ export function hostBrowser(store: Store, threadId: string): () => void {
       await client.call('browser.complete', { requestId: request.requestId, ...(error ? { error } : { result }) }).catch(() => {});
     })();
   });
+  // Paired devices show the conversation's browser tab while it exists: the
+  // core hears at once when the agent opens or closes one.
+  let live = false;
   const renew = () => {
     const agent = isExperimentEnabled('agent-browser-control'), remote = isExperimentEnabled('remote-browser');
+    live = remote && panel.surfaces.some(s => s.kind === 'browser');
     if (!stopped && store.client === client && store.machineId === machine && store.openThread?.id === threadId) {
-      void client.call('browser.host', agent || remote ? { threadId, enabled: true, allowAgentControl: agent, remote } : { threadId, enabled: false }).catch(() => {});
+      void client.call('browser.host', agent || remote ? { threadId, enabled: true, allowAgentControl: agent, remote, live } : { threadId, enabled: false }).catch(() => {});
     }
   };
   renew();
   const timer = setInterval(renew, 10000);
+  const watch = setInterval(() => { if (live !== (isExperimentEnabled('remote-browser') && panel.surfaces.some(s => s.kind === 'browser'))) renew(); }, 1000);
   const offExperiments = subscribeExperiments(() => { consentRevision++; renew(); });
   return () => {
-    stopped = true; clearInterval(timer); off(); offExperiments();
+    stopped = true; clearInterval(timer); clearInterval(watch); off(); offExperiments();
     void client.call('browser.host', { threadId, enabled: false }).catch(() => {});
   };
 }

@@ -3,29 +3,28 @@ import type { Core } from './core.ts';
 import type { Connection } from './router.ts';
 import { refused } from './errors.ts';
 
-/** `agent` and `remote` are the desktop's two separate consents: agent control, and sharing with paired devices. */
-interface Host { connection: Connection; expires: number; agent: boolean; remote: boolean }
+/**
+ * `agent` and `remote` are the desktop's two separate consents: agent control,
+ * and sharing with paired devices. `live`: its panel has a browser tab to share.
+ */
+interface Host { connection: Connection; expires: number; agent: boolean; remote: boolean; live: boolean }
 interface Pending {
   threadId: string; connectionId: string; capture: boolean; timer: ReturnType<typeof setTimeout>;
   resolve(result: BrowserReply): void; reject(error: Error): void;
 }
-
-/** A sharing desktop renews this every 20 seconds while its remote-browser switch is on. */
-const READY_MS = 35000;
-const OPEN_INTERVAL_MS = 2000;
 
 /** One owner desktop answers a request, never a broadcast or an agent socket. */
 export class BrowserControl {
   private hosts = new Map<string, Host>();
   private pending = new Map<string, Pending>();
   private remoteFrames = new Map<string, { threadId: string; hostId: string; frames: RemoteBrowserFrame[]; requestedAt: number }>();
-  /** Owner desktops that share their browser and can open a conversation's tab when a viewer asks. */
-  private ready = new Map<string, { connection: Connection; expires: number }>();
-  private opened = new Map<string, number>();
+  /** The conversations whose viewers were last told that a shared tab exists. */
+  private announced = new Set<string>();
+  private closed = false;
   constructor(private core: Core, private timeout = 20000) {}
 
-  host({ threadId, enabled, allowAgentControl, remote = false }: RpcParams<'browser.host'>, connection: Connection): { ok: true } {
-    if (typeof enabled !== 'boolean' || typeof remote !== 'boolean') throw refused('browser.host enabled and remote must be booleans');
+  host({ threadId, enabled, allowAgentControl, remote = false, live = false }: RpcParams<'browser.host'>, connection: Connection): { ok: true } {
+    if (typeof enabled !== 'boolean' || typeof remote !== 'boolean' || typeof live !== 'boolean') throw refused('browser.host enabled, remote and live must be booleans');
     const thread = this.core.threads.require(threadId);
     if (enabled && (thread.archived || !connection.subscriptions.has(threadId))) throw refused('browser.host needs a subscribed, active conversation');
     const previous = this.hosts.get(threadId);
@@ -40,38 +39,30 @@ export class BrowserControl {
       const agent = allowAgentControl === true;
       // Withdrawing one consent settles what was waiting on it.
       if (previous?.connection.id === connection.id && previous.agent && !agent) this.settle(threadId, false, 'agent browser control was turned off on the desktop');
-      this.hosts.set(threadId, { connection, expires: Date.now() + 35000, agent, remote });
+      this.hosts.set(threadId, { connection, expires: Date.now() + 35000, agent, remote, live });
+      this.changed(threadId);
       if (!remote) for (const [id, value] of this.remoteFrames) if (value.threadId === threadId) this.remoteFrames.delete(id);
     }
     return { ok: true };
   }
 
-  remoteReady({ enabled }: RpcParams<'browser.remoteReady'>, connection: Connection): { ok: true } {
-    if (typeof enabled !== 'boolean') throw refused('browser.remoteReady enabled must be a boolean');
-    if (enabled) this.ready.set(connection.id, { connection, expires: Date.now() + READY_MS });
-    else this.ready.delete(connection.id);
-    return { ok: true };
+  /** A browser tab of this conversation that paired devices may watch now. */
+  private live(threadId: string): boolean {
+    const host = this.hosts.get(threadId);
+    return !!host && host.expires >= Date.now() && host.remote && host.live && host.connection.subscriptions.has(threadId);
   }
 
-  /**
-   * The phone cannot reach the PC's screen, so it asks the desktop that shares
-   * its browser to show this conversation and a browser tab. The desktop that
-   * hosts the conversation now wins; otherwise the one that renewed last.
-   */
-  remoteOpen({ threadId }: RpcParams<'browser.remoteOpen'>, connection: Connection): { ok: true } {
+  /** Tells the conversation's viewers when its shared tab appears or goes away. */
+  private changed(threadId: string): void {
+    const live = this.live(threadId);
+    if (live === this.announced.has(threadId) || this.closed) return;
+    if (live) this.announced.add(threadId); else this.announced.delete(threadId);
+    this.core.bus.emit('browser.remoteChanged', { threadId, live });
+  }
+
+  remoteStatus({ threadId }: RpcParams<'browser.remoteStatus'>, connection: Connection): { live: boolean } {
     if (this.core.threads.require(threadId).archived || !connection.subscriptions.has(threadId)) throw refused('subscribe to the active conversation before watching its browser');
-    const key = `${connection.id}:${threadId}`, now = Date.now();
-    if (now - (this.opened.get(key) ?? 0) < OPEN_INTERVAL_MS) throw refused('wait before asking the desktop again');
-    for (const [id, value] of this.ready) if (value.expires < now) this.ready.delete(id);
-    const host = this.hosts.get(threadId);
-    const target = host && host.expires > now && host.remote && this.ready.has(host.connection.id)
-      ? host.connection
-      : [...this.ready.values()].sort((a, b) => b.expires - a.expires)[0]?.connection;
-    if (!target) throw refused('No desktop is sharing its browser. Open Boite on the PC with Live browser on other devices enabled.');
-    if (this.opened.size > 256) this.opened.clear();
-    this.opened.set(key, now);
-    target.sendEvent('browser.remoteOpenRequested', { threadId });
-    return { ok: true };
+    return { live: this.live(threadId) };
   }
 
   private shared(threadId: string, connection: Connection): Host {
@@ -173,14 +164,13 @@ export class BrowserControl {
 
   release(threadId: string): void {
     this.hosts.delete(threadId);
+    this.changed(threadId);
     for (const [id, value] of this.remoteFrames) if (value.threadId === threadId) this.remoteFrames.delete(id);
     this.settle(threadId, true, 'the browser host left this conversation');
   }
   disconnect(connectionId: string): void {
-    this.ready.delete(connectionId);
     for (const id of this.remoteFrames.keys()) if (id.startsWith(`${connectionId}:`)) this.remoteFrames.delete(id);
-    for (const id of this.opened.keys()) if (id.startsWith(`${connectionId}:`)) this.opened.delete(id);
     for (const [id, host] of this.hosts) if (host.connection.id === connectionId) this.release(id);
   }
-  close(): void { this.ready.clear(); for (const id of this.hosts.keys()) this.release(id); }
+  close(): void { this.closed = true; for (const id of this.hosts.keys()) this.release(id); }
 }

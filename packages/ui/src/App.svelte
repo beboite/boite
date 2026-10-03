@@ -2,7 +2,8 @@
   import { onMount } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { hostBrowser } from './lib/browser-host';
-  import { shareBrowserOnRequest } from './lib/browser-remote-open';
+  import { browserBridge } from './lib/browser-bridge';
+  import { watchRemoteBrowser } from './lib/remote-browser-watch.svelte';
   import { browserProfiles } from './lib/browser-profiles.svelte';
   import TerminalDrawer from './components/TerminalDrawer.svelte';
   import UndoToast from './components/UndoToast.svelte';
@@ -51,11 +52,13 @@
     void store.connection;
     if ((experimentOn('agent-browser-control') || experimentOn('remote-browser')) && threadId && store.owner && store.client?.state === 'ready') return hostBrowser(store, threadId);
   });
-  $effect(() => {
-    void store.connection;
-    if (experimentOn('remote-browser') && store.owner && store.client?.state === 'ready') return shareBrowserOnRequest(store);
-  });
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
+  // Away from the PC, the agent's browser tab shows up by itself in its conversation.
+  $effect(() => {
+    const threadId = store.openThread?.id;
+    void store.connection;
+    if (!inShell && !browserBridge.paints && threadId && store.client?.state === 'ready') return watchRemoteBrowser(store, threadId);
+  });
   const narrow = new MediaQuery('(max-width: 720px)');
   let appRoot = $state<HTMLDivElement | undefined>(undefined);
   let mobileScreen = $state<'chat' | 'threads' | 'activity'>('chat');

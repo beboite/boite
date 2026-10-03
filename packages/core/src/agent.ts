@@ -198,8 +198,7 @@ export function registerAgentMethods(core: Core): void {
   core.router.register('browser.host', (params, { connection }) => core.browser.host(params, connection));
   core.router.register('browser.remoteFrame', (params, { connection }) => core.browser.remoteFrame(params, connection));
   core.router.register('browser.remoteInput', (params, { connection }) => core.browser.remoteInput(params, connection));
-  core.router.register('browser.remoteReady', (params, { connection }) => core.browser.remoteReady(params, connection));
-  core.router.register('browser.remoteOpen', (params, { connection }) => core.browser.remoteOpen(params, connection));
+  core.router.register('browser.remoteStatus', (params, { connection }) => core.browser.remoteStatus(params, connection));
   core.router.register('browser.command', params => core.browser.command(params));
   core.router.register('browser.complete', (params, { connection }) => core.browser.complete(params, connection));
   core.router.register('artifacts.publish', (params) => publishArtifact(core, params));

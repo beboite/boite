@@ -18,6 +18,7 @@
   import { offeredCards, available as availableTo, kindName, label, tooltip, unavailable } from '../lib/surface-labels';
   import BrowserSurface from './BrowserSurface.svelte';
   import RemoteBrowser from './RemoteBrowser.svelte';
+  import { remoteLive } from '../lib/remote-browser-watch.svelte';
   import DelegationSurface from './DelegationSurface.svelte';
   import ChangesSurface from './ChangesSurface.svelte';
   import FileSurface from './FileSurface.svelte';
@@ -58,9 +59,9 @@
   let active = $derived(panel.active);
   let empty = $derived(surfaces.length === 0);
 
-  /** A web client watches the desktop browser through its device-scoped stream. */
+  /** A web client shows the PC's browser tab only while the agent has one in this conversation. */
   function available(kind: SurfaceKind): boolean {
-    if (kind === 'browser' && !inShell) return !!store.openThread;
+    if (kind === 'browser' && !inShell) return !!store.openThread && (browserBridge.paints || remoteLive.has(store.threadKey(store.openThread.id)));
     return availableTo(kind, inShell, store.owner);
   }
 
@@ -425,7 +426,7 @@
     {:else if active?.kind === 'browser'}
       {#key active.id}
         {#if !inShell && !browserBridge.paints && store.openThread}
-          <RemoteBrowser {store} threadId={store.openThread.id} surface />
+          <RemoteBrowser {store} threadId={store.openThread.id} />
         {:else}<BrowserSurface surface={active} {panel} {store} />{/if}
       {/key}
     {:else if active?.kind === 'changes'}
@@ -441,7 +442,6 @@
     {:else}
       <SurfaceLauncher
         {available}
-        remoteBrowser={!inShell}
         onlaunch={launch}
         onmenu={(event, kind) => controlMenu(event, store, `panel.${kind}` as ControlId)}
         oncustomize={() => store.showSettings('appearance', CONTROLS_SECTION)}

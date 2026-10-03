@@ -492,42 +492,44 @@ pairing). Doing it with one app would need the installing core to relay: the
 other cores send their events to it over coordination, and it pushes them
 with its own key.
 
-## Experimental desktop browser control
+## The desktop browser on a phone
 
 Enable **Live browser on other devices** in Settings, Experiments on the
-Windows desktop. That consent alone shares the desktop's browser with paired
-devices; it does not give agents control, which stays behind **Agent browser
-control**. Leave Boite open on the desktop. On the phone, choose **Browser** in
-the conversation's header or panel, then **Enable on this device** if prompted.
-This experiment is saved separately on each device. Opening its setup screen
-does not start sharing; frame requests start after activation.
+Windows desktop. That consent alone shares the browser tabs of the
+conversation the desktop shows with paired devices; it does not give agents
+control, which stays behind **Agent browser control**. The phone needs no
+setting and has nothing to open: like the desktop panel, it shows a browser
+when the conversation has one. When an agent opens a tab in the conversation
+on the desktop (`browser open`), the desktop tells the core
+(`browser.host` with `live`), the core tells the conversation's subscribers
+(`browser.remoteChanged`) and the phone opens its panel on that tab. A phone
+that opens the conversation later asks once (`browser.remoteStatus`). When the
+last browser tab of the conversation closes on the desktop, the view leaves
+the phone. A view the user closed stays closed for that tab; the panel's
+**Browser** card brings it back while the tab exists, and is disabled
+otherwise. The phone cannot ask the desktop to open a browser or a
+conversation.
 
-The phone does not need the conversation to be open on the desktop. When the
-desktop is not showing it yet, the viewer asks once (`browser.remoteOpen`) and
-the desktop opens that conversation with a browser tab, reusing the tab it
-already has. **Open on the PC** asks again. A desktop announces that it can be
-asked (`browser.remoteReady`) every 20 seconds while the experiment is on; the
-core forgets it 35 seconds after its last announcement. If no desktop answers,
-the viewer says to open Boite on the PC with the experiment enabled.
+The view shows the desktop's active browser tab under an address bar with
+back, forward and reload. Tap to click and drag to scroll, as on the phone
+itself. Tap a page field and type in the input below the preview: Return sends
+the text and then Enter, and Backspace in the empty input erases on the page.
+Navigation keys and scroll buttons remain available without a hardware
+keyboard. When the desktop shows another surface of its panel, or another
+conversation, the view waits for it.
 
-The dialog shows that desktop tab under an address bar with back, forward and
-reload. Tap to click and drag to scroll, as on the phone itself. Tap a page
-field and type in the input below the preview: Return sends the text and then
-Enter, and Backspace in the empty input erases on the page. Navigation keys
-and scroll buttons remain available without a hardware keyboard.
-
-The phone requests JPEG frames while the dialog is open and visible: about
-three a second while the page moves, slower on a still page or a slow link,
-sized to the phone's screen (at most twice its CSS width) and lighter when
-frames take long to arrive. The desktop captures its tab as shown and shrinks
-the image itself: asking Chromium for a smaller capture redraws the live tab at
-that size and made it flash on the PC each time the phone's keyboard shrank the
-preview. A lost desktop is retried with a growing pause
-up to eight seconds. Pause, closing the dialog, switching off the experiment
-or hiding the app stops those requests; returning to the app, regaining the
-network or reconnecting resumes them at once. This is a periodically
-refreshed preview, not a video stream with audio. The desktop must stay awake
-with Boite open; a minimized window may stop producing frames.
+The phone requests JPEG frames while the view is shown and the app visible:
+about three a second while the page moves, slower on a still page or a slow
+link, sized to the phone's screen (at most twice its CSS width) and lighter
+when frames take long to arrive. The desktop captures its tab as shown and
+shrinks the image itself: asking Chromium for a smaller capture redraws the
+live tab at that size and made it flash on the PC each time the phone's
+keyboard shrank the preview. A lost desktop is retried with a growing pause up
+to eight seconds. Pause, closing the view or hiding the app stops those
+requests; returning to the app, regaining the network or reconnecting resumes
+them at once. This is a periodically refreshed preview, not a video stream
+with audio. The desktop must stay awake with Boite open; a minimized window may
+stop producing frames.
 
 **Display** offers phone, tablet and PC resolutions, custom dimensions from
 240 to 3840 pixels, rotation and a fit-to-screen action. Resolution changes the
@@ -536,9 +538,10 @@ Preview zoom stays on the viewing device. At 100, 150 or 200 percent, drag to
 pan the enlarged image and use the arrow buttons to scroll the web page.
 Changing resolution waits for a new frame before accepting more input.
 
-The core permits the paired device's `browser.remoteFrame`,
-`browser.remoteInput` and `browser.remoteOpen` only for a subscribed
-conversation, and frames only from an owner desktop that has opted in. Inputs
+The core permits the paired device's `browser.remoteStatus`,
+`browser.remoteFrame` and `browser.remoteInput` only for a subscribed
+conversation, and frames only from an owner desktop that has opted in. The
+status says only whether a shared tab exists, never its address. Inputs
 must refer to a recent frame issued to that connection. The desktop refuses a
 tap or key after the page navigates or its viewport changes; the address bar
 accepts only http and https addresses. Turning off desktop sharing invalidates
@@ -546,14 +549,16 @@ frames, including captures in flight. The phone cannot use `browser.command`,
 execute JavaScript or register itself as the desktop host. It can interact
 with the visible web page, including sites signed in on the desktop, so pair
 only devices you intend to give that control. For that reason the experiment
-stays off by default.
+stays off by default. The desktop that hosts the browser shows its real panel
+and never a remote view of itself.
 
 On iPhone, use the HTTPS web app in Safari or install it on the Home Screen.
 Taps map through the letterboxed preview, its zoom and rotation, and the phone's
-pixel ratio, in page coordinates. Unit tests cover that arithmetic, the polling
-and the reconnection; layout checks at iPhone width run in Chromium. They do
-not establish behavior on a physical iPhone or Safari, including keyboard,
-backgrounding and network handover.
+pixel ratio, in page coordinates. Unit tests cover that arithmetic, the polling,
+the reconnection and the view appearing and leaving with the tab; layout
+checks at iPhone width run in Chromium. They do not establish behavior on a
+physical iPhone or Safari, including keyboard, backgrounding and network
+handover.
 
 Browser recordings are H.264 MP4 when the desktop engine encodes it (WebView2
 does), which every iPhone plays, else WebM. A video the device reports it
