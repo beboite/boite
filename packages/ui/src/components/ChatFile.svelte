@@ -179,7 +179,7 @@
   {#if showPreview && url}
     <div class="preview" data-testid="artifact-content">
       {#if previewError}
-        <div class="media-fallback" role="status"><FileText size={28} /><p>{strings.artifacts.mediaFailed}</p><button type="button" class="ghost small" onclick={load}><RefreshCw size={14} />{strings.artifacts.retry}</button></div>
+        <div class="media-fallback" role="status"><FileText size={28} /><p>{strings.artifacts.mediaFailed}</p><button type="button" class="ghost small" onclick={load}><RefreshCw size={14} /><span class="ui-label">{strings.artifacts.retry}</span></button></div>
       {:else}
         {#key attempt}
           {#if text !== null}<pre>{#if line}<span class="line">{`${path}:${line}\n`}</span>{/if}{text}</pre>
@@ -200,15 +200,15 @@
       {#if image}<Image size={18} />{:else if video}<Film size={18} />{:else if audio}<Music2 size={18} />{:else}<FileText size={20} />{/if}
       <span class="label"><span class="filename">{name}</span><small>{loading ? strings.artifacts.loading : saving ? strings.artifacts.saving : saved ? strings.artifacts.saved : [bytes(size), dimensions, duration ? millis(duration * 1000) : ''].filter(Boolean).join(' · ')}</small></span>
     </button>
-    {#if directory}<button class="ghost small" type="button" onclick={open} disabled={opening} data-testid="artifact-open">{strings.artifacts.open}</button>{/if}
+    {#if directory}<button class="ghost small" type="button" onclick={open} disabled={opening} data-testid="artifact-open"><span class="ui-label">{strings.artifacts.open}</span></button>{/if}
     {#if url || (file?.type === 'file' && file.dataDeferred)}
-      {#if deferredImage}<button class="ghost small" type="button" onclick={() => imageRequested = true} data-testid="artifact-load-image">{strings.artifacts.loadImage}</button>
-      {:else if rich && previewable && !inlineMedia}<button class="ghost small" type="button" onclick={() => expanded = !expanded} aria-expanded={expanded} data-testid="artifact-preview">{strings.artifacts.preview}</button>{/if}
+      {#if deferredImage}<button class="ghost small" type="button" onclick={() => imageRequested = true} data-testid="artifact-load-image"><span class="ui-label">{strings.artifacts.loadImage}</span></button>
+      {:else if rich && previewable && !inlineMedia}<button class="ghost small" type="button" onclick={() => expanded = !expanded} aria-expanded={expanded} data-testid="artifact-preview"><span class="ui-label">{strings.artifacts.preview}</span></button>{/if}
       <a class="ghost small download" href={url || '#'} download={name} onclick={download} data-testid="artifact-download" aria-label={strings.artifacts.download} aria-disabled={saving || loading} title={strings.artifacts.download}>{#if saved}<Check size={16} />{:else}<Download size={16} />{/if}</a>
     {/if}
     {#if onclose}<button class="ghost small icon" type="button" onclick={onclose} aria-label={strings.artifacts.close}><X size={16} /></button>{/if}
   </div>
-  {#if error}<div class="error" role="alert"><p>{error}</p><button type="button" class="ghost small" onclick={load} disabled={loading}>{strings.artifacts.retry}</button></div>{/if}
+  {#if error}<div class="error" role="alert"><p>{error}</p><button type="button" class="ghost small" onclick={load} disabled={loading}><span class="ui-label">{strings.artifacts.retry}</span></button></div>{/if}
 </section>
 {#if viewing && url}<ImageViewer src={url} alt={name} ondownload={() => { if (window.__TAURI_INTERNALS__ === undefined) browserDownload(url, name); else void save(false); }} onclose={() => viewing = false} />{/if}
 

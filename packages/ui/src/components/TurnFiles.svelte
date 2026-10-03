@@ -56,8 +56,8 @@
   <header>
     <button type="button" class="ghost small fold" data-testid="turn-files-toggle" aria-expanded={open} onclick={() => (open = !open)}>
       <ChevronRight size={14} class={open ? 'chevron expanded' : 'chevron'} />
-      <span>{strings.chat.turnFiles}</span>
-      <span class="count">{files.length}</span>
+      <span class="ui-label">{strings.chat.turnFiles}</span>
+      <span class="count ui-label">{files.length}</span>
       {#if diffs.length > 0}{@render counts(lines.total)}{/if}
     </button>
     {#if open && hasFolders}
@@ -71,7 +71,7 @@
     <span class="tools">
       {#if diffs.length > 0}
         <button type="button" class="ghost small" data-testid="turn-diff-toggle" aria-expanded={showDiff} onclick={() => (showDiff = !showDiff)}>
-          <FileDiff size={14} />{showDiff ? strings.chat.hideTurnDiff : strings.chat.showTurnDiff}
+          <FileDiff size={14} /><span class="ui-label">{showDiff ? strings.chat.hideTurnDiff : strings.chat.showTurnDiff}</span>
         </button>
       {/if}
       {#if repository}
@@ -114,8 +114,8 @@
             onclick={() => expanded[node.key] = !open}>
             <ChevronRight size={14} class={open ? 'chevron expanded' : 'chevron'} />
             {#if open}<FolderOpen size={14} strokeWidth={1.75} />{:else}<Folder size={14} strokeWidth={1.75} />{/if}
-            <span class="folder">{node.name}</span>
-            <span class="count">{node.count}</span>
+            <span class="folder ui-label">{node.name}</span>
+            <span class="count ui-label">{node.count}</span>
           </button>
           {#if open}{@render branch(node.children, depth + 1)}{/if}
         </li>
@@ -132,12 +132,12 @@
             onclick={() => store.panel.openFile(file.relative!)}
           >
             {@render fileIcon(file)}
-            <span class="name">{file.name}</span>
+            <span class="name ui-label">{file.name}</span>
           </button>
         {:else}
           <span class="open" data-testid="turn-file">
             {@render fileIcon(file)}
-            <span class="name">{file.name}</span>
+            <span class="name ui-label">{file.name}</span>
           </span>
         {/if}
         {#if fileLines}{@render counts(fileLines)}{/if}

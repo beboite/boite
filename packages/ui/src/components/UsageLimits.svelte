@@ -31,7 +31,7 @@
         <span class="logo" title={row.providerName}><ProviderLogo providerId={row.providerId} size={22} /></span>
         <div class="identity">
           <strong title={name}>{name}</strong>
-          {#if at !== null}<small class="checked" title={fill(observed ? strings.quotas.observed : strings.quotas.checked, { time: observed ? exactTime(at) : weekdayTime(at) })}><Clock3 size={11} aria-hidden="true" />{observed ? exactTime(at) : weekdayTime(at)}</small>{/if}
+          {#if at !== null}<small class="checked" title={fill(observed ? strings.quotas.observed : strings.quotas.checked, { time: observed ? exactTime(at) : weekdayTime(at) })}><Clock3 size={11} aria-hidden="true" /><span class="ui-label">{observed ? exactTime(at) : weekdayTime(at)}</span></small>{/if}
         </div>
       </header>
       <!-- Bars without a fresh answer: the last good reading, kept after a failure or before a re-read. -->
@@ -46,7 +46,7 @@
             <div class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={left} aria-label="{name} {quotaWindowName(limit.label)}">
               <div class="fill" style:width="{left}%"></div>
             </div>
-            {#if limit.resetsAt}<small class="reset"><Clock3 size={11} aria-hidden="true" />{fill(strings.quotas.resets, { time: weekdayTime(limit.resetsAt) })}</small>{/if}
+            {#if limit.resetsAt}<small class="reset"><Clock3 size={11} aria-hidden="true" /><span class="ui-label">{fill(strings.quotas.resets, { time: weekdayTime(limit.resetsAt) })}</span></small>{/if}
           </div>
         {/each}
         {#if store?.owner}<QuotaReset {row} {store} disabled={pending} />{:else}<QuotaExtras {row} />{/if}

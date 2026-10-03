@@ -33,8 +33,8 @@
     <span class="title">{strings.workflow.card} · {run.name}</span>
     <span class="progress">
       <WorkflowMark status={run.status} run />
-      <span>{strings.workflow.status[run.status]}</span>
-      <span>· {fill(strings.workflow.steps, { done: String(progress.done), total: String(progress.total) })}</span>
+      <span class="ui-label">{strings.workflow.status[run.status]}</span>
+      <span class="ui-label">· {fill(strings.workflow.steps, { done: String(progress.done), total: String(progress.total) })}</span>
     </span>
     <span class="phases" aria-hidden="true">
       {#each phases as _, index (index)}<i class={phaseStatus(index)}></i>{/each}

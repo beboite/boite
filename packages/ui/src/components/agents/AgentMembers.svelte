@@ -53,7 +53,7 @@
   <div class="agent-card-head">
     <h2>{labels.members}</h2>
     {#if view.store.owner && !editing && members.length}
-      <button type="button" class="ghost small" onclick={edit} data-testid="agent-roles-edit"><Pencil size={14} strokeWidth={1.75} />{labels.editRoles}</button>
+      <button type="button" class="ghost small" onclick={edit} data-testid="agent-roles-edit"><Pencil size={14} strokeWidth={1.75} /><span class="ui-label">{labels.editRoles}</span></button>
     {/if}
   </div>
   {#if editing}
@@ -65,8 +65,8 @@
         </label>
       {/each}
       <div class="agent-form-actions">
-        <button type="submit" class="primary" disabled={view.pending} data-testid="agent-roles-save">{labels.save}</button>
-        <button type="button" class="ghost" onclick={() => { editing = false; }}>{labels.cancel}</button>
+        <button type="submit" class="primary" disabled={view.pending} data-testid="agent-roles-save"><span class="ui-label">{labels.save}</span></button>
+        <button type="button" class="ghost" onclick={() => { editing = false; }}><span class="ui-label">{labels.cancel}</span></button>
       </div>
     </form>
   {:else}
@@ -80,5 +80,5 @@
 </section>
 
 {#if team && !group && view.store.owner && members.length}
-  <div class="agent-form-actions agent-start"><button type="button" class="primary" disabled={view.pending} onclick={() => void startChat()} data-testid="agent-start-chat">{labels.startChat}</button></div>
+  <div class="agent-form-actions agent-start"><button type="button" class="primary" disabled={view.pending} onclick={() => void startChat()} data-testid="agent-start-chat"><span class="ui-label">{labels.startChat}</span></button></div>
 {/if}

@@ -82,8 +82,8 @@
   {#if answer !== null}
     <button type="button" class="ghost answered-row" data-testid="question-toggle" aria-expanded={open} onclick={() => (open = !open)}>
       <span class="glyph"><MessageCircleQuestionMark size={15} strokeWidth={1.75} /></span>
-      <span class="verdict" data-testid="question-verdict">{strings.chat.questionAnswered}</span>
-      <span class="given" data-testid="question-answer" title={summary(answer)}>{summary(answer)}</span>
+      <span class="verdict ui-label" data-testid="question-verdict">{strings.chat.questionAnswered}</span>
+      <span class="given ui-label" data-testid="question-answer" title={summary(answer)}>{summary(answer)}</span>
       <span class="caret" class:open aria-hidden="true"><ChevronRight size={12} strokeWidth={2} /></span>
     </button>
     <div class="fold" class:open inert={!open}>
@@ -100,7 +100,7 @@
   {#if !docked}
     <div class="head">
       <span class="glyph"><MessageCircleQuestionMark size={15} strokeWidth={1.75} /></span>
-      <span class="muted">{async ? strings.chat.questionAsyncHeading : strings.chat.questionHeading}</span>
+      <span class="muted ui-label">{async ? strings.chat.questionAsyncHeading : strings.chat.questionHeading}</span>
     </div>
   {/if}
 
@@ -157,7 +157,7 @@
     {#if pending}
       <div class="actions">
         {#if skip}
-          <button type="button" class="ghost" data-testid="question-skip" disabled={sent} onclick={pass}>{strings.chat.questionSkip}</button>
+          <button type="button" class="ghost" data-testid="question-skip" disabled={sent} onclick={pass}><span class="ui-label">{strings.chat.questionSkip}</span></button>
         {/if}
         <button
           type="button"
@@ -166,7 +166,7 @@
           disabled={!ready || sent}
           onclick={send}
         >
-          {strings.chat.questionAnswer}
+          <span class="ui-label">{strings.chat.questionAnswer}</span>
         </button>
       </div>
     {:else}

@@ -20,7 +20,7 @@
 </script>
 
 {#if elapsed !== null}
-  <span class="elapsed" title={strings.delegation.elapsed} data-testid="agent-elapsed">{format(elapsed)}</span>
+  <span class="elapsed ui-label" title={strings.delegation.elapsed} data-testid="agent-elapsed">{format(elapsed)}</span>
 {/if}
 
 <style>

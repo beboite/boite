@@ -178,7 +178,7 @@
           spellcheck="false"
           data-testid="palette-input"
         />
-        <span class="kbd">Esc</span>
+        <span class="kbd ui-label">Esc</span>
       </label>
       <div class="list" role="listbox" bind:this={list} data-testid="palette-list">
         {#each rows as item, index (item.id)}
@@ -202,9 +202,9 @@
           >
             <!-- Empty for a command, so every label starts on the same line. -->
             <span class="mark-slot">{#if thread}<StatusMark status={thread.status} unread={thread.unread} />{/if}</span>
-            <span class="label">{item.label}</span>
+            <span class="label ui-label">{item.label}</span>
             {#if item.hint}
-              <span class="hint" class:kbd={item.kind === 'command'}>{item.hint}</span>
+              <span class="hint ui-label" class:kbd={item.kind === 'command'}>{item.hint}</span>
             {/if}
           </button>
         {/each}

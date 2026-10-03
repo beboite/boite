@@ -51,9 +51,9 @@
 <details class="coordination disclosure" class:expanded open={expanded} data-testid="coordination-panel" ontoggle={toggleSettings}>
   <summary>
     <Network size={14} strokeWidth={1.75} />
-    <span>{strings.coordination.heading}</span>
-    <span class="mode" data-mode={config.mode}>{modeLabel(config.mode)}</span>
-    {#if config.paused}<span class="paused">{strings.coordination.paused}</span>{/if}
+    <span class="ui-label">{strings.coordination.heading}</span>
+    <span class="mode ui-label-box" data-mode={config.mode}><span class="ui-label">{modeLabel(config.mode)}</span></span>
+    {#if config.paused}<span class="paused ui-label-box"><span class="ui-label">{strings.coordination.paused}</span></span>{/if}
   </summary>
 
   <div class="body">
@@ -73,7 +73,7 @@
           onkeydown={(event) => modeKey(event, choice)}
           data-testid="coordination-mode-{choice}"
           onclick={() => choose(choice)}
-        >{choice === 'on' ? strings.coordination.on : strings.coordination.off}</button>
+        ><span class="ui-label">{choice === 'on' ? strings.coordination.on : strings.coordination.off}</span></button>
       {/each}
     </div>
 
@@ -119,7 +119,7 @@
 
       {#if store.owner}
         <button class="quiet pause" disabled={store.coordinationSaving} data-testid="coordination-pause" onclick={() => configure({ paused: !config.paused })}>
-          {#if config.paused}<CirclePlay size={14} />{strings.coordination.resume}{:else}<CirclePause size={14} />{strings.coordination.pause}{/if}
+          {#if config.paused}<CirclePlay size={14} /><span class="ui-label">{strings.coordination.resume}</span>{:else}<CirclePause size={14} /><span class="ui-label">{strings.coordination.pause}</span>{/if}
         </button>
       {/if}
 
@@ -127,7 +127,7 @@
         <header>
           <h3 id="coordination-directory">{strings.coordination.directory}</h3>
            <button class="ghost small" data-testid="coordination-refresh" disabled={store.coordinationLoading} onclick={() => void store.loadCoordination(threadId, true)}>
-            <RefreshCw size={13} />{strings.coordination.refresh}
+            <RefreshCw size={13} /><span class="ui-label">{strings.coordination.refresh}</span>
           </button>
         </header>
         {#if (store.coordinationDirectory?.agents.length ?? 0) === 0}

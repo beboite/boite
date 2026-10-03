@@ -164,7 +164,7 @@
     onclick={() => { if (!shown) { attempted = false; loadError = null; } toggled = !shown; }}
   >
     <span class="glyph"><Glyph size={15} strokeWidth={1.75} /></span>
-    <span class="line" class:mono={!compact && line.mono} class:live={status === 'running'} title={diffs[0]?.path ?? line.title}>{label}</span>
+    <span class="line ui-label" class:mono={!compact && line.mono} class:live={status === 'running'} title={diffs[0]?.path ?? line.title}>{label}</span>
     {#if counts.added > 0 || counts.removed > 0}
       <span class="counts" data-testid="tool-diff-counts">
         {#if counts.added > 0}<span class="added">{fill(strings.chat.diffAdded, { count: String(counts.added) })}</span>{/if}
@@ -172,16 +172,16 @@
       </span>
     {/if}
     {#if chip}
-      <span class="chip" data-testid="tool-document-chip">{chip}</span>
+      <span class="chip" data-testid="tool-document-chip"><span class="ui-label">{chip}</span></span>
     {/if}
     {#if background}
-      <span class="chip live" data-testid="tool-background"><span class="pulse" aria-hidden="true"></span>{strings.chat.backgroundChip}</span>
+      <span class="chip live" data-testid="tool-background"><span class="pulse" aria-hidden="true"></span><span class="ui-label">{strings.chat.backgroundChip}</span></span>
     {/if}
     {#if took}
-      <span class="took" data-testid="tool-elapsed">{took}</span>
+      <span class="took ui-label" data-testid="tool-elapsed">{took}</span>
     {/if}
     {#if exitLabel}
-      <span class="took" data-testid="tool-exit-code">{exitLabel}</span>
+      <span class="took ui-label" data-testid="tool-exit-code">{exitLabel}</span>
     {/if}
     {#if status === 'running'}
       <span class="status" title={strings.chat.toolStatus.running}><span class="spinner"></span></span>
@@ -232,7 +232,7 @@
                   data-testid="tool-input-show-all"
                   onclick={() => (showAll = true)}
                 >
-                  {strings.chat.showAll}
+                  <span class="ui-label">{strings.chat.showAll}</span>
                 </button>
               {/if}
             {/if}

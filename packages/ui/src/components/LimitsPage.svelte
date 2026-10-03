@@ -62,12 +62,12 @@
       </button>
     {/if}
   </header>
-  {#if proxyEnabled}<div class="actions proxy-switch"><button type="button" class="ghost small" onclick={() => native = false} data-testid="subscription-proxy-show-dashboard">{strings.subscriptionProxy.showDashboard}</button></div>{/if}
+  {#if proxyEnabled}<div class="actions proxy-switch"><button type="button" class="ghost small" onclick={() => native = false} data-testid="subscription-proxy-show-dashboard"><span class="ui-label">{strings.subscriptionProxy.showDashboard}</span></button></div>{/if}
 
   {#if store.owner && reader.error}
     <div class="card failed" role="alert" data-testid="limits-error">
       <p>{fill(strings.quotas.readFailed, { error: reader.error })}</p>
-      <button type="button" class="ghost small" disabled={reader.loading} data-testid="limits-retry" onclick={refresh}>{strings.quotas.retry}</button>
+      <button type="button" class="ghost small" disabled={reader.loading} data-testid="limits-retry" onclick={refresh}><span class="ui-label">{strings.quotas.retry}</span></button>
     </div>
   {/if}
   {#if !store.owner}
@@ -80,12 +80,12 @@
     <!-- A failed read never passes for "no provider connected". -->
     {#if !reader.error}<div class="card empty" data-testid="limits-empty">
       <p>{strings.quotas.empty}</p>
-      <button type="button" onclick={() => store.showSettings('accounts')}>{strings.settings.connectProvider}</button>
+      <button type="button" onclick={() => store.showSettings('accounts')}><span class="ui-label">{strings.settings.connectProvider}</span></button>
     </div>{/if}
   {:else}
     {#if rows.length > 0}<UsageLimits {rows} {store} loading={reader.loading} completed={reader.completed} />{/if}
     <section class="card tracked" data-testid="limits-tracked">
-      <h2>{strings.quotas.tracked}<InfoTip topic={strings.quotas.tracked} text={strings.quotas.trackedHint} /></h2>
+      <h2 class="ui-label-box"><span class="ui-label">{strings.quotas.tracked}</span><InfoTip topic={strings.quotas.tracked} text={strings.quotas.trackedHint} /></h2>
       {#each tracked as row (row.accountId)}
         {@const account = row.accountId.startsWith('quota:') ? strings.quotas.cliSource : row.label}
         {@const entry = store.accounts?.find((entry) => entry.id === row.accountId)}
@@ -100,7 +100,7 @@
       {/each}
     </section>
   {/if}
-  {#if store.owner}<details class="disclosure"><summary>{strings.subscriptionProxy.configure}</summary><SubscriptionProxySettings {store} /></details>{/if}
+  {#if store.owner}<details class="disclosure"><summary><span class="ui-label">{strings.subscriptionProxy.configure}</span></summary><SubscriptionProxySettings {store} /></details>{/if}
   {/if}
 </div>
 

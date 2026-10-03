@@ -50,7 +50,7 @@
   </header>
 
   <section class="card" id="settings-quiet">
-    <h2>{strings.protection.quiet}<InfoTip topic={strings.protection.quiet} text={strings.protection.windows} /></h2>
+    <h2 class="ui-label-box"><span class="ui-label">{strings.protection.quiet}</span><InfoTip topic={strings.protection.quiet} text={strings.protection.windows} /></h2>
     <label for="{uid}-focus-guard" class="switch-row">
       <span class="text"><span id="{uid}-focus-guard-name">{strings.settings.focusGuard}</span></span>
       <input id="{uid}-focus-guard" aria-labelledby="{uid}-focus-guard-name" type="checkbox" role="switch" data-testid="setting-focus-guard" checked={store.settings?.focusGuard ?? true} onchange={(event) => void store.saveSettings({focusGuard: event.currentTarget.checked})} />
@@ -60,7 +60,7 @@
       <input id="{uid}-mute-agents" aria-labelledby="{uid}-mute-agents-name" type="checkbox" role="switch" data-testid="setting-mute-agents" checked={store.settings?.muteAgents ?? true} onchange={(event) => void store.saveSettings({muteAgents: event.currentTarget.checked})} />
     </label>
     <label for="{uid}-reap-orphans" class="switch-row">
-      <span class="text"><span id="{uid}-reap-orphans-name">{strings.settings.reapOrphans}</span><InfoTip topic={strings.settings.reapOrphans} text={strings.settings.reapOrphansHint} /></span>
+      <span class="text ui-label-box"><span class="ui-label" id="{uid}-reap-orphans-name">{strings.settings.reapOrphans}</span><InfoTip topic={strings.settings.reapOrphans} text={strings.settings.reapOrphansHint} /></span>
       <input id="{uid}-reap-orphans" aria-labelledby="{uid}-reap-orphans-name" type="checkbox" role="switch" data-testid="setting-reap-orphans" checked={store.settings?.reapOrphans ?? true} onchange={(event) => void store.saveSettings({reapOrphans: event.currentTarget.checked})} />
     </label>
   </section>
@@ -68,24 +68,24 @@
   <section class="card" id="settings-limits">
     <h2>{strings.protection.limits}</h2>
     <label for="{uid}-memory-protection" class="switch-row">
-      <span class="text"><span id="{uid}-memory-protection-name">{strings.settings.memoryProtection}</span><InfoTip topic={strings.settings.memoryProtection} text={strings.settings.memoryProtectionHint} /></span>
+      <span class="text ui-label-box"><span class="ui-label" id="{uid}-memory-protection-name">{strings.settings.memoryProtection}</span><InfoTip topic={strings.settings.memoryProtection} text={strings.settings.memoryProtectionHint} /></span>
       <input id="{uid}-memory-protection" aria-labelledby="{uid}-memory-protection-name" type="checkbox" role="switch" data-testid="setting-memory-protection" checked={memoryEnabled} onchange={async (event) => {
         const input = event.currentTarget;
         if (!await store.saveSettings({ memoryProtection: input.checked })) input.checked = memoryEnabled;
       }} />
     </label>
     <form onsubmit={(event) => { event.preventDefault(); void store.saveSettings({agentCpuCapPercent: cpuCap, ...(memoryEnabled ? {agentMemoryBudgetPercent: memoryBudget, threadMemoryCapMb: memoryCap, memoryReserveMb: memoryReserve} : {})}); }}>
-      <label><span class="name">{strings.settings.agentCpuCapPercent}<InfoTip topic={strings.settings.agentCpuCapPercent} text={strings.settings.agentCpuCapHint} /></span><input type="number" min="0" max="100" required bind:value={cpuCap} /></label>
-      <label><span class="name">{strings.settings.agentMemoryBudgetPercent}<InfoTip topic={strings.settings.agentMemoryBudgetPercent} text={strings.settings.agentMemoryBudgetHint} /></span><input disabled={!memoryEnabled} aria-label={strings.settings.agentMemoryBudgetPercent} data-testid="memory-budget" type="number" min="10" max="90" step="1" required bind:value={memoryBudget} />
+      <label><span class="name"><span class="ui-label">{strings.settings.agentCpuCapPercent}</span><InfoTip topic={strings.settings.agentCpuCapPercent} text={strings.settings.agentCpuCapHint} /></span><input type="number" min="0" max="100" required bind:value={cpuCap} /></label>
+      <label><span class="name"><span class="ui-label">{strings.settings.agentMemoryBudgetPercent}</span><InfoTip topic={strings.settings.agentMemoryBudgetPercent} text={strings.settings.agentMemoryBudgetHint} /></span><input disabled={!memoryEnabled} aria-label={strings.settings.agentMemoryBudgetPercent} data-testid="memory-budget" type="number" min="10" max="90" step="1" required bind:value={memoryBudget} />
         {#if memoryEnabled && store.memory}<span class="hint" data-testid="memory-budget-resolved">{strings.resources.resolved(store.memory.limits.budgetMb)}</span>{/if}
       </label>
-      <label><span class="name">{strings.settings.threadMemoryCapMb}<InfoTip topic={strings.settings.threadMemoryCapMb} text={strings.settings.threadMemoryCapHint} /></span><input disabled={!memoryEnabled} aria-label={strings.settings.threadMemoryCapMb} data-testid="memory-cap" type="number" min="0" required bind:value={memoryCap} />
+      <label><span class="name"><span class="ui-label">{strings.settings.threadMemoryCapMb}</span><InfoTip topic={strings.settings.threadMemoryCapMb} text={strings.settings.threadMemoryCapHint} /></span><input disabled={!memoryEnabled} aria-label={strings.settings.threadMemoryCapMb} data-testid="memory-cap" type="number" min="0" required bind:value={memoryCap} />
         {#if memoryEnabled && memoryCap === 0 && store.memory}<span class="hint" data-testid="memory-cap-auto">{strings.resources.auto(store.memory.limits.threadMemoryCapMb)}</span>{/if}
       </label>
-      <label><span class="name">{strings.settings.memoryReserveMb}<InfoTip topic={strings.settings.memoryReserveMb} text={strings.settings.memoryReserveHint} /></span><input disabled={!memoryEnabled} aria-label={strings.settings.memoryReserveMb} data-testid="memory-reserve" type="number" min="0" required bind:value={memoryReserve} />
+      <label><span class="name"><span class="ui-label">{strings.settings.memoryReserveMb}</span><InfoTip topic={strings.settings.memoryReserveMb} text={strings.settings.memoryReserveHint} /></span><input disabled={!memoryEnabled} aria-label={strings.settings.memoryReserveMb} data-testid="memory-reserve" type="number" min="0" required bind:value={memoryReserve} />
         {#if memoryEnabled && memoryReserve === 0 && store.memory}<span class="hint" data-testid="memory-reserve-auto">{strings.resources.auto(store.memory.limits.memoryReserveMb)}</span>{/if}
       </label>
-      <button type="submit" class="primary">{strings.settings.save}</button>
+      <button type="submit" class="primary"><span class="ui-label">{strings.settings.save}</span></button>
     </form>
   </section>
   <section class="card" data-testid="memory-status">
@@ -100,7 +100,7 @@
   </section>
   {#if !limitsOnly}
   <div class="group-heading" id="settings-tasks">
-    <h2 class="tasks-heading">{strings.protection.tasks}<span class="live-dot" aria-hidden="true"></span></h2>
+    <h2 class="tasks-heading"><span class="ui-label">{strings.protection.tasks}</span><span class="live-dot" aria-hidden="true"></span></h2>
   </div>
 
   {#if store.resources.length === 0}
@@ -111,18 +111,18 @@
     <section class="card flush" data-testid="resource-row" data-thread-id={entry.threadId}>
       <div class="head">
         <StatusMark status={entry.status} />
-        <button class="quiet title" onclick={() => void store.open(entry.threadId)}>{entry.title}</button>
+        <button class="quiet title" onclick={() => void store.open(entry.threadId)}><span class="ui-label">{entry.title}</span></button>
         <span class="load" data-testid="resource-load">
           <span>{entry.load.processes} {strings.resources.processes}</span>
           <span>{cpu(entry.load.cpuPercent)}</span>
           <span>{bytes(entry.load.memoryBytes)}</span>
         </span>
         {#if confirming === entry.threadId}
-          <span class="confirm">{strings.resources.killConfirm}</span>
-          <button class="danger" onclick={() => void kill(entry.threadId)}>{strings.resources.killConfirmYes}</button>
-          <button class="quiet" onclick={() => (confirming = null)}>{strings.resources.killConfirmNo}</button>
+          <span class="confirm ui-label">{strings.resources.killConfirm}</span>
+          <button class="danger" onclick={() => void kill(entry.threadId)}><span class="ui-label">{strings.resources.killConfirmYes}</span></button>
+          <button class="quiet" onclick={() => (confirming = null)}><span class="ui-label">{strings.resources.killConfirmNo}</span></button>
         {:else}
-          <button class="danger" onclick={() => (confirming = entry.threadId)}>{strings.resources.killTree}</button>
+          <button class="danger" onclick={() => (confirming = entry.threadId)}><span class="ui-label">{strings.resources.killTree}</span></button>
         {/if}
       </div>
       <div class="process-table"><table>

@@ -154,26 +154,26 @@
 
 <div class="page usage" data-testid="usage-page">
   <header>
-    <div><h1>{strings.usage.heading}<InfoTip topic={strings.usage.heading} text={`${strings.usage.intro} ${strings.usage.note}`} /></h1></div>
+    <div><h1 class="ui-label-box"><span class="ui-label">{strings.usage.heading}</span><InfoTip topic={strings.usage.heading} text={`${strings.usage.intro} ${strings.usage.note}`} /></h1></div>
   </header>
 
   <div class="filters">
     <div class="segmented" role="group" aria-label={strings.usage.range}>
       {#each USAGE_RANGES as days (days)}
         <button type="button" class:on={range === days} aria-pressed={range === days} data-testid="usage-range-{days}" onclick={() => { range = days; }}>
-          {fill(strings.usage.days, { days: String(days) })}
+          <span class="ui-label">{fill(strings.usage.days, { days: String(days) })}</span>
         </button>
       {/each}
     </div>
     <div class="segmented" role="group" aria-label={strings.usage.metric}>
       {#each USAGE_METRICS as option (option)}
         <button type="button" class:on={metric === option} aria-pressed={metric === option} data-testid="usage-metric-{option}" onclick={() => { metric = option; }}>
-          {strings.usage.metrics[option]}
+          <span class="ui-label">{strings.usage.metrics[option]}</span>
         </button>
       {/each}
     </div>
     <Menu items={providerItems} label={strings.usage.provider} placement="bottom" testid="usage-provider-filter" onpick={(id) => { provider = id || null; }}>
-      <span class="filter-name">{provider === null ? strings.usage.allProviders : providerName(provider)}</span><ChevronDown size={13} />
+      <span class="filter-name ui-label">{provider === null ? strings.usage.allProviders : providerName(provider)}</span><ChevronDown size={13} />
     </Menu>
     <button type="button" class="quiet icon refresh" aria-label={strings.usage.refresh} title={strings.usage.refresh} data-testid="usage-refresh" onclick={refresh}>
       <RefreshCw size={15} strokeWidth={1.75} class={loading ? 'spinning' : ''} />
@@ -238,7 +238,7 @@
           />
           <ul class="legend" aria-hidden="true">
             {#each chartSeries as serie (serie.key)}
-              <li><span class="swatch" style:background={serie.color}></span>{providerName(serie.key)}</li>
+              <li><span class="swatch" style:background={serie.color}></span><span class="ui-label">{providerName(serie.key)}</span></li>
             {/each}
           </ul>
         {/if}
@@ -258,8 +258,8 @@
           <div class="card-head">
             <h2>{strings.usage.breakdown}</h2>
             <div class="segmented" role="group" aria-label={strings.usage.breakdown}>
-              <button type="button" class:on={breakdown === 'model'} aria-pressed={breakdown === 'model'} data-testid="usage-by-model" onclick={() => { breakdown = 'model'; }}>{strings.usage.byModel}</button>
-              <button type="button" class:on={breakdown === 'day'} aria-pressed={breakdown === 'day'} data-testid="usage-by-day" onclick={() => { breakdown = 'day'; }}>{strings.usage.byDay}</button>
+              <button type="button" class:on={breakdown === 'model'} aria-pressed={breakdown === 'model'} data-testid="usage-by-model" onclick={() => { breakdown = 'model'; }}><span class="ui-label">{strings.usage.byModel}</span></button>
+              <button type="button" class:on={breakdown === 'day'} aria-pressed={breakdown === 'day'} data-testid="usage-by-day" onclick={() => { breakdown = 'day'; }}><span class="ui-label">{strings.usage.byDay}</span></button>
             </div>
           </div>
           <div class="table" class:scroll={breakdown === 'day'}>

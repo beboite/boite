@@ -34,21 +34,21 @@
       title={strings.composer.editQueued}
       {disabled}
       onclick={() => onrestore(at)}>
-      <span class="queued-text">{entry.text || strings.composer.attachAlt}</span>
+      <span class="queued-text ui-label">{entry.text || strings.composer.attachAlt}</span>
       {#if entry.attachments.length || entry.previewReferences?.length}
         <span class="queued-extras">
-          {#if entry.attachments.length}<span>{entry.attachments.length} <Paperclip size={12} /></span>{/if}
+          {#if entry.attachments.length}<span><span class="ui-label">{entry.attachments.length}</span> <Paperclip size={12} /></span>{/if}
           {#if entry.previewReferences?.length}<span>@{entry.previewReferences.length}</span>{/if}
         </span>
       {/if}
     </button>
   {/each}
   <div class="queued-foot">
-    <span>{paused ? strings.composer.queuedPaused : strings.composer.queued}</span>
+    <span class="ui-label">{paused ? strings.composer.queuedPaused : strings.composer.queued}</span>
     {#if sendNow}
       <button type="button" class="ghost small" data-testid="composer-send-now"
         title={sendNow === 'steer' ? strings.composer.sendNowHint : strings.composer.retryQueuedHint}
-        onclick={onsendnow}>{strings.composer.sendNow}</button>
+        onclick={onsendnow}><span class="ui-label">{strings.composer.sendNow}</span></button>
     {/if}
   </div>
 </div>

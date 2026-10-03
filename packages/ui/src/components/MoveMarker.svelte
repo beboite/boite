@@ -16,7 +16,7 @@
 <div class="move" data-testid="move-marker" data-by={notice.by ?? 'user'} title={`${notice.from.cwd} > ${notice.to.cwd}`}>
   <span class="rule"></span>
   {#if byAgent}
-    <span class="label"><FolderInput size={13} />{fill(strings.chat.movedByAgent, { project: notice.to.name })}</span>
+    <span class="label"><FolderInput size={13} /><span class="ui-label">{fill(strings.chat.movedByAgent, { project: notice.to.name })}</span></span>
   {:else}
     <button
       type="button"
@@ -25,7 +25,7 @@
       aria-expanded={open}
       title={open ? strings.chat.moveHide : strings.chat.moveShow}
       onclick={() => (open = !open)}
-    ><FolderInput size={13} />{strings.chat.moveExplained}<span class="caret" class:open><ChevronRight size={12} /></span></button>
+    ><FolderInput size={13} /><span class="ui-label">{strings.chat.moveExplained}</span><span class="caret" class:open><ChevronRight size={12} /></span></button>
   {/if}
   <span class="rule"></span>
 </div>

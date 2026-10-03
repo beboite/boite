@@ -48,23 +48,23 @@
 
 {#if store.owner}
   <section class="card" id="settings-privacy" data-testid="telemetry-settings">
-    <h2>{strings.telemetry.heading}<InfoTip topic={strings.telemetry.heading} text={strings.telemetry.description} /></h2>
+    <h2 class="ui-label-box"><span class="ui-label">{strings.telemetry.heading}</span><InfoTip topic={strings.telemetry.heading} text={strings.telemetry.description} /></h2>
     {#if consent}
       {#if !consent.configured}<p class="hint">{strings.telemetry.unconfigured}</p>{/if}
       <label for="{uid}-basic" class="switch-row">
-        <span class="text"><span id="{uid}-basic-name">{strings.telemetry.basic}</span><InfoTip topic={strings.telemetry.basic} text={strings.telemetry.basicHint} /></span>
+        <span class="text ui-label-box"><span class="ui-label" id="{uid}-basic-name">{strings.telemetry.basic}</span><InfoTip topic={strings.telemetry.basic} text={strings.telemetry.basicHint} /></span>
         <input id="{uid}-basic" aria-labelledby="{uid}-basic-name" type="checkbox" role="switch" checked={consent.mode !== 'off'} disabled={busy}
           onchange={event => void change(event.currentTarget.checked ? 'basic' : 'off')} />
       </label>
       <label for="{uid}-enhanced" class="switch-row">
-        <span class="text"><span id="{uid}-enhanced-name">{strings.telemetry.enhanced}</span><InfoTip topic={strings.telemetry.enhanced} text={strings.telemetry.enhancedHint} /></span>
+        <span class="text ui-label-box"><span class="ui-label" id="{uid}-enhanced-name">{strings.telemetry.enhanced}</span><InfoTip topic={strings.telemetry.enhanced} text={strings.telemetry.enhancedHint} /></span>
         <input id="{uid}-enhanced" aria-labelledby="{uid}-enhanced-name" type="checkbox" role="switch" checked={consent.mode === 'enhanced'} disabled={busy}
           onchange={event => void change(event.currentTarget.checked ? 'enhanced' : 'basic')} />
       </label>
       {#if consent.pendingDeletion}<p class="hint">{strings.telemetry.pending}</p>{/if}
       <div class="actions">
-        {#if consent.mode === 'enhanced'}<button disabled={busy} onclick={() => void dataAction('export')}>{strings.telemetry.export}</button>{/if}
-        {#if consent.pendingDeletion}<button disabled={busy} onclick={() => void dataAction('retryForget')}>{strings.telemetry.retry}</button>{/if}
+        {#if consent.mode === 'enhanced'}<button disabled={busy} onclick={() => void dataAction('export')}><span class="ui-label">{strings.telemetry.export}</span></button>{/if}
+        {#if consent.pendingDeletion}<button disabled={busy} onclick={() => void dataAction('retryForget')}><span class="ui-label">{strings.telemetry.retry}</span></button>{/if}
       </div>
     {/if}
     {#if error}<p role="alert">{error}</p>{/if}

@@ -99,13 +99,13 @@
         <AgentAvatar kind={chat.kind} id={chat.id} name={chat.name} avatar={chat.avatar} members={memberList(chat)} status={chat.status} />
         <span class="agents-row-text">
           <span class="agents-row-line">
-            <strong>{chat.name}</strong>
-            <time datetime={new Date(chat.at).toISOString()} title={exactTime(chat.at)}>{ago(chat.at, now)}</time>
+            <strong class="ui-label">{chat.name}</strong>
+            <time class="ui-label" datetime={new Date(chat.at).toISOString()} title={exactTime(chat.at)}>{ago(chat.at, now)}</time>
           </span>
           <span class="agents-row-line">
-            <small data-status={chat.status}>{preview(chat)}</small>
-            {#if chat.attention}<span class="agent-count" data-tone="live" role="img" aria-label="{labels.attention}: {chat.attention}">{chat.attention}</span>
-            {:else if chat.unread}<span class="agent-count" role="img" aria-label={fill(labels.unread, { count: String(chat.unread) })}>{chat.unread}</span>{/if}
+            <small class="ui-label" data-status={chat.status}>{preview(chat)}</small>
+            {#if chat.attention}<span class="agent-count" data-tone="live" role="img" aria-label="{labels.attention}: {chat.attention}"><span class="ui-label">{chat.attention}</span></span>
+            {:else if chat.unread}<span class="agent-count" role="img" aria-label={fill(labels.unread, { count: String(chat.unread) })}><span class="ui-label">{chat.unread}</span></span>{/if}
           </span>
         </span>
       </button>
@@ -122,11 +122,11 @@
   {#if counts.running || counts.pending || counts.paused || attention}
     <footer>
       {#if counts.running || counts.pending || counts.paused}
-        <span class="agents-summary"><i data-status={counts.paused ? 'paused' : 'running'}></i>{counts.paused ? labels.paused : fill(labels.summary, { running: String(counts.running), pending: String(counts.pending) })}</span>
+        <span class="agents-summary"><i data-status={counts.paused ? 'paused' : 'running'}></i><span class="ui-label">{counts.paused ? labels.paused : fill(labels.summary, { running: String(counts.running), pending: String(counts.pending) })}</span></span>
       {/if}
       {#if attention}
         <button type="button" class="ghost agents-attention" class:active={active === 'attention'} aria-current={active === 'attention' ? 'page' : undefined} onclick={() => onfocus({ kind: 'attention' })} data-testid="agents-attention">
-          <Bell size={14} strokeWidth={1.75} />{labels.attention}<span class="agent-count" data-tone="live">{attention}</span>
+          <Bell size={14} strokeWidth={1.75} /><span class="ui-label">{labels.attention}</span><span class="agent-count" data-tone="live"><span class="ui-label">{attention}</span></span>
         </button>
       {/if}
     </footer>

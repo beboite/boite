@@ -65,7 +65,7 @@
     <div class="grid">
       {#each FIELDS as field (field.key)}
         <label>
-          <span class="name">{label(field.key)}<InfoTip topic={label(field.key)} text={strings.settings[HINTS[field.key]]} /></span>
+          <span class="name"><span class="ui-label">{label(field.key)}</span><InfoTip topic={label(field.key)} text={strings.settings[HINTS[field.key]]} /></span>
           <input
             type="number"
             min={field.min}
@@ -84,9 +84,9 @@
       {/each}
     </div>
     <div class="actions">
-      <button type="button" class="primary" data-testid="scheduler-save" disabled={!allValid || saving || !store.settings} onclick={() => void save()}>{strings.settings.save}</button>
+      <button type="button" class="primary" data-testid="scheduler-save" disabled={!allValid || saving || !store.settings} onclick={() => void save()}><span class="ui-label">{strings.settings.save}</span></button>
       {#if savedAt !== null}
-        <span class="muted" data-testid="scheduler-saved">{strings.settings.saved} {time(savedAt)}</span>
+        <span class="muted ui-label" data-testid="scheduler-saved">{strings.settings.saved} {time(savedAt)}</span>
       {/if}
     </div>
   </section>
