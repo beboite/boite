@@ -98,7 +98,7 @@ test('sharing alone hosts the browser for viewers but not for the agent, and sca
   };
   const store = { client, owner: true, machineId: 'test', openThread: { id: 'remote-thread' }, threadKey: (id: string) => id } as unknown as Store;
   const panel = rightPanel.for('remote-thread'), surface = panel.open('browser', 'https://example.test');
-  const page = { width: 1000, height: 700, title: 'Fixture', href: 'https://example.test/', origin: 1, dpr: 2, left: 0, top: 350 };
+  const page = { width: 1000, height: 700, title: 'Fixture', href: 'https://example.test/', origin: 1, dpr: 2 };
   const protocol = vi.mocked(browserBridge.protocol!);
   protocol.mockImplementation(async (_id, method) => method === 'Page.captureScreenshot' ? { data: '/9j/2Q==' } : { result: { value: page } });
   stop = hostBrowser(store, 'remote-thread');
@@ -108,6 +108,8 @@ test('sharing alone hosts the browser for viewers but not for the agent, and sca
   requested({ threadId: 'remote-thread', requestId: 'frame', action: { kind: 'remote-frame', maxWidth: 800, quality: 40 } });
   await vi.waitFor(() => expect(completed.get('frame')?.result?.frame?.url).toBe('https://example.test/'));
   const shot = protocol.mock.calls.find(call => call[1] === 'Page.captureScreenshot')![2];
-  expect(shot).toMatchObject({ quality: 40, clip: { x: 0, y: 350, width: 1000, height: 700, scale: 0.4 } });
+  // 2000 pixels for an 800-pixel viewer: captured whole, shrunk on the PC (browser-remote-host.test.ts).
+  expect(shot).toMatchObject({ format: 'jpeg', quality: 90 });
+  expect(shot).not.toHaveProperty('clip');
   expect(panel.active?.id).toBe(surface.id);
 });
