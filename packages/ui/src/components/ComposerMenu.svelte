@@ -98,7 +98,7 @@
           {/if}
         </span>
         {#if item.description}
-          <span class="description">{item.description}</span>
+          <span class="description ui-label">{item.description}</span>
         {/if}
       </button>
     {/each}

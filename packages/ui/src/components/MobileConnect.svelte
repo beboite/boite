@@ -25,10 +25,10 @@
     </section>
     <p class="privacy"><ShieldCheck size={16} /><span>{strings.mobile.pairPrivacy}</span></p>
   {:else}
-    <button class="primary retry" data-testid="mobile-reconnect" disabled={store.connection === 'connecting'} onclick={() => void store.connect()}><RefreshCw size={16} />{store.connection === 'connecting' ? strings.connection.connecting : strings.common.refresh}</button>
-    <button class="ghost manage" onclick={() => store.showSettings('machines')}>{strings.connection.manage}</button>
+    <button class="primary retry" data-testid="mobile-reconnect" disabled={store.connection === 'connecting'} onclick={() => void store.connect()}><RefreshCw size={16} /><span class="ui-label">{store.connection === 'connecting' ? strings.connection.connecting : strings.common.refresh}</span></button>
+    <button class="ghost manage" onclick={() => store.showSettings('machines')}><span class="ui-label">{strings.connection.manage}</span></button>
   {/if}
-  {#if host}<p class="host" title={host}><Monitor size={13} /><span>{host}</span></p>{/if}
+  {#if host}<p class="host" title={host}><Monitor size={13} /><span class="ui-label">{host}</span></p>{/if}
 </div>
 
 <style>

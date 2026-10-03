@@ -144,9 +144,9 @@
           {#if item.glyph}
             <span class="glyph" aria-hidden="true"><item.glyph size={16} strokeWidth={1.75} /></span>
           {/if}
-          <span class="label">{item.label}</span>{#if item.checked}<Check size={16} aria-hidden="true" />{/if}
+          <span class="label ui-label">{item.label}</span>{#if item.checked}<Check size={16} aria-hidden="true" />{/if}
           {#if item.hint}
-            <span class="hint">{item.hint}</span>
+            <span class="hint ui-label">{item.hint}</span>
           {/if}
         </button>
       {/if}

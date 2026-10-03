@@ -34,9 +34,9 @@
 
 <div class="agent-updates" data-testid="harness-updates-card">
   <header>
-    <h4>{strings.harnessUpdates.heading}<InfoTip topic={strings.harnessUpdates.heading} text={strings.harnessUpdates.intro} /></h4>
+    <h4 class="ui-label-box"><span class="ui-label">{strings.harnessUpdates.heading}</span><InfoTip topic={strings.harnessUpdates.heading} text={strings.harnessUpdates.intro} /></h4>
     <button type="button" class="ghost small" data-testid="harness-updates-check" disabled={!connected || busy} onclick={() => void check()}>
-      <RefreshCw size={13} />{busy ? strings.harnessUpdates.checking : strings.providerSettings.checkUpdates}
+      <RefreshCw size={13} /><span class="ui-label">{busy ? strings.harnessUpdates.checking : strings.providerSettings.checkUpdates}</span>
     </button>
   </header>
   <div class="agents">
@@ -46,14 +46,14 @@
       {@const installing = install?.state === 'verifying' || install?.state === 'downloading' || install?.state === 'extracting'}
       <div class="agent" data-testid="machine-agent-update" data-provider-id={provider.id}>
         <div class="agent-row">
-          <span class="name"><ProviderLogo providerId={provider.id} size={16} />{provider.name}</span>
+          <span class="name"><ProviderLogo providerId={provider.id} size={16} /><span class="ui-label">{provider.name}</span></span>
           <ProviderVersion {store} {provider} controls main {installing} disabled={!connected || busy}
             oninstall={() => void store.installProvider(provider.id)} />
           {#if installing}
-            <span class="progress" role="status">{strings.providerSettings.updating}</span>
-            <button class="ghost small" data-testid="install-cancel" disabled={!connected} onclick={() => void store.cancelInstall(provider.id)}>{strings.install.cancel}</button>
+            <span class="progress ui-label" role="status">{strings.providerSettings.updating}</span>
+            <button class="ghost small" data-testid="install-cancel" disabled={!connected} onclick={() => void store.cancelInstall(provider.id)}><span class="ui-label">{strings.install.cancel}</span></button>
           {:else if install?.state === 'failed' && update?.state !== 'failed'}
-            <button class="small" disabled={!connected || busy} data-testid="install-update" onclick={() => void store.installProvider(provider.id)}>{strings.install.retry}</button>
+            <button class="small" disabled={!connected || busy} data-testid="install-update" onclick={() => void store.installProvider(provider.id)}><span class="ui-label">{strings.install.retry}</span></button>
           {/if}
         </div>
         {#if installing}
@@ -73,7 +73,7 @@
     {/each}
   </div>
   <label class="auto" for="{uid}-auto-update">
-    <span>{strings.providerSettings.autoUpdate}<InfoTip topic={strings.providerSettings.autoUpdate} text={strings.harnessUpdates.autoHint} /></span>
+    <span class="ui-label-box"><span class="ui-label">{strings.providerSettings.autoUpdate}</span><InfoTip topic={strings.providerSettings.autoUpdate} text={strings.harnessUpdates.autoHint} /></span>
     <input id="{uid}-auto-update" type="checkbox" role="switch" data-testid="setting-auto-update-harnesses"
       checked={store.settings?.autoUpdateHarnesses ?? false} disabled={!connected || !store.settings}
       onchange={(event) => void toggleAuto(event.currentTarget)} />

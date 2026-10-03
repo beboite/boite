@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp';
-import { startDevUi } from './lib/ui.ts';
+import { startUi } from './lib/ui.ts';
 
 let server: { close(): Promise<void> };
 let port = 0;
@@ -9,14 +9,16 @@ const pages: BrowserPage[] = [];
 
 beforeAll(async () => {
   port = await freePort();
-  server = await startDevUi(port);
+  server = await startUi(port);
 }, 90_000);
+afterEach(async () => {
+  await Promise.all(pages.splice(0).map((page) => page.close()));
+}, 15_000);
 afterAll(async () => {
-  await Promise.all(pages.map((page) => page.close()));
   await server?.close();
 }, 15_000);
 
-const STORE = `(await import('/src/lib/workspace.svelte.ts')).workspace.active`;
+const STORE = `globalThis.__boiteTest.workspace.active`;
 
 /** Opens the recent thread with a long context and picks a Claude model, the seeded thread being echo's. */
 async function switchAway(size: { width: number; height: number }, name: string): Promise<BrowserPage> {

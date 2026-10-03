@@ -55,17 +55,17 @@
 
 <svelte:document onvisibilitychange={() => hidden = document.hidden} />
 {#snippet metric(id: string, text: string | null, title?: string, quiet = false)}
-  <span class="dot" aria-hidden="true">·</span>
-  <span class:quiet data-testid={id} {title}>{text}</span>
+  <span class="dot ui-label" aria-hidden="true">·</span>
+  <span class="ui-label" class:quiet data-testid={id} {title}>{text}</span>
 {/snippet}
 {#if preparing}
-  <div class="reply-pending"><TypingIndicator /><span aria-hidden="true">{strings.chat.preparingReply}</span></div>
+  <div class="reply-pending"><TypingIndicator /><span class="ui-label" aria-hidden="true">{strings.chat.preparingReply}</span></div>
 {/if}
 {#if turn.status !== 'queued' && !(running && activeTool && !waiting && background.length === 0 && !observed)}
   <div class="summary" class:preparing class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
     {#if turn.status === 'done'}<Check size={14} />{:else if turn.status === 'error'}<CircleAlert size={14} />{:else if turn.status === 'stopped'}<Square size={12} />{:else if !preparing && !activeContent}<LoaderCircle size={16} class="spinner" />{/if}
     {#if spent !== null}
-      <span data-testid="turn-elapsed">{fill(running ? strings.chat.workingFor : strings.chat.workedFor, { time: elapsed(spent) })}</span>
+      <span class="ui-label" data-testid="turn-elapsed">{fill(running ? strings.chat.workingFor : strings.chat.workedFor, { time: elapsed(spent) })}</span>
     {/if}
     {#if observed}
       {@render metric('turn-progress', observed.detail ? `${activityLabel}: ${observed.detail}` : activityLabel, observed.detail ?? undefined)}
@@ -81,9 +81,9 @@
       {@render metric('turn-tokens', `${formatTokens(total)} ${strings.units.tokens}`, breakdown)}
     {/if}
     {#if still}
-      <span class="dot" aria-hidden="true">·</span>
+      <span class="dot ui-label" aria-hidden="true">·</span>
       <span class="background" data-testid="turn-background" title={background.map((task) => task.description).join('\n')}>
-        <span class="pulse" aria-hidden="true"></span>{still}
+        <span class="pulse" aria-hidden="true"></span><span class="ui-label">{still}</span>
       </span>
       {#if stop && !running}
         <button type="button" class="stop-background" data-testid="turn-background-stop" title={strings.chat.backgroundStop} aria-label={strings.chat.backgroundStop} onclick={stop}>

@@ -28,7 +28,7 @@
 <div class="done-thread" data-testid="done-thread" data-thread-id={entry.thread.id} data-machine-id={entry.machine.id}>
   <button type="button" class="ghost read" data-testid="done-thread-open" title={entry.thread.title}
     onclick={() => { onopen?.(); void workspace.select(entry.machine.store, entry.thread.id); }}>
-    <span class="title">{entry.thread.title}</span>
+    <span class="title ui-label">{entry.thread.title}</span>
     <span class="detail"><ProjectTile project={entry.project} store={entry.machine.store} size={14} /><span>{projectName(entry.project)}{#if showMachine} · {entry.machine.label}{/if}</span>
       <time datetime={new Date(entry.thread.updatedAt).toISOString()} title={exactTime(entry.thread.updatedAt)}>{ago(entry.thread.updatedAt, now)}</time>
     </span>

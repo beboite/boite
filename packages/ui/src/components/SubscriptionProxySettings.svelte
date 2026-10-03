@@ -43,18 +43,18 @@
 </script>
 
 <section class="card proxy-settings" data-testid="subscription-proxy-settings">
-  <h2>{strings.subscriptionProxy.heading}<InfoTip topic={strings.subscriptionProxy.heading} text={strings.subscriptionProxy.hint} /></h2>
-  <label class="switch-row"><span class="text">{strings.subscriptionProxy.enable}</span><input type="checkbox" role="switch" bind:checked={config.enabled} data-testid="subscription-proxy-enabled" /></label>
+  <h2 class="ui-label-box"><span class="ui-label">{strings.subscriptionProxy.heading}</span><InfoTip topic={strings.subscriptionProxy.heading} text={strings.subscriptionProxy.hint} /></h2>
+  <label class="switch-row"><span class="text ui-label">{strings.subscriptionProxy.enable}</span><input type="checkbox" role="switch" bind:checked={config.enabled} data-testid="subscription-proxy-enabled" /></label>
   <div class="actions" role="group" aria-label={strings.subscriptionProxy.heading}>
-    <button type="button" class="quiet small" aria-pressed={config.kind === 'douane'} onclick={() => choose('douane')} data-testid="subscription-proxy-douane">Douane</button>
-    <button type="button" class="quiet small" aria-pressed={config.kind === 'cliproxyapi'} onclick={() => choose('cliproxyapi')} data-testid="subscription-proxy-cliproxyapi">CLIProxyAPI</button>
+    <button type="button" class="quiet small" aria-pressed={config.kind === 'douane'} onclick={() => choose('douane')} data-testid="subscription-proxy-douane"><span class="ui-label">Douane</span></button>
+    <button type="button" class="quiet small" aria-pressed={config.kind === 'cliproxyapi'} onclick={() => choose('cliproxyapi')} data-testid="subscription-proxy-cliproxyapi"><span class="ui-label">CLIProxyAPI</span></button>
   </div>
   <form onsubmit={(event) => { event.preventDefault(); void save(); }}>
-    <label>{strings.subscriptionProxy.baseUrl}<input type="url" bind:value={config.baseUrl} required data-testid="subscription-proxy-url" /></label>
-    <label>{strings.subscriptionProxy.dashboardUrl}<input type="url" bind:value={config.dashboardUrl} required data-testid="subscription-proxy-dashboard" /></label>
-    <label>{strings.subscriptionProxy.key}<InfoTip topic={strings.subscriptionProxy.key} text={strings.subscriptionProxy.keyHint} /><input type="password" bind:value={key} autocomplete="new-password" disabled={clearKey} data-testid="subscription-proxy-key" /></label>
-    <label class="clear-key"><input type="checkbox" bind:checked={clearKey} />{strings.subscriptionProxy.clearKey}</label>
-    <div class="actions"><button type="submit" class="primary small" disabled={busy} data-testid="subscription-proxy-save">{strings.subscriptionProxy.save}</button></div>
+    <label><span class="ui-label">{strings.subscriptionProxy.baseUrl}</span><input type="url" bind:value={config.baseUrl} required data-testid="subscription-proxy-url" /></label>
+    <label><span class="ui-label">{strings.subscriptionProxy.dashboardUrl}</span><input type="url" bind:value={config.dashboardUrl} required data-testid="subscription-proxy-dashboard" /></label>
+    <label><span class="ui-label-box"><span class="ui-label">{strings.subscriptionProxy.key}</span><InfoTip topic={strings.subscriptionProxy.key} text={strings.subscriptionProxy.keyHint} /></span><input type="password" bind:value={key} autocomplete="new-password" disabled={clearKey} data-testid="subscription-proxy-key" /></label>
+    <label class="clear-key"><input type="checkbox" bind:checked={clearKey} /><span class="ui-label">{strings.subscriptionProxy.clearKey}</span></label>
+    <div class="actions"><button type="submit" class="primary small" disabled={busy} data-testid="subscription-proxy-save"><span class="ui-label">{strings.subscriptionProxy.save}</span></button></div>
     {#if result}<p class="hint" class:error={failed} role="status" data-testid="subscription-proxy-result">{result}</p>{/if}
   </form>
 </section>

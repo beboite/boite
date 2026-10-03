@@ -19,11 +19,11 @@
   <h2>{labels.engine}</h2>
   <p class="hint">{labels.engineHint}</p>
   <label class="switch-row">
-    <span class="text">{labels.concurrency}</span>
+    <span class="text ui-label">{labels.concurrency}</span>
     <input class="agent-number" type="number" min="1" max="8" disabled={view.pending} value={limits.backgroundConcurrency} onchange={event => { void view.call('agents.limits.set', { ...limits, backgroundConcurrency: Number(event.currentTarget.value) }); }} />
   </label>
   <label class="switch-row">
-    <span class="text">{labels.paused}</span>
+    <span class="text ui-label">{labels.paused}</span>
     <input type="checkbox" role="switch" disabled={view.pending} checked={limits.paused} onchange={event => { void view.call('agents.limits.set', { ...limits, paused: event.currentTarget.checked }); }} />
   </label>
   <label class="switch-row">
@@ -37,5 +37,5 @@
 <section class="card">
   <h2>{labels.dangerZone}</h2>
   <p class="hint">{labels.dangerHint}</p>
-  <button type="button" class="danger" onclick={() => void stopEngine()}>{labels.stopEngine}</button>
+  <button type="button" class="danger" onclick={() => void stopEngine()}><span class="ui-label">{labels.stopEngine}</span></button>
 </section>

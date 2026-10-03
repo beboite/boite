@@ -788,7 +788,7 @@
   {#if behind}
     <button type="button" class="small jump" onclick={jump} data-testid="jump-to-latest">
       <ArrowDown size={14} strokeWidth={2} />
-      {unseen > 0 ? fill(unseen === 1 ? strings.chat.newMessage : strings.chat.newMessages, { count: String(unseen) }) : strings.chat.jumpToLatest}
+      <span class="ui-label">{unseen > 0 ? fill(unseen === 1 ? strings.chat.newMessage : strings.chat.newMessages, { count: String(unseen) }) : strings.chat.jumpToLatest}</span>
     </button>
   {/if}
 </div>

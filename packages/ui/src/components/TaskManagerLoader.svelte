@@ -12,6 +12,6 @@
 {:catch}
   <div class="notice" role="status">
     <span>{strings.taskManager.loadFailed}</span>
-    <button class="quiet" onclick={() => loading = import('./TaskManager.svelte')}>{strings.common.refresh}</button>
+    <button class="quiet" onclick={() => loading = import('./TaskManager.svelte')}><span class="ui-label">{strings.common.refresh}</span></button>
   </div>
 {/await}

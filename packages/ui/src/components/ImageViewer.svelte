@@ -63,9 +63,9 @@
 
 <div class="viewer" bind:this={dialog} use:portal role="dialog" aria-modal="true" aria-label={alt} data-testid="image-viewer">
   <div class="toolbar">
-    <span class="name" title={alt}>{alt}</span>
+    <span class="name ui-label" title={alt}>{alt}</span>
     <button type="button" class="ghost icon" onclick={() => zoom = Math.max(1, zoom - 0.5)} disabled={zoom === 1} aria-label={strings.artifacts.zoomOut} title={strings.artifacts.zoomOut}><Minus size={17} /></button>
-    <button type="button" class="ghost small fit" onclick={() => zoom = 1} aria-label={strings.artifacts.fitImage} title={strings.artifacts.fitImage}><Maximize2 size={16} /><span>{Math.round(zoom * 100)}%</span></button>
+    <button type="button" class="ghost small fit" onclick={() => zoom = 1} aria-label={strings.artifacts.fitImage} title={strings.artifacts.fitImage}><Maximize2 size={16} /><span class="ui-label">{Math.round(zoom * 100)}%</span></button>
     <button type="button" class="ghost icon" onclick={() => zoom = Math.min(4, zoom + 0.5)} disabled={zoom === 4} aria-label={strings.artifacts.zoomIn} title={strings.artifacts.zoomIn}><Plus size={17} /></button>
     {#if ondownload}<button type="button" class="ghost icon" onclick={ondownload} aria-label={strings.artifacts.download} title={strings.artifacts.download}><Download size={17} /></button>{/if}
     <button type="button" class="ghost icon" bind:this={close} aria-label={strings.artifacts.closeImage} title={strings.artifacts.closeImage} onclick={onclose} data-testid="image-viewer-close"><X size={18} /></button>

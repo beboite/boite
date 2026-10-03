@@ -66,7 +66,7 @@
 
 <section class="agent-conversation" aria-label={strings.agents.conversation} bind:this={section}>
   <div class="agent-transcript" data-testid="agent-transcript">
-    {#if view.hasOlder(key, 'message')}<button type="button" class="ghost small agent-older" disabled={view.loadingOlder === key} onclick={() => void view.loadOlder(key, history, messages)} data-testid="agent-messages-older">{strings.agents.loadEarlier}</button>{/if}
+    {#if view.hasOlder(key, 'message')}<button type="button" class="ghost small agent-older" disabled={view.loadingOlder === key} onclick={() => void view.loadOlder(key, history, messages)} data-testid="agent-messages-older"><span class="ui-label">{strings.agents.loadEarlier}</span></button>{/if}
     {#each messages as message, index (message.id)}
       {@const previous = messages[index - 1]}
       {@const mine = message.senderId === null}
@@ -85,9 +85,9 @@
   <form class="agent-composer" onsubmit={e => { e.preventDefault(); void send(); }}>
     {#if group}
       <div class="agent-recipients" role="group" aria-label={strings.agents.recipients}>
-        <button type="button" class="chip" class:on={!recipients.length} aria-pressed={!recipients.length} onclick={() => { recipients = []; }}>{strings.agents.toEveryone}</button>
+        <button type="button" class="chip" class:on={!recipients.length} aria-pressed={!recipients.length} onclick={() => { recipients = []; }}><span class="ui-label">{strings.agents.toEveryone}</span></button>
         {#each group.memberIds as id (id)}
-          <button type="button" class="chip" class:on={recipients.includes(id)} aria-pressed={recipients.includes(id)} onclick={() => { recipients = recipients.includes(id) ? recipients.filter(r => r !== id) : [...recipients, id]; }}>{nameOf(id)}</button>
+          <button type="button" class="chip" class:on={recipients.includes(id)} aria-pressed={recipients.includes(id)} onclick={() => { recipients = recipients.includes(id) ? recipients.filter(r => r !== id) : [...recipients, id]; }}><span class="ui-label">{nameOf(id)}</span></button>
         {/each}
       </div>
     {/if}

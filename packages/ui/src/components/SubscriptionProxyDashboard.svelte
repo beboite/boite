@@ -40,12 +40,12 @@
 
 <div class="proxy-dashboard" data-testid="subscription-proxy-dashboard-page">
   <header>
-    <h1>{strings.usage.limits}</h1>
-    {#if onNative}<button type="button" class="ghost small" onclick={onNative} data-testid="subscription-proxy-native">{strings.subscriptionProxy.native}</button>{/if}
-    {#if store.owner}<button type="button" class="ghost small" onclick={() => configuring = !configuring} data-testid="subscription-proxy-configure">{strings.subscriptionProxy.configure}</button>{/if}
+    <h1 class="ui-label-box"><span class="ui-label">{strings.usage.limits}</span></h1>
+    {#if onNative}<button type="button" class="ghost small" onclick={onNative} data-testid="subscription-proxy-native"><span class="ui-label">{strings.subscriptionProxy.native}</span></button>{/if}
+    {#if store.owner}<button type="button" class="ghost small" onclick={() => configuring = !configuring} data-testid="subscription-proxy-configure"><span class="ui-label">{strings.subscriptionProxy.configure}</span></button>{/if}
     {#if !configuring && proxy}
       <button type="button" class="ghost icon" aria-label={strings.browser.reload} title={strings.browser.reload} onclick={reload} data-testid="subscription-proxy-reload"><RotateCw size={16} /></button>
-      <button type="button" class="ghost small" onclick={() => void openExternal(proxy!.dashboardUrl)} data-testid="subscription-proxy-open"><ExternalLink size={16} />{strings.subscriptionProxy.openDashboard}</button>
+      <button type="button" class="ghost small" onclick={() => void openExternal(proxy!.dashboardUrl)} data-testid="subscription-proxy-open"><ExternalLink size={16} /><span class="ui-label">{strings.subscriptionProxy.openDashboard}</span></button>
     {/if}
   </header>
   {#if configuring}<SubscriptionProxySettings {store} />{:else if proxy?.enabled}

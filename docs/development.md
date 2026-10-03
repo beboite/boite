@@ -75,6 +75,9 @@ its generated tsconfig makes Vite reload the page and can reset a fixture mid-te
 Fake browser fixtures do not always need a development server.
 `tests/e2e/lib/ui.ts` selects a prebuilt fixture from `BOITE_E2E_FAKE_UI`, builds
 one per test process with `BOITE_E2E_PREBUILT_UI=1`, or falls back to Vite.
+Both modes expose the fixture workspace through `globalThis.__boiteTest`, so
+tests that only need the Store can use the prebuilt bundle. Close each scenario's
+browsers in `afterEach` to release their rendering resources before the next test.
 Pages importing `/src/...` call `startDevUi` directly. That server warms their
 reachable modules before browser interactions. Fixture bundles enable the fake
 client separately from the production assets staged in installers.
@@ -531,6 +534,16 @@ applies to panels, drawers, terminals and disclosures. Collapsed task controls
 are inert. Settings pages use `--settings-width`, `--settings-padding` and
 `settings-stack`; explanatory text belongs in `InfoTip`, with visible hints
 reserved for current errors, counts or missing steps.
+
+For text beside icons, put `ui-label` on the text leaf inside the flex or grid
+row. The shared rule in `app.css` centres the font's cap height and alphabetic
+baseline with `text-box`; it keeps padding for accents and descenders when a
+label truncates. Use `ui-label-box` on padded badges or inline icon rows to
+preserve their original line-height and centre the label. Trimming on the row
+itself does not reach its flex items.
+The existing line-height remains the fallback when a browser lacks `text-box`.
+`bun test tests/e2e/text-alignment.test.ts` measures this alignment across the
+eight reading fonts, desktop menus and phone controls.
 
 ### Window material
 

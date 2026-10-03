@@ -44,9 +44,9 @@
     <span class="glyph" class:denied={decision === 'deny'} class:allowed={decision === 'allow'}>
       {#if decision === 'allow'}<ShieldCheck size={15} strokeWidth={1.75} />{:else if decision === 'deny'}<ShieldX size={15} strokeWidth={1.75} />{:else}<ShieldQuestion size={15} strokeWidth={1.75} />{/if}
     </span>
-    <span class="sentence" data-testid="permission-sentence" title={described.subject || toolName}>{sentence}</span>
+    <span class="sentence ui-label" data-testid="permission-sentence" title={described.subject || toolName}>{sentence}</span>
     {#if decision !== null}
-      <span class="verdict" class:denied={decision === 'deny'} data-testid="permission-verdict">
+      <span class="verdict ui-label" class:denied={decision === 'deny'} data-testid="permission-verdict">
         {decision === 'allow' ? strings.chat.allowed : strings.chat.denied}
       </span>
     {/if}
@@ -65,7 +65,7 @@
   {/if}
   {#if request}
     <details class="technical">
-      <summary><ChevronRight size={12} strokeWidth={2} />{strings.chat.permissionTechnical}</summary>
+      <summary><ChevronRight size={12} strokeWidth={2} /><span class="ui-label">{strings.chat.permissionTechnical}</span></summary>
       <p class="tool mono">{toolName}</p>
       <pre class="mono" data-testid="permission-input">{json(request.input)}</pre>
     </details>
@@ -74,10 +74,10 @@
   {#if decision === null}
     <div class="actions">
       <button type="button" class="primary" data-testid="permission-allow" onclick={() => answer('allow')}>
-        {strings.chat.allow}
+        <span class="ui-label">{strings.chat.allow}</span>
       </button>
       <button type="button" class="danger" data-testid="permission-deny" onclick={() => answer('deny')}>
-        {strings.chat.deny}
+        <span class="ui-label">{strings.chat.deny}</span>
       </button>
     </div>
   {/if}

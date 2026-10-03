@@ -38,13 +38,13 @@
   <header class="run-head">
     <button type="button" class="ghost small icon" aria-label={strings.delegation.backToTeam} title={strings.delegation.backToTeam} data-testid="workflow-run-back" onclick={onback}><ArrowLeft size={15} strokeWidth={1.75} /></button>
     <div class="title">
-      <h2><Workflow size={15} strokeWidth={1.75} /><span>{run.name}</span></h2>
+      <h2><Workflow size={15} strokeWidth={1.75} /><span class="ui-label">{run.name}</span></h2>
       <p class="meta" data-testid="workflow-meta">
         <WorkflowMark status={run.status} run />
-        <span>{strings.workflow.status[run.status]}</span>
-        <span>·</span><span>{fill(strings.workflow.steps, { done: String(progress.done), total: String(progress.total) })}</span>
-        <span>·</span><AgentElapsed startedAt={run.createdAt} finishedAt={run.finishedAt} active={run.status === 'running'} />
-        {#if tokens > 0}<span>·</span><span>{fill(strings.workflow.tokens, { tokens: formatTokens(tokens) })}</span>{/if}
+        <span class="ui-label">{strings.workflow.status[run.status]}</span>
+        <span class="ui-label">·</span><span class="ui-label">{fill(strings.workflow.steps, { done: String(progress.done), total: String(progress.total) })}</span>
+        <span class="ui-label">·</span><AgentElapsed startedAt={run.createdAt} finishedAt={run.finishedAt} active={run.status === 'running'} />
+        {#if tokens > 0}<span class="ui-label">·</span><span class="ui-label">{fill(strings.workflow.tokens, { tokens: formatTokens(tokens) })}</span>{/if}
       </p>
     </div>
     <div class="actions">
