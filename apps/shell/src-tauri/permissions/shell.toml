@@ -34,6 +34,8 @@ commands.allow = [
   "browser_destroy",
   "browser_profile_delete",
   "browser_protocol",
+  "browser_screencast_start",
+  "browser_screencast_stop",
 ]
 
 [[permission]]
