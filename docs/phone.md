@@ -494,7 +494,10 @@ and scroll buttons remain available without a hardware keyboard.
 The phone requests JPEG frames while the dialog is open and visible: about
 three a second while the page moves, slower on a still page or a slow link,
 sized to the phone's screen (at most twice its CSS width) and lighter when
-frames take long to arrive. A lost desktop is retried with a growing pause
+frames take long to arrive. The desktop captures its tab as shown and shrinks
+the image itself: asking Chromium for a smaller capture redraws the live tab at
+that size and made it flash on the PC each time the phone's keyboard shrank the
+preview. A lost desktop is retried with a growing pause
 up to eight seconds. Pause, closing the dialog, switching off the experiment
 or hiding the app stops those requests; returning to the app, regaining the
 network or reconnecting resumes them at once. This is a periodically

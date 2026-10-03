@@ -2,7 +2,7 @@ import { remoteBrowserInputError, type RemoteBrowserFrame, type RemoteBrowserInp
 import { browserBridge } from './browser-bridge';
 import { isExperimentEnabled } from './experiments';
 
-interface Page { width: number; height: number; title: string; href: string; origin: number; dpr: number; left: number; top: number }
+interface Page { width: number; height: number; title: string; href: string; origin: number; dpr: number }
 interface Captured { frame: RemoteBrowserFrame; page: Page }
 const captured = new Map<string, Captured>();
 /** Recheck the owning conversation, tab and consent at every asynchronous boundary. */
@@ -24,26 +24,49 @@ function remotePage(id: string, assertCurrent: () => void) {
   };
   return { protocol, evaluate, check };
 }
-const pageInfo = '({width:innerWidth,height:innerHeight,title:document.title,href:location.href,origin:performance.timeOrigin,dpr:devicePixelRatio||1,left:visualViewport?visualViewport.pageLeft:scrollX,top:visualViewport?visualViewport.pageTop:scrollY})';
+const pageInfo = '({width:innerWidth,height:innerHeight,title:document.title,href:location.href,origin:performance.timeOrigin,dpr:devicePixelRatio||1})';
 const samePage = (a: Page, b: Page) => a.width === b.width && a.height === b.height && a.href === b.href && a.origin === b.origin;
 
+/** The width a frame is shrunk to: what the viewer can show, never more than the page has. */
+export function remoteWidth(pixels: number, maxWidth?: number): number | undefined {
+  return maxWidth && pixels > maxWidth ? maxWidth : undefined;
+}
+
 /**
- * The screenshot clip is in page coordinates, so it follows the scroll position;
- * `scale` shrinks a high-density desktop page to what the viewer can show.
+ * Shrinks a captured JPEG here, on the PC. Asking Chromium for a smaller image
+ * (a screenshot `clip` with a `scale`) re-renders the live tab at that size
+ * for the capture: the PC's browser flashed on every frame once the phone's
+ * keyboard shrank the preview. Without canvas support the frame stays whole.
  */
-export function remoteClip(page: Pick<Page, 'width' | 'height' | 'dpr' | 'left' | 'top'>, maxWidth?: number) {
-  const pixels = page.width * (page.dpr > 0 ? page.dpr : 1);
-  if (!maxWidth || !(pixels > maxWidth)) return undefined;
-  return { x: page.left || 0, y: page.top || 0, width: page.width, height: page.height, scale: maxWidth / pixels };
+async function shrinkFrame(base64: string, maxWidth: number, quality: number): Promise<string> {
+  if (typeof createImageBitmap !== 'function' || typeof OffscreenCanvas !== 'function') return base64;
+  const bitmap = await createImageBitmap(new Blob([Uint8Array.from(atob(base64), c => c.charCodeAt(0))], { type: 'image/jpeg' }));
+  try {
+    const width = remoteWidth(bitmap.width, maxWidth);
+    if (!width) return base64;
+    const canvas = new OffscreenCanvas(width, Math.max(1, Math.round(bitmap.height * width / bitmap.width)));
+    const context = canvas.getContext('2d');
+    if (!context) return base64;
+    context.imageSmoothingQuality = 'high';
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const bytes = new Uint8Array(await (await canvas.convertToBlob({ type: 'image/jpeg', quality: quality / 100 })).arrayBuffer());
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(binary);
+  } finally { bitmap.close(); }
 }
 
 export async function captureRemoteBrowser(id: string, assertCurrent: () => void, options: RemoteFrameOptions = {}): Promise<RemoteBrowserFrame> {
-  const { protocol, evaluate } = remotePage(id, assertCurrent);
+  const { protocol, evaluate, check } = remotePage(id, assertCurrent);
   const page = await evaluate(pageInfo) as Page;
-  const clip = remoteClip(page, options.maxWidth);
-  const shot = await protocol('Page.captureScreenshot', { format: 'jpeg', quality: options.quality ?? 55, captureBeyondViewport: false, ...(clip ? { clip } : {}) });
+  const quality = options.quality ?? 55;
+  // Never a clip: the visible viewport, at the scroll position, is what a plain capture takes.
+  const shrink = remoteWidth(page.width * (page.dpr > 0 ? page.dpr : 1), options.maxWidth);
+  const shot = await protocol('Page.captureScreenshot', { format: 'jpeg', quality: shrink ? 90 : quality, captureBeyondViewport: false });
   if (!samePage(page, await evaluate(pageInfo) as Page)) throw new Error('the page changed during capture; retry');
-  const frame: RemoteBrowserFrame = { id: crypto.randomUUID(), tabId: id, title: page.title.slice(0, 200), width: page.width, height: page.height, base64: String(shot.data), at: Date.now(), url: page.href.slice(0, 4096) };
+  const base64 = shrink ? await shrinkFrame(String(shot.data), shrink, quality) : String(shot.data);
+  check();
+  const frame: RemoteBrowserFrame = { id: crypto.randomUUID(), tabId: id, title: page.title.slice(0, 200), width: page.width, height: page.height, base64, at: Date.now(), url: page.href.slice(0, 4096) };
   for (const [key, value] of captured) if (Date.now() - value.frame.at > 5000) captured.delete(key);
   if (captured.size >= 24) captured.delete(captured.keys().next().value!);
   captured.set(frame.id, { frame: { ...frame, base64: '' }, page });

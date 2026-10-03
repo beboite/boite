@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { captureRemoteBrowser, inputRemoteBrowser, remoteClip } from './browser-remote-host';
+import { captureRemoteBrowser, inputRemoteBrowser, remoteWidth } from './browser-remote-host';
 import { browserBridge } from './browser-bridge';
 import { writeExperiments } from './experiments';
 
@@ -27,13 +27,36 @@ test('remote resolution uses bounded emulation, retires old coordinates and can 
   expect(protocol).not.toHaveBeenCalled();
 });
 
-test('frames shrink to the viewer width at the scroll position, never enlarge', () => {
-  const page = { width: 1280, height: 800, dpr: 1.5, left: 0, top: 2400 };
-  expect(remoteClip(page)).toBeUndefined();
-  expect(remoteClip(page, 1920)).toBeUndefined();
-  expect(remoteClip(page, 3000)).toBeUndefined();
-  expect(remoteClip(page, 960)).toEqual({ x: 0, y: 2400, width: 1280, height: 800, scale: 0.5 });
-  expect(remoteClip({ width: 800, height: 600, dpr: 0, left: NaN, top: 0 }, 400)).toEqual({ x: 0, y: 0, width: 800, height: 600, scale: 0.5 });
+test('a phone asking for a smaller frame gets it shrunk on the PC, never by re-rendering the tab', async () => {
+  expect(remoteWidth(1920)).toBeUndefined();
+  expect(remoteWidth(1920, 1920)).toBeUndefined();
+  expect(remoteWidth(1920, 960)).toBe(960);
+  writeExperiments(['remote-browser']);
+  const protocol = vi.mocked(browserBridge.protocol!);
+  const page = { width: 1280, height: 800, title: 'Fixture', href: 'https://example.test/', origin: 1, dpr: 1.5 };
+  protocol.mockImplementation(async (_id, method) => method === 'Page.captureScreenshot' ? { data: btoa('full') } : { result: { value: page } });
+  const drawn: number[][] = [];
+  vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 1920, height: 1200, close: vi.fn() })));
+  vi.stubGlobal('OffscreenCanvas', class {
+    constructor(public width: number, public height: number) {}
+    getContext() { return { drawImage: (_image: unknown, ...box: number[]) => drawn.push(box) }; }
+    async convertToBlob() { return new Blob(['small']); }
+  });
+  try {
+    // The keyboard opened: the preview, and the frame it asks for, got narrower.
+    for (const maxWidth of [780, 260]) {
+      const frame = await captureRemoteBrowser('browser:shrink', vi.fn(), { maxWidth, quality: 45 });
+      expect(atob(frame.base64)).toBe('small');
+      expect(frame).toMatchObject({ width: 1280, height: 800 });
+    }
+    expect(drawn).toEqual([[0, 0, 780, 488], [0, 0, 260, 163]]);
+    const full = await captureRemoteBrowser('browser:shrink', vi.fn(), { maxWidth: 1920 });
+    expect(atob(full.base64)).toBe('full');
+    // A clip, scaled or not, makes Chromium redraw the live tab for the capture: the PC flashes.
+    const shots = protocol.mock.calls.filter(([, method]) => method === 'Page.captureScreenshot');
+    expect(shots).toHaveLength(3);
+    for (const [, , params] of shots) expect(params).not.toHaveProperty('clip');
+  } finally { vi.unstubAllGlobals(); }
 });
 
 test('the finger start aims the wheel, and the address bar and history drive the tab then retire its frames', async () => {
