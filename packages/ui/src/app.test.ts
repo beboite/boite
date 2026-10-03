@@ -157,14 +157,15 @@ test('the app mounts against the fake core, lists the seeded threads and opens t
 
 test('the page leaves the service worker its notification words on boot', async () => {
   const put = vi.fn(async (_path: string, _response: Response) => {});
-  vi.stubGlobal('caches', { open: vi.fn(async () => ({ put })) });
+  // Set and removed by hand: unstubAllGlobals would also drop test-setup's ResizeObserver and matchMedia.
+  Object.defineProperty(globalThis, 'caches', { configurable: true, value: { open: vi.fn(async () => ({ put })) } });
   try {
     await mountOnFake();
     await waitFor(() => put.mock.calls.length > 0);
     const [path, response] = put.mock.calls[0]!;
     expect(path).toBe('/notification-words');
     expect(await response.json()).toMatchObject({ done: expect.any(String), needsYou: expect.any(String) });
-  } finally { vi.unstubAllGlobals(); }
+  } finally { Reflect.deleteProperty(globalThis, 'caches'); }
 });
 
 test('the app opens on a new thread in the project last worked in', async () => {
