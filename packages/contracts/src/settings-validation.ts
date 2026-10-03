@@ -1,4 +1,5 @@
 import type { Settings, TitleModel } from './index.ts';
+import { BROWSER_PROFILE_NAME_MAX, BROWSER_PROFILES_MAX, browserProfileIdError, DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE, type BrowserProfile } from './browser';
 
 // Both supported hosts expose URL; contracts otherwise need no DOM or Node types.
 declare const URL: new (value: string) => {
@@ -118,6 +119,33 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
       return { ok: false, field: 'browserOrigins', message: `browserOrigins must contain at most ${BROWSER_ORIGINS_MAX} HTTP or HTTPS origins` };
     }
     next.browserOrigins = unique;
+  }
+  if (patch.browserProfiles !== undefined) {
+    const raw: unknown = patch.browserProfiles;
+    const profiles: BrowserProfile[] = [];
+    if (!Array.isArray(raw) || raw.length > BROWSER_PROFILES_MAX) {
+      return { ok: false, field: 'browserProfiles', message: `browserProfiles must list at most ${BROWSER_PROFILES_MAX} profiles` };
+    }
+    for (const entry of raw as Partial<BrowserProfile>[]) {
+      const idError = browserProfileIdError(entry?.id);
+      if (idError) return { ok: false, field: 'browserProfiles', message: `browserProfiles: ${idError}` };
+      const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+      // A profile is found by name too, so `default` and `private` stay keywords.
+      if (!name || name.length > BROWSER_PROFILE_NAME_MAX || /[\u0000-\u001f]/.test(name) || [DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE].includes(name.toLowerCase())) {
+        return { ok: false, field: 'browserProfiles', message: `browserProfiles: ${entry.id} needs a name of 1 to ${BROWSER_PROFILE_NAME_MAX} characters other than default or private` };
+      }
+      if (profiles.some(profile => profile.id === entry.id || profile.name.toLowerCase() === name.toLowerCase())) {
+        return { ok: false, field: 'browserProfiles', message: `browserProfiles: ${entry.id} repeats another profile's id or name` };
+      }
+      profiles.push({ id: entry.id as string, name });
+    }
+    next.browserProfiles = profiles;
+  }
+  if (patch.browserDefaultProfile !== undefined) {
+    const wanted = patch.browserDefaultProfile;
+    const known = wanted === DEFAULT_BROWSER_PROFILE || (browserProfileIdError(wanted) === null
+      && (next.browserProfiles === undefined || next.browserProfiles.some(profile => profile.id === wanted)));
+    if (!known) return { ok: false, field: 'browserDefaultProfile', message: 'browserDefaultProfile must be default or the id of a browser profile, never private' };
   }
   for (const key of NUMERIC_KEYS) {
     const value = patch[key];

@@ -3,7 +3,8 @@
  * tabs and the new-surface menu all read their names, hints and availability here.
  */
 import { baseName, type Surface, type SurfaceKind } from './right-panel.svelte';
-import { strings } from './strings';
+import { browserProfiles } from './browser-profiles.svelte';
+import { fill, strings } from './strings';
 import { work, type ControlId } from './work-prefs.svelte';
 
 /**
@@ -82,5 +83,8 @@ export function label(surface: Surface): string {
 }
 
 export function tooltip(surface: Surface): string {
+  if (surface.kind === 'browser' && surface.profile !== undefined) {
+    return `${label(surface)} · ${fill(strings.browserProfiles.profile, { name: browserProfiles.name(surface.profile) })}`;
+  }
   return surface.kind === 'file' && surface.path ? surface.path : label(surface);
 }

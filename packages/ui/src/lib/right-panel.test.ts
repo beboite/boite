@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE, type Settings } from '@boite/contracts';
 import { browserBridge } from './browser-bridge';
+import { browserProfiles } from './browser-profiles.svelte';
 import { work } from './work-prefs.svelte';
 import {
   PANEL_DEFAULT,
@@ -438,6 +440,31 @@ describe('the right panel', () => {
     expect(Object.keys(new RightPanelStore().threads).sort()).toEqual(['', 't-kept']);
     destroy.mockRestore();
     write.mockRestore();
+  });
+
+  test('a browser tab keeps the profile it opened in, and a deleted profile takes its tabs in every thread', () => {
+    const pro = { id: 'p-0123456789ab', name: 'Pro' };
+    browserProfiles.source = { settings: { browserProfiles: [pro], browserDefaultProfile: pro.id } as Settings, saveSettings: async () => true };
+    try {
+      const root = new RightPanelStore();
+      const one = root.for('t-1'), two = root.for('t-2');
+      const chosen = one.open('browser');
+      const plain = one.open('browser', undefined, DEFAULT_BROWSER_PROFILE);
+      const hidden = one.open('browser', undefined, PRIVATE_BROWSER_PROFILE);
+      const elsewhere = two.open('browser');
+      expect([chosen.profile, plain.profile, hidden.profile]).toEqual([pro.id, undefined, PRIVATE_BROWSER_PROFILE]);
+      expect(new RightPanelStore().for('t-1').surfaces.map((surface) => surface.profile)).toEqual([pro.id, undefined, PRIVATE_BROWSER_PROFILE]);
+      const destroy = vi.spyOn(browserBridge, 'destroy');
+
+      root.closeProfile(pro.id);
+
+      expect(destroy.mock.calls.map(([id]) => id).sort()).toEqual([chosen.id, elsewhere.id].sort());
+      expect(one.surfaces.map((surface) => surface.id)).toEqual([plain.id, hidden.id]);
+      expect(one.active?.id).toBe(hidden.id);
+      expect(two.surfaces).toHaveLength(0);
+      expect(new RightPanelStore().for('t-2').surfaces).toHaveLength(0);
+      destroy.mockRestore();
+    } finally { browserProfiles.source = null; }
   });
 
   test('a file tab keeps its unsaved text until it is closed, and each close names what it takes', () => {

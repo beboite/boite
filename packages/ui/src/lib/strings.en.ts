@@ -1368,6 +1368,30 @@ export const strings = {
     slotLinux: 'The built-in browser is not available in the Linux app yet. Open the page in your own browser.'
   },
 
+  browserProfiles: {
+    heading: 'Browser profiles',
+    hint: 'Each profile keeps its own cookies, storage and sign-ins in the built-in browser, and keeps them after a restart. A private tab keeps nothing once the last private tab closes.',
+    default: 'Default',
+    private: 'Private',
+    profile: 'Browser profile: {name}',
+    newTabIn: 'New tab in {name}',
+    newPrivateTab: 'New private tab',
+    manage: 'Manage browser profiles',
+    isDefault: 'Opens new tabs',
+    makeDefault: 'Open new tabs here',
+    rename: 'Rename',
+    renameLabel: 'New name for {name}',
+    delete: 'Delete',
+    addLabel: 'New profile name',
+    addPlaceholder: 'Work, Personal…',
+    add: 'Add profile',
+    invalidName: 'Choose a name of 1 to 40 characters that no other profile uses, other than Default or Private.',
+    tooMany: 'At most {count} browser profiles.',
+    deleteTitle: 'Delete the profile {name}?',
+    deleteBody: 'Its open tabs close, and its cookies, storage and sign-ins are erased from this computer. This cannot be undone.',
+    deleteFailed: 'The profile was removed, but its data could not be erased: {reason}'
+  },
+
   terminal: {
     title: 'Terminal',
     hide: 'Hide the terminal',

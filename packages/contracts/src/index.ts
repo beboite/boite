@@ -1,6 +1,6 @@
 import type { AgentsRpcMethods, AgentsRpcEvents } from './agents';
 import type { WorkflowsRpcMethods, WorkflowsRpcEvents } from './workflows';
-import type { BrowserRpcMethods, BrowserRpcEvents } from './browser';
+import type { BrowserRpcMethods, BrowserRpcEvents, BrowserProfile } from './browser';
 import type { PullRequestsRpcMethods, PullRequestsRpcEvents } from './pull-requests';
 export * from './pull-requests';
 export * from './browser';
@@ -1405,6 +1405,13 @@ export interface Settings {
   worktreeStorage?: WorktreeStorage;
   /** Exact browser origins allowed to connect alongside the shell and this core's own origin. */
   browserOrigins?: string[];
+  /**
+   * The browser profiles the user made on this machine's desktop, each its own
+   * cookies and logins. The built-in `default` and `private` are not listed.
+   */
+  browserProfiles?: BrowserProfile[];
+  /** The profile a new browser tab opens in. Missing or unknown means `default`; never `private`. */
+  browserDefaultProfile?: string;
   /** HTTPS origin served by the reverse proxy, used in phone pairing links. */
   publicUrl?: string | null;
   /** Minutes a Claude process stays warm after a turn. 0 releases it at once. */

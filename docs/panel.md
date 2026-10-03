@@ -72,7 +72,6 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 | Subagents | one     | the thread's workflow runs and subagents in one list, a run's graph, a subagent's conversation, see [delegation.md](delegation.md) and [workflows.md](workflows.md) |
 | Trace    | one      | the thread's processes, see [trace.md](trace.md)                              |
 
-Browser tabs share the shell's webview profile, so logins survive restart.
 The iframe bridge belongs to browser test fixtures; ordinary web clients have
 no native Browser surface. [Portability](portability.md#remaining-gaps) records
 the Linux shell's system-browser fallback.
@@ -85,6 +84,31 @@ other than 100% has a reset button.
 `lib/browser-bounds.ts` observes layout changes and follows finite layout
 animations, rather than measuring the page slot on every idle frame.
 
+### Browser profiles
+
+A browser tab opens in a profile and keeps it. Each profile has its own cookies,
+storage and logins, kept across restarts. **Default** is the profile every tab
+used before there were others, so earlier logins stay there. Settings > General >
+Browser profiles adds, renames and deletes the others, and chooses the one new
+tabs open in. The profile button in the address bar names the tab's profile
+(only its icon on a narrow bar). Its menu, like the panel's **+** menu, opens a
+new tab in another profile, or a private tab. A private tab is chosen per tab,
+never as the default. Private tabs share one session that keeps nothing once
+the last of them closes.
+
+The profiles belong to the desktop that shows the browser: they are stored in
+the settings of the core its shell started, and a phone has no Browser surface
+to choose them. Deleting a profile closes its tabs in every conversation and
+erases what it kept. On Windows each profile is a WebView2 profile of the
+shell's single browser process (`src/platform/webview_profiles.rs`): the
+debugging port is unchanged, and WebView2 removes a deleted profile's folder
+when that process exits, which is why an id is never reused. macOS keeps each
+profile in a WebKit data store, which needs macOS 14. The Linux shell has no
+built-in browser. `tests/e2e/browser-profiles.test.ts` checks separate cookies,
+their survival across a restart and deletion in the real shell.
+
+The agent's `boite browser profiles` and `open <url> --profile <name>` are
+described in the [CLI](cli.md).
 ### Local HTML artifacts
 
 `boite preview reports/index.html` opens a generated page in the integrated

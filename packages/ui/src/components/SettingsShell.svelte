@@ -27,6 +27,7 @@
   import { providerGroups } from '../lib/provider-family';
 import { workspace } from '../lib/workspace.svelte';
   import { showAppUpdateUi } from '../lib/app-update.svelte';
+  import { browserBridge } from '../lib/browser-bridge';
 
   let { store, onopenthread }: { store: Store; onopenthread?: () => void } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
@@ -65,6 +66,7 @@ import { workspace } from '../lib/workspace.svelte';
       { id: 'conversations', label: strings.settings.conversations },
       { id: 'archived', label: strings.settings.archived.heading },
       ...(store.owner ? [{ id: 'worktrees', label: strings.settings.worktrees.heading }] : []),
+      ...(browserBridge.paints ? [{ id: 'browser-profiles', label: strings.browserProfiles.heading }] : []),
       { id: 'app', label: strings.settings.app },
       ...(showAppUpdateUi() ? [{ id: 'updates', label: strings.appUpdate.heading }] : []),
       ...(store.owner ? [{ id: 'privacy', label: strings.telemetry.heading }] : [])

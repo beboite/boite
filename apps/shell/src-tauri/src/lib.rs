@@ -160,6 +160,7 @@ pub fn run() {
             browser::browser_annotate,
             browser::browser_highlight,
             browser::browser_destroy,
+            browser::browser_profile_delete,
             browser_control::browser_protocol,
         ])
         .setup(move |app| {
