@@ -244,8 +244,8 @@
             <button type="button" class="chip" disabled={!usable} aria-label={strings.devicePanel.recents} title={strings.devicePanel.recents} onclick={() => void input({ kind: 'key', key: 'recents' })}><Square size={14} /></button>
             <button type="button" class="chip" disabled={!usable} aria-label={strings.devicePanel.rotate} title={strings.devicePanel.rotate} onclick={() => void input({ kind: 'key', key: 'rotate' })}><RotateCw size={15} /></button>
             <button type="button" class="chip" disabled={!usable} aria-label={strings.devicePanel.power} title={strings.devicePanel.power} onclick={() => void input({ kind: 'key', key: 'power' })}><Power size={15} /></button>
-            <button type="button" class="chip" disabled={!usable} aria-label="Enter" onclick={() => void input({ kind: 'key', key: 'enter' })}><CornerDownLeft size={15} /></button>
-            <button type="button" class="chip" disabled={!usable} aria-label="Backspace" onclick={() => void input({ kind: 'key', key: 'backspace' })}><Delete size={15} /></button>
+            <button type="button" class="chip" disabled={!usable} aria-label={strings.devicePanel.enter} title={strings.devicePanel.enter} onclick={() => void input({ kind: 'key', key: 'enter' })}><CornerDownLeft size={15} /></button>
+            <button type="button" class="chip" disabled={!usable} aria-label={strings.devicePanel.backspace} title={strings.devicePanel.backspace} onclick={() => void input({ kind: 'key', key: 'backspace' })}><Delete size={15} /></button>
           </div>
           <form onsubmit={e => { e.preventDefault(); void sendText(false); }}>
             <input bind:value={text} data-testid="device-text" maxlength="500" enterkeyhint="send" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label={strings.devicePanel.text} placeholder={strings.devicePanel.text} onkeydown={textKey} />

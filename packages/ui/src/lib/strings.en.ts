@@ -29,7 +29,7 @@ export const strings = {
     starting: 'Starting {name}. This can take a minute.', failed: '{name} did not start',
     stopped: 'Off', running: 'Running', booting: 'Starting',
     viewOnly: 'View only. The agent drives iOS Simulators with xcrun simctl.',
-    back: 'Back', home: 'Home', recents: 'Recent apps', rotate: 'Rotate', power: 'Power button',
+    back: 'Back', home: 'Home', recents: 'Recent apps', rotate: 'Rotate', power: 'Power button', enter: 'Enter', backspace: 'Delete the previous character',
     text: 'Type into the focused field', send: 'Send the text', ascii: 'Only printable ASCII characters reach the device.',
     screenshot: 'Save a screenshot', close: 'Close {name}', shutdown: 'Power off',
     interact: 'Tap or swipe the device screen', image: 'Live view of {name}', gesture: 'Tap to touch. Drag to swipe.'

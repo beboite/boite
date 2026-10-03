@@ -39,7 +39,7 @@ export const fr: Translation = {
     starting: 'Démarrage de {name}. Cela peut prendre une minute.', failed: "{name} n'a pas démarré",
     stopped: 'Éteint', running: 'Allumé', booting: 'Démarrage',
     viewOnly: "Lecture seule. L'agent pilote les simulateurs iOS avec xcrun simctl.",
-    back: 'Retour', home: 'Accueil', recents: 'Applications récentes', rotate: 'Pivoter', power: "Bouton d'alimentation",
+    back: 'Retour', home: 'Accueil', recents: 'Applications récentes', rotate: 'Pivoter', power: "Bouton d'alimentation", enter: 'Entrée', backspace: 'Effacer le caractère précédent',
     text: 'Écrire dans le champ actif', send: 'Envoyer le texte', ascii: "Seuls les caractères ASCII imprimables atteignent l'appareil.",
     screenshot: "Enregistrer une capture d'écran", close: 'Fermer {name}', shutdown: 'Éteindre',
     interact: "Touchez ou glissez sur l'écran de l'appareil", image: 'Vue en direct de {name}', gesture: 'Touchez pour appuyer. Glissez pour balayer.'
