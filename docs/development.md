@@ -590,8 +590,8 @@ source over 50 MB is refused before decoding, since a phone's canvas would not
 hold it. So twenty iPhone screenshots, 2 to 4 MB each as PNG, fit one turn at
 around 400 KB each.
 
-A question card with a free field takes files the same way (`questions.answer`
-`attachments`); see [Providers](providers.md).
+An answer to a question with a free field takes the composer's files the same
+way (`questions.answer` `attachments`); see [Providers](providers.md).
 
 The core validates bytes and writes sanitized, content-addressed copies under
 `<dataDir>/attachments/`. Copies survive resume and are currently not removed

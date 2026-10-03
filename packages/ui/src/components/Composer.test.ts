@@ -7,6 +7,7 @@ import { FakeClient } from '../lib/fake-client';
 import { RpcFailure } from '../lib/client';
 import { defaultPrefs, PREFS_STORAGE_KEY, STASH_STORAGE_KEY } from '../lib/prefs';
 import { store } from '../lib/store.svelte';
+import { repliesOf } from '../lib/question-reply.svelte';
 import { closeTour } from '../lib/onboarding.svelte';
 import { freshWork, work, WORK_STORAGE_KEY } from '../lib/work-prefs.svelte';
 
@@ -119,6 +120,8 @@ afterEach(() => {
   running = null;
   document.body.innerHTML = '';
   window.localStorage.clear();
+  // Each test's fake numbers its questions from one again, on the same store.
+  Object.assign(repliesOf(store), { picks: {}, ignored: {}, docked: null, chosen: null });
   // The device's work record is module state: the next test starts with no record.
   work.load();
   vi.restoreAllMocks();
@@ -815,6 +818,9 @@ test('all queued prompts run together on their thread without reopening it', asy
   await store.send('question');
   await waitFor(() => store.openThread?.status === 'waiting');
   const question = store.pendingQuestions.find(item => item.threadId === 't-trace')!;
+  // The composer would answer the question: set it aside to queue ordinary prompts.
+  await waitFor(() => document.querySelector('[data-testid=composer-reply-ignore]') !== null);
+  query<HTMLButtonElement>('[data-testid=composer-reply-ignore]').click();
   await type('first queued prompt');
   press('Enter');
   await type('second queued prompt');
@@ -975,6 +981,63 @@ test('a pasted image becomes a chip, comes off again, and rides the prompt', asy
   // What went out left the composer, text and picture together.
   expect(input().value).toBe('');
   expect(document.querySelector('[data-testid=composer-attachments]')).toBeNull();
+});
+
+function pendingCard(): HTMLElement {
+  return query('[data-testid=question-card][data-state=pending]');
+}
+
+test('a waiting question takes the composer as its free answer, with the card pick and a photo', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
+  await type('one question please');
+  press('Enter');
+  await waitFor(() => document.querySelector('[data-testid=composer-reply]') !== null);
+  expect(input().placeholder).toBe('Your answer…');
+  expect(query('[data-testid=composer-send]').getAttribute('aria-label')).toBe('Send the answer');
+  expect(pendingCard().querySelector('[data-testid=question-reply-hint]')).not.toBeNull();
+
+  // Ignore gives the composer back to ordinary messages; the card offers it again.
+  query<HTMLButtonElement>('[data-testid=composer-reply-ignore]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-reply]') === null);
+  expect(input().placeholder).not.toBe('Your answer…');
+  pendingCard().querySelector<HTMLButtonElement>('[data-testid=question-write]')!.click();
+  await waitFor(() => document.querySelector('[data-testid=composer-reply]') !== null);
+
+  pendingCard().querySelector<HTMLButtonElement>('[data-option=short]')!.click();
+  await type('one line please');
+  paste(pngFile('mockup.png'));
+  await waitFor(() => chips().length === 1);
+  const call = vi.spyOn(store.client!, 'call');
+  input().focus();
+  press('Enter');
+  await waitFor(() => document.querySelector('[data-testid=question-card][data-state=pending]') === null);
+  const answered = call.mock.calls.find(([method]) => method === 'questions.answer')?.[1] as
+    { optionIds: string[]; text: string; attachments?: { kind: string; name?: string }[] };
+  // The pasted photo keeps its reference in the text, as it does in a prompt.
+  expect(answered).toMatchObject({ optionIds: ['short'], text: 'one line please [Image 1]' });
+  expect(answered.attachments?.map((file) => [file.kind, file.name])).toEqual([['image', 'mockup.png']]);
+  // The answer left the composer, which writes ordinary messages again.
+  expect(input().value).toBe('');
+  expect(chips()).toHaveLength(0);
+  await waitFor(() => !store.busy && document.querySelector('[data-testid=composer-reply]') === null);
+  expect(input().placeholder).not.toBe('Your answer…');
+  expect(call.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(0);
+});
+
+test('an ignored async question stays docked while an ordinary message goes out as a turn', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await send('check this [ask]');
+  await waitFor(() => document.querySelector('[data-testid=composer-reply]') !== null);
+  const asked = store.pendingQuestions.find((question) => question.threadId === 't-trace')!;
+  expect(query('[data-testid=composer-reply]').dataset.question).toBe(asked.id);
+  query<HTMLButtonElement>('[data-testid=composer-reply-ignore]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-reply]') === null);
+  await send('something else entirely');
+  const prompt = store.openThread!.messages.filter((message) => message.role === 'user').at(-1)!;
+  expect(prompt.parts).toEqual([{ type: 'text', text: 'something else entirely' }]);
+  expect(store.pendingQuestions.map((question) => question.id)).toContain(asked.id);
+  expect(document.querySelector('[data-testid=activity-question]')).not.toBeNull();
 });
 
 /**

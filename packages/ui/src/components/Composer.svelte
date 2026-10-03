@@ -1,6 +1,5 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
-  import { Pencil, X } from '@lucide/svelte';
   import { supportsSideQuestions, type Attachment, type PreviewReference } from '@boite/contracts';
   import { restorePreviewMentions } from '../lib/preview-mentions';
   import { AGENT_PREFIX, isAgentCommand, runCommand } from '../lib/commands.svelte';
@@ -11,6 +10,7 @@
   import { editComposerInput, insertImageReference, removeImageReferences, trackImageSend } from '../lib/composer-images';
   import { unresolvedAssetId } from '../lib/draft-attachments';
   import { focusWithin } from '../lib/focus';
+  import { ignoreQuestions, repliesOf, replyTarget, sendAnswer } from '../lib/question-reply.svelte';
   import { sentPrompts, type SentPrompt } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
@@ -21,6 +21,7 @@
   import ComposerAttachments from './ComposerAttachments.svelte';
   import ComposerImageReferences from './ComposerImageReferences.svelte';
   import ComposerBar from './ComposerBar.svelte';
+  import ComposerIntent from './ComposerIntent.svelte';
   import ComposerQueue from './ComposerQueue.svelte';
   import MentionMenu from './MentionMenu.svelte';
   import SlashMenu from './SlashMenu.svelte';
@@ -142,12 +143,19 @@
    */
   let offline = $derived(store.connection !== 'ready' && store.openThread !== null && !store.draft);
   let machineLabel = $derived(workspace.machines.find((machine) => machine.store === store)?.label ?? strings.machines.local);
+  /**
+   * A question waiting for a written answer makes the box its free field: Send
+   * answers it with the card's picks, the text and the attachments
+   * (`lib/question-reply.svelte.ts`). Editing a sent message takes precedence.
+   */
+  let reply = $derived(composer?.editing ? null : replyTarget(store));
+  // An answer counts the card's picks, needs no model and cannot wait in the outbox.
   let canSend = $derived(
-    (text.trim().length > 0 || attachments.length > 0 || previewReferences.length > 0) &&
+    (text.trim().length > 0 || attachments.length > 0 || (reply ? !!repliesOf(store).picks[reply.id]?.length : previewReferences.length > 0)) &&
       readingFiles === 0 &&
       !attachments.some(unresolvedAssetId) &&
-      choice !== null &&
-      (store.connection === 'ready' || offline) &&
+      (reply !== null || choice !== null) &&
+      (store.connection === 'ready' || (offline && !reply)) &&
       !picking &&
       !dictating &&
       !composer?.sending
@@ -155,7 +163,9 @@
 
   // A new conversation asks what the user wants done; one under way names who reads the message.
   let placeholder = $derived(
-    offline
+    reply
+      ? strings.composer.replyPlaceholder
+      : offline
       ? fill(strings.composer.placeholderOffline, { machine: machineLabel })
       : !store.openThread && store.draft
       ? strings.composer.placeholderNew
@@ -370,6 +380,10 @@
     const prompt = text;
     const images = attachments;
     const references = previewReferences;
+    if (reply) {
+      if (canSend && await sendAnswer(store, reply)) { recall = null; requestAnimationFrame(grow); }
+      return;
+    }
     if (!canSend || !choice) return;
     const inputStore = store, inputKey = key, sendChoice = choice;
     const state = stateForInput();
@@ -427,7 +441,8 @@
   async function take(files: File[]) {
     if (files.length === 0) return;
     const state = stateForInput();
-    const attachmentProvider = provider;
+    // An answer's files reach the agent as paths, so it takes images whatever the provider reads.
+    const attachmentProvider = reply ? null : provider;
     const inputKey = key;
     const inputStore = store;
     readingFiles += 1;
@@ -677,7 +692,7 @@
     }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      if (boxEmpty && sendNow) sendQueuedNow();
+      if (boxEmpty && sendNow && !reply) sendQueuedNow();
       else void submit();
     } else if (event.key === 'ArrowUp' && !event.shiftKey) {
       if (older()) event.preventDefault();
@@ -718,13 +733,7 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="composer" class:dictating data-testid="composer" {ondragover} {ondrop}>
     <ThreadActivity {store} reserveInComposer={hasQueue} onroom={(height) => (activityRoom = height)} />
-    {#if composer?.editing}
-      <div class="editing" data-testid="composer-editing">
-        <Pencil size={13} />
-        <span>{strings.composer.editing}</span>
-        <button type="button" class="ghost small icon" data-testid="composer-editing-cancel" title={strings.composer.editingCancel} aria-label={strings.composer.editingCancel} onclick={cancelEdit}><X size={13} /></button>
-      </div>
-    {/if}
+    <ComposerIntent editing={!!composer?.editing} {reply} oncancel={cancelEdit} onignore={() => ignoreQuestions(store)} />
 
     {#if side.current && side.current.threadId === store.openThread?.id}<SideAnswer {...side.current} {store} onclose={() => { side.clear(); box?.focus({ preventScroll: true }); }} />{/if}
     {#if attachments.length > 0}
@@ -788,7 +797,7 @@
       </div>
     {/if}
 
-    <ComposerBar bind:this={toolbar} {store} {key} {provider} {canSend} bind:choice bind:picking bind:dictating
+    <ComposerBar bind:this={toolbar} {store} {key} {provider} {canSend} sendLabel={reply ? strings.composer.replySend : undefined} bind:choice bind:picking bind:dictating
       onsubmit={() => void submit()}
       onfiles={(files) => void take(files)}
       onpreview={(text, status, error) => { speechPreview = text; speechStatus = status; speechError = error; }}
@@ -837,17 +846,6 @@
 
   /* Focus tints the hairline with the accent and lays a faint halo of it around the box. */
   .composer:focus-within { border-color: var(--color-composer-focus); box-shadow: var(--composer-rest), 0 0 0 3px var(--color-composer-halo); }
-
-  /* Editing a sent message: one quiet line above the box, the way out on its right. */
-  .editing {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 6px 0 14px;
-    color: var(--color-accent);
-    font-size: var(--text-xs);
-  }
-  .editing span { flex: 1; min-width: 0; }
 
   .input-wrap { position: relative; }
 

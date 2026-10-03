@@ -33,6 +33,7 @@
     key,
     provider,
     canSend,
+    sendLabel = strings.composer.send,
     choice = $bindable(),
     picking = $bindable(),
     dictating = $bindable(),
@@ -46,6 +47,8 @@
     key: string;
     provider: ProviderSummary | null | undefined;
     canSend: boolean;
+    /** What Send does, when it answers a question rather than sending a message. */
+    sendLabel?: string;
     choice: Choice | null;
     picking: boolean;
     dictating: boolean;
@@ -277,8 +280,8 @@
     type="button"
     class="primary icon send"
     data-testid="composer-send"
-    title={strings.composer.send}
-    aria-label={strings.composer.send}
+    title={sendLabel}
+    aria-label={sendLabel}
     disabled={!canSend}
     onmousedown={keepFocus}
     onclick={() => onsubmit()}
