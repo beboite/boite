@@ -49,9 +49,33 @@ test('empty reasoning keeps a recorded duration while untimed legacy placeholder
     message.parts.push({ type: 'tool', toolId: 'read', name: 'Read', input: {}, output: null, status: 'running' });
     flushSync();
     expect(document.querySelector('[data-testid=thinking-part]')).toBeNull();
+    expect(document.querySelector('[data-kind=thinking]')).toBeNull();
     message.parts[0] = { type: 'thinking', text: '', startedAt: 1000, finishedAt: 4500 };
     flushSync();
     expect(document.querySelector('[data-testid=thinking-elapsed]')?.textContent).toBe('3s');
     expect(document.querySelector('[data-testid=thinking-toggle] .caret')).toBeNull();
+  } finally { store.detach(); client.close(); }
+});
+
+test('hidden protocol text reserves no row and gains its row when visible text arrives', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store(); store.attach(client);
+  try {
+    await store.connect(); await store.open('t-trace');
+    const message = store.openThread!.messages.at(-1)!;
+    message.state = 'complete';
+    message.parts = [
+      { type: 'thinking', text: '', startedAt: 1000, finishedAt: 2000 },
+      { type: 'text', text: '[BOITE_GOAL_COMPLETE]' },
+      { type: 'tool', toolId: 'read', name: 'Read', input: {}, output: '', status: 'done' }
+    ];
+    mounted = mount(AssistantMessage, { target: document.body, props: { store, threadId: message.threadId, message, signedOut: null, showModel: false } });
+    flushSync();
+    expect(document.querySelectorAll('.parts > .part')).toHaveLength(2);
+    expect(document.querySelector('[data-kind=text]')).toBeNull();
+    message.parts[1] = { type: 'text', text: 'Found the file.' };
+    flushSync();
+    expect(document.querySelectorAll('.parts > .part')).toHaveLength(3);
+    expect(document.querySelector('[data-kind=text]')?.textContent).toContain('Found the file.');
   } finally { store.detach(); client.close(); }
 });

@@ -75,15 +75,15 @@
     {:else if message.parts[run.index]}
     {@const index = run.index}
     {@const part = message.parts[run.index]!}
+    {@const shownText = part.type === 'text' ? message.role === 'system' ? promptText(part) : visibleAnswer(part.text) : ''}
+    {#if (part.type !== 'text' || shownText.length > 0 || index === caretAt)
+      && (part.type !== 'thinking' || part.text.trim().length > 0 || part.startedAt !== undefined || (message.state === 'streaming' && index === message.parts.length - 1))}
     <div class="part" data-kind={part.type}>
       {#if part.type === 'text'}
-        {@const shownText = message.role === 'system' ? promptText(part) : visibleAnswer(part.text)}
-        {#if shownText.length > 0 || index === caretAt}
-          <Prose text={shownText} live={index === caretAt && part.complete !== true} bubble={message.role === 'assistant'}
-            typing={latestInTurn && message.role === 'assistant' && store.connection === 'ready' && store.openThread?.status === 'running' && index === message.parts.length - 1 && index === caretAt && part.complete !== true} {store} {threadId} />
-        {/if}
+        <Prose text={shownText} live={index === caretAt && part.complete !== true} bubble={message.role === 'assistant'}
+          typing={latestInTurn && message.role === 'assistant' && store.connection === 'ready' && store.openThread?.status === 'running' && index === message.parts.length - 1 && index === caretAt && part.complete !== true} {store} {threadId} />
 
-      {:else if part.type === 'thinking' && (part.text.trim().length > 0 || part.startedAt !== undefined || (message.state === 'streaming' && index === message.parts.length - 1))}
+      {:else if part.type === 'thinking'}
         <ThinkingPart text={part.text} live={message.state === 'streaming' && index === message.parts.length - 1 && part.finishedAt == null} startedAt={part.startedAt ?? null} finishedAt={part.finishedAt ?? null} />
       {:else if part.type === 'file' || part.type === 'artifact'}
         <ChatFile file={part} {store} {threadId} messageId={message.id} partIndex={index} />
@@ -152,6 +152,7 @@
         </div>
       {/if}
     </div>
+    {/if}
     {/if}
   {/each}
 </div>

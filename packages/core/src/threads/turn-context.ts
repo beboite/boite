@@ -119,8 +119,8 @@ export class TurnContexts {
       return { ...part, startedAt: seen.startedAt, finishedAt: seen.finishedAt };
     };
     /**
-     * A driver writes its whole answer under one message id. A user follow-up
-     * or published file cuts that message: new parts and continued text start
+     * A driver writes its whole answer under one message id. A user follow-up,
+     * agent exchange or published file cuts it: new parts and continued text start
      * after it, while existing tools keep their original cards.
      */
     interface Segment { id: MessageId; open: boolean; next: number }
