@@ -93,7 +93,10 @@ export function resourceMethods(ctx: FakeContext) {
       const valid = Array.isArray(edges) && edges.length >= 2 && edges.length <= 367 &&
         edges.every((edge, index) => typeof edge === 'number' && Number.isFinite(edge) && (index === 0 || edge > edges[index - 1]!));
       if (!valid) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'edges: expected 2 to 367 strictly ascending timestamps in milliseconds' });
-      return fakeUsageHistory(edges, { seeded: ctx.usageSeeded, finished: ctx.finished });
+      if (params.providerId !== undefined && (typeof params.providerId !== 'string' || !params.providerId.trim())) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'providerId: expected a non-empty provider id' });
+      }
+      return fakeUsageHistory(edges, { seeded: ctx.usageSeeded, finished: ctx.finished, providerId: params.providerId });
     },
   } satisfies Partial<FakeMethods>;
 }

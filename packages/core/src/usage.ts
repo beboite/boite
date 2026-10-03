@@ -72,9 +72,9 @@ function sumsToUsage(sums: UsageSums, cachedInInput: boolean): Usage {
   };
 }
 
-export function usageHistory(core: Core, edges: number[]): UsageHistory {
+export function usageHistory(core: Core, edges: number[], providerId?: ProviderId): UsageHistory {
   const cachedInInput = (providerId: ProviderId): boolean => core.providers.get(providerId)?.protocol === 'codex-appserver';
-  const rows = core.journal.usageByBucket(edges).map((row) => ({
+  const rows = core.journal.usageByBucket(edges).filter((row) => providerId === undefined || row.provider_id === providerId).map((row) => ({
     bucket: row.bucket,
     providerId: row.provider_id,
     model: row.model,
@@ -86,6 +86,7 @@ export function usageHistory(core: Core, edges: number[]): UsageHistory {
 
   const byThread = new Map<ThreadId, UsageHistoryThread>();
   for (const row of core.journal.usageByThread(edges[0]!, edges[edges.length - 1]!)) {
+    if (providerId !== undefined && row.provider_id !== providerId) continue;
     const usage = sumsToUsage(row, cachedInInput(row.provider_id));
     const entry = byThread.get(row.thread_id);
     if (entry !== undefined) {
@@ -97,7 +98,7 @@ export function usageHistory(core: Core, edges: number[]): UsageHistory {
       threadId: row.thread_id,
       title: row.title,
       projectId: row.project_id,
-      providerId: row.thread_provider_id,
+      providerId: providerId ?? row.thread_provider_id,
       archived: row.archived !== 0,
       turns: row.turns,
       usage,
@@ -120,5 +121,11 @@ export function usageHistory(core: Core, edges: number[]): UsageHistory {
 
 export function registerUsageMethods(core: Core): void {
   core.router.register('usage.get', (params) => usageOf(core, params.threadId));
-  core.router.register('usage.history', (params) => usageHistory(core, checkEdges(params?.edges)));
+  core.router.register('usage.history', (params) => {
+    const edges = checkEdges(params?.edges);
+    if (params.providerId !== undefined && (typeof params.providerId !== 'string' || !params.providerId.trim())) {
+      throw invalidParams('providerId: expected a non-empty provider id', { field: 'providerId' });
+    }
+    return usageHistory(core, edges, params.providerId);
+  });
 }

@@ -394,6 +394,14 @@ reports early exit or the CDP deadline and saves the last 16 KiB of stderr.
 Screenshots go to the ignored `tests/e2e/.artifacts/`. Open desktop and phone
 captures before claiming a visual change is verified.
 
+Run capture scripts and browser suites sequentially in one checkout. Concurrent
+Vite development servers can invalidate their shared optimized dependencies
+and return HTTP 504 for a module that another page is loading.
+
+An unfiltered `BrowserPage.attach` waits past startup `about:blank` targets
+before choosing a navigated page. Pass `about:blank` explicitly when that is
+the intended target. `cdp.test.ts` checks both discovery and explicit selection.
+
 Condition waits pass their remaining deadline to each CDP evaluation. Timeout
 diagnostics get at most 250 ms. A wait after `page.close()` fails immediately.
 `browser-deadlines.test.ts` covers unfulfilled promises and busy renderers.
