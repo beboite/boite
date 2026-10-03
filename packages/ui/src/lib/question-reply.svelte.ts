@@ -33,11 +33,12 @@ export function repliesOf(store: Store): QuestionReplies {
 /**
  * The question the composer answers, or null when it sends ordinary messages.
  * The one a card chose, else the question the agent stopped for, else the one
- * the dock shows.
+ * the dock shows. None while the composer edits a sent message: Send replaces
+ * that message, and a card's Answer must not take the recalled text.
  */
 export function replyTarget(store: Store): QuestionRequest | null {
   const thread = store.openThread?.id;
-  if (!thread) return null;
+  if (!thread || store.composerStates[thread]?.editing) return null;
   const held = repliesOf(store);
   const open = store.pendingQuestions.filter((question) => question.threadId === thread && question.allowText && !held.ignored[question.id]);
   return open.find((question) => question.id === held.chosen)

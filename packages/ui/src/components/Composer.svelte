@@ -148,7 +148,7 @@
    * answers it with the card's picks, the text and the attachments
    * (`lib/question-reply.svelte.ts`). Editing a sent message takes precedence.
    */
-  let reply = $derived(composer?.editing ? null : replyTarget(store));
+  let reply = $derived(replyTarget(store));
   // An answer counts the card's picks, needs no model and cannot wait in the outbox.
   let canSend = $derived(
     (text.trim().length > 0 || attachments.length > 0 || (reply ? !!repliesOf(store).picks[reply.id]?.length : previewReferences.length > 0)) &&

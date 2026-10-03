@@ -1040,6 +1040,26 @@ test('an ignored async question stays docked while an ordinary message goes out 
   expect(document.querySelector('[data-testid=activity-question]')).not.toBeNull();
 });
 
+test('a question card does not take a sent message being edited as its answer', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await send('check this [ask]');
+  await waitFor(() => document.querySelector('[data-testid=composer-reply]') !== null);
+  const row = Array.from(document.querySelectorAll('[data-testid=message][data-role=user]')).find(row => row.querySelector('[data-testid=text-part]')?.textContent === 'check this [ask]')!;
+  row.querySelector<HTMLButtonElement>('[data-testid=message-edit]')!.click();
+  await waitFor(() => input().value === 'check this [ask]');
+  const editing = store.composerStates['t-trace']!.editing;
+  expect(editing).toBeTruthy();
+  expect(document.querySelector('[data-testid=composer-reply]')).toBeNull();
+  const call = vi.spyOn(store.client!, 'call');
+  pendingCard().querySelector<HTMLButtonElement>('[data-testid=question-submit]')?.click();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const answered = call.mock.calls.find(([method]) => method === 'questions.answer')?.[1] as { text: string } | undefined;
+  expect(answered?.text ?? '').not.toContain('check this');
+  // The edit stays armed with its text: the next Send replaces the message as asked.
+  expect(input().value).toBe('check this [ask]');
+  expect(store.composerStates['t-trace']!.editing).toBe(editing);
+});
+
 /**
  * On a phone the focus is the keyboard: a press that moved it closed the
  * keyboard (Send took two taps), and removing a chip focused the box and opened it.
