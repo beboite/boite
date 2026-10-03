@@ -112,9 +112,12 @@ A page that calls `window.open` with a size or a position, as "Sign in with
 Google" and most sign-in buttons do, gets a real popup window
 (`apps/shell/src-tauri/src/browser/popups.rs`). The popup opens in the tab's
 profile, or in the private session, and keeps `window.opener`: the sign-in
-answers the page through it and closes itself. Closing the tab closes its
+answers the page through it and closes itself. Its title starts with the
+host it shows, since it has no address bar. Closing the tab closes its
 popups. A `target="_blank"` link, or `window.open` without a size, opens a tab
-in the same panel and profile instead, and that tab has no opener. Popups are
+in the same panel and profile instead, and that tab has no opener. So does a
+sized `window.open` while the tab already holds three popups: WebView2 has no
+popup blocker. Popups are
 desktop windows: an agent's browser commands and the phone's remote view see
 the tab, not its popups.
 
