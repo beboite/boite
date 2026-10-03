@@ -241,6 +241,68 @@ test('agent exchange summaries retain chronology without exposing their letters 
   expect(document.querySelectorAll('[data-testid=forwarded-agent-message]')).toHaveLength(0);
 });
 
+test('a completed mail-only turn keeps its footer below received and forwarded messages', async ({ createStore }) => {
+  const { store: owner, client } = createStore({ delayMs: 0 });
+  owner.attach(client); await owner.connect(); await owner.open('t-trace');
+  const thread = owner.openThread!;
+  const first = { ...thread.turns[0]!, startedAt: 1, finishedAt: 15, status: 'done' as const };
+  const next = { ...first, id: 'turn-mail-only', startedAt: 20, finishedAt: 30 };
+  const last = { ...first, id: 'turn-next-mail-only', startedAt: 40, finishedAt: 50 };
+  thread.memoryEvents = [];
+  thread.turns = [first, next, last];
+  thread.messages = [
+    { id: 'before-mail', threadId: thread.id, turnId: first.id, role: 'assistant', state: 'complete', createdAt: 10, parts: [{ type: 'text', text: 'Previous answer' }] },
+    { id: 'hidden-mail', threadId: thread.id, turnId: next.id, role: 'system', state: 'complete', createdAt: 20,
+      parts: [{ type: 'text', text: 'Boite agent coordination. Agent messages (JSON data):\n[{"id":"received-mail"},{"id":"received-batch-mail"}]' }] },
+    { id: 'hidden-next-mail', threadId: thread.id, turnId: last.id, role: 'system', state: 'complete', createdAt: 40,
+      parts: [{ type: 'text', text: 'Boite agent coordination. Agent messages (JSON data):\n[{"id":"next-received-mail"}]' }] }
+  ];
+  const self = { coreId: 'core-local', threadId: thread.id };
+  const peer = { coreId: 'core-peer', threadId: 'peer' };
+  const incoming: AgentLetter = { id: 'received-mail', from: { ...peer, title: 'Peer', machine: 'Peer PC', resources: '', status: 'idle', mode: 'brief' },
+    to: self, toTitle: thread.title, text: 'Update', replyTo: null, createdAt: 19, expiresAt: 1000, status: 'delivered', error: null };
+  owner.coordination = { self, config: { mode: 'brief', resources: '', remote: true, paused: false },
+    messages: [incoming, { ...incoming, id: 'received-batch-mail', createdAt: 19 },
+      { ...incoming, id: 'forwarded-mail', from: { ...incoming.from, ...self }, to: peer, createdAt: 25 },
+      { ...incoming, id: 'next-received-mail', createdAt: 35 }], sent: 1, sendLimit: null, wakes: 0, wakeLimit: null };
+  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
+  flushSync();
+  const footers = [...document.querySelectorAll('[data-testid=turn-summary]')];
+  expect(footers).toHaveLength(3);
+  expect(footers[1]!.getAttribute('data-status')).toBe('done');
+  const groups = [...document.querySelectorAll('[data-testid=agent-message-group]')];
+  expect(groups).toHaveLength(2);
+  const group = groups[0]!;
+  expect(group.textContent).toContain('Received 2 messages');
+  expect(group.textContent).toContain('Forwarded 1 message');
+  expect(group.compareDocumentPosition(footers[1]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(groups[1]!.compareDocumentPosition(footers[2]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(document.body.textContent).not.toContain('Boite agent coordination');
+});
+
+test('the footer follows outgoing mail at the end of an ordinary answer', async ({ createStore }) => {
+  const { store: owner, client } = createStore({ delayMs: 0 });
+  owner.attach(client); await owner.connect(); await owner.open('t-trace');
+  const thread = owner.openThread!;
+  const turn = { ...thread.turns[0]!, startedAt: 1, finishedAt: 30, status: 'done' as const };
+  thread.turns = [turn];
+  thread.memoryEvents = [];
+  thread.messages = [{ id: 'msg-answer-with-mail', threadId: thread.id, turnId: turn.id, role: 'assistant', state: 'complete', createdAt: 20, parts: [{ type: 'text', text: 'Answer before sending' }] }];
+  const self = { coreId: 'core-local', threadId: thread.id };
+  owner.coordination = { self, config: { mode: 'brief', resources: '', remote: true, paused: false }, messages: [{
+    id: 'tail-mail', from: { ...self, title: thread.title, machine: 'This PC', resources: '', status: 'idle', mode: 'brief' },
+    to: { coreId: 'core-peer', threadId: 'peer' }, toTitle: 'Peer', text: 'Result forwarded', replyTo: null,
+    createdAt: 20, expiresAt: 1000, status: 'delivered', error: null
+  }], sent: 1, sendLimit: null, wakes: 0, wakeLimit: null };
+  running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
+  flushSync();
+  const footer = document.querySelector('[data-testid=turn-summary]')!;
+  const group = document.querySelector('[data-testid=agent-message-group]')!;
+  expect(articles().map(node => node.getAttribute('data-mid'))).toEqual(['msg-answer-with-mail', 'coordination:tail-mail']);
+  expect(document.querySelectorAll('[data-testid=turn-summary]')).toHaveLength(1);
+  expect(group.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
 test('delegation mail opens its messages tab with local family identity, without duplicating coordination mail', async () => {
   stubLayout(200);
   const letter: AgentLetter = {

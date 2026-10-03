@@ -58,7 +58,10 @@
     }] : [];
     const runs: Message[] = [...workflowRows].map(([id, run]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: run.createdAt }));
     const memory: Message[] = [...memoryRows].map(([id, event]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: event.at }));
-    const rows = [...withAgentMail(messages, mail, threadId), ...activity, ...runs, ...memory].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    const turns = store.openThread?.id === threadId ? store.openThread.turns : store.delegationThread?.id === threadId ? store.delegationThread.turns : [];
+    // Output that already existed in this millisecond precedes its exchange.
+    const rows = [...withAgentMail(messages, mail, threadId, turns), ...activity, ...runs, ...memory].sort((a, b) =>
+      a.createdAt - b.createdAt || Number(a.id.startsWith('coordination:')) - Number(b.id.startsWith('coordination:')) || a.id.localeCompare(b.id));
     return groupAgentMail(rows, mail);
   });
   const timeline = $derived(grouped.timeline);
@@ -668,7 +671,7 @@
   });
   const lastInTurn = $derived.by(() => {
     const result = new Map<string, string>();
-    for (const message of messages) result.set(message.turnId, message.id);
+    for (const message of timeline) result.set(message.turnId, message.id);
     return result;
   });
   /**
@@ -736,6 +739,7 @@
       {#each rendered as message (message.id)}
         {@const group = grouped.groups.get(message.id)}
         {@const turn = store.openThread?.turns.find(turn => turn.id === message.turnId)}
+        {@const source = group ? messages.findLast(current => current.turnId === message.turnId) : message}
         <article
           use:track={message.id}
           class="message {message.role}"
@@ -764,12 +768,12 @@
             <TurnFiles {store} {...filesByTurn.get(turn.id)!} />
           {/if}
           {#if turn && lastInTurn.get(turn.id) === message.id}
-            <MessageTurnSummary {store} {threadId} {turn} {message} {messages}>
+            <MessageTurnSummary {store} {threadId} {turn} message={source ?? message} {messages}>
               {#snippet actions()}
                 <MessageActions
                   text={() => answerOf(turn.id)}
                   retry={atRest && store.openThread?.turns.at(-1)?.id === turn.id ? () => void retry(turn.id) : undefined}
-                  fork={branchable && message.state !== 'streaming' ? (worktree) => void store.fork(message.id, { worktree }) : undefined}
+                  fork={branchable && source && source.state !== 'streaming' ? (worktree) => void store.fork(source.id, { worktree }) : undefined}
                 />
               {/snippet}
             </MessageTurnSummary>

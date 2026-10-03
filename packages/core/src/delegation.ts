@@ -342,6 +342,7 @@ export class Delegation {
     this.core.journal.append({ type: 'delegation.sent', threadId: sender.id, version: 1, payload: letter }, () => {
       this.core.journal.db.query('INSERT INTO delegation_messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(letter.id, root.id, sender.id, recipient.id, requestId, fingerprint, letter.status, letter.createdAt, JSON.stringify(letter));
     });
+    for (const id of [sender.id, recipient.id]) this.core.threads.runner.noteMail(id, letter.createdAt);
     // An explicit new instruction resumes this child only. It cannot resume a paused team.
     this.stopped.delete(recipient.id);
     this.changed(root.id);
