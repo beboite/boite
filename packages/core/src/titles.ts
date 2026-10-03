@@ -52,7 +52,7 @@ export function cleanAgentTitle(answer: string, max = AGENT_TITLE_MAX): string |
     .split('\n')
     .map((candidate) => candidate.trim())
     .find((candidate) => candidate.length > 0);
-  if (line === undefined) return null;
+  if (line === undefined || /^(?:`{3,}|~{3,})/.test(line)) return null;
   const unquoted = line
     .replace(/^(?:title:\s*)/i, '')
     .replace(/^["'“‘`*_]+|["'”’`*_]+$/g, '')
@@ -100,7 +100,8 @@ function limitTitleInput(text: string): string {
 
 /** Structured answers carry the refinement decision; older hooks may still return a plain title. */
 export function parseAgentTitle(raw: string): { title: string; needsRefinement: boolean } | null {
-  const text = raw.trim().replace(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i, '$1').trim();
+  const text = titleResponse(raw);
+  if (text === null) return null;
   if (!text.startsWith('{')) {
     const title = cleanAgentTitle(text);
     return title === null ? null : { title, needsRefinement: false };
@@ -116,9 +117,18 @@ export function parseAgentTitle(raw: string): { title: string; needsRefinement: 
   }
 }
 
+/** Extract a complete response block even with surrounding prose; reject unsupported or unfinished fences. */
+function titleResponse(raw: string): string | null {
+  const text = raw.trim();
+  if (!/^[ \t]*(?:`{3,}|~{3,})/m.test(text)) return text;
+  const block = text.match(/^[ \t]*(`{3,}|~{3,})(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*\1[ \t]*\r?$/im);
+  return block?.[2]?.trim() ?? null;
+}
+
 /** A branch is optional: invalid model output leaves the temporary branch intact. */
 export function cleanAgentBranch(answer: string): string | null {
-  const text = answer.trim().replace(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i, '$1').trim();
+  const text = titleResponse(answer);
+  if (text === null) return null;
   let slug: unknown;
   if (text.startsWith('{')) {
     try { slug = (JSON.parse(text) as { branch?: unknown } | null)?.branch; } catch { return null; }

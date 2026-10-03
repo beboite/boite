@@ -11,7 +11,7 @@ test('Claude titles the first request with its images while the main SDK query k
   const release = Promise.withResolvers<void>();
   scripted((fake, options) => {
     if (options.persistSession === false) {
-      fake.emit(sdk({ ...success('title'), result: '{"title":"Inspect scheduler image","needsRefinement":false}' }));
+      fake.emit(sdk({ ...success('title'), result: '```json\n{"title":"Inspect scheduler image","needsRefinement":false}\n```\nThe title names the requested inspection.' }));
       fake.end();
     } else {
       fake.emit(init('main'));

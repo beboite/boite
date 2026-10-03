@@ -27,6 +27,7 @@ describe('title rules', () => {
     expect(cleanAgentTitle('Title: **Caps per account**\nmore')).toBe('Caps per account');
     expect(cleanAgentTitle('\n  \n')).toBeNull();
     expect(cleanAgentTitle('""')).toBeNull();
+    expect(cleanAgentTitle('```json\n{"title":"Scheduler fix"}')).toBeNull();
     expect(cleanAgentTitle(`${'word '.repeat(30)}end`)).toHaveLength(59);
   });
 
@@ -48,6 +49,28 @@ describe('title rules', () => {
     expect(parseAgentTitle('{"title":12}')).toBeNull();
     expect(parseAgentTitle('{"title":"Unknown","needsRefinement":"true"}')).toBeNull();
     expect(parseAgentTitle('{broken')).toBeNull();
+  });
+
+  test('a fenced title survives surrounding explanation', () => {
+    const response = '```json\n{"title":"Scheduler fix","needsRefinement":true,"branch":"scheduler-fix"}\n```';
+    for (const raw of [response + '\nThis title describes the task.', 'Here is the title:\n' + response]) {
+      expect(parseAgentTitle(raw)).toEqual({ title: 'Scheduler fix', needsRefinement: true });
+      expect(cleanAgentBranch(raw)).toBe('scheduler-fix');
+    }
+    expect(parseAgentTitle('~~~JSON\r\n{"title":"Scheduler fix"}\r\n~~~')).toEqual({ title: 'Scheduler fix', needsRefinement: false });
+    expect(parseAgentTitle('```\nPlain title\n```\nExplanation')).toEqual({ title: 'Plain title', needsRefinement: false });
+    expect(parseAgentTitle('json')).toEqual({ title: 'json', needsRefinement: false });
+  });
+
+  test('incomplete or invalid fences never become a title', () => {
+    for (const raw of [
+      '```json\n{"title":"Scheduler fix"}',
+      'Here is the title:\n```json\n{"title":"Scheduler fix"}',
+      '```json\n{broken\n```\nExplanation',
+      '```typescript\nconst title = "Scheduler fix";\n```',
+    ]) {
+      expect(parseAgentTitle(raw)).toBeNull();
+    }
   });
 
   test('branch naming shares structured title output and rejects invalid slugs', () => {
@@ -192,6 +215,28 @@ describe('thread titles', () => {
       expect(calls).toBe(3);
       await finished;
       expect(calls).toBe(3);
+    } finally { restore(); }
+  });
+
+  test('automatic naming retries an incomplete fence and saves the title inside the completed JSON block', async () => {
+    let calls = 0;
+    const restore = setDriver('echo', { ...echoDriver, title: async () => {
+      calls += 1;
+      if (calls === 1) return '```json\n{"title":"Scheduler fix"}';
+      return '```json\n{"title":"Scheduler fix","needsRefinement":false}\n```\nThis title describes the task.';
+    } });
+    try {
+      const client = await harness.connect();
+      const { threadId } = await echoThread(harness, client, 'Fix the scheduler');
+      const updates: string[] = [];
+      client.on('thread.updated', thread => { if (thread.id === threadId) updates.push(thread.title); });
+      const finished = client.next('turn.finished', turn => turn.threadId === threadId, EVENT_TIMEOUT_MS);
+      await client.call('turns.start', { threadId, prompt: 'Fix the scheduler' });
+      await finished;
+      await waitFor(() => harness.core.threads.require(threadId).titleSource === 'agent');
+      expect(await client.call('threads.get', { threadId })).toMatchObject({ title: 'Scheduler fix', titleState: { needsRefinement: false } });
+      expect(calls).toBe(2);
+      expect(updates).not.toContain('json');
     } finally { restore(); }
   });
 
