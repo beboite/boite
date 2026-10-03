@@ -32,6 +32,7 @@
     message,
     signedOut,
     showModel,
+    latestInTurn = true,
     memoryEvents = []
   }: {
     store: Store;
@@ -39,6 +40,7 @@
     message: Message;
     signedOut: Account | null;
     showModel: boolean;
+    latestInTurn?: boolean;
     memoryEvents?: MemoryEvent[];
   } = $props();
 
@@ -77,7 +79,8 @@
       {#if part.type === 'text'}
         {@const shownText = message.role === 'system' ? promptText(part) : visibleAnswer(part.text)}
         {#if shownText.length > 0 || index === caretAt}
-          <Prose text={shownText} live={index === caretAt && part.complete !== true} {store} {threadId} />
+          <Prose text={shownText} live={index === caretAt && part.complete !== true} bubble={message.role === 'assistant'}
+            typing={latestInTurn && message.role === 'assistant' && store.connection === 'ready' && store.openThread?.status === 'running' && index === message.parts.length - 1 && index === caretAt && part.complete !== true} {store} {threadId} />
         {/if}
 
       {:else if part.type === 'thinking' && (part.text.trim().length > 0 || part.startedAt !== undefined || (message.state === 'streaming' && index === message.parts.length - 1))}
@@ -187,6 +190,7 @@
   .part[data-kind='text'] {
     max-width: var(--prose);
   }
+
 
   .error {
     padding: 8px 12px;

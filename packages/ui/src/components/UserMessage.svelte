@@ -138,14 +138,16 @@
   .command { color: var(--color-accent); font-weight: 600; }
 
   .bubble {
-    max-width: 75%;
-    padding: 10px 14px;
+    max-width: min(85%, var(--prose));
+    padding: 12px 16px;
     background: var(--color-accent-soft);
     border: 1px solid color-mix(in oklch, var(--color-accent) 35%, transparent);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-bubble);
     border-bottom-right-radius: var(--radius-sm);
     box-shadow: var(--shadow-e1);
   }
+
+  @media (max-width: 720px) { .bubble { max-width: 90%; padding: 10px 14px; } }
 
   .user-text {
     white-space: pre-wrap;

@@ -8,8 +8,9 @@
   import ChatFile from './ChatFile.svelte';
   import { executableLink, localFileDirectory, openLocalFile, openChatFile } from '../lib/local-files';
   import { glides } from '../lib/motion';
+  import TypingIndicator from './TypingIndicator.svelte';
 
-  let { text, live = false, store, threadId }: { text: string; live?: boolean; store?: Store; threadId?: string } = $props();
+  let { text, live = false, typing = false, bubble = false, store, threadId }: { text: string; live?: boolean; typing?: boolean; bubble?: boolean; store?: Store; threadId?: string } = $props();
   let selected = $state<{ path: string; line?: number } | null>(null);
   const directLinks = $derived(experimentOn('open-chat-links'));
   const rich = $derived(experimentOn('chat-artifacts') || directLinks);
@@ -93,11 +94,11 @@
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div class="prose" class:live data-testid="text-part" bind:this={host} onclick={follow}>
+<div class="prose" class:live class:answer-bubble={bubble && (blocks.length > 0 || typing)} data-testid="text-part" bind:this={host} onclick={follow}>
   {#each blocks as block, index (index)}
     <!-- A streaming answer shows finished paragraphs only (`ParagraphScan`): every block here is final and kept. -->
     <div class="paragraph" data-testid="paragraph">{@html renderBlock(block, rich)}</div>
-  {/each}
+  {/each}{#if typing}<TypingIndicator />{/if}
 </div>
 {#if selected && rich}
   {#key `${threadId}:${selected.path}:${selected.line}`}

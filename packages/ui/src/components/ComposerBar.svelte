@@ -373,9 +373,11 @@
     margin-left: auto;
     width: var(--control);
     height: var(--control);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-full);
     flex: none;
   }
+
+  .send:not(:disabled):active { transform: scale(.92); }
 
   .stop {
     color: var(--color-foreground);
@@ -389,7 +391,7 @@
     .chips :global(.picker > .trigger) { max-width: 100%; height: var(--touch-target); padding: 0 6px; border: none; background: transparent; font-weight: 500; color: var(--color-muted-foreground); }
     .chips :global(.picker > .trigger > .label) { min-width: 0; max-width: none; }
     .chips :global(.picker > .trigger.connect) { padding: 0 12px; border-radius: var(--radius-md); background: var(--color-accent-soft); color: var(--color-accent); }
-    .send, .stop { border-radius: 50%; margin-left: 2px; }
+    .send, .stop { margin-left: 2px; }
     /* The composer carries `dictating` while a dictation runs. */
     :global(.dictating) .send { display: none; }
   }

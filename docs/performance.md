@@ -412,6 +412,20 @@ The total UI budget increases from 3,880,000 to 3,920,000 bytes, leaving
 36,405 bytes of headroom. The entry and core limits stay unchanged. This
 records the feature cost; it does not claim a size or startup improvement.
 
+### Chat reply activity
+
+On 2026-10-03, `bun run build:ui` with Bun 1.4.2 on Linux measured
+4,010,822 bytes for the complete UI and 537,206 bytes for its entry chunk,
+after integrating `main` at `2ba18d9b`. Main's 4,020,000-byte UI limit covers
+this build with 9,178 bytes of headroom; entry and core limits stay unchanged.
+Totals exclude precompressed copies, as `bun scripts/ci/budgets.ts` does.
+
+Before that integration, the same command measured 3,984,925 bytes after
+integrating `main` at `1c6d8319`, matching desktop CI. The steering-activity
+fix adds 126 bytes to the 3,979,995-byte build at `46388ac4`; the intervening
+usage changes add another 4,804 bytes. The earlier UI limit adjustment is
+superseded by main's text-alignment budget.
+
 ## The desktop browser on a phone
 
 A paired phone watching the desktop's browser tab
