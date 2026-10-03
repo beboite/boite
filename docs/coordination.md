@@ -133,6 +133,12 @@ a forwarded agent message in the timeline. Provider input explicitly labels
 the body as data from another agent. It does not become a user request or grant
 permission to run a tool.
 
+Sent and received exchanges stay where they occurred in the conversation.
+Continued text and new tools start after each exchange; a tool already running
+keeps its original card. Consecutive exchanges collapse into counters within
+one turn. The elapsed-time footer follows the last visible message or exchange,
+including turns that only receive and forward messages.
+
 Claude receives messages at its next PostToolUse hook. Codex uses `turn/steer`
 with the active turn ID, and Muse its own `turn/steer` the same way. Pi uses
 its `steer` RPC, Grok its `_x.ai/interject`. Providers without an interrupt

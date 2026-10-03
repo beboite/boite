@@ -493,6 +493,7 @@ export class Coordination {
     const createdAt = Date.now();
     const letter: AgentLetter = { id: randomUUID(), from, to, toTitle, toProject, toMachine, text: body, replyTo: params.replyTo ?? null, createdAt, expiresAt: createdAt + LETTER_TTL_MS, status: 'queued', error: null };
     this.core.journal.append({ type: 'coordination.sent', threadId: from.threadId, version: 1, payload: letter }, () => this.put(letter, 'out', from.threadId, requestId, fingerprint));
+    this.core.threads.runner.noteMail(from.threadId, letter.createdAt);
     this.changed(from.threadId);
     if (to.coreId === from.coreId) {
       try { this.receive(letter); } catch (error) { this.update(letter, 'rejected', messageOf(error)); }
@@ -520,6 +521,7 @@ export class Coordination {
     if (!Number.isSafeInteger(letter.createdAt) || !Number.isSafeInteger(letter.expiresAt) || letter.createdAt > Date.now() + 60_000 || letter.expiresAt <= Date.now() || letter.expiresAt > letter.createdAt + LETTER_TTL_MS) throw refused('message expired or timestamps invalid');
     const accepted: AgentLetter = { id: letter.id, from, to: this.self(target.threadId), toTitle: target.title, toProject: target.project, toMachine: target.machine, text: text(letter.text, 'letter.text'), replyTo: letter.replyTo === null ? null : text(letter.replyTo, 'letter.replyTo', 100), createdAt: Date.now(), expiresAt: letter.expiresAt, status: 'received', error: null };
     this.core.journal.append({ type: 'coordination.received', threadId: target.threadId, version: 1, payload: accepted }, () => this.put(accepted, 'in', target.threadId));
+    this.core.threads.runner.noteMail(target.threadId, accepted.createdAt);
     this.update(accepted, 'received');
     if (!this.handToWaiter(accepted)) this.kick(target.threadId);
     return this.find(accepted.id, 'in') ?? accepted;
@@ -535,7 +537,8 @@ export class Coordination {
   private update(letter: AgentLetter, status: AgentLetter['status'], error: string | null = null): void {
     const next = { ...letter, status, error };
     this.core.journal.append({ type: 'coordination.status', threadId: letter.to.coreId === this.self('').coreId ? letter.to.threadId : letter.from.threadId, version: 1, payload: { id: letter.id, status, error } }, () => {
-      this.core.journal.db.query('UPDATE coordination_letters SET status = ?, data = ? WHERE id = ?').run(status, JSON.stringify(next), letter.id);
+      // Each endpoint retains its own send or receipt time when acknowledgement metadata arrives.
+      this.core.journal.db.query("UPDATE coordination_letters SET status = ?, data = json_set(?, '$.createdAt', created_at) WHERE id = ?").run(status, JSON.stringify(next), letter.id);
     });
     for (const endpoint of [letter.from, letter.to]) if (endpoint.coreId === this.coreId) this.changed(endpoint.threadId);
   }
