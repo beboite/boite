@@ -9,8 +9,8 @@
   Run your coding agents in one workspace, with the conversation and changes side by side.
 </p>
 <p align="center">
-  <a href="https://github.com/beboite/boite/releases">Download Boite</a> &nbsp; / &nbsp;
-  <a href="docs/README.md">Read the docs</a> &nbsp; / &nbsp;
+  <a href="https://github.com/beboite/boite/releases">Download</a> &nbsp; / &nbsp;
+  <a href="docs/README.md">Docs</a> &nbsp; / &nbsp;
   <a href="docs/server.md">Self-host</a>
 </p>
 
