@@ -1799,7 +1799,10 @@ describe('native Codex rewind', () => {
     await run(client, threadId, 'First'); await run(client, threadId, 'Second');
     // Cold source teardown is asynchronous; a retained warm source owns its
     // lease throughout the failed rewind. Neither belongs to the setup fork.
-    if (warmProcessMinutes === 0) await waitFor(() => harness!.core.procs.liveCount(threadId) === 0);
+    // Windows trace exit and the child exit callback release these resources
+    // separately, so observing one does not prove the other was released.
+    if (warmProcessMinutes === 0) await waitFor(() => harness!.core.procs.liveCount(threadId) === 0
+      && harness!.core.providers.installs.leaseCount('codex-fake') === 0);
     const sourcePids = harness!.core.procs.liveOf(threadId).map(process => process.pid);
     const sourceLeases = harness!.core.providers.installs.leaseCount('codex-fake');
     expect(sourcePids).toHaveLength(warmProcessMinutes === 0 ? 0 : 1);
@@ -1812,6 +1815,8 @@ describe('native Codex rewind', () => {
     expect({ ...harness!.core.threads.get(threadId), load: null }).toEqual({ ...before, load: null });
     expect(fakeLog()).toContain('thread/archive codex-fork-');
     expect(fakeLog()).not.toContain(`thread/archive ${before.sessionId}`);
+    // Fork release awaits the child exit callback, after procs and lease
+    // listeners ran, so the setup fork must already be gone on return.
     expect(harness!.core.procs.liveOf(threadId).map(process => process.pid)).toEqual(sourcePids);
     expect(harness!.core.providers.installs.leaseCount('codex-fake')).toBe(sourceLeases);
   });

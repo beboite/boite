@@ -9,7 +9,7 @@ let dir: string, file: string;
 const fixture = readFileSync(new URL('./fixtures/journal-v27.sql', import.meta.url), 'utf8');
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'boite-schema27-')); file = join(dir, 'journal.db');
-  const db = new Database(file); db.exec(fixture); db.close();
+  const db = new Database(file); db.transaction(() => db.exec(fixture))(); db.close();
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 test('immutable schema27 produced by original migration preserves its data through 28 and reopen', () => {
