@@ -4,6 +4,7 @@
  */
 import { baseName, type Surface, type SurfaceKind } from './right-panel.svelte';
 import { browserProfiles } from './browser-profiles.svelte';
+import { experimentOn } from './experiments.svelte';
 import { fill, strings } from './strings';
 import { work, type ControlId } from './work-prefs.svelte';
 
@@ -15,6 +16,7 @@ export const CARDS: { kind: SurfaceKind; key: string }[] = [
   { kind: 'agents', key: 'A' },
   { kind: 'messages', key: 'M' },
   { kind: 'browser', key: 'B' },
+  { kind: 'device', key: 'D' },
   { kind: 'changes', key: 'C' },
   { kind: 'files', key: 'F' },
   { kind: 'tasks', key: 'K' },
@@ -27,6 +29,8 @@ export const CARDS: { kind: SurfaceKind; key: string }[] = [
  * agent still open the surface, and an open tab stays.
  */
 export function hiddenKind(kind: SurfaceKind): boolean {
+  // An experiment: the Device panel's card shows once it is on (docs/devices.md).
+  if (kind === 'device' && !experimentOn('device-panel')) return true;
   return CARDS.some((card) => card.kind === kind) && !work.shows(`panel.${kind}` as ControlId);
 }
 
@@ -42,6 +46,7 @@ export function kindName(kind: SurfaceKind): string {
   if (kind === 'browser') return strings.rightPanel.browser;
   if (kind === 'changes') return strings.rightPanel.changes;
   if (kind === 'files') return strings.rightPanel.files;
+  if (kind === 'device') return strings.rightPanel.device;
   if (kind === 'file') return strings.rightPanel.file;
   if (kind === 'tasks') return strings.rightPanel.tasks;
   return strings.rightPanel.trace;
@@ -53,17 +58,18 @@ export function kindHint(kind: SurfaceKind): string {
   if (kind === 'browser') return strings.rightPanel.browserHint;
   if (kind === 'changes') return strings.rightPanel.changesHint;
   if (kind === 'files') return strings.rightPanel.filesHint;
+  if (kind === 'device') return strings.rightPanel.deviceHint;
   if (kind === 'tasks') return strings.rightPanel.tasksHint;
   return strings.rightPanel.traceHint;
 }
 
 /**
  * A page needs a webview. Paired devices follow subagents and mail, and read
- * changes and files read-only (`DEVICE_METHODS`); tasks and the trace read what
+ * changes and files read-only and watch the Device panel (`DEVICE_METHODS`); tasks and the trace read what
  * only the owner may ask for.
  */
 export function available(kind: SurfaceKind, inShell: boolean, owner: boolean): boolean {
-  if (kind === 'agents' || kind === 'messages' || kind === 'changes' || kind === 'files' || kind === 'file') return true;
+  if (kind === 'agents' || kind === 'messages' || kind === 'changes' || kind === 'files' || kind === 'file' || kind === 'device') return true;
   return kind === 'browser' ? inShell : owner;
 }
 

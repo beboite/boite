@@ -21,6 +21,19 @@ export const strings = {
     interact: 'Tap or swipe the shared page', image: 'Live view of the desktop browser', scrollUp: 'Scroll up', scrollDown: 'Scroll down',
     text: 'Tap a page field, then type here', send: 'Send text to the page', gesture: 'Tap to click. Drag to scroll. Return sends the text and Enter; ⌫ on an empty field erases in the page.'
   },
+  /** The Device panel: simulators and emulators an agent opened with `boite device`. */
+  devicePanel: {
+    empty: 'No device is open in this conversation. An agent opens one with boite device open, or open one here.',
+    onMachine: 'On this machine', open: 'Open', refresh: 'Refresh', add: 'Open a device',
+    none: 'No simulators or emulators were found on this machine.',
+    starting: 'Starting {name}. This can take a minute.', failed: '{name} did not start',
+    stopped: 'Off', running: 'Running', booting: 'Starting',
+    viewOnly: 'View only. The agent drives iOS Simulators with xcrun simctl.',
+    back: 'Back', home: 'Home', recents: 'Recent apps', rotate: 'Rotate', power: 'Power button', enter: 'Enter', backspace: 'Delete the previous character',
+    text: 'Type into the focused field', send: 'Send the text', ascii: 'Only printable ASCII characters reach the device.',
+    screenshot: 'Save a screenshot', close: 'Close {name}', shutdown: 'Power off',
+    interact: 'Tap or swipe the device screen', image: 'Live view of {name}', gesture: 'Tap to touch. Drag to swipe.'
+  },
   agents: {
     runtime: "Models and limits",
     brain: "Brain",
@@ -1281,6 +1294,8 @@ export const strings = {
     filesHint: "The thread's working directory",
     file: 'File',
     tasks: 'Tasks',
+    device: 'Device',
+    deviceHint: 'A simulator or emulator the agent opened',
     tasksHint: "The goal, the agent's tasks and the project's todos",
     browserAbsent: 'Opens when an agent uses the browser',
     ownerOnly: "Only in the owner's app",
@@ -1948,6 +1963,7 @@ export const strings = {
   experiments: {
     remoteBrowser: { title: 'Live browser on other devices', hint: 'On the desktop, let paired devices watch and drive a conversation’s browser tab, such as the one an agent opened. It appears by itself in that conversation on the phone. Agents do not get browser control from it.' },
     recordingIndicators: { title: 'Show actions in recordings', hint: 'Add click markers and navigation keys to browser recordings. Typed text and password input are never shown as key labels.' },
+    devicePanel: { title: 'Device panel', hint: 'Show the iOS Simulators and Android emulators an agent opens with boite device, live in the side panel of this device. Taps, swipes and text reach Android; iOS is view-only. Agents open devices without it.' },
     openChatLinks: { title: 'Open chat links in their apps', hint: 'On this desktop, clicking a local file or folder opens its default app, including shortcuts and files outside the project. Only links from this computer are opened.' },
     whip: {
       title: 'Whip',

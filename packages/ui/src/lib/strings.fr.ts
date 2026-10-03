@@ -32,6 +32,18 @@ export const fr: Translation = {
     interact: 'Toucher ou faire défiler la page partagée', image: 'Vue en direct du navigateur du PC', scrollUp: 'Défiler vers le haut', scrollDown: 'Défiler vers le bas',
     text: 'Touchez un champ de la page, puis écrivez ici', send: 'Envoyer le texte à la page', gesture: 'Touchez pour cliquer. Glissez pour défiler. Retour envoie le texte puis Entrée ; ⌫ sur un champ vide efface dans la page.'
   },
+  devicePanel: {
+    empty: "Aucun appareil n'est ouvert dans cette conversation. Un agent en ouvre un avec boite device open, ou ouvrez-en un ici.",
+    onMachine: 'Sur cette machine', open: 'Ouvrir', refresh: 'Actualiser', add: 'Ouvrir un appareil',
+    none: 'Aucun simulateur ni émulateur trouvé sur cette machine.',
+    starting: 'Démarrage de {name}. Cela peut prendre une minute.', failed: "{name} n'a pas démarré",
+    stopped: 'Éteint', running: 'Allumé', booting: 'Démarrage',
+    viewOnly: "Lecture seule. L'agent pilote les simulateurs iOS avec xcrun simctl.",
+    back: 'Retour', home: 'Accueil', recents: 'Applications récentes', rotate: 'Pivoter', power: "Bouton d'alimentation", enter: 'Entrée', backspace: 'Effacer le caractère précédent',
+    text: 'Écrire dans le champ actif', send: 'Envoyer le texte', ascii: "Seuls les caractères ASCII imprimables atteignent l'appareil.",
+    screenshot: "Enregistrer une capture d'écran", close: 'Fermer {name}', shutdown: 'Éteindre',
+    interact: "Touchez ou glissez sur l'écran de l'appareil", image: 'Vue en direct de {name}', gesture: 'Touchez pour appuyer. Glissez pour balayer.'
+  },
   agents: {
     runtime: "Modèles et limites",
     brain: "Cerveau",
@@ -1225,6 +1237,8 @@ export const fr: Translation = {
     file: 'Fichier',
     tasks: 'Tâches',
     tasksHint: "L'objectif, les tâches de l'agent et les todos du projet",
+    device: 'Appareil',
+    deviceHint: "Un simulateur ou un émulateur ouvert par l'agent",
     browserAbsent: 'S’ouvre quand un agent utilise le navigateur',
     ownerOnly: "Seulement dans l'application du propriétaire",
     launcher: 'Ouvrir une surface dans ce panneau',
@@ -1877,6 +1891,7 @@ export const fr: Translation = {
   experiments: {
     remoteBrowser: { title: 'Navigateur en direct à distance', hint: 'Sur le PC, laisser les appareils associés voir et piloter l’onglet navigateur d’une conversation, comme celui qu’un agent a ouvert. Il apparaît de lui-même dans cette conversation sur le téléphone. Cette option ne donne pas le contrôle du navigateur aux agents.' },
     recordingIndicators: { title: 'Actions visibles dans les vidéos', hint: 'Ajouter des repères de clics et les touches de navigation aux enregistrements. Le texte saisi et les mots de passe ne sont jamais affichés comme libellés de touches.' },
+    devicePanel: { title: 'Panneau Appareil', hint: "Afficher en direct dans le panneau latéral de cet appareil les simulateurs iOS et émulateurs Android qu'un agent ouvre avec boite device. Les touchers, glissements et textes atteignent Android ; iOS est en lecture seule. Les agents ouvrent des appareils sans lui." },
     openChatLinks: { title: 'Ouvrir les liens du chat dans leurs applications', hint: 'Sur ce bureau, un clic sur un fichier ou dossier local ouvre son application, y compris les raccourcis et les fichiers hors du projet. Seuls les liens de cet ordinateur sont ouverts.' },
     whip: {
       title: 'Fouet',
