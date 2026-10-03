@@ -21,10 +21,11 @@ interface Side {
   towardCore: boolean;
 }
 
-export function startWire(targetPort: number, oneWayDelayMs = 0): Wire {
+export function startWire(targetPort: number, oneWayDelayMs = 0, bytesPerSecond = Infinity): Wire {
   let up = 0;
   let down = 0;
   let chunksDown = 0;
+  let upReady = 0, downReady = 0;
 
   const flush = (socket: Socket<Side>): void => {
     const side = socket.data;
@@ -56,7 +57,11 @@ export function startWire(targetPort: number, oneWayDelayMs = 0): Wire {
       peer.data.backlog.push(copy);
       flush(peer);
     };
-    if (oneWayDelayMs > 0) setTimeout(deliver, oneWayDelayMs);
+    const now = performance.now();
+    const ready = Math.max(now, from.data.towardCore ? downReady : upReady) + bytes.byteLength * 1000 / bytesPerSecond;
+    if (from.data.towardCore) downReady = ready; else upReady = ready;
+    const wait = oneWayDelayMs + ready - now;
+    if (wait > 0) setTimeout(deliver, wait);
     else deliver();
   };
 

@@ -65,6 +65,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'threads.activity.control',
   'messages.list',
   'messages.toolOutput', // Read only the output of a tool in the conversation the phone can already read.
+  'messages.attachment', // Only journalled bytes in a conversation already readable from the phone.
   'artifacts.read', // Download only snapshots already published in a visible conversation, never host paths.
   'threads.update',
   'threads.retitle',

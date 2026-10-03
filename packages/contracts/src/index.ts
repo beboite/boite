@@ -1002,7 +1002,7 @@ export type MessagePart =
   | { type: 'text'; text: string; complete?: boolean; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number }; moved?: MoveNotice; startedBy?: ThreadLink; started?: ThreadLink }
   /** An image the user sent with the prompt, journalled with the message. */
   | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null }
-  | { type: 'file'; mimeType: string; data: string; name: string | null }
+  | { type: 'file'; mimeType: string; data: string; name: string | null; dataDeferred?: true; bytes?: number }
   /** An immutable published file; resolve its bytes with artifacts.read, never as a disk path. */
   | { type: 'artifact'; id: string; mimeType: string; bytes: number; name: string }
   /** The model's reasoning as the provider streams it, folded in the UI. */
@@ -1132,6 +1132,10 @@ export interface Thread extends ThreadSummary {
    * within the message count and serialized byte limits.
    */
   messagesFrom?: MessageId;
+  /** Opaque proof of the complete resume tail, including deferred tool output. Never persisted. */
+  messagesSync?: MessageSync;
+  /** The requested tail still matches messagesSync; reuse it instead of replacing it with messages. */
+  messagesUnchanged?: true;
   /** A bounded tail within the serialized page budget, oldest first. Older messages come from `messages.list`. */
   messages: Message[];
   /**
@@ -1153,6 +1157,16 @@ export interface Thread extends ThreadSummary {
   messagesBefore: MessageId | null;
   /** The turns `messages` refers to, plus any still queued or running; never the whole history. */
   turns: Turn[];
+}
+
+export interface MessageSync {
+  from: MessageId;
+  hash: string;
+}
+
+/** An opt-in opening reads requests and changes this socket's subscription in the same RPC. */
+export interface ThreadSnapshot extends Thread {
+  opened?: { permissions?: PermissionRequest[]; questions?: QuestionRequest[] };
 }
 
 /** What `threads.rewind` answers: the thread after the cut and the removed message, ready for the composer. */
@@ -1666,6 +1680,8 @@ export interface CoreInfo {
   /** SHA-256 of the loaded JavaScript entry bundle, captured before serving requests. */
   bundleHash?: string;
   protocolVersion: typeof PROTOCOL_VERSION;
+  /** Optional optimizations. Their absence keeps older cores and clients interoperable. */
+  features?: { threadSnapshots?: boolean };
   os: Os;
   /** The install this core belongs to. `--channel` on its command line decides. */
   channel: Channel;
@@ -2801,7 +2817,16 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * with more than a page's count or serialized byte budget behind it, is
    * answered with the full page, without `messagesFrom`.
    */
-  'threads.get': { params: { threadId: ThreadId; after?: MessageId; limit?: number; compactTools?: boolean }; result: Thread };
+  'threads.get': {
+    params: {
+      threadId: ThreadId; after?: MessageId; limit?: number; compactTools?: boolean; compactFiles?: boolean;
+      /** Request a resume proof, or reuse a proof previously supplied by this core. */
+      sync?: true | MessageSync;
+      /** Subscribe after a successful snapshot, optionally replacing the previous subscription and acknowledging unread content. */
+      open?: { previous?: ThreadId; requests?: boolean; markRead?: boolean };
+    };
+    result: ThreadSnapshot;
+  };
   /**
    * One page of older messages, oldest first inside the page: what was written
    * before `before`, at most `limit` (`MESSAGE_PAGE` by default, `MESSAGE_PAGE_MAX`
@@ -2813,13 +2838,18 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * a `before` that is not a message of that thread is refused by name.
    */
   'messages.list': {
-    params: { threadId: ThreadId; before: MessageId; limit?: number; compactTools?: boolean };
+    params: { threadId: ThreadId; before: MessageId; limit?: number; compactTools?: boolean; compactFiles?: boolean };
     result: { messages: Message[]; before: MessageId | null; turns?: Turn[] };
   };
   /** The full output of a tool already visible in this conversation. No filesystem path is accepted. */
   'messages.toolOutput': {
     params: { threadId: ThreadId; messageId: MessageId; toolId: string };
     result: { output: string | null };
+  };
+  /** Read one journalled attachment on demand. No filesystem path or executable is accepted. */
+  'messages.attachment': {
+    params: { threadId: ThreadId; messageId: MessageId; partIndex: number };
+    result: { data: string };
   };
   'threads.update': {
     params: {
@@ -3270,3 +3300,5 @@ export function supportsSideQuestions(protocol: Protocol): boolean {
 }
 
 export { sideQuestionSnapshot } from './side-question-snapshot.ts';
+export { resumeAnchor, snapshotOptionsProblem } from './thread-sync.ts';
+export { previewFileData } from './file-preview.ts';

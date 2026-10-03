@@ -231,7 +231,8 @@ test('only the visible host keeps a thread subscription, and switching back resu
   await w.select(a);
   expect(right).toHaveBeenCalledWith('threads.unsubscribe', { threadId: id });
   expect(a.visible).toBe(true);
-  expect(left.mock.calls.filter(([m]) => m === 'threads.subscribe')).toHaveLength(2);
+  expect(ca.coreSubscribers).toEqual([id]);
+  expect(cb.coreSubscribers).toEqual([]);
 });
 
 test('disconnecting the active remote keeps primary data and the view preference', async () => {
