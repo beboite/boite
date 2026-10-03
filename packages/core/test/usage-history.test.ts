@@ -142,6 +142,13 @@ test('usage.history keeps the top threads of each ranking', async () => {
   const client = await harness.connect();
   const ids = (await client.call('usage.history', { edges: EDGES })).threads.map((thread) => thread.threadId).sort();
   expect(ids).toEqual(['thr_many_10', 'thr_many_11', 'thr_many_12', 'thr_many_13', 'thr_many_4', 'thr_many_5', 'thr_many_6', 'thr_many_7', 'thr_many_8', 'thr_many_9', 'thr_priced']);
+  // A low-usage provider must still get its own ranking, even after a thread switched providers.
+  journal.putTurn(turn(priced, D0 + 6000, usage(4, 2), { providerId: 'muse', model: 'default' }));
+  const filtered = await client.call('usage.history', { edges: EDGES, providerId: 'muse' });
+  expect(filtered.rows).toHaveLength(1);
+  expect(filtered.rows[0]).toMatchObject({ providerId: 'muse', turns: 1 });
+  expect(filtered.threads).toHaveLength(1);
+  expect(filtered.threads[0]).toMatchObject({ threadId: priced.id, providerId: 'muse', turns: 1, usage: usage(4, 2) });
 });
 
 test('usage.history rejects edges that are not ascending timestamps', async () => {
@@ -156,6 +163,10 @@ test('usage.history rejects edges that are not ascending timestamps', async () =
     }
     expect(failure).toBe(`edges: expected 2 to ${MAX_USAGE_EDGES} strictly ascending timestamps in milliseconds`);
   }
+  for (const providerId of ['', ' ', null, 42]) {
+    await expect(client.call('usage.history', { edges: EDGES, providerId } as { edges: number[]; providerId: string })).rejects.toThrow('providerId: expected a non-empty provider id');
+  }
+  expect((await client.call('usage.history', { edges: EDGES, providerId: 'removed-provider' })).rows).toEqual([]);
 });
 
 test('usage.history reads a real echo turn', async () => {

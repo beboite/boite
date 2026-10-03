@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { Usage, UsageHistory, UsageHistoryRow } from '@boite/contracts';
 import { fakeUsageHistory } from './fake-usage';
 import { setLocaleSetting } from './i18n.svelte';
-import { dayEdges, formatMetric, formatTick, niceScale, seriesFor, summarize, topThreads } from './usage';
+import { dayEdges, formatMetric, formatTick, modelName, niceScale, reportedValue, seriesFor, summarize, topThreads } from './usage';
 
 function usage(inputTokens: number, outputTokens: number, cost: number | null = null): Usage {
   return { inputTokens, outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0, costUsdEquivalent: cost };
@@ -38,16 +38,16 @@ describe('niceScale', () => {
 });
 
 describe('seriesFor', () => {
-  test('keeps the fixed provider order, gives two spare slots, and folds the rest', () => {
+  test('keeps every provider separate, including more than two additional providers', () => {
     const { series, keyOf } = seriesFor(['zeta', 'codex', 'alpha', 'claude', 'beta']);
     expect(series.map((serie) => [serie.key, serie.color])).toEqual([
       ['claude', 'var(--series-1)'],
       ['codex', 'var(--series-2)'],
       ['alpha', 'var(--series-7)'],
       ['beta', 'var(--series-8)'],
-      ['other', 'var(--series-other)']
+      ['zeta', 'var(--series-7)']
     ]);
-    expect(keyOf('zeta')).toBe('other');
+    expect(keyOf('zeta')).toBe('zeta');
   });
 
   test('a provider keeps its colour when others leave the range', () => {
@@ -82,6 +82,22 @@ describe('summarize', () => {
     expect(view.total.value).toBeCloseTo(2.1);
     expect(view.bySeries['codex']?.priced).toBe(0);
     expect(view.unpriced).toEqual(['codex']);
+  });
+
+  test('lists unused providers and keeps partial reporting counts without inventing a price', () => {
+    const view = summarize({ edges: [0, 10], rows: [
+      { ...row(0, 'muse', 'default', 3, usage(20, 10, 0.5)), reported: 2, priced: 1 },
+      { ...row(0, 'custom', null, 2, usage(0, 0)), reported: 0 }
+    ], threads: [] }, 'cost', ['muse', 'antigravity-cli', 'echo']);
+    expect(view.series.map((entry) => entry.key)).toEqual(['antigravity-cli', 'muse', 'custom', 'echo']);
+    expect(view.bySeries['echo']).toMatchObject({ turns: 0, priced: 0, usage: { costUsdEquivalent: null } });
+    expect(view.total).toMatchObject({ turns: 5, reported: 2, priced: 1, value: 0.5 });
+    expect(view.unpriced).toEqual(['custom']);
+    expect(reportedValue('tokens', 0, view.buckets[0]!.coverage['custom']!)).toBe('Not reported');
+    expect(reportedValue('cost', 0, view.buckets[0]!.coverage['custom']!)).toBe('No cost reported');
+    expect(reportedValue('tokens', 0, view.buckets[0]!.coverage['echo']!)).toBe('0');
+    expect(reportedValue('cost', 0, { turns: 1, reported: 1, priced: 1 })).toBe('$0.00');
+    expect(modelName('default', new Map([['muse\u0000default', 'Muse default'], ['antigravity-cli\u0000default', 'Antigravity CLI default']]), 'muse')).toBe('Muse default');
   });
 
   test('breaks down by model, largest first, and by day, newest first', () => {
@@ -138,10 +154,14 @@ describe('the fake ledger', () => {
   test('draws the same days every time, from several providers', () => {
     const first = fakeUsageHistory(edges, { seeded: true, finished: [], now });
     expect(fakeUsageHistory(edges, { seeded: true, finished: [], now })).toEqual(first);
-    expect(new Set(first.rows.map((entry) => entry.providerId))).toEqual(new Set(['claude', 'codex', 'opencode', 'grok', 'antigravity', 'pi']));
+    expect(new Set(first.rows.map((entry) => entry.providerId))).toEqual(new Set(['claude', 'codex', 'opencode', 'grok', 'antigravity', 'pi', 'antigravity-cli', 'muse']));
     expect(first.rows.every((entry) => entry.bucket >= 0 && entry.bucket < 90)).toBe(true);
     expect(first.rows.filter((entry) => entry.providerId === 'codex').every((entry) => entry.usage.costUsdEquivalent === null && entry.priced === 0)).toBe(true);
     expect(first.rows.some((entry) => entry.reported < entry.turns)).toBe(true);
+    const filtered = fakeUsageHistory(edges, { seeded: true, finished: [], now, providerId: 'muse' });
+    expect(filtered.rows.length).toBeGreaterThan(0);
+    expect(filtered.rows.every((entry) => entry.providerId === 'muse')).toBe(true);
+    expect(filtered.threads.every((entry) => entry.providerId === 'muse')).toBe(true);
   });
 
   test('adds the turns this session finished and is empty on a fresh machine', () => {

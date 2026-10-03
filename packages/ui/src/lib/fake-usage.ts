@@ -97,6 +97,18 @@ const PROFILES: Profile[] = [
     tokens: [3_100, 1_200, 26_000, 3_000], price: [3, 15, 0.3, 3.75],
     threads: [{ id: 't-descriptors', title: 'Review the descriptor loader' }],
   },
+  {
+    providerId: 'antigravity-cli', models: [{ id: 'default', share: 1 }],
+    perDay: 7, since: 19, idle: 0.25,
+    tokens: [4_000, 1_400, 19_000, 0], price: null,
+    threads: [{ id: 'u-agy-models', title: 'Discover the CLI models' }],
+  },
+  {
+    providerId: 'muse', models: [{ id: 'default', share: 1 }],
+    perDay: 6, since: 17, idle: 0.2,
+    tokens: [3_500, 1_500, 15_000, 0], price: null,
+    threads: [{ id: 'u-muse-tools', title: 'Map the Muse tools' }],
+  },
 ];
 
 const DAY = 86_400_000;
@@ -193,7 +205,7 @@ function seededDay(day: Date, today: Date, now: number): Group[] {
   return groups.filter((group) => group.at <= now);
 }
 
-export function fakeUsageHistory(edges: number[], options: { seeded: boolean; finished: FakeFinishedTurn[]; now?: number }): UsageHistory {
+export function fakeUsageHistory(edges: number[], options: { seeded: boolean; finished: FakeFinishedTurn[]; now?: number; providerId?: string }): UsageHistory {
   const now = options.now ?? Date.now();
   const first = edges[0]!;
   const last = edges[edges.length - 1]!;
@@ -212,6 +224,7 @@ export function fakeUsageHistory(edges: number[], options: { seeded: boolean; fi
   const threads = new Map<ThreadId, UsageHistoryThread>();
   for (const group of groups) {
     if (group.at < first || group.at >= last) continue;
+    if (options.providerId !== undefined && group.providerId !== options.providerId) continue;
     let bucket = 0;
     while (edges[bucket + 1]! <= group.at) bucket += 1;
     const key = `${bucket}\u0000${group.providerId}\u0000${group.model ?? ''}`;
