@@ -147,10 +147,11 @@ test('a block that is still being written carries no button yet', async () => {
   expect(document.querySelector('[data-testid=code-copy]')).toBeNull();
 });
 
-test('text with no fenced block gets no button', async () => {
+test('plain text preserves its rendered content and gets no copy button', async () => {
   running = mount(Prose, { target: document.body, props: { text: 'Plain `inline` text only.' } });
   flushSync();
   await tick();
 
+  expect(query('[data-testid=text-part]').textContent).toBe('Plain inline text only.');
   expect(document.querySelector('[data-testid=code-copy]')).toBeNull();
 });

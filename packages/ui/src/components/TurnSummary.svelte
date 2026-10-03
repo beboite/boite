@@ -7,12 +7,17 @@
   import { formatLocale } from '../lib/i18n.svelte';
   import { backgroundLabel } from '../lib/background';
   import type { Snippet } from 'svelte';
-  let { turn, progress, waiting = false, activeTool = false, background = [], stop, actions }: {
+  import TypingIndicator from './TypingIndicator.svelte';
+  let { turn, progress, waiting = false, activeTool = false, activeContent = false, typing = false, background = [], stop, actions }: {
     turn: Turn;
     progress?: ThreadProgress | null;
     waiting?: boolean;
     /** The message already shows the running tool's activity row. */
     activeTool?: boolean;
+    /** Streaming text or reasoning already shows that the agent is working. */
+    activeContent?: boolean;
+    /** No text or reasoning is currently showing its own live activity. */
+    typing?: boolean;
     /** What the agent still runs in the background; only the thread's last turn is handed it. */
     background?: BackgroundTask[];
     /** Ends the agent process and its background work. */
@@ -23,6 +28,7 @@
   let hidden = $state(document.hidden);
   let now = $state(Date.now());
   const running = $derived(turn.status === 'running');
+  const preparing = $derived(running && typing && !waiting && !activeTool);
   const label = $derived(turn.status === 'done' ? strings.notify.done : turn.status === 'error' ? strings.notify.failed : turn.status === 'stopped' ? strings.chat.stopped : waiting ? strings.notify.needsYou : strings.chat.working);
   const spent = $derived(turn.startedAt === null ? null : Math.max(0, (turn.finishedAt ?? now) - turn.startedAt));
   const usage = $derived(turn.usage);
@@ -48,29 +54,31 @@
 </script>
 
 <svelte:document onvisibilitychange={() => hidden = document.hidden} />
+{#snippet metric(id: string, text: string | null, title?: string, quiet = false)}
+  <span class="dot" aria-hidden="true">·</span>
+  <span class:quiet data-testid={id} {title}>{text}</span>
+{/snippet}
+{#if preparing}
+  <div class="reply-pending"><TypingIndicator /><span aria-hidden="true">{strings.chat.preparingReply}</span></div>
+{/if}
 {#if turn.status !== 'queued' && !(running && activeTool && !waiting && background.length === 0 && !observed)}
-  <div class="summary" class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
-    {#if turn.status === 'done'}<Check size={14} />{:else if turn.status === 'error'}<CircleAlert size={14} />{:else if turn.status === 'stopped'}<Square size={12} />{:else}<LoaderCircle size={16} class="spinner" />{/if}
+  <div class="summary" class:preparing class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
+    {#if turn.status === 'done'}<Check size={14} />{:else if turn.status === 'error'}<CircleAlert size={14} />{:else if turn.status === 'stopped'}<Square size={12} />{:else if !preparing && !activeContent}<LoaderCircle size={16} class="spinner" />{/if}
     {#if spent !== null}
       <span data-testid="turn-elapsed">{fill(running ? strings.chat.workingFor : strings.chat.workedFor, { time: elapsed(spent) })}</span>
     {/if}
     {#if observed}
-      <span class="dot" aria-hidden="true">·</span>
-      <span data-testid="turn-progress" title={observed.detail ?? undefined}>{activityLabel}{observed.detail ? `: ${observed.detail}` : ''}</span>
-      <span class="dot" aria-hidden="true">·</span>
-      <span class:quiet={quiet >= 60_000} data-testid="turn-last-activity">{fill(quiet >= 60_000 ? strings.chat.noActivity : strings.chat.lastActivity, { time: elapsed(quiet) })}</span>
+      {@render metric('turn-progress', observed.detail ? `${activityLabel}: ${observed.detail}` : activityLabel, observed.detail ?? undefined)}
+      {@render metric('turn-last-activity', fill(quiet >= 60_000 ? strings.chat.noActivity : strings.chat.lastActivity, { time: elapsed(quiet) }), undefined, quiet >= 60_000)}
       {#if providerAge !== null && observed.providerAt! > observed.at}
-        <span class="dot" aria-hidden="true">·</span>
-        <span data-testid="turn-provider-signal">{fill(strings.chat.providerSignal, { time: elapsed(providerAge) })}</span>
+        {@render metric('turn-provider-signal', fill(strings.chat.providerSignal, { time: elapsed(providerAge) }))}
       {/if}
     {/if}
     {#if turn.finishedAt !== null}
-      <span class="dot" aria-hidden="true">·</span>
-      <span data-testid="turn-finished-at" title={new Date(turn.finishedAt).toLocaleString(formatLocale())}>{fill(strings.chat.finishedAt, { time: clockTime(turn.finishedAt) })}</span>
+      {@render metric('turn-finished-at', fill(strings.chat.finishedAt, { time: clockTime(turn.finishedAt) }), new Date(turn.finishedAt).toLocaleString(formatLocale()))}
     {/if}
     {#if total > 0}
-      <span class="dot" aria-hidden="true">·</span>
-      <span data-testid="turn-tokens" title={breakdown}>{formatTokens(total)} {strings.units.tokens}</span>
+      {@render metric('turn-tokens', `${formatTokens(total)} ${strings.units.tokens}`, breakdown)}
     {/if}
     {#if still}
       <span class="dot" aria-hidden="true">·</span>
@@ -90,6 +98,9 @@
 <style>
   .summary { display: flex; flex-wrap: wrap; align-self: stretch; align-items: center; gap: 4px 6px; margin: 12px 0 0 4px; font-size: var(--text-xs); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; }
   .summary[data-status='running'] { color: var(--color-accent); }
+  .reply-pending { display: flex; align-items: center; gap: 10px; align-self: flex-start; margin: var(--chat-block-gap) 0 0 var(--activity-padding); color: var(--color-muted-foreground); }
+  .reply-pending :global(.typing) { min-height: 40px; padding: 10px 14px; }
+  .summary.preparing { margin-top: 6px; color: var(--color-muted-foreground); }
   .summary[data-status='error'] { color: var(--color-danger); }
   .dot { opacity: .6; }
   [data-testid='turn-progress'] { min-width: 0; overflow-wrap: anywhere; }

@@ -14,8 +14,8 @@ export const WINDOW_FROM = 24;
 export const OVERSCAN = 4;
 /** What a message's slot is worth before it has been measured. */
 export const ESTIMATE = 80;
-/** The column's flex gap, which belongs to the slot a message takes. */
-export const GAP = 24;
+/** The column's --chat-message-gap in app.css, included in each measured slot. */
+export const GAP = 20;
 
 // -- the running totals ------------------------------------------------------
 // `sums[i]` is the height of everything above message `i`. A spacer is then
