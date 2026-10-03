@@ -604,7 +604,6 @@
 {/snippet}
 
 <div class="page" data-testid="accounts-page">
-  {#if store.owner}<SubscriptionProxySettings {store} />{/if}
   <header>
     <div>
       <h1>{strings.providerSettings.heading}<InfoTip topic={strings.providerSettings.heading} text={strings.providerSettings.intro} /></h1>
@@ -647,6 +646,7 @@
       {#each groups.rest as row (row.id)}{@render providerRow(row, groups.connected.length > 0)}{/each}
     </div>
   {/if}
+  {#if store.owner}<SubscriptionProxySettings {store} />{/if}
 </div>
 
 <style>
