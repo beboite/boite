@@ -141,6 +141,34 @@ test('a release directory planted as a symlink is not unpacked into', async () =
   expect(readFileSync(join(target, 'secret.txt'), 'utf8')).toBe('keep');
 });
 
+test('an install refuses a release reached through a symlink before it deletes anything', async () => {
+  const data = outside('boite-install-run-');
+  const escaped = outside('boite-install-run-out-');
+  mkdirSync(join(escaped, '1.0.0'), { recursive: true });
+  writeFileSync(join(escaped, '1.0.0', 'secret.txt'), 'keep');
+  const provider = join(data, 'agents', 'echo');
+  mkdirSync(provider, { recursive: true });
+  symlinkSync(escaped, join(provider, 'releases'), 'junction');
+  const bytes = new TextEncoder().encode('leak');
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const manager = new InstallManager(data);
+  const part = manager.partFile('echo', '1.0.0');
+  mkdirSync(join(provider, 'downloads'), { recursive: true });
+  writeFileSync(part, bytes);
+  writeFileSync(`${part}.json`, `${JSON.stringify({ url: 'https://example.invalid/agent', sha256, validator: null })}\n`);
+  const settled = new Promise<{ outcome: string }>((resolve) => { manager.onSettled(resolve); });
+  manager.start('echo', {
+    version: '1.0.0',
+    format: 'binary',
+    url: 'https://example.invalid/agent',
+    sha256,
+    archiveBytes: bytes.byteLength,
+    files: [{ path: 'secret.txt', bytes: bytes.byteLength }],
+  });
+  expect((await settled).outcome).toBe('failed');
+  expect(readFileSync(join(escaped, '1.0.0', 'secret.txt'), 'utf8')).toBe('keep');
+});
+
 test('prune does not follow a provider directory that is a symlink', () => {
   const data = outside('boite-prune-provider-');
   const escaped = outside('boite-prune-provider-out-');

@@ -389,6 +389,9 @@ export class InstallManager {
         log: (level, message) => this.#log(level, message),
       });
       this.#move(running, providerId, { state: 'extracting', version: install.version, operationId: running.operationId });
+      // A junction at `releases` or the provider directory would make this
+      // delete the target's files, and the extract check would only refuse after.
+      if (reachesThroughLink(this.dataDir, releaseDir)) throw refused('the release directory is a symlink');
       rmSync(releaseDir, { recursive: true, force: true });
       await extractRelease(install, running.controller.signal, part, releaseDir, this.dataDir);
       checkSizes(install, releaseDir);
@@ -418,7 +421,7 @@ export class InstallManager {
       // it got so far: the next install resumes there. A cancel, a wrong size or
       // a wrong digest starts over.
       if (!(error instanceof Dropped) && !(error instanceof Cancelled && error.keep)) dropPart(part);
-      rmSync(releaseDir, { recursive: true, force: true });
+      if (!reachesThroughLink(this.dataDir, releaseDir)) rmSync(releaseDir, { recursive: true, force: true });
       this.#running.delete(providerId);
       if (error instanceof Cancelled || (error as { name?: string } | null)?.name === 'InstallCancelled') {
         // Back to what is on disk: absent for a first install, the release that
