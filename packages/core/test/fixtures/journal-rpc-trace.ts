@@ -1,21 +1,25 @@
 import { spyOn } from 'bun:test';
 import { FrameQueue } from '../../src/server/frame-queue.ts';
 import { ServerConnection } from '../../src/server/connection.ts';
+import { BrowserControl } from '../../src/browser.ts';
 import { Router } from '../../src/router.ts';
 
 /** Test-only bounded metadata: never retain a request, response body or credential. */
-export function journalRpcTrace() {
+export function rpcTrace({ label = 'journal.inspect', methods = ['hello', 'pairing.grant', 'journal.inspect'], browser = false }: { label?: string; methods?: readonly string[]; browser?: boolean } = {}) {
   const events: Record<string, unknown>[] = [];
   const identities = new WeakMap<object, number>();
+  const roles = new WeakMap<object, string>();
+  const serverConnections = new Map<string, object>();
   let nextIdentity = 1;
-  const started = performance.now();
+  const started = performance.now(), wallStarted = Date.now();
   const identity = (object: object): number => {
     const known = identities.get(object);
     if (known !== undefined) return known;
     const id = nextIdentity++; identities.set(object, id); return id;
   };
   const record = (hop: string, object: object, metadata: Record<string, unknown> = {}): void => {
-    if (events.length < 64) events.push({ hop, connection: identity(object), timing: Math.round(performance.now() - started), ...metadata });
+    if (events.length === 64) events.shift();
+    events.push({ hop, connection: identity(object), role: roles.get(object), timing: Math.round(performance.now() - started), wallTiming: Date.now() - wallStarted, ...metadata });
   };
   const frame = (raw: unknown): Record<string, unknown> => {
     const type = typeof raw;
@@ -26,7 +30,7 @@ export function journalRpcTrace() {
       const parsed = value as { id?: unknown; method?: unknown; error?: { code?: unknown } };
       // The test uses numeric IDs and a fixed method whitelist. Arbitrary fields never enter the trace.
       return { ...(typeof parsed.id === 'number' ? { id: parsed.id } : {}),
-        ...(['hello', 'pairing.grant', 'journal.inspect'].includes(String(parsed.method)) ? { method: parsed.method } : {}),
+        ...(methods.includes(String(parsed.method)) ? { method: parsed.method } : {}),
         ...(typeof parsed.error?.code === 'number' ? { code: parsed.error.code } : {}) };
     } catch { return { type, length }; }
   };
@@ -36,13 +40,14 @@ export function journalRpcTrace() {
   const close = ServerConnection.prototype.close;
   const send = WebSocket.prototype.send;
   const addListener = WebSocket.prototype.addEventListener;
-  const spies = [
+  const spies: { mockRestore(): void }[] = [
     spyOn(FrameQueue.prototype, 'enqueue').mockImplementation(function (this: FrameQueue, connection, raw) {
+      serverConnections.set(connection.id, connection);
       record('server.enqueue', connection, { ...frame(raw), principal: connection.identity.principal });
       return enqueue.call(this, connection, raw);
     }),
     spyOn(Router.prototype, 'dispatch').mockImplementation(function (this: Router, method, params, ctx) {
-      record('router.dispatch', ctx.connection, { method, principal: ctx.connection.identity.principal });
+      record('router.dispatch', ctx.connection, { ...(methods.includes(method) ? { method } : {}), principal: ctx.connection.identity.principal });
       return dispatch.call(this, method, params, ctx);
     }),
     spyOn(ServerConnection.prototype, 'sendResponse').mockImplementation(function (this: ServerConnection, value) {
@@ -51,7 +56,7 @@ export function journalRpcTrace() {
       record('server.response.sent', this, { principal: this.identity.principal, bufferedAmount: this.bufferedAmount() });
     }),
     spyOn(ServerConnection.prototype, 'close').mockImplementation(function (this: ServerConnection, code, reason) {
-      record('server.close', this, { principal: this.identity.principal, code });
+      record('server.close', this, { principal: this.identity.principal, code, classification: reason === 'Protocol error - unexpected opcode' ? 'unexpected-opcode' : undefined });
       close.call(this, code, reason);
     }),
     spyOn(WebSocket.prototype, 'send').mockImplementation(function (this: WebSocket, raw) {
@@ -63,17 +68,45 @@ export function journalRpcTrace() {
     spyOn(WebSocket.prototype, 'addEventListener').mockImplementation(function (this: WebSocket, type: string, listener: EventListener | { handleEvent(event: Event): void }, options?: boolean | AddEventListenerOptions) {
       if (type !== 'message' && type !== 'close') return addListener.call(this, type, listener, options);
       const observed: EventListener = event => {
+        if (type === 'message') {
+          try {
+            const principal = JSON.parse((event as MessageEvent).data).result?.principal;
+            if (['owner', 'session', 'agent'].includes(principal)) roles.set(this, principal === 'session' ? 'phone' : principal);
+          } catch { /* Metadata only; invalid frames remain classified by frame(). */ }
+        }
         record(type === 'message' ? 'client.receive' : 'client.close', this,
-          type === 'message' ? frame((event as MessageEvent).data) : { code: (event as CloseEvent).code });
+          type === 'message' ? frame((event as MessageEvent).data) : { code: (event as CloseEvent).code, classification: (event as CloseEvent).reason === 'Protocol error - unexpected opcode' ? 'unexpected-opcode' : undefined });
         if (typeof listener === 'function') listener.call(this, event);
         else listener?.handleEvent(event);
       };
       return addListener.call(this, type, observed, options);
     }),
   ];
+  if (browser) {
+    const host = BrowserControl.prototype.host, release = BrowserControl.prototype.release, disconnect = BrowserControl.prototype.disconnect;
+    spies.push(
+      spyOn(BrowserControl.prototype, 'host').mockImplementation(function (this: BrowserControl, params, connection) {
+        record('browser.host', connection, { principal: connection.identity.principal, enabled: params.enabled, remote: params.remote === true, subscribed: connection.subscriptions.has(params.threadId) });
+        const result = host.call(this, params, connection);
+        record('browser.host.accepted', connection);
+        return result;
+      }),
+      spyOn(BrowserControl.prototype, 'release').mockImplementation(function (this: BrowserControl, threadId) {
+        record('browser.release', this);
+        return release.call(this, threadId);
+      }),
+      spyOn(BrowserControl.prototype, 'disconnect').mockImplementation(function (this: BrowserControl, connectionId) {
+        record('browser.disconnect', serverConnections.get(connectionId) ?? this);
+        return disconnect.call(this, connectionId);
+      }),
+    );
+  }
+  let restored = false;
   return {
-    restore() { for (const spy of spies.reverse()) spy.mockRestore(); },
-    printFailure() { console.error('journal.inspect RPC trace ' + JSON.stringify(events)); },
+    restore() { if (restored) return; restored = true; for (const spy of spies.reverse()) spy.mockRestore(); },
+    printFailure() { console.error(label + ' RPC trace ' + JSON.stringify(events)); },
     snapshot() { return events.map(event => ({ ...event })); },
   };
 }
+
+export function journalRpcTrace() { return rpcTrace(); }

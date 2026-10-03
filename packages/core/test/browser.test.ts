@@ -1,16 +1,27 @@
+import { rpcTrace } from './fixtures/journal-rpc-trace.ts';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { connect, type CoreClient } from '../src/client.ts';
 import { echoThread, startTestCore, type TestCore } from './harness.ts';
 
 let harness: TestCore, owner: CoreClient, agent: CoreClient, threadId: string;
+let opened: { harness?: TestCore; owner?: CoreClient; agent?: CoreClient } = {};
+let trace: ReturnType<typeof rpcTrace>;
+function browserTest(name: string, body: () => Promise<void>) {
+  test(name, async () => { try { await body(); } catch (error) { trace.printFailure(); throw error; } });
+}
 beforeEach(async () => {
-  harness = await startTestCore(); owner = await harness.connect();
-  ({ threadId } = await echoThread(harness, owner));
-  agent = await connect(harness.url, harness.core.agents.tokenFor(threadId), { client: { name: 'boite-cli', version: 'test' } });
+  opened = {};
+  trace = rpcTrace({ label: 'browser', browser: true, methods: ['hello', 'pairing.grant', 'threads.subscribe', 'browser.host', 'browser.command', 'browser.complete', 'browser.remoteFrame', 'browser.remoteInput'] });
+  try {
+    opened.harness = harness = await startTestCore();
+    opened.owner = owner = await harness.connect();
+    ({ threadId } = await echoThread(harness, owner));
+    opened.agent = agent = await connect(harness.url, harness.core.agents.tokenFor(threadId), { client: { name: 'boite-cli', version: 'test' } });
+  } catch (error) { trace.printFailure(); trace.restore(); throw error; }
 });
-afterEach(async () => { agent?.close(); owner?.close(); await harness?.stop(); });
+afterEach(async () => { try { opened.agent?.close(); opened.owner?.close(); await opened.harness?.stop(); } finally { trace?.restore(); } });
 
-test('an agent controls only its conversation; only the registered owner socket can answer', async () => {
+browserTest('an agent controls only its conversation; only the registered owner socket can answer', async () => {
   await expect(agent.call('browser.command', { threadId, action: { kind: 'snapshot' } })).rejects.toThrow('desktop app');
   await owner.call('threads.subscribe', { threadId });
   await expect(owner.call('browser.host', { threadId, enabled: true })).rejects.toThrow('explicit consent');
@@ -32,7 +43,7 @@ test('an agent controls only its conversation; only the registered owner socket 
   } finally { stranger.close(); }
 });
 
-test('leaving or losing the host settles in-flight work and requires a fresh registration', async () => {
+browserTest('leaving or losing the host settles in-flight work and requires a fresh registration', async () => {
   await owner.call('threads.subscribe', { threadId });
   await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: true });
   const requested = owner.next('browser.requested', () => true);
@@ -50,7 +61,7 @@ test('leaving or losing the host settles in-flight work and requires a fresh reg
   await expect(agent.call('browser.command', { threadId, action: { kind: 'status' } })).rejects.toThrow('desktop app');
 });
 
-test('paired viewers require desktop consent and a fresh frame of their own; capture does not block agent input', async () => {
+browserTest('paired viewers require desktop consent and a fresh frame of their own; capture does not block agent input', async () => {
   const { grant } = await owner.call('pairing.grant', {});
   const phone = await connect(harness.url, '', { grant, client: { name: 'pwa', version: 'test' } });
   try {
@@ -97,7 +108,7 @@ test('paired viewers require desktop consent and a fresh frame of their own; cap
   } finally { phone.close(); }
 });
 
-test('disabling sharing while a frame is in flight does not deliver it to a paired viewer', async () => {
+browserTest('disabling sharing while a frame is in flight does not deliver it to a paired viewer', async () => {
   const { grant } = await owner.call('pairing.grant', {});
   const phone = await connect(harness.url, '', { grant });
   try {
