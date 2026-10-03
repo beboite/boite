@@ -3,7 +3,7 @@ import { FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode } from '@boite/
 import { timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
-import { basename, dirname, join, normalize, resolve, sep } from 'node:path';
+import { dirname, join, normalize, resolve, sep } from 'node:path';
 import { eventThreadId, type EventPayload } from './bus.ts';
 import { mayReceiveEvent } from './access.ts';
 import type { Core } from './core.ts';
@@ -13,7 +13,7 @@ import type { SocketData } from './server/connection.ts';
 import { ServerConnection } from './server/connection.ts';
 import { handleFrame } from './server/frame.ts';
 import { FrameQueue } from './server/frame-queue.ts';
-import { fileResponse } from './server/file-response.ts';
+import { fdResponse } from './server/file-response.ts';
 export { ServerConnection } from './server/connection.ts';
 
 const DEFAULT_HELLO_TIMEOUT_MS = 5000;
@@ -240,22 +240,20 @@ function mayReadTodos(core: Core, connection: Connection, projectId: string): bo
  * is how a video seeks, and nothing is cached because the ticket outlives
  * neither the ten minutes nor the next write to the file.
  */
-function ticketedFile(core: Core, ticket: string, range: string | null): Response {
-  const target = core.fileTickets.resolve(ticket);
-  if (target === null || !existsSync(target.path)) return new Response('unknown or expired ticket', { status: 404 });
-  const file = Bun.file(target.path);
+async function ticketedFile(core: Core, ticket: string, range: string | null): Promise<Response> {
+  const opened = await core.fileTickets.open(ticket);
+  if (opened === null) return new Response('unknown or expired ticket', { status: 404 });
   const headers: Record<string, string> = {
-    'content-type': target.mime,
-    'accept-ranges': 'bytes',
+    'content-type': opened.mime,
     'cache-control': 'no-store',
     // The type is the one the extension named and nothing the bytes suggest,
     // and a ticket opened as a page downloads instead of rendering: an agent
     // picks what the panel opens, so no file of its may run in a window.
     // Neither header touches an <img> or a <video> loading the same address.
     'x-content-type-options': 'nosniff',
-    'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(target.name ?? basename(target.path))}`,
+    'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(opened.name ?? 'download')}`,
   };
-  return fileResponse(file, range, headers);
+  return fdResponse(opened.handle, opened.size, range, headers);
 }
 
 /**

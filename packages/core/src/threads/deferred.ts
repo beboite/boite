@@ -19,6 +19,12 @@ export class DeferredInput {
    * as the next prompt once that turn finished.
    */
   readonly deferredAnswers = new Map<ThreadId, string[]>();
+  /**
+   * Held text already written into the journal, waiting for the prompt that
+   * carries it. It leaves `deferredAnswers` so a stopped start cannot journal
+   * the same answer again, and so the pending bubble does not sit beside it.
+   */
+  readonly consumed = new Map<ThreadId, string>();
   /** A driver asked for a background turn while the thread's last turn was still closing. */
   readonly pendingWakes = new Map<ThreadId, string>();
 
@@ -89,7 +95,14 @@ export class DeferredInput {
   recordHeldBeforePrompt(threadId: ThreadId, turnId: string, promptAt: number): void {
     if (this.threads.runner.steering.has(threadId)) return;
     const held = this.deferredAnswers.get(threadId);
-    if (held?.length) this.recordAnswer(threadId, turnId, held.join('\n\n'), promptAt - 1);
+    if (!held?.length) return;
+    const text = held.join('\n\n');
+    this.recordAnswer(threadId, turnId, text, promptAt - 1);
+    // No `changed` here: this runs inside the startTurn transaction, and the
+    // status event after it already sees the empty map.
+    this.deferredAnswers.delete(threadId);
+    const previous = this.consumed.get(threadId);
+    this.consumed.set(threadId, previous ? `${previous}\n\n${text}` : text);
   }
 
   /** The held answers as one prompt, when the thread can take one. */
@@ -132,11 +145,15 @@ export class DeferredInput {
   /** What was held and never sent: it goes in front of the next prompt. */
   takeDeferred(threadId: ThreadId): string {
     if (this.threads.runner.steering.has(threadId)) return '';
+    const consumed = this.consumed.get(threadId);
     const held = this.deferredAnswers.get(threadId);
-    if (held === undefined) return '';
-    this.deferredAnswers.delete(threadId);
-    this.changed(threadId);
-    return held.join('\n\n') + '\n\n';
+    this.consumed.delete(threadId);
+    if (held !== undefined) {
+      this.deferredAnswers.delete(threadId);
+      this.changed(threadId);
+    }
+    const text = [consumed, held?.length ? held.join('\n\n') : undefined].filter((part): part is string => part !== undefined && part.length > 0).join('\n\n');
+    return text.length > 0 ? `${text}\n\n` : '';
   }
 
   /**

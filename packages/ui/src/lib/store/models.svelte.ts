@@ -314,7 +314,12 @@ export class Models {
         this.probedModels = { ...this.probedModels, [probeKey(choice.providerId, choice.accountId)]: result.models };
         this.saveModels();
       } catch (error) {
-        if (client === this.ctx.client && epoch === this.probeEpoch) this.ctx.fail(error);
+        const current = client === this.ctx.client && epoch === this.probeEpoch;
+        // An effort probe can fail for a model the catalog already lists. The
+        // draft still starts. Any other probe failure still stops it.
+        const known = s.modelsOf(provider.id, choice.accountId).some((model) => model.id === choice.model);
+        if (current && provider.protocol === 'acp' && choice.effort !== null && known) return choice;
+        if (current) this.ctx.fail(error);
         return null;
       }
     }

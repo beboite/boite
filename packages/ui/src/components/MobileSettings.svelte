@@ -1,9 +1,10 @@
 <script lang="ts">
   import TelemetrySettings from './TelemetrySettings.svelte';
-  import { Activity, ArchiveRestore, ArrowLeft, Bell, Brain, ChevronRight, Coins, Compass, FlaskConical, Gauge, Minimize2, Monitor, Palette, Mic, ShieldCheck } from '@lucide/svelte';
+  import { Activity, ArchiveRestore, ArrowLeft, Bell, Brain, ChevronRight, Coins, Compass, FlaskConical, Gauge, ListFilter, Minimize2, Monitor, Palette, Mic, ShieldCheck } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
+  import { recentPreferences } from '../lib/recent.svelte';
   import { mobileOverlay } from '../lib/mobile-history';
   import { openTour } from '../lib/onboarding.svelte';
   import AppearancePage from './AppearancePage.svelte';
@@ -23,6 +24,7 @@
   import InfoTip from './InfoTip.svelte';
 
   let { store, onopenthread }: { store: Store; onopenthread?: () => void } = $props();
+  const uid = $props.id();
   let phone = $state(false);
   /**
    * The phone has no General page, so the archive, which lives there on the
@@ -84,6 +86,12 @@
           <button class="ghost row" data-testid="settings-tab-experiments" onclick={() => store.showSettings('experiments')}>
             <FlaskConical size={20} /><span>{strings.settings.tabs.experiments}</span><ChevronRight size={18} />
           </button>
+          <label for="{uid}-group-working" class="row">
+            <ListFilter size={20} />
+            <span><span id="{uid}-group-working-name">{strings.settings.groupWorkingThreads}</span><InfoTip topic={strings.settings.groupWorkingThreads} text={strings.settings.groupWorkingThreadsHint} /></span>
+            <input id="{uid}-group-working" aria-labelledby="{uid}-group-working-name" type="checkbox" role="switch" data-testid="setting-group-working-threads"
+              checked={recentPreferences.groupWorking} onchange={event => recentPreferences.setGroupWorking(event.currentTarget.checked)} />
+          </label>
         </div>
       </section>
       <section aria-labelledby="remote-machines">

@@ -189,3 +189,15 @@ test('a failed catalog read preserves the draft and its cached selection', async
   expect(calls.mock.calls.some(([method]) => method === 'threads.create' || method === 'turns.start')).toBe(false);
   expect(store.modelsOf('codex', accountId).some(model => model.id === choice.model)).toBe(true);
 });
+
+test('an ACP effort probe that fails still keeps a model the catalog already lists', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0 });
+  const provider = store.providerOf('claude')!;
+  provider.protocol = 'acp';
+  provider.models = [{ id: 'claude-opus-5', name: 'Opus 5' }];
+  const account = store.accountsOf(provider.id)[0]!;
+  const choice = { providerId: provider.id, accountId: account.id, model: 'claude-opus-5', effort: 'high' as const, permissionMode: 'default' as const };
+  vi.spyOn(client, 'call').mockRejectedValue(new Error('effort scale unavailable'));
+  expect(await store.prepareDraftChoice(choice)).toEqual(choice);
+  expect(store.error).toBeNull();
+});

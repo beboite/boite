@@ -9,14 +9,15 @@
  * as base64 in a WebSocket message is paid for twice.
  */
 
-import { existsSync, lstatSync, realpathSync, statSync } from 'node:fs';
+import { constants, existsSync, lstatSync, realpathSync, statSync } from 'node:fs';
 import type { Stats } from 'node:fs';
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
+import { open, readdir, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { FILES_LIST_MAX, FILE_MAX_BYTES, FILE_ROUTE, FILE_TICKET_TTL_MS } from '@boite/contracts';
 import type { FileContent, FileEntry, ThreadId, Timestamp } from '@boite/contracts';
 import type { Core } from './core.ts';
-import { refused } from './errors.ts';
+import { refused, RpcFailure } from './errors.ts';
 import { newToken } from './ids.ts';
 
 /** How much of a file decides whether it is text: one NUL in there and it is not. */
@@ -75,7 +76,7 @@ export function existingInside(
   path: string,
   expect: 'file' | 'dir',
   what: string,
-): InsidePath & { stats: Stats } {
+): InsidePath & { stats: Stats; real: string } {
   const found = resolveInside(cwd, path, what);
   let real: string;
   let stats: Stats;
@@ -90,7 +91,73 @@ export function existingInside(
   }
   if (expect === 'file' && !stats.isFile()) throw refused(`${what} is not a file: ${path}`, { what, path });
   if (expect === 'dir' && !stats.isDirectory()) throw refused(`${what} is not a directory: ${path}`, { what, path });
-  return { ...found, stats };
+  return { ...found, real, stats };
+}
+
+const NOFOLLOW = constants.O_NOFOLLOW ?? 0;
+
+async function writeAll(handle: FileHandle, data: Uint8Array): Promise<void> {
+  let offset = 0;
+  while (offset < data.length) {
+    const { bytesWritten } = await handle.write(data, offset);
+    if (bytesWritten <= 0) throw refused('the file write made no progress');
+    offset += bytesWritten;
+  }
+}
+
+/** Open the real directory checked a moment ago. The handle stays on that inode if its path is renamed. */
+export async function openHeldDirectory(real: string, dev: number, ino: number, what: string, path: string): Promise<FileHandle> {
+  let handle: FileHandle;
+  try {
+    handle = await open(real, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | NOFOLLOW);
+  } catch {
+    throw refused(`${what} changed while it was opened: ${path}`, { what, path });
+  }
+  try {
+    const stats = await handle.stat();
+    if (!stats.isDirectory() || stats.dev !== dev || stats.ino !== ino) {
+      throw refused(`${what} changed while it was opened: ${path}`, { what, path });
+    }
+    return handle;
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
+}
+
+/**
+ * Create `name` inside a directory the caller holds. On Linux the new file is
+ * opened through that inode, so renaming the directory onto an outside link
+ * cannot redirect it. Elsewhere the fallback path is opened after the inode
+ * check; a swap in that gap can still create the file outside.
+ */
+export async function createExclusiveFile(dir: FileHandle, name: string, fallbackPath: string): Promise<FileHandle> {
+  if (name.length === 0 || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) {
+    throw refused(`files.write path is not a file name: ${name}`, { what: 'files.write path', path: name });
+  }
+  const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW;
+  const target = process.platform === 'linux' ? `/proc/self/fd/${dir.fd}/${name}` : fallbackPath;
+  return open(target, flags, 0o666);
+}
+
+/** Open the real file checked a moment ago, and refuse a symlink swapped in since. */
+async function openChecked(real: string, flags: number, dev: number, ino: number, what: string, path: string): Promise<FileHandle> {
+  let handle: FileHandle;
+  try {
+    handle = await open(real, flags | NOFOLLOW);
+  } catch {
+    throw refused(`${what} changed while it was opened: ${path}`, { what, path });
+  }
+  try {
+    const stats = await handle.stat();
+    if (!stats.isFile() || stats.dev !== dev || stats.ino !== ino) {
+      throw refused(`${what} changed while it was opened: ${path}`, { what, path });
+    }
+    return handle;
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
 }
 
 /**
@@ -230,24 +297,41 @@ export async function readFileContent(core: Core, cwd: string, path: string): Pr
   const found = existingInside(cwd, path, 'file', 'files.read path');
   const modifiedAt = Math.round(found.stats.mtimeMs);
   const media = mediaOf(found.relative);
-  if (found.stats.size <= FILE_MAX_BYTES && media.mime === 'application/octet-stream') {
-    const data = await readFile(found.absolute);
-    if (!hasNul(data)) {
-      // Past the cap here only by being written while it is read; the text is cut and said to be.
-      const cut = data.length > FILE_MAX_BYTES;
-      const text = new TextDecoder().decode(cut ? data.subarray(0, FILE_MAX_BYTES) : data);
-      return {
-        kind: 'text',
-        path: found.relative,
-        bytes: data.length,
-        modifiedAt,
-        text,
-        truncated: cut,
-        language: languageOf(found.relative),
-      };
+  const handle = await openChecked(found.real, constants.O_RDONLY, found.stats.dev, found.stats.ino, 'files.read path', path);
+  let ticketIdentity: string | null = null;
+  try {
+    if (found.stats.size <= FILE_MAX_BYTES && media.mime === 'application/octet-stream') {
+      const data = Buffer.alloc(found.stats.size);
+      let offset = 0;
+      while (offset < data.length) {
+        const { bytesRead } = await handle.read(data, offset, data.length - offset, offset);
+        if (bytesRead === 0) break;
+        offset += bytesRead;
+      }
+      const read = data.subarray(0, offset);
+      if (!hasNul(read)) {
+        const cut = read.length > FILE_MAX_BYTES;
+        const text = new TextDecoder().decode(cut ? read.subarray(0, FILE_MAX_BYTES) : read);
+        return {
+          kind: 'text',
+          path: found.relative,
+          bytes: read.length,
+          modifiedAt,
+          text,
+          truncated: cut,
+          language: languageOf(found.relative),
+        };
+      }
     }
+    const held = await handle.stat({ bigint: true });
+    ticketIdentity = `${found.real}|${held.dev}|${held.ino}|${held.size}|${held.mtimeNs}|${held.ctimeNs}`;
+  } finally {
+    await handle.close();
   }
-  const ticket = core.fileTickets.mint(found.absolute, media.mime);
+  if (ticketIdentity === null) throw refused(`files.read path changed while it was opened: ${path}`, { what: 'files.read path', path });
+  // The identity comes from the handle, not a second walk. A parent swapped
+  // before mint would otherwise bind the ticket to the new file.
+  const ticket = core.fileTickets.mint(found.real, media.mime, Date.now(), basename(found.absolute), ticketIdentity);
   return {
     kind: media.kind,
     path: found.relative,
@@ -270,7 +354,7 @@ export async function writeFileText(
   const found = resolveInside(cwd, path, 'files.write path');
   // Named by its relative form, so a refusal never prints where the data lives.
   const parent = found.relative.includes('/') ? found.relative.slice(0, found.relative.lastIndexOf('/')) : '.';
-  existingInside(cwd, parent, 'dir', 'files.write path directory');
+  const parentInside = existingInside(cwd, parent, 'dir', 'files.write path directory');
   // The entry itself, not what it points at: a link to nothing is still there,
   // and the write would follow it and create its target wherever that is.
   let entry: Stats | null = null;
@@ -279,15 +363,47 @@ export async function writeFileText(
   } catch {
     entry = null;
   }
+  const data = new TextEncoder().encode(text);
   if (entry !== null) {
     if (entry.isSymbolicLink() && !existsSync(found.absolute)) {
       throw refused(`files.write path is a link to nothing: ${path}`, { what: 'files.write path', path });
     }
     // The write follows a link: the real file has to be inside the working directory too.
-    existingInside(cwd, path, 'file', 'files.write path');
+    const inside = existingInside(cwd, path, 'file', 'files.write path');
+    // Truncate only after the inode matches. Windows Bun 1.4.2 returns EINVAL
+    // for O_WRONLY|O_TRUNC on an ordinary file, and truncating first would
+    // also shorten a file the check then refuses.
+    const handle = await openChecked(inside.real, constants.O_WRONLY, inside.stats.dev, inside.stats.ino, 'files.write path', path);
+    try {
+      await handle.truncate(0);
+      await writeAll(handle, data);
+    } finally {
+      await handle.close();
+    }
+  } else {
+    // Create the name in the held parent inode. O_EXCL plus O_NOFOLLOW still
+    // refuses a symlink that appears at that name. On Linux the create goes
+    // through the directory fd, so a parent renamed onto an outside link
+    // cannot receive the bytes. Other platforms open the path after this
+    // inode check; a swap in that gap can still create the file outside.
+    const dir = await openHeldDirectory(parentInside.real, parentInside.stats.dev, parentInside.stats.ino, 'files.write path directory', path);
+    try {
+      let handle: FileHandle;
+      try {
+        handle = await createExclusiveFile(dir, basename(found.absolute), join(parentInside.real, basename(found.absolute)));
+      } catch (error) {
+        if (error instanceof RpcFailure) throw error;
+        throw refused(`files.write path changed while it was opened: ${path}`, { what: 'files.write path', path });
+      }
+      try {
+        await writeAll(handle, data);
+      } finally {
+        await handle.close();
+      }
+    } finally {
+      await dir.close();
+    }
   }
-  const data = new TextEncoder().encode(text);
-  await writeFile(found.absolute, data);
   const stats = await stat(found.absolute);
   return { bytes: data.length, modifiedAt: Math.round(stats.mtimeMs) };
 }
@@ -316,10 +432,16 @@ function fileIdentity(path: string): string | null {
 export class FileTickets {
   private readonly held = new Map<string, FileTicketTarget & { expiresAt: number; identity: string | null }>();
 
-  mint(path: string, mime: string, now = Date.now(), name?: string): string {
+  mint(path: string, mime: string, now = Date.now(), name?: string, identity?: string): string {
     this.sweep(now);
     const ticket = newToken();
-    this.held.set(ticket, { path, mime, ...(name ? { name } : {}), expiresAt: now + FILE_TICKET_TTL_MS, identity: fileIdentity(path) });
+    this.held.set(ticket, {
+      path,
+      mime,
+      ...(name ? { name } : {}),
+      expiresAt: now + FILE_TICKET_TTL_MS,
+      identity: identity ?? fileIdentity(path),
+    });
     return ticket;
   }
 
@@ -340,6 +462,54 @@ export class FileTickets {
       return null;
     }
     return { path: entry.path, mime: entry.mime, ...(entry.name ? { name: entry.name } : {}) };
+  }
+
+  /** Drop every ticket. A revoked session must not keep a bearer URL alive. */
+  forgetAll(): void {
+    this.held.clear();
+  }
+
+  /** Drop tickets for files under `root`. Artifact tickets live outside a project cwd, so they stay. */
+  forgetUnder(root: string): void {
+    const base = realOf(root);
+    for (const [ticket, entry] of this.held) {
+      if (contains(base, realOf(entry.path))) this.held.delete(ticket);
+    }
+  }
+
+  /**
+   * Open the ticket's file without following a symlink swapped in after the
+   * mint. The handle is the caller's to close. A mismatch drops the ticket.
+   */
+  async open(ticket: string, now = Date.now()): Promise<{ handle: FileHandle; mime: string; name?: string; size: number } | null> {
+    this.sweep(now);
+    const entry = this.held.get(ticket);
+    if (entry === undefined || entry.identity === null) {
+      if (entry !== undefined) this.held.delete(ticket);
+      return null;
+    }
+    let handle: FileHandle;
+    try {
+      handle = await open(entry.path, constants.O_RDONLY | NOFOLLOW);
+    } catch {
+      this.held.delete(ticket);
+      return null;
+    }
+    try {
+      const stats = await handle.stat({ bigint: true });
+      // The stored identity leads with the real path. Comparing the fstat tail
+      // still rejects a swapped inode, including when the ticket named a link.
+      const suffix = `|${stats.dev}|${stats.ino}|${stats.size}|${stats.mtimeNs}|${stats.ctimeNs}`;
+      if (!stats.isFile() || suffix.length >= entry.identity.length || !entry.identity.endsWith(suffix)) {
+        this.held.delete(ticket);
+        await handle.close();
+        return null;
+      }
+      return { handle, mime: entry.mime, ...(entry.name ? { name: entry.name } : {}), size: Number(stats.size) };
+    } catch (error) {
+      await handle.close();
+      throw error;
+    }
   }
 
   private sweep(now: number): void {

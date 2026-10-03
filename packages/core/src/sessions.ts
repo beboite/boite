@@ -177,6 +177,7 @@ export class SessionStore {
     this.core.journal.append({ type: 'session.revoked', threadId: null, version: 1, payload: { id: sessionId } }, () => {
       this.core.journal.deleteSession(sessionId);
     });
+    this.core.fileTickets.forgetAll();
     this.forgetDelivery(sessionId);
     // The sockets first, so the event never reaches the client it is about.
     this.core.subscribers.closeSession(sessionId);

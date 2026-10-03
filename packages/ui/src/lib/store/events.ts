@@ -166,8 +166,16 @@ export function listen(ctx: StoreContext, client: Client): void {
     requests.mergePermissions([request], 'one');
     layout.notify('needs-you', request.threadId, null);
   });
-  on('permission.resolved', ({ requestId }) => {
+  on('permission.resolved', ({ requestId, threadId, decision }) => {
     requests.resolvePermission(requestId);
+    if (decision !== 'allow' && decision !== 'deny') return;
+    for (const thread of threads.threadSnapshots(threadId)) {
+      for (const message of thread.messages) {
+        for (const part of message.parts) {
+          if (part.type === 'permission' && part.requestId === requestId && part.decision === null) part.decision = decision;
+        }
+      }
+    }
   });
 
   on('question.asked', (request) => {
