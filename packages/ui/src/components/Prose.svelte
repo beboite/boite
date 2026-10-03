@@ -35,7 +35,7 @@
       if (opening) return;
       opening = true;
       void (directLinks ? openChatFile : openLocalFile)(directory, anchor.dataset.filePath).catch(reason => {
-        if (store) store.error = reason instanceof Error ? reason.message : String(reason);
+        store?.reportError(reason, 'minor');
       }).finally(() => { opening = false; });
       return;
     }

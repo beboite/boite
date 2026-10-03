@@ -54,7 +54,7 @@
       if (window.__TAURI_INTERNALS__ === undefined) browserDownload(`data:application/octet-stream;base64,${data}`, part.name ?? strings.composer.attachAlt);
       else await saveAttachment(part.name ?? strings.composer.attachAlt, decodeBase64(data), true);
     } catch (error) {
-      owner.error = error instanceof Error ? error.message : String(error);
+      owner.reportError(error, 'minor');
     }
   }
 
@@ -75,7 +75,7 @@
       src, name, mimeType: image.mimeType, kind: 'image',
       save: () => {
         if (window.__TAURI_INTERNALS__ === undefined) { browserDownload(src, name); return; }
-        saveAttachment(name, decodeBase64(image.data), false).catch((error: unknown) => { store.error = error instanceof Error ? error.message : String(error); });
+        saveAttachment(name, decodeBase64(image.data), false).catch((error: unknown) => { store.reportError(error, 'minor'); });
       }
     };
   }
