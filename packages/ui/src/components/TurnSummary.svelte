@@ -28,9 +28,19 @@
   let hidden = $state(document.hidden);
   let now = $state(Date.now());
   const running = $derived(turn.status === 'running');
-  const preparing = $derived(running && typing && !waiting && !activeTool);
-  const label = $derived(turn.status === 'done' ? strings.notify.done : turn.status === 'error' ? strings.notify.failed : turn.status === 'stopped' ? strings.chat.stopped : waiting ? strings.notify.needsYou : strings.chat.working);
+  const compactOperation = $derived(turn.execution?.operation === 'compact');
+  const observed = $derived(running && !waiting && progress?.turnId === turn.id ? progress : null);
+  const compacting = $derived(running && !waiting && (compactOperation || observed?.phase === 'compacting'));
+  const preparing = $derived(running && typing && !waiting && !activeTool && !compacting);
+  const label = $derived.by(() => {
+    if (compacting) return strings.chat.compacting;
+    if (turn.status === 'done') return compactOperation ? strings.chat.compactionUnknown : strings.notify.done;
+    if (turn.status === 'error') return compactOperation ? strings.chat.compactionFailed : strings.notify.failed;
+    if (turn.status === 'stopped') return compactOperation ? strings.chat.compactionStopped : strings.chat.stopped;
+    return waiting ? strings.notify.needsYou : strings.chat.working;
+  });
   const spent = $derived(turn.startedAt === null ? null : Math.max(0, (turn.finishedAt ?? now) - turn.startedAt));
+  const elapsedLabel = $derived(compactOperation ? turn.status === 'done' ? strings.chat.compactedFor : strings.chat.compactionElapsed : running ? strings.chat.workingFor : strings.chat.workedFor);
   const usage = $derived(turn.usage);
   const total = $derived(usage === null ? 0 : usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens);
   const breakdown = $derived(usage === null ? '' : [
@@ -39,7 +49,6 @@
     fill(strings.chat.cacheTokens, { read: formatTokens(usage.cacheReadTokens), write: formatTokens(usage.cacheWriteTokens) }),
   ].join('\n'));
   const still = $derived(backgroundLabel(background.map((task) => task.kind)));
-  const observed = $derived(running && !waiting && progress?.turnId === turn.id ? progress : null);
   const quiet = $derived(observed ? Math.max(0, now - observed.at) : 0);
   const activityLabel = $derived(observed ? strings.chat.progress[observed.phase] : null);
   const providerAge = $derived(observed?.providerAt == null ? null : Math.max(0, now - observed.providerAt));
@@ -61,11 +70,24 @@
 {#if preparing}
   <div class="reply-pending"><TypingIndicator /><span class="ui-label" aria-hidden="true">{strings.chat.preparingReply}</span></div>
 {/if}
-{#if turn.status !== 'queued' && !(running && activeTool && !waiting && background.length === 0 && !observed)}
-  <div class="summary" class:preparing class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
+{#if turn.status !== 'queued' && !(running && activeTool && !waiting && background.length === 0 && !observed && !compacting)}
+  <div class="summary" class:compacting class:preparing class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
+    {#if compacting}
+      <LoaderCircle size={18} class="spinner compaction-icon" aria-hidden="true" />
+      <div class="compaction-copy">
+        <span class="compaction-title ui-label">{strings.chat.compacting}</span>
+        <!-- Provider activity timestamps do not tell us when a mid-turn compaction began. -->
+        {#if compactOperation && spent !== null}
+          <span class="compaction-elapsed ui-label" data-testid="compaction-elapsed">{fill(strings.chat.compactionElapsed, { time: elapsed(spent) })}</span>
+        {/if}
+      </div>
+    {:else}
     {#if turn.status === 'done'}<Check size={14} />{:else if turn.status === 'error'}<CircleAlert size={14} />{:else if turn.status === 'stopped'}<Square size={12} />{:else if !preparing && !activeContent}<LoaderCircle size={16} class="spinner" />{/if}
     {#if spent !== null}
-      <span class="ui-label" data-testid="turn-elapsed">{fill(running ? strings.chat.workingFor : strings.chat.workedFor, { time: elapsed(spent) })}</span>
+      <span class="ui-label" data-testid="turn-elapsed">{fill(elapsedLabel, { time: elapsed(spent) })}</span>
+    {/if}
+    {#if compactOperation && (turn.status === 'error' || turn.status === 'stopped')}
+      {@render metric('compaction-result', label)}
     {/if}
     {#if observed}
       {@render metric('turn-progress', observed.detail ? `${activityLabel}: ${observed.detail}` : activityLabel, observed.detail ?? undefined)}
@@ -92,6 +114,7 @@
       {/if}
     {/if}
     {#if actions && !running}{@render actions()}{/if}
+    {/if}
   </div>
 {/if}
 
@@ -102,6 +125,11 @@
   .reply-pending :global(.typing) { min-height: 40px; padding: 10px 14px; }
   .summary.preparing { margin-top: 6px; color: var(--color-muted-foreground); }
   .summary[data-status='error'] { color: var(--color-danger); }
+  .summary.compacting { align-self: flex-start; align-items: flex-start; flex-wrap: nowrap; gap: 10px; max-width: 520px; box-sizing: border-box; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-2); }
+  .compaction-copy { min-width: 0; }
+  .compaction-title { display: block; color: var(--color-foreground); font-size: var(--text-sm); font-weight: 500; }
+  .compaction-elapsed { display: block; margin-top: 8px; color: var(--color-muted-foreground); }
+  .summary :global(.compaction-icon) { flex: none; margin-top: 1px; }
   .dot { opacity: .6; }
   [data-testid='turn-progress'] { min-width: 0; overflow-wrap: anywhere; }
   .quiet { color: var(--color-muted-foreground); }
@@ -115,4 +143,6 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
   @media (prefers-reduced-motion: reduce) { .summary :global(.spinner), .pulse { animation: none; } }
+  :global(html[data-motion='reduced']) .summary :global(.spinner),
+  :global(html[data-motion='reduced']) .summary .pulse { animation: none; }
 </style>

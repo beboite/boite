@@ -874,6 +874,11 @@ export const strings = {
     /** The footer of a turn: `Working 12s`, then `Worked 4m 41s`. */
     workingFor: 'Working for {time}',
     workedFor: 'Worked for {time}',
+    compacting: 'Compacting conversation',
+    compactionElapsed: 'Elapsed: {time}',
+    compactedFor: 'Compacted in {time}',
+    compactionFailed: 'Compaction failed',
+    compactionStopped: 'Compaction stopped',
     progress: { starting: 'Starting agent', thinking: 'Thinking', compacting: 'Compacting context', retrying: 'Retrying request', tool: 'Running tool', working: 'Receiving activity', waiting: 'Waiting for provider' },
     providerSignal: 'Provider signal {time} ago',
     lastActivity: 'Last activity {time} ago',
