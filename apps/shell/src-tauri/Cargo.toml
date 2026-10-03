@@ -9,7 +9,7 @@ license = "MIT"
 
 [lib]
 name = "boite_shell_lib"
-crate-type = ["lib", "cdylib", "staticlib"]
+crate-type = ["lib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

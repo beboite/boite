@@ -12,6 +12,6 @@ export function resolveMemoryLimits(settings: Pick<Settings, 'agentMemoryBudgetP
   return {
     budgetMb,
     threadMemoryCapMb: Math.min(settings.threadMemoryCapMb || roundDown(budgetMb / 2), budgetMb),
-    memoryReserveMb: settings.memoryReserveMb || Math.max(totalMb * 0.1, 3072),
+    memoryReserveMb: settings.memoryReserveMb || Math.max(totalMb * 0.1, Math.min(3072, totalMb / 4)),
   };
 }

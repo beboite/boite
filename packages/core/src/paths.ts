@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
-import { join, relative, sep } from 'node:path';
+import { existsSync } from 'node:fs';
+import { join, posix, relative, sep } from 'node:path';
 import type { Channel, Os } from '@boite/contracts';
 
 export function currentOs(): Os {
@@ -18,17 +19,29 @@ export function dataDirName(channel: Channel): string {
   return channel === 'dev' ? 'boite2-dev' : 'boite2';
 }
 
-export function defaultDataDir(channel: Channel = 'stable'): string {
+export function defaultDataDir(
+  channel: Channel = 'stable',
+  os: Os = currentOs(),
+  env: Record<string, string | undefined> = process.env,
+  home = homedir(),
+  exists: (path: string) => boolean = existsSync,
+): string {
   const name = dataDirName(channel);
-  switch (currentOs()) {
+  switch (os) {
     case 'windows': {
-      const local = process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local');
+      const local = env.LOCALAPPDATA ?? join(home, 'AppData', 'Local');
       return join(local, name);
     }
     case 'macos':
-      return join(homedir(), 'Library', 'Application Support', name);
-    default:
-      return join(homedir(), '.local', 'share', name);
+      return posix.join(home, 'Library', 'Application Support', name);
+    default: {
+      const dataHome = env.XDG_DATA_HOME;
+      const legacy = posix.join(home, '.local', 'share', name);
+      if (!dataHome || !posix.isAbsolute(dataHome)) return legacy;
+      const directory = posix.join(dataHome, name);
+      // An upgrade must not hide conversations stored before XDG support.
+      return exists(posix.join(legacy, 'journal.db')) && !exists(posix.join(directory, 'journal.db')) ? legacy : directory;
+    }
   }
 }
 

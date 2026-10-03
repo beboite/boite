@@ -1522,7 +1522,7 @@ export interface Settings {
    * exceed the budget. The kernel safety net sits 10% above this quota on Windows.
    */
   threadMemoryCapMb: number;
-  /** Memory kept available in MB. 0 uses the larger of 10% of physical RAM and 3 GB. */
+  /** Memory kept available in MB. 0 uses 10% of RAM or 3 GB; below 12 GB, it uses 25% of RAM. */
   memoryReserveMb: number;
   /** Automatic memory stops and Windows allocation caps. Missing means enabled. */
   memoryProtection?: boolean;

@@ -155,7 +155,9 @@ pub(crate) fn build_main_window<R: Runtime>(
             .inner_size(MAIN_SIZE.0, MAIN_SIZE.1)
             .min_inner_size(MAIN_MIN_SIZE.0, MAIN_MIN_SIZE.1)
             .resizable(true)
-            .decorations(cfg!(target_os = "macos"))
+            // Linux lets the window manager choose buttons, their order and
+            // title-bar actions. Windows draws its captions in the page.
+            .decorations(!cfg!(windows))
             .visible(false)
             .focused(!hidden())
             .skip_taskbar(hidden())
@@ -303,9 +305,9 @@ const MENU_QUIT: &str = "boite-menu-quit";
 /// quit). This keeps the Edit items WKWebView needs for copy and paste, and the
 /// application menu, with Quit on a click only.
 #[cfg(target_os = "macos")]
-pub(crate) fn install_macos_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+pub(crate) fn install_macos_menu<R: Runtime>(app: &AppHandle<R>, channel: Channel) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem, PredefinedMenuItem as Item, Submenu};
-    let name = app.package_info().name.clone();
+    let name = product_label(app, channel);
     let quit = MenuItem::with_id(app, MENU_QUIT, format!("Quit {name}"), true, None::<&str>)?;
     let application = Submenu::with_items(app, &name, true, &[
         &Item::about(app, None, None)?, &Item::separator(app)?, &Item::services(app, None)?, &Item::separator(app)?,

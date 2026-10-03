@@ -39,7 +39,8 @@ retains a lock while its recorded PID is alive.
 | `--channel stable\|dev` | Selects the default `boite2` or `boite2-dev` directory |
 
 Directory selection is `--data-dir`, then `BOITE_DATA_DIR`, then the platform
-default: `%LOCALAPPDATA%\boite2`, `~/.local/share/boite2` or
+default: `%LOCALAPPDATA%\boite2`, `$XDG_DATA_HOME/boite2` (an absolute value,
+otherwise `~/.local/share/boite2`) or
 `~/Library/Application Support/boite2`. It contains the journal, accounts,
 providers and managed installs. Tests must use fresh directories.
 
