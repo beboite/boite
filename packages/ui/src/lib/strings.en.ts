@@ -1511,7 +1511,7 @@ export const strings = {
     untitled: 'Untitled thread',
     archived: 'Archived',
     emptyRange: 'No turn finished in the last {days} days.',
-    unpriced: '{providers} report no price, so their turns add nothing to the cost.',
+    unpriced: 'No API cost is reported for {providers}. These turns are excluded from the estimate.',
     unreported: '{count} turns reported no usage. They count as turns only.',
     limits: 'Limits',
     limitsOwner: 'Subscription limits are read on the computer that runs Boite. Open this page there to see them.',

@@ -1451,7 +1451,7 @@ export const fr: Translation = {
     untitled: 'Conversation sans titre',
     archived: 'Archivée',
     emptyRange: "Aucun tour terminé sur les {days} derniers jours.",
-    unpriced: "{providers} ne donnent aucun tarif, leurs tours n'ajoutent donc rien au coût.",
+    unpriced: "Aucun coût API n'est rapporté pour {providers}. Ces tours sont exclus de l'estimation.",
     unreported: "{count} tours n'ont rapporté aucune consommation. Ils comptent seulement comme des tours.",
     limits: 'Limites',
     limitsOwner: "Les limites d'abonnement sont lues sur l'ordinateur qui fait tourner Boite. Ouvrez cette page là-bas pour les voir.",
