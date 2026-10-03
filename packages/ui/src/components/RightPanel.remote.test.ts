@@ -77,13 +77,27 @@ test('an agent tab on the PC shows up by itself on a paired phone and goes away 
   expect(button('launch-browser').disabled).toBe(false);
   button('launch-browser').click(); await settle();
   expect(store.panel.active?.kind).toBe('browser');
-  // The agent closes its tab: the view leaves; the next tab shows up again.
+  // The tab goes and comes back, as the PC reports it on a reconnect: the view
+  // leaves with it and does not open over the composer again by itself.
+  store.panel.close(store.panel.active!.id); await settle();
   changed!({ threadId: 't-trace', live: false }); await settle();
   expect(store.panel.surfaces).toHaveLength(0);
   expect(button('launch-browser').disabled).toBe(true);
   changed!({ threadId: 't-trace', live: true }); await settle();
-  expect(store.panel.active?.kind).toBe('browser');
+  expect(store.panel.surfaces).toHaveLength(0);
+  // So does a watcher restarted on the same conversation.
   stop();
+  const again = watchRemoteBrowser(store, 't-trace'); await settle();
+  expect(store.panel.surfaces).toHaveLength(0);
+  expect(button('launch-browser').disabled).toBe(false);
+  // Leaving the conversation (App stops the watcher once the thread changed)
+  // and coming back shows the tab again.
+  const open = async (id: string) => { const opening = store.open(id); await vi.advanceTimersByTimeAsync(50); await opening; await settle(); };
+  await open('t-scheduler'); again();
+  await open('t-trace');
+  const back = watchRemoteBrowser(store, 't-trace'); await settle();
+  expect(store.panel.active?.kind).toBe('browser');
+  back();
   expect(create).not.toHaveBeenCalled();
 });
 

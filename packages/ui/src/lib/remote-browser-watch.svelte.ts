@@ -4,7 +4,11 @@ import { rightPanel } from './right-panel.svelte';
 
 /** The conversations, by thread key, whose agent browser tab the PC shares right now. */
 export const remoteLive = new SvelteSet<string>();
-/** Shown once per shared tab: a panel the user closed stays closed until the next one. */
+/**
+ * Shown once per visit: a panel the user closed stays closed until they leave the
+ * conversation. The PC announces its tab again after a reconnect, an experiment
+ * toggled or the conversation reopened there, and none of that reopens it.
+ */
 const shown = new Set<string>();
 
 /**
@@ -21,7 +25,7 @@ export function watchRemoteBrowser(store: Store, threadId: string): () => void {
     if (stopped) return;
     const tabs = panel.surfaces.filter(surface => surface.kind === 'browser');
     if (!live) {
-      remoteLive.delete(key); shown.delete(key);
+      remoteLive.delete(key);
       for (const tab of tabs) panel.close(tab.id);
       return;
     }
@@ -38,5 +42,9 @@ export function watchRemoteBrowser(store: Store, threadId: string): () => void {
     });
   };
   ask(0);
-  return () => { stopped = true; clearTimeout(retry); off(); remoteLive.delete(key); };
+  return () => {
+    stopped = true; clearTimeout(retry); off(); remoteLive.delete(key);
+    // A watcher also restarts on a reconnect, with the conversation still open.
+    if (store.openThread?.id !== threadId) shown.delete(key);
+  };
 }
