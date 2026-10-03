@@ -106,7 +106,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 588,000 |
-| UI files, excluding `.br` and `.gz` copies | 3,980,000 |
+| UI files, excluding `.br` and `.gz` copies | 3,990,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,376,000 |
 
@@ -122,6 +122,12 @@ Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured
 3,961,330 UI bytes and 3,239,585 emitted core JavaScript bytes on the same day.
 Reproduce it with `bun run build:ui && bun run build:core && bun scripts/ci/budgets.ts`.
+
+On 2026-10-03, `290ba1f3` measured 3,977,635 UI bytes. Adding project Working
+and Done counters, folded project lists and their empty states measured
+3,983,551 bytes, a 5,916-byte increase using the same source filename hashes.
+The UI total limit is 3,990,000 bytes, leaving 6,449 bytes of headroom. The
+534,926-byte entry remains below its unchanged limit; core limits are unchanged.
 
 Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
