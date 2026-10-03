@@ -125,6 +125,9 @@ worktree storage, network access, public URLs, browser origins and provider
 sign-ins stay on their own machine. Each owner machine card has a Settings for
 this machine button beside its synchronization control. It opens resource and
 execution settings for that core without changing the active conversation.
+Agent update checks, versions and the automatic update switch sit directly
+under that machine's card. Desktop and server updates also live in Machines;
+the footer's download shortcut opens this tab without switching cores.
 Checking synchronization leaves the machine list open. The button is available
 on desktop and phone; offline machines cannot be edited. The report names
 providers that still need signing in on the target

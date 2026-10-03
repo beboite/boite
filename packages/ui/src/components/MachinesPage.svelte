@@ -11,6 +11,9 @@
   import PhoneSettings from './PhoneSettings.svelte';
   import MachineSettings from './MachineSettings.svelte';
   import ServerUpdateCard from './ServerUpdateCard.svelte';
+  import HarnessUpdatesCard from './HarnessUpdatesCard.svelte';
+  import AppUpdateContent from './AppUpdateContent.svelte';
+  import { showAppUpdateUi } from '../lib/app-update.svelte';
   import PairMachine from './PairMachine.svelte';
   let { mobile = false }: { mobile?: boolean } = $props();
   let customizing = $state<string | null>(null);
@@ -54,6 +57,13 @@
     </div>
 
   </header>
+
+  {#if showAppUpdateUi()}
+    <section class="card app-update-card" id="settings-updates" data-testid="app-update-card">
+      <h2>{strings.appUpdate.heading}<span>{strings.machines.local}</span></h2>
+      <AppUpdateContent beforeInstall={() => undefined} />
+    </section>
+  {/if}
 
   <PairMachine {mobile} bind:this={pairingForm} />
 
@@ -131,6 +141,7 @@
           {/if}
         {/if}
         {#if !machine.store.localCore}<ServerUpdateCard store={machine.store} label={machine.label} />{/if}
+        {#if machine.store.owner}<HarnessUpdatesCard store={machine.store} />{/if}
         {#if mobile && machine.store.pairingRequired && (machine.store.error === strings.errors.unpaired || machine.store.error === strings.errors.revoked)}
           <p class="pair-hint">{strings.mobile.pairInstalled}</p>
         {:else if machine.store.error}<p class="error">{machine.store.error}</p>{/if}
@@ -159,6 +170,9 @@
   }
   .machines-page > :global(*) { max-width: var(--settings-width); }
   .machines { margin-bottom: 20px; }
+  .app-update-card { padding: 0; margin-bottom: 20px; }
+  .app-update-card h2 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 0; padding: 14px 14px 0; font-size: var(--text-sm); }
+  .app-update-card h2 span { font-size: var(--text-xs); font-weight: 400; color: var(--color-muted-foreground); }
   .head {
     display: flex;
     align-items: flex-start;

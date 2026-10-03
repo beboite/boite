@@ -66,7 +66,6 @@ import { workspace } from '../lib/workspace.svelte';
       { id: 'archived', label: strings.settings.archived.heading },
       ...(store.owner ? [{ id: 'worktrees', label: strings.settings.worktrees.heading }] : []),
       { id: 'app', label: strings.settings.app },
-      ...(showAppUpdateUi() ? [{ id: 'updates', label: strings.appUpdate.heading }] : []),
       ...(store.owner ? [{ id: 'privacy', label: strings.telemetry.heading }] : [])
     ],
     appearance: [{ id: 'theme', label: strings.settings.display }, { id: 'reading', label: strings.settings.reading }, { id: 'workspace', label: strings.settings.workspace }, { id: 'buttons', label: strings.controls.heading }],
@@ -90,6 +89,7 @@ import { workspace } from '../lib/workspace.svelte';
     ],
     machines: [
       { id: 'machines', label: strings.machines.heading },
+      ...(showAppUpdateUi() ? [{ id: 'updates', label: strings.appUpdate.heading }] : []),
       // MachinesPage draws the card only while this window owns two machines.
       ...(workspace.machines.filter((machine) => machine.store.owner).length > 1 ? [{ id: 'agent-links', label: strings.machines.agentLinks }] : []),
       { id: 'devices', label: strings.settings.pairing.heading },
@@ -140,7 +140,9 @@ import { workspace } from '../lib/workspace.svelte';
     ['appearance', 'buttons', strings.terminal.title],
     ['appearance', 'buttons', strings.rightPanel.trace],
     ['accounts', null, strings.settings.modelDefaults],
-    ['accounts', null, strings.harnessUpdates.auto],
+    ['machines', 'machines', strings.harnessUpdates.auto],
+    ['machines', 'machines', strings.harnessUpdates.heading],
+    ['machines', 'machines', strings.serverUpdate.updates],
     ['resources', 'quiet', strings.settings.focusGuard],
     ['resources', 'quiet', strings.settings.muteAgents],
     ['resources', 'limits', strings.settings.memoryProtection],

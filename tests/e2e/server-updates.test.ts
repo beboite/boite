@@ -31,7 +31,7 @@ async function capture(name: string) {
   await page.screenshot(join(captureDir, `server-update-${name}.png`));
 }
 
-test('current servers hide update actions and available updates open their owning machine', async () => {
+test('the update shortcut opens Machines and server actions target their owning machine', async () => {
   await size(1400);
   await machines();
   await page.waitFor(`document.querySelector('${card} ${id('server-update-check')}')`);
@@ -40,10 +40,11 @@ test('current servers hide update actions and available updates open their ownin
   await capture('current-desktop');
   await page.navigate(`${base}/?fake=1&machines=1&open=recent&serverUpdate=available`);
   await page.waitFor(`document.querySelector('${id('nav-app-update')}')`);
+  const active = await page.evaluate('window.__boiteTest.workspace.active.machineId');
   await page.click(id('nav-app-update'));
-  await page.waitFor(`Array.from(document.querySelectorAll('${id('nav-server-update')}')).some(button => button.textContent.includes('Builder'))`);
-  await page.evaluate(`Array.from(document.querySelectorAll('${id('nav-server-update')}')).find(button => button.textContent.includes('Builder')).click()`);
-  await page.waitFor(`window.__boiteTest.workspace.active.machineId === 'http://builder.test' && document.querySelector('${card} ${id('server-update-install')}')`);
+  await page.waitFor(`document.querySelector('${card} ${id('server-update-install')}')`);
+  expect(await page.evaluate('window.__boiteTest.workspace.active.machineId')).toBe(active);
+  expect(await page.evaluate(`document.querySelector('${id('app-update-popover')}') === null`)).toBe(true);
   await capture('available-desktop');
   await page.click(`${card} ${id('server-update-install')}`);
   await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);

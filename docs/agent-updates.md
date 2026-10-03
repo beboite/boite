@@ -15,29 +15,24 @@ agents without a readable latest version.
 
 ## What the user sees
 
-A newer version is a notice pinned under the title bar, top right. It carries
-the agent, the new version, the installed one, and two buttons. It does not
-time out. It leaves on Update, on Skip, or when the core reports the agent
-current. Three notices show at most; a phone shows one at a time and only on
-the conversation screen, below the conversation's header row so its title and
-buttons stay in reach.
+Settings, Machines lists each machine's agents with their installed and
+available versions, Update and Skip. The footer's download shortcut opens
+Machines when an update is pending. Updates create no pinned chat notice.
 
 - Update releases the provider's warm processes and runs the update in the
-  background: the notice leaves at once. The threads stay; the next turn starts
-  the new version. Settings, Providers shows the agent as updating meanwhile.
+  background. The row shows progress; the next turn starts the new version.
 - Skip stops offering that version. A later version is offered again.
-  In Settings, Providers, each provider's row shows its agent's version, the
-  newer one when there is one, and offers a skipped version again.
-- A failed update brings its notice back with the updater's error and Try
+  The same row in Machines offers a skipped version again.
+- A failed update keeps the updater's error and Try
   again. Standard error takes priority over progress on standard output; an
   explicit error takes priority over npm's final log-file location.
 - When the agent that runs is the user's own install (the `self` route), its
-  provider row offers no Update for a copy Boite downloaded earlier: that copy
+  update row offers no Update for a copy Boite downloaded earlier: that copy
   is not what runs, and the version shown is the one the update reads.
 
-`Automatic updates` at the top of Settings, Providers makes the core update by
-itself. It is off by default. `Check for updates` beside it reads every
-version again.
+`Automatic updates` under each machine's agents makes that core update by
+itself. It is off by default. `Check for updates` reads its versions again.
+Providers keeps installed versions, sign-ins and installation controls.
 
 ## Two routes
 
@@ -96,8 +91,8 @@ POSIX group can survive. Output draining ends two seconds later even if a
 descendant still holds the pipe. Only the last 256 KB of each stream is kept.
 
 A check reads two agents at a time. Its readings land in
-`<dataDir>/harness-versions.json`, so a restart shows the last reading and its
-notices without running any agent. At start the core reads each managed agent
+`<dataDir>/harness-versions.json`, so a restart shows the last reading without
+running any agent. At start the core reads each managed agent
 again, which spawns nothing, so a Boite build that pins a newer release offers
 it at once; a kept row whose agent is gone, changed route or now resolves to
 another program is dropped. An agent that updates itself keeps its kept reading until
@@ -113,7 +108,7 @@ dropped connection by itself and fails once the retries run out
 card is already downloading that release joins that download instead of
 failing. A download cancelled from the install card fails the update with
 `the download was cancelled`, and a release the install card lands clears the
-notice at once, without waiting for the next check.
+offer at once, without waiting for the next check.
 
 ## Rules
 
@@ -140,15 +135,15 @@ notice at once, without waiting for the next check.
 ## Remote machines
 
 A multi-machine client keeps separate update lists and routes each action to
-the owning core ([machines](machines.md)). Notices name the machine when more
-than one is connected.
+the owning core ([machines](machines.md)). Each agent row stays under its own
+machine's card, including when provider IDs match on different machines.
 
 With `autoUpdateHarnesses` enabled, a headless core checks ten minutes after
 startup and every six hours, postponing checks while work is active. Enable it
-in Settings, Providers on that machine. Providers without a managed release
+under that machine's agents in Settings, Machines. Providers without a managed release
 use the self route as the core user. An unwritable npm prefix fails before the
 updater starts and names the directory; other updater permission failures
-appear in the notice.
+appear on the update row.
 
 To fix that, install the agent under the core user's own prefix. Run these
 commands as that user, then place `$HOME/.local/bin` before the system agent directory in the core service's
@@ -165,8 +160,8 @@ Restart the core after its active turns finish. The reading kept from the old
 copy is dropped, since the program moved, and the check runs ten minutes after
 start; `Check for updates` reads at once.
 Installing a second copy without changing the service's `PATH` leaves the old
-copy selected. A remote core owns these installations even when the notice is
-displayed by a desktop client.
+copy selected. A remote core owns these installations even when its update
+controls are displayed by a desktop client.
 
 A core older than this feature answers `MethodNotFound` to `providers.updates`.
 The client treats that machine as having no updates and shows no error.
@@ -175,7 +170,7 @@ The client treats that machine as having no updates and shows no error.
 
 - `providers.updates { refresh? }`: the list, answered from the last reading
   without running any agent. `refresh: true` reads every agent first. On a core
-  with no reading yet the list is empty; Settings, Providers asks for a refresh
+  with no reading yet the list is empty; Settings, Machines asks for a refresh
   when it opens on an empty list.
 - `providers.update { providerId }`: start one update.
 - `providers.updateSkip { providerId, version }`: skip a version, `null`
@@ -183,6 +178,6 @@ The client treats that machine as having no updates and shows no error.
 - `providers.updatesChanged`: the whole list, after each check, update or skip.
 
 Tests: `packages/core/test/updates.test.ts` runs a fixture agent with a real
-updater; `tests/e2e/harness-updates.test.ts` captures the notices and the
-settings card at desktop and phone widths on the fake client
+updater; `tests/e2e/harness-updates.test.ts` checks machine ownership and captures
+the update controls at desktop and phone widths on the fake client
 (`?fake=1&updates=1`).

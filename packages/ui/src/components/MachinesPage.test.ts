@@ -64,6 +64,9 @@ test('sync stays on the list and the settings button edits the owning machine wi
   expect(document.querySelector('[data-testid="machine-sync-report"]')).toBeNull();
   expect(document.querySelector('[data-testid="machine-settings"]')).toBeNull();
   expect(target.store.settings).toMatchObject({ warmProcessMinutes: 2, agentMemoryBudgetPercent: 40 });
+  query<HTMLInputElement>('[data-machine-id="target"] [data-testid="setting-auto-update-harnesses"]').click();
+  await vi.waitFor(() => expect(target.store.settings?.autoUpdateHarnesses).toBe(true));
+  expect(source.store.settings?.autoUpdateHarnesses).toBe(false);
 
   query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-settings-open"]').click();
   flushSync();
@@ -80,9 +83,6 @@ test('sync stays on the list and the settings button edits the owning machine wi
   query<HTMLButtonElement>('[data-testid="scheduler-save"]').click();
   await vi.waitFor(() => expect(target.store.settings?.warmProcessMinutes).toBe(12));
   expect(source.store.settings?.warmProcessMinutes).toBe(9);
-  query<HTMLInputElement>('[data-testid="setting-auto-update-harnesses"]').click();
-  await vi.waitFor(() => expect(target.store.settings?.autoUpdateHarnesses).toBe(true));
-  expect(source.store.settings?.autoUpdateHarnesses).toBe(false);
   expect(document.querySelector('[data-testid="worktree-storage"]')).not.toBeNull();
   await source.store.client!.call('settings.set', { asyncQuestions: true });
   await vi.waitFor(() => expect(target.store.settings?.asyncQuestions).toBe(true));

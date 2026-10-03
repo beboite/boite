@@ -3,103 +3,73 @@ import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 import { startUi } from './lib/ui.ts';
 
-
 let server: { close(): Promise<void> };
 let page: BrowserPage;
 let url: string;
 const id = (name: string) => `[data-testid="${name}"]`;
-const notice = (provider: string) => `${id('harness-update-notice')}[data-update-provider="${provider}"]`;
-async function settled() {
-  await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
+const local = `${id('machine-card')}:first-child`;
+const remote = `${id('machine-card')}[data-machine-id="http://builder.test"]`;
+const row = (card: string, provider: string) => `${card} ${id('machine-agent-update')}[data-provider-id="${provider}"]`;
+async function capture(name: string) {
+  await page.evaluate('document.fonts.ready');
+  await page.evaluate('Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await page.screenshot(join(process.env.BOITE_UPDATE_CAPTURES ?? join(import.meta.dir, '.artifacts'), `${name}.png`));
 }
-async function capture(name: string) { await settled(); await page.screenshot(join(import.meta.dir, '.artifacts', name)); }
-const desktop = () => page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
-const phone = () => page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+const size = (width: number) => page.send('Emulation.setDeviceMetricsOverride', { width, height: width < 720 ? 844 : 1000, deviceScaleFactor: 1, mobile: width < 720 });
+async function machines() {
+  await page.click(id('nav-app-update'));
+  await page.waitFor(`document.querySelectorAll('${id('harness-updates-card')}').length === 2`);
+}
 
 beforeAll(async () => {
-  // The fake client is deliberately absent from production bundles.
-  const port = await freePort();
-  url = `http://127.0.0.1:${port}/?fake=1&updates=1&open=recent`;
+  const port = await freePort(); url = `http://127.0.0.1:${port}/?fake=1&updates=1&machines=1&open=recent`;
   server = await startUi(port);
 }, 60_000);
-beforeEach(async () => {
-  page = await BrowserPage.launch({ url });
-  await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
-  await desktop();
-}, 30_000);
+beforeEach(async () => { page = await BrowserPage.launch({ url }); await size(1400); await page.waitFor(`document.querySelector('${id('nav-app-update')}')`); }, 30_000);
 afterEach(async () => { await page?.close(); }, 15_000);
 afterAll(async () => { await server?.close(); }, 15_000);
 
-test('an agent update is a pinned notice with Update and Skip, on a desktop and on a phone', async () => {
-  await page.waitFor(`document.querySelectorAll('${id('harness-update-notice')}').length === 2`);
-  // Pinned to the top right corner, where neither the composer nor the sidebar is.
-  const overlap = await page.evaluate(`(() => {
-    const notices = document.querySelector('${id('harness-update-notices')}').getBoundingClientRect();
-    const composer = document.querySelector('${id('composer')}').getBoundingClientRect();
-    return { right: notices.right, top: notices.top, clear: notices.bottom <= composer.top };
-  })()`) as { right: number; top: number; clear: boolean };
-  expect(overlap.right).toBeGreaterThan(1400 - 32);
-  expect(overlap.top).toBeLessThan(80);
-  expect(overlap.clear).toBe(true);
-  await capture('harness-updates-desktop.png');
+test('agent updates stay in Machines and Update and Skip target their own machine on desktop and phone', async () => {
+  expect(await page.evaluate(`document.querySelector('${id('harness-update-notices')}') === null`)).toBe(true);
+  await capture('harness-updates-chat');
+  await machines();
+  expect(await page.evaluate(`document.querySelector('${id('app-update-popover')}') === null`)).toBe(true);
+  await capture('harness-updates-desktop');
 
-  await phone();
-  // One card at a time on a phone, under the header.
-  expect(await page.evaluate(`[...document.querySelectorAll('${id('harness-update-notice')}')].filter(card => card.offsetParent !== null).length`)).toBe(1);
-  expect(await page.evaluate(`document.documentElement.scrollWidth <= 390`)).toBe(true);
-  // Below the conversation's own header row: its title and toggles stay in reach.
-  expect(await page.evaluate(`(() => {
-    const card = [...document.querySelectorAll('${id('harness-update-notice')}')].find(card => card.offsetParent !== null).getBoundingClientRect();
-    return card.top >= document.querySelector('${id('thread-header')}').getBoundingClientRect().bottom;
-  })()`)).toBe(true);
-  await capture('harness-updates-phone.png');
-  await desktop();
+  await page.click(`${row(local, 'claude')} ${id('harness-update-skip')}`);
+  await page.waitFor(`document.querySelector('${row(local, 'claude')} ${id('harness-update-unskip')}')`);
+  expect(await page.evaluate(`document.querySelector('${row(remote, 'claude')} ${id('harness-update-row-run')}') !== null`)).toBe(true);
+  await page.click(`${row(remote, 'codex')} ${id('harness-update-row-run')}`);
+  await page.waitFor(`document.querySelector('${row(remote, 'codex')} .version')?.textContent === '0.155.1'`);
+  expect(await page.evaluate(`document.querySelector('${row(local, 'codex')} ${id('harness-update-row-run')}') !== null`)).toBe(true);
+  await page.click(`${remote} ${id('setting-auto-update-harnesses')}`);
+  await page.waitFor(`document.querySelector('${remote} ${id('setting-auto-update-harnesses')}').checked`);
+  expect(await page.evaluate(`document.querySelector('${local} ${id('setting-auto-update-harnesses')}').checked`)).toBe(false);
 
-  // Skip takes this version off the screen and nothing else.
-  await page.click(`${notice('claude')} ${id('harness-update-skip')}`);
-  await page.waitFor(`document.querySelector('${notice('claude')}') === null`);
-  expect(await page.evaluate(`document.querySelectorAll('${id('harness-update-notice')}').length`)).toBe(1);
+  await size(390);
+  await page.waitFor(`document.querySelector('${id('machines-page')}')`);
+  await page.evaluate(`document.querySelector('${local}').scrollIntoView({block:'start'})`);
+  await capture('harness-updates-phone');
+  await page.click(`${row(local, 'claude')} ${id('harness-update-unskip')}`);
+  await page.waitFor(`document.querySelector('${row(local, 'claude')} ${id('harness-update-row-run')}')`);
+  await page.click(`${row(local, 'codex')} ${id('harness-update-row-run')}`);
+  await page.waitFor(`document.querySelector('${row(local, 'codex')} .version')?.textContent === '0.155.1'`);
+}, 30_000);
 
-  // Update takes the card away at once; the agent updates in the background.
-  await page.click(`${notice('codex')} ${id('harness-update-run')}`);
-  await page.waitFor(`document.querySelector('${id('harness-update-notices')}') === null`);
-}, 20_000);
-
-test('Settings, Providers shows every agent version on its row, offers a skipped version again and carries the automatic switch', async () => {
-  await page.click(`${notice('claude')} ${id('harness-update-skip')}`);
-  await page.waitFor(`document.querySelector('${notice('claude')}') === null`);
-  await page.click(id('nav-settings')); await page.click(id('settings-tab-accounts'));
-  await page.waitFor(`document.querySelectorAll('${id('provider-update')}').length === 4`);
-  const text = await page.evaluate(`document.querySelector('${id('accounts-page')}').textContent`) as string;
-  expect(text).toContain('2.1.278 skipped');
-  // The separate updates card is gone: every version sits on its provider's row.
-  expect(await page.evaluate(`document.querySelector('${id('harness-updates-card')}') === null`)).toBe(true);
-  expect(await page.evaluate(`document.querySelector('[data-update-provider="opencode"]').closest('${id('provider-settings')}').dataset.providerId`)).toBe('opencode');
-  expect(await page.evaluate(`document.querySelector('[data-update-provider="opencode"] .version').title`)).toContain('Up to date');
-  // An agent that cannot name its newest release offers its updater instead of a version,
-  // on the one Antigravity row its CLI shares with the download Boite manages.
-  const cli = '[data-update-provider="antigravity-cli"]';
+test('unknown releases run their own updater and Providers keeps only installed versions', async () => {
+  await machines();
+  const cli = row(local, 'antigravity-cli');
+  expect(await page.evaluate(`document.querySelector('${row(local, 'opencode')} .version').title`)).toContain('Up to date');
   expect(await page.evaluate(`document.querySelector('${cli} .version').title`)).toContain('Checks by itself');
-  expect(await page.evaluate(`document.querySelector('${cli} ${id('harness-update-row-blind')}') !== null`)).toBe(true);
-  expect(await page.evaluate(`document.querySelector('${cli}').closest('${id('provider-settings')}').dataset.providerId`)).toBe('antigravity');
-  // Its updater ran and exited clean: the row says so instead of offering it again.
   await page.click(`${cli} ${id('harness-update-row-blind')}`);
   await page.waitFor(`document.querySelector('${cli} ${id('harness-update-current')}')`);
   expect(await page.evaluate(`document.querySelector('${cli} ${id('harness-update-row-blind')}') === null`)).toBe(true);
-  await capture('harness-update-blind-current.png');
-
-  await page.click(id('setting-auto-update-harnesses'));
-  await page.waitFor(`document.querySelector('${id('setting-auto-update-harnesses')}').checked`);
-  await capture('harness-updates-settings.png');
-
-  await page.click(id('harness-update-unskip'));
-  await page.waitFor(`document.querySelector('${notice('claude')}') !== null`);
-
-  await phone();
-  // A phone's settings keep their one column to themselves.
-  expect(await page.evaluate(`document.querySelector('${id('harness-update-notices')}').offsetParent === null`)).toBe(true);
-  expect(await page.evaluate(`document.documentElement.scrollWidth <= 390`)).toBe(true);
-  await capture('harness-updates-settings-phone.png');
-  await desktop();
-// Includes the first lazy Settings import and captures at both viewport sizes.
-}, 20_000);
+  await capture('harness-update-blind-current');
+  await page.click(id('settings-tab-accounts'));
+  await page.waitFor(`document.querySelectorAll('${id('provider-update')}').length === 4`);
+  expect(await page.evaluate(`document.querySelector('[data-update-provider="claude"] .version').textContent`)).toBe('2.1.267');
+  for (const name of ['harness-updates-check', 'setting-auto-update-harnesses', 'harness-update-row-run', 'harness-update-row-blind', 'install-update']) {
+    expect(await page.evaluate(`document.querySelector('${id('accounts-page')} ${id(name)}') === null`)).toBe(true);
+  }
+}, 30_000);
