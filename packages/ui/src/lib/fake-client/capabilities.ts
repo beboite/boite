@@ -1,4 +1,4 @@
-import { deriveThreadCapabilities, threadActive } from '@boite/contracts';
+import { deriveThreadCapabilities, protocolSupportsSteering, threadActive } from '@boite/contracts';
 import type { FakeContext, FakeMethods } from './context';
 
 /** The fixture reports its implemented controls through the same pure mapping as the core. */
@@ -13,7 +13,7 @@ export function capabilityMethods(ctx: FakeContext): Pick<FakeMethods, 'threads.
       const running = ctx.inFlight.get(threadId);
       const pendingApprovals = [...ctx.pendingPermissions.values()].some(item => item.request.threadId === threadId);
       const pendingQuestions = [...ctx.pendingQuestions.values()].filter(item => item.request.threadId === threadId);
-      const steeringSupported = protocol !== null && ['echo', 'claude-sdk', 'codex-appserver', 'pi'].includes(protocol);
+      const steeringSupported = protocolSupportsSteering(protocol);
       const steeringReason = thread.status !== 'running' || !turn || !running || running.cancelled ? 'not-running'
         : turn.execution?.operation === 'compact' ? 'busy'
         : !steeringSupported ? 'unsupported'

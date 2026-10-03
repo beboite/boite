@@ -750,7 +750,7 @@ describe('server', () => {
     } catch (error) {
       after = (error as Error).message;
     }
-    expect(['the socket closed', 'the client is closed']).toContain(after);
+    expect(after).toMatch(/^the (socket closed|client is closed)/);
   });
 
   test('an owner pairing link becomes a key that drives the core as its owner, until it is revoked', async () => {

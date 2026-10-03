@@ -100,7 +100,11 @@ export class TurnRunner {
     const completion = await settleTurn(this.core, { queued, running, thread, result, started, finished });
     // No in-memory events or after-finish effects run before the transaction
     // commits. Even a failure in the thread write cannot publish completion twice.
-    if (completion === null) return;
+    if (completion === null) {
+      // An abandoned result still owns its old progress, but a newer turn does not.
+      if (!this.core.journal.isClosed()) this.threads.progress.end(threadId, turnId);
+      return;
+    }
     const { next, sameSession, threadOwned } = completion;
     this.threads.progress.end(threadId, turnId);
     if (threadOwned) {

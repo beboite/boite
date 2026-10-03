@@ -78,7 +78,7 @@ export class DelegationWaits {
         try {
           directChildren(this.core, params.threadId, params.agentId);
           const agents = this.agents(params.threadId).filter(agent => params.agentId === undefined || agent.thread.id === params.agentId);
-          const waiting = agents.some(agent => !agent.lastTurn || ['queued', 'running'].includes(agent.lastTurn.status));
+          const waiting = agents.some(agent => agent.lastTurn !== null && ['queued', 'running'].includes(agent.lastTurn.status));
           if (waiting && !timedOut) return;
           cleanup();
           resolve({ state: waiting ? 'waiting_for_children' : params.agentId && agents.some(agent => agent.resultRef) ? 'result_available' : 'settled', timedOut, agents });

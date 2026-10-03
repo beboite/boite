@@ -41,7 +41,8 @@ test('terminal persistence recovers twice without replaying the provider or publ
   }
 });
 
-test.each(['stopped', 'queued'] as const)('settlement does not overwrite a turn replaced with %s during backoff', async status => {
+test.each(['stopped', 'queued', 'running', 'newer-running'] as const)('settlement does not overwrite a turn replaced with %s during backoff', async replacementKind => {
+  const status = replacementKind === 'newer-running' ? 'stopped' : replacementKind;
   const h = await startTestCore();
   const putTurn = h.core.journal.putTurn.bind(h.core.journal);
   let failed = false;
@@ -56,11 +57,23 @@ test.each(['stopped', 'queued'] as const)('settlement does not overwrite a turn 
     const { threadId } = await echoThread(h, client);
     const turn = await client.call('turns.start', { threadId, prompt: 'replaced' });
     await waitFor(() => failed);
-    const replacement = { ...h.core.journal.getTurn(turn.id)!, status, startedAt: status === 'queued' ? null : turn.startedAt, finishedAt: status === 'queued' ? null : 42 };
+    h.core.threads.progress.report(threadId, turn.id, 'tool', 'Old execution tool');
+    const replacement = { ...h.core.journal.getTurn(turn.id)!, status, startedAt: status === 'queued' ? null : status === 'running' ? Date.now() + 1 : turn.startedAt, finishedAt: status === 'running' || status === 'queued' ? null : 42 };
     putTurn(replacement);
+    let newerId: string | null = null;
+    if (replacementKind === 'newer-running') {
+      newerId = `${turn.id}-newer`;
+      putTurn({ ...replacement, id: newerId, status: 'running', startedAt: Date.now(), finishedAt: null, execution: { ...turn.execution!, sessionGeneration: 7 } });
+      h.core.journal.putThread({ ...h.core.threads.require(threadId), sessionGeneration: 7, status: 'running' });
+      h.core.threads.progress.begin(threadId, newerId);
+      h.core.threads.progress.report(threadId, newerId, 'tool', 'New execution tool');
+    }
     await waitFor(() => h.core.scheduler.state().running.length === 0);
     expect(h.core.journal.getTurn(turn.id)).toEqual(replacement);
     expect(finishedEvents).toBe(0);
+    expect(h.core.threads.get(threadId).progress).toEqual(newerId
+      ? expect.objectContaining({ turnId: newerId, phase: 'tool', detail: 'New execution tool' })
+      : null);
   } finally { h.core.journal.putTurn = putTurn; await h.stop(); }
 });
 

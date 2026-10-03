@@ -109,7 +109,7 @@ test('registered protocol metadata stays cold and live steering uses the action 
   } finally { get.mockRestore(); spawn.mockRestore(); child.mockRestore(); piped.mockRestore(); owner.close(); }
 });
 
-test('real and fake capability RPCs share mapping for the same idle echo facts', async () => {
+test('real and fake capability RPCs agree on echo facts and idle steering for every protocol', async () => {
   h = await startTestCore();
   const owner = await h.connect();
   const { threadId } = await echoThread(h, owner);
@@ -119,5 +119,14 @@ test('real and fake capability RPCs share mapping for the same idle echo facts',
   const ctx = { thread: () => full, providers: h.core.providers.list().loaded, accounts: h.core.accounts.list(),
     inFlight: new Map(), pendingPermissions: new Map(), pendingQuestions: new Map() };
   expect(await capabilityMethods(ctx)['threads.capabilities']({ threadId })).toEqual(real);
+  const provider = h.core.providers.require('echo');
+  const get = spyOn(h.core.providers, 'get');
+  try {
+    for (const protocol of ['echo', 'claude-sdk', 'codex-appserver', 'acp', 'pi', 'muse', 'agy'] as const) {
+      get.mockImplementation(() => ({ ...provider, protocol }));
+      const fake = await capabilityMethods({ ...ctx, providers: ctx.providers.map(item => ({ ...item, protocol })) })['threads.capabilities']({ threadId });
+      expect(fake.steering).toEqual(threadCapabilities(h.core, threadId).steering);
+    }
+  } finally { get.mockRestore(); }
   owner.close();
 });

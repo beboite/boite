@@ -229,12 +229,16 @@ export class ThreadBranching {
         if (native) plan = { sessionId: native.sessionId, sessionResumeAt: null, session: 'native' };
       }
       const current = this.threads.require(source.id);
-      if (current.updatedAt !== source.updatedAt || current.selectionVersion !== source.selectionVersion
+      // Seeded snapshots may outlive changes to the source's next selection.
+      // Native cuts require the unchanged session, including a prepared cut
+      // discarded by an unsupported-verification fallback.
+      const preparedNative = checkpoint !== null || plan !== null;
+      if (this.core.journal.messageRowid(source.id, target.id) !== rowid
+        || JSON.stringify(this.core.journal.getMessage(target.id)) !== JSON.stringify(target)
+        || (preparedNative && (current.updatedAt !== source.updatedAt || current.selectionVersion !== source.selectionVersion
         || current.sessionId !== source.sessionId || current.sessionGeneration !== source.sessionGeneration
         || current.providerId !== source.providerId || current.accountId !== source.accountId || current.cwd !== source.cwd
-        || this.core.journal.messageRowid(source.id, target.id) !== rowid
-        || JSON.stringify(this.core.journal.getMessage(target.id)) !== JSON.stringify(target)
-        || (checkpoint && JSON.stringify(this.nativeForkCheckpoint(current, target.turnId)) !== JSON.stringify(checkpoint))) {
+        || (checkpoint && JSON.stringify(this.nativeForkCheckpoint(current, target.turnId)) !== JSON.stringify(checkpoint))))) {
         throw refused('the source thread changed while preparing its fork; retry the fork', { threadId: source.id, expected: 'the unchanged source boundary' });
       }
       const result = this.persistFork(source, messages, [...new Set(messages.map(message => message.turnId))].flatMap(id => {

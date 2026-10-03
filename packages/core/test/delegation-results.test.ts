@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { connect } from '../src/client.ts';
 import { ServerConnection } from '../src/server.ts';
 import { runCli } from '../src/cli.ts';
-import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
+import { refused } from '../src/errors.ts';
+import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
@@ -31,6 +32,26 @@ async function setup() {
   await waitFor(() => pending.has(child.thread.id));
   return { h, client, threadId, child, pending, async stop() { await h.stop(); restore(); } };
 }
+
+test('a child whose initial turn could not start settles individual and team waits', async () => {
+  const h = await startTestCore();
+  const client = await h.connect();
+  const { threadId } = await echoThread(h, client);
+  const start = spyOn(h.core.threads, 'startTurn').mockImplementation(() => { throw refused('fixture startup refused'); });
+  try {
+    await expect(client.call('delegation.spawn', { threadId, profileId: CONVERSATION_PROFILE_ID, task: 'Inspect source', requestId: 'failed-start' })).rejects.toThrow('fixture startup refused');
+    const view = await client.call('delegation.get', { threadId });
+    expect(view.settlement).toBe('settled');
+    expect(view.agents).toHaveLength(1);
+    const child = view.agents[0]!;
+    expect(child).toMatchObject({ lastTurn: null, settlement: 'settled', thread: { status: 'error' } });
+    for (const agentId of [child.thread.id, undefined]) {
+      const result = await client.call('delegation.wait', { threadId, agentId, timeoutMs: 0 });
+      expect(result).toMatchObject({ state: 'settled', timedOut: false, agents: [child] });
+      expect(h.core.delegation.waits.size).toBe(0);
+    }
+  } finally { start.mockRestore(); await h.stop(); }
+});
 
 test('full child result pages and concurrent wait do not duplicate bounded automatic mail', async () => {
   const s = await setup();

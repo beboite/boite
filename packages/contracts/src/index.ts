@@ -3358,4 +3358,4 @@ export function supportsSideQuestions(protocol: Protocol): boolean {
 
 export { sideQuestionSnapshot } from './side-question-snapshot.ts';
 
-export { deriveThreadCapabilities, type ThreadCapabilitySnapshot } from './thread-capabilities.ts';
+export { deriveThreadCapabilities, protocolSupportsSteering, type ThreadCapabilitySnapshot } from './thread-capabilities.ts';

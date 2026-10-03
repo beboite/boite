@@ -1,6 +1,28 @@
-import { expect } from 'vitest';
+import { expect, vi } from 'vitest';
 import { test } from '../../test/fake-client';
-import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode } from '@boite/contracts';
+import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, RpcErrorCode } from '@boite/contracts';
+import { FakeContext } from './context';
+import { seed } from './seed';
+import { delegationMethods } from './delegation';
+
+test('fake individual and team waits settle after a child fails before its first turn', async () => {
+  const ctx = new FakeContext({ delayMs: 0 });
+  seed(ctx);
+  const methods = delegationMethods(ctx);
+  const threadId = 't-trace';
+  const start = vi.spyOn(ctx, 'startTurn').mockImplementation(() => { throw new Error('fixture startup refused'); });
+  try {
+    await expect(methods['delegation.spawn']({ threadId, profileId: CONVERSATION_PROFILE_ID, task: 'Inspect source', requestId: 'failed-start' })).rejects.toThrow('fixture startup refused');
+    const view = await methods['delegation.get']({ threadId });
+    expect(view.settlement).toBe('settled');
+    expect(view.agents).toHaveLength(1);
+    const child = view.agents[0]!;
+    expect(child.lastTurn).toBeNull();
+    for (const agentId of [child.thread.id, undefined]) {
+      expect(await methods['delegation.wait']({ threadId, agentId, timeoutMs: 0 })).toMatchObject({ state: 'settled', timedOut: false, agents: [child] });
+    }
+  } finally { start.mockRestore(); }
+});
 
 test('fake waits and bounded result pages preserve one automatic result and paired read scope', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });

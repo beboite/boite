@@ -1,5 +1,10 @@
 import type { Protocol, ProviderCapabilities, ProviderId, ThreadCapabilities, ThreadCapability, ThreadCapabilityReason, ThreadId } from './index.ts';
 
+/** Known protocol support; a live handle still decides whether a turn can accept input. */
+export function protocolSupportsSteering(protocol: Protocol | null): boolean {
+  return protocol !== null && ['echo', 'claude-sdk', 'codex-appserver', 'pi', 'muse'].includes(protocol);
+}
+
 /** Observed facts only. Gathering them must neither load a driver nor start a process. */
 export interface ThreadCapabilitySnapshot {
   threadId: ThreadId;
