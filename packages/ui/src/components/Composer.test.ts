@@ -1058,17 +1058,25 @@ test('the composer buttons keep the focus where it was, and a removed chip opens
     expect(pressed(selector), selector).toBe(true);
   }
 
-  // Keyboard closed: neither the preview nor the removal focuses the box.
+  // Keyboard closed: neither the preview nor the removal focuses the box. Each
+  // press starts from an empty focus and is checked before anything else runs:
+  // on a loaded runner, another close path can hand the focus back to the
+  // composer later, which says nothing about the press.
+  const focus = vi.spyOn(input(), 'focus');
   input().blur();
   query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
+  expect(focus).not.toHaveBeenCalled();
   await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
-  expect(document.activeElement).not.toBe(input());
   // Nothing has the focus, so Escape reaches the app: it closes the preview first.
+  input().blur();
   document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  expect(focus).not.toHaveBeenCalled();
   await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') === null);
+  input().blur();
   query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
+  expect(focus).not.toHaveBeenCalled();
   await waitFor(() => chips().length === 0);
-  expect(document.activeElement).not.toBe(input());
+  focus.mockRestore();
 
   // Keyboard open: it stays open through the removal.
   paste(pngFile());
