@@ -172,6 +172,12 @@ archived lists; restore keeps history without resuming work. Paired devices may
 archive and restore. Project archive only hides the project; its existing turns
 continue. New work in it restores the project. Drafts cannot be archived.
 `Project.archivedThreads` counts archived top-level threads and updates clients.
+An archive or delete action on the open conversation returns to a draft in its project.
+Removing a background conversation keeps the current conversation on screen.
+
+Chat text selection never activates a file or conversation link at the end of
+the drag. A later click or keyboard activation still opens the link. Delayed
+cross-machine conversation links yield to a newer conversation or draft.
 
 Recent keeps completed conversations in a collapsed Done section at the bottom.
 Mark done uses the persistent archive and its undo action; `threads.archive`
@@ -203,6 +209,11 @@ work finishes, a question arrives or a draft starts, its project returns to the
 main list. Expansion follows the owning project between desktop and phone for
 the current session. Phone search exposes matching
 working conversations even when their counter is closed.
+Recent project order uses the latest user message among live conversations,
+including imported history. Removing or moving the newest conversation lowers
+the project; empty projects follow those with conversations. A selected project
+promoted to the top by a new prompt also scrolls the desktop sidebar to the top.
+Custom project order remains fixed until the user changes it.
 
 Visible desktop thread rows read their PR again every 15 seconds, on a turn's
 status change and when the app becomes visible. Folded rows and hidden windows

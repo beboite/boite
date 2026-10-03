@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import WindowList from './WindowList.svelte';
   import WhipButton from './WhipButton.svelte';
@@ -19,7 +19,7 @@
   import { sidebarRows } from '../lib/sidebar-rows.svelte';
   import { projectMenu } from '../lib/project-menu';
   import { work } from '../lib/work-prefs.svelte';
-  import { PROJECT_DRAG_TYPE, projectKey, projectView, type ProjectEntry } from '../lib/project-view.svelte';
+  import { PROJECT_DRAG_TYPE, projectActivity, projectKey, projectView, type ProjectEntry } from '../lib/project-view.svelte';
   import { activeProject, projectThreadLists, projectThreadView } from '../lib/project-threads.svelte';
   import ProjectViews from './ProjectViews.svelte';
   import RecentGroup from './RecentGroup.svelte';
@@ -61,6 +61,19 @@
   let activeGroups = $derived(groups.filter(activeProject));
   let otherGroups = $derived(groups.filter(entry => !activeProject(entry)));
   let shownGroups = $derived([...activeGroups, ...(projectThreadView.otherOpen ? otherGroups : [])]);
+  let previousLeader: { key: string; activity: number } | undefined;
+  $effect(() => {
+    const first = activeGroups[0];
+    const next = first && { key: projectKey(first), activity: projectActivity(first) };
+    const promoted = next && previousLeader && next.key !== previousLeader.key && next.activity > previousLeader.activity;
+    previousLeader = next;
+    // Follow a new prompt in the selected project; removing rows keeps the reading position.
+    if (promoted && workspace.view === 'projects' && projectView.order === 'recent'
+      && untrack(() => first.machine.store === workspace.active && first.project.id === store.openProject?.id)) {
+      savedScroll = 0;
+      void tick().then(() => { if (scrollRoot && activeGroups[0] && projectKey(activeGroups[0]) === next.key) scrollRoot.scrollTop = 0; });
+    }
+  });
   let shelved = $derived(all.filter(({ project }) => project.archived === true));
   let selected = $derived(projectView.selected(groups));
   let recentGroups = $derived(selected ? [selected] : groups);

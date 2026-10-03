@@ -25,6 +25,27 @@ async function ready() {
   return store;
 }
 
+test.each(['archive', 'removeThread'] as const)('%s leaves the open conversation on its project draft', async (action) => {
+  const store = await ready();
+  await store.open('t-trace');
+  const projectId = store.openThread!.projectId;
+  await store[action]('t-trace');
+  expect(store.openThread).toBeNull();
+  expect(store.draft?.projectId).toBe(projectId);
+  expect(store.threads.some(thread => thread.id === 't-descriptors')).toBe(true);
+  await store.reload();
+  expect(store.openThread).toBeNull();
+  expect(store.draft?.projectId).toBe(projectId);
+});
+
+test.each(['archive', 'removeThread'] as const)('%s in the background preserves the conversation being read', async (action) => {
+  const store = await ready();
+  await store.open('t-descriptors');
+  await store[action]('t-trace');
+  expect(store.openThread?.id).toBe('t-descriptors');
+  expect(store.draft).toBeNull();
+});
+
 test('deleting a just-archived thread removes its undo offer and reopening skips it', async () => {
   const store = await ready();
   expect(await archiveThread(store, 't-trace')).toBe(true);

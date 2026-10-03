@@ -672,13 +672,8 @@ export class Threads {
       this.ctx.threadReads.change(threadId, null);
       this.threads = this.threads.filter((t) => t.id !== threadId);
       this.ctx.requests.dropRequestsOf(threadId);
-      const wasOpen = this.openThread?.id === threadId;
-      if (wasOpen) this.openThread = null;
+      if (this.openThread?.id === threadId) this.ctx.store.startDraft(this.openThread.projectId, { refresh: false });
       this.forgetThread(threadId);
-      if (wasOpen) {
-        await this.unsubscribe();
-        await this.ctx.store.openWhereLeft();
-      }
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     }
@@ -721,13 +716,10 @@ export class Threads {
     this.threads = this.threads.filter(t => t.id !== threadId);
     forgetArchivedThread(s, threadId);
     this.ctx.requests.dropRequestsOf(threadId);
-    this.forgetThread(threadId);
     if (this.#openTarget === threadId) { this.openGeneration++; this.#openTarget = null; }
     if (s.delegationThread?.id === threadId) s.delegationThread = null;
-    if (this.openThread?.id !== threadId) return;
-    this.openThread = null;
-    await this.unsubscribe();
-    await s.openWhereLeft();
+    if (this.openThread?.id === threadId) s.startDraft(this.openThread.projectId, { refresh: false });
+    this.forgetThread(threadId);
   }
 
   // -------------------------------------------------------------------------
