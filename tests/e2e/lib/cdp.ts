@@ -249,10 +249,12 @@ export class BrowserPage {
 
   /**
    * Drives a page that something else launched, such as the shell's WebView2
-   * started with `--remote-debugging-port`. Closing it kills nothing.
+   * started with `--remote-debugging-port`. Waits for a navigated page unless
+   * the caller names a target, so a startup blank cannot win discovery order.
+   * Closing it kills nothing.
    */
   static async attach(port: number, urlIncludes = ''): Promise<BrowserPage> {
-    const socket = await openSocket(await waitForPageTarget(port, urlIncludes));
+    const socket = await openSocket(await waitForPageTarget(port, urlIncludes, undefined, urlIncludes === ''));
     const page = new BrowserPage(socket, null, null);
     await page.send('Page.enable', {});
     await page.send('Runtime.enable', {});
@@ -494,7 +496,7 @@ export class BrowserPage {
   }
 }
 
-async function waitForPageTarget(port: number, urlIncludes = '', proc?: Subprocess): Promise<TargetInfo> {
+async function waitForPageTarget(port: number, urlIncludes = '', proc?: Subprocess, skipStartupBlank = false): Promise<TargetInfo> {
   const deadline = Date.now() + CONNECT_TIMEOUT_MS;
   let last = 'the debugging port never answered';
   for (;;) {
@@ -503,7 +505,7 @@ async function waitForPageTarget(port: number, urlIncludes = '', proc?: Subproce
       const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(1_000) });
       const targets = (await response.json()) as TargetInfo[];
       const page = targets.find(
-        (target) => target.type === 'page' && target.url.includes(urlIncludes) && typeof target.webSocketDebuggerUrl === 'string',
+        (target) => target.type === 'page' && (!skipStartupBlank || target.url !== 'about:blank') && target.url.includes(urlIncludes) && typeof target.webSocketDebuggerUrl === 'string',
       );
       if (page !== undefined) return page;
       last = `no page target among ${targets.length}`;
