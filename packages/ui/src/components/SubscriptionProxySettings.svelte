@@ -31,8 +31,10 @@
     try {
       const checked = checkSettingsPatch({ subscriptionProxy: { ...config } });
       if (!checked.ok) throw new Error(checked.message);
-      if (key || clearKey) await client.call('subscriptionProxy.key', { key: clearKey ? null : key });
-      if (!await store.saveSettings(checked.patch)) return;
+      store.settings = await client.call('subscriptionProxy.configure', {
+        subscriptionProxy: checked.patch.subscriptionProxy!,
+        ...(key || clearKey ? { key: clearKey ? null : key } : {}),
+      });
       key = ''; clearKey = false;
       result = strings.subscriptionProxy.saved;
     } catch (error) { failed = true; result = error instanceof Error ? error.message : String(error); }

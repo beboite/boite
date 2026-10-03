@@ -46,6 +46,17 @@ test('disabled mode retains the native glance; saving the proxy opens its embedd
   await page.waitFor(`document.querySelector('iframe[data-browser-id]')?.src === ${JSON.stringify(`${dashboard}/admin/#quotas`)} && document.querySelector('[data-testid=subscription-proxy-slot]')?.getAttribute('aria-busy') === 'false'`);
   await capture('boite-proxy-dashboard-desktop.png');
   expect(await page.evaluate('document.querySelector("iframe[data-browser-id]").getBoundingClientRect().width > 600')).toBe(true);
+  await page.click('[data-testid="subscription-proxy-native"]');
+  await page.waitFor('document.querySelector("[data-testid=quota-monitor][data-account-id=a-opencode]")');
+  expect(await page.evaluate('document.querySelector("[data-testid=quota-monitor][data-account-id=a-claude-main]") === null')).toBe(true);
+  expect(await page.evaluate('document.querySelector("iframe[data-browser-id]") === null')).toBe(true);
+  await page.click('[data-testid="quota-monitor"][data-account-id="a-opencode"]');
+  await page.waitFor('document.querySelector("[data-testid=quota-monitor][data-account-id=a-opencode]")?.checked === false');
+  await page.click('[data-testid="quota-monitor"][data-account-id="a-opencode"]');
+  await page.waitFor('document.querySelector("[data-testid=quota-monitor][data-account-id=a-opencode]")?.checked === true');
+  await capture('boite-proxy-native-limits-desktop.png');
+  await page.click('[data-testid="subscription-proxy-show-dashboard"]');
+  await page.waitFor(`document.querySelector('iframe[data-browser-id]')?.src === ${JSON.stringify(`${dashboard}/admin/#quotas`)}`);
   await page.click('[data-testid="subscription-proxy-configure"]');
   await page.waitFor('document.querySelector("iframe[data-browser-id]") === null');
   await page.click('[data-testid="subscription-proxy-cliproxyapi"]');
@@ -67,6 +78,13 @@ test('phone Limits opens the same gateway and disabling it restores the native p
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   expect(await page.evaluate('document.querySelector("iframe[data-browser-id]").getBoundingClientRect().width <= 390')).toBe(true);
   await capture('boite-proxy-dashboard-phone.png');
+  await page.click('[data-testid="subscription-proxy-native"]');
+  await page.waitFor('document.querySelector("[data-testid=quota-monitor][data-account-id=a-opencode]")');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  expect(await page.evaluate('document.querySelector("[data-testid=subscription-proxy-show-dashboard]").getBoundingClientRect().top >= document.querySelector("[data-testid=settings] > header").getBoundingClientRect().bottom')).toBe(true);
+  await capture('boite-proxy-native-limits-phone.png');
+  await page.click('[data-testid="subscription-proxy-show-dashboard"]');
+  await page.waitFor('document.querySelector("[data-testid=subscription-proxy-dashboard-page]")');
   await page.click('[data-testid="subscription-proxy-configure"]');
   await page.waitFor('document.querySelector("[data-testid=subscription-proxy-settings]")');
   await capture('boite-proxy-settings-phone.png');
@@ -94,8 +112,15 @@ test('production desktop and phone embed the dashboard through the real core wit
     expect(await browser.evaluate('new URLSearchParams(location.search).get("fake")')).toBeNull();
     expect(await browser.text('[data-testid=subscription-proxy-browser-hint]')).toContain('Sign in');
     await browser.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
-    const tree = await browser.send('Page.getFrameTree', {}) as { frameTree: { childFrames: { frame: { id: string; url: string } }[] } };
-    const child = tree.frameTree.childFrames.find(entry => entry.frame.url.startsWith(dashboard))!;
+    type FrameEntry = { frame: { id: string; url: string } };
+    let child: FrameEntry | undefined;
+    const deadline = Date.now() + 5_000;
+    while (!child && Date.now() < deadline) {
+      const tree = await browser.send('Page.getFrameTree', {}) as { frameTree: { childFrames?: FrameEntry[] } };
+      child = tree.frameTree.childFrames?.find(entry => entry.frame.url.startsWith(dashboard));
+      if (!child) await Bun.sleep(25);
+    }
+    if (!child) throw new Error('The gateway iframe did not finish navigating within 5 seconds');
     const world = await browser.send('Page.createIsolatedWorld', { frameId: child.frame.id }) as { executionContextId: number };
     const content = await browser.send('Runtime.evaluate', { contextId: world.executionContextId, expression: 'document.querySelector("h1")?.textContent', returnByValue: true }) as { result: { value: string } };
     expect(content.result.value).toBe('Subscription quotas');

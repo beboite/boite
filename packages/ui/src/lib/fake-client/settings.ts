@@ -9,6 +9,15 @@ export function settingsMethods(ctx: FakeContext) {
       if (key !== null && (typeof key !== 'string' || key.length > 4096 || !key.trim() || /[\u0000-\u0020\u007f]/.test(key))) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'subscriptionProxy.key must be null or a non-empty token without whitespace' });
       return { configured: key !== null };
     },
+    'subscriptionProxy.configure': async ({ subscriptionProxy, key }) => {
+      if (!subscriptionProxy || typeof subscriptionProxy !== 'object') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'subscriptionProxy configuration is required' });
+      if (key !== undefined && key !== null && (typeof key !== 'string' || key.length > 4096 || !key.trim() || /[\u0000-\u0020\u007f]/.test(key))) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'subscriptionProxy.key must be null or a non-empty token without whitespace' });
+      const checked = checkSettingsPatch({ subscriptionProxy });
+      if (!checked.ok) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: checked.message, data: { field: checked.field } });
+      ctx.settings = { ...ctx.settings, ...checked.patch };
+      ctx.emit('settings.updated', { ...ctx.settings });
+      return { ...ctx.settings };
+    },
     'scheduler.get': async (params) => {
       return structuredClone(ctx.scheduler);
     },

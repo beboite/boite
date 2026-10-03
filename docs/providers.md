@@ -17,10 +17,14 @@ HTTPS browser sessions require an HTTPS dashboard URL; Boite shows this before
 creating a blocked HTTP frame. Open dashboard provides a separate sign-in page,
 then Reload retries the embedded view. Some gateways refuse framing or restrict
 cross-site cookies; those dashboards remain available through Open dashboard.
+Show account limits opens the native limits and monitoring switches for agents
+that keep their own configuration; Show proxy dashboard returns to the gateway.
 
 An optional API key stays on the core and is supplied through the agent's
 environment, never a URL or process argument. Leave the key field empty to keep
-a saved key, or select Remove saved key. Dashboard management credentials belong
+a saved key, or select Remove saved key. Configuration and key changes are saved
+in one transaction. Use HTTPS when sending a key over an untrusted network;
+HTTP remains available for local and private-network gateways. Dashboard management credentials belong
 to the dashboard's own sign-in and are not passed by Boite.
 
 Claude calls the gateway's Messages API. Codex uses its Responses API with

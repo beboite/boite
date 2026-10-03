@@ -19,6 +19,53 @@ test('proxy URLs reject credential channels and retain the dashboard route', () 
     expect(checkSettingsPatch({ subscriptionProxy: config(baseUrl) }).ok).toBe(false);
   }
   expect(checkSettingsPatch({ subscriptionProxy: config('http://127.0.0.1:8317/v1/') })).toMatchObject({ ok: true, patch: { subscriptionProxy: { baseUrl: 'http://127.0.0.1:8317/v1', dashboardUrl: 'http://127.0.0.1:8317/admin/#quotas' } } });
+  expect(checkSettingsPatch({ subscriptionProxy: config('http://gateway.lan:8787') }).ok).toBe(true);
+});
+
+test('configuration and private key roll back together without leaking to events, snapshots, errors or logs', async () => {
+  const previous = config('http://gateway.lan:8787');
+  const next = config('https://gateway.test');
+  const oldKey = 'previous-private-proxy-token', newKey = 'replacement-private-proxy-token';
+  harness = await startTestCore({ settings: { subscriptionProxy: previous } });
+  const owner = await harness.connect();
+  await owner.call('subscriptionProxy.key', { key: oldKey });
+  const broadcasts: unknown[] = [];
+  const errors: unknown[] = [];
+  const off = owner.on('settings.updated', value => broadcasts.push(value));
+  const db = harness.core.journal.db;
+  const envKey = () => subscriptionProxyEnv(harness!.core, harness!.core.providers.require('claude')).ANTHROPIC_AUTH_TOKEN;
+  const events = harness.core.journal.countEvents('settings.changed');
+  try {
+    for (const [name, operation, condition, key] of [
+      ['config', 'INSERT', "NEW.key = 'settings'", newKey],
+      ['config_clear', 'INSERT', "NEW.key = 'settings'", null],
+      ['key', 'INSERT', "NEW.key = 'subscription-proxy-key'", newKey],
+      ['clear', 'DELETE', "OLD.key = 'subscription-proxy-key'", null],
+    ] as const) {
+      db.exec(`CREATE TRIGGER refuse_proxy_${name} BEFORE ${operation} ON settings WHEN ${condition} BEGIN SELECT RAISE(ABORT, 'forced persistence refusal'); END`);
+      let failure: Error | undefined;
+      try { await owner.call('subscriptionProxy.configure', { subscriptionProxy: next, key }); }
+      catch (error) { failure = error as Error; errors.push({ ...error as object, message: failure.message }); }
+      expect(failure?.message).toBe('Subscription proxy configuration could not be saved');
+      expect((await owner.call('settings.get', {})).subscriptionProxy).toEqual(previous);
+      expect(envKey()).toBe(oldKey);
+      expect(harness.core.journal.countEvents('settings.changed')).toBe(events);
+      expect(broadcasts).toEqual([]);
+      db.exec(`DROP TRIGGER refuse_proxy_${name}`);
+    }
+    const saved = await owner.call('subscriptionProxy.configure', { subscriptionProxy: next, key: newKey });
+    expect(saved.subscriptionProxy).toEqual(next);
+    expect(envKey()).toBe(newKey);
+    await owner.call('subscriptionProxy.configure', { subscriptionProxy: next });
+    expect(envKey()).toBe(newKey);
+    await expect(owner.call('subscriptionProxy.configure', { subscriptionProxy: next, key: `${newKey}\n` })).rejects.toThrow('without whitespace');
+    expect(envKey()).toBe(newKey);
+    const publicData = JSON.stringify({ saved, settings: await owner.call('settings.get', {}), broadcasts, errors,
+      events: db.query('SELECT payload FROM events').all(), logs: await owner.call('core.logs', {}) });
+    for (const key of [oldKey, newKey]) expect(publicData).not.toContain(key);
+    await owner.call('subscriptionProxy.configure', { subscriptionProxy: next, key: null });
+    expect(envKey()).toBe('boite-subscription-proxy');
+  } finally { off(); }
 });
 
 test('real RPC discovers gateway models, separates the key and restores native accounts when disabled', async () => {
@@ -39,9 +86,8 @@ test('real RPC discovers gateway models, separates the key and restores native a
   // Native login detection differs by platform; disabling restores the original status.
   const nativeClaudeStatus = harness.core.accounts.require(claude.id).status;
   const key = 'subscription-proxy-test-token';
-  await owner.call('subscriptionProxy.key', { key });
   const proxy = config(`http://127.0.0.1:${gateway.port}/v1`);
-  const saved = await owner.call('settings.set', { subscriptionProxy: proxy });
+  const saved = await owner.call('subscriptionProxy.configure', { subscriptionProxy: proxy, key });
   expect(JSON.stringify(saved)).not.toContain(key);
   expect(JSON.stringify(await owner.call('settings.get', {}))).not.toContain(key);
   expect(harness.core.accounts.require(claude.id).status).toBe('ok');
@@ -68,6 +114,7 @@ test('real RPC discovers gateway models, separates the key and restores native a
   try {
     expect((await phone.call('settings.get', {})).subscriptionProxy).toEqual(proxy);
     await expect(phone.call('subscriptionProxy.key', { key: null })).rejects.toThrow('owner');
+    await expect(phone.call('subscriptionProxy.configure', { subscriptionProxy: proxy, key: null })).rejects.toThrow('owner');
     expect((await phone.call('providers.probe', { providerId: 'codex', accountId: codex.id })).models).toEqual(b.models);
   } finally { phone.close(); }
   await owner.call('settings.set', { subscriptionProxy: { ...proxy, enabled: false } });

@@ -1,6 +1,6 @@
 import type { ModelInfo, ProviderDescriptor, SubscriptionProxy } from '@boite/contracts';
 import type { Core } from './core.ts';
-import { invalidParams, unavailable } from './errors.ts';
+import { invalidParams, unavailable, RpcFailure } from './errors.ts';
 
 const KEY_SETTING = 'subscription-proxy-key';
 export const PROXY_URL_ENV = 'BOITE_SUBSCRIPTION_PROXY_URL';
@@ -102,13 +102,33 @@ export async function readSubscriptionProxyModels(core: Core, provider: Provider
   return models;
 }
 
+function validateKey(key: unknown): asserts key is string | null {
+  if (key !== null && (typeof key !== 'string' || key.length > 4096 || !key.trim() || /[\u0000-\u0020\u007f]/.test(key))) {
+    throw invalidParams('subscriptionProxy.key must be null or a non-empty token without whitespace');
+  }
+}
+
+function writeKey(core: Core, key: string | null): void {
+  if (key === null) core.journal.deleteSetting(KEY_SETTING);
+  else core.journal.setSetting(KEY_SETTING, key);
+}
+
 export function registerSubscriptionProxy(core: Core): void {
   core.router.register('subscriptionProxy.key', ({ key }) => {
-    if (key !== null && (typeof key !== 'string' || key.length > 4096 || !key.trim() || /[\u0000-\u0020\u007f]/.test(key))) {
-      throw invalidParams('subscriptionProxy.key must be null or a non-empty token without whitespace');
-    }
-    if (key === null) core.journal.deleteSetting(KEY_SETTING);
-    else core.journal.setSetting(KEY_SETTING, key);
+    validateKey(key);
+    try { writeKey(core, key); }
+    catch { throw unavailable('Subscription proxy key could not be saved'); }
     return { configured: key !== null };
+  });
+  core.router.register('subscriptionProxy.configure', ({ subscriptionProxy, key }) => {
+    if (!subscriptionProxy || typeof subscriptionProxy !== 'object') throw invalidParams('subscriptionProxy configuration is required');
+    if (key !== undefined) validateKey(key);
+    try {
+      return core.settings.set({ subscriptionProxy }, key === undefined ? undefined : () => writeKey(core, key));
+    } catch (error) {
+      if (error instanceof RpcFailure) throw error;
+      // A storage error must not expose a bound private value to the caller or logs.
+      throw unavailable('Subscription proxy configuration could not be saved');
+    }
   });
 }

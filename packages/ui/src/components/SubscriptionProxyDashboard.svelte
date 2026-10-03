@@ -9,7 +9,7 @@
   import { strings } from '../lib/strings';
   import { secureId } from '../lib/secure-id';
   import SubscriptionProxySettings from './SubscriptionProxySettings.svelte';
-  let { store }: { store: Store } = $props();
+  let { store, onNative }: { store: Store; onNative?: () => void } = $props();
   let configuring = $state(false);
   let slot = $state<HTMLDivElement>();
   let frame = $state<HTMLIFrameElement>();
@@ -41,6 +41,7 @@
 <div class="proxy-dashboard" data-testid="subscription-proxy-dashboard-page">
   <header>
     <h1>{strings.usage.limits}</h1>
+    {#if onNative}<button type="button" class="ghost small" onclick={onNative} data-testid="subscription-proxy-native">{strings.subscriptionProxy.native}</button>{/if}
     {#if store.owner}<button type="button" class="ghost small" onclick={() => configuring = !configuring} data-testid="subscription-proxy-configure">{strings.subscriptionProxy.configure}</button>{/if}
     {#if !configuring && proxy}
       <button type="button" class="ghost icon" aria-label={strings.browser.reload} title={strings.browser.reload} onclick={reload} data-testid="subscription-proxy-reload"><RotateCw size={16} /></button>
@@ -59,7 +60,7 @@
 
 <style>
   .proxy-dashboard { display: flex; flex-direction: column; min-height: 560px; height: calc(100dvh - 160px); gap: 8px; }
-  header { display: flex; align-items: center; gap: 8px; flex: none; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: none; }
   h1 { flex: 1; min-width: 0; }
   .slot { flex: 1; min-height: 0; position: relative; background: var(--color-background); }
   .slot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }

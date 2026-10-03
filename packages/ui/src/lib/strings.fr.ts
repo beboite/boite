@@ -19,6 +19,7 @@ export const fr: Translation = {
     keyHint: 'Laissez vide pour garder la clé enregistrée. Utilisez la clé API du proxy, pas sa clé de gestion du tableau de bord.',
     clearKey: 'Retirer la clé enregistrée', save: 'Enregistrer le proxy', saved: 'Proxy enregistré',
     configure: 'Configurer le proxy', native: 'Voir les limites des comptes',
+    showDashboard: 'Voir le tableau du proxy',
     openDashboard: 'Ouvrir le tableau',
     signInHint: 'Connectez-vous avec Ouvrir le tableau, puis rechargez ici. Si la page reste vide, ce tableau peut refuser les vues intégrées.',
     mixedContent: "Cette page utilise HTTPS. Configurez une URL de tableau HTTPS pour l'afficher ici, ou ouvrez le tableau HTTP séparément.",
