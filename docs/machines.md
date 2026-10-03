@@ -128,7 +128,6 @@ execution settings for that core without changing the active conversation.
 Agent update checks, versions and the automatic update switch sit under that
 machine in the Updates section of Machines and updates. Desktop and server
 updates share this section, above connections, pairing and synchronization.
-The footer's download shortcut opens it without switching cores.
 Checking synchronization leaves the machine list open. The button is available
 on desktop and phone; offline machines cannot be edited. The report names
 providers that still need signing in on the target

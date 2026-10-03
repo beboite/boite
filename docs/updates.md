@@ -8,13 +8,9 @@ It names the release and its age, links to the changelog on GitHub and offers
 installation with a restart confirmation. Channel options show the installed
 version and let you switch channels.
 
-The footer's download icon appears when an update is available or in progress.
-It opens the Updates section directly and keeps the selected machine and
-conversation.
-The settings navigation uses the same shortcut. Manual checks and channel
-controls remain in Machines and updates when everything is current. Each
-remote machine
-has its own [server update card](server.md#updating-from-the-app) and owner-only
+Manual checks and channel controls remain in Machines and updates when
+everything is current. Each remote machine has its own
+[server update card](server.md#updating-from-the-app) and owner-only
 [agent update controls](agent-updates.md).
 
 ## Boite and Boite Nightly

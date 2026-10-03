@@ -136,10 +136,8 @@ no real provider call and uses no existing login directory.
 
 Open Settings, Machines and updates. In Updates, each remote server shows its
 installed version and a Check for updates action. When a signed server release
-is available, Update appears on that machine's card. The footer's download
-shortcut opens this section when Boite or an agent has an update pending. The
-desktop
-app's own manual check and channel choices remain in Settings, General.
+is available, Update appears on that machine's card. The desktop app's own
+manual check and channel choices appear in the same Updates section.
 Cards show the installed and offered versions together. Details expands the
 idle wait, backup and recovery behavior without adding it to the confirmation.
 

@@ -45,25 +45,28 @@ beforeEach(async () => { page = await BrowserPage.launch({ url: `${base}/?fake=1
 afterEach(async () => { await page?.close(); }, 15_000);
 afterAll(async () => { await server?.close(); }, 15_000);
 
-test('the footer shortcut opens Machines directly with release details and an external changelog', async () => {
+test('updates are reached through Machines without adding a footer shortcut', async () => {
   await page.navigate(`${base}/?fake=1&open=recent&machines=1&appUpdate=ready&appUpdateChannel=nightly`);
-  await page.waitFor(`window.__boiteTest?.workspace.machines.length === 2 && ['machine-status', 'add-project', 'nav-limits', 'nav-app-update', 'nav-settings'].every(name => document.querySelector('[data-testid="' + name + '"]'))`);
-  expect(await page.evaluate(`document.querySelector('.foot ${id('nav-app-update')}') !== null`)).toBe(true);
+  await page.waitFor(`window.__boiteTest?.workspace.machines.length === 2 && ['machine-status', 'add-project', 'nav-limits', 'nav-settings'].every(name => document.querySelector('[data-testid="' + name + '"]'))`);
+  expect(await page.evaluate(`document.querySelector('${id('nav-app-update')}') === null`)).toBe(true);
   expect((await page.text(id('add-project'))).trim()).toBe('');
   expect((await page.text(id('panel-toggle'))).trim()).toBe('');
   await page.evaluate('window.__boiteTest.workspace.active.setSidebarWidth(208)');
   expect(await page.evaluate(`(() => {
-    const controls = ['machine-status', 'add-project', 'nav-limits', 'nav-app-update', 'nav-settings'].map(name => document.querySelector('[data-testid="' + name + '"]').getBoundingClientRect());
+    const controls = ['machine-status', 'add-project', 'nav-limits', 'nav-settings'].map(name => document.querySelector('[data-testid="' + name + '"]').getBoundingClientRect());
     const foot = document.querySelector('.foot').getBoundingClientRect();
     return controls.every((box, index) => box.width >= 26 && box.right <= foot.right && (!index || box.left >= controls[index - 1].right));
   })()`)).toBe(true);
   const active = await page.evaluate('window.__boiteTest.workspace.active.machineId');
-  await page.evaluate(`document.querySelector('${id('nav-app-update')}').focus()`);
-  expect(await page.evaluate(`document.activeElement === document.querySelector('${id('nav-app-update')}')`)).toBe(true);
+  await page.evaluate(`document.querySelector('${id('nav-settings')}').focus()`);
+  expect(await page.evaluate(`document.activeElement === document.querySelector('${id('nav-settings')}')`)).toBe(true);
   await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', text: '\r', windowsVirtualKeyCode: 13 });
   await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+  await page.waitFor(`document.querySelector('${id('settings-tab-machines')}')`);
+  await page.click(id('settings-tab-machines'));
   await page.waitFor(`document.querySelector('${id('machines-page')}')`);
   expect(await page.evaluate('window.__boiteTest.workspace.active.machineId')).toBe(active);
+  expect(await page.evaluate(`document.querySelector('${id('nav-app-update')}') === null`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('${id('app-update-popover')}') === null`)).toBe(true);
   expect(await page.text(id('app-update-card'))).toContain('Boite Nightly 2.0.0-nightly.8');
   expect(await page.text(id('app-update-published'))).toMatch(/Released .*ago/);
@@ -94,13 +97,14 @@ test('installation confirms in both languages and cancelling keeps the downloade
   expect(await page.text(id('app-update-status'))).toContain("l'installation démarre");
 }, 30_000);
 
-test('General has no update controls and the settings shortcut returns to Machines', async () => {
+test('General has no update controls or shortcut and the Machines tab opens updates', async () => {
   await updates('ready');
   await page.click(id('settings-tab-general'));
   await page.waitFor(`document.querySelector('${id('settings-page')}')`);
   expect(await page.evaluate(`document.querySelector('${id('app-update-card')}') === null`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('${id('app-update-install')}') === null`)).toBe(true);
-  await page.click(id('nav-app-update'));
+  expect(await page.evaluate(`document.querySelector('${id('nav-app-update')}') === null`)).toBe(true);
+  await page.click(id('settings-tab-machines'));
   await page.waitFor(`document.querySelector('${id('machines-page')}') && document.querySelector('${id('app-update-install')}')`);
   expect(await page.evaluate(`document.querySelector('${id('app-update-popover')}') === null`)).toBe(true);
 }, 30_000);

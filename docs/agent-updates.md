@@ -16,8 +16,7 @@ agents without a readable latest version.
 ## What the user sees
 
 Settings, Machines and updates lists each machine's agents in the Updates
-section, with their installed and available versions, Update and Skip. The
-footer's download shortcut opens that section when an update is pending.
+section, with their installed and available versions, Update and Skip.
 Updates create no pinned chat notice.
 
 - Update releases the provider's warm processes and runs the update in the

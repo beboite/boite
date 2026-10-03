@@ -230,10 +230,12 @@ test('an unavailable onboarding chunk keeps agent updates accessible in Machines
     const origin = await page.evaluate<string>('location.origin');
     await offline.navigate(`${origin}/?fake=1&updates=1`);
     await offline.waitFor(`document.querySelector('[data-testid=nav-settings]')`);
-    await offline.waitFor(`document.querySelector('[data-testid=nav-app-update]')`);
     expect(await offline.evaluate(`document.querySelector('[data-testid=onboarding]') === null`)).toBe(true);
     expect(await offline.evaluate(`document.querySelector('[data-testid=harness-update-notices]') === null`)).toBe(true);
-    await offline.click('[data-testid=nav-app-update]');
+    expect(await offline.evaluate(`document.querySelector('[data-testid=nav-app-update]') === null`)).toBe(true);
+    await offline.click('[data-testid=nav-settings]');
+    await offline.waitFor(`document.querySelector('[data-testid=settings-tab-machines]')`);
+    await offline.click('[data-testid=settings-tab-machines]');
     await offline.waitFor(`document.querySelector('[data-testid=machines-page]') && document.querySelectorAll('[data-testid=harness-update-row-run]').length === 2`);
   } finally {
     await offline.close();

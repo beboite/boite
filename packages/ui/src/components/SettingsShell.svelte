@@ -2,7 +2,6 @@
   import { MediaQuery } from 'svelte/reactivity';
   import { tick } from 'svelte';
   import MobileSettings from './MobileSettings.svelte';
-  import AppUpdateNotice from './AppUpdateNotice.svelte';
   import BrainPage from './BrainPage.svelte';
   import { Activity, ArrowLeft, Brain, ChevronRight, Coins, FlaskConical, Gauge, House, Keyboard, Mic, Monitor, Palette, Puzzle, Settings2, ShieldCheck, SlidersHorizontal, Users } from '@lucide/svelte';
   import KeyboardPage from './KeyboardPage.svelte';
@@ -274,7 +273,6 @@ import { workspace } from '../lib/workspace.svelte';
       {/if}
       </div>
     {/each}
-    <div class="update-footer"><AppUpdateNotice /></div>
   </nav>
 
   {#if toc[tab]}
@@ -360,7 +358,6 @@ import { workspace } from '../lib/workspace.svelte';
     overflow-y: auto;
   }
 
-  .update-footer { margin-top: auto; padding-top: 16px; flex: none; }
 
   .back {
     justify-content: flex-start;
