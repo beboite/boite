@@ -1,6 +1,6 @@
 import { browserActionError, DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE, type BrowserReply } from '@boite/contracts';
 import { browserProfiles } from './browser-profiles.svelte';
-import { tick } from 'svelte';
+import { tick, untrack } from 'svelte';
 import type { Store } from './store.svelte';
 import { rightPanel } from './right-panel.svelte';
 import { browserBridge } from './browser-bridge';
@@ -103,7 +103,9 @@ export function hostBrowser(store: Store, threadId: string): () => void {
       void client.call('browser.host', agent || remote ? { threadId, enabled: true, allowAgentControl: agent, remote, live } : { threadId, enabled: false }).catch(() => {});
     }
   };
-  renew();
+  // Untracked: the caller's effect would otherwise rerun when a tab opens, and
+  // its cleanup would release the host while the agent's open waits.
+  untrack(renew);
   const timer = setInterval(renew, 10000);
   const watch = setInterval(() => { if (live !== (isExperimentEnabled('remote-browser') && panel.surfaces.some(s => s.kind === 'browser'))) renew(); }, 1000);
   const offExperiments = subscribeExperiments(() => { consentRevision++; renew(); });
