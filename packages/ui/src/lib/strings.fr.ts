@@ -487,6 +487,10 @@ export const fr: Translation = {
   sidebar: {
     doneThreads: 'Terminés',
     workingThreads: 'En cours',
+    projectWorkingThreads: '{project} : {count} en cours',
+    projectDoneThreads: '{project} : {count} terminées',
+    otherProjects: 'Autres projets',
+    noActiveProjects: 'Aucune conversation à traiter.',
     markDone: 'Marquer comme terminé',
     doneToast: '« {title} » marqué comme terminé',
     doneLoadFailed: "Certaines conversations terminées n'ont pas pu être chargées.",

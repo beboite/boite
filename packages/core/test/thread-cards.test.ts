@@ -168,11 +168,12 @@ test('threads of one repository share one git remote and one gh call, and a miss
   const spawn = harness.core.procs.spawn.bind(harness.core.procs);
   const commands: string[] = [];
   let ghMissing = false;
+  const prs = [{ headRefName: 'topic-0', number: 7 }, { headRefName: 'topic-1', number: 8 }];
   const replacement = spyOn(harness.core.procs, 'spawn').mockImplementation((scope, command, args, options) => {
     commands.push(command);
     if (command === 'git') return spawn(scope, process.execPath, ['-e', 'console.log("origin\\thttps://github.com/example/repo.git (fetch)")'], options);
     if (ghMissing) throw Object.assign(new Error('Executable not found in $PATH: "gh"'), { code: 'ENOENT' });
-    return spawn(scope, process.execPath, fakeGh([{ headRefName: 'topic-0', number: 7 }, { headRefName: 'topic-1', number: 8 }]), options);
+    return spawn(scope, process.execPath, fakeGh(prs), options);
   });
   try {
     const reader = new PullRequests(harness.core);
@@ -180,6 +181,12 @@ test('threads of one repository share one git remote and one gh call, and a miss
     // topic-2 has no pull request: the list was not full, so gh is not asked for it alone.
     expect(results.map((pr) => pr?.number ?? null)).toEqual([7, 8, null]);
     expect(commands).toEqual(['git', 'gh']);
+    prs.push({ headRefName: 'topic-2', number: 9 });
+    const clock = spyOn(Date, 'now').mockReturnValue(Date.now() + 15_000);
+    try {
+      expect((await reader.read(ids[2]!))?.number).toBe(9);
+      expect(commands).toEqual(['git', 'gh', 'gh']);
+    } finally { clock.mockRestore(); }
 
     ghMissing = true;
     const missing = new PullRequests(harness.core);
@@ -212,7 +219,7 @@ function git(cwd: string, ...args: string[]): void {
   if (!run.success) throw new Error(`git ${args.join(' ')} failed: ${run.stderr.toString()}`);
 }
 
-test('threads in two worktrees of one repository share one git remote and one gh call', async () => {
+test('worktree PRs follow renamed branches, share repository reads and reject detached HEAD', async () => {
   const client = await harness.connect();
   const repo = join(harness.dataDir, 'main-checkout');
   mkdirSync(repo, { recursive: true });
@@ -222,6 +229,7 @@ test('threads in two worktrees of one repository share one git remote and one gh
   for (let index = 0; index < 2; index++) {
     const checkout = join(harness.dataDir, '.boite-worktrees', 'repo', `wt-${index}`);
     git(repo, 'worktree', 'add', '-q', '-b', `topic-${index}`, checkout);
+    if (index === 0) git(checkout, 'branch', '-m', 'published-topic');
     expect(statSync(join(checkout, '.git')).isFile()).toBe(true);
     expect(repositoryOf(checkout)).toBe(repositoryOf(repo));
     const { threadId } = await echoThread(harness, client);
@@ -234,12 +242,16 @@ test('threads in two worktrees of one repository share one git remote and one gh
   const replacement = spyOn(harness.core.procs, 'spawn').mockImplementation((scope, command, args, options) => {
     commands.push(command);
     if (command === 'git') return spawn(scope, process.execPath, ['-e', 'console.log("origin\\thttps://github.com/example/repo.git (fetch)")'], options);
-    return spawn(scope, process.execPath, fakeGh([{ headRefName: 'topic-0', number: 7 }, { headRefName: 'topic-1', number: 8 }]), options);
+    return spawn(scope, process.execPath, fakeGh([{ headRefName: 'published-topic', number: 7 }, { headRefName: 'topic-1', number: 8 }]), options);
   });
   try {
     const reader = new PullRequests(harness.core);
     const results = await Promise.all(ids.map((id) => reader.read(id)));
     expect(results.map((pr) => pr?.number ?? null)).toEqual([7, 8]);
+    expect(commands).toEqual(['git', 'gh']);
+    expect(harness.core.threads.require(ids[0]!).branch).toBe('topic-0');
+    git(harness.core.threads.require(ids[0]!).cwd, 'checkout', '-q', '--detach');
+    expect(await reader.read(ids[0]!)).toBeNull();
     expect(commands).toEqual(['git', 'gh']);
   } finally {
     replacement.mockRestore();

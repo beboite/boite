@@ -12,7 +12,38 @@ afterEach(async () => {
   if (mounted) await unmount(mounted);
   mounted = undefined;
   store?.detach(); client?.close();
+  vi.useRealTimers();
   vi.restoreAllMocks(); document.body.innerHTML = ''; localStorage.clear();
+});
+
+test('a PR opened during a turn appears without remounting and refresh failures keep its link', async () => {
+  client = new FakeClient({ delayMs: 0 });
+  store = new Store(); store.attach(client); await store.connect();
+  const thread = store.threads.find(thread => thread.branch)!;
+  thread.status = 'running';
+  const project = store.projects.find(project => project.id === thread.projectId)!;
+  const pr = { number: 181, url: 'https://github.com/example/repo/pull/181', state: 'OPEN' as const };
+  const call = vi.spyOn(client, 'call').mockResolvedValueOnce(null).mockResolvedValueOnce(pr).mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ ...pr, state: 'MERGED' });
+  vi.useFakeTimers();
+  mounted = mount(ThreadCard, { target: document.body, props: { machine: { id: 'local', label: 'Local', store }, project, thread, now: Date.now(), showProject: false } });
+  await settle();
+  expect(document.querySelector('[data-testid=thread-pr]')).toBeNull();
+  await vi.advanceTimersByTimeAsync(15_000); await settle();
+  expect(document.querySelector('[data-testid=thread-pr]')?.textContent).toContain('#181');
+  await vi.advanceTimersByTimeAsync(15_000); await settle();
+  expect(document.querySelector('[data-testid=thread-pr]')?.textContent).toContain('#181');
+  expect(store.error).toBeNull();
+  thread.status = 'idle'; await settle();
+  expect(call).toHaveBeenCalledTimes(4);
+  const visibility = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+  await vi.advanceTimersByTimeAsync(30_000); await settle();
+  expect(call).toHaveBeenCalledTimes(4);
+  visibility.mockReturnValue(false);
+  document.dispatchEvent(new Event('visibilitychange')); await settle();
+  expect(call).toHaveBeenCalledTimes(5);
+  await unmount(mounted); mounted = undefined;
+  await vi.advanceTimersByTimeAsync(30_000); await settle();
+  expect(call).toHaveBeenCalledTimes(5);
 });
 
 test('moving a thread clears its PR and ignores the previous checkout lookup', async () => {

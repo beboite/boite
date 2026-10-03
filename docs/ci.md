@@ -123,6 +123,12 @@ before integrating these orchestration additions. The combined build measured
 3,961,330 UI bytes and 3,239,585 emitted core JavaScript bytes on the same day.
 Reproduce it with `bun run build:ui && bun run build:core && bun scripts/ci/budgets.ts`.
 
+On 2026-10-03, `290ba1f3` measured 3,977,635 UI bytes. Adding project Working
+and Done counters, folded project lists and their empty states measured
+3,983,551 bytes, a 5,916-byte increase using the same source filename hashes.
+At that revision the UI total limit was 3,990,000 bytes, leaving 6,449 bytes of headroom. The
+534,926-byte entry remains below its unchanged limit; core limits are unchanged.
+
 On 2026-10-03, Linux
 UI builds with Bun 1.4.2 measured 3,950,303 bytes at `df3159d4` and 3,974,754
 bytes at `807387a0` after the vertical text alignment changes. Text leaves and shared label
