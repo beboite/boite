@@ -329,6 +329,11 @@ The native shell cases require their executable and adjacent files;
 `BOITE_E2E_SKIP_SHELL=1` explicitly selects a partial core/browser run.
 It does not establish native macOS or Linux WebView coverage.
 
+Windows process usage reaches the registry through a completion-port event,
+or a one-second fallback after the child exits (`procs.ts`). Cleanup assertions
+must wait for both the expected PID set and install leases before checking them;
+the child exit callback alone does not establish that the trace row was removed.
+
 ### Contract scenarios
 
 `tests/contract/scenarios.ts` drives RPC results and events through the same
