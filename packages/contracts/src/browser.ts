@@ -64,12 +64,10 @@ export function browserPresetSize(preset: BrowserPreset, orientation?: 'portrait
 export interface BrowserRpcMethods {
   /**
    * Only the owner can grant this. An enabled host consents to agent control,
-   * to sharing with paired devices (emote), or both; agents reach it only with
-   * llowAgentControl.
-   */
-  /**
-   * `live` says the conversation's panel on that desktop has a browser tab,
-   * which paired devices then show (`browser.remoteChanged`).
+   * to sharing with paired devices (`remote`), or both; agents reach it only
+   * with `allowAgentControl`. `live` says the conversation's panel on that
+   * desktop has a browser tab, which paired devices then show
+   * (`browser.remoteChanged`).
    */
   'browser.host': { params: { threadId: string; enabled: boolean; allowAgentControl?: boolean; remote?: boolean; live?: boolean }; result: { ok: true } };
   'browser.remoteFrame': { params: { threadId: string } & RemoteFrameOptions; result: RemoteBrowserFrame };
