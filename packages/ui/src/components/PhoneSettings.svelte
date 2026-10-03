@@ -1,5 +1,6 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
+  import TailscaleAccess from './TailscaleAccess.svelte';
   import { untrack } from 'svelte';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
@@ -11,6 +12,8 @@
   const capable = secure && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   let standalone = $state(installed());
   let publicUrl = $state(untrack(() => store.settings?.publicUrl ?? ''));
+  // The field follows the saved value, which the Tailscale switch can change too.
+  $effect(() => { publicUrl = store.settings?.publicUrl ?? ''; });
   let key = $state('');
   let subscribed = $state(false);
   let busy = $state(false);
@@ -79,6 +82,7 @@
 <section class="card" id="settings-phone" data-testid="phone-settings">
   <h2>{strings.phone.heading}</h2>
   {#if store.owner && showServerSettings}
+    <div class="block"><TailscaleAccess {store} /></div>
     <div class="block">
       <label for="{uid}-public-url"><span><span id="{uid}-public-url-name">{strings.phone.publicUrl}</span><InfoTip topic={strings.phone.publicUrl} text={strings.phone.publicUrlHint} /></span><input id="{uid}-public-url" aria-labelledby="{uid}-public-url-name" type="url" bind:value={publicUrl} placeholder={strings.phone.urlPlaceholder} data-testid="phone-public-url" /></label>
       <div class="actions">
@@ -109,6 +113,7 @@
             <button disabled={busy} onclick={testPush}>{strings.phone.test}</button>
           {:else}<button disabled={busy || !key} onclick={enable}>{strings.phone.enable}</button>{/if}
         </div>
+        {#if subscribed}<p class="hint" data-testid="phone-multi-machine">{strings.phone.multiMachine}</p>{/if}
       {/if}
       {#if message}<p class="hint" role="status">{message}</p>{/if}
       {#if error}<p class="hint" role="alert">{error}</p>{/if}

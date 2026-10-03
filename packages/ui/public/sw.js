@@ -123,8 +123,20 @@ self.addEventListener('push', (event) => {
       tag: threadId ? `thread-${threadId}` : typeof payload.tag === 'string' ? payload.tag : 'boite-update',
       data: { threadId }
     });
+    // The icon's count of threads waiting for the user, as the core counted it when it sent this.
+    await setBadge(payload.badge);
   })());
 });
+
+/** Set the app badge where the platform has one (iOS 16.4+ home-screen apps, desktop Chromium); a failure costs nothing. */
+async function setBadge(count) {
+  const nav = self.navigator;
+  if (!nav || typeof count !== 'number' || !Number.isFinite(count) || count < 0) return;
+  try {
+    if (count === 0) await nav.clearAppBadge?.();
+    else await nav.setAppBadge?.(Math.floor(count));
+  } catch { /* No badge permission: the notification itself still shows. */ }
+}
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
@@ -134,8 +146,11 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const existing = windows.find(client => new URL(client.url).origin === url.origin);
-    if (existing) { existing.postMessage({ type: 'boite.open-thread', threadId: typeof threadId === 'string' ? threadId : null }); await existing.focus(); }
-    else await self.clients.openWindow(url.href);
+    if (existing) {
+      existing.postMessage({ type: 'boite.open-thread', threadId: typeof threadId === 'string' ? threadId : null });
+      // iOS can refuse to focus a suspended home-screen app; opening the URL then reaches the thread.
+      try { await existing.focus(); } catch { await self.clients.openWindow(url.href); }
+    } else await self.clients.openWindow(url.href);
   })());
 });
 

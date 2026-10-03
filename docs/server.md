@@ -296,6 +296,23 @@ says which role it carries and until when it works. Without `--owner` the link
 is a phone's. `--data-dir` and `--channel` name another core, as they do at
 start.
 
+stderr also gives the link's typing code, for an installed phone app.
+
+To reach the core from a phone over HTTPS through Tailscale:
+
+```bash
+~/.local/lib/boite/boite-core tailscale          # status
+~/.local/lib/boite/boite-core tailscale on       # serve it on https://<machine>.<tailnet>.ts.net
+~/.local/lib/boite/boite-core tailscale off
+```
+
+`on` runs `tailscale serve` for this core's port and sets the public URL; it
+refuses to take 443 from another target unless given `--replace`. The command
+exits 0 when the state is on or off, 2 when Tailscale needs something first
+(the line says what, with the page to open), 1 on an error. The account running
+it must be allowed to change Tailscale's serve config (on Linux, `sudo tailscale
+set --operator=$USER` once). See [phone.md](phone.md#through-tailscale).
+
 Paste the link into Settings, Machines, Add machine. Full control permits
 accounts, projects, settings and further pairing. Removing the local connection
 forgets its key; revoking it on the server invalidates it. [Machines](machines.md)

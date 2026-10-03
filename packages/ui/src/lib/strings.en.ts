@@ -234,7 +234,43 @@ export const strings = {
     enable: 'Enable notifications', disable: 'Disable notifications', test: 'Send test notification',
     enabled: 'Notifications enabled for this device.', testSent: 'The push service accepted the test notification.',
     denied: 'Notifications were not allowed. You can change this in the browser or device settings.',
-    subscriptionFailed: 'The browser did not return a complete push subscription.'
+    subscriptionFailed: 'The browser did not return a complete push subscription.',
+    multiMachine: 'Notifications come from the machine this app was installed from. For another machine, open its own pairing link in Safari and add it to the Home Screen as a separate app.',
+    tailscale: {
+      heading: 'HTTPS through Tailscale',
+      hint: 'Tailscale gives this machine an HTTPS address on your tailnet. Boite serves itself there with tailscale serve, and new pairing links use it. A phone needs Tailscale connected to reach it.',
+      checking: 'Checking Tailscale…',
+      missing: 'Tailscale is not installed on this machine.',
+      download: 'Get Tailscale',
+      stopped: 'Tailscale is installed but not connected. Open Tailscale and connect, then check again.',
+      needsLogin: 'Tailscale is signed out on this machine. Sign in, then check again.',
+      signIn: 'Sign in to Tailscale',
+      httpsDisabled: 'HTTPS certificates are off for your tailnet. In the Tailscale admin console, DNS page, turn on MagicDNS and HTTPS Certificates, then check again.',
+      openAdmin: 'Open the admin console',
+      off: 'Ready: this core can be served at {url}.',
+      on: 'This core is served at {url}.',
+      onPublic: 'New pairing links use this address.',
+      conflict: '{url} already serves {target}. Boite leaves it alone unless you replace it.',
+      error: 'The tailscale command did not answer as expected.',
+      enable: 'Enable HTTPS via Tailscale',
+      disable: 'Disable',
+      replace: 'Replace…',
+      refresh: 'Check again',
+      pair: 'Pair a phone',
+      approve: 'Allow Serve',
+      replaceTitle: 'Replace what {url} serves?',
+      replaceBody: 'Tailscale serves {target} at this address now. Replacing it points the address at Boite, and what used it stops being reachable there.',
+      replaceConfirm: 'Replace',
+      disableTitle: 'Stop serving Boite through Tailscale?',
+      disableBody: 'Phones paired through {url} cannot reach this core until it is served again. Their keys stay valid.',
+      details: {
+        'permission-denied': 'Tailscale refused the change. On Linux, run sudo tailscale set --operator=$USER once, then try again.',
+        'serve-consent': 'Your tailnet has not allowed Serve yet. Open the link, approve it, then try again.',
+        'not-logged-in': 'Tailscale is signed out. Sign in, then try again.',
+        timeout: 'Tailscale did not answer in time. Try again.',
+        unknown: 'Tailscale refused the change. Run tailscale serve status on this machine to see why.'
+      }
+    }
   },
   mobile: {
     clearSearch: 'Clear search', draftTitle: 'What would you like to do?', draftHint: 'Start a task, ask a question, or pick up your work.',
@@ -242,7 +278,8 @@ export const strings = {
     pairBody: 'Connect to your computer to find your projects, conversations and agents here.',
     pairStep: 'On your computer, open Settings → Machines and devices and create a pairing code.',
     pairInstalled: 'Just installed Boite? Pair it here too: the iPhone app keeps its connection separately from the browser.',
-    pairPrivacy: 'Scan from this app. The code is single-use and expires after 10 minutes.',
+    pairPrivacy: 'Scan from this app, or type the code shown under the QR code. Either works once and expires within minutes.',
+    scanInApp: 'Use the Scan button here rather than the Camera app: the camera opens the link in Safari, which keeps a pairing of its own.',
     pairingRequired: 'Pair this app',
     offlineTitle: 'Waiting for your computer',
     offlineBody: 'Keep Boite running on your computer and check your connection. If you use Tailscale, keep it connected on both devices.',
@@ -264,6 +301,9 @@ export const strings = {
     label: 'Machine name', icon: 'Machine icon', icons: { desktop: 'Desktop', laptop: 'Laptop', server: 'Server', rack: 'Server rack', cloud: 'Cloud', cpu: 'Processor' }, link: 'Pairing link', add: 'Add machine', adding: 'Connecting', connect: 'Connect',
     addHint: 'On the other machine, open Settings, Machines and devices, make a pairing link and paste it here. Full control there lets this machine manage its accounts and settings.',
     scan: 'Scan a QR code', pasteLink: 'Paste a pairing link', scanTitle: 'Scan the pairing code',
+    typeCode: 'Type a pairing code', codeLabel: 'Pairing code', codePlaceholder: 'ABCD-EFGH',
+    codeHint: 'The 8-character code shown under the QR code on your computer.',
+    codeInvalid: 'A pairing code has 8 letters and digits, like ABCD-EFGH.',
     scanHint: 'On the other machine, open Settings, Machines and devices, create a pairing link and point the camera at its QR code.',
     scanStarting: 'Starting the camera', scanClose: 'Close the camera',
     scanErrors: {
@@ -1742,7 +1782,14 @@ export const strings = {
       ownerHint:
         'For another computer of yours: its key drives this core as you do. Leave it off for a phone.',
       ownerTag: 'full control',
-      pasteOwner: 'Paste it in Settings, General, on the other computer.'
+      pasteOwner: 'Paste it in Settings, General, on the other computer.',
+      code: 'Or type this code in the installed app',
+      codeExpires: 'The code works once, until {time}.',
+      ownerQr: 'QR code for a phone',
+      ownerQrTitle: 'Give a phone full control?',
+      ownerQrBody: 'Whoever scans this QR code or types its code in the next 5 minutes drives this core as you do: agents, files, accounts and settings. Show it only to your own phone, and revoke the device below if in doubt.',
+      ownerQrConfirm: 'Show the code',
+      ownerScan: 'Scan it from the Boite app on your phone, or type the code there. It works once, within 5 minutes.'
     }
   },
 

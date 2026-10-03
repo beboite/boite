@@ -243,7 +243,43 @@ export const fr: Translation = {
     enable: 'Activer les notifications', disable: 'Désactiver les notifications', test: 'Envoyer une notification de test',
     enabled: 'Notifications activées pour cet appareil.', testSent: 'Le service push a accepté la notification de test.',
     denied: "Les notifications ont été refusées. Vous pouvez changer ça dans les réglages du navigateur ou de l'appareil.",
-    subscriptionFailed: "Le navigateur n'a pas renvoyé un abonnement push complet."
+    subscriptionFailed: "Le navigateur n'a pas renvoyé un abonnement push complet.",
+    multiMachine: "Les notifications viennent de la machine depuis laquelle cette application a été installée. Pour une autre machine, ouvrez son propre lien d'appairage dans Safari et ajoutez-la à l'écran d'accueil comme une application à part.",
+    tailscale: {
+      heading: 'HTTPS via Tailscale',
+      hint: "Tailscale donne à cette machine une adresse HTTPS sur votre tailnet. Boite s'y sert lui-même avec tailscale serve, et les nouveaux liens d'appairage l'utilisent. Un téléphone doit avoir Tailscale connecté pour l'atteindre.",
+      checking: 'Vérification de Tailscale…',
+      missing: "Tailscale n'est pas installé sur cette machine.",
+      download: 'Obtenir Tailscale',
+      stopped: "Tailscale est installé mais pas connecté. Ouvrez Tailscale et connectez-le, puis vérifiez à nouveau.",
+      needsLogin: 'Tailscale est déconnecté de votre compte sur cette machine. Connectez-vous, puis vérifiez à nouveau.',
+      signIn: 'Se connecter à Tailscale',
+      httpsDisabled: "Les certificats HTTPS sont désactivés sur votre tailnet. Dans la console d'administration Tailscale, page DNS, activez MagicDNS et HTTPS Certificates, puis vérifiez à nouveau.",
+      openAdmin: "Ouvrir la console d'administration",
+      off: 'Prêt : ce cœur peut être servi sur {url}.',
+      on: 'Ce cœur est servi sur {url}.',
+      onPublic: "Les nouveaux liens d'appairage utilisent cette adresse.",
+      conflict: "{url} sert déjà {target}. Boite n'y touche pas, sauf si vous le remplacez.",
+      error: "La commande tailscale n'a pas répondu comme prévu.",
+      enable: "Activer l'accès HTTPS via Tailscale",
+      disable: 'Désactiver',
+      replace: 'Remplacer…',
+      refresh: 'Vérifier à nouveau',
+      pair: 'Associer un téléphone',
+      approve: 'Autoriser Serve',
+      replaceTitle: 'Remplacer ce que sert {url} ?',
+      replaceBody: "Tailscale sert actuellement {target} à cette adresse. La remplacer la fait pointer vers Boite, et ce qui l'utilisait n'y est plus joignable.",
+      replaceConfirm: 'Remplacer',
+      disableTitle: 'Ne plus servir Boite via Tailscale ?',
+      disableBody: "Les téléphones associés via {url} ne peuvent plus joindre ce cœur tant qu'il n'est pas servi à nouveau. Leurs clés restent valides.",
+      details: {
+        'permission-denied': 'Tailscale a refusé la modification. Sous Linux, lancez une fois sudo tailscale set --operator=$USER, puis réessayez.',
+        'serve-consent': "Votre tailnet n'autorise pas encore Serve. Ouvrez le lien, approuvez, puis réessayez.",
+        'not-logged-in': 'Tailscale est déconnecté. Connectez-vous, puis réessayez.',
+        timeout: "Tailscale n'a pas répondu à temps. Réessayez.",
+        unknown: 'Tailscale a refusé la modification. Lancez tailscale serve status sur cette machine pour savoir pourquoi.'
+      }
+    }
   },
   mobile: {
     clearSearch: 'Effacer la recherche', draftTitle: 'Que voulez-vous faire ?', draftHint: 'Lancez une tâche, posez une question ou reprenez votre travail.',
@@ -251,7 +287,8 @@ export const fr: Translation = {
     pairBody: 'Connectez votre ordinateur pour retrouver ici vos projets, vos conversations et vos agents.',
     pairStep: 'Sur votre ordinateur, ouvrez Réglages → Machines et appareils et créez un code d’appairage.',
     pairInstalled: 'Vous venez d’installer Boite ? Associez-la ici aussi : sur iPhone, l’application garde sa connexion séparément du navigateur.',
-    pairPrivacy: 'Scannez depuis cette application. Le code est à usage unique et expire après 10 minutes.',
+    pairPrivacy: 'Scannez depuis cette application, ou tapez le code affiché sous le QR code. Chacun ne sert qu’une fois et expire en quelques minutes.',
+    scanInApp: "Utilisez le bouton Scanner ici plutôt que l'app Appareil photo : celle-ci ouvre le lien dans Safari, qui garde son propre appairage.",
     pairingRequired: 'Associer cette application',
     offlineTitle: 'En attente de votre ordinateur',
     offlineBody: 'Gardez Boite ouverte sur votre ordinateur et vérifiez votre connexion. Si vous utilisez Tailscale, gardez-le connecté sur les deux appareils.',
@@ -273,6 +310,9 @@ export const fr: Translation = {
     label: 'Nom de la machine', icon: 'Icône de la machine', icons: { desktop: 'Ordinateur fixe', laptop: 'Portable', server: 'Serveur', rack: 'Baie', cloud: 'Cloud', cpu: 'Processeur' }, link: "Lien d'appairage", add: 'Ajouter une machine', adding: 'Connexion', connect: 'Connecter',
     addHint: 'Sur l\'autre machine, ouvrez Réglages, Machines et appareils, créez un lien d\'appairage et collez-le ici. Le contrôle total, là-bas, laisse cette machine gérer ses comptes et ses réglages.',
     scan: 'Scanner un QR code', pasteLink: "Coller un lien d'appairage", scanTitle: "Scannez le code d'appairage",
+    typeCode: "Taper un code d'appairage", codeLabel: "Code d'appairage", codePlaceholder: 'ABCD-EFGH',
+    codeHint: 'Le code de 8 caractères affiché sous le QR code sur votre ordinateur.',
+    codeInvalid: "Un code d'appairage compte 8 lettres et chiffres, comme ABCD-EFGH.",
     scanHint: "Sur l'autre machine, ouvrez Réglages, Machines et appareils, créez un lien d'appairage et visez son QR code avec la caméra.",
     scanStarting: 'Démarrage de la caméra', scanClose: 'Fermer la caméra',
     scanErrors: {
@@ -1677,7 +1717,14 @@ export const fr: Translation = {
       ownerHint:
         'Pour un autre de vos ordinateurs : sa clé pilote ce cœur comme vous le faites. Laissez désactivé pour un téléphone.',
       ownerTag: 'contrôle total',
-      pasteOwner: "Collez-le dans Réglages, Général, sur l'autre ordinateur."
+      pasteOwner: "Collez-le dans Réglages, Général, sur l'autre ordinateur.",
+      code: "Ou tapez ce code dans l'application installée",
+      codeExpires: "Le code ne sert qu'une fois, jusqu'à {time}.",
+      ownerQr: 'QR code pour un téléphone',
+      ownerQrTitle: 'Donner le contrôle total à un téléphone ?',
+      ownerQrBody: "Quiconque scanne ce QR code ou tape son code dans les 5 prochaines minutes pilote ce cœur comme vous : agents, fichiers, comptes et réglages. Ne le montrez qu'à votre propre téléphone, et révoquez l'appareil ci-dessous en cas de doute.",
+      ownerQrConfirm: 'Afficher le code',
+      ownerScan: "Scannez-le depuis l'application Boite de votre téléphone, ou tapez-y le code. Il ne sert qu'une fois, dans les 5 minutes."
     }
   },
 
