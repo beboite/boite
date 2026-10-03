@@ -19,11 +19,13 @@
   import { sidebarRows } from '../lib/sidebar-rows.svelte';
   import { projectMenu } from '../lib/project-menu';
   import { work } from '../lib/work-prefs.svelte';
-  import { PROJECT_DRAG_TYPE, projectKey, projectView } from '../lib/project-view.svelte';
+  import { PROJECT_DRAG_TYPE, projectKey, projectView, type ProjectEntry } from '../lib/project-view.svelte';
+  import { activeProject, projectThreadLists, projectThreadView } from '../lib/project-threads.svelte';
   import ProjectViews from './ProjectViews.svelte';
   import RecentGroup from './RecentGroup.svelte';
   import RecentDone from './RecentDone.svelte';
-  import ArchivedDrawer from './ArchivedDrawer.svelte';
+  import ProjectThreadCounters from './ProjectThreadCounters.svelte';
+  import OtherProjects from './OtherProjects.svelte';
   import ArchivedProjects from './ArchivedProjects.svelte';
   import LimitsGlance from './LimitsGlance.svelte';
   import AppUpdateNotice from './AppUpdateNotice.svelte';
@@ -57,6 +59,9 @@
   let all = $derived(visible.flatMap((machine) => machine.store.projects.map((project) => ({ machine, project }))));
   /** An archived project leaves the list for the fold under it; its threads keep running. */
   let groups = $derived(projectView.sorted(all.filter(({ project }) => project.archived !== true)));
+  let activeGroups = $derived(groups.filter(activeProject));
+  let otherGroups = $derived(groups.filter(entry => !activeProject(entry)));
+  let shownGroups = $derived([...activeGroups, ...(projectThreadView.otherOpen ? otherGroups : [])]);
   let shelved = $derived(all.filter(({ project }) => project.archived === true));
   let selected = $derived(projectView.selected(groups));
   let recentGroups = $derived(selected ? [selected] : groups);
@@ -71,21 +76,31 @@
   );
   let workingOpen = $state(false);
   let doneRows = $state.raw<{ store: Store; threadId: ThreadId }[]>([]);
+  let projectDoneRows = $state.raw<Record<string, { store: Store; threadId: ThreadId }[]>>({});
+  const doneObservers = new Map<string, (rows: { store: Store; threadId: ThreadId }[]) => void>();
+  function doneObserver(entry: ProjectEntry) {
+    const key = projectKey(entry);
+    if (!doneObservers.has(key)) doneObservers.set(key, rows => rememberDoneRows(key, rows));
+    return doneObservers.get(key)!;
+  }
+  function rememberDoneRows(key: string, rows: { store: Store; threadId: ThreadId }[]) {
+    const previous = projectDoneRows[key] ?? [];
+    if (previous.length === rows.length && previous.every((row, index) => row.store === rows[index]?.store && row.threadId === rows[index]?.threadId)) return;
+    projectDoneRows = { ...projectDoneRows, [key]: rows };
+  }
   let working = $derived(recentPreferences.groupWorking ? recent.filter(({ machine, thread }) => groupWorkingThread(machine.store, thread)) : []);
   let attention = $derived(recentPreferences.groupWorking ? recent.filter(({ machine, thread }) => !groupWorkingThread(machine.store, thread)) : recent);
   // Alt+1 to Alt+9 count the rows as drawn: this view, open projects only.
   $effect(() => {
     sidebarRows.list = (workspace.view === 'recent'
       ? [...attention, ...(workingOpen ? working : [])].map(({ machine, thread }) => ({ store: machine.store, threadId: thread.id })).concat(doneRows)
-      : groups.flatMap(({ machine, project }) =>
-          machine.store.isCollapsed(project.id)
-            ? []
-            : machine.store
-                .threadsOf(project.id)
-                .slice()
-                .sort(compareThreads)
-                .map((thread) => ({ store: machine.store, threadId: thread.id }))
-        )
+      : shownGroups.flatMap(entry => {
+          if (entry.machine.store.isCollapsed(entry.project.id)) return [];
+          const open = projectThreadView.isOpen(entry, 'working');
+          const lists = projectThreadLists(entry, entry.machine.store.threadsOf(entry.project.id), open);
+          return [...lists.attention, ...(open ? lists.working : [])].map(thread => ({ store: entry.machine.store, threadId: thread.id }))
+            .concat(projectThreadView.isOpen(entry, 'done') ? projectDoneRows[projectKey(entry)] ?? [] : []);
+        })
     ).slice(0, 9);
   });
   $effect(() => {
@@ -98,9 +113,9 @@
   function openProjectMenu(event: MouseEvent, machine: Machine, project: Project) {
     const key = projectKey({ machine, project });
     projectMenu(event, machine.store, project, projectView.order === 'manual' ? {
-      up: groups[0] !== undefined && projectKey(groups[0]) !== key,
-      down: groups.at(-1) !== undefined && projectKey(groups.at(-1)!) !== key,
-      move: direction => projectView.step(groups, key, direction)
+      up: shownGroups[0] !== undefined && projectKey(shownGroups[0]) !== key,
+      down: shownGroups.at(-1) !== undefined && projectKey(shownGroups.at(-1)!) !== key,
+      move: direction => projectView.step(shownGroups, key, direction)
     } : undefined);
   }
   /** The project a dragged thread row hovers, drawn with the accent outline; only another project of the row's machine takes it. */
@@ -135,7 +150,7 @@
   function drop(event: DragEvent, machine: Machine, project: Project) {
     if (draggedProject && event.dataTransfer?.types.includes(PROJECT_DRAG_TYPE)) {
       event.preventDefault();
-      projectView.move(groups, draggedProject, projectKey({ machine, project }), dropAfter);
+      projectView.move(shownGroups, draggedProject, projectKey({ machine, project }), dropAfter);
       draggedProject = null;
       dropOver = null;
       return;
@@ -206,18 +221,21 @@
           <DraftRow owner={machine.store} {entry} />
         {/each}
       {/each}
-      {#each groups as { machine, project } (`${machine.id}:${project.id}`)}
+      {#snippet projectRows(entries: ProjectEntry[])}
+      {#each entries as entry (projectKey(entry))}
+        {@const { machine, project } = entry}
         {@const owner = machine.store}
-        {@const threads = owner
-          .threadsOf(project.id)
-          .slice()
-          .sort(compareThreads)}
+        {@const workingOpen = projectThreadView.isOpen(entry, 'working')}
+        {@const doneOpen = !!project.archivedThreads && projectThreadView.isOpen(entry, 'done')}
+        {@const lists = projectThreadLists(entry, owner.threadsOf(project.id), workingOpen)}
+        {@const controls = `sidebar-project-${encodeURIComponent(projectKey(entry))}`}
         {@const collapsed = owner.isCollapsed(project.id)}
         {@const rollup = collapsed ? projectRollup(owner.threadsOf(project.id)) : null}
         {@const draftHere = owner.draftEntries.find(entry => entry.projectId === project.id)}
         {@const dropKey = `${machine.id}:${project.id}`}
         <section
           class="project"
+          class:inactive={!activeProject(entry)}
           class:drop={dropOver === dropKey}
           class:reordering={dropOver === dropKey && draggedProject !== null}
           class:after={dropAfter}
@@ -250,6 +268,7 @@
                 >{/if}{#if multi}<span class="host" data-testid="project-host" class:offline={owner.connection !== 'ready'}
                   title={`${machine.label} · ${strings.connection[owner.connection]}`} aria-label={machine.label}><MachineIcon icon={machine.icon} os={owner.core?.os} /></span>{/if}
             </button>
+            <ProjectThreadCounters {entry} working={lists.working.length} {controls} {collapsed} />
             <button
               class="ghost small icon project-actions"
               data-testid="project-menu"
@@ -261,18 +280,34 @@
           <div class="fold" class:expanded={!collapsed} inert={collapsed}>
             <div class="rows">
               {#if draftHere}<DraftRow {owner} entry={draftHere} />{/if}
-              <WindowList items={threads} keyOf={thread => JSON.stringify([machine.id, thread.id])} {scrollRoot} active={!collapsed} estimate={34} measurements={measurements(JSON.stringify([machine.id, project.id]))}>
-                {#snippet row(thread)}<ThreadCard {machine} {project} {thread} {now} showProject={false} showMachine={false} />{/snippet}
+              <WindowList items={lists.attention} keyOf={thread => JSON.stringify([machine.id, thread.id])} {scrollRoot} active={!collapsed} estimate={34} measurements={measurements(JSON.stringify([machine.id, project.id]))}>
+                {#snippet row(thread)}<ThreadCard {machine} {project} {thread} {now} showProject={false} showMachine={false} showDone />{/snippet}
               </WindowList>
-              {#if threads.length === 0 && !draftHere}<p class="none">
-                  {strings.sidebar.noThreads}
-                </p>{/if}
-              <ArchivedDrawer store={owner} {project} />
+              <div id="{controls}-working" hidden={!workingOpen || lists.working.length === 0} data-testid="project-working">
+                {#if workingOpen && lists.working.length > 0}
+                  <p class="group-label">{strings.sidebar.workingThreads}</p>
+                  <WindowList items={lists.working} keyOf={thread => JSON.stringify([machine.id, thread.id])} {scrollRoot} active={!collapsed} estimate={34} measurements={measurements(JSON.stringify([machine.id, project.id, 'working']))}>
+                    {#snippet row(thread)}<ThreadCard {machine} {project} {thread} {now} showProject={false} showMachine={false} showDone />{/snippet}
+                  </WindowList>
+                {/if}
+              </div>
+              <div id="{controls}-done" hidden={!doneOpen} data-testid="project-done">
+                {#if doneOpen}<p class="group-label">{strings.sidebar.doneThreads}</p>{/if}
+                <RecentDone entries={[entry]} {scrollRoot} {now} open={doneOpen && !collapsed} header={false}
+                  onrows={doneObserver(entry)} />
+              </div>
+              {#if lists.attention.length === 0 && lists.working.length === 0 && !project.archivedThreads && !draftHere}<p class="none">{strings.sidebar.noThreads}</p>{/if}
             </div>
           </div>
         </section>
       {/each}
-      <ArchivedProjects entries={shelved} {multi} />
+      {/snippet}
+      {@render projectRows(activeGroups)}
+      {#if groups.length > 0 && activeGroups.length === 0}<p class="none">{strings.sidebar.noActiveProjects}</p>{/if}
+      <div class="project-folds">
+        <OtherProjects count={otherGroups.length}>{@render projectRows(otherGroups)}</OtherProjects>
+        <ArchivedProjects entries={shelved} {multi} />
+      </div>
     {/if}
     {/if}
   </div>
@@ -316,6 +351,13 @@
 </aside>
 
 <style>
+  .sidebar { container: sidebar / inline-size; }
+  @container sidebar (max-width: 240px) {
+    .sidebar .head { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+    .head .toggle { grid-column: 1; grid-row: 1; }
+    .head .project-actions { grid-column: 2; grid-row: 1; }
+    .head :global(.counters) { grid-column: 1 / -1; grid-row: 2; justify-content: flex-end; margin-bottom: 4px; }
+  }
   .sidebar {
     position: relative;
     width: var(--sidebar-width);
@@ -332,9 +374,11 @@
     overflow: auto;
     padding: 8px 6px;
   }
-  .scroll.recent { display: flex; flex-direction: column; }
-  .scroll.recent > :global(*) { flex-shrink: 0; }
+  .scroll { display: flex; flex-direction: column; }
+  .scroll > :global(*) { flex-shrink: 0; }
   .recent-folds { margin-top: auto; padding-top: 12px; }
+  .project-folds { margin-top: auto; }
+  .group-label { margin: 0; padding: 8px 10px 4px; color: var(--color-subtle); font-size: var(--text-xs); border-top: 1px solid var(--color-border); }
   .project {
     margin-bottom: 10px;
     padding: 4px;
@@ -361,7 +405,7 @@
     height: var(--row);
     padding: 0 4px;
     justify-content: flex-start;
-    gap: 6px;
+    gap: 4px;
   }
   .name {
     flex: 1;

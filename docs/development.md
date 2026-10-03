@@ -175,7 +175,7 @@ Mark done uses the persistent archive and its undo action; `threads.archive`
 with `onlyIfIdle: true` refuses pending work or input in the conversation's
 family before changing it. Done reads archived summaries only on expansion,
 respecting the project and machine filters. A completed conversation opens for
-reading with a Reopen thread button in place of the composer. Reopening keeps
+reading with a Move to Recent button in place of the composer. Reopening keeps
 history without restarting work.
 
 Settings > General > Conversations offers Group working threads in Recent,
@@ -186,6 +186,18 @@ the user's answer remain visible. Phone search temporarily shows matching
 working conversations in the main list. Keyboard thread shortcuts follow the
 expanded rows in their displayed order. Merged-PR archiving feeds Done through
 the core check below; its PR link appears under the completed title.
+
+Projects shows projects with open conversations or a draft. Each project header
+has separate Working and Done counters that toggle their lists, both closed by
+default. Working includes running, queued and background work. Pins and unsent
+drafts stay visible while Working is folded and appear once when expanded;
+questions and failures stay in the main list. Done reads only that project's
+archived summaries when expanded, with the same reading and restore actions as
+Recent. Other projects holds empty projects and projects with only completed
+conversations in a closed section below the active list. Restoring or starting a
+conversation brings its project back. Expansion follows the owning project
+between desktop and phone for the current session. Phone search exposes matching
+working conversations even when their counter is closed.
 
 Deletion is owner-only and separate from archive. `threads.remove` stops the
 thread family and waits for processes before hiding it behind persistent

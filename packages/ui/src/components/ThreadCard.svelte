@@ -34,7 +34,7 @@
     now: number;
     /** In a folded project: the card waits for the unfold to look up its pull request. */
     hidden?: boolean;
-    /** Recent's quick action puts finished work in its Done section. */
+    /** The quick action puts finished work in Done. */
     showDone?: boolean;
     /** Off under the project's own header, where the folder line would only repeat it. */
     showProject?: boolean;
