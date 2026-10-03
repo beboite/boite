@@ -76,6 +76,39 @@ test('in the shell the name saves and opens the file, and Download saves it with
   expect(document.querySelector('[data-testid=image-viewer]')).toBeNull();
 });
 
+test('a deferred file shows its size and fetches the owning conversation only when opened', async () => {
+  const invoke = vi.fn(async () => ({ path: 'C:/Downloads/build.zip', opened: true }));
+  window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
+  const loadMessageAttachment = vi.fn(async () => archive.data);
+  running = mount(ChatFile, { target: document.body, props: {
+    file: { ...archive, data: '', dataDeferred: true, bytes: 9 },
+    store: { loadMessageAttachment } as unknown as Store, threadId: 'owning-thread', messageId: 'message', partIndex: 3
+  } });
+  flushSync();
+  expect(loadMessageAttachment).not.toHaveBeenCalled();
+  expect(query('[data-testid=artifact-launch]').textContent).toContain('9 B');
+  query<HTMLButtonElement>('[data-testid=artifact-launch]').click();
+  await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
+  expect(loadMessageAttachment).toHaveBeenCalledWith('owning-thread', 'message', 3);
+  expect(new TextDecoder().decode((invoke.mock.lastCall as unknown as [string, Uint8Array])[1])).toBe('zip bytes');
+});
+
+test('a failed attachment refresh does not save bytes from the previous successful read', async () => {
+  const invoke = vi.fn(async () => ({ path: 'C:/Downloads/build.zip', opened: true }));
+  window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
+  const loadMessageAttachment = vi.fn().mockResolvedValueOnce(archive.data).mockRejectedValueOnce(new Error('Attachment unavailable'));
+  running = mount(ChatFile, { target: document.body, props: {
+    file: { ...archive, data: '', dataDeferred: true, bytes: 9 },
+    store: { loadMessageAttachment } as unknown as Store, threadId: 'thread', messageId: 'message', partIndex: 0
+  } });
+  flushSync();
+  query<HTMLButtonElement>('[data-testid=artifact-launch]').click();
+  await vi.waitFor(() => expect(query('[data-testid=artifact-launch]').textContent).toContain('Saved in Downloads'));
+  query<HTMLButtonElement>('[data-testid=artifact-launch]').click();
+  await vi.waitFor(() => expect(query('[role=alert]').textContent).toContain('Attachment unavailable'));
+  expect(invoke).toHaveBeenCalledTimes(1);
+});
+
 test('a disk snapshot uses its owning store and streams its download without a full-body fetch', async () => {
   writeExperiments([]);
   const invoke = vi.fn(async () => ({ path: 'C:/Downloads/clip.mp4', opened: false }));

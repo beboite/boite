@@ -1,4 +1,6 @@
 import type { MessageId, ProjectId, Thread, ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
+import { resumeAnchor } from '@boite/contracts';
+export { resumeAnchor } from '@boite/contracts';
 
 export function workingThread(status: ThreadStatus): boolean {
   return status === 'running' || status === 'queued' || status === 'waiting';
@@ -70,17 +72,6 @@ export function lastIndexById<T extends { id: string }>(items: readonly T[], id:
   return -1;
 }
 
-/**
- * The message a held thread asks `threads.get` to start from: the oldest one of
- * a turn this client has not seen finish, since its parts may still have moved,
- * or the last one when every turn it knows is over. Null when nothing is held.
- */
-export function resumeAnchor(thread: Pick<Thread, 'messages' | 'turns'>): MessageId | null {
-  const finished = new Set(thread.turns.filter((turn) => turn.finishedAt !== null).map((turn) => turn.id));
-  const open = thread.messages.find((message) => message.state === 'streaming' || !finished.has(message.turnId));
-  return (open ?? thread.messages[thread.messages.length - 1])?.id ?? null;
-}
-
 /** The `threads.get` parameters for a thread, from its resume anchor when part of it is held. */
 export function resumeRequest(threadId: ThreadId, held: Pick<Thread, 'messages' | 'turns'> | undefined): { threadId: ThreadId; after?: MessageId } {
   const after = held ? resumeAnchor(held) : null;
@@ -113,14 +104,18 @@ export function unlistedPanels(machineId: string, listed: ReadonlySet<string>, o
  */
 export function mergeResumed(held: Thread, fetched: Thread): void {
   if (fetched.messagesFrom === undefined) return;
-  const fresh = new Set(fetched.messages.map((message) => message.id));
-  const from = held.messages.findIndex((message) => message.id === fetched.messagesFrom);
-  const kept = held.messages.slice(0, from === -1 ? held.messages.length : from).filter((message) => !fresh.has(message.id));
-  fetched.messages = [...kept, ...fetched.messages];
+  if (fetched.messagesUnchanged) fetched.messages = held.messages;
+  else {
+    const fresh = new Set(fetched.messages.map((message) => message.id));
+    const from = held.messages.findIndex((message) => message.id === fetched.messagesFrom);
+    const kept = held.messages.slice(0, from === -1 ? held.messages.length : from).filter((message) => !fresh.has(message.id));
+    fetched.messages = [...kept, ...fetched.messages];
+  }
   const freshTurns = new Set(fetched.turns.map((turn) => turn.id));
   fetched.turns = [...held.turns.filter((turn) => !freshTurns.has(turn.id)), ...fetched.turns];
   fetched.messagesBefore = held.messagesBefore;
   delete fetched.messagesFrom;
+  delete fetched.messagesUnchanged;
 }
 
 /** JSON wire values compared without allocating another copy of a large tool payload. */

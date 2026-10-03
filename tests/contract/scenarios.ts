@@ -145,6 +145,51 @@ async function unavailable(env: ContractEnv): Promise<{ provider: ProviderSummar
 }
 
 export const SCENARIOS: Record<string, Scenario> = {
+  'opening snapshots restore questions, replace subscriptions and omit a proven quiet tail': async env => {
+    const { setup, threadId, questionId } = await asked(env);
+    const previous = await thread(env, setup, 'previous');
+    await env.call('threads.subscribe', { threadId: previous.id });
+    const rejected = await refusedWith(env.call('threads.get', { threadId, sync: { from: 'anchor', hash: 'invalid' }, open: { previous: previous.id, markRead: true } }), RpcErrorCode.InvalidParams, ['field', 'expected']);
+    same(rejected.field, 'sync.hash', 'invalid proof field');
+    const retained = record(env, ['message.started']);
+    try {
+      await env.call('turns.start', { threadId: previous.id, prompt: 'subscription survived the refusal' });
+      await until('the previous turn to finish', async () => (await summary(env, previous.id)).status === 'idle');
+      check(retained.events.some(event => (event.payload as { threadId: string }).threadId === previous.id), 'a refused snapshot removed the previous subscription');
+    } finally { retained.stop(); }
+    const opened = await env.call('threads.get', { threadId, sync: true, open: { previous: previous.id, markRead: true } });
+    check(opened.opened?.questions?.some(question => question.id === questionId) === true, 'opening lost its pending question');
+    check(!opened.unread && opened.messagesSync !== undefined, 'opening omitted its read receipt or resume proof');
+    const quiet = await env.call('threads.get', { threadId, after: opened.messagesSync.from, sync: opened.messagesSync });
+    same(quiet.messages, [], 'unchanged message bytes');
+    check(quiet.messagesUnchanged === true, 'the quiet tail was not reusable');
+    const events = record(env, ['message.started']);
+    try {
+      await env.call('turns.start', { threadId: previous.id, prompt: 'unsubscribed content' });
+      await until('the previous turn to finish', async () => (await summary(env, previous.id)).status === 'idle');
+      check(!events.events.some(event => (event.payload as { threadId: string }).threadId === previous.id), 'the previous subscription remained active');
+    } finally { events.stop(); }
+  },
+  'deferred attachment metadata downloads the original bytes and rejects a different conversation': async env => {
+    const setup = await echo(env), created = await thread(env, setup);
+    const data = btoa('attachment bytes preserved');
+    await env.call('turns.start', { threadId: created.id, prompt: 'read the file', attachments: [{ kind: 'file', name: 'fixture.txt', mimeType: 'text/plain', data }] });
+    await until('the attachment turn to finish', async () => (await summary(env, created.id)).status === 'idle');
+    const compact = await env.call('threads.get', { threadId: created.id, compactFiles: true, sync: true });
+    const message = compact.messages.find(message => message.parts.some(part => part.type === 'file'));
+    check(message !== undefined, 'the attachment disappeared');
+    const partIndex = message.parts.findIndex(part => part.type === 'file');
+    const part = message.parts[partIndex];
+    check(part?.type === 'file' && part.dataDeferred === true && part.data === '' && part.bytes === atob(data).length, 'the file was transferred before being requested');
+    same((await env.call('messages.attachment', { threadId: created.id, messageId: message.id, partIndex })).data, data, 'downloaded attachment bytes');
+    const other = await thread(env, setup);
+    await refusedWith(env.call('messages.attachment', { threadId: other.id, messageId: message.id, partIndex }), RpcErrorCode.NotFound, ['messageId']);
+    await refusedWith(env.call('messages.attachment', { threadId: created.id, messageId: message.id, partIndex: -1 }), RpcErrorCode.InvalidParams, ['field']);
+    const full = await env.call('threads.get', { threadId: created.id, after: compact.messagesSync?.from, sync: compact.messagesSync });
+    check(full.messagesUnchanged !== true, 'a compact proof incorrectly certified a full attachment response');
+    const journal = await env.call('threads.get', { threadId: created.id });
+    check(journal.messages.some(message => message.parts.some(part => part.type === 'file' && part.data === data && !part.dataDeferred)), 'snapshot compaction changed the journal');
+  },
   'activity uploads are validated before mutation and accompany only the first iteration': async env => {
     const setup = await echo(env);
     const { id: threadId } = await thread(env, setup);

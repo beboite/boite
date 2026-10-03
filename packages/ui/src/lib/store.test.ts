@@ -230,6 +230,7 @@ test.for(['reload', 'open'] as const)('a delayed %s request snapshot preserves r
       held++;
       if (action === 'reload') await gate.promise;
     }
+    if (action === 'open' && method === 'threads.get' && (value as import('@boite/contracts').ThreadSnapshot).opened) held += 2;
     // The scoped answers can finish before their subscription/get allows application.
     if (action === 'open' && method === 'threads.get') await gate.promise;
     return value;
@@ -305,6 +306,12 @@ test.for(['all-first', 'thread-first'] as const)('the newer request scope wins o
   const offlineQuestion = { ...questions[0]!, id: 'offline-question', threadId: 't-trace' };
   let held = 0;
   const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'threads.get' && (params as import('@boite/contracts').RpcParams<'threads.get'>).open?.requests !== false && (params as import('@boite/contracts').RpcParams<'threads.get'>).open) {
+      const older = order === 'thread-first';
+      if (older) { held += 2; await gate.promise; }
+      const snapshot = await call('threads.get', params as import('@boite/contracts').RpcParams<'threads.get'>);
+      return { ...snapshot, opened: { permissions: older ? permissions : [], questions: older ? questions : [] } } as never;
+    }
     if (method !== 'permissions.list' && method !== 'questions.list') return call(method, params);
     const global = !('threadId' in params);
     const older = global === (order === 'all-first');

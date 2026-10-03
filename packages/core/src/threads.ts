@@ -1,7 +1,7 @@
 import { archiveState, archiveStateKey } from './merged-pr-archive-state.ts';
 import { assertIdleFamily } from './threads/completion.ts';
 import { repositoryOf, type MergedPrProof } from './pull-requests.ts';
-import { previewToolOutputs, previewReferencesError, previewPrompt, MESSAGE_PAGE, MESSAGE_PAGE_MAX, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type AgentProfile } from '@boite/contracts';
+import { previewToolOutputs, previewFileData, previewReferencesError, previewPrompt, MESSAGE_PAGE, MESSAGE_PAGE_MAX, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type AgentProfile } from '@boite/contracts';
 import type {
   Account,
   AccountId,
@@ -48,7 +48,7 @@ import { saveThread, setThreadStatus, withLoad } from './threads/records.ts';
 import { ThreadRecovery } from './threads/recovery.ts';
 import { ThreadTitles } from './threads/retitle.ts';
 import { SideQuestions } from './threads/side-questions.ts';
-import { readMemoryEvents } from './threads/memory-read.ts';
+import { threadSnapshot } from './threads/snapshot.ts';
 import { checkEffort, checkModel, checkSpeed, checkStoredEffort, checkStoredSpeed, defaultModel } from './threads/selection.ts';
 import { TurnContexts } from './threads/turn-context.ts';
 import { TurnRunner } from './threads/turn-runner.ts';
@@ -145,36 +145,8 @@ export class ThreadStore {
    * one page here; the rest is walked back through `messages`, whose cursor is
    * `messagesBefore`.
    */
-  get(threadId: ThreadId, after?: MessageId, options: { limit?: number; compactTools?: boolean } = {}): Thread {
-    const asked = options.limit ?? MESSAGE_PAGE;
-    if (!Number.isFinite(asked)) throw refused('threads.get limit must be a finite number', { limit: options.limit });
-    const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
-    const thread = this.withLoad(this.require(threadId));
-    // A snapshot taken mid-stream holds every delta up to this line, and every
-    // one of them has left for the sockets: what arrives after the answer is
-    // text the answer does not have.
-    this.core.journal.flushDeltas();
-    this.core.bus.flush();
-    const fromRowid = after === undefined ? null : this.core.journal.messageRowid(threadId, after);
-    const tail = fromRowid === null ? null : this.core.journal.listMessagesFrom(threadId, fromRowid, limit);
-    const page = tail === null
-      ? this.core.journal.listMessagePage(threadId, { limit })
-      : { messages: tail, before: null };
-    return {
-      ...thread,
-      ...(tail === null || after === undefined ? {} : { messagesFrom: after }),
-      messages: options.compactTools ? previewToolOutputs(page.messages) : page.messages,
-      memoryEvents: readMemoryEvents(this.core.journal, threadId),
-      commands: this.agentState.commands.get(threadId) ?? [],
-      background: this.agentState.background.get(threadId) ?? [],
-      activity: this.core.activity.get(threadId),
-      messagesBefore: page.before,
-      // The turns of that page and the ones still in flight, never the whole history.
-      turns: this.core.journal.listTurnsFor(
-        threadId,
-        page.messages.map((message) => message.turnId),
-      ),
-    };
+  get(threadId: ThreadId, after?: MessageId, options: Pick<RpcParams<'threads.get'>, 'limit' | 'compactTools' | 'compactFiles' | 'sync' | 'open'> = {}): Thread {
+    return threadSnapshot(this.core, this.withLoad(this.require(threadId)), after, options, this.agentState);
   }
 
   /**
@@ -182,7 +154,7 @@ export class ThreadStore {
    * unknown thread is a not-found; a cursor that is not a message of that thread
    * is refused by name rather than answered with an empty page.
    */
-  messages(params: { threadId: ThreadId; before: MessageId; limit?: number; compactTools?: boolean }): {
+  messages(params: RpcParams<'messages.list'>): {
     messages: Message[];
     before: MessageId | null;
     turns: Turn[];
@@ -198,7 +170,8 @@ export class ThreadStore {
     const asked = params.limit ?? MESSAGE_PAGE;
     const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
     const page = this.core.journal.listMessagePage(params.threadId, { beforeRowid: rowid, limit });
-    return { ...page, messages: params.compactTools ? previewToolOutputs(page.messages) : page.messages, turns: this.core.journal.listTurnsFor(params.threadId, page.messages.map((message) => message.turnId)) };
+    const messages = params.compactTools ? previewToolOutputs(page.messages) : page.messages;
+    return { ...page, messages: params.compactFiles ? previewFileData(messages) : messages, turns: this.core.journal.listTurnsFor(params.threadId, page.messages.map((message) => message.turnId)) };
   }
 
   // -- writes ---------------------------------------------------------------

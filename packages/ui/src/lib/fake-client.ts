@@ -223,6 +223,10 @@ export class FakeClient implements ObservableClient {
     // The real client writes its set from the answer, never from the request.
     if (method === 'threads.subscribe') {
       bus.clientSubscribed.add((params as RpcParams<'threads.subscribe'>).threadId);
+    } else if (method === 'threads.get' && (result as RpcResult<'threads.get'>).opened) {
+      const request = params as RpcParams<'threads.get'>;
+      bus.clientSubscribed.add(request.threadId);
+      if (request.open?.previous && request.open.previous !== request.threadId) bus.clientSubscribed.delete(request.open.previous);
     } else if (method === 'threads.unsubscribe') {
       bus.clientSubscribed.delete((params as RpcParams<'threads.unsubscribe'>).threadId);
     }
