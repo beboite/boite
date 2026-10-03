@@ -5,8 +5,8 @@
 <style>
 *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}
 #desktop{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
-#cursor{position:fixed;left:0;top:0;z-index:100;pointer-events:none;transform:translate(-100px,-100px);transition:transform .45s cubic-bezier(.22,1,.36,1);filter:drop-shadow(0 2px 3px hsl(240 20% 0% / .45))}
-#cursor svg{width:24px;height:30px}#pulse{position:fixed;z-index:99;width:44px;height:44px;border-radius:50%;border:2px solid hsl(254 87% 77%);pointer-events:none;opacity:0}
+#cursor{position:fixed;left:0;top:0;z-index:100;pointer-events:none;opacity:0;transform:translate(1160px,90px);transition:transform .45s cubic-bezier(.22,1,.36,1),opacity .25s;filter:drop-shadow(0 2px 3px hsl(240 20% 0% / .35))}
+#cursor svg{width:20px;height:25px}#pulse{position:fixed;z-index:99;width:44px;height:44px;border-radius:50%;border:2px solid hsl(211 85% 62%);pointer-events:none;opacity:0}
 #pulse.pressed{animation:press .45s ease-out}@keyframes press{0%{opacity:.8;scale:.4}100%{opacity:0;scale:1.5}}
 </style>
 <iframe id="desktop" title="Boite desktop" src="/?fake=1&amp;open=recent&amp;team=1"></iframe>
