@@ -4,6 +4,7 @@ import { SvelteMap } from 'svelte/reactivity';
 import type { UsageHistory } from '@boite/contracts';
 import type { Store } from '../lib/store.svelte';
 import UsagePage from './UsagePage.svelte';
+import { workspace } from '../lib/workspace.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
 afterEach(async () => { if (mounted) await unmount(mounted); mounted = undefined; document.body.innerHTML = ''; });
@@ -106,4 +107,64 @@ test('an older core with unfiltered rows or thread identities is reported instea
   await settle();
   expect(document.querySelector('[role=alert]')?.textContent).toContain('did not filter usage');
   expect(document.querySelector('[data-testid=usage-total]')).toBeNull();
+});
+
+test('the machine menu reads one machine or adds every connected one, and names the machines it could not count', async () => {
+  const spent = (edges: number[], providerId: string, threadId: string): UsageHistory => {
+    const result = history(edges, providerId);
+    result.threads = [{ threadId, projectId: 'project', title: `${threadId} title`, providerId, archived: false, turns: 2, usage: result.rows[0]!.usage }];
+    return result;
+  };
+  const machine = (id: string, label: string, call: unknown, connection = 'ready') => {
+    // A Store is a class instance, which `$state` keeps as it is rather than proxying.
+    const owner = Object.assign(Object.create({}), store(call), { connection, threads: [] }) as Store;
+    return { id, label, store: owner };
+  };
+  const here = machine('http://here', 'Here', vi.fn(async (_method: string, params: { edges: number[] }) => spent(params.edges, 'claude', 'same-id')));
+  const builderCall = vi.fn(async (_method: string, params: { edges: number[] }) => spent(params.edges, 'codex', 'same-id'));
+  const builder = machine('http://builder', 'Builder', builderCall);
+  const asleep = machine('http://asleep', 'Asleep', vi.fn(), 'connecting');
+  workspace.machines = [here, builder, asleep];
+  try {
+    mounted = mount(UsagePage, { target: document.body, props: { store: here.store } });
+    await settle();
+    expect(document.querySelector('[data-testid=usage-machine-filter]')?.textContent).toContain('Here');
+    expect(document.querySelector('[data-testid=usage-total]')?.textContent).toBe('Not reported');
+    expect(document.querySelector('[data-provider=claude]')).not.toBeNull();
+    expect(document.querySelector('[data-provider=codex]')).toBeNull();
+    expect(builderCall).not.toHaveBeenCalled();
+
+    click('[data-testid=usage-machine-filter]');
+    await settle();
+    click('[data-testid=usage-machine-filter-menu] [data-value="http://builder"]');
+    await settle();
+    expect(document.querySelector('[data-provider=codex]')).not.toBeNull();
+    expect(document.querySelector('[data-provider=claude]')).toBeNull();
+
+    click('[data-testid=usage-machine-filter]');
+    await settle();
+    document.querySelectorAll<HTMLElement>('[data-testid=usage-machine-filter-menu] [data-row]')[0]!.click();
+    await settle();
+    expect(document.querySelector('[data-testid=usage-machine-filter]')?.textContent).toContain('All machines');
+    expect(document.querySelector('[data-provider=claude]')).not.toBeNull();
+    expect(document.querySelector('[data-provider=codex]')).not.toBeNull();
+    click('[data-testid=usage-metric-turns]');
+    await settle();
+    expect(document.querySelector('[data-testid=usage-total]')?.textContent).toBe('4');
+    // The same thread id on two machines is two threads, each named with its machine.
+    const rows = [...document.querySelectorAll('[data-testid=usage-threads] li')].map((row) => row.textContent);
+    expect(rows).toHaveLength(2);
+    expect(rows.some((row) => row?.includes('Here'))).toBe(true);
+    expect(rows.some((row) => row?.includes('Builder'))).toBe(true);
+    expect(document.querySelector('[data-testid=usage-offline]')?.textContent).toContain('Asleep');
+
+    // A machine that fails is named; the others still count.
+    builderCall.mockRejectedValueOnce(new Error('History unavailable'));
+    click('[data-testid=usage-refresh]');
+    await settle();
+    expect(document.querySelector('[role=alert]')?.textContent).toContain('Builder: History unavailable');
+    expect(document.querySelector('[data-testid=usage-total]')?.textContent).toBe('2');
+  } finally {
+    workspace.machines = [];
+  }
 });

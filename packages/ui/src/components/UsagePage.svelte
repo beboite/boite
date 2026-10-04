@@ -1,13 +1,15 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { ChevronDown, RefreshCw } from '@lucide/svelte';
-  import type { UsageHistory } from '@boite/contracts';
+  import type { UsageHistory, UsageHistoryThread } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
   import { formatLocale } from '../lib/i18n.svelte';
+  import { workspace, type Machine } from '../lib/workspace.svelte';
   import {
     dayEdges,
     formatMetric,
+    mergeHistories,
     modelName,
     reportedValue,
     seriesFor,
@@ -27,85 +29,144 @@
 
   let { store }: { store: Store } = $props();
 
+  type MachineThread = UsageHistoryThread & { machine: Machine };
+  type MachineHistory = Omit<UsageHistory, 'threads'> & { threads: MachineThread[] };
+  const ALL = '\u0000all';
+
   let range = $state<UsageRange>(30);
   let metric = $state<UsageMetric>('tokens');
   let breakdown = $state<'model' | 'day'>('model');
   let provider = $state<string | null>(null);
+  /** Null follows the machine the window is on; `ALL` reads every connected machine. */
+  let scope = $state<string | null>(null);
   let historicalProviders = $state<string[]>([]);
-  let history = $state<UsageHistory | null>(null);
+  let history = $state<MachineHistory | null>(null);
   let loading = $state(false);
-  let failure = $state<string | null>(null);
+  let failures = $state<string[]>([]);
   /** Only the newest request writes, so a slow 90-day answer never lands over a 7-day one. */
   let latest = 0;
 
-  async function load(days: UsageRange, providerId = provider) {
-    const client = store.client;
-    if (!client) return;
+  /** The page's own machine, for a store the workspace does not list. */
+  let own = $derived<Machine>({ id: store.endpointUrl ?? 'local', label: store.core?.hostname ?? strings.machines.local, store });
+  /** The workspace's machine objects are kept, so a derived machine only changes when the choice does. */
+  let machines = $derived(workspace.machines.some((machine) => machine.store === store) ? workspace.machines : [own, ...workspace.machines]);
+  let current = $derived(machines.find((machine) => machine.store === store) ?? own);
+  let chosen = $derived(scope === null || scope === ALL ? current : machines.find((machine) => machine.id === scope) ?? current);
+  let all = $derived(scope === ALL && machines.length > 1);
+  /** Every machine of the workspace that answers; one still connecting joins once it is ready. */
+  let ready = $derived(machines.filter((machine) => machine.store.client !== null && machine.store.connection === 'ready'));
+  let sources = $derived(all ? ready : [chosen]);
+  let offline = $derived(all ? machines.filter((machine) => !ready.includes(machine)) : []);
+
+  async function read(source: Machine, edges: number[], providerId: string | null): Promise<MachineHistory> {
+    const client = source.store.client;
+    if (!client) throw new Error(strings.usage.offline);
+    const result = await client.call('usage.history', { edges, ...(providerId === null ? {} : { providerId }) });
+    if (providerId !== null && (
+      result.rows.some((row) => row.providerId !== providerId) ||
+      result.threads.some((thread) => thread.providerId !== providerId)
+    )) {
+      throw new Error(strings.usage.filterUnsupported);
+    }
+    return { ...result, threads: result.threads.map((thread) => ({ ...thread, machine: source })) };
+  }
+
+  async function load(days: UsageRange, providerId = provider, from: Machine[] = sources) {
+    if (from.length === 0 || from.some((source) => !source.store.client)) return;
     const request = ++latest;
     loading = true;
-    failure = null;
+    failures = [];
+    const edges = dayEdges(days);
+    const named = from.length > 1;
     try {
-      const result = await client.call('usage.history', { edges: dayEdges(days), ...(providerId === null ? {} : { providerId }) });
+      const results = await Promise.allSettled(from.map((source) => read(source, edges, providerId)));
       if (request !== latest) return;
-      if (providerId !== null && (
-        result.rows.some((row) => row.providerId !== providerId) ||
-        result.threads.some((thread) => thread.providerId !== providerId)
-      )) {
-        throw new Error(strings.usage.filterUnsupported);
-      }
-      history = result;
-      historicalProviders = [...new Set([...historicalProviders, ...result.rows.map((row) => row.providerId)])];
-      failure = null;
-    } catch (error) {
-      if (request === latest) failure = error instanceof Error ? error.message : String(error);
+      const answered = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
+      failures = results.flatMap((result, index) => {
+        if (result.status === 'fulfilled') return [];
+        const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        return [named ? `${from[index]!.label}: ${message}` : message];
+      });
+      if (answered.length === 0) return;
+      history = mergeHistories(edges, answered);
+      historicalProviders = [...new Set([...historicalProviders, ...history.rows.map((row) => row.providerId)])];
     } finally {
       if (request === latest) loading = false;
     }
   }
 
+  // Another machine's providers are not this one's. The whole workspace stays the whole workspace.
   $effect(() => {
     void store;
-    untrack(() => { provider = null; historicalProviders = []; history = null; });
+    untrack(() => {
+      if (scope === ALL) return;
+      provider = null; scope = null; historicalProviders = []; history = null;
+    });
   });
 
   $effect(() => {
     const days = range;
     const selected = provider;
-    if (!store.client) return;
-    untrack(() => { history = null; void load(days, selected); });
+    // One machine reloads on its own client; the whole workspace when a machine joins or leaves it.
+    const from = all ? ready : [chosen];
+    if (!all) void chosen.store.client;
+    if (from.length === 0 || from.some((source) => !source.store.client)) return;
+    untrack(() => { history = null; void load(days, selected, from); });
     return () => { latest += 1; };
   });
 
   $effect(() => {
-    const client = store.client;
-    if (!client) return;
+    const clients = sources.flatMap((source) => source.store.client ? [source.store.client] : []);
+    if (clients.length === 0) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     // A finished turn changes today's column; a burst of them reloads once.
-    const offTurns = client.on('turn.finished', () => {
+    const offs = clients.map((client) => client.on('turn.finished', () => {
       clearTimeout(timer);
       timer = setTimeout(() => void load(range), 1500);
-    });
-    return () => { clearTimeout(timer); offTurns(); };
+    }));
+    return () => { clearTimeout(timer); offs.forEach((off) => off()); };
   });
 
   function refresh() {
     void load(range);
   }
 
-  let providerIds = $derived([...new Set([...store.providers.map((entry) => entry.id), ...historicalProviders, ...(provider === null ? [] : [provider])])]);
+  function pickMachine(id: string) {
+    const next = id === ALL ? ALL : id === current.id ? null : id;
+    if (next === scope) return;
+    scope = next;
+    provider = null;
+    historicalProviders = [];
+  }
+
+  let providers = $derived(sources.flatMap((source) => source.store.providers));
+  let providerIds = $derived([...new Set([...providers.map((entry) => entry.id), ...historicalProviders, ...(provider === null ? [] : [provider])])]);
   let view = $derived(history === null ? null : summarize(history, metric, provider === null ? providerIds : [provider]));
   let chartSeries = $derived(view?.series.filter((serie) => view!.bySeries[serie.key]!.turns > 0) ?? []);
-  let names = $derived(new Map(store.providers.map((provider) => [provider.id, provider.name])));
-  let modelNames = $derived(new Map(store.providers.flatMap((entry) => entry.models.map((model) => [`${entry.id}\u0000${model.id}`, model.name] as const))));
+  let names = $derived(new Map(providers.map((provider) => [provider.id, provider.name])));
+  let modelNames = $derived(new Map(providers.flatMap((entry) => entry.models.map((model) => [`${entry.id}\u0000${model.id}`, model.name] as const))));
   let colors = $derived(new Map(seriesFor(providerIds).series.map((serie) => [serie.key, serie.color])));
   let providerItems = $derived([
     { id: '', label: strings.usage.allProviders, active: provider === null },
     ...seriesFor(providerIds).series.filter((serie) => serie.key.trim()).map((serie) => ({ id: serie.key, label: providerName(serie.key), active: provider === serie.key }))
   ]);
-  let known = $derived(new Set(store.threads.map((thread) => thread.id)));
+  let machineItems = $derived([
+    { id: ALL, label: strings.usage.allMachines, active: all },
+    ...machines.map((machine) => ({ id: machine.id, label: machine.label, active: !all && machine === chosen }))
+  ]);
   let threads = $derived(history === null ? [] : topThreads(history.threads, metric));
   let threadPeak = $derived(threads[0]?.value ?? 0);
   let dayRows = $derived(view?.days.filter((day) => day.turns > 0) ?? []);
+
+  function known(thread: MachineThread): boolean {
+    return thread.machine.store.threads.some((entry) => entry.id === thread.threadId);
+  }
+
+  function openThread(thread: MachineThread) {
+    // A thread of another machine opens through the workspace, which makes that machine the active one.
+    if (thread.machine.store === store) void store.open(thread.threadId);
+    else void workspace.select(thread.machine.store, thread.threadId);
+  }
 
   function providerName(providerId: string): string {
     if (!providerId.trim()) return strings.usage.unknownProvider;
@@ -172,6 +233,11 @@
         </button>
       {/each}
     </div>
+    {#if machines.length > 1}
+      <Menu items={machineItems} label={strings.usage.machine} placement="bottom" testid="usage-machine-filter" onpick={pickMachine}>
+        <span class="filter-name ui-label">{all ? strings.usage.allMachines : chosen.label}</span><ChevronDown size={13} />
+      </Menu>
+    {/if}
     <Menu items={providerItems} label={strings.usage.provider} placement="bottom" testid="usage-provider-filter" onpick={(id) => { provider = id || null; }}>
       <span class="filter-name ui-label">{provider === null ? strings.usage.allProviders : providerName(provider)}</span><ChevronDown size={13} />
     </Menu>
@@ -180,12 +246,15 @@
     </button>
   </div>
 
-  {#if failure}
+  {#each failures as failure (failure)}
     <p class="failure" role="alert">{fill(strings.usage.failed, { error: failure })}</p>
+  {/each}
+  {#if offline.length > 0}
+    <p class="failure" role="status" data-testid="usage-offline">{fill(strings.usage.machinesOffline, { machines: offline.map((machine) => machine.label).join(', ') })}</p>
   {/if}
 
   <div class="body settings-stack" class:stale={loading && view !== null} aria-busy={loading}>
-    {#if view === null && !failure}
+    {#if view === null && failures.length === 0}
       <section class="card"><p class="muted">{strings.usage.loading}</p></section>
     {:else if view !== null}
       <section class="card overview" id="settings-usage-overview" data-testid="usage-overview">
@@ -296,10 +365,10 @@
           <h2>{strings.usage.threads}</h2>
           {#if threads.length === 0}<p class="muted">{strings.usage.noRankedThreads}</p>{/if}
           <ol class="threads" data-testid="usage-threads">
-            {#each threads as thread (thread.threadId)}
+            {#each threads as thread (`${thread.machine.id}\u0000${thread.threadId}`)}
               <li>
-                {#if known.has(thread.threadId)}
-                  <button type="button" class="ghost thread" onclick={() => void store.open(thread.threadId)}>
+                {#if known(thread)}
+                  <button type="button" class="ghost thread" onclick={() => openThread(thread)}>
                     {@render threadRow(thread)}
                   </button>
                 {:else}
@@ -319,7 +388,7 @@
   <span class="title">
     <span class="name">{thread.title || strings.usage.untitled}</span>
     <small>
-      {fill(strings.usage.threadTurns, { turns: formatMetric('turns', thread.turns) })}
+      {fill(strings.usage.threadTurns, { turns: formatMetric('turns', thread.turns) })}{#if all} · {thread.machine.label}{/if}
       {#if thread.archived}<span class="tag">{strings.usage.archived}</span>{/if}
     </small>
   </span>
