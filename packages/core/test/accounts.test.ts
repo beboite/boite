@@ -247,6 +247,8 @@ describe('accounts', () => {
     expect(harness.core.accounts.accountEnv(harness.core.accounts.require(isolated.id), harness.core.providers.require('opencode'))).toEqual({
       XDG_DATA_HOME: isolated.isolationDir ?? '',
       XDG_CONFIG_HOME: isolated.isolationDir ?? '',
+      // Subagents are Boite conversations: OpenCode's own task tool is denied.
+      OPENCODE_CONFIG_CONTENT: '{"permission":{"task":"deny"}}',
     });
 
     const accounts = await client.call('accounts.list', {});

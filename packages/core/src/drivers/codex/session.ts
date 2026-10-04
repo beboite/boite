@@ -27,6 +27,7 @@ import {
   EXIT_GRACE_MS,
   FILE_CHANGE_TOOL_NAME,
   MODE_POLICY,
+  NO_NATIVE_SUBAGENTS,
   PERMISSIONS_TOOL_NAME,
   STDERR_MAX,
 } from './protocol.ts';
@@ -378,6 +379,7 @@ export class CodexSession {
   private spawn(ctx: SessionContext, executable: string, args: string[]): CodexRpc {
     args = subscriptionProxyCodexArgs(args, ctx.accountEnv);
     if (ctx.thread.permissionMode === 'yolo') args = [...args, '--config', 'features.hooks=false'];
+    args = [...args, ...NO_NATIVE_SUBAGENTS];
     const child = ctx.spawnChild(executable, args, {
       startup: true,
       cwd: ctx.thread.cwd,

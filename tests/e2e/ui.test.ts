@@ -144,7 +144,8 @@ test(
       const [thread] = await client.call('threads.list', {});
       expect(thread?.context?.tokens).toBeGreaterThan(0);
       expect(thread?.context?.window).toBeGreaterThan(0);
-      percent = Math.round(thread!.context!.tokens / thread!.context!.window! * 100);
+      // The meter stops at 100%; echo's 2,000-token window is smaller than a fresh session's guidance.
+      percent = Math.min(100, Math.round(thread!.context!.tokens / thread!.context!.window! * 100));
     } finally { client.close(); }
     await page.waitFor(`document.querySelector('${testid('context-meter')}')?.dataset.percent === '${percent}'`);
     expect((await page.text(testid('context-trigger'))).trim()).toBe('');

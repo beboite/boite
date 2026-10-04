@@ -9,9 +9,8 @@ import type { WorkflowNode, WorkflowPlan, WorkflowRun, WorkflowStepPlan } from '
 import type { CoreClient } from './client.ts';
 
 export const WORKFLOW_HELP = `A workflow is a JSON plan the core runs for you: every step is a child
-agent on this conversation's model, steps run as soon as the steps they depend
-on end, and the results come back to you in one message. Nothing has to be
-enabled first.
+agent, a step starts as soon as the steps it depends on end, and the results
+come back to you in one message. Nothing has to be enabled first.
 
 {
   "name": "Review the parser",
@@ -20,7 +19,7 @@ enabled first.
     { "id": "scan",
       "task": "List the source files of src/parser that changed this week.",
       "output": { "files": ["string"] } },
-    { "id": "review", "forEach": "scan.files",
+    { "id": "review", "forEach": "scan.files", "model": "codex/gpt-5.5", "effort": "high",
       "task": "Review {{item}} for malformed-input bugs. Do not edit files.",
       "output": { "bugs": [{ "line": "number", "text": "string" }] } },
     { "id": "fix", "when": { "path": "review.bugs", "notEmpty": true },
@@ -32,10 +31,12 @@ enabled first.
 
 Fields of a step:
   id        letters, digits, _ or -, starting with a letter
-  profile   optional: a profile id from boite delegate profiles, to run the
-            step on another model than this conversation's, as in
-            { "id": "review", "profile": "reviewer", "task": "..." }
-  task      the brief; {{step}}, {{step.field}}, {{item}}, {{index}} are filled in
+  task      the brief; {{step}}, {{step.field}}, {{item}}, {{index}} are filled in.
+            The step sees only this text: name its files and how to verify.
+  model     optional: provider/model from boite delegate models, any harness;
+            left out, the step runs on this conversation's model
+  effort    optional: a reasoning level that model lists
+  profile   optional: a profile id from boite delegate profiles
   after     step ids that must end first (steps named anywhere else are added)
   forEach   a path to a list: one execution per item, {{item}} is the item
   when      { "path": ..., "equals": value | "notEmpty": true | "empty": true }
@@ -43,6 +44,11 @@ Fields of a step:
             "boolean", "any", [shape], or { "key": shape }
 A path reads a step's output (or its answer when it has none). On a fanned-out
 step, "review.bugs" collects the bugs of every item into one list.
+
+Run it: write the plan to a file, boite workflow check plan.json, then
+boite workflow run plan.json. Report the run ID, then keep working or end your
+turn: the results arrive as one message, do not poll. boite delegate list
+shows its progress; boite workflow show <run-id> prints every step's result.
 
 A step with output returns it with boite workflow output '<json>' or a final
 \`\`\`json block; the core checks the shape and asks once more on a mismatch.
@@ -69,7 +75,8 @@ const MARK: Record<WorkflowNode['status'], string> = { waiting: '[ ]', running: 
 
 function nodeRow(node: WorkflowNode): string {
   const counts = node.forEach === null ? '' : ` ${node.instances.filter(i => i.status === 'done').length}/${node.instances.length}`;
-  const model = node.instances.find(i => i.model)?.model;
+  const inst = node.instances.find(i => i.model);
+  const model = inst ? `${inst.providerId}/${inst.model}${inst.effort ? ` effort=${inst.effort}` : ''}` : '';
   return `${MARK[node.status]} ${node.id}${counts} ${node.status}${model ? ` ${model}` : ''}${node.error ? ` error=${JSON.stringify(node.error)}` : ''}`;
 }
 

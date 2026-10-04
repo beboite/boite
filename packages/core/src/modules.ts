@@ -35,14 +35,6 @@ export function registerModules(core: Core): void {
   core.router.register('core.updateInstall', params => core.serverUpdates.install(params.version));
   core.router.register('core.updateCancel', () => core.serverUpdates.cancel());
   registerPersistentAgents(core);
-  core.router.register('delegation.result', params => core.delegation.resultPage(params));
-  core.router.register('delegation.wait', (params, ctx) => core.delegation.wait(params, ctx.connection));
-  core.router.register('delegation.get', params => core.delegation.get(params.threadId));
-  core.router.register('delegation.configure', params => core.delegation.configure(params.threadId, params.config));
-  core.router.register('delegation.spawn', params => core.delegation.spawn(params));
-  core.router.register('delegation.send', (params, ctx) => core.delegation.send(params, ctx.connection.identity.principal === 'agent' ? 'agent' : 'user'));
-  core.router.register('delegation.stop', params => ({ stopped: core.delegation.stop(params.threadId, params.agentId) }));
-  registerWorkflowMethods(core);
   core.router.register('brain.status', () => core.brain.status());
   core.router.register('brain.configure', params => core.brain.configure(params));
   core.router.register('brain.sync', () => core.brain.sync());
@@ -68,6 +60,18 @@ export function registerModules(core: Core): void {
   registerProjectMethods(core);
   registerProviderMethods(core);
   const probe = registerProbeMethods(core);
+  core.router.register('delegation.result', params => core.delegation.resultPage(params));
+  core.router.register('delegation.wait', (params, ctx) => core.delegation.wait(params, ctx.connection));
+  core.router.register('delegation.get', params => core.delegation.get(params.threadId));
+  core.router.register('delegation.configure', params => core.delegation.configure(params.threadId, params.config));
+  core.router.register('delegation.models', params => core.delegation.models(params.threadId, probe));
+  core.router.register('delegation.spawn', async params => {
+    await core.delegation.prepareRoutes(params.threadId, probe, [typeof params.model === 'string' ? params.model : undefined]);
+    return core.delegation.spawn(params);
+  });
+  core.router.register('delegation.send', (params, ctx) => core.delegation.send(params, ctx.connection.identity.principal === 'agent' ? 'agent' : 'user'));
+  core.router.register('delegation.stop', params => ({ stopped: core.delegation.stop(params.threadId, params.agentId) }));
+  registerWorkflowMethods(core, probe);
   registerUpdateMethods(core);
   registerAccountMethods(core);
   registerThreadMethods(core, probe);

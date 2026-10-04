@@ -2,7 +2,8 @@
 
 A workflow is a JSON plan of steps that the core runs for a conversation. Each
 step is a child agent on the conversation's own harness, account, model and
-effort, or on a [delegation](delegation.md) profile the step names. A step starts once
+effort, on a model and reasoning level the step names, or on a
+[delegation](delegation.md) profile. A step starts once
 every step it depends on has ended. When the run
 ends, its results come back to the conversation as one message. No model sits
 in the middle deciding what runs next, so the plan behaves the same whichever
@@ -41,12 +42,17 @@ native subagents or plain work when that fits better.
 ```
 
 Every step above runs on the conversation's model. A step that should run on
-another one names a profile: `{ "id": "review", "profile": "reviewer", ... }`.
+another one names it, as `boite delegate spawn --model` does:
+`{ "id": "review", "model": "codex/gpt-5.5", "effort": "high", ... }`, or a
+profile: `{ "id": "review", "profile": "reviewer", ... }`. `boite delegate
+models` lists the choices.
 
 | Field | Meaning |
 | --- | --- |
 | `id` | Letters, digits, `_` and `-`, starting with a letter |
-| `profile` | Optional. A delegation profile id of this thread, to run the step on another model. Left out, the step runs on the conversation's model |
+| `model` | Optional. `provider/model`, a model id or a unique part of one, matched like `delegate spawn --model`. Refused when the owner turned off "Let the agent choose the model" and it is not a suggested one |
+| `effort` | Optional. One of the model's reasoning levels. Left out: the parent's level on the same model, else the model's default |
+| `profile` | Optional. A delegation profile id of this thread. Left out with no `model`, the step runs on the conversation's model |
 | `task` | The brief. `{{step}}`, `{{step.field}}`, `{{item}}` and `{{index}}` are filled in when the step starts |
 | `after` | Steps that must end first. A step named in `forEach`, `when` or the task is added automatically |
 | `forEach` | A path to a list. The step runs once per item |
@@ -56,7 +62,7 @@ another one names a profile: `{ "id": "review", "profile": "reviewer", ... }`.
 A path reads a step's structured output, or its final answer when it has none.
 On a fanned-out step, `review.bugs` collects the bugs of every item into one
 list. The core checks the whole plan before anything starts: a name that is no profile,
-cycles, a path to a step that does not exist and a bad shape are refused with
+a model that is not installed or not allowed, a level the model lacks, cycles, a path to a step that does not exist and a bad shape are refused with
 the field named.
 
 `forEach`, `when` and `extend` make a plan dynamic. `forEach` sizes a step

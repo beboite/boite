@@ -108,9 +108,9 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 588,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,160,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,200,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,420,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,460,000 |
 
 The total JavaScript measure excludes native binaries and source maps. On
 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
@@ -138,6 +138,20 @@ rules add 24,451 bytes (0.62%). Windows desktop CI at `a77909e6` measured
 3,983,734 bytes, above the former 3,980,000-byte limit. The 4,020,000-byte
 limit retains 36,266 bytes above that Windows measurement. Alignment changes
 leave the entry and core limits unchanged.
+
+On 2026-10-04, Linux core builds measured 3,409,224 emitted JavaScript bytes at
+`0f8104b1` and 3,424,372 bytes on the subagent branch (model routing,
+`boite delegate` output and the delegation guide). Windows desktop CI measured
+3,424,333 bytes, above the former 3,420,000-byte limit. The 3,460,000-byte
+limit retains 35,667 bytes above that measurement; `dist/main.js` stays at
+13,211 bytes.
+
+Main's desktop CI at `72cc0b92` reported 4060.0 KB of UI, about 2,600 bytes
+below the former 4,160,000-byte limit. Merged with main, the subagent branch measured
+4,160,739 bytes on Linux and in desktop CI: about 3,300 bytes for the model and
+reasoning picker, the team view and their translations. The 4,200,000-byte
+limit retains 39,261 bytes above that build; the entry limit stays unchanged.
+
 After integrating main at `8b72af5b` and aligning the new proxy controls, the
 same Linux setup measured 3,992,019 UI bytes, within the existing limit.
 On 2026-10-03, phone remote coding merged with main at `c3e9c37` measured

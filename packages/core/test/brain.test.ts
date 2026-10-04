@@ -248,7 +248,8 @@ test.each(['connected', 'disabled', 'disconnected'] as const)('Boite guide reach
   }
   else expect(first).not.toContain('Shared convention');
   expect(first).toContain('boite agents send');
-  expect(first).not.toContain('boite delegate spawn');
+  // Native subagent tools are off in Boite, so a fresh session always learns the Boite way.
+  expect(first).toContain('boite delegate spawn');
   expect(first.indexOf('boite where')).toBeLessThan(first.indexOf('Hello'));
   expect(readdirSync(root)).toEqual(files);
   expect(readFileSync(join(root, 'AGENTS.md'), 'utf8')).toBe('Shared convention');
@@ -256,6 +257,7 @@ test.each(['connected', 'disabled', 'disconnected'] as const)('Boite guide reach
   const second = await run('Again');
   if (state === 'connected') expect(second).toContain('Shared convention');
   expect(second).not.toContain('boite where');
+  expect(second).not.toContain('boite delegate spawn');
 });
 
 test('the Boite guide switch persists, and echo never receives the ask command', async () => {
@@ -294,7 +296,8 @@ test('echo with the default guide and asynchronous questions finishes without as
   const owner = await h.connect();
   const { threadId } = await echoThread(h, owner);
   const turn = await owner.call('turns.start', { threadId, prompt: 'container persistence check' });
-  await waitFor(() => h.core.journal.listTurns(threadId).find(t => t.id === turn.id)?.status === 'done', 1000);
+  // Echo streams the whole guide back at 16 characters per 5 ms: about 0.9 s here, longer on slow runners.
+  await waitFor(() => h.core.journal.listTurns(threadId).find(t => t.id === turn.id)?.status === 'done');
   const parts = h.core.journal.listMessages(threadId).filter(m => m.role === 'assistant').flatMap(m => m.parts);
   expect(parts.some(p => p.type === 'question')).toBe(false);
   expect(JSON.stringify(parts)).toContain('boite where');

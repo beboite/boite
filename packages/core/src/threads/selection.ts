@@ -3,7 +3,7 @@ import { probedModelsOf } from '../drivers/index.ts';
 import { refused } from '../errors.ts';
 
 /** The protocols whose models come from the agent, not from the descriptor. */
-const PROBED_PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'];
+export const PROBED_PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'];
 
 /**
  * What this account may run: the descriptor's models, plus the ones the last
@@ -11,7 +11,7 @@ const PROBED_PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'acp', 'codex-appse
  * probed here; a model the agent could list but nobody asked for is not offered
  * yet.
  */
-function modelsFor(provider: ProviderDescriptor, accountId: AccountId): ModelInfo[] {
+export function modelsFor(provider: ProviderDescriptor, accountId: AccountId): ModelInfo[] {
   const probed = probedModelsOf(provider.protocol, provider.id, accountId);
   if (probed === null) return provider.models;
   const known = new Set(probed.map((model) => model.id));

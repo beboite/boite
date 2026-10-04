@@ -24,6 +24,7 @@
       },
       "launch": { "args": ["acp", "--port", "0"] },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}" },
+      "env": { "OPENCODE_CONFIG_CONTENT": "{\"permission\":{\"task\":\"deny\"}}" },
       "close": { "processes": ["opencode.exe"] }
     },
     "linux": {
@@ -35,6 +36,7 @@
       ],
       "launch": { "args": ["acp", "--port", "0"] },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}" },
+      "env": { "OPENCODE_CONFIG_CONTENT": "{\"permission\":{\"task\":\"deny\"}}" },
       "close": { "processes": ["opencode"] }
     },
     "macos": {
@@ -46,6 +48,7 @@
       ],
       "launch": { "args": ["acp", "--port", "0"] },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}" },
+      "env": { "OPENCODE_CONFIG_CONTENT": "{\"permission\":{\"task\":\"deny\"}}" },
       "close": { "processes": ["opencode"] }
     }
   },

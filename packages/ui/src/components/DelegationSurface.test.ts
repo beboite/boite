@@ -36,17 +36,26 @@ async function close(shown: Awaited<ReturnType<typeof show>>): Promise<void> {
   shown.store.detach(); shown.client.close(); document.body.innerHTML = ''; window.localStorage.clear();
 }
 
-test('a conversation that handed nothing out shows a title and nothing else', async () => {
+test('a conversation that handed nothing out shows a title and one sentence on how subagents start', async () => {
   const shown = await show({ delayMs: 0 });
   try {
     expect(document.querySelectorAll('[data-testid=delegation-member], [data-testid=delegation-run]')).toHaveLength(0);
-    expect(document.querySelectorAll('textarea, details, p')).toHaveLength(0);
+    expect(document.querySelectorAll('textarea, details')).toHaveLength(0);
+    expect([...document.querySelectorAll('p')].map(p => p.dataset.testid)).toEqual(['delegation-empty']);
+    expect(document.querySelector('[data-testid=delegation-empty]')!.textContent).toContain('Ask the agent to split the work');
     expect(document.querySelector('[data-testid=delegation-stop-all]')).toBeNull();
     // The owner's settings stay one icon away, closed.
     expect(document.querySelector('[data-testid=delegation-settings]')).toBeNull();
     document.querySelector<HTMLButtonElement>('[data-testid=delegation-settings-toggle]')!.click();
     flushSync();
     expect(document.querySelector('[data-testid=delegation-settings] input[role=switch]')).not.toBeNull();
+    // The agent picks any model by default; turning that off reaches the core.
+    const any = document.querySelector<HTMLInputElement>('[data-testid=delegation-any-model]')!;
+    expect(any.checked).toBe(true);
+    any.click();
+    await settle();
+    expect((await shown.client.call('delegation.get', { threadId: 't-trace' })).config.anyModel).toBe(false);
+    expect(document.querySelector<HTMLInputElement>('[data-testid=delegation-any-model]')!.checked).toBe(false);
   } finally {
     await close(shown);
   }
@@ -60,6 +69,10 @@ test('one list holds the workflow runs and the subagents, and a run opens its gr
     const agents = store.delegation!.agents;
     expect(agents.length).toBeGreaterThan(0);
     expect([...document.querySelectorAll<HTMLElement>('[data-testid=delegation-member]')].map(row => row.dataset.agentId)).toEqual(agents.map(agent => agent.thread.id));
+    // Each row names its harness and model the way the composer does.
+    const route = document.querySelector('[data-testid=delegation-member-route]')!.textContent!;
+    expect(route).toContain(store.providerOf(agents[0]!.thread.providerId)!.name);
+    expect(route.split(' · ').length).toBeGreaterThanOrEqual(2);
     const rows = document.querySelectorAll<HTMLButtonElement>('[data-testid=delegation-run]');
     expect(rows).toHaveLength(1);
     expect(rows[0]!.textContent).toContain('Review the parser');

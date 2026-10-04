@@ -11,7 +11,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { AGENT_ENV, CONVERSATION_PROFILE_ID } from '@boite/contracts';
+import { AGENT_ENV } from '@boite/contracts';
 import type { AgentTask, GitChange, PanelSurface, Todo } from '@boite/contracts';
 import { connect } from './client.ts';
 import type { CoreClient } from './client.ts';
@@ -19,6 +19,7 @@ import { CORE_VERSION } from './version.ts';
 import { resolveDataDir } from './paths.ts';
 import { agentCommand } from './agents/cli.ts';
 import { workflowCommand } from './workflow-cli.ts';
+import { DELEGATE_ACTIONS, delegateCommand } from './delegate-cli.ts';
 import { browserCommand, BROWSER_HELP } from './browser-cli.ts';
 import { deviceCommand } from './device-cli.ts';
 import { agentsCommand, AgentsUsage, WAIT_MAX_S } from './agents-cli.ts';
@@ -93,13 +94,19 @@ export const USAGE = `usage: boite <command> [args] [--json]
   agent routines                list this identity's scheduled work
   agent schedule <json>          name, prompt, schedule; optional id, expectedRevision, enabled
   --request-id <id>              reuse to retry agent, agents send|reply or delegate spawn|send
-  delegate profiles|list         usable profiles (conversation = this model), team status, results
-  delegate spawn <profile> <brief>
+  delegate models                models and reasoning levels a subagent can use
+  delegate spawn <brief>         start a subagent on one bounded job; its result
+                                 comes back as a message (--model <provider/model>,
+                                 --effort <level>, --title <title>, --profile <id>)
+  delegate list                  every subagent and workflow: state, model, time
   delegate send <thread-id> <text>
-  delegate stop [thread-id]      stop one child, or pause the whole team
-  delegate wait [thread-id]      await children (--timeout <s>, default 600, max 3600)
+                                 steer or reuse a subagent, or ask the parent
+  delegate stop [thread-id]      stop one subagent, or all of them
+  delegate wait [thread-id]      block until children finish (--timeout <s>,
+                                 default 600, max 3600); only with nothing else to do
   delegate result <child> <turn> [offset]
                                  read a bounded page of full assistant text
+  delegate profiles              the owner's named routes
   workflow help                  the plan format, with an example
   workflow check|run <plan>      validate, or start, a JSON plan (file or inline)
   workflow list|show [run-id]    runs of this thread, or one run's steps and results
@@ -279,39 +286,12 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       print([`attached: ${rest[0]}`, `message: ${message.id}`], message);
     },
     delegate: async () => {
-      const action = want(0, 'profiles, list, spawn, send, stop, wait or result');
-      if (action === 'profiles' || action === 'list') {
-        const view = await client.call('delegation.get', { threadId });
-        print([
-          `parent: ${view.rootThreadId}`,
-          `delegation: ${!view.config.enabled ? 'disabled' : view.config.paused ? 'paused' : 'enabled'}`,
-          `turns: ${view.turnsUsed}`,
-          ...(action === 'profiles'
-            ? [...(view.config.profiles.some(p => p.id === CONVERSATION_PROFILE_ID) ? [] : [`${CONVERSATION_PROFILE_ID} "This conversation's model"`]), ...view.config.profiles.map(p => `${p.id} ${JSON.stringify(p.name)} ${p.providerId}/${p.model} effort=${p.effort ?? 'default'}`)]
-            : view.agents.map(a => `${a.thread.id} ${a.thread.status} ${a.thread.providerId}/${a.thread.model} ${JSON.stringify(a.thread.title)}${a.result ? ` result=${JSON.stringify(a.result)}` : ''}`)),
-          'Results arrive automatically. Use delegate wait to await completion without polling.',
-        ], view);
-      } else if (action === 'spawn') {
-        const profileId = want(1, 'a profile id from delegate profiles');
-        const task = requiredText(rest, 2, 'delegate spawn needs a bounded task brief', false);
-        const agent = await client.call('delegation.spawn', { threadId, profileId, task, requestId: parsed.requestId ?? crypto.randomUUID() });
-        print([`agent: ${agent.thread.id}`, `status: ${agent.thread.status}`, `model: ${agent.thread.providerId}/${agent.thread.model}`, 'Result will be forwarded to the parent automatically.'], agent);
-      } else if (action === 'send') {
-        const toThreadId = want(1, 'a parent or child thread id');
-        const body = requiredText(rest, 2, 'delegate send needs message text', false);
-        const letter = await client.call('delegation.send', { threadId, toThreadId, text: body, requestId: parsed.requestId ?? crypto.randomUUID() });
-        print([`id: ${letter.id}`, `status: ${letter.status}`, 'Queued messages are not an acknowledgement or consent.'], letter);
-      } else if (action === 'wait') {
-        const result = await client.call('delegation.wait', { threadId, ...(rest[1] ? { agentId: rest[1] } : {}), ...(parsed.timeout === undefined ? {} : { timeoutMs: Math.round(parsed.timeout * 1000) }) });
-        print([`state: ${result.state}`, `timed out: ${result.timedOut}`, ...result.agents.map(agent => `${agent.thread.id} ${agent.lastTurn?.status ?? 'idle'}${agent.resultRef ? ` result turn=${agent.resultRef.turnId}` : ''}`)], result);
-      } else if (action === 'result') {
-        const agentId = want(1, 'a child thread id'), turnId = want(2, 'the result turn id');
-        const result = await client.call('delegation.result', { threadId, agentId, turnId, ...(rest[3] === undefined ? {} : { offset: Number(rest[3]) }) });
-        print([result.text, `next offset: ${result.nextOffset ?? 'complete'}`, `total: ${result.total}`], result);
-      } else if (action === 'stop') {
-        const result = await client.call('delegation.stop', { threadId, ...(rest[1] ? { agentId: rest[1] } : {}) });
-        print([`stopped: ${result.stopped}`], result);
-      } else throw new Usage('delegate expects profiles, list, spawn, send, stop, wait or result');
+      if (rest[0] === undefined) throw new Usage(`delegate needs ${DELEGATE_ACTIONS}`);
+      await delegateCommand(client, threadId, rest, {
+        ...(parsed.requestId === undefined ? {} : { requestId: parsed.requestId }), ...(parsed.timeout === undefined ? {} : { timeout: parsed.timeout }),
+        ...(parsed.title === undefined ? {} : { title: parsed.title }), ...(parsed.model === undefined ? {} : { model: parsed.model }),
+        ...(parsed.effort === undefined ? {} : { effort: parsed.effort }), ...(parsed.profile === undefined ? {} : { profile: parsed.profile }),
+      }, print);
     },
     agents: async () => {
       try {

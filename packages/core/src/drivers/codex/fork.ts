@@ -5,7 +5,7 @@ import type { ForkedSession, SessionContext } from '../types.ts';
 import { exitWithin } from '../exit.ts';
 import { NativeForkUnsupported } from '../native-fork.ts';
 import { modelOf } from './mapping.ts';
-import { CLIENT_NAME, MODE_POLICY } from './protocol.ts';
+import { CLIENT_NAME, MODE_POLICY, NO_NATIVE_SUBAGENTS } from './protocol.ts';
 import { CodexRpc, CodexRpcError } from './rpc.ts';
 
 const FORK_TIMEOUT_MS = 30_000;
@@ -15,7 +15,7 @@ export async function forkSession(ctx: SessionContext, checkpoint: { sessionId: 
   const profile = profileFor(ctx.provider);
   const executable = profile === undefined ? null : resolveExecutable(profile);
   if (executable === null) throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
-  const args = [...(profile?.launch?.args ?? []), ...(ctx.thread.permissionMode === 'yolo' ? ['--config', 'features.hooks=false'] : [])];
+  const args = [...(profile?.launch?.args ?? []), ...(ctx.thread.permissionMode === 'yolo' ? ['--config', 'features.hooks=false'] : []), ...NO_NATIVE_SUBAGENTS];
   const child = ctx.spawnChild(executable, args, { startup: true, cwd: ctx.thread.cwd, env: { ...process.env, ...ctx.accountEnv } });
   const exited = new Promise<number | null>(resolve => { child.once('exit', resolve); child.once('error', () => resolve(null)); });
   const rpc = new CodexRpc(child, {

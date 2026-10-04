@@ -861,6 +861,8 @@ describe('codex driver', () => {
     expect(processes).toHaveLength(2);
     expect(processes[0]?.commandLine).toContain('features.hooks=false');
     expect(processes[1]?.commandLine).not.toContain('features.hooks=false');
+    // Codex's own subagents stay off in every mode: subagents are Boite conversations.
+    for (const process of processes) expect(process.commandLine).toContain('features.multi_agent=false');
   });
 
   test('an approval is asked, answered, and the decision reaches the agent', async () => {

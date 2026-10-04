@@ -85,6 +85,14 @@
     patchProfile(profile, { providerId, accountId, model, effort: patch.effort ?? store.defaultEffortOf(providerId, accountId, model) });
   }
 
+  /** Harness, model and reasoning level, the way the composer's picker names them. */
+  function routeLabel(agent: (typeof agents)[number]): string {
+    const thread = agent.thread;
+    const model = store.modelOf({ providerId: thread.providerId, accountId: thread.accountId, model: thread.model, effort: thread.effort, permissionMode: 'default', speed: null });
+    const effort = thread.effort ? model?.effort?.levels.find(level => level.id === thread.effort)?.label ?? thread.effort : null;
+    return [store.providerOf(thread.providerId)?.name ?? thread.providerId, model?.name ?? thread.model ?? strings.thread.defaultModel, effort].filter(Boolean).join(' · ');
+  }
+
   async function openChild(): Promise<void> {
     if (!selected) return;
     const id = selected.thread.id;
@@ -112,12 +120,18 @@
     {#if settings && view && store.owner}
       <div class="settings" data-testid="delegation-settings">
         <label class="switch-row">
-          <span><strong>{strings.delegation.enabled}</strong></span>
+          <span><strong>{strings.delegation.enabled}</strong><small>{strings.delegation.enabledHint}</small></span>
           <input type="checkbox" role="switch" checked={config.enabled} disabled={store.delegationSaving} onchange={(event) => save({ enabled: event.currentTarget.checked, paused: false })} />
         </label>
+        {#if config.enabled}
+          <label class="switch-row">
+            <span><strong>{strings.delegation.anyModel}</strong><small>{strings.delegation.anyModelHint}</small></span>
+            <input type="checkbox" role="switch" data-testid="delegation-any-model" checked={config.anyModel !== false} disabled={store.delegationSaving} onchange={(event) => save({ anyModel: event.currentTarget.checked })} />
+          </label>
+        {/if}
 
         <div class="profiles-head">
-          <strong class="ui-label">{strings.delegation.profiles}</strong>
+          <span><strong class="ui-label">{strings.delegation.profiles}</strong><small>{strings.delegation.profilesHint}</small></span>
           <button type="button" class="quiet small" data-testid="delegation-add-profile" disabled={store.delegationSaving} onclick={addProfile}><Plus size={14} /><span class="ui-label">{strings.delegation.addProfile}</span></button>
         </div>
         <div class="profiles">
@@ -157,7 +171,7 @@
             {@const progress = agentProgress(agent)}
             <button type="button" class="member" class:selected={selected?.thread.id === agent.thread.id} data-testid="delegation-member" data-agent-id={agent.thread.id} onclick={() => void store.selectDelegatedAgent(agent.thread.id)}>
               <StatusMark status={agent.thread.status} />
-              <span class="member-main"><strong>{agent.thread.title}</strong><small>{store.providerOf(agent.thread.providerId)?.name ?? agent.thread.providerId} · {agent.thread.model ?? strings.thread.defaultModel}</small></span>
+              <span class="member-main"><strong>{agent.thread.title}</strong><small data-testid="delegation-member-route">{routeLabel(agent)}</small></span>
               <span class="status ui-label">{progress.status === 'done' ? strings.delegation.doneStatus : progress.status === 'stopped' ? strings.delegation.stoppedStatus : strings.threadStatus[agent.thread.status]}</span>
               <span class="task">{agent.task}</span>
               <span class="member-usage"><AgentElapsed startedAt={progress.startedAt} finishedAt={progress.finishedAt} active={progress.active} />{#if agent.lastTurn?.usage} · {formatTokens(agent.lastTurn.usage.inputTokens + agent.lastTurn.usage.outputTokens + agent.lastTurn.usage.cacheReadTokens + agent.lastTurn.usage.cacheWriteTokens)} {strings.units.tokens}{/if}</span>
@@ -180,6 +194,7 @@
           </article>
         {/if}
       </div>
+      {#if !agents.length && !runs.length && !native.length && !processes.length}<p class="empty" data-testid="delegation-empty">{config.enabled ? strings.delegation.empty : strings.delegation.enabledHint}</p>{/if}
       {#if !selected && native.length}<NativeAgents agents={native} />{/if}
       {#if !selected && processes.length}<NativeAgents agents={processes} source="process" />{/if}
     {/if}
@@ -201,8 +216,10 @@
   .member-usage { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 0 4px; font-variant-numeric: tabular-nums; }
   .error { margin: 12px 16px; color: var(--color-danger); font-size: var(--text-sm); }
   .team:not(.detail) { flex: none; }
-  .switch-row { min-height: var(--control-lg); display: flex; align-items: center; gap: 14px; }
-  .switch-row > span { flex: 1; }
+  .switch-row { min-height: var(--control-lg); padding: 6px 0; display: flex; align-items: center; gap: 14px; }
+  .switch-row > span, .profiles-head > span { flex: 1; min-width: 0; }
+  .switch-row small, .profiles-head small { display: block; margin-top: 2px; color: var(--color-muted-foreground); font-size: var(--text-xs); line-height: 1.4; font-weight: normal; }
+  .empty { margin: 16px; color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.5; }
   input[role='switch'] { appearance: none; position: relative; width: 40px; height: 24px; min-height: 24px; padding: 0; border-radius: 999px; background: var(--color-surface-3); }
   input[role='switch']::after { content: ''; position: absolute; width: 16px; height: 16px; top: 3px; left: 3px; border-radius: 50%; background: var(--color-muted-foreground); transition: transform var(--dur-2) var(--ease-out-quint); }
   input[role='switch']:checked { background: var(--color-foreground); }
@@ -223,6 +240,8 @@
   .workflow-name :global(svg) { flex: none; }
   .workflow-name .ui-label { overflow: hidden; text-overflow: ellipsis; }
   .member-main small, .status, .member-usage { color: var(--color-muted-foreground); font-size: var(--text-xs); }
+  .status { display: inline-block; }
+  .status::first-letter { text-transform: uppercase; }
   .task, .result { grid-column: 2 / -1; font-size: var(--text-xs); line-height: 1.4; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
   .task { color: var(--color-muted-foreground); line-clamp: 2; -webkit-line-clamp: 2; }
   .result { margin-top: 3px; padding: 5px 7px; line-clamp: 4; -webkit-line-clamp: 4; border-left: 2px solid var(--color-edge); background: var(--color-surface-2); white-space: pre-wrap; }

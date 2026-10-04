@@ -21,6 +21,10 @@ export interface WorkflowStepPlan {
   title?: string;
   /** A delegation profile id of the thread. Left out, the step runs on the conversation's own model. */
   profile?: string;
+  /** `provider/model` or a model id from `boite delegate models`; wins over `profile`. */
+  model?: string;
+  /** A reasoning level the step's model offers. */
+  effort?: string;
   /** The brief. `{{step.field}}`, `{{item}}` and `{{index}}` are filled in when the step starts. */
   task: string;
   /** Steps that must end first. Steps named in `forEach`, `when` or the task are added automatically. */
@@ -73,6 +77,8 @@ export interface WorkflowInstance {
   threadId: ThreadId | null;
   providerId: ProviderId | null;
   model: string | null;
+  /** The reasoning level it runs at; null or missing on older runs: the model's default. */
+  effort?: string | null;
   status: WorkflowStepStatus;
   attempts: number;
   /** A durable output correction awaiting admission, including while paused. */
