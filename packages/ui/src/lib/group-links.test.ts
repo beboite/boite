@@ -4,7 +4,7 @@ import { ENVIRONMENTS_STORAGE_KEY, readEnvironments, rememberSession, removeBrou
 import { GroupLinks, usableAddresses } from './group-links.svelte';
 import type { Machine, Workspace } from './workspace.svelte';
 
-const core = (coreId: string, addresses: string[]): GroupCore => ({ coreId, name: coreId.toUpperCase(), addresses });
+const core = (coreId: string, addresses: string[], epoch = 1): GroupCore => ({ coreId, name: coreId.toUpperCase(), addresses, epoch });
 const group = (self: string, cores: GroupCore[], id = 'grp'): Group => ({ id, name: 'Home', self, cores, devices: [] });
 
 interface FakeStore {
@@ -21,7 +21,7 @@ function machine(id: string, store: Partial<FakeStore>, brought?: { coreId: stri
     connection: 'ready', client: { call: vi.fn(async () => ({ ticket: `ticket-for-${id}` })) }, group: null, groupKnown: true, endpointUrl: id,
     loadGroup: vi.fn(async () => undefined), ...store
   };
-  return { id, label: id, store: full as unknown as Machine['store'], ...(brought === undefined ? {} : { coreId: brought.coreId, groupId: brought.groupId ?? 'grp' }) };
+  return { id, label: id, store: full as unknown as Machine['store'], ...(brought === undefined ? {} : { coreId: brought.coreId, groupId: brought.groupId ?? 'grp', epoch: 1 }) };
 }
 const storeOf = (entry: Machine) => entry.store as unknown as FakeStore;
 
@@ -37,11 +37,11 @@ function workspace(machines: Machine[]) {
       added.push({ endpoint, label, quiet });
       return true;
     }),
-    remove: vi.fn(async (id: string) => {
+    remove: vi.fn(async (id: string, _dropped?: boolean) => {
       removed.push(id);
       stub.machines = stub.machines.filter((entry) => entry.id !== id);
     }),
-    dropPrimary: vi.fn(async (_id: string) => undefined)
+    dropPrimary: vi.fn(async (_id: string, _dropped?: boolean) => undefined)
   };
   return { stub, added, removed, workspace: stub as unknown as Workspace };
 }
@@ -64,7 +64,7 @@ describe('group links', () => {
     expect(reach).toHaveBeenCalledWith(['http://100.64.0.2:1', 'http://192.168.1.20:1']);
     // The ticket is asked for the address that answered, and is good nowhere else.
     expect(storeOf(a).client!.call).toHaveBeenCalledWith('group.ticket', { coreId: 'b', url: 'http://192.168.1.20:1' });
-    expect(added).toEqual([{ endpoint: { url: 'http://192.168.1.20:1', token: '', ticket: 'ticket-for-http://10.0.0.1:1', coreId: 'b', groupId: 'grp' }, label: 'B', quiet: true }]);
+    expect(added).toEqual([{ endpoint: { url: 'http://192.168.1.20:1', token: '', ticket: 'ticket-for-http://10.0.0.1:1', coreId: 'b', groupId: 'grp', epoch: 1 }, label: 'B', quiet: true }]);
     expect(links.states).toEqual({});
   });
 
@@ -169,7 +169,8 @@ describe('group links', () => {
     const { stub, workspace: ws, removed } = workspace([opened, a]);
     const links = new GroupLinks(ws, { reach: async () => null, secure: () => false });
     await links.reconcile();
-    expect(stub.dropPrimary).toHaveBeenCalledWith('http://100.64.0.2:1');
+    // Dropped by the group, not moved: its address is marked for every window.
+    expect(stub.dropPrimary).toHaveBeenCalledWith('http://100.64.0.2:1', true);
     expect(removed).toEqual([]);
   });
 
@@ -233,7 +234,8 @@ describe('group links', () => {
     const links = new GroupLinks(ws, { reach: async (addresses) => addresses[0] ?? null, secure: () => false });
     await links.reconcile();
     await settle();
-    expect(stub.dropPrimary).toHaveBeenCalledWith('http://100.64.0.2:1');
+    // It only moved: nothing is marked, and it is reached where it is now.
+    expect(stub.dropPrimary).toHaveBeenCalledWith('http://100.64.0.2:1', false);
     expect(removed).toEqual([]);
     expect(added.map((entry) => entry.endpoint.url)).toEqual(['https://b.example']);
   });
@@ -342,16 +344,32 @@ describe('group links', () => {
     expect(reach).toHaveBeenCalledTimes(4);
   });
 
-  it('lets go of a machine another window was told the group dropped, before its own machines say so', async () => {
+  it('lets go of a machine another window was told the group dropped, whoever answers here, and does not go back to it on a stale listing', async () => {
     const url = 'http://100.64.0.2:1';
-    // This window's hand-paired machine still lists b. Another window, sharing its storage, dropped b.
-    rememberSession({ url, token: '', ticket: 't', coreId: 'b', groupId: 'grp' }, 'key');
-    removeBrought(url, 'b');
-    const a = machine('http://10.0.0.1:1', { connection: 'ready', group: null, groupKnown: true });
-    const b = machine(url, { group: group('b', members) }, { coreId: 'b' });
-    const { workspace: ws, removed } = workspace([a, b]);
-    await new GroupLinks(ws, { reach: async () => null, secure: () => false }).reconcile();
+    rememberSession({ url, token: '', ticket: 't', coreId: 'b', groupId: 'grp', epoch: 1 }, 'key');
+    // Another window, sharing this one's storage, was told the group dropped b.
+    removeBrought(url, 'b', 1);
+    // Here the hand-paired machine has not caught up and still lists b, and b itself never says which group it is in.
+    const stale = group('a', [members[0]!, core('b', [url], 1)]);
+    const a = machine('http://10.0.0.1:1', { group: stale, groupKnown: false });
+    const b = machine(url, { group: null, groupKnown: false }, { coreId: 'b' });
+    const { stub, workspace: ws, removed, added } = workspace([a, b]);
+    const reach = vi.fn(async (addresses: string[]) => addresses[0] ?? null);
+    await new GroupLinks(ws, { reach, secure: () => false }).reconcile();
+    // Nobody here has answered about its group, and b goes all the same.
     expect(removed).toEqual([url]);
+    expect(stub.remove).toHaveBeenCalledWith(url, true);
+    // The stale listing, the admission that was dropped, gets no ticket asked for that address.
+    storeOf(a).groupKnown = true;
+    await new GroupLinks(ws, { reach, secure: () => false }).reconcile();
+    await settle();
+    expect(reach).not.toHaveBeenCalled();
+    expect(added).toEqual([]);
+    // Admitted again, the machine is listed under a later admission: it is reached, and the key it hands back ends the mark.
+    storeOf(a).group = group('a', [members[0]!, core('b', [url], 2)]);
+    await new GroupLinks(ws, { reach, secure: () => false }).reconcile();
+    await settle();
+    expect(added.map((entry) => [entry.endpoint.url, entry.endpoint.epoch])).toEqual([[url, 2]]);
   });
 
   it('takes the word of the hand-paired machine that no longer lists a member over the one that still does', async () => {

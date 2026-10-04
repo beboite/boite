@@ -134,7 +134,9 @@ export class GroupLinks {
         return core !== undefined && usableAddresses(core.addresses, this.#secure()).includes(entry.url);
       });
       // Forgotten only while it is still the group's entry: the owner may have paired that machine by hand meanwhile.
-      if (!stands && entry.coreId !== undefined) removeBrought(entry.url, entry.coreId);
+      // No longer listed, the machine was dropped and its address is marked; listed elsewhere, it only moved.
+      const delisted = voices.some((voice) => !voice.cores.some((listed) => listed.coreId === entry.coreId));
+      if (!stands && entry.coreId !== undefined) removeBrought(entry.url, entry.coreId, delisted ? entry.epoch ?? Number.MAX_SAFE_INTEGER : undefined);
       return stands;
     });
   }
@@ -170,6 +172,10 @@ export class GroupLinks {
   }
 
   async reconcile(): Promise<void> {
+    // Told by another window that the group dropped a machine: it goes at once, whoever answers here and whatever this window still loads.
+    for (const machine of [...this.workspace.machines]) {
+      if (machine.coreId !== undefined && isDropped(machine.id, machine.epoch)) await this.#drop(machine, true);
+    }
     // Remembered machines are still being added: one of them may be the member that looks missing.
     if (!this.workspace.settled) return;
     // Only a machine that has answered about its group speaks here; one still loading neither vouches nor denies.
@@ -189,7 +195,9 @@ export class GroupLinks {
         if (core.coreId === group.self || wanted.has(core.coreId)) continue;
         // Two hand-paired machines of one group that disagree: the one that no longer lists it wins.
         if (anchors.some((other) => other.store.group?.id === group.id && !other.store.group.cores.some((listed) => listed.coreId === core.coreId))) continue;
-        wanted.set(core.coreId, { core, via, addresses: this.#agreed(core.coreId, group.id, anchors) });
+        // An address the group dropped that machine at is not dialled on the word of a member still listing
+        // the admission that was dropped: only a later admission, the machine having come back, opens it again.
+        wanted.set(core.coreId, { core, via, addresses: this.#agreed(core.coreId, group.id, anchors).filter((address) => !isDropped(address, core.epoch)) });
       }
     }
 
@@ -201,7 +209,7 @@ export class GroupLinks {
       // A key the group handed out for an address the machine no longer gives, or no longer
       // allows now that it has HTTPS, is not sent there again: the machine is reached anew.
       if (existing?.coreId !== undefined && !addresses.includes(existing.id)) {
-        await this.#drop(existing);
+        await this.#drop(existing, false);
         existing = undefined;
       }
       if (existing !== undefined && (existing.store.connection !== 'closed' || this.#holdsKey(existing))) {
@@ -249,16 +257,16 @@ export class GroupLinks {
       // Its key was taken away and nobody it could be vouched by is in that group any more: nothing left to reconnect with.
       const orphaned = machine.store.connection === 'closed' && !this.#holdsKey(machine)
         && !informed.some((other) => other !== machine && other.coreId === undefined && other.store.group?.id === machine.groupId);
-      // Or another window was told the group dropped it, and marked its address for every window.
-      if (!delisted && !orphaned && !isDropped(machine.id)) continue;
-      await this.#drop(machine);
+      if (!delisted && !orphaned) continue;
+      await this.#drop(machine, delisted);
     }
   }
 
   /** The machine this window opened on cannot leave the list: its key goes and the window falls back to its own core. */
-  async #drop(machine: Machine): Promise<void> {
-    if (machine.store === this.workspace.primary) await this.workspace.dropPrimary(machine.id);
-    else await this.workspace.remove(machine.id);
+  /** `gone`: the group dropped it, and its address is marked for every window. Otherwise it only moved, or its key died. */
+  async #drop(machine: Machine, gone: boolean): Promise<void> {
+    if (machine.store === this.workspace.primary) await this.workspace.dropPrimary(machine.id, gone);
+    else await this.workspace.remove(machine.id, gone);
   }
 
   /** A remembered key reconnects by itself; a machine without one needs a ticket again. */
@@ -307,7 +315,7 @@ export class GroupLinks {
         moved = true;
         return;
       }
-      if (await this.workspace.add({ url, token: '', ticket, coreId, groupId }, core.name, true)) state = null;
+      if (await this.workspace.add({ url, token: '', ticket, coreId, groupId, epoch: core.epoch }, core.name, true)) state = null;
     } catch {
       // The machine that vouches went away, or the member refused: the next pass asks again.
     } finally {

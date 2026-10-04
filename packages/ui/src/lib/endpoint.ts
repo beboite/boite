@@ -15,6 +15,8 @@ export interface Endpoint {
   coreId?: string;
   /** The group that led here: only a member of that group can later say this machine left it. */
   groupId?: string;
+  /** Which admission of that machine the group listed when it led here. */
+  epoch?: number;
   /**
    * The token is the session key a pairing link became, not a core token. In
    * the shell this is what lets a stored endpoint win over the core the shell
@@ -47,12 +49,15 @@ function isEndpoint(value: unknown): value is Endpoint {
 export const DROPPED_STORAGE_KEY = 'boite.group.dropped';
 const DROPPED_MAX = 256;
 
-/** Address to the moment it was dropped. */
-function droppedAddresses(): Record<string, number> {
+interface Dropped { at: number; epoch: number }
+
+/** Address to when the group dropped the machine there, and which admission of it that was. */
+function droppedAddresses(): Record<string, Dropped> {
   try {
     const parsed: unknown = JSON.parse(window.localStorage.getItem(DROPPED_STORAGE_KEY) ?? '{}');
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
-    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, number] => typeof entry[1] === 'number'));
+    return Object.fromEntries(Object.entries(parsed as Record<string, Partial<Dropped> | null>)
+      .filter((entry): entry is [string, Dropped] => typeof entry[1]?.at === 'number' && typeof entry[1].epoch === 'number'));
   } catch {
     return {};
   }
@@ -61,14 +66,16 @@ function droppedAddresses(): Record<string, number> {
 /**
  * The addresses of machines a group brought and then dropped, shared by every
  * window. Nothing saved for one is read again, whichever window left it and
- * wherever it sits, until a new key is issued for that address: by a pairing
- * made by hand, or by the group bringing the machine back.
+ * wherever it sits, and no ticket is asked for it on the word of a member that
+ * still lists the admission that was dropped. It ends when a new key is
+ * issued for that address: by a pairing made by hand, or by the group having
+ * admitted the machine again.
  */
-function setDropped(url: string, dropped: boolean): void {
+function setDropped(url: string, epoch: number | null): void {
   const target = normalise(url);
   const { [target]: was, ...rest } = droppedAddresses();
-  if (!dropped && was === undefined) return;
-  const next = dropped ? Object.entries({ ...rest, [target]: Date.now() }).slice(-DROPPED_MAX) : Object.entries(rest);
+  if (epoch === null && was === undefined) return;
+  const next = epoch === null ? Object.entries(rest) : Object.entries({ ...rest, [target]: { at: Date.now(), epoch } }).slice(-DROPPED_MAX);
   try {
     window.localStorage.setItem(DROPPED_STORAGE_KEY, JSON.stringify(Object.fromEntries(next)));
   } catch {
@@ -76,9 +83,14 @@ function setDropped(url: string, dropped: boolean): void {
   }
 }
 
-/** Whether the group dropped the machine at this address, and nothing brought it back since. */
-export function isDropped(url: string): boolean {
-  return droppedAddresses()[normalise(url)] !== undefined;
+/**
+ * Whether the group dropped the machine at this address and nothing brought it
+ * back. With `epoch`, the admission a member lists for it now: a later one
+ * than the one dropped means the machine was admitted again, and is not dropped.
+ */
+export function isDropped(url: string, epoch?: number): boolean {
+  const mark = droppedAddresses()[normalise(url)];
+  return mark !== undefined && (epoch === undefined || epoch <= mark.epoch);
 }
 
 /**
@@ -87,8 +99,8 @@ export function isDropped(url: string): boolean {
  * key is not kept, and does not bring the address back.
  */
 export function droppedSince(url: string, began: number): boolean {
-  const at = droppedAddresses()[normalise(url)];
-  return at !== undefined && at >= began;
+  const mark = droppedAddresses()[normalise(url)];
+  return mark !== undefined && mark.at >= began;
 }
 
 export function readStoredEndpoint(): Endpoint | null {
@@ -104,8 +116,12 @@ export function readStoredEndpoint(): Endpoint | null {
 }
 
 /** The marks of a machine a group brought, kept wherever its key is saved: without them it would pass for one paired by hand. */
-function brought(from: { coreId?: unknown; groupId?: unknown }): { coreId?: string; groupId?: string } {
-  return { ...(typeof from.coreId === 'string' ? { coreId: from.coreId } : {}), ...(typeof from.groupId === 'string' ? { groupId: from.groupId } : {}) };
+function brought(from: { coreId?: unknown; groupId?: unknown; epoch?: unknown }): { coreId?: string; groupId?: string; epoch?: number } {
+  return {
+    ...(typeof from.coreId === 'string' ? { coreId: from.coreId } : {}),
+    ...(typeof from.groupId === 'string' ? { groupId: from.groupId } : {}),
+    ...(typeof from.coreId === 'string' && typeof from.epoch === 'number' ? { epoch: from.epoch } : {})
+  };
 }
 
 export function storeEndpoint(endpoint: Endpoint): void {
@@ -142,6 +158,8 @@ export interface StoredEnvironment {
   coreId?: string;
   /** The group that connected it. */
   groupId?: string;
+  /** Which admission of that machine the group listed then. */
+  epoch?: number;
 }
 
 export const ENVIRONMENTS_STORAGE_KEY = 'boite.envs';
@@ -229,17 +247,15 @@ export function upsertEnvironment(entry: {
   label?: string;
   coreId?: string;
   groupId?: string;
+  epoch?: number;
 }): StoredEnvironment[] {
   const url = normalise(entry.url);
   const list = readEnvironments();
   const at = list.findIndex((env) => env.url === url);
   const label = entry.label ?? list[at]?.label ?? defaultEnvironmentLabel(url);
-  const coreId = entry.coreId ?? list[at]?.coreId;
-  const groupId = entry.groupId ?? list[at]?.groupId;
   const next: StoredEnvironment = {
     url, label, token: entry.token, paired: entry.paired,
-    ...(typeof coreId === 'string' ? { coreId } : {}),
-    ...(typeof groupId === 'string' ? { groupId } : {})
+    ...brought({ coreId: entry.coreId ?? list[at]?.coreId, groupId: entry.groupId ?? list[at]?.groupId, epoch: entry.epoch ?? list[at]?.epoch })
   };
   if (at === -1) {
     list.push(next);
@@ -252,7 +268,7 @@ export function upsertEnvironment(entry: {
 
 /** The machine was paired by hand since: it is no longer the group's to drop. */
 export function forgetGroupOf(url: string): StoredEnvironment[] {
-  setDropped(url, false);
+  setDropped(url, null);
   const list = readEnvironments().map((env) => (env.url === normalise(url) ? { url: env.url, label: env.label, token: env.token, paired: env.paired } : env));
   storeEnvironments(list);
   return list;
@@ -265,13 +281,9 @@ export function forgetGroupOf(url: string): StoredEnvironment[] {
  */
 export function rememberSession(endpoint: Endpoint, token: string): StoredEnvironment[] {
   // A new key for that address: whatever was dropped there before is past.
-  setDropped(endpoint.url, false);
+  setDropped(endpoint.url, null);
   if (endpoint.grant !== undefined) forgetGroupOf(endpoint.url);
-  return upsertEnvironment({
-    url: endpoint.url, token, paired: true,
-    ...(endpoint.coreId === undefined ? {} : { coreId: endpoint.coreId }),
-    ...(endpoint.groupId === undefined ? {} : { groupId: endpoint.groupId })
-  });
+  return upsertEnvironment({ url: endpoint.url, token, paired: true, ...brought(endpoint) });
 }
 
 /**
@@ -293,18 +305,21 @@ export function removeEnvironment(url: string, token?: string): StoredEnvironmen
 /**
  * Forgets a machine the group brought, when the saved entry is still the one
  * the group brought: paired by hand since, in this window or another, the
- * entry is the owner's and stays.
+ * entry is the owner's and stays. `dropped` says the group dropped the
+ * machine, and which admission of it: its address is then marked for every
+ * window. Without it the machine only moved, and nothing is marked.
  */
-export function removeBrought(url: string, coreId: string): StoredEnvironment[] {
+export function removeBrought(url: string, coreId: string, dropped?: number): StoredEnvironment[] {
   const saved = readEnvironments().find((env) => env.url === normalise(url));
   const stored = readStoredEndpoint();
   // Something saved must say the group brought that machine there. An address a member merely gave, and
-  // that was only tried, is not one to mark: a key the owner holds for whoever really sits there stays.
+  // that was only tried, is not one to touch: a key the owner holds for whoever really sits there stays.
   const mine = saved?.coreId === coreId || (stored?.url === normalise(url) && stored.coreId === coreId);
   if (!mine || (saved !== undefined && saved.coreId !== coreId)) return readEnvironments();
+  if (dropped === undefined) return removeEnvironment(url, saved?.token);
   // The address is marked first: a key another window left for that machine, in the list or as the core
   // it opens on, is not read again either.
-  setDropped(url, true);
+  setDropped(url, dropped);
   if (rawStoredUrl() === normalise(url)) clearStoredEndpoint();
   return readEnvironments();
 }
@@ -449,7 +464,7 @@ async function followLink(endpoint: Endpoint, approve?: (url: string) => Promise
   if (known && !promotes) return true;
   if (approve === undefined || !(await approve(endpoint.url))) return false;
   // The owner said yes to that address: what the group dropped there before is past.
-  setDropped(endpoint.url, false);
+  setDropped(endpoint.url, null);
   return true;
 }
 

@@ -232,7 +232,8 @@ never of another's. A member the core never served yet can be turned away with
 the strangers while such a flood lasts. Requests from the machine itself are not
 counted, since a reverse proxy puts every remote peer behind that one address. A member's own
 allowance, 120 requests a minute, is only spent by requests that are its own,
-fresh and not seen before, one turned away for that allowance included.
+fresh and not seen before, one turned away for that allowance included, up to
+three times the allowance a minute.
 
 **Tickets.** A client connected to a member asks it for a ticket to another
 (`group.ticket`): the member's signed statement of who vouches, for whom, at
@@ -298,16 +299,20 @@ it is still the one the group brought: paired by hand since, in another
 window, the entry stays. The group's mark is kept wherever a key of that
 machine is saved, the core the window opens on next included, and a link that
 reopens the machine keeps it. The address of a machine the group dropped is
-remembered, in storage every window shares (`boite.group.dropped`): nothing
-saved for that address is read again, whichever window left it and wherever it
-sits, so a key left behind never passes for a pairing made by hand, and a link
-to that address asks as for a core nobody knows. A new key issued for the
-address ends that: a pairing made by hand, a link the owner said yes to, or
-the group bringing the machine back. A window that is open lets the machine go
-as soon as another window marks its address, and a ticket exchange that began
-before the mark and ends after it leaves no key. Only a machine something
-saved says the group brought is marked: an address a member gave, tried and
-given up, is not. A key the group handed
+remembered, in storage every window shares (`boite.group.dropped`), with which
+admission of the machine it was (`GroupCore.epoch`). Nothing saved for that
+address is read again, whichever window left it and wherever it sits, so a key
+left behind never passes for a pairing made by hand, and a link to that address
+asks as for a core nobody knows. No ticket is asked for it on the word of a
+member that still lists the admission that was dropped. It ends when a new key
+is issued for the address: a pairing made by hand, a link the owner said yes
+to, or the machine admitted again, which a member lists under a later
+admission. A window that is open lets the machine go as soon as another window
+marks its address, whoever answers in that window, and a ticket exchange that
+began before the mark and ends after it is refused its key and closed. Only a
+machine the group dropped is marked, and only when something saved says the
+group brought it: one that moved to another address is not, nor an address a
+member gave that was tried and given up. A key the group handed
 out for an address the machine no longer gives, or no longer allows once it has
 HTTPS, is dropped and the machine reached anew, the machine the window opened
 on included: the window then goes to a machine paired by hand, or to the

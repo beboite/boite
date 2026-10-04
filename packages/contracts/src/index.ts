@@ -2279,6 +2279,13 @@ export interface GroupCore {
    * HTTPS address, the tailnet name, the tailnet address, then the LAN one.
    */
   addresses: string[];
+  /**
+   * Which admission this is: 1 when the machine first joined, one more each
+   * time it is admitted again after a removal. A client that was told the
+   * group dropped a machine tells a member that has not caught up, which
+   * still lists the old admission, from the machine having come back.
+   */
+  epoch: number;
 }
 
 /** A phone or another computer paired with one member, which the group lets reach every member. */

@@ -164,7 +164,7 @@ export class GroupStore {
       id: roster.id,
       name: roster.name,
       self: this.selfId(),
-      cores: liveCores(roster).map((core) => ({ coreId: core.coreId, name: core.name, ...(core.os ? { os: core.os } : {}), addresses: [...core.addresses] })),
+      cores: liveCores(roster).map((core) => ({ coreId: core.coreId, name: core.name, ...(core.os ? { os: core.os } : {}), addresses: [...core.addresses], epoch: core.epoch })),
       // A phone connects to the machines; who else is paired is the owner's to read.
       devices: principal === 'owner' ? liveDevices(roster).map((device) => ({ id: device.id, name: device.name, role: device.role })) : [],
     };

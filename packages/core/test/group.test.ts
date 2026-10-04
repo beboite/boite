@@ -909,6 +909,14 @@ test('a recorded request sent again and again never spends the member\'s allowan
   rates.set(id(b), { since: Date.now(), count: 0 });
   expect((await late()).status).toBe(403);
   expect(rates.get(id(b))!.count).toBe(0);
+  // Past three times the quota nothing more is remembered: what one machine can make this core hold is bounded.
+  const nonces = (a.core.coordination as unknown as { nonces: Map<string, number> }).nonces;
+  rates.set(id(b), { since: Date.now(), count: 360 });
+  const held = nonces.size;
+  const more = JSON.stringify({ from: id(b), to: id(a), at: Date.now(), nonce: crypto.randomUUID(), operation: 'directory', payload: {} });
+  const beyond = b.core.group.sealFor(id(a), pack(more, b.core.coordination.signature(Buffer.from(more)).toString('base64')))!;
+  expect((await fetch(`${a.url}/agent-messages`, { method: 'POST', body: beyond.body, headers: { 'x-boite-peer': id(b), 'x-boite-signature': SEALED } })).status).toBe(429);
+  expect(nonces.size).toBe(held);
 });
 
 test('requests are counted against the address they come from as they arrive, and a refusal keeps its place for a minute', () => {

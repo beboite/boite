@@ -790,13 +790,13 @@ export class Coordination {
       for (const [id, at] of this.nonces) if (now - at > 120_000) this.nonces.delete(id);
       const key = `${peer.coreId}:${envelope.nonce}`;
       if (this.nonces.has(key)) throw new Error('replayed request');
-      // Remembered before the quota, which comes last: a request somebody recorded and sends again never
-      // spends the member's allowance, in this minute or, once turned away here, in the next.
-      this.nonces.set(key, now);
       const rate = this.rates.get(peer.coreId) ?? { since: now, count: 0 };
       if (now - rate.since > 60_000) { rate.since = now; rate.count = 0; }
       this.rates.set(peer.coreId, rate);
-      if (++rate.count > 120) return new Response('peer rate limit', { status: 429 });
+      // Remembered before the quota decides, so a request recorded and sent again never spends the member's allowance,
+      // in this minute or, turned away here, in the next. Up to three times the quota: what one machine can make this core remember is bounded.
+      if (++rate.count <= 360) this.nonces.set(key, now);
+      if (rate.count > 120) return new Response('peer rate limit', { status: 429 });
     } catch { return new Response('invalid signed message', { status: 403 }); }
     if (this.core.group.removedPeer(peer.coreId) !== null && (envelope.operation === 'group.sync' || !this.trusted().some(p => p.coreId === peer.coreId))) {
       return this.signed({ nonce: envelope.nonce, error: 'this machine was removed from the group', gone: true }, 410, sealing);

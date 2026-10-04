@@ -251,11 +251,12 @@ export class Connection {
       onSession: (session) => {
         key = session.token;
         if (this.ctx.client !== client) return;
-        // The group dropped this machine while its ticket was being exchanged: the key is not kept, and the group links let the machine go.
-        if (endpoint.grant === undefined && droppedSince(url, began)) return;
+        // The group dropped this machine while its ticket was being exchanged: the key is refused, and the connection ends there.
+        if (endpoint.grant === undefined && droppedSince(url, began)) return false;
         // A ticket leaves the machine the group's; a grant makes it the owner's.
-        if (rememberActive) storeEndpoint({ url, token: session.token, paired: true, ...(endpoint.grant === undefined ? { coreId: endpoint.coreId, groupId: endpoint.groupId } : {}) });
+        if (rememberActive) storeEndpoint({ url, token: session.token, paired: true, ...(endpoint.grant === undefined ? { coreId: endpoint.coreId, groupId: endpoint.groupId, epoch: endpoint.epoch } : {}) });
         this.environments = rememberSession(endpoint, session.token);
+        return true;
       },
       onUnauthorized: (error) => {
         if (this.ctx.client === client && !this.localCore) this.#authenticationFailed(error);
@@ -412,8 +413,8 @@ export class Connection {
    * `brought` is the machine of a group it was: its entry goes only while it
    * is still that one, not once it was paired by hand.
    */
-  async forgetEnvironment(url: string, brought?: string): Promise<void> {
-    this.environments = brought === undefined ? removeEnvironment(url) : removeBrought(url, brought);
+  async forgetEnvironment(url: string, brought?: string, dropped?: number): Promise<void> {
+    this.environments = brought === undefined ? removeEnvironment(url) : removeBrought(url, brought, dropped);
     if (this.endpointUrl === url) await this.ctx.store.useLocalCore(url);
   }
 

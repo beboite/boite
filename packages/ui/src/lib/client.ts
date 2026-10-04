@@ -90,7 +90,8 @@ export interface WsClientOptions {
    * is stored the same way.
    */
   ticket?: string;
-  onSession?: (session: Session) => void;
+  /** Returning false refuses the key: the client closes instead of using it. */
+  onSession?: (session: Session) => unknown;
   /**
    * The token is the session key of a pairing, whatever role it speaks as. A
    * key paired with the owner role says hello as the owner, so the principal
@@ -258,7 +259,7 @@ export class WsClient implements ObservableClient {
   #nonce: string;
   /** The token is a pairing's session key, so a hello it no longer opens is a revoke. */
   #paired: boolean;
-  #onSession: ((session: Session) => void) | null;
+  #onSession: ((session: Session) => unknown) | null;
   #onRevoked: (() => void) | null;
   #onUnauthorized: ((error: RpcFailure) => void) | null;
   #principal: Principal | null = null;
@@ -514,7 +515,13 @@ export class WsClient implements ObservableClient {
               this.#ticket = null;
               this.#paired = true;
               this.#options.token = result.session.token;
-              this.#onSession?.(result.session);
+              // The caller may refuse the key: the machine was dropped while its ticket was being exchanged.
+              if (this.#onSession?.(result.session) === false) {
+                this.#manuallyClosed = true;
+                fail('the machine left its group while it was being reached');
+                socket.close();
+                return;
+              }
             }
             this.#principal = result.principal;
             this.#attempt = 0;

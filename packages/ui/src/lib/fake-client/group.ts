@@ -20,7 +20,7 @@ const refuse = (message: string, field?: string) =>
 const invalid = (message: string, field: string) => new RpcFailure({ code: RpcErrorCode.InvalidParams, message, data: { field } });
 
 function card(ctx: FakeContext): GroupCore {
-  return { coreId: ctx.identity.coreId, name: ctx.identity.name, os: ctx.core.os, addresses: [ctx.identity.url] };
+  return { coreId: ctx.identity.coreId, name: ctx.identity.name, os: ctx.core.os, addresses: [ctx.identity.url], epoch: 1 };
 }
 
 function view(ctx: FakeContext): Group | null {

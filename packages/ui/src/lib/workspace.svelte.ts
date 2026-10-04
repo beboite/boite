@@ -29,6 +29,8 @@ export interface Machine {
   coreId?: string;
   /** The group that brought it. */
   groupId?: string;
+  /** Which admission of that machine the group listed when it brought it. */
+  epoch?: number;
 }
 
 export function isThisPC(machine: Machine): boolean {
@@ -99,7 +101,8 @@ export class Workspace {
       label: remembered.find(e => e.url === selected?.url)?.label ?? (store.localCore ? strings.machines.local : store.core?.hostname ?? hostOf(store.endpointUrl)) ?? strings.machines.local,
       store,
       ...(brought?.coreId === undefined ? {} : { coreId: brought.coreId }),
-      ...(brought?.groupId === undefined ? {} : { groupId: brought.groupId })
+      ...(brought?.groupId === undefined ? {} : { groupId: brought.groupId }),
+      ...(brought?.coreId === undefined || brought.epoch === undefined ? {} : { epoch: brought.epoch })
     };
     this.restoreProfile(machine);
     return machine;
@@ -336,7 +339,8 @@ export class Workspace {
       upsertEnvironment({
         url: machine.id, token: endpoint.token, paired: endpoint.paired ?? false, label: machine.label,
         ...(machine.coreId === undefined ? {} : { coreId: machine.coreId }),
-        ...(machine.groupId === undefined ? {} : { groupId: machine.groupId })
+        ...(machine.groupId === undefined ? {} : { groupId: machine.groupId }),
+        ...(machine.epoch === undefined ? {} : { epoch: machine.epoch })
       });
     else {
       const saved = readEnvironments().find((e) => e.url === machine.id);
@@ -379,7 +383,8 @@ export class Workspace {
       const fresh: Machine = {
         id, label: label?.trim() || host, store: target,
         ...(endpoint.coreId === undefined ? {} : { coreId: endpoint.coreId }),
-        ...(endpoint.groupId === undefined ? {} : { groupId: endpoint.groupId })
+        ...(endpoint.groupId === undefined ? {} : { groupId: endpoint.groupId }),
+        ...(endpoint.coreId === undefined || endpoint.epoch === undefined ? {} : { epoch: endpoint.epoch })
       };
       this.#distinct(fresh);
       this.machines = [...this.machines, fresh];
@@ -414,6 +419,7 @@ export class Workspace {
     if (existing && endpoint.ticket === undefined && endpoint.coreId === undefined && existing.coreId !== undefined) {
       delete existing.coreId;
       delete existing.groupId;
+      delete existing.epoch;
       forgetGroupOf(existing.id);
     }
     this.#rememberConnected(machine, endpoint, label, host);
@@ -459,7 +465,8 @@ export class Workspace {
     await this.select(local, undefined, local.draft?.projectId ?? undefined);
   }
 
-  async remove(id: string): Promise<void> {
+  /** `dropped`: the group dropped this machine, as opposed to it having moved or the owner taking it off the list. */
+  async remove(id: string, dropped = false): Promise<void> {
     const machine = this.machines.find((m) => m.id === id);
     if (!machine || machine.store === store) return;
     ++this.#generation;
@@ -468,7 +475,7 @@ export class Workspace {
     machine.store.detach();
     this.machines = this.machines.filter((m) => m !== machine);
     if (machine.coreId === undefined) removeEnvironment(id);
-    else removeBrought(id, machine.coreId);
+    else removeBrought(id, machine.coreId, dropped ? machine.epoch ?? Number.MAX_SAFE_INTEGER : undefined);
     if (this.active === machine.store) await this.select(store);
   }
 
@@ -477,13 +484,14 @@ export class Workspace {
    * key is forgotten and the window goes back to its own core. The entry
    * follows the store, and a machine already listed at that address gives way.
    */
-  async dropPrimary(id: string): Promise<void> {
+  async dropPrimary(id: string, dropped = false): Promise<void> {
     ++this.#generation;
     // A machine paired by hand first, never the address being dropped: a page that address
     // served would otherwise reach it again, with no key, and take it for the window's own.
     const next = this.#byHand();
     if (next && next.url !== id) await store.switchEnvironment(next.url);
-    await store.forgetEnvironment(id, this.machines.find((m) => m.store === store)?.coreId);
+    const was = this.machines.find((m) => m.store === store);
+    await store.forgetEnvironment(id, was?.coreId, dropped ? was?.epoch ?? Number.MAX_SAFE_INTEGER : undefined);
     // Nothing to fall back on: the window shows a machine paired by hand that is still connected, if there is one.
     const other = store.connection === 'ready' ? undefined : this.machines.find((m) => m.store !== store && m.coreId === undefined && m.store.connection === 'ready');
     if (other && this.active === store) await this.select(other.store);
