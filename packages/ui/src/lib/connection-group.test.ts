@@ -135,3 +135,27 @@ test('a successful join with a lost reply is remembered without joining twice', 
   await lost.migration.merge();
   expect(spy.mock.calls.filter(([method]) => method === 'group.join')).toHaveLength(1);
 });
+
+test('reopening after an interrupted admission records membership and respects a later leave', async () => {
+  const { workspace, source, target, migration } = await setup();
+  const client = target.store.client!;
+  const call = client.call.bind(client);
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const result = await call(method, params);
+    if (method === 'group.join') migration.stop();
+    return result;
+  });
+  await migration.merge();
+  await Promise.all([source.store.loadGroup(), target.store.loadGroup()]);
+  const groupId = source.store.group!.id;
+  expect(target.store.group?.id).toBe(groupId);
+  expect(target.groupId).toBeUndefined();
+
+  await new ConnectionGroup(workspace).merge();
+  expect(target).toMatchObject({ coreId: 'target', groupId, epoch: 1 });
+  expect(readEnvironments().find(entry => entry.url === target.id)).toMatchObject({ coreId: 'target', groupId, epoch: 1, token: 'fixture-key' });
+  await target.store.leaveGroup();
+  await source.store.loadGroup();
+  await new ConnectionGroup(workspace).merge();
+  expect(target.store.group).toBeNull();
+});

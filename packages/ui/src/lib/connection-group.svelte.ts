@@ -69,7 +69,18 @@ export class ConnectionGroup {
       for (const target of owners) {
         const remote = target.store.client;
         if (target === source || !remote || !current(source, client) || !current(target, remote)) continue;
-        if (target.store.group?.id === groupId) continue;
+        if (target.store.group?.id === groupId) {
+          // Admission may have completed before this page recorded it.
+          const group = groupOf(target);
+          const member = group?.cores.find(core => core.coreId === group.self);
+          if (member) {
+            if (target.coreId !== member.coreId || target.groupId !== groupId || target.epoch !== member.epoch) {
+              this.workspace.markGrouped(target, groupId, member);
+            }
+            this.#remember(target);
+          }
+          continue;
+        }
         if (target.store.group !== null) {
           const error = fill(strings.group.otherGroup, { machine: target.label, group: target.store.group.name });
           if (!this.errors.includes(error)) this.errors = [...this.errors, error];
