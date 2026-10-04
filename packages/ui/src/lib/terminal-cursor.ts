@@ -11,8 +11,12 @@ export const TERMINAL_CURSORS: readonly TerminalCursor[] = ['bar', 'block', 'und
 
 export const TERMINAL_CURSOR_STORAGE_KEY = 'boite.terminalCursor';
 
-/** The stored shape, `bar` when nothing is stored, storage is refused or the id is unknown. */
+/** The shape picked on this page, which storage may have refused to keep. */
+let picked: TerminalCursor | undefined;
+
+/** The shape picked here, else the stored one: `bar` when nothing is stored, storage is refused or the id is unknown. */
 export function readTerminalCursor(): TerminalCursor {
+  if (picked !== undefined) return picked;
   try {
     const raw = window.localStorage.getItem(TERMINAL_CURSOR_STORAGE_KEY);
     return TERMINAL_CURSORS.includes(raw as TerminalCursor) ? (raw as TerminalCursor) : 'bar';
@@ -22,6 +26,7 @@ export function readTerminalCursor(): TerminalCursor {
 }
 
 export function setTerminalCursor(cursor: TerminalCursor): void {
+  picked = cursor;
   try {
     if (cursor === 'bar') window.localStorage.removeItem(TERMINAL_CURSOR_STORAGE_KEY);
     else window.localStorage.setItem(TERMINAL_CURSOR_STORAGE_KEY, cursor);
