@@ -6,15 +6,16 @@ composer and settings. It does not move the thread or its processes.
 
 ## Connecting a machine
 
-Machines that are all yours go in a [group](groups.md): one invitation per
-machine, and each connects to every other, phones included. The pairing link
-below connects one machine to one client, in one direction, and is the way to
-reach a machine you would not give full control of the others.
+Machines connect through a [group](groups.md): one invitation per machine,
+and each connects to every other, phones included. Existing full-control
+connections are merged into one group when opening Machines and updates.
+The group card contains each machine's settings, connection status and display
+preferences. Click its name to rename the group.
 
-Open Machines and updates from Settings. On the machine to add,
-mint a full-control pairing link in General, or run `boite-core pair --owner`.
-Paste the link into Add machine, optionally name it, then connect. A manual URL
-and token form is available under the pairing form.
+On the first machine, create a group. Invite each additional machine and paste
+the invitation on that machine under Join a group. A phone pairs with any
+member and reaches the others with the same role. Pairing links and the CLI
+remain available for connecting a device or repairing a remembered key.
 
 The client saves the exchanged session key and discards the grant
 ([pairing](phone.md#pairing)). Startup restores the selected connection and
@@ -76,9 +77,11 @@ A loopback core is retried regardless, since it is on the same machine.
 
 A key a remote core refuses is not retried: the machine shows as closed with
 the reason. A page opened on its own core with no key says the device holds
-none. Pasting a pairing link under Add a machine replaces the key of any
-listed machine that is not connected, the page's own included, which cannot
-be removed. Only a connected machine is refused as already connected.
+none. Click the affected machine's **Pair again** control and paste a new
+pairing link from that machine. This replaces the key of a listed machine that
+is not connected, the page's own included, which cannot be removed. Device-only
+clients can also paste the link under **Add a machine**. Only a connected
+machine is refused as already connected.
 
 The link decides which machine is reached; the name only labels it. Once a
 link is pasted the form names the host it reaches and the listed machine at
@@ -88,25 +91,20 @@ when renaming.
 
 ## Agent links
 
-Two machines connected here with owner connections are linked for agent
-coordination as soon as both are ready: each core trusts the other's public
-key and address, then both check the link. Their agents can then find, read
-and message each other ([coordination](coordination.md)). Paired-device
-connections are never linked. Each core needs an HTTPS public address the
-other can reach. When a core advertises loopback, the client uses its connected
-HTTPS origin if available. Otherwise, it asks for a reachable public address
-before exchanging trust or probing the link. A pair that cannot link shows the
-reason in the Agent links
-section and is tried again when one of the machines reconnects. A link removed
-there is remembered on this device and stays removed until Link agents is
-used again. Link failures name the source, destination and address without
-broadcasting an internal-error notification. Owners can inspect and retry links
-on desktop and phone.
+Group members establish agent trust and browser origins through the shared
+roster. Their agents can find, read and message each other
+([coordination](coordination.md)) once both cores are reachable. Removing a
+machine from the group removes that trust when the other members hear it.
+Paired-device connections do not grant agent trust.
+
+Older manually configured agent links remain supported by the core and CLI.
+The Machines page manages group membership instead of offering a second list
+of pairwise links.
 
 ## Automatic settings synchronization
 
-Each card of another machine has a checkbox to keep its settings synchronized
-with the machine currently selected in Settings. Checking it copies settings
+The group card has one checkbox to keep its machines
+synchronized with the named source. Checking it copies settings
 immediately, then copies changes while this client is open, including when
 Settings is closed. The source stays the one chosen when checking the box;
 switching the visible machine does not reverse the direction. Cyclic links are

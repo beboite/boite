@@ -3,6 +3,7 @@ import { flushSync, mount, tick, unmount } from 'svelte';
 import Prose from './Prose.svelte';
 import type { Store } from '../lib/store.svelte';
 import { writeExperiments } from '../lib/experiments';
+import { installExternalLinks } from '../lib/links';
 
 let running: Record<string, unknown> | null = null;
 
@@ -89,6 +90,30 @@ test('dragging across a game path never launches it, and the next click still do
   link.click();
   await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
   await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('open_local_file', { directory: 'C:/project', path: 'build/game.exe' }, undefined));
+});
+
+test.each([false, true])('selecting external link text skips navigation, then a click still opens it (shell: %s)', async (shell) => {
+  const invoke = vi.fn(async () => {});
+  const opened = vi.spyOn(window, 'open').mockReturnValue(null);
+  if (shell) window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
+  running = mount(Prose, { target: document.body, props: { text: '[External reference](https://example.invalid/reference)' } });
+  flushSync();
+  const stopLinks = installExternalLinks(document.body);
+  try {
+    const link = query<HTMLAnchorElement>('a[href]');
+    link.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 10 }));
+    link.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, buttons: 1, clientX: 60, clientY: 10 }));
+    link.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0, clientX: 60, clientY: 10 }));
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 });
+    link.dispatchEvent(click);
+    await vi.dynamicImportSettled();
+    expect(click.defaultPrevented).toBe(true);
+    expect(opened).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    link.click();
+    if (shell) await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('plugin:opener|open_url', { url: 'https://example.invalid/reference', with: undefined }, undefined));
+    else expect(opened).toHaveBeenCalledWith('https://example.invalid/reference', '_blank', 'noopener,noreferrer');
+  } finally { stopLinks(); opened.mockRestore(); }
 });
 
 test('the direct-link experiment opens a desktop shortcut and text outside the checkout only on a click', async () => {

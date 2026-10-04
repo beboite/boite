@@ -91,6 +91,37 @@ test('closing an image and dragging chat text or a thread link preserves the con
   } finally { await page.close(); }
 }, 30_000);
 
+test('dropping URL text keeps the app open and still inserts text in the composer', async () => {
+  const page = await BrowserPage.launch({ url, windowSize: { width: 1280, height: 900 } });
+  try {
+    await page.waitFor(`${state}.openThread`);
+    const text = url + '&dropped=1';
+    await page.evaluate(`(async () => {
+      await ${state}.open('t-trace');
+      document.addEventListener('dragover', event => { window.__textDropOver = event.defaultPrevented; });
+    })()`);
+    for (const phone of [false, true]) {
+      await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 390 : 1280, height: phone ? 844 : 900, deviceScaleFactor: 1, mobile: phone });
+      for (const target of ['timeline', 'composer-input']) {
+        const point = await page.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('${id(target)}').getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`);
+        const data = { items: [{ mimeType: 'text/uri-list', data: text }, { mimeType: 'text/plain', data: text }], dragOperationsMask: 1 };
+        for (const type of ['dragEnter', 'dragOver']) await page.send('Input.dispatchDragEvent', { type, ...point, data });
+        expect(await page.evaluate('window.__textDropOver')).toBe(target === 'timeline');
+        await page.send('Input.dispatchDragEvent', { type: 'drop', ...point, data });
+        const history = await page.send('Page.getNavigationHistory', {}) as { currentIndex: number; entries: Array<{ url: string }> };
+        expect(history.entries[history.currentIndex]!.url).toBe(url);
+        expect(await page.evaluate(`${state}.openThread.id`)).toBe('t-trace');
+        if (target === 'composer-input') {
+          expect(await page.evaluate(`document.querySelector('${id('composer-input')}').value`)).toBe(text);
+          await page.type(id('composer-input'), '');
+        }
+      }
+      await capture(page, `text-drop-${phone ? 'phone' : 'desktop'}.png`);
+    }
+    expect(page.errors()).toEqual([]);
+  } finally { await page.close(); }
+}, 30_000);
+
 test('archive and delete leave a project draft on desktop and phone', async () => {
   const page = await BrowserPage.launch({ url, windowSize: { width: 1280, height: 900 } });
   try {

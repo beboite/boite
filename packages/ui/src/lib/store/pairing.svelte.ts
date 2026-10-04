@@ -117,6 +117,10 @@ export class Pairing {
     return this.#change((client) => client.call('group.join', { invite }));
   }
 
+  renameGroup(name: string): Promise<boolean> {
+    return this.#change((client) => client.call('group.rename', { name }));
+  }
+
   leaveGroup(): Promise<boolean> {
     return this.#change(async (client) => {
       await client.call('group.leave', {});

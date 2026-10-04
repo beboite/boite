@@ -95,6 +95,30 @@ test('inviting shows an invitation, and the machine that joins with it becomes a
   await vi.waitFor(() => { flushSync(); expect(one('group-invite-code')).toBeNull(); });
 });
 
+test('clicking the group name edits it, Enter shares the rename, and Escape cancels', async () => {
+  const first = await grouped();
+  const second = await joined();
+  one<HTMLButtonElement>('group-rename-start')!.click();
+  await settle();
+  expect(document.activeElement).toBe(one('group-rename'));
+  type('group-rename', 'Studio');
+  one('group-rename')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await vi.waitFor(() => { flushSync(); expect(first.group?.name).toBe('Studio'); expect(second.group?.name).toBe('Studio'); });
+  expect(one('group-rename')).toBeNull();
+  one<HTMLButtonElement>('group-rename-start')!.click();
+  await settle();
+  type('group-rename', 'Cancelled');
+  one('group-rename')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await settle();
+  expect(first.group?.name).toBe('Studio');
+  expect(one('group-rename')).toBeNull();
+  one<HTMLButtonElement>('group-rename-start')!.click();
+  await settle();
+  type('group-rename', 'Office');
+  one('group-rename')!.dispatchEvent(new FocusEvent('blur'));
+  await vi.waitFor(() => { flushSync(); expect(second.group?.name).toBe('Office'); });
+});
+
 test('a member says how it is reached, and one switch keeps every connected one like the selected machine', async () => {
   await grouped();
   const second = await joined();

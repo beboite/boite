@@ -161,6 +161,7 @@ export class FakeContext {
   readonly delegationSendRequests = new Map<string, { fingerprint: string; letter: AgentLetter }>();
   readonly letters = new Map<ThreadId, AgentLetter[]>();
   readonly peers = new Map<string, CoordinationPeer>();
+  readonly groupReads = new Map<string, { groupId: string; epoch: number }>();
   /** The group this fake core is in, shared by reference with the other fake cores of it. */
   roster: FakeRoster | null = null;
   readonly identity: CoordinationPeer;

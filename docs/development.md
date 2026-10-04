@@ -181,8 +181,11 @@ open/pin, completion/archive, title/move, tools, then a separate Delete group.
 Archive stays available beside Mark done in project and recent lists, including
 while work is pending. Pull request refresh appears only for a named branch.
 
-Chat text selection never activates a file or conversation link at the end of
-the drag. A later click or keyboard activation still opens the link. Delayed
+Chat text selection never activates a file, conversation or external link at
+the end of the drag. The external opener runs after the selection guards.
+Dropped text and URLs insert into writable fields; drops elsewhere cannot
+navigate the app. File attachments and project moves retain their own handlers.
+A later click or keyboard activation still opens the link. Delayed
 cross-machine conversation links yield to a newer conversation or draft.
 
 Recent keeps completed conversations in a collapsed Done section at the bottom.

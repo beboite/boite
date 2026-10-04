@@ -122,16 +122,15 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     await page.waitFor(`document.querySelector('${id('thread-title')}')?.textContent === 'Primary project'`);
     await page.click(id('nav-settings'));
     await page.click(id('settings-tab-machines'));
+    // Restore a legacy individual owner connection. The new UI folds it into the group automatically.
     const grant = await b.call('pairing.grant', { role: 'owner' });
-    await page.click(id('machine-add-open'));
-    await page.type(id('machine-link'), grant.url);
-    await page.click(id('machine-add'));
-    await page.waitFor(
-      `document.querySelectorAll('${id('machine-card')}').length === 2 && !document.querySelector('${id('machine-add')}').textContent.includes('Connecting')`
-    );
+    await page.evaluate(`globalThis.__boiteTest.workspace.pair(${JSON.stringify(grant.url)}, 'Remote')`);
+    await page.waitFor(`document.querySelectorAll('[data-group-member="true"]').length === 2`);
+    expect((await a.call('group.get', {}))?.id).toBe((await b.call('group.get', {}))?.id);
+    expect(await page.evaluate(`document.querySelector('${id('machine-add-open')}') === null`)).toBe(true);
     await b.call('settings.set', { warmProcessMinutes: 2, agentCpuCapPercent: 35 });
     await a.call('settings.set', { asyncQuestions: false, warmProcessMinutes: 7, agentCpuCapPercent: 85 });
-    await page.click(id('machine-sync'));
+    await page.click(id('group-sync'));
     await page.waitFor(`globalThis.__boiteTest.workspace.machines.find(machine => machine.id === ${JSON.stringify(second.url)})?.store.settings?.asyncQuestions === false`);
     expect(await b.call('settings.get', {})).toMatchObject({ asyncQuestions: false, warmProcessMinutes: 2, agentCpuCapPercent: 35 });
     expect(await page.evaluate(`!!document.querySelector('${id('machines-page')}') && !document.querySelector('${id('machine-settings')}')`)).toBe(true);
@@ -204,14 +203,13 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     await page.click(id('settings-tab-machines'));
     const admin = await connect(restarted.url, restarted.token);
     try {
-      const session = (await admin.call('sessions.list', {}))[0]!;
-      await admin.call('sessions.revoke', { sessionId: session.id });
-      await page.waitFor(`document.querySelector('[data-testid="machine-card"][data-machine-id="${second.url}"] .status')?.textContent === 'Pair this app'`);
-      expect(await page.evaluate(`!!document.querySelector('[data-testid="machine-card"][data-machine-id="${second.url}"] [data-testid=machine-repair]')`)).toBe(true);
-      const replacement = await admin.call('pairing.grant', { role: 'owner' });
-      await page.click(id('machine-add-open'));
-      await page.type(id('machine-link'), replacement.url);
-      await page.click(id('machine-add'));
+      const sessions = await admin.call('sessions.list', {});
+      expect(sessions.length).toBeGreaterThan(0);
+      for (const session of sessions) await admin.call('sessions.revoke', { sessionId: session.id });
+      // Its other group member can issue a replacement key without a new pairing link.
+      const previous = sessions.map(session => session.id);
+      await page.waitFor(`globalThis.__boiteTest.workspace.machines[1]?.store.client.call('sessions.list', {}).then(sessions => sessions.some(session => !${JSON.stringify(previous)}.includes(session.id))).catch(() => false)`);
+      expect((await admin.call('sessions.list', {})).some(current => !previous.includes(current.id))).toBe(true);
       await page.waitFor(`document.querySelector('[data-testid="machine-card"][data-machine-id="${second.url}"] .status')?.textContent === 'Connected'`);
       expect(await page.evaluate(`document.querySelectorAll('${id('machine-card')}').length`)).toBe(2);
     } finally { admin.close(); }
@@ -264,7 +262,7 @@ test('one invitation groups two real cores: the page connects the second by itse
     // One machine starts the group and mints an invitation.
     await page.type(id('group-name'), 'Home');
     await page.click(id('group-create'));
-    await page.waitFor(`document.querySelectorAll('${id('group-member')}').length === 1`);
+    await page.waitFor(`document.querySelectorAll('[data-group-member="true"], ${id('group-member')}').length === 1`);
     expect((await a.call('group.get', {}))?.name).toBe('Home');
     await page.click(id('group-invite'));
     await page.waitFor(`document.querySelector('${id('group-invite-code')}')?.value.startsWith('boite-group:')`);
@@ -277,11 +275,18 @@ test('one invitation groups two real cores: the page connects the second by itse
     expect(joined.cores).toHaveLength(2);
     // No pairing link for the second machine: the page was handed a key by it through the group.
     await page.waitFor(machines(2));
-    await page.waitFor(`document.querySelectorAll('${id('group-member')}').length === 2 && document.querySelectorAll('${id('machine-card')}').length === 2`);
+    await page.waitFor(`document.querySelectorAll('[data-group-member="true"], ${id('group-member')}').length === 2 && document.querySelectorAll('${id('machine-card')}').length === 2`);
     const sessions = await b.call('sessions.list', {});
     expect(sessions).toHaveLength(1);
     expect(sessions[0]).toMatchObject({ role: 'owner', group: true });
     await showGroup();
+    await page.click(id('group-rename-start'));
+    await page.type(id('group-rename'), 'Studio');
+    await page.evaluate(`document.querySelector('${id('group-rename')}').closest('form').requestSubmit()`);
+    await page.waitFor(`document.querySelector('${id('group-rename-start')}')?.textContent === 'Studio'`);
+    await b.call('group.get', {});
+    for (let attempt = 0; attempt < 50 && (await b.call('group.get', {}))?.name !== 'Studio'; attempt++) await Bun.sleep(100);
+    expect((await b.call('group.get', {}))?.name).toBe('Studio');
     await capture('group-real-cores-desktop.png');
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await page.waitFor(`document.querySelector('${id('group-card')}')`);

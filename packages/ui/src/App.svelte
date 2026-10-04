@@ -23,6 +23,7 @@
   import { confirm } from './lib/confirm.svelte';
   import { startGlass } from './lib/glass';
   import { installExternalLinks } from './lib/links';
+  import { installDropNavigationGuard } from './lib/drop-navigation';
   import { isQuitChord, QUIT_HOLD_MS, QuitHold } from './lib/quit-hold';
   import { notificationWords, onNotificationOpen, storeNotificationWords } from './lib/notify';
   import { closeTabs } from './lib/panel-close';
@@ -344,7 +345,9 @@
   $effect(() => {
     const root = appRoot;
     if (!root) return;
-    return installExternalLinks(root);
+    const stopLinks = installExternalLinks(root);
+    const stopDrops = installDropNavigationGuard(root);
+    return () => { stopLinks(); stopDrops(); };
   });
 
   // What wants the user rides the document title, so the taskbar and a browser
