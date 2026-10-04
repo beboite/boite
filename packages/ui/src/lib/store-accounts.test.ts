@@ -196,3 +196,24 @@ test('provider reload stops follow-up account checks after replacement during an
     expect(accepted).toBe(false);
   } finally { gate.release(); await pending; }
 });
+
+test('a proxied provider shows one gateway account over its local ones, which come back when the proxy goes off', async () => {
+  const { store, client } = await ready();
+  const douane = { enabled: true, kind: 'douane' as const, baseUrl: 'http://gateway.test:8787/v1', dashboardUrl: 'http://gateway.test:8787/admin/#quotas' };
+  store.settings = await client.call('subscriptionProxy.configure', { subscriptionProxy: douane });
+  // One account, the first local id under the gateway's name: a thread on either seat still resolves.
+  expect(store.accountsOf('claude').map(account => [account.id, account.label, account.status, account.identity])).toEqual([['a-claude-main', 'Douane', 'ok', null]]);
+  expect(store.accountOf('a-claude-side')).toMatchObject({ id: 'a-claude-side', label: 'Douane', status: 'ok' });
+  expect(store.gatewayOf('codex')).toEqual({ kind: 'douane', name: 'Douane', origin: 'http://gateway.test:8787' });
+  // Other protocols keep their own sign-ins, and nothing was written to the accounts.
+  expect(store.gatewayOf('opencode')).toBeNull();
+  expect(store.accountsOf('opencode')[0]!.label).toBe('Default');
+  expect(store.accounts.filter(account => account.providerId === 'claude').map(account => account.label)).toEqual(['Default login', 'Second seat']);
+  expect((await client.call('accounts.list', {})).some(account => account.label === 'Douane')).toBe(false);
+
+  store.settings = await client.call('subscriptionProxy.configure', { subscriptionProxy: { ...douane, kind: 'cliproxyapi' } });
+  expect(store.accountsOf('claude')[0]!.label).toBe('CLIProxyAPI');
+  store.settings = await client.call('subscriptionProxy.configure', { subscriptionProxy: { ...douane, enabled: false } });
+  expect(store.accountsOf('claude').map(account => [account.label, account.status])).toEqual([['Default login', 'ok'], ['Second seat', 'unauthenticated']]);
+  expect(store.accountOf('a-claude-side')!.label).toBe('Second seat');
+});

@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { Clock3 } from '@lucide/svelte';
+  import { Clock3, Wallet } from '@lucide/svelte';
   import QuotaExtras from './QuotaExtras.svelte';
   import QuotaReset from './QuotaReset.svelte';
   import type { Store } from '../lib/store.svelte';
   import type { AccountQuota } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
-  import { exactTime, quotaWindowName, tenth, weekdayTime } from '../lib/format';
+  import { creditBalance, exactTime, quotaWindowName, tenth, weekdayTime } from '../lib/format';
   import { quotaAccountName } from '../lib/quota-reader.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
 
@@ -31,6 +31,12 @@
         <span class="logo" title={row.providerName}><ProviderLogo providerId={row.providerId} size={22} /></span>
         <div class="identity">
           <strong title={name}>{name}</strong>
+          {#if row.gateway && (row.gateway.plan || row.gateway.status !== 'ready')}
+            <span class="badges">
+              {#if row.gateway.plan}<span class="badge" data-testid="usage-limit-plan"><span class="ui-label">{row.gateway.plan}</span></span>{/if}
+              {#if row.gateway.status !== 'ready'}<span class="badge status-{row.gateway.status}" data-testid="usage-limit-status"><span class="ui-label">{strings.subscriptionProxy.entryStatus[row.gateway.status]}</span></span>{/if}
+            </span>
+          {/if}
           {#if at !== null}<small class="checked" title={fill(observed ? strings.quotas.observed : strings.quotas.checked, { time: observed ? exactTime(at) : weekdayTime(at) })}><Clock3 size={11} aria-hidden="true" /><span class="ui-label">{observed ? exactTime(at) : weekdayTime(at)}</span></small>{/if}
         </div>
       </header>
@@ -49,9 +55,18 @@
             {#if limit.resetsAt}<small class="reset"><Clock3 size={11} aria-hidden="true" /><span class="ui-label">{fill(strings.quotas.resets, { time: weekdayTime(limit.resetsAt) })}</span></small>{/if}
           </div>
         {/each}
+        {#each row.gateway?.credits ?? [] as credit (credit.id)}
+          {@const unit = credit.unit ? ` ${credit.unit}` : ''}
+          <div class="credit" data-testid="usage-limit-credit">
+            <span class="heading"><Wallet size={13} aria-hidden="true" /><span class="ui-label">{credit.label}</span></span>
+            <span class="amount ui-label">{credit.remaining !== null
+              ? `${credit.limit !== null ? fill(strings.subscriptionProxy.creditOf, { remaining: creditBalance(credit.remaining), limit: creditBalance(credit.limit) }) : creditBalance(credit.remaining)}${unit}`
+              : credit.used !== null ? `${fill(strings.subscriptionProxy.creditUsed, { used: creditBalance(credit.used) })}${unit}` : '—'}</span>
+          </div>
+        {/each}
         {#if store?.owner}<QuotaReset {row} {store} disabled={pending} />{:else}<QuotaExtras {row} />{/if}
         {#if stale}<small data-testid="usage-limit-stale">{row.checkedAt === null ? strings.quotas.stale : `${strings.quotas.stale} · ${weekdayTime(row.checkedAt)}`}</small>{/if}
-        {#if row.windows.length === 0 && !row.error}
+        {#if row.windows.length === 0 && !row.gateway?.credits.length && !row.error}
           {#if pending}
             <p class="muted" role="status" data-testid="usage-limit-loading">{strings.quotas.loading}</p>
             {#if row.providerId === 'antigravity'}<small>{strings.quotas.slowHint}</small>{/if}
@@ -71,6 +86,14 @@
   .identity { flex: 1; min-width: 0; display: grid; gap: 3px; }
   header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: var(--text-md); }
   .checked, .reset { display: flex; align-items: center; gap: 5px; }
+  .badges { display: flex; flex-wrap: wrap; gap: 5px; }
+  .badge { padding: 2px 7px; border-radius: var(--radius-sm); background: var(--color-surface-3); color: var(--color-muted-foreground); font-size: var(--text-xs); }
+  .status-cooldown { color: var(--color-live); }
+  .status-error { color: var(--color-danger); }
+  .credit { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: var(--text-sm); }
+  .credit .heading { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--color-muted-foreground); }
+  .credit .heading :global(svg) { flex: none; color: var(--color-success); }
+  .credit .amount { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
   .checked :global(svg), .reset :global(svg) { flex: none; opacity: 0.7; }
   article { display: grid; gap: 17px; }
   .window { display: grid; gap: 7px; }

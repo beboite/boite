@@ -1,4 +1,4 @@
-import { RpcErrorCode } from '@boite/contracts';
+import { RpcErrorCode, subscriptionProxyName, subscriptionProxyOf, subscriptionProxyOrigin } from '@boite/contracts';
 import type {
   Account,
   HarnessUpdate,
@@ -6,11 +6,25 @@ import type {
   ProviderInstallState,
   ProviderRejected,
   ProviderSummary,
-  RpcEvents
+  RpcEvents,
+  SubscriptionProxy
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import type { LoginState } from '../store.svelte';
 import type { StoreContext } from './context';
+
+export interface AccountGateway {
+  kind: SubscriptionProxy['kind'];
+  /** Douane or CLIProxyAPI: the name the account shows. */
+  name: string;
+  /** The API URL's origin, never its path or key. */
+  origin: string;
+}
+
+/** The gateway is signed in on its own machine: this one's login state does not apply. */
+function gatewayAccount(account: Account, gateway: AccountGateway): Account {
+  return { ...account, label: gateway.name, identity: null, status: 'ok' };
+}
 
 /** What the summaries say about every managed install, as one map. */
 export function installStatesOf(providers: ProviderSummary[]): Record<ProviderId, ProviderInstallState> {
@@ -47,8 +61,31 @@ export class Accounts {
 
   constructor(private readonly ctx: StoreContext) {}
 
+  /**
+   * The gateway a provider's requests go through while the subscription proxy
+   * covers it, null when its own sign-ins serve. Every client reads the same
+   * settings and protocols, so a phone shows the same account as the PC.
+   */
+  gatewayOf(providerId: ProviderId): AccountGateway | null {
+    const proxy = subscriptionProxyOf(this.ctx.store.settings, this.providerOf(providerId)?.protocol);
+    return proxy ? { kind: proxy.kind, name: subscriptionProxyName(proxy.kind), origin: subscriptionProxyOrigin(proxy) } : null;
+  }
+
+  /**
+   * A proxied provider shows one account named after its gateway. It is a view
+   * of the first local account, never stored: the id stays the local one, so a
+   * thread or profile keeps working, and the real accounts come back unchanged
+   * when the proxy goes off.
+   */
   accountsOf(providerId: ProviderId): Account[] {
-    return this.accounts.filter((a) => a.providerId === providerId);
+    const own = this.accounts.filter((a) => a.providerId === providerId);
+    const gateway = own.length ? this.gatewayOf(providerId) : null;
+    return gateway ? [gatewayAccount(own[0]!, gateway)] : own;
+  }
+
+  /** Every account as a view shows it: signed in through the gateway while proxied. */
+  shownAccounts(): Account[] {
+    return this.accounts.map((account) => this.accountOf(account.id) ?? account);
   }
 
   providerOf(id: ProviderId): ProviderSummary | null {
@@ -61,7 +98,10 @@ export class Accounts {
   }
 
   accountOf(id: string): Account | null {
-    return this.accounts.find((a) => a.id === id) ?? null;
+    const account = this.accounts.find((a) => a.id === id);
+    if (!account) return null;
+    const gateway = this.gatewayOf(account.providerId);
+    return gateway ? gatewayAccount(account, gateway) : account;
   }
 
   openConnect(providerId: ProviderId | null = null, accountId: string | null = null): void {

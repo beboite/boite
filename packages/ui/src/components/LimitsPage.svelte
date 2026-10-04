@@ -1,12 +1,14 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { RefreshCw } from '@lucide/svelte';
+  import { ExternalLink, RefreshCw } from '@lucide/svelte';
+  import { subscriptionProxyName, type AccountQuota } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import UsageLimits from './UsageLimits.svelte';
   import AccountRename from './AccountRename.svelte';
   import QuotaMachineScope from './QuotaMachineScope.svelte';
-  import { namedQuotas, quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
+  import { openExternal } from '../lib/links';
+  import { gatewayReader, namedQuotas, quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
   import SubscriptionProxyDashboard from './SubscriptionProxyDashboard.svelte';
@@ -20,12 +22,33 @@
    */
   let { store, showTitle = true }: { store: Store; showTitle?: boolean } = $props();
   let native = $state(false);
-  const proxyEnabled = $derived(store.settings?.subscriptionProxy?.enabled);
+  const proxy = $derived(store.settings?.subscriptionProxy);
+  const proxyEnabled = $derived(proxy?.enabled === true);
+  const proxyName = $derived(proxy ? subscriptionProxyName(proxy.kind) : '');
 
   let reader = $derived(quotaReader(store.endpointUrl ?? 'here'));
-  let rows = $derived(reader.rows === null ? null : shownQuotas(reader.rows, store.accounts));
-  /** Every signed-in account with limits to read, switched on or not. */
-  let tracked = $derived(namedQuotas(reader.rows ?? [], store.accounts).filter((row) => row.status !== 'unsupported'
+  let gateway = $derived(gatewayReader(store.endpointUrl ?? 'here'));
+  /**
+   * Douane serving its quotas: its entries are native bars like any account's.
+   * CLIProxyAPI, or a Douane without the route, keeps its dashboard.
+   */
+  const gatewayNative = $derived(proxyEnabled && proxy?.kind === 'douane' && store.owner && gateway.state?.status !== 'unsupported');
+  const dashboard = $derived(proxyEnabled && !gatewayNative && !native);
+  const gatewayError = $derived(gatewayNative && gateway.state?.status === 'unavailable' ? gateway.state.error : null);
+
+  let shown = $derived(reader.rows === null ? null : shownQuotas(reader.rows, store.accounts));
+  /** The card above says why the gateway's bars are old; each bar only dims. */
+  let gatewayRows = $derived(gatewayNative ? (shown ?? []).filter((row) => row.gateway).map((row) => gatewayError ? { ...row, error: null } : row) : []);
+  let rows = $derived(shown === null ? null : shown.filter((row) => !row.gateway));
+  /** One heading per provider the gateway reports, in its order. */
+  let gatewayGroups = $derived(gatewayRows.reduce<{ providerId: string; name: string; rows: AccountQuota[] }[]>((groups, row) => {
+    const group = groups.find((entry) => entry.providerId === row.providerId);
+    if (group) group.rows.push(row);
+    else groups.push({ providerId: row.providerId, name: row.providerName, rows: [row] });
+    return groups;
+  }, []));
+  /** Every signed-in account with limits to read, switched on or not. The gateway's entries are always read. */
+  let tracked = $derived(namedQuotas(reader.rows ?? [], store.accounts).filter((row) => !row.gateway && row.status !== 'unsupported'
     && store.accounts?.find((account) => account.id === row.accountId)?.status !== 'unauthenticated'));
 
   $effect(() => {
@@ -33,9 +56,19 @@
     const current = reader;
     // A call before the socket is up is refused at once: read when it becomes
     // ready, and again after a reconnect. A failure shows on `reader.error`.
-    if (!client || !store.owner || store.connection !== 'ready' || (proxyEnabled && !native)) return;
+    if (!client || !store.owner || store.connection !== 'ready' || dashboard) return;
     const off = client.on('quotas.updated', (value) => current.accept(value));
     untrack(() => void current.read(client).catch(() => {}));
+    return off;
+  });
+
+  // Whether Douane serves its quotas, asked again for another gateway.
+  $effect(() => {
+    const client = store.client;
+    const current = gateway;
+    if (!client || !store.owner || store.connection !== 'ready' || !proxyEnabled || proxy?.kind !== 'douane' || !proxy.baseUrl) return;
+    const off = client.on('subscriptionProxy.quotasUpdated', (value) => current.accept(value));
+    untrack(() => void current.read(client));
     return off;
   });
 
@@ -51,7 +84,7 @@
 </script>
 
 <div class="page limits-page" data-testid="limits-page">
-  {#if proxyEnabled && !native}
+  {#if dashboard}
     <SubscriptionProxyDashboard {store} onNative={() => native = true} />
   {:else}
   <header class="top">
@@ -62,7 +95,8 @@
       </button>
     {/if}
   </header>
-  {#if proxyEnabled}<div class="actions proxy-switch"><button type="button" class="ghost small" onclick={() => native = false} data-testid="subscription-proxy-show-dashboard"><span class="ui-label">{strings.subscriptionProxy.showDashboard}</span></button></div>{/if}
+  {#if proxyEnabled && !gatewayNative}<div class="actions proxy-switch"><button type="button" class="ghost small" onclick={() => native = false} data-testid="subscription-proxy-show-dashboard"><span class="ui-label">{strings.subscriptionProxy.showDashboard}</span></button></div>
+  {:else if gatewayNative && proxy}<div class="actions proxy-switch"><button type="button" class="ghost small" onclick={() => void openExternal(proxy!.dashboardUrl)} data-testid="subscription-proxy-open"><ExternalLink size={15} /><span class="ui-label">{strings.subscriptionProxy.openDashboard}</span></button></div>{/if}
 
   {#if store.owner && reader.error}
     <div class="card failed" role="alert" data-testid="limits-error">
@@ -70,12 +104,31 @@
       <button type="button" class="ghost small" disabled={reader.loading} data-testid="limits-retry" onclick={refresh}><span class="ui-label">{strings.quotas.retry}</span></button>
     </div>
   {/if}
+  {#if gatewayError}
+    <div class="card failed" role="alert" data-testid="gateway-quotas-error">
+      <p>{fill(strings.subscriptionProxy.quotasFailed, { name: proxyName, error: gatewayError })}</p>
+      <button type="button" class="ghost small" disabled={reader.loading} onclick={refresh}><span class="ui-label">{strings.quotas.retry}</span></button>
+    </div>
+  {/if}
+  {#if gatewayNative}
+    {#each gatewayGroups as group (group.providerId)}
+      <section class="gateway-group" data-testid="gateway-quotas" data-provider={group.providerId}>
+        <h2 class="group-head"><ProviderLogo providerId={group.providerId} size={16} /><span class="ui-label">{group.name}</span><small class="ui-label">{fill(strings.subscriptionProxy.via, { name: proxyName })}</small></h2>
+        <UsageLimits rows={group.rows} {store} loading={reader.loading} completed={reader.completed} />
+      </section>
+    {/each}
+    {#if gateway.state?.status === 'ready' && gatewayGroups.length === 0 && shown !== null}
+      <p class="muted gateway-empty" data-testid="gateway-quotas-empty">{fill(strings.subscriptionProxy.quotasEmpty, { name: proxyName })}</p>
+    {/if}
+  {/if}
   {#if !store.owner}
     <p class="muted" data-testid="usage-limits-owner">{strings.usage.limitsOwner}</p>
   {:else if rows === null}
     <div class="skeleton" role="status" aria-label={strings.quotas.loading}>
       {#each [0, 1] as index (index)}<div class="card ghost-card"></div>{/each}
     </div>
+  {:else if gatewayNative && rows.length === 0 && tracked.length === 0}
+    <!-- Everything this machine reads goes through the gateway. -->
   {:else if rows.length === 0 && tracked.length === 0}
     <!-- A failed read never passes for "no provider connected". -->
     {#if !reader.error}<div class="card empty" data-testid="limits-empty">
@@ -107,6 +160,10 @@
 <style>
   .top { display: flex; align-items: center; gap: 8px; max-width: var(--settings-width); }
   .proxy-switch { margin-bottom: 12px; }
+  .gateway-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; max-width: var(--settings-width); margin-bottom: 16px; }
+  .group-head { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--text-base); font-weight: 600; }
+  .group-head small { color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 400; }
+  .gateway-empty { max-width: var(--settings-width); margin-bottom: 12px; }
   .refresh { flex: none; margin-left: auto; width: var(--control); height: var(--control); padding: 0; }
   .refresh :global(.spinning) { animation: spin 900ms linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }

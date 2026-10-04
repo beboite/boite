@@ -35,6 +35,7 @@ function render(titleModel: TitleModel | null, models = MODELS) {
       { id: 'opencode-main', providerId: 'opencode', status: 'ok' },
       { id: 'pi-main', providerId: 'pi', status: 'ok' },
     ],
+    accountsOf: (providerId: string) => store.accounts.filter((account) => account.providerId === providerId),
     modelsOf: (providerId: string) => models[providerId] ?? [],
     saveSettings: vi.fn(async (patch: Partial<Settings>) => {
       store.settings = { ...store.settings, ...patch };

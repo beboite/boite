@@ -12,6 +12,8 @@ let origin: string;
 let dashboard: string;
 beforeAll(async () => {
   gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+    // A gateway without Douane's quota route: Limits falls back to its dashboard.
+    if (new URL(request.url).pathname.endsWith('/quotas')) return new Response('Not found', { status: 404 });
     return new Response(`<!doctype html><html><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font:16px system-ui;background:rgb(24,24,28);color:white;padding:20px}article{border:1px solid rgb(90,90,95);padding:20px;max-width:480px;border-radius:10px}progress{width:100%}</style><h1>Subscription quotas</h1><article><h2>Codex subscription</h2><p>Weekly allowance: 72% remaining</p><progress value="72" max="100"></progress></article><p id="route">${new URL(request.url).pathname}</p></html>`, { headers: { 'content-type': 'text/html' } });
   } });
   dashboard = `http://127.0.0.1:${gateway.port}`;
@@ -25,7 +27,11 @@ async function capture(name: string) {
   await page.screenshot(join(process.env.BOITE_CAPTURE_DIR ?? join(import.meta.dir, '.artifacts'), name));
 }
 
-test('disabled mode retains the native glance; saving the proxy opens its embedded dashboard directly', async () => {
+const saved = 'document.querySelector("[data-testid=subscription-proxy-result]")?.textContent.includes("saved")';
+const gatewayRow = 'document.querySelector("[data-testid=account-gateway][data-provider=claude]")';
+const showGatewayRow = `${gatewayRow} || document.querySelector("[data-testid=provider-settings][data-provider-id=claude] [data-testid=provider-details-toggle]").click()`;
+
+test('disabled mode retains the native glance; Douane brings its quota bars and one gateway account', async () => {
   await page.waitFor('document.querySelector("[data-testid=nav-limits]")');
   await page.click('[data-testid="nav-limits"]');
   await page.waitFor('document.querySelector("[data-testid=limits-glance]")');
@@ -36,14 +42,55 @@ test('disabled mode retains the native glance; saving the proxy opens its embedd
   await page.click('[data-testid="subscription-proxy-enabled"]');
   await page.type('[data-testid="subscription-proxy-url"]', dashboard);
   await page.type('[data-testid="subscription-proxy-dashboard"]', `${dashboard}/admin/#quotas`);
+  expect(await page.text('[data-testid=subscription-proxy-enabled-hint]')).toContain('no longer used for Claude and Codex');
   await capture('boite-proxy-settings-desktop.png');
   await page.click('[data-testid="subscription-proxy-save"]');
-  await page.waitFor('document.querySelector("[data-testid=subscription-proxy-result]")?.textContent.includes("saved")');
+  await page.waitFor(saved);
+
+  // Claude reads ready through the gateway, with one account and nothing to manage.
+  await page.waitFor('document.querySelector("[data-testid=provider-settings][data-provider-id=claude]")?.textContent.includes("Ready · via Douane")');
+  await page.evaluate(showGatewayRow);
+  await page.waitFor(gatewayRow);
+  expect(await page.text('[data-testid=account-gateway][data-provider=claude]')).toContain(dashboard);
+  expect(await page.evaluate('document.querySelector("[data-testid=provider-settings][data-provider-id=claude]").querySelectorAll("[data-testid=account-row], [data-testid=account-add], [data-testid=account-gateway] button").length')).toBe(0);
+  await page.evaluate(`${gatewayRow}.scrollIntoView({ block: 'center' })`);
+  await capture('boite-proxy-gateway-account-desktop.png');
+
+  // Limits shows Douane's own entries, grouped by provider, instead of its dashboard.
+  await page.click('[data-testid="settings-tab-limits"]');
+  await page.waitFor('document.querySelectorAll("[data-testid=gateway-quotas]").length === 3');
+  expect(await page.evaluate('document.querySelector("iframe[data-browser-id]") === null')).toBe(true);
+  expect(await page.text('[data-testid=gateway-quotas][data-provider=antigravity]')).toContain('Antigravity · 10 accounts');
+  await capture('boite-proxy-gateway-quotas-desktop.png');
+  await page.click('[data-testid="settings-back"]');
+  await page.click('[data-testid="nav-limits"]');
+  await page.waitFor('document.querySelector("[data-testid=limits-glance]")');
+  expect(await page.evaluate('document.querySelector("[data-testid=subscription-proxy-dashboard-page]") === null')).toBe(true);
+  await page.click('[data-testid="nav-limits"]');
+  await page.waitFor('document.querySelector("[data-testid=limits-glance]") === null');
+
+  await page.click('[data-testid="nav-settings"]');
+  await page.click('[data-testid="settings-tab-limits"]');
+  await page.waitFor('document.querySelectorAll("[data-testid=gateway-quotas]").length === 3');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.waitFor('document.querySelector("[data-testid=mobile-settings-detail] [data-testid=gateway-quotas]")');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await capture('boite-proxy-gateway-quotas-phone.png');
+  await page.send('Emulation.clearDeviceMetricsOverride', {});
+  await page.waitFor('document.querySelector("[data-testid=mobile-settings-detail]") === null');
+  await page.click('[data-testid="settings-tab-accounts"]');
+  await page.waitFor('document.querySelector("[data-testid=subscription-proxy-settings]")');
+
+  // CLIProxyAPI has no quota route: Limits opens its embedded dashboard directly.
+  await page.click('[data-testid="subscription-proxy-cliproxyapi"]');
+  expect(await page.evaluate('document.querySelector("[data-testid=subscription-proxy-dashboard]").value')).toBe(`${dashboard}/management.html#/quota`);
+  await page.click('[data-testid="subscription-proxy-save"]');
+  await page.waitFor(saved);
   await page.click('[data-testid="settings-back"]');
   await page.click('[data-testid="nav-limits"]');
   await page.waitFor('document.querySelector("[data-testid=subscription-proxy-dashboard-page]")');
   expect(await page.evaluate('document.querySelector("[data-testid=limits-glance]") === null')).toBe(true);
-  await page.waitFor(`document.querySelector('iframe[data-browser-id]')?.src === ${JSON.stringify(`${dashboard}/admin/#quotas`)} && document.querySelector('[data-testid=subscription-proxy-slot]')?.getAttribute('aria-busy') === 'false'`);
+  await page.waitFor(`document.querySelector('iframe[data-browser-id]')?.src === ${JSON.stringify(`${dashboard}/management.html#/quota`)} && document.querySelector('[data-testid=subscription-proxy-slot]')?.getAttribute('aria-busy') === 'false'`);
   await capture('boite-proxy-dashboard-desktop.png');
   expect(await page.evaluate('document.querySelector("iframe[data-browser-id]").getBoundingClientRect().width > 600')).toBe(true);
   await page.click('[data-testid="subscription-proxy-native"]');
@@ -56,17 +103,11 @@ test('disabled mode retains the native glance; saving the proxy opens its embedd
   await page.waitFor('document.querySelector("[data-testid=quota-monitor][data-account-id=a-opencode]")?.checked === true');
   await capture('boite-proxy-native-limits-desktop.png');
   await page.click('[data-testid="subscription-proxy-show-dashboard"]');
-  await page.waitFor(`document.querySelector('iframe[data-browser-id]')?.src === ${JSON.stringify(`${dashboard}/admin/#quotas`)}`);
+  await page.waitFor(`document.querySelector('iframe[data-browser-id]')?.src === ${JSON.stringify(`${dashboard}/management.html#/quota`)}`);
   await page.click('[data-testid="subscription-proxy-configure"]');
   await page.waitFor('document.querySelector("iframe[data-browser-id]") === null');
-  await page.click('[data-testid="subscription-proxy-cliproxyapi"]');
-  expect(await page.evaluate('document.querySelector("[data-testid=subscription-proxy-dashboard]").value')).toBe(`${dashboard}/management.html#/quota`);
-  await page.click('[data-testid="subscription-proxy-save"]');
-  await page.waitFor('document.querySelector("[data-testid=subscription-proxy-result]")?.textContent.includes("saved")');
-  await page.click('[data-testid="subscription-proxy-configure"]');
-  await page.waitFor(`document.querySelector('iframe[data-browser-id]')?.src === ${JSON.stringify(`${dashboard}/management.html#/quota`)}`);
   expect(page.errors()).toEqual([]);
-}, 45_000);
+}, 60_000);
 
 test('phone Limits opens the same gateway and disabling it restores the native page', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });

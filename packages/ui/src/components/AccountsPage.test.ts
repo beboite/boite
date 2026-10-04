@@ -95,3 +95,27 @@ test('accounts keep their chosen name and reveal the email on demand', async ({ 
   await vi.waitFor(() => expect(rename).toHaveBeenCalledWith('a1', 'Work'));
 
 });
+
+test('a proxied provider shows only the gateway account, without actions, and its local accounts come back', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0 });
+  await store.reload();
+  const douane = { enabled: true, kind: 'douane' as const, baseUrl: 'http://gateway.test:8787', dashboardUrl: 'http://gateway.test:8787/admin/#quotas' };
+  store.settings = await client.call('subscriptionProxy.configure', { subscriptionProxy: douane });
+  mounted = mount(AccountsPage, { target: document.body, props: { store } });
+  flushSync();
+  expect(row('claude')?.textContent).toContain('Ready · via Douane');
+  (row('claude')?.querySelector('[data-testid="provider-details-toggle"]') as HTMLButtonElement).click();
+  flushSync();
+  const gateway = row('claude')!.querySelector('[data-testid="account-gateway"]')!;
+  expect(gateway.querySelector('h3')!.textContent).toBe('Douane');
+  expect(gateway.textContent).toContain('http://gateway.test:8787');
+  expect(gateway.querySelector('button')).toBeNull();
+  for (const testId of ['account-row', 'account-rename', 'account-verify', 'account-remove', 'account-add', 'account-use-cli'])
+    expect(row('claude')!.querySelector(`[data-testid="${testId}"]`), testId).toBeNull();
+
+  store.settings = await client.call('subscriptionProxy.configure', { subscriptionProxy: { ...douane, enabled: false } });
+  flushSync();
+  expect(row('claude')!.querySelector('[data-testid="account-gateway"]')).toBeNull();
+  expect([...row('claude')!.querySelectorAll('[data-testid="account-row"]')].map(entry => entry.getAttribute('data-account-id'))).toEqual(['a-claude-main', 'a-claude-side']);
+  expect(row('claude')!.querySelector('[data-testid="account-add"]')).not.toBeNull();
+});

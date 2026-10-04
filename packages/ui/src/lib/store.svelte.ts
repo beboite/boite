@@ -396,6 +396,8 @@ export class Store {
   set logins(value) { this.#ctx.accounts.logins = value; }
 
   accountsOf(...args: Parameters<Accounts['accountsOf']>) { return this.#ctx.accounts.accountsOf(...args); }
+  gatewayOf(...args: Parameters<Accounts['gatewayOf']>) { return this.#ctx.accounts.gatewayOf(...args); }
+  shownAccounts() { return this.#ctx.accounts.shownAccounts(); }
   providerOf(...args: Parameters<Accounts['providerOf']>) { return this.#ctx.accounts.providerOf(...args); }
   installOf(...args: Parameters<Accounts['installOf']>) { return this.#ctx.accounts.installOf(...args); }
   accountOf(...args: Parameters<Accounts['accountOf']>) { return this.#ctx.accounts.accountOf(...args); }

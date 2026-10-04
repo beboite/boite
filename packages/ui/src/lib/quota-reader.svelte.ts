@@ -1,5 +1,6 @@
-import type { Account, AccountQuota } from '@boite/contracts';
+import type { Account, AccountQuota, SubscriptionProxyQuotas } from '@boite/contracts';
 import type { Client } from './client';
+import { fill, strings } from './strings';
 
 /**
  * Subscription limits as every view shows them: the last reading stays on
@@ -48,8 +49,15 @@ export function namedQuotas(rows: AccountQuota[], accounts?: Account[]): Account
   });
 }
 
-/** Keep the associated profile's chosen name, including a profile named Default. */
+/**
+ * Keep the associated profile's chosen name, including a profile named Default.
+ * A gateway's average stands for its accounts: the provider and how many.
+ */
 export function quotaAccountName(row: AccountQuota): string {
+  if (row.gateway?.display === 'average') {
+    const count = row.gateway.accounts;
+    return fill(count === 1 ? strings.subscriptionProxy.averageOne : strings.subscriptionProxy.average, { name: row.providerName, count: String(count) });
+  }
   return row.label.trim() ? row.label : row.providerName;
 }
 
@@ -134,6 +142,37 @@ export class QuotaReader {
     this.accept(await client.call('quotas.configure', { accountId, enabled }));
     await this.read(client).catch(() => {});
   }
+}
+
+/**
+ * Where the subscription gateway's own limits stand, as the core read them:
+ * whether it serves them at all decides between native bars and its dashboard.
+ * The bars themselves come with `quotas.list`.
+ */
+export class GatewayReader {
+  /** Null until the core first answered. */
+  state = $state.raw<SubscriptionProxyQuotas | null>(null);
+
+  accept(state: SubscriptionProxyQuotas): void {
+    this.state = state;
+  }
+
+  /** A core that cannot answer, an older one included, leaves the gateway its dashboard. */
+  async read(client: Client, refresh = false): Promise<void> {
+    try { this.accept(await client.call('subscriptionProxy.quotas', { refresh })); }
+    catch { this.accept({ status: 'unsupported', providers: [], updatedAt: null, checkedAt: null, error: null }); }
+  }
+}
+
+const gateways = new Map<string, GatewayReader>();
+
+export function gatewayReader(key: string): GatewayReader {
+  let reader = gateways.get(key);
+  if (!reader) {
+    reader = new GatewayReader();
+    gateways.set(key, reader);
+  }
+  return reader;
 }
 
 const readers = new Map<string, QuotaReader>();

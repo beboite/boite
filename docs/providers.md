@@ -8,9 +8,26 @@ URL, enable the switch and save. The API URL accepts an origin or a path ending
 in `/v1`. Model discovery runs on the machine hosting the core through
 `GET /v1/models`; paired phones use that same catalog.
 
+While the proxy is enabled, Claude and Codex show one account named after the
+gateway, Douane or CLIProxyAPI, with the API URL's origin. It has no rename,
+check, remove or add actions, and the provider row reads Ready · via Douane.
+The composer, delegation profiles, the default model and Limits show the same
+account. This account is a view in the UI, not a stored account. Threads,
+profiles, routes and agent grants keep naming the local account they were
+created with, and the proxy only replaces that account's environment, so every
+reference keeps working in both states. The UI shows the first local account of
+the provider under the gateway's name, and `accountOf` resolves any local id of
+a proxied provider to that view. Settings and provider protocols reach every
+client, so a phone computes the same view. Nothing is deleted. Turning the
+proxy off brings the local accounts back unchanged. A proxied provider with no
+local account at all has nothing to show and asks for a sign-in as before.
+
 Douane's default dashboard path is `/admin/#quotas`; CLIProxyAPI uses
-`/management.html#/quota`. With the proxy enabled, Limits opens this page inside
-Boite instead of the account popup. Desktop uses the shell's existing browser
+`/management.html#/quota`. With Douane, the core reads `GET /v1/quotas` with
+the proxy key and Limits shows native bars, described in
+[usage](usage.md#gateway-quotas). With CLIProxyAPI, or a Douane that answers
+404 on that route, Limits opens the dashboard inside Boite instead of the
+account popup. Desktop uses the shell's existing browser
 view, and browsers and phones use an iframe. The dashboard must permit embedding
 and its configured URL must be reachable from the device displaying it.
 HTTPS browser sessions require an HTTPS dashboard URL; Boite shows this before
@@ -31,9 +48,9 @@ Claude calls the gateway's Messages API. Codex uses its Responses API with
 WebSocket support enabled. Codex owns the conversation identifier and prompt
 cache key, retaining them between turns and after a socket reconnect; Boite
 does not override those headers. Cache-read token counts reported by the agent
-remain visible in usage. Disabling the proxy restores native login checks,
-model discovery and subscription quota monitoring. Other agents use their
-existing configuration.
+remain visible in usage. Disabling the proxy restores the local accounts,
+native login checks, model discovery and subscription quota monitoring. Other
+agents use their existing configuration.
 
 A provider descriptor configures an agent for an existing driver. Adding an ACP
 provider can use JSON alone; adding a new protocol requires runtime code. Shipped

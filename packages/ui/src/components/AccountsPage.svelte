@@ -13,7 +13,7 @@
   import { bytes, percent } from '../lib/format';
   import { providerGroups, type ProviderRow } from '../lib/provider-family';
   import { connected, nextAccountLabel, setupStep, signInTarget, type SetupStep } from '../lib/provider-setup';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
   /**
@@ -42,7 +42,7 @@
   let detecting = $state(false);
   let lastDetect = 0;
 
-  let groups = $derived(providerGroups(store.providers, store.accounts));
+  let groups = $derived(providerGroups(store.providers, store.shownAccounts()));
   /** With nothing connected yet, the ways in are the page's main actions. */
   let firstRun = $derived(groups.connected.length === 0);
 
@@ -111,6 +111,8 @@
       if (install.state === 'absent') return strings.install.absent.replace('{size}', bytes(install.archiveBytes));
     }
     if (step === 'ready') {
+      const gateway = store.gatewayOf(provider.id);
+      if (gateway) return `${strings.providerSettings.step.ready} · ${fill(strings.subscriptionProxy.via, { name: gateway.name })}`;
       const signedIn = store.accountsOf(provider.id).filter((account) => account.status === 'ok');
       return signedIn.length > 1
         ? `${strings.providerSettings.step.ready} · ${strings.providerSettings.accountsCount.replace('{count}', String(signedIn.length))}`
@@ -384,14 +386,26 @@
      Limits page, not here. -->
 {#snippet memberBody(provider: ProviderSummary)}
   {@const accounts = store.accountsOf(provider.id)}
+  {@const gateway = store.gatewayOf(provider.id)}
   {@const install = store.installOf(provider.id)}
   {@const account = modelAccount(provider)}
-  {#if accounts.length > 0}
+  {#if accounts.length > 0 || gateway}
     <div class="section-head">
       <span class="section-label"><span class="ui-label">{strings.providerSettings.accounts}</span></span>
     </div>
   {/if}
-  {#each accounts as entry (entry.id)}
+  {#if gateway}
+    <!-- The gateway's sign-ins live on its own machine: nothing here to rename, check or remove. -->
+    <div class="account" data-testid="account-gateway" data-provider={provider.id}>
+      <div class="account-line">
+        <div class="who">
+          <h3>{gateway.name}</h3>
+          <p class="state"><span class="ui-label">{fill(strings.subscriptionProxy.account, { name: gateway.name, origin: gateway.origin })}</span></p>
+        </div>
+      </div>
+    </div>
+  {/if}
+  {#each gateway ? [] : accounts as entry (entry.id)}
     <div class="account" data-testid="account-row" data-account-id={entry.id}>
       <div class="account-line">
         <div class="who">
@@ -425,7 +439,7 @@
     </div>
   {/each}
 
-  {#if provider.available && (provider.login || (!provider.alwaysIsolated && !accounts.some((entry) => entry.isolationDir === null)))}
+  {#if !gateway && provider.available && (provider.login || (!provider.alwaysIsolated && !accounts.some((entry) => entry.isolationDir === null)))}
     <div class="more">
       {#if provider.login}
         <button class="quiet small" data-testid="account-add" disabled={busy !== null} onclick={() => void signIn(provider, true)}><Plus size={14} /><span class="ui-label">{strings.providerSettings.addAccount}</span></button>

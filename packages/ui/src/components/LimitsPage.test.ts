@@ -167,3 +167,67 @@ test('renaming a tracked subscription updates cached cards immediately and cance
     expect(store.accountOf('a-codex')!.label).toBe('Personal');
   } finally { store.detach(); client.close(); }
 });
+
+const douane = { enabled: true, kind: 'douane' as const, baseUrl: 'http://gateway.test:8787', dashboardUrl: 'http://gateway.test:8787/admin/#quotas' };
+
+test('Douane quotas are native cards grouped by provider, with plan, status, credits and an average count', async () => {
+  const store = new Store();
+  const client = new FakeClient({ delayMs: 0 });
+  store.attach(client);
+  await store.connect();
+  store.settings = await client.call('subscriptionProxy.configure', { subscriptionProxy: douane });
+  const open = vi.spyOn(window, 'open').mockReturnValue(null);
+  mounted = mount(LimitsPage, { target: document.body, props: { store } });
+  try {
+    await vi.waitFor(() => expect(document.querySelectorAll('[data-testid="gateway-quotas"]')).toHaveLength(3));
+    expect(document.querySelector('[data-testid="subscription-proxy-dashboard-page"]')).toBeNull();
+    const groups = [...document.querySelectorAll<HTMLElement>('[data-testid="gateway-quotas"]')];
+    expect(groups.map(group => group.dataset.provider)).toEqual(['claude', 'codex', 'antigravity']);
+    expect(groups[0]!.querySelector('h2')!.textContent).toContain('via Douane');
+    const claude = groups[0]!.querySelectorAll('[data-testid="usage-limit-provider"]');
+    expect(claude).toHaveLength(2);
+    expect(claude[0]!.querySelector('[data-testid="usage-limit-plan"]')!.textContent).toBe('Max 20x');
+    expect(claude[1]!.querySelector('[data-testid="usage-limit-status"]')!.textContent).toBe('Cooling down');
+    expect(claude[0]!.querySelectorAll('[role="meter"]')).toHaveLength(2);
+    expect(groups[1]!.querySelector('[data-testid="usage-limit-credit"]')!.textContent).toMatch(/Credits.*62,500 credits/);
+    // An average stands for its accounts: Boite names it, in the app's language.
+    expect(groups[2]!.querySelector('strong')!.textContent).toBe('Antigravity · 10 accounts');
+    // The gateway's entries are always read: no monitor switch for them.
+    expect(document.querySelector('[data-testid="quota-monitor"][data-account-id^="proxy:"]')).toBeNull();
+    document.querySelector<HTMLButtonElement>('[data-testid="subscription-proxy-open"]')!.click();
+    expect(open).toHaveBeenCalledWith(douane.dashboardUrl, '_blank', 'noopener,noreferrer');
+  } finally { store.detach(); client.close(); }
+});
+
+test('CLIProxyAPI and a Douane without the route keep the embedded dashboard', async () => {
+  for (const [kind, status] of [['cliproxyapi', 'unsupported'], ['douane', 'unsupported']] as const) {
+    const call = vi.fn(async (method: string) => method === 'subscriptionProxy.quotas'
+      ? { status, providers: [], updatedAt: null, checkedAt: null, error: null } : []);
+    mounted = mount(LimitsPage, { target: document.body, props: {
+      store: { client: { call, on: () => () => {} }, connection: 'ready', owner: true, endpointUrl: `fallback-${kind}`,
+        settings: { subscriptionProxy: { ...douane, kind } } } as unknown as Store,
+    } });
+    await settle();
+    expect(document.querySelector('[data-testid="subscription-proxy-dashboard-page"]'), kind).not.toBeNull();
+    expect(document.querySelector('[data-testid="gateway-quotas"]')).toBeNull();
+    // CLIProxyAPI has no quotas route to ask.
+    expect(call.mock.calls.some(([method]) => method === 'subscriptionProxy.quotas')).toBe(kind === 'douane');
+    await unmount(mounted); mounted = undefined;
+  }
+});
+
+test('a failed Douane read shows once above its dimmed last bars', async () => {
+  const error = 'Douane quotas returned HTTP 502.';
+  const row: AccountQuota = { ...quota('Claude'), accountId: 'proxy:claude:one', status: 'unavailable', error, checkedAt: Date.UTC(2026, 9, 4, 9),
+    gateway: { kind: 'douane', entryId: 'one', display: 'accounts', plan: null, accounts: 1, status: 'ready', credits: [] } };
+  const call = vi.fn(async (method: string) => method === 'subscriptionProxy.quotas'
+    ? { status: 'unavailable', providers: [], updatedAt: null, checkedAt: row.checkedAt, error } : [row]);
+  mounted = mount(LimitsPage, { target: document.body, props: {
+    store: { client: { call, on: () => () => {} }, connection: 'ready', owner: true, endpointUrl: 'gateway-failed',
+      settings: { subscriptionProxy: douane } } as unknown as Store,
+  } });
+  await settle();
+  expect(document.querySelector('[data-testid="gateway-quotas-error"]')!.textContent).toContain(error);
+  expect(document.body.textContent!.split(error)).toHaveLength(2);
+  expect(document.querySelector('[data-testid="usage-limit-account"]')!.classList.contains('stale')).toBe(true);
+});

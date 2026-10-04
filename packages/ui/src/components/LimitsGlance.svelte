@@ -3,7 +3,7 @@
   import { Gauge } from '@lucide/svelte';
   import { Closing } from '../lib/closing.svelte';
   import { floating } from '../lib/floating';
-  import { quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
+  import { gatewayReader, quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
   import QuotaPopup from './QuotaPopup.svelte';
@@ -21,6 +21,7 @@
   let trigger = $state<HTMLButtonElement>();
   let content = $state<HTMLDivElement>();
   let reader = $derived(quotaReader(store.endpointUrl ?? 'here'));
+  let gateway = $derived(gatewayReader(store.endpointUrl ?? 'here'));
   let rows = $derived(reader.rows === null ? null : shownQuotas(reader.rows, store.accounts));
   /** The last read's failure, cleared by the next read that lands. */
   let failed = $state('');
@@ -38,6 +39,17 @@
     if (!popover.open || !client || !store.owner) return;
     const off = client.on('quotas.updated', (value) => current.accept(value));
     untrack(() => read());
+    return off;
+  });
+
+  // Whether Douane serves its quotas decides where the next press goes.
+  $effect(() => {
+    const client = store.client;
+    const current = gateway;
+    const proxy = store.settings?.subscriptionProxy;
+    if (!popover.open || !client || !store.owner || !proxy?.enabled || proxy.kind !== 'douane') return;
+    const off = client.on('subscriptionProxy.quotasUpdated', (value) => current.accept(value));
+    untrack(() => void current.read(client));
     return off;
   });
 
@@ -71,8 +83,10 @@
     store.showSettings(tab);
   }
 
+  /** A gateway without native quotas has only its dashboard, on the Limits page. */
   function open() {
-    if (store.settings?.subscriptionProxy?.enabled) { page('limits'); return; }
+    const proxy = store.settings?.subscriptionProxy;
+    if (proxy?.enabled && (proxy.kind !== 'douane' || gateway.state?.status === 'unsupported')) { page('limits'); return; }
     if (popover.open) close(); else popover.show();
   }
 </script>
