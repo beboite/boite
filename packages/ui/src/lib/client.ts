@@ -84,7 +84,14 @@ export interface WsClientOptions {
    * `onSession` is where the caller stores it.
    */
   grant?: string;
-  onSession?: (session: Session) => void;
+  /**
+   * A group ticket (`group.ticket`), used once like a grant: another member of
+   * the core's group vouched for this client, and the session that comes back
+   * is stored the same way.
+   */
+  ticket?: string;
+  /** Returning false refuses the key: the client closes instead of using it. */
+  onSession?: (session: Session) => unknown;
   /**
    * The token is the session key of a pairing, whatever role it speaks as. A
    * key paired with the owner role says hello as the owner, so the principal
@@ -236,12 +243,14 @@ function browserSocket(url: string): SocketLike {
 }
 
 export class WsClient implements ObservableClient {
-  #options: Required<Omit<WsClientOptions, 'clientName' | 'version' | 'grant' | 'paired' | 'onSession' | 'onRevoked' | 'onUnauthorized'>> & {
+  #options: Required<Omit<WsClientOptions, 'clientName' | 'version' | 'grant' | 'ticket' | 'paired' | 'onSession' | 'onRevoked' | 'onUnauthorized'>> & {
     clientName: ClientName;
     version: string;
   };
   /** Spent on the first hello that answers; a refused grant is not retried. */
   #grant: string | null;
+  /** Spent like the grant. A ticket the core refused is asked for again from the member that vouches. */
+  #ticket: string | null;
   /**
    * Repeated on every grant hello, retries included, so a retry after an
    * answer lost on the way gets the session the core already made for it.
@@ -250,7 +259,7 @@ export class WsClient implements ObservableClient {
   #nonce: string;
   /** The token is a pairing's session key, so a hello it no longer opens is a revoke. */
   #paired: boolean;
-  #onSession: ((session: Session) => void) | null;
+  #onSession: ((session: Session) => unknown) | null;
   #onRevoked: (() => void) | null;
   #onUnauthorized: ((error: RpcFailure) => void) | null;
   #principal: Principal | null = null;
@@ -285,8 +294,9 @@ export class WsClient implements ObservableClient {
       backoff: options.backoff ?? defaultBackoff
     };
     this.#grant = options.grant ?? null;
+    this.#ticket = options.ticket ?? null;
     this.#nonce = this.#grant === null ? '' : pairingNonce();
-    this.#paired = options.paired ?? options.grant !== undefined;
+    this.#paired = options.paired ?? (options.grant !== undefined || options.ticket !== undefined);
     this.#onSession = options.onSession ?? null;
     this.#onRevoked = options.onRevoked ?? null;
     this.#onUnauthorized = options.onUnauthorized ?? null;
@@ -339,7 +349,7 @@ export class WsClient implements ObservableClient {
   async resume(): Promise<void> {
     if (this.#manuallyClosed || this.#state === 'idle') return;
     // A one-time grant must finish its exchange before any connection replaces it.
-    if (this.#grant !== null && this.#opening) { await this.#opening; return; }
+    if ((this.#grant !== null || this.#ticket !== null) && this.#opening) { await this.#opening; return; }
     const socket = this.#socket;
     if (this.#state === 'ready' && socket !== null) {
       if (await this.#probeSocket(socket, RESUME_PROBE_MS)) return;
@@ -488,7 +498,7 @@ export class WsClient implements ObservableClient {
         this.#scheduleRetry();
       };
       socket.onopen = () => {
-        const grant = this.#grant;
+        const grant = this.#grant ?? this.#ticket;
         this.#send(socket, 'hello', this.#helloParams()).then(
           (result) => {
             if (result.core.protocolVersion !== PROTOCOL_VERSION) {
@@ -497,12 +507,21 @@ export class WsClient implements ObservableClient {
               socket.close();
               return;
             }
-            if (result.session) {
+            // A key is only taken from a core that was shown a grant or a ticket: one that answers a
+            // plain token with a new key has no business handing it, and is not written down as paired.
+            if (result.session && grant !== null) {
               // The grant is spent: from here on this client is its session.
               this.#grant = null;
+              this.#ticket = null;
               this.#paired = true;
               this.#options.token = result.session.token;
-              this.#onSession?.(result.session);
+              // The caller may refuse the key: the machine was dropped while its ticket was being exchanged.
+              if (this.#onSession?.(result.session) === false) {
+                this.#manuallyClosed = true;
+                fail('the machine left its group while it was being reached');
+                socket.close();
+                return;
+              }
             }
             this.#principal = result.principal;
             this.#attempt = 0;
@@ -554,7 +573,8 @@ export class WsClient implements ObservableClient {
 
   #helloParams(): RpcParams<'hello'> {
     return {
-      ...(this.#grant === null ? { token: this.#options.token } : { grant: this.#grant, nonce: this.#nonce }),
+      ...(this.#ticket !== null ? { ticket: this.#ticket }
+        : this.#grant === null ? { token: this.#options.token } : { grant: this.#grant, nonce: this.#nonce }),
       protocolVersion: PROTOCOL_VERSION,
       client: { name: this.#options.clientName, version: this.#options.version }
     };

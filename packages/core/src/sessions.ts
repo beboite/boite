@@ -194,9 +194,18 @@ export class SessionStore {
     this.grants.delete(grant);
     // A code spent without a nonce has no retry to answer: it names nothing now.
     if (nonce === null) this.dropCodes(grant);
+    const session = this.issue(known.role, client, now);
+    if (nonce !== null) this.deliveries.set(grant, { nonceHash: nonceHash(nonce), ...session, expiresAt: known.expiresAt });
+    return session;
+  }
+
+  /**
+   * A session of this core's own for a client something already vouched for:
+   * a grant just exchanged, or a group member's ticket.
+   */
+  issue(role: PairingRole, client: ClientIdentity, now = Date.now()): { id: string; token: string; role: PairingRole } {
     const token = newToken();
     const id = newId('ses_');
-    const role = known.role;
     this.core.journal.append({ type: 'session.created', threadId: null, version: 1, payload: { id, client, role } }, () => {
       this.core.journal.putSession({
         id,
@@ -208,7 +217,6 @@ export class SessionStore {
         last_seen_at: now,
       });
     });
-    if (nonce !== null) this.deliveries.set(grant, { nonceHash: nonceHash(nonce), id, token, role, expiresAt: known.expiresAt });
     this.core.bus.emit('sessions.updated', { sessionId: id, state: 'created' });
     return { id, token, role };
   }
@@ -231,6 +239,7 @@ export class SessionStore {
       createdAt: row.created_at,
       lastSeenAt: row.last_seen_at,
       current: row.id === current,
+      ...(this.core.group.owns(row.id) ? { group: true } : {}),
     }));
   }
 
@@ -238,6 +247,8 @@ export class SessionStore {
     if (this.core.journal.getSession(sessionId) === null) {
       throw refused(`unknown session ${sessionId}`, { sessionId });
     }
+    // First: a device of the group is revoked on every member, and that is written before its session goes.
+    this.core.group.sessionRevoking(sessionId);
     this.core.journal.append({ type: 'session.revoked', threadId: null, version: 1, payload: { id: sessionId } }, () => {
       this.core.journal.deleteSession(sessionId);
     });
@@ -246,6 +257,7 @@ export class SessionStore {
     // The sockets first, so the event never reaches the client it is about.
     this.core.subscribers.closeSession(sessionId);
     this.core.bus.emit('sessions.updated', { sessionId, state: 'revoked' });
+    this.core.group.sessionRevoked(sessionId);
   }
 
   private sweep(now: number): void {

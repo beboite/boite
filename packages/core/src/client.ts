@@ -19,6 +19,8 @@ export interface ConnectOptions {
   grant?: string;
   /** Sent with the grant, so a retry after a lost answer gets the same session back. */
   nonce?: string;
+  /** Say hello with a group ticket instead of the token; `session` then carries what came back. */
+  ticket?: string;
   /** Extra upgrade headers. The bench names a `Host` here to be served as a remote client. */
   headers?: Record<string, string>;
 }
@@ -157,7 +159,8 @@ export async function connect(url: string, token: string, options: ConnectOption
   }).catch(error => { socket.close(); throw error; });
 
   const hello = (await send('hello', {
-    ...(options.grant === undefined ? { token } : { grant: options.grant, ...(options.nonce === undefined ? {} : { nonce: options.nonce }) }),
+    ...(options.ticket !== undefined ? { ticket: options.ticket }
+      : options.grant === undefined ? { token } : { grant: options.grant, ...(options.nonce === undefined ? {} : { nonce: options.nonce }) }),
     protocolVersion: PROTOCOL_VERSION,
     client: options.client ?? { name: 'test', version: '2.0.0-beta.1' },
   }, Math.max(1, deadline - Date.now())).catch(error => { socket.close(); throw error; })) as { core: CoreInfo; principal: Principal; session?: { id: string; token: string }; threadId?: ThreadId };

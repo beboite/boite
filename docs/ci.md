@@ -93,7 +93,9 @@ cached download store. UI tests use at most eight workers. Core files run in
 fresh Bun processes, four at once by default; `BOITE_TEST_WORKERS` accepts 1 to
 8 and `bun run --cwd packages/core test:serial` runs one file at a time. Each
 core has a fresh data directory and port. Full per-file output and nonzero
-exit failures are retained.
+exit failures are retained. A file still running after five minutes, its event
+loop blocked where no test timeout can fire, is ended and reported with what it
+printed (`BOITE_TEST_FILE_DEADLINE_MS`).
 
 The Windows job shares release-profile Rust dependencies, builds the installer
 once, and stages its existing core beside the shell for native E2E. Installer
@@ -108,7 +110,7 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 588,000 |
 | UI files, excluding `.br` and `.gz` copies | 4,160,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,376,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,420,000 |
 
 The total JavaScript measure excludes native binaries and source maps. On
 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
@@ -148,6 +150,13 @@ On 2026-10-04, Windows desktop CI measured 4,101,897 UI bytes for main at
 reconciliation merged with it measured 4,120,993 bytes on Windows, 19,096 more.
 The 4,160,000-byte limit keeps 39,007 bytes above it; the entry and
 core limits are unchanged.
+On 2026-10-04, Linux builds with Bun 1.4.2 measured 4,097,984 UI bytes and
+3,341,343 emitted core JavaScript bytes for main at `eb69e5bf`. Machine groups
+merged with it measured 4,123,339 and 3,391,488: the UI gains 25,355 bytes for
+the group card, its sentences in two languages and the group links, within its
+unchanged limit; the core gains 50,145 bytes for the roster, sealing, tickets
+and the join route. The core total limit becomes 3,420,000 bytes, 28,512 above
+this measurement; the entry and `main.js` limits are unchanged.
 Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
 

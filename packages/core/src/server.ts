@@ -8,11 +8,13 @@ import { eventThreadId, type EventPayload } from './bus.ts';
 import { mayReceiveEvent } from './access.ts';
 import type { Core } from './core.ts';
 import { messageOf } from './errors.ts';
+import { JOIN_ROUTE } from './group.ts';
 import type { Connection } from './router.ts';
 import type { SocketData } from './server/connection.ts';
 import { ServerConnection } from './server/connection.ts';
 import { handleFrame } from './server/frame.ts';
 import { FrameQueue } from './server/frame-queue.ts';
+import { Refusals } from './server/refusals.ts';
 import { fdResponse } from './server/file-response.ts';
 export { ServerConnection } from './server/connection.ts';
 
@@ -66,12 +68,20 @@ export interface ServerOptions {
   host?: string;
   port?: number;
   helloTimeoutMs?: number;
+  /**
+   * A core in a group may answer on this machine's tailnet address through a
+   * listener of its own. `main` turns it on unless `--host` or `--lan` chose
+   * the address; a test core never opens a port outside loopback.
+   */
+  tailnet?: boolean;
 }
 
 export interface RunningServer {
   host: string;
   port: number;
   url: string;
+  /** Sockets open now, the ones still saying hello included. */
+  connections(): number;
   stop(): Promise<void>;
 }
 
@@ -331,11 +341,14 @@ export function startServer(options: ServerOptions): RunningServer {
   const frames = new Set<Promise<void>>();
   const incoming = new FrameQueue((connection, raw) => handleFrame(core, connection, raw));
   const peerRequests = new Set<Promise<Response>>();
+  const refusals = new Refusals();
   let stopping = false;
 
-  const server = Bun.serve<SocketData>({
-    hostname: host,
-    port: options.port ?? 0,
+  // One set of handlers for every address the core answers on: the sockets,
+  // the hello bounds and the broadcast are the core's, not a listener's.
+  const serve = (hostname: string, bind: number) => Bun.serve<SocketData>({
+    hostname,
+    port: bind,
     // HTTP only: the websocket block below keeps Bun's own 120 s and its pings.
     idleTimeout: HTTP_IDLE_TIMEOUT_S,
 
@@ -343,9 +356,21 @@ export function startServer(options: ServerOptions): RunningServer {
       if (stopping) return new Response('core stopping', { status: 503 });
       const url = new URL(request.url);
 
-      if (url.pathname === '/agent-messages') {
+      if (url.pathname === '/agent-messages' || url.pathname === JOIN_ROUTE) {
         if (core.stopping) return new Response('core stopping', { status: 503 });
-        const response = core.coordination.http(request);
+        // A stranger's requests are counted against its address from the moment they arrive, before any body is read.
+        const address = self.requestIP(request)?.address ?? null;
+        const answered = address === null || isLoopbackAddress(address) ? () => undefined : refusals.begin(address);
+        if (answered === null) return new Response('too many refused requests from this address', { status: 429 });
+        const named = request.headers.get('x-boite-peer') ?? '';
+        const response = (url.pathname === JOIN_ROUTE ? core.group.http(request) : core.coordination.http(request)).then((answer) => {
+          // Served means the signature of the machine the request names was checked: that address is this member's.
+          answered(answer.status, named);
+          return answer;
+        }, (error: unknown) => {
+          answered(403);
+          throw error;
+        });
         peerRequests.add(response);
         void response.finally(() => peerRequests.delete(response)).catch(() => undefined);
         return response;
@@ -366,7 +391,8 @@ export function startServer(options: ServerOptions): RunningServer {
 
       if (url.pathname === RPC_PATH) {
         const origin = request.headers.get('origin');
-        if (!isAllowedOrigin(origin, self.port ?? 0, host) && !(origin !== null && (core.settings.get().browserOrigins?.includes(origin) || origin === core.settings.get().publicUrl))) {
+        // A page served by one machine of the group opens its socket on the others.
+        if (!isAllowedOrigin(origin, self.port ?? 0, hostname) && !(origin !== null && (core.settings.get().browserOrigins?.includes(origin) || origin === core.settings.get().publicUrl || core.group.allowsOrigin(origin)))) {
           core.log('warn', `refused a websocket from origin ${origin ?? '(none)'}`);
           return new Response('forbidden origin', { status: 403 });
         }
@@ -445,9 +471,40 @@ export function startServer(options: ServerOptions): RunningServer {
       },
     },
   });
+  const server = serve(host, options.port ?? 0);
 
   const port = server.port ?? 0;
   core.setEndpoint(host, port);
+  const everywhere = host === '0.0.0.0' || host === '::';
+  let extra: { host: string; server: ReturnType<typeof serve> } | null = null;
+  let refused: string | null = null;
+  const closeExtra = (): void => {
+    // As for the main listener: `stop()` never resolves once a socket was upgraded.
+    if (extra !== null) void extra.server.stop(true);
+    extra = null;
+  };
+  core.network = {
+    also(address: string | null): boolean {
+      if (stopping) return false;
+      if (address === null || everywhere || address === host || options.tailnet !== true) {
+        closeExtra();
+        return address !== null && (everywhere || address === host);
+      }
+      if (extra?.host === address) return true;
+      closeExtra();
+      try {
+        extra = { host: address, server: serve(address, port) };
+        refused = null;
+        core.log('info', `listening on ${address}:${port} too, for the machines of this core's group`);
+        return true;
+      } catch (error) {
+        // Asked again at every tick while the address stays unusable: say it once.
+        if (refused !== address) core.log('warn', `could not listen on ${address}:${port} for the group: ${messageOf(error)}`);
+        refused = address;
+        return false;
+      }
+    },
+  };
   // What a restart handed over starts once agents can reach this core. After
   // the caller's own setup: `main` writes `core.json` right behind this call.
   setTimeout(() => {
@@ -523,10 +580,13 @@ export function startServer(options: ServerOptions): RunningServer {
     }, SCHEDULER_WINDOW_MS);
   });
 
+  core.group.start();
+
   return {
     host,
     port,
     url: core.baseUrl(),
+    connections: () => connections.size,
     async stop(): Promise<void> {
       stopping = true;
       incoming.close();
@@ -542,6 +602,7 @@ export function startServer(options: ServerOptions): RunningServer {
       // Bun 1.3.11 never resolves server.stop() once a socket has been upgraded,
       // so the listener is closed without waiting on that promise.
       void server.stop(true);
+      closeExtra();
       await Promise.allSettled([...frames, ...peerRequests]);
     },
   };

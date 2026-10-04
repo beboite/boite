@@ -548,6 +548,53 @@ describe('WsClient', () => {
     client.close();
   });
 
+  test('a key is taken only from a core that was shown a grant: one handed back to a plain token is ignored', async () => {
+    const sockets: FakeSocket[] = [];
+    const stored: { id: string; token: string }[] = [];
+    const client = new WsClient({
+      url: 'http://192.0.2.1:8777',
+      token: 'held',
+      onSession: (session) => stored.push(session),
+      socketFactory: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+      reconnect: false
+    });
+    const connecting = client.connect();
+    const socket = take(sockets, 0);
+    socket.open();
+    socket.receive({ jsonrpc: '2.0', id: socket.frame(0).id, result: { core: CORE, principal: 'owner', session: { id: 'ses-9', token: 'unasked' } } });
+    await connecting;
+    expect(stored).toEqual([]);
+    client.close();
+  });
+
+  test('a key the caller refuses is not used: the client closes instead of going on with it', async () => {
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({
+      url: 'http://192.0.2.1:8777',
+      token: '',
+      ticket: 'one-time',
+      // The machine was dropped by its group while this ticket was being exchanged.
+      onSession: () => false,
+      socketFactory: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      }
+    });
+    const connecting = client.connect();
+    const socket = take(sockets, 0);
+    socket.open();
+    socket.receive({ jsonrpc: '2.0', id: socket.frame(0).id, result: { core: CORE, principal: 'owner', session: { id: 'ses-9', token: 'late' } } });
+    await expect(connecting).rejects.toThrow('left its group');
+    expect(socket.closed).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(sockets).toHaveLength(1);
+  });
+
   test('a grant hello whose answer is lost is retried with the same grant and nonce', async () => {
     const sockets: FakeSocket[] = [];
     const stored: { id: string; token: string }[] = [];

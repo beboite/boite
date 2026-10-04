@@ -1,12 +1,22 @@
-import type { PairedSession, PairingGrant, PairingRole } from '@boite/contracts';
+import { RpcErrorCode, type Group, type GroupInvite, type PairedSession, type PairingGrant, type PairingRole } from '@boite/contracts';
+import { RpcFailure, type Client } from '../client';
 import type { StoreContext } from './context';
 
-/** Pairing: the owner mints one-time links, sees every paired device, revokes. */
+/** A read of the group that failed is tried again after these waits, on the same connection. */
+const GROUP_READ_DELAYS_MS = [1000, 4000];
+
+/** Pairing: the owner mints one-time links, sees every paired device, revokes, and groups its machines. */
 export class Pairing {
   /** The last one-time pairing link, until it is closed or the core changes. */
   pairing = $state<PairingGrant | null>(null);
   sessions = $state<PairedSession[]>([]);
   private revision = 0;
+  /** The group this core belongs to, null for none or for a core from before groups. */
+  group = $state<Group | null>(null);
+  /** The core answered `group.get` at least once on this connection: null then means no group, not no answer yet. */
+  groupKnown = $state(false);
+  /** The last invitation minted from Settings, until it is used or the page changes. */
+  groupInvite = $state<GroupInvite | null>(null);
 
   constructor(private readonly ctx: StoreContext) {}
 
@@ -47,6 +57,85 @@ export class Pairing {
       this.sessions = this.sessions.filter((session) => session.id !== sessionId);
     } catch (error) {
       this.ctx.fail(error);
+    }
+  }
+
+  /**
+   * Read on every connection and on every `group.updated`. A core from before
+   * groups has no such method and belongs to none. A read that fails is tried
+   * again twice on the same connection, a second then four apart, without a
+   * toast nobody asked for: until it answers, the machine neither vouches for
+   * a group nor gets its agents linked.
+   */
+  async loadGroup(attempt = 0): Promise<void> {
+    const client = this.ctx.client;
+    if (!client) return;
+    try {
+      const group = await client.call('group.get', {});
+      if (client !== this.ctx.client) return;
+      // An invitation is for one machine: once the roster gains one, it is spent.
+      if ((group?.cores.length ?? 0) !== (this.group?.cores.length ?? 0)) this.groupInvite = null;
+      this.group = group;
+      this.groupKnown = true;
+    } catch (error) {
+      if (client !== this.ctx.client) return;
+      if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) {
+        this.group = null;
+        this.groupKnown = true;
+        return;
+      }
+      console.warn('reading the group failed', error);
+      if (attempt >= GROUP_READ_DELAYS_MS.length) return;
+      setTimeout(() => {
+        if (client === this.ctx.client && !this.groupKnown) void this.loadGroup(attempt + 1);
+      }, GROUP_READ_DELAYS_MS[attempt]);
+    }
+  }
+
+  /** True once the core answered; a refusal is the store's error and leaves the group as it was. */
+  async #change(work: (client: Client) => Promise<Group | null>): Promise<boolean> {
+    const client = this.ctx.client;
+    if (!client) return false;
+    try {
+      const group = await work(client);
+      // The store moved to another core meanwhile: this answer, or this refusal, is about the one it left.
+      if (client !== this.ctx.client) return false;
+      this.group = group;
+      this.groupInvite = null;
+      return true;
+    } catch (error) {
+      if (client === this.ctx.client) this.ctx.fail(error);
+      return false;
+    }
+  }
+
+  createGroup(name: string): Promise<boolean> {
+    return this.#change((client) => client.call('group.create', { name }));
+  }
+
+  joinGroup(invite: string): Promise<boolean> {
+    return this.#change((client) => client.call('group.join', { invite }));
+  }
+
+  leaveGroup(): Promise<boolean> {
+    return this.#change(async (client) => {
+      await client.call('group.leave', {});
+      return null;
+    });
+  }
+
+  removeFromGroup(coreId: string): Promise<boolean> {
+    return this.#change((client) => client.call('group.remove', { coreId }));
+  }
+
+  async inviteToGroup(): Promise<void> {
+    const client = this.ctx.client;
+    if (!client) return;
+    try {
+      const invite = await client.call('group.invite', {});
+      if (client === this.ctx.client) this.groupInvite = invite;
+    } catch (error) {
+      if (client === this.ctx.client) this.ctx.fail(error);
     }
   }
 }

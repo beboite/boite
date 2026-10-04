@@ -299,6 +299,17 @@ resources before disposing the bus and journal, then flushes diagnostic logs.
 A restart continuation remains durable until it starts or is explicitly excluded.
 [Restart handoff](restart-handoff.md) owns deadlines and recovery exclusions.
 
+## Groups
+
+A group is one roster every member core holds: the machines of one owner,
+their public keys and addresses, and the devices paired with them. Members
+exchange it through the signed coordination endpoint and merge it by revision.
+A client of one member gets a signed ticket for another, which that one
+exchanges at `hello` for a session of its own; browser origins and coordination
+peers are read off the same roster. A member listens on its tailnet address
+beside the one it started on. [Groups](groups.md) describes the trust this
+assumes and where it stops.
+
 ## The phone keeps the app
 
 The service worker registers after first paint on the core's HTTP(S) origin.

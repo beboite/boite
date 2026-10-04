@@ -9,6 +9,14 @@ export interface Endpoint {
    * back is what gets stored in its place.
    */
   grant?: string;
+  /** A group ticket, spent like a grant: another machine of the core's group vouched for this client. */
+  ticket?: string;
+  /** The group member this endpoint is, when the group led here. */
+  coreId?: string;
+  /** The group that led here: only a member of that group can later say this machine left it. */
+  groupId?: string;
+  /** Which admission of that machine the group listed when it led here. */
+  epoch?: number;
   /**
    * The token is the session key a pairing link became, not a core token. In
    * the shell this is what lets a stored endpoint win over the core the shell
@@ -38,23 +46,155 @@ function isEndpoint(value: unknown): value is Endpoint {
   return typeof shape['url'] === 'string' && typeof shape['token'] === 'string';
 }
 
+export const DROPPED_STORAGE_KEY = 'boite.group.dropped';
+const DROPPED_MAX = 256;
+/** Machines remembered as dropped. A removal is never forgotten to make room: past this, nothing a group brings is reached by itself. */
+const DROPPED_MEMBERS_MAX = 2048;
+
+interface Dropped { at: number; epoch: number }
+
+/** What this window knows was dropped: what it read or wrote, less what it cleared itself. */
+const known = new Map<string, Dropped>();
+
+/** Address to when the group dropped the machine there, and which admission of it that was. */
+function droppedAddresses(): Record<string, Dropped> {
+  try {
+    const raw = window.localStorage.getItem(DROPPED_STORAGE_KEY);
+    // Storage emptied: nothing is left for this window to put back.
+    if (raw === null) known.clear();
+    const parsed: unknown = JSON.parse(raw ?? '{}');
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed as Record<string, Partial<Dropped> | null>)
+      .filter((entry): entry is [string, Dropped] => typeof entry[1]?.at === 'number' && typeof entry[1].epoch === 'number'));
+  } catch {
+    return {};
+  }
+}
+
+function writeDropped(marks: Record<string, Dropped>): void {
+  const entries = Object.entries(marks);
+  // Addresses make room for newer ones: what was saved for an old one is long gone. Machines do not.
+  const members = entries.filter(([key]) => key.startsWith('member ')).slice(0, DROPPED_MEMBERS_MAX);
+  const addresses = entries.filter(([key]) => !key.startsWith('member ')).slice(-DROPPED_MAX);
+  try {
+    window.localStorage.setItem(DROPPED_STORAGE_KEY, JSON.stringify(Object.fromEntries([...members, ...addresses])));
+  } catch {
+    /* a browser that refuses storage still runs for this session */
+  }
+}
+
+/**
+ * Windows share the record without a lock: two that write at the same instant
+ * each start from what they had read, and the later one erases or lowers what
+ * the other recorded. A window that hears the record change puts back what it
+ * knew. A lower admission is raised again. A machine's mark that went is
+ * restored: when a later admission cleared it, that admission is past the mark
+ * anyway. An address that went stays gone, since a pairing made by hand clears
+ * it and putting it back would hide that machine.
+ */
+export function keepDropped(): void {
+  const now = droppedAddresses();
+  const back: Record<string, Dropped> = {};
+  for (const [key, was] of known) {
+    const mark = now[key];
+    if (mark === undefined && !key.startsWith('member ')) known.delete(key);
+    else if (mark === undefined || mark.epoch < was.epoch) back[key] = { at: Math.max(was.at, mark?.at ?? 0), epoch: was.epoch };
+  }
+  for (const [key, mark] of Object.entries({ ...now, ...back })) known.set(key, mark);
+  if (Object.keys(back).length > 0) writeDropped({ ...now, ...back });
+}
+
+/**
+ * The addresses of machines a group brought and then dropped, shared by every
+ * window. Nothing saved for one is read again, whichever window left it and
+ * wherever it sits, and no ticket is asked for it on the word of a member that
+ * still lists the admission that was dropped. It ends when a new key is
+ * issued for that address: by a pairing made by hand, or by the group having
+ * admitted the machine again.
+ */
+function setDropped(url: string, epoch: number | null): void {
+  setMark(normalise(url), epoch);
+}
+
+/** The same machine under every address it gives: a drop heard for one of them holds for the others. */
+function memberKey(groupId: string, coreId: string): string {
+  return `member ${groupId} ${coreId}`;
+}
+
+function setMark(target: string, epoch: number | null): void {
+  const { [target]: was, ...rest } = droppedAddresses();
+  if (epoch === null) {
+    known.delete(target);
+    if (was !== undefined) writeDropped(rest);
+    return;
+  }
+  // A window that knew an older admission must not lower what another one recorded: the highest admission dropped stays.
+  const mark = { at: Date.now(), epoch: Math.max(was?.epoch ?? epoch, known.get(target)?.epoch ?? epoch, epoch) };
+  known.set(target, mark);
+  writeDropped({ ...rest, [target]: mark });
+}
+
+/**
+ * Whether the group dropped the machine at this address and nothing brought it
+ * back. With `epoch`, the admission a member lists for it now: a later one
+ * than the one dropped means the machine was admitted again, and is not dropped.
+ */
+export function isDropped(url: string, epoch?: number): boolean {
+  const mark = droppedAddresses()[normalise(url)];
+  return mark !== undefined && (epoch === undefined || epoch <= mark.epoch);
+}
+
+/**
+ * Whether the address was dropped after `began`. A ticket exchange that began
+ * before the drop and ends after it is for a machine that has left since: its
+ * key is not kept, and does not bring the address back.
+ */
+export function droppedSince(url: string, began: number, member?: { coreId?: string; groupId?: string }): boolean {
+  const marks = droppedAddresses();
+  const of = member?.coreId !== undefined && member.groupId !== undefined ? marks[memberKey(member.groupId, member.coreId)] : undefined;
+  return [marks[normalise(url)], of].some((mark) => mark !== undefined && mark.at >= began);
+}
+
+/**
+ * Whether the group dropped this machine, whatever address it is reached at.
+ * With `epoch`, the admission a member lists for it now: a later one than the
+ * one dropped is the machine admitted again.
+ */
+export function isMemberDropped(groupId: string | undefined, coreId: string | undefined, epoch?: number): boolean {
+  if (groupId === undefined || coreId === undefined) return false;
+  const marks = droppedAddresses();
+  const mark = marks[memberKey(groupId, coreId)];
+  // No room left to remember a removal: one that could not be written must not look like none.
+  if (mark === undefined) return Object.keys(marks).filter((key) => key.startsWith('member ')).length >= DROPPED_MEMBERS_MAX;
+  return epoch === undefined || epoch <= mark.epoch;
+}
+
 export function readStoredEndpoint(): Endpoint | null {
   try {
     const raw = window.localStorage.getItem(ENDPOINT_STORAGE_KEY);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
-    if (!isEndpoint(parsed)) return null;
-    return { url: normalise(parsed.url), token: parsed.token, ...(parsed.paired === true ? { paired: true } : {}) };
+    if (!isEndpoint(parsed) || isDropped(parsed.url)) return null;
+    return { url: normalise(parsed.url), token: parsed.token, ...(parsed.paired === true ? { paired: true } : {}), ...brought(parsed) };
   } catch {
     return null;
   }
+}
+
+/** The marks of a machine a group brought, kept wherever its key is saved: without them it would pass for one paired by hand. */
+function brought(from: { coreId?: unknown; groupId?: unknown; epoch?: unknown }): { coreId?: string; groupId?: string; epoch?: number } {
+  return {
+    ...(typeof from.coreId === 'string' ? { coreId: from.coreId } : {}),
+    ...(typeof from.groupId === 'string' ? { groupId: from.groupId } : {}),
+    ...(typeof from.coreId === 'string' && typeof from.epoch === 'number' ? { epoch: from.epoch } : {})
+  };
 }
 
 export function storeEndpoint(endpoint: Endpoint): void {
   try {
     window.localStorage.setItem(
       ENDPOINT_STORAGE_KEY,
-      JSON.stringify({ url: normalise(endpoint.url), token: endpoint.token, ...(endpoint.paired ? { paired: true } : {}) })
+      JSON.stringify({ url: normalise(endpoint.url), token: endpoint.token, ...(endpoint.paired ? { paired: true } : {}), ...brought(endpoint) })
     );
   } catch {
     /* a browser that refuses storage still runs for this session */
@@ -80,6 +220,12 @@ export interface StoredEnvironment {
   label: string;
   token: string;
   paired: boolean;
+  /** Set when the group connected this core: its id in the roster, so it is found again offline and dropped when it leaves. */
+  coreId?: string;
+  /** The group that connected it. */
+  groupId?: string;
+  /** Which admission of that machine the group listed then. */
+  epoch?: number;
 }
 
 export const ENVIRONMENTS_STORAGE_KEY = 'boite.envs';
@@ -110,23 +256,29 @@ function isEnvironment(value: unknown): value is StoredEnvironment {
  */
 export function readEnvironments(): StoredEnvironment[] {
   let list: StoredEnvironment[] = [];
+  let raw: string | null = null;
   try {
-    const raw = window.localStorage.getItem(ENVIRONMENTS_STORAGE_KEY);
+    raw = window.localStorage.getItem(ENVIRONMENTS_STORAGE_KEY);
     if (raw) {
       const parsed: unknown = JSON.parse(raw);
-      if (Array.isArray(parsed)) list = parsed.filter(isEnvironment);
+      const dropped = droppedAddresses();
+      if (Array.isArray(parsed)) list = parsed.filter(isEnvironment).filter((env) => dropped[env.url] === undefined);
     }
   } catch {
     list = [];
   }
   if (list.length > 0) return list;
+  // A list that was written, even emptied, is the list: an entry taken out of it must not come
+  // back from the stored endpoint, without what the list knew of where it came from.
+  if (raw !== null) return [];
   const stored = readStoredEndpoint();
   if (!stored?.paired) return [];
   const seeded: StoredEnvironment = {
     url: stored.url,
     label: defaultEnvironmentLabel(stored.url),
     token: stored.token,
-    paired: true
+    paired: true,
+    ...brought(stored)
   };
   storeEnvironments([seeded]);
   return [seeded];
@@ -159,25 +311,96 @@ export function upsertEnvironment(entry: {
   token: string;
   paired: boolean;
   label?: string;
+  coreId?: string;
+  groupId?: string;
+  epoch?: number;
 }): StoredEnvironment[] {
   const url = normalise(entry.url);
   const list = readEnvironments();
   const at = list.findIndex((env) => env.url === url);
   const label = entry.label ?? list[at]?.label ?? defaultEnvironmentLabel(url);
+  const next: StoredEnvironment = {
+    url, label, token: entry.token, paired: entry.paired,
+    ...brought({ coreId: entry.coreId ?? list[at]?.coreId, groupId: entry.groupId ?? list[at]?.groupId, epoch: entry.epoch ?? list[at]?.epoch })
+  };
   if (at === -1) {
-    list.push({ url, label, token: entry.token, paired: entry.paired });
+    list.push(next);
   } else {
-    list[at] = { url, label, token: entry.token, paired: entry.paired };
+    list[at] = next;
   }
   storeEnvironments(list);
   return list;
 }
 
-/** Forgets the core. Its key stays valid there until revoked; it just opens nothing from here. */
-export function removeEnvironment(url: string): StoredEnvironment[] {
-  const list = readEnvironments().filter((env) => env.url !== normalise(url));
+/** The machine was paired by hand since: it is no longer the group's to drop. */
+export function forgetGroupOf(url: string): StoredEnvironment[] {
+  setDropped(url, null);
+  const list = readEnvironments().map((env) => (env.url === normalise(url) ? { url: env.url, label: env.label, token: env.token, paired: env.paired } : env));
   storeEnvironments(list);
   return list;
+}
+
+/**
+ * Keeps the key a core handed back for a grant or a ticket. A grant is a
+ * pairing made by hand: whatever group brought this machine before has no say
+ * over it any more, so the mark that lets a group drop it goes.
+ */
+export function rememberSession(endpoint: Endpoint, token: string): StoredEnvironment[] {
+  // A new key for that address, and for that machine when the group brings it: whatever was dropped before is past.
+  setDropped(endpoint.url, null);
+  if (endpoint.grant === undefined && endpoint.coreId !== undefined && endpoint.groupId !== undefined) setMark(memberKey(endpoint.groupId, endpoint.coreId), null);
+  if (endpoint.grant !== undefined) forgetGroupOf(endpoint.url);
+  return upsertEnvironment({ url: endpoint.url, token, paired: true, ...brought(endpoint) });
+}
+
+/**
+ * Forgets the core. Its key stays valid there until revoked; it just opens
+ * nothing from here. With `token`, only the entry that still holds that key
+ * goes: another window may have paired the machine anew since.
+ */
+export function removeEnvironment(url: string, token?: string): StoredEnvironment[] {
+  const all = readEnvironments();
+  const list = all.filter((env) => env.url !== normalise(url) || (token !== undefined && env.token !== token));
+  storeEnvironments(list);
+  // The same key may be the one the window opens on next time: it goes too, or the
+  // next start would send it to the address it was just forgotten at.
+  const stored = readStoredEndpoint();
+  if (stored?.url === normalise(url) && all.some((env) => !list.includes(env) && env.token === stored.token)) clearStoredEndpoint();
+  return list;
+}
+
+/**
+ * Forgets a machine the group brought, when the saved entry is still the one
+ * the group brought: paired by hand since, in this window or another, the
+ * entry is the owner's and stays. `dropped` says the group dropped the
+ * machine, and which admission of it: its address is then marked for every
+ * window. Without it the machine only moved, and nothing is marked.
+ */
+export function removeBrought(url: string, machine: { coreId: string; groupId?: string }, dropped?: number): StoredEnvironment[] {
+  const { coreId, groupId } = machine;
+  // The machine is marked whatever is saved for this address: another window may hold it under another one.
+  if (dropped !== undefined && groupId !== undefined) setMark(memberKey(groupId, coreId), dropped);
+  const saved = readEnvironments().find((env) => env.url === normalise(url));
+  const stored = readStoredEndpoint();
+  // Something saved must say the group brought that machine there. An address a member merely gave, and
+  // that was only tried, is not one to touch: a key the owner holds for whoever really sits there stays.
+  const mine = saved?.coreId === coreId || (stored?.url === normalise(url) && stored.coreId === coreId);
+  if (!mine || (saved !== undefined && saved.coreId !== coreId)) return readEnvironments();
+  if (dropped === undefined) return removeEnvironment(url, saved?.token);
+  // The address is marked first: a key another window left for that machine, in the list or as the core
+  // it opens on, is not read again either.
+  setDropped(url, dropped);
+  if (rawStoredUrl() === normalise(url)) clearStoredEndpoint();
+  return readEnvironments();
+}
+
+function rawStoredUrl(): string | null {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(ENDPOINT_STORAGE_KEY) ?? 'null');
+    return isEndpoint(parsed) ? normalise(parsed.url) : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -214,10 +437,13 @@ function takeFromQuery(): Endpoint | null {
   if (!core && !token && !grant) return null;
 
   const url = normalise(core ?? window.location.origin);
-  const known = !token && !grant ? knownEndpoint(url) : null;
+  // A token this device already holds for that core says nothing new: the core is reopened as it is known.
+  const held = heldFor(url);
+  const known = grant ? null : !token ? knownEndpoint(url) : held.keys.includes(token) ? { url, token, paired: true } : null;
+  // What the group brought stays marked whatever the link looks like. Only a grant, once the owner said yes, makes it the owner's.
   const endpoint: Endpoint = known
-    ? { ...known, fromLink: true }
-    : { url, token: token ?? '', ...(grant ? { grant } : {}), fromLink: true };
+    ? { ...known, ...held.marks, fromLink: true }
+    : { url, token: token ?? '', ...(grant ? { grant } : held.marks), fromLink: true };
 
   params.delete(CORE_QUERY_PARAM);
   params.delete(PAIR_QUERY_PARAM);
@@ -227,6 +453,12 @@ function takeFromQuery(): Endpoint | null {
   window.history.replaceState(null, '', stripped);
 
   return endpoint;
+}
+
+/** The core a `?core=` link names, with or without a key of its own, read before the link is taken. */
+export function linkedCore(): string | null {
+  const core = new URLSearchParams(window.location.search).get(CORE_QUERY_PARAM);
+  return core ? normalise(core) : null;
 }
 
 export function insideTauri(): boolean {
@@ -268,11 +500,23 @@ function fromOrigin(): Endpoint | null {
 }
 
 /** The stored core or a remembered one at this address, with the key this device holds for it. */
+/**
+ * What this device holds for a core, in both places a key is saved: the keys,
+ * and the group's marks if either place has them. A machine the group brought
+ * is one wherever its key sits.
+ */
+function heldFor(url: string): { keys: string[]; marks: { coreId?: string; groupId?: string } } {
+  const stored = readStoredEndpoint();
+  const places = [stored?.url === url ? stored : undefined, readEnvironments().find((env) => env.url === url)].filter((place) => place !== undefined);
+  const marked = places.find((place) => place.coreId !== undefined);
+  return { keys: places.map((place) => place.token), marks: marked === undefined ? {} : brought(marked) };
+}
+
 function knownEndpoint(url: string): Endpoint | null {
   const stored = readStoredEndpoint();
   if (stored?.url === url) return stored;
   const remembered = readEnvironments().find((env) => env.url === url);
-  return remembered ? { url, token: remembered.token, ...(remembered.paired ? { paired: true } : {}) } : null;
+  return remembered ? { url, token: remembered.token, ...(remembered.paired ? { paired: true } : {}), ...brought(remembered) } : null;
 }
 
 /**
@@ -282,8 +526,16 @@ function knownEndpoint(url: string): Endpoint | null {
  * prompt typed here, so the user is asked first, and a missing asker refuses.
  */
 async function followLink(endpoint: Endpoint, approve?: (url: string) => Promise<boolean>): Promise<boolean> {
-  if (endpoint.url === normalise(window.location.origin) || knownEndpoint(endpoint.url) !== null) return true;
-  return approve ? await approve(endpoint.url) : false;
+  const known = endpoint.url === normalise(window.location.origin) || knownEndpoint(endpoint.url) !== null;
+  // A link that carries a key of its own, a grant or a token, turns a machine the group brought into
+  // the owner's, out of the group's hands. A machine the group removed can make such a link itself: the owner is asked.
+  const held = heldFor(endpoint.url);
+  const promotes = held.marks.coreId !== undefined && (endpoint.grant !== undefined || !held.keys.includes(endpoint.token));
+  if (known && !promotes) return true;
+  if (approve === undefined || !(await approve(endpoint.url))) return false;
+  // The owner said yes to that address: what the group dropped there before is past.
+  setDropped(endpoint.url, null);
+  return true;
 }
 
 /**

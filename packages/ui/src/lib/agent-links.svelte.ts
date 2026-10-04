@@ -147,11 +147,24 @@ class AgentAutoLink {
     if (this.#tried.has(key)) return;
     this.#tried.add(key);
     try {
+      // Whether the two share a group decides what is written: wait until both have said.
+      if (!a.store.groupKnown || !b.store.groupKnown) { this.#tried.delete(key); return; }
       const [left, right] = await Promise.all([a.store.coordinationIdentity(), b.store.coordinationIdentity()]);
       // Two connections to one core are one machine.
       if (left.coreId === right.coreId || isUnlinked(left.coreId, right.coreId)) return;
       const [peersA, peersB] = await Promise.all([a.store.coordinationPeers(), b.store.coordinationPeers()]);
-      if (peersA.some(peer => peer.coreId === right.coreId) && peersB.some(peer => peer.coreId === left.coreId)) {
+      // Machines of one group trust each other while both are members. A link written here
+      // would outlive that: a machine removed from the group would keep reaching the other's agents.
+      // What a machine says of its own group is not asked: a machine the group brought, or one
+      // the other's roster lists, gets no standing link from this app, whatever it claims.
+      const grouped = a.coreId !== undefined || b.coreId !== undefined
+        || a.store.group?.cores.some(core => core.coreId === right.coreId) === true
+        || b.store.group?.cores.some(core => core.coreId === left.coreId) === true;
+      const linked = peersA.some(peer => peer.coreId === right.coreId) && peersB.some(peer => peer.coreId === left.coreId);
+      if (grouped && !linked) {
+        // No relay through this app: said under Agent links, and tried again when one of the two reconnects.
+        if (!await bridgeMachines(a, b, left.coreId, right.coreId)) throw new Error(fill(strings.machines.agentLinkAddressRequired, { machine: b.label }));
+      } else if (linked) {
         await bridgeMachines(a, b, left.coreId, right.coreId);
         // Persisted trust is configuration, not proof that either signed route still works.
         await Promise.all([a.store.checkCoordinationPeer(right.coreId), b.store.checkCoordinationPeer(left.coreId)]);
@@ -167,7 +180,7 @@ class AgentAutoLink {
   start(): () => void {
     const stop = $effect.root(() => {
       $effect(() => {
-        ownerMachines().map(machine => machine.id).join('\0');
+        ownerMachines().map(machine => `${machine.id}\0${machine.store.groupKnown}\0${machine.store.group?.id ?? ''}`).join('\0');
         untrack(() => { void this.sweep(); });
       });
     });

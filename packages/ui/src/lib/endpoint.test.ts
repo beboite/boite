@@ -1,8 +1,15 @@
 import { beforeEach, describe, expect, test } from 'vitest';
 import {
+  linkedCore,
   parsePairingLink,
   readEnvironments,
   readStoredEndpoint,
+  droppedSince,
+  isDropped,
+  isMemberDropped,
+  keepDropped,
+  rememberSession,
+  removeBrought,
   removeEnvironment,
   resolveEndpoint,
   storeEndpoint,
@@ -196,12 +203,168 @@ describe('environments', () => {
     ]);
   });
 
+  test('a key the group brought keeps its mark, and a pairing link opened on that machine takes the mark away', () => {
+    const url = 'http://10.0.0.5:9000';
+    rememberSession({ url, token: '', ticket: 't', coreId: 'b', groupId: 'grp' }, 'from-ticket');
+    expect(readEnvironments()).toEqual([{ url, label: '10.0.0.5:9000', token: 'from-ticket', paired: true, coreId: 'b', groupId: 'grp' }]);
+    // Paired by hand since: the group can no longer drop it.
+    rememberSession({ url, token: '', grant: 'g' }, 'from-grant');
+    expect(readEnvironments()).toEqual([{ url, label: '10.0.0.5:9000', token: 'from-grant', paired: true }]);
+  });
+
   test('a paired endpoint stored before this list existed seeds one entry', () => {
     storeEndpoint({ url: 'http://10.0.0.5:9000', token: 'key', paired: true });
 
     expect(readEnvironments()).toEqual([
       { url: 'http://10.0.0.5:9000', label: '10.0.0.5:9000', token: 'key', paired: true }
     ]);
+  });
+
+  test('an entry taken out of the list does not come back from the stored endpoint, stripped of where it came from', () => {
+    const url = 'http://10.0.0.5:9000';
+    storeEndpoint({ url, token: 'key', paired: true });
+    rememberSession({ url, token: '', ticket: 't', coreId: 'b', groupId: 'grp' }, 'key');
+    removeEnvironment(url);
+    expect(readEnvironments()).toEqual([]);
+  });
+
+  test('the key the window would open on goes with its entry, unless a newer pairing replaced it', () => {
+    const url = 'http://10.0.0.5:9000';
+    upsertEnvironment({ url, token: 'old', paired: true });
+    upsertEnvironment({ url: 'https://other.test', token: 'kept', paired: true });
+    storeEndpoint({ url, token: 'old', paired: true });
+    removeEnvironment(url);
+    expect(readStoredEndpoint()).toBeNull();
+    // Paired anew in another window meanwhile: the stored key is not the one that was forgotten.
+    upsertEnvironment({ url, token: 'old', paired: true });
+    storeEndpoint({ url, token: 'new', paired: true });
+    removeEnvironment(url);
+    expect(readStoredEndpoint()).toMatchObject({ url, token: 'new' });
+  });
+
+  test('a pairing link on a machine the group brought asks the owner, one on a machine paired by hand does not', async () => {
+    const url = 'https://b.example';
+    rememberSession({ url, token: '', ticket: 't', coreId: 'b', groupId: 'grp' }, 'from-ticket');
+    const asked: string[] = [];
+    const approve = async (target: string) => { asked.push(target); return false; };
+    // The group brought it: a link, which a removed machine can mint for itself, does not make it the owner's without a yes.
+    at('/?core=https%3A%2F%2Fb.example&grant=g');
+    expect((await resolveEndpoint(false, approve))?.url).not.toBe(url);
+    expect(asked).toEqual([url]);
+    expect(readEnvironments()[0]).toMatchObject({ coreId: 'b', groupId: 'grp' });
+    // The same for a link that brings a key of its own.
+    at('/?core=https%3A%2F%2Fb.example&token=its-own');
+    expect((await resolveEndpoint(false, approve))?.url).not.toBe(url);
+    expect(asked).toEqual([url, url]);
+    // Reopened with the key it holds, no grant: nothing changes hands and nobody is asked.
+    at('/?core=https%3A%2F%2Fb.example');
+    expect(await resolveEndpoint(false, approve)).toMatchObject({ url, token: 'from-ticket' });
+    // Reopened with the very key it holds, written in the link: still the group's machine, marks and all.
+    at('/?core=https%3A%2F%2Fb.example&token=from-ticket');
+    expect(await resolveEndpoint(false, approve)).toMatchObject({ url, token: 'from-ticket', coreId: 'b', groupId: 'grp' });
+    expect(asked).toEqual([url, url]);
+    // The marks may sit only with the core the window opens on, the list entry gone: a pairing link asks all the same.
+    removeEnvironment(url);
+    storeEndpoint({ url, token: 'other-key', paired: true, coreId: 'b', groupId: 'grp' });
+    at('/?core=https%3A%2F%2Fb.example&grant=g');
+    expect((await resolveEndpoint(false, approve))?.grant).toBeUndefined();
+    expect(asked).toEqual([url, url, url]);
+    window.localStorage.removeItem('boite.core');
+    asked.length = 2;
+    // Paired by hand: its own link goes through as before.
+    upsertEnvironment({ url: 'https://hand.example', token: 'hand', paired: true });
+    at('/?core=https%3A%2F%2Fhand.example&grant=g');
+    expect(await resolveEndpoint(false, approve)).toMatchObject({ url: 'https://hand.example', grant: 'g' });
+    expect(asked).toEqual([url, url]);
+    at('/');
+  });
+
+  test('the group\'s mark stays with the core the window opens on, and that core goes with its machine whatever key it holds', () => {
+    const url = 'http://10.0.0.5:9000';
+    // Two windows each got a key for the same machine of the group: one is the stored core, the other the saved entry.
+    storeEndpoint({ url, token: 'first', paired: true, coreId: 'b', groupId: 'grp' });
+    expect(readStoredEndpoint()).toEqual({ url, token: 'first', paired: true, coreId: 'b', groupId: 'grp' });
+    rememberSession({ url, token: '', ticket: 't', coreId: 'b', groupId: 'grp' }, 'second');
+    removeBrought(url, { coreId: 'b', groupId: 'grp' }, 1);
+    expect(readEnvironments()).toEqual([]);
+    expect(readStoredEndpoint()).toBeNull();
+    // From then on nothing saved for that address is read, whichever window left it and however it looks.
+    storeEndpoint({ url, token: 'left-behind', paired: true });
+    upsertEnvironment({ url, token: 'left-behind', paired: true });
+    expect(readStoredEndpoint()).toBeNull();
+    expect(readEnvironments()).toEqual([]);
+    // A new key issued for it ends that: here a pairing made by hand, which is not the group's to take.
+    rememberSession({ url, token: '', grant: 'g' }, 'hand');
+    storeEndpoint({ url, token: 'hand', paired: true });
+    removeBrought(url, { coreId: 'b', groupId: 'grp' }, 1);
+    expect(readEnvironments()).toEqual([{ url, label: '10.0.0.5:9000', token: 'hand', paired: true }]);
+    expect(readStoredEndpoint()).toMatchObject({ token: 'hand' });
+    // An address a member merely gave, tried and given up, is no machine the group brought: the owner's key for
+    // whoever really sits there, saved so far only as the core a window opens on, is left alone.
+    storeEndpoint({ url: 'https://d.example', token: 'approved', paired: true });
+    removeBrought('https://d.example', { coreId: 'm', groupId: 'grp' }, 1);
+    expect(isDropped('https://d.example')).toBe(false);
+    expect(readStoredEndpoint()).toMatchObject({ url: 'https://d.example', token: 'approved' });
+    storeEndpoint({ url, token: 'hand', paired: true });
+    // A ticket exchange begun before the drop and finished after it is for a machine that has left since.
+    const began = Date.now() - 1000;
+    rememberSession({ url: 'http://10.0.0.7:9000', token: '', ticket: 't', coreId: 'e', groupId: 'grp' }, 'one');
+    expect(droppedSince('http://10.0.0.7:9000', began)).toBe(false);
+    removeBrought('http://10.0.0.7:9000', { coreId: 'e', groupId: 'grp' }, 1);
+    expect([isDropped('http://10.0.0.7:9000'), droppedSince('http://10.0.0.7:9000', began), droppedSince('http://10.0.0.7:9000', Date.now() + 1000)]).toEqual([true, true, false]);
+    // And so does the group bringing the machine back at that address.
+    rememberSession({ url: 'http://10.0.0.6:9000', token: '', ticket: 't', coreId: 'c', groupId: 'grp' }, 'one');
+    removeBrought('http://10.0.0.6:9000', { coreId: 'c', groupId: 'grp' }, 1);
+    // A member that has not caught up still lists the admission that was dropped: that is not the machine coming back.
+    expect([isDropped('http://10.0.0.6:9000'), isDropped('http://10.0.0.6:9000', 1), isDropped('http://10.0.0.6:9000', 2)]).toEqual([true, true, false]);
+    rememberSession({ url: 'http://10.0.0.6:9000', token: '', ticket: 't', coreId: 'c', groupId: 'grp', epoch: 2 }, 'two');
+    expect(readEnvironments().find((env) => env.url === 'http://10.0.0.6:9000')).toMatchObject({ token: 'two', coreId: 'c', epoch: 2 });
+    // The machine is marked as what it is too, for a window that holds it under another address, until a later admission brings it back.
+    removeBrought('http://10.0.0.6:9000', { coreId: 'c', groupId: 'grp' }, 2);
+    expect([isMemberDropped('grp', 'c'), isMemberDropped('grp', 'c', 2), isMemberDropped('grp', 'c', 3), isMemberDropped('other', 'c')]).toEqual([true, true, false, false]);
+    expect(droppedSince('http://10.0.0.9:9000', began, { coreId: 'c', groupId: 'grp' })).toBe(true);
+    rememberSession({ url: 'http://10.0.0.6:9000', token: '', ticket: 't', coreId: 'c', groupId: 'grp', epoch: 3 }, 'three');
+    expect(isMemberDropped('grp', 'c')).toBe(false);
+    // Many later removals make room among the addresses, never among the machines: a removal stays known.
+    removeBrought('http://10.0.0.6:9000', { coreId: 'c', groupId: 'grp' }, 3);
+    for (let index = 0; index < 300; index += 1) {
+      rememberSession({ url: `http://10.1.${index}.1:9000`, token: '', ticket: 't', coreId: `m${index}`, groupId: 'grp', epoch: 1 }, 'key');
+      removeBrought(`http://10.1.${index}.1:9000`, { coreId: `m${index}`, groupId: 'grp' }, 1);
+    }
+    expect([isMemberDropped('grp', 'c', 3), isMemberDropped('grp', 'm0', 1), isDropped('http://10.1.299.1:9000'), isDropped('http://10.1.0.1:9000')]).toEqual([true, true, true, false]);
+    // A window that held an older admission of the machine lets it go without lowering what is recorded.
+    removeBrought('http://10.0.0.6:9000', { coreId: 'c', groupId: 'grp' }, 1);
+    expect([isMemberDropped('grp', 'c', 3), isMemberDropped('grp', 'c', 4)]).toEqual([true, false]);
+    // Two windows wrote at the same instant, and the later one started from what it had read: an older admission
+    // comes back, or the machine's mark goes. The window that hears the change puts back what it knew.
+    const kept = JSON.parse(window.localStorage.getItem('boite.group.dropped')!) as Record<string, { at: number; epoch: number }>;
+    window.localStorage.setItem('boite.group.dropped', JSON.stringify({ ...kept, 'member grp c': { at: 1, epoch: 1 } }));
+    expect(isMemberDropped('grp', 'c', 3)).toBe(false);
+    keepDropped();
+    expect([isMemberDropped('grp', 'c', 3), isMemberDropped('grp', 'c', 4), droppedSince('http://10.0.0.9:9000', began, { coreId: 'c', groupId: 'grp' })]).toEqual([true, false, true]);
+    const { 'member grp c': gone, 'http://10.1.299.1:9000': address, ...others } = kept;
+    window.localStorage.setItem('boite.group.dropped', JSON.stringify(others));
+    expect([gone !== undefined, address !== undefined, isMemberDropped('grp', 'c', 3)]).toEqual([true, true, false]);
+    keepDropped();
+    // The address stays gone: a pairing made by hand clears it, and putting it back would hide that machine.
+    expect([isMemberDropped('grp', 'c', 3), isDropped('http://10.1.299.1:9000'), isDropped('http://10.1.298.1:9000')]).toEqual([true, false, true]);
+    rememberSession({ url: 'http://10.0.0.6:9000', token: '', ticket: 't', coreId: 'c', groupId: 'grp', epoch: 4 }, 'four');
+    // A machine that only moved leaves no mark: it may come back to the address it had.
+    removeBrought('http://10.0.0.6:9000', { coreId: 'c', groupId: 'grp' });
+    expect([isDropped('http://10.0.0.6:9000'), readEnvironments().some((env) => env.url === 'http://10.0.0.6:9000')]).toEqual([false, false]);
+  });
+
+  test('the core a link names is read before the link is taken, whatever key the link brings', () => {
+    at('/?core=http%3A%2F%2F10.0.0.5%3A9000%2F');
+    expect(linkedCore()).toBe('http://10.0.0.5:9000');
+    at('/?core=http%3A%2F%2F10.0.0.5%3A9000&grant=g');
+    expect(linkedCore()).toBe('http://10.0.0.5:9000');
+    at('/?core=http%3A%2F%2F10.0.0.5%3A9000&token=t');
+    expect(linkedCore()).toBe('http://10.0.0.5:9000');
+    at('/?grant=g');
+    expect(linkedCore()).toBeNull();
+    at('/');
+    expect(linkedCore()).toBeNull();
   });
 
   test('an unpaired stored endpoint and a broken list seed nothing', () => {

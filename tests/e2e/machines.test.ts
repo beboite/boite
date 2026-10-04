@@ -228,3 +228,124 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     b.close();
   }
 }, 60_000);
+
+test('one invitation groups two real cores: the page connects the second by itself, and a paired phone reaches both', async () => {
+  const first = await startCore(),
+    second = await startCore();
+  cores.push(first, second);
+  const a = await connect(first.url, first.token),
+    b = await connect(second.url, second.token);
+  try {
+    // The page is served by the UI server of this test, not by a core: both cores allow its origin.
+    await Promise.all([
+      a.call('settings.set', { browserOrigins: [url] }),
+      b.call('settings.set', { browserOrigins: [url] })
+    ]);
+    const create = async (client: typeof a, path: string, name: string) => {
+      const project = await client.call('projects.add', { path, name });
+      const account = (await client.call('accounts.list', {})).find((entry) => entry.providerId === 'echo')!;
+      return client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title: name });
+    };
+    const ta = await create(a, first.dataDir, 'Desk project');
+    const tb = await create(b, second.dataDir, 'Server project');
+    const machines = (count: number) => `globalThis.__boiteTest.workspace.machines.filter(machine => machine.store.connection === 'ready').length === ${count}`;
+    // The card sits under the updates of each machine: a capture is of the card, not of the top of the page.
+    const showGroup = () => page.evaluate(`document.querySelector('${id('group-card')}').scrollIntoView({ block: 'start' })`);
+
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+    await page.evaluate('localStorage.clear()');
+    await page.navigate(`${url}/?core=${encodeURIComponent(first.url)}&token=${encodeURIComponent(first.token)}`);
+    await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);
+    await page.click(id('confirm-ok'));
+    await page.waitFor(`document.querySelector('[data-thread-id="${ta.id}"]')`);
+    await page.click(id('nav-settings'));
+    await page.click(id('settings-tab-machines'));
+
+    // One machine starts the group and mints an invitation.
+    await page.type(id('group-name'), 'Home');
+    await page.click(id('group-create'));
+    await page.waitFor(`document.querySelectorAll('${id('group-member')}').length === 1`);
+    expect((await a.call('group.get', {}))?.name).toBe('Home');
+    await page.click(id('group-invite'));
+    await page.waitFor(`document.querySelector('${id('group-invite-code')}')?.value.startsWith('boite-group:')`);
+    const invite = await page.evaluate<string>(`document.querySelector('${id('group-invite-code')}').value`);
+    await showGroup();
+    await capture('group-invite-desktop.png');
+
+    // The other machine joins with it, as its own settings or `boite-core group join` would.
+    const joined = await b.call('group.join', { invite });
+    expect(joined.cores).toHaveLength(2);
+    // No pairing link for the second machine: the page was handed a key by it through the group.
+    await page.waitFor(machines(2));
+    await page.waitFor(`document.querySelectorAll('${id('group-member')}').length === 2 && document.querySelectorAll('${id('machine-card')}').length === 2`);
+    const sessions = await b.call('sessions.list', {});
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({ role: 'owner', group: true });
+    await showGroup();
+    await capture('group-real-cores-desktop.png');
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await page.waitFor(`document.querySelector('${id('group-card')}')`);
+    await showGroup();
+    await capture('group-real-cores-phone.png');
+    expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+
+    // The key is remembered: a reload reconnects both without another ticket.
+    await page.evaluate('location.reload()');
+    await page.waitFor(machines(2));
+    await page.waitFor(`document.querySelector('[data-thread-id="${tb.id}"]')`);
+    expect(await b.call('sessions.list', {})).toHaveLength(1);
+
+    // The address the second machine's key was saved for is retired, and somebody else listens there.
+    // At start the first machine is asked before that key is sent: it never is, and the page reaches the second anew.
+    const heard: string[] = [];
+    const retired = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch(request, listener) {
+        return listener.upgrade(request) ? undefined : new Response('retired', { status: 404 });
+      },
+      websocket: { message(_socket, message) { heard.push(String(message)); } }
+    });
+    try {
+      await page.evaluate(`(() => {
+        const saved = JSON.parse(localStorage.getItem('boite.envs'));
+        saved.find((env) => env.url === ${JSON.stringify(second.url)}).url = 'http://127.0.0.1:${retired.port}';
+        localStorage.setItem('boite.envs', JSON.stringify(saved));
+      })()`);
+      await page.evaluate('location.reload()');
+      await page.waitFor(`${machines(2)} && globalThis.__boiteTest.workspace.machines.some(machine => machine.id === ${JSON.stringify(second.url)})`);
+      expect(heard).toEqual([]);
+      expect(await page.evaluate<string[]>(`JSON.parse(localStorage.getItem('boite.envs')).map((env) => env.url).sort()`)).toEqual([first.url, second.url].sort());
+    } finally {
+      await retired.stop(true);
+    }
+
+    // A phone pairs with the first machine only, as a device, on a browser that knows neither.
+    await page.evaluate('localStorage.clear()');
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    const grant = await a.call('pairing.grant', { role: 'device' });
+    await page.navigate(`${url}/?core=${encodeURIComponent(first.url)}&grant=${encodeURIComponent(grant.grant)}`);
+    await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);
+    await page.click(id('confirm-ok'));
+    await page.waitFor(machines(2));
+    expect(await page.evaluate<string[]>(`globalThis.__boiteTest.workspace.machines.map(machine => machine.store.principal)`)).toEqual(['session', 'session']);
+    const device = (await b.call('sessions.list', {})).find((session) => session.role === 'device');
+    expect(device).toMatchObject({ group: true });
+    expect((await a.call('group.get', {}))?.devices).toHaveLength(1);
+    await mobileAction(page, 'mobile-conversations');
+    await page.waitFor(`document.querySelectorAll('[data-testid="mobile-list"] .thread').length === 2`);
+    await capture('group-phone-both-machines.png');
+    expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+
+    // Removed from the group: the second machine leaves, drops the phone's key, and the page lets it go.
+    await a.call('group.remove', { coreId: joined.self });
+    await page.waitFor(`globalThis.__boiteTest.workspace.machines.length === 1`, 20_000);
+    expect(await b.call('group.get', {})).toBeNull();
+    expect((await b.call('sessions.list', {})).filter((session) => session.group)).toEqual([]);
+    await page.send('Emulation.clearDeviceMetricsOverride', {});
+  } finally {
+    a.close();
+    b.close();
+  }
+}, 90_000);

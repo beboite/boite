@@ -63,6 +63,11 @@ connection can change permissions.
 
 ## Reaching another computer
 
+The machines of a [group](groups.md) are linked already: every member trusts
+the others' keys, over the addresses the group gives, HTTP on a tailnet or a
+LAN included, with the app closed. What follows links two machines that share
+no group.
+
 Connect both machines in Machines using owner connections. The app relays signed
 requests between these connections, including a desktop core without a public
 address. Both connections must remain open for this route. For communication

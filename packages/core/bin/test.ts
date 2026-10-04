@@ -15,6 +15,13 @@ if (!args.some(arg => arg === '--timeout' || arg.startsWith('--timeout='))) {
   args.push('--timeout', '60000');
 }
 
+// A file whose process stops answering, its event loop blocked where no test timeout can fire, is
+// ended here with what it printed, rather than holding the whole run until the job is cancelled.
+const fileDeadlineMs = Number(process.env.BOITE_TEST_FILE_DEADLINE_MS ?? 300_000);
+if (!Number.isInteger(fileDeadlineMs) || fileDeadlineMs < 1000) {
+  throw new Error(`BOITE_TEST_FILE_DEADLINE_MS: expected at least 1000, received ${process.env.BOITE_TEST_FILE_DEADLINE_MS}`);
+}
+
 const files = [...new Bun.Glob('**/*.test.ts').scanSync({ cwd: resolve(core, 'test') })].sort();
 if (!files.length) throw new Error(`${resolve(core, 'test')}: expected at least one .test.ts file`);
 const running = new Set<Bun.Subprocess>();
@@ -40,11 +47,16 @@ async function runFile(file: string) {
     env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
   });
   running.add(child);
+  let overdue = false;
+  const deadline = setTimeout(() => {
+    overdue = true;
+    child.kill();
+  }, fileDeadlineMs);
   try {
     const [stdout, stderr, code] = await Promise.all([
       new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
     ]);
-    console.log(`\n=== ${file} (exit ${code}) ===`);
+    console.log(`\n=== ${file} (exit ${code}${overdue ? `, ended after ${fileDeadlineMs} ms without finishing` : ''}) ===`);
     if (stdout) process.stdout.write(stdout);
     if (stderr) process.stderr.write(stderr);
     const output = (stdout + '\n' + stderr).replace(/\x1b\[[0-9;]*m/g, '');
@@ -54,6 +66,7 @@ async function runFile(file: string) {
     if (code !== 0) failures.push(file);
     completed++;
   } finally {
+    clearTimeout(deadline);
     // Also reap a captured process if reading its output failed.
     if (child.exitCode === null) child.kill();
     await child.exited;

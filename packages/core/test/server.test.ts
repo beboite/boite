@@ -915,7 +915,7 @@ describe('server', () => {
       token: harness.token, grant: 'x', protocolVersion: PROTOCOL_VERSION, client: { name: 'test', version: '0' },
     } }));
     const frame = (await firstFrame(socket)) as { error?: { code: number; message: string } };
-    expect(frame.error?.message).toBe('hello takes a token or a grant, one of the two');
+    expect(frame.error?.message).toBe('hello takes a token, a grant or a group ticket, one of the three');
     expect(await closeCode(socket)).toBe(RpcCloseCode.Unauthorized);
   });
 

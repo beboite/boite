@@ -365,6 +365,7 @@
     const requestedThread = new URLSearchParams(location.search).get('thread');
     if (requestedThread) { const url = new URL(location.href); url.searchParams.delete('thread'); history.replaceState(history.state, '', url); }
     const stopSettingsSync = workspace.settingsSync.start();
+    const stopGroupLinks = workspace.groups.start();
     void workspace.boot(requestedThread || null);
     // The stored theme, and the OS one while the setting reads `system`.
     const stopTheme = startTheme();
@@ -377,6 +378,7 @@
         stopTheme();
         stopToasts();
         stopSettingsSync();
+        stopGroupLinks();
         workspace.close();
       };
     }
@@ -421,6 +423,7 @@
       stopToasts();
       quitHold?.dispose();
       stopSettingsSync();
+      stopGroupLinks();
       workspace.close();
     };
   });

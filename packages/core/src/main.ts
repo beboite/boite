@@ -11,7 +11,7 @@ import {
 import { uptime } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import type { Channel, PairingGrant, PairingRole, Settings, TailscaleStatus } from '@boite/contracts';
+import type { Channel, Group, PairingGrant, PairingRole, Settings, TailscaleStatus } from '@boite/contracts';
 import { connect } from './client.ts';
 import type { Core } from './core.ts';
 import { CORE_VERSION } from './version.ts';
@@ -282,6 +282,64 @@ export function describeTailscale(status: TailscaleStatus): string {
   return `${lines[status.state]}${detail}${action}`;
 }
 
+const FLAGS_WITH_VALUE = new Set(['--public-url', '--port', '--host', '--data-dir', '--channel']);
+
+/** What is left of a command line once the flags and their values are taken out. */
+export function positionals(argv: string[]): string[] {
+  const out: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]!;
+    if (FLAGS_WITH_VALUE.has(arg)) index += 1;
+    else if (!arg.startsWith('--')) out.push(arg);
+  }
+  return out;
+}
+
+function describeGroup(group: Group | null): string {
+  if (group === null) return 'this machine belongs to no group\n';
+  const lines = group.cores.map((core) => `  ${core.coreId === group.self ? '*' : ' '} ${core.name}  ${core.addresses.join(' ')}`);
+  return `group ${group.name}, ${group.cores.length} machine${group.cores.length === 1 ? '' : 's'}, ${group.devices.length} device${group.devices.length === 1 ? '' : 's'}\n${lines.join('\n')}\n`;
+}
+
+/**
+ * `boite-core group <status|create|invite|join|leave>`: the group card of a
+ * machine with no window, on the core already running on this data directory.
+ * What it prints on stdout is the answer alone (the invitation, the roster),
+ * so a script can take it; an invitation is a credential and stays out of logs.
+ */
+export async function group(argv: string[]): Promise<string> {
+  const [action = 'status', value] = positionals(argv);
+  // Refused before anything else: an invitation given as an argument stays in the process list, in the
+  // shell's history and in a traced command line, and lets whoever reads it join first.
+  if (action === 'join' && value !== undefined) {
+    throw new Error('group join takes no argument: give the invitation on its standard input, so it stays out of the process list');
+  }
+  const client = await ownerClient(argv);
+  try {
+    switch (action) {
+      case 'status':
+        return describeGroup(await client.call('group.get', {}));
+      case 'create':
+        if (!value) throw new Error('group create expects a name');
+        return describeGroup(await client.call('group.create', { name: value }));
+      case 'invite':
+        return `${(await client.call('group.invite', {})).invite}\n`;
+      case 'join': {
+        const invite = (await Bun.stdin.text()).trim();
+        if (!invite) throw new Error('group join reads the invitation "group invite" printed on a machine of the group from its standard input');
+        return describeGroup(await client.call('group.join', { invite }));
+      }
+      case 'leave':
+        await client.call('group.leave', {});
+        return describeGroup(null);
+      default:
+        throw new Error(`group expects status, create, invite, join or leave, got ${action}`);
+    }
+  } finally {
+    client.close();
+  }
+}
+
 /** A connection to the core already running on this data directory, as its owner, with the token `core.json` holds. */
 async function ownerClient(argv: string[]): Promise<Awaited<ReturnType<typeof connect>>> {
   const flags = parseFlags(argv);
@@ -378,6 +436,19 @@ export function main(argv: string[]): void {
     );
     return;
   }
+  if (argv[0] === 'group') {
+    group(argv.slice(1)).then(
+      (answer) => {
+        process.stdout.write(answer);
+        process.exit(0);
+      },
+      (error: unknown) => {
+        process.stderr.write(`boite-core group: ${error instanceof Error ? error.message : String(error)}\n`);
+        process.exit(1);
+      },
+    );
+    return;
+  }
   if (argv[0] === 'tailscale') {
     tailscale(argv.slice(1)).then(
       (status) => {
@@ -428,7 +499,8 @@ export function main(argv: string[]): void {
     const host = resolveHost(flags, settings);
     let server: ReturnType<typeof startServerOnStickyPort>;
     try {
-      server = startServerOnStickyPort({ core, host, port: flags.port, explicitPort: flags.portExplicit, previousPort: previous.port });
+      // An address the operator named is the only one this core answers on.
+      server = startServerOnStickyPort({ core, host, port: flags.port, explicitPort: flags.portExplicit, previousPort: previous.port, tailnet: !flags.hostExplicit });
     } catch (error) {
       const deadline = setTimeout(() => { unlock(); refuseToStart(error); }, SHUTDOWN_TIMEOUT_MS);
       deadline.unref();

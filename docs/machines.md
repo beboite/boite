@@ -6,6 +6,11 @@ composer and settings. It does not move the thread or its processes.
 
 ## Connecting a machine
 
+Machines that are all yours go in a [group](groups.md): one invitation per
+machine, and each connects to every other, phones included. The pairing link
+below connects one machine to one client, in one direction, and is the way to
+reach a machine you would not give full control of the others.
+
 Open Machines and updates from Settings. On the machine to add,
 mint a full-control pairing link in General, or run `boite-core pair --owner`.
 Paste the link into Add machine, optionally name it, then connect. A manual URL
@@ -155,6 +160,9 @@ header never carries one, and a line given twice is kept once. Save the list on
 that core.
 Removing an origin blocks new connections from it; existing authenticated
 connections must be revoked separately if they should lose access immediately.
+
+The machines of a [group](groups.md) allow each other's addresses as origins,
+so this list is only needed outside one.
 
 The origin permission does not replace authentication. Every socket still needs
 its own valid token or one-time grant. HTTPS pages need secure WebSocket

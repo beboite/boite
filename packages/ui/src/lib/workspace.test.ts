@@ -147,6 +147,224 @@ test('an empty local core yields to the remembered journal on the same computer'
   expect(w.machines[0]?.label).toBe('Studio');
   expect(a.threads.length).toBeGreaterThan(0);
 });
+test('a machine the group brought never becomes the page core by claiming this computer\'s name, and its key over plain HTTP waits to be vetted', async () => {
+  const { w, a, b } = await setup();
+  a.localCore = true;
+  a.threads = [];
+  a.core = { ...a.core!, hostname: 'desktop', dataDir: '/fresh-dev' };
+  b.core = { ...b.core!, hostname: 'desktop', dataDir: '/elsewhere' };
+  a.endpointUrl = 'http://local.test';
+  upsertEnvironment({ url: 'http://local.test', token: 'fake', paired: true, label: 'Local', coreId: 'a', groupId: 'grp' });
+  upsertEnvironment({ url: 'http://10.0.0.7:1', token: 'fake', paired: true, label: 'Studio', coreId: 'b', groupId: 'grp' });
+  upsertEnvironment({ url: 'http://10.0.0.8:1', token: 'fake', paired: true, label: 'Retired', coreId: 'c', groupId: 'grp' });
+  const vet = vi.spyOn(w.groups, 'vet').mockImplementation(async (held) => held.filter((env) => env.coreId !== 'c'));
+  // The page opened on a pairing link for its own machine: the exchange takes the group's mark off the saved entry.
+  vi.spyOn(a, 'boot').mockImplementation(async () => { endpoints.rememberSession({ url: 'http://local.test', token: '', grant: 'g' }, 'by-hand'); });
+  const add = vi.spyOn(w, 'add').mockImplementation(async (endpoint) => {
+    w.machines = [...w.machines, { id: endpoint.url, label: 'Studio', store: b, coreId: 'b', groupId: 'grp' }];
+    return true;
+  });
+  const restore = vi.spyOn(a, 'switchEnvironment').mockResolvedValue();
+  await w.boot();
+  expect(vet.mock.calls[0]![0].map((env) => env.coreId)).toEqual(['a', 'b', 'c']);
+  // The key that was refused is never sent; the one that stands is.
+  expect(add.mock.calls.map(([endpoint]) => endpoint.url)).toEqual(['http://10.0.0.7:1']);
+  expect(restore).not.toHaveBeenCalled();
+  expect(w.machines.map((machine) => [machine.id, machine.coreId])).toEqual([['http://local.test', undefined], ['http://10.0.0.7:1', 'b']]);
+});
+
+test('the window opens on a machine paired by hand when the key of the one it would open on is refused at start', async () => {
+  const { w, a } = await setup();
+  endpoints.storeEndpoint({ url: 'http://10.0.0.8:1', token: 'old', paired: true });
+  upsertEnvironment({ url: 'http://10.0.0.8:1', token: 'old', paired: true, label: 'Retired', coreId: 'c', groupId: 'grp' });
+  upsertEnvironment({ url: 'https://anchor.test', token: 'hand', paired: true, label: 'Anchor' });
+  const vet = vi.spyOn(w.groups, 'vet').mockImplementation(async (held, anchors) => {
+    expect(anchors).toEqual([{ url: 'https://anchor.test', token: 'hand', paired: true }]);
+    for (const env of held) endpoints.removeEnvironment(env.url);
+    return [];
+  });
+  // By the time the page core connects, the refused key is no longer the one it would send.
+  const boot = vi.spyOn(a, 'boot').mockImplementation(async () => {
+    expect(endpoints.readStoredEndpoint()).toMatchObject({ url: 'https://anchor.test', token: 'hand' });
+  });
+  vi.spyOn(w, 'add').mockResolvedValue(true);
+  await w.boot();
+  expect(vet).toHaveBeenCalledTimes(1);
+  expect(boot).toHaveBeenCalledTimes(1);
+});
+
+test('a refused key is sent nowhere: not through a link that reopens its core, not read back once it was the last entry', async () => {
+  const { w, a } = await setup();
+  // The answer takes a moment, as a question over the network does: nothing may be sent meanwhile.
+  const refuse = () => vi.spyOn(w.groups, 'vet').mockImplementation(async (held) => {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    for (const env of held) endpoints.removeEnvironment(env.url);
+    return [];
+  });
+  vi.spyOn(w, 'add').mockResolvedValue(true);
+  // A page sends the owner to `?core=` of a machine the group brought: the link waits for the answer like the stored core does.
+  endpoints.storeEndpoint({ url: 'https://anchor.test', token: 'hand', paired: true });
+  upsertEnvironment({ url: 'https://anchor.test', token: 'hand', paired: true, label: 'Anchor' });
+  upsertEnvironment({ url: 'http://10.0.0.8:1', token: 'old', paired: true, label: 'Retired', coreId: 'c', groupId: 'grp' });
+  window.history.replaceState(null, '', '/?core=http%3A%2F%2F10.0.0.8%3A1');
+  let vet = refuse();
+  const boot = vi.spyOn(a, 'boot').mockImplementation(async () => {
+    expect(endpoints.readEnvironments().map((env) => env.url)).toEqual(['https://anchor.test']);
+  });
+  await w.boot();
+  expect(vet).toHaveBeenCalledTimes(1);
+  expect(boot).toHaveBeenCalledTimes(1);
+  window.history.replaceState(null, '', '/');
+
+  // In the shell, the only saved machine is one the group brought and the window was left on it.
+  localStorage.clear();
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+  vi.spyOn(endpoints, 'fromTauri').mockResolvedValue({ url: 'http://127.0.0.1:41000', token: 'test', local: true });
+  endpoints.storeEndpoint({ url: 'http://10.0.0.8:1', token: 'old', paired: true });
+  upsertEnvironment({ url: 'http://10.0.0.8:1', token: 'old', paired: true, label: 'Retired', coreId: 'c', groupId: 'grp' });
+  vet.mockRestore();
+  vet = refuse();
+  boot.mockImplementation(async () => {
+    // Its key is gone from both places, and the emptied list did not seed it back as a machine paired by hand.
+    expect(endpoints.readStoredEndpoint()).toBeNull();
+    expect(endpoints.readEnvironments()).toEqual([]);
+  });
+  await w.boot();
+  expect(vet.mock.calls[0]![1]).toEqual([{ url: 'http://127.0.0.1:41000', token: 'test', local: true }]);
+  expect(boot).toHaveBeenCalledTimes(2);
+
+  // A link to a core nobody knows, which the owner may decline: the stored core it would fall back on is asked about all the same.
+  delete window.__TAURI_INTERNALS__;
+  localStorage.clear();
+  endpoints.storeEndpoint({ url: 'http://10.0.0.8:1', token: 'old', paired: true });
+  upsertEnvironment({ url: 'http://10.0.0.8:1', token: 'old', paired: true, label: 'Retired', coreId: 'c', groupId: 'grp' });
+  upsertEnvironment({ url: 'https://anchor.test', token: 'hand', paired: true, label: 'Anchor' });
+  window.history.replaceState(null, '', '/?core=https%3A%2F%2Funknown.example');
+  vet.mockRestore();
+  vet = refuse();
+  boot.mockImplementation(async () => {
+    expect(endpoints.readStoredEndpoint()).toMatchObject({ url: 'https://anchor.test', token: 'hand' });
+  });
+  await w.boot();
+  window.history.replaceState(null, '', '/');
+  expect(vet).toHaveBeenCalledTimes(1);
+  expect(boot).toHaveBeenCalledTimes(3);
+});
+
+test('a machine the group brought stays the group\'s to drop when its key is refused as the window opens on it', async () => {
+  const { w, a } = await setup();
+  a.localCore = false;
+  a.endpointUrl = 'https://b.example';
+  upsertEnvironment({ url: 'https://b.example', token: 'old', paired: true, label: 'B', coreId: 'b', groupId: 'grp' });
+  // The hello is refused: the dead key and its saved entry go during the boot.
+  vi.spyOn(a, 'boot').mockImplementation(async () => { endpoints.removeEnvironment('https://b.example', 'old'); });
+  vi.spyOn(w, 'add').mockResolvedValue(true);
+  await w.boot();
+  expect(w.machines[0]).toMatchObject({ id: 'https://b.example', coreId: 'b', groupId: 'grp' });
+
+  // The entry goes during the boot and the window connects all the same, on a key a link brought:
+  // written again, the entry is still one the group brought.
+  upsertEnvironment({ url: 'https://b.example', token: 'old', paired: true, label: 'B', coreId: 'b', groupId: 'grp' });
+  vi.spyOn(a, 'boot').mockImplementation(async () => {
+    endpoints.removeEnvironment('https://b.example', 'old');
+    endpoints.storeEndpoint({ url: 'https://b.example', token: 'from-a-link', paired: true });
+  });
+  await w.boot();
+  expect(endpoints.readEnvironments().find((env) => env.url === 'https://b.example')).toMatchObject({ token: 'from-a-link', coreId: 'b', groupId: 'grp' });
+  expect(w.machines[0]).toMatchObject({ coreId: 'b', groupId: 'grp' });
+
+  // A pairing link the owner said yes to, opened during the boot: the entry it wrote is the owner's, and stays so.
+  vi.spyOn(a, 'boot').mockImplementation(async () => {
+    endpoints.rememberSession({ url: 'https://b.example', token: '', grant: 'g' }, 'by-hand');
+    endpoints.storeEndpoint({ url: 'https://b.example', token: 'by-hand', paired: true });
+  });
+  await w.boot();
+  const entry = endpoints.readEnvironments().find((env) => env.url === 'https://b.example')!;
+  expect([entry.token, entry.coreId, w.machines[0]!.coreId]).toEqual(['by-hand', undefined, undefined]);
+});
+
+test('a stored core the group brought is still one when the list has no entry left for it', async () => {
+  const { w, a } = await setup();
+  a.localCore = false;
+  a.endpointUrl = 'http://10.0.0.8:1';
+  // Another window dropped the saved entry; this key, from an earlier ticket, stayed as the core the window opens on.
+  endpoints.storeEndpoint({ url: 'http://10.0.0.8:1', token: 'earlier', paired: true, coreId: 'c', groupId: 'grp' });
+  upsertEnvironment({ url: 'https://anchor.test', token: 'hand', paired: true, label: 'Anchor' });
+  const vet = vi.spyOn(w.groups, 'vet').mockImplementation(async (held) => held);
+  vi.spyOn(a, 'boot').mockResolvedValue();
+  vi.spyOn(w, 'add').mockResolvedValue(true);
+  await w.boot();
+  // Asked about before its key is sent, and listed as the group's, so the group can drop it.
+  expect(vet.mock.calls[0]![0].map((env) => [env.url, env.coreId])).toEqual([['http://10.0.0.8:1', 'c']]);
+  expect(w.machines[0]).toMatchObject({ id: 'http://10.0.0.8:1', coreId: 'c', groupId: 'grp' });
+  expect(endpoints.readEnvironments().find((env) => env.url === 'http://10.0.0.8:1')).toMatchObject({ coreId: 'c', groupId: 'grp' });
+});
+
+test('a window whose machine the group dropped falls back on a machine paired by hand, never on the address it dropped', async () => {
+  const { w, a } = await setup();
+  a.endpointUrl = 'http://10.0.0.8:1';
+  w.machines = [{ id: 'http://10.0.0.8:1', label: 'Retired', store: a, coreId: 'c', groupId: 'grp' }];
+  upsertEnvironment({ url: 'http://10.0.0.8:1', token: 'old', paired: true, label: 'Retired', coreId: 'c', groupId: 'grp' });
+  upsertEnvironment({ url: 'https://anchor.test', token: 'hand', paired: true, label: 'Anchor' });
+  const order: string[] = [];
+  vi.spyOn(a, 'switchEnvironment').mockImplementation(async (url) => { order.push(`switch ${url}`); a.endpointUrl = url; });
+  vi.spyOn(a, 'forgetEnvironment').mockImplementation(async (url) => { order.push(`forget ${url}`); endpoints.removeEnvironment(url); });
+  await w.dropPrimary('http://10.0.0.8:1');
+  expect(order).toEqual(['switch https://anchor.test', 'forget http://10.0.0.8:1']);
+  expect(w.machines.map((machine) => [machine.id, machine.coreId])).toEqual([['https://anchor.test', undefined]]);
+});
+
+test('a window served by the machine the group dropped stays closed rather than reach it again with no key', async () => {
+  const { w, a, b } = await setup();
+  const origin = window.location.origin;
+  a.endpointUrl = origin;
+  w.machines = [{ id: origin, label: 'Dropped', store: a, coreId: 'c', groupId: 'grp' }, { id: 'https://anchor.test', label: 'Anchor', store: b }];
+  // Its saved entry is the only one: the pairing of the other machine was forgotten in another window.
+  upsertEnvironment({ url: origin, token: 'old', paired: true, label: 'Dropped', coreId: 'c', groupId: 'grp' });
+  const select = vi.spyOn(w, 'select').mockResolvedValue();
+  await w.dropPrimary(origin);
+  expect(a.connection).toBe('closed');
+  expect(a.client).toBeNull();
+  expect(endpoints.readEnvironments()).toEqual([]);
+  // The window shows the machine paired by hand that is still connected.
+  expect(select).toHaveBeenCalledWith(b);
+});
+
+test('a machine the group drops goes from this window, and its saved entry only while it is still the group\'s', async () => {
+  const { w, b } = await setup();
+  const url = 'http://10.0.0.7:1';
+  w.machines = [...w.machines.filter((machine) => machine.store !== b), { id: url, label: 'Studio', store: b, coreId: 'b', groupId: 'grp' }];
+  // Another window paired it by hand meanwhile: the entry is the owner's, with a key of its own.
+  upsertEnvironment({ url, token: 'by-hand', paired: true, label: 'Studio' });
+  await w.remove(url);
+  expect(w.machines.some((machine) => machine.id === url)).toBe(false);
+  expect(endpoints.readEnvironments().find((env) => env.url === url)).toMatchObject({ token: 'by-hand' });
+  // Still the entry the group brought: it goes.
+  upsertEnvironment({ url: 'http://10.0.0.8:1', token: 'from-group', paired: true, label: 'Other', coreId: 'c', groupId: 'grp' });
+  w.machines = [...w.machines, { id: 'http://10.0.0.8:1', label: 'Other', store: new Store(), coreId: 'c', groupId: 'grp' }];
+  await w.remove('http://10.0.0.8:1');
+  expect(endpoints.readEnvironments().some((env) => env.url === 'http://10.0.0.8:1')).toBe(false);
+});
+
+test('a machine the group brought is written back as one when its entry went while it connected', async () => {
+  const { w } = await setup();
+  vi.spyOn(Store.prototype, 'connectEndpoint').mockImplementation(async function (this: Store) {
+    // Another window dropped the entry while this one was saying hello.
+    endpoints.removeEnvironment('http://10.0.0.7:1');
+    this.connection = 'ready';
+  });
+  upsertEnvironment({ url: 'http://10.0.0.7:1', token: 'from-group', paired: true, label: 'Studio', coreId: 'b', groupId: 'grp' });
+  expect(await w.add({ url: 'http://10.0.0.7:1', token: 'from-group', paired: true, coreId: 'b', groupId: 'grp' }, 'Studio', true)).toBe(true);
+  expect(endpoints.readEnvironments().find((env) => env.url === 'http://10.0.0.7:1')).toMatchObject({ coreId: 'b', groupId: 'grp' });
+});
+
+test('a key refused late does not take away the pairing another window made meanwhile', () => {
+  const url = 'http://10.0.0.5:9000';
+  upsertEnvironment({ url, token: 'new-by-hand', paired: true });
+  expect(endpoints.removeEnvironment(url, 'old-from-group')).toHaveLength(1);
+  expect(endpoints.removeEnvironment(url, 'new-by-hand')).toEqual([]);
+});
+
 test('a notification link reaches the page core before a remembered machine answers', async () => {
   const { w, a } = await setup();
   a.endpointUrl = window.location.origin;

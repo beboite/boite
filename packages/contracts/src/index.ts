@@ -2062,6 +2062,8 @@ export interface PairedSession {
   lastSeenAt: Timestamp;
   /** True on the connection that asked. */
   current: boolean;
+  /** The group handed this key over: the client paired with another member. Revoking it there revokes it everywhere. */
+  group?: boolean;
 }
 
 /**
@@ -2262,6 +2264,88 @@ export interface CoordinationPeer {
 }
 /** Signed coordination response carried unchanged through the owner's app. */
 export interface CoordinationBridgeResponse { status: number; body: string; signature: string }
+
+/**
+ * One machine of a group. `coreId` is the fingerprint of its Ed25519 public
+ * key, the same identity agent coordination signs with, so it survives a
+ * change of address or of name.
+ */
+export interface GroupCore {
+  coreId: string;
+  name: string;
+  os?: Os;
+  /**
+   * Origins the other members and their clients dial, best first: the public
+   * HTTPS address, the tailnet name, the tailnet address, then the LAN one.
+   */
+  addresses: string[];
+  /**
+   * Which admission this is: 1 when the machine first joined, one more each
+   * time it is admitted again after a removal. A client that was told the
+   * group dropped a machine tells a member that has not caught up, which
+   * still lists the old admission, from the machine having come back.
+   */
+  epoch: number;
+}
+
+/** A phone or another computer paired with one member, which the group lets reach every member. */
+export interface GroupDevice {
+  /** `<home core id>:<session id>`: the member it paired with and its session there. */
+  id: string;
+  name: string;
+  role: PairingRole;
+}
+
+/**
+ * The machines that trust each other. Every member holds the same roster and
+ * accepts what another member vouches for: a client of one member is handed a
+ * key by each of the others, at the role it already has.
+ */
+export interface Group {
+  id: string;
+  name: string;
+  /** The core that answered. */
+  self: string;
+  cores: GroupCore[];
+  /** Left empty for a paired device, which only needs the machines. */
+  devices: GroupDevice[];
+}
+
+/**
+ * What a machine pastes to join. It names the group, the member that minted
+ * it, that member's addresses and key fingerprint, and a one-time grant good
+ * until `expiresAt`. It is a credential: whoever holds it joins.
+ */
+export interface GroupInvite {
+  invite: string;
+  expiresAt: Timestamp;
+}
+
+/**
+ * A member's signed word that the caller may connect to another member. The
+ * caller says `hello` with it there, once, within `expiresAt`, and receives a
+ * session key of its own for that core.
+ */
+export interface GroupTicket {
+  ticket: string;
+  coreId: string;
+  /** Where that member answers, best first. */
+  addresses: string[];
+  /**
+   * The one address the ticket is good at: the one asked for, else the first a
+   * key may be sent to. The member refuses a ticket made for an address it no
+   * longer gives, so one sent where the member used to be opens nothing.
+   */
+  url: string;
+  expiresAt: Timestamp;
+}
+
+/** The prefix of an invitation, so a pasted pairing link is told apart from one. */
+export const GROUP_INVITE_PREFIX = 'boite-group:';
+/** How long a ticket stays good: the time to open one socket, no more. */
+export const GROUP_TICKET_TTL_MS = 60 * 1000;
+/** A group is one person's machines; the roster travels whole in every exchange. */
+export const GROUP_MAX_CORES = 32;
 export interface CoordinationView {
   self: AgentAddress;
   config: CoordinationConfig;
@@ -2639,6 +2723,20 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'collaboration.bridge.forward': { params: { coreId: string; body: string; signature: string }; result: CoordinationBridgeResponse };
   /** Only the owner connection that received this request can complete it. */
   'collaboration.bridge.reply': { params: { requestId: string; response: CoordinationBridgeResponse }; result: { ok: true } };
+  /** The group this core belongs to, or null. A paired device reads the machines, never the devices. */
+  'group.get': { params: Record<string, never>; result: Group | null };
+  /** Starts a group with this core as its only member. Refused while it belongs to one. Owner only. */
+  'group.create': { params: { name: string }; result: Group };
+  /** A one-time invitation another machine joins with. Owner only. */
+  'group.invite': { params: Record<string, never>; result: GroupInvite };
+  /** Joins the group an invitation names: this core calls the member that minted it. Owner only. */
+  'group.join': { params: { invite: string }; result: Group };
+  /** Leaves the group and drops every key it handed out here. Owner only. */
+  'group.leave': { params: Record<string, never>; result: { ok: true } };
+  /** Removes another member: the others stop trusting it as each one hears of it. Owner only. */
+  'group.remove': { params: { coreId: string }; result: Group };
+  /** A ticket for the caller to connect to another member at its own role. */
+  'group.ticket': { params: { coreId: string; url?: string }; result: GroupTicket };
   'speech.status': { params: Record<string, never>; result: SpeechStatus };
   'speech.configure': { params: SpeechConfig & { groqKey?: string; openrouterKey?: string }; result: SpeechStatus };
   'speech.config': { params: Record<string, never>; result: SpeechConfig };
@@ -2696,7 +2794,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * The first frame. `token` is the core token or a session token; `grant` is
    * a pairing grant, exchanged here for a session whose token comes back in
    * `session` and is what this client says hello with from then on. One of the
-   * two, never both.
+   * two, never both. `ticket` is the third way in: a group member's signed
+   * word (`group.ticket`), exchanged once like a grant for a session of the
+   * role the ticket names.
    *
    * `nonce` goes with a grant: a random string of 16 to 256 characters the
    * client picks once and repeats on every retry. When the answer carrying the
@@ -2710,6 +2810,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
     params: {
       token?: string;
       grant?: string;
+      ticket?: string;
       nonce?: string;
       protocolVersion: number;
       client: { name: string; version: string };
@@ -3410,6 +3511,8 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserR
   'settings.updated': Settings;
   /** The keybindings file changed on disk and was read again; the whole result, as `keybindings.get` would answer. */
   'keybindings.updated': Keybindings;
+  /** The roster changed, or this core joined or left a group: re-read `group.get`. */
+  'group.updated': Record<string, never>;
   /** A session was created or revoked: the list to re-read is `sessions.list`. */
   'sessions.updated': { sessionId: string; state: 'created' | 'revoked' };
   /** What `providers.reload` found: the descriptors that loaded and the ones refused. */

@@ -11,6 +11,11 @@ export function registerCore(ctx: FakeContext): void {
   cores.set(ctx.identity.coreId, ctx);
 }
 
+/** A fake core of this page by its id, which is how one reaches another without a network. */
+export function fakeCore(coreId: string): FakeContext | undefined {
+  return cores.get(coreId);
+}
+
 export function unregisterCore(ctx: FakeContext): void {
   if (cores.get(ctx.identity.coreId) === ctx) cores.delete(ctx.identity.coreId);
 }

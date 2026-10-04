@@ -1,7 +1,7 @@
 import { RpcErrorCode, type CoreInfo, type Principal, type ThreadId } from '@boite/contracts';
 import { RpcFailure, WsClient, type Client, type ClientState, type ObservableClient } from '../client';
 import { confirm } from '../confirm.svelte';
-import { clearStoredEndpoint, refreshLocalEnvironment, fromTauri, shellEndpointError, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, servesThisPage, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from '../endpoint';
+import { clearStoredEndpoint, droppedSince, forgetGroupOf, readStoredEndpoint, rememberSession, refreshLocalEnvironment, removeBrought, fromTauri, shellEndpointError, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, servesThisPage, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from '../endpoint';
 import { onboardingSeen } from '../onboarding';
 import { rightPanel } from '../right-panel.svelte';
 import { fill, strings } from '../strings';
@@ -219,7 +219,7 @@ export class Connection {
     const off = client.onState((state) => {
       if (state !== 'ready') return;
       off();
-      storeEndpoint({ url: endpoint.url, token: endpoint.token, ...(endpoint.paired ? { paired: true } : {}) });
+      storeEndpoint(endpoint);
     });
     this.ctx.off.push(off);
   }
@@ -228,27 +228,35 @@ export class Connection {
     const url = endpoint.url;
     const repairing = this.pairingRequired && this.endpointUrl === url;
     this.ctx.store.machineId = endpoint.local ? 'local' : url;
-    const paired = endpoint.paired === true || endpoint.grant !== undefined;
+    const paired = endpoint.paired === true || endpoint.grant !== undefined || endpoint.ticket !== undefined;
     this.endpointUrl = url;
     this.paired = paired;
     // Keep the recovery form mounted during a new handshake with this machine.
     this.pairingRequired = repairing;
     this.ctx.store.error = null;
     this.localCore = endpoint.local === true;
-    this.#keyless = endpoint.token === '' && endpoint.grant === undefined;
+    this.#keyless = endpoint.token === '' && endpoint.grant === undefined && endpoint.ticket === undefined;
+    let key = endpoint.token;
+    const began = Date.now();
     const client = new WsClient({
       url,
       token: endpoint.token,
       ...(endpoint.grant === undefined ? {} : { grant: endpoint.grant }),
+      ...(endpoint.ticket === undefined ? {} : { ticket: endpoint.ticket }),
       paired,
       // The session a grant became is this device's own credential: kept
       // where the next load reads it, so the link is opened once, ever.
       // The core joins the remembered environments with it, so switching
       // back later needs no new link.
       onSession: (session) => {
+        key = session.token;
         if (this.ctx.client !== client) return;
-        if (rememberActive) storeEndpoint({ url, token: session.token, paired: true });
-        this.environments = upsertEnvironment({ url, token: session.token, paired: true });
+        // The group dropped this machine while its ticket was being exchanged: the key is refused, and the connection ends there.
+        if (endpoint.grant === undefined && droppedSince(url, began, endpoint)) return false;
+        // A ticket leaves the machine the group's; a grant makes it the owner's.
+        if (rememberActive) storeEndpoint({ url, token: session.token, paired: true, ...(endpoint.grant === undefined ? { coreId: endpoint.coreId, groupId: endpoint.groupId, epoch: endpoint.epoch } : {}) });
+        this.environments = rememberSession(endpoint, session.token);
+        return true;
       },
       onUnauthorized: (error) => {
         if (this.ctx.client === client && !this.localCore) this.#authenticationFailed(error);
@@ -258,8 +266,9 @@ export class Connection {
       // retrying every ten seconds.
       onRevoked: () => {
         if (this.ctx.client !== client) return;
-        if (rememberActive) clearStoredEndpoint();
-        this.environments = removeEnvironment(url);
+        // Only the key this connection presented is dead: another window may have paired this machine anew meanwhile.
+        if (rememberActive && readStoredEndpoint()?.token === key) clearStoredEndpoint();
+        this.environments = removeEnvironment(url, key);
         this.connection = 'closed';
         this.pairingRequired = true;
         this.ctx.store.error = strings.errors.revoked;
@@ -282,6 +291,9 @@ export class Connection {
     s.draft = null;
     s.closePairing();
     s.sessions = [];
+    s.group = null;
+    s.groupKnown = false;
+    s.groupInvite = null;
     s.projects = [];
     s.threads = [];
     // What the next core answers replaces these; one that cannot answer must not show the last one's.
@@ -378,6 +390,7 @@ export class Connection {
   /** Point the UI at another core, from the Settings page. It stays remembered. */
   async connectTo(url: string, token: string): Promise<void> {
     storeEndpoint({ url, token });
+    forgetGroupOf(url);
     this.environments = upsertEnvironment({ url, token, paired: false });
     await this.#switchTo({ url, token });
   }
@@ -390,17 +403,19 @@ export class Connection {
       this.ctx.store.error = strings.errors.noEndpoint;
       return;
     }
-    storeEndpoint({ url: env.url, token: env.token, ...(env.paired ? { paired: true } : {}) });
+    storeEndpoint(env);
     await this.#switchTo({ url: env.url, token: env.token, ...(env.paired ? { paired: true } : {}) });
   }
 
   /**
    * Drop a remembered core from this device. Its key stays valid there until
    * revoked; forgetting the core under the UI falls back to the local one.
+   * `brought` is the machine of a group it was: its entry goes only while it
+   * is still that one, not once it was paired by hand.
    */
-  async forgetEnvironment(url: string): Promise<void> {
-    this.environments = removeEnvironment(url);
-    if (this.endpointUrl === url) await this.ctx.store.useLocalCore();
+  async forgetEnvironment(url: string, brought?: { coreId: string; groupId?: string }, dropped?: number): Promise<void> {
+    this.environments = brought === undefined ? removeEnvironment(url) : removeBrought(url, brought, dropped);
+    if (this.endpointUrl === url) await this.ctx.store.useLocalCore(url);
   }
 
   /**
@@ -419,12 +434,16 @@ export class Connection {
     return this.connection === 'ready';
   }
 
-  /** Back to the core this shell started. Remembered cores stay remembered. */
-  async useLocalCore(): Promise<void> {
+  /**
+   * Back to the core this shell started. Remembered cores stay remembered.
+   * `not` is a core that was just forgotten: a page it served would resolve
+   * back to it, with no key, so the window stays closed instead.
+   */
+  async useLocalCore(not?: string): Promise<void> {
     const s = this.ctx.store;
     clearStoredEndpoint();
     const endpoint = await resolveEndpoint();
-    if (!endpoint) {
+    if (!endpoint || endpoint.url === not) {
       this.ctx.client?.close();
       s.detach();
       this.connection = 'closed';
@@ -465,6 +484,8 @@ export class Connection {
     const { accounts, requests } = this.ctx;
     const current = () => this.ctx.currentClient(client, generation) && this.#readEpoch === epoch;
     const loginRevision = accounts.loginRevision;
+    // What this connection said of its group before does not speak for what it is now.
+    s.groupKnown = false;
     const revisions = { ...this.ctx.metadataRevision };
     const projectRead = this.ctx.projectReads.begin();
     const threadRead = this.ctx.threadReads.begin();
@@ -516,6 +537,8 @@ export class Connection {
       await Promise.all([essential, ...secondary]);
       if (!current()) return;
       void s.loadHarnessUpdates();
+      // Beside the lists, not among them: the machines of the group are connected once it answers.
+      void s.loadGroup();
       void s.refreshMemory();
       if (open && reopened && s.openThread?.id === open.id) {
         await this.ctx.delegation.refreshDelegated(client);

@@ -22,6 +22,7 @@ import { hookMethods, recordHookRun } from './fake-client/hooks';
 import { logMethods } from './fake-client/logs';
 import { coordinationMethods, registerCore, unregisterCore } from './fake-client/coordination';
 import { delegationMethods, seedDelegationDemo } from './fake-client/delegation';
+import { groupMethods } from './fake-client/group';
 import { pairingMethods } from './fake-client/pairing';
 import { projectMethods } from './fake-client/projects';
 import { pathKey } from './fake-client/checks';
@@ -362,6 +363,7 @@ export class FakeClient implements ObservableClient {
       ...speechMethods(ctx),
       ...delegationMethods(ctx),
       ...coordinationMethods(ctx),
+      ...groupMethods(ctx),
       ...todoMethods(ctx),
       ...workdirMethods(ctx),
       ...browserMethods(ctx),

@@ -2,6 +2,7 @@ import { secureId } from '../secure-id';
 import type { FakeArchiveState, MergedPrFixture } from './merged-pr-archive';
 /** The state one fake core keeps, and the plumbing every domain module shares. */
 import { observeProgress } from './progress';
+import type { FakeRoster } from './group';
 import {
   DEFAULT_THREAD_DELETION_RETENTION_DAYS,
   PROTOCOL_VERSION,
@@ -160,6 +161,8 @@ export class FakeContext {
   readonly delegationSendRequests = new Map<string, { fingerprint: string; letter: AgentLetter }>();
   readonly letters = new Map<ThreadId, AgentLetter[]>();
   readonly peers = new Map<string, CoordinationPeer>();
+  /** The group this fake core is in, shared by reference with the other fake cores of it. */
+  roster: FakeRoster | null = null;
   readonly identity: CoordinationPeer;
   readonly activityTimers = new Map<string, ReturnType<typeof setTimeout>>();
   readonly activityTurns = new Map<string, { kind: 'goal' | 'loop'; generation: number }>();
