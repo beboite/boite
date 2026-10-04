@@ -15,6 +15,8 @@ test('nightly retries unpublished commits and skips already published commits', 
   expect(needsNightly(head, [])).toBe(true);
   expect(needsNightly(head, ['b'.repeat(40)])).toBe(true);
   expect(needsNightly(head, [head])).toBe(false);
+  // A dry run of a published commit still builds and tests it.
+  expect(needsNightly(head, [head], true)).toBe(true);
 });
 
 test('nightly refuses branch names instead of silently skipping a revision', () => {

@@ -2,9 +2,10 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { PORTABLE_ALL } from './changes.ts';
 
 export interface NightlyTag { name: string; commit: { sha: string } }
-export function needsNightly(sha: string, released: string[]): boolean {
+/** A dry run builds its ref even when that commit already has a published nightly. */
+export function needsNightly(sha: string, released: string[], dryRun = false): boolean {
   if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('expected a full commit SHA');
-  return !released.includes(sha);
+  return dryRun || !released.includes(sha);
 }
 export function nightlyVersion(base: string, date: string, sha: string, tags: NightlyTag[]): string {
   needsNightly(sha, []);
@@ -26,7 +27,7 @@ if (import.meta.main) {
   const tags: NightlyTag[] = JSON.parse(readFileSync(process.argv[3]!, 'utf8')).flat();
   const published = new Set(releases.filter((r: any) => !r.draft).map((r: any) => r.tag_name));
   const released = tags.filter((tag) => tag.name.includes('-nightly.') && published.has(tag.name)).map((tag) => tag.commit.sha);
-  const changed = needsNightly(sha, released);
+  const changed = needsNightly(sha, released, process.env.NIGHTLY_DRY_RUN === '1');
   const date = new Date().toISOString().slice(0, 10).replaceAll('-', '');
   const base = JSON.parse(readFileSync('package.json', 'utf8')).version;
   const version = nightlyVersion(base, date, sha, tags);

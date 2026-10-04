@@ -256,8 +256,9 @@ AppImage and the macOS bundle. The Rust tests are skipped because the commit's
 CI already ran them.
 
 A dispatch with `dry-run` builds any branch with throwaway signing keys and an
-unsigned APK. It accepts that branch's pull request CI run without rerunning
-it, skips reservation and every publication, and has its own concurrency group.
+unsigned APK, even a commit that already has a nightly. It accepts that
+branch's pull request CI run without rerunning it, skips reservation and every
+publication, and has its own concurrency group.
 
 Versions use `2.0.0-nightly.YYYYMMDD.N`, taking the base from the manifest and
 resetting the counter each UTC day. For example, September 15's first build is

@@ -49,6 +49,7 @@ jobs:
       - id: revision
         env:
           GH_TOKEN: ${{ github.token }}
+          NIGHTLY_DRY_RUN: ${{ inputs.dry-run && '1' || '' }}
         run: |
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > released.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/tags?per_page=100" > tags.json
