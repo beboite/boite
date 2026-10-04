@@ -272,21 +272,28 @@ out for an address the machine no longer gives, or no longer allows once it has
 HTTPS, is dropped and the machine reached anew, the machine the window opened
 on included: the window then goes to a machine paired by hand, or to the
 shell's own core, never back to the address it dropped, and stays closed when
-that address is all there is. When two hand-paired
-machines of a group list different addresses for a member, a key or a ticket
-goes only to an address both allow, and to none until they agree: one of them
-may hold an older roster, and somebody else may listen where the member was.
-The question is asked again when an address has answered and once more when
-the ticket is in hand, so a roster that changes under an attempt stops it.
+that address is all there is. Every member is listed with a
+revision that only grows (`GroupCore.rev`). When two hand-paired machines of a
+group list a member differently, the newer listing decides alone: the other
+machine has not caught up, and somebody else may listen where the member was.
+The client remembers what the newest revision it ever saw allowed, across
+reloads, so a listing that is behind decides nothing even once the machine
+that gave the newer one is off. Two listings of the same revision that differ
+leave only the addresses both allow. The question is asked again when an
+address has answered and once more when the ticket is in hand, so a roster that
+changes under an attempt stops it; the attempt starts over at once, once a
+minute at most. A key that is dropped is taken out of both places it is saved
+in, the list of machines and the core the window opens on next.
 
 At start, a key the group brought for a plain HTTP address is not sent before
 the machines paired by hand have been asked, each on a short connection of its
 own, what their group lists (`GroupLinks.vet`). A key whose address no longer
 stands is forgotten unsent, whether the window would open on that machine, a
 `?core=` link names it or would fall back on it, or it is one of the others. They get three seconds: when none of that group
-answers, the machine that vouched being off, the key is used as it was left, so
-someone able to keep those machines silent still gets it sent to the old
-address.
+answers, the machine that vouched being off, what the newest revision this
+client ever saw allowed decides, and a key it knows nothing against is used as
+it was left. So someone able to keep those machines silent gets a key sent to
+an old address only if this client never heard the address had changed.
 
 ## Limits
 

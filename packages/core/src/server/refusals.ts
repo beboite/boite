@@ -60,8 +60,8 @@ export function senderOf(address: string): string {
 
 export class Refusals {
   private readonly strangers = new Map<string, Entry>();
-  /** By exact address: a stranger in a member's /64 does not spend the member's allowance. */
-  private readonly served = new Map<string, { entry: Entry; member: string }>();
+  /** By exact address: a stranger in a member's /64 does not spend the member's allowance. Several members can sit behind one. */
+  private readonly served = new Map<string, { entry: Entry; claims: Set<string> }>();
   /** The addresses each member was served at, oldest first. */
   private readonly members = new Map<string, string[]>();
   private readonly crowd: Entry = { since: 0, refused: 0, pending: 0 };
@@ -99,15 +99,26 @@ export class Refusals {
     };
   }
 
-  /** A request of `member` was served to this address: it gets an allowance of its own, in that member's places. */
+  /**
+   * A request of `member` was served to this address: the address gets an
+   * allowance of its own, held in that member's places. It goes when the last
+   * member that claims it has given its place to a newer address.
+   */
   private keep(address: string, member: string, now: number): void {
-    if (this.served.has(address)) return;
     const own = this.members.get(member) ?? [];
+    if (own.includes(address)) return;
     if (own.length === 0 && this.members.size >= MEMBERS_MAX) return;
-    if (own.length >= ADDRESSES_PER_MEMBER) this.served.delete(own.shift()!);
+    if (own.length >= ADDRESSES_PER_MEMBER) {
+      const oldest = own.shift()!;
+      const claims = this.served.get(oldest)?.claims;
+      claims?.delete(member);
+      if (claims?.size === 0) this.served.delete(oldest);
+    }
     own.push(address);
     this.members.set(member, own);
-    this.served.set(address, { entry: { since: now, refused: 0, pending: 0 }, member });
+    const kept = this.served.get(address);
+    if (kept === undefined) this.served.set(address, { entry: { since: now, refused: 0, pending: 0 }, claims: new Set([member]) });
+    else kept.claims.add(member);
   }
 
   private stranger(sender: string, now: number): Entry {

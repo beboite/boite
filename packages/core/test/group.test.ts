@@ -786,6 +786,15 @@ test('requests are counted against the address they come from as they arrive, an
   for (let index = 0; index < REFUSALS_PER_MINUTE + 2; index += 1) full.begin(`10.8.${index}.1`, start + 61_000)?.(403);
   expect(full.begin('10.8.99.1', start + 61_000)).toBeNull();
   expect(full.begin('2001:db8:1:2::5', start + 61_000)).not.toBeNull();
+  // Two members behind one address: carrying one's requests from elsewhere does not take the address from the other.
+  const shared = new Refusals(1);
+  shared.begin('10.4.4.4', start)!(200, 'member-a');
+  shared.begin('10.4.4.4', start)!(200, 'member-b');
+  for (let index = 0; index < 8; index += 1) shared.begin(`10.5.${index}.1`, start)!(200, 'member-a');
+  shared.begin('10.0.1.1', start)!(403);
+  for (let index = 0; index < REFUSALS_PER_MINUTE; index += 1) shared.begin(`10.0.2.${index}`, start)!(403);
+  expect(shared.begin('10.0.3.1', start)).toBeNull();
+  expect(shared.begin('10.4.4.4', start)).not.toBeNull();
   // A request served that proved no name keeps no place of its own.
   const nameless = new Refusals(1);
   nameless.begin('10.9.9.9', start)!(200);

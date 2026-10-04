@@ -167,12 +167,11 @@ export class Workspace {
   }
 
   /**
-   * The core at `url` was refused its key. When it is the stored one, the key
-   * goes first, so nothing reads it back, and the window opens on a machine
-   * paired by hand or on the shell's own core.
+   * The stored core was refused its key: the key goes first, so nothing reads
+   * it back, and the window opens on a machine paired by hand or on the
+   * shell's own core.
    */
-  #openElsewhere(url: string): void {
-    if (readStoredEndpoint()?.url !== url) return;
+  #openElsewhere(): void {
     clearStoredEndpoint();
     const next = this.#byHand();
     if (next) storeEndpoint({ url: next.url, token: next.token, ...(next.paired ? { paired: true } : {}) });
@@ -206,12 +205,13 @@ export class Workspace {
     // link names: it waits for the answer, and on a refusal that key is sent nowhere.
     // Both count: a link the owner declines falls back on the stored core.
     const saved = readEnvironments();
-    const gated = [linkedCore(), readStoredEndpoint()?.url].filter((url): url is string => typeof url === 'string' && saved.some((e) => e.url === url && holdsBack(e)));
+    const stored = readStoredEndpoint()?.url;
+    const gated = [linkedCore(), stored].filter((url): url is string => typeof url === 'string' && saved.some((e) => e.url === url && holdsBack(e)));
     const vetting = this.#vet().catch(() => [] as StoredEnvironment[]);
     if (gated.length > 0) {
       const cleared = await vetting;
       if (!this.#current(lifecycle)) return;
-      for (const url of gated) if (!cleared.some((e) => e.url === url)) this.#openElsewhere(url);
+      if (stored !== undefined && gated.includes(stored) && !cleared.some((e) => e.url === stored)) this.#openElsewhere();
     }
     const selected = readStoredEndpoint();
     await (thread === null ? store.boot() : store.boot(false, thread));

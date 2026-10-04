@@ -2279,6 +2279,12 @@ export interface GroupCore {
    * HTTPS address, the tailnet name, the tailnet address, then the LAN one.
    */
   addresses: string[];
+  /**
+   * How recent what this machine published is, a counter that only grows. A
+   * client that has seen one revision never acts on an older one: a member
+   * that has not caught up may still list an address the machine gave up.
+   */
+  rev: number;
 }
 
 /** A phone or another computer paired with one member, which the group lets reach every member. */

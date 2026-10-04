@@ -18,8 +18,10 @@ const refuse = (message: string, field?: string) =>
   new RpcFailure({ code: RpcErrorCode.Refused, message, ...(field === undefined ? {} : { data: { field } }) });
 const invalid = (message: string, field: string) => new RpcFailure({ code: RpcErrorCode.InvalidParams, message, data: { field } });
 
-function card(ctx: FakeContext): GroupCore {
-  return { coreId: ctx.identity.coreId, name: ctx.identity.name, os: ctx.core.os, addresses: [ctx.identity.url] };
+/** `after` is the roster the machine enters: its revision is one past the highest there, as on the core. */
+function card(ctx: FakeContext, after: GroupCore[] = []): GroupCore {
+  const rev = after.reduce((highest, core) => Math.max(highest, core.rev), 0) + 1;
+  return { coreId: ctx.identity.coreId, name: ctx.identity.name, os: ctx.core.os, addresses: [ctx.identity.url], rev };
 }
 
 function view(ctx: FakeContext): Group | null {
@@ -86,7 +88,7 @@ export function groupMethods(ctx: FakeContext) {
       if (expiresAt === undefined || expiresAt <= ctx.now()) throw refuse('the invitation was already used by another machine, expired, or never issued', 'invite');
       if (roster.cores.length >= GROUP_MAX_CORES) throw refuse(`a group holds at most ${GROUP_MAX_CORES} machines`, 'invite');
       roster.invites.delete(invite.t as string);
-      roster.cores.push(card(ctx));
+      roster.cores.push(card(ctx, roster.cores));
       ctx.roster = roster;
       announce(roster);
       return view(ctx)!;

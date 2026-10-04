@@ -223,8 +223,13 @@ export function rememberSession(endpoint: Endpoint, token: string): StoredEnviro
  * goes: another window may have paired the machine anew since.
  */
 export function removeEnvironment(url: string, token?: string): StoredEnvironment[] {
-  const list = readEnvironments().filter((env) => env.url !== normalise(url) || (token !== undefined && env.token !== token));
+  const all = readEnvironments();
+  const list = all.filter((env) => env.url !== normalise(url) || (token !== undefined && env.token !== token));
   storeEnvironments(list);
+  // The same key may be the one the window opens on next time: it goes too, or the
+  // next start would send it to the address it was just forgotten at.
+  const stored = readStoredEndpoint();
+  if (stored?.url === normalise(url) && all.some((env) => !list.includes(env) && env.token === stored.token)) clearStoredEndpoint();
   return list;
 }
 

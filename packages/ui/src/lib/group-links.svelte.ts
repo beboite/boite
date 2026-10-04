@@ -9,6 +9,9 @@ const RETRY_MS = 60_000;
 const PROBE_MS = 4000;
 /** At start, how long the machines paired by hand are given to answer before a held key is used as it was left. */
 const VOUCH_WAIT_MS = 3000;
+/** What the newest revision seen of each member allowed, kept across reloads: an older listing is never acted on. */
+const REVISIONS_KEY = 'boite.group.revs';
+const REVISIONS_MAX = 256;
 
 /** Why a machine of the group is not connected from this client. */
 export type GroupLinkState =
@@ -37,6 +40,44 @@ function askGroup(endpoint: Endpoint, patience: number): Promise<Group | null | 
     client.connect().then(() => client.call('group.get', {})).catch(() => undefined),
     new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), patience))
   ]).finally(() => client.close());
+}
+
+interface Seen { rev: number; addresses: string[] }
+
+function readSeen(): Record<string, Seen> {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(REVISIONS_KEY) ?? '{}');
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed as Record<string, Partial<Seen> | null>).filter((entry): entry is [string, Seen] =>
+      Number.isSafeInteger(entry[1]?.rev) && Array.isArray(entry[1]?.addresses) && entry[1].addresses.every((address) => typeof address === 'string')));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Where a key for one member may be sent, from the listings of it given: the
+ * addresses its newest listings all allow. A hand-paired machine that has not
+ * caught up may still list an address the member gave up, where somebody else
+ * may listen. So what the newest revision said is remembered, across reloads,
+ * and when every listing given is older than it, that is still the answer:
+ * an older listing decides nothing. Null with no listing at all.
+ */
+function newestAllowed(groupId: string, listings: readonly GroupCore[], secure: boolean): string[] | null {
+  const coreId = listings[0]?.coreId;
+  if (coreId === undefined) return null;
+  const all = readSeen();
+  const key = `${groupId}:${coreId}`;
+  const seen = all[key];
+  const newest = listings.reduce((highest, listing) => Math.max(highest, listing.rev), seen?.rev ?? 0);
+  const lists = listings.filter((listing) => listing.rev === newest).map((listing) => usableAddresses(listing.addresses, secure));
+  if (lists.length === 0) return seen?.addresses ?? null;
+  const allowed = lists[0]!.filter((address) => lists.every((list) => list.includes(address)));
+  if (seen === undefined || newest > seen.rev || allowed.length < seen.addresses.length) {
+    const kept = Object.entries({ ...all, [key]: { rev: newest, addresses: allowed } }).slice(-REVISIONS_MAX);
+    try { localStorage.setItem(REVISIONS_KEY, JSON.stringify(Object.fromEntries(kept))); } catch { /* this window only */ }
+  }
+  return allowed;
 }
 
 /** A key the group brought for a plain HTTP address: at start it waits for a hand-paired machine to have its say. */
@@ -115,6 +156,7 @@ export class GroupLinks {
   /** Per core id, for the machines of the group this client is not connected to. */
   states = $state<Record<string, GroupLinkState>>({});
   #attempts = new Map<string, number>();
+  #movedAt = new Map<string, number>();
   #running = new Set<string>();
   #reach: (addresses: string[]) => Promise<string | null>;
   #secure: () => boolean;
@@ -142,12 +184,15 @@ export class GroupLinks {
     if (held.length === 0) return [];
     const answers = await Promise.all(anchors.map((anchor) => this.#ask(anchor, this.#patience).catch(() => undefined)));
     return held.filter((entry) => {
+      if (entry.groupId === undefined || entry.coreId === undefined) return true;
       const voices = answers.filter((answer): answer is Group => answer != null && answer.id === entry.groupId);
-      if (voices.length === 0) return true;
-      const stands = voices.every((voice) => {
-        const core = voice.cores.find((listed) => listed.coreId === entry.coreId);
-        return core !== undefined && usableAddresses(core.addresses, this.#secure()).includes(entry.url);
-      });
+      const listings = voices.flatMap((voice) => voice.cores.filter((listed) => listed.coreId === entry.coreId));
+      // One of them no longer lists it: out. Else the newest listing decides, and one older than what was seen
+      // decides nothing. With nobody answering, what the newest revision seen allowed still holds.
+      const allowed = listings.length < voices.length ? []
+        : listings.length > 0 ? newestAllowed(entry.groupId, listings, this.#secure())
+          : readSeen()[`${entry.groupId}:${entry.coreId}`]?.addresses ?? null;
+      const stands = allowed === null || allowed.includes(entry.url);
       // Forgotten only if it is still the entry that was asked about: the owner may have paired that machine by hand meanwhile.
       if (!stands && readEnvironments().some((env) => env.url === entry.url && env.token === entry.token && env.coreId === entry.coreId)) removeEnvironment(entry.url);
       return stands;
@@ -198,7 +243,7 @@ export class GroupLinks {
     const anchors = informed.filter((machine) => machine.coreId === undefined);
     await this.#prune(informed, anchors);
 
-    const wanted = new Map<string, { core: GroupCore; via: Machine; addresses: string[] }>();
+    const wanted = new Map<string, { core: GroupCore; via: Machine; addresses: string[] | null }>();
     for (const via of anchors) {
       const group = via.store.group;
       // The fake core has no address to dial and stands for itself.
@@ -218,7 +263,8 @@ export class GroupLinks {
       let existing = this.workspace.machines.find((machine) => GroupLinks.coreOf(machine) === coreId);
       // A key the group handed out for an address the machine no longer gives, or no longer
       // allows now that it has HTTPS, is not sent there again: the machine is reached anew.
-      if (existing?.coreId !== undefined && !addresses.includes(existing.id)) {
+      // With no listing as recent as what this client already saw, nothing is known against the connection it has.
+      if (addresses !== null && existing?.coreId !== undefined && !addresses.includes(existing.id)) {
         await this.#drop(existing);
         existing = undefined;
       }
@@ -226,6 +272,8 @@ export class GroupLinks {
         delete states[coreId];
         continue;
       }
+      // And nothing new is tried on the word of a listing that is behind.
+      if (addresses === null) continue;
       if (this.#running.has(coreId) || this.#now() - (this.#attempts.get(coreId) ?? -RETRY_MS) < RETRY_MS) continue;
       states[coreId] = 'connecting';
       starting.push({ core, via, addresses });
@@ -236,18 +284,16 @@ export class GroupLinks {
   }
 
   /**
-   * Where a key for this member may be sent: the addresses every hand-paired
-   * machine of that group that lists it allows. One of them holding an older
-   * roster must not send a ticket to an address the member gave up, where
-   * somebody else may be listening; until they agree, the member waits.
+   * Where a key for this member may be sent: the addresses the newest listings
+   * of it, among the hand-paired machines of that group, all allow. Null when
+   * none of them is as recent as what this client has already seen.
    */
-  #agreed(coreId: string, groupId: string, anchors: readonly Machine[]): string[] {
-    const lists = anchors.flatMap((machine) => {
+  #agreed(coreId: string, groupId: string, anchors: readonly Machine[]): string[] | null {
+    const listings = anchors.flatMap((machine) => {
       const group = machine.store.group;
-      const core = group?.id === groupId ? group.cores.find((listed) => listed.coreId === coreId) : undefined;
-      return core === undefined ? [] : [usableAddresses(core.addresses, this.#secure())];
+      return group?.id === groupId ? group.cores.filter((listed) => listed.coreId === coreId) : [];
     });
-    return (lists[0] ?? []).filter((address) => lists.every((list) => list.includes(address)));
+    return newestAllowed(groupId, listings, this.#secure());
   }
 
   /**
@@ -286,7 +332,7 @@ export class GroupLinks {
     const anchors = this.workspace.machines.filter((machine) => machine.coreId === undefined && machine.store.connection === 'ready'
       && machine.store.client !== null && machine.store.groupKnown && machine.store.group?.id === groupId);
     if (anchors.some((machine) => !machine.store.group!.cores.some((listed) => listed.coreId === coreId))) return [];
-    return this.#agreed(coreId, groupId, anchors);
+    return this.#agreed(coreId, groupId, anchors) ?? [];
   }
 
   async #connect(core: GroupCore, via: Machine, addresses: string[]): Promise<void> {
@@ -330,8 +376,10 @@ export class GroupLinks {
       if (state === null) delete states[coreId];
       else states[coreId] = state;
       this.states = states;
-      // The addresses changed under the attempt: the member is reached where they stand now, without the minute's wait.
-      if (moved) {
+      // The addresses changed under the attempt: the member is reached where they stand now, without
+      // the minute's wait. Once a minute at most, or rosters made to flip would have tickets asked for without end.
+      if (moved && this.#now() - (this.#movedAt.get(coreId) ?? -RETRY_MS) >= RETRY_MS) {
+        this.#movedAt.set(coreId, this.#now());
         this.#attempts.delete(coreId);
         void this.reconcile();
       }

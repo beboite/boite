@@ -223,6 +223,20 @@ describe('environments', () => {
     expect(readEnvironments()).toEqual([]);
   });
 
+  test('the key the window would open on goes with its entry, unless a newer pairing replaced it', () => {
+    const url = 'http://10.0.0.5:9000';
+    upsertEnvironment({ url, token: 'old', paired: true });
+    upsertEnvironment({ url: 'https://other.test', token: 'kept', paired: true });
+    storeEndpoint({ url, token: 'old', paired: true });
+    removeEnvironment(url);
+    expect(readStoredEndpoint()).toBeNull();
+    // Paired anew in another window meanwhile: the stored key is not the one that was forgotten.
+    upsertEnvironment({ url, token: 'old', paired: true });
+    storeEndpoint({ url, token: 'new', paired: true });
+    removeEnvironment(url);
+    expect(readStoredEndpoint()).toMatchObject({ url, token: 'new' });
+  });
+
   test('a link that reopens a known core is named before it is taken, a pairing link is not', () => {
     at('/?core=http%3A%2F%2F10.0.0.5%3A9000%2F');
     expect(linkedCore()).toBe('http://10.0.0.5:9000');
