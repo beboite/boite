@@ -13,8 +13,9 @@ const id = (name: string) => `[data-testid="${name}"]`;
 const desktopRow = (machine: string, thread = 't-trace') => `${id('thread-row')}[data-machine-id="${machine}"][data-thread-id="${thread}"]`;
 const doneRow = (machine: string, thread = 't-trace') => `${id('done-thread')}[data-machine-id="${machine}"][data-thread-id="${thread}"]`;
 const phoneRow = (machine: string, thread = 't-trace') => `.row[data-machine-id="${machine}"][data-thread-id="${thread}"]`;
-const phoneDone = (machine: string) => `${id('mobile-list')} ${doneRow(machine)}`;
-const phoneToggle = (kind: 'done' | 'working') => `${id('mobile-list')} ${id(`recent-${kind}-toggle`)}`;
+const inGroup = (kind: 'done' | 'archived', machine: string, thread = 't-trace') => `${id(`recent-${kind}`)} ${doneRow(machine, thread)}`;
+const phoneArchived = (machine: string) => `${id('mobile-list')} ${inGroup('archived', machine)}`;
+const phoneToggle = (kind: 'done' | 'archived' | 'working') => `${id('mobile-list')} ${id(`recent-${kind}-toggle`)}`;
 const captures = process.env.BOITE_RECENT_CAPTURES ?? join(import.meta.dir, '.artifacts');
 
 async function capture(name: string): Promise<void> {
@@ -26,7 +27,7 @@ async function phone(): Promise<void> {
   await page.click(id('mobile-back'));
   await page.waitFor(`document.querySelector('${id('mobile-list')}')`);
 }
-async function phoneGroup(kind: 'done' | 'working'): Promise<void> {
+async function phoneGroup(kind: 'done' | 'archived' | 'working'): Promise<void> {
   await page.evaluate(`document.querySelector('${phoneToggle(kind)}').scrollIntoView({block:'center'})`);
   await page.click(phoneToggle(kind));
 }
@@ -60,8 +61,8 @@ test('Done is collapsed, can be read and reopened, and keeps the other machine w
   expect(await page.evaluate(`document.querySelector('${id('recent-done-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
   expect(await page.evaluate(`document.querySelectorAll('${id('done-thread')}').length`)).toBe(0);
   await page.click(id('recent-done-toggle'));
-  await page.waitFor(`document.querySelector(${JSON.stringify(doneRow(main))})`);
-  await page.click(`${doneRow(main)} ${id('done-thread-open')}`);
+  await page.waitFor(`document.querySelector(${JSON.stringify(inGroup('done', main))})`);
+  await page.click(`${inGroup('done', main)} ${id('done-thread-open')}`);
   await page.waitFor(`document.querySelector('${id('done-thread-notice')}')`);
   expect(await page.evaluate(`!!document.querySelector('${id('composer-input')}')`)).toBe(false);
   expect(await page.evaluate(`document.querySelectorAll('${id('message')}').length > 0`)).toBe(true);
@@ -74,9 +75,11 @@ test('Done is collapsed, can be read and reopened, and keeps the other machine w
   await page.click(`${id('mobile-thread-menu-t-trace-menu')} [data-value=archive]`);
   await page.waitFor(`!document.querySelector(${JSON.stringify(phoneRow(main))})`);
   expect(await page.evaluate(`!!document.querySelector(${JSON.stringify(phoneRow(remote))})`)).toBe(true);
-  await phoneGroup('done');
-  await page.waitFor(`document.querySelector(${JSON.stringify(phoneDone(main))})`);
-  await page.click(`${phoneDone(main)} ${id('done-thread-open')}`);
+  // Archiving by hand keeps the thread for later: it lands in Archived, not Done.
+  await phoneGroup('archived');
+  await page.waitFor(`document.querySelector(${JSON.stringify(phoneArchived(main))})`);
+  expect(await page.evaluate(`!!document.querySelector('${id('mobile-list')} ${id('recent-done')}')`)).toBe(false);
+  await page.click(`${phoneArchived(main)} ${id('done-thread-open')}`);
   await page.waitFor(`document.querySelector('${id('done-thread-reopen')}')`);
   await page.click(id('done-thread-reopen'));
   await page.waitFor('globalThis.__boiteTest.workspace.active.openThread?.archived === false');
@@ -137,12 +140,15 @@ test('a merged PR arrives in Done and project filtering and restoration follow t
   expect(archived).toBe(1);
   await page.waitFor(`!document.querySelector(${JSON.stringify(desktopRow(main, threadId))})`);
   await page.click(id('recent-done-toggle'));
-  await page.waitFor(`document.querySelector(${JSON.stringify(doneRow(main, threadId))})`);
-  expect(await page.evaluate(`document.querySelector(${JSON.stringify(doneRow(main, threadId))}).querySelector('${id('done-thread-merged')}').getAttribute('href')`)).toBe('https://github.com/example/repo/pull/407');
+  await page.waitFor(`document.querySelector(${JSON.stringify(inGroup('done', main, threadId))})`);
+  expect(await page.evaluate(`document.querySelector(${JSON.stringify(inGroup('done', main, threadId))}).querySelector('${id('done-thread-merged')}').getAttribute('href')`)).toBe('https://github.com/example/repo/pull/407');
   await capture('recent-done-desktop.png');
   await page.click(id('project-filter'));
   await page.evaluate(`Array.from(document.querySelectorAll('${id('project-filter-menu')} [data-value]')).find(e => e.dataset.value === ${JSON.stringify(JSON.stringify(['http://builder.test', 'p-boite']))}).click()`);
-  await page.waitFor(`document.querySelectorAll('${id('done-thread')}').length === 1 && document.querySelector('${id('done-thread')}').dataset.machineId === ${JSON.stringify(remote)}`);
+  // The other machine has no done thread in this project, only its seeded archive.
+  await page.waitFor(`!document.querySelector('${id('recent-done')}')`);
+  await page.click(id('recent-archived-toggle'));
+  await page.waitFor(`document.querySelectorAll('${id('done-thread')}').length === 1 && document.querySelector(${JSON.stringify(inGroup('archived', remote, 't-parser'))})`);
   expect(await page.evaluate(`!!document.querySelector(${JSON.stringify(desktopRow(remote))})`)).toBe(true);
   await page.click(id('project-filter'));
   await page.click(`${id('project-filter-menu')} [data-value=all]`);
@@ -155,7 +161,7 @@ test('a merged PR arrives in Done and project filtering and restoration follow t
 test('the draft project picker has its logo and dashed selection at desktop and phone widths', async () => {
   await page.evaluate('globalThis.__boiteTest.workspace.machines[0].store.startDraft("p-boite")');
   await page.waitFor(`document.querySelector('${id('draft-project')} [data-kind=image] img')?.complete`);
-  await page.waitFor(`document.querySelector('${id('recent-done-toggle')}')`);
+  await page.waitFor(`document.querySelector('${id('recent-archived-toggle')}')`);
   expect(await page.evaluate(`getComputedStyle(document.querySelector('${id('draft-project')}').closest('.project-choice')).borderStyle`)).toBe('dashed');
   await capture('recent-project-desktop.png');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
