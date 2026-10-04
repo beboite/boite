@@ -255,6 +255,18 @@ describe('environments', () => {
     // Reopened with the key it holds, no grant: nothing changes hands and nobody is asked.
     at('/?core=https%3A%2F%2Fb.example');
     expect(await resolveEndpoint(false, approve)).toMatchObject({ url, token: 'from-ticket' });
+    // Reopened with the very key it holds, written in the link: still the group's machine, marks and all.
+    at('/?core=https%3A%2F%2Fb.example&token=from-ticket');
+    expect(await resolveEndpoint(false, approve)).toMatchObject({ url, token: 'from-ticket', coreId: 'b', groupId: 'grp' });
+    expect(asked).toEqual([url, url]);
+    // The marks may sit only with the core the window opens on, the list entry gone: a pairing link asks all the same.
+    removeEnvironment(url);
+    storeEndpoint({ url, token: 'other-key', paired: true, coreId: 'b', groupId: 'grp' });
+    at('/?core=https%3A%2F%2Fb.example&grant=g');
+    expect((await resolveEndpoint(false, approve))?.grant).toBeUndefined();
+    expect(asked).toEqual([url, url, url]);
+    window.localStorage.removeItem('boite.core');
+    asked.length = 2;
     // Paired by hand: its own link goes through as before.
     upsertEnvironment({ url: 'https://hand.example', token: 'hand', paired: true });
     at('/?core=https%3A%2F%2Fhand.example&grant=g');
@@ -272,12 +284,22 @@ describe('environments', () => {
     removeBrought(url, 'b');
     expect(readEnvironments()).toEqual([]);
     expect(readStoredEndpoint()).toBeNull();
-    // Paired by hand since: neither the entry nor the stored core is the group's to take.
+    // From then on nothing saved for that address is read, whichever window left it and however it looks.
+    storeEndpoint({ url, token: 'left-behind', paired: true });
+    upsertEnvironment({ url, token: 'left-behind', paired: true });
+    expect(readStoredEndpoint()).toBeNull();
+    expect(readEnvironments()).toEqual([]);
+    // A new key issued for it ends that: here a pairing made by hand, which is not the group's to take.
+    rememberSession({ url, token: '', grant: 'g' }, 'hand');
     storeEndpoint({ url, token: 'hand', paired: true });
-    upsertEnvironment({ url, token: 'hand', paired: true });
     removeBrought(url, 'b');
-    expect(readEnvironments()).toHaveLength(1);
+    expect(readEnvironments()).toEqual([{ url, label: '10.0.0.5:9000', token: 'hand', paired: true }]);
     expect(readStoredEndpoint()).toMatchObject({ token: 'hand' });
+    // And so does the group bringing the machine back at that address.
+    rememberSession({ url: 'http://10.0.0.6:9000', token: '', ticket: 't', coreId: 'c', groupId: 'grp' }, 'one');
+    removeBrought('http://10.0.0.6:9000', 'c');
+    rememberSession({ url: 'http://10.0.0.6:9000', token: '', ticket: 't', coreId: 'c', groupId: 'grp' }, 'two');
+    expect(readEnvironments().find((env) => env.url === 'http://10.0.0.6:9000')).toMatchObject({ token: 'two', coreId: 'c' });
   });
 
   test('the core a link names is read before the link is taken, whatever key the link brings', () => {

@@ -49,6 +49,8 @@ const VIAS_SETTING = 'group:session-addresses';
 const SPENT_SETTING = 'group:spent';
 /** Join requests a minute that name a live invitation: each costs a key agreement, and no honest group makes this many. */
 const JOINS_PER_MINUTE = 30;
+/** Requests one invitation is asked with before it is taken away: a machine joins once, and asks again a few times at most. */
+const JOIN_REQUESTS_MAX = 64;
 export const JOIN_ROUTE = '/group/join';
 /** What a join request and its answer are signed with, so neither passes for a coordination message. */
 const JOIN_SIGNING_PREFIX = 'boite-group-join\n';
@@ -65,15 +67,7 @@ const FAREWELL_MS = 6000;
 const CLOCK_SKEW_MS = 60_000;
 const DEVICES_MAX = 200;
 
-/** What the server alone can do for the group: answer on one more address. */
-export interface NetworkSink {
-  /**
-   * Listens on `host` beside the address the core was started on, or on no
-   * extra address for null. True when a client that dials `host` reaches this
-   * core, whether through that listener or the main one.
-   */
-  also(host: string | null): boolean;
-}
+export type { NetworkSink } from './group/addresses.ts';
 
 interface JoinReply { nonce: string; publicKey: string; roster?: unknown; error?: string }
 
@@ -712,13 +706,15 @@ export class GroupStore {
     }
     // Counted once it opened and proved who sent it, so only a holder of the invitation spends the
     // allowance: naming an invitation is no proof of holding it, and its name travels readable.
+    // Remembered before it is counted, so one turned away for the allowance cannot come back, recorded, to
+    // spend a later minute's. An invitation asked this many times is spent.
+    invite.seen.add(name);
+    if (invite.seen.size > JOIN_REQUESTS_MAX) this.invites.delete(named);
     const now = Date.now();
     if (now - this.joins.since > 60_000) this.joins = { since: now, count: 0 };
     this.joins.count += 1;
     if (this.joins.count > JOINS_PER_MINUTE) return new Response('too many join requests', { status: 429 });
     if (this.closed || this.core.stopping) return new Response('the core is stopping', { status: 503 });
-    // Remembered only once it is served, so the allowance above bounds what an invitation remembers.
-    invite.seen.add(name);
     return this.core.router.trackRequest(() => {
       let nonce = '';
       let roster: Roster | undefined;

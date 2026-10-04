@@ -236,8 +236,9 @@ export class Workspace {
     await this.#connectShellLocal(lifecycle);
     if (!this.#current(lifecycle)) return;
     if (!store.localCore && primaryEndpoint?.url === store.endpointUrl && primaryEndpoint.token) {
-      // An entry that went during the boot comes back as what it was: a machine the group brought is not made the owner's by being written again.
-      const was = saved.find((e) => e.url === primaryEndpoint.url);
+      // An entry that went during the boot comes back as what it was: a machine the group brought is not made
+      // the owner's by being written again. One still there says what it is itself, a pairing by hand included.
+      const was = readEnvironments().some((e) => e.url === primaryEndpoint.url) ? undefined : saved.find((e) => e.url === primaryEndpoint.url);
       upsertEnvironment({
         ...primaryEndpoint, paired: primaryEndpoint.paired ?? false, label: this.machines[0]!.label,
         ...(was?.coreId === undefined ? {} : { coreId: was.coreId }),
@@ -408,14 +409,14 @@ export class Workspace {
       return fail(`${machine.label}: ${target.error ?? strings.connection.closed}`);
     }
     if (this.#discardAlias(machine)) return true;
-    this.#rememberConnected(machine, endpoint, label, host);
     // Paired again by hand: from now on it is the owner's machine, not one the group may drop.
-    if (existing && endpoint.ticket === undefined && existing.coreId !== undefined) {
+    // The marks go before the key is written back, so neither place it is saved in keeps them.
+    if (existing && endpoint.ticket === undefined && endpoint.coreId === undefined && existing.coreId !== undefined) {
       delete existing.coreId;
       delete existing.groupId;
       forgetGroupOf(existing.id);
-      this.machines = [...this.machines];
     }
+    this.#rememberConnected(machine, endpoint, label, host);
     if (!quiet) this.error = null;
     return true;
   }

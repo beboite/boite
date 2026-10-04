@@ -160,3 +160,13 @@ export async function probeTailnet(known: Tailnet | null, stale: boolean): Promi
   const name = await magicName(ip);
   return { ip, name: name ?? (known?.ip === ip ? known.name : null) };
 }
+
+/** What the server alone can do for the group: answer on one more address. */
+export interface NetworkSink {
+  /**
+   * Listens on `host` beside the address the core was started on, or on no
+   * extra address for null. True when a client that dials `host` reaches this
+   * core, whether through that listener or the main one.
+   */
+  also(host: string | null): boolean;
+}

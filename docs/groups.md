@@ -188,9 +188,11 @@ never sent: the request names the invitation by a hash and only opens for the
 machine that minted it. The member checks that the signature matches the
 announced key, adds the machine and answers with the roster, signed and sealed
 back. Thirty requests a minute that open are served, and the invitation must
-still be live once the request has been read, before it is opened or counted. A request already served is
+still be live once the request has been read, before it is opened or counted. A request already received is
 refused before anything is computed for it, however its JSON is written, so
-one recorded on the path and sent again spends nothing of those thirty. Neither
+one recorded on the path and sent again spends nothing of those thirty, in
+that minute or a later one. An invitation asked with 64 different requests is
+taken away. Neither
 does the invitation of a machine that was since removed: it is spent, and
 refused before it is read. A request is counted only once it has proved who
 sent it, and an invitation already used is good for the machine it admitted
@@ -294,9 +296,14 @@ client takes a new key only from a core it showed a grant or a ticket to. A
 machine the group drops leaves the window, and its saved entry goes only while
 it is still the one the group brought: paired by hand since, in another
 window, the entry stays. The group's mark is kept wherever a key of that
-machine is saved, the core the window opens on next included, so a key left
-there by another window is dropped with the machine and never passes for a
-pairing made by hand. A key the group handed
+machine is saved, the core the window opens on next included, and a link that
+reopens the machine keeps it. The address of a machine the group dropped is
+remembered, in storage every window shares (`boite.group.dropped`): nothing
+saved for that address is read again, whichever window left it and wherever it
+sits, so a key left behind never passes for a pairing made by hand, and a link
+to that address asks as for a core nobody knows. A new key issued for the
+address ends that: a pairing made by hand, a link the owner said yes to, or
+the group bringing the machine back. A key the group handed
 out for an address the machine no longer gives, or no longer allows once it has
 HTTPS, is dropped and the machine reached anew, the machine the window opened
 on included: the window then goes to a machine paired by hand, or to the

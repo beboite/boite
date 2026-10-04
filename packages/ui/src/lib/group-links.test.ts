@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Group, GroupCore } from '@boite/contracts';
-import { ENVIRONMENTS_STORAGE_KEY, readEnvironments, type Endpoint } from './endpoint';
+import { ENVIRONMENTS_STORAGE_KEY, readEnvironments, rememberSession, type Endpoint } from './endpoint';
 import { GroupLinks, usableAddresses } from './group-links.svelte';
 import type { Machine, Workspace } from './workspace.svelte';
 
@@ -258,11 +258,12 @@ describe('group links', () => {
     // Paired by hand in another window while the question was out: that pairing is not the one refused, and it stays.
     const repaired = { url: 'http://10.0.0.4:1', label: 'd', token: 'by-hand', paired: true };
     const late = vi.fn(async () => {
-      localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([repaired]));
+      rememberSession({ url: repaired.url, token: '', grant: 'g' }, repaired.token);
       return roster;
     });
     expect(await new GroupLinks(ws, { secure: () => false, ask: late }).vet([held[2]!], [anchors[0]!])).toEqual([]);
-    expect(readEnvironments()).toEqual([repaired]);
+    expect(readEnvironments().find((env) => env.url === repaired.url)).toMatchObject({ token: 'by-hand', paired: true });
+    expect(readEnvironments().find((env) => env.url === repaired.url)?.coreId).toBeUndefined();
   });
 
   it('sends no ticket to an address one hand-paired machine still lists and another no longer does', async () => {

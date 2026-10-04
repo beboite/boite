@@ -849,10 +849,25 @@ test('only a holder of the invitation spends the join allowance, and a pairing l
     retry.roster = null;
     expect((await b.core.group.join(invite)).cores).toHaveLength(2);
   }
-  // The thirty-first request that opens, within the minute, is one too many, and one turned away is not remembered.
+  // The thirty-first request that opens, within the minute, is one too many. It is remembered all the same:
+  // recorded and sent again once the minute is over, it would otherwise spend the next allowance.
+  let turnedAway: { body: string; headers: Headers } | undefined;
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    if (String(input).endsWith('/group/join')) turnedAway = { body: String(init?.body ?? ''), headers: new Headers(init?.headers) };
+    return real(input, init);
+  }) as typeof fetch;
   retry.roster = null;
-  await expect(b.core.group.join(invite)).rejects.toThrow('no machine accepted');
-  expect((a.core.group as unknown as { invites: Map<string, { seen: Set<string> }> }).invites.get(inviteId)!.seen.size).toBe(30);
+  try {
+    await expect(b.core.group.join(invite)).rejects.toThrow('no machine accepted');
+  } finally {
+    globalThis.fetch = real;
+  }
+  expect((a.core.group as unknown as { invites: Map<string, { seen: Set<string> }> }).invites.get(inviteId)!.seen.size).toBe(31);
+  const later = a.core.group as unknown as { joins: { since: number; count: number } };
+  later.joins = { since: 0, count: 0 };
+  const again = await fetch(`${a.url}/group/join`, { method: 'POST', body: turnedAway!.body, headers: turnedAway!.headers });
+  expect([again.status, await again.text()]).toEqual([403, 'this join request was already received']);
+  expect(later.joins.count).toBe(0);
   retry.roster = a.core.journal.getSetting('group') as Roster;
 
   const held = a.core.group as unknown as { roster: Roster };

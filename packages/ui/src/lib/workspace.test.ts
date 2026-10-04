@@ -272,6 +272,15 @@ test('a machine the group brought stays the group\'s to drop when its key is ref
   await w.boot();
   expect(endpoints.readEnvironments().find((env) => env.url === 'https://b.example')).toMatchObject({ token: 'from-a-link', coreId: 'b', groupId: 'grp' });
   expect(w.machines[0]).toMatchObject({ coreId: 'b', groupId: 'grp' });
+
+  // A pairing link the owner said yes to, opened during the boot: the entry it wrote is the owner's, and stays so.
+  vi.spyOn(a, 'boot').mockImplementation(async () => {
+    endpoints.rememberSession({ url: 'https://b.example', token: '', grant: 'g' }, 'by-hand');
+    endpoints.storeEndpoint({ url: 'https://b.example', token: 'by-hand', paired: true });
+  });
+  await w.boot();
+  const entry = endpoints.readEnvironments().find((env) => env.url === 'https://b.example')!;
+  expect([entry.token, entry.coreId, w.machines[0]!.coreId]).toEqual(['by-hand', undefined, undefined]);
 });
 
 test('a stored core the group brought is still one when the list has no entry left for it', async () => {
