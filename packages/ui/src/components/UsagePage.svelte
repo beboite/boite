@@ -56,7 +56,9 @@
   /** Every machine of the workspace that answers; one still connecting joins once it is ready. */
   let ready = $derived(machines.filter((machine) => machine.store.client !== null && machine.store.connection === 'ready'));
   let sources = $derived(all ? ready : [chosen]);
-  let offline = $derived(all ? machines.filter((machine) => !ready.includes(machine)) : []);
+  let offline = $derived(all ? machines.filter((machine) => !ready.includes(machine)) : chosen.store.client ? [] : [chosen]);
+  /** Nothing to ask: the page says which machine is missing instead of reading forever. */
+  let unreadable = $derived(sources.length === 0 || sources.some((source) => !source.store.client));
 
   async function read(source: Machine, edges: number[], providerId: string | null): Promise<MachineHistory> {
     const client = source.store.client;
@@ -71,13 +73,25 @@
     return { ...result, threads: result.threads.map((thread) => ({ ...thread, machine: source })) };
   }
 
+  /** No result at all rather than totals from machines this read did not count. */
+  function clear() {
+    latest += 1;
+    history = null;
+    failures = [];
+    loading = false;
+  }
+
   async function load(days: UsageRange, providerId = provider, from: Machine[] = sources) {
-    if (from.length === 0 || from.some((source) => !source.store.client)) return;
+    if (from.length === 0 || from.some((source) => !source.store.client)) {
+      clear();
+      return;
+    }
     const request = ++latest;
     loading = true;
     failures = [];
     const edges = dayEdges(days);
-    const named = from.length > 1;
+    // All machines names each failure, even when only one of them could be asked.
+    const named = all;
     try {
       const results = await Promise.allSettled(from.map((source) => read(source, edges, providerId)));
       if (request !== latest) return;
@@ -87,7 +101,10 @@
         const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
         return [named ? `${from[index]!.label}: ${message}` : message];
       });
-      if (answered.length === 0) return;
+      if (answered.length === 0) {
+        history = null;
+        return;
+      }
       history = mergeHistories(edges, answered);
       historicalProviders = [...new Set([...historicalProviders, ...history.rows.map((row) => row.providerId)])];
     } finally {
@@ -110,7 +127,10 @@
     // One machine reloads on its own client; the whole workspace when a machine joins or leaves it.
     const from = all ? ready : [chosen];
     if (!all) void chosen.store.client;
-    if (from.length === 0 || from.some((source) => !source.store.client)) return;
+    if (from.length === 0 || from.some((source) => !source.store.client)) {
+      untrack(clear);
+      return;
+    }
     untrack(() => { history = null; void load(days, selected, from); });
     return () => { latest += 1; };
   });
@@ -254,7 +274,7 @@
   {/if}
 
   <div class="body settings-stack" class:stale={loading && view !== null} aria-busy={loading}>
-    {#if view === null && failures.length === 0}
+    {#if view === null && failures.length === 0 && !unreadable}
       <section class="card"><p class="muted">{strings.usage.loading}</p></section>
     {:else if view !== null}
       <section class="card overview" id="settings-usage-overview" data-testid="usage-overview">

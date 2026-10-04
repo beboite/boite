@@ -124,7 +124,9 @@ test('the machine menu reads one machine or adds every connected one, and names 
   const builderCall = vi.fn(async (_method: string, params: { edges: number[] }) => spent(params.edges, 'codex', 'same-id'));
   const builder = machine('http://builder', 'Builder', builderCall);
   const asleep = machine('http://asleep', 'Asleep', vi.fn(), 'connecting');
-  workspace.machines = [here, builder, asleep];
+  const gone = machine('http://gone', 'Gone', vi.fn(), 'closed');
+  Object.assign(gone.store, { client: null });
+  workspace.machines = [here, builder, asleep, gone];
   try {
     mounted = mount(UsagePage, { target: document.body, props: { store: here.store } });
     await settle();
@@ -164,6 +166,25 @@ test('the machine menu reads one machine or adds every connected one, and names 
     await settle();
     expect(document.querySelector('[role=alert]')?.textContent).toContain('Builder: History unavailable');
     expect(document.querySelector('[data-testid=usage-total]')?.textContent).toBe('2');
+
+    // When no machine answers, the earlier totals go rather than standing for machines nobody counted.
+    builderCall.mockRejectedValueOnce(new Error('History unavailable'));
+    (here.store.client!.call as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Core stopped'));
+    click('[data-testid=usage-refresh]');
+    await settle();
+    const alerts = [...document.querySelectorAll('[role=alert]')].map((alert) => alert.textContent);
+    expect(alerts.some((alert) => alert?.includes('Here: Core stopped'))).toBe(true);
+    expect(alerts.some((alert) => alert?.includes('Builder: History unavailable'))).toBe(true);
+    expect(document.querySelector('[data-testid=usage-total]')).toBeNull();
+
+    // A machine with no client is named, not read forever, and shows none of the previous totals.
+    click('[data-testid=usage-machine-filter]');
+    await settle();
+    click('[data-testid=usage-machine-filter-menu] [data-value="http://gone"]');
+    await settle();
+    expect(document.querySelector('[data-testid=usage-offline]')?.textContent).toContain('Gone');
+    expect(document.querySelector('[data-testid=usage-total]')).toBeNull();
+    expect(document.body.textContent).not.toContain('Reading usage');
   } finally {
     workspace.machines = [];
   }
