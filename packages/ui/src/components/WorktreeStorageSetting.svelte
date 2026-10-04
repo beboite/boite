@@ -2,6 +2,7 @@
   import { ChevronDown, FolderOpen } from '@lucide/svelte';
   import { checkSettingsPatch, type WorktreeStorage } from '@boite/contracts';
   import Menu from './Menu.svelte';
+  import InfoTip from './InfoTip.svelte';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
@@ -57,15 +58,13 @@
 <form data-testid="worktree-storage" onsubmit={event => { event.preventDefault(); void save(); }}>
   <fieldset disabled={busy || !store.settings || store.connection !== 'ready'}>
   <div class="switch-row">
-    <span class="ui-label">{s.storage}</span>
+    <span class="ui-label-box"><span class="ui-label">{s.storage}</span><InfoTip topic={s.storage} text={`${current.mode === 'project' ? `${s.storageProjectHint} .boite/worktrees` : s.storageSharedHint} ${s.storageNewOnly}`} /></span>
     <Menu {items} label={s.storage} placement="bottom" align="end" testid="worktree-storage-mode"
       onpick={id => edit({ mode: id as Draft['mode'] })}>
       <span class="ui-label">{current.mode === 'project' ? s.storageProject : s.storageShared}</span><ChevronDown size={13} />
     </Menu>
   </div>
-  {#if current.mode === 'project'}
-    <p class="hint">{s.storageProjectHint} <code>.boite/worktrees</code></p>
-  {:else}
+  {#if current.mode === 'shared'}
     <label for="{uid}-directory">{s.storageDirectory}</label>
     <div class="directory">
       <input id="{uid}-directory" data-testid="worktree-storage-directory" type="text" value={current.directory}
@@ -75,9 +74,7 @@
         <button type="button" class="icon" aria-label={s.storageBrowse} title={s.storageBrowse} disabled={busy} onclick={() => void browse()}><FolderOpen size={16} /></button>
       {/if}
     </div>
-    <p class="hint">{s.storageSharedHint}</p>
   {/if}
-  <p class="hint">{s.storageNewOnly}</p>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   <button type="submit" data-testid="worktree-storage-save" disabled={busy || !store.settings || !changed || store.connection !== 'ready'}><span class="ui-label">{strings.settings.save}</span></button>
   </fieldset>
@@ -90,6 +87,5 @@
   label { display: block; font-size: var(--text-sm); margin: 12px 0 6px; }
   .directory { display: flex; gap: 8px; }
   input { flex: 1; min-width: 0; width: 100%; font-family: var(--font-mono); }
-  .hint { margin: 8px 0 12px; font-size: var(--text-sm); color: var(--color-muted-foreground); line-height: 1.5; }
   .error { color: var(--color-danger); overflow-wrap: anywhere; }
 </style>

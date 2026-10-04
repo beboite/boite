@@ -5,6 +5,7 @@
   import ResourcesPage from './ResourcesPage.svelte';
   import SchedulerSettings from './SchedulerSettings.svelte';
   import WorktreeStorageSetting from './WorktreeStorageSetting.svelte';
+  import InfoTip from './InfoTip.svelte';
 
   let { machine, source, onback }: { machine: Machine; source?: string; onback: () => void } = $props();
   const store = $derived(machine.store);
@@ -13,8 +14,7 @@
 <div class="machine-settings" data-testid="machine-settings" data-machine-id={machine.id}>
   <header>
     <button class="ghost back" data-testid="machine-settings-back" onclick={onback}><ArrowLeft size={15} /><span class="ui-label">{strings.machines.heading}</span></button>
-    <h1>{machine.label}</h1>
-    <p>{strings.machines.settingsHint}</p>
+    <h1 class="ui-label-box"><span class="ui-label">{machine.label}</span><InfoTip topic={strings.machines.settings} text={strings.machines.settingsHint} /></h1>
     {#if source}<p class="synced" data-testid="machine-settings-source">{fill(strings.machines.synced, { source })}</p>{/if}
   </header>
   {#if store.connection !== 'ready'}<p role="status">{strings.connection[store.connection]}</p>{/if}

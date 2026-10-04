@@ -33,12 +33,13 @@ test('silent Codex reasoning and completed stored tools remain visible after rec
     await page.click(`[data-thread-id="${thread.id}"]`);
     await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread?.id === ${JSON.stringify(thread.id)} && !globalThis.__boiteTest.workspace.active.loadingThread`);
     await client.call('turns.start', { threadId: thread.id, prompt: '[silent-reasoning]' });
-    await page.waitFor('document.querySelector("[data-testid=turn-progress]")?.textContent === "Thinking"');
+    await page.waitFor('globalThis.__boiteTest.workspace.active.openThread?.progress?.phase === "thinking"');
+    expect(await page.evaluate('document.querySelector("[data-testid=turn-progress], [data-testid=turn-last-activity]") === null')).toBe(true);
     expect(await page.evaluate('globalThis.__boiteTest.workspace.active.openThread.messages.filter(message => message.role === "assistant").flatMap(message => message.parts).filter(part => part.type === "thinking").length')).toBe(0);
     await capture(page, 'codex-silent-thinking-desktop.png');
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await capture(page, 'codex-silent-thinking-phone.png');
-    await page.waitFor('document.querySelector("[data-testid=turn-progress]")?.textContent === "Waiting for provider"');
+    await page.waitFor('globalThis.__boiteTest.workspace.active.openThread?.progress?.phase === "waiting"');
     const before = await client.call('threads.get', { threadId: thread.id });
     const ids = before.messages.map(message => message.id);
     // Closing the page drops its websocket and subscription, then a new page loads the stored snapshot.
@@ -49,13 +50,14 @@ test('silent Codex reasoning and completed stored tools remain visible after rec
     await page.waitFor(`document.querySelector(${JSON.stringify(working)})?.dataset.count === '1'`);
     await page.click(working);
     await page.click(`[data-thread-id="${thread.id}"]`);
-    await page.waitFor('document.querySelector("[data-testid=turn-progress]")?.textContent === "Waiting for provider"');
+    await page.waitFor('globalThis.__boiteTest.workspace.active.openThread?.progress?.phase === "waiting"');
     expect(await page.evaluate('globalThis.__boiteTest.workspace.active.openThread.messages.map(message => message.id)')).toEqual(ids);
     expect(await page.evaluate('document.querySelectorAll("[data-role=assistant]").length')).toBe(1);
     expect(await page.evaluate('document.querySelector("[data-testid=chat]").textContent.includes("Message already stored.")')).toBe(true);
     expect(await page.evaluate('document.querySelector("[data-testid=chat]").textContent.includes("opaque-do-not-render")')).toBe(false);
     expect(await page.evaluate('globalThis.__boiteTest.workspace.active.openThread.messages.flatMap(message => message.parts).filter(part => part.type === "tool").map(part => [part.status, part.output])')).toEqual([['done', 'Filesystem copied']]);
     await page.evaluate('(() => { const store = globalThis.__boiteTest.workspace.active; store.openThread = { ...store.openThread, progress: { ...store.openThread.progress, at: Date.now() - 75000 } }; })()');
+    await page.waitFor('document.querySelector("[data-testid=turn-progress]")?.textContent === "Waiting for provider"');
     await capture(page, 'codex-silent-reconnected-desktop.png');
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await capture(page, 'codex-silent-reconnected-phone.png');

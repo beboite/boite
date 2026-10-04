@@ -170,7 +170,7 @@
     <section class="card status" data-testid="voice-status" data-state={status?.ready ? 'ready' : 'setup'}>
       <div class="status-line">
         <span class="dot" class:ok={status?.ready}></span>
-        <div class="text">{status?.ready ? strings.speech.ready : strings.speech.notReady}<span class="hint">{strings.speech.ownerOnly}</span></div>
+        <div class="text ui-label-box"><span class="ui-label">{status?.ready ? strings.speech.ready : strings.speech.notReady}</span><InfoTip topic={strings.speech.heading} text={strings.speech.ownerOnly} /></div>
       </div>
     </section>
   {:else if config && status}
@@ -180,7 +180,6 @@
         <div class="text">
           {#if stage === 'ready'}
             {status.engine === 'local' ? fill(strings.speech.readyLocal, { model: modelName }) : fill(strings.speech.readyApi, { provider: provider(config.apiProvider) })}
-            {#if status.streaming}<span class="hint">{strings.speech.streamingHint}</span>{/if}
             {#if status.engine === 'local' && status.runtimeOutdated}<span class="hint">{strings.speech.updateHint}</span>{/if}
           {:else if stage === 'downloading'}
             {fill(strings.speech.downloadingModel, { model: fetching?.name ?? '' })}

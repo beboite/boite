@@ -68,7 +68,7 @@
   <span class="ui-label" class:quiet data-testid={id} {title}>{text}</span>
 {/snippet}
 {#if preparing}
-  <div class="reply-pending"><TypingIndicator /><span class="ui-label" aria-hidden="true">{strings.chat.preparingReply}</span></div>
+  <div class="reply-pending"><TypingIndicator /></div>
 {/if}
 {#if turn.status !== 'queued' && !(running && activeTool && !waiting && background.length === 0 && !observed && !compacting)}
   <div class="summary" class:compacting class:preparing class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
@@ -90,9 +90,13 @@
       {@render metric('compaction-result', label)}
     {/if}
     {#if observed}
-      {@render metric('turn-progress', observed.detail ? `${activityLabel}: ${observed.detail}` : activityLabel, observed.detail ?? undefined)}
-      {@render metric('turn-last-activity', fill(quiet >= 60_000 ? strings.chat.noActivity : strings.chat.lastActivity, { time: elapsed(quiet) }), undefined, quiet >= 60_000)}
-      {#if providerAge !== null && observed.providerAt! > observed.at}
+      {#if observed.detail || observed.phase === 'retrying' || quiet >= 60_000}
+        {@render metric('turn-progress', observed.detail ? `${activityLabel}: ${observed.detail}` : activityLabel, observed.detail ?? undefined)}
+      {/if}
+      {#if quiet >= 60_000}
+        {@render metric('turn-last-activity', fill(strings.chat.noActivity, { time: elapsed(quiet) }), undefined, true)}
+      {/if}
+      {#if quiet >= 60_000 && providerAge !== null && observed.providerAt! > observed.at}
         {@render metric('turn-provider-signal', fill(strings.chat.providerSignal, { time: elapsed(providerAge) }))}
       {/if}
     {/if}
@@ -121,7 +125,7 @@
 <style>
   .summary { display: flex; flex-wrap: wrap; align-self: stretch; align-items: center; gap: 4px 6px; margin: 12px 0 0 4px; font-size: var(--text-xs); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; }
   .summary[data-status='running'] { color: var(--color-accent); }
-  .reply-pending { display: flex; align-items: center; gap: 10px; align-self: flex-start; margin: var(--chat-block-gap) 0 0 var(--activity-padding); color: var(--color-muted-foreground); }
+  .reply-pending { display: flex; align-items: center; align-self: flex-start; margin: var(--chat-block-gap) 0 0 var(--activity-padding); }
   .reply-pending :global(.typing) { min-height: 40px; padding: 10px 14px; }
   .summary.preparing { margin-top: 6px; color: var(--color-muted-foreground); }
   .summary[data-status='error'] { color: var(--color-danger); }

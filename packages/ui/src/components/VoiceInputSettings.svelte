@@ -6,6 +6,7 @@
   import { voice, VOICE_STORAGE_KEY } from '../lib/voice-prefs.svelte';
   import { fill, strings } from '../lib/strings';
   import Menu from './Menu.svelte';
+  import InfoTip from './InfoTip.svelte';
 
   let devices = $state<MediaDeviceInfo[]>([]);
   let phase = $state<'idle' | 'opening' | 'listening'>('idle');
@@ -75,11 +76,11 @@
 
 <section class="card" data-testid="voice-input-settings">
   <label class="switch-row">
-    <span class="text">{strings.speech.enabled}<span class="hint">{strings.speech.enabledHint}</span></span>
+    <span class="text ui-label-box"><span class="ui-label">{strings.speech.enabled}</span><InfoTip topic={strings.speech.enabled} text={strings.speech.enabledHint} /></span>
     <input type="checkbox" role="switch" data-testid="voice-enabled" checked={voice.current.enabled} onchange={(event) => voice.setEnabled(event.currentTarget.checked)} />
   </label>
   <div class="switch-row microphone-row">
-    <span class="text">{strings.speech.microphone}<span class="hint">{strings.speech.microphoneHint}</span></span>
+    <span class="text ui-label-box"><span class="ui-label">{strings.speech.microphone}</span><InfoTip topic={strings.speech.microphone} text={strings.speech.microphoneHint} /></span>
     <div class="picker">
       <Menu items={inputs} onpick={pick} label={strings.speech.microphone} placement="bottom" align="end" testid="voice-microphone">
         <Mic size={15} /><span class="selected ui-label">{selected}</span><ChevronDown size={14} />
@@ -92,14 +93,14 @@
     </button>
     <meter min="0" max="1" value={level} aria-label={strings.speech.inputLevel} data-testid="voice-microphone-level"></meter>
   </div>
-  <p class="hint" role="status">{phase === 'opening' ? strings.speech.opening : phase === 'listening' ? strings.speech.microphoneTestHint : strings.speech.microphoneIdleHint}</p>
+  {#if phase !== 'idle'}<p class="hint" role="status">{phase === 'opening' ? strings.speech.opening : strings.speech.microphoneTestHint}</p>{/if}
   {#if error}<p class="error" role="alert" data-testid="voice-microphone-error">{error}</p>{/if}
 </section>
 
 <style>
   .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; }
   .switch-row + .switch-row { border-top: 1px solid var(--color-edge); }
-  .text { min-width: 0; }
+  .text { min-width: 0; justify-content: flex-start; }
   .hint { display: block; margin: 4px 0 0; color: var(--color-muted-foreground); font-size: var(--text-xs); line-height: 1.5; }
   .picker { min-width: 0; max-width: 55%; }
   .picker :global(.menu), .picker :global(.trigger) { max-width: 100%; }
