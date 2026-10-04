@@ -54,10 +54,16 @@ const IDLE_MS = 1000;
  * first frame, and drops the frames that arrive meanwhile: the first take of a
  * session lost 20 of them, later takes none (measured 2026-10-04). Its software
  * AV1 encoder froze the first 1 to 2.6 s of a take. A throwaway recording of a
- * tiny canvas pays that before the first take; the muxer writes its first bytes
- * once the encoder runs, about 3.4 s later for AV1.
+ * tiny canvas pays that ahead of the first take, when a page opens or a codec is
+ * picked; the muxer writes its first bytes once the encoder runs, about 3.4 s
+ * later for AV1. A take never waits for it: one that starts first pays the
+ * cold start itself.
  */
 const warmed = new Map<string, Promise<void>>();
+export function warmRecordingEncoder(codec: BrowserRecordingCodec): void {
+  const type = supportedRecordingCodecs()[codec];
+  if (type) void warmEncoder(type);
+}
 function warmEncoder(type: string): Promise<void> {
   let warm = warmed.get(type);
   if (!warm) {
@@ -155,16 +161,20 @@ export class BrowserRecorder {
         })();
       };
       this.frames = 0;
-      const warming = warmEncoder(type);
+      // This take warms the encoder for the next ones: no throwaway recording runs beside it.
+      if (!warmed.has(type)) warmed.set(type, Promise.resolve());
       if (this.source.stream) {
         try { this.stopStream = await this.source.stream(frameRate, jpeg => { lastStreamed = performance.now(); show(new Blob([jpeg], { type: 'image/jpeg' })); }); }
         catch { this.stopStream = null; }
       }
-      // The first frame sizes the video. A page that does not stream one soon is captured once.
-      const firstBy = performance.now() + (this.stopStream ? 1500 : 0);
-      while (!page && performance.now() < firstBy && !this.disposed) await new Promise(resolve => setTimeout(resolve, 20));
-      if (!page) { show(jpegOf(await this.source.capture())); await decoding; }
-      await warming;
+      // The first frame sizes the video: one capture, unless the page streams a newer frame meanwhile.
+      // A still page streams nothing, so nothing waits for the stream.
+      const asked = performance.now();
+      try {
+        const data = await this.source.capture();
+        if (lastStreamed <= asked) show(jpegOf(data));
+      } catch (error) { if (lastStreamed <= asked) throw error; }
+      await decoding;
       if (this.disposed) throw new Error('the browser tab is closed');
       if (!page) throw new Error('could not capture the browser page');
       ({ width: canvas.width, height: canvas.height } = recordingSize((page as ImageBitmap).width, (page as ImageBitmap).height));
@@ -221,6 +231,8 @@ export class BrowserRecorder {
           else if (!capturing && (moving || now - lastFrame >= IDLE_MS)) {
             capturing = true; lastFrame = now;
             void this.source.capture().then(data => {
+              // A frame streamed since the request is newer: showing the capture would step back.
+              if (lastStreamed > now) { moving = false; return; }
               moving = data !== captured; captured = data;
               if (moving) show(jpegOf(data));
             }, () => { moving = false; }).finally(() => { capturing = false; });

@@ -2,7 +2,7 @@ import { SvelteMap } from 'svelte/reactivity';
 import { browserPresetSize, type BrowserAction, type BrowserDiagnostics, type BrowserHistoryEntry, type BrowserPreset, type BrowserRecording, type BrowserReply } from '@boite/contracts';
 import { browserBridge } from './browser-bridge';
 import { automateBrowser } from './browser-automation';
-import { BrowserRecorder } from './browser-recording';
+import { BrowserRecorder, warmRecordingEncoder } from './browser-recording';
 import { RecordingIndicators } from './recording-indicators';
 import { isExperimentEnabled } from './experiments';
 import { recordingCodec, recordingFrameRate } from './recording-settings';
@@ -38,6 +38,8 @@ function recorder(id: string, indicators = false): BrowserRecorder {
   return value;
 }
 browserBridge.on(event => {
+  // A page opening warms the encoder of the desktop's codec, once per process, so a first take starts clean.
+  if (event.type === 'loading' && event.loading) warmRecordingEncoder(recordingCodec());
   if (event.type !== 'destroyed') return;
   recorders.get(event.id)?.dispose(); recorders.delete(event.id); states.delete(event.id); history.delete(event.id);
 });

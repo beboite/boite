@@ -7,7 +7,7 @@
   import { focusedElement, restoreFocus } from '../lib/focus';
   import { mobileOverlay } from '../lib/mobile-history';
   import { recordingCodec, recordingFrameRate, setRecordingCodec, setRecordingFrameRate } from '../lib/recording-settings';
-  import { recordingVideoType, supportedRecordingCodecs } from '../lib/browser-recording';
+  import { recordingVideoType, supportedRecordingCodecs, warmRecordingEncoder } from '../lib/browser-recording';
   import { videoPlayable } from '../lib/video-support';
   import Menu from './Menu.svelte';
   let { id, onerror }: { id: string; onerror: (message: string) => void } = $props();
@@ -74,7 +74,7 @@
     else if (value === 'rotate' && toolsState.preset) void act({ kind: 'preset', preset: toolsState.preset, orientation: toolsState.orientation === 'portrait' ? 'landscape' : 'portrait' });
     else if (value === 'diagnostics') void diagnostics();
     else if (value.startsWith('fps:')) { frameRate = Number(value.slice(4)) as BrowserRecordingFrameRate; setRecordingFrameRate(frameRate); }
-    else if (value.startsWith('codec:')) { codec = value.slice(6) as BrowserRecordingCodec; setRecordingCodec(codec); }
+    else if (value.startsWith('codec:')) { codec = value.slice(6) as BrowserRecordingCodec; setRecordingCodec(codec); warmRecordingEncoder(codec); }
     else if (value === 'recording') view = 'recording';
   }
 </script>

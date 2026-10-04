@@ -451,11 +451,35 @@ thread at the chosen rate, so Chromium never sends faster than 30 or 60 frames
 a second and never more than two at once. The JPEG reaches the UI as raw bytes
 over a Tauri channel, without base64 or the core. The UI decodes only the
 newest frame, draws it on a canvas and asks the MediaRecorder for exactly that
-frame. WebView2's H.264 encoder takes about 0.7 s to start once per process
-and drops what it receives meanwhile; its software AV1 encoder froze the first
-1.1 to 2.6 s of a take. The first recording in each codec therefore starts its
-encoder on a 64 × 64 canvas before the page's first frame is committed; the
-start still answers within a second.
+frame. WebView2's H.264 encoder took about 0.7 s to start once per process
+and dropped what it received meanwhile; its software AV1 encoder froze the first
+1.1 to 2.6 s of a take. Opening a page therefore starts the encoder of the
+desktop's codec on a 64 × 64 canvas, once per process, and so does picking a
+codec in the menu. A take never waits for that warm-up: it records at once and
+warms its own codec for the next takes. Its first frame is one capture of the
+page, or a streamed frame if one arrives meanwhile; a start no longer waits
+1.5 s for a still page to stream.
+
+Time from `recording-start` to its answer, first take of a fresh shell, the
+page open for 6 s before, on 2026-10-04 (Windows 11, Edge WebView2 154). The
+desktop's codec is H.264, so only that one was warmed at page open; AV1 started
+cold. Before is the release shell before this change, whose start waited for
+the warm-up and for a streamed frame:
+
+| Page | Codec | Before | After | After: frames, longest gap |
+|---|---|---|---|---|
+| 358 × 748, animated | H.264 | 550 ms | 34 ms | 93 in 3 s, 43 ms |
+| 358 × 748, animated | AV1 | 547 ms | 37 ms | 93 in 3 s, 40 ms |
+| 358 × 748, still | H.264 | 480 ms | 25 ms | 5 in 3 s, 1023 ms |
+| 358 × 748, still | AV1 | 482 ms | 29 ms | 5 in 3 s, 1023 ms |
+| 1920 × 1080, animated | H.264 | 584 ms | 51 ms | 150 in 5 s, 133 ms |
+| 1920 × 1080, animated | AV1 | 552 ms | 60 ms | 152 in 5 s, 45 ms |
+
+The cold AV1 takes kept their frame rate from the first second. A still page
+repeats its frame once a second by design. Command, per row:
+`BOITE_E2E_SHELL_EXE=<release shell> BOITE_RECORDING_CODEC=h264|av1
+BOITE_RECORDING_SECONDS=3|5 [BOITE_RECORDING_STILL=1]
+[BOITE_RECORDING_PRESET=desktop-1920x1080] bun test tests/e2e/browser-recording.test.ts`.
 
 A still page streams nothing, so its last frame is repeated and the page is
 captured once a second. A capture that differs from the previous one means the

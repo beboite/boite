@@ -14,7 +14,8 @@ import type { BrowserPreset } from '../../packages/contracts/src/index.ts';
  * `BOITE_RECORDING_SECONDS` lengthens the take, `BOITE_RECORDING_FPS=60` and
  * `BOITE_RECORDING_CODEC=av1` are passed to `recording-start`,
  * `BOITE_RECORDING_PRESET` sizes the page, `BOITE_RECORDING_NOISE=1` animates
- * noise no encoder compresses, to reach the size cap, `BOITE_RECORDING_PLAY`
+ * noise no encoder compresses, to reach the size cap, `BOITE_RECORDING_STILL=1`
+ * records a page that never changes, `BOITE_RECORDING_PLAY`
  * lists other videos (`;`-separated) to play in the chat and
  * `BOITE_RECORDING_KEEP` copies the video there.
  */
@@ -36,6 +37,8 @@ const NOISE = `<!doctype html><meta charset="utf-8"><title>Recording noise</titl
 <style>html,body{margin:0;height:100%;overflow:hidden}canvas{width:100%;height:100%;image-rendering:pixelated}</style><canvas width="480" height="270"></canvas>
 <script>const c=document.querySelector('canvas').getContext('2d'),img=c.createImageData(480,270),px=new Uint32Array(img.data.buffer);
 (function tick(){for(let i=0;i<px.length;i++)px[i]=(Math.random()*0xffffff)|0xff000000;c.putImageData(img,0,0);requestAnimationFrame(tick)})()</script>`;
+
+const STILL = '<!doctype html><meta charset="utf-8"><title>Recording still</title><p style="font:600 48px system-ui">Still</p>';
 
 /** User plus kernel CPU seconds of `root` and every descendant. */
 async function treeCpuSeconds(root: number): Promise<number> {
@@ -94,7 +97,7 @@ const DIALOG_PLAYBACK = `(async () => {
 })()`;
 
 test.skipIf(process.platform !== 'win32' || !executable)('a browser recording keeps its frame rate on an animated page', async () => {
-  const site = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response(process.env.BOITE_RECORDING_NOISE ? NOISE : ANIMATED, { headers: { 'content-type': 'text/html;charset=utf-8' } }) });
+  const site = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response(process.env.BOITE_RECORDING_NOISE ? NOISE : process.env.BOITE_RECORDING_STILL ? STILL : ANIMATED, { headers: { 'content-type': 'text/html;charset=utf-8' } }) });
   const session = await startBrowserSession(executable!);
   const cli = async (args: string[]) => {
     const out: string[] = [], err: string[] = [];
@@ -119,7 +122,7 @@ test.skipIf(process.platform !== 'win32' || !executable)('a browser recording ke
       await expect(session.command({ kind: 'recording-stop' }, id)).rejects.toThrow('no browser recording has started');
       return;
     }
-    console.log(`Recording started in ${((performance.now() - startedAt) / 1000).toFixed(1)} s`);
+    console.log(`Recording started in ${Math.round(performance.now() - startedAt)} ms`);
     await Bun.sleep(seconds * 1000);
     // The desktop stops and keeps the video for review; the agent then downloads it.
     const stopAt = performance.now();
@@ -140,7 +143,8 @@ test.skipIf(process.platform !== 'win32' || !executable)('a browser recording ke
     console.log(`Full decode: ${probe?.decode || 'no error'}; review dialog: ${JSON.stringify(dialog)}`);
     if (process.env.BOITE_RECORDING_KEEP) { mkdirSync(process.env.BOITE_RECORDING_KEEP, { recursive: true }); copyFileSync(recorded.path, join(process.env.BOITE_RECORDING_KEEP, `recording-${recorded.codec ?? 'h264'}-${recorded.frameRate ?? 30}fps.${recorded.mime === 'video/mp4' ? 'mp4' : 'webm'}`)); }
     expect(statSync(recorded.path).size).toBe(recorded.bytes);
-    expect(fps).toBeGreaterThanOrEqual((recorded.frameRate ?? 30) * 0.85);
+    // A still page repeats its frame about once a second.
+    if (!process.env.BOITE_RECORDING_STILL) expect(fps).toBeGreaterThanOrEqual((recorded.frameRate ?? 30) * 0.85);
     if (codec) expect(recorded.codec).toBe(codec);
     if (probe) { expect(probe.decode).toBe(''); expect(probe.codec).toStartWith(({ h264: 'h264', hevc: 'hevc', av1: 'av1' } as Record<string, string>)[recorded.codec ?? 'h264']!); }
     expect(dialog.played || !!dialog.fallback).toBe(true);

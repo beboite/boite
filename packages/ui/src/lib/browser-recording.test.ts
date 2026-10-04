@@ -79,7 +79,8 @@ test('a recording streams at the desktop rate and commits only the newest page f
   const result = await recorder.stop();
   expect(stop).toHaveBeenCalledOnce();
   expect(result).toMatchObject({ mime: 'video/mp4', frameRate: 60, frames: 3, codec: 'h264', reason: 'stopped' });
-  expect(source.capture).not.toHaveBeenCalled();
+  // Captured once, for the first frame: a page that streams nothing does not hold the start back.
+  expect(source.capture).toHaveBeenCalledOnce();
 });
 
 test('a codec the engine cannot encode is refused with the ones it can, and a chosen one is recorded and reported', async () => {
@@ -90,8 +91,7 @@ test('a codec the engine cannot encode is refused with the ones it can, and a ch
   expect(FakeRecorder.instances).toEqual([]);
   expect(source.stream).not.toHaveBeenCalled();
   await recorder.start(30, 'av1');
-  // The first AV1 take warms its encoder, then records, both in AV1.
-  expect(FakeRecorder.instances.map(instance => instance.options.mimeType)).toEqual(['video/mp4;codecs=av01', 'video/mp4;codecs=av01']);
+  expect(FakeRecorder.instances.map(instance => instance.options.mimeType)).toEqual(['video/mp4;codecs=av01']);
   expect(await recorder.stop()).toMatchObject({ mime: 'video/mp4', codec: 'av1', reason: 'stopped' });
 });
 
@@ -142,6 +142,51 @@ test('a page that moves while its stream is silent is captured at the frame rate
   await vi.advanceTimersByTimeAsync(5000);
   expect(source.capture.mock.calls.length - moving).toBeLessThanOrEqual(7);
   expect((await recorder.stop()).frames).toBeGreaterThan(25);
+});
+
+test('a capture that answers after a streamed frame is dropped, so the video never steps back', async () => {
+  fakeTime();
+  const { source, push } = streamed();
+  const recorder = new BrowserRecorder(source, () => {});
+  await startAt(recorder, 30);
+  let answer: (data: string) => void = () => {};
+  source.capture.mockImplementation(() => new Promise<string>(resolve => { answer = resolve; }));
+  // The silent page is captured again; the page streams before the capture answers.
+  await vi.advanceTimersByTimeAsync(1100);
+  expect(source.capture).toHaveBeenCalledTimes(2);
+  const decoded = vi.mocked(createImageBitmap).mock.calls.length;
+  push(1);
+  await vi.advanceTimersByTimeAsync(50);
+  expect(createImageBitmap).toHaveBeenCalledTimes(decoded + 1);
+  answer(btoa('older page'));
+  await vi.advanceTimersByTimeAsync(50);
+  expect(createImageBitmap).toHaveBeenCalledTimes(decoded + 1);
+  await recorder.stop();
+});
+
+test('the encoder warms ahead of a first take, which never waits for it nor for a still page to stream', async () => {
+  vi.resetModules();
+  const { BrowserRecorder, warmRecordingEncoder } = await import('./browser-recording');
+  fakeTime();
+  // An encoder that has not written yet keeps the throwaway recording running, up to 5 s.
+  vi.spyOn(FakeRecorder.prototype, 'requestData').mockImplementation(() => {});
+  warmRecordingEncoder('av1');
+  expect(FakeRecorder.instances.map(instance => instance.options.mimeType)).toEqual(['video/mp4;codecs=av01']);
+  const source = { capture: vi.fn(async () => btoa('jpeg')), stream: vi.fn(async () => async () => {}) };
+  const recorder = new BrowserRecorder(source, () => {});
+  let started = false;
+  void recorder.start(30, 'av1').then(() => { started = true; });
+  await vi.advanceTimersByTimeAsync(100);
+  expect(started).toBe(true);
+  expect(FakeRecorder.instances.map(instance => instance.state)).toEqual(['recording', 'recording']);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(FakeRecorder.instances[0]!.state).toBe('inactive');
+  recorder.discard((await recorder.stop()).id);
+  // A take in a cold codec warms it itself: nothing throwaway runs after it.
+  await startAt(recorder, 30, 'h264');
+  warmRecordingEncoder('h264');
+  expect(FakeRecorder.instances).toHaveLength(3);
+  await recorder.stop();
 });
 
 test('input marks fade at the frame rate over a still page', async () => {
