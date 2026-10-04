@@ -33,6 +33,7 @@
     key,
     provider,
     canSend,
+    answering = false,
     sendLabel = strings.composer.send,
     choice = $bindable(),
     picking = $bindable(),
@@ -47,6 +48,7 @@
     key: string;
     provider: ProviderSummary | null | undefined;
     canSend: boolean;
+    answering?: boolean;
     /** What Send does, when it answers a question rather than sending a message. */
     sendLabel?: string;
     choice: Choice | null;
@@ -194,7 +196,8 @@
 
 <svelte:window onstorage={(event) => { if (event.key === VOICE_STORAGE_KEY || event.key === null) voice.load(); }} />
 
-<div class="bar" bind:this={bar}>
+<div class="bar" class:answering bind:this={bar}>
+  {#if !answering}
   {#key `${key}:${store.draft?.projectId ?? ''}`}
   <ComposerOptions busy={picking} levels={effortLevels} effort={activeEffort} {speeds} speed={speedOptions.speed} {modes} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={store.draft && draftRepository ? store.draft.worktree : null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick(speedOptions.pick(speed))} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} />
   {/key}
@@ -238,10 +241,8 @@
     {/if}
     </div>
   </div>
-
-
-
-  {#if bound && showContext}
+  {/if}
+  {#if bound && showContext && !answering}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="context-control" oncontextmenu={(event) => controlMenu(event, store, 'header.context')}><ContextControl {store} /></div>
   {/if}
@@ -292,6 +293,7 @@
     onclick={() => onsubmit()}
   >
     <ArrowUp size={16} strokeWidth={2.25} />
+    {#if answering}<span class="ui-label">{sendLabel}</span>{/if}
   </button>
 </div>
 
@@ -383,6 +385,8 @@
   }
 
   .send:not(:disabled):active { transform: scale(.92); }
+  .answering .send { width: auto; padding-inline: 12px; border-radius: var(--radius-md); }
+  .answering .attach { display: inline-flex; }
 
   .stop {
     color: var(--color-foreground);
@@ -397,6 +401,7 @@
     .chips :global(.picker > .trigger > .label) { min-width: 0; max-width: none; }
     .chips :global(.picker > .trigger.connect) { padding: 0 12px; border-radius: var(--radius-md); background: var(--color-accent-soft); color: var(--color-accent); }
     .send, .stop { margin-left: 2px; }
+    .answering .send { margin-left: auto; }
     /* The composer carries `dictating` while a dictation runs. */
     :global(.dictating) .send { display: none; }
   }

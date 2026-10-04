@@ -993,14 +993,14 @@ test('a waiting question takes the composer as its free answer, with the card pi
   await type('one question please');
   press('Enter');
   await waitFor(() => document.querySelector('[data-testid=composer-reply]') !== null);
-  expect(input().placeholder).toBe('Your answer…');
+  expect(input().placeholder).toBe('Write your answer');
   expect(query('[data-testid=composer-send]').getAttribute('aria-label')).toBe('Send the answer');
   expect(pendingCard().querySelector('[data-testid=question-reply-hint]')).not.toBeNull();
 
   // Ignore gives the composer back to ordinary messages; the card offers it again.
   query<HTMLButtonElement>('[data-testid=composer-reply-ignore]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-reply]') === null);
-  expect(input().placeholder).not.toBe('Your answer…');
+  expect(input().placeholder).not.toBe('Write your answer');
   pendingCard().querySelector<HTMLButtonElement>('[data-testid=question-write]')!.click();
   await waitFor(() => document.querySelector('[data-testid=composer-reply]') !== null);
 
@@ -1021,7 +1021,7 @@ test('a waiting question takes the composer as its free answer, with the card pi
   expect(input().value).toBe('');
   expect(chips()).toHaveLength(0);
   await waitFor(() => !store.busy && document.querySelector('[data-testid=composer-reply]') === null);
-  expect(input().placeholder).not.toBe('Your answer…');
+  expect(input().placeholder).not.toBe('Write your answer');
   expect(call.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(0);
 });
 

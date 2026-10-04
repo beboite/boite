@@ -3,7 +3,7 @@
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
   import { dockRoom, questionDock } from '../lib/question-dock.svelte';
-  import { replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
+  import { ignoreQuestions, replyOf, repliesOf, sendAnswer, writeAnswer } from '../lib/question-reply.svelte';
   import QuestionCard from './QuestionCard.svelte';
 
   let { store, reserveInComposer = false, onroom }: {
@@ -26,6 +26,7 @@
   let shown = $derived(asked.find((question) => question.id === shownId) ?? asked[0]);
   let at = $derived(shown ? asked.indexOf(shown) : 0);
   let questionOpen = $state(true);
+  let inline = $derived(asked.length > 0);
   // A new question comes up open, even over one the user folded, and so does
   // another thread's: the dock stays mounted while the open thread changes, and
   // a count would miss a question that replaces another.
@@ -70,9 +71,9 @@
   let height = $state(0);
   let readingHeight = $state(0);
   $effect(() => {
-    onroom?.(visible ? height : 0);
-    dockRoom.height = visible && !reserveInComposer ? readingHeight : 0;
-    dockRoom.clearance = visible && !reserveInComposer ? height : 0;
+    onroom?.(visible && !inline ? height : 0);
+    dockRoom.height = visible && !reserveInComposer && !inline ? readingHeight : 0;
+    dockRoom.clearance = visible && !reserveInComposer && !inline ? height : 0;
   });
   $effect(() => () => {
     dockRoom.height = 0;
@@ -129,18 +130,22 @@
 </script>
 
 {#if activity || asked.length > 0}
-  <section class="activity" class:hidden={!visible} use:measure data-testid="thread-activity" aria-label={strings.activity.tasks} inert={!visible}>
+  <section class="activity" class:inline class:hidden={!visible} use:measure data-testid="thread-activity" aria-label={shown ? strings.activity.question : strings.activity.tasks} inert={!visible}>
     {#if shown}
       <div class="questions" data-testid="activity-questions" data-count={asked.length}>
         <div class="activity-row question-row">
           <MessageCircleQuestionMark size={16} />
-          <span class="kind ui-label">{strings.activity.question}</span>
           <button type="button" class="ghost objective question-toggle" aria-expanded={questionOpen}
             title={questionOpen ? strings.activity.questionFold : strings.activity.questionUnfold} data-testid="activity-question-toggle"
             onclick={() => (questionOpen = !questionOpen)}>
             <span class="question-line ui-label">{questionOpen ? strings.chat.questionAsyncHeading : shown.text}</span>
             <ChevronDown size={16} class={questionOpen ? 'turned' : ''} />
           </button>
+          {#if replyOf(store, shown.id).replying}
+            <span data-testid="composer-reply" data-question={shown.id}>
+              <button type="button" class="ghost small" data-testid="composer-reply-ignore" title={strings.composer.replyIgnoreHint} onclick={() => ignoreQuestions(store)}>{strings.composer.replyIgnore}</button>
+            </span>
+          {/if}
           {#if asked.length > 1}
             <span class="pager">
               <button type="button" class="ghost small icon" aria-label={strings.activity.questionPrev} title={strings.activity.questionPrev} data-testid="activity-question-prev" onclick={() => page(-1)}><ChevronLeft size={16} /></button>
@@ -251,6 +256,7 @@
      every side and the air above the first line equals the air under the last. */
   .activity { position: absolute; bottom: calc(100% + 4px); inset-inline: 0; z-index: 5; width: 100%; margin-inline: auto; max-height: 45vh; overflow-y: auto; padding: 4px; border: 1px solid var(--color-border); border-top-color: var(--color-edge); border-radius: var(--radius-lg); background: var(--composer-glaze) var(--color-activity-surface); backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2); box-shadow: var(--shadow-e1); font-size: var(--text-sm); transition: opacity var(--dur-3), transform var(--dur-3); }
   .activity.hidden { opacity: 0; transform: translateY(8px); pointer-events: none; }
+  .activity.inline { position: relative; bottom: auto; inset-inline: auto; z-index: auto; background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; border: none; border-bottom: 1px solid var(--color-border); border-radius: 0; box-shadow: none; padding: 8px 4px 4px; }
   .activity-row { display: flex; align-items: center; gap: 8px; min-height: var(--control); min-width: 0; padding: 0 2px 0 8px; }
   /* The questions sit above the goal, the loop and the tasks, a hairline between. */
   .questions + :is(.activity-row, .tasks-toggle) { margin-top: 4px; border-top: 1px solid var(--color-border); padding-top: 4px; }
