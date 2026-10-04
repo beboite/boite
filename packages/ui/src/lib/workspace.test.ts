@@ -274,6 +274,23 @@ test('a machine the group brought stays the group\'s to drop when its key is ref
   expect(w.machines[0]).toMatchObject({ coreId: 'b', groupId: 'grp' });
 });
 
+test('a stored core the group brought is still one when the list has no entry left for it', async () => {
+  const { w, a } = await setup();
+  a.localCore = false;
+  a.endpointUrl = 'http://10.0.0.8:1';
+  // Another window dropped the saved entry; this key, from an earlier ticket, stayed as the core the window opens on.
+  endpoints.storeEndpoint({ url: 'http://10.0.0.8:1', token: 'earlier', paired: true, coreId: 'c', groupId: 'grp' });
+  upsertEnvironment({ url: 'https://anchor.test', token: 'hand', paired: true, label: 'Anchor' });
+  const vet = vi.spyOn(w.groups, 'vet').mockImplementation(async (held) => held);
+  vi.spyOn(a, 'boot').mockResolvedValue();
+  vi.spyOn(w, 'add').mockResolvedValue(true);
+  await w.boot();
+  // Asked about before its key is sent, and listed as the group's, so the group can drop it.
+  expect(vet.mock.calls[0]![0].map((env) => [env.url, env.coreId])).toEqual([['http://10.0.0.8:1', 'c']]);
+  expect(w.machines[0]).toMatchObject({ id: 'http://10.0.0.8:1', coreId: 'c', groupId: 'grp' });
+  expect(endpoints.readEnvironments().find((env) => env.url === 'http://10.0.0.8:1')).toMatchObject({ coreId: 'c', groupId: 'grp' });
+});
+
 test('a window whose machine the group dropped falls back on a machine paired by hand, never on the address it dropped', async () => {
   const { w, a } = await setup();
   a.endpointUrl = 'http://10.0.0.8:1';

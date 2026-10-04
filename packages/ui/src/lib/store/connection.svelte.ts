@@ -219,7 +219,7 @@ export class Connection {
     const off = client.onState((state) => {
       if (state !== 'ready') return;
       off();
-      storeEndpoint({ url: endpoint.url, token: endpoint.token, ...(endpoint.paired ? { paired: true } : {}) });
+      storeEndpoint(endpoint);
     });
     this.ctx.off.push(off);
   }
@@ -250,7 +250,8 @@ export class Connection {
       onSession: (session) => {
         key = session.token;
         if (this.ctx.client !== client) return;
-        if (rememberActive) storeEndpoint({ url, token: session.token, paired: true });
+        // A ticket leaves the machine the group's; a grant makes it the owner's.
+        if (rememberActive) storeEndpoint({ url, token: session.token, paired: true, ...(endpoint.grant === undefined ? { coreId: endpoint.coreId, groupId: endpoint.groupId } : {}) });
         this.environments = rememberSession(endpoint, session.token);
       },
       onUnauthorized: (error) => {
@@ -398,7 +399,7 @@ export class Connection {
       this.ctx.store.error = strings.errors.noEndpoint;
       return;
     }
-    storeEndpoint({ url: env.url, token: env.token, ...(env.paired ? { paired: true } : {}) });
+    storeEndpoint(env);
     await this.#switchTo({ url: env.url, token: env.token, ...(env.paired ? { paired: true } : {}) });
   }
 

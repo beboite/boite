@@ -1,7 +1,7 @@
 import { untrack } from 'svelte';
 import { RPC_PATH, type Group, type GroupCore } from '@boite/contracts';
 import { WsClient } from './client';
-import { readEnvironments, removeEnvironment, type Endpoint, type StoredEnvironment } from './endpoint';
+import { readEnvironments, removeBrought, type Endpoint, type StoredEnvironment } from './endpoint';
 import { usableAddresses } from './group-addresses';
 import type { Machine, Workspace } from './workspace.svelte';
 
@@ -133,8 +133,8 @@ export class GroupLinks {
         const core = voice.cores.find((listed) => listed.coreId === entry.coreId);
         return core !== undefined && usableAddresses(core.addresses, this.#secure()).includes(entry.url);
       });
-      // Forgotten only if it is still the entry that was asked about: the owner may have paired that machine by hand meanwhile.
-      if (!stands && readEnvironments().some((env) => env.url === entry.url && env.token === entry.token && env.coreId === entry.coreId)) removeEnvironment(entry.url);
+      // Forgotten only while it is still the group's entry: the owner may have paired that machine by hand meanwhile.
+      if (!stands && entry.coreId !== undefined) removeBrought(entry.url, entry.coreId);
       return stands;
     });
   }

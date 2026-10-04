@@ -192,7 +192,10 @@ still be live once the request has been read, before it is opened or counted. A 
 refused before anything is computed for it, however its JSON is written, so
 one recorded on the path and sent again spends nothing of those thirty. Neither
 does the invitation of a machine that was since removed: it is spent, and
-refused before it is read. The joining core accepts the answer only if the key that signed it has
+refused before it is read. A request is counted only once it has proved who
+sent it, and an invitation already used is good for the machine it admitted
+alone, asking again after a lost answer: anybody else holding it is refused
+uncounted. The joining core accepts the answer only if the key that signed it has
 the id the invitation named. A machine that merely sits at that address reads
 nothing and cannot answer, and a request that names no known invitation costs
 the member one lookup.
@@ -290,7 +293,10 @@ brings a key of its own for that machine, a grant or a token, asks first. A
 client takes a new key only from a core it showed a grant or a ticket to. A
 machine the group drops leaves the window, and its saved entry goes only while
 it is still the one the group brought: paired by hand since, in another
-window, the entry stays. A key the group handed
+window, the entry stays. The group's mark is kept wherever a key of that
+machine is saved, the core the window opens on next included, so a key left
+there by another window is dropped with the machine and never passes for a
+pairing made by hand. A key the group handed
 out for an address the machine no longer gives, or no longer allows once it has
 HTTPS, is dropped and the machine reached anew, the machine the window opened
 on included: the window then goes to a machine paired by hand, or to the

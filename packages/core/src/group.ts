@@ -634,7 +634,7 @@ export class GroupStore {
       try {
         reply = await Promise.any(invite.a.map((url) => this.askToJoin(url, invite, sealed, nonce)));
       } catch {
-        throw refused(`no machine accepted the invitation at ${invite.a.join(', ')}: it is off or unreachable from here, or the invitation expired or was made by another machine`, { field: 'invite' });
+        throw refused(`no machine accepted the invitation at ${invite.a.join(', ')}: it is off or unreachable from here, or the invitation expired, was already used or was made by another machine`, { field: 'invite' });
       }
       if (reply.error !== undefined) throw refused(reply.error, { field: 'invite' });
       const roster = checkRoster(reply.roster);
@@ -683,30 +683,35 @@ export class GroupStore {
     if (this.closed || request.method !== 'POST' || request.headers.has('origin')) return new Response('forbidden', { status: 403 });
     if (this.roster === null) return new Response('this machine belongs to no group', { status: 404 });
     const from = request.headers.get('x-boite-peer') ?? '';
-    const invite = this.invites.get(request.headers.get('x-boite-invite') ?? '');
-    // An invitation whose machine was since removed is spent: asked again, it costs nothing and counts as a refusal.
-    const spent = invite?.joined != null && !liveCores(this.roster).some((core) => core.coreId === invite.joined);
-    if (invite === undefined || spent || invite.expiresAt <= Date.now() || request.headers.get('x-boite-signature') !== SEALED || !/^[0-9a-f]{64}$/.test(from)) {
-      return new Response('unknown or expired invitation', { status: 403 });
-    }
     const named = request.headers.get('x-boite-invite') ?? '';
+    const invite = this.invites.get(named);
+    const unknown = (): Response => new Response('unknown or expired invitation', { status: 403 });
+    // Spent: expired, replaced, or used by a machine that was since removed. Asked again it costs nothing and counts as a refusal.
+    const spent = (): boolean => this.roster === null || invite === undefined || this.invites.get(named) !== invite || invite.expiresAt <= Date.now()
+      || (invite.joined !== null && !liveCores(this.roster).some((core) => core.coreId === invite.joined));
+    if (invite === undefined || spent() || request.headers.get('x-boite-signature') !== SEALED || !/^[0-9a-f]{64}$/.test(from)) return unknown();
     const context = { from, to: this.selfId() };
     let opened: { plaintext: string; responseKey: Buffer };
     let name: string;
     try {
       const raw = await boundedBody(request.body, JOIN_BODY_MAX);
-      // The body may have taken its time: the invitation must still be the live one before anything is opened or counted.
-      if (this.invites.get(named) !== invite || invite.expiresAt <= Date.now()) return new Response('unknown or expired invitation', { status: 403 });
+      // The body may have taken its time: asked again before anything is opened or counted.
+      if (spent()) return unknown();
       // A request recorded on the path and sent again, respaced or not, is refused before anything is
       // computed for it: its sender holds no invitation, and what it replays must not spend the allowance below.
       name = sealedName(raw);
       if (invite.seen.has(name)) return new Response('this join request was already received', { status: 403 });
       opened = open(raw, this.box().key, context, invite.psk);
+      // Who asks is proven before anything is counted: an invitation already used is good for the machine it admitted, and for no other holder.
+      const { body, signature } = unpack(opened.plaintext);
+      const card = checkCard((JSON.parse(body) as { core?: unknown }).core);
+      const signed = card.coreId === from && verify(null, Buffer.from(JOIN_SIGNING_PREFIX + body), card.publicKey, Buffer.from(signature, 'base64'));
+      if (!signed || (invite.joined !== null && invite.joined !== from)) return unknown();
     } catch {
-      return new Response('unknown or expired invitation', { status: 403 });
+      return unknown();
     }
-    // Counted once it opened, so only a holder of the invitation spends the allowance:
-    // naming an invitation is no proof of holding it, and its name travels readable.
+    // Counted once it opened and proved who sent it, so only a holder of the invitation spends the
+    // allowance: naming an invitation is no proof of holding it, and its name travels readable.
     const now = Date.now();
     if (now - this.joins.since > 60_000) this.joins = { since: now, count: 0 };
     this.joins.count += 1;

@@ -5,6 +5,7 @@ import {
   readEnvironments,
   readStoredEndpoint,
   rememberSession,
+  removeBrought,
   removeEnvironment,
   resolveEndpoint,
   storeEndpoint,
@@ -260,6 +261,23 @@ describe('environments', () => {
     expect(await resolveEndpoint(false, approve)).toMatchObject({ url: 'https://hand.example', grant: 'g' });
     expect(asked).toEqual([url, url]);
     at('/');
+  });
+
+  test('the group\'s mark stays with the core the window opens on, and that core goes with its machine whatever key it holds', () => {
+    const url = 'http://10.0.0.5:9000';
+    // Two windows each got a key for the same machine of the group: one is the stored core, the other the saved entry.
+    storeEndpoint({ url, token: 'first', paired: true, coreId: 'b', groupId: 'grp' });
+    expect(readStoredEndpoint()).toEqual({ url, token: 'first', paired: true, coreId: 'b', groupId: 'grp' });
+    rememberSession({ url, token: '', ticket: 't', coreId: 'b', groupId: 'grp' }, 'second');
+    removeBrought(url, 'b');
+    expect(readEnvironments()).toEqual([]);
+    expect(readStoredEndpoint()).toBeNull();
+    // Paired by hand since: neither the entry nor the stored core is the group's to take.
+    storeEndpoint({ url, token: 'hand', paired: true });
+    upsertEnvironment({ url, token: 'hand', paired: true });
+    removeBrought(url, 'b');
+    expect(readEnvironments()).toHaveLength(1);
+    expect(readStoredEndpoint()).toMatchObject({ token: 'hand' });
   });
 
   test('the core a link names is read before the link is taken, whatever key the link brings', () => {

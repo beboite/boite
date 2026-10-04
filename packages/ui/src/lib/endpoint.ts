@@ -50,17 +50,22 @@ export function readStoredEndpoint(): Endpoint | null {
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!isEndpoint(parsed)) return null;
-    return { url: normalise(parsed.url), token: parsed.token, ...(parsed.paired === true ? { paired: true } : {}) };
+    return { url: normalise(parsed.url), token: parsed.token, ...(parsed.paired === true ? { paired: true } : {}), ...brought(parsed) };
   } catch {
     return null;
   }
+}
+
+/** The marks of a machine a group brought, kept wherever its key is saved: without them it would pass for one paired by hand. */
+function brought(from: { coreId?: unknown; groupId?: unknown }): { coreId?: string; groupId?: string } {
+  return { ...(typeof from.coreId === 'string' ? { coreId: from.coreId } : {}), ...(typeof from.groupId === 'string' ? { groupId: from.groupId } : {}) };
 }
 
 export function storeEndpoint(endpoint: Endpoint): void {
   try {
     window.localStorage.setItem(
       ENDPOINT_STORAGE_KEY,
-      JSON.stringify({ url: normalise(endpoint.url), token: endpoint.token, ...(endpoint.paired ? { paired: true } : {}) })
+      JSON.stringify({ url: normalise(endpoint.url), token: endpoint.token, ...(endpoint.paired ? { paired: true } : {}), ...brought(endpoint) })
     );
   } catch {
     /* a browser that refuses storage still runs for this session */
@@ -140,7 +145,8 @@ export function readEnvironments(): StoredEnvironment[] {
     url: stored.url,
     label: defaultEnvironmentLabel(stored.url),
     token: stored.token,
-    paired: true
+    paired: true,
+    ...brought(stored)
   };
   storeEnvironments([seeded]);
   return [seeded];
@@ -240,6 +246,9 @@ export function removeEnvironment(url: string, token?: string): StoredEnvironmen
  */
 export function removeBrought(url: string, coreId: string): StoredEnvironment[] {
   const saved = readEnvironments().find((env) => env.url === normalise(url));
+  // The core the window opens on may hold another key of that machine, from another window's ticket: it goes too.
+  const stored = readStoredEndpoint();
+  if (stored?.url === normalise(url) && stored.coreId === coreId) clearStoredEndpoint();
   return saved === undefined || saved.coreId !== coreId ? readEnvironments() : removeEnvironment(url, saved.token);
 }
 
@@ -341,7 +350,7 @@ function knownEndpoint(url: string): Endpoint | null {
   const stored = readStoredEndpoint();
   if (stored?.url === url) return stored;
   const remembered = readEnvironments().find((env) => env.url === url);
-  return remembered ? { url, token: remembered.token, ...(remembered.paired ? { paired: true } : {}) } : null;
+  return remembered ? { url, token: remembered.token, ...(remembered.paired ? { paired: true } : {}), ...brought(remembered) } : null;
 }
 
 /**

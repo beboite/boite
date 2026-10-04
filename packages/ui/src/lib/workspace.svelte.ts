@@ -91,7 +91,9 @@ export class Workspace {
   #primaryMachine(selected: Endpoint | null, remembered: StoredEnvironment[], before: StoredEnvironment[] = []): Machine {
     // A machine the group brought stays one when it is the machine this window opens on. When its saved entry
     // went during the boot, its key refused, what the entry said before still holds: the group may drop it.
-    const brought = remembered.find(e => e.url === store.endpointUrl) ?? before.find(e => e.url === store.endpointUrl);
+    // With no entry at all, the core the window was stored on says it itself.
+    const brought = remembered.find(e => e.url === store.endpointUrl) ?? before.find(e => e.url === store.endpointUrl)
+      ?? (selected?.url === store.endpointUrl ? selected : undefined);
     const machine: Machine = {
       id: store.endpointUrl ?? 'local',
       label: remembered.find(e => e.url === selected?.url)?.label ?? (store.localCore ? strings.machines.local : store.core?.hostname ?? hostOf(store.endpointUrl)) ?? strings.machines.local,
@@ -152,8 +154,7 @@ export class Workspace {
   }
 
   /** Which keys the group brought over plain HTTP may be sent where they were saved: asked before any of them is. */
-  async #vet(): Promise<StoredEnvironment[]> {
-    const saved = readEnvironments();
+  async #vet(saved: StoredEnvironment[]): Promise<StoredEnvironment[]> {
     const held = saved.filter(holdsBack);
     if (held.length === 0) return [];
     const anchors: Endpoint[] = saved.filter((e) => e.coreId === undefined && e.token !== '').map((e) => ({ url: e.url, token: e.token, paired: e.paired }));
@@ -206,10 +207,14 @@ export class Workspace {
     // The window would open on a machine whose key is held back, the stored one or the one a `?core=`
     // link names: it waits for the answer, and on a refusal that key is sent nowhere.
     // Both count: a link the owner declines falls back on the stored core.
-    const saved = readEnvironments();
-    const stored = readStoredEndpoint()?.url;
+    const kept = readStoredEndpoint();
+    // The stored core counts as an entry even when the list no longer has one for it: its marks travel with it.
+    const saved = kept?.coreId !== undefined && !readEnvironments().some((e) => e.url === kept.url)
+      ? [...readEnvironments(), { url: kept.url, label: '', token: kept.token, paired: true, coreId: kept.coreId, ...(kept.groupId === undefined ? {} : { groupId: kept.groupId }) }]
+      : readEnvironments();
+    const stored = kept?.url;
     const gated = [linkedCore(), stored].filter((url): url is string => typeof url === 'string' && saved.some((e) => e.url === url && holdsBack(e)));
-    const vetting = this.#vet().catch(() => [] as StoredEnvironment[]);
+    const vetting = this.#vet(saved).catch(() => [] as StoredEnvironment[]);
     if (gated.length > 0) {
       const cleared = await vetting;
       if (!this.#current(lifecycle)) return;

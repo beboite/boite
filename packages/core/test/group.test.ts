@@ -716,6 +716,11 @@ test('a used invitation welcomes its machine again without writing, and never af
   await c.core.group.join(second);
   const admitted = stored();
   expect(admitted).not.toBe(before);
+  // Somebody else who holds that invitation, now used, is refused before anything is counted.
+  const other = await machine();
+  const spentBefore = joins();
+  await expect(other.core.group.join(second)).rejects.toThrow('already used');
+  expect(joins()).toBe(spentBefore);
   // The answer was lost and the machine asks again: same welcome, nothing rewritten.
   const retry = c.core.group as unknown as { roster: Roster | null };
   retry.roster = null;
