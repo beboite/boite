@@ -123,6 +123,23 @@ test('real RPC discovers gateway models, separates the key and restores native a
   expect(harness.core.accounts.require(claude.id).status).toBe(nativeClaudeStatus);
 });
 
+test('a gateway that translates every model keeps proprietary models in their own harness', async () => {
+  const anyApi = ['anthropic', 'openai', 'openai-response'];
+  gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
+    return Response.json({ data: ['claude/claude-opus-5-5', 'codex/gpt-6-sol', 'codex/codex-auto-review', 'antigravity/claude-sonnet-5-5-high',
+      'antigravity/gemini-3-flash', 'antigravity/gpt-oss-120b-medium', 'xai/grok-5', 'muse/muse-code', 'kimi/kimi-k2']
+      .map(id => ({ id, supported_endpoint_types: anyApi })) });
+  } });
+  harness = await startTestCore({ settings: { subscriptionProxy: config(`http://127.0.0.1:${gateway.port}/v1`) } });
+  const owner = await harness.connect();
+  const claude = await owner.call('accounts.add', { providerId: 'claude', label: 'Gateway Claude' });
+  const codex = await owner.call('accounts.add', { providerId: 'codex', label: 'Gateway Codex' });
+  const ids = async (providerId: 'claude' | 'codex', accountId: string) =>
+    (await owner.call('providers.probe', { providerId, accountId })).models.map(model => model.id);
+  expect(await ids('claude', claude.id)).toEqual(['claude/claude-opus-5-5', 'antigravity/claude-sonnet-5-5-high', 'antigravity/gpt-oss-120b-medium', 'kimi/kimi-k2']);
+  expect(await ids('codex', codex.id)).toEqual(['codex/gpt-6-sol', 'codex/codex-auto-review', 'antigravity/gpt-oss-120b-medium', 'kimi/kimi-k2']);
+});
+
 test('legacy CLIProxy catalogs select native families and malformed gateway errors cannot echo the key', async () => {
   let fail = false;
   gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
