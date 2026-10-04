@@ -44,6 +44,21 @@ describe('the keyboard table', () => {
     expect(commandForKey(table, key({ key: 'n' }), false)).toBeNull();
   });
 
+  test('in a terminal its own chords come first, T3 Code`s, and elsewhere they are not there', () => {
+    const table = resolveBindings({ 'theme-dark': 'mod+shift+d' });
+    const ctrl = (k: string, shiftKey = false) => key({ key: k, ctrlKey: true, shiftKey });
+    expect(commandForKey(table, ctrl('n'), false, 'terminal')).toBe('terminal-new');
+    expect(commandForKey(table, ctrl('d'), false, 'terminal')).toBe('terminal-split');
+    expect(commandForKey(table, ctrl('D', true), false, 'terminal')).toBe('terminal-split-vertical');
+    expect(commandForKey(table, ctrl('w'), false, 'terminal')).toBe('terminal-close');
+    // Out of the terminal the same keys keep the app's commands.
+    expect(commandForKey(table, ctrl('n'), false)).toBe('new-thread');
+    expect(commandForKey(table, ctrl('D', true), false)).toBe('theme-dark');
+    expect(commandForKey(table, ctrl('w'), false)).not.toBe('terminal-close');
+    // A terminal key with no terminal command of its own still finds the app's.
+    expect(commandForKey(table, key({ key: ',', ctrlKey: true }), false, 'terminal')).toBe('settings');
+  });
+
   test('labels read the way the tooltips always did', () => {
     const table = resolveBindings({ trace: 'alt+up', pair: 'f5', rename: 'mod+shift+,' });
     expect(chordLabel(table['new-thread'].chord!, false)).toBe('Ctrl+N');

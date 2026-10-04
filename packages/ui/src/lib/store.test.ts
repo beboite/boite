@@ -28,7 +28,8 @@ test('opening the drawer starts its shell before a view mounts and shares an in-
   });
   try {
     store.toggleTerminal();
-    expect(spy.mock.calls.filter(([method]) => method === 'terminals.open')).toHaveLength(1);
+    // The drawer asks which shells run first, then starts the one it shows.
+    await vi.waitFor(() => expect(spy.mock.calls.filter(([method]) => method === 'terminals.open')).toHaveLength(1));
     await client.call('terminals.write', { id: `terminal:${threadId}`, data: 'early-output' });
     const attaching = store.openTerminal(threadId, 100, 30);
     expect(spy.mock.calls.filter(([method]) => method === 'terminals.open')).toHaveLength(1);
@@ -60,6 +61,8 @@ test('an older core keeps output arriving before the lazy terminal view attaches
   });
   try {
     store.toggleTerminal();
+    // The drawer asks which shells run first, then starts the one it shows.
+    await vi.waitFor(() => expect(spy.mock.calls.filter(([method]) => method === 'terminals.open')).toHaveLength(1));
     await client.call('terminals.write', { id: `terminal:${threadId}`, data: 'legacy-early-output' });
     const attaching = store.openTerminal(threadId, 100, 30);
     release();
@@ -84,6 +87,8 @@ test('closing a thread shell invalidates a legacy refresh and delayed view attac
   });
   try {
     store.toggleTerminal();
+    // The drawer asks which shells run first, then starts the one it shows.
+    await vi.waitFor(() => expect(spy.mock.calls.filter(([method]) => method === 'terminals.open')).toHaveLength(1));
     await client.call('terminals.write', { id: `terminal:${threadId}`, data: 'early-output' });
     const attaching = store.openTerminal(threadId, 100, 30);
     await store.closeTerminal(`terminal:${threadId}`);
@@ -98,6 +103,149 @@ test('closing a thread shell invalidates a legacy refresh and delayed view attac
     expect(spy.mock.calls.filter(([method]) => method === 'terminals.open')).toHaveLength(2);
     expect(store.terminalShown(threadId)).toBe(true);
   } finally { release(); spy.mockRestore(); }
+});
+
+test('tabs and splits come back after a reload, and a shell that ends anywhere leaves its pane', async ({ store, client }) => {
+  await store.open(store.threads[0]!.id);
+  const threadId = store.openThread!.id;
+  const opened = () => client.call('terminals.list', { threadId }).then((shells) => shells.map((shell) => shell.id));
+  store.toggleTerminal();
+  await vi.waitFor(() => expect(store.terminalLayout(threadId)).not.toBeNull());
+  store.newTerminal(threadId);
+  store.splitTerminal(threadId, 'column');
+  const second = `terminal:${threadId}:term-2`;
+  const third = `terminal:${threadId}:term-3`;
+  await vi.waitFor(async () => expect(await opened()).toEqual([`terminal:${threadId}`, second, third]));
+  const layout = store.terminalLayout(threadId)!;
+  expect(layout.tabs.map((tab) => [tab.panes, tab.direction])).toEqual([[[`terminal:${threadId}`], 'row'], [[second, third], 'column']]);
+
+  // A reload: a new page on the same core finds the drawer open and every shell where it was.
+  const reloaded = new Store();
+  try {
+    reloaded.attach(client);
+    await reloaded.connect();
+    await reloaded.open(threadId);
+    reloaded.restoreTerminal(threadId);
+    expect(reloaded.terminalShown(threadId)).toBe(true);
+    await vi.waitFor(() => expect(reloaded.terminalLayout(threadId)).toEqual(layout));
+    // Another client closes the split's second shell: its pane goes, the keyboard to the one left.
+    await client.call('terminals.close', { id: third });
+    await vi.waitFor(() => expect(reloaded.terminalLayout(threadId)?.tabs[1]?.panes).toEqual([second]));
+    expect(reloaded.terminalLayout(threadId)?.active).toBe(second);
+  } finally { reloaded.detach(); }
+});
+
+test('a new shell in one window never takes the id of one another window just opened', async ({ store, client }) => {
+  await store.open(store.threads[0]!.id);
+  const threadId = store.openThread!.id;
+  const other = new Store();
+  try {
+    other.attach(client);
+    await other.connect();
+    await other.open(threadId);
+    store.toggleTerminal();
+    other.toggleTerminal();
+    await vi.waitFor(() => expect(store.terminalLayout(threadId)).not.toBeNull());
+    await vi.waitFor(() => expect(other.terminalLayout(threadId)).not.toBeNull());
+    // The first window opens term-2; the second has not laid it out yet.
+    expect(store.newTerminal(threadId)).toBe(true);
+    await vi.waitFor(async () => expect(await client.call('terminals.list', { threadId })).toHaveLength(2));
+    expect(other.newTerminal(threadId)).toBe(true);
+    await vi.waitFor(() => expect(other.terminalLayout(threadId)?.tabs).toHaveLength(2));
+    expect(other.terminalLayout(threadId)!.active).toBe(`terminal:${threadId}:term-3`);
+    await vi.waitFor(async () => expect((await client.call('terminals.list', { threadId })).map((shell) => shell.terminalId)).toEqual([undefined, 'term-2', 'term-3']));
+  } finally { other.detach(); }
+});
+
+test('Ctrl+N and Ctrl+D reach the shell when they open nothing there', async ({ store, client }) => {
+  await store.open(store.threads[0]!.id);
+  const threadId = store.openThread!.id;
+  const first = `terminal:${threadId}`;
+  const call = client.call.bind(client);
+  // A core from before `terminals.list` runs one shell per thread.
+  const spy = vi.spyOn(client, 'call').mockImplementation(((method: string, params: never) => method === 'terminals.list'
+    ? Promise.reject(new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: 'unknown method terminals.list' }))
+    : call(method as never, params)) as typeof client.call);
+  try {
+    store.toggleTerminal();
+    await vi.waitFor(() => expect(store.terminalLayout(threadId)).not.toBeNull());
+    expect(store.terminalCommand(first, 'terminal-new')).toBe(false);
+    expect(store.terminalCommand(first, 'terminal-split')).toBe(false);
+    expect(store.terminalCommand(first, 'terminal-split-vertical')).toBe(false);
+    expect(store.terminalLayout(threadId)!.tabs).toHaveLength(1);
+  } finally { spy.mockRestore(); }
+  // A tab of four takes no fifth: Ctrl+D is the shell's end of input again.
+  const multi = new Store();
+  try {
+    multi.attach(client);
+    await multi.connect();
+    await multi.open(threadId);
+    multi.toggleTerminal();
+    await vi.waitFor(() => expect(multi.terminalLayout(threadId)).not.toBeNull());
+    for (let i = 0; i < 3; i++) expect(multi.terminalCommand(first, 'terminal-split')).toBe(true);
+    await vi.waitFor(() => expect(multi.terminalLayout(threadId)!.tabs[0]!.panes).toHaveLength(4));
+    expect(multi.terminalCommand(first, 'terminal-split')).toBe(false);
+    expect(multi.terminalCommand(first, 'terminal-new')).toBe(true);
+  } finally { multi.detach(); }
+});
+
+test('a drawer hidden before its shells are listed stays shut after a reload', async ({ store, client }) => {
+  await store.open(store.threads[0]!.id);
+  const threadId = store.openThread!.id;
+  store.toggleTerminal();
+  await vi.waitFor(() => expect(store.terminalLayout(threadId)).not.toBeNull());
+  // A new page restores the open drawer, and its owner hides it before the core answers.
+  const reloaded = new Store();
+  const call = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'terminals.list') await gate;
+    return call(method, params);
+  });
+  try {
+    reloaded.attach(client);
+    await reloaded.connect();
+    await reloaded.open(threadId);
+    reloaded.restoreTerminal(threadId);
+    expect(reloaded.terminalShown(threadId)).toBe(true);
+    reloaded.hideTerminal(threadId);
+    release();
+    await vi.waitFor(() => expect(spy.mock.calls.some(([method]) => method === 'terminals.list')).toBe(true));
+  } finally { release(); spy.mockRestore(); reloaded.detach(); }
+  const next = new Store();
+  try {
+    next.attach(client);
+    await next.connect();
+    await next.open(threadId);
+    next.restoreTerminal(threadId);
+    expect(next.terminalShown(threadId)).toBe(false);
+  } finally { next.detach(); }
+});
+
+test('back on line, the drawer drops a shell that ended in the gap and shows one started elsewhere', async ({ store, client }) => {
+  await store.open(store.threads[0]!.id);
+  const threadId = store.openThread!.id;
+  const first = `terminal:${threadId}`;
+  store.toggleTerminal();
+  await vi.waitFor(() => expect(store.terminalLayout(threadId)).not.toBeNull());
+  store.newTerminal(threadId);
+  await vi.waitFor(() => expect(store.terminalLayout(threadId)?.tabs).toHaveLength(2));
+  await vi.waitFor(async () => expect(await client.call('terminals.list', { threadId })).toHaveLength(2));
+  client.drop();
+  // While the socket was down, term-2 ended and another device started term-5: no event said so.
+  const call = client.call.bind(client);
+  const spy = vi.spyOn(client, 'call').mockImplementation(((method: string, params: never) => method === 'terminals.list'
+    ? Promise.resolve([{ id: first, cwd: '/w' }, { id: `${first}:term-5`, terminalId: 'term-5', cwd: '/w' }])
+    : call(method as never, params)) as typeof client.call);
+  try {
+    await client.restore();
+    // The screen of term-2 asks to attach again, as a stale view does: it waits for the list and gets nothing.
+    expect(await store.openTerminal(threadId, 80, 24, 'term-2')).toBeNull();
+    expect(store.terminalLayout(threadId)!.tabs.map((tab) => tab.panes)).toEqual([[first], [`${first}:term-5`]]);
+    expect(spy.mock.calls.some(([method, params]) => method === 'terminals.open' && (params as { terminalId?: string }).terminalId === 'term-2')).toBe(false);
+    expect(store.terminalShown(threadId)).toBe(true);
+  } finally { spy.mockRestore(); }
 });
 
 test('a rejected terminal keystroke reports the failure instead of leaving a silent prompt', async ({ store, client }) => {

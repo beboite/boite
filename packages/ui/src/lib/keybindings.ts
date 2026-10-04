@@ -37,6 +37,12 @@ export const DEFAULT_BINDINGS: Record<KeybindingCommand, string | null> = {
   archive: null,
   'import-session': null,
   terminal: 'mod+j',
+  // T3 Code's, and only while a terminal has the keyboard: there they win over
+  // the global chord on the same keys (`TERMINAL_COMMANDS`).
+  'terminal-new': 'mod+n',
+  'terminal-split': 'mod+d',
+  'terminal-split-vertical': 'mod+shift+d',
+  'terminal-close': 'mod+w',
   // The browser's key for the tab just closed: here the thread just archived.
   'reopen-thread': 'mod+shift+t',
   'copy-answer': 'mod+alt+c',
@@ -86,10 +92,30 @@ export function matchesChord(event: KeyboardEvent, chord: Chord, mac: boolean = 
   return /^[0-9]$/.test(chord.key) && event.code === `Digit${chord.key}`;
 }
 
-/** The first command whose chord this keydown is, or null when the key belongs to no one. */
-export function commandForKey(table: BindingTable, event: KeyboardEvent, mac: boolean = isMac()): KeybindingCommand | null {
+/**
+ * The commands a key reaches only while a terminal has the keyboard, and ahead
+ * of every other there: Ctrl+N opens a shell in a terminal and a thread
+ * elsewhere, as in T3 Code.
+ */
+export const TERMINAL_COMMANDS: readonly KeybindingCommand[] = ['terminal-new', 'terminal-split', 'terminal-split-vertical', 'terminal-close'];
+
+/** Where a key was pressed: the page at large, or a terminal's screen. */
+export type KeyScope = 'app' | 'terminal';
+
+/** The scope a command answers in, and so the ones whose chord it may not share. */
+export function scopeOf(id: KeybindingCommand): KeyScope {
+  return TERMINAL_COMMANDS.includes(id) ? 'terminal' : 'app';
+}
+
+/**
+ * The first command whose chord this keydown is, or null when the key belongs
+ * to no one. In a terminal the terminal's own commands come first.
+ */
+export function commandForKey(table: BindingTable, event: KeyboardEvent, mac: boolean = isMac(), scope: KeyScope = 'app'): KeybindingCommand | null {
   if (event.isComposing) return null;
-  for (const id of KEYBINDING_COMMANDS) {
+  const order = scope === 'terminal' ? [...TERMINAL_COMMANDS, ...KEYBINDING_COMMANDS] : KEYBINDING_COMMANDS;
+  for (const id of order) {
+    if (scope === 'app' && TERMINAL_COMMANDS.includes(id)) continue;
     const chord = table[id].chord;
     if (chord !== null && matchesChord(event, chord, mac)) return id;
   }
@@ -162,9 +188,10 @@ export function chordFromEvent(event: KeyboardEvent, mac: boolean = isMac()): st
 }
 
 /** The Keyboard page's sections. Every command sits in exactly one; a test holds that. */
-export const COMMAND_GROUPS: { id: 'general' | 'surfaces' | 'thread' | 'jump' | 'theme'; commands: KeybindingCommand[] }[] = [
+export const COMMAND_GROUPS: { id: 'general' | 'surfaces' | 'terminal' | 'thread' | 'jump' | 'theme'; commands: KeybindingCommand[] }[] = [
   { id: 'general', commands: ['new-thread', 'palette', 'sidebar', 'panel', 'settings', 'providers', 'appearance', 'add-project', 'pair', 'import-session'] },
   { id: 'surfaces', commands: ['terminal', 'browser', 'changes', 'files', 'tasks', 'trace', 'close-surface'] },
+  { id: 'terminal', commands: ['terminal-new', 'terminal-split', 'terminal-split-vertical', 'terminal-close'] },
   { id: 'thread', commands: ['send-and-draft', 'stash', 'pin', 'rename', 'retitle', 'archive', 'reopen-thread', 'copy-answer', 'find'] },
   { id: 'jump', commands: ['thread-1', 'thread-2', 'thread-3', 'thread-4', 'thread-5', 'thread-6', 'thread-7', 'thread-8', 'thread-9'] },
   { id: 'theme', commands: ['theme-dark', 'theme-light', 'theme-system'] }

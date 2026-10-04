@@ -1455,7 +1455,15 @@ export const strings = {
     title: 'Terminal',
     hide: 'Hide the terminal',
     close: 'Close the shell',
-    resize: 'Resize the terminal'
+    resize: 'Resize the terminal',
+    /** A tab, `Terminal 2`, named after its first shell as T3 Code does. */
+    tab: 'Terminal {n}',
+    tabs: 'Terminals',
+    new: 'New terminal',
+    splitRight: 'Split right',
+    splitDown: 'Split down',
+    closeTab: 'Close the tab',
+    resizePanes: 'Resize the split'
   },
 
   trace: {
@@ -1777,6 +1785,10 @@ export const strings = {
     chatWidthComfortable: 'Comfortable',
     chatWidthWide: 'Wide',
     chatWidthFull: 'Full',
+    terminalCursor: 'Terminal cursor',
+    terminalCursorBar: 'Bar',
+    terminalCursorBlock: 'Block',
+    terminalCursorUnderline: 'Underline',
     connection: 'Connection',
     localCore: 'This app runs on the core it started on this computer.',
     coreAt: 'Connected to the core at {url}.',
@@ -1921,7 +1933,7 @@ export const strings = {
     heading: 'Shortcuts',
     intro: 'Click a shortcut, then press the keys you want instead. It applies at once on this machine.',
     search: 'Filter commands',
-    groups: { general: 'General', surfaces: 'Side panel', thread: 'Thread and composer', jump: 'Go to a thread', theme: 'Theme' },
+    groups: { general: 'General', surfaces: 'Side panel', thread: 'Thread and composer', jump: 'Go to a thread', theme: 'Theme', terminal: 'Terminal' },
     record: 'Press the keys',
     change: 'Change the shortcut',
     reset: 'Back to the default',
@@ -1955,6 +1967,10 @@ export const strings = {
       reopenThread: 'Reopen the thread archived last',
       copyAnswer: 'Copy the last answer',
       find: 'Find in this thread',
+      terminalNew: 'New terminal',
+      terminalSplit: 'Split the terminal right',
+      terminalSplitVertical: 'Split the terminal down',
+      terminalClose: 'Close the terminal',
       /** `Go to thread 3`: the third row of the sidebar, as drawn. */
       thread: 'Go to thread {n}'
     }

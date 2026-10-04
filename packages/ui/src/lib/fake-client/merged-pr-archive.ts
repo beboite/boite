@@ -1,4 +1,4 @@
-import type { Thread, ThreadArchiveReason, ThreadId } from '@boite/contracts';
+import { isThreadTerminal, type Thread, type ThreadArchiveReason, type ThreadId } from '@boite/contracts';
 import type { FakeContext } from './context';
 import { pathKey } from './checks';
 import { describedProject } from './project-archive';
@@ -49,7 +49,7 @@ function quiescent(ctx: FakeContext, thread: Thread, child = false): boolean {
   const id = thread.id;
   if (thread.agentSessionId || thread.status !== 'idle' || thread.unread || thread.pinned || thread.pendingMove || thread.background?.length || ctx.workflows.active(id) || ctx.bus.focusedThreadId === id || ctx.hasProtectedInput(id)) return false;
   if (hasActiveSideQuestion(ctx, id)) return false;
-  if (ctx.inFlight.has(id) || ctx.heldAnswers.get(id)?.length || [...ctx.scheduler.running, ...ctx.scheduler.queued].some(entry => entry.threadId === id) || ctx.processes.some(process => (process.threadId === id || process.threadId === `terminal:${id}`) && process.exitedAt === null) || ctx.terminals.has(`terminal:${id}`)) return false;
+  if (ctx.inFlight.has(id) || ctx.heldAnswers.get(id)?.length || [...ctx.scheduler.running, ...ctx.scheduler.queued].some(entry => entry.threadId === id) || ctx.processes.some(process => (process.threadId === id || isThreadTerminal(id, process.threadId)) && process.exitedAt === null) || [...ctx.terminals.keys()].some(key => isThreadTerminal(id, key))) return false;
   if ([...ctx.pendingPermissions.values(), ...ctx.pendingQuestions.values()].some(entry => entry.request.threadId === id)) return false;
   if ((thread.activity?.goal && thread.activity.goal.status !== 'complete') || (thread.activity?.loop && thread.activity.loop.status !== 'complete')) return false;
   if ((child && !thread.turns.length) || (thread.turns.at(-1) && thread.turns.at(-1)!.status !== 'done')) return false;

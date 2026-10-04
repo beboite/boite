@@ -4,7 +4,7 @@
   import InfoTip from './InfoTip.svelte';
   import { commandLabel } from '../lib/commands.svelte';
   import { openOwnFile } from '../lib/links';
-  import { COMMAND_GROUPS, chordFromEvent, chordParts, isMac } from '../lib/keybindings';
+  import { COMMAND_GROUPS, chordFromEvent, chordParts, isMac, scopeOf } from '../lib/keybindings';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
@@ -48,14 +48,20 @@
     held = [];
   }
 
-  /** Who else answers to this chord: the table's own matcher decides, so `mod+k` and `ctrl+k` meet here. */
+  /**
+   * Who else answers to this chord: the table's own matcher decides, so
+   * `mod+k` and `ctrl+k` meet here. A terminal's command shares its chord with
+   * a command of the page's, as Ctrl+N does, but never with Ctrl+J, the way
+   * back out of the terminal.
+   */
   function takenBy(id: KeybindingCommand, text: string): KeybindingCommand | null {
     const parsed = parseChord(text);
     if (!parsed.ok) return null;
     const wanted = chordParts(parsed.chord, mac).join('+');
+    const meets = (other: KeybindingCommand) => scopeOf(other) === scopeOf(id) || other === 'terminal' || id === 'terminal';
     for (const group of COMMAND_GROUPS) {
       for (const other of group.commands) {
-        if (other !== id && partsOf(other)?.join('+') === wanted) return other;
+        if (other !== id && meets(other) && partsOf(other)?.join('+') === wanted) return other;
       }
     }
     return null;

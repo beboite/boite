@@ -11,6 +11,7 @@
   import { readTheme, setTheme, THEME_STORAGE_KEY, type Theme } from '../lib/theme';
   import { COLORS_EVENT } from '../lib/theme-colors';
   import { readChatWidth, setChatWidth, type ChatWidth } from '../lib/chat-width';
+  import { readTerminalCursor, setTerminalCursor, type TerminalCursor } from '../lib/terminal-cursor';
   import { matchingPreset, work, type PanelStart, type Profile, type StartIn } from '../lib/work-prefs.svelte';
   import ThemeColors from './ThemeColors.svelte';
   import { controlGroups } from '../lib/control-groups';
@@ -98,6 +99,17 @@
   function pickChatWidth(next: ChatWidth) {
     chatWidth = next;
     setChatWidth(next);
+  }
+
+  let terminalCursor = $state<TerminalCursor>(untrack(() => readTerminalCursor()));
+  let cursors = $derived<{ id: TerminalCursor; label: string }[]>([
+    { id: 'bar', label: strings.settings.terminalCursorBar },
+    { id: 'block', label: strings.settings.terminalCursorBlock },
+    { id: 'underline', label: strings.settings.terminalCursorUnderline }
+  ]);
+  function pickTerminalCursor(next: TerminalCursor) {
+    terminalCursor = next;
+    setTerminalCursor(next);
   }
 
   function pickTheme(next: Theme) {
@@ -199,6 +211,14 @@
       <div class="segmented" role="group" aria-label={strings.settings.chatWidth}>
         {#each widths as option (option.id)}
           <button type="button" class:on={chatWidth === option.id} aria-pressed={chatWidth === option.id} data-testid="chat-width-{option.id}" onclick={() => pickChatWidth(option.id)}><span class="ui-label">{option.label}</span></button>
+        {/each}
+      </div>
+    </div>
+    <div class="switch-row">
+      <span class="text ui-label">{strings.settings.terminalCursor}</span>
+      <div class="segmented" role="group" aria-label={strings.settings.terminalCursor}>
+        {#each cursors as option (option.id)}
+          <button type="button" class:on={terminalCursor === option.id} aria-pressed={terminalCursor === option.id} data-testid="terminal-cursor-{option.id}" onclick={() => pickTerminalCursor(option.id)}><span class="ui-label">{option.label}</span></button>
         {/each}
       </div>
     </div>

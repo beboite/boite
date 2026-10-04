@@ -59,7 +59,7 @@ export class MergedPrArchive {
     if (core.threads.isRemoving(thread.id) || thread.agentSessionId || thread.status !== 'idle' || thread.pinned || thread.unread || Date.now() - thread.updatedAt < this.settleMs || core.threads.focus.viewed(thread.id) || core.threads.focus.hasProtectedInput(thread.id)) return false;
     if (core.threads.sideQuestions.active(thread.id) || core.threads.runner.handles.has(thread.id) || core.threads.runner.steering.has(thread.id) || core.threads.agentState.background.get(thread.id)?.length || core.threads.moves.pendingOf(thread.id)) return false;
     if (busy.has(thread.id)) return false;
-    if (core.procs.liveCount(thread.id) || core.procs.liveCount(`terminal:${thread.id}`) || core.threads.cards.listPermissions(thread.id).length || [...core.threads.cards.questions.values()].some(entry => entry.request.threadId === thread.id) || [...core.threads.cards.asyncCards.values()].some(entry => entry.threadId === thread.id)) return false;
+    if (core.procs.liveCount(thread.id) || core.terminals.threadProcesses(thread.id) || core.threads.cards.listPermissions(thread.id).length || [...core.threads.cards.questions.values()].some(entry => entry.request.threadId === thread.id) || [...core.threads.cards.asyncCards.values()].some(entry => entry.threadId === thread.id)) return false;
     if (core.threads.deferred.deferredAnswers.get(thread.id)?.length || core.threads.deferred.consumed.has(thread.id) || core.threads.deferred.pendingWakes.has(thread.id)) return false;
     const activity = core.activity.get(thread.id);
     if ((activity.goal && activity.goal.status !== 'complete') || (activity.loop && activity.loop.status !== 'complete') || core.workflows.active(thread.id)) return false;

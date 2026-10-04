@@ -1,15 +1,17 @@
 /*
- * Shells in a pseudo-terminal. A thread has one, opened under the chat with
- * Ctrl+J in the thread's working directory, and an account whose CLI signs in
- * through an interactive menu gets one with its login command typed in. Each
- * shell goes through `procs.spawnTerminal` under its own trace id, never the
- * thread's: stopping a turn must not take the user's shell with it.
+ * Shells in a pseudo-terminal. A thread has up to `MAX_THREAD_TERMINALS`,
+ * opened under the chat with Ctrl+J in the thread's working directory, and an
+ * account whose CLI signs in through an interactive menu gets one with its
+ * login command typed in. Each shell goes through `procs.spawnTerminal` under
+ * its own trace id, never the thread's: stopping a turn must not take the
+ * user's shell with it, and closing one tab must not take the others.
  */
 
 import { existsSync } from 'node:fs';
 import { release } from 'node:os';
 import { win32 } from 'node:path';
-import type { TerminalState, ThreadId } from '@boite/contracts';
+import { MAX_THREAD_TERMINALS, THREAD_TERMINAL_KEY, isThreadTerminal, threadTerminalId } from '@boite/contracts';
+import type { TerminalState, ThreadId, ThreadTerminal } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, notFound, refused } from './errors.ts';
 import type { Router } from './router.ts';
@@ -44,9 +46,7 @@ export function windowsPty(
   return Number.isInteger(buildNumber) && buildNumber > 0 ? { windowsPty: { buildNumber } } : {};
 }
 
-export function threadTerminalId(threadId: ThreadId): string {
-  return `terminal:${threadId}`;
-}
+export { threadTerminalId };
 
 export interface Shell {
   exe: string;
@@ -163,11 +163,49 @@ export class TerminalStore {
 
   constructor(private readonly core: Core) {}
 
-  /** The thread's shell, started in its working directory the first time. */
-  openThread(threadId: ThreadId, cols: number, rows: number): TerminalState {
+  /** One of the thread's shells, started in its working directory the first time. */
+  openThread(threadId: ThreadId, cols: number, rows: number, terminalId?: string): TerminalState {
+    if (terminalId !== undefined && (typeof terminalId !== 'string' || !THREAD_TERMINAL_KEY.test(terminalId))) {
+      throw invalidParams(`terminalId must be term-2 to term-${MAX_THREAD_TERMINALS}, not ${JSON.stringify(terminalId)}`, { field: 'terminalId', expected: `term-2 to term-${MAX_THREAD_TERMINALS}` });
+    }
     const thread = this.core.threads.require(threadId);
     if (thread.archived) throw refused(`the thread ${threadId} is archived`, { threadId, field: 'archived', expected: false });
-    return this.open(threadTerminalId(threadId), { cwd: thread.cwd, env: { ...process.env }, cols, rows });
+    // The ids bound the count: the first shell and `term-2` to `term-16`.
+    const id = threadTerminalId(threadId, terminalId);
+    return this.open(id, { cwd: thread.cwd, env: { ...process.env }, cols, rows });
+  }
+
+  /** The thread's running shells, in the order they started. A closing one is gone already. */
+  listThread(threadId: ThreadId): ThreadTerminal[] {
+    const first = threadTerminalId(threadId);
+    return this.threadSessions(threadId).filter((session) => !session.closing).map((session) => ({
+      id: session.id,
+      ...(session.id === first ? {} : { terminalId: session.id.slice(first.length + 1) }),
+      cwd: session.cwd,
+    }));
+  }
+
+  /** Closes every shell of the thread. */
+  async closeThread(threadId: ThreadId): Promise<void> {
+    await Promise.all(this.threadSessions(threadId).map((session) => this.close(session.id)));
+  }
+
+  /**
+   * Kills every shell of the thread and waits for its processes to be gone, a
+   * leftover whose session went already included: the records go next.
+   */
+  async stopThread(threadId: ThreadId): Promise<void> {
+    const ids = new Set([...this.threadSessions(threadId).map((session) => session.id), ...this.core.procs.liveThreads().filter((id) => isThreadTerminal(threadId, id))]);
+    await Promise.all([...ids].map((id) => this.core.procs.stopAndWait(id as ThreadId)));
+  }
+
+  /** How many processes the thread's shells run. */
+  threadProcesses(threadId: ThreadId): number {
+    return this.core.procs.liveThreads().filter((id) => isThreadTerminal(threadId, id)).reduce((sum, id) => sum + this.core.procs.liveCount(id), 0);
+  }
+
+  private threadSessions(threadId: ThreadId): Session[] {
+    return [...this.sessions.values()].filter((session) => isThreadTerminal(threadId, session.id));
   }
 
   /** The running shell under this id, resized to the client that attaches, or a new one. */
@@ -330,7 +368,12 @@ function requireString(value: unknown, field: string): string {
 export function registerTerminalMethods(core: Core): void {
   const router: Router = core.router;
   router.register('terminals.open', (params) =>
-    core.terminals.openThread(requireString(params.threadId, 'threadId') as ThreadId, params.cols, params.rows));
+    core.terminals.openThread(requireString(params.threadId, 'threadId') as ThreadId, params.cols, params.rows, params.terminalId));
+  router.register('terminals.list', (params) => {
+    const threadId = requireString(params.threadId, 'threadId') as ThreadId;
+    core.threads.require(threadId);
+    return core.terminals.listThread(threadId);
+  });
   router.register('terminals.write', (params) => {
     if (typeof params.data !== 'string') throw invalidParams('data must be a string', { field: 'data' });
     return core.terminals.write(requireString(params.id, 'id'), params.data);

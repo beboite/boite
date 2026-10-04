@@ -818,6 +818,23 @@ test('Ctrl+J opens the shell of the thread under the chat, hides it again, and i
   expect(reopen.mock.calls[0]?.[0]).toBe(threadId);
   reopen.mockRestore();
 
+  // T3 Code's chords, in the screen only: Ctrl+D splits, Ctrl+N opens a tab, Ctrl+W ends the shell with the keyboard.
+  const inTerminal = (key: string) => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true }));
+  const focused = (id: string) => document.activeElement?.closest(`[data-terminal-id="${id}"]`) != null;
+  expect(inTerminal('d')).toBe(false);
+  await waitFor(() => document.querySelectorAll('[data-testid=terminal-pane]').length === 2 && focused(`terminal:${threadId}:term-2`));
+  expect(inTerminal('n')).toBe(false);
+  await waitFor(() => document.querySelectorAll('[data-testid=terminal-tab]').length === 2 && focused(`terminal:${threadId}:term-3`));
+  // Ctrl+N stayed the terminal's: no new thread or draft took the chat.
+  expect(store.openThread?.id).toBe(threadId);
+  expect(inTerminal('w')).toBe(false);
+  await waitFor(() => document.querySelectorAll('[data-testid=terminal-tab]').length === 0
+    && document.querySelectorAll('[data-testid=terminal-pane]').length === 2);
+  expect(store.terminalLayout(threadId)?.active).toBe(`terminal:${threadId}`);
+  await waitFor(() => focused(`terminal:${threadId}`));
+  expect(inTerminal('w')).toBe(false);
+  await waitFor(() => document.querySelectorAll('[data-testid=terminal-pane]').length === 1 && focused(`terminal:${threadId}:term-2`));
+
   expect(document.body.dispatchEvent(chord())).toBe(false);
   await waitFor(() => document.querySelector('[data-testid=terminal-drawer]') === null);
   expect(store.terminalShown(threadId)).toBe(false);

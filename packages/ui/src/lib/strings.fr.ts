@@ -1390,7 +1390,14 @@ export const fr: Translation = {
     title: 'Terminal',
     hide: 'Masquer le terminal',
     close: 'Fermer le shell',
-    resize: 'Redimensionner le terminal'
+    resize: 'Redimensionner le terminal',
+    tab: 'Terminal {n}',
+    tabs: 'Terminaux',
+    new: 'Nouveau terminal',
+    splitRight: 'Diviser à droite',
+    splitDown: 'Diviser en bas',
+    closeTab: "Fermer l'onglet",
+    resizePanes: 'Redimensionner la division'
   },
 
   trace: {
@@ -1708,6 +1715,10 @@ export const fr: Translation = {
     chatWidthComfortable: 'Confortable',
     chatWidthWide: 'Large',
     chatWidthFull: 'Pleine',
+    terminalCursor: 'Curseur du terminal',
+    terminalCursorBar: 'Barre',
+    terminalCursorBlock: 'Bloc',
+    terminalCursorUnderline: 'Soulignement',
     connection: 'Connexion',
     localCore: "Cette application tourne sur le cœur qu'elle a lancé sur cet ordinateur.",
     coreAt: 'Connecté au cœur à {url}.',
@@ -1850,7 +1861,7 @@ export const fr: Translation = {
     heading: 'Raccourcis',
     intro: 'Cliquez sur un raccourci, puis appuyez sur les touches voulues. Le changement s\'applique aussitôt sur cette machine.',
     search: 'Filtrer les commandes',
-    groups: { general: 'Général', surfaces: 'Panneau latéral', thread: 'Conversation et message', jump: 'Aller à une conversation', theme: 'Thème' },
+    groups: { general: 'Général', surfaces: 'Panneau latéral', thread: 'Conversation et message', jump: 'Aller à une conversation', theme: 'Thème', terminal: 'Terminal' },
     record: 'Appuyez sur les touches',
     change: 'Changer le raccourci',
     reset: 'Revenir au défaut',
@@ -1884,6 +1895,10 @@ export const fr: Translation = {
       reopenThread: 'Rouvrir la dernière conversation archivée',
       copyAnswer: 'Copier la dernière réponse',
       find: 'Chercher dans cette conversation',
+      terminalNew: 'Nouveau terminal',
+      terminalSplit: 'Diviser le terminal à droite',
+      terminalSplitVertical: 'Diviser le terminal en bas',
+      terminalClose: 'Fermer le terminal',
       thread: 'Aller à la conversation {n}'
     }
   },

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import type { RpcEvents } from '@boite/contracts';
+import { MAX_THREAD_TERMINALS, type RpcEvents } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { HISTORY_CHARS, OutputHistory, commandLine, pickShell, threadTerminalId, windowsPty } from '../src/terminals.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
@@ -162,6 +162,85 @@ describe('terminals', () => {
     await client.call('terminals.open', { threadId, cols: 80, rows: 24 });
     await client.call('projects.remove', { projectId: projectId! });
     expect(harness.core.procs.liveCount(id)).toBe(0);
+  }, 30_000);
+
+  test('a thread runs several shells side by side, lists them in order, and closing one leaves the others', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const first = threadTerminalId(threadId);
+    const second = threadTerminalId(threadId, 'term-2');
+    const third = threadTerminalId(threadId, 'term-3');
+    await expect(client.call('terminals.open', { threadId, cols: 80, rows: 24, terminalId: 'Bad id' })).rejects.toThrow(/terminalId must be/);
+    await client.call('terminals.open', { threadId, cols: 80, rows: 24 });
+    const opened = await client.call('terminals.open', { threadId, cols: 80, rows: 24, terminalId: 'term-2' });
+    expect(opened.id).toBe(second);
+    await client.call('terminals.open', { threadId, cols: 80, rows: 24, terminalId: 'term-3' });
+    const cwd = harness.core.threads.require(threadId).cwd;
+    expect(await client.call('terminals.list', { threadId })).toEqual([
+      { id: first, cwd },
+      { id: second, terminalId: 'term-2', cwd },
+      { id: third, terminalId: 'term-3', cwd },
+    ]);
+    // Each shell is its own process tree: closing a tab kills that one only.
+    for (const id of [first, second, third]) expect(harness.core.procs.liveCount(id)).toBeGreaterThan(0);
+    const seen = watch(client, second);
+    await client.call('terminals.write', { id: second, data: 'echo second-pty-marker\r' });
+    await waitFor(() => seen.text().split('second-pty-marker').length > 2, SHELL_MS);
+    await client.call('terminals.close', { id: second });
+    await waitFor(() => harness.core.procs.liveCount(second) === 0);
+    expect(harness.core.procs.liveCount(first)).toBeGreaterThan(0);
+    expect(harness.core.procs.liveCount(third)).toBeGreaterThan(0);
+    expect((await client.call('terminals.list', { threadId })).map((shell) => shell.id)).toEqual([first, third]);
+    // Opening an id that runs attaches to it, with what it printed.
+    const third2 = await client.call('terminals.open', { threadId, cols: 90, rows: 30, terminalId: 'term-3' });
+    expect(third2.id).toBe(third);
+
+    await client.call('threads.archive', { threadId });
+    await waitFor(() => harness.core.procs.liveCount(first) + harness.core.procs.liveCount(third) === 0, SHELL_MS);
+    expect(await client.call('terminals.list', { threadId })).toEqual([]);
+  }, 30_000);
+
+  test('a thread holds at most MAX_THREAD_TERMINALS shells, named term-2 to term-16', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const spawn = spyOn(harness.core.procs, 'spawnTerminal');
+    // Sixteen of the lightest shell there is, not sixteen of the user's.
+    const chosen = process.env['BOITE_TERMINAL_SHELL'];
+    process.env['BOITE_TERMINAL_SHELL'] = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh';
+    try {
+      for (let i = 1; i <= MAX_THREAD_TERMINALS; i++) {
+        harness.core.terminals.openThread(threadId, 80, 24, i === 1 ? undefined : `term-${i}`);
+      }
+      // No other name opens a seventeenth, nor one a client would number 0.
+      for (const name of ['term-17', 'term-1', 'term-02', 'foo']) {
+        expect(() => harness.core.terminals.openThread(threadId, 80, 24, name)).toThrow(/terminalId must be term-2 to term-16/);
+      }
+      // Reattaching to a running one is no new shell.
+      expect(harness.core.terminals.openThread(threadId, 80, 24, 'term-3').id).toBe(threadTerminalId(threadId, 'term-3'));
+      expect(spawn).toHaveBeenCalledTimes(MAX_THREAD_TERMINALS);
+    } finally {
+      spawn.mockRestore();
+      if (chosen === undefined) delete process.env['BOITE_TERMINAL_SHELL'];
+      else process.env['BOITE_TERMINAL_SHELL'] = chosen;
+    }
+  }, 60_000);
+
+  test('removing a thread stops every one of its shells and drops their process records', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const ids = [threadTerminalId(threadId), threadTerminalId(threadId, 'term-2')];
+    await client.call('terminals.open', { threadId, cols: 80, rows: 24 });
+    await client.call('terminals.open', { threadId, cols: 80, rows: 24, terminalId: 'term-2' });
+    const other = (await echoThread(harness, client)).threadId;
+    await client.call('terminals.open', { threadId: other, cols: 80, rows: 24 });
+    const records = (id: string) => (harness.core.journal.db.query("SELECT COUNT(*) AS n FROM processes WHERE thread_id LIKE 'terminal:' || ? || '%'").get(id) as { n: number }).n;
+    await waitFor(() => records(threadId) >= 2 && records(other) >= 1);
+    await client.call('threads.remove', { threadId });
+    for (const id of ids) expect(harness.core.procs.liveCount(id)).toBe(0);
+    // The records go with the conversation's history, once its retention ends.
+    harness.core.journal.deleteThreads([threadId]);
+    expect(records(threadId)).toBe(0);
+    expect(records(other)).toBeGreaterThan(0);
   }, 30_000);
 
   test('a terminal login types its command, and closing the shell rechecks the account', async () => {

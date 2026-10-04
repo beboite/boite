@@ -7,7 +7,7 @@ import type {
   Settings,
   TelemetryState
 } from '@boite/contracts';
-import { chordLabel, commandForKey, resolveBindings } from '../keybindings';
+import { chordLabel, commandForKey, isMac, resolveBindings, type KeyScope } from '../keybindings';
 import { strings } from '../strings';
 import type { StoreContext } from './context';
 
@@ -39,9 +39,9 @@ export class CoreSettings {
   // The keyboard
   // -------------------------------------------------------------------------
 
-  /** The command this keydown is bound to, or null when the key is nobody's. */
-  commandForKey(event: KeyboardEvent): KeybindingCommand | null {
-    return commandForKey(this.ctx.store.bindings, event);
+  /** The command this keydown is bound to, or null when the key is nobody's. A terminal asks for its own first. */
+  commandForKey(event: KeyboardEvent, scope: KeyScope = 'app'): KeybindingCommand | null {
+    return commandForKey(this.ctx.store.bindings, event, isMac(), scope);
   }
 
   /** True while this keydown is the chord of that one command. */
