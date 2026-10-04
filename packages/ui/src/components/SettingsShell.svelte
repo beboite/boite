@@ -123,6 +123,7 @@ import { workspace } from '../lib/workspace.svelte';
    */
   let settingsWords = $derived<[SettingsTab, string | null, string][]>([
     ['general', 'conversations', strings.settings.groupWorkingThreads],
+    ['general', 'conversations', strings.settings.groupOtherProjects],
     ['general', 'conversations', strings.settings.notifications],
     ['general', 'conversations', strings.settings.asyncQuestions],
     ['general', 'conversations', strings.settings.titleModel],

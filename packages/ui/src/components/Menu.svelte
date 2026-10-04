@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick, type Snippet } from 'svelte';
-  import { Settings } from '@lucide/svelte';
+  import { Check, Settings } from '@lucide/svelte';
   import { Closing } from '../lib/closing.svelte';
   import { floating } from '../lib/floating';
   import type { MenuItem } from '../lib/menu';
@@ -12,6 +12,7 @@
     align = 'start',
     placement = 'top',
     variant = 'chip',
+    switches = false,
     label,
     testid,
     children
@@ -23,6 +24,8 @@
     placement?: 'top' | 'bottom';
     /** `text` reads as the sentence it sits in: no fill, no border, the parent's type. */
     variant?: 'chip' | 'ghost' | 'text';
+    /** Show persistent toggles with switches and keep the menu open while adjusting them. */
+    switches?: boolean;
     label: string;
     testid?: string;
     children: Snippet;
@@ -49,7 +52,7 @@
 
   function pick(item: MenuItem) {
     if (item.disabled) return;
-    popover.hide();
+    if (!switches || item.checked === undefined) popover.hide();
     onpick(item.id);
   }
 
@@ -119,6 +122,7 @@
   {#if popover.shown}
     <div
       class="popover"
+      class:switches
       class:end={align === 'end'}
       class:below={placement === 'bottom'}
       class:closing={popover.closing}
@@ -130,6 +134,7 @@
       onanimationend={popover.end}
       data-testid={testid ? `${testid}-menu` : undefined}
     >
+      {#if switches}<div class="heading ui-label" aria-hidden="true">{label}</div>{/if}
       {#each items as item (item.id)}
         {#if item.separator}
           <div class="separator" role="separator"></div>
@@ -140,7 +145,9 @@
           class:active={item.active}
           class:danger={item.danger}
           class:hide-mark={item.hideActiveMark}
-          role="menuitem"
+          class:checkable={item.checked !== undefined}
+          role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+          aria-checked={item.checked}
           disabled={item.disabled}
           data-row
           data-value={item.id}
@@ -157,6 +164,9 @@
           {#if item.hint}
             <span class="hint ui-label">{item.hint}</span>
           {/if}
+          {#if switches && item.checked !== undefined}
+            <span class="switch" class:on={item.checked} aria-hidden="true"></span>
+          {:else if item.checked}<span class="check"><Check size={14} aria-hidden="true" /></span>{/if}
         </button>
         {/if}
       {/each}
@@ -169,6 +179,20 @@
   .label { display: flex; align-items: center; gap: 6px; }
   .glyph { display: inline-flex; color: var(--color-muted-foreground); margin-right: 2px; }
   .glyph.live { color: var(--color-live); }
+  .item.checkable { display: grid; grid-template-columns: minmax(0, 1fr) 14px; column-gap: 8px; }
+  .checkable .hint { grid-column: 1; grid-row: 2; }
+  .check { display: flex; grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+  .heading { padding: 8px 10px 10px; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 500; }
+  .popover.switches { width: min(300px, calc(100vw - 24px)); padding: 6px; border-radius: var(--radius-lg); }
+  .switches .item.checkable { grid-template-columns: minmax(0, 1fr) 36px; min-height: 56px; padding: 9px 10px; column-gap: 12px; }
+  .switches .label { gap: 9px; }
+  .switches .glyph { margin-right: 0; }
+  .switches .hint { padding-left: 23px; font-size: var(--text-xs); }
+  .switch { position: relative; grid-column: 2; grid-row: 1 / span 2; align-self: center; width: 36px; height: 22px; border: 1px solid var(--color-edge); border-radius: 999px; background: var(--color-surface-3); transition: background var(--dur-2), border-color var(--dur-2); }
+  .switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--color-muted-foreground); transition: transform var(--dur-2) var(--ease-out-quint); }
+  .switch.on { background: var(--color-foreground); border-color: var(--color-foreground); }
+  .switch.on::after { transform: translateX(14px); background: var(--color-background); }
+  @media (prefers-reduced-motion: reduce) { .switch, .switch::after { transition: none; } }
   .item.hide-mark.active { background: var(--color-active); }
   .status-dot { display: inline-block; width: 6px; height: 6px; flex: none; border-radius: 50%; margin-right: 8px; vertical-align: middle; background: var(--color-live); }
   .status-dot[data-tone='success'] { background: var(--color-success); }

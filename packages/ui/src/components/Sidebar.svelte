@@ -58,8 +58,8 @@
   let all = $derived(visible.flatMap((machine) => machine.store.projects.map((project) => ({ machine, project }))));
   /** An archived project leaves the list for the fold under it; its threads keep running. */
   let groups = $derived(projectView.sorted(all.filter(({ project }) => project.archived !== true)));
-  let activeGroups = $derived(groups.filter(activeProject));
-  let otherGroups = $derived(groups.filter(entry => !activeProject(entry)));
+  let activeGroups = $derived(recentPreferences.groupOtherProjects ? groups.filter(activeProject) : groups);
+  let otherGroups = $derived(recentPreferences.groupOtherProjects ? groups.filter(entry => !activeProject(entry)) : []);
   let shownGroups = $derived([...activeGroups, ...(projectThreadView.otherOpen ? otherGroups : [])]);
   let previousLeader: { key: string; activity: number } | undefined;
   $effect(() => {

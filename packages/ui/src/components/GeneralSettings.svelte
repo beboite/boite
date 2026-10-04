@@ -10,7 +10,7 @@
   import { strings } from '../lib/strings';
   import { openTour } from '../lib/onboarding.svelte';
   import type { Store } from '../lib/store.svelte';
-  import { recentPreferences } from '../lib/recent.svelte';
+  import ThreadGroupingSettings from './ThreadGroupingSettings.svelte';
 
   /**
    * What the app does for the person in front of it: how a thread
@@ -35,13 +35,7 @@
 
   <section class="card" id="settings-conversations">
     <h2>{strings.settings.conversations}</h2>
-    <label for="{uid}-group-working" class="switch-row">
-      <span class="text ui-label-box">
-        <span class="ui-label" id="{uid}-group-working-name">{strings.settings.groupWorkingThreads}</span><InfoTip topic={strings.settings.groupWorkingThreads} text={strings.settings.groupWorkingThreadsHint} />
-      </span>
-      <input id="{uid}-group-working" aria-labelledby="{uid}-group-working-name" type="checkbox" role="switch" data-testid="setting-group-working-threads"
-        checked={recentPreferences.groupWorking} onchange={event => recentPreferences.setGroupWorking(event.currentTarget.checked)} />
-    </label>
+    <ThreadGroupingSettings />
     <label for="{uid}-notifications" class="switch-row">
       <span class="text ui-label-box">
         <span class="ui-label" id="{uid}-notifications-name">{strings.settings.notifications}</span><InfoTip topic={strings.settings.notifications} text={strings.settings.notificationsHint} />
