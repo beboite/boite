@@ -140,7 +140,8 @@ describe('journal', () => {
       .replace(/project_id TEXT/i, 'project_id TEXT NOT NULL'));
     journal.db.exec('INSERT INTO threads_legacy SELECT * FROM threads; DROP TABLE threads; ALTER TABLE threads_legacy RENAME TO threads');
     for (const index of indexes) journal.db.exec(index.sql);
-    const addedColumns = [[2, 'threads', 'effort'], [3, 'threads', 'pinned'], [5, 'threads', 'branch'], [6, 'threads', 'title_source'], [7, 'threads', 'context'], [9, 'threads', 'session_generation'], [9, 'threads', 'selection_version'], [9, 'turns', 'execution'], [10, 'threads', 'speed'], [15, 'threads', 'agent_session_id']] as const;
+    journal.db.exec('DROP INDEX threads_done_expiry');
+    const addedColumns = [[2, 'threads', 'effort'], [3, 'threads', 'pinned'], [5, 'threads', 'branch'], [6, 'threads', 'title_source'], [7, 'threads', 'context'], [9, 'threads', 'session_generation'], [9, 'threads', 'selection_version'], [9, 'turns', 'execution'], [10, 'threads', 'speed'], [15, 'threads', 'agent_session_id'], [29, 'threads', 'done_at']] as const;
     for (const [since, table, column] of addedColumns) {
       if (version < since) journal.db.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
     }

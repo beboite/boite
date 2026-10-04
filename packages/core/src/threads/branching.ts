@@ -291,6 +291,7 @@ export class ThreadBranching {
       status: 'idle',
       unread: false,
       archived: false,
+      doneAt: null,
       pinned: false,
       sessionId: plan?.sessionId ?? null,
       ...(plan?.sessionResumeAt ? { sessionResumeAt: plan.sessionResumeAt } : {}),

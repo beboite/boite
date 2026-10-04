@@ -20,6 +20,7 @@ export interface ProjectIconRow {
 }
 
 export interface ThreadRow {
+  done_at?: number | null;
   fork_origin?: string | null;
   parent_thread_id: string | null;
   last_user_message_at?: number | null;
@@ -135,6 +136,7 @@ export function toThread(row: ThreadRow): ThreadSummary {
     status: row.status as ThreadSummary['status'],
     unread: row.unread !== 0,
     archived: row.archived !== 0,
+    ...(row.done_at != null ? { doneAt: row.done_at } : {}),
     pinned: row.pinned !== 0,
     sessionId: row.session_id,
     ...(row.session_resume_at ? { sessionResumeAt: row.session_resume_at } : {}),

@@ -174,6 +174,10 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
     if (value !== undefined && value > 100) return { ok: false, field: key, message: `${key} must be between 0 and 100` };
   }
   const budget = patch.agentMemoryBudgetPercent;
+  const doneRetention = patch.threadDoneRetentionDays;
+  if (doneRetention !== undefined && (!Number.isInteger(doneRetention) || doneRetention < 0 || doneRetention > 3650)) {
+    return { ok: false, field: 'threadDoneRetentionDays', message: 'threadDoneRetentionDays must be an integer between 0 and 3650 days (0 disables automatic deletion)' };
+  }
   const retention = patch.threadDeletionRetentionDays;
   if (retention !== undefined && (!Number.isInteger(retention) || retention < 0 || retention > 3650)) {
     return { ok: false, field: 'threadDeletionRetentionDays', message: 'threadDeletionRetentionDays must be an integer between 0 and 3650 days (0 keeps deleted conversations indefinitely)' };

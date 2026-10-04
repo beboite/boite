@@ -419,6 +419,7 @@ test('merged archive retains checkout and reason, and restored exact PR stays di
   }
   expect(archiveCount).toBe(1);
   const archived = await f.client.call('threads.get', { threadId: f.threadId });
+  expect(archived.doneAt).toBeTypeOf('number');
   expect(archived.archiveReason).toMatchObject({ type: 'pr-merged', number: 7, url: 'https://github.com/example/repo/pull/7' });
   expect(existsSync(join(f.checkout, '.git'))).toBe(true);
   expect(git(f.repo, 'show-ref', '--verify', 'refs/heads/topic')).toContain(f.sha);
@@ -516,6 +517,7 @@ test('the merged PR filter reveals automatic hides, preserves manual archives an
   const project = await f.client.call('projects.setAutoArchiveMergedPr', { projectId: f.project.id, enabled: false });
   expect(project.autoArchiveMergedPr).toBe(false);
   expect(harness.core.threads.require(f.threadId).archived).toBe(false);
+  expect(harness.core.threads.require(f.threadId).doneAt).toBeUndefined();
   expect(harness.core.threads.require('manually-archived').archived).toBe(true);
   expect(archiveState(harness.core.journal, f.threadId).dismissed ?? []).toEqual([]);
   expect(await service.sweep()).toBe(0);

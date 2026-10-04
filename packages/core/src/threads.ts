@@ -468,7 +468,7 @@ export class ThreadStore {
     if (!thread || thread.updatedAt !== expected.updatedAt || thread.cwd !== expected.cwd || thread.branch !== proof.branch || thread.projectId !== expected.projectId || state.generation !== generation || state.dismissed?.includes(proof.url) || !this.core.mergedPrArchive.eligible(thread)) return null;
     const archivedThread = this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
       this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, binding: proof, reason: { type: 'pr-merged', number: proof.number, url: proof.url, archivedAt: Date.now() } });
-      const saved = this.save({ ...thread, archived: true }, 'thread.archived');
+      const saved = this.save({ ...thread, archived: true, doneAt: Date.now() }, 'thread.archived');
       if (thread.projectId !== null) this.core.projects.announce(thread.projectId);
       return saved;
     })());
@@ -483,7 +483,7 @@ export class ThreadStore {
       const state = archiveState(this.core.journal, thread.id);
       if (state.reason?.type !== 'pr-merged') continue;
       this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, reason: undefined, generation: state.generation + 1 });
-      this.save({ ...thread, archived: false }, 'thread.archived');
+      this.save({ ...thread, archived: false, doneAt: null }, 'thread.archived');
     }
   }
 
@@ -522,7 +522,7 @@ export class ThreadStore {
         const state = archiveState(this.core.journal, threadId);
         if (state.reason) this.core.journal.setSetting(archiveStateKey(threadId), { ...state, reason: undefined, generation: state.generation + 1 });
       }
-      const saved = this.save({ ...thread, archived }, 'thread.archived');
+      const saved = this.save({ ...thread, archived, doneAt: archived && onlyIfIdle ? thread.doneAt ?? Date.now() : null }, 'thread.archived');
       if (thread.archived !== archived && !thread.parentThreadId && thread.projectId !== null) this.core.projects.announce(thread.projectId);
       return saved;
     })());

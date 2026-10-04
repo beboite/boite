@@ -38,7 +38,7 @@ import { DEVICE_METHODS, toSummary } from './fake-client/shared';
 import { speechMethods } from './fake-client/speech';
 import { terminalMethods } from './fake-client/terminals';
 import { capabilityMethods } from './fake-client/capabilities';
-import { purgeDeletedThreads, threadMethods } from './fake-client/threads';
+import { deleteExpiredDoneThreads, purgeDeletedThreads, threadMethods } from './fake-client/threads';
 import { threadMoveMethods } from './fake-client/thread-move';
 import { spawnMethods } from './fake-client/spawn';
 import { todoMethods } from './fake-client/todos';
@@ -64,6 +64,7 @@ export class FakeClient implements ObservableClient {
   readonly #ctx: FakeContext;
   readonly #methods: FakeMethods;
   #mergedPrSweep: Promise<number> | null = null;
+  #doneSweep: Promise<void> | null = null;
   #transportGeneration = 0;
 
   constructor(options: FakeClientOptions = {}) {
@@ -148,6 +149,11 @@ export class FakeClient implements ObservableClient {
     return this.#mergedPrSweep;
   }
 
+  sweepDoneThreads(): Promise<void> {
+    return this.#doneSweep ??= deleteExpiredDoneThreads(this.#ctx, id => this.#methods['threads.remove']({ threadId: id }))
+      .finally(() => { this.#doneSweep = null; });
+  }
+
   onState(handler: (state: ClientState) => void): () => void {
     return this.#ctx.bus.onState(handler);
   }
@@ -157,6 +163,7 @@ export class FakeClient implements ObservableClient {
   }
 
   async connect(): Promise<CoreInfo> {
+    if ([...this.#ctx.threads.values()].some(thread => thread.doneAt != null)) await this.sweepDoneThreads();
     purgeDeletedThreads(this.#ctx);
     this.#ctx.agents.open();
     this.#ctx.bus.setState('connecting');

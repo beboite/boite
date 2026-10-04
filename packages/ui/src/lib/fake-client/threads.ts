@@ -2,7 +2,7 @@ import { dismissMergedPr } from './merged-pr-archive';
 import { assertIdleFamily } from './completion';
 import { isThreadTerminal, protectedThreadIdsError } from '@boite/contracts';
 /** Threads and their messages: create, read, select, archive, and the turn entry points. */
-import { DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
+import { DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
 import { steerUser } from './user-steering';
 import { recoverTurn } from './recovery';
 import { RpcFailure } from '../client';
@@ -42,7 +42,7 @@ function writeFakeFork(ctx: FakeContext, source: Thread, kept: Message[], placed
     id, projectId: source.projectId, title, titleSource: source.titleSource,
     providerId: source.providerId, accountId: source.accountId, model: source.model, effort: source.effort, speed: source.speed ?? null,
     cwd: placed?.path ?? source.cwd, branch: placed?.branch ?? source.branch, branchNamingPending: placed?.namingPending ?? false, permissionMode: source.permissionMode,
-    status: 'idle', unread: false, archived: false, pinned: false,
+    status: 'idle', unread: false, archived: false, doneAt: null, pinned: false,
     forkOrigin: { threadId: source.id, messageId: kept.at(-1)?.id ?? null, turnId: kept.at(-1)?.turnId ?? null, mode: 'seeded' },
     sessionId: null, sessionGeneration: 1, selectionVersion: 0, load: null, context: null,
     createdAt: now, updatedAt: now, messages, turns, commands: [], messagesBefore: null,
@@ -194,6 +194,21 @@ function checkSelection(ctx: FakeContext, thread: Thread, params: RpcParams<'thr
   }
   if (params.effort !== undefined) effort = params.effort;
   if (switched || model !== thread.model || effort !== thread.effort) checkEffort(provider, models, model, effort);
+}
+
+export async function deleteExpiredDoneThreads(ctx: FakeContext, remove: (id: string) => Promise<unknown>): Promise<void> {
+  for (const thread of [...ctx.threads.values()]) {
+    const days = ctx.settings.threadDoneRetentionDays ?? DEFAULT_THREAD_DONE_RETENTION_DAYS;
+    if (days === 0) return;
+    if (!thread.archived || thread.doneAt == null || thread.parentThreadId || thread.agentSessionId
+      || thread.doneAt > Date.now() - days * 86_400_000 || ctx.threads.get(thread.id) !== thread) continue;
+    try { assertIdleFamily(ctx, thread.id); }
+    catch (error) {
+      if (error instanceof RpcFailure && error.code === RpcErrorCode.Refused) continue;
+      throw error;
+    }
+    await remove(thread.id);
+  }
 }
 
 export function threadMethods(ctx: FakeContext) {
@@ -409,6 +424,7 @@ export function threadMethods(ctx: FakeContext) {
       if (params.archived === false) dismissMergedPr(ctx, thread.id);
       const was = thread.archived;
       thread.archived = params.archived ?? true;
+      thread.doneAt = thread.archived && params.onlyIfIdle === true ? thread.doneAt ?? Date.now() : null;
       if (thread.archived) {
         delete thread.archiveReason;
         cancelFamilySideQuestions(ctx, thread.id);
@@ -444,7 +460,7 @@ export function threadMethods(ctx: FakeContext) {
       if (removing.has(threadId)) throw refusal('threadId: this conversation is already being deleted', { threadId, field: 'threadId', expected: 'a conversation not being deleted' });
       const family = [...ctx.threads.values()].filter(t => t.id === threadId || t.parentThreadId === threadId);
       const archived = family.map(t => t.archived);
-      for (const thread of family) { removing.add(thread.id); thread.archived = true; }
+      for (const thread of family) { removing.add(thread.id); thread.archived = true; thread.doneAt = null; }
       try {
         cancelFamilySideQuestions(ctx, threadId);
         ctx.workflows.stopRoot(threadId, 'Conversation deleted');

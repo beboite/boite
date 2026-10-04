@@ -1,10 +1,11 @@
-import { checkSettingsPatch, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type Settings } from '@boite/contracts';
+import { checkSettingsPatch, DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type Settings } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { writesTitles } from './drivers/index.ts';
 import { invalidParams } from './errors.ts';
 import { isAbsolute, resolve } from 'node:path';
 
 export const DEFAULT_SETTINGS: Settings = {
+  threadDoneRetentionDays: DEFAULT_THREAD_DONE_RETENTION_DAYS,
   threadDeletionRetentionDays: DEFAULT_THREAD_DELETION_RETENTION_DAYS,
   worktreeStorage: { mode: 'project', directory: null },
   warmProcessMinutes: 0,
