@@ -641,6 +641,10 @@ export const strings = {
       error: 'Failed',
       done: 'Done',
       queued: 'Queued',
+      /** The turn ended, the agent waits on the agents it delegated to: their results wake it. */
+      delegating: 'Sub-agents',
+      delegatingOne: 'Waiting on 1 sub-agent',
+      delegatingMany: 'Waiting on {count} sub-agents',
       /** The turn ended, the agent still watches something: a monitor it left going. */
       monitoring: 'Monitoring',
       monitoringFor: 'Monitoring for {elapsed}',

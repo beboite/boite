@@ -242,7 +242,7 @@
         {@const lists = projectThreadLists(entry, owner.threadsOf(project.id), workingOpen)}
         {@const controls = `sidebar-project-${encodeURIComponent(projectKey(entry))}`}
         {@const collapsed = owner.isCollapsed(project.id)}
-        {@const rollup = collapsed ? projectRollup(owner.threadsOf(project.id)) : null}
+        {@const rollup = collapsed ? projectRollup(owner.threadsOf(project.id), thread => owner.subagents(thread.id)?.count ?? 0) : null}
         {@const draftHere = owner.draftEntries.find(entry => entry.projectId === project.id)}
         {@const dropKey = `${machine.id}:${project.id}`}
         <section
@@ -441,12 +441,12 @@
     font-variant-numeric: tabular-nums;
   }
   .rollup .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-  .rollup.working, .rollup.monitoring, .rollup.background { color: var(--color-accent); }
+  .rollup.working, .rollup.delegating, .rollup.monitoring, .rollup.background { color: var(--color-accent); }
   .rollup.waiting { color: var(--color-live); }
   .rollup.error { color: var(--color-danger); }
   .rollup.done { color: var(--color-success); }
   .rollup.queued { color: var(--color-muted-foreground); }
-  .rollup.monitoring .dot, .rollup.background .dot { animation: rollup-pulse 1.6s var(--ease-out-quint) infinite; }
+  .rollup.delegating .dot, .rollup.monitoring .dot, .rollup.background .dot { animation: rollup-pulse 1.6s var(--ease-out-quint) infinite; }
   .rollup :global(.spinner) { animation: rollup-spin 1s linear infinite; }
   @keyframes rollup-spin { to { transform: rotate(360deg); } }
   @keyframes rollup-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }

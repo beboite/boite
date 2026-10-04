@@ -13,7 +13,7 @@ import { readingCacheBytes, READING_CACHE_BYTES } from '../reading-cache';
 import { INITIAL_MESSAGE_PAGE, MESSAGE_PAGE_MAX, previewToolOutputs, previewFileData } from '@boite/contracts';
 import { forgetArchivedThread } from '../archive-history';
 import { rightPanel } from '../right-panel.svelte';
-import { blockedMoveParents, lastIndexById, mergeResumed, patchRow, reconcileThread, resumeRequest, threadsByProject } from '../thread-rows';
+import { workingChildren, type WorkingChildren, lastIndexById, mergeResumed, patchRow, reconcileThread, resumeRequest, threadsByProject } from '../thread-rows';
 import type { StoreContext } from './context';
 import { RpcErrorCode } from '@boite/contracts';
 import { RpcFailure } from '../client';
@@ -123,8 +123,10 @@ export class Threads {
     return this.#byProject.get(projectId) ?? [];
   }
 
-  #blockedMoveParents = $derived(blockedMoveParents(this.threads));
-  moveBlocked(threadId: ThreadId): boolean { return this.#blockedMoveParents.has(threadId); }
+  #workingChildren = $derived(workingChildren(this.threads));
+  /** The thread's delegated agents still at work, the parent waiting on them; null when none is. */
+  subagents(threadId: ThreadId): WorkingChildren | null { return this.#workingChildren.get(threadId) ?? null; }
+  moveBlocked(threadId: ThreadId): boolean { return this.#workingChildren.has(threadId); }
 
   async compact(): Promise<void> {
     const thread = this.openThread;
