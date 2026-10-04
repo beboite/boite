@@ -247,6 +247,10 @@ describe('environments', () => {
     expect((await resolveEndpoint(false, approve))?.url).not.toBe(url);
     expect(asked).toEqual([url]);
     expect(readEnvironments()[0]).toMatchObject({ coreId: 'b', groupId: 'grp' });
+    // The same for a link that brings a key of its own.
+    at('/?core=https%3A%2F%2Fb.example&token=its-own');
+    expect((await resolveEndpoint(false, approve))?.url).not.toBe(url);
+    expect(asked).toEqual([url, url]);
     // Reopened with the key it holds, no grant: nothing changes hands and nobody is asked.
     at('/?core=https%3A%2F%2Fb.example');
     expect(await resolveEndpoint(false, approve)).toMatchObject({ url, token: 'from-ticket' });
@@ -254,14 +258,18 @@ describe('environments', () => {
     upsertEnvironment({ url: 'https://hand.example', token: 'hand', paired: true });
     at('/?core=https%3A%2F%2Fhand.example&grant=g');
     expect(await resolveEndpoint(false, approve)).toMatchObject({ url: 'https://hand.example', grant: 'g' });
-    expect(asked).toEqual([url]);
+    expect(asked).toEqual([url, url]);
     at('/');
   });
 
-  test('a link that reopens a known core is named before it is taken, a pairing link is not', () => {
+  test('the core a link names is read before the link is taken, whatever key the link brings', () => {
     at('/?core=http%3A%2F%2F10.0.0.5%3A9000%2F');
     expect(linkedCore()).toBe('http://10.0.0.5:9000');
     at('/?core=http%3A%2F%2F10.0.0.5%3A9000&grant=g');
+    expect(linkedCore()).toBe('http://10.0.0.5:9000');
+    at('/?core=http%3A%2F%2F10.0.0.5%3A9000&token=t');
+    expect(linkedCore()).toBe('http://10.0.0.5:9000');
+    at('/?grant=g');
     expect(linkedCore()).toBeNull();
     at('/');
     expect(linkedCore()).toBeNull();

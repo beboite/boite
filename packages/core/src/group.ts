@@ -32,7 +32,7 @@ import type { CoordinationPeer, Group, GroupInvite, GroupTicket, PairingRole, Pr
 import { boundedBody, MAX_BODY, PeerGone } from './coordination-wire.ts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unauthorized } from './errors.ts';
-import { advertisedAddresses, magicName, tailnetAddress, ticketAddresses, type Tailnet } from './group/addresses.ts';
+import { advertisedAddresses, probeTailnet, tailnetAddress, ticketAddresses, type Tailnet } from './group/addresses.ts';
 import { admissionInput, checkCard, checkRoster, clockOf, CORE_ENTRIES_MAX, DEVICE_ENTRIES_MAX, digestOf, fingerprint, homeOf, liveCores, liveDevices, mergeRosters } from './group/roster.ts';
 import type { CoreCard, CoreEntry, DeviceEntry, Roster } from './group/roster.ts';
 import { boxPublic, boxSigningInput, newBoxKey, open, openResponse, pack, readBoxKey, seal, SEALED, sealedName, sealResponse, unpack } from './group/seal.ts';
@@ -111,6 +111,8 @@ export class GroupStore {
   private ticks = 0;
   private ticking = false;
   private closed = false;
+  /** The server answers: this machine's addresses can be read off its listeners and interfaces. */
+  private live = false;
   private reconciling = false;
   private readonly pending = new Set<Promise<unknown>>();
 
@@ -149,7 +151,14 @@ export class GroupStore {
 
   /** Called once the server listens: a member publishes where it answers and asks the others what it missed. */
   start(): void {
-    if (this.roster === null || this.closed) return;
+    if (this.closed) return;
+    // Before anything is awaited: from the first hello on, what this machine gives is what it listens on now.
+    const ip = tailnetAddress();
+    this.tailnet = ip === null ? null : { ip, name: this.tailnet?.ip === ip ? this.tailnet.name : null };
+    this.listen(this.roster !== null);
+    this.live = true;
+    this.reconcile();
+    if (this.roster === null) return;
     this.arm();
     this.background(this.refresh().then(() => this.syncPending()));
   }
@@ -258,17 +267,9 @@ export class GroupStore {
   // -- This core's own entry.
 
   private async probe(): Promise<void> {
-    const ip = tailnetAddress();
-    const now = Date.now();
-    if (ip === null) {
-      this.tailnet = null;
-      return;
-    }
-    if (this.tailnet?.ip === ip && now - this.tailnetAt < NAME_REFRESH_MS) return;
-    this.tailnetAt = now;
-    const name = await magicName(ip);
-    // A resolver that stays silent once keeps the name it gave for the same address.
-    this.tailnet = { ip, name: name ?? (this.tailnet?.ip === ip ? this.tailnet.name : null) };
+    const stale = Date.now() - this.tailnetAt >= NAME_REFRESH_MS;
+    if (stale) this.tailnetAt = Date.now();
+    this.tailnet = await probeTailnet(this.tailnet, stale);
   }
 
   /** A member answers on its tailnet address; a core in no group opens nothing. */
@@ -297,6 +298,8 @@ export class GroupStore {
    * last published, and between a move and the next publication it is behind.
    */
   private given(): string[] {
+    // Until the server is bound there is nothing to read: what was last published stands.
+    if (!this.live) return ticketAddresses(this.roster?.cores.find((core) => core.coreId === this.selfId())?.addresses ?? []);
     const ip = tailnetAddress();
     const tailnet = ip === null ? null : { ip, name: null };
     const listening = { ...this.core.boundEndpoint(), tailnet: this.onTailnet && ip === this.tailnet?.ip, publicUrl: this.core.settings.get().publicUrl };

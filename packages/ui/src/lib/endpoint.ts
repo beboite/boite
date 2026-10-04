@@ -282,11 +282,10 @@ function takeFromQuery(): Endpoint | null {
   return endpoint;
 }
 
-/** The core a `?core=` link reopens with the key this device holds for it, before the link is taken. */
+/** The core a `?core=` link names, with or without a key of its own, read before the link is taken. */
 export function linkedCore(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  const core = params.get(CORE_QUERY_PARAM);
-  return core && !params.get(PAIR_QUERY_PARAM) && !params.get(GRANT_QUERY_PARAM) ? normalise(core) : null;
+  const core = new URLSearchParams(window.location.search).get(CORE_QUERY_PARAM);
+  return core ? normalise(core) : null;
 }
 
 export function insideTauri(): boolean {
@@ -343,9 +342,10 @@ function knownEndpoint(url: string): Endpoint | null {
  */
 async function followLink(endpoint: Endpoint, approve?: (url: string) => Promise<boolean>): Promise<boolean> {
   const known = endpoint.url === normalise(window.location.origin) || knownEndpoint(endpoint.url) !== null;
-  // A pairing link turns a machine the group brought into one paired by hand, out of the group's
-  // hands from then on. A machine the group removed can mint such a link itself: the owner is asked.
-  const promotes = endpoint.grant !== undefined && readEnvironments().some((env) => env.url === endpoint.url && env.coreId !== undefined);
+  // A link that carries a key of its own, a grant or a token, turns a machine the group brought into
+  // the owner's, out of the group's hands. A machine the group removed can make such a link itself: the owner is asked.
+  const brought = readEnvironments().find((env) => env.url === endpoint.url && env.coreId !== undefined);
+  const promotes = brought !== undefined && (endpoint.grant !== undefined || endpoint.token !== brought.token);
   if (known && !promotes) return true;
   return approve ? await approve(endpoint.url) : false;
 }

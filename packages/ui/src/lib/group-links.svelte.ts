@@ -2,6 +2,7 @@ import { untrack } from 'svelte';
 import { RPC_PATH, type Group, type GroupCore } from '@boite/contracts';
 import { WsClient } from './client';
 import { readEnvironments, removeEnvironment, type Endpoint, type StoredEnvironment } from './endpoint';
+import { usableAddresses } from './group-addresses';
 import type { Machine, Workspace } from './workspace.svelte';
 
 /** A machine that did not answer is asked again no sooner than this. */
@@ -39,6 +40,8 @@ function askGroup(endpoint: Endpoint, patience: number): Promise<Group | null | 
   ]).finally(() => client.close());
 }
 
+export { usableAddresses };
+
 /** A key the group brought for a plain HTTP address: at start it waits for a hand-paired machine to have its say. */
 export function holdsBack(entry: StoredEnvironment): boolean {
   return entry.coreId !== undefined && entry.url.startsWith('http://');
@@ -74,25 +77,6 @@ async function firstReachable(addresses: string[]): Promise<string | null> {
   } catch {
     return null;
   }
-}
-
-/** `http://` followed by an address written as numbers, IPv4 or bracketed IPv6: nothing a resolver gets a say in. */
-const LITERAL_HTTP = /^http:\/\/(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:]+\])(:\d+)?$/i;
-
-/**
- * The addresses of a machine this client may send a ticket and then a key to.
- * The client link is not sealed, so the transport has to say who answers:
- *
- * - a machine that gives an HTTPS address is reached there and nowhere else,
- *   so nothing on the path can talk the client down to plain HTTP;
- * - over plain HTTP only an address written as numbers: a name is whatever the
- *   resolver of this device says it is, and may be another host;
- * - an HTTPS page opens secure sockets only.
- */
-export function usableAddresses(addresses: readonly string[], secure: boolean): string[] {
-  const https = addresses.filter((address) => address.startsWith('https://'));
-  if (https.length > 0 || secure) return https;
-  return addresses.filter((address) => LITERAL_HTTP.test(address));
 }
 
 /**

@@ -39,17 +39,9 @@ const MEMBERS_MAX = 128;
 const SWEEP_MS = 1000;
 
 /** Statuses a core-to-core route answers a request it would not serve with. */
-const REFUSED = new Set([403, 409, 410, 429]);
-/** The status of a request already received: the copy of one that was served. */
-const REPLAYED = 409;
-/**
- * Copies a member may send from its own address in a minute before they count
- * as refusals. A member asks a second address when the first is slow, and both
- * may reach this core: that is its own traffic, not a stranger's.
- */
-const REPLAYS_PER_MINUTE = 600;
+const REFUSED = new Set([403, 410, 429]);
 
-interface Entry { since: number; refused: number; pending: number; replays?: number }
+interface Entry { since: number; refused: number; pending: number }
 
 /**
  * What is counted as one stranger. A host on IPv6 has a whole /64 to send
@@ -91,7 +83,6 @@ export class Refusals {
     if (now - entry.since > WINDOW_MS) {
       entry.since = now;
       entry.refused = 0;
-      entry.replays = 0;
     }
     if (entry.refused + entry.pending >= REFUSALS_PER_MINUTE) return null;
     entry.pending += 1;
@@ -100,11 +91,6 @@ export class Refusals {
       if (!open) return;
       open = false;
       entry.pending -= 1;
-      // The copy of a request this member already had served, from an address it is known at: its own, up to a point.
-      if (status === REPLAYED && this.members.get(member)?.includes(address) === true) {
-        entry.replays = (entry.replays ?? 0) + 1;
-        if (entry.replays <= REPLAYS_PER_MINUTE) return;
-      }
       if (REFUSED.has(status)) {
         entry.refused += 1;
         return;

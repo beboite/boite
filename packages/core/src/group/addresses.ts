@@ -147,3 +147,16 @@ export function ticketAddresses(addresses: readonly string[]): string[] {
   const https = addresses.filter((address) => address.startsWith('https://'));
   return https.length > 0 ? https : addresses.filter((address) => /^http:\/\/(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:]+\])(:\d+)?$/i.test(address));
 }
+
+/**
+ * The tailnet address of this machine now, and its name. The name is asked
+ * for again when the address changed or `stale` says the last answer is old;
+ * a resolver that stays silent once keeps the name it gave for that address.
+ */
+export async function probeTailnet(known: Tailnet | null, stale: boolean): Promise<Tailnet | null> {
+  const ip = tailnetAddress();
+  if (ip === null) return null;
+  if (known?.ip === ip && !stale) return known;
+  const name = await magicName(ip);
+  return { ip, name: name ?? (known?.ip === ip ? known.name : null) };
+}

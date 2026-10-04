@@ -736,24 +736,26 @@ export class Coordination {
    */
   private async exchange(peer: CoordinationPeer, operation: Operation, payload: unknown): Promise<unknown> {
     this.identityKey();
-    const nonce = randomUUID();
-    const body = JSON.stringify({ from: this.coreId, to: peer.coreId, at: Date.now(), nonce, operation, payload } satisfies Envelope);
-    const signed = sign(null, Buffer.from(body), this.key!).toString('base64');
-    // To a machine of this core's group the signed message leaves sealed, whatever carries it, the owner's app included.
-    const sealing = this.core.group.sealFor(peer.coreId, pack(body, signed));
-    const wire = sealing === null ? body : sealing.body;
-    const signature = sealing === null ? signed : SEALED;
-    const relayed = async (): Promise<Answer> => {
+    // Signed and sealed anew for every address tried, the owner's app included: the same request sent twice
+    // is a replay at a machine both addresses lead to, refused there, and every operation bears being asked twice.
+    const attempt = async (url: string | null): Promise<Answer> => {
+      const nonce = randomUUID();
+      const body = JSON.stringify({ from: this.coreId, to: peer.coreId, at: Date.now(), nonce, operation, payload } satisfies Envelope);
+      const signed = sign(null, Buffer.from(body), this.key!).toString('base64');
+      const sealing = this.core.group.sealFor(peer.coreId, pack(body, signed));
+      const wire = sealing === null ? body : sealing.body;
+      const signature = sealing === null ? signed : SEALED;
+      if (url !== null) return post(url, this.coreId, peer.publicKey, wire, signature, nonce, sealing);
       const response = await this.bridge.request(peer.coreId, { fromCoreId: this.coreId, toCoreId: peer.coreId, body: wire, signature });
       return settle(null, peer.publicKey, nonce, response.status, response.body, response.signature, sealing);
     };
     const routes = this.core.group.routes(peer.coreId);
     let answer: Answer;
-    if (routes === null) answer = this.bridge.available(peer.coreId) || peer.viaClient ? await relayed() : await post(peer.url, this.coreId, peer.publicKey, wire, signature, nonce, sealing);
+    if (routes === null) answer = await attempt(this.bridge.available(peer.coreId) || peer.viaClient ? null : peer.url);
     else {
-      try { answer = await firstAnswer(routes, url => post(url, this.coreId, peer.publicKey, wire, signature, nonce, sealing)); }
+      try { answer = await firstAnswer(routes, attempt); }
       catch (error) {
-        if (this.bridge.available(peer.coreId)) answer = await relayed();
+        if (this.bridge.available(peer.coreId)) answer = await attempt(null);
         else throw error instanceof AggregateError ? error.errors[0] ?? new Error('peer unreachable') : error;
       }
     }
@@ -785,7 +787,7 @@ export class Coordination {
       text(envelope.nonce, 'nonce', 100);
       for (const [id, at] of this.nonces) if (now - at > 120_000) this.nonces.delete(id);
       const key = `${peer.coreId}:${envelope.nonce}`;
-      if (this.nonces.has(key)) return new Response('this request was already received', { status: 409 });
+      if (this.nonces.has(key)) throw new Error('replayed request');
       // The quota last: a request somebody recorded and sends again never spends the member's allowance.
       const rate = this.rates.get(peer.coreId) ?? { since: now, count: 0 };
       if (now - rate.since > 60_000) { rate.since = now; rate.count = 0; }

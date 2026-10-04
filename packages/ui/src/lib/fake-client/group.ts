@@ -1,6 +1,7 @@
 /** The group of machines: one roster shared by the fake cores of this page that joined it. */
 import { GRANT_TTL_MS, GROUP_INVITE_PREFIX, GROUP_MAX_CORES, GROUP_TICKET_TTL_MS, RpcErrorCode, type Group, type GroupCore, type GroupDevice } from '@boite/contracts';
 import { RpcFailure } from '../client';
+import { usableAddresses } from '../group-addresses';
 import { fakeCore } from './coordination';
 import type { FakeContext, FakeMethods } from './context';
 
@@ -115,7 +116,9 @@ export function groupMethods(ctx: FakeContext) {
       const roster = required(ctx);
       const target = roster.cores.find((core) => core.coreId === params?.coreId);
       if (target === undefined || target.coreId === ctx.identity.coreId) throw refuse(`${String(params?.coreId)} is not another machine of this group`, 'coreId');
-      const at = params?.url === undefined ? target.addresses[0] : target.addresses.find((address) => address === params.url);
+      // The real core's rule: HTTPS when the machine has one, else an address written as numbers.
+      const usable = usableAddresses(target.addresses, false);
+      const at = params?.url === undefined ? usable[0] : usable.find((address) => address === params.url);
       if (at === undefined) throw refuse(`url: expected an address of ${target.name} a key may be sent to, HTTPS when it has one and written as numbers otherwise`, 'url');
       return { ticket: `fake-ticket-${++ctx.seq}`, coreId: target.coreId, addresses: [...target.addresses], url: at, expiresAt: ctx.now() + GROUP_TICKET_TTL_MS };
     },

@@ -87,9 +87,9 @@ address, and gives the other members these addresses, best first:
 A member dialing another asks the address that answered last, and the
 others once that one has failed or stayed silent for a second, and keeps the
 first that answers with a valid signature. A machine reachable by any of the
-four is reached, and a request is not sent twice to a machine that has two
-addresses: the copy would be refused as a replay and counted against its
-sender. What it sends is sealed to that machine's key, so an address that
+four is reached. Each address is sent a request of its own, signed and sealed
+for that attempt: the same request sent twice to a machine that has two
+addresses would be refused there as a replay, and counted against its sender. What it sends is sealed to that machine's key, so an address that
 leads elsewhere reads nothing and cannot answer. When none answers and the
 owner's app is connected to both machines, the app relays the sealed request,
 as it does for two machines linked by hand ([coordination](coordination.md)).
@@ -223,10 +223,7 @@ never of another's. A member the core never served yet can be turned away with
 the strangers while such a flood lasts. Requests from the machine itself are not
 counted, since a reverse proxy puts every remote peer behind that one address. A member's own
 allowance, 120 requests a minute, is only spent by requests that are its own,
-fresh and not seen before. A copy of a request already served is answered 409.
-From an address the member is known at it is the member's own, a second
-address tried while the first was slow, and 600 a minute pass before they count
-as refusals; from anywhere else it is one.
+fresh and not seen before.
 
 **Tickets.** A client connected to a member asks it for a ticket to another
 (`group.ticket`): the member's signed statement of who vouches, for whom, at
@@ -242,7 +239,8 @@ publishes an HTTPS address, or its address changes, the keys issued for what it
 gave up are revoked, so a key sent there afterwards is worth nothing. Both
 checks read what the machine gives at that moment, off its interfaces and its
 settings, at every `hello`: the roster holds what it last published, which is
-behind for a few seconds after a move. The use and
+behind for a few seconds after a move. At a start, until the server listens,
+there is nothing to read and what was last published stands. The use and
 the session are one write in the journal, so a restart does not make a used
 ticket good again. A ticket is refused one minute after its date, plus one
 more for the difference between two clocks. From then on
@@ -283,8 +281,8 @@ even when it sits at a member's address or another machine reports its name,
 and a machine the group brought never takes the place of the window's own core
 by reporting this computer's name. Opening a pairing link on a machine the
 group brought makes it one paired by hand from then on, and since a machine
-the group removed can mint such a link itself, a link that arrives in the
-address bar asks first. A key the group handed
+the group removed can make such a link itself, a link in the address bar that
+brings a key of its own for that machine, a grant or a token, asks first. A key the group handed
 out for an address the machine no longer gives, or no longer allows once it has
 HTTPS, is dropped and the machine reached anew, the machine the window opened
 on included: the window then goes to a machine paired by hand, or to the
@@ -318,6 +316,9 @@ address, where it is worth nothing once the member has given that address up.
   there: a ticket, a session key and what follows are readable, and can be
   taken over, by someone on that network. Sealing it needs a secure channel
   inside the WebSocket, which a page served over plain HTTP cannot build.
+- A window trusts the machine that serves its page. A machine removed from
+  the group that still serves the page a client opens decides what that page
+  does, with every key saved under its address.
 - A member that has not heard a removal stays exposed to the removed machine,
   which may use it to act on the group. The only answer is to have every
   member on when a compromised machine is removed.

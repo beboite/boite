@@ -70,12 +70,11 @@ export function settle(url: string | null, publicKey: string, nonce: string, sta
 export const HEAD_START_MS = 1000;
 
 /**
- * The addresses of a member may all lead to the same core, which serves a
- * request once and refuses its copies as replays, counted against the sender:
- * a machine that sent every request everywhere would lock itself out. So the
- * first address, the one that answered last, is asked alone. The others are
- * asked once it failed, or has stayed silent for a moment, and then whichever
- * answers first counts.
+ * The addresses of a member may all lead to the same core, and asking them all
+ * at once would have it do everything several times over. So the first
+ * address, the one that answered last, is asked alone. The others are asked
+ * once it failed, or has stayed silent for a moment, each with a request of
+ * its own, and whichever answers first counts.
  */
 export async function firstAnswer<T>(routes: readonly string[], send: (url: string) => Promise<T>, headStartMs = HEAD_START_MS): Promise<T> {
   const first = send(routes[0]!);

@@ -253,6 +253,7 @@ test('a refused key is sent nowhere: not through a link that reopens its core, n
 
 test('a machine the group brought stays the group\'s to drop when its key is refused as the window opens on it', async () => {
   const { w, a } = await setup();
+  a.localCore = false;
   a.endpointUrl = 'https://b.example';
   upsertEnvironment({ url: 'https://b.example', token: 'old', paired: true, label: 'B', coreId: 'b', groupId: 'grp' });
   // The hello is refused: the dead key and its saved entry go during the boot.
@@ -260,6 +261,17 @@ test('a machine the group brought stays the group\'s to drop when its key is ref
   vi.spyOn(w, 'add').mockResolvedValue(true);
   await w.boot();
   expect(w.machines[0]).toMatchObject({ id: 'https://b.example', coreId: 'b', groupId: 'grp' });
+
+  // The entry goes during the boot and the window connects all the same, on a key a link brought:
+  // written again, the entry is still one the group brought.
+  upsertEnvironment({ url: 'https://b.example', token: 'old', paired: true, label: 'B', coreId: 'b', groupId: 'grp' });
+  vi.spyOn(a, 'boot').mockImplementation(async () => {
+    endpoints.removeEnvironment('https://b.example', 'old');
+    endpoints.storeEndpoint({ url: 'https://b.example', token: 'from-a-link', paired: true });
+  });
+  await w.boot();
+  expect(endpoints.readEnvironments().find((env) => env.url === 'https://b.example')).toMatchObject({ token: 'from-a-link', coreId: 'b', groupId: 'grp' });
+  expect(w.machines[0]).toMatchObject({ coreId: 'b', groupId: 'grp' });
 });
 
 test('a window whose machine the group dropped falls back on a machine paired by hand, never on the address it dropped', async () => {

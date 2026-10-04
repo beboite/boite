@@ -230,7 +230,13 @@ export class Workspace {
     await this.#connectShellLocal(lifecycle);
     if (!this.#current(lifecycle)) return;
     if (!store.localCore && primaryEndpoint?.url === store.endpointUrl && primaryEndpoint.token) {
-      upsertEnvironment({ ...primaryEndpoint, paired: primaryEndpoint.paired ?? false, label: this.machines[0]!.label });
+      // An entry that went during the boot comes back as what it was: a machine the group brought is not made the owner's by being written again.
+      const was = saved.find((e) => e.url === primaryEndpoint.url);
+      upsertEnvironment({
+        ...primaryEndpoint, paired: primaryEndpoint.paired ?? false, label: this.machines[0]!.label,
+        ...(was?.coreId === undefined ? {} : { coreId: was.coreId }),
+        ...(was?.groupId === undefined ? {} : { groupId: was.groupId })
+      });
     }
     const others = readEnvironments().filter((e) => e.url !== store.endpointUrl);
     await Promise.all([
