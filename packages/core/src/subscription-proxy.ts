@@ -67,6 +67,34 @@ function proxyEffort(row: Record<string, unknown>): ModelInfo['effort'] | undefi
   return { levels, default: typeof wanted === 'string' && levels.some(level => level.id === wanted) ? wanted : levels[0]!.id };
 }
 
+type ModelFamily = 'anthropic' | 'openai' | 'google' | 'xai' | 'meta';
+
+const ROUTE_FAMILIES: Record<string, ModelFamily> = {
+  claude: 'anthropic', anthropic: 'anthropic', codex: 'openai', openai: 'openai', chatgpt: 'openai',
+  gemini: 'google', google: 'google', xai: 'xai', grok: 'xai', muse: 'meta',
+};
+
+/** Open-weight families: offered to every harness, whatever routing prefix the gateway gives them. */
+const OPEN_MODEL = /gpt-oss|kimi|qwen|llama|deepseek|mistral|mixtral|glm/i;
+
+/**
+ * The vendor whose harness a proprietary model belongs to, or null for an open
+ * or unknown model. The name is read after the gateway's routing prefix, so
+ * `antigravity/claude-opus-5-5` is a Claude model; an unknown name falls back
+ * to a vendor prefix, so `codex/computer-use-preview` is an OpenAI model.
+ */
+export function proprietaryFamily(id: string): ModelFamily | null {
+  const slash = id.lastIndexOf('/');
+  const name = id.slice(slash + 1);
+  if (OPEN_MODEL.test(name)) return null;
+  if (/claude|opus|sonnet|haiku|fable/i.test(name)) return 'anthropic';
+  if (/^(?:chatgpt|gpt|codex)(?:[-_.\d]|$)|^openai(?:[-_]|$)|^o\d+(?:-|$)/i.test(name)) return 'openai';
+  if (/gemini/i.test(name)) return 'google';
+  if (/grok/i.test(name)) return 'xai';
+  if (/muse/i.test(name)) return 'meta';
+  return slash > 0 ? ROUTE_FAMILIES[id.slice(0, slash).split('/').pop()!.toLowerCase()] ?? null : null;
+}
+
 /** Discovery is a bounded HTTP read on the core, so a phone uses its host's gateway. */
 export async function readSubscriptionProxyModels(core: Core, provider: ProviderDescriptor): Promise<ModelInfo[] | null> {
   const proxy = activeSubscriptionProxy(core, provider);
@@ -89,6 +117,11 @@ export async function readSubscriptionProxyModels(core: Core, provider: Provider
   for (const row of body.data as Record<string, unknown>[]) {
     if (!row || typeof row !== 'object' || typeof row.id !== 'string' || !row.id || row.id.length > 200 || seen.has(row.id)) continue;
     const endpoints = row.supported_endpoint_types;
+    const own = provider.protocol === 'claude-sdk' ? 'anthropic' : 'openai';
+    const family = proprietaryFamily(row.id);
+    // A gateway can translate any model to any API; a proprietary model still stays in its own harness.
+    // Gemini's harness, Antigravity, cannot go through a gateway, so its models stay usable in both.
+    if (family !== null && family !== 'google' && family !== own) continue;
     if (Array.isArray(endpoints) && !endpoints.includes(provider.protocol === 'claude-sdk' ? 'anthropic' : 'openai-response')) continue;
     // Older gateways omit endpoint metadata; their known native model families remain selectable.
     if (!Array.isArray(endpoints) && (provider.protocol === 'claude-sdk' ? !/claude|opus|sonnet|haiku|fable/i.test(row.id) : !/gpt|codex|\bo[134](?:-|$)/i.test(row.id))) continue;
