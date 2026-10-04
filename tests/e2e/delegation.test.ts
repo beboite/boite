@@ -25,8 +25,9 @@ beforeAll(async () => {
 afterAll(async () => { await page?.close(); owner?.close(); await core?.stop(); }, 30_000);
 
 test('inspect and stop a real delegated thread from the panel, which launches nothing itself', async () => {
-  // An empty conversation shows the title and nothing to fill in.
-  expect(await page.evaluate('document.querySelectorAll("[data-testid=delegation-surface] :is(textarea, input, details, p)").length')).toBe(0);
+  // An empty conversation shows one line on what subagents are, and nothing to fill in.
+  expect(await page.evaluate('document.querySelectorAll("[data-testid=delegation-surface] :is(textarea, input, details, p:not([data-testid=delegation-empty]))").length')).toBe(0);
+  expect(await page.text('[data-testid="delegation-empty"]')).not.toBe('');
   await owner.call('delegation.spawn', { threadId, profileId: 'review', task: 'Review parser boundaries [sleep:20000]', requestId: 'first-agent' });
   await page.waitFor('document.querySelector("[data-testid=active-subagents]")?.textContent.includes("1 active subagent")');
   await page.waitFor('document.querySelectorAll("[data-testid=delegation-member]").length === 1');
@@ -40,7 +41,7 @@ test('inspect and stop a real delegated thread from the panel, which launches no
   expect(await page.evaluate('!!document.querySelector("[data-testid=delegation-activity] [data-testid=agent-elapsed]")')).toBe(true);
   await page.click('[data-testid="delegation-activity"]');
   await page.waitFor('!!document.querySelector("[data-testid=delegation-member]")');
-  expect(await page.text('[data-testid="delegation-member"]')).toContain('echo');
+  expect(await page.text('[data-testid="delegation-member"]')).toContain('Echo · Echo');
   await page.click('[data-testid="delegation-member"]');
   await page.waitFor('!!document.querySelector("[data-testid=delegation-detail]")');
   expect(await page.evaluate('document.querySelectorAll("[data-testid=delegation-surface] :is(textarea, input)").length')).toBe(0);
