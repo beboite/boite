@@ -67,20 +67,29 @@ function proxyEffort(row: Record<string, unknown>): ModelInfo['effort'] | undefi
   return { levels, default: typeof wanted === 'string' && levels.some(level => level.id === wanted) ? wanted : levels[0]!.id };
 }
 
+type ModelFamily = 'anthropic' | 'openai' | 'google' | 'xai' | 'meta';
+
+const ROUTE_FAMILIES: Record<string, ModelFamily> = {
+  claude: 'anthropic', anthropic: 'anthropic', codex: 'openai', openai: 'openai', chatgpt: 'openai',
+  gemini: 'google', google: 'google', xai: 'xai', grok: 'xai', muse: 'meta', meta: 'meta',
+};
+
 /**
  * The vendor whose harness a proprietary model belongs to, or null for an open
  * or unknown model. The name is read after the gateway's routing prefix, so
- * `antigravity/claude-opus-5-5` is a Claude model.
+ * `antigravity/claude-opus-5-5` is a Claude model; an unknown name falls back
+ * to a vendor prefix, so `codex/computer-use-preview` is an OpenAI model.
  */
-export function proprietaryFamily(id: string): 'anthropic' | 'openai' | 'google' | 'xai' | 'meta' | null {
-  const name = id.slice(id.lastIndexOf('/') + 1);
+export function proprietaryFamily(id: string): ModelFamily | null {
+  const slash = id.lastIndexOf('/');
+  const name = id.slice(slash + 1);
   if (/gpt-oss/i.test(name)) return null;
   if (/claude|opus|sonnet|haiku|fable/i.test(name)) return 'anthropic';
-  if (/gpt|codex|chatgpt|^o[134](?:-|$)/i.test(name)) return 'openai';
+  if (/^(?:chatgpt|gpt|codex)(?:[-_.\d]|$)|^openai(?:[-_]|$)|^o\d+(?:-|$)/i.test(name)) return 'openai';
   if (/gemini/i.test(name)) return 'google';
   if (/grok/i.test(name)) return 'xai';
   if (/muse/i.test(name)) return 'meta';
-  return null;
+  return slash > 0 ? ROUTE_FAMILIES[id.slice(0, slash).split('/').pop()!.toLowerCase()] ?? null : null;
 }
 
 /** Discovery is a bounded HTTP read on the core, so a phone uses its host's gateway. */
@@ -112,7 +121,7 @@ export async function readSubscriptionProxyModels(core: Core, provider: Provider
     if (family !== null && family !== 'google' && family !== own) continue;
     if (Array.isArray(endpoints) && !endpoints.includes(provider.protocol === 'claude-sdk' ? 'anthropic' : 'openai-response')) continue;
     // Older gateways omit endpoint metadata; their known native model families remain selectable.
-    if (!Array.isArray(endpoints) && family !== own) continue;
+    if (!Array.isArray(endpoints) && (provider.protocol === 'claude-sdk' ? !/claude|opus|sonnet|haiku|fable/i.test(row.id) : !/gpt|codex|\bo[134](?:-|$)/i.test(row.id))) continue;
     seen.add(row.id);
     const name = row.name ?? row.display_name;
     const effort = proxyEffort(row);
