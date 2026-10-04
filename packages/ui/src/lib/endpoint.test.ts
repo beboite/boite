@@ -7,6 +7,7 @@ import {
   droppedSince,
   isDropped,
   isMemberDropped,
+  keepDropped,
   rememberSession,
   removeBrought,
   removeEnvironment,
@@ -333,6 +334,15 @@ describe('environments', () => {
     expect([isMemberDropped('grp', 'c', 3), isMemberDropped('grp', 'm0', 1), isDropped('http://10.1.299.1:9000'), isDropped('http://10.1.0.1:9000')]).toEqual([true, true, true, false]);
     // A window that held an older admission of the machine lets it go without lowering what is recorded.
     removeBrought('http://10.0.0.6:9000', { coreId: 'c', groupId: 'grp' }, 1);
+    expect([isMemberDropped('grp', 'c', 3), isMemberDropped('grp', 'c', 4)]).toEqual([true, false]);
+    // Two windows wrote at the same instant and the later one, from what it had read, put an older admission back:
+    // the window that hears the change puts the highest back.
+    const before = window.localStorage.getItem('boite.group.dropped');
+    const stale = JSON.parse(before!) as Record<string, { at: number; epoch: number }>;
+    stale['member grp c'] = { at: Date.now(), epoch: 1 };
+    window.localStorage.setItem('boite.group.dropped', JSON.stringify(stale));
+    expect(isMemberDropped('grp', 'c', 3)).toBe(false);
+    keepDropped(before);
     expect([isMemberDropped('grp', 'c', 3), isMemberDropped('grp', 'c', 4)]).toEqual([true, false]);
     rememberSession({ url: 'http://10.0.0.6:9000', token: '', ticket: 't', coreId: 'c', groupId: 'grp', epoch: 4 }, 'four');
     // A machine that only moved leaves no mark: it may come back to the address it had.

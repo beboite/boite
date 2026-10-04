@@ -305,7 +305,9 @@ its address and by what it is, in storage every window shares
 (`boite.group.dropped`), with which admission of it that was
 (`GroupCore.epoch`): a window that holds it under another address lets it go
 too. Addresses make room for newer ones, 256 of them; a machine dropped is
-never forgotten to make room. Nothing saved for that
+never forgotten to make room, and the highest admission recorded as dropped is
+kept, also when two windows write at the same instant: the one that hears the
+other puts it back. Nothing saved for that
 address is read again, whichever window left it and wherever it sits, so a key
 left behind never passes for a pairing made by hand, and a link to that address
 asks as for a core nobody knows. No ticket is asked for it on the word of a

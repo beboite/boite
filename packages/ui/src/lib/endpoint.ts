@@ -53,15 +53,40 @@ const DROPPED_MEMBERS_MAX = 2048;
 
 interface Dropped { at: number; epoch: number }
 
-/** Address to when the group dropped the machine there, and which admission of it that was. */
-function droppedAddresses(): Record<string, Dropped> {
+function parseDropped(raw: string | null): Record<string, Dropped> {
   try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(DROPPED_STORAGE_KEY) ?? '{}');
+    const parsed: unknown = JSON.parse(raw ?? '{}');
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
     return Object.fromEntries(Object.entries(parsed as Record<string, Partial<Dropped> | null>)
       .filter((entry): entry is [string, Dropped] => typeof entry[1]?.at === 'number' && typeof entry[1].epoch === 'number'));
   } catch {
     return {};
+  }
+}
+
+/** Address to when the group dropped the machine there, and which admission of it that was. */
+function droppedAddresses(): Record<string, Dropped> {
+  try {
+    return parseDropped(window.localStorage.getItem(DROPPED_STORAGE_KEY));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Two windows that write the record at the same instant each start from what
+ * they had read, and the later one can put back an older admission than the
+ * other just recorded. The window that hears the record change puts back the
+ * highest it had seen. `previous` is the record before that change.
+ */
+export function keepDropped(previous: string | null): void {
+  const now = droppedAddresses();
+  const lowered = Object.entries(parseDropped(previous)).filter(([key, was]) => now[key] !== undefined && now[key].epoch < was.epoch);
+  if (lowered.length === 0) return;
+  try {
+    window.localStorage.setItem(DROPPED_STORAGE_KEY, JSON.stringify({ ...now, ...Object.fromEntries(lowered.map(([key, was]) => [key, { at: now[key]!.at, epoch: was.epoch }])) }));
+  } catch {
+    /* a browser that refuses storage still runs for this session */
   }
 }
 

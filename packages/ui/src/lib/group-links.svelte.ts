@@ -1,7 +1,7 @@
 import { untrack } from 'svelte';
 import { RPC_PATH, type Group, type GroupCore } from '@boite/contracts';
 import { WsClient } from './client';
-import { DROPPED_STORAGE_KEY, isDropped, isMemberDropped, readEnvironments, removeBrought, type Endpoint, type StoredEnvironment } from './endpoint';
+import { DROPPED_STORAGE_KEY, isDropped, isMemberDropped, keepDropped, readEnvironments, removeBrought, type Endpoint, type StoredEnvironment } from './endpoint';
 import { usableAddresses } from './group-addresses';
 import type { Machine, Workspace } from './workspace.svelte';
 
@@ -159,7 +159,11 @@ export class GroupLinks {
       });
     });
     // Another window dropped a machine: this one lets it go too, without waiting for its own machines to say so.
-    const heard = (event: StorageEvent): void => { if (event.key === DROPPED_STORAGE_KEY) void this.reconcile(); };
+    const heard = (event: StorageEvent): void => {
+      if (event.key !== DROPPED_STORAGE_KEY) return;
+      keepDropped(event.oldValue);
+      void this.reconcile();
+    };
     window.addEventListener('storage', heard);
     return () => {
       clearInterval(timer);
