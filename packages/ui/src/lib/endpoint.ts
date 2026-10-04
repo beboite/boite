@@ -192,6 +192,13 @@ export function upsertEnvironment(entry: {
   return list;
 }
 
+/** The machine was paired by hand since: it is no longer the group's to drop. */
+export function forgetGroupOf(url: string): StoredEnvironment[] {
+  const list = readEnvironments().map((env) => (env.url === normalise(url) ? { url: env.url, label: env.label, token: env.token, paired: env.paired } : env));
+  storeEnvironments(list);
+  return list;
+}
+
 /** Forgets the core. Its key stays valid there until revoked; it just opens nothing from here. */
 export function removeEnvironment(url: string): StoredEnvironment[] {
   const list = readEnvironments().filter((env) => env.url !== normalise(url));

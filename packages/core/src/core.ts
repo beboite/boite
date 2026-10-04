@@ -268,6 +268,7 @@ export class Core {
     this.serverUpdates = new ServerUpdates(this, options.serverUpdates);
     this.coordination = new Coordination(this);
     this.group = new GroupStore(this);
+    this.group.restore();
     this.delegation = new Delegation(this);
     this.workflows = new Workflows(this);
     this.brain = new BrainStore(this);

@@ -11,14 +11,17 @@
  * public half in the roster, signed with that identity so no other member can
  * swap it. To seal, the sender makes a one-time X25519 key, agrees on a secret
  * with the recipient's listed key, and derives two AES-256-GCM keys from it
- * with HKDF-SHA256: one for the request, one for the answer. The construction
- * is the base mode of HPKE (RFC 9180) with its answer key, written with the
- * primitives the runtime ships rather than a dependency.
+ * with HKDF-SHA256: one for the request, one for the answer. It follows the
+ * pattern of HPKE's base mode (RFC 9180), a one-time key against the
+ * recipient's static one, but is not HPKE: the key schedule is its own and
+ * nothing here interoperates with one. It is written with the primitives the
+ * runtime ships rather than a dependency.
  *
  * What is sealed is the signed message, signature included, so who sent it is
- * proved inside and hidden outside. The key derivation takes both machines'
- * ids, so a sealed request opened by the wrong machine, or presented as coming
- * from another, fails to open. An invitation's grant goes in as a pre-shared
+ * proved inside. The key derivation takes both machines' ids, so a sealed
+ * request opened by the wrong machine, or presented as coming from another,
+ * fails to open. What stays readable outside is who talks to whom (the
+ * sender's id is a header), how much, and when. An invitation's grant goes in as a pre-shared
  * key: a join request only opens for the machine that minted that invitation.
  *
  * The limit: the recipient's key is long-lived. Someone who records the

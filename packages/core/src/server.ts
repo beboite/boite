@@ -14,6 +14,7 @@ import type { SocketData } from './server/connection.ts';
 import { ServerConnection } from './server/connection.ts';
 import { handleFrame } from './server/frame.ts';
 import { FrameQueue } from './server/frame-queue.ts';
+import { Refusals } from './server/refusals.ts';
 import { fdResponse } from './server/file-response.ts';
 export { ServerConnection } from './server/connection.ts';
 
@@ -338,6 +339,7 @@ export function startServer(options: ServerOptions): RunningServer {
   const frames = new Set<Promise<void>>();
   const incoming = new FrameQueue((connection, raw) => handleFrame(core, connection, raw));
   const peerRequests = new Set<Promise<Response>>();
+  const refusals = new Refusals();
   let stopping = false;
 
   // One set of handlers for every address the core answers on: the sockets,
@@ -354,7 +356,14 @@ export function startServer(options: ServerOptions): RunningServer {
 
       if (url.pathname === '/agent-messages' || url.pathname === JOIN_ROUTE) {
         if (core.stopping) return new Response('core stopping', { status: 503 });
-        const response = url.pathname === JOIN_ROUTE ? core.group.http(request) : core.coordination.http(request);
+        // A stranger's refused requests are counted against its address before any is read again.
+        const address = self.requestIP(request)?.address ?? null;
+        const source = address === null || isLoopbackAddress(address) ? null : address;
+        if (source !== null && refusals.blocked(source)) return new Response('too many refused requests from this address', { status: 429 });
+        const response = (url.pathname === JOIN_ROUTE ? core.group.http(request) : core.coordination.http(request)).then((answer) => {
+          if (source !== null && answer.status === 403) refusals.record(source);
+          return answer;
+        });
         peerRequests.add(response);
         void response.finally(() => peerRequests.delete(response)).catch(() => undefined);
         return response;

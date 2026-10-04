@@ -257,6 +257,7 @@ export class SessionStore {
     // The sockets first, so the event never reaches the client it is about.
     this.core.subscribers.closeSession(sessionId);
     this.core.bus.emit('sessions.updated', { sessionId, state: 'revoked' });
+    this.core.group.sessionRevoked(sessionId);
   }
 
   private sweep(now: number): void {

@@ -69,8 +69,9 @@ boite-core group status
 boite-core group leave
 ```
 
-`join` takes the invitation on its standard input, pasted then Ctrl+D or
-piped, so that it stays out of the process list and of the shell's history.
+`join` takes the invitation on its standard input only, pasted then Ctrl+D or
+piped: given as an argument it would sit in the process list, in the shell's
+history and in a traced command line, where whoever reads it could join first.
 `--data-dir` and `--channel` name another core, as they do at start.
 
 ## The network
@@ -153,7 +154,7 @@ coordination already uses (`POST /agent-messages`, operation `group.sync`):
 the receiver merges and answers with the result, which leaves both equal after
 one round trip. A member offers its roster on every change, every 15 seconds
 to members that have not agreed on it yet, and to all of them every five
-minutes. A roster is accepted only from a current member, never readable, and
+minutes. A merge whose result would not be a valid roster is not kept. A roster is accepted only from a current member, never readable, and
 never from a machine linked by hand for agent messages. An answer that arrives
 after its sender was removed is dropped.
 
@@ -179,7 +180,8 @@ the member's box key with the grant as a pre-shared key. The grant itself is
 never sent: the request names the invitation by a hash and only opens for the
 machine that minted it. The member checks that the signature matches the
 announced key, adds the machine and answers with the roster, signed and sealed
-back. The joining core accepts the answer only if the key that signed it has
+back. Thirty requests a minute that open are served, and the invitation must
+still be live when the request has been read. The joining core accepts the answer only if the key that signed it has
 the id the invitation named. A machine that merely sits at that address reads
 nothing and cannot answer, and a request that names no known invitation costs
 the member one lookup.
@@ -190,10 +192,19 @@ signature over it, so no other member can substitute a key. To send, a member
 makes a one-time X25519 key, agrees on a secret with the recipient's listed
 key and derives two AES-256-GCM keys with HKDF-SHA256, one for the request and
 one for its answer; both machines' ids go into the derivation. The signed
-message travels inside, signature included. This is the base mode of HPKE
-(RFC 9180) with an answer key, written with the runtime's own primitives
-(`group/seal.ts`). The recipient's key is long-lived: someone who records the
+message travels inside, signature included. It follows the pattern of HPKE's
+base mode (RFC 9180) without being HPKE, and is written with the runtime's own
+primitives (`group/seal.ts`). Who talks to whom, how much and when stays
+readable on the path: the sender's id is a header. The recipient's key is long-lived: someone who records the
 traffic and later steals that machine's key file reads what was sent to it.
+
+**Strangers.** A request on these two routes that does not prove who sent it
+is refused, after a key agreement or a signature check. Sixty refusals a
+minute from one address and that address is answered nothing more for the rest
+of the minute, before its body is read. Requests from the machine itself are
+not counted, since a reverse proxy puts every remote peer behind that one
+address. A member's own allowance, 120 requests a minute, is only spent by
+requests that are its own, fresh and not seen before.
 
 **Tickets.** A client connected to a member asks it for a ticket to another
 (`group.ticket`): the member's signed statement of who vouches, for whom, at
@@ -215,8 +226,9 @@ listed in the roster as a device.
   The list in [machines](machines.md#browser-and-phone-connections) is only
   needed outside a group.
 - Agent coordination: every member is a trusted peer for messages, with the
-  app closed, while it is a member. The app writes no standing agent link
-  between two machines of one group, so a removed machine keeps none. A
+  app closed, while it is a member. The app writes no standing agent link for
+  a machine the group brought, or between two machines one of which lists the
+  other, so a removed machine keeps none. A
   thread's own restrictions and pause still apply. Letting the agents of
   another machine read this machine's conversations stays the per-machine
   switch of Agent links, on a link made by hand: membership does not grant it.
@@ -231,10 +243,14 @@ listed in the roster as a device.
 The UI does the client's part by itself (`lib/group-links.svelte.ts`). Each
 connected machine says which group it is in; for every member this client
 holds no key for, it finds an address that answers, asks a connected member
-for a ticket and connects. A machine the group brought is dropped once another
-member of that group no longer lists it: what the machine says of itself does
-not count. A machine paired by hand is never touched, even when it sits at a
-member's address.
+for a ticket and connects. Who is in a group is read off the machines this
+client was paired with by hand, the one it opened on included. A machine the
+group brought vouches for nothing: it is dropped once one of those hand-paired
+machines, in the same group, no longer lists it, whatever it and other
+machines the group brought say. A machine paired by hand is never touched,
+even when it sits at a member's address or another machine reports its name. A
+key the group handed out for an address the machine no longer gives, or no
+longer allows once it has HTTPS, is dropped and the machine reached anew.
 
 ## Limits
 

@@ -110,9 +110,10 @@ describe('group links', () => {
 
   it('leaves alone a member already connected, and one that is offline with a key it remembers', async () => {
     localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([{ url: 'http://100.64.0.2:1', label: 'B', token: 'key', paired: true, coreId: 'b', groupId: 'grp' }]));
-    const a = machine('http://10.0.0.1:1', { group: group('a', [...members, core('c', ['http://10.0.0.3:1'])]) });
+    const all = [...members, core('c', ['http://10.0.0.3:1'])];
+    const a = machine('http://10.0.0.1:1', { group: group('a', all) });
     const b = machine('http://100.64.0.2:1', { connection: 'closed', client: null }, { coreId: 'b' });
-    const c = machine('http://10.0.0.3:1', { group: group('c', members) });
+    const c = machine('http://10.0.0.3:1', { group: group('c', all) });
     const { workspace: ws, added, removed } = workspace([a, b, c]);
     const reach = vi.fn(async (addresses: string[]) => addresses[0] ?? null);
     const links = new GroupLinks(ws, { reach, secure: () => false });
@@ -141,19 +142,21 @@ describe('group links', () => {
     expect(storeOf(a).client!.call).not.toHaveBeenCalled();
   });
 
-  it('drops a machine the group brought once a member of that group no longer lists it, whatever the machine says of itself', async () => {
+  it('drops a machine the group brought once a hand-paired member no longer lists it, whatever it and its friends say', async () => {
     const a = machine('http://10.0.0.1:1', { group: group('a', [members[0]!]) });
     // Removed, still connected, still listing itself: its own word does not keep it.
-    const defiant = machine('http://100.64.0.2:1', { group: group('b', members) }, { coreId: 'b' });
+    const defiant = machine('http://100.64.0.2:1', { group: group('b', [...members, core('y', ['http://100.64.0.9:1'])]) }, { coreId: 'b' });
+    // A second removed machine that vouches for the first, and is vouched for by it: neither counts.
+    const accomplice = machine('http://100.64.0.9:1', { group: group('y', [...members, core('y', ['http://100.64.0.9:1'])]) }, { coreId: 'y' });
     // Paired by hand: never the group's to drop. From another group: this group has no say on it.
     const byHand = machine('http://server:1', { group: null });
     const elsewhere = machine('http://10.9.9.9:1', { connection: 'closed', client: null }, { coreId: 'z', groupId: 'other' });
     localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([{ url: 'http://10.9.9.9:1', label: 'Z', token: 'key', paired: true, coreId: 'z', groupId: 'other' }]));
-    const { workspace: ws, removed, added } = workspace([a, defiant, byHand, elsewhere]);
-    const links = new GroupLinks(ws, { reach: async () => null, secure: () => false });
+    const { workspace: ws, removed, added } = workspace([a, defiant, accomplice, byHand, elsewhere]);
+    const links = new GroupLinks(ws, { reach: async () => 'http://100.64.0.9:1', secure: () => false });
     await links.reconcile();
     await settle();
-    expect(removed).toEqual(['http://100.64.0.2:1']);
+    expect(removed).toEqual(['http://100.64.0.2:1', 'http://100.64.0.9:1']);
     // And what the removed machine's roster lists is not connected to on its word.
     expect(added).toEqual([]);
   });
@@ -206,4 +209,29 @@ describe('group links', () => {
     expect(untouched).toEqual([]);
     expect(added).toEqual([]);
   });
+
+  it('reaches a machine anew when it starts giving HTTPS, instead of sending the old key over HTTP again', async () => {
+    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([{ url: 'http://100.64.0.2:1', label: 'B', token: 'key', paired: true, coreId: 'b', groupId: 'grp' }]));
+    const upgraded = [members[0]!, core('b', ['https://b.example', 'http://100.64.0.2:1'])];
+    const a = machine('http://10.0.0.1:1', { group: group('a', upgraded) });
+    const b = machine('http://100.64.0.2:1', { group: group('b', upgraded) }, { coreId: 'b' });
+    const { workspace: ws, removed, added } = workspace([a, b]);
+    const links = new GroupLinks(ws, { reach: async (addresses) => addresses[0] ?? null, secure: () => false });
+    await links.reconcile();
+    await settle();
+    expect(removed).toEqual(['http://100.64.0.2:1']);
+    expect(added.map((entry) => entry.endpoint.url)).toEqual(['https://b.example']);
+  });
+
+  it('takes the word of the hand-paired machine that no longer lists a member over the one that still does', async () => {
+    const stale = machine('http://10.0.0.1:1', { group: group('a', members) });
+    const current = machine('http://10.0.0.7:1', { group: group('c', [members[0]!, core('c', ['http://10.0.0.7:1'])]) });
+    const { workspace: ws, added } = workspace([stale, current]);
+    const links = new GroupLinks(ws, { reach: async (addresses) => addresses[0] ?? null, secure: () => false });
+    await links.reconcile();
+    await settle();
+    // b is listed by one and dropped by the other: no ticket is asked for it.
+    expect(added.map((entry) => entry.endpoint.coreId)).toEqual([]);
+  });
 });
+

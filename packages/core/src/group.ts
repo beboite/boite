@@ -139,8 +139,14 @@ export class GroupStore {
       const now = Date.now();
       for (const [nonce, until] of Object.entries(spent)) if (typeof until === 'number' && until > now) this.spent.set(nonce, until);
     }
-    // Before any socket is accepted: a crash between writing a removal and dropping
-    // the keys it kills, or between leaving and dropping them, must not leave them good.
+  }
+
+  /**
+   * Called by the core once this store is in place and before any socket is
+   * accepted: a crash between writing a removal and dropping the keys it
+   * kills, or between leaving and dropping them, must not leave them good.
+   */
+  restore(): void {
     this.reconcile();
   }
 
@@ -362,12 +368,23 @@ export class GroupStore {
           if (device.removed && device.id.startsWith(prefix)) gone.push(device.id.slice(prefix.length));
         }
       }
+      let forgotten = false;
       for (const sessionId of gone) {
-        delete this.sessions[sessionId];
-        if (this.revoking.has(sessionId) || this.core.journal.getSession(sessionId) === null) continue;
-        try { this.core.sessions.revoke(sessionId); } catch (error) { this.core.log('warn', `group: could not revoke session ${sessionId}: ${messageOf(error)}`); }
+        // Its own revocation is under way: that one drops the session, then what it stood for.
+        if (this.revoking.has(sessionId)) continue;
+        if (this.core.journal.getSession(sessionId) !== null) {
+          // What a session stood for is forgotten only once the session is gone: a failure here leaves both, for the next start.
+          try { this.core.sessions.revoke(sessionId); } catch (error) {
+            this.core.log('warn', `group: could not revoke session ${sessionId}: ${messageOf(error)}`);
+            continue;
+          }
+        }
+        if (sessionId in this.sessions) {
+          delete this.sessions[sessionId];
+          forgotten = true;
+        }
       }
-      if (gone.length > 0) this.saveSessions();
+      if (forgotten) this.saveSessions();
     } finally {
       this.reconciling = false;
     }
@@ -381,10 +398,6 @@ export class GroupStore {
    */
   sessionRevoking(sessionId: string): void {
     const member = this.sessions[sessionId];
-    if (member !== undefined) {
-      delete this.sessions[sessionId];
-      this.saveSessions();
-    }
     const roster = this.roster;
     if (this.reconciling || roster === null) return;
     // A machine's own key is no device: taking it away here revokes nothing elsewhere.
@@ -405,10 +418,24 @@ export class GroupStore {
     }
   }
 
+  /** The session is gone: what it stood for is forgotten last, so a crash before this leaves something the next start cleans up. */
+  sessionRevoked(sessionId: string): void {
+    if (this.sessions[sessionId] === undefined) return;
+    delete this.sessions[sessionId];
+    this.saveSessions();
+  }
+
   private absorb(theirs: Roster): void {
     const mine = this.roster;
     if (mine === null) return;
-    const merged = mergeRosters(mine, theirs);
+    let merged: Roster;
+    try {
+      // What is kept must be a roster this core, and the others, can read back: bounds and admissions included.
+      merged = checkRoster(mergeRosters(mine, theirs));
+    } catch (error) {
+      this.core.log('error', `group: a roster from a member was not merged, the result would not be a valid roster: ${messageOf(error)}`);
+      return;
+    }
     const self = merged.cores.find((core) => core.coreId === this.selfId());
     if (self === undefined || self.removed) {
       this.disband();
@@ -643,10 +670,7 @@ export class GroupStore {
     if (invite === undefined || invite.expiresAt <= Date.now() || request.headers.get('x-boite-signature') !== SEALED || !/^[0-9a-f]{64}$/.test(from)) {
       return new Response('unknown or expired invitation', { status: 403 });
     }
-    const now = Date.now();
-    if (now - this.joins.since > 60_000) this.joins = { since: now, count: 0 };
-    this.joins.count += 1;
-    if (this.joins.count > JOINS_PER_MINUTE) return new Response('too many join requests', { status: 429 });
+    const named = request.headers.get('x-boite-invite') ?? '';
     const context = { from, to: this.selfId() };
     let opened: { plaintext: string; responseKey: Buffer };
     try {
@@ -654,6 +678,14 @@ export class GroupStore {
     } catch {
       return new Response('unknown or expired invitation', { status: 403 });
     }
+    // Counted once it opened, so only a holder of the invitation spends the allowance:
+    // naming an invitation is no proof of holding it, and its name travels readable.
+    const now = Date.now();
+    if (now - this.joins.since > 60_000) this.joins = { since: now, count: 0 };
+    this.joins.count += 1;
+    if (this.joins.count > JOINS_PER_MINUTE) return new Response('too many join requests', { status: 429 });
+    // The body may have taken its time: the invitation must still be the live one when it is used.
+    if (this.invites.get(named) !== invite || invite.expiresAt <= now) return new Response('unknown or expired invitation', { status: 403 });
     if (this.closed || this.core.stopping) return new Response('the core is stopping', { status: 503 });
     return this.core.router.trackRequest(() => {
       let nonce = '';

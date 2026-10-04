@@ -1,6 +1,7 @@
 import { Store, store } from './store.svelte';
 import type { AgentAddress } from '@boite/contracts';
 import {
+  forgetGroupOf,
   parsePairingLink,
   readEnvironments,
   removeEnvironment,
@@ -252,7 +253,9 @@ export class Workspace {
   /** Two URLs can reach the same core; keep the already connected machine. */
   #discardAlias(machine: Machine): boolean {
     const target = machine.store;
-    const alias = target.core?.hostname && this.machines.find(m => m.store !== target && m.store.core?.hostname && profileKey(m) === profileKey(machine));
+    // The name, folder and channel a core reports are its own word. A machine the group brought may
+    // report anyone's, so it never makes another machine pass for its duplicate.
+    const alias = target.core?.hostname && this.machines.find(m => m.store !== target && m.coreId === undefined && m.store.core?.hostname && profileKey(m) === profileKey(machine));
     if (!alias) return false;
     target.client?.close();
     target.detach();
@@ -342,6 +345,13 @@ export class Workspace {
     }
     if (this.#discardAlias(machine)) return true;
     this.#rememberConnected(machine, endpoint, label, host);
+    // Paired again by hand: from now on it is the owner's machine, not one the group may drop.
+    if (existing && endpoint.ticket === undefined && existing.coreId !== undefined) {
+      delete existing.coreId;
+      delete existing.groupId;
+      forgetGroupOf(existing.id);
+      this.machines = [...this.machines];
+    }
     if (!quiet) this.error = null;
     return true;
   }

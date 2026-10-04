@@ -82,9 +82,13 @@ export function usableAddresses(addresses: readonly string[], secure: boolean): 
  * a key of its own, and the key is kept like any pairing's: the member is then
  * reached directly, whether or not the machine that vouched is on.
  *
- * A machine the group brought here goes when a member of that same group no
- * longer lists it. Its own word does not count: a removed machine still lists
- * itself. A machine paired by hand is never touched.
+ * Who is in a group is read off the machines this client was paired with by
+ * hand, the one it opened on included: they are what it trusts to begin with.
+ * A machine the group brought vouches for nothing and lists nothing here, or a
+ * removed one, still connected and still listing itself and its friends, would
+ * keep them all in place. Such a machine goes when one of those hand-paired
+ * machines, in the same group, no longer lists it. A machine paired by hand is
+ * never touched.
  */
 export class GroupLinks {
   /** Per core id, for the machines of the group this client is not connected to. */
@@ -134,16 +138,20 @@ export class GroupLinks {
     const informed = this.workspace.machines.filter((machine) => machine.store.connection === 'ready' && machine.store.client !== null && machine.store.groupKnown);
     if (informed.length === 0) return;
 
-    await this.#prune(informed);
+    // What the group brought vouches for nothing: only what was paired by hand says who is in a group.
+    const anchors = informed.filter((machine) => machine.coreId === undefined);
+    await this.#prune(informed, anchors);
 
-    const machines = this.workspace.machines;
     const wanted = new Map<string, { core: GroupCore; via: Machine }>();
-    for (const via of informed) {
+    for (const via of anchors) {
       const group = via.store.group;
-      // The fake core has no address to dial and stands for itself. A machine just pruned vouches for nothing.
-      if (group === null || via.store.endpointUrl === null || !machines.includes(via)) continue;
+      // The fake core has no address to dial and stands for itself.
+      if (group === null || via.store.endpointUrl === null) continue;
       for (const core of group.cores) {
-        if (core.coreId !== group.self && !wanted.has(core.coreId)) wanted.set(core.coreId, { core, via });
+        if (core.coreId === group.self || wanted.has(core.coreId)) continue;
+        // Two hand-paired machines of one group that disagree: the one that no longer lists it wins.
+        if (anchors.some((other) => other.store.group?.id === group.id && !other.store.group.cores.some((listed) => listed.coreId === core.coreId))) continue;
+        wanted.set(core.coreId, { core, via });
       }
     }
 
@@ -151,7 +159,13 @@ export class GroupLinks {
     const starting: { core: GroupCore; via: Machine }[] = [];
     for (const [coreId, state] of Object.entries(this.states)) if (wanted.has(coreId)) states[coreId] = state;
     for (const [coreId, { core, via }] of wanted) {
-      const existing = machines.find((machine) => GroupLinks.coreOf(machine) === coreId);
+      let existing = this.workspace.machines.find((machine) => GroupLinks.coreOf(machine) === coreId);
+      // A key the group handed out for an address the machine no longer gives, or no longer
+      // allows now that it has HTTPS, is not sent there again: the machine is reached anew.
+      if (existing?.coreId !== undefined && existing.store !== this.workspace.primary && !usableAddresses(core.addresses, this.#secure()).includes(existing.id)) {
+        await this.workspace.remove(existing.id);
+        existing = undefined;
+      }
       if (existing !== undefined && (existing.store.connection !== 'closed' || this.#holdsKey(existing))) {
         delete states[coreId];
         continue;
@@ -166,18 +180,20 @@ export class GroupLinks {
   }
 
   /**
-   * Drops what the group brought and no longer lists. The only voice that
-   * counts is another machine of the group that brought it: the machine's own
-   * roster still lists it after its removal, and a machine of another group
-   * knows nothing of this one.
+   * Drops what the group brought and no longer lists. The voice that counts is
+   * a hand-paired machine of the group that brought it, and one is enough: the
+   * machine's own roster still lists it after its removal, another machine the
+   * group brought may be its accomplice, and a machine of another group knows
+   * nothing of this one.
    */
-  async #prune(informed: readonly Machine[]): Promise<void> {
+  async #prune(informed: readonly Machine[], anchors: readonly Machine[]): Promise<void> {
     for (const machine of [...this.workspace.machines]) {
       if (machine.coreId === undefined || machine.groupId === undefined) continue;
-      const witnesses = informed.filter((other) => other !== machine && other.store.group?.id === machine.groupId);
-      const delisted = witnesses.length > 0 && witnesses.every((other) => !other.store.group!.cores.some((core) => core.coreId === machine.coreId));
-      // Its key was taken away and nobody of that group is here to vouch again: nothing left to reconnect with.
-      const orphaned = machine.store.connection === 'closed' && !this.#holdsKey(machine) && witnesses.length === 0;
+      const witnesses = anchors.filter((other) => other !== machine && other.store.group?.id === machine.groupId);
+      const delisted = witnesses.some((other) => !other.store.group!.cores.some((core) => core.coreId === machine.coreId));
+      // Its key was taken away and nobody it could be vouched by is in that group any more: nothing left to reconnect with.
+      const orphaned = machine.store.connection === 'closed' && !this.#holdsKey(machine)
+        && !informed.some((other) => other !== machine && other.coreId === undefined && other.store.group?.id === machine.groupId);
       if (!delisted && !orphaned) continue;
       if (machine.store === this.workspace.primary) await machine.store.forgetEnvironment(machine.id);
       else await this.workspace.remove(machine.id);

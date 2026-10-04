@@ -473,6 +473,8 @@ export class Connection {
     const { accounts, requests } = this.ctx;
     const current = () => this.ctx.currentClient(client, generation) && this.#readEpoch === epoch;
     const loginRevision = accounts.loginRevision;
+    // What this connection said of its group before does not speak for what it is now.
+    s.groupKnown = false;
     const revisions = { ...this.ctx.metadataRevision };
     const projectRead = this.ctx.projectReads.begin();
     const threadRead = this.ctx.threadReads.begin();

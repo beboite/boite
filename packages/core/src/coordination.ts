@@ -780,16 +780,17 @@ export class Coordination {
         ({ body: raw, signature } = unpack(opened.plaintext));
       }
       if (!verify(null, Buffer.from(raw), peer.publicKey, Buffer.from(signature, 'base64'))) throw new Error('invalid signature');
-      const rate = this.rates.get(peer.coreId) ?? { since: now, count: 0 };
-      if (now - rate.since > 60_000) { rate.since = now; rate.count = 0; }
-      this.rates.set(peer.coreId, rate);
-      if (++rate.count > 120) return new Response('peer rate limit', { status: 429 });
       envelope = JSON.parse(raw) as Envelope;
       if (envelope.from !== peer.coreId || envelope.to !== this.self('').coreId || !Number.isSafeInteger(envelope.at) || Math.abs(now - envelope.at) > 60_000) throw new Error('invalid envelope');
       text(envelope.nonce, 'nonce', 100);
       for (const [id, at] of this.nonces) if (now - at > 120_000) this.nonces.delete(id);
       const key = `${peer.coreId}:${envelope.nonce}`;
       if (this.nonces.has(key)) throw new Error('replayed request');
+      // The quota last: a request somebody recorded and sends again never spends the member's allowance.
+      const rate = this.rates.get(peer.coreId) ?? { since: now, count: 0 };
+      if (now - rate.since > 60_000) { rate.since = now; rate.count = 0; }
+      this.rates.set(peer.coreId, rate);
+      if (++rate.count > 120) return new Response('peer rate limit', { status: 429 });
       this.nonces.set(key, now);
     } catch { return new Response('invalid signed message', { status: 403 }); }
     if (this.core.group.removedPeer(peer.coreId) !== null && (envelope.operation === 'group.sync' || !this.trusted().some(p => p.coreId === peer.coreId))) {

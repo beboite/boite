@@ -189,7 +189,9 @@ export function checkRoster(value: unknown): Roster {
   if (liveCores(roster).length > GROUP_MAX_CORES * OVERSHOOT) throw invalidParams(`roster.cores: a group holds at most ${GROUP_MAX_CORES} machines`, { field: 'roster.cores' });
   const keys = new Map(roster.cores.map((core) => [core.coreId, core.publicKey] as const));
   for (const core of roster.cores) {
-    if (!admitted(core, roster.id, roster.founder, keys)) {
+    // A removed entry grants nothing, so it needs no admission: the machine that
+    // admitted it may itself be one this core never accepted, and is then absent.
+    if (!core.removed && !admitted(core, roster.id, roster.founder, keys)) {
       throw invalidParams(`roster.cores: ${core.coreId} carries no valid admission by a machine of this roster`, { field: 'roster.cores' });
     }
   }

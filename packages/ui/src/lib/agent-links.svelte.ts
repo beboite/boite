@@ -155,9 +155,13 @@ class AgentAutoLink {
       const [peersA, peersB] = await Promise.all([a.store.coordinationPeers(), b.store.coordinationPeers()]);
       // Machines of one group trust each other while both are members. A link written here
       // would outlive that: a machine removed from the group would keep reaching the other's agents.
-      const sameGroup = a.store.group !== null && a.store.group.id === b.store.group?.id;
+      // What a machine says of its own group is not asked: a machine the group brought, or one
+      // the other's roster lists, gets no standing link from this app, whatever it claims.
+      const grouped = a.coreId !== undefined || b.coreId !== undefined
+        || a.store.group?.cores.some(core => core.coreId === right.coreId) === true
+        || b.store.group?.cores.some(core => core.coreId === left.coreId) === true;
       const linked = peersA.some(peer => peer.coreId === right.coreId) && peersB.some(peer => peer.coreId === left.coreId);
-      if (sameGroup && !linked) {
+      if (grouped && !linked) {
         await bridgeMachines(a, b, left.coreId, right.coreId);
       } else if (linked) {
         await bridgeMachines(a, b, left.coreId, right.coreId);

@@ -4,6 +4,8 @@ import { createHash } from 'node:crypto';
 import { connect } from '../src/client.ts';
 import { settle } from '../src/coordination-wire.ts';
 import { GroupStore } from '../src/group.ts';
+import { group as groupCommand } from '../src/main.ts';
+import { Refusals, REFUSALS_PER_MINUTE } from '../src/server/refusals.ts';
 import { advertisedAddresses, isTailnetAddress, tailnetAddress } from '../src/group/addresses.ts';
 import { checkRoster, digestOf, fingerprint, liveCores, liveDevices, mergeRosters, type CoreEntry, type Roster } from '../src/group/roster.ts';
 import { boxPublic, newBoxKey, open, openResponse, pack, seal, SEALED, sealResponse, unpack } from '../src/group/seal.ts';
@@ -37,6 +39,14 @@ function members(h: TestCore): string[] {
 }
 
 const id = (h: TestCore): string => h.core.coordination.card().coreId;
+
+/** What a restart builds: a store reading the same journal, with nothing in memory, put in the core's place. */
+function restart(h: TestCore): GroupStore {
+  const store = new GroupStore(h.core);
+  (h.core as unknown as { group: GroupStore }).group = store;
+  store.restore();
+  return store;
+}
 
 function entry(coreId: string, rev: number, extra: Partial<CoreEntry> = {}): CoreEntry {
   return { coreId, name: 'm', publicKey: 'k', box: 'b', boxSig: 's', addresses: [], epoch: 1, admit: { by: 'a', sig: 's' }, rev, ...extra };
@@ -436,11 +446,11 @@ test('nothing a member sends another is readable on the wire, and a readable ros
   const b = await machine();
   await a.core.group.create('Maison-du-test');
   const real = globalThis.fetch;
-  const wire: { url: string; signature: string; body: string; answer: string }[] = [];
+  const wire: { url: string; signature: string; body: string; status: number; answer: string }[] = [];
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const response = await real(input, init);
     const headers = new Headers(init?.headers);
-    wire.push({ url: String(input), signature: headers.get('x-boite-signature') ?? '', body: String(init?.body ?? ''), answer: await response.clone().text() });
+    wire.push({ url: String(input), signature: headers.get('x-boite-signature') ?? '', body: String(init?.body ?? ''), status: response.status, answer: await response.clone().text() });
     return response;
   }) as typeof fetch;
   try {
@@ -460,14 +470,18 @@ test('nothing a member sends another is readable on the wire, and a readable ros
   expect(wire.some((entry) => entry.url.endsWith('/group/join'))).toBe(true);
   expect(wire.filter((entry) => entry.url.endsWith('/agent-messages')).length).toBeGreaterThan(1);
   const publicKey = a.core.coordination.card().publicKey;
+  expect(wire.filter((entry) => entry.status === 200).length).toBeGreaterThan(2);
   for (const entry of wire) {
     expect(entry.signature).toBe(SEALED);
     for (const text of [entry.body, entry.answer]) {
       for (const secret of ['Maison-du-test', 'Secret-thread-title', 'secret-resource-name', 'BEGIN PUBLIC KEY', publicKey.split('\n')[1]!, 'group.sync', 'directory']) {
         expect(text).not.toContain(secret);
       }
-      expect(Object.keys(JSON.parse(text) as object).sort().join()).toMatch(/^(ct,epk,iv,v|ct,iv,v)$/);
     }
+    expect(Object.keys(JSON.parse(entry.body) as object).sort().join()).toBe('ct,epk,iv,v');
+    // An offer that reached the joining machine before it had the roster is turned away in two words, with nothing in them.
+    if (entry.status === 403) expect(entry.answer).toBe('unknown peer');
+    else expect(Object.keys(JSON.parse(entry.answer) as object).sort().join()).toBe('ct,iv,v');
   }
   // The same roster, signed but readable, is not taken: a member's word arrives sealed or not at all.
   const self = a.core.coordination.card();
@@ -520,11 +534,11 @@ test('a ticket stays spent across a restart of the machine it was used on', asyn
   const ticket = a.core.group.ticket(id(b), { principal: 'owner', sessionId: null, threadId: null }).ticket;
   const first = b.core.group.admit(ticket, { name: 'shell', version: '1' });
   expect(first.role).toBe('owner');
-  // What a restart builds: a store reading the same journal, with nothing in memory.
-  const restarted = new GroupStore(b.core);
+  const before = b.core.group;
+  const restarted = restart(b);
   expect(() => restarted.admit(ticket, { name: 'shell', version: '1' })).toThrow('already used');
   expect(b.core.sessions.list(null)).toHaveLength(1);
-  await restarted.close();
+  await before.close();
 });
 
 test('keys die with what they stood for even when the core stopped between the removal and the cleanup', async () => {
@@ -537,16 +551,17 @@ test('keys die with what they stood for even when the core stopped between the r
   // The removal of `a` reached the journal, the session it vouched for was not dropped yet: the core died there.
   b.core.journal.setSetting('group', { ...roster, cores: roster.cores.map((core) => (core.coreId === id(a) ? { ...core, rev: 50, removed: true } : core)) });
   expect(b.core.sessions.list(null).map((session) => session.id)).toEqual([key.id]);
-  const afterRemoval = new GroupStore(b.core);
+  const first = b.core.group;
+  const afterRemoval = restart(b);
   expect(b.core.sessions.list(null)).toEqual([]);
-  await afterRemoval.close();
+  await first.close();
   // Same for a machine that left: the group setting is gone, a key it had handed out is not.
   const leftover = b.core.sessions.issue('owner', { name: 'shell', version: '1' });
   b.core.journal.setSetting('group:sessions', { [leftover.id]: `core:${id(a)}` });
   b.core.journal.deleteSetting('group');
-  const afterLeaving = new GroupStore(b.core);
+  restart(b);
   expect(b.core.sessions.list(null)).toEqual([]);
-  await afterLeaving.close();
+  await afterRemoval.close();
 });
 
 test('an answer that arrives after its sender was removed changes nothing', async () => {
@@ -596,18 +611,25 @@ test('"you were removed" counts only signed inside a sealed answer, never from a
   expect(() => settle('http://b', key, nonce, 200, ok, sign(ok), { responseKey: sealed.responseKey, context })).toThrow('in the clear');
 });
 
-test('join requests that name a live invitation are counted, and a pairing link never names a machine by a plain-HTTP name', async () => {
+test('only a holder of the invitation spends the join allowance, and a pairing link never names a machine by a plain-HTTP name', async () => {
   const a = await machine();
+  const b = await machine();
   await a.core.group.create('Home');
   const { invite } = await a.core.group.invite();
   const inviteId = createHash('sha256').update(`boite-group-invite-id\n${parseInvite(invite).t}`).digest('hex');
   const attempt = (named: string) => fetch(`${a.url}/group/join`, { method: 'POST', body: '{"v":1}', headers: { 'x-boite-peer': 'c'.repeat(64), 'x-boite-invite': named, 'x-boite-signature': SEALED } });
-  // No invitation named: refused before anything is computed, and not counted.
-  for (let index = 0; index < 40; index += 1) expect((await attempt('0'.repeat(64))).status).toBe(403);
-  const statuses: number[] = [];
-  for (let index = 0; index < 32; index += 1) statuses.push((await attempt(inviteId)).status);
-  expect(statuses.slice(0, 30).every((status) => status === 403)).toBe(true);
-  expect(statuses.slice(30)).toEqual([429, 429]);
+  // Naming an invitation, known or not, without holding it: refused each time, and the allowance is untouched.
+  for (let index = 0; index < 20; index += 1) expect((await attempt('0'.repeat(64))).status).toBe(403);
+  for (let index = 0; index < 40; index += 1) expect((await attempt(inviteId)).status).toBe(403);
+  const retry = b.core.group as unknown as { roster: Roster | null };
+  for (let index = 0; index < 30; index += 1) {
+    retry.roster = null;
+    expect((await b.core.group.join(invite)).cores).toHaveLength(2);
+  }
+  // The thirty-first request that opens, within the minute, is one too many.
+  retry.roster = null;
+  await expect(b.core.group.join(invite)).rejects.toThrow('no machine accepted');
+  retry.roster = a.core.journal.getSetting('group') as Roster;
 
   const held = a.core.group as unknown as { roster: Roster };
   const withAddresses = (addresses: string[]) => { held.roster = { ...held.roster, cores: held.roster.cores.map((core) => ({ ...core, addresses })) }; };
@@ -622,3 +644,47 @@ test('join requests that name a live invitation are counted, and a pairing link 
   expect(a.core.group.ownAddress()).toBeNull();
 });
 
+test('a recorded request sent again and again never spends the member\'s allowance', async () => {
+  const a = await machine();
+  const b = await machine();
+  await a.core.group.create('Home');
+  await join(a, b);
+  await waitFor(() => members(b).length === 2);
+  const body = JSON.stringify({ from: id(b), to: id(a), at: Date.now(), nonce: crypto.randomUUID(), operation: 'directory', payload: {} });
+  const sealed = b.core.group.sealFor(id(a), pack(body, b.core.coordination.signature(Buffer.from(body)).toString('base64')))!;
+  const send = () => fetch(`${a.url}/agent-messages`, { method: 'POST', body: sealed.body, headers: { 'x-boite-peer': id(b), 'x-boite-signature': SEALED } });
+  expect((await send()).status).toBe(200);
+  // What somebody on the path recorded, sent 150 times: each is refused as seen before, none is charged to b.
+  for (let index = 0; index < 150; index += 1) expect((await send()).status).toBe(403);
+  const entryOfA = (b.core.journal.getSetting('group') as Roster).cores.find((core) => core.coreId === id(a))!;
+  const peer = { coreId: entryOfA.coreId, name: entryOfA.name, url: entryOfA.addresses[0]!, publicKey: entryOfA.publicKey };
+  expect(await b.core.coordination.request(peer, 'directory', {})).toEqual([]);
+});
+
+test('refused requests are counted against the address they come from, for a minute', () => {
+  const refusals = new Refusals();
+  const start = 1_000_000;
+  for (let index = 0; index < REFUSALS_PER_MINUTE - 1; index += 1) refusals.record('10.0.0.9', start);
+  expect(refusals.blocked('10.0.0.9', start)).toBe(false);
+  refusals.record('10.0.0.9', start + 1);
+  expect(refusals.blocked('10.0.0.9', start + 2)).toBe(true);
+  // Another address is not the one that misbehaved, and the minute ends.
+  expect(refusals.blocked('10.0.0.10', start + 2)).toBe(false);
+  expect(refusals.blocked('10.0.0.9', start + 60_001)).toBe(false);
+  refusals.record('10.0.0.9', start + 60_001);
+  expect(refusals.blocked('10.0.0.9', start + 60_002)).toBe(false);
+});
+
+test('a removal needs no admission behind it, and the invitation is never a command-line argument', async () => {
+  const a = await machine();
+  const b = await machine();
+  await a.core.group.create('Home');
+  await join(a, b);
+  const roster = a.core.journal.getSetting('group') as Roster;
+  const other = roster.cores.find((core) => core.coreId === id(b))!;
+  // A machine admitted by one this core never accepted, and since removed: kept as a removal, readable back.
+  const orphan = { ...other, admit: { by: 'e'.repeat(64), sig: 'AAAA' }, rev: 40, removed: true as const };
+  expect(checkRoster({ ...roster, cores: [roster.cores.find((core) => core.coreId === id(a))!, orphan] }).cores).toHaveLength(2);
+  expect(() => checkRoster({ ...roster, cores: [roster.cores.find((core) => core.coreId === id(a))!, { ...orphan, removed: undefined }] })).toThrow('no valid admission');
+  await expect(groupCommand(['join', 'boite-group:anything', '--data-dir', a.dataDir])).rejects.toThrow('takes no argument');
+});

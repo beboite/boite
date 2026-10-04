@@ -309,6 +309,11 @@ function describeGroup(group: Group | null): string {
  */
 export async function group(argv: string[]): Promise<string> {
   const [action = 'status', value] = positionals(argv);
+  // Refused before anything else: an invitation given as an argument stays in the process list, in the
+  // shell's history and in a traced command line, and lets whoever reads it join first.
+  if (action === 'join' && value !== undefined) {
+    throw new Error('group join takes no argument: give the invitation on its standard input, so it stays out of the process list');
+  }
   const client = await ownerClient(argv);
   try {
     switch (action) {
@@ -320,8 +325,7 @@ export async function group(argv: string[]): Promise<string> {
       case 'invite':
         return `${(await client.call('group.invite', {})).invite}\n`;
       case 'join': {
-        // On stdin by default: an argument stays in the process list and in the shell's history, and an invitation is a credential.
-        const invite = value ?? (await Bun.stdin.text()).trim();
+        const invite = (await Bun.stdin.text()).trim();
         if (!invite) throw new Error('group join reads the invitation "group invite" printed on a machine of the group from its standard input');
         return describeGroup(await client.call('group.join', { invite }));
       }
