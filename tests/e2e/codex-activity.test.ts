@@ -47,6 +47,7 @@ test('silent Codex reasoning and completed stored tools remain visible after rec
     await page.click('[data-testid=confirm-ok]');
     await page.click('[data-testid=grouping-options]');
     await page.click('[data-testid=grouping-options-menu] [data-value=working]');
+    await page.click('[data-testid=grouping-options]');
     const working = `[data-testid=project][data-project-id="${project.id}"] [data-testid=project-working-toggle]`;
     await page.waitFor(`document.querySelector(${JSON.stringify(working)})?.dataset.count === '1'`);
     await page.click(working);
