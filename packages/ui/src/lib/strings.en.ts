@@ -565,9 +565,12 @@ export const strings = {
 
   sidebar: {
     doneThreads: 'Done',
+    /** Archived by hand to pick up later; done threads have their own group. */
+    archivedGroup: 'Archived',
     workingThreads: 'Working',
     projectWorkingThreads: '{project}: {count} working',
     projectDoneThreads: '{project}: {count} done',
+    projectArchivedThreads: '{project}: {count} archived',
     otherProjects: 'Other projects',
     groupingOptions: 'Display options',
     workingGroupingScope: 'Projects and Recent · This device',

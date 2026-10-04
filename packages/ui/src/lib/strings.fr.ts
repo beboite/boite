@@ -567,9 +567,11 @@ export const fr: Translation = {
 
   sidebar: {
     doneThreads: 'Terminés',
+    archivedGroup: 'Archivés',
     workingThreads: 'En cours',
     projectWorkingThreads: '{project} : {count} en cours',
     projectDoneThreads: '{project} : {count} terminées',
+    projectArchivedThreads: '{project} : {count} archivées',
     otherProjects: 'Autres projets',
     groupingOptions: "Options d'affichage",
     workingGroupingScope: 'Projets et Récent · Cet appareil',

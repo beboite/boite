@@ -671,6 +671,12 @@ export interface Project {
    */
   archivedThreads?: number;
   /**
+   * How many of `archivedThreads` are done: marked done or archived after
+   * their PR merged (`doneAt` set). The rest were archived by hand to be
+   * picked up later. Absent when none and from a core older than this field.
+   */
+  doneThreads?: number;
+  /**
    * The project's folder is gone from the disk: deleted, moved or renamed
    * since it was added. Read on every answer like `repository`, and
    * `project.updated` follows when it changes. A thread cannot start there

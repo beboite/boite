@@ -121,7 +121,9 @@ for (const width of [1280, 390]) {
       expect(await page.evaluate(`document.querySelector(${JSON.stringify(project(main, 'p-notes'))}) === null && document.querySelector(${JSON.stringify(project(main, empty))}) === null`)).toBe(true);
       expect(await page.evaluate(`document.querySelector('${root} ${id('other-projects-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
       expect(await page.evaluate(`document.querySelector('${first} ${id('project-working-toggle')}').dataset.count`)).toBe('1');
-      expect(await page.evaluate(`document.querySelector('${first} ${id('project-done-toggle')}').dataset.count`)).toBe('1');
+      // t-parser was archived by hand: it waits under Archived, not Done.
+      expect(await page.evaluate(`document.querySelector('${first} ${id('project-done-toggle')}').dataset.count`)).toBe('0');
+      expect(await page.evaluate(`document.querySelector('${first} ${id('project-archived-toggle')}').dataset.count`)).toBe('1');
       expect(await page.evaluate(`!!document.querySelector('${row(first, 't-bench')}') && !document.querySelector('${row(first, 't-scheduler')}')`)).toBe(true);
       await page.evaluate(`document.querySelector(${JSON.stringify(project(main, busy))}).scrollIntoView({block:'center'})`);
       await shot('folded');
@@ -138,9 +140,11 @@ for (const width of [1280, 390]) {
 
       await click(`${first} ${id('project-working-toggle')}`);
       await page.waitFor(`document.querySelector('${row(first, 't-scheduler')}')`);
-      await click(`${first} ${id('project-done-toggle')}`);
-      await page.waitFor(`document.querySelector('${first} ${id('done-thread')}[data-thread-id="t-parser"]')`);
-      expect(await page.evaluate(`document.querySelector('${second} ${id('project-done-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
+      expect(await page.evaluate(`document.querySelector('${first} ${id('project-done-toggle')}').disabled`)).toBe(true);
+      await click(`${first} ${id('project-archived-toggle')}`);
+      await page.waitFor(`document.querySelector('${first} ${id('project-archived')} ${id('done-thread')}[data-thread-id="t-parser"]')`);
+      expect(await page.evaluate(`!document.querySelector('${first} ${id('project-done')} ${id('done-thread')}')`)).toBe(true);
+      expect(await page.evaluate(`document.querySelector('${second} ${id('project-archived-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
       expect(await page.evaluate(`!!document.querySelector('${row(first, 't-scheduler')}')`)).toBe(true);
       await shot('expanded');
       if (width < 720) {
@@ -149,7 +153,7 @@ for (const width of [1280, 390]) {
         await click(`${first} ${id('project-working-toggle')}`);
         expect(await page.evaluate(`document.querySelector('${first} ${id('project-working-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
         expect(await page.evaluate(`globalThis.__boiteTest.workspace.machines[0].store.isCollapsed('p-boite')`)).toBe(true);
-        expect(await page.evaluate(`document.querySelector('${first} ${id('project-done-toggle')}').getAttribute('aria-expanded')`)).toBe('true');
+        expect(await page.evaluate(`document.querySelector('${first} ${id('project-archived-toggle')}').getAttribute('aria-expanded')`)).toBe('true');
         await click(`${first} ${id('project-working-toggle')}`);
         await page.waitFor(`document.querySelector('${row(first, 't-scheduler')}')`);
       }
@@ -158,7 +162,12 @@ for (const width of [1280, 390]) {
         await click(`${trace} ${id('mobile-thread-menu-t-trace')}`);
         await page.click(`${id('mobile-thread-menu-t-trace-menu')} [data-value=archive]`);
       } else await click(`${trace} ~ ${id('thread-done')}`);
-      await page.waitFor(`document.querySelector('${first} ${id('project-done-toggle')}').dataset.count === '2' && document.querySelector('${first} ${id('done-thread')}[data-thread-id="t-trace"]')`);
+      // Mark done lands in Done; a plain archive lands in Archived.
+      const landed = width < 720 ? 'archived' : 'done';
+      await page.waitFor(`document.querySelector('${first} ${id(`project-${landed}-toggle`)}').dataset.count === '${width < 720 ? 2 : 1}'`);
+      // Done was empty, so its list opens only now.
+      if (landed === 'done') await click(`${first} ${id('project-done-toggle')}`);
+      await page.waitFor(`document.querySelector('${first} ${id(`project-${landed}`)} ${id('done-thread')}[data-thread-id="t-trace"]')`);
       expect(await page.evaluate(`!!document.querySelector('${row(project(remote, 'p-boite'), 't-trace')}')`)).toBe(true);
       await click(`${first} ${id('project-working-toggle')}`);
       expect(await page.evaluate(`!document.querySelector('${row(first, 't-scheduler')}') && !!document.querySelector('${first} ${id('done-thread')}')`)).toBe(true);

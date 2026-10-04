@@ -20,7 +20,7 @@
   import { projectMenu } from '../lib/project-menu';
   import { work } from '../lib/work-prefs.svelte';
   import { PROJECT_DRAG_TYPE, projectActivity, projectKey, projectView, type ProjectEntry } from '../lib/project-view.svelte';
-  import { activeProject, projectThreadLists, projectThreadView } from '../lib/project-threads.svelte';
+  import { activeProject, archiveCount, projectThreadLists, projectThreadView, type ArchiveKind } from '../lib/project-threads.svelte';
   import ProjectViews from './ProjectViews.svelte';
   import RecentGroup from './RecentGroup.svelte';
   import RecentDone from './RecentDone.svelte';
@@ -88,10 +88,11 @@
   );
   let workingOpen = $state(false);
   let doneRows = $state.raw<{ store: Store; threadId: ThreadId }[]>([]);
+  let archivedRows = $state.raw<{ store: Store; threadId: ThreadId }[]>([]);
   let projectDoneRows = $state.raw<Record<string, { store: Store; threadId: ThreadId }[]>>({});
   const doneObservers = new Map<string, (rows: { store: Store; threadId: ThreadId }[]) => void>();
-  function doneObserver(entry: ProjectEntry) {
-    const key = projectKey(entry);
+  function doneObserver(entry: ProjectEntry, kind: ArchiveKind) {
+    const key = JSON.stringify([kind, projectKey(entry)]);
     if (!doneObservers.has(key)) doneObservers.set(key, rows => rememberDoneRows(key, rows));
     return doneObservers.get(key)!;
   }
@@ -105,13 +106,13 @@
   // Alt+1 to Alt+9 count the rows as drawn: this view, open projects only.
   $effect(() => {
     sidebarRows.list = (workspace.view === 'recent'
-      ? [...attention, ...(workingOpen ? working : [])].map(({ machine, thread }) => ({ store: machine.store, threadId: thread.id })).concat(doneRows)
+      ? [...attention, ...(workingOpen ? working : [])].map(({ machine, thread }) => ({ store: machine.store, threadId: thread.id })).concat(doneRows, archivedRows)
       : shownGroups.flatMap(entry => {
           if (entry.machine.store.isCollapsed(entry.project.id)) return [];
           const open = projectThreadView.isOpen(entry, 'working');
           const lists = projectThreadLists(entry, entry.machine.store.threadsOf(entry.project.id), open);
           return [...lists.attention, ...(open ? lists.working : [])].map(thread => ({ store: entry.machine.store, threadId: thread.id }))
-            .concat(projectThreadView.isOpen(entry, 'done') ? projectDoneRows[projectKey(entry)] ?? [] : []);
+            .concat(...(['done', 'archived'] as const).map(kind => projectThreadView.isOpen(entry, kind) ? projectDoneRows[JSON.stringify([kind, projectKey(entry)])] ?? [] : []));
         })
     ).slice(0, 9);
   });
@@ -226,6 +227,7 @@
           </RecentGroup>
         {/if}
         <RecentDone entries={recentGroups} {scrollRoot} {now} onrows={rows => doneRows = rows} />
+        <RecentDone kind="archived" entries={recentGroups} {scrollRoot} {now} onrows={rows => archivedRows = rows} />
       </div>
     {:else}
       {#each visible as machine (machine.id)}
@@ -238,7 +240,8 @@
         {@const { machine, project } = entry}
         {@const owner = machine.store}
         {@const workingOpen = projectThreadView.isOpen(entry, 'working')}
-        {@const doneOpen = !!project.archivedThreads && projectThreadView.isOpen(entry, 'done')}
+        {@const doneOpen = archiveCount(project, 'done') > 0 && projectThreadView.isOpen(entry, 'done')}
+        {@const archivedOpen = archiveCount(project, 'archived') > 0 && projectThreadView.isOpen(entry, 'archived')}
         {@const lists = projectThreadLists(entry, owner.threadsOf(project.id), workingOpen)}
         {@const controls = `sidebar-project-${encodeURIComponent(projectKey(entry))}`}
         {@const collapsed = owner.isCollapsed(project.id)}
@@ -306,7 +309,12 @@
               <div id="{controls}-done" hidden={!doneOpen} data-testid="project-done">
                 {#if doneOpen}<p class="group-label">{strings.sidebar.doneThreads}</p>{/if}
                 <RecentDone entries={[entry]} {scrollRoot} {now} open={doneOpen && !collapsed} header={false}
-                  onrows={doneObserver(entry)} />
+                  onrows={doneObserver(entry, 'done')} />
+              </div>
+              <div id="{controls}-archived" hidden={!archivedOpen} data-testid="project-archived">
+                {#if archivedOpen}<p class="group-label">{strings.sidebar.archivedGroup}</p>{/if}
+                <RecentDone kind="archived" entries={[entry]} {scrollRoot} {now} open={archivedOpen && !collapsed} header={false}
+                  onrows={doneObserver(entry, 'archived')} />
               </div>
               {#if lists.attention.length === 0 && lists.working.length === 0 && !project.archivedThreads && !draftHere}<p class="none">{strings.sidebar.noThreads}</p>{/if}
             </div>

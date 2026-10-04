@@ -465,7 +465,7 @@ export class ProjectStore {
    * the disk here: each answer starts the next check in the background, so a
    * folder that gained or lost its `.git` shows it on the following answer
    * (`listFresh` waits for it instead). Before any check has answered,
-   * `repository` is left out. `archivedThreads` is counted here too, once
+   * `repository` is left out. `archivedThreads` and `doneThreads` are counted here too, once
    * per list when the caller hands the counts over, and the icon is the one
    * stored by the last detection, read from the journal, never the folder.
    */
@@ -477,12 +477,13 @@ export class ProjectStore {
   ): Project {
     const flag = this.git.get(project.path);
     if (refresh) this.refreshGit(project.path);
-    const archivedThreads = counts.get(project.id) ?? 0;
+    const { archived: archivedThreads, done: doneThreads } = counts.get(project.id) ?? { archived: 0, done: 0 };
     const icon = iconOf(icons.get(project.id));
     return {
       ...project,
       autoArchiveMergedPr: this.core.journal.getSetting(`project-auto-archive-merged-pr:${project.id}`) !== false,
       ...(archivedThreads > 0 ? { archivedThreads } : {}),
+      ...(doneThreads > 0 ? { doneThreads } : {}),
       ...(icon === undefined ? {} : { icon }),
       ...(flag?.value === undefined ? {} : { repository: flag.value }),
       ...(flag?.missing === true ? { missing: true } : {}),
