@@ -613,6 +613,12 @@ The existing line-height remains the fallback when a browser lacks `text-box`.
 `bun test tests/e2e/text-alignment.test.ts` measures this alignment across the
 eight reading fonts, desktop menus and phone controls.
 
+A folded list opens on `FoldHeader`: chevron, optional glyph, label, then its
+count at the end of the row through `fold-count`, never in parentheses inside
+the label. Rows inside a fold start at `--fold-indent` so they line up under the
+label. Other folds turn the shared `fold-caret` chevron, and a native
+`<details>` uses `details.disclosure`.
+
 ### Window material
 
 Windows offers acrylic from build 22523, mica from 22000 and solid on every

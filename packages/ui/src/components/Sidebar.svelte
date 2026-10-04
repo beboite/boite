@@ -275,7 +275,7 @@
               title={multi ? `${project.path} · ${machine.label}` : project.path}
               onclick={() => owner.toggleProject(project.id)}
             >
-              {#if projectView.order === 'manual'}<GripVertical size={12} />{/if}<span class="caret" class:collapsed><ChevronRight size={12} /></span><ProjectTile {project} store={owner}
+              {#if projectView.order === 'manual'}<GripVertical size={12} />{/if}<span class="fold-caret" class:open={!collapsed} aria-hidden="true"><ChevronRight size={12} /></span><ProjectTile {project} store={owner}
               /><span class="name ui-label" class:gone={project.missing === true}>{projectName(project)}</span
               >{#if project.missing === true}<span class="missing" data-testid="project-missing" title={strings.sidebar.projectMissing} aria-label={strings.sidebar.projectMissing}><FolderX size={13} aria-hidden="true" /></span>{/if}{#if rollup}{@const label = fill(rollup.count === 1 ? strings.sidebar.rollupOne : strings.sidebar.rollupMany, { count: String(rollup.count), state: strings.sidebar.state[rollup.kind] })}<span
                   class="rollup {rollup.kind}" data-testid="project-rollup" data-state={rollup.kind} title={label} aria-label={label}
@@ -461,21 +461,13 @@
   @media (prefers-reduced-motion: reduce) { .rollup .dot, .rollup :global(.spinner) { animation: none; } }
   :global(html[data-motion='reduced']) .rollup .dot,
   :global(html[data-motion='reduced']) .rollup :global(.spinner) { animation: none; }
-  .host,
-  .caret {
+  .host {
     display: flex;
     color: var(--color-subtle);
   }
   /* The rows under it carry no machine icon, so the header says the machine is unreachable. */
   .host.offline {
     color: var(--color-danger);
-  }
-  .caret {
-    transform: rotate(90deg);
-    transition: transform var(--dur-2) var(--ease-out-quint);
-  }
-  .caret.collapsed {
-    transform: none;
   }
   .project-actions {
     opacity: 0;

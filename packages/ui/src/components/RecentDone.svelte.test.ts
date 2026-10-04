@@ -94,7 +94,7 @@ test('done and archived threads are separate lists with their own counts', async
   expect([project.archivedThreads, project.doneThreads]).toEqual([2, 1]);
   mounted = mount(RecentDone, { target: document.body, props: { entries: entries(), now: Date.now(), kind: 'archived' } });
   await settle();
-  expect(document.querySelector('[data-testid=recent-archived-toggle] .count')?.textContent).toBe('1');
+  expect(document.querySelector('[data-testid=recent-archived-toggle] .fold-count')?.textContent).toBe('1');
   click('[data-testid=recent-archived-toggle]'); await settle();
   expect([...document.querySelectorAll('[data-testid=done-thread]')].map(row => (row as HTMLElement).dataset.threadId)).toEqual(['t-parser']);
   await unmount(mounted);

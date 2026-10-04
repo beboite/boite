@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { ChevronRight, RotateCcw, Trash2 } from '@lucide/svelte';
+  import { RotateCcw, Trash2 } from '@lucide/svelte';
   import type { Project, ThreadId, ThreadSummary } from '@boite/contracts';
   import { archivedThreads, restoreThread } from '../lib/archive';
   import { canDeleteThread, deleteThread } from '../lib/thread-removal';
   import { ago, exactTime } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import FoldHeader from './FoldHeader.svelte';
 
   /**
    * A project's archived threads, under its rows. Folded until asked, and the
@@ -17,6 +18,7 @@
   let threads = $state<ThreadSummary[] | null>(null);
   let restoring = $state<ThreadId | null>(null);
   let count = $derived(project.archivedThreads ?? 0);
+  const uid = $props.id();
 
   $effect(() => {
     void store.connection;
@@ -69,11 +71,9 @@
 
 {#if count > 0}
   <div class="drawer" data-testid="archived-drawer">
-    <button class="ghost small toggle" aria-expanded={open} data-testid="archived-drawer-toggle" onclick={() => (open = !open)}>
-      <span class="caret" class:open><ChevronRight size={11} /></span>
-      <span class="ui-label">{count === 1 ? strings.sidebar.archivedThreadsOne : fill(strings.sidebar.archivedThreadsMany, { count: String(count) })}</span>
-    </button>
-    <div class="motion-fold" class:expanded={open && threads !== null} inert={!open}><div>
+    <FoldHeader nested label={strings.sidebar.archivedThreads} {count} {open} controls={uid}
+      testid="archived-drawer-toggle" onclick={() => (open = !open)} />
+    <div id={uid} class="motion-fold" class:expanded={open && threads !== null} inert={!open}><div>
     {#if threads}
       <ul>
         {#each threads as thread (thread.id)}
@@ -109,20 +109,6 @@
   .drawer {
     margin-top: 2px;
   }
-  .toggle {
-    width: 100%;
-    justify-content: flex-start;
-    gap: 4px;
-    padding: 0 6px;
-    color: var(--color-subtle);
-  }
-  .caret {
-    display: flex;
-    transition: transform var(--dur-2) var(--ease-out-quint);
-  }
-  .caret.open {
-    transform: rotate(90deg);
-  }
   ul {
     margin: 0;
     padding: 0 0 2px;
@@ -134,7 +120,7 @@
     align-items: center;
     gap: 2px 6px;
     min-height: var(--row);
-    padding: 8px 4px 8px 22px;
+    padding: 8px 4px 8px var(--fold-indent-nested);
     border-bottom: 1px solid var(--color-border);
     color: var(--color-muted-foreground);
     font-size: var(--text-sm);

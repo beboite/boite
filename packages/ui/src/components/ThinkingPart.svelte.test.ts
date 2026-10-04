@@ -95,7 +95,7 @@ test('a reasoning with no text offers nothing to unfold', () => {
   const toggle = document.querySelector<HTMLButtonElement>('[data-testid=thinking-toggle]')!;
   toggle.click();
   flushSync();
-  expect(toggle.querySelector('.caret')).toBeNull();
+  expect(toggle.querySelector('.fold-caret')).toBeNull();
   expect(toggle.hasAttribute('aria-expanded')).toBe(false);
   expect(document.querySelector('.fold')!.classList.contains('open')).toBe(false);
 

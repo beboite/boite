@@ -188,7 +188,7 @@
     {:else if failed}
       <span class="status" title={strings.chat.toolStatus[status]}><X size={12} strokeWidth={2.25} /></span>
     {/if}
-    <span class="caret" class:open={shown} aria-hidden="true"><ChevronRight size={12} strokeWidth={2} /></span>
+    <span class="fold-caret" class:open={shown} aria-hidden="true"><ChevronRight size={12} /></span>
   </button>
 
   <div class="fold" class:open={shown} inert={!shown}>
@@ -311,26 +311,6 @@
 
   .line.live { color: var(--color-accent); }
   .error-preview { margin: 0 0 4px; color: var(--color-danger); font-size: var(--text-xs); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
-
-  .caret {
-    display: inline-flex;
-    flex: none;
-    color: var(--color-subtle);
-    opacity: 1;
-    transition:
-      transform var(--dur-2) var(--ease-out-quint),
-      opacity var(--dur-2) var(--ease-out-quint);
-  }
-
-  .head:hover .caret,
-  .head:focus-visible .caret,
-  .caret.open {
-    opacity: 1;
-  }
-
-  .caret.open {
-    transform: rotate(90deg);
-  }
 
   .chip {
     flex: none;
@@ -482,7 +462,7 @@
   }
 
   /* The same blinking block a streaming text part ends on, so both read as one
-     thing. Not `.caret`: that class is the head's chevron. */
+     thing. Not `.fold-caret`: that class is the head's chevron. */
   .cursor {
     display: inline-block;
     width: 7px;

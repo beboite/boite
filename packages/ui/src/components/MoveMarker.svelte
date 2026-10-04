@@ -25,7 +25,7 @@
       aria-expanded={open}
       title={open ? strings.chat.moveHide : strings.chat.moveShow}
       onclick={() => (open = !open)}
-    ><FolderInput size={13} /><span class="ui-label">{strings.chat.moveExplained}</span><span class="caret" class:open><ChevronRight size={12} /></span></button>
+    ><FolderInput size={13} /><span class="ui-label">{strings.chat.moveExplained}</span><span class="fold-caret" class:open aria-hidden="true"><ChevronRight size={12} /></span></button>
   {/if}
   <span class="rule"></span>
 </div>
@@ -56,13 +56,6 @@
     color: var(--color-accent);
     font-size: var(--text-xs);
     font-weight: 600;
-  }
-  .caret {
-    display: inline-flex;
-    transition: transform var(--dur-2) var(--ease-out-quint);
-  }
-  .caret.open {
-    transform: rotate(90deg);
   }
   .note {
     align-self: stretch;

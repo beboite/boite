@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { ChevronRight, RotateCcw, Trash2 } from '@lucide/svelte';
+  import { RotateCcw, Trash2 } from '@lucide/svelte';
   import type { Project } from '@boite/contracts';
   import { confirm } from '../lib/confirm.svelte';
   import { projectName } from '../lib/format';
   import { fill, strings } from '../lib/strings';
+  import FoldHeader from './FoldHeader.svelte';
   import type { Machine } from '../lib/workspace.svelte';
   import MachineIcon from './MachineIcon.svelte';
   import ProjectTile from './ProjectTile.svelte';
@@ -18,6 +19,7 @@
   let { entries, multi }: { entries: { machine: Machine; project: Project }[]; multi: boolean } = $props();
   let open = $state(false);
   let visited = $state(false);
+  const uid = $props.id();
   /** The row whose action is in flight, so a second click cannot race it. */
   let busy = $state<string | null>(null);
 
@@ -64,12 +66,10 @@
 </script>
 
 {#if entries.length > 0}
-  <div class="archived" data-testid="archived-projects">
-    <button class="ghost small toggle" aria-expanded={open} data-testid="archived-projects-toggle" onclick={() => { visited = true; open = !open; }}>
-      <span class="caret" class:open><ChevronRight size={11} /></span>
-      <span class="ui-label">{fill(strings.sidebar.archivedProjects, { count: String(entries.length) })}</span>
-    </button>
-    <div class="motion-fold" class:expanded={open} inert={!open}><div>
+  <section class="archived" data-testid="archived-projects">
+    <FoldHeader label={strings.sidebar.archivedProjects} count={entries.length} {open} controls={uid}
+      testid="archived-projects-toggle" onclick={() => { visited = true; open = !open; }} />
+    <div id={uid} class="motion-fold" class:expanded={open} inert={!open}><div>
       {#if visited}
         {#each groups as { machine, projects } (machine.id)}
           {#if multi}
@@ -109,32 +109,18 @@
         {/each}
       {/if}
     </div></div>
-  </div>
+  </section>
 {/if}
 
 <style>
   .archived {
-    padding: 0 4px;
-  }
-  .toggle {
-    width: 100%;
-    justify-content: flex-start;
-    gap: 4px;
-    padding: 0 6px;
-    color: var(--color-subtle);
-  }
-  .caret {
-    display: flex;
-    transition: transform var(--dur-2) var(--ease-out-quint);
-  }
-  .caret.open {
-    transform: rotate(90deg);
+    border-top: 1px solid var(--color-border);
   }
   .machine {
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 6px 6px 2px 22px;
+    padding: 6px var(--fold-inset) 2px var(--fold-indent);
     color: var(--color-subtle);
     font-size: var(--text-xs);
   }
@@ -158,7 +144,7 @@
     align-items: center;
     gap: 8px;
     min-height: var(--row);
-    padding: 0 2px 0 22px;
+    padding: 0 2px 0 var(--fold-indent);
     border-radius: var(--radius-sm);
     color: var(--color-muted-foreground);
     font-size: var(--text-sm);
