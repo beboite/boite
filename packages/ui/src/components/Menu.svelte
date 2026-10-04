@@ -150,7 +150,7 @@
           <span class="label">
             {#if item.icon === 'settings'}<Settings size={14} strokeWidth={1.75} />{/if}
             {#if item.projectTile}<ProjectTile project={item.projectTile.project} store={item.projectTile.store} size={18} />{/if}
-            {#if item.glyph}<span class="glyph" class:live={item.live}><item.glyph size={14} strokeWidth={1.75} /></span>{/if}
+            {#if item.glyph}<span class="glyph" class:live={item.live} aria-hidden="true"><item.glyph size={16} strokeWidth={1.75} /></span>{/if}
             {#if item.status}<span class="status-dot" data-tone={item.status.tone} role="img" aria-label={item.status.label} title={item.status.label}></span>{/if}
             <span class="ui-label">{item.label}</span>
           </span>
@@ -167,8 +167,9 @@
 <style>
   .separator { height: 1px; background: var(--color-border); margin: 4px 6px; }
   .label { display: flex; align-items: center; gap: 6px; }
-  .glyph { display: inline-flex; color: var(--color-muted-foreground); margin-right: 2px; }
+  .glyph { display: inline-flex; flex: 0 0 16px; color: var(--color-muted-foreground); margin-right: 2px; }
   .glyph.live { color: var(--color-live); }
+  .item.danger .glyph { color: inherit; }
   .item.hide-mark.active { background: var(--color-active); }
   .status-dot { display: inline-block; width: 6px; height: 6px; flex: none; border-radius: 50%; margin-right: 8px; vertical-align: middle; background: var(--color-live); }
   .status-dot[data-tone='success'] { background: var(--color-success); }
