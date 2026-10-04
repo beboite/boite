@@ -5,8 +5,18 @@
 Settings, Providers offers an optional subscription proxy for Claude and Codex.
 Choose Douane or CLIProxyAPI, enter the gateway's API URL and its limits dashboard
 URL, enable the switch and save. The API URL accepts an origin or a path ending
-in `/v1`. Model discovery runs on the machine hosting the core through
-`GET /v1/models`; paired phones use that same catalog.
+in `/v1`. Model discovery runs on the machine hosting the core. The agent's own
+discovery runs through the gateway first, so each model keeps the effort scale,
+speed tiers (Fast) and names a direct subscription shows. `GET /v1/models` then
+adds the models only the gateway routes, and stands alone when the agent's
+discovery fails. Paired phones use that same catalog.
+
+Claude Code is told the gateway is first-party, because the gateway relays Messages
+unchanged to Anthropic on a subscription: tool search, first-party model aliases
+and the one-hour prompt cache stay on (`_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL`,
+`CLAUDE_CODE_PROMPT_CACHE_TTL=1h`), and fast mode skips the organization check
+that needs a native login (`CLAUDE_CODE_SKIP_FAST_MODE_ORG_CHECK`). Codex already
+sends its service tier and prompt cache key to a custom provider.
 
 While the proxy is enabled, Claude and Codex show one account named after the
 gateway, Douane or CLIProxyAPI, with the API URL's origin. It has no rename,

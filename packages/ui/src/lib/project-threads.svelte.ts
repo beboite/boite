@@ -54,9 +54,9 @@ export function projectThreadLists(entry: ProjectEntry, threads: ThreadSummary[]
 } {
   const sorted = threads.slice().sort(compareThreads);
   return {
-    working: sorted.filter(workingThread),
+    working: sorted.filter(thread => workingThread(entry.machine.store, thread)),
     attention: recentPreferences.groupWorking
-      ? sorted.filter(thread => workingOpen ? !workingThread(thread) : !groupWorkingThread(entry.machine.store, thread))
+      ? sorted.filter(thread => workingOpen ? !workingThread(entry.machine.store, thread) : !groupWorkingThread(entry.machine.store, thread))
       : sorted
   };
 }

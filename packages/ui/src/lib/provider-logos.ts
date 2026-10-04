@@ -123,3 +123,11 @@ export const providerLogos: Record<string, ProviderLogo> = {
     ]
   }
 };
+
+/** A gateway names some providers by their service: Douane says `opencode_go` and `xai`. */
+const gatewayNames: Record<string, string> = { opencode_go: 'opencode', 'opencode-go': 'opencode', xai: 'grok' };
+
+/** The mark for a Boite provider id or a gateway's name for the same service. */
+export function providerLogoOf(providerId: string): ProviderLogo | null {
+  return providerLogos[providerId] ?? providerLogos[gatewayNames[providerId] ?? ''] ?? null;
+}

@@ -12,6 +12,12 @@ itself.
 - The range is 7, 30 or 90 days, ending today. The measure is tokens, API cost
   or turns, and every card follows it. The provider filter also applies to the
   chart, breakdown and thread ranking, using each turn's execution provider.
+- With more than one machine connected, the machine menu reads one machine or
+  all of them. It opens on the machine the window is on. All machines asks
+  each connected core for `usage.history` over the same days and adds the
+  answers; a machine not connected or whose read failed is named above the
+  page and left out of the totals. Top threads then name their machine, and a
+  thread of another machine opens on it.
 - The overview gives the total for the range and one row per provider with its
   share, including providers with no turns and historical providers no longer
   configured. Each row and the total show how many turns reported tokens and
@@ -71,7 +77,10 @@ failure. It never quotes the body, which can echo a credential.
   and a `gateway` field: the plan, the entry's status (ready, cooldown, error
   or disabled), the credits, the display mode and its account count. The tray
   popup, the sidebar glance and the quota order therefore show them like any
-  account. Local Claude and Codex accounts read as unsupported meanwhile.
+  account. While Douane is enabled, the list holds only its entries: the
+  machine's own logins, whatever their provider, are neither listed nor read.
+  The gateway also reports a provider under its own id (`opencode_go`, `xai`),
+  which draws that provider's mark.
   `quotas.configure` refuses a `proxy:` id, because the gateway decides what it
   reports.
 - The cadence is the native one. A list within a minute of the last read

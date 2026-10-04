@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import type { MessagePart } from '@boite/contracts';
-import { liveLabel, partRuns, programOf, runSummary, toolLine, unwrapCommand, type ToolPart } from './tool-groups';
+import { activityShown, liveLabel, partRuns, programOf, runSpan, runSummary, thinkingShown, toolLine, unwrapCommand, type ToolPart } from './tool-groups';
 
 function tool(name: string, input: unknown, extra: Partial<ToolPart> = {}): ToolPart {
   return { type: 'tool', toolId: `${name}-${JSON.stringify(input)}`, name, input, output: 'ok', status: 'done', ...extra };
@@ -62,12 +62,11 @@ test('calls fold into runs that text, a question or a produced document breaks',
     tool('Read', { file_path: 'y' })
   ];
   expect(partRuns(parts)).toEqual([
-    { kind: 'part', index: 0 },
-    { kind: 'tools', indices: [1, 3] },
+    { kind: 'activity', indices: [0, 1, 3] },
     { kind: 'part', index: 4 },
-    { kind: 'tools', indices: [5] },
-    { kind: 'tools', indices: [6] },
-    { kind: 'tools', indices: [7] }
+    { kind: 'activity', indices: [5] },
+    { kind: 'activity', indices: [6] },
+    { kind: 'activity', indices: [7] }
   ]);
 });
 
@@ -80,40 +79,39 @@ test('successful file changes stand alone while failed attempts stay in their ru
     tool('Read', { file_path: 'z' })
   ];
   expect(partRuns(parts)).toEqual([
-    { kind: 'tools', indices: [0] },
-    { kind: 'tools', indices: [1] },
-    { kind: 'tools', indices: [2, 3, 4] }
+    { kind: 'activity', indices: [0] },
+    { kind: 'activity', indices: [1] },
+    { kind: 'activity', indices: [2, 3, 4] }
   ]);
 });
 
-test('reasoning between calls breaks their group and keeps both thinking steps visible', () => {
+test('reasoning folds into the calls around it so one stretch of work is one run', () => {
   expect(partRuns([
     { type: 'thinking', text: 'Inspecting' },
     tool('Read', { file_path: 'a.ts' }),
-    { type: 'thinking', text: 'Checking' },
-    tool('Read', { file_path: 'b.ts' })
+    { type: 'thinking', text: '', startedAt: 1000, finishedAt: 1200 },
+    { type: 'text', text: ' ' },
+    tool('Read', { file_path: 'b.ts' }),
+    { type: 'thinking', text: '' },
+    { type: 'text', text: 'Done.' },
+    { type: 'thinking', text: 'After' }
   ])).toEqual([
-    { kind: 'part', index: 0 }, { kind: 'tools', indices: [1] },
-    { kind: 'part', index: 2 }, { kind: 'tools', indices: [3] }
+    { kind: 'activity', indices: [0, 1, 2, 4, 5] },
+    { kind: 'part', index: 6 },
+    { kind: 'activity', indices: [7] }
   ]);
 });
 
-test('empty legacy reasoning between calls stays invisible while timed and trailing steps keep their place', () => {
-  expect(partRuns([
-    tool('Read', { file_path: 'a.ts' }),
-    { type: 'thinking', text: '' },
-    { type: 'text', text: ' ' },
-    { type: 'thinking', text: ' ' },
-    tool('Read', { file_path: 'b.ts' }),
-    { type: 'thinking', text: '', startedAt: 1000, finishedAt: 2000 },
-    tool('Read', { file_path: 'c.ts' }),
-    { type: 'thinking', text: '' }
-  ])).toEqual([
-    { kind: 'tools', indices: [0, 4] },
-    { kind: 'part', index: 5 },
-    { kind: 'tools', indices: [6] },
-    { kind: 'part', index: 7 }
-  ]);
+test('empty reasoning under a second is not drawn; words, a live clock or a whole second are', () => {
+  const step = (text: string, startedAt?: number, finishedAt?: number | null) => ({ type: 'thinking' as const, text, startedAt, finishedAt });
+  expect(thinkingShown(step('', 1000, 1900), false)).toBe(false);
+  expect(thinkingShown(step(''), false)).toBe(false);
+  expect(thinkingShown(step('', 1000, 2000), false)).toBe(true);
+  expect(thinkingShown(step('hm', 1000, 1100), false)).toBe(true);
+  expect(thinkingShown(step(''), true)).toBe(true);
+  expect(activityShown([step('', 1000, 1100), step('')], false)).toBe(false);
+  expect(activityShown([step('', 1000, 1100), step('')], true)).toBe(true);
+  expect(runSpan([step('', 1000, 1500), tool('Read', { file_path: 'a' }, { startedAt: 1600, finishedAt: 9000 })])).toEqual({ start: 1000, end: 9000 });
 });
 
 test('command inputs using cmd keep their family and live program label', () => {
@@ -131,8 +129,8 @@ test('a proposed plan is a part of its own, never folded into the calls around i
     tool('Read', { file_path: 'b.ts' })
   ];
   expect(partRuns(parts)).toEqual([
-    { kind: 'tools', indices: [0, 1] },
+    { kind: 'activity', indices: [0, 1] },
     { kind: 'part', index: 2 },
-    { kind: 'tools', indices: [3] }
+    { kind: 'activity', indices: [3] }
   ]);
 });

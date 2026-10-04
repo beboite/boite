@@ -246,8 +246,16 @@ export function summarize(history: UsageHistory, metric: UsageMetric, providerId
   };
 }
 
+/**
+ * Several machines' histories read over the same edges, as one. `summarize`
+ * adds rows that share a bucket, provider and model, so they are only joined.
+ */
+export function mergeHistories<T extends UsageHistoryThread>(edges: number[], parts: { rows: UsageHistory['rows']; threads: T[] }[]): Omit<UsageHistory, 'threads'> & { threads: T[] } {
+  return { edges, rows: parts.flatMap((part) => part.rows), threads: parts.flatMap((part) => part.threads) };
+}
+
 /** The threads that spent the most by this metric, largest first. */
-export function topThreads(threads: UsageHistoryThread[], metric: UsageMetric, limit = 10): (UsageHistoryThread & { value: number })[] {
+export function topThreads<T extends UsageHistoryThread>(threads: T[], metric: UsageMetric, limit = 10): (T & { value: number })[] {
   return threads
     .map((thread) => ({ ...thread, value: measure(metric, thread.turns, thread.usage) }))
     .filter((thread) => thread.value > 0)

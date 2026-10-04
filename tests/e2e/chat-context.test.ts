@@ -84,10 +84,12 @@ test('typing dots cover silent and buffered replies, yield to visible activity, 
   await update(`thread.messages.at(-1).parts.at(-1).status = 'done';`);
   await page.waitFor(`document.querySelector('.reply-pending [data-testid="typing-indicator"]')`);
   await update(`thread.messages.at(-1).parts.push({type:'thinking',text:'Checking the result',startedAt:Date.now()});`);
-  await page.waitFor(`document.querySelector('[data-testid="thinking-part"]')`);
+  // Reasoning right after a call folds into that call's line, which says it is thinking.
+  await page.waitFor(`document.querySelector('[data-testid="tool-group"][data-live="true"] [data-testid="tool-group-label"]')?.textContent === 'Thinking'`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="thinking-part"]') === null`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('[data-testid="typing-indicator"]') === null`)).toBe(true);
   await update(`thread.messages.push({...thread.messages[0],id:'thinking-steer',createdAt:Date.now(),parts:[{type:'text',text:'Check the desktop too.'}]});`);
-  expect(await page.evaluate(`document.querySelector('[data-testid="thinking-part"] .dot') !== null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('[data-testid="tool-group"][data-live="true"] .shimmer') !== null`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('[data-testid="typing-indicator"]') === null`)).toBe(true);
   await capture('quiet-chat-thinking-steering');
   await page.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});

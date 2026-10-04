@@ -239,7 +239,17 @@ export class QuotaStore {
   }
   /** Every row as known now, the gateway's last answer included, for an update event. */
   private known(): AccountQuota[] {
+    if (this.gatewayOwnsLimits()) return this.gateway.rows();
     return [...[...this.core.accounts.list(), cliAccount].map((row) => this.snapshot(row)), ...this.gateway.rows()];
+  }
+  /**
+   * A Douane in use answers for the accounts that serve this machine's agents.
+   * The machine's own logins would only be noise beside them, and reading them
+   * would start their agents for nothing.
+   */
+  private gatewayOwnsLimits(): boolean {
+    const proxy = this.core.settings.get().subscriptionProxy;
+    return proxy?.enabled === true && proxy.kind === 'douane';
   }
   /** What is known without reading: the cached row, else the last good reading, else nothing yet. */
   private snapshot(account: Account): AccountQuota {
@@ -254,6 +264,11 @@ export class QuotaStore {
     }
     // Providers run independently; at most two accounts per provider per list.
     // Concurrent lists still share the account's pending read and cache.
+    if (this.gatewayOwnsLimits()) {
+      const rows = this.gateway.rows(await this.gateway.read(refresh));
+      if (requestId) for (const quota of rows) this.core.bus.emit('quotas.progress', { requestId, quota });
+      return rows;
+    }
     const rows = [...this.core.accounts.list(), cliAccount];
     const result = new Array<AccountQuota>(rows.length);
     const groups = new Map<string, { account: Account; index: number }[]>();

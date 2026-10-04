@@ -31,6 +31,12 @@ test('every agent Boite ships has a mark, and only those', () => {
   expect(Object.keys(providerLogos).sort()).toEqual(['antigravity', 'antigravity-cli', 'claude', 'codex', 'grok', 'muse', 'opencode', 'pi']);
 });
 
+test('a gateway name for a shipped agent draws that agent, not an initial', () => {
+  draw('opencode_go');
+  expect(document.querySelector('[data-initial]')).toBeNull();
+  expect(document.querySelector('svg')).not.toBeNull();
+});
+
 test('a mark in one colour draws its path at the size it was given, in that colour', () => {
   draw('claude', 20);
 

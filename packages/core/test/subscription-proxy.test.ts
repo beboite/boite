@@ -3,7 +3,8 @@ import type { SubscriptionProxy } from '@boite/contracts';
 import { checkSettingsPatch } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { probedModelsOf } from '../src/drivers/index.ts';
-import { subscriptionProxyCodexArgs, subscriptionProxyEnv } from '../src/subscription-proxy.ts';
+import { childEnv } from '../src/drivers/claude/query.ts';
+import { mergeProxyModels, subscriptionProxyCodexArgs, subscriptionProxyEnv } from '../src/subscription-proxy.ts';
 import { startTestCore, type TestCore } from './harness.ts';
 
 let harness: TestCore | undefined;
@@ -102,13 +103,18 @@ test('real RPC discovers gateway models, separates the key and restores native a
   expect(claudeEnv.ANTHROPIC_BASE_URL).toBe(`http://127.0.0.1:${gateway.port}`);
   expect(claudeEnv.ANTHROPIC_AUTH_TOKEN).toBe(key);
   expect(claudeEnv.ANTHROPIC_API_KEY).toBe('');
+  // Through the gateway, Claude Code keeps its subscription behavior: tool search, 1h cache, fast mode.
+  expect(claudeEnv).toMatchObject({ _CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL: '1', CLAUDE_CODE_PROMPT_CACHE_TTL: '1h', CLAUDE_CODE_SKIP_FAST_MODE_ORG_CHECK: '1' });
+  expect(childEnv(claudeEnv).CLAUDE_CODE_PROMPT_CACHE_TTL).toBe('1h');
   const codexEnv = subscriptionProxyEnv(harness.core, harness.core.providers.require('codex'));
   const args = subscriptionProxyCodexArgs(['app-server'], codexEnv);
   expect(args.join(' ')).not.toContain(key);
   expect(args).toContain('model_providers.boite_subscription_proxy.wire_api="responses"');
   expect(args).toContain('model_providers.boite_subscription_proxy.supports_websockets=true');
+  // Douane answers for the limits; this machine's own logins are not listed beside it.
   const quotas = await owner.call('quotas.list', { refresh: true });
-  expect(quotas.find(row => row.accountId === claude.id)?.status).toBe('unsupported');
+  expect(quotas.some(row => row.accountId === claude.id || row.accountId === codex.id)).toBe(false);
+  expect(paths).toContain('/v1/quotas');
   const { grant } = await owner.call('pairing.grant', {});
   const phone = await connect(harness.url, '', { grant, client: { name: 'pwa', version: 'test' } });
   try {
@@ -121,6 +127,7 @@ test('real RPC discovers gateway models, separates the key and restores native a
   expect(subscriptionProxyEnv(harness.core, harness.core.providers.require('codex'))).toEqual({});
   expect(probedModelsOf('codex-appserver', 'codex', codex.id)).toBeNull();
   expect(harness.core.accounts.require(claude.id).status).toBe(nativeClaudeStatus);
+  expect((await owner.call('quotas.list', {})).some(row => row.accountId === claude.id)).toBe(true);
 });
 
 test('a gateway that translates every model keeps proprietary models in their own harness', async () => {
@@ -165,4 +172,23 @@ test('legacy CLIProxy catalogs select native families and malformed gateway erro
   fail = true;
   await expect(owner.call('providers.probe', { providerId: 'codex', accountId: account.id, refresh: true })).rejects.toThrow('HTTP 401');
   expect(JSON.stringify(await owner.call('core.logs', {}))).not.toContain('private-token-in-body');
+});
+
+test('native discovery describes the models and the gateway adds only what it routes beyond them', () => {
+  const native = [{ id: 'claude-opus-5-5', name: 'Opus 5.5', default: true, speeds: [{ id: 'fast', label: 'Fast' }] }];
+  const proxy = [{ id: 'claude-opus-5-5', name: 'Claude Opus 5.5', default: true }, { id: 'antigravity/claude-sonnet-5', name: 'Sonnet', default: false }];
+  expect(mergeProxyModels(native, proxy)).toEqual([native[0]!, proxy[1]!]);
+  expect(mergeProxyModels([], proxy)).toBe(proxy);
+});
+
+test('a Claude child drops the parent session markers and keeps the account variables', () => {
+  const saved = process.env.CLAUDE_CODE_ENTRYPOINT;
+  process.env.CLAUDE_CODE_ENTRYPOINT = 'parent-session';
+  try {
+    const env = childEnv({ CLAUDE_CODE_PROMPT_CACHE_TTL: '1h' });
+    expect(env.CLAUDE_CODE_ENTRYPOINT).toBeUndefined();
+    expect(env.CLAUDE_CODE_PROMPT_CACHE_TTL).toBe('1h');
+  } finally {
+    if (saved === undefined) delete process.env.CLAUDE_CODE_ENTRYPOINT; else process.env.CLAUDE_CODE_ENTRYPOINT = saved;
+  }
 });
