@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { BROWSER_RECORDING_MAX_BYTES } from '@boite/contracts';
+import { BROWSER_RECORDING_CHUNK_BYTES, BROWSER_RECORDING_MAX_BYTES, browserActionError } from '@boite/contracts';
 import { BrowserRecorder, recordingBitrate, recordingCodecTypes, recordingSize, recordingTypeCodec } from './browser-recording';
 
 test('each codec records into MP4 with the first type the engine encodes, and none stands in for another', () => {
@@ -49,7 +49,12 @@ beforeEach(() => {
   };
   URL.createObjectURL = () => 'blob:recording';
 });
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+/** Timers and clocks the recorder reads, faked so minutes pass at once. */
+const fakeTime = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance', 'Date'] });
+async function startAt(recorder: BrowserRecorder, ...args: Parameters<BrowserRecorder['start']>) {
+  const started = recorder.start(...args); await vi.advanceTimersByTimeAsync(100); await started;
+}
 
 function streamed() {
   let push: (jpeg: ArrayBuffer) => void = () => {};
@@ -99,16 +104,67 @@ test('an engine that encodes another codec than the one asked reports it and the
 });
 
 test('a recording has no time limit and stops before 100 MB', async () => {
+  fakeTime();
   const { source, stop } = streamed();
   const recorder = new BrowserRecorder(source, () => {});
-  await recorder.start();
+  await startAt(recorder);
   const media = FakeRecorder.instances.at(-1)!;
+  // Ten minutes of a still page, past the former three-minute limit: its frame is
+  // repeated and captured again about once a second.
+  await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+  expect(media.state).toBe('recording');
+  expect(source.capture.mock.calls.length).toBeGreaterThan(550);
+  expect(source.capture.mock.calls.length).toBeLessThan(610);
   media.ondataavailable!({ data: { size: BROWSER_RECORDING_MAX_BYTES - 9 * 1024 * 1024 } as Blob });
   expect(media.state).toBe('recording');
   media.ondataavailable!({ data: { size: 2 * 1024 * 1024 } as Blob });
   expect(media.state).toBe('inactive');
   expect(await recorder.stop()).toMatchObject({ frameRate: 30, reason: 'size' });
   expect(stop).toHaveBeenCalledOnce();
+});
+
+test('a page that moves while its stream is silent is captured at the frame rate until it streams or stills', async () => {
+  fakeTime();
+  const { source, push } = streamed();
+  let shot = 0;
+  source.capture.mockImplementation(async () => btoa(`jpeg${++shot}`));
+  const recorder = new BrowserRecorder(source, () => {});
+  await startAt(recorder, 30);
+  await vi.advanceTimersByTimeAsync(2000);
+  const moving = source.capture.mock.calls.length;
+  expect(moving).toBeGreaterThan(25);
+  // A streamed frame takes over again.
+  push(1);
+  await vi.advanceTimersByTimeAsync(900);
+  expect(source.capture).toHaveBeenCalledTimes(moving);
+  // A page that stops changing is captured about once a second.
+  source.capture.mockImplementation(async () => btoa('still'));
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(source.capture.mock.calls.length - moving).toBeLessThanOrEqual(7);
+  expect((await recorder.stop()).frames).toBeGreaterThan(25);
+});
+
+test('input marks fade at the frame rate over a still page', async () => {
+  fakeTime();
+  const { source } = streamed();
+  const overlay = { start() {}, active: () => true, draw: vi.fn(), dispose() {} };
+  const recorder = new BrowserRecorder(source, () => {}, overlay);
+  await startAt(recorder, 60);
+  const drawn = overlay.draw.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(overlay.draw.mock.calls.length - drawn).toBeGreaterThan(50);
+  await recorder.stop();
+});
+
+test('a recording is read in chunks a core accepts: 512 KiB unless it asks for more', async () => {
+  const { source } = streamed();
+  const recorder = new BrowserRecorder(source, () => {});
+  await recorder.start();
+  FakeRecorder.instances.at(-1)!.ondataavailable!({ data: new Blob([new Uint8Array(600 * 1024)]) });
+  const { id } = await recorder.stop();
+  expect(await recorder.read(id, 0)).toMatchObject({ nextOffset: 512 * 1024, done: false });
+  expect(await recorder.read(id, 0, BROWSER_RECORDING_CHUNK_BYTES)).toMatchObject({ nextOffset: 600 * 1024, done: true });
+  expect(browserActionError({ kind: 'recording-read', recordingId: id, offset: 0, maxBytes: BROWSER_RECORDING_CHUNK_BYTES + 1 })).toBe(`recording maxBytes must be an integer from 1 to ${BROWSER_RECORDING_CHUNK_BYTES}`);
 });
 
 test('where nothing streams, the page is captured a request at a time at the frame rate', async () => {

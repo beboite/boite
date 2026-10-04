@@ -15,7 +15,8 @@ export type BrowserAction =
   | ({ kind: 'remote-frame' } & RemoteFrameOptions)
   | { kind: 'remote-input'; frameId: string; input: RemoteBrowserInput }
   | { kind: 'recording-stop' }
-  | { kind: 'recording-read'; recordingId: string; offset: number }
+  /** `maxBytes` caps the chunk; cores from before 100 MB recordings read 512 KiB at a time. */
+  | { kind: 'recording-read'; recordingId: string; offset: number; maxBytes?: number }
   | { kind: 'recording-discard'; recordingId: string }
   | { kind: 'click'; selector: string }
   | { kind: 'type'; selector: string; text: string }
@@ -124,7 +125,9 @@ export function browserActionError(action: BrowserAction): string | null {
     case 'remote-input': return text(action.frameId, 80) ? remoteBrowserInputError(action.input) : 'remote input needs a frame id';
     case 'recording-discard': case 'recording-read':
       if (!text(action.recordingId, 80) || !/^[a-zA-Z0-9-]+$/.test(action.recordingId)) return 'recordingId must come from recording-stop';
-      return action.kind === 'recording-discard' || (Number.isSafeInteger(action.offset) && action.offset >= 0 && action.offset <= BROWSER_RECORDING_MAX_BYTES) ? null : `recording offset must be an integer within ${BROWSER_RECORDING_MAX_BYTES / 1024 / 1024} MB`;
+      if (action.kind === 'recording-discard') return null;
+      if (!Number.isSafeInteger(action.offset) || action.offset < 0 || action.offset > BROWSER_RECORDING_MAX_BYTES) return `recording offset must be an integer within ${BROWSER_RECORDING_MAX_BYTES / 1024 / 1024} MB`;
+      return action.maxBytes === undefined || (Number.isSafeInteger(action.maxBytes) && action.maxBytes > 0 && action.maxBytes <= BROWSER_RECORDING_CHUNK_BYTES) ? null : `recording maxBytes must be an integer from 1 to ${BROWSER_RECORDING_CHUNK_BYTES}`;
     case 'status': case 'profiles': case 'snapshot': case 'screenshot': case 'close': case 'reset-viewport': return null;
     case 'open': case 'navigate': {
       if (action.kind === 'open' && action.profile !== undefined && !text(action.profile, BROWSER_PROFILE_NAME_MAX)) return `browser profile must be a profile name or id of 1 to ${BROWSER_PROFILE_NAME_MAX} characters, default or private`;

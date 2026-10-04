@@ -313,6 +313,8 @@ pub fn close_all<R: Runtime>(app: &AppHandle<R>) {
         picks.clear();
     }
     surfaces().shown.clear();
+    #[cfg(windows)]
+    crate::platform::browser_screencast::remove_all();
     for (label, view) in app.webviews() {
         if !label.starts_with(LABEL_PREFIX) {
             continue;

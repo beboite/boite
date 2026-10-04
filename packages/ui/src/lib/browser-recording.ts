@@ -92,6 +92,8 @@ export interface RecordingSource {
 }
 export interface RecordingOverlay { start(): void; active(): boolean; draw(ctx: CanvasRenderingContext2D, rect: RecordingRect): void; dispose(): void }
 
+/** What a core from before 100 MB recordings reads at a time: its CLI refuses a larger chunk. */
+const LEGACY_CHUNK_BYTES = 512 * 1024;
 const jpegOf = (base64: string): Blob => new Blob([Uint8Array.from(atob(base64), c => c.charCodeAt(0))], { type: 'image/jpeg' });
 
 export class BrowserRecorder {
@@ -126,7 +128,7 @@ export class BrowserRecorder {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('could not capture the browser canvas');
-      let page: ImageBitmap | null = null, lastFrame = 0, lastCommit = 0, live = false;
+      let page: ImageBitmap | null = null, lastFrame = 0, lastCommit = 0, lastStreamed = 0, live = false;
       let commit = () => {};
       const paint = () => {
         if (!page) return;
@@ -155,7 +157,7 @@ export class BrowserRecorder {
       this.frames = 0;
       const warming = warmEncoder(type);
       if (this.source.stream) {
-        try { this.stopStream = await this.source.stream(frameRate, jpeg => show(new Blob([jpeg], { type: 'image/jpeg' }))); }
+        try { this.stopStream = await this.source.stream(frameRate, jpeg => { lastStreamed = performance.now(); show(new Blob([jpeg], { type: 'image/jpeg' })); }); }
         catch { this.stopStream = null; }
       }
       // The first frame sizes the video. A page that does not stream one soon is captured once.
@@ -207,18 +209,23 @@ export class BrowserRecorder {
       const interval = 1000 / frameRate;
       if (this.stopStream) {
         // A still page streams nothing. Its frame is repeated and, now and then, captured
-        // again, which also covers a stream that stopped while the page goes on.
-        let capturing = false;
+        // again. A capture that differs from the last one means the page moves while the
+        // stream is silent, so it is captured at the frame rate until it streams or stills.
+        let capturing = false, moving = false, captured = '';
         this.timer = setInterval(() => {
           if (recorder.state !== 'recording') return;
           const now = performance.now();
-          // Marks fade at the frame rate even when the page under them is still.
-          if ((this.indicators?.active() && now - lastCommit >= interval) || now - lastCommit >= IDLE_MS) paint();
-          if (now - lastFrame >= IDLE_MS && !capturing) {
+          // Marks fade at the frame rate even when the page under them is still. A tick may come a hair early.
+          if ((this.indicators?.active() && now - lastCommit >= interval * 0.9) || now - lastCommit >= IDLE_MS) paint();
+          if (lastStreamed > now - IDLE_MS) moving = false;
+          else if (!capturing && (moving || now - lastFrame >= IDLE_MS)) {
             capturing = true; lastFrame = now;
-            void this.source.capture().then(data => show(jpegOf(data)), () => {}).finally(() => { capturing = false; });
+            void this.source.capture().then(data => {
+              moving = data !== captured; captured = data;
+              if (moving) show(jpegOf(data));
+            }, () => { moving = false; }).finally(() => { capturing = false; });
           }
-        }, Math.max(interval, 100));
+        }, interval);
       } else {
         // Nothing streams here: capture the page at the frame rate, a request at a time.
         const next = async () => {
@@ -238,10 +245,10 @@ export class BrowserRecorder {
     if (this.recorder?.state === 'recording') { this.halt(); this.recorder.stop(); }
     return this.finish;
   }
-  async read(id: string, offset: number): Promise<{ base64: string; nextOffset: number; done: boolean }> {
+  async read(id: string, offset: number, maxBytes = LEGACY_CHUNK_BYTES): Promise<{ base64: string; nextOffset: number; done: boolean }> {
     if (!this.blob || this.result?.id !== id) throw new Error('recording not found in this browser tab');
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > this.blob.size) throw new Error('recording offset is outside the file');
-    const bytes = new Uint8Array(await this.blob.slice(offset, offset + BROWSER_RECORDING_CHUNK_BYTES).arrayBuffer());
+    const bytes = new Uint8Array(await this.blob.slice(offset, offset + Math.min(maxBytes, BROWSER_RECORDING_CHUNK_BYTES)).arrayBuffer());
     const parts: string[] = []; for (let i = 0; i < bytes.length; i += 8192) parts.push(String.fromCharCode(...bytes.subarray(i, i + 8192)));
     return { base64: btoa(parts.join('')), nextOffset: offset + bytes.length, done: offset + bytes.length === this.blob.size };
   }

@@ -457,6 +457,13 @@ and drops what it receives meanwhile; its software AV1 encoder froze the first
 encoder on a 64 × 64 canvas before the page's first frame is committed; the
 start still answers within a second.
 
+A still page streams nothing, so its last frame is repeated and the page is
+captured once a second. A capture that differs from the previous one means the
+page moves while the stream is silent: it is then captured at the frame rate,
+one request at a time, until a streamed frame arrives or two captures match.
+The CLI downloads a recording in 4 MiB chunks; a core from before this change
+reads 512 KiB at a time, which is what the desktop sends unless asked for more.
+
 `tests/e2e/browser-recording.test.ts` records an animated page through the
 shell's CLI and counts the frames with ffprobe. With `BOITE_E2E_SHELL_EXE` set
 to a release shell on 2026-10-04 (Windows 11, other agents' builds running):

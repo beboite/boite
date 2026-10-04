@@ -113,7 +113,7 @@ export async function browserCommand(args: string[], io: CliIo, client: CoreClie
     const fd = openSync(partial, 'wx'); let offset = 0, complete = false;
     try {
       while (offset < recording.bytes) {
-        const reply = await client.call('browser.command', { threadId, tabId: result.tabId, action: { kind: 'recording-read', recordingId: recording.id, offset } });
+        const reply = await client.call('browser.command', { threadId, tabId: result.tabId, action: { kind: 'recording-read', recordingId: recording.id, offset, maxBytes: BROWSER_RECORDING_CHUNK_BYTES } });
         const chunk = reply.value as { base64?: string; nextOffset?: number; done?: boolean };
         if (typeof chunk?.base64 !== 'string' || chunk.base64.length > Math.ceil(BROWSER_RECORDING_CHUNK_BYTES / 3) * 4) throw new Error('invalid recording chunk');
         const bytes = Buffer.from(chunk.base64, 'base64');

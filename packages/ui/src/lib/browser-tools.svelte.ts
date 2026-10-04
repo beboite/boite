@@ -78,7 +78,7 @@ export async function runBrowserAction(id: string, action: BrowserAction): Promi
         await recorder(id, action.indicators !== false && isExperimentEnabled('recording-indicators')).start(action.frameRate ?? recordingFrameRate(), action.codec ?? recordingCodec()); break;
       }
       case 'recording-stop': return { tabId: id, recording: await recorder(id).stop() };
-      case 'recording-read': value = await recorder(id).read(action.recordingId, action.offset); break;
+      case 'recording-read': value = await recorder(id).read(action.recordingId, action.offset, action.maxBytes); break;
       case 'recording-discard': recorder(id).discard(action.recordingId); break;
       default: {
         const reply = await automateBrowser(id, action);

@@ -67,6 +67,12 @@ pub fn remove(id: &str) {
     if let Some(cast) = CASTS.lock().ok().and_then(|mut casts| casts.remove(id)) { let _ = cast.worker.send(Message::Stop); }
 }
 
+/// Forgets every screencast, as when the UI reloads and closes all its tabs.
+pub fn remove_all() {
+    let Ok(mut casts) = CASTS.lock() else { return };
+    for (_, cast) in casts.drain() { let _ = cast.worker.send(Message::Stop); }
+}
+
 fn stop_local(view: &tauri::Webview, id: &str) -> bool {
     let Some(cast) = CASTS.lock().ok().and_then(|mut casts| casts.remove(id)) else { return false };
     let _ = cast.worker.send(Message::Stop);
