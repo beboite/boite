@@ -34,7 +34,8 @@ export const CONTROL_IDS = [
   'panel.changes',
   'panel.files',
   'panel.tasks',
-  'panel.trace'
+  'panel.trace',
+  'panel.device'
 ] as const;
 export type ControlId = (typeof CONTROL_IDS)[number];
 

@@ -109,6 +109,13 @@ export class AccountStore {
     return account;
   }
 
+  /** The top-level conversations that name this account: what removing it leaves without one. */
+  threadCount(accountId: AccountId): number {
+    this.require(accountId);
+    const row = this.core.journal.db.query('SELECT COUNT(*) AS count FROM threads WHERE account_id = ? AND parent_thread_id IS NULL').get(accountId) as { count: number };
+    return row.count;
+  }
+
   add(params: { providerId: ProviderId; label: string; useDefaultLocation?: boolean }): Account {
     const provider = this.core.providers.require(params.providerId);
     const id = newId('acc_');
@@ -148,10 +155,15 @@ export class AccountStore {
         throw refused('this account is used by a persistent agent; choose another account on its profile first', { accountId });
       }
     };
+    // A conversation that only names the account keeps it by name and asks for
+    // another one on its next send; a turn in flight is using the login itself.
+    const checkActiveTurns = () => {
+      if (this.core.scheduler.activeAccountIds().includes(accountId)) {
+        throw refused('this account is running a turn; stop it or wait for it before removing the account', { accountId });
+      }
+    };
     checkAgentReferences();
-    if (this.core.scheduler.activeAccountIds().includes(accountId) || this.core.journal.listThreads().some((thread) => thread.accountId === accountId)) {
-      throw refused('this account is used by a thread; remove its project before removing the account', { accountId });
-    }
+    checkActiveTurns();
     const directory = account.isolationDir;
     if (directory !== null && (resolve(directory) !== resolve(this.core.dataDir, 'accounts', accountId)
       || (existsSync(directory) && lstatSync(directory).isSymbolicLink()))) {
@@ -164,9 +176,11 @@ export class AccountStore {
       await this.core.procs.stopAndWait(probeThreadId(account.providerId, accountId));
       await this.checks.get(accountId)?.catch(() => {});
       checkAgentReferences();
-      // Cancelling yields to RPC work; a new thread may have claimed this account.
-      if (this.core.scheduler.activeAccountIds().includes(accountId) || this.core.journal.listThreads().some((thread) => thread.accountId === accountId)) {
-        throw refused('this account is used by a thread; remove its project before removing the account', { accountId });
+      // Cancelling yields to RPC work; a turn may have started on this account.
+      checkActiveTurns();
+      // A warm agent of an idle conversation still holds the login and its directory.
+      for (const { id } of this.core.journal.db.query('SELECT id FROM threads WHERE account_id = ?').all(accountId) as { id: string }[]) {
+        this.core.threads.releaseAgent(id);
       }
       if (directory !== null) {
         unshareProfile(directory);
@@ -763,6 +777,7 @@ export class AccountStore {
 
 export function registerAccountMethods(core: Core): void {
   core.router.register('accounts.list', () => core.accounts.list());
+  core.router.register('accounts.threads', (params) => ({ count: core.accounts.threadCount(params.accountId) }));
   core.router.register('accounts.add', (params) => {
     if (typeof params.label !== 'string') throw refused('an account needs a label', { field: 'label' });
     return core.accounts.add(params);

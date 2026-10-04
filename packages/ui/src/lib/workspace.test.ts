@@ -291,6 +291,31 @@ test('an unconnected core never opens a coincident local thread id', async () =>
   expect(a.error).toBe('Connect to this machine in Settings to open its thread.');
 });
 
+test.each(['draft', 'thread'] as const)('a delayed agent link cannot replace a later %s opened directly on the Store', async (next) => {
+  const { w, a, b } = await setup();
+  await w.select(a, 't-trace');
+  const self = { coreId: (await a.coordinationIdentity()).coreId, threadId: 't-trace' };
+  const remote = { coreId: (await b.coordinationIdentity()).coreId, threadId: 't-descriptors' };
+  const call = b.client!.call.bind(b.client);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.spyOn(b.client!, 'call').mockImplementation(async (method, params) => {
+    const result = await call(method, params);
+    if (method === 'collaboration.get') await gate;
+    return result;
+  });
+  const opening = w.openAgentThread(a, self, remote);
+  try {
+    if (next === 'draft') a.startDraft('p-boite');
+    else await a.open('t-scheduler');
+    release();
+    await opening;
+    expect(w.active).toBe(a);
+    expect(a.openThread?.id ?? null).toBe(next === 'draft' ? null : 't-scheduler');
+    expect(a.draft?.projectId ?? null).toBe(next === 'draft' ? 'p-boite' : null);
+  } finally { release(); await opening; }
+});
+
 
 test('a paired phone can follow an agent link without owner-only identity RPC access', async () => {
   const { w, a, b } = await setup();

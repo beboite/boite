@@ -33,6 +33,7 @@ import { scheduleThreadDeletionRetention } from './threads/deletion-retention.ts
 import { scheduleArtifactRetention } from './artifact-retention.ts';
 import { ArtifactPreviews } from './artifact-preview.ts';
 import { BrowserControl } from './browser.ts';
+import { MobileDevices } from './devices/control.ts';
 import { QuotaStore } from './quotas.ts';
 import { PluginStore } from './plugins.ts';
 import { Worktrees } from './worktree.ts';
@@ -157,6 +158,8 @@ export class Core {
   readonly stopArtifactRetention: () => Promise<void>;
   readonly artifactPreviews = new ArtifactPreviews(this);
   readonly browser = new BrowserControl(this);
+  /** Simulators and emulators open in conversations' Device panels. */
+  readonly devices = new MobileDevices(this);
 
   /**
    * The server tells the core what it alone can know. The default answers no
@@ -383,6 +386,7 @@ export class Core {
 
   async close(): Promise<void> {
     this.browser.close();
+    this.devices.stop();
     this.artifactPreviews.stop();
     this.threads.sideQuestions.close();
     await this.mergedPrArchive.close();

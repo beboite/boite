@@ -198,6 +198,13 @@ export function registerAgentMethods(core: Core): void {
   core.router.register('browser.host', (params, { connection }) => core.browser.host(params, connection));
   core.router.register('browser.remoteFrame', (params, { connection }) => core.browser.remoteFrame(params, connection));
   core.router.register('browser.remoteInput', (params, { connection }) => core.browser.remoteInput(params, connection));
+  core.router.register('devices.list', (params, { connection }) => core.devices.list(params, connection));
+  core.router.register('devices.sessions', (params, { connection }) => core.devices.sessions(params, connection));
+  core.router.register('devices.open', (params, { connection }) => core.devices.open(params, connection));
+  core.router.register('devices.frame', (params, { connection }) => core.devices.frame(params, connection));
+  core.router.register('devices.input', (params, { connection }) => core.devices.input(params, connection));
+  core.router.register('devices.screenshot', (params, { connection }) => core.devices.screenshot(params, connection));
+  core.router.register('devices.close', (params, { connection }) => core.devices.close(params, connection));
   core.router.register('browser.remoteStatus', (params, { connection }) => core.browser.remoteStatus(params, connection));
   core.router.register('browser.command', params => core.browser.command(params));
   core.router.register('browser.complete', (params, { connection }) => core.browser.complete(params, connection));
@@ -247,6 +254,7 @@ export function registerAgentMethods(core: Core): void {
   // panels on a thread the user had put away.
   const shut = (threadId: ThreadId): void => {
     core.browser.release(threadId);
+    core.devices.release(threadId);
     core.agents.forget(threadId);
     core.subscribers.closeAgents(threadId);
   };

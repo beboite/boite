@@ -422,8 +422,10 @@ export class Workspace {
 
   /** Resolve the authenticated core identity before using a machine-scoped thread id. */
   async openAgentThread(owner: Store, self: AgentAddress, address: AgentAddress): Promise<void> {
-    const generation = this.#generation;
+    const generation = ++this.#generation;
     const lifecycle = this.#lifecycle;
+    const active = this.active;
+    const navigation = active.navigationGeneration;
     let target: Store | undefined;
     if (address.coreId === self.coreId) target = owner;
     else {
@@ -435,7 +437,7 @@ export class Workspace {
         }
         catch { return null; }
       }));
-      if (generation !== this.#generation || lifecycle !== this.#lifecycle) return;
+      if (generation !== this.#generation || lifecycle !== this.#lifecycle || navigation !== active.navigationGeneration) return;
       target = identities.find(identity => identity?.coreId === address.coreId)?.store;
     }
     if (!target) { owner.error = strings.coordination.machineNotConnected; return; }

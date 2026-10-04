@@ -22,6 +22,7 @@
   import DelegationSurface from './DelegationSurface.svelte';
   import AgentMessagesSurface from './AgentMessagesSurface.svelte';
   import ChangesSurface from './ChangesSurface.svelte';
+  import DeviceSurface from './DeviceSurface.svelte';
   import FileSurface from './FileSurface.svelte';
   import FilesSurface from './FilesSurface.svelte';
   import Menu from './Menu.svelte';
@@ -65,40 +66,6 @@
     if (kind === 'browser' && !inShell) return !!store.openThread && (browserBridge.paints || remoteLive.has(store.threadKey(store.openThread.id)));
     return availableTo(kind, inShell, store.owner);
   }
-
-  // What the pages report. Only the thread showing has browser views, because a
-  // thread that leaves takes them with it in the effect below, so one listener
-  // on the bound panel is the whole story.
-  $effect(() => {
-    const bound = panel;
-    return browserBridge.on((event) => {
-      if (event.type === 'new-window') {
-        // A page asked for a window of its own and was refused one: it opens
-        // beside the tab that asked, which is where the user is looking, and in
-        // its profile: the page that asked is signed in there.
-        const opener = bound.surfaces.find((surface) => surface.id === event.id);
-        bound.open('browser', event.url, opener ? (opener.profile ?? DEFAULT_BROWSER_PROFILE) : undefined);
-      } else if (event.type === 'url') {
-        // A blank tab is a tab with no address, not one pointed at `about:blank`.
-        if (event.url !== 'about:blank') bound.update(event.id, { url: event.url });
-      } else if (event.type === 'title') {
-        bound.update(event.id, { title: event.title });
-      } else if (event.type === 'failed') {
-        console.warn(`[browser] the surface ${event.id} refused: ${event.reason}`);
-      }
-    });
-  });
-
-  // A browser tab that left the strip takes its view with it. The surface's own
-  // teardown only parks the view, because a tab keeps its page while it is hidden.
-  let known = new Set<string>();
-  $effect(() => {
-    const live = new Set(
-      surfaces.filter((surface) => surface.kind === 'browser').map((surface) => surface.id)
-    );
-    for (const id of known) if (!live.has(id)) browserBridge.destroy(id);
-    known = live;
-  });
 
   function measure(): void {
     const node = tabs;
@@ -440,6 +407,10 @@
       {#key active.id}
         <FileSurface {store} surface={active} {panel} />
       {/key}
+    {:else if active?.kind === 'device'}
+      {#if store.openThread}
+        {#key store.threadKey(store.openThread.id)}<DeviceSurface {store} threadId={store.openThread.id} />{/key}
+      {/if}
     {:else if active?.kind === 'tasks'}
       <TasksSurface {store} />
     {:else}

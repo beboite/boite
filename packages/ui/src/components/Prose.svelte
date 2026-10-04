@@ -9,6 +9,7 @@
   import { executableLink, localFileDirectory, openLocalFile, openChatFile } from '../lib/local-files';
   import { glides } from '../lib/motion';
   import TypingIndicator from './TypingIndicator.svelte';
+  import { selectionClicks } from '../lib/selection-clicks';
 
   let { text, live = false, typing = false, bubble = false, store, threadId }: { text: string; live?: boolean; typing?: boolean; bubble?: boolean; store?: Store; threadId?: string } = $props();
   let selected = $state<{ path: string; line?: number } | null>(null);
@@ -34,7 +35,7 @@
       if (opening) return;
       opening = true;
       void (directLinks ? openChatFile : openLocalFile)(directory, anchor.dataset.filePath).catch(reason => {
-        if (store) store.error = reason instanceof Error ? reason.message : String(reason);
+        store?.reportError(reason, 'minor');
       }).finally(() => { opening = false; });
       return;
     }
@@ -94,7 +95,7 @@
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div class="prose" class:live class:answer-bubble={bubble && (blocks.length > 0 || typing)} data-testid="text-part" bind:this={host} onclick={follow}>
+<div class="prose" class:live class:answer-bubble={bubble && (blocks.length > 0 || typing)} data-testid="text-part" bind:this={host} use:selectionClicks onclick={follow}>
   {#each blocks as block, index (index)}
     <!-- A streaming answer shows finished paragraphs only (`ParagraphScan`): every block here is final and kept. -->
     <div class="paragraph" data-testid="paragraph">{@html renderBlock(block, rich)}</div>

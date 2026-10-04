@@ -5,6 +5,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(test)]
 use std::sync::Mutex;
 mod attachments;
+#[cfg(test)]
+mod acl;
 mod attachment_download;
 mod browser;
 mod browser_control;
@@ -76,13 +78,18 @@ fn acquire_after_update(directory: &std::path::Path) -> std::io::Result<Option<s
     }
 }
 
+// One expansion: on macOS generate_context also embeds the application plist.
+fn shell_context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
+}
+
 pub fn run() {
     platform::before_webview();
     // The channel is read here and nowhere else: the compiled bundle identifier
     // is the only thing that says which install this executable is. Nothing
     // from here to the end of this block may panic: there is no window yet,
     // so a panic here is the app not starting with nothing the user can see.
-    let context = tauri::generate_context!();
+    let context = shell_context();
     let channel = Channel::of_identifier(&context.config().identifier);
     let directory = resolve_data_dir(channel);
     let _instance = match acquire_after_update(&directory) {
@@ -181,7 +188,7 @@ pub fn run() {
             // used to wait behind it for no reason (bench/startup.ts).
             start_core(&handle);
             #[cfg(target_os = "macos")]
-            window::install_macos_menu(&handle)?;
+            window::install_macos_menu(&handle, channel)?;
             let window = build_main_window(&handle, channel)?;
             if !hidden() {
                 // The window works without a tray: closing it then quits.

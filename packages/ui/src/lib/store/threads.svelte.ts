@@ -381,8 +381,12 @@ export class Threads {
     } catch (error) {
       if (newest()) {
         if (!loaded && error instanceof RpcFailure && (error.code === RpcErrorCode.NotFound || error.code === RpcErrorCode.Refused)) {
-          if (previousThread && previousThread.id !== threadId) this.#show(previousThread, navigate);
-          else this.openThread = null;
+          if (previousThread && previousThread.id !== threadId
+            && summaryRead.changes.get(previousThread.id) !== null) this.#show(previousThread, navigate);
+          else {
+            this.openThread = null;
+            if (previousThread) s.startDraft(previousThread.projectId, { refresh: false });
+          }
           // Rollback can remember the rejected target: discard it afterwards.
           this.readingThreads.delete(threadId);
           this.readingPositions.delete(threadId);
@@ -666,19 +670,15 @@ export class Threads {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
     if (!client) return;
+    const navigationGeneration = this.openGeneration;
     try {
       await client.call('threads.archive', { threadId, archived: true, ...(onlyIfIdle ? { onlyIfIdle: true } : {}) });
       if (!this.ctx.currentClient(client, clientGeneration)) return;
       this.ctx.threadReads.change(threadId, null);
       this.threads = this.threads.filter((t) => t.id !== threadId);
       this.ctx.requests.dropRequestsOf(threadId);
-      const wasOpen = this.openThread?.id === threadId;
-      if (wasOpen) this.openThread = null;
+      if (this.openThread?.id === threadId && this.openGeneration === navigationGeneration) this.ctx.store.startDraft(this.openThread.projectId, { refresh: false });
       this.forgetThread(threadId);
-      if (wasOpen) {
-        await this.unsubscribe();
-        await this.ctx.store.openWhereLeft();
-      }
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     }
@@ -718,16 +718,14 @@ export class Threads {
   async removed(threadId: ThreadId): Promise<void> {
     this.ctx.threadReads.change(threadId, null);
     const s = this.ctx.store;
+    const openingOther = this.loadingThreadId !== null && this.loadingThreadId !== threadId;
     this.threads = this.threads.filter(t => t.id !== threadId);
     forgetArchivedThread(s, threadId);
     this.ctx.requests.dropRequestsOf(threadId);
-    this.forgetThread(threadId);
     if (this.#openTarget === threadId) { this.openGeneration++; this.#openTarget = null; }
     if (s.delegationThread?.id === threadId) s.delegationThread = null;
-    if (this.openThread?.id !== threadId) return;
-    this.openThread = null;
-    await this.unsubscribe();
-    await s.openWhereLeft();
+    if (this.openThread?.id === threadId && !openingOther) s.startDraft(this.openThread.projectId, { refresh: false });
+    this.forgetThread(threadId);
   }
 
   // -------------------------------------------------------------------------

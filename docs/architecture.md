@@ -250,6 +250,11 @@ Unmeasured messages start at 80 px; measurements above the reading position
 adjust `scrollTop`. The same UI runs on local RPC, remote RPC and the in-memory
 client. [Machines](machines.md) describes connection and routing behavior.
 
+Minor file-opening, download and clipboard errors dismiss after five seconds.
+Unknown errors, connection failures and core or turn errors stay until dismissed.
+Error sources explicitly mark minor failures; repeating one restarts its delay.
+Switching between desktop and phone layouts preserves the current error's expiry.
+
 ## Module boundaries and complexity
 
 Driver entry files compose protocol modules. Framing, sessions, turns, model

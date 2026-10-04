@@ -20,6 +20,7 @@ import { resolveDataDir } from './paths.ts';
 import { agentCommand } from './agents/cli.ts';
 import { workflowCommand } from './workflow-cli.ts';
 import { browserCommand, BROWSER_HELP } from './browser-cli.ts';
+import { deviceCommand } from './device-cli.ts';
 import { agentsCommand, AgentsUsage, WAIT_MAX_S } from './agents-cli.ts';
 import { parse, requiredText, Usage, type Parsed } from './cli-args.ts';
 
@@ -47,6 +48,8 @@ export const USAGE = `usage: boite <command> [args] [--json]
   diff [file]                    open the changes, or one file's diff
   browse <url>                   open a url in the panel's browser
   browser help                   inspect, test and capture the built-in browser
+  device help                    open an iOS Simulator or Android emulator in the
+                                 user's Device panel, capture and drive it
   pr list|refresh                this conversation's linked pull requests
   pr link|unlink <url>           attach or remove a PR link; does not change GitHub
   preview <file.html>             open a local HTML artifact with its assets
@@ -242,6 +245,10 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       if (rest[0] === 'help') { print([BROWSER_HELP], { help: BROWSER_HELP }); return; }
       const result = await browserCommand(rest, io, client, threadId);
       print([JSON.stringify(result, null, 2)], result);
+    },
+    device: async () => {
+      const result = await deviceCommand(rest, io, client, threadId, parsed.timeout);
+      print(result.lines, result.value);
     },
     logs: async () => {
       if (rest.length > 0) throw new Usage('logs takes --limit, --level and --thread filters');

@@ -536,6 +536,8 @@ export function startServer(options: ServerOptions): RunningServer {
       name.startsWith('panel.') ||
       // Whether that thread's shared browser tab exists.
       name === 'browser.remoteChanged' ||
+      // That thread's Device panel sessions.
+      name === 'devices.changed' ||
       // Every grandchild's record, command line included: only that thread's
       // trace panel reads it.
       name.startsWith('process.');
