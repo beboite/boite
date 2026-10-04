@@ -23,6 +23,11 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
   ctx.bus.onState(state => { if (state !== 'ready') release(); });
   ctx.bus.on('thread.updated', thread => { if (thread.archived) release(thread.id); });
   ctx.bus.on('thread.removed', ({ threadId }) => release(threadId));
+  // The desktop discards the recordings an agent left running when a turn that ran ends.
+  ctx.bus.on('turn.finished', turn => {
+    const host = hosts.get(turn.threadId);
+    if (turn.startedAt && host?.agent && host.expires >= Date.now()) ctx.bus.deliver('browser.turnFinished', { threadId: turn.threadId });
+  });
   const live = (threadId: string) => (hosts.get(threadId)?.expires ?? 0) >= Date.now();
   const showing = (threadId: string) => live(threadId) && shared.has(threadId) && !!hosts.get(threadId)?.live;
   function changed(threadId: string) {

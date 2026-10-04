@@ -567,10 +567,14 @@ checks at iPhone width run in Chromium. They do not establish behavior on a
 physical iPhone or Safari, including keyboard, backgrounding and network
 handover.
 
-Browser recordings are H.264 MP4 when the desktop engine encodes it (WebView2
-does), which every iPhone plays, else WebM. A video the device reports it
-cannot play, such as WebM on an older iPhone, shows a download button instead
-of a black frame; a video that fails while loading also offers it.
+Browser recordings are MP4 in the codec chosen on the desktop. H.264, the
+default, plays everywhere. HEVC plays in iPhone Safari, and on a desktop only
+with a decoder: WebView2 on Windows uses the HEVC Video Extensions and a GPU
+that decodes it. AV1 plays in desktop Chromium, and on an iPhone only with
+hardware decoding (iPhone 15 Pro and later). A video the device reports it
+cannot play, such as AV1 on an older iPhone, shows a download button instead
+of a black frame; a video that fails while loading also offers it. The
+desktop's review dialog does the same.
 
 ## The limits
 

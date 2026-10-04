@@ -395,8 +395,8 @@ preview changes. Totals exclude precompressed `.br` and `.gz` copies, as
 | Browser tools and remote review | 478,371 bytes | 3,835,773 bytes |
 
 The added dialogs, browser controls, recording encoder support and translations
-add 84,415 bytes (2.25%) to the complete UI. The WebM duration parser loads only
-when finalizing a recording. The total UI budget increases by 84,000 bytes to
+add 84,415 bytes (2.25%) to the complete UI. The WebM duration parser, removed
+since recordings became MP4 only, loaded only when finalizing a recording. The total UI budget increases by 84,000 bytes to
 3,880,000, leaving about 44 KB of headroom; entry and core budgets are unchanged.
 
 ### Phone navigation and remote viewport controls
@@ -441,6 +441,98 @@ of added latency, and from 1.6 to 3.3 with 200 ms
 desktop's capture and shrink take 100 to 140 ms a frame. The phone decodes each
 frame before showing it, so a frame never appears half loaded; that decoding
 was not measured on an iPhone.
+
+## Browser recordings
+
+A recording used to ask the tab for a screenshot every 125 ms and wait for
+it: 6.5 frames a second, at three minutes and 50 MiB at most. The shell now
+subscribes to the page's screencast and acknowledges each frame on a worker
+thread at the chosen rate, so Chromium never sends faster than 30 or 60 frames
+a second and never more than two at once. The JPEG reaches the UI as raw bytes
+over a Tauri channel, without base64 or the core. The UI decodes only the
+newest frame, draws it on a canvas and asks the MediaRecorder for exactly that
+frame. WebView2's H.264 encoder took about 0.7 s to start once per process
+and dropped what it received meanwhile; its software AV1 encoder froze the first
+1.1 to 2.6 s of a take. Opening a page therefore starts the encoder of the
+desktop's codec on a 64 × 64 canvas, once per process, and so does picking a
+codec in the menu. A take never waits for that warm-up: it records at once and
+warms its own codec for the next takes. Its first frame is one capture of the
+page, or a streamed frame if one arrives meanwhile; a start no longer waits
+1.5 s for a still page to stream.
+
+Time from `recording-start` to its answer, first take of a fresh shell, the
+page open for 6 s before, on 2026-10-04 (Windows 11, Edge WebView2 154). The
+desktop's codec is H.264, so only that one was warmed at page open; AV1 started
+cold. Before is the release shell before this change, whose start waited for
+the warm-up and for a streamed frame:
+
+| Page | Codec | Before | After | After: frames, longest gap |
+|---|---|---|---|---|
+| 358 × 748, animated | H.264 | 550 ms | 34 ms | 93 in 3 s, 43 ms |
+| 358 × 748, animated | AV1 | 547 ms | 37 ms | 93 in 3 s, 40 ms |
+| 358 × 748, still | H.264 | 480 ms | 25 ms | 5 in 3 s, 1023 ms |
+| 358 × 748, still | AV1 | 482 ms | 29 ms | 5 in 3 s, 1023 ms |
+| 1920 × 1080, animated | H.264 | 584 ms | 51 ms | 150 in 5 s, 133 ms |
+| 1920 × 1080, animated | AV1 | 552 ms | 60 ms | 152 in 5 s, 45 ms |
+
+The cold AV1 takes kept their frame rate from the first second. A still page
+repeats its frame once a second by design. Command, per row:
+`BOITE_E2E_SHELL_EXE=<release shell> BOITE_RECORDING_CODEC=h264|av1
+BOITE_RECORDING_SECONDS=3|5 [BOITE_RECORDING_STILL=1]
+[BOITE_RECORDING_PRESET=desktop-1920x1080] bun test tests/e2e/browser-recording.test.ts`.
+
+A still page streams nothing, so its last frame is repeated and the page is
+captured once a second. A capture that differs from the previous one means the
+page moves while the stream is silent: it is then captured at the frame rate,
+one request at a time, until a streamed frame arrives or two captures match.
+The CLI downloads a recording in 4 MiB chunks; a core from before this change
+reads 512 KiB at a time, which is what the desktop sends unless asked for more.
+
+`tests/e2e/browser-recording.test.ts` records an animated page through the
+shell's CLI and counts the frames with ffprobe. With `BOITE_E2E_SHELL_EXE` set
+to a release shell on 2026-10-04 (Windows 11, other agents' builds running):
+
+| Requested | Length | Measured | Frame gap median / p95 / max | Size | Shell tree CPU, page alone |
+|---|---|---|---|---|---|
+| 30 fps | 10 s | 30.0 fps | 31 / 40 / 43 ms | 8.2 MiB/min | 68 %, 33 % of one core |
+| 60 fps | 10 s | 60.0 fps | 19 / 21 / 25 ms | 14.8 MiB/min | 106 %, 33 % |
+| 30 fps | 120 s | 30.0 fps | 31 / 42 / 50 ms | 8.1 MiB/min | 79 %, 35 % |
+| 60 fps | 240 s | 58.2 fps | 18 / 25 / 1033 ms | 14.4 MiB/min | 100 %, 38 % |
+
+The 240 s take's 58 MiB stopped and downloaded in 12.2 s. Its slow frames
+came between 145 and 190 s, while the machine was loaded at 60 to 100 %.
+
+The same test per codec, 30 s takes of the 358 × 748 page on 2026-10-04
+(Windows 11, Edge WebView2 154, Radeon RX 6750 XT):
+
+| Codec | Requested | Measured | Frame gap median / p95 / max | Size | Shell tree CPU, page alone |
+|---|---|---|---|---|---|
+| H.264 | 30 fps | 30.0 fps | 32 / 39 / 78 ms | 8.1 MiB/min | 67 %, 36 % of one core |
+| H.264 | 60 fps | 59.9 fps | 19 / 23 / 55 ms | 14.8 MiB/min | 99 %, 82 % |
+| AV1 | 30 fps | 30.0 fps | 32 / 41 / 52 ms | 4.4 MiB/min | 70 %, 35 % |
+| AV1 | 60 fps | 58.7 fps | 18 / 24 / 108 ms | 7.5 MiB/min | 112 %, 34 % |
+| HEVC | 30 or 60 | refused | | | |
+
+AV1 is half the size of H.264 for about 15 points more CPU at 60 fps; WebView2
+encodes it in software. Every file decoded whole with ffmpeg and played in the
+review dialog and in chat. WebView2 154 reports no HEVC for MediaRecorder in
+MP4, `hvc1` or `hev1`, even with its `PlatformHEVCEncoderSupport` feature on,
+so HEVC is greyed out in the menu and refused by the CLI. An HEVC MP4 made by
+ffmpeg's `hevc_amf` encoder played in chat on this PC; an MPEG-4 Part 2 MP4
+showed the chat's download fallback. Encoding HEVC would need WebCodecs, which
+reports it only behind that feature, and an MP4 muxer in the UI.
+
+A noise page at 1920 × 1080 and 60 fps grows 88 MiB a minute: H.264 stopped
+by itself after 62.8 s at 92.3 MiB, below the 100 MB cap that leaves room for
+the container. The file decoded whole, the dialog played it and gave the
+reason, and the CLI result's `note` named the limit. Stopping and downloading
+took 8.4 s.
+
+`BOITE_RECORDING_SECONDS`, `BOITE_RECORDING_FPS`, `BOITE_RECORDING_CODEC` and
+`BOITE_RECORDING_KEEP` set the length, the rate, the codec and a folder that
+keeps the video. `BOITE_RECORDING_PRESET` sizes the page,
+`BOITE_RECORDING_NOISE=1` records noise to reach the cap, and
+`BOITE_RECORDING_PLAY` lists other videos (`;`-separated) to play in chat.
 
 ## Benches
 

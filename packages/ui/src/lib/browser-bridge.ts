@@ -40,6 +40,8 @@ export interface BrowserBridge {
   /** Whether this bridge paints anything at all. False keeps the slot's muted line. */
   readonly paints: boolean;
   protocol?(id: string, method: string, params: Record<string, unknown>): Promise<unknown>;
+  /** Streams the page's frames as JPEG bytes, at most `frameRate` a second, until the returned stop runs. */
+  screencast?(id: string, frameRate: number, frame: (jpeg: ArrayBuffer) => void): Promise<() => Promise<void>>;
   viewport?(id: string): { width: number; height: number } | null;
   isReady(id: string): boolean;
   /** `profile` is a profile id or `private`; absent opens the default profile. Fixed for the view's life. */

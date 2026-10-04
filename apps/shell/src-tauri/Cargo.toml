@@ -58,6 +58,8 @@ webview2-com = "0.38"
 windows = "0.61"
 # `implement`, for the environment wrapper that opens a named browser profile.
 windows-core = "0.61"
+# Screencast frames arrive as base64 JPEG; the recorder receives raw bytes.
+base64 = "0.22"
 # A toast when a thread finishes or asks something while the window is not the
 # one the user is looking at. The UI decides when; Rust carries the toast and
 # hands a click back as `notification://open`, which the notification plugin

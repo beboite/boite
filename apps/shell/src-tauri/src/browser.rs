@@ -313,6 +313,8 @@ pub fn close_all<R: Runtime>(app: &AppHandle<R>) {
         picks.clear();
     }
     surfaces().shown.clear();
+    #[cfg(windows)]
+    crate::platform::browser_screencast::remove_all();
     for (label, view) in app.webviews() {
         if !label.starts_with(LABEL_PREFIX) {
             continue;
@@ -806,7 +808,10 @@ pub async fn browser_highlight(app: AppHandle, webview: Webview, id: String, req
 pub async fn browser_destroy(app: AppHandle, webview: Webview, id: String) -> Result<(), String> {
     only_main(&webview)?;
     #[cfg(windows)]
-    crate::platform::browser_diagnostics::remove(&id);
+    {
+        crate::platform::browser_diagnostics::remove(&id);
+        crate::platform::browser_screencast::remove(&id);
+    }
     cancel_pick(&id);
     if let Ok(mut highlights) = HIGHLIGHTS.lock() { highlights.remove(&id); }
     surfaces().want(&label_of(&id)?, false);

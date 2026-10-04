@@ -72,3 +72,19 @@ test('a share-only desktop serves viewers, refuses the agent and says when its t
     expect(changes).toEqual([true, false]);
   } finally { client.close(); }
 });
+
+test('the agent-control host hears each turn that ran end, as from the real core', async () => {
+  const client = new FakeClient({ delayMs: 0 }), heard: string[] = [];
+  client.on('browser.turnFinished', ({ threadId }) => heard.push(threadId));
+  try {
+    await client.connect();
+    const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
+    await client.call('browser.host', { threadId: thread.id, enabled: true, allowAgentControl: true });
+    await client.call('turns.start', { threadId: thread.id, prompt: 'record' }); await client.settled();
+    expect(heard).toEqual([thread.id]);
+    // A desktop that only shares the browser runs no agent recording.
+    await client.call('browser.host', { threadId: thread.id, enabled: true, allowAgentControl: false, remote: true });
+    await client.call('turns.start', { threadId: thread.id, prompt: 'again' }); await client.settled();
+    expect(heard).toEqual([thread.id]);
+  } finally { client.close(); }
+});

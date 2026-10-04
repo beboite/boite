@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "@boite/contracts": "workspace:*",
-    "@fix-webm-duration/fix": "1.0.1",
     "@lucide/svelte": "1.48.0",
     "@tauri-apps/api": "2.12.0",
     "@tauri-apps/plugin-dialog": "2.7.3",
