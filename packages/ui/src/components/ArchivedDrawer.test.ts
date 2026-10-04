@@ -199,7 +199,9 @@ test('the drawer reads the project\'s archived threads on opening, and a restore
   running = mount(ArchivedDrawer, { target: document.body, props: { store: store as never, project: project({ archivedThreads: 2 }) } });
   flushSync();
   const toggle = document.querySelector<HTMLButtonElement>('[data-testid=archived-drawer-toggle]')!;
-  expect(toggle.textContent).toContain('Archived conversations (2)');
+  // The count sits after the label, as on every fold, never inside it.
+  expect(toggle.querySelector('.label')?.textContent).toBe('Archived conversations');
+  expect(toggle.querySelector('.fold-count')?.textContent).toBe('2');
   // Folded, nothing is read.
   expect(call).not.toHaveBeenCalled();
 
@@ -224,7 +226,8 @@ test('the archived projects fold lists them and restores one in one click', () =
   });
   flushSync();
   const toggle = document.querySelector<HTMLButtonElement>('[data-testid=archived-projects-toggle]')!;
-  expect(toggle.textContent).toContain('Archived projects (1)');
+  expect(toggle.querySelector('.label')?.textContent).toBe('Archived projects');
+  expect(toggle.querySelector('.fold-count')?.textContent).toBe('1');
   expect(document.querySelector('[data-testid=archived-project-restore]')).toBeNull();
   toggle.click();
   flushSync();

@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { BackgroundTaskObservation } from '@boite/contracts';
-  import { fill, strings } from '../lib/strings';
-  import { exactTime } from '../lib/format';
+  import { strings } from '../lib/strings';
+  import { count, exactTime } from '../lib/format';
   let { tasks }: { tasks: BackgroundTaskObservation[] } = $props();
   let recent = $derived([...tasks].reverse());
   const label = (task: BackgroundTaskObservation) => task.reason === 'core-restarted' ? strings.chat.backgroundRestarted
@@ -9,8 +9,8 @@
 </script>
 
 {#if recent.length}
-  <details class="history" data-testid="background-history">
-    <summary>{fill(strings.chat.backgroundHistory, { count: String(recent.length) })}</summary>
+  <details class="history disclosure" data-testid="background-history">
+    <summary><span class="ui-label">{strings.chat.backgroundHistory}</span> <span class="fold-count ui-label">{count(recent.length)}</span></summary>
     <ul>
       {#each recent as task (`${task.providerId}:${task.sessionGeneration}:${task.parentTurnId}:${task.id}`)}
         <li data-state={task.state}>
@@ -24,8 +24,8 @@
 
 <style>
   .history { flex: none; width: min(calc(100% - 40px), var(--content)); margin: 0 auto 8px; font-size: var(--text-xs); color: var(--color-muted-foreground); }
-  summary { cursor: pointer; min-height: 32px; padding: 8px 0; }
-  ul { max-height: 220px; overflow: auto; margin: 0; padding: 0; list-style: none; border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+  .history > summary { font-size: var(--text-xs); }
+  ul { max-height: 220px; overflow: auto; margin: 4px 0 0; padding: 0; list-style: none; border: 1px solid var(--color-border); border-radius: var(--radius-md); }
   li { padding: 8px 10px; }
   li + li { border-top: 1px solid var(--color-border); }
   .description { color: var(--color-foreground); overflow-wrap: anywhere; }

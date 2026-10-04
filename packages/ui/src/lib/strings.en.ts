@@ -612,11 +612,10 @@ export const strings = {
     archiveProject: 'Archive project',
     refreshIcon: 'Refresh icon',
     projectArchivedToast: 'Archived {project}',
-    archivedProjects: 'Archived projects ({count})',
+    archivedProjects: 'Archived projects',
     restoreProject: 'Restore',
     /** The drawer under a project's rows: its archived threads, opened for this session only. */
-    archivedThreadsOne: 'Archived conversations (1)',
-    archivedThreadsMany: 'Archived conversations ({count})',
+    archivedThreads: 'Archived conversations',
     restoreThread: 'Restore',
     removeProject: 'Remove from Boite',
     /** On a project whose folder was deleted, moved or renamed outside Boite. */
@@ -947,7 +946,7 @@ export const strings = {
     finishedAt: 'done {time}',
     /** `{what}` is a list of `backgroundOne` and `backgroundMany` joined by `backgroundJoin`. */
     backgroundRunning: '{what} still running',
-    backgroundHistory: 'Native task history ({count})',
+    backgroundHistory: 'Native task history',
     forkOrigin: 'Forked from', forkReturn: 'Send conclusions back', forkSummary: 'Conclusions for the original conversation',
     forkReturned: 'Conclusions sent to the original conversation', forkSourceUnavailable: 'Original conversation unavailable',
     forkNative: 'Native context preserved', forkSeeded: 'Visible history copied',

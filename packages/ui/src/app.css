@@ -307,6 +307,14 @@
   --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E");
   --input: 34px;
   --touch-target: 44px;
+  /* Folded lists (FoldHeader): chevron, gap, label. Rows inside a fold start
+     at its indent so they line up under the label, not under the chevron. */
+  --fold-caret: 12px;
+  --fold-gap: 7px;
+  --fold-inset: 10px;
+  --fold-inset-nested: 6px;
+  --fold-indent: calc(var(--fold-inset) + var(--fold-caret) + var(--fold-gap));
+  --fold-indent-nested: calc(var(--fold-inset-nested) + var(--fold-caret) + var(--fold-gap));
   /* Shared alignment for tool, reasoning and answered-question disclosures. */
   --activity-gap: 8px;
   --activity-padding: 4px;
@@ -1072,6 +1080,28 @@ details.disclosure[open] > summary {
 
 details.disclosure[open] > summary::before {
   transform: rotate(90deg);
+}
+
+/* The chevron of a fold drawn with Lucide's icon instead of a native summary:
+   right when shut, down when open. One rule so every fold turns alike. */
+.fold-caret {
+  display: inline-flex;
+  flex: none;
+  color: var(--color-subtle);
+  transition: transform var(--dur-2) var(--ease-out-quint);
+}
+
+.fold-caret.open {
+  transform: rotate(90deg);
+}
+
+/* How many rows a fold holds, after its label rather than in parentheses. */
+.fold-count {
+  flex: none;
+  color: var(--color-subtle);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Native details retain their keyboard and accessibility behavior. Browsers

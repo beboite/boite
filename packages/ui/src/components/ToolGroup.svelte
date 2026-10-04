@@ -116,7 +116,7 @@
       {#if issues}
         <span class="status" data-testid="tool-group-issues" title={issueLabel}><TriangleAlert size={12} strokeWidth={1.75} /><span class="ui-label">{issues}</span></span>
       {/if}
-      <span class="caret" class:open aria-hidden="true"><ChevronRight size={12} strokeWidth={2} /></span>
+      <span class="fold-caret" class:open aria-hidden="true"><ChevronRight size={12} /></span>
     </button>
     <div class="fold" class:open inert={!open}>
       <div class="clip">
@@ -208,17 +208,6 @@
     color: var(--color-subtle);
     font-size: var(--text-xs);
     font-variant-numeric: tabular-nums;
-  }
-
-  .caret {
-    display: inline-flex;
-    flex: none;
-    color: var(--color-subtle);
-    transition: transform var(--dur-2) var(--ease-out-quint);
-  }
-
-  .caret.open {
-    transform: rotate(90deg);
   }
 
   .pulse {

@@ -55,7 +55,7 @@
     {#if live}
       <span class="dot" aria-label={strings.chat.streaming}></span>
     {/if}
-    {#if !empty}<span class="caret" class:open={shown} aria-hidden="true"><ChevronRight size={12} strokeWidth={2} /></span>{/if}
+    {#if !empty}<span class="fold-caret" class:open={shown} aria-hidden="true"><ChevronRight size={12} /></span>{/if}
   </button>
 
   <div class="fold" class:open={shown} inert={!shown}>
@@ -92,16 +92,6 @@
 
   .head:hover:not(:disabled) {
     color: var(--color-foreground);
-  }
-
-  .caret {
-    display: inline-flex;
-    color: var(--color-subtle);
-    transition: transform var(--dur-2) var(--ease-out-quint);
-  }
-
-  .caret.open {
-    transform: rotate(90deg);
   }
 
   .label {

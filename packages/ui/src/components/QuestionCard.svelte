@@ -104,7 +104,7 @@
       {#if answer.attachments?.length}
         <span class="given-files" data-testid="question-answer-files" title={fileNames(answer)}><Paperclip size={12} strokeWidth={2} />{answer.attachments.length}</span>
       {/if}
-      <span class="caret" class:open aria-hidden="true"><ChevronRight size={12} strokeWidth={2} /></span>
+      <span class="fold-caret" class:open aria-hidden="true"><ChevronRight size={12} /></span>
     </button>
     <div class="fold" class:open inert={!open}>
       <div class="clip">
@@ -274,8 +274,6 @@
   .answered-row:hover:not(:disabled) { background: var(--color-surface-2); }
   .answered-row:active:not(:disabled) { transform: none; }
   .answered-row .glyph { flex: none; width: var(--activity-glyph); justify-content: center; }
-  .caret { display: inline-flex; flex: none; color: var(--color-subtle); transition: transform var(--dur-2) var(--ease-out-quint); }
-  .caret.open { transform: rotate(90deg); }
   .fold { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows var(--dur-3) var(--ease-out-quint), opacity var(--dur-3) var(--ease-out-quint); }
   .fold.open { grid-template-rows: 1fr; opacity: 1; }
   .clip { min-height: 0; overflow: hidden; }
