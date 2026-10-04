@@ -12,6 +12,8 @@ import { invalidParams, messageOf, refused } from './errors.ts';
 import { newId } from './ids.ts';
 import { assertDriverRunnable } from './drivers/index.ts';
 import type { RpcContext } from './router.ts';
+import type { ProviderProbe } from './providers/probe.ts';
+import type { ChildRoute } from './delegation/routes.ts';
 
 interface DataRow { data: string }
 interface StepRow { thread_id: string; run_id: string; step_key: string }
@@ -142,6 +144,17 @@ export class Workflows {
     if (principal === 'agent' && run.launchedBy !== 'agent') throw refused('the user started this run; an agent changes only the runs it started');
     return run;
   }
+  /** Every step that names a model or a level runs on a route that exists and the owner allows, checked before anything starts. */
+  private checkRoutes(rootId: string, steps: WorkflowStepPlan[], field = 'steps'): void {
+    steps.forEach((step, i) => {
+      if (step.model === undefined && step.effort === undefined) return;
+      try {
+        this.core.delegation.resolve(rootId, { profileId: step.profile ?? null, ...(step.model === undefined ? {} : { model: step.model }), ...(step.effort === undefined ? {} : { effort: step.effort }) });
+      } catch (error) {
+        throw invalidParams(`${field}[${i}] (${step.id}): ${messageOf(error)}`);
+      }
+    });
+  }
   private team(rootId: string): DelegationConfig {
     const config = this.core.delegation.config(rootId);
     if (config.enabled && config.paused) throw refused('subagents are paused for this thread; the owner resumes them in Subagents > Settings');
@@ -171,6 +184,7 @@ export class Workflows {
     const root = this.rootOf(threadId);
     const config = this.team(root.id);
     const checked = planError(() => checkPlan(plan, { profiles: config.profiles.map(p => p.id) }));
+    this.checkRoutes(root.id, checked.steps);
     return { levels: workflowLevels(checked.steps.map(s => ({ id: s.id, after: s.deps }))) };
   }
 
@@ -186,6 +200,7 @@ export class Workflows {
     if (existing) return this.view(existing);
     const config = this.team(root.id);
     const checked = planError(() => checkPlan(params.plan, { profiles: config.profiles.map(p => p.id) }));
+    this.checkRoutes(root.id, checked.steps);
     if (params.templateId !== undefined && !this.core.journal.db.query('SELECT 1 FROM workflow_templates WHERE id = ?').get(params.templateId)) throw invalidParams(`templateId: no template ${params.templateId}`);
     const active = this.core.journal.db.query("SELECT count(*) AS n FROM workflow_runs WHERE root_id = ? AND status IN ('running', 'paused')").get(root.id) as { n: number };
     if (active.n >= ACTIVE_RUNS) throw refused(`this thread already has ${active.n} unfinished workflows; stop or finish one first`);
@@ -217,6 +232,7 @@ export class Workflows {
     if (run.status !== 'running' && run.status !== 'paused') throw refused(`the run is ${run.status}; only a running or paused run takes new steps`);
     const config = this.team(run.rootThreadId);
     const steps = planError(() => checkSteps(params.steps, { profiles: config.profiles.map(p => p.id), existing: run.nodes.map(n => ({ id: n.id, after: n.after })) }));
+    this.checkRoutes(run.rootThreadId, steps);
     this.core.journal.db.transaction(() => {
       this.mutate(run.id, current => {
         current.plan.steps.push(...steps.map(({ deps: _deps, ...step }) => step));
@@ -356,9 +372,14 @@ export class Workflows {
     if (threadId === null) {
       try {
         const root = this.core.threads.require(run.rootThreadId);
-        // No profile named: the step is one more conversation on the model the user already chose here.
-        const profile = this.core.delegation.route(root, config, node.profileId);
-        if (!profile) return failNow(`profile ${node.profileId} is no longer a profile of this thread`);
+        // No model or profile named: the step is one more conversation on the model the user already chose here.
+        const step = run.plan.steps.find(s => s.id === node.id);
+        let profile: ChildRoute;
+        try {
+          profile = this.core.delegation.resolve(root.id, { profileId: node.profileId, ...(step?.model === undefined ? {} : { model: step.model }), ...(step?.effort === undefined ? {} : { effort: step.effort }) });
+        } catch (error) {
+          return failNow(step?.model === undefined && node.profileId !== null && !config.profiles.some(p => p.id === node.profileId) ? `profile ${node.profileId} is no longer a profile of this thread` : messageOf(error));
+        }
         const provider = this.core.providers.require(profile.providerId);
         assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), this.core.accounts.require(profile.accountId), () => this.core.providers.launcherScriptOnly(provider.id));
         const title = `${run.name} · ${node.title}${inst.label ? ` · ${inst.label}` : ''}`.slice(0, 120);
@@ -367,7 +388,7 @@ export class Workflows {
           this.core.journal.db.query('INSERT INTO workflow_steps VALUES (?, ?, ?)').run(id, run.id, key);
         });
         this.stepOf.set(threadId, { runId: run.id, key });
-        Object.assign(inst, { threadId, providerId: profile.providerId, model: profile.model });
+        Object.assign(inst, { threadId, providerId: profile.providerId, model: profile.model, effort: profile.effort });
       } catch (error) {
         return failNow(messageOf(error));
       }
@@ -748,13 +769,19 @@ export class Workflows {
 }
 
 /** Registered beside delegation: the same principals, the core checks the thread. */
-export function registerWorkflowMethods(core: Core): void {
+/** The model names a plan's steps carry, so their providers' lists are read before the checks. */
+function stepModels(steps: unknown): (string | undefined)[] {
+  return Array.isArray(steps) ? steps.map(step => typeof (step as { model?: unknown } | null)?.model === 'string' ? (step as { model: string }).model : undefined) : [];
+}
+
+export function registerWorkflowMethods(core: Core, probe: ProviderProbe): void {
   const principal = (ctx: RpcContext) => ctx.connection.identity.principal;
+  const routes = (threadId: string, steps: unknown) => core.delegation.prepareRoutes(threadId, probe, stepModels(steps));
   core.router.register('workflows.list', params => core.workflows.list(params.threadId));
   core.router.register('workflows.get', params => core.workflows.get(params.threadId, params.runId));
-  core.router.register('workflows.check', params => core.workflows.check(params.threadId, params.plan));
-  core.router.register('workflows.start', (params, ctx) => core.workflows.start(params, principal(ctx) === 'agent' ? 'agent' : 'user'));
-  core.router.register('workflows.extend', (params, ctx) => core.workflows.extend(params, principal(ctx)));
+  core.router.register('workflows.check', async params => { await routes(params.threadId, params.plan?.steps); return core.workflows.check(params.threadId, params.plan); });
+  core.router.register('workflows.start', async (params, ctx) => { await routes(params.threadId, params.plan?.steps); return core.workflows.start(params, principal(ctx) === 'agent' ? 'agent' : 'user'); });
+  core.router.register('workflows.extend', async (params, ctx) => { await routes(params.threadId, params.steps); return core.workflows.extend(params, principal(ctx)); });
   core.router.register('workflows.control', (params, ctx) => core.workflows.control(params, principal(ctx)));
   core.router.register('workflows.output', params => core.workflows.output(params.threadId, params.value));
   core.router.register('workflows.templates.list', params => core.workflows.templates(params.threadId));

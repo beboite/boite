@@ -248,7 +248,8 @@ test.each(['connected', 'disabled', 'disconnected'] as const)('Boite guide reach
   }
   else expect(first).not.toContain('Shared convention');
   expect(first).toContain('boite agents send');
-  expect(first).not.toContain('boite delegate spawn');
+  // Native subagent tools are off in Boite, so a fresh session always learns the Boite way.
+  expect(first).toContain('boite delegate spawn');
   expect(first.indexOf('boite where')).toBeLessThan(first.indexOf('Hello'));
   expect(readdirSync(root)).toEqual(files);
   expect(readFileSync(join(root, 'AGENTS.md'), 'utf8')).toBe('Shared convention');
@@ -256,6 +257,7 @@ test.each(['connected', 'disabled', 'disconnected'] as const)('Boite guide reach
   const second = await run('Again');
   if (state === 'connected') expect(second).toContain('Shared convention');
   expect(second).not.toContain('boite where');
+  expect(second).not.toContain('boite delegate spawn');
 });
 
 test('the Boite guide switch persists, and echo never receives the ask command', async () => {

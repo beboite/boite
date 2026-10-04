@@ -495,3 +495,20 @@ test('an agent saves new templates but never replaces a saved one', async () => 
     expect((await owner.call('workflows.templates.save', { threadId, name: 'Review', plan: { ...REVIEW, steps: REVIEW.steps.slice(0, 1) } })).id).toBe(saved.id);
   } finally { agent.close(); }
 });
+
+test('a step names its model and reasoning level, and a level the model lacks is refused before anything starts', async () => {
+  scripted(() => 'done');
+  const { h, owner, threadId } = await setup();
+  const bad: WorkflowPlan = { name: 'Bad', steps: [{ id: 'think', model: 'echo/echo', effort: 'ultra', task: 'Think.' }] };
+  await expect(owner.call('workflows.check', { threadId, plan: bad })).rejects.toThrow('steps[0] (think)');
+  await expect(owner.call('workflows.check', { threadId, plan: { name: 'Missing', steps: [{ id: 'think', model: 'no-such-model', task: 'Think.' }] } })).rejects.toThrow('no installed model');
+  const run = await owner.call('workflows.start', { threadId, requestId: 'routes', plan: { name: 'Routes', steps: [
+    { id: 'quick', model: 'echo', effort: 'low', task: 'Look quickly.' },
+    { id: 'plain', after: ['quick'], task: 'Look again.' },
+  ] } });
+  const done = await settled(h, threadId, run.id, ['done']);
+  const [quick, plain] = done.nodes.map(node => node.instances[0]!);
+  expect([quick!.providerId, quick!.model, quick!.effort]).toEqual(['echo', 'echo', 'low']);
+  expect(h.core.threads.require(quick!.threadId!).effort).toBe('low');
+  expect(plain!.effort).toBe(h.core.threads.require(threadId).effort);
+});

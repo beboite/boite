@@ -254,7 +254,9 @@ export class TurnContexts {
     carried.memory ??= this.threads.deferred.memory.take(threadId);
     carried.letters ??= operation === 'compact' ? '' : this.core.delegation.initialInput(threadId, turn.id);
     const deferred = carried.deferred;
-    const tail = operation === 'compact' ? '' : this.core.delegation.instructions(threadId, prepared.prompt) + carried.letters;
+    // The subagent guide comes with the Boite guide on a fresh session, and on any turn about delegation.
+    // Core-woken turns (results, workflow summaries) bring no request of their own.
+    const tail = (fresh: boolean): string => operation === 'compact' ? '' : this.core.delegation.instructions(threadId, operation ? '' : prepared.prompt, fresh) + carried.letters;
     const compose = (body: string, sessionId: string | null): string => {
       const inject = !((operation && sessionId !== null) || nativeCommandPrompt(body));
       // Echo treats "question" as a test directive, including in injected help.
@@ -263,7 +265,7 @@ export class TurnContexts {
       const guide = inject && sessionId === null && guideEnabled
         ? agentGuide(provider.protocol !== 'echo' && this.core.settings.get().asyncQuestions !== false) : '';
       const prefix = (inject ? this.core.brain.instructions(provider.id) : '') + guide;
-      return carried.memory + prefix + (prefix ? 'User request:\n' : '') + deferred + body + coordinationGuide + tail + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
+      return carried.memory + prefix + (prefix ? 'User request:\n' : '') + deferred + body + coordinationGuide + tail(inject && sessionId === null && guideEnabled) + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
     };
     return {
       thread,

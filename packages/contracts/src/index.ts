@@ -2464,14 +2464,40 @@ export interface DelegationConfig {
   enabled: boolean;
   paused: boolean;
   profiles: DelegationProfile[];
+  /**
+   * The agent may start a child on any installed model it can run, with any
+   * reasoning level that model offers. Off, it is held to this conversation's
+   * model and the profiles. Missing on older cores and saved configs: on.
+   */
+  anyModel?: boolean;
 }
 /**
- * On from the first turn: a conversation delegates to its own model with
- * nothing to set up. Owner profiles only add other models.
+ * On from the first turn: a conversation delegates to its own model, or to
+ * any other installed model, with nothing to set up. Owner profiles name
+ * suggested routes.
  */
 export const DEFAULT_DELEGATION_CONFIG: DelegationConfig = {
-  enabled: true, paused: false, profiles: [],
+  enabled: true, paused: false, profiles: [], anyModel: true,
 };
+/** One model a delegating agent may name, on the account Boite would use for it. */
+export interface DelegationModelChoice {
+  providerId: ProviderId;
+  providerName: string;
+  accountId: AccountId;
+  model: string;
+  name: string;
+  /** Reasoning levels this model offers, lowest first. Empty: no reasoning control. */
+  efforts: string[];
+  defaultEffort: string | null;
+  /** The parent conversation's own model. */
+  current: boolean;
+}
+export interface DelegationModels {
+  anyModel: boolean;
+  choices: DelegationModelChoice[];
+  /** Installed providers whose models could not be read, with the reason. */
+  unavailable: { providerId: ProviderId; reason: string }[];
+}
 /** The profile every conversation has without configuring one: its own harness, account, model and effort. */
 export const CONVERSATION_PROFILE_ID = 'conversation';
 export interface DelegationResultRef { agentId: ThreadId; turnId: TurnId }
@@ -2781,7 +2807,13 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'core.updateCancel': { params: Record<string, never>; result: ServerUpdateStatus };
   'delegation.get': { params: { threadId: ThreadId }; result: DelegationView };
   'delegation.configure': { params: { threadId: ThreadId; config: DelegationConfig }; result: DelegationView };
-  'delegation.spawn': { params: { threadId: ThreadId; profileId: string; task: string; title?: string; requestId: string }; result: DelegatedAgent };
+  /**
+   * `model` is `provider/model` or a model id `delegation.models` lists; it
+   * wins over `profileId`. Neither: this conversation's own model. A child
+   * never runs in a fast service tier.
+   */
+  'delegation.spawn': { params: { threadId: ThreadId; profileId?: string; model?: string; effort?: string; task: string; title?: string; requestId: string }; result: DelegatedAgent };
+  'delegation.models': { params: { threadId: ThreadId }; result: DelegationModels };
   'delegation.send': { params: { threadId: ThreadId; toThreadId: ThreadId; text: string; requestId: string }; result: AgentLetter };
   'delegation.stop': { params: { threadId: ThreadId; agentId?: ThreadId }; result: { stopped: number } };
   'delegation.result': { params: { threadId: ThreadId; agentId: ThreadId; turnId: TurnId; offset?: number; limit?: number }; result: DelegationResultPage };

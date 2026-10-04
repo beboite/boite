@@ -236,9 +236,11 @@ boite agent memory [query]
 boite agent remember <json>
 boite agent routines
 boite agent schedule <json>
-boite delegate profiles|list
-boite delegate spawn <profile-id> <brief>
+boite delegate models|profiles|list
+boite delegate spawn <brief> [--model <provider/model>] [--effort <level>] [--profile <id>] [--title <t>]
 boite delegate send <thread-id> <text>
+boite delegate wait [thread-id] [--timeout <s>]
+boite delegate result <thread-id> <turn-id> [offset]
 boite delegate stop [thread-id]
 boite workflow help|check|run|list|show|extend|pause|resume|stop|retry
 boite workflow output|templates|save|start
@@ -388,9 +390,9 @@ flag each call gets a fresh id. An artifact object contains `missionId`, `taskId
 and `options`; it yields execution until the user answers. A memory contains
 `title` and `text`, with `id` and `expectedRevision` for an edit. The core adds
 the source context. Use `--json` to preserve the structured result.
-[Delegation](delegation.md) uses the built-in conversation route or owner-added
-profiles and records
-team usage. Children share the parent's checkout, retain their own sessions,
+[Delegation](delegation.md) runs each child on the model and reasoning level
+the agent names (`delegate models` lists them), else on the conversation's own
+route or an owner-added profile, and records team usage. Children share the parent's checkout, retain their own sessions,
 and return bounded results automatically. `delegate stop` pauses the whole team;
 only the owner can change profiles or resume a paused team.
 [Workflows](workflows.md) run a JSON plan of such children: `workflow help`

@@ -13,6 +13,8 @@ import type { ClaudeTurn } from './turn.ts';
 import { SessionRetention } from '../session-retention.ts';
 
 /** How long `stop()` lets the CLI end its turn before the abort signal takes it. */
+/** Claude Code's own subagent and workflow tools; `Task` is the older name of `Agent`. */
+export const NATIVE_SUBAGENT_TOOLS = ['Agent', 'Task', 'Workflow'] as const;
 const STOP_GRACE_MS = 3_000;
 /** How long the CLI has to exit on its own once the prompt stream is over. */
 const FINISH_GRACE_MS = 5_000;
@@ -619,6 +621,9 @@ export class ClaudeSession {
       allowDangerouslySkipPermissions: true,
       pathToClaudeCodeExecutable: executable,
       settingSources: ['user', 'project', 'local'],
+      // Subagents in Boite are Boite conversations (`boite delegate spawn`), so the user
+      // can follow, steer and stop them; the CLI's own subagent tools never reach the model.
+      disallowedTools: [...NATIVE_SUBAGENT_TOOLS],
       settings: {
         fastMode: setup.fastMode,
         ...(ctx.thread.permissionMode === 'yolo' ? { disableAllHooks: true } : {}),

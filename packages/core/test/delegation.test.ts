@@ -1,5 +1,5 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import type { DelegationConfig, ProcessRecord, Turn } from '@boite/contracts';
@@ -164,7 +164,7 @@ test('a conversation without a team is offered workflows when the request names 
   const prompt = runs.get(threadId)!.ctx.prompt;
   for (const part of ['boite workflow help', 'boite workflow run', "this conversation's model"]) expect(prompt).toContain(part);
   for (const part of ['disabled', 'owner must', 'Do not substitute', 'Team settings']) expect(prompt).not.toContain(part);
-  expect(h.core.delegation.instructions(threadId, 'Fix the parser')).toBe('');
+  expect(h.core.delegation.instructions(threadId, 'Fix the parser', false)).toBe('');
   runs.get(threadId)!.finish();
 });
 
@@ -396,11 +396,11 @@ test('a conversation delegates to its own model with nothing configured, and no 
     await owner.call('turns.start', { threadId, prompt: 'Hand the review to a subagent' });
     await waitFor(() => runs.has(threadId));
     expect(runs.get(threadId)!.ctx.prompt).toContain('boite delegate spawn');
-    expect(h.core.delegation.instructions(threadId, 'Fix the parser')).toBe('');
+    expect(h.core.delegation.instructions(threadId, 'Fix the parser', false)).toBe('');
     // A stopped turn of a conversation that delegated nothing leaves the team usable.
     await owner.call('turns.stop', { threadId });
     await waitFor(() => h.core.threads.require(threadId).status !== 'running');
-    expect(h.core.delegation.config(threadId)).toEqual({ enabled: true, paused: false, profiles: [] });
+    expect(h.core.delegation.config(threadId)).toEqual({ enabled: true, paused: false, profiles: [], anyModel: true });
     const child = await agent.call('delegation.spawn', { threadId, profileId: 'conversation', task: 'Review', requestId: 'plain' });
     const parent = h.core.threads.require(threadId);
     expect([child.thread.providerId, child.thread.accountId, child.thread.model]).toEqual([parent.providerId, parent.accountId, parent.model]);
@@ -462,7 +462,15 @@ test('CLI exposes approved profiles, launches one agent and sends/stops under th
   const child = JSON.parse(await call(['delegate', 'spawn', 'worker', 'Inspect only tests', '--json']));
   expect(await call(['delegate', 'send', child.thread.id, 'Report paths'])).toContain('received');
   expect(await call(['delegate', 'list'])).toContain(child.thread.id);
-  expect(await call(['delegate', 'stop'])).toContain('stopped: 1');
+  // The current form: the brief alone, with a model and a level by flag.
+  expect(await call(['delegate', 'models'])).toContain('echo/echo "Echo" effort=low|high (default high) [this conversation]');
+  const free = await call(['delegate', 'spawn', 'Read', 'the', 'parser', '--model', 'echo/echo', '--effort', 'low', '--title', 'Parser read']);
+  expect(free).toMatch(/^agent: thr_\S+\nmodel: echo\/echo effort=low\nstatus: \w+\n/);
+  const list = await call(['delegate', 'list']);
+  expect(list.split('\n')[0]).toBe('subagents: on; 2 running, 0 done, 0 failed, 0 stopped');
+  expect(list).toMatch(/thr_\S+ running \d+s echo\/echo effort=low "Parser read"/);
+  expect(list).toContain('Results arrive as messages');
+  expect(await call(['delegate', 'stop'])).toContain('stopped: 2');
 });
 
 test('a parent failure pauses the team and stops its active children', async () => {
@@ -678,4 +686,40 @@ test('a finished child wakes an idle parent at once, without waiting for the tic
   await new Promise(resolve => setTimeout(resolve, 100));
   expect(h.core.journal.listTurns(threadId).map(turn => turn.execution?.operation)).toEqual(['delegation']);
   expect(runs.get(threadId)?.ctx.prompt).toContain('Checked src/example.ts');
+});
+
+test('an agent picks any installed model and reasoning level for a child, never a fast tier, unless the owner holds it to the profiles', async () => {
+  const running = scripted();
+  const { h, owner, threadId } = await setup();
+  const shipped = JSON.parse(readFileSync(join(import.meta.dir, '../src/providers/shipped/echo.json'), 'utf8')) as Record<string, unknown>;
+  mkdirSync(join(h.dataDir, 'providers'), { recursive: true });
+  writeFileSync(join(h.dataDir, 'providers', 'twin.json'), JSON.stringify({ ...shipped, id: 'twin', name: 'Twin', shortName: 'Twin', models: [
+    { id: 'echo', name: 'Twin echo' },
+    { id: 'deep-thinker', name: 'Deep thinker', effort: { levels: [{ id: 'low', label: 'Low' }, { id: 'max', label: 'Max' }], default: 'low' } },
+  ] }));
+  expect((await owner.call('providers.reload', {})).rejected).toEqual([]);
+  h.core.accounts.ensureDefaults();
+  h.core.journal.putThread({ ...h.core.threads.require(threadId), speed: 'fast' });
+  const agent = await connect(h.url, h.core.agents.tokenFor(threadId));
+  try {
+    const models = await agent.call('delegation.models', { threadId });
+    expect(models.anyModel).toBe(true);
+    expect(models.choices.map(c => `${c.providerId}/${c.model}`)).toEqual(expect.arrayContaining(['echo/echo', 'twin/echo', 'twin/deep-thinker']));
+    expect(models.choices.find(c => c.providerId === 'echo')?.current).toBe(true);
+
+    const deep = await agent.call('delegation.spawn', { threadId, model: 'deep', effort: 'max', task: 'Think hard', requestId: 'deep' });
+    expect([deep.thread.providerId, deep.thread.model, deep.thread.effort, deep.thread.speed ?? null]).toEqual(['twin', 'deep-thinker', 'max', null]);
+    expect(deep.thread.accountId).toBe(h.core.accounts.list().find(a => a.providerId === 'twin')!.id);
+    // A bare id two harnesses share resolves to the parent's own; a full id names the other one.
+    expect((await agent.call('delegation.spawn', { threadId, model: 'echo', task: 'Same harness', requestId: 'same' })).thread.providerId).toBe('echo');
+    expect((await agent.call('delegation.spawn', { threadId, model: 'twin/echo', task: 'Other harness', requestId: 'other' })).thread.providerId).toBe('twin');
+    await expect(agent.call('delegation.spawn', { threadId, model: 'twin/deep-thinker', effort: 'ultra', task: 'Bad level', requestId: 'bad-level' })).rejects.toThrow('reasoning effort');
+    await expect(agent.call('delegation.spawn', { threadId, model: 'nothing-like-this', task: 'Missing', requestId: 'missing' })).rejects.toThrow('boite delegate models');
+    await waitFor(() => running.has(deep.thread.id));
+
+    await owner.call('delegation.configure', { threadId, config: { ...h.core.delegation.config(threadId), anyModel: false } });
+    await expect(agent.call('delegation.spawn', { threadId, model: 'twin/deep-thinker', task: 'Held', requestId: 'held' })).rejects.toThrow('limited subagents');
+    expect((await agent.call('delegation.spawn', { threadId, model: 'echo/echo', effort: 'low', task: 'Own model', requestId: 'own' })).thread.effort).toBe('low');
+    expect((await agent.call('delegation.models', { threadId })).anyModel).toBe(false);
+  } finally { agent.close(); }
 });

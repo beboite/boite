@@ -95,6 +95,8 @@ describe('claude driver', () => {
     expect(calls[0]?.options).toMatchObject({
       permissionMode: 'bypassPermissions', allowDangerouslySkipPermissions: true,
       settings: { disableAllHooks: true },
+      // Subagents are Boite conversations even when every hook is off.
+      disallowedTools: ['Agent', 'Task', 'Workflow'],
     });
     expect((await client.call('threads.get', { threadId })).messages.flatMap(message => message.parts)
       .filter(part => part.type === 'permission')).toEqual([]);

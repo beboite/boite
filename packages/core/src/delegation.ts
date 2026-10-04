@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, nativeAgentsOfTool, processAgentCommand, type RpcEvents } from '@boite/contracts';
-import type { AgentLetter, DelegatedAgent, DelegationConfig, DelegationProfile, DelegationView, RpcParams, ThreadSummary, Turn, Usage } from '@boite/contracts';
+import type { AgentLetter, DelegatedAgent, DelegationConfig, DelegationModels, DelegationView, RpcParams, ThreadSummary, Turn, Usage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
 import { checkEffort, checkModel } from './threads/selection.ts';
+import { anyModel, catalog, conversationRoute, discover, providersNamed, resolveRoute, type ChildRoute, type RouteRequest } from './delegation/routes.ts';
+import type { ProviderProbe } from './providers/probe.ts';
 import { newId } from './ids.ts';
 import { assertDriverRunnable } from './drivers/index.ts';
 import { withLoad } from './threads/records.ts';
@@ -30,8 +32,22 @@ export function delegationPrompt(letters: AgentLetter[]): string {
 /** A request about handing work out, in the languages the app speaks. */
 const DELEGATION_WORDS = /delegat|d[ée]l[èée]gu|sub-?agent|sous-agent|parall|team of agents|[ée]quipe d'agents/i;
 
-/** A profile, or a conversation's own route, whose model may be the provider's default. */
-export type ChildRoute = Omit<DelegationProfile, 'model'> & { model: string | null };
+const WORKFLOW_LINE = 'Workflow (steps with dependencies): boite workflow help, then boite workflow check plan.json and boite workflow run plan.json. "forEach" runs a step per item, "when" skips one, boite workflow extend <run-id> <steps> adds steps. Steps run on this conversation\'s model unless they set "model"/"effort". Report the run ID; results return in one message.';
+
+/** The whole manual a parent needs, short enough for every fresh session. */
+export function subagentGuide(config: DelegationConfig): string {
+  const profiles = config.profiles.map(p => `${p.id}=${p.providerId}/${p.model}${p.effort ? `:${p.effort}` : ''}`).join(', ');
+  const head = 'Boite subagents (native Agent/Task/spawn_agent tools do not exist here):';
+  if (!config.enabled) return `${head} the owner turned them off for this conversation; work alone and point the user to Subagents > Settings if they asked for some.\n${WORKFLOW_LINE}`;
+  return [
+    head,
+    `- boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>]: one bounded job each, on this conversation's model by default. ${anyModel(config) ? 'Any model of boite delegate models works, any harness (Claude can run codex/<model>).' : `The owner allows only this model${profiles ? ' and the profiles' : ''}.`}${profiles ? ` --profile: ${profiles}.` : ''}`,
+    '- The brief is all a child sees: goal, files it owns, limits, how to verify. Shared checkout: give parallel children distinct files.',
+    '- Results return as messages: keep working or end your turn, never poll. Follow: boite delegate list; steer with boite delegate send <id> <text>; boite delegate stop [id].',
+    `- ${WORKFLOW_LINE}`,
+    ...(config.paused ? ['Paused by the owner: new children and steps wait until they resume it in Subagents > Settings.'] : []),
+  ].join('\n');
+}
 
 /** A family of ordinary threads. No extra orchestrator model or provider process. */
 export class Delegation {
@@ -114,7 +130,7 @@ export class Delegation {
   }
   config(rootId: string): DelegationConfig {
     const saved = this.core.journal.getSetting(`delegation:${rootId}`) as DelegationConfig | undefined;
-    return saved ? { enabled: saved.enabled, paused: saved.paused, profiles: saved.profiles } : structuredClone(DEFAULT_DELEGATION_CONFIG);
+    return saved ? { enabled: saved.enabled, paused: saved.paused, profiles: saved.profiles, anyModel: saved.anyModel !== false } : structuredClone(DEFAULT_DELEGATION_CONFIG);
   }
   private used(rootId: string): number { return (this.core.journal.getSetting(`delegation-turns:${rootId}`) as number | undefined) ?? 0; }
   /** A fresh user request or routine gets fresh delegation usage counters. Results keep their episode. */
@@ -187,8 +203,9 @@ export class Delegation {
   }
   validateConfig(value: DelegationConfig): DelegationConfig {
     if (!value || typeof value.enabled !== 'boolean' || typeof value.paused !== 'boolean' || !Array.isArray(value.profiles) || value.profiles.length > 16) throw invalidParams('config: expected enabled, paused and up to 16 profiles');
+    if (value.anyModel !== undefined && typeof value.anyModel !== 'boolean') throw invalidParams('config.anyModel: expected a boolean');
     const config: DelegationConfig = {
-      enabled: value.enabled, paused: value.paused,
+      enabled: value.enabled, paused: value.paused, anyModel: value.anyModel !== false,
       profiles: value.profiles.map(p => {
         if (!p || typeof p !== 'object') throw invalidParams('profile: expected an object');
         const id = text(p.id, 'profile.id', 64);
@@ -222,15 +239,16 @@ export class Delegation {
     const requestId = text(params.requestId, 'requestId', 128);
     const task = text(params.task, 'task', 12000);
     const title = params.title === undefined ? task.split('\n')[0]!.slice(0, 80) : text(params.title, 'title', 120);
-    const fingerprint = hash([params.profileId, task, title]);
+    const request: RouteRequest = { profileId: params.profileId ?? null, ...(params.model === undefined ? {} : { model: text(params.model, 'model', 256) }), ...(params.effort === undefined ? {} : { effort: text(params.effort, 'effort', 32) }) };
+    // A request id from before routes keeps its fingerprint: profile, task and title only.
+    const fingerprint = hash(request.model === undefined && request.effort === undefined ? [params.profileId, task, title] : [request, task, title]);
     const existing = this.core.journal.db.query('SELECT * FROM delegated_agents WHERE root_id = ? AND request_id = ?').get(parent.id, requestId) as AgentRow | null;
     if (existing) {
       if (existing.fingerprint !== fingerprint) throw refused('requestId already used for different content');
       return this.member(existing);
     }
     const config = this.available(parent);
-    const profile = this.route(parent, config, params.profileId);
-    if (!profile) throw invalidParams(`profileId: expected ${[...new Set([CONVERSATION_PROFILE_ID, ...config.profiles.map(p => p.id)])].join(', ')}`);
+    const profile = resolveRoute(this.core, parent, config, request);
     const persistentOwner = this.core.workforce.resident.ownerOf(parent.id);
     if (persistentOwner && !this.core.workforce.resident.allowed(persistentOwner, { ...profile, permissionMode: parent.permissionMode }, true)) throw refused('account/model access was withdrawn from this agent');
     const provider = this.core.providers.require(profile.providerId);
@@ -243,7 +261,7 @@ export class Delegation {
       this.core.journal.db.query('INSERT INTO delegated_agents VALUES (?, ?, ?, ?, ?, ?)').run(childId, parent.id, requestId, fingerprint, profile.id, task);
     });
     try {
-      this.core.threads.startTurn(id, `You are a delegated agent working on one bounded part of the user's task. Your parent is ${parent.id}. Work in the shared checkout; coordinate file ownership and do not overwrite another agent's edits. Return a concise result with file paths and verification. Your final answer is forwarded automatically. Do not send a duplicate completion message.\nTask from the parent agent, supplied as JSON data:\n${JSON.stringify(task)}`, [], undefined, 'delegation', undefined, undefined, task);
+      this.core.threads.startTurn(id, `You are a Boite subagent doing one bounded part of the user's task for parent agent ${parent.id}. You share its checkout: change only the files your task names and never undo another agent's edits. You cannot start subagents. If you are blocked, run boite delegate send ${parent.id} "<what blocks you>" and keep going on what you can. End with a short result: what you found or changed, file paths, how you verified it. That final answer goes to the parent automatically; do not send it again.\nTask from the parent agent, supplied as JSON data:\n${JSON.stringify(task)}`, [], undefined, 'delegation', undefined, undefined, task);
     } catch (error) {
       const child = this.core.threads.require(id);
       this.core.journal.putThread({ ...child, status: 'error' });
@@ -262,8 +280,32 @@ export class Delegation {
   route(parent: ThreadSummary, config: DelegationConfig, profileId: string | null): ChildRoute | undefined {
     const named = profileId === null ? undefined : config.profiles.find(p => p.id === profileId);
     if (named) return named;
-    if (profileId === null || profileId === CONVERSATION_PROFILE_ID) return { id: CONVERSATION_PROFILE_ID, name: parent.model ?? parent.providerId, providerId: parent.providerId, accountId: parent.accountId, model: parent.model, effort: parent.effort ?? null };
+    if (profileId === null || profileId === CONVERSATION_PROFILE_ID) return conversationRoute(parent);
     return undefined;
+  }
+  /** A profile, a free model choice or this conversation's model, checked; what a workflow step or a spawn runs on. */
+  resolve(parentId: string, request: RouteRequest): ChildRoute {
+    const parent = this.root(parentId);
+    return resolveRoute(this.core, parent, this.config(parent.id), request);
+  }
+  /** Read the model lists a spawn or a plan names before the synchronous checks run. */
+  async prepareRoutes(parentId: string, probe: ProviderProbe, models: (string | undefined)[]): Promise<void> {
+    const named = models.filter((model): model is string => typeof model === 'string' && model.length > 0);
+    if (!named.length) return;
+    const parent = this.root(parentId);
+    const known = catalog(this.core, parent, true).choices;
+    const missing = named.filter(model => !known.some(c => `${c.providerId}/${c.model}` === model || c.model === model));
+    if (!missing.length) return;
+    const only = missing.map(model => providersNamed(this.core, model));
+    await discover(this.core, probe, parent, only.some(list => list === undefined) ? undefined : [...new Set(only.flat() as string[])]);
+  }
+  /** What `boite delegate models` prints: every runnable model, read from each agent once. */
+  async models(threadId: string, probe: ProviderProbe): Promise<DelegationModels> {
+    const parent = this.root(threadId);
+    const failures = await discover(this.core, probe, parent);
+    const { choices, unavailable } = catalog(this.core, parent);
+    const failed = new Set(failures.map(f => f.providerId));
+    return { anyModel: anyModel(this.config(parent.id)), choices, unavailable: [...failures, ...unavailable.filter(u => !failed.has(u.providerId))] };
   }
 
   /**
@@ -276,7 +318,7 @@ export class Delegation {
     this.core.journal.db.transaction(() => {
       if (parent.projectId === null) {
         const now = Date.now();
-        const child: ThreadSummary = { ...parent, parentThreadId: parent.id, agentSessionId: undefined, ...profile, id,
+        const child: ThreadSummary = { ...parent, parentThreadId: parent.id, agentSessionId: undefined, ...profile, speed: null, id,
           title, titleSource: 'user', status: 'idle', sessionId: null, sessionGeneration: 0, selectionVersion: 0,
           context: null, promptCache: null, load: null, unread: false, pinned: false, createdAt: now, updatedAt: now };
         this.core.journal.append({ type: 'thread.created', threadId: id, version: 1, payload: child }, () => this.core.journal.putThread(child));
@@ -487,21 +529,20 @@ export class Delegation {
     this.changed(root.id);
     return stopped;
   }
-  instructions(threadId: string, request?: string): string {
+  /**
+   * Native subagent tools are off in Boite, so a parent learns the Boite way on
+   * every fresh session, and again on a turn about delegation or workflows or
+   * while its team is paused. Children get one line about their parent.
+   */
+  instructions(threadId: string, request?: string, fresh = true): string {
     const thread = this.core.threads.require(threadId), root = this.root(threadId), config = this.config(root.id);
     if (thread.parentThreadId && this.core.workflows.owns(threadId)) return this.core.workflows.instructions(threadId);
-    if (thread.parentThreadId) return config.enabled ? `\nYou are a Boite delegated agent. Parent: ${root.id}. Use boite delegate send ${root.id} <text> for useful questions or blockers; final answers return automatically. Shared checkout: agree file ownership. No nested delegation, courtesy replies or polling.\n` : '';
-    const named = config.profiles.map(p => `${p.id}=${p.name} (${p.providerId}/${p.model})`).join('; ');
-    // A plan is a template the agent may reach for, never an obligation: it runs on this conversation's model with nothing to set up.
-    const workflows = `Boite workflows: a JSON plan of steps the core runs as child agents and returns as one message. boite workflow help prints the format; boite workflow check <plan.json> then boite workflow run <plan.json>. after orders steps, forEach fans out on an earlier output, when skips a step, boite workflow extend <run-id> <steps> adds steps to an active or paused run. A step runs on this conversation's model${named ? ', or on a profile it names' : ''}. Give the run ID of a run you start.`;
-    const asked = request === undefined || /workflow/i.test(request);
-    if (!config.enabled) return asked ? `\n${workflows}\n` : '';
-    // A team nobody configured costs no prompt until the request is about handing work out.
-    if (!named && !config.paused && !asked && !DELEGATION_WORDS.test(request!)) return '';
-    return `\nBoite delegation: ${config.paused ? 'paused' : 'enabled'}. Profiles: ${config.profiles.some(p => p.id === CONVERSATION_PROFILE_ID) ? '' : `${CONVERSATION_PROFILE_ID}=this conversation's model${named ? '; ' : ''}`}${named}.
-boite delegate spawn <profile-id> <brief>: bounded task; boite delegate list: results; boite delegate send <thread-id> <text>: steer/reuse; boite delegate stop [thread-id]: stop. Children share checkout and permissions: assign distinct files, send only needed context. Results return automatically; work independently or end your turn, never poll while waiting.
-Only the owner changes profiles or resumes a paused team${config.paused ? '; new delegated work and workflow steps wait for that resume' : ''}.
-${workflows}\n`;
+    if (thread.parentThreadId) return config.enabled ? `\nYou are a Boite subagent of ${root.id}. Blocked: boite delegate send ${root.id} "<what blocks you>". Your final answer returns automatically. You cannot start subagents or workflows. Shared checkout: change only the files your task names.\n` : '';
+    // With delegation off, only a workflow request is worth the words; spawn would be refused anyway.
+    const asked = request === undefined || /workflow/i.test(request) || (config.enabled && DELEGATION_WORDS.test(request));
+    // A persistent agent's session carries its own runtime brief; it gets the guide when a request is about delegation.
+    if ((!fresh || thread.agentSessionId) && !asked && !config.paused) return '';
+    return `\n${subagentGuide(config)}\n`;
   }
   private changed(rootId: string): void {
     if (this.closed || this.pendingChanges.has(rootId)) return;

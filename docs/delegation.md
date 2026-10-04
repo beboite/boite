@@ -1,11 +1,24 @@
 # Subagents
 
 Delegation is on in every conversation, with nothing to set up. The main agent
-delegates through the `boite` CLI; nothing is launched by hand. The built-in
-profile `conversation` is the conversation's own harness, account, model and
-effort. The gear in the Subagents tab opens Settings, where the owner adds named
-profiles for other models, with the same picker the composer uses, or turns
-delegation off for that conversation.
+delegates through the `boite` CLI; nothing is launched by hand. For each child
+it names a model and a reasoning level, from any installed provider: a Claude
+conversation can start a Codex reviewer. `boite delegate models` lists the
+choices. Without `--model` the child runs on the built-in profile
+`conversation`, the conversation's own harness, account, model and effort. A
+child never runs on a fast service tier.
+
+The gear in the Subagents tab opens Settings with two switches and a list.
+"Let this conversation start subagents" turns delegation off for that
+conversation. "Let the agent choose the model", on by default, can restrict
+children to the conversation's model and the suggested models. Suggested
+models are named profiles the owner adds with the same picker the composer
+uses; the agent sees them by name, for example `reviewer`.
+
+Boite picks the child's account: the parent's own when the model belongs to the
+parent's provider, else that provider's logged-in default login. A provider
+whose model list was never read is probed once, at most 30 seconds, when the
+agent asks for its models or names one of them.
 
 Every child is a normal Boite conversation with its own provider session,
 permissions, process trace and usage. It inherits the parent's project,
@@ -29,6 +42,11 @@ conversations is a separate setting in the title's menu; its Off label does not
 disable provider-native subagents.
 
 ## Native provider subagents
+
+Boite subagents replace the providers' own. Claude starts with its `Agent`,
+`Task` and `Workflow` tools disallowed, Codex with `features.multi_agent` and
+`features.multi_agent_v2` off, and the shipped OpenCode descriptor denies its
+`task` permission. Other harnesses keep whatever native agents they have.
 
 Subagents shows native agents' reported names, tasks, models, status and bounded
 results. Active agents contribute to the count above the composer. Ask the main agent to steer
@@ -97,10 +115,12 @@ existing child to reuse its session.
 
 ## Controls and usage
 
-Delegation starts enabled on the built-in `conversation` profile. The agent is
-told about it when the request is about handing work out (delegation,
-subagents, parallel work, a workflow), and on every turn once the owner added a
-profile. Persistent agents keep their own setting, which starts off. Only the
+Delegation starts enabled, with free model choice. The first turn of a new
+provider session carries a short guide: the commands, `--model` and `--effort`,
+and the rule that results come back as messages. Later turns carry it again
+when the request is about handing work out (delegation, subagents, parallel
+work, a workflow) or the team is paused. A child receives one line naming its
+parent and how to report a blocker. Persistent agents keep their own setting, which starts off. Only the
 owner can configure profiles, turn delegation off or resume a paused team. A paired phone can inspect and stop an enabled team.
 
 Boite imposes no quota on the number of children, their concurrent turns, total
@@ -138,14 +158,30 @@ structured output, commands and recovery.
 ## Agent commands
 
 ```sh
-boite delegate profiles
-boite delegate spawn conversation "List the parser's entry points. Do not edit files."
-boite delegate spawn reviewer "Review the parser changes. Do not edit files."
+boite delegate models
+boite delegate spawn "List the parser's entry points. Do not edit files."
+boite delegate spawn "Review the parser changes. Do not edit files." --model codex/gpt-5.5 --effort high
+boite delegate spawn "Review the parser changes." --profile reviewer
 boite delegate list
 boite delegate send <child-thread-id> "Focus on malformed inputs."
+boite delegate result <child-thread-id> <turn-id>
 boite delegate stop <child-thread-id>
 boite delegate stop
 ```
+
+`--model` takes `provider/model`, a bare model id (the parent's provider wins a
+tie) or a unique part of an id or name, such as `opus`. An ambiguous or
+unknown name is refused with the candidates. `--effort` must be one of the
+model's levels; without it the child keeps the parent's level on the same
+model, else the model's default. The older `delegate spawn <profile> "<brief>"`
+form still works.
+
+Every answer is a few plain lines. `delegate list` starts with one summary
+line (`subagents: on; 1 running, 2 done, 0 failed, 0 stopped`), then one row per
+child with its id, state, elapsed time, `provider/model effort=` and title, and
+the first 300 characters of a finished result. Workflow runs follow as
+`<run-id> workflow <status> <elapsed> steps=<done>/<total>`. A spawn prints the
+child id, its route and a reminder that the result arrives as a message.
 
 A child can send a question or blocker to its parent with `delegate send`.
 Its final answer returns automatically, so it should not send a duplicate

@@ -2,6 +2,8 @@ import type { NativeAgentUpdate, PermissionMode, ToolStatus } from '@boite/contr
 
 /** What the agent sees as `clientInfo.name`. */
 export const CLIENT_NAME = 'boite';
+/** Subagents in Boite are Boite conversations; Codex's own `spawn_agent` family stays off. */
+export const NO_NATIVE_SUBAGENTS = ['--config', 'features.multi_agent=false', '--config', 'features.multi_agent_v2=false'] as const;
 
 export const STDERR_MAX = 400;
 
