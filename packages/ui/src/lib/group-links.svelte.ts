@@ -148,7 +148,8 @@ export class GroupLinks {
         const core = voice.cores.find((listed) => listed.coreId === entry.coreId);
         return core !== undefined && usableAddresses(core.addresses, this.#secure()).includes(entry.url);
       });
-      if (!stands) removeEnvironment(entry.url);
+      // Forgotten only if it is still the entry that was asked about: the owner may have paired that machine by hand meanwhile.
+      if (!stands && readEnvironments().some((env) => env.url === entry.url && env.token === entry.token && env.coreId === entry.coreId)) removeEnvironment(entry.url);
       return stands;
     });
   }
@@ -197,7 +198,7 @@ export class GroupLinks {
     const anchors = informed.filter((machine) => machine.coreId === undefined);
     await this.#prune(informed, anchors);
 
-    const wanted = new Map<string, { core: GroupCore; via: Machine }>();
+    const wanted = new Map<string, { core: GroupCore; via: Machine; addresses: string[] }>();
     for (const via of anchors) {
       const group = via.store.group;
       // The fake core has no address to dial and stands for itself.
@@ -206,18 +207,18 @@ export class GroupLinks {
         if (core.coreId === group.self || wanted.has(core.coreId)) continue;
         // Two hand-paired machines of one group that disagree: the one that no longer lists it wins.
         if (anchors.some((other) => other.store.group?.id === group.id && !other.store.group.cores.some((listed) => listed.coreId === core.coreId))) continue;
-        wanted.set(core.coreId, { core, via });
+        wanted.set(core.coreId, { core, via, addresses: this.#agreed(core.coreId, group.id, anchors) });
       }
     }
 
     const states: Record<string, GroupLinkState> = {};
-    const starting: { core: GroupCore; via: Machine }[] = [];
+    const starting: { core: GroupCore; via: Machine; addresses: string[] }[] = [];
     for (const [coreId, state] of Object.entries(this.states)) if (wanted.has(coreId)) states[coreId] = state;
-    for (const [coreId, { core, via }] of wanted) {
+    for (const [coreId, { core, via, addresses }] of wanted) {
       let existing = this.workspace.machines.find((machine) => GroupLinks.coreOf(machine) === coreId);
       // A key the group handed out for an address the machine no longer gives, or no longer
       // allows now that it has HTTPS, is not sent there again: the machine is reached anew.
-      if (existing?.coreId !== undefined && !usableAddresses(core.addresses, this.#secure()).includes(existing.id)) {
+      if (existing?.coreId !== undefined && !addresses.includes(existing.id)) {
         await this.#drop(existing);
         existing = undefined;
       }
@@ -227,11 +228,26 @@ export class GroupLinks {
       }
       if (this.#running.has(coreId) || this.#now() - (this.#attempts.get(coreId) ?? -RETRY_MS) < RETRY_MS) continue;
       states[coreId] = 'connecting';
-      starting.push({ core, via });
+      starting.push({ core, via, addresses });
     }
     // Written before any attempt starts: one that ends at once writes its own state after this.
     this.states = states;
-    for (const { core, via } of starting) void this.#connect(core, via);
+    for (const { core, via, addresses } of starting) void this.#connect(core, via, addresses);
+  }
+
+  /**
+   * Where a key for this member may be sent: the addresses every hand-paired
+   * machine of that group that lists it allows. One of them holding an older
+   * roster must not send a ticket to an address the member gave up, where
+   * somebody else may be listening; until they agree, the member waits.
+   */
+  #agreed(coreId: string, groupId: string, anchors: readonly Machine[]): string[] {
+    const lists = anchors.flatMap((machine) => {
+      const group = machine.store.group;
+      const core = group?.id === groupId ? group.cores.find((listed) => listed.coreId === coreId) : undefined;
+      return core === undefined ? [] : [usableAddresses(core.addresses, this.#secure())];
+    });
+    return (lists[0] ?? []).filter((address) => lists.every((list) => list.includes(address)));
   }
 
   /**
@@ -265,13 +281,12 @@ export class GroupLinks {
     return readEnvironments().some((env) => env.url === machine.id && env.token !== '');
   }
 
-  async #connect(core: GroupCore, via: Machine): Promise<void> {
+  async #connect(core: GroupCore, via: Machine, addresses: string[]): Promise<void> {
     const coreId = core.coreId;
     this.#running.add(coreId);
     this.#attempts.set(coreId, this.#now());
     let state: GroupLinkState | null = 'unreachable';
     try {
-      const addresses = usableAddresses(core.addresses, this.#secure());
       if (addresses.length === 0) {
         state = 'insecure';
         return;

@@ -183,9 +183,9 @@ never sent: the request names the invitation by a hash and only opens for the
 machine that minted it. The member checks that the signature matches the
 announced key, adds the machine and answers with the roster, signed and sealed
 back. Thirty requests a minute that open are served, and the invitation must
-still be live when the request has been read. A request already received is
-refused before anything is computed for it, so one recorded on the path and
-sent again spends nothing of those thirty. The joining core accepts the answer only if the key that signed it has
+still be live when the request has been read. A request already served is
+refused before anything is computed for it, however its JSON is written, so
+one recorded on the path and sent again spends nothing of those thirty. The joining core accepts the answer only if the key that signed it has
 the id the invitation named. A machine that merely sits at that address reads
 nothing and cannot answer, and a request that names no known invitation costs
 the member one lookup.
@@ -208,10 +208,14 @@ allowance, and each refusal costs a key agreement or a signature check. An
 address has sixty places a minute: a request takes one as it arrives, gives it
 back when it is answered well and keeps it for the rest of the minute when it
 is refused. With no place left the address is answered nothing more, before
-its body is read, so sixty requests held open together gain nothing. The core
-remembers 1024 addresses at once, and the ones past that share one such
-allowance. Requests from the machine itself are not counted, since a reverse
-proxy puts every remote peer behind that one address. A member's own
+its body is read, so sixty requests held open together gain nothing. An IPv6
+host is counted by its /64, which is all its to send from. The core remembers
+1024 strangers at once, and the ones past that share one such allowance. An
+address a request was served to is a member's: it keeps an allowance of its
+own, apart from that table, so a flood from many addresses does not turn the
+members away. A member the core never served yet can be turned away with the
+strangers while such a flood lasts. Requests from the machine itself are not
+counted, since a reverse proxy puts every remote peer behind that one address. A member's own
 allowance, 120 requests a minute, is only spent by requests that are its own,
 fresh and not seen before.
 
@@ -263,12 +267,17 @@ by reporting this computer's name. Opening a pairing link on a machine the
 group brought makes it one paired by hand from then on. A key the group handed
 out for an address the machine no longer gives, or no longer allows once it has
 HTTPS, is dropped and the machine reached anew, the machine the window opened
-on included: the window then goes back to its own core.
+on included: the window then goes to a machine paired by hand, or to the
+shell's own core, never back to the address it dropped. When two hand-paired
+machines of a group list different addresses for a member, a key or a ticket
+goes only to an address both allow, and to none until they agree: one of them
+may hold an older roster, and somebody else may listen where the member was.
 
 At start, a key the group brought for a plain HTTP address is not sent before
 the machines paired by hand have been asked, each on a short connection of its
 own, what their group lists (`GroupLinks.vet`). A key whose address no longer
-stands is forgotten unsent. They get three seconds: when none of that group
+stands is forgotten unsent, whether the window would open on that machine, a
+`?core=` link names it, or it is one of the others. They get three seconds: when none of that group
 answers, the machine that vouched being off, the key is used as it was left, so
 someone able to keep those machines silent still gets it sent to the old
 address.

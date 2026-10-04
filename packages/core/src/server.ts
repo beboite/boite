@@ -361,10 +361,10 @@ export function startServer(options: ServerOptions): RunningServer {
         const answered = address === null || isLoopbackAddress(address) ? () => undefined : refusals.begin(address);
         if (answered === null) return new Response('too many refused requests from this address', { status: 429 });
         const response = (url.pathname === JOIN_ROUTE ? core.group.http(request) : core.coordination.http(request)).then((answer) => {
-          answered(Refusals.refuses(answer.status));
+          answered(answer.status);
           return answer;
         }, (error: unknown) => {
-          answered(true);
+          answered(403);
           throw error;
         });
         peerRequests.add(response);

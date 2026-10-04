@@ -5,7 +5,7 @@ import { connect } from '../src/client.ts';
 import { settle } from '../src/coordination-wire.ts';
 import { GroupStore } from '../src/group.ts';
 import { group as groupCommand } from '../src/main.ts';
-import { Refusals, REFUSALS_PER_MINUTE } from '../src/server/refusals.ts';
+import { Refusals, REFUSALS_PER_MINUTE, senderOf } from '../src/server/refusals.ts';
 import { advertisedAddresses, isTailnetAddress, tailnetAddress } from '../src/group/addresses.ts';
 import { checkRoster, digestOf, fingerprint, liveCores, liveDevices, mergeRosters, type CoreEntry, type Roster } from '../src/group/roster.ts';
 import { boxPublic, newBoxKey, open, openResponse, pack, seal, SEALED, sealResponse, unpack } from '../src/group/seal.ts';
@@ -672,18 +672,21 @@ test('only a holder of the invitation spends the join allowance, and a pairing l
   } finally {
     globalThis.fetch = real;
   }
-  // That join, recorded on the path and sent again forty times: refused before it is opened, and never charged.
+  // That join, recorded on the path and sent again forty times, as it was or written another way:
+  // refused before it is opened, and never charged.
+  const respaced = JSON.stringify({ extra: 1, ...(JSON.parse(recorded!.body) as object) }, null, 2);
   for (let index = 0; index < 40; index += 1) {
-    const replay = await fetch(`${a.url}/group/join`, { method: 'POST', body: recorded!.body, headers: recorded!.headers });
+    const replay = await fetch(`${a.url}/group/join`, { method: 'POST', body: index % 2 === 0 ? recorded!.body : respaced, headers: recorded!.headers });
     expect([replay.status, await replay.text()]).toEqual([403, 'this join request was already received']);
   }
   for (let index = 0; index < 29; index += 1) {
     retry.roster = null;
     expect((await b.core.group.join(invite)).cores).toHaveLength(2);
   }
-  // The thirty-first request that opens, within the minute, is one too many.
+  // The thirty-first request that opens, within the minute, is one too many, and one turned away is not remembered.
   retry.roster = null;
   await expect(b.core.group.join(invite)).rejects.toThrow('no machine accepted');
+  expect((a.core.group as unknown as { invites: Map<string, { seen: Set<string> }> }).invites.get(inviteId)!.seen.size).toBe(30);
   retry.roster = a.core.journal.getSetting('group') as Roster;
 
   const held = a.core.group as unknown as { roster: Roster };
@@ -724,23 +727,29 @@ test('requests are counted against the address they come from as they arrive, an
   expect(held.every((answered) => answered !== null)).toBe(true);
   expect(refusals.begin('10.0.0.9', start)).toBeNull();
   // Answered well, a request gives its place back. Refused, as unproven, removed or over quota, it keeps it.
-  expect([403, 410, 429, 200, 400].map((status) => Refusals.refuses(status))).toEqual([true, true, true, false, false]);
-  held[0]!(false);
-  refusals.begin('10.0.0.9', start + 1)!(true);
-  for (const answered of held.slice(1)) answered!(true);
+  held[0]!(400);
+  refusals.begin('10.0.0.9', start + 1)!(403);
+  for (const [index, answered] of held.slice(1).entries()) answered!(index % 2 === 0 ? 410 : 429);
   expect(refusals.begin('10.0.0.9', start + 2)).toBeNull();
   // Another address is not the one that misbehaved, and the minute ends.
-  refusals.begin('10.0.0.10', start + 2)!(false);
-  refusals.begin('10.0.0.9', start + 60_001)!(true);
+  refusals.begin('10.0.0.10', start + 2)!(400);
+  refusals.begin('10.0.0.9', start + 60_001)!(403);
   expect(refusals.begin('10.0.0.9', start + 60_002)).not.toBeNull();
+
+  // A host on IPv6 has a whole /64 to send from: it is one sender. An IPv4 address inside an IPv6 one is that address.
+  expect(['2001:db8:1:2:aaaa::1', '2001:0db8:0001:0002::9', '2001:db8:1:3::1', '::ffff:10.0.0.9', 'fe80::1%eth0'].map(senderOf))
+    .toEqual(['2001:db8:1:2::/64', '2001:db8:1:2::/64', '2001:db8:1:3::/64', '10.0.0.9', 'fe80:0:0:0::/64']);
 
   // A table with no room left counts the addresses it cannot hold together, never leaves them uncounted.
   const full = new Refusals(2);
-  full.begin('10.0.1.1', start)!(true);
-  full.begin('10.0.1.2', start)!(true);
-  for (let index = 0; index < REFUSALS_PER_MINUTE; index += 1) full.begin(`10.0.2.${index}`, start)!(true);
+  // A member was served before the flood: it keeps an allowance of its own.
+  full.begin('10.0.5.5', start)!(200);
+  full.begin('10.0.1.1', start)!(403);
+  full.begin('10.0.1.2', start)!(403);
+  for (let index = 0; index < REFUSALS_PER_MINUTE; index += 1) full.begin(`10.0.2.${index}`, start)!(403);
   expect(full.begin('10.0.3.1', start)).toBeNull();
   expect(full.begin('10.0.1.1', start)).not.toBeNull();
+  expect(full.begin('10.0.5.5', start)).not.toBeNull();
 });
 
 test('a removal needs no admission behind it, and the invitation is never a command-line argument', async () => {

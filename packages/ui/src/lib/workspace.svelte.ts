@@ -3,6 +3,7 @@ import type { AgentAddress } from '@boite/contracts';
 import {
   clearStoredEndpoint,
   forgetGroupOf,
+  linkedCore,
   parsePairingLink,
   readEnvironments,
   removeEnvironment,
@@ -159,12 +160,22 @@ export class Workspace {
     return this.groups.vet(held, anchors);
   }
 
-  /** The stored core was refused its key: the window opens on a machine paired by hand, the one serving this page first, or on the shell's own core. */
-  #openElsewhere(): void {
+  /** The machine paired by hand a window falls back on: the one serving this page first. None in the shell, which has its own core. */
+  #byHand(): StoredEnvironment | undefined {
     const byHand = readEnvironments().filter((e) => e.coreId === undefined && e.token !== '');
-    const next = window.__TAURI_INTERNALS__ ? undefined : byHand.find((e) => servesThisPage(e.url)) ?? byHand[0];
+    return window.__TAURI_INTERNALS__ ? undefined : byHand.find((e) => servesThisPage(e.url)) ?? byHand[0];
+  }
+
+  /**
+   * The core at `url` was refused its key. When it is the stored one, the key
+   * goes first, so nothing reads it back, and the window opens on a machine
+   * paired by hand or on the shell's own core.
+   */
+  #openElsewhere(url: string): void {
+    if (readStoredEndpoint()?.url !== url) return;
+    clearStoredEndpoint();
+    const next = this.#byHand();
     if (next) storeEndpoint({ url: next.url, token: next.token, ...(next.paired ? { paired: true } : {}) });
-    else clearStoredEndpoint();
   }
 
   /**
@@ -191,14 +202,15 @@ export class Workspace {
     } catch {
       /* session only */
     }
-    // The window would open on a machine whose key is held back: it waits for the answer, and opens elsewhere on a refusal.
-    const wanted = readStoredEndpoint();
-    const waits = wanted !== null && readEnvironments().some((e) => e.url === wanted.url && holdsBack(e));
+    // The window would open on a machine whose key is held back, the stored one or the one a `?core=`
+    // link names: it waits for the answer, and on a refusal that key is sent nowhere.
+    const wanted = linkedCore() ?? readStoredEndpoint()?.url ?? null;
+    const waits = wanted !== null && readEnvironments().some((e) => e.url === wanted && holdsBack(e));
     const vetting = this.#vet().catch(() => [] as StoredEnvironment[]);
     if (wanted !== null && waits) {
       const cleared = await vetting;
       if (!this.#current(lifecycle)) return;
-      if (!cleared.some((e) => e.url === wanted.url)) this.#openElsewhere();
+      if (!cleared.some((e) => e.url === wanted)) this.#openElsewhere(wanted);
     }
     const selected = readStoredEndpoint();
     await (thread === null ? store.boot() : store.boot(false, thread));
@@ -446,6 +458,10 @@ export class Workspace {
    */
   async dropPrimary(id: string): Promise<void> {
     ++this.#generation;
+    // A machine paired by hand first, never the address being dropped: a page that address
+    // served would otherwise reach it again, with no key, and take it for the window's own.
+    const next = this.#byHand();
+    if (next && next.url !== id) await store.switchEnvironment(next.url);
     await store.forgetEnvironment(id);
     const entry = this.#primaryMachine(readStoredEndpoint(), readEnvironments());
     const twin = this.machines.find((m) => m.store !== store && m.id === entry.id);

@@ -254,6 +254,33 @@ describe('group links', () => {
     expect(readEnvironments().map((env) => env.coreId)).toEqual(['b', 'z']);
     // The machine that vouched is off: the key is used as it was left.
     expect(await new GroupLinks(ws, { secure: () => false, ask: async () => undefined }).vet([held[0]!], anchors)).toEqual([held[0]]);
+    // Paired by hand in another window while the question was out: that pairing is not the one refused, and it stays.
+    const repaired = { url: 'http://10.0.0.4:1', label: 'd', token: 'by-hand', paired: true };
+    const late = vi.fn(async () => {
+      localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([repaired]));
+      return roster;
+    });
+    expect(await new GroupLinks(ws, { secure: () => false, ask: late }).vet([held[2]!], [anchors[0]!])).toEqual([]);
+    expect(readEnvironments()).toEqual([repaired]);
+  });
+
+  it('sends no ticket to an address one hand-paired machine still lists and another no longer does', async () => {
+    // One roster is older: it still gives b the address b left, where somebody else may listen.
+    const stale = machine('http://10.0.0.1:1', { group: group('a', members) });
+    const current = machine('http://10.0.0.7:1', { group: group('c', [members[0]!, core('b', ['https://b.example']), core('c', ['http://10.0.0.7:1'])]) });
+    const { workspace: ws, added } = workspace([stale, current]);
+    const reach = vi.fn(async (addresses: string[]) => addresses[0] ?? null);
+    const links = new GroupLinks(ws, { reach, secure: () => false });
+    await links.reconcile();
+    await settle();
+    expect(reach).not.toHaveBeenCalled();
+    expect(added).toEqual([]);
+    expect(links.states['b']).toBe('insecure');
+    // Once the two agree, the address they both give is used.
+    storeOf(stale).group = group('a', [members[0]!, core('b', ['https://b.example']), core('c', ['http://10.0.0.7:1'])]);
+    await new GroupLinks(ws, { reach, secure: () => false }).reconcile();
+    await settle();
+    expect(added.map((entry) => entry.endpoint.url)).toEqual(['https://b.example']);
   });
 
   it('treats a machine paired again by hand as the owner\'s own, whatever its former group says afterwards', async () => {

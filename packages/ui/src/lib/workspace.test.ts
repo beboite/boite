@@ -193,6 +193,61 @@ test('the window opens on a machine paired by hand when the key of the one it wo
   expect(boot).toHaveBeenCalledTimes(1);
 });
 
+test('a refused key is sent nowhere: not through a link that reopens its core, not read back once it was the last entry', async () => {
+  const { w, a } = await setup();
+  // The answer takes a moment, as a question over the network does: nothing may be sent meanwhile.
+  const refuse = () => vi.spyOn(w.groups, 'vet').mockImplementation(async (held) => {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    for (const env of held) endpoints.removeEnvironment(env.url);
+    return [];
+  });
+  vi.spyOn(w, 'add').mockResolvedValue(true);
+  // A page sends the owner to `?core=` of a machine the group brought: the link waits for the answer like the stored core does.
+  endpoints.storeEndpoint({ url: 'https://anchor.test', token: 'hand', paired: true });
+  upsertEnvironment({ url: 'https://anchor.test', token: 'hand', paired: true, label: 'Anchor' });
+  upsertEnvironment({ url: 'http://10.0.0.8:1', token: 'old', paired: true, label: 'Retired', coreId: 'c', groupId: 'grp' });
+  window.history.replaceState(null, '', '/?core=http%3A%2F%2F10.0.0.8%3A1');
+  let vet = refuse();
+  const boot = vi.spyOn(a, 'boot').mockImplementation(async () => {
+    expect(endpoints.readEnvironments().map((env) => env.url)).toEqual(['https://anchor.test']);
+  });
+  await w.boot();
+  expect(vet).toHaveBeenCalledTimes(1);
+  expect(boot).toHaveBeenCalledTimes(1);
+  window.history.replaceState(null, '', '/');
+
+  // In the shell, the only saved machine is one the group brought and the window was left on it.
+  localStorage.clear();
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+  vi.spyOn(endpoints, 'fromTauri').mockResolvedValue({ url: 'http://127.0.0.1:41000', token: 'test', local: true });
+  endpoints.storeEndpoint({ url: 'http://10.0.0.8:1', token: 'old', paired: true });
+  upsertEnvironment({ url: 'http://10.0.0.8:1', token: 'old', paired: true, label: 'Retired', coreId: 'c', groupId: 'grp' });
+  vet.mockRestore();
+  vet = refuse();
+  boot.mockImplementation(async () => {
+    // Its key is gone from both places, and the emptied list did not seed it back as a machine paired by hand.
+    expect(endpoints.readStoredEndpoint()).toBeNull();
+    expect(endpoints.readEnvironments()).toEqual([]);
+  });
+  await w.boot();
+  expect(vet.mock.calls[0]![1]).toEqual([{ url: 'http://127.0.0.1:41000', token: 'test', local: true }]);
+  expect(boot).toHaveBeenCalledTimes(2);
+});
+
+test('a window whose machine the group dropped falls back on a machine paired by hand, never on the address it dropped', async () => {
+  const { w, a } = await setup();
+  a.endpointUrl = 'http://10.0.0.8:1';
+  w.machines = [{ id: 'http://10.0.0.8:1', label: 'Retired', store: a, coreId: 'c', groupId: 'grp' }];
+  upsertEnvironment({ url: 'http://10.0.0.8:1', token: 'old', paired: true, label: 'Retired', coreId: 'c', groupId: 'grp' });
+  upsertEnvironment({ url: 'https://anchor.test', token: 'hand', paired: true, label: 'Anchor' });
+  const order: string[] = [];
+  vi.spyOn(a, 'switchEnvironment').mockImplementation(async (url) => { order.push(`switch ${url}`); a.endpointUrl = url; });
+  vi.spyOn(a, 'forgetEnvironment').mockImplementation(async (url) => { order.push(`forget ${url}`); endpoints.removeEnvironment(url); });
+  await w.dropPrimary('http://10.0.0.8:1');
+  expect(order).toEqual(['switch https://anchor.test', 'forget http://10.0.0.8:1']);
+  expect(w.machines.map((machine) => [machine.id, machine.coreId])).toEqual([['https://anchor.test', undefined]]);
+});
+
 test('a notification link reaches the page core before a remembered machine answers', async () => {
   const { w, a } = await setup();
   a.endpointUrl = window.location.origin;

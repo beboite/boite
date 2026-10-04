@@ -35,7 +35,7 @@ import { invalidParams, messageOf, refused, RpcFailure, unauthorized } from './e
 import { advertisedAddresses, magicName, tailnetAddress, type Tailnet } from './group/addresses.ts';
 import { admissionInput, checkCard, checkRoster, clockOf, CORE_ENTRIES_MAX, DEVICE_ENTRIES_MAX, digestOf, fingerprint, homeOf, liveCores, liveDevices, mergeRosters } from './group/roster.ts';
 import type { CoreCard, CoreEntry, DeviceEntry, Roster } from './group/roster.ts';
-import { boxPublic, boxSigningInput, newBoxKey, open, openResponse, pack, readBoxKey, seal, SEALED, sealResponse, unpack } from './group/seal.ts';
+import { boxPublic, boxSigningInput, newBoxKey, open, openResponse, pack, readBoxKey, seal, SEALED, sealedName, sealResponse, unpack } from './group/seal.ts';
 import type { Sealing } from './group/seal.ts';
 import { encodeInvite, encodeTicket, parseInvite, parseTicket, ticketSigningInput } from './group/ticket.ts';
 import type { Invite } from './group/ticket.ts';
@@ -673,14 +673,14 @@ export class GroupStore {
     const named = request.headers.get('x-boite-invite') ?? '';
     const context = { from, to: this.selfId() };
     let opened: { plaintext: string; responseKey: Buffer };
+    let name: string;
     try {
       const raw = await boundedBody(request.body, JOIN_BODY_MAX);
-      // A request recorded on the path and sent again is refused before anything is computed for it:
-      // its sender holds no invitation, and what it replays must not spend the allowance below.
-      const digest = createHash('sha256').update(raw).digest('hex');
-      if (invite.seen.has(digest)) return new Response('this join request was already received', { status: 403 });
+      // A request recorded on the path and sent again, respaced or not, is refused before anything is
+      // computed for it: its sender holds no invitation, and what it replays must not spend the allowance below.
+      name = sealedName(raw);
+      if (invite.seen.has(name)) return new Response('this join request was already received', { status: 403 });
       opened = open(raw, this.box().key, context, invite.psk);
-      invite.seen.add(digest);
     } catch {
       return new Response('unknown or expired invitation', { status: 403 });
     }
@@ -693,6 +693,8 @@ export class GroupStore {
     // The body may have taken its time: the invitation must still be the live one when it is used.
     if (this.invites.get(named) !== invite || invite.expiresAt <= now) return new Response('unknown or expired invitation', { status: 403 });
     if (this.closed || this.core.stopping) return new Response('the core is stopping', { status: 503 });
+    // Remembered only once it is served, so the allowance above bounds what an invitation remembers.
+    invite.seen.add(name);
     return this.core.router.trackRequest(() => {
       let nonce = '';
       let roster: Roster | undefined;

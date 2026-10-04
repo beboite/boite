@@ -28,7 +28,7 @@
  * traffic and later steals that machine's key file reads what was sent to it.
  */
 
-import { createCipheriv, createDecipheriv, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
 import { invalidParams } from '../errors.ts';
 
@@ -163,6 +163,20 @@ export function open(body: string, privateKey: KeyObject, context: SealContext, 
   const epk = b64(bytes(message['epk'], KEY_BYTES, 'epk'));
   const keys = deriveKeys(agree(privateKey, publicKey(epk)), epk, boxPublic(privateKey), context, psk);
   return { plaintext: decrypt(keys.request, aad('request', context), message['iv'], message['ct']), responseKey: keys.response };
+}
+
+/**
+ * What a sealed request is, whatever its JSON looks like: the three values it
+ * opens with. Spaced, padded or carrying a field more, the same request has the
+ * same name, and one altered where it counts no longer opens.
+ */
+export function sealedName(body: string): string {
+  const message = parse(body);
+  return createHash('sha256')
+    .update(bytes(message['epk'], KEY_BYTES, 'epk'))
+    .update(bytes(message['iv'], IV_BYTES, 'iv'))
+    .update(bytes(message['ct'], null, 'ciphertext'))
+    .digest('hex');
 }
 
 export function sealResponse(plaintext: string, responseKey: Buffer, context: SealContext): string {

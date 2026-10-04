@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from 'vitest';
 import {
+  linkedCore,
   parsePairingLink,
   readEnvironments,
   readStoredEndpoint,
@@ -212,6 +213,23 @@ describe('environments', () => {
     expect(readEnvironments()).toEqual([
       { url: 'http://10.0.0.5:9000', label: '10.0.0.5:9000', token: 'key', paired: true }
     ]);
+  });
+
+  test('an entry taken out of the list does not come back from the stored endpoint, stripped of where it came from', () => {
+    const url = 'http://10.0.0.5:9000';
+    storeEndpoint({ url, token: 'key', paired: true });
+    rememberSession({ url, token: '', ticket: 't', coreId: 'b', groupId: 'grp' }, 'key');
+    removeEnvironment(url);
+    expect(readEnvironments()).toEqual([]);
+  });
+
+  test('a link that reopens a known core is named before it is taken, a pairing link is not', () => {
+    at('/?core=http%3A%2F%2F10.0.0.5%3A9000%2F');
+    expect(linkedCore()).toBe('http://10.0.0.5:9000');
+    at('/?core=http%3A%2F%2F10.0.0.5%3A9000&grant=g');
+    expect(linkedCore()).toBeNull();
+    at('/');
+    expect(linkedCore()).toBeNull();
   });
 
   test('an unpaired stored endpoint and a broken list seed nothing', () => {

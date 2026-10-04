@@ -120,8 +120,9 @@ function isEnvironment(value: unknown): value is StoredEnvironment {
  */
 export function readEnvironments(): StoredEnvironment[] {
   let list: StoredEnvironment[] = [];
+  let raw: string | null = null;
   try {
-    const raw = window.localStorage.getItem(ENVIRONMENTS_STORAGE_KEY);
+    raw = window.localStorage.getItem(ENVIRONMENTS_STORAGE_KEY);
     if (raw) {
       const parsed: unknown = JSON.parse(raw);
       if (Array.isArray(parsed)) list = parsed.filter(isEnvironment);
@@ -130,6 +131,9 @@ export function readEnvironments(): StoredEnvironment[] {
     list = [];
   }
   if (list.length > 0) return list;
+  // A list that was written, even emptied, is the list: an entry taken out of it must not come
+  // back from the stored endpoint, without what the list knew of where it came from.
+  if (raw !== null) return [];
   const stored = readStoredEndpoint();
   if (!stored?.paired) return [];
   const seeded: StoredEnvironment = {
@@ -267,6 +271,13 @@ function takeFromQuery(): Endpoint | null {
   window.history.replaceState(null, '', stripped);
 
   return endpoint;
+}
+
+/** The core a `?core=` link reopens with the key this device holds for it, before the link is taken. */
+export function linkedCore(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  const core = params.get(CORE_QUERY_PARAM);
+  return core && !params.get(PAIR_QUERY_PARAM) && !params.get(GRANT_QUERY_PARAM) ? normalise(core) : null;
 }
 
 export function insideTauri(): boolean {
