@@ -26,7 +26,7 @@ export function placeMemoryEvents(messages: Message[], events: MemoryEvent[]) {
 
 type MemoryRun = { kind: 'memory'; key: string; events: MemoryEvent[] };
 
-/** Break folded tool groups at notice boundaries so later calls cannot cover them. */
+/** Break folded activity runs at notice boundaries so later calls cannot cover them. */
 export function memoryPartRuns(parts: MessagePart[], events: MemoryEvent[]): (PartRun | MemoryRun)[] {
   if (!events.length) return partRuns(parts);
   const boundaries = new Map<number, MemoryEvent[]>();
@@ -55,5 +55,5 @@ export function memoryPartRuns(parts: MessagePart[], events: MemoryEvent[]): (Pa
 function shiftedRuns(parts: MessagePart[], start: number, end: number): PartRun[] {
   return partRuns(parts.slice(start, end)).map(run => run.kind === 'part'
     ? { kind: 'part', index: run.index + start }
-    : { kind: 'tools', indices: run.indices.map(index => index + start) });
+    : { kind: 'activity', indices: run.indices.map(index => index + start) });
 }

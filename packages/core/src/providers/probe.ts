@@ -1,11 +1,11 @@
-import type { AccountId, ProviderId, RpcEvents, RpcParams, RpcResult, ThreadId } from '@boite/contracts';
+import type { AccountId, ModelInfo, ProviderId, RpcEvents, RpcParams, RpcResult, ThreadId } from '@boite/contracts';
 import { mkdtempSync } from 'node:fs';
 import { removeDir } from '../fs-retry.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Core } from '../core.ts';
 import { forgetProbes, probeModels, rememberExternalModels } from '../drivers/index.ts';
-import { readSubscriptionProxyModels } from '../subscription-proxy.ts';
+import { mergeProxyModels, readSubscriptionProxyModels } from '../subscription-proxy.ts';
 import { invalidParams, refused } from '../errors.ts';
 import { logMessageOf } from '../log-errors.ts';
 
@@ -41,12 +41,39 @@ async function probeProvider(
 
   const proxyModels = await readSubscriptionProxyModels(core, provider);
   if (proxyModels !== null) {
+    // The agent's own discovery, run through the gateway, describes each model
+    // as a subscription would: effort scale, speed tiers, names. The gateway
+    // only adds the models it routes beyond that list.
+    let native: ModelInfo[] = [];
+    try { native = (await probeNative(core, provider, account.id, model)).models; }
+    catch (error) { core.logs.record('warn', logMessageOf(error), { source: provider.id, event: 'provider.probeFailed', threadId: probeThreadId(provider.id, account.id) }); }
     if (!isCurrent()) throw refused('the subscription proxy changed during discovery; refresh models');
+    const models = mergeProxyModels(native, proxyModels);
     const probedAt = Date.now();
-    rememberExternalModels(provider.protocol, provider.id, account.id, proxyModels);
-    core.bus.emit('providers.probed', { providerId: provider.id, accountId: account.id, models: proxyModels, probedAt });
-    return { models: proxyModels, probedAt };
+    rememberExternalModels(provider.protocol, provider.id, account.id, models);
+    core.bus.emit('providers.probed', { providerId: provider.id, accountId: account.id, models, probedAt });
+    return { models, probedAt };
   }
+  try {
+    const { models, probedAt } = await probeNative(core, provider, account.id, model);
+    core.accounts.require(account.id);
+    if (!isCurrent()) throw refused('the provider or account changed during discovery; refresh models');
+    core.bus.emit('providers.probed', { providerId: provider.id, accountId: account.id, models, probedAt });
+    return { models, probedAt };
+  } catch (error) {
+    core.logs.record('warn', logMessageOf(error), { source: provider.id, event: 'provider.probeFailed', threadId: probeThreadId(provider.id, account.id) });
+    throw error;
+  }
+}
+
+/** One temporary agent process lists its models; every path stops it and removes its directory. */
+async function probeNative(
+  core: Core,
+  provider: ReturnType<Core['providers']['require']>,
+  accountId: AccountId,
+  model?: string,
+): Promise<{ models: ModelInfo[]; probedAt: number }> {
+  const account = core.accounts.require(accountId);
   const threadId = probeThreadId(provider.id, account.id);
   const cleanupContext = { source: provider.id, event: 'provider.probeCleanup', threadId };
   const directory = mkdtempSync(join(tmpdir(), 'boite-probe-'));
@@ -86,13 +113,7 @@ async function probeProvider(
         core.log(level, message, { ...context, source: provider.id, event: 'provider.probe', threadId });
       },
     });
-    core.accounts.require(account.id);
-    if (!isCurrent()) throw refused('the provider or account changed during discovery; refresh models');
-    core.bus.emit('providers.probed', { providerId: provider.id, accountId: account.id, models, probedAt });
     return { models, probedAt };
-  } catch (error) {
-    core.logs.record('warn', logMessageOf(error), { source: provider.id, event: 'provider.probeFailed', threadId });
-    throw error;
   } finally {
     // A descendant can hold the directory after the direct child closed. Neither
     // waiting for it nor removing the directory may replace the models just read.

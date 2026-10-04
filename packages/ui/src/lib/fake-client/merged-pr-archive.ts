@@ -7,10 +7,12 @@ import { hasActiveSideQuestion, retainedFamilyIds } from './side-questions';
 /** Deterministic disk/GitHub evidence for offline tests; the fake never polls a network. */
 export interface MergedPrFixture {
   repository: string;
+  /** The checkout's branch, which its agent may have changed from the thread's starting branch. */
   branch: string;
   tip: string;
   clean: boolean;
-  candidates: { repository: string; branch: string; sha: string; number: number; url: string; mergedAt: string; fork?: boolean }[];
+  /** `linked` PRs were attached with `boite pr link`: their head may have another name than the checkout's branch. */
+  candidates: { repository: string; branch: string; sha: string; number: number; url: string; mergedAt: string; fork?: boolean; linked?: boolean }[];
   beforeValidate?: () => Promise<void>;
   workflowActive?: boolean;
 }
@@ -64,8 +66,8 @@ export async function sweepMergedPrFixtures(ctx: FakeContext): Promise<number> {
     const state = ctx.mergedPrArchive.get(id) ?? { generation: 0, dismissed: [] };
     const checkout = checkoutKey(thread), updatedAt = thread.updatedAt;
     const candidate = fixture.candidates.length === 1 ? fixture.candidates[0] : undefined;
-    const proof = candidate ? { ...candidate } : undefined;
-    if (!proof || proof.fork || proof.repository !== fixture.repository || proof.branch !== thread.branch || fixture.branch !== thread.branch || proof.sha !== fixture.tip || !/^[a-f0-9]{40,64}$/.test(fixture.tip) || !fixture.clean || !Number.isFinite(Date.parse(proof.mergedAt)) || !Number.isInteger(proof.number) || proof.number < 1) continue;
+    const proof = candidate ? { ...candidate, branch: fixture.branch } : undefined;
+    if (!proof || proof.fork || proof.repository !== fixture.repository || (!candidate!.linked && candidate!.branch !== fixture.branch) || proof.sha !== fixture.tip || !/^[a-f0-9]{40,64}$/.test(fixture.tip) || !fixture.clean || !Number.isFinite(Date.parse(proof.mergedAt)) || !Number.isInteger(proof.number) || proof.number < 1) continue;
     let url: URL;
     try { url = new URL(proof.url); } catch { continue; }
     if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || `${url.host}${url.pathname}`.toLowerCase() !== `${fixture.repository}/pull/${proof.number}`.toLowerCase()) continue;

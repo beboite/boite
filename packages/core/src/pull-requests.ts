@@ -4,6 +4,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, join, normalize, resolve } from 'node:path';
 import { messageOf, refused } from './errors.ts';
+import { linkedPullRequestUrls } from './linked-pull-requests.ts';
 import { GIT_PROBE_TIMEOUT_MS, hasGitMarker } from './projects.ts';
 import { PullRequestReviews } from './pull-request-review.ts';
 
@@ -95,7 +96,8 @@ export function repositoryOf(root: string): string {
 export interface MergedPrProof {
   repository: string;
   checkoutRepository: string;
-  branch: string;
+  /** The checkout's own branch when proved, null on a detached HEAD. The PR head may have another name. */
+  branch: string | null;
   sha: string;
   number: number;
   url: string;
@@ -118,13 +120,18 @@ export function githubRepository(remotes: string, host = process.env.GH_HOST ?? 
   return identities.size === 1 ? [...identities][0]! : null;
 }
 
-export function parseMergedPrProof(text: string, expected: Omit<MergedPrProof, 'number' | 'url' | 'mergedAt'>): MergedPrProof | null {
+/**
+ * A merged PR whose head commit is the checkout's clean tip. A PR found by
+ * branch name must also have that name; a PR the conversation linked names
+ * itself, so the agent may have pushed the tip under another branch name.
+ */
+export function parseMergedPrProof(text: string, expected: Omit<MergedPrProof, 'number' | 'url' | 'mergedAt'>, linked = false): MergedPrProof | null {
   const values = pullRequestArray(text);
   // Reusing a branch, or finding a fork, never selects an arbitrary newest PR.
   if (values.length !== 1) return null;
   const item = values[0] as Record<string, unknown>;
   const pr = toPullRequest(item);
-  if (pr.state !== 'MERGED' || item.isCrossRepository !== false || item.headRefName !== expected.branch || item.headRefOid !== expected.sha || typeof item.mergedAt !== 'string' || !Number.isFinite(Date.parse(item.mergedAt))) return null;
+  if (pr.state !== 'MERGED' || item.isCrossRepository !== false || (!linked && item.headRefName !== expected.branch) || typeof item.headRefName !== 'string' || item.headRefOid !== expected.sha || typeof item.mergedAt !== 'string' || !Number.isFinite(Date.parse(item.mergedAt))) return null;
   const [host, owner, name] = expected.repository.split('/');
   const repository = item.headRepository as { name?: unknown } | null;
   const repositoryOwner = item.headRepositoryOwner as { login?: unknown } | null;
@@ -138,6 +145,9 @@ export function parseMergedPrProof(text: string, expected: Omit<MergedPrProof, '
 export const LIST_LIMIT = 200;
 const LIST_TTL_MS = 15_000;
 const PROOF_TTL_MS = 60_000;
+/** Linked PRs asked about per proof, newest first: a conversation can link twenty. */
+const LINKED_PROOFS = 5;
+const PROOF_FIELDS = 'number,url,state,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergedAt';
 /** A repository's remotes rarely change: they are read once per five minutes. */
 const REMOTES_TTL_MS = 5 * 60_000;
 const TIMEOUT_MS = 10_000;
@@ -211,20 +221,26 @@ export class PullRequests {
     });
   }
 
-  /** Fresh checkout checks use the same bounded process queue as display lookups. */
-  async cleanCheckout(thread: ThreadSummary, sha?: string, signal?: AbortSignal): Promise<string | null> {
+  /**
+   * The checkout's branch and tip when nothing is uncommitted or untracked.
+   * Agents often leave the conversation's starting branch for one named after
+   * the fix, so the branch is read from the checkout, not from the thread.
+   * Fresh checkout checks use the same bounded process queue as display lookups.
+   */
+  async cleanCheckout(thread: ThreadSummary, sha?: string, signal?: AbortSignal): Promise<{ branch: string | null; sha: string } | null> {
     if (!thread.branch || thread.branch === 'HEAD') return null;
     const status = await this.#run(thread, thread.cwd, 'git', ['status', '--porcelain=v2', '--branch', '-z'], signal);
     const records = status.split('\0').filter(Boolean);
     const branch = records.find(record => record.startsWith('# branch.head '))?.slice(14);
     const tip = records.find(record => record.startsWith('# branch.oid '))?.slice(13);
-    return branch === thread.branch && tip && /^[a-f0-9]{40,64}$/.test(tip) && (!sha || tip === sha) && records.every(record => record.startsWith('# ')) ? tip : null;
+    if (!branch || !tip || !/^[a-f0-9]{40,64}$/.test(tip) || (sha && tip !== sha) || !records.every(record => record.startsWith('# '))) return null;
+    return { branch: branch === '(detached)' ? null : branch, sha: tip };
   }
 
   async validateMergedCheckout(thread: ThreadSummary, proof: MergedPrProof, signal?: AbortSignal): Promise<boolean> {
     signal?.throwIfAborted();
     if (repositoryOf(thread.cwd) !== proof.checkoutRepository || githubRepository(await this.#run(thread, thread.cwd, 'git', ['remote', '-v'], signal)) !== proof.repository) return false;
-    return await this.cleanCheckout(thread, proof.sha, signal) !== null;
+    return (await this.cleanCheckout(thread, proof.sha, signal))?.branch === proof.branch;
   }
 
   async proveMerged(thread: ThreadSummary, signal?: AbortSignal): Promise<MergedPrProof | null> {
@@ -237,13 +253,30 @@ export class PullRequests {
     signal?.throwIfAborted();
     const checkoutRepository = repositoryOf(thread.cwd);
     if (checkoutRepository !== repositoryOf(project.path)) return null;
-    const sha = await this.cleanCheckout(thread, undefined, signal);
-    if (!sha || this.#ghUnavailable !== null) return null;
+    const tip = await this.cleanCheckout(thread, undefined, signal);
+    if (!tip || this.#ghUnavailable !== null) return null;
     const repository = githubRepository(await this.#run(thread, thread.cwd, 'git', ['remote', '-v'], signal));
     if (!repository) return null;
-    return this.#gh(false, () => this.#sharedProof(`${checkoutRepository}\n${repository}\n${thread.branch}\n${sha}`, async ownerSignal => parseMergedPrProof(
-      await this.#run(thread, thread.cwd, 'gh', ['pr', 'list', '--repo', repository, '--head', thread.branch!, '--state', 'all', '--limit', '2', '--json', 'number,url,state,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergedAt'], ownerSignal),
-      { repository, checkoutRepository, branch: thread.branch!, sha },
+    const expected = { repository, checkoutRepository, branch: tip.branch, sha: tip.sha };
+    // `boite pr link` is how an agent names its PR: it holds even when the agent
+    // pushed the tip under a branch name the checkout does not have.
+    for (const url of linkedPullRequestUrls(this.core.journal, thread.id, repository).slice(0, LINKED_PROOFS)) {
+      try {
+        const proof = await this.#gh(false, () => this.#sharedProof(`${checkoutRepository}\n${url}\n${tip.sha}`, async ownerSignal => parseMergedPrProof(
+          `[${await this.#run(thread, thread.cwd, 'gh', ['pr', 'view', url, '--json', PROOF_FIELDS], ownerSignal)}]`, expected, true,
+        ), signal));
+        if (proof) return proof;
+        if (this.#ghUnavailable !== null) return null;
+      } catch (error) {
+        // One deleted or unreadable link does not hide the conversation's other PRs.
+        signal?.throwIfAborted();
+      }
+    }
+    if (!tip.branch) return null;
+    const branch = tip.branch;
+    return this.#gh(false, () => this.#sharedProof(`${checkoutRepository}\n${repository}\n${branch}\n${tip.sha}`, async ownerSignal => parseMergedPrProof(
+      await this.#run(thread, thread.cwd, 'gh', ['pr', 'list', '--repo', repository, '--head', branch, '--state', 'all', '--limit', '2', '--json', PROOF_FIELDS], ownerSignal),
+      expected,
     ), signal));
   }
 

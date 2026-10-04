@@ -251,7 +251,10 @@ Older cores without the setting omit the toggle. The change is sent through
 that project's owning Store, even when another machine has the same project ID.
 
 Automatic archive hides an eligible idle worktree conversation after its exact
-branch tip is proved merged. It preserves the worktree, branch, commits, files,
+branch tip is proved merged. The proof reads the checkout's current branch, so
+an agent may leave the starting branch for one named after its fix. A PR linked
+with `boite pr link` counts too, even when the agent pushed under another branch
+name, as long as its head commit is the checkout's tip. It preserves the worktree, branch, commits, files,
 history and provider session. Archived conversations show the PR reason/link
 and archive time; Restore makes them visible and protects that restored checkout
 from automatic archiving again.

@@ -14,15 +14,14 @@
   import QuestionCard from './QuestionCard.svelte';
   import Prose from './Prose.svelte';
   import ChatFile from './ChatFile.svelte';
-  import ThinkingPart from './ThinkingPart.svelte';
   import ToolGroup from './ToolGroup.svelte';
-  import { runKey, type ToolPart } from '../lib/tool-groups';
+  import { activityShown, runKey, type ActivityPart } from '../lib/tool-groups';
   import { memoryPartRuns } from '../lib/memory-timeline';
   import MemoryRow from './MemoryRow.svelte';
 
   /**
    * An assistant or system message in the timeline: the model that wrote it,
-   * then every part it carries, including each reasoning step in order.
+   * then every part it carries, its calls and reasoning folded into activity runs.
    * `signedOut` is the thread's account when it is signed out, so an error can
    * carry the way back in.
    */
@@ -69,24 +68,27 @@
   {#each runs as run (run.kind === 'memory' ? run.key : runKey(run))}
     {#if run.kind === 'memory'}
       <MemoryRow event={run.events[0]!} events={run.events} onconfigure={store.owner ? () => store.showSettings('resources', 'limits') : undefined} />
-    {:else if run.kind === 'tools'}
-      <div class="part" data-kind="tool">
-        <ToolGroup parts={run.indices.map((at) => message.parts[at]).filter((part): part is ToolPart => part?.type === 'tool')} {isBackground}
+    {:else if run.kind === 'activity'}
+      {@const activity = run.indices.map((at) => message.parts[at]).filter((part): part is ActivityPart => part?.type === 'tool' || part?.type === 'thinking')}
+      {@const lastAt = run.indices.at(-1) ?? -1}
+      {@const tail = message.parts[lastAt]}
+      {@const thinkingLive = message.state === 'streaming' && lastAt === message.parts.length - 1 && tail?.type === 'thinking' && tail.finishedAt == null}
+      {#if activityShown(activity, thinkingLive)}
+      <div class="part" data-kind={activity.every((part) => part.type === 'thinking') ? 'thinking' : 'tool'}>
+        <ToolGroup parts={activity} {thinkingLive} {isBackground}
           loadOutput={toolId => store.loadToolOutput(threadId, message.id, toolId)} />
       </div>
+      {/if}
     {:else if message.parts[run.index]}
     {@const index = run.index}
     {@const part = message.parts[run.index]!}
     {@const shownText = part.type === 'text' ? message.role === 'system' ? promptText(part) : visibleAnswer(part.text) : ''}
-    {#if (part.type !== 'text' || shownText.length > 0 || index === caretAt)
-      && (part.type !== 'thinking' || part.text.trim().length > 0 || part.startedAt !== undefined || (message.state === 'streaming' && index === message.parts.length - 1))}
+    {#if part.type !== 'text' || shownText.length > 0 || index === caretAt}
     <div class="part" data-kind={part.type}>
       {#if part.type === 'text'}
         <Prose text={shownText} live={index === caretAt && part.complete !== true} bubble={message.role === 'assistant'}
           typing={!compacting && latestInTurn && message.role === 'assistant' && store.connection === 'ready' && store.openThread?.status === 'running' && index === message.parts.length - 1 && index === caretAt && part.complete !== true} {store} {threadId} />
 
-      {:else if part.type === 'thinking'}
-        <ThinkingPart text={part.text} live={message.state === 'streaming' && index === message.parts.length - 1 && part.finishedAt == null} startedAt={part.startedAt ?? null} finishedAt={part.finishedAt ?? null} />
       {:else if part.type === 'file' || part.type === 'artifact'}
         <ChatFile file={part} {store} {threadId} messageId={message.id} partIndex={index} />
       {:else if part.type === 'tool' && planOf(part.name, part.input) !== null}

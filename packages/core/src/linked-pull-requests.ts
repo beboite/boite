@@ -1,9 +1,27 @@
 import { orderPullRequests, pullRequestAddress, type LinkedPullRequest } from '@boite/contracts';
 import type { Core } from './core.ts';
+import type { Journal } from './journal.ts';
 import { messageOf, refused } from './errors.ts';
 
 const PREFIX = 'linked-pull-requests:';
 const LIMIT = 20;
+
+/**
+ * The conversation's linked PR URLs in one GitHub repository (`host/owner/name`),
+ * newest link first. Bad stored entries are skipped, never trusted.
+ */
+export function linkedPullRequestUrls(journal: Journal, threadId: string, repository: string): string[] {
+  const stored = journal.getSetting(PREFIX + threadId);
+  if (!Array.isArray(stored)) return [];
+  const urls: string[] = [];
+  for (const entry of [...stored].reverse()) {
+    try {
+      const address = pullRequestAddress((entry as { url?: unknown } | null)?.url as string);
+      if (`${address.host}/${address.repository}`.toLowerCase() === repository.toLowerCase() && !urls.includes(address.url)) urls.push(address.url);
+    } catch { /* A malformed entry names no PR. */ }
+  }
+  return urls;
+}
 
 /** Explicit links belong to the conversation, including when its checkout moves. */
 export class LinkedPullRequests {

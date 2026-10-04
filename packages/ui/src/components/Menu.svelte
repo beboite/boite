@@ -274,6 +274,9 @@
     transform-origin: bottom left;
   }
 
+  /* A capped list scrolls: a row that shrank instead let its hint run over the next one. */
+  .popover > * { flex: none; }
+
   .popover.closing {
     animation-name: pop-out;
     pointer-events: none;

@@ -198,7 +198,7 @@
       <div class="row" data-thread-id={row.thread.id} data-machine-id={row.machine.id}>
         <button class="ghost thread" class:offline={row.machine.store.connection !== 'ready'} data-testid="mobile-thread-{row.thread.id}" onclick={() => { show('chat'); void workspace.select(row.machine.store, row.thread.id); }}>
           <span class="summary"><span class="title"><span class="provider" data-testid="thread-provider" role="img" aria-label={agentLabel(row.machine.store, row.thread)}><ProviderLogo providerId={row.thread.providerId} size={13} /></span>{#if row.thread.pinned}<Pin size={12} />{/if}{row.thread.title}{#if hasUnsentDraft(row.machine.store.composerStates[row.thread.id])}<span class="draft" data-testid="thread-draft" title={strings.sidebar.unsentDraft} aria-label={strings.sidebar.unsentDraft}><PencilLine size={12} /></span>{/if}</span><span class="detail" title={row.thread.branch ?? undefined}>{[projectName(row.project), several ? row.machine.label : null, row.thread.branch].filter(Boolean).join(' · ')}</span></span>
-          <ThreadState thread={row.thread} {now} />
+          <ThreadState thread={row.thread} {now} subagents={row.machine.store.subagents(row.thread.id)} />
         </button>
         <Menu items={rowItems(row.machine.store, row.thread)} onpick={(action) => void rowAction(row.machine.store, row.thread, action, row.machine.id)} label={strings.sidebar.threadMenu} placement="bottom" variant="ghost" testid="mobile-thread-menu-{row.thread.id}"><Ellipsis size={18} /></Menu>
       </div>
@@ -209,15 +209,15 @@
         {@const groupRows = rows.filter(row => row.machine.id === group.machine.id && row.thread.projectId === group.project.id)}
         {@const workingOpen = projectThreadView.isOpen(group, 'working')}
         {@const doneOpen = !!group.project.archivedThreads && projectThreadView.isOpen(group, 'done')}
-        {@const workingRows = groupRows.filter(row => workingThread(row.thread))}
-        {@const attentionRows = query || !recentPreferences.groupWorking ? groupRows : groupRows.filter(row => workingOpen ? !workingThread(row.thread) : !groupWorkingThread(group.machine.store, row.thread))}
+        {@const workingRows = groupRows.filter(row => workingThread(row.machine.store, row.thread))}
+        {@const attentionRows = query || !recentPreferences.groupWorking ? groupRows : groupRows.filter(row => workingOpen ? !workingThread(row.machine.store, row.thread) : !groupWorkingThread(group.machine.store, row.thread))}
         {@const controls = `mobile-project-${encodeURIComponent(projectKey(group))}`}
         {@const draft = group.machine.store.draftEntries.find(entry => entry.projectId === group.project.id)}
         {#if !query || groupRows.length > 0 || (doneOpen && group.project.archivedThreads)}
         <section class="project-group" class:inactive={!activeProject(group)} data-testid="mobile-project-group" data-project-id={group.project.id} data-machine-id={group.machine.id}>
           <div class="project-heading">
             <ProjectTile project={group.project} store={group.machine.store} /><h2>{projectName(group.project)}{#if several}<span>{group.machine.label}</span>{/if}</h2>
-            <ProjectThreadCounters entry={group} working={group.machine.store.threadsOf(group.project.id).filter(workingThread).length} {controls} searching={!!query} />
+            <ProjectThreadCounters entry={group} working={group.machine.store.threadsOf(group.project.id).filter(thread => workingThread(group.machine.store, thread)).length} {controls} searching={!!query} />
             {#if projectView.order === 'manual'}
               <Menu items={[
                 { id: 'up', label: strings.sidebar.moveProjectUp, disabled: projectKey(shownGroups[0]!) === projectKey(group) },

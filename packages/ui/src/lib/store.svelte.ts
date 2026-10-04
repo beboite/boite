@@ -479,6 +479,7 @@ export class Store {
 
   threadsOf(...args: Parameters<Threads['threadsOf']>) { return this.#ctx.threads.threadsOf(...args); }
   moveBlocked(threadId: ThreadId) { return this.#ctx.threads.moveBlocked(threadId); }
+  subagents(threadId: ThreadId) { return this.#ctx.threads.subagents(threadId); }
   compact(...args: Parameters<Threads['compact']>) { return this.#ctx.threads.compact(...args); }
   rewind(...args: Parameters<Threads['rewind']>) { return this.#ctx.threads.rewind(...args); }
   forkSideQuestion(...args: Parameters<Threads['forkSideQuestion']>) { return this.#ctx.threads.forkSideQuestion(...args); }

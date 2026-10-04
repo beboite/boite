@@ -27,6 +27,14 @@ export function subscriptionProxyEnv(core: Core, provider: ProviderDescriptor): 
   if (provider.protocol === 'claude-sdk') return {
     ANTHROPIC_BASE_URL: proxyApiUrl(proxy).replace(/\/v1$/, ''),
     ANTHROPIC_AUTH_TOKEN: key, ANTHROPIC_API_KEY: '',
+    // The gateway relays Messages verbatim to Anthropic on a subscription. A
+    // custom base URL would otherwise switch Claude Code to its third-party
+    // behavior: no tool search, no first-party model aliases, and a 5-minute
+    // prompt cache where a subscription gets one hour. Fast mode's organization
+    // check needs a native login the gateway holds instead, so it is skipped.
+    _CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL: '1',
+    CLAUDE_CODE_PROMPT_CACHE_TTL: '1h',
+    CLAUDE_CODE_SKIP_FAST_MODE_ORG_CHECK: '1',
   };
   return { [PROXY_URL_ENV]: proxyApiUrl(proxy), [PROXY_KEY_ENV]: key };
 }
@@ -46,6 +54,16 @@ export function subscriptionProxyCodexArgs(args: string[], env: Record<string, s
     `model_providers.${provider}.env_key="${PROXY_KEY_ENV}"`,
   ];
   return [...args, ...config.flatMap(value => ['--config', value])];
+}
+
+/**
+ * The agent's native list first, as a subscription shows it, then the models
+ * only the gateway routes. Without a native list the gateway's stands alone.
+ */
+export function mergeProxyModels(native: ModelInfo[], proxy: ModelInfo[]): ModelInfo[] {
+  if (!native.length) return proxy;
+  const ids = new Set(native.map(model => model.id));
+  return [...native, ...proxy.filter(model => !ids.has(model.id)).map(model => ({ ...model, default: false }))];
 }
 
 /** Effort controls come from explicit gateway capabilities, including Codex's native metadata. */

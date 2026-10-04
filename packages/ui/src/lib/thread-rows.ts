@@ -6,14 +6,20 @@ export function workingThread(status: ThreadStatus): boolean {
   return status === 'running' || status === 'queued' || status === 'waiting';
 }
 
-/** Parents with a working child, shared by every row of this machine. */
-export function blockedMoveParents(threads: readonly ThreadSummary[]): Set<ThreadId> {
-  const blocked = new Set<ThreadId>();
+/** A parent's delegated agents with a turn under way, and when the first of them started; null before any has. */
+export type WorkingChildren = { count: number; since: number | null };
+
+/** Each parent with a working child, shared by every row of this machine. */
+export function workingChildren(threads: readonly ThreadSummary[]): Map<ThreadId, WorkingChildren> {
+  const parents = new Map<ThreadId, WorkingChildren>();
   for (const thread of threads) {
     const parent = thread.parentThreadId;
-    if (parent && !thread.archived && workingThread(thread.status)) blocked.add(parent);
+    if (!parent || thread.archived || !workingThread(thread.status)) continue;
+    const held = parents.get(parent) ?? { count: 0, since: null };
+    const started = thread.runningSince ?? null;
+    parents.set(parent, { count: held.count + 1, since: started === null ? held.since : held.since === null ? started : Math.min(held.since, started) });
   }
-  return blocked;
+  return parents;
 }
 
 /** Same value: primitives by identity, the small objects of a summary (load, context, cache) by content. */

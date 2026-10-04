@@ -45,6 +45,11 @@ async function fixture() {
     if (command !== 'gh') return spawn(scope, command, args, options);
     ghCalls++;
     const wait = ghGate ? `while (!require('node:fs').existsSync(${JSON.stringify(ghGate)})) await Bun.sleep(5);` : '';
+    // `gh pr view <url>` answers one object, or fails for an unknown PR.
+    if (args[1] === 'view') {
+      const found = candidates.find(candidate => candidate.url === args[2]);
+      return spawn(scope, process.execPath, ['-e', found ? `${wait}console.log(${JSON.stringify(JSON.stringify(found))})` : 'console.error("no pull requests found"); process.exit(1)'], options);
+    }
     return spawn(scope, process.execPath, ['-e', `${wait}console.log(${JSON.stringify(JSON.stringify(candidates))})`], options);
   });
   restoreSpawn = () => replacement.mockRestore();
@@ -297,6 +302,9 @@ test('strict action proof rejects forks, reused branch, wrong tip and repository
   const pr = { number: 7, url: 'https://github.com/example/repo/pull/7', state: 'MERGED', headRefName: 'topic', headRefOid: expected.sha, headRepository: { name: 'repo' }, headRepositoryOwner: { login: 'example' }, isCrossRepository: false, mergedAt: '2026-10-01T12:00:00Z' };
   expect(parseMergedPrProof(JSON.stringify([pr]), expected)?.number).toBe(7);
   for (const candidate of [[pr, pr], [{ ...pr, isCrossRepository: true }], [{ ...pr, headRefOid: 'b'.repeat(40) }], [{ ...pr, headRefName: 'other' }], [{ ...pr, headRepositoryOwner: { login: 'fork' } }], [{ ...pr, mergedAt: null }], [{ ...pr, url: `${pr.url}?token=unsafe` }]]) expect(parseMergedPrProof(JSON.stringify(candidate), expected)).toBeNull();
+  // A linked PR names itself; its head may differ from the checkout's branch, but never its tip or repository.
+  expect(parseMergedPrProof(JSON.stringify([{ ...pr, headRefName: 'other' }]), expected, true)?.number).toBe(7);
+  for (const candidate of [{ ...pr, headRefOid: 'b'.repeat(40) }, { ...pr, isCrossRepository: true }, { ...pr, headRepositoryOwner: { login: 'fork' } }, { ...pr, state: 'OPEN' }]) expect(parseMergedPrProof(JSON.stringify([candidate]), expected, true)).toBeNull();
   expect(githubRepository('origin https://github.com/example/repo.git (fetch)\norigin git@github.com:example/repo.git (push)')).toBe(expected.repository);
   expect(githubRepository('origin https://github.com/fork/repo.git (fetch)\nupstream https://github.com/example/repo.git (fetch)')).toBeNull();
 });
@@ -458,6 +466,29 @@ test('dirty, advanced or wrong checkout and duplicate root holders never archive
   const thread = harness.core.threads.require(f.threadId);
   harness.core.journal.putThread({ ...thread, id: 'other-holder', archived: true });
   expect(await service.sweep()).toBe(0);
+});
+
+test('a worktree branch renamed by its agent archives through its own merged PR', async () => {
+  const f = await fixture();
+  // The agent left the starting branch for one named after its fix, then opened the PR from it.
+  git(f.checkout, 'checkout', '-q', '-b', 'fix/topic');
+  f.setCandidates([{ ...f.candidates[0]!, headRefName: 'fix/topic' }]);
+  expect(await service.sweep()).toBe(1);
+  expect(harness.core.threads.require(f.threadId).archived).toBe(true);
+  expect(archiveState(harness.core.journal, f.threadId).binding).toMatchObject({ branch: 'fix/topic', sha: f.sha, number: 7 });
+});
+
+test('a linked PR pushed under another branch name archives the conversation', async () => {
+  const f = await fixture();
+  const pushed = { ...f.candidates[0]!, headRefName: 'fix/elsewhere' };
+  f.setCandidates([pushed]);
+  // `git push origin HEAD:fix/elsewhere` leaves no local branch of that name to look up.
+  expect(await service.sweep()).toBe(0);
+  const link = { url: pushed.url, repository: 'example/repo', number: 7, title: 'Fix', state: 'OPEN', draft: false, head: 'fix/elsewhere', base: 'main', headRepository: 'example/repo', checkedAt: 1 };
+  // The newest link no longer resolves; the older one still proves the merge.
+  harness.core.journal.setSetting(`linked-pull-requests:${f.threadId}`, [link, { ...link, url: 'https://github.com/example/repo/pull/6', number: 6 }]);
+  expect(await service.sweep()).toBe(1);
+  expect(archiveState(harness.core.journal, f.threadId).reason).toMatchObject({ type: 'pr-merged', number: 7, url: pushed.url });
 });
 
 test('busy, viewed, paused workflow, child and stale opt-out or restore leave the root visible', async () => {

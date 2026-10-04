@@ -33,22 +33,23 @@ test('commands stay folded and parallel activity cannot reveal an unfinished par
       { type:'thinking', text:'Checking files' }
     ];
   `);
-  await page.waitFor(`document.querySelector('${id('tool-card')}[data-streaming=true]')`);
+  // The call and the reasoning after it are one folded line that names the running call.
+  await page.waitFor(`document.querySelector('${id('tool-group')}[data-live=true]')`);
   for (const width of [1300, 390]) {
     await page.send('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: width < 720 });
-    expect(await page.evaluate(`document.querySelector('${id('tool-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
+    expect(await page.evaluate(`document.querySelector('${id('tool-group-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
     expect(await page.evaluate(`document.querySelector('${id('tool-input')}') === null`)).toBe(true);
-    expect(await page.text(`${id('tool-card')} .line`)).toBe('Running a command');
+    expect(await page.text(id('tool-group-label'))).toBe('Running a command');
     expect(await page.evaluate(`document.querySelector('${id('timeline')}').textContent.includes('unfinished')`)).toBe(false);
     await capture(`chat-delivery-stream-${width < 720 ? 'phone' : 'desktop'}`);
     expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   }
   await update(`thread.messages.at(-1).parts[1].inputText += 't status --short'; thread.messages.at(-1).parts[0].text += ' and still growing';`);
-  expect(await page.text(`${id('tool-card')} .line`)).toBe('Running a command');
+  expect(await page.text(id('tool-group-label'))).toBe('Running a command');
   expect(await page.evaluate(`document.querySelector('${id('timeline')}').textContent.includes('unfinished')`)).toBe(false);
   await update(`const message = thread.messages.at(-1); message.parts[0].text += '.\\n\\n'; message.parts[1].inputText = null; message.parts[1].input = {command:'git status --short'}; message.parts[1].status = 'done'; message.state = 'complete'; thread.status = 'idle'; thread.turns[0].status = 'done';`);
   await page.waitFor(`document.querySelectorAll('${id('paragraph')}').length === 2`);
-  expect(await page.text(`${id('tool-card')} .line`)).toBe('Ran 1 command');
+  expect(await page.text(id('tool-group-label'))).toBe('Ran 1 command');
 });
 
 test('a reasoning without text shows no empty fold and leaves once the agent moves on', async () => {
