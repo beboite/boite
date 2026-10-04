@@ -243,6 +243,9 @@ test('agent deliverables and file links open in chat on desktop and paired phone
         await page.click(`a[data-file-path=${JSON.stringify(picturePath)}]`);
         // The published picture is already loaded. Wait for the preview opened by this link.
         const linkedImage = '[data-testid="chat-file"]:has([data-testid="artifact-preview"]) [data-testid="artifact-content"] img';
+        // The image loads lazily and the echo reply can push the card below the fold.
+        await page.waitFor(`document.querySelector(${JSON.stringify(linkedImage)})`);
+        await page.evaluate(`document.querySelector(${JSON.stringify(linkedImage)}).scrollIntoView({ block: 'center' })`);
         await page.waitFor(`document.querySelector(${JSON.stringify(linkedImage)})?.naturalWidth > 0`).catch(async error => {
           console.error(await page!.evaluate(`JSON.stringify(Array.from(document.querySelectorAll('[data-testid=chat-file]')).map(card => ({ text: card.textContent, images: Array.from(card.querySelectorAll('img')).map(img => ({ src: img.src, width: img.naturalWidth })) })))`));
           await page!.screenshot(join(import.meta.dir, '.artifacts', 'artifacts-linked-image-failure.png'));
