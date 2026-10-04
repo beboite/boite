@@ -20,6 +20,20 @@ test('rich markdown supports local paths, spaces, line numbers, file URIs and ba
   expect(renderMarkdown('# Project files\n\n[Jump](#project-files)', true)).toContain('id="project-files"');
 });
 
+test('a bare local address with its port opens in the browser instead of naming a file', () => {
+  expect(chatLink('192.168.1.117:7337')).toEqual({ kind: 'web', target: 'http://192.168.1.117:7337/' });
+  expect(chatLink('localhost:3000/admin/#quotas')).toEqual({ kind: 'web', target: 'http://localhost:3000/admin/#quotas' });
+  expect(chatLink('[::1]:8787')).toEqual({ kind: 'web', target: 'http://[::1]:8787/' });
+  const html = renderMarkdown('Boite from the PC (`192.168.1.117:7337`), [dashboard](192.168.1.112:8787/admin/)', true);
+  expect(html).toContain('<code><a href="http://192.168.1.117:7337/" target="_blank" rel="noopener noreferrer">192.168.1.117:7337</a></code>');
+  expect(html).toContain('href="http://192.168.1.112:8787/admin/"');
+  expect(html).not.toContain('data-file-path');
+  // Without a port it stays plain text, so a dotted version is never a link; real files keep their line.
+  expect(renderMarkdown('`1.4.2.0` and `192.168.1.117`', true)).not.toContain('<a');
+  expect(chatLink('999.1.1.1:80')).toEqual({ kind: 'file', target: '999.1.1.1', line: 80 });
+  expect(chatLink('src/main.ts:12')).toEqual({ kind: 'file', target: 'src/main.ts', line: 12 });
+});
+
 test('markup, executable schemes and remote file shares cannot turn into active content', () => {
   for (const value of ['javascript:alert(1)', 'data:text/html,hello', 'vbscript:foo', 'file://server/share', '//server/share']) expect(chatLink(value)).toBeNull();
   const html = renderMarkdown('[x](javascript:alert(1)) [x](data:text/html,bad) [<img onerror=x>](<docs/a"b.pdf>) ![image](https://example.test/pixel.png)', true);

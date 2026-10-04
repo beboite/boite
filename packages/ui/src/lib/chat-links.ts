@@ -4,10 +4,19 @@ export function escapeHtml(text: string): string {
 
 export type ChatLink = { kind: 'web' | 'file' | 'anchor' | 'email'; target: string; line?: number };
 
+/**
+ * A bare local address with its port, `192.168.1.117:7337` or `localhost:3000/admin`:
+ * a server to open in the browser, not `192.168.1.117` at line 7337. The port is
+ * required, so a dotted version number is never taken for an address.
+ */
+const OCTET = String.raw`(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)`;
+const HOST_PORT = new RegExp(String.raw`^(?:localhost|${OCTET}(?:\.${OCTET}){3}|\[[\da-f:.]+\]):\d{1,5}(?:[/?#][^\s]*)?$`, 'i');
+
 /** Local links are handled by the owning core, never resolved against the UI's origin. */
 export function chatLink(raw: string): ChatLink | null {
   let target = raw.trim();
   if (!target || /[\u0000-\u001f]/.test(target)) return null;
+  if (HOST_PORT.test(target)) target = `http://${target}`;
   if (/^https?:\/\//i.test(target)) {
     try { return { kind: 'web', target: new URL(target).href }; } catch { return null; }
   }
@@ -37,6 +46,8 @@ const NUMERIC_PATH = /^[\\/]?\d[\d.,\\/]*$/;
 
 export function fileLike(text: string): boolean {
   if (NUMERIC_PATH.test(text)) return false;
+  // Not a file, but `chatLink` makes it a web link, so a code span is still linked.
+  if (HOST_PORT.test(text)) return true;
   return /^(?:\.{0,2}[\\/]|[a-z]:[\\/]|file:\/\/)/i.test(text) || /^[\w@.-]+[\\/][^\s]+$/.test(text) || /^[\w.-]+\.[a-z\d]{1,8}(?::\d+)?$/i.test(text);
 }
 
