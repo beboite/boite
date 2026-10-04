@@ -1187,6 +1187,24 @@ test('fake close and reconnect fence calls waiting before dispatch even when the
   } finally { release(); held.mockRestore(); }
 });
 
+test('fake merged PR proof follows the checkout branch and linked PRs like the core', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const project = await client.call('projects.add', { path: '/workspace/renamed-branch-fixture' });
+  await client.call('threads.focus', { threadId: null, protectedThreadIds: [], protectAllThreads: false });
+  const archiveWith = async (title: string, checkoutBranch: string, prHead: string, linked: boolean) => {
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: 'a-echo', worktree: { branch: title }, title });
+    await client.call('threads.markRead', { threadId: thread.id });
+    client.setMergedPrFixture(thread.id, { repository: 'github.com/example/repo', branch: checkoutBranch, tip: 'a'.repeat(40), clean: true,
+      candidates: [{ repository: 'github.com/example/repo', branch: prHead, sha: 'a'.repeat(40), number: 7, url: 'https://github.com/example/repo/pull/7', mergedAt: '2026-10-01T12:00:00Z', linked }] });
+    return client.sweepMergedPrArchives();
+  };
+  // The agent switched its worktree to the branch its PR came from.
+  expect(await archiveWith('renamed', 'fix/renamed', 'fix/renamed', false)).toBe(1);
+  // Pushed under another name: only a linked PR names it.
+  expect(await archiveWith('pushed', 'pushed', 'fix/elsewhere', false)).toBe(0);
+  expect(await archiveWith('linked', 'linked', 'fix/elsewhere', true)).toBe(1);
+});
+
 test.for([{ questionOn: 'parent', release: 'dismiss' }, { questionOn: 'child', release: 'expire' }] as const)(
   'fake side questions protect a merged conversation family until the answer is released: %#',
   async (scenario, { createClient }) => {

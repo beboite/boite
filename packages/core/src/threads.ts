@@ -465,7 +465,7 @@ export class ThreadStore {
     const state = archiveState(this.core.journal, expected.id);
     const project = thread?.projectId ? this.core.journal.getProject(thread.projectId) : null;
     if (!thread || !project || repositoryOf(thread.cwd) !== proof.checkoutRepository || repositoryOf(project.path) !== proof.checkoutRepository) return null;
-    if (!thread || thread.updatedAt !== expected.updatedAt || thread.cwd !== expected.cwd || thread.branch !== proof.branch || thread.projectId !== expected.projectId || state.generation !== generation || state.dismissed?.includes(proof.url) || !this.core.mergedPrArchive.eligible(thread)) return null;
+    if (!thread || thread.updatedAt !== expected.updatedAt || thread.cwd !== expected.cwd || thread.branch !== expected.branch || thread.projectId !== expected.projectId || state.generation !== generation || state.dismissed?.includes(proof.url) || !this.core.mergedPrArchive.eligible(thread)) return null;
     const archivedThread = this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
       this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, binding: proof, reason: { type: 'pr-merged', number: proof.number, url: proof.url, archivedAt: Date.now() } });
       const saved = this.save({ ...thread, archived: true, doneAt: Date.now() }, 'thread.archived');
