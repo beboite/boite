@@ -35,7 +35,7 @@ test('tools and reasoning arriving beside a text delta keep its unfinished parag
   } finally { store.detach(); client.close(); }
 });
 
-test('empty reasoning keeps a recorded duration while untimed legacy placeholders disappear', async () => {
+test('reasoning folds with the calls into one line and empty reasoning under a second is not drawn', async () => {
   const client = new FakeClient({ delayMs: 0 });
   const store = new Store(); store.attach(client);
   try {
@@ -50,7 +50,18 @@ test('empty reasoning keeps a recorded duration while untimed legacy placeholder
     flushSync();
     expect(document.querySelector('[data-testid=thinking-part]')).toBeNull();
     expect(document.querySelector('[data-kind=thinking]')).toBeNull();
+    message.parts[0] = { type: 'thinking', text: '', startedAt: 1000, finishedAt: 1400 };
+    flushSync();
+    expect(document.querySelector('[data-testid=thinking-part]')).toBeNull();
+    expect(document.querySelector('[data-testid=tool-group]')).toBeNull();
     message.parts[0] = { type: 'thinking', text: '', startedAt: 1000, finishedAt: 4500 };
+    message.parts[1] = { type: 'tool', toolId: 'read', name: 'Read', input: {}, output: '', status: 'done', startedAt: 4600, finishedAt: 9000 };
+    message.state = 'complete';
+    flushSync();
+    expect(document.querySelectorAll('.parts > .part')).toHaveLength(1);
+    expect(document.querySelector('[data-testid=tool-group-elapsed]')?.textContent).toBe('8s');
+    expect(document.querySelector('[data-testid=thinking-part]')).toBeNull();
+    document.querySelector<HTMLButtonElement>('[data-testid=tool-group-toggle]')!.click();
     flushSync();
     expect(document.querySelector('[data-testid=thinking-elapsed]')?.textContent).toBe('3s');
     expect(document.querySelector('[data-testid=thinking-toggle] .caret')).toBeNull();
