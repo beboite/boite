@@ -34,8 +34,12 @@ for (const width of [1280, 390]) {
         return !!document.querySelector('${row(thread)}');
       })()`);
       const option = async (key: string) => {
-        await page.click(id(`${prefix}grouping-options`));
-        await page.click(`${menu} ${key === 'merged' ? '[data-value]:last-child' : `[data-value=${key}]`}`);
+        if (await page.evaluate(`document.querySelector('${id(`${prefix}grouping-options`)}').getAttribute('aria-expanded') !== 'true'`)) await page.click(id(`${prefix}grouping-options`));
+        const selector = `${menu} ${key === 'merged' ? '[data-value]:last-child' : `[data-value=${key}]`}`;
+        const checked = await page.evaluate(`document.querySelector('${selector}').getAttribute('aria-checked')`);
+        await page.click(selector);
+        await page.waitFor(`document.querySelector('${selector}')?.getAttribute('aria-checked') === '${checked === 'true' ? 'false' : 'true'}'`);
+        expect(await page.evaluate(`document.querySelector('${id(`${prefix}grouping-options`)}').getAttribute('aria-expanded')`)).toBe('true');
       };
       const shot = async (state: string) => {
         await page.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
@@ -67,9 +71,9 @@ for (const width of [1280, 390]) {
       await page.evaluate(`Array.from(document.querySelectorAll('${id(`${prefix}project-filter-menu`)} [data-value]')).find(e => e.dataset.value === JSON.stringify(['http://builder.test', 'p-boite'])).click()`);
       await option('merged');
       expect(await page.evaluate('globalThis.__boiteTest.workspace.machines.map(m => m.store.projects.find(p => p.id === "p-boite").autoArchiveMergedPr)')).toEqual([true, false]);
-      await page.click(id(`${prefix}grouping-options`));
       await page.waitFor(`document.querySelector('${menu} [role=menuitemcheckbox]')`);
       await shot('recent-options');
+      expect(await page.evaluate(`(() => { const r=document.querySelector('${menu}').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; })()`)).toBe(true);
       await page.reload();
       await page.waitFor('globalThis.__boiteTest?.workspace.machines.length === 2');
       expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.recent.v1'))`)).toEqual({groupWorking:false, groupOtherProjects:false});
@@ -101,6 +105,7 @@ for (const width of [1280, 390]) {
       await page.click(id(width < 720 ? 'mobile-view-projects' : 'view-projects'));
       await page.click(id(width < 720 ? 'mobile-grouping-options' : 'grouping-options'));
       await page.click(`${id(width < 720 ? 'mobile-grouping-options-menu' : 'grouping-options-menu')} [data-value=working]`);
+      await page.click(id(width < 720 ? 'mobile-grouping-options' : 'grouping-options'));
       const root = width < 720 ? id('mobile-list') : id('sidebar');
       const project = (machine: string, projectId: string) => `${root} ${id(width < 720 ? 'mobile-project-group' : 'project')}[data-machine-id="${machine}"][data-project-id="${projectId}"]`;
       const first = project(main, 'p-boite'), second = project(remote, 'p-boite');

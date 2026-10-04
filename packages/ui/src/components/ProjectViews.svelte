@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowDownWideNarrow, ChevronDown, Folder, GripVertical, List, ListFilter, Plus, Search } from '@lucide/svelte';
+  import { ArrowDownWideNarrow, ChevronDown, Folder, Folders, GitMerge, GripVertical, List, LoaderCircle, Plus, Search, SlidersHorizontal } from '@lucide/svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { projectKey, projectView, type ProjectEntry } from '../lib/project-view.svelte';
   import { projectName } from '../lib/format';
@@ -56,18 +56,18 @@
     <div class="actions">
     {#if entries.length}
       <Menu items={[
-        { id: 'working', label: strings.settings.groupWorkingThreads, checked: recentPreferences.groupWorking },
-        ...(workspace.view === 'projects' ? [{ id: 'other', label: strings.settings.groupOtherProjects, checked: recentPreferences.groupOtherProjects }] : []),
+        { id: 'working', label: strings.settings.groupWorkingThreads, hint: strings.sidebar.workingGroupingScope, title: strings.settings.groupWorkingThreadsHint, glyph: LoaderCircle, checked: recentPreferences.groupWorking },
+        ...(workspace.view === 'projects' ? [{ id: 'other', label: strings.settings.groupOtherProjects, hint: strings.sidebar.otherGroupingScope, title: strings.settings.groupOtherProjectsHint, glyph: Folders, checked: recentPreferences.groupOtherProjects }] : []),
         ...(target && targetOwner.owner && target.autoArchiveMergedPr !== undefined && target.repository !== false && target.kind !== 'drafts' ? [
           { id: 'merged-separator', label: '', separator: true },
-          { id: mergedKey, label: strings.sidebar.autoArchiveMergedPr, hint: projectName(target), checked: target.autoArchiveMergedPr,
+          { id: mergedKey, label: strings.sidebar.autoArchiveMergedPr, hint: fill(strings.sidebar.mergedPrScope, { project: projectName(target) }), glyph: GitMerge, checked: target.autoArchiveMergedPr,
             disabled: targetOwner.connection !== 'ready' || targetOwner.projectAutoArchiveMergedPrBusy(target.id) }
         ] : [])
       ]} onpick={key => {
         if (key === 'working') recentPreferences.setGroupWorking(!recentPreferences.groupWorking);
         if (key === 'other') recentPreferences.setGroupOtherProjects(!recentPreferences.groupOtherProjects);
         if (key === mergedKey && target) void targetOwner.setProjectAutoArchiveMergedPr(target.id, !target.autoArchiveMergedPr);
-      }} label={strings.sidebar.groupingOptions} placement="bottom" variant="ghost" testid={`${prefix}grouping-options`}><ListFilter size={15} /></Menu>
+      }} label={strings.sidebar.groupingOptions} placement="bottom" align="end" variant="ghost" switches testid={`${prefix}grouping-options`}><SlidersHorizontal size={15} /></Menu>
       <button class="ghost icon small" title={`${strings.sidebar.search}${store.keyHint('palette')}`} aria-label={strings.sidebar.search} data-testid={`${prefix}sidebar-search-open`} onclick={() => store.paletteOpen = true}><Search size={15} /></button>
       {#if !prefix}<button class="ghost icon small" title={`${newLabel}${store.keyHint('new-thread')}`} aria-label={newLabel} data-testid="new-thread" onclick={create}><Plus size={16} /></button>{/if}
     {/if}

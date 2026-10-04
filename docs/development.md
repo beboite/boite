@@ -190,7 +190,8 @@ history without restarting work.
 
 Settings > General > Conversations offers Group working threads,
 stored on this device; phone settings offer the same switch under device
-preferences. The grouping menu beside Projects and Recent offers it too.
+preferences. Display options beside Projects and Recent offers the same switches
+with their scope and stays open while adjusting multiple options.
 It moves running, queued and background work to a collapsed section above Done
 in Recent and behind each project's working counter in Projects. Turning it
 off keeps those conversations in the main list in both views.
