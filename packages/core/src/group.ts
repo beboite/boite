@@ -21,8 +21,8 @@
  * is not: that link is as private as its transport, Tailscale, HTTPS, or a
  * LAN the owner chose to listen on, the same as a `ws://` pairing.
  */
-
 import { randomUUID, verify } from 'node:crypto';
+import { migrateGroupPeer } from './coordination-group.ts';
 import type { KeyObject } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
@@ -169,7 +169,6 @@ export class GroupStore {
       devices: principal === 'owner' ? liveDevices(roster).map((device) => ({ id: device.id, name: device.name, role: device.role })) : [],
     };
   }
-
   // -- What the rest of the core reads off the roster.
 
   /** The other members, as agent coordination addresses them. */
@@ -220,7 +219,6 @@ export class GroupStore {
   owns(sessionId: string): boolean {
     return this.sessions[sessionId] !== undefined;
   }
-
   // -- Sealing: what this core says to another member, and hears from one.
 
   /** This machine's X25519 key, made on first use and kept beside its identity key. */
@@ -248,7 +246,6 @@ export class GroupStore {
     const context = { from, to: this.selfId() };
     return { ...open(body, this.box().key, context), context };
   }
-
   // -- This core's own entry.
 
   private async probe(): Promise<void> {
@@ -369,6 +366,8 @@ export class GroupStore {
     const retired = (sessionId: string): boolean => !given.includes(this.vias[sessionId] ?? '');
     this.reconciling = true;
     try {
+      // Group membership replaces standing pairwise trust, which would survive a removal.
+      for (const peer of this.core.coordination.peers()) if (cores.has(peer.coreId)) migrateGroupPeer(this.core, peer);
       const gone = Object.entries(this.sessions).filter(([sessionId, member]) => dead(member) || retired(sessionId)).map(([sessionId]) => sessionId);
       // A device paired here and revoked elsewhere loses its own session too.
       if (roster !== null) {
@@ -606,6 +605,15 @@ export class GroupStore {
     const expiresAt = now + GRANT_TTL_MS;
     this.invites.set(inviteId(grant), { expiresAt, joined: null, psk: invitePsk(grant), seen: new Set() });
     return { invite: encodeInvite({ g: roster.id, n: roster.name, c: self.coreId, a: self.addresses, x: self.box, t: grant }), expiresAt };
+  }
+  rename(name: unknown): Group {
+    const checked = groupName(name);
+    const roster = this.require();
+    if (roster.name !== checked) {
+      if ((roster.nameRev ?? 0) >= Number.MAX_SAFE_INTEGER) throw refused('name: the group name revision has reached its limit', { field: 'name' });
+      this.commit({ ...roster, name: checked, nameRev: (roster.nameRev ?? 0) + 1 });
+    }
+    return this.view('owner')!;
   }
 
   /** This core calls the member the invitation names, proves it holds its own key, and takes the roster back. */

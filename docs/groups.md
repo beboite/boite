@@ -5,19 +5,26 @@ it connects to every other machine of it, in both directions, with no pairing
 link each. A phone paired with one machine reaches all of them. Agents on one
 machine find the agents of the others.
 
-Before groups, each of those was set up one pair at a time: a pairing link per
-client and per core, the browser origin of every other core added by hand, and
-an agent link between two cores that both needed an HTTPS address. Those still
-work ([machines](machines.md), [coordination](coordination.md)) and remain the
-way to connect a machine you do not fully trust.
+Settings shows one group card containing the machine connections and their
+settings. Opening Machines converts existing full-control connections into one
+group automatically, reusing an existing group when there is one. Offline
+machines join when they reconnect while the page is open. Device-only
+connections retain their role and are never made group members.
+
+A machine already in another group stays there and shows the group to leave
+before moving it; each existing group keeps its own name and controls.
+An existing offline group is reused when it returns, and creation waits for
+unknown owners to answer. Failed migrations name the machine and can be retried.
+Leaving or removing a migrated machine is remembered on this client, so opening
+Settings again does not join it back automatically.
 
 ## Trust
 
 **Every machine of a group has full control of the others.** A member may
 invite a machine, remove one, and vouch for a client at the owner role. Group
 only machines that are yours. A machine that is partly trusted, a friend's or
-a shared server, takes a pairing link instead: that link gives one direction
-and one role.
+a shared server, should not be added to your group. Device pairing gives one
+direction and one role.
 
 A removal takes effect on each member when it hears of it. Until then that
 member still treats the removed machine as one of the group, with full control
@@ -41,6 +48,9 @@ In Settings, Machines:
    minutes, and whoever holds it joins: treat it as a credential.
 3. On the machine that joins, paste it under **Join a group**.
 
+Click or tap the group name to rename it. Enter or leaving the field saves;
+Escape cancels. Updated members synchronize the name, including after a restart.
+
 The two machines list each other and connect. A third machine joins with an
 invitation from either. A phone needs nothing more than its usual pairing
 link, from any member ([phone](phone.md)): once paired, it connects to the
@@ -53,7 +63,7 @@ leaves on its own, or learns it the next time it reaches a member. Revoking a
 paired device on any member revokes it on all of them.
 
 The group card also offers one switch to keep the settings of every connected
-machine like the selected one. It turns on the per-machine synchronization
+machine like the selected one. It uses the settings synchronization
 described in [machines](machines.md#automatic-settings-synchronization) for
 all of them at once, and has the same limits: the copy runs while that window
 is open.

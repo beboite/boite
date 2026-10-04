@@ -120,6 +120,71 @@ test('a device stops counting once the machine it paired with leaves', () => {
   expect(liveDevices({ ...roster, cores: [entry(home, 3, { removed: true })] })).toHaveLength(0);
 });
 
+test('group names converge after concurrent renames and a stale roster cannot undo a rename', () => {
+  const base: Roster = { id: 'grp', name: 'Home', founder: 'a', cores: [entry('a', 1)], devices: [] };
+  const renamed = { ...base, name: 'Studio', nameRev: 1 };
+  expect(mergeRosters(renamed, base).name).toBe('Studio');
+  expect(digestOf(mergeRosters(base, renamed))).toBe(digestOf(mergeRosters(renamed, base)));
+  const concurrent = { ...base, name: 'Work', nameRev: 1 };
+  expect(digestOf(mergeRosters(renamed, concurrent))).toBe(digestOf(mergeRosters(concurrent, renamed)));
+  expect(mergeRosters(concurrent, { ...renamed, name: 'A', nameRev: 2 }).name).toBe('A');
+});
+
+test('the owner renames a group on either member, and the name survives synchronization and restart', async () => {
+  const a = await machine();
+  const b = await machine();
+  a.core.coordination.trust({ ...b.core.coordination.card(), name: 'B', url: b.url });
+  b.core.coordination.trust({ ...a.core.coordination.card(), name: 'A', url: a.url });
+  await a.core.group.create('Home');
+  await join(a, b);
+  expect(a.core.coordination.peers()).toEqual([]);
+  expect(b.core.coordination.peers()).toEqual([]);
+  const owner = await b.connect();
+  expect(await owner.call('group.rename', { name: '  Studio  ' })).toMatchObject({ name: 'Studio' });
+  await waitFor(() => a.core.group.view('owner')?.name === 'Studio');
+  const stored = checkRoster(a.core.journal.getSetting('group'));
+  expect(stored).toMatchObject({ name: 'Studio', nameRev: 1 });
+  for (const bad of ['', ' '.repeat(3), 'x'.repeat(81)]) await expect(owner.call('group.rename', { name: bad })).rejects.toThrow('name: expected');
+  expect(() => checkRoster({ ...stored, nameRev: -1 })).toThrow('roster.nameRev');
+  const grant = a.core.sessions.grant();
+  const phone = await connect(a.url, '', { grant: grant.grant, client: { name: 'pwa', version: '1' } });
+  await expect(phone.call('group.rename', { name: 'Denied' })).rejects.toThrow();
+  await hangUp(a, phone);
+  await hangUp(b, owner);
+  await a.core.group.close();
+  expect(restart(a).view('owner')?.name).toBe('Studio');
+});
+
+test('migration preserves granted transcript reads only for the current group admission', async () => {
+  const a = await machine();
+  const b = await machine();
+  const ownerA = await a.connect();
+  const ownerB = await b.connect();
+  const ta = (await echoThread(a, ownerA, 'Reader')).threadId;
+  const tb = (await echoThread(b, ownerB, 'Writer')).threadId;
+  const config: CoordinationConfig = { mode: 'brief', resources: '', remote: true, paused: false };
+  a.core.coordination.configure(ta, config);
+  b.core.coordination.configure(tb, config);
+  b.core.coordination.trust({ ...a.core.coordination.card(), name: 'A', url: a.url, readThreads: true });
+  await a.core.group.create('Home');
+  await join(a, b);
+  expect(b.core.coordination.peers()).toEqual([]);
+  expect((await a.core.coordination.read(ta, { coreId: id(b), threadId: tb })).contact.threadId).toBe(tb);
+  await b.core.group.close();
+  restart(b);
+  expect((await a.core.coordination.read(ta, { coreId: id(b), threadId: tb })).contact.threadId).toBe(tb);
+  await a.core.group.remove(id(b));
+  await waitFor(() => b.core.group.view('owner') === null);
+  expect(b.core.coordination.trusted()).toEqual([]);
+  await join(a, b);
+  await expect(a.core.coordination.read(ta, { coreId: id(b), threadId: tb })).rejects.toThrow('not allowed to read');
+  b.core.coordination.trust({ ...a.core.coordination.card(), name: 'A', url: a.url, readThreads: true });
+  expect(b.core.coordination.peers()).toEqual([]);
+  expect((await a.core.coordination.read(ta, { coreId: id(b), threadId: tb })).contact.threadId).toBe(tb);
+  b.core.coordination.untrust(id(a));
+  await expect(a.core.coordination.read(ta, { coreId: id(b), threadId: tb })).rejects.toThrow('not allowed to read');
+});
+
 test('a roster from another machine is read field by field', async () => {
   const a = await machine();
   await a.core.group.create('Home');
@@ -481,6 +546,8 @@ test('the owner\'s app carries what two members cannot send each other directly,
   const tb = (await echoThread(b, ownerB, 'Relayed-title')).threadId;
   a.core.coordination.configure(ta, brief);
   b.core.coordination.configure(tb, brief);
+  a.core.coordination.trust({ ...b.core.coordination.card(), name: 'B', url: b.url });
+  await ownerA.call('collaboration.bridge.register', { coreId: id(b), enabled: true });
   await a.core.group.create('Home');
   await join(a, b);
   await waitFor(() => members(b).length === 2);
@@ -491,9 +558,9 @@ test('the owner\'s app carries what two members cannot send each other directly,
     forwarding.push(ownerB.call('collaboration.bridge.forward', { coreId: request.fromCoreId, body: request.body, signature: request.signature })
       .then((response) => ownerA.call('collaboration.bridge.reply', { requestId: request.requestId, response })));
   });
-  // No link was made by hand: being members of one group is enough for the app to relay between them.
+  // The former standing link is gone: group membership now authorizes this existing relay.
   expect(a.core.coordination.peers()).toEqual([]);
-  await ownerA.call('collaboration.bridge.register', { coreId: id(b), enabled: true });
+  // The existing relay survives replacing standing trust with group membership.
   await expect(ownerA.call('collaboration.bridge.register', { coreId: 'f'.repeat(64), enabled: true })).rejects.toThrow('trusted for coordination');
   const real = globalThis.fetch;
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {

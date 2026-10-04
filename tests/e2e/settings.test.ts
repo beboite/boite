@@ -242,22 +242,22 @@ test('machines list each execution host and disconnect only the selected host', 
   expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="machine-rename"]')).map(input => input.value)`)).toContain('Builder');
   await capture('machines.png');
   // Checking the option immediately copies settings and keeps following changes.
-  expect(await page.evaluate(`document.querySelectorAll('${id('machine-sync')}').length`)).toBe(1);
+  expect(await page.evaluate(`document.querySelectorAll('${id('group-sync')}').length`)).toBe(1);
   await page.evaluate(`(async () => {
     const w = globalThis.__boiteTest.workspace;
     await w.machines.find(machine => machine.id === 'http://builder.test').store.client.call('settings.set', { asyncQuestions: true });
     await w.active.client.call('settings.set', { asyncQuestions: false });
   })()`);
-  await page.click(id('machine-sync'));
+  await page.click(id('group-sync'));
   await page.waitFor(`globalThis.__boiteTest.workspace.settingsSync.reports['http://builder.test'] && !globalThis.__boiteTest.workspace.settingsSync.busy['http://builder.test']`);
   expect(await page.evaluate(`globalThis.__boiteTest.workspace.machines.find(machine => machine.id === 'http://builder.test').store.settings.asyncQuestions`)).toBe(false);
-  expect(await page.evaluate(`document.querySelector('${id('machine-sync')}').closest('${id('machine-card')}').querySelector('${id('machine-rename')}').value`)).toBe('Builder');
+  expect(await page.evaluate(`document.querySelector('${id('group-sync')}').closest('${id('group-card')}').querySelector('[data-machine-id="http://builder.test"] ${id('machine-rename')}').value`)).toBe('Builder');
   expect(await page.evaluate(`document.querySelector('${id('machine-sync-report')}') === null`)).toBe(true);
-  expect(await page.evaluate(`document.querySelector('${id('machine-sync')}').checked`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('group-sync')}').checked`)).toBe(true);
   await capture('machines-sync.png');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   // The phone layout draws the page anew; the checked state stays.
-  await page.waitFor(`document.querySelector('${id('machine-sync')}')?.checked`);
+  await page.waitFor(`document.querySelector('${id('group-sync')}')?.checked`);
   expect(await page.evaluate(`document.querySelector('${id('machine-sync-report')}') === null`)).toBe(true);
   await capture('machines-sync-phone.png');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);

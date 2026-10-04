@@ -55,12 +55,13 @@ test('a phone scans the pairing code of another machine, which arrives under its
   const a = await connect(first.url, first.token), b = await connect(second.url, second.token);
   try {
     await Promise.all([a.call('settings.set', { browserOrigins: [url] }), b.call('settings.set', { browserOrigins: [url] })]);
+    const phone = await a.call('pairing.grant', { role: 'device' });
     const grant = await b.call('pairing.grant', {});
     const video = join(scratch, 'code.y4m');
     // The camera first shows a code that is no pairing link, then the real one.
     writeFileSync(video, codeVideo('https://example.com/not-a-pairing-link'));
     page = await BrowserPage.launch({
-      url: `${url}/?core=${encodeURIComponent(first.url)}&token=${encodeURIComponent(first.token)}`,
+      url: `${url}/?core=${encodeURIComponent(first.url)}&grant=${encodeURIComponent(phone.grant)}`,
       windowSize: { width: 390, height: 844 },
       args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', `--use-file-for-fake-video-capture=${video}`]
     });

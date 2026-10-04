@@ -113,7 +113,9 @@ test('an unpublished local machine links through the owner app without requiring
   expect(agentAutoLink.failureOf(a, b)).toBeUndefined();
   component = mount(MachinesPage, { target: document.body, props: { mobile: true } });
   await settle();
-  expect(document.querySelectorAll('[data-testid="agent-peer-read"]')).toHaveLength(2);
+  await vi.waitFor(() => { flushSync(); expect(first.group?.cores).toHaveLength(2); });
+  expect(document.querySelector('[data-testid="group-card"]')).not.toBeNull();
+  expect(document.querySelector('[data-testid="agent-peer-read"]')).toBeNull();
 });
 
 test('conversation access is an owner-controlled checkbox in the receiving machine, independent of the reverse grant', async () => {

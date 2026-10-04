@@ -382,6 +382,8 @@ export const fr: Translation = {
     reciprocalLink: 'Configuré sur les deux machines', oneSidedLink: 'Configuré sur une machine seulement', agentLinkReachable: 'Connexion signée vérifiée', publicIdentityHint: 'L’app relaie les messages signés entre les connexions propriétaires. Une adresse HTTPS publique permet aussi aux agents de communiquer quand cette app est fermée.',
   },
   group: {
+    rename: 'Renommer le groupe', merging: 'Regroupement des machines connectées',
+    otherGroup: '{machine} appartient à {group}. Quittez ce groupe sur la machine pour la déplacer ici.',
     heading: 'Groupe',
     intro: "Les machines d'un même groupe se connectent entre elles toutes seules, et un téléphone appairé avec l'une d'elles les atteint toutes. Chaque machine d'un groupe a le contrôle total des autres : ne groupez que des machines à vous.",
     name: 'Nom du groupe', namePlaceholder: 'Maison',
