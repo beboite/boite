@@ -115,7 +115,7 @@ for (const width of [1280, 390]) {
       await page.waitFor(`document.querySelector('${row(building, 't-building')}')`);
       expect(await page.evaluate(`document.querySelector('${building} ${id('project-done-toggle')}').disabled`)).toBe(true);
       // Queued and background work also keep the project outside Other projects.
-      for (const index of [0, 1, 2, 3]) {
+      for (const [index, renderedState] of ['queued', 'monitoring', 'background', 'working'].entries()) {
         await page.evaluate(`(() => {
           const states = [
             { status: 'queued', backgroundWork: null },
@@ -126,7 +126,7 @@ for (const width of [1280, 390]) {
           const store = globalThis.__boiteTest.workspace.machines[0].store;
           store.threads = store.threads.map(t => t.id === 't-building' ? {...t, ...states[${index}]} : t);
         })()`);
-        await page.waitFor(`document.querySelector('${building}:not(.inactive) ${id('project-working-toggle')}')?.dataset.count === '1'`);
+        await page.waitFor(`document.querySelector('${row(building, 't-building')} ${id('thread-state')}[data-state="${renderedState}"]')`);
         expect(await page.evaluate(`!document.querySelector('${root} ${id('other-projects')} [data-project-id="${busy}"]')`)).toBe(true);
       }
       const finished = project(main, 'p-notes');
