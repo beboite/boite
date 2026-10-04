@@ -296,7 +296,8 @@ test('echo with the default guide and asynchronous questions finishes without as
   const owner = await h.connect();
   const { threadId } = await echoThread(h, owner);
   const turn = await owner.call('turns.start', { threadId, prompt: 'container persistence check' });
-  await waitFor(() => h.core.journal.listTurns(threadId).find(t => t.id === turn.id)?.status === 'done', 1000);
+  // Echo streams the whole guide back at 16 characters per 5 ms: about 0.9 s here, longer on slow runners.
+  await waitFor(() => h.core.journal.listTurns(threadId).find(t => t.id === turn.id)?.status === 'done');
   const parts = h.core.journal.listMessages(threadId).filter(m => m.role === 'assistant').flatMap(m => m.parts);
   expect(parts.some(p => p.type === 'question')).toBe(false);
   expect(JSON.stringify(parts)).toContain('boite where');
