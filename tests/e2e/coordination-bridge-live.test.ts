@@ -80,7 +80,7 @@ test('the owner app relays signed reads, preserves directional grants on reload,
     await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread?.id === ${JSON.stringify(threads[0]!.id)} && !globalThis.__boiteTest.workspace.active.loadingThread`);
     await page.type('[data-testid=composer-input]', 'Prepare the filesystem [think][sleep:60000]');
     await page.click('[data-testid=composer-send]');
-    await page.waitFor('document.querySelector("[data-testid=turn-progress]")?.textContent.includes("Thinking")');
+    await page.waitFor('globalThis.__boiteTest.workspace.active.openThread?.progress?.phase === "thinking"');
     const observed = await pc.call('threads.get', { threadId: threads[0]!.id });
     expect(observed.progress?.phase).toBe('thinking');
     // Age only the view fixture to exercise the quiet-state layout without a one-minute sleep.

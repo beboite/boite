@@ -31,6 +31,7 @@ test('typing dots cover silent and buffered replies, yield to visible activity, 
   expect(await page.evaluate(`document.querySelectorAll('[data-testid="typing-indicator"]').length`)).toBe(1);
   expect(await page.evaluate(`document.querySelectorAll('[data-testid="typing-dot"]').length`)).toBe(3);
   expect(await page.evaluate(`document.querySelector('[data-testid="typing-indicator"]').getAttribute('aria-label')`)).toBe('Writing');
+  expect(await page.evaluate(`document.querySelector('.reply-pending').textContent.trim()`)).toBe('');
   await update(`thread.turns[0].status = 'queued'; thread.status = 'queued';`);
   await page.waitFor(`!document.querySelector('[data-testid="typing-indicator"]')`);
   await update(`thread.turns[0].status = 'running'; thread.status = 'running'; store.connection = 'closed';`);

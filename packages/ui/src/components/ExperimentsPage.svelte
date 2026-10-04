@@ -29,10 +29,8 @@
       <label for="{uid}-{id}" class="switch-row" id="settings-{id}">
         <span class="text">
           <span class="ui-label-box"><span class="ui-label" id="{uid}-{id}-name">{copy[id].title}</span><InfoTip topic={copy[id].title} text={copy[id].hint} /></span>
-          {#if id === 'agent-browser-control'}<span class="hint" id="{uid}-{id}-hint">{copy[id].hint}</span>{/if}
         </span>
         <input id="{uid}-{id}" aria-labelledby="{uid}-{id}-name"
-          aria-describedby={id === 'agent-browser-control' ? `${uid}-${id}-hint` : undefined}
           type="checkbox"
           role="switch"
           data-testid="experiment-{id}"
