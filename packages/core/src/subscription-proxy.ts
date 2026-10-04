@@ -108,7 +108,8 @@ export async function readSubscriptionProxyModels(core: Core, provider: Provider
     const own = provider.protocol === 'claude-sdk' ? 'anthropic' : 'openai';
     const family = proprietaryFamily(row.id);
     // A gateway can translate any model to any API; a proprietary model still stays in its own harness.
-    if (family !== null && family !== own) continue;
+    // Gemini's harness, Antigravity, cannot go through a gateway, so its models stay usable in both.
+    if (family !== null && family !== 'google' && family !== own) continue;
     if (Array.isArray(endpoints) && !endpoints.includes(provider.protocol === 'claude-sdk' ? 'anthropic' : 'openai-response')) continue;
     // Older gateways omit endpoint metadata; their known native model families remain selectable.
     if (!Array.isArray(endpoints) && family !== own) continue;

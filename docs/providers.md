@@ -12,8 +12,9 @@ Douane's default dashboard path is `/admin/#quotas`; CLIProxyAPI uses
 `/management.html#/quota`. A gateway may translate any model to any API, but a
 proprietary model stays in its own harness: Claude lists Claude models and
 Codex lists OpenAI models, whatever routing prefix the gateway gives them, while
-Gemini, Grok and Muse models are listed by neither. Open models (`gpt-oss`,
-Kimi, Qwen and the like) are offered to both. With the proxy enabled, Limits opens this page inside
+Grok and Muse models are listed by neither. Gemini models are offered to both,
+because Antigravity, their own harness, cannot run through a gateway. Open
+models (`gpt-oss`, Kimi, Qwen and the like) are offered to both too. With the proxy enabled, Limits opens this page inside
 Boite instead of the account popup. Desktop uses the shell's existing browser
 view, and browsers and phones use an iframe. The dashboard must permit embedding
 and its configured URL must be reachable from the device displaying it.

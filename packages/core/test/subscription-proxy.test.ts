@@ -136,8 +136,10 @@ test('a gateway that translates every model keeps proprietary models in their ow
   const codex = await owner.call('accounts.add', { providerId: 'codex', label: 'Gateway Codex' });
   const ids = async (providerId: 'claude' | 'codex', accountId: string) =>
     (await owner.call('providers.probe', { providerId, accountId })).models.map(model => model.id);
-  expect(await ids('claude', claude.id)).toEqual(['claude/claude-opus-5-5', 'antigravity/claude-sonnet-5-5-high', 'antigravity/gpt-oss-120b-medium', 'kimi/kimi-k2']);
-  expect(await ids('codex', codex.id)).toEqual(['codex/gpt-6-sol', 'codex/codex-auto-review', 'antigravity/gpt-oss-120b-medium', 'kimi/kimi-k2']);
+  expect(await ids('claude', claude.id)).toEqual(['claude/claude-opus-5-5', 'antigravity/claude-sonnet-5-5-high', 'antigravity/gemini-3-flash',
+    'antigravity/gpt-oss-120b-medium', 'kimi/kimi-k2']);
+  expect(await ids('codex', codex.id)).toEqual(['codex/gpt-6-sol', 'codex/codex-auto-review', 'antigravity/gemini-3-flash',
+    'antigravity/gpt-oss-120b-medium', 'kimi/kimi-k2']);
 });
 
 test('legacy CLIProxy catalogs select native families and malformed gateway errors cannot echo the key', async () => {
