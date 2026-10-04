@@ -1,6 +1,6 @@
 import { writeFileSync, openSync, writeSync, closeSync, renameSync, unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { browserActionError, BROWSER_PRESETS, BROWSER_RECORDING_TYPES, type BrowserAction, type BrowserPreset } from '@boite/contracts';
+import { browserActionError, BROWSER_PRESETS, BROWSER_RECORDING_CHUNK_BYTES, BROWSER_RECORDING_CODECS, BROWSER_RECORDING_FRAME_RATES, BROWSER_RECORDING_MAX_BYTES, BROWSER_RECORDING_TYPES, type BrowserAction, type BrowserPreset, type BrowserRecordingCodec, type BrowserRecordingFrameRate } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
 import type { CliIo } from './cli.ts';
 
@@ -22,7 +22,13 @@ export const BROWSER_HELP = `boite browser <command> [args] [tab-id] [--json]
   appearance system|light|dark [tab-id]     emulate page color scheme
   diagnostics [tab-id]           console, JavaScript/network errors and actions
   diagnostics-clear [tab-id]     clear captured diagnostics and action history
-  recording-start [tab-id]       record this page (silent MP4, else WebM; up to 3 min/50 MB)
+  recording-start [tab-id] [--fps 30|60] [--codec h264|hevc|av1]
+                                 record this page as a silent MP4, by default at the rate
+                                 and codec set on the desktop (30 fps, H.264); a codec the
+                                 desktop cannot encode is refused; no time limit, stops by
+                                 itself at 100 MB and keeps the video. You MUST stop it with
+                                 recording-stop before your turn ends: a recording still
+                                 running when the turn ends is discarded, no file is kept
   recording-stop [tab-id]        stop and save the video in cwd
   screenshot [tab-id] [--output <path>] save a PNG (default: unique name in cwd)
   close [tab-id]                 close the tab
@@ -62,10 +68,24 @@ export async function browserCommand(args: string[], io: CliIo, client: CoreClie
       if (rest.includes('--output')) throw new Error('browser screenshot accepts one --output path');
     }
   }
+  const recordingOptions: { frameRate?: BrowserRecordingFrameRate; codec?: BrowserRecordingCodec } = {};
+  if (command === 'recording-start') {
+    for (const flag of ['--fps', '--codec'] as const) {
+      const at = rest.indexOf(flag);
+      if (at === -1) continue;
+      const value = rest[at + 1];
+      if (!value || value.startsWith('--')) throw new Error(`browser recording-start ${flag} needs ${flag === '--fps' ? BROWSER_RECORDING_FRAME_RATES.join(' or ') : BROWSER_RECORDING_CODECS.join(', ')}`);
+      rest.splice(at, 2);
+      if (rest.includes(flag)) throw new Error(`browser recording-start accepts one ${flag}`);
+      if (flag === '--fps') recordingOptions.frameRate = Number(value) as BrowserRecordingFrameRate;
+      else recordingOptions.codec = value.toLowerCase() as BrowserRecordingCodec;
+    }
+  }
   const need = (index: number) => { const value = rest[index]; if (value === undefined) throw new Error(BROWSER_HELP); return value; };
   let action: BrowserAction; let count = 0;
   switch (command) {
-    case 'diagnostics': case 'recording-start': case 'recording-stop': action = { kind: command }; break;
+    case 'recording-start': action = { kind: command, ...recordingOptions }; break;
+    case 'diagnostics': case 'recording-stop': action = { kind: command }; break;
     case 'diagnostics-clear': action = { kind: 'diagnostics', clear: true }; break;
     case 'appearance': action = { kind: 'appearance', colorScheme: need(0) as 'system' | 'light' | 'dark' }; count = 1; break;
     case 'preset': {
@@ -91,14 +111,14 @@ export async function browserCommand(args: string[], io: CliIo, client: CoreClie
   const result = await client.call('browser.command', { threadId, action, ...(rest[count] ? { tabId: rest[count] } : {}) });
   if (result.recording) {
     const recording = result.recording;
-    if (!result.tabId || !Object.hasOwn(BROWSER_RECORDING_TYPES, recording.mime) || !Number.isSafeInteger(recording.bytes) || recording.bytes <= 0 || recording.bytes > 50 * 1024 * 1024) throw new Error('browser returned an invalid recording');
+    if (!result.tabId || !Object.hasOwn(BROWSER_RECORDING_TYPES, recording.mime) || !Number.isSafeInteger(recording.bytes) || recording.bytes <= 0 || recording.bytes > BROWSER_RECORDING_MAX_BYTES) throw new Error('browser returned an invalid recording');
     const path = resolve(io.cwd, `boite-browser-${crypto.randomUUID()}.${BROWSER_RECORDING_TYPES[recording.mime]}`), partial = path + '.part';
     const fd = openSync(partial, 'wx'); let offset = 0, complete = false;
     try {
       while (offset < recording.bytes) {
-        const reply = await client.call('browser.command', { threadId, tabId: result.tabId, action: { kind: 'recording-read', recordingId: recording.id, offset } });
+        const reply = await client.call('browser.command', { threadId, tabId: result.tabId, action: { kind: 'recording-read', recordingId: recording.id, offset, maxBytes: BROWSER_RECORDING_CHUNK_BYTES } });
         const chunk = reply.value as { base64?: string; nextOffset?: number; done?: boolean };
-        if (typeof chunk?.base64 !== 'string' || chunk.base64.length > 700_000) throw new Error('invalid recording chunk');
+        if (typeof chunk?.base64 !== 'string' || chunk.base64.length > Math.ceil(BROWSER_RECORDING_CHUNK_BYTES / 3) * 4) throw new Error('invalid recording chunk');
         const bytes = Buffer.from(chunk.base64, 'base64');
         if (!bytes.length || chunk.nextOffset !== offset + bytes.length || chunk.nextOffset > recording.bytes || chunk.done !== (chunk.nextOffset === recording.bytes)) throw new Error('invalid recording chunk offset');
         if (offset === 0 && !recordingMagic(recording.mime, bytes)) throw new Error(`recording is not ${BROWSER_RECORDING_TYPES[recording.mime].toUpperCase()}`);
@@ -115,7 +135,10 @@ export async function browserCommand(args: string[], io: CliIo, client: CoreClie
     try { renameSync(partial, path); }
     catch (error) { unlinkSync(partial); throw error; }
     await client.call('browser.command', { threadId, tabId: result.tabId, action: { kind: 'recording-discard', recordingId: recording.id } }).catch(() => {});
-    return { ...recording, path, tabId: result.tabId };
+    // The video plays to its end either way; the note says why it ended before recording-stop.
+    const note = recording.reason === 'size' ? `The recording stopped by itself at the ${BROWSER_RECORDING_MAX_BYTES / 1024 / 1024} MB size limit. The saved video is complete up to that point.`
+      : recording.reason === 'error' ? `The recording stopped by itself after an error${recording.error ? `: ${recording.error}` : ''}. The saved video holds what was encoded before it.` : undefined;
+    return { ...recording, path, tabId: result.tabId, ...(note ? { note } : {}) };
   }
   if (!result.screenshot) return result;
   const screenshot = result.screenshot;

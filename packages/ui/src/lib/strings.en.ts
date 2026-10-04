@@ -1424,8 +1424,10 @@ export const strings = {
     system: 'Follow system appearance', light: 'Light page', dark: 'Dark page', diagnostics: 'Page diagnostics and actions',
     startRecording: 'Record this browser tab', stopRecording: 'Stop recording', reviewRecording: 'Recorded video',
     refresh: 'Refresh', clear: 'Clear', pageEvents: 'Page events', actions: 'Actions', noEvents: 'No page events captured.', noActions: 'No actions recorded yet.',
-    omitted: '{count} older or oversized events omitted.', recorded: '{seconds} seconds · {mb} MB · silent {format}',
-    recordingError: 'Recording stopped after an error.', recordingLimit: 'Recording stopped at the duration or size limit.',
+    omitted: '{count} older or oversized events omitted.', recorded: '{seconds} seconds · {fps} fps · {mb} MB · silent {format}',
+    recordingError: 'Recording stopped after an error.', recordingDiscarded: 'Recording discarded: the agent did not stop it before its turn ended.', recordingLimit: 'Recording stopped by itself at the {mb} MB size limit. The video plays up to that point.',
+    frameRate: 'Record at {rate} frames per second', codec: 'Encode as {codec}', codecUnavailable: 'This computer cannot encode it',
+    unplayable: 'This view cannot play {codec} video. Download it to watch it in another player.',
     download: 'Download video', discard: 'Discard video',
   },
   browser: {
@@ -1476,7 +1478,15 @@ export const strings = {
     title: 'Terminal',
     hide: 'Hide the terminal',
     close: 'Close the shell',
-    resize: 'Resize the terminal'
+    resize: 'Resize the terminal',
+    /** A tab, `Terminal 2`, named after its first shell as T3 Code does. */
+    tab: 'Terminal {n}',
+    tabs: 'Terminals',
+    new: 'New terminal',
+    splitRight: 'Split right',
+    splitDown: 'Split down',
+    closeTab: 'Close the tab',
+    resizePanes: 'Resize the split'
   },
 
   trace: {
@@ -1798,6 +1808,10 @@ export const strings = {
     chatWidthComfortable: 'Comfortable',
     chatWidthWide: 'Wide',
     chatWidthFull: 'Full',
+    terminalCursor: 'Terminal cursor',
+    terminalCursorBar: 'Bar',
+    terminalCursorBlock: 'Block',
+    terminalCursorUnderline: 'Underline',
     connection: 'Connection',
     localCore: 'This app runs on the core it started on this computer.',
     coreAt: 'Connected to the core at {url}.',
@@ -1942,7 +1956,7 @@ export const strings = {
     heading: 'Shortcuts',
     intro: 'Click a shortcut, then press the keys you want instead. It applies at once on this machine.',
     search: 'Filter commands',
-    groups: { general: 'General', surfaces: 'Side panel', thread: 'Thread and composer', jump: 'Go to a thread', theme: 'Theme' },
+    groups: { general: 'General', surfaces: 'Side panel', thread: 'Thread and composer', jump: 'Go to a thread', theme: 'Theme', terminal: 'Terminal' },
     record: 'Press the keys',
     change: 'Change the shortcut',
     reset: 'Back to the default',
@@ -1976,6 +1990,10 @@ export const strings = {
       reopenThread: 'Reopen the thread archived last',
       copyAnswer: 'Copy the last answer',
       find: 'Find in this thread',
+      terminalNew: 'New terminal',
+      terminalSplit: 'Split the terminal right',
+      terminalSplitVertical: 'Split the terminal down',
+      terminalClose: 'Close the terminal',
       /** `Go to thread 3`: the third row of the sidebar, as drawn. */
       thread: 'Go to thread {n}'
     }

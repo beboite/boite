@@ -49,8 +49,9 @@
   .terminal {
     min-height: 0;
     height: 100%;
-    padding: 6px 0 0 10px;
-    background: var(--color-code-background);
+    /* Windows Terminal's narrow margin; the fit leaves the odd pixels at the right and bottom. */
+    padding: 4px 0 0 8px;
+    background: var(--color-terminal-background);
   }
 
   .terminal :global(.xterm) { height: 100%; }

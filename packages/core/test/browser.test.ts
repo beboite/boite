@@ -33,6 +33,24 @@ browserTest('a desktop keeps hosting a background conversation after switching i
   expect(await result).toEqual({ value: 'Background page' });
 });
 
+browserTest('the agent-control host hears each turn that ran end, to discard the recordings its agent left running', async () => {
+  const heard: string[] = [];
+  owner.on('browser.turnFinished', event => heard.push(event.threadId));
+  await owner.call('threads.subscribe', { threadId });
+  await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: true });
+  const turn = async () => {
+    const finished = owner.next('turn.finished', row => row.threadId === threadId, 5000);
+    await owner.call('turns.start', { threadId, prompt: 'hello' });
+    await finished; await Bun.sleep(100);
+  };
+  await turn();
+  expect(heard).toEqual([threadId]);
+  // A desktop that only shares the browser runs no agent recording.
+  await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: false, remote: true });
+  await turn();
+  expect(heard).toEqual([threadId]);
+});
+
 browserTest('an agent controls only its conversation; only the registered owner socket can answer', async () => {
   await expect(agent.call('browser.command', { threadId, action: { kind: 'snapshot' } })).rejects.toThrow('desktop app');
   await owner.call('threads.subscribe', { threadId });

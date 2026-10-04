@@ -1,6 +1,6 @@
 import { dismissMergedPr } from './merged-pr-archive';
 import { assertIdleFamily } from './completion';
-import { protectedThreadIdsError } from '@boite/contracts';
+import { isThreadTerminal, protectedThreadIdsError } from '@boite/contracts';
 /** Threads and their messages: create, read, select, archive, and the turn entry points. */
 import { DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
 import { steerUser } from './user-steering';
@@ -9,7 +9,7 @@ import { RpcFailure } from '../client';
 import { checkCwd, checkEffort, checkModel, checkRunnable, defaultModel } from './checks';
 import { writeTitle } from './titles';
 import { DATA_DIR, fakeWorktree, fakeDraftFolder, refusal, toSummary } from './shared';
-import { closeTerminal } from './terminals';
+import { closeThreadTerminals } from './terminals';
 import { announceProject, archiveProject, requireFakeFolder } from './project-archive';
 import { modelsOf, checkSpeed, discoverSelection } from './provider-catalog';
 import { delegationConfig, stopDelegation } from './delegation';
@@ -128,8 +128,8 @@ function pagingReply<T>(result: T): T {
 /**
  * What the core's archive does beyond the flag, from `threads.archive` and
  * `projects.remove` alike: the turn stops, nobody answers a card on the
- * thread, its background work goes, and its shell closes the way the core
- * closes `terminal:<id>`.
+ * thread, its background work goes, and its shells close the way the core
+ * closes them.
  */
 export async function putAway(ctx: FakeContext, thread: Thread): Promise<void> {
   cancelSide(ctx, thread.id);
@@ -143,7 +143,7 @@ export async function putAway(ctx: FakeContext, thread: Thread): Promise<void> {
   }
   ctx.heldAnswers.delete(thread.id);
   if ((thread.background?.length ?? 0) > 0) ctx.setBackground(thread, [], 'session-ended');
-  closeTerminal(ctx, `terminal:${thread.id}`);
+  closeThreadTerminals(ctx, thread.id);
 }
 
 /** Like the resident core, expire stopped families from their deletion date. */
@@ -158,7 +158,7 @@ export function purgeDeletedThreads(ctx: FakeContext): void {
     for (const thread of family.threads) {
       ctx.mergedPrFixtures.delete(thread.id);
       ctx.mergedPrArchive.delete(thread.id);
-      ctx.processes = ctx.processes.filter(p => p.threadId !== thread.id && p.threadId !== `terminal:${thread.id}`);
+      ctx.processes = ctx.processes.filter(p => p.threadId !== thread.id && !isThreadTerminal(thread.id, p.threadId));
       ctx.coordination.delete(thread.id);
       ctx.moveNotes.delete(thread.id);
       ctx.delegationConfigs.delete(thread.id);

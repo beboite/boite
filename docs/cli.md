@@ -106,11 +106,31 @@ and 100 actions. Network URLs omit credentials, queries and fragments. Action
 history records operation names, not typed values or evaluated code.
 `diagnostics-clear` clears both buffers.
 
-`recording-start` and `recording-stop` save a silent video in the working
-directory: H.264 MP4 where the engine encodes it (WebView2 does), which iPhones
-play, else WebM. Its extension follows the format. Recording runs at up to 8
-frames per second and 1920 × 1080, and stops at three minutes or the 50 MiB
-transfer limit. Run `boite attach <video.mp4>` to show it in chat. Closing the tab discards an unfinished recording.
+`recording-start` and `recording-stop` save a silent MP4 in the working
+directory. The shell streams the page's own frames (`Page.startScreencast`)
+and paces them to 30 frames per second, or 60, up to 1920 × 1080. The codec is
+H.264, HEVC or AV1. `recording-start --fps 60 --codec av1` overrides the rate
+and codec chosen in the desktop's browser tools menu, which default to 30 and
+H.264. A codec the desktop's engine cannot encode into MP4 is refused with the
+codecs it can; nothing records in another one. WebView2 encodes H.264 and AV1,
+not HEVC. The result's `codec` names the codec written.
+
+There is no time limit; a recording stops by itself at 100 MB (about 12 minutes
+at 30 fps, 6 at 60), which the desktop keeps in memory and sends in 4 MB chunks.
+The saved video is complete up to that point, and the result's `note` says
+why it ended. There is no sound, as in T3 Code. Run `boite attach <video.mp4>`
+to show it in chat. Closing the tab discards an unfinished recording.
+
+The agent stops its own recording within the turn that started it. When that
+turn ends, however it ends (done, interrupted, failed, or the conversation
+archived or removed), the core tells the hosting desktop (`browser.turnFinished`)
+and the desktop discards any recording the agent left running: it is stopped,
+its chunks dropped, and no file is kept or offered for download. The browser
+pane says so in one line, and a later `recording-stop` or `recording-read`
+fails with an error that says the recording was discarded. A recording started
+from the browser tools menu, or one already stopped at 100 MB, is kept. A turn
+that ends while the desktop is disconnected, or before the core restarts, sends
+nothing; that recording is discarded when the conversation's next turn ends.
 
 Automation uses WebView2's native devtools channel, without a debugging port.
 Only the owner UI can register a host or answer its requests. The agent token

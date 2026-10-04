@@ -8,7 +8,7 @@ handling, palette hints, tooltips and the Keyboard settings page together.
 ## From Settings
 
 The Keyboard page groups the commands (General, Side panel, Thread and
-composer, Theme) under a search field that matches a label, an id or a chord.
+composer, Terminal, Theme) under a search field that matches a label, an id or a chord.
 Clicking a chord starts recording: hold the modifiers, press the key, and the
 row saves on the key press. Escape alone cancels, as does leaving the window.
 A chord with no modifier is refused on the row. A chord another command
@@ -72,7 +72,11 @@ A chord is modifiers, then one key, joined with `+`, case and spaces ignored.
 | `changes` | `mod+shift+c` | The changes surface, the working tree of the thread |
 | `files` | `mod+shift+f` | The files surface, the tree of the working directory |
 | `tasks` | `mod+shift+k` | The tasks surface, the agent's list and the project's |
-| `terminal` | `mod+j` | The thread's shell under the chat ([terminal.md](terminal.md)) |
+| `terminal` | `mod+j` | The thread's shells under the chat ([terminal.md](terminal.md)) |
+| `terminal-new` | `mod+n` | In a terminal: a shell in a new tab |
+| `terminal-split` | `mod+d` | In a terminal: a shell beside the active one |
+| `terminal-split-vertical` | `mod+shift+d` | In a terminal: a shell under the active one |
+| `terminal-close` | `mod+w` | In a terminal: end the active shell |
 | `close-surface` | `mod+w` | The active surface of the panel, never the window |
 | `settings` | `mod+,` | Settings |
 | `stash` | `mod+shift+s` | Put the composer text aside, or take it back |
@@ -97,6 +101,15 @@ A digit chord matches the physical key too, so `alt+3` fires on a layout
 where the top row types another character without Shift. In a plain browser
 tab, the browser keeps `Ctrl+Shift+T` for itself; the shell and the palette
 always reach it.
+
+The four `terminal-` commands are T3 Code's and act only while a terminal
+screen has the keyboard. There they come before every other command, so
+`mod+n` opens a shell rather than a draft and `mod+w` closes the shell rather
+than the panel's surface; anywhere else those chords keep their app meaning.
+On the Keyboard page they conflict only with each other and with `terminal`,
+which also works from a terminal. A
+full-screen program, in the terminal's alternate screen, still receives its
+Ctrl-letter keys ([terminal.md](terminal.md#keys)).
 
 While a writable file editor has focus, `mod+s` saves its file. Elsewhere it toggles
 the thread sidebar and keeps the browser's save dialog closed. The panel button's

@@ -6,7 +6,7 @@ import { experimentOn } from './experiments.svelte';
 
 /** Keep visited conversations hosted until archive, disconnect or consent withdrawal. */
 export function watchBrowserHosts(stores: () => Store[]): () => void {
-  const hosted = new Map<Store, { client: Store['client']; machine: string; threads: Map<string, () => void> }>();
+  const hosted = new Map<Store, { client: Store['client']; machine: string; threads: Map<string, (closed?: boolean) => void> }>();
   const release = (store: Store) => {
     const entry = hosted.get(store);
     entry?.threads.forEach(stop => stop());
@@ -29,7 +29,7 @@ export function watchBrowserHosts(stores: () => Store[]): () => void {
           let entry = hosted.get(store);
           if (entry && (entry.client !== client || entry.machine !== machine)) { release(store); entry = undefined; }
           if (!entry) { entry = { client, machine, threads: new Map() }; hosted.set(store, entry); }
-          for (const [id, stop] of entry.threads) if (!alive.has(id)) { stop(); entry.threads.delete(id); }
+          for (const [id, stop] of entry.threads) if (!alive.has(id)) { stop(true); entry.threads.delete(id); }
           for (const id of wanted) if (!entry.threads.has(id)) entry.threads.set(id, hostBrowser(store, id));
         }
       });

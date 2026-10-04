@@ -67,6 +67,7 @@ export function parse(argv: string[]): Parsed {
     else if (arg === '--platform' && parsed.positional[0] === 'device' && parsed.positional[1] === 'open') parsed.positional.push(arg, next());
     else if (arg === '--shutdown' && parsed.positional[0] === 'device' && parsed.positional[1] === 'close') parsed.positional.push(arg);
     else if (arg === '--profile' && parsed.positional[0] === 'browser' && parsed.positional[1] === 'open') parsed.positional.push(arg, next());
+    else if ((arg === '--fps' || arg === '--codec') && parsed.positional[0] === 'browser' && parsed.positional[1] === 'recording-start') parsed.positional.push(arg, next());
     else if (arg.startsWith('--')) throw new Usage(`unknown flag ${arg}`);
     else parsed.positional.push(arg);
   }

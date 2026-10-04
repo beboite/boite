@@ -156,6 +156,26 @@
 :root {
   --color-code-background: var(--color-surface-2);
   --color-code-foreground: var(--color-foreground);
+  /* The shell's screen: a console's face on a flat ground, and the sixteen
+     ANSI colours of VS Code's dark terminal (light ones under data-theme). */
+  --font-terminal: 'Cascadia Mono', Consolas, 'SF Mono', Menlo, ui-monospace, monospace;
+  --color-terminal-background: var(--color-background);
+  --ansi-black: #000000;
+  --ansi-red: #cd3131;
+  --ansi-green: #0dbc79;
+  --ansi-yellow: #e5e510;
+  --ansi-blue: #2472c8;
+  --ansi-magenta: #bc3fbc;
+  --ansi-cyan: #11a8cd;
+  --ansi-white: #e5e5e5;
+  --ansi-bright-black: #666666;
+  --ansi-bright-red: #f14c4c;
+  --ansi-bright-green: #23d18b;
+  --ansi-bright-yellow: #f5f543;
+  --ansi-bright-blue: #3b8eea;
+  --ansi-bright-magenta: #d670d6;
+  --ansi-bright-cyan: #29b8db;
+  --ansi-bright-white: #ffffff;
   --color-background: #101013;
   /* The window's frame: title bar and rails on one grey, the work
      inset in cards of the page colour with an edge that reads. */
@@ -637,6 +657,23 @@ html[data-chat-width='full'] {
   --color-muted-foreground: #50505a;
   --color-subtle: #67676f;
   --color-selection: rgba(28, 28, 33, 0.14);
+  --color-terminal-background: var(--color-surface-2);
+  --ansi-black: #000000;
+  --ansi-red: #cd3131;
+  --ansi-green: #00a100;
+  --ansi-yellow: #949800;
+  --ansi-blue: #0451a5;
+  --ansi-magenta: #bc05bc;
+  --ansi-cyan: #0598bc;
+  --ansi-white: #555555;
+  --ansi-bright-black: #666666;
+  --ansi-bright-red: #cd3131;
+  --ansi-bright-green: #14ce14;
+  --ansi-bright-yellow: #b5ba00;
+  --ansi-bright-blue: #0451a5;
+  --ansi-bright-magenta: #bc05bc;
+  --ansi-bright-cyan: #0598bc;
+  --ansi-bright-white: #a5a5a5;
   --color-live: #ca8a04;
   --color-success: #16a34a;
   --color-danger: #dc2626;

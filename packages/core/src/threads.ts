@@ -29,7 +29,6 @@ import type {
   TurnInFlightData,
 } from '@boite/contracts';
 import type { Core } from './core.ts';
-import { threadTerminalId } from './terminals.ts';
 import { notFound, refused } from './errors.ts';
 import { newId } from './ids.ts';
 import { assertDriverRunnable, releaseThread } from './drivers/index.ts';
@@ -500,7 +499,7 @@ export class ThreadStore {
       this.deferred.deferredAnswers.delete(threadId);
       this.deferred.consumed.delete(threadId);
       this.deferred.pendingWakes.delete(threadId);
-      void this.core.terminals.close(threadTerminalId(threadId));
+      void this.core.terminals.closeThread(threadId);
     }
     const thread = this.require(threadId);
     const saved = this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
@@ -562,7 +561,7 @@ export class ThreadStore {
       await Promise.all(family.map(thread => this.core.scheduler.stopAndWait(thread.id)));
       await Promise.all(family.flatMap(thread => [
         this.core.procs.stopAndWait(thread.id),
-        this.core.procs.stopAndWait(threadTerminalId(thread.id)),
+        this.core.terminals.stopThread(thread.id),
       ]));
       const ids = family.map(thread => thread.id);
       this.core.journal.append(

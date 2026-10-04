@@ -11,8 +11,9 @@ import { untrack } from 'svelte';
 import type { FitAddon } from '@xterm/addon-fit';
 import type { Terminal } from '@xterm/xterm';
 import type { RpcEvents, TerminalState } from '@boite/contracts';
-import { isMac } from './keybindings';
+import { TERMINAL_COMMANDS, isMac } from './keybindings';
 import { openExternal } from './links';
+import { readTerminalCursor } from './terminal-cursor';
 import type { Store } from './store.svelte';
 
 export type TerminalStart = (cols: number, rows: number) => Promise<TerminalState | null>;
@@ -40,21 +41,33 @@ export function shellOwnsKey(event: KeyboardEvent): boolean {
   return event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey && /^[a-z[\]\\^_@ ]$/i.test(event.key);
 }
 
-/** The chrome's own tokens, so the terminal changes with the theme. ANSI colours stay xterm's. */
+const ANSI = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'] as const;
+const capitalized = (name: string) => name[0]!.toUpperCase() + name.slice(1);
+
+/** The chrome's own tokens, ANSI colours included, so the terminal changes with the theme. */
 function theme() {
   const css = getComputedStyle(document.documentElement);
   const token = (name: string) => css.getPropertyValue(name).trim();
+  const colours: Record<string, string> = {};
+  for (const name of ANSI) {
+    colours[name] = token(`--ansi-${name}`);
+    colours[`bright${capitalized(name)}`] = token(`--ansi-bright-${name}`);
+  }
   return {
-    background: token('--color-code-background'),
-    foreground: token('--color-code-foreground'),
+    ...colours,
+    background: token('--color-terminal-background'),
+    foreground: token('--color-foreground'),
     cursor: token('--color-foreground'),
-    cursorAccent: token('--color-code-background'),
-    selectionBackground: token('--color-selection')
+    cursorAccent: token('--color-terminal-background'),
+    selectionBackground: token('--color-selection'),
+    scrollbarSliderBackground: token('--color-border'),
+    scrollbarSliderHoverBackground: token('--color-edge'),
+    scrollbarSliderActiveBackground: token('--color-edge')
   };
 }
 
 function fontFamily(): string {
-  return getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim();
+  return getComputedStyle(document.documentElement).getPropertyValue('--font-terminal').trim();
 }
 
 /** A cell measured before the code font arrived stays that wide: wait for the font, but not for long. */
@@ -83,6 +96,8 @@ export class TerminalSession {
   #attaching = false;
   #run = 0;
   #pending: RpcEvents['terminal.output'][] = [];
+  /** Keys typed while the shell is being attached, a few lines at most. */
+  #typed = '';
   /** Above zero while a snapshot replays: xterm answers the queries in it again, and the shell must not get them. */
   #muted = 0;
   /** The socket dropped since the last snapshot, so events were lost and the core may have no shell any more. */
@@ -175,16 +190,20 @@ export class TerminalSession {
     const term = new Terminal({
       fontFamily: family,
       fontSize: FONT_SIZE,
-      // The blinking bar of a console window, which is what a shell is expected to show.
+      // A blinking cursor of the shape Appearance names, the bar of a console window by default.
       cursorBlink: true,
-      cursorStyle: 'bar',
+      cursorStyle: readTerminalCursor(),
       cursorWidth: 2,
+      // A screen without the keyboard shows where its cursor is, hollow, as Windows Terminal does.
+      cursorInactiveStyle: 'outline',
       scrollback: 5000,
-      // The ANSI colours are xterm's, picked for a black screen: on the light
-      // theme white and yellow vanished. xterm moves a colour until it reads on
-      // the background, and asks half as much of dim text, so what PowerShell
+      // Some ANSI colours are picked for one ground and vanish on the other,
+      // yellow on white say. xterm moves a colour until it reads on the
+      // background, and asks half as much of dim text, so what PowerShell
       // suggests after a typed letter stays grey instead of reading as typed.
       minimumContrastRatio: 4.5,
+      // OSC 8 links, `ls --hyperlink` say. xterm's own handler asks with `window.confirm`.
+      linkHandler: { activate: (_event, uri) => void openExternal(uri) },
       theme: theme()
     });
     const fit = new FitAddon();
@@ -194,7 +213,13 @@ export class TerminalSession {
     this.#fit = fit;
     term.attachCustomKeyEventHandler((event) => this.#key(event));
     const input = term.onData((data) => {
-      if (this.#muted > 0 || !this.#attached) return;
+      // What is typed the moment a split shows goes to the shell once its screen
+      // is drawn. xterm's answers to the queries of a replayed screen do not.
+      if (this.#muted > 0 || !this.#attached) {
+        const keys = this.#muted > 0 ? !data.startsWith('\x1b') : this.#attaching;
+        if (keys && this.#typed.length < 4096) this.#typed += data;
+        return;
+      }
       this.store.writeTerminal(this.id, data);
     });
     const resize = term.onResize(() => this.#scheduleResize());
@@ -214,9 +239,11 @@ export class TerminalSession {
       term.options.theme = theme();
       const next = fontFamily();
       if (next !== term.options.fontFamily) term.options.fontFamily = next;
+      const cursor = readTerminalCursor();
+      if (cursor !== term.options.cursorStyle) term.options.cursorStyle = cursor;
       this.#scheduleFit();
     });
-    looks.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style', 'class'] });
+    looks.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style', 'class', 'data-terminal-cursor'] });
     this.#cleanups.push(() => looks.disconnect());
   }
 
@@ -265,7 +292,13 @@ export class TerminalSession {
     if (state.windowsPty) term.options.windowsPty = { backend: 'conpty', buildNumber: state.windowsPty.buildNumber };
     this.#muted++;
     term.reset();
-    term.write(output, () => { this.#muted--; });
+    term.write(output, () => {
+      this.#muted--;
+      if (this.#muted > 0 || !this.#attached || this.#typed.length === 0) return;
+      const typed = this.#typed;
+      this.#typed = '';
+      this.store.writeTerminal(this.id, typed);
+    });
     this.#scheduleResize();
   }
 
@@ -299,6 +332,16 @@ export class TerminalSession {
   #key(event: KeyboardEvent): boolean {
     if (event.type !== 'keydown') return true;
     const term = this.#term;
+    // Ctrl+N, Ctrl+D, Ctrl+W: the drawer's tabs and splits, before the app's
+    // chords and the shell. A full-screen program keeps its Ctrl+letter chords.
+    const scoped = this.store.commandForKey(event, 'terminal');
+    if (scoped !== null && TERMINAL_COMMANDS.includes(scoped)
+      && !(term?.buffer.active.type === 'alternate' && shellOwnsKey(event))
+      && this.store.terminalCommand(this.id, scoped)) {
+      event.preventDefault();
+      event.stopPropagation();
+      return false;
+    }
     const command = this.store.commandForKey(event);
     // The terminal's own key always answers, or there is no way back out of it.
     if (command === 'terminal') return false;

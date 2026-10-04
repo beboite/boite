@@ -1,4 +1,6 @@
 /** The fake shells a thread or a sign-in opens. */
+import { MAX_THREAD_TERMINALS, RpcErrorCode, THREAD_TERMINAL_KEY, isThreadTerminal, threadTerminalId, type ThreadId } from '@boite/contracts';
+import { RpcFailure } from '../client';
 import type { FakeContext, FakeMethods } from './context';
 
 /** The shell goes; a sign-in one leaves its account signed in, as the real CLI would. */
@@ -13,15 +15,33 @@ export function closeTerminal(ctx: FakeContext, id: string): void {
   ctx.emit('accounts.updated', structuredClone(account));
 }
 
+/** Every shell of the thread goes, as the core's `closeThread` does on archive. */
+export function closeThreadTerminals(ctx: FakeContext, threadId: ThreadId): void {
+  for (const id of [...ctx.terminals.keys()]) if (isThreadTerminal(threadId, id)) closeTerminal(ctx, id);
+}
+
 export function terminalMethods(ctx: FakeContext) {
   return {
     'terminals.open': async (params) => {
       const thread = ctx.threads.get(params.threadId);
       if (!thread) throw ctx.notFound('thread', params.threadId);
-      const id = `terminal:${thread.id}`;
+      if (params.terminalId !== undefined && !THREAD_TERMINAL_KEY.test(params.terminalId)) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `terminalId must be term-2 to term-${MAX_THREAD_TERMINALS}, not ${JSON.stringify(params.terminalId)}`, data: { field: 'terminalId', expected: `term-2 to term-${MAX_THREAD_TERMINALS}` } });
+      }
+      const id = threadTerminalId(thread.id, params.terminalId);
       if (!ctx.terminals.has(id)) ctx.terminals.set(id, { cwd: thread.cwd, output: `PS ${thread.cwd}> `, line: '' });
       const shell = ctx.terminals.get(id)!;
       return { id, cwd: shell.cwd, output: shell.output, sequence: shell.sequence ?? 0 };
+    },
+    'terminals.list': async (params) => {
+      const thread = ctx.threads.get(params.threadId);
+      if (!thread) throw ctx.notFound('thread', params.threadId);
+      const first = threadTerminalId(thread.id);
+      return [...ctx.terminals].filter(([id]) => isThreadTerminal(thread.id, id)).map(([id, shell]) => ({
+        id,
+        ...(id === first ? {} : { terminalId: id.slice(first.length + 1) }),
+        cwd: shell.cwd,
+      }));
     },
     'terminals.write': async (params) => {
       const shell = ctx.terminals.get(params.id);
