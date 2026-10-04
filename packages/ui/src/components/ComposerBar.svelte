@@ -319,7 +319,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 4px 8px 8px 10px;
+    padding: var(--composer-bar-padding, 4px 8px 8px 10px);
   }
 
   .chips {
@@ -389,7 +389,7 @@
   }
 
   @media (max-width: 720px) {
-    .bar { gap: 2px; padding: 0 8px 6px; }
+    .bar { gap: 2px; padding: var(--composer-bar-padding, 0 8px 6px); }
     .desktop-options, .attach { display: none; }
     .chips { flex: 1; flex-wrap: nowrap; }
     .chips :global(.picker) { min-width: 0; max-width: 100%; }
