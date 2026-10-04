@@ -1,7 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
 import { GROUP_INVITE_PREFIX, type CoordinationConfig } from '@boite/contracts';
 import { createHash } from 'node:crypto';
-import { writeSync } from 'node:fs';
 import { connect } from '../src/client.ts';
 import { settle } from '../src/coordination-wire.ts';
 import { GroupStore } from '../src/group.ts';
@@ -14,22 +13,38 @@ import { parseInvite, parseTicket } from '../src/group/ticket.ts';
 import { isAllowedOrigin } from '../src/server.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
-// DIAGNOSTIC, to remove: where this file stops on Windows. Written at once, whatever the event loop does next.
-const mark = (text: string): void => { writeSync(2, `[mark ${Math.round(performance.now())}] ${text}\n`); };
-
 const cores: TestCore[] = [];
 afterEach(async () => {
   const stopping = cores.splice(0);
-  mark(`afterEach: ${stopping.length} cores`);
   // Every roster exchange still in flight ends while all the servers answer. Stopping
   // a server under a request made from this same process crashed Bun on Windows.
   await Promise.all(stopping.map((core) => core.core.group.close()));
-  mark('afterEach: groups closed');
-  for (const core of stopping) {
-    await core.stop();
-    mark('afterEach: core stopped');
-  }
+  for (const core of stopping) await core.stop();
 });
+
+/**
+ * Bun 1.4.2 on Windows crashes in its socket code when a socket is opened or
+ * refused while another one of the same process is still closing: an event of
+ * the old socket lands on memory the new one took. A test that closes a client
+ * and opens the next lets the core finish with the first in between.
+ */
+async function settled(h: TestCore, open: number): Promise<void> {
+  await waitFor(() => h.server.connections() <= open);
+  await new Promise((resolve) => setTimeout(resolve, 25));
+}
+
+async function hangUp(h: TestCore, client: { close(): void }): Promise<void> {
+  const open = h.server.connections();
+  client.close();
+  await settled(h, open - 1);
+}
+
+/** A hello the core refuses, and the socket it was said on gone before the test goes on. */
+async function refusedHello(h: TestCore, token: string, options: Parameters<typeof connect>[2], message: string): Promise<void> {
+  const open = h.server.connections();
+  await expect(connect(h.url, token, options)).rejects.toThrow(message);
+  await settled(h, open);
+}
 
 async function machine(): Promise<TestCore> {
   const core = await startTestCore();
@@ -204,39 +219,28 @@ test('an invitation is refused when it is malformed, unknown, or answered by ano
 });
 
 test('the shell of one member is handed an owner key by another, once per ticket', async () => {
-  mark('t7: start');
   const a = await machine();
   const b = await machine();
-  mark('t7: two cores');
   await a.core.group.create('Home');
-  mark('t7: created');
   await join(a, b);
-  mark('t7: joined');
   const shell = await a.connect();
-  mark('t7: shell connected');
   const ticket = await shell.call('group.ticket', { coreId: id(b) });
-  mark('t7: ticket');
   expect(ticket).toMatchObject({ coreId: id(b), addresses: [b.url] });
   expect(parseTicket(ticket.ticket).payload).toMatchObject({ iss: id(a), aud: id(b), sub: `core:${id(a)}`, role: 'owner' });
 
   const remote = await connect(b.url, '', { ticket: ticket.ticket });
-  mark('t7: remote connected');
   try {
     expect(remote.principal).toBe('owner');
     expect(remote.session?.token).toBeTruthy();
     expect((await remote.call('group.get', {}))?.self).toBe(id(b));
-    mark('t7: group.get');
     const listed = await remote.call('sessions.list', {});
-    mark('t7: sessions.list');
     expect(listed).toEqual([expect.objectContaining({ id: remote.session!.id, role: 'owner', group: true, current: true })]);
-  } finally { remote.close(); }
+  } finally { await hangUp(b, remote); }
   // The key the ticket became keeps working; the ticket itself is spent.
   const again = await connect(b.url, remote.session!.token);
-  mark('t7: again connected');
   expect(again.principal).toBe('owner');
-  again.close();
-  await expect(connect(b.url, '', { ticket: ticket.ticket })).rejects.toThrow('already used');
-  mark('t7: spent ticket refused');
+  await hangUp(b, again);
+  await refusedHello(b, '', { ticket: ticket.ticket }, 'already used');
   await expect(shell.call('group.ticket', { coreId: id(a) })).rejects.toThrow('not another machine');
   await expect(shell.call('group.ticket', { coreId: 'f'.repeat(64) })).rejects.toThrow('not another machine');
 });
@@ -254,20 +258,20 @@ test('a ticket is refused when forged, expired, for another machine or from outs
   const forB = a.core.group.ticket(id(b), owner).ticket;
   const [payload, signature] = forB.split('.') as [string, string];
   const tampered = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(payload, 'base64url').toString()), role: 'owner', sub: `core:${id(c)}` })).toString('base64url');
-  await expect(connect(b.url, '', { ticket: `${tampered}.${signature}` })).rejects.toThrow('signature');
-  await expect(connect(c.url, '', { ticket: forB })).rejects.toThrow('another machine');
-  await expect(connect(outsider.url, '', { ticket: forB })).rejects.toThrow('another machine');
+  await refusedHello(b, '', { ticket: `${tampered}.${signature}` }, 'signature');
+  await refusedHello(c, '', { ticket: forB }, 'another machine');
+  await refusedHello(outsider, '', { ticket: forB }, 'another machine');
   expect(() => b.core.group.admit(forB, { name: 't', version: '1' }, Date.now() + 5 * 60_000)).toThrow('expired');
-  await expect(connect(b.url, '', { ticket: 'nonsense' })).rejects.toThrow('malformed');
+  await refusedHello(b, '', { ticket: 'nonsense' }, 'malformed');
   // A core in no group has nothing to check a ticket against.
   const alone = await machine();
-  await expect(connect(alone.url, '', { ticket: forB })).rejects.toThrow('no group');
+  await refusedHello(alone, '', { ticket: forB }, 'no group');
   // An agent cannot ask for one, and a hello takes one credential.
   const owned = await a.connect();
   const { threadId } = await echoThread(a, owned);
   const agent = await connect(a.url, a.core.agents.tokenFor(threadId));
   await expect(agent.call('group.ticket', { coreId: id(b) })).rejects.toThrow("agent's methods");
-  agent.close();
+  await hangUp(a, agent);
   // Nothing above left a session behind on b.
   expect(b.core.sessions.list(null)).toEqual([]);
 });
@@ -302,7 +306,7 @@ test('a phone paired with one member reaches the others as a device, and one rev
   a.core.sessions.revoke(phone.session!.id);
   expect(a.core.group.view('owner')?.devices).toEqual([]);
   await waitFor(() => b.core.sessions.list(null).length === 0);
-  await expect(connect(b.url, onB.session!.token)).rejects.toThrow('token is wrong');
+  await refusedHello(b, onB.session!.token, undefined, 'token is wrong');
   // And no member vouches for it again.
   expect(() => b.core.group.admit(ticket.ticket, { name: 'pwa', version: '1' })).toThrow();
   phone.close();
@@ -321,7 +325,7 @@ test('revoking a device on another member reaches its home machine, even before 
   held.roster = { ...held.roster, devices: [] };
   b.core.sessions.revoke(onB.session!.id);
   await waitFor(() => a.core.sessions.list(null).length === 0);
-  await expect(connect(a.url, phone.session!.token)).rejects.toThrow('token is wrong');
+  await refusedHello(a, phone.session!.token, undefined, 'token is wrong');
   phone.close();
   onB.close();
 });
@@ -336,7 +340,7 @@ test('a removed machine is told, leaves, and its keys die on the members that st
   await waitFor(() => members(b).length === 3 && members(c).length === 3);
   // b's shell holds an owner key on a.
   const key = await connect(a.url, '', { ticket: b.core.group.ticket(id(a), { principal: 'owner', sessionId: null, threadId: null }).ticket });
-  key.close();
+  await hangUp(a, key);
   expect(a.core.sessions.list(null)).toHaveLength(1);
 
   expect(a.core.group.remove(id(b)).cores.map((core) => core.coreId).sort()).toEqual([id(a), id(c)].sort());
@@ -345,7 +349,7 @@ test('a removed machine is told, leaves, and its keys die on the members that st
   expect(a.core.sessions.list(null)).toEqual([]);
   await waitFor(() => b.core.group.view('owner') === null && members(c).length === 2);
   // What b signs is no longer listened to, and a ticket from it opens nothing.
-  await expect(connect(a.url, key.session!.token)).rejects.toThrow('token is wrong');
+  await refusedHello(a, key.session!.token, undefined, 'token is wrong');
   expect(a.core.group.peers().map((peer) => peer.coreId)).toEqual([id(c)]);
 });
 

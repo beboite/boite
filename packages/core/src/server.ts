@@ -80,6 +80,8 @@ export interface RunningServer {
   host: string;
   port: number;
   url: string;
+  /** Sockets open now, the ones still saying hello included. */
+  connections(): number;
   stop(): Promise<void>;
 }
 
@@ -360,9 +362,10 @@ export function startServer(options: ServerOptions): RunningServer {
         const address = self.requestIP(request)?.address ?? null;
         const answered = address === null || isLoopbackAddress(address) ? () => undefined : refusals.begin(address);
         if (answered === null) return new Response('too many refused requests from this address', { status: 429 });
+        const named = request.headers.get('x-boite-peer') ?? '';
         const response = (url.pathname === JOIN_ROUTE ? core.group.http(request) : core.coordination.http(request)).then((answer) => {
           // Served means the signature of the machine the request names was checked: that address is this member's.
-          answered(answer.status, request.headers.get('x-boite-peer') ?? '');
+          answered(answer.status, named);
           return answer;
         }, (error: unknown) => {
           answered(403);
@@ -583,6 +586,7 @@ export function startServer(options: ServerOptions): RunningServer {
     host,
     port,
     url: core.baseUrl(),
+    connections: () => connections.size,
     async stop(): Promise<void> {
       stopping = true;
       incoming.close();
