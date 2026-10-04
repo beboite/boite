@@ -23,7 +23,7 @@
   /** A provider that writes titles, is here and has an account signed in. */
   let writers = $derived(
     store.providers.flatMap((provider) => {
-      const account = store.accounts.find((entry) => entry.providerId === provider.id && entry.status === 'ok');
+      const account = store.accountsOf(provider.id).find((entry) => entry.status === 'ok');
       return provider.titles === true && provider.available && account ? [{ provider, account }] : [];
     })
   );

@@ -45,7 +45,7 @@
   });
 
   let rows = $derived(providerRows(store.providers));
-  let ready = $derived(rows.filter((row) => row.members.some((provider) => connected(provider, store.accounts))).length);
+  let ready = $derived(rows.filter((row) => row.members.some((provider) => connected(provider, store.shownAccounts()))).length);
   let machines = $derived(Math.max(1, workspace.machines.length));
 
   /** The state line under a tile, null when the page has none worth a glance. */

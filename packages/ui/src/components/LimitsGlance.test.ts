@@ -2,6 +2,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { AccountQuota } from '@boite/contracts';
 import type { Store } from '../lib/store.svelte';
+import { RpcFailure } from '../lib/client';
 import LimitsGlance from './LimitsGlance.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
@@ -71,4 +72,75 @@ test('the glance shows fallback allowances without expanding and dates cached Mu
   expect(document.querySelector('[data-testid=quota-banked-resets]')).toBeNull();
   expect(document.body.textContent).toContain('0.04 credits');
   expect(document.querySelector('[aria-expanded="false"][aria-controls="usage-claude-account"]')).not.toBeNull();
+});
+
+const douane = { enabled: true, kind: 'douane', baseUrl: 'http://gateway.test/v1', dashboardUrl: 'http://gateway.test/admin/#quotas' };
+function proxied(owner: boolean, status: 'ready' | 'unsupported' | (() => Promise<unknown>), key: string) {
+  const call = vi.fn(async (method: string) => method === 'subscriptionProxy.quotas'
+    ? typeof status === 'function' ? status() : { status, providers: [], updatedAt: null, checkedAt: null, error: null }
+    : [quota]);
+  const showSettings = vi.fn();
+  const store = { client: { call, on: () => () => {} }, owner, endpointUrl: key, accounts: [], settings: { subscriptionProxy: douane }, showSettings } as unknown as Store;
+  mounted = mount(LimitsGlance, { target: document.body, props: { store } });
+  return { call, showSettings };
+}
+
+test('a paired device sends the press to the Limits page, which shows the gateway, without asking for its quotas', async () => {
+  const { call, showSettings } = proxied(false, 'ready', 'glance-proxy-phone');
+  document.querySelector<HTMLButtonElement>('[data-testid="nav-limits"]')!.click();
+  await settle();
+  expect(showSettings).toHaveBeenCalledWith('limits');
+  expect(document.querySelector('[data-testid="limits-glance"]')).toBeNull();
+  expect(call).not.toHaveBeenCalledWith('subscriptionProxy.quotas', expect.anything());
+});
+
+test('the first press already knows whether Douane serves its quotas: the dashboard without the route, the bars with it', async () => {
+  const missing = proxied(true, 'unsupported', 'glance-proxy-missing');
+  document.querySelector<HTMLButtonElement>('[data-testid="nav-limits"]')!.click();
+  await settle();
+  expect(missing.showSettings).toHaveBeenCalledWith('limits');
+  expect(document.querySelector('[data-testid="limits-glance"]')).toBeNull();
+  await unmount(mounted!);
+  document.body.innerHTML = '';
+
+  const ready = proxied(true, 'ready', 'glance-proxy-ready');
+  document.querySelector<HTMLButtonElement>('[data-testid="nav-limits"]')!.click();
+  await settle();
+  expect(ready.showSettings).not.toHaveBeenCalled();
+  expect(document.querySelector('[data-testid="limits-glance"]')).not.toBeNull();
+});
+
+const press = () => document.querySelector<HTMLButtonElement>('[data-testid="nav-limits"]')!.click();
+const gatewayCalls = (call: ReturnType<typeof vi.fn>) => call.mock.calls.filter(([method]) => method === 'subscriptionProxy.quotas').length;
+
+test('only an older core that does not know the method sends the press to the dashboard', async () => {
+  const older = proxied(true, () => Promise.reject(new RpcFailure({ code: -32601, message: 'unknown method subscriptionProxy.quotas' })), 'glance-proxy-older');
+  press();
+  await settle();
+  expect(older.showSettings).toHaveBeenCalledWith('limits');
+});
+
+test('a transport failure leaves the gateway unknown: the glance opens and the next press asks again', async () => {
+  const dropped = proxied(true, () => Promise.reject(new Error('socket closed')), 'glance-proxy-dropped');
+  press();
+  await settle();
+  expect(dropped.showSettings).not.toHaveBeenCalled();
+  expect(document.querySelector('[data-testid="limits-glance"]')).not.toBeNull();
+  const before = gatewayCalls(dropped.call);
+  press();
+  await settle();
+  press();
+  await settle();
+  expect(gatewayCalls(dropped.call)).toBeGreaterThan(before);
+  expect(dropped.showSettings).not.toHaveBeenCalled();
+});
+
+test('a gateway that hangs does not hold the press: the glance opens within a few hundred ms', async () => {
+  const hanging = proxied(true, () => new Promise(() => {}), 'glance-proxy-hanging');
+  press();
+  await settle();
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  await settle();
+  expect(hanging.showSettings).not.toHaveBeenCalled();
+  expect(document.querySelector('[data-testid="limits-glance"]')).not.toBeNull();
 });

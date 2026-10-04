@@ -3,7 +3,7 @@
   import { Gauge } from '@lucide/svelte';
   import { Closing } from '../lib/closing.svelte';
   import { floating } from '../lib/floating';
-  import { quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
+  import { gatewayReader, quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
   import QuotaPopup from './QuotaPopup.svelte';
@@ -21,6 +21,9 @@
   let trigger = $state<HTMLButtonElement>();
   let content = $state<HTMLDivElement>();
   let reader = $derived(quotaReader(store.endpointUrl ?? 'here'));
+  let gateway = $derived(gatewayReader(store.endpointUrl ?? 'here'));
+  /** How long a press waits for the gateway's first answer before opening the glance anyway. */
+  const KNOWN_WAIT_MS = 300;
   let rows = $derived(reader.rows === null ? null : shownQuotas(reader.rows, store.accounts));
   /** The last read's failure, cleared by the next read that lands. */
   let failed = $state('');
@@ -39,6 +42,27 @@
     const off = client.on('quotas.updated', (value) => current.accept(value));
     untrack(() => read());
     return off;
+  });
+
+  /** The Douane an owner reads, by address: a press goes to its bars or to its dashboard. */
+  let douane = $derived.by(() => {
+    const proxy = store.settings?.subscriptionProxy;
+    return store.owner && proxy?.enabled && proxy.kind === 'douane' ? proxy.baseUrl : null;
+  });
+
+  // Known before the first press, and kept current, since it decides where that press goes.
+  $effect(() => {
+    const client = store.client;
+    const current = gateway;
+    if (!client || douane === null) return;
+    const off = client.on('subscriptionProxy.quotasUpdated', (value) => current.accept(value));
+    untrack(() => void current.read(client));
+    return off;
+  });
+
+  // A Douane found without the route while the glance is open: its dashboard instead.
+  $effect(() => {
+    if (popover.open && douane !== null && gateway.state?.status === 'unsupported') untrack(() => page('limits'));
   });
 
   // A press anywhere else puts it away.
@@ -71,13 +95,24 @@
     store.showSettings(tab);
   }
 
-  function open() {
-    if (store.settings?.subscriptionProxy?.enabled) { page('limits'); return; }
-    if (popover.open) close(); else popover.show();
+  /**
+   * A gateway without native quotas has only its dashboard, on the Limits page,
+   * and so does a paired device, which cannot read the gateway's quotas.
+   */
+  async function open() {
+    if (popover.open) { close(); return; }
+    const proxy = store.settings?.subscriptionProxy;
+    if (proxy?.enabled && !store.owner) { page('limits'); return; }
+    const client = store.client;
+    // A slow gateway does not hold the press: the glance opens, and the effect above
+    // moves it to the page if the answer turns out to be `unsupported`.
+    if (douane !== null && client) await Promise.race([gateway.known(client), new Promise((resolve) => setTimeout(resolve, KNOWN_WAIT_MS))]);
+    if (proxy?.enabled && (proxy.kind !== 'douane' || gateway.state?.status === 'unsupported')) { page('limits'); return; }
+    popover.show();
   }
 </script>
 
-<button type="button" class="ghost icon" bind:this={trigger} aria-label={strings.quotas.glance} title={strings.quotas.glance} aria-haspopup="dialog" aria-expanded={popover.open} data-testid="nav-limits" onclick={open}><Gauge size={16} /></button>
+<button type="button" class="ghost icon" bind:this={trigger} aria-label={strings.quotas.glance} title={strings.quotas.glance} aria-haspopup="dialog" aria-expanded={popover.open} data-testid="nav-limits" onclick={() => void open()}><Gauge size={16} /></button>
 
 {#if popover.shown}
   <div class="glance" class:closing={popover.closing} bind:this={content} role="dialog" tabindex="-1" aria-label={strings.quotas.glance} data-testid="limits-glance" {onkeydown}

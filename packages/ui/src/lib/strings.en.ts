@@ -12,6 +12,18 @@ export const strings = {
     openDashboard: 'Open dashboard',
     signInHint: 'Sign in with Open dashboard, then reload here. If the page stays blank, this dashboard may block embedded views.',
     mixedContent: 'This page uses HTTPS. Set an HTTPS dashboard URL to view it here, or open the HTTP dashboard separately.',
+    enabledHint: 'When on, the accounts signed in on this machine are no longer used for Claude and Codex.',
+    /** The single account a proxied provider shows. */
+    account: 'Requests go through {name} at {origin}. This machine\'s own sign-ins are not used.',
+    via: 'via {name}',
+    quotasFailed: 'Could not read the {name} limits: {error}',
+    quotasEmpty: '{name} reports no limits yet.',
+    /** An entry that stands for several gateway accounts, as their average. */
+    averageOne: '{name} · 1 account',
+    average: '{name} · {count} accounts',
+    entryStatus: { ready: 'Ready', cooldown: 'Cooling down', error: 'Error', disabled: 'Disabled' },
+    creditOf: '{remaining} of {limit}',
+    creditUsed: '{used} used',
   },
   remoteBrowser: {
     display: 'Display', resolution: 'Page resolution', fitPhone: 'Fit this screen', phone: 'Phone', tablet: 'Tablet', rotate: 'Rotate', width: 'Width', height: 'Height', apply: 'Apply', sharedSize: 'Resolution also changes the shared tab on the PC.', restoreSize: 'Use the PC panel size', previewZoom: 'Preview zoom (this device only)', fit: 'Fit', panHint: 'Drag to pan the preview. Use the arrows to scroll the page.',

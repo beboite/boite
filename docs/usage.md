@@ -56,6 +56,40 @@ itself.
   Antigravity adds that it can take up to two minutes, the time `agy` may take
   to answer `/usage`.
 
+### Gateway quotas
+
+With the Douane [subscription proxy](providers.md#subscription-proxy) enabled,
+the core reads `GET <api>/v1/quotas` itself. The request sends the proxy key as
+a Bearer token, refuses redirects and gives up after 15 seconds. A body over
+1 MiB is refused, whatever its `Content-Length` claimed. The body is checked
+field by field: strings are bounded and stripped of control characters, and a
+row that breaks the contract is dropped. An error names the HTTP status or the
+failure. It never quotes the body, which can echo a credential.
+`packages/core/src/subscription-proxy-quotas.ts` holds the reader.
+
+- Each entry becomes a `quotas.list` row with the id `proxy:<provider>:<entry>`
+  and a `gateway` field: the plan, the entry's status (ready, cooldown, error
+  or disabled), the credits, the display mode and its account count. The tray
+  popup, the sidebar glance and the quota order therefore show them like any
+  account. Local Claude and Codex accounts read as unsupported meanwhile.
+  `quotas.configure` refuses a `proxy:` id, because the gateway decides what it
+  reports.
+- The cadence is the native one. A list within a minute of the last read
+  reuses it, and the refresh button reads again. `subscriptionProxy.quotas`
+  returns the gateway's state (`ready`, `unavailable`, `unsupported` or `off`)
+  and `subscriptionProxy.quotasUpdated` follows it. Both are owner-only, like
+  `quotas.list`. A phone with full control gets the rows from its core and
+  never reaches the gateway.
+- Limits shows one heading per provider the gateway reports, then one card per
+  entry. Each card has its window bars, reset times, plan, status and credits.
+  An `average` entry is named by its provider and account count, such as
+  "Antigravity · 10 accounts". Open dashboard opens the gateway's page in the
+  system browser.
+- A failed read keeps the last good entries, dimmed, under one card naming the
+  error. A 404 means an older Douane: the state turns `unsupported` and Limits
+  falls back to the embedded dashboard, as it does for CLIProxyAPI. Changing
+  the proxy configuration drops the previous gateway's entries.
+
 ## Quota sources and freshness
 
 Settings > Limits and the tray show monitored, signed-in accounts. Providers

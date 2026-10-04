@@ -45,6 +45,7 @@
 <section class="card proxy-settings" data-testid="subscription-proxy-settings">
   <h2 class="ui-label-box"><span class="ui-label">{strings.subscriptionProxy.heading}</span><InfoTip topic={strings.subscriptionProxy.heading} text={strings.subscriptionProxy.hint} /></h2>
   <label class="switch-row"><span class="text ui-label">{strings.subscriptionProxy.enable}</span><input type="checkbox" role="switch" bind:checked={config.enabled} data-testid="subscription-proxy-enabled" /></label>
+  <p class="hint" data-testid="subscription-proxy-enabled-hint">{strings.subscriptionProxy.enabledHint}</p>
   <div class="actions" role="group" aria-label={strings.subscriptionProxy.heading}>
     <button type="button" class="quiet small" aria-pressed={config.kind === 'douane'} onclick={() => choose('douane')} data-testid="subscription-proxy-douane"><span class="ui-label">Douane</span></button>
     <button type="button" class="quiet small" aria-pressed={config.kind === 'cliproxyapi'} onclick={() => choose('cliproxyapi')} data-testid="subscription-proxy-cliproxyapi"><span class="ui-label">CLIProxyAPI</span></button>
@@ -66,6 +67,7 @@
   form > label { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: var(--text-sm); }
   form input:not([type='checkbox']) { width: 100%; min-width: 0; }
   .clear-key { min-height: var(--row); }
+  .proxy-settings > .hint { margin: 2px 0 10px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .error { color: var(--color-danger); }
   [aria-pressed='true'] { background: var(--color-active); }
 </style>

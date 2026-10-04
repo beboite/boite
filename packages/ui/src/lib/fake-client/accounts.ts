@@ -1,5 +1,5 @@
 /** Accounts, their quotas and the fake sign-in a login runs. */
-import { RpcErrorCode, type Account, type AccountQuota, type RpcEvents } from '@boite/contracts';
+import { RpcErrorCode, subscriptionProxyOf, type Account, type AccountQuota, type GatewayQuotaEntry, type QuotaWindow, type RpcEvents, type SubscriptionProxyQuotas } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { sessionStatus } from './checks';
 import { DATA_DIR } from './shared';
@@ -19,9 +19,48 @@ const FAKE_LOGIN_MENU = [
   ''
 ].join('\r\n');
 
+/** What a Douane with the quotas route reports, as the core maps it. */
+export function gatewayQuotas(ctx: FakeContext): SubscriptionProxyQuotas {
+  const proxy = ctx.settings.subscriptionProxy;
+  if (!proxy?.enabled) return { status: 'off', providers: [], updatedAt: null, checkedAt: null, error: null };
+  if (proxy.kind !== 'douane') return { status: 'unsupported', providers: [], updatedAt: null, checkedAt: null, error: null };
+  const now = Date.now();
+  const window = (id: string, label: string, usedPercent: number, hours: number) => ({ id, label, usedPercent, resetsAt: now + hours * 3600_000 });
+  const entry = (id: string, label: string, plan: string | null, windows: QuotaWindow[], more: Partial<GatewayQuotaEntry> = {}): GatewayQuotaEntry =>
+    ({ id, label, plan, accounts: 1, status: 'ready', error: null, updatedAt: now, windows, credits: [], ...more });
+  return { status: 'ready', updatedAt: now, checkedAt: now, error: null, providers: [
+    { providerId: 'claude', name: 'Claude', display: 'accounts', entries: [
+      entry('claude-1', 'Claude Max x20 · chris@…', 'Max 20x', [window('five-hour', '5 hours', 11, 2), window('seven-day', 'Weekly', 64, 70)]),
+      entry('claude-2', 'Claude Pro · work@…', 'Pro', [window('five-hour', '5 hours', 100, 1), window('seven-day', 'Weekly', 82, 30)], { status: 'cooldown' }),
+    ] },
+    { providerId: 'codex', name: 'Codex', display: 'accounts', entries: [
+      entry('codex-1', 'ChatGPT Plus · chris@…', 'Plus', [window('five-hour', '5 hours', 37, 3)],
+        { credits: [{ id: 'codex-credits', label: 'Credits', unit: 'credits', remaining: 62500, limit: null, used: null }] }),
+    ] },
+    { providerId: 'antigravity', name: 'Antigravity', display: 'average', entries: [
+      entry('antigravity', 'Antigravity · 10 comptes', null, [window('gemini-pro', 'Gemini Pro', 42, 4), window('claude', 'Claude', 18, 4)], { accounts: 10 }),
+    ] },
+  ] };
+}
+
+/** The entries as limit rows, the core's `GatewayQuotas.rows`. */
+function gatewayRows(state: SubscriptionProxyQuotas): AccountQuota[] {
+  const stale = state.status === 'unavailable';
+  return state.providers.flatMap(provider => provider.entries.map((entry): AccountQuota => ({
+    accountId: `proxy:${provider.providerId}:${entry.id}`, providerId: provider.providerId, providerName: provider.name, label: entry.label, enabled: true,
+    status: stale || entry.status === 'error' ? 'unavailable' : 'ready', windows: entry.windows, checkedAt: entry.updatedAt ?? state.checkedAt,
+    error: stale ? state.error : entry.error,
+    gateway: { kind: 'douane', entryId: entry.id, display: provider.display, plan: entry.plan, accounts: entry.accounts, status: entry.status, credits: entry.credits },
+  })));
+}
+
 function quotas(ctx: FakeContext): AccountQuota[] {
+  return [...accountQuotas(ctx), ...gatewayRows(gatewayQuotas(ctx))];
+}
+
+function accountQuotas(ctx: FakeContext): AccountQuota[] {
   const accounts = [...ctx.accounts, { id: 'quota:antigravity-cli', providerId: 'antigravity', label: 'Antigravity CLI' }];
-  const proxied = (providerId: string) => ctx.settings.subscriptionProxy?.enabled && ['claude-sdk', 'codex-appserver'].includes(ctx.providers.find(provider => provider.id === providerId)?.protocol ?? '');
+  const proxied = (providerId: string) => subscriptionProxyOf(ctx.settings, ctx.providers.find(provider => provider.id === providerId)?.protocol) !== null;
   return accounts.map((account, index) => ({
     ...(ctx.quotaExtras && ctx.quotaEnabled[account.id] !== false && ['claude', 'codex'].includes(account.providerId) ? {
       resetCredits: { availableCount: Math.max(0, (account.providerId === 'claude' ? 1 : 2) - (ctx.quotaResetsUsed[account.id] ?? 0)), nextExpiresAt: Date.now() + 7 * 86400_000 },
@@ -131,7 +170,12 @@ export function accountMethods(ctx: FakeContext) {
       for (const quota of rows) {
         if (params.requestId) ctx.emit('quotas.progress', { requestId: params.requestId, quota });
       }
+      if (ctx.settings.subscriptionProxy?.enabled && ctx.settings.subscriptionProxy.kind === 'douane') ctx.emit('subscriptionProxy.quotasUpdated', gatewayQuotas(ctx));
       return rows;
+    },
+    'subscriptionProxy.quotas': async (params) => {
+      if (params.refresh !== undefined && typeof params.refresh !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'subscriptionProxy.quotas refresh must be a boolean' });
+      return gatewayQuotas(ctx);
     },
     'accounts.list': async (params) => {
       return structuredClone(ctx.accounts);

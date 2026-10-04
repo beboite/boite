@@ -12,6 +12,7 @@ import { consumeClaudeReset, QuotaResetStore, type QuotaResetConsumer } from './
 import { ANTIGRAVITY_QUOTA_ID, readExtraQuota } from './quota-readers.ts';
 import type { ProbeContext } from './drivers/types.ts';
 import { activeSubscriptionProxy } from './subscription-proxy.ts';
+import { GatewayQuotas } from './subscription-proxy-quotas.ts';
 
 export { claudeUsageAgent } from './quota-details.ts';
 
@@ -156,6 +157,8 @@ export type QuotaReader = (account: Account) => Promise<QuotaWindow[] | QuotaRea
 
 export class QuotaStore {
   readonly resets: QuotaResetStore;
+  /** The subscription gateway's own accounts, listed after this machine's. */
+  readonly gateway: GatewayQuotas;
   /** Backoff and freshness: when the next read may go out. Cleared by every invalidation. */
   private cache = new Map<string, { value: AccountQuota; retryAt: number }>();
   /**
@@ -170,6 +173,7 @@ export class QuotaStore {
   /** Bumped when one account's reading is dropped, so a read already in flight cannot restore it. */
   private epochs = new Map<string, number>();
   constructor(private core: Core, private read: QuotaReader = (account) => account.providerId === 'claude' ? readClaude(core, account) : account.providerId === 'codex' ? readCodex(core, account) : readExtraQuota(core, account), consume?: QuotaResetConsumer) {
+    this.gateway = new GatewayQuotas(core, undefined, () => this.core.bus.emit('quotas.updated', this.known()));
     this.resets = new QuotaResetStore(core, consume ?? (async (account, requestId, selection) => {
       if (account.providerId === 'claude') return consumeClaudeReset(core, account, requestId, selection);
       const { consumeCodexReset } = await import('./drivers/codex/models.ts');
@@ -179,7 +183,7 @@ export class QuotaStore {
       await this.pending.get(account.id);
       this.cache.delete(account.id);
       const quota = await this.one(account, true);
-      this.core.bus.emit('quotas.updated', [...this.core.accounts.list(), cliAccount].map((row) => this.snapshot(row)));
+      this.core.bus.emit('quotas.updated', this.known());
       return quota;
     });
     core.bus.onAny((name, payload) => {
@@ -227,12 +231,15 @@ export class QuotaStore {
     if (previous && (previous.checkedAt ?? 0) > observedAt) return;
     const value: AccountQuota = { ...this.base(account), ...reading, status: 'ready', source: 'observation', checkedAt: observedAt };
     this.observations.set(accountId, value);
-    const rows = [...this.core.accounts.list(), cliAccount].map((row) => this.snapshot(row));
-    this.core.bus.emit('quotas.updated', rows);
+    this.core.bus.emit('quotas.updated', this.known());
   }
   private kept(account: Account): AccountQuota | undefined {
     const kept = this.lastGood.get(account.id);
     return kept && sameLogin(kept.identity, account.identity) ? kept.value : undefined;
+  }
+  /** Every row as known now, the gateway's last answer included, for an update event. */
+  private known(): AccountQuota[] {
+    return [...[...this.core.accounts.list(), cliAccount].map((row) => this.snapshot(row)), ...this.gateway.rows()];
   }
   /** What is known without reading: the cached row, else the last good reading, else nothing yet. */
   private snapshot(account: Account): AccountQuota {
@@ -255,6 +262,12 @@ export class QuotaStore {
       group.push({ account, index });
       groups.set(account.providerId, group);
     });
+    // The gateway answers for its own accounts, alongside the providers.
+    const gateway = this.gateway.read(refresh).then((state) => {
+      const rows = this.gateway.rows(state);
+      if (requestId) for (const quota of rows) this.core.bus.emit('quotas.progress', { requestId, quota });
+      return rows;
+    });
     await Promise.all([...groups.values()].map(async (group) => {
       let next = 0;
       await Promise.all(Array.from({ length: Math.min(2, group.length) }, async () => {
@@ -266,7 +279,7 @@ export class QuotaStore {
         }
       }));
     }));
-    return result.map((row) => this.observations.get(row.accountId) ?? row);
+    return [...result.map((row) => this.observations.get(row.accountId) ?? row), ...await gateway];
   }
   private async one(account: Account, refresh: boolean): Promise<AccountQuota> {
     const base = this.base(account);
@@ -306,7 +319,7 @@ export class QuotaStore {
     // Only this account changes: every other one keeps the reading it had.
     if (enabled) { this.cache.delete(accountId); this.observations.delete(accountId); }
     else this.forget((id) => id === accountId);
-    const result = [...this.core.accounts.list(), cliAccount].map((account) => this.snapshot(account));
+    const result = this.known();
     this.core.bus.emit('quotas.updated', result);
     return result;
   }

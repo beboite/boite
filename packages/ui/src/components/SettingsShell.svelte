@@ -57,7 +57,7 @@ import { workspace } from '../lib/workspace.svelte';
     { id: 'experiments', label: strings.settings.tabs.experiments, icon: FlaskConical, group: 3 }
   ]);
 
-  let providerList = $derived(providerGroups(store.providers, store.accounts));
+  let providerList = $derived(providerGroups(store.providers, store.shownAccounts()));
 
   let children: Partial<Record<SettingsTab, { id: string; label: string }[]>> = $derived({
     general: [

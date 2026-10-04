@@ -2,6 +2,7 @@
 import { KEYBINDING_COMMANDS, parseChord, RpcErrorCode, checkSettingsPatch } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import type { FakeContext, FakeMethods } from './context';
+import { gatewayQuotas } from './accounts';
 
 export function settingsMethods(ctx: FakeContext) {
   return {
@@ -16,6 +17,8 @@ export function settingsMethods(ctx: FakeContext) {
       if (!checked.ok) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: checked.message, data: { field: checked.field } });
       ctx.settings = { ...ctx.settings, ...checked.patch };
       ctx.emit('settings.updated', { ...ctx.settings });
+      // As the core: another gateway starts its quotas over.
+      ctx.emit('subscriptionProxy.quotasUpdated', gatewayQuotas(ctx));
       return { ...ctx.settings };
     },
     'scheduler.get': async (params) => {
@@ -75,6 +78,7 @@ export function settingsMethods(ctx: FakeContext) {
       ctx.settings = { ...ctx.settings, ...checked.patch };
       ctx.emit('scheduler.updated', structuredClone(ctx.scheduler));
       ctx.emit('settings.updated', { ...ctx.settings });
+      if (checked.patch.subscriptionProxy) ctx.emit('subscriptionProxy.quotasUpdated', gatewayQuotas(ctx));
       return { ...ctx.settings };
     },
   } satisfies Partial<FakeMethods>;
