@@ -149,7 +149,8 @@ export class GatewayQuotas {
   private config: string;
   private epoch = 0;
 
-  constructor(private core: Core, private max = MAX_BYTES) {
+  /** `onReset` tells the quota store, whose `quotas.updated` still carries the dropped rows. */
+  constructor(private core: Core, private max = MAX_BYTES, private onReset: () => void = () => {}) {
     this.config = JSON.stringify(core.settings.get().subscriptionProxy ?? null);
     core.bus.onAny((name) => { if (name === 'settings.updated') this.reconfigure(); });
   }
@@ -163,11 +164,20 @@ export class GatewayQuotas {
     const config = JSON.stringify(this.core.settings.get().subscriptionProxy ?? null);
     if (config === this.config) return;
     this.config = config;
+    this.reset();
+  }
+
+  /**
+   * Forgets the answer and any read in flight: the proxy changed, or its key,
+   * which lives outside settings. Clients drop the old rows at once.
+   */
+  reset(): void {
     this.epoch++;
     this.pending = null;
     this.readAt = 0;
     this.last = { ...OFF, status: 'unavailable' };
     this.core.bus.emit('subscriptionProxy.quotasUpdated', this.state());
+    this.onReset();
   }
 
   /** What is known without asking the gateway. */

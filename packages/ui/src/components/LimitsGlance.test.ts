@@ -72,3 +72,39 @@ test('the glance shows fallback allowances without expanding and dates cached Mu
   expect(document.body.textContent).toContain('0.04 credits');
   expect(document.querySelector('[aria-expanded="false"][aria-controls="usage-claude-account"]')).not.toBeNull();
 });
+
+const douane = { enabled: true, kind: 'douane', baseUrl: 'http://gateway.test/v1', dashboardUrl: 'http://gateway.test/admin/#quotas' };
+function proxied(owner: boolean, status: 'ready' | 'unsupported', key: string) {
+  const call = vi.fn(async (method: string) => method === 'subscriptionProxy.quotas'
+    ? { status, providers: [], updatedAt: null, checkedAt: null, error: null }
+    : [quota]);
+  const showSettings = vi.fn();
+  const store = { client: { call, on: () => () => {} }, owner, endpointUrl: key, accounts: [], settings: { subscriptionProxy: douane }, showSettings } as unknown as Store;
+  mounted = mount(LimitsGlance, { target: document.body, props: { store } });
+  return { call, showSettings };
+}
+
+test('a paired device sends the press to the Limits page, which shows the gateway, without asking for its quotas', async () => {
+  const { call, showSettings } = proxied(false, 'ready', 'glance-proxy-phone');
+  document.querySelector<HTMLButtonElement>('[data-testid="nav-limits"]')!.click();
+  await settle();
+  expect(showSettings).toHaveBeenCalledWith('limits');
+  expect(document.querySelector('[data-testid="limits-glance"]')).toBeNull();
+  expect(call).not.toHaveBeenCalledWith('subscriptionProxy.quotas', expect.anything());
+});
+
+test('the first press already knows whether Douane serves its quotas: the dashboard without the route, the bars with it', async () => {
+  const missing = proxied(true, 'unsupported', 'glance-proxy-missing');
+  document.querySelector<HTMLButtonElement>('[data-testid="nav-limits"]')!.click();
+  await settle();
+  expect(missing.showSettings).toHaveBeenCalledWith('limits');
+  expect(document.querySelector('[data-testid="limits-glance"]')).toBeNull();
+  await unmount(mounted!);
+  document.body.innerHTML = '';
+
+  const ready = proxied(true, 'ready', 'glance-proxy-ready');
+  document.querySelector<HTMLButtonElement>('[data-testid="nav-limits"]')!.click();
+  await settle();
+  expect(ready.showSettings).not.toHaveBeenCalled();
+  expect(document.querySelector('[data-testid="limits-glance"]')).not.toBeNull();
+});

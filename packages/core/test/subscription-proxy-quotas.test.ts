@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import type { RpcEvents, SubscriptionProxy } from '@boite/contracts';
+import type { AccountQuota, RpcEvents, SubscriptionProxy } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { parseGatewayQuotas } from '../src/subscription-proxy-quotas.ts';
 import { startTestCore, type TestCore } from './harness.ts';
@@ -89,9 +89,13 @@ test('quotas come from Douane through the core, in both display modes, with the 
   try { await expect(phone.call('subscriptionProxy.quotas', {})).rejects.toThrow('owner'); }
   finally { phone.close(); }
 
-  // Turning the proxy off drops the entries at once.
+  // Turning the proxy off drops the entries at once, from the quota rows every reader keeps too.
+  const updates: AccountQuota[][] = [];
+  harness.core.bus.onAny((name, payload) => { if (name === 'quotas.updated') updates.push(payload as AccountQuota[]); });
   await owner.call('settings.set', { subscriptionProxy: { ...config(`http://127.0.0.1:${gateway.port}/v1`), enabled: false } });
   expect(events.at(-1)?.status).toBe('off');
+  expect(updates).toHaveLength(1);
+  expect(updates[0]!.some((row) => row.gateway)).toBe(false);
   expect((await owner.call('quotas.list', {})).some((row) => row.gateway)).toBe(false);
   expect(seen).toHaveLength(2);
 });
@@ -188,4 +192,28 @@ test('local accounts stay stored and come back unchanged when the proxy goes off
   await owner.call('settings.set', { subscriptionProxy: { ...proxy, enabled: false } });
   const after = await owner.call('accounts.list', {});
   expect(after.map(({ id, label, isolationDir }) => ({ id, label, isolationDir }))).toEqual(before.map(({ id, label, isolationDir }) => ({ id, label, isolationDir })));
+});
+
+test('a new key is asked again at once, whether saved alone or with the configuration', async () => {
+  const seen: string[] = [];
+  gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+    const auth = request.headers.get('authorization') ?? '';
+    seen.push(auth);
+    return auth === 'Bearer good-key' ? Response.json(DOUANE) : Response.json({ error: 'bad key' }, { status: 401 });
+  } });
+  harness = await startTestCore();
+  const owner = await harness.connect();
+  const proxy = config(`http://127.0.0.1:${gateway.port}/v1`);
+  await owner.call('subscriptionProxy.configure', { subscriptionProxy: proxy, key: 'wrong-key' });
+  expect((await owner.call('subscriptionProxy.quotas', {})).status).toBe('unavailable');
+
+  // The corrected key alone: the next plain read asks the gateway with it.
+  await owner.call('subscriptionProxy.key', { key: 'good-key' });
+  expect((await owner.call('subscriptionProxy.quotas', {})).status).toBe('ready');
+  expect(seen).toEqual(['Bearer wrong-key', 'Bearer good-key']);
+
+  // The same settings with another key: no settings change, still a new answer.
+  await owner.call('subscriptionProxy.configure', { subscriptionProxy: proxy, key: 'wrong-key' });
+  expect((await owner.call('subscriptionProxy.quotas', {})).status).toBe('unavailable');
+  expect(seen).toEqual(['Bearer wrong-key', 'Bearer good-key', 'Bearer wrong-key']);
 });

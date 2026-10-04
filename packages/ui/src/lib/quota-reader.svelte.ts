@@ -157,10 +157,23 @@ export class GatewayReader {
     this.state = state;
   }
 
+  private pending: Promise<void> | null = null;
+
   /** A core that cannot answer, an older one included, leaves the gateway its dashboard. */
-  async read(client: Client, refresh = false): Promise<void> {
-    try { this.accept(await client.call('subscriptionProxy.quotas', { refresh })); }
-    catch { this.accept({ status: 'unsupported', providers: [], updatedAt: null, checkedAt: null, error: null }); }
+  read(client: Client, refresh = false): Promise<void> {
+    if (this.pending && !refresh) return this.pending;
+    const running = (async () => {
+      try { this.accept(await client.call('subscriptionProxy.quotas', { refresh })); }
+      catch { this.accept({ status: 'unsupported', providers: [], updatedAt: null, checkedAt: null, error: null }); }
+    })();
+    this.pending = running;
+    void running.finally(() => { if (this.pending === running) this.pending = null; });
+    return running;
+  }
+
+  /** Settles once the state is known: the read in flight, or a first one. */
+  known(client: Client): Promise<void> {
+    return this.pending ?? (this.state ? Promise.resolve() : this.read(client));
   }
 }
 

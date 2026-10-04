@@ -117,6 +117,8 @@ export function registerSubscriptionProxy(core: Core): void {
     validateKey(key);
     try { writeKey(core, key); }
     catch { throw unavailable('Subscription proxy key could not be saved'); }
+    // The last answer was read with the previous key.
+    core.quotas.gateway.reset();
     return { configured: key !== null };
   });
   core.router.register('subscriptionProxy.quotas', ({ refresh }) => {
@@ -126,12 +128,16 @@ export function registerSubscriptionProxy(core: Core): void {
   core.router.register('subscriptionProxy.configure', ({ subscriptionProxy, key }) => {
     if (!subscriptionProxy || typeof subscriptionProxy !== 'object') throw invalidParams('subscriptionProxy configuration is required');
     if (key !== undefined) validateKey(key);
+    let settings;
     try {
-      return core.settings.set({ subscriptionProxy }, key === undefined ? undefined : () => writeKey(core, key));
+      settings = core.settings.set({ subscriptionProxy }, key === undefined ? undefined : () => writeKey(core, key));
     } catch (error) {
       if (error instanceof RpcFailure) throw error;
       // A storage error must not expose a bound private value to the caller or logs.
       throw unavailable('Subscription proxy configuration could not be saved');
     }
+    // A new key can change the answer even when the settings did not.
+    if (key !== undefined) core.quotas.gateway.reset();
+    return settings;
   });
 }

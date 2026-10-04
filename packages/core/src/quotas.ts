@@ -173,7 +173,7 @@ export class QuotaStore {
   /** Bumped when one account's reading is dropped, so a read already in flight cannot restore it. */
   private epochs = new Map<string, number>();
   constructor(private core: Core, private read: QuotaReader = (account) => account.providerId === 'claude' ? readClaude(core, account) : account.providerId === 'codex' ? readCodex(core, account) : readExtraQuota(core, account), consume?: QuotaResetConsumer) {
-    this.gateway = new GatewayQuotas(core);
+    this.gateway = new GatewayQuotas(core, undefined, () => this.core.bus.emit('quotas.updated', this.known()));
     this.resets = new QuotaResetStore(core, consume ?? (async (account, requestId, selection) => {
       if (account.providerId === 'claude') return consumeClaudeReset(core, account, requestId, selection);
       const { consumeCodexReset } = await import('./drivers/codex/models.ts');

@@ -42,15 +42,25 @@
     return off;
   });
 
-  // Whether Douane serves its quotas decides where the next press goes.
+  /** The Douane an owner reads, by address: a press goes to its bars or to its dashboard. */
+  let douane = $derived.by(() => {
+    const proxy = store.settings?.subscriptionProxy;
+    return store.owner && proxy?.enabled && proxy.kind === 'douane' ? proxy.baseUrl : null;
+  });
+
+  // Known before the first press, and kept current, since it decides where that press goes.
   $effect(() => {
     const client = store.client;
     const current = gateway;
-    const proxy = store.settings?.subscriptionProxy;
-    if (!popover.open || !client || !store.owner || !proxy?.enabled || proxy.kind !== 'douane') return;
+    if (!client || douane === null) return;
     const off = client.on('subscriptionProxy.quotasUpdated', (value) => current.accept(value));
     untrack(() => void current.read(client));
     return off;
+  });
+
+  // A Douane found without the route while the glance is open: its dashboard instead.
+  $effect(() => {
+    if (popover.open && douane !== null && gateway.state?.status === 'unsupported') untrack(() => page('limits'));
   });
 
   // A press anywhere else puts it away.
@@ -83,15 +93,22 @@
     store.showSettings(tab);
   }
 
-  /** A gateway without native quotas has only its dashboard, on the Limits page. */
-  function open() {
+  /**
+   * A gateway without native quotas has only its dashboard, on the Limits page,
+   * and so does a paired device, which cannot read the gateway's quotas.
+   */
+  async function open() {
+    if (popover.open) { close(); return; }
     const proxy = store.settings?.subscriptionProxy;
+    if (proxy?.enabled && !store.owner) { page('limits'); return; }
+    const client = store.client;
+    if (douane !== null && client) await gateway.known(client);
     if (proxy?.enabled && (proxy.kind !== 'douane' || gateway.state?.status === 'unsupported')) { page('limits'); return; }
-    if (popover.open) close(); else popover.show();
+    popover.show();
   }
 </script>
 
-<button type="button" class="ghost icon" bind:this={trigger} aria-label={strings.quotas.glance} title={strings.quotas.glance} aria-haspopup="dialog" aria-expanded={popover.open} data-testid="nav-limits" onclick={open}><Gauge size={16} /></button>
+<button type="button" class="ghost icon" bind:this={trigger} aria-label={strings.quotas.glance} title={strings.quotas.glance} aria-haspopup="dialog" aria-expanded={popover.open} data-testid="nav-limits" onclick={() => void open()}><Gauge size={16} /></button>
 
 {#if popover.shown}
   <div class="glance" class:closing={popover.closing} bind:this={content} role="dialog" tabindex="-1" aria-label={strings.quotas.glance} data-testid="limits-glance" {onkeydown}
