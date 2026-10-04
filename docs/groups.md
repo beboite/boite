@@ -84,9 +84,12 @@ address, and gives the other members these addresses, best first:
 3. its tailnet address, `http://100.x.y.z:<port>`;
 4. its LAN address, when the core listens on the network (`listenOnLan`).
 
-A member dialing another tries all of them at once and keeps the first that
-answers with a valid signature, so a machine reachable by any of the four is
-reached. What it sends is sealed to that machine's key, so an address that
+A member dialing another asks the address that answered last, and the
+others once that one has failed or stayed silent for a second, and keeps the
+first that answers with a valid signature. A machine reachable by any of the
+four is reached, and a request is not sent twice to a machine that has two
+addresses: the copy would be refused as a replay and counted against its
+sender. What it sends is sealed to that machine's key, so an address that
 leads elsewhere reads nothing and cannot answer. When none answers and the
 owner's app is connected to both machines, the app relays the sealed request,
 as it does for two machines linked by hand ([coordination](coordination.md)).
@@ -227,7 +230,13 @@ fresh and not seen before.
 which role, for which machine, for one minute. The client says `hello` with
 the ticket on the other member, which checks the signature against the roster,
 that the ticket names it, its date and that it was never used, then issues a
-session key of its own, exactly as it does for a pairing grant. The use and
+session key of its own, exactly as it does for a pairing grant. A ticket also
+names the one address it is good at, and the member refuses one made for an
+address it does not give, or no longer: a ticket a client was led to send where
+the member used to be opens nothing when carried to the member. The key the
+ticket becomes lives while the member still gives that address. When it
+publishes an HTTPS address, or its address changes, the keys issued for what it
+gave up are revoked, so a key sent there afterwards is worth nothing. The use and
 the session are one write in the journal, so a restart does not make a used
 ticket good again. A ticket is refused one minute after its date, plus one
 more for the difference between two clocks. From then on
@@ -272,28 +281,25 @@ out for an address the machine no longer gives, or no longer allows once it has
 HTTPS, is dropped and the machine reached anew, the machine the window opened
 on included: the window then goes to a machine paired by hand, or to the
 shell's own core, never back to the address it dropped, and stays closed when
-that address is all there is. Every member is listed with a
-revision that only grows (`GroupCore.rev`). When two hand-paired machines of a
-group list a member differently, the newer listing decides alone: the other
-machine has not caught up, and somebody else may listen where the member was.
-The client remembers what the newest revision it ever saw allowed, across
-reloads, so a listing that is behind decides nothing even once the machine
-that gave the newer one is off. Two listings of the same revision that differ
-leave only the addresses both allow. The question is asked again when an
+that address is all there is. When two hand-paired machines of a
+group list different addresses for a member, a ticket goes only to an address
+both allow, and to none until they agree. The question is asked again when an
 address has answered and once more when the ticket is in hand, so a roster that
 changes under an attempt stops it; the attempt starts over at once, once a
 minute at most. A key that is dropped is taken out of both places it is saved
-in, the list of machines and the core the window opens on next.
+in, the list of machines and the core the window opens on next. These rules
+spare a client a useless attempt. They are not what keeps a key safe: the
+member is, by refusing a ticket for an address it gave up and by revoking the
+keys issued for it ([tickets](#how-it-works)).
 
 At start, a key the group brought for a plain HTTP address is not sent before
 the machines paired by hand have been asked, each on a short connection of its
 own, what their group lists (`GroupLinks.vet`). A key whose address no longer
 stands is forgotten unsent, whether the window would open on that machine, a
 `?core=` link names it or would fall back on it, or it is one of the others. They get three seconds: when none of that group
-answers, the machine that vouched being off, what the newest revision this
-client ever saw allowed decides, and a key it knows nothing against is used as
-it was left. So someone able to keep those machines silent gets a key sent to
-an old address only if this client never heard the address had changed.
+answers, the machine that vouched being off, the key is used as it was left.
+Someone able to keep those machines silent still gets it sent to the old
+address, where it is worth nothing once the member has given that address up.
 
 ## Limits
 

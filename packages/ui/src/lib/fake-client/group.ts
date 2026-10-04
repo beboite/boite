@@ -18,10 +18,8 @@ const refuse = (message: string, field?: string) =>
   new RpcFailure({ code: RpcErrorCode.Refused, message, ...(field === undefined ? {} : { data: { field } }) });
 const invalid = (message: string, field: string) => new RpcFailure({ code: RpcErrorCode.InvalidParams, message, data: { field } });
 
-/** `after` is the roster the machine enters: its revision is one past the highest there, as on the core. */
-function card(ctx: FakeContext, after: GroupCore[] = []): GroupCore {
-  const rev = after.reduce((highest, core) => Math.max(highest, core.rev), 0) + 1;
-  return { coreId: ctx.identity.coreId, name: ctx.identity.name, os: ctx.core.os, addresses: [ctx.identity.url], rev };
+function card(ctx: FakeContext): GroupCore {
+  return { coreId: ctx.identity.coreId, name: ctx.identity.name, os: ctx.core.os, addresses: [ctx.identity.url] };
 }
 
 function view(ctx: FakeContext): Group | null {
@@ -88,7 +86,7 @@ export function groupMethods(ctx: FakeContext) {
       if (expiresAt === undefined || expiresAt <= ctx.now()) throw refuse('the invitation was already used by another machine, expired, or never issued', 'invite');
       if (roster.cores.length >= GROUP_MAX_CORES) throw refuse(`a group holds at most ${GROUP_MAX_CORES} machines`, 'invite');
       roster.invites.delete(invite.t as string);
-      roster.cores.push(card(ctx, roster.cores));
+      roster.cores.push(card(ctx));
       ctx.roster = roster;
       announce(roster);
       return view(ctx)!;
@@ -117,7 +115,9 @@ export function groupMethods(ctx: FakeContext) {
       const roster = required(ctx);
       const target = roster.cores.find((core) => core.coreId === params?.coreId);
       if (target === undefined || target.coreId === ctx.identity.coreId) throw refuse(`${String(params?.coreId)} is not another machine of this group`, 'coreId');
-      return { ticket: `fake-ticket-${++ctx.seq}`, coreId: target.coreId, addresses: [...target.addresses], expiresAt: ctx.now() + GROUP_TICKET_TTL_MS };
+      const at = params?.url === undefined ? target.addresses[0] : target.addresses.find((address) => address === params.url);
+      if (at === undefined) throw refuse(`url: expected an address of ${target.name} a key may be sent to, HTTPS when it has one and written as numbers otherwise`, 'url');
+      return { ticket: `fake-ticket-${++ctx.seq}`, coreId: target.coreId, addresses: [...target.addresses], url: at, expiresAt: ctx.now() + GROUP_TICKET_TTL_MS };
     },
   } satisfies Partial<FakeMethods>;
 }

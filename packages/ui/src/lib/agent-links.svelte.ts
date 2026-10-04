@@ -162,7 +162,8 @@ class AgentAutoLink {
         || b.store.group?.cores.some(core => core.coreId === left.coreId) === true;
       const linked = peersA.some(peer => peer.coreId === right.coreId) && peersB.some(peer => peer.coreId === left.coreId);
       if (grouped && !linked) {
-        await bridgeMachines(a, b, left.coreId, right.coreId);
+        // No relay through this app: said under Agent links, and tried again when one of the two reconnects.
+        if (!await bridgeMachines(a, b, left.coreId, right.coreId)) throw new Error(fill(strings.machines.agentLinkAddressRequired, { machine: b.label }));
       } else if (linked) {
         await bridgeMachines(a, b, left.coreId, right.coreId);
         // Persisted trust is configuration, not proof that either signed route still works.

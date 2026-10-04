@@ -2,6 +2,9 @@ import { RpcErrorCode, type Group, type GroupInvite, type PairedSession, type Pa
 import { RpcFailure, type Client } from '../client';
 import type { StoreContext } from './context';
 
+/** A read of the group that failed is tried again after these waits, on the same connection. */
+const GROUP_READ_DELAYS_MS = [1000, 4000];
+
 /** Pairing: the owner mints one-time links, sees every paired device, revokes, and groups its machines. */
 export class Pairing {
   /** The last one-time pairing link, until it is closed or the core changes. */
@@ -60,9 +63,11 @@ export class Pairing {
   /**
    * Read on every connection and on every `group.updated`. A core from before
    * groups has no such method and belongs to none. A read that fails is tried
-   * again at the next reconnect, without a toast nobody asked for.
+   * again twice on the same connection, a second then four apart, without a
+   * toast nobody asked for: until it answers, the machine neither vouches for
+   * a group nor gets its agents linked.
    */
-  async loadGroup(): Promise<void> {
+  async loadGroup(attempt = 0): Promise<void> {
     const client = this.ctx.client;
     if (!client) return;
     try {
@@ -77,7 +82,13 @@ export class Pairing {
       if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) {
         this.group = null;
         this.groupKnown = true;
-      } else console.warn('reading the group failed', error);
+        return;
+      }
+      console.warn('reading the group failed', error);
+      if (attempt >= GROUP_READ_DELAYS_MS.length) return;
+      setTimeout(() => {
+        if (client === this.ctx.client && !this.groupKnown) void this.loadGroup(attempt + 1);
+      }, GROUP_READ_DELAYS_MS[attempt]);
     }
   }
 
@@ -86,11 +97,14 @@ export class Pairing {
     const client = this.ctx.client;
     if (!client) return false;
     try {
-      this.group = await work(client);
+      const group = await work(client);
+      // The store moved to another core meanwhile: this answer, or this refusal, is about the one it left.
+      if (client !== this.ctx.client) return false;
+      this.group = group;
       this.groupInvite = null;
       return true;
     } catch (error) {
-      this.ctx.fail(error);
+      if (client === this.ctx.client) this.ctx.fail(error);
       return false;
     }
   }
@@ -118,9 +132,10 @@ export class Pairing {
     const client = this.ctx.client;
     if (!client) return;
     try {
-      this.groupInvite = await client.call('group.invite', {});
+      const invite = await client.call('group.invite', {});
+      if (client === this.ctx.client) this.groupInvite = invite;
     } catch (error) {
-      this.ctx.fail(error);
+      if (client === this.ctx.client) this.ctx.fail(error);
     }
   }
 }

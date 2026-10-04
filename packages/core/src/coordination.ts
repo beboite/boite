@@ -5,7 +5,7 @@ import { defaultCoordinationConfig } from '@boite/contracts';
 import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscript, CoordinationBridgeResponse, CoordinationConfig, CoordinationPeer, CoordinationView, RpcParams } from '@boite/contracts';
 import { checkMatchExtras, checkTranscript, searchContacts, searchWords, transcript } from './coordination-lookup.ts';
 import { CoordinationBridge } from './coordination-bridge.ts';
-import { boundedBody, MAX_BODY, PeerGone, PeerRefusal, post, ROUTE, settle, type Answer } from './coordination-wire.ts';
+import { boundedBody, firstAnswer, MAX_BODY, PeerGone, PeerRefusal, post, ROUTE, settle, type Answer } from './coordination-wire.ts';
 import { pack, SEALED, sealResponse, unpack, type Sealing } from './group/seal.ts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unavailable } from './errors.ts';
@@ -729,10 +729,10 @@ export class Coordination {
 
   /**
    * A member of a group answers on several addresses and this core cannot know
-   * which one reaches it today, so the same signed request goes to each and
-   * the first verified reply counts; the peer handles one of them and refuses
-   * the nonce it has already seen. When none answers, the owner's app relays,
-   * if it holds both machines.
+   * which one reaches it today: the one that answered last is asked first, the
+   * others when it fails or stays silent, and the first verified reply counts
+   * (`firstAnswer`). When none answers, the owner's app relays, if it holds
+   * both machines.
    */
   private async exchange(peer: CoordinationPeer, operation: Operation, payload: unknown): Promise<unknown> {
     this.identityKey();
@@ -751,7 +751,7 @@ export class Coordination {
     let answer: Answer;
     if (routes === null) answer = this.bridge.available(peer.coreId) || peer.viaClient ? await relayed() : await post(peer.url, this.coreId, peer.publicKey, wire, signature, nonce, sealing);
     else {
-      try { answer = await Promise.any(routes.map(url => post(url, this.coreId, peer.publicKey, wire, signature, nonce, sealing))); }
+      try { answer = await firstAnswer(routes, url => post(url, this.coreId, peer.publicKey, wire, signature, nonce, sealing)); }
       catch (error) {
         if (this.bridge.available(peer.coreId)) answer = await relayed();
         else throw error instanceof AggregateError ? error.errors[0] ?? new Error('peer unreachable') : error;

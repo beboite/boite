@@ -66,6 +66,30 @@ export function settle(url: string | null, publicKey: string, nonce: string, sta
   return { url, result: reply.result };
 }
 
+/** How long the address that answered last is asked alone before the others are tried. */
+export const HEAD_START_MS = 1000;
+
+/**
+ * The addresses of a member may all lead to the same core, which serves a
+ * request once and refuses its copies as replays, counted against the sender:
+ * a machine that sent every request everywhere would lock itself out. So the
+ * first address, the one that answered last, is asked alone. The others are
+ * asked once it failed, or has stayed silent for a moment, and then whichever
+ * answers first counts.
+ */
+export async function firstAnswer<T>(routes: readonly string[], send: (url: string) => Promise<T>, headStartMs = HEAD_START_MS): Promise<T> {
+  const first = send(routes[0]!);
+  if (routes.length === 1) return first;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const early = await Promise.race([
+    first.then((value) => ({ value }), () => null),
+    new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), headStartMs); }),
+  ]);
+  clearTimeout(timer);
+  if (early) return early.value;
+  return Promise.any([...(early === null ? [] : [first]), ...routes.slice(1).map(send)]);
+}
+
 /** One signed request to one address of a peer, sealed when `sealing` says the body is. */
 export async function post(url: string, from: string, publicKey: string, body: string, signature: string, nonce: string, sealing: Sealing | null = null): Promise<Answer> {
   const response = await fetch(`${url}${ROUTE}`, {

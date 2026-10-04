@@ -32,7 +32,7 @@ import type { CoordinationPeer, Group, GroupInvite, GroupTicket, PairingRole, Pr
 import { boundedBody, MAX_BODY, PeerGone } from './coordination-wire.ts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unauthorized } from './errors.ts';
-import { advertisedAddresses, magicName, tailnetAddress, type Tailnet } from './group/addresses.ts';
+import { advertisedAddresses, magicName, tailnetAddress, ticketAddresses, type Tailnet } from './group/addresses.ts';
 import { admissionInput, checkCard, checkRoster, clockOf, CORE_ENTRIES_MAX, DEVICE_ENTRIES_MAX, digestOf, fingerprint, homeOf, liveCores, liveDevices, mergeRosters } from './group/roster.ts';
 import type { CoreCard, CoreEntry, DeviceEntry, Roster } from './group/roster.ts';
 import { boxPublic, boxSigningInput, newBoxKey, open, openResponse, pack, readBoxKey, seal, SEALED, sealedName, sealResponse, unpack } from './group/seal.ts';
@@ -45,6 +45,7 @@ import type { ClientIdentity, Identity } from './sessions.ts';
 
 const SETTING = 'group';
 const SESSIONS_SETTING = 'group:sessions';
+const VIAS_SETTING = 'group:session-addresses';
 const SPENT_SETTING = 'group:spent';
 /** Join requests a minute that name a live invitation: each costs a key agreement, and no honest group makes this many. */
 const JOINS_PER_MINUTE = 30;
@@ -99,6 +100,8 @@ export class GroupStore {
   private roster: Roster | null = null;
   /** Session id here to the member it stands for: `core:<id>` or `device:<id>`. Local, never exchanged. */
   private sessions: Record<string, string> = {};
+  /** The address each of those sessions was issued for: it lives while this machine still gives it. */
+  private vias: Record<string, string> = {};
   /** Keyed by `inviteId`: the grant itself is kept nowhere once the invitation is handed out. */
   private readonly invites = new Map<string, { expiresAt: number; joined: string | null; psk: Buffer; seen: Set<string> }>();
   private boxKey: KeyObject | null = null;
@@ -133,6 +136,10 @@ export class GroupStore {
     const sessions = core.journal.getSetting(SESSIONS_SETTING);
     if (typeof sessions === 'object' && sessions !== null && !Array.isArray(sessions)) {
       this.sessions = Object.fromEntries(Object.entries(sessions).filter(([, member]) => typeof member === 'string')) as Record<string, string>;
+    }
+    const vias = core.journal.getSetting(VIAS_SETTING);
+    if (typeof vias === 'object' && vias !== null && !Array.isArray(vias)) {
+      this.vias = Object.fromEntries(Object.entries(vias).filter(([, url]) => typeof url === 'string')) as Record<string, string>;
     }
     const spent = core.journal.getSetting(SPENT_SETTING);
     if (typeof spent === 'object' && spent !== null && !Array.isArray(spent)) {
@@ -173,7 +180,7 @@ export class GroupStore {
       id: roster.id,
       name: roster.name,
       self: this.selfId(),
-      cores: liveCores(roster).map((core) => ({ coreId: core.coreId, name: core.name, ...(core.os ? { os: core.os } : {}), addresses: [...core.addresses], rev: core.rev })),
+      cores: liveCores(roster).map((core) => ({ coreId: core.coreId, name: core.name, ...(core.os ? { os: core.os } : {}), addresses: [...core.addresses] })),
       // A phone connects to the machines; who else is paired is the owner's to read.
       devices: principal === 'owner' ? liveDevices(roster).map((device) => ({ id: device.id, name: device.name, role: device.role })) : [],
     };
@@ -337,6 +344,7 @@ export class GroupStore {
 
   private saveSessions(): void {
     this.core.journal.setSetting(SESSIONS_SETTING, this.sessions);
+    this.core.journal.setSetting(VIAS_SETTING, this.vias);
   }
 
   private saveSpent(): void {
@@ -358,9 +366,12 @@ export class GroupStore {
       const id = member.slice('device:'.length);
       return !cores.has(homeOf(id)) || roster.devices.some((device) => device.id === id && device.removed);
     };
+    // A key issued for an address this machine no longer gives is dead too: sent there now, it reaches somebody else.
+    const given = ticketAddresses(roster?.cores.find((core) => core.coreId === this.selfId())?.addresses ?? []);
+    const retired = (sessionId: string): boolean => this.vias[sessionId] !== undefined && !given.includes(this.vias[sessionId]);
     this.reconciling = true;
     try {
-      const gone = Object.entries(this.sessions).filter(([, member]) => dead(member)).map(([sessionId]) => sessionId);
+      const gone = Object.entries(this.sessions).filter(([sessionId, member]) => dead(member) || retired(sessionId)).map(([sessionId]) => sessionId);
       // A device paired here and revoked elsewhere loses its own session too.
       if (roster !== null) {
         const prefix = `${this.selfId()}:`;
@@ -381,6 +392,7 @@ export class GroupStore {
         }
         if (sessionId in this.sessions) {
           delete this.sessions[sessionId];
+          delete this.vias[sessionId];
           forgotten = true;
         }
       }
@@ -422,6 +434,7 @@ export class GroupStore {
   sessionRevoked(sessionId: string): void {
     if (this.sessions[sessionId] === undefined) return;
     delete this.sessions[sessionId];
+    delete this.vias[sessionId];
     this.saveSessions();
   }
 
@@ -792,11 +805,15 @@ export class GroupStore {
     return id;
   }
 
-  ticket(coreId: unknown, identity: Identity): GroupTicket {
+  ticket(coreId: unknown, identity: Identity, url?: unknown): GroupTicket {
     const roster = this.require();
     const self = this.selfId();
     const target = liveCores(roster).find((core) => core.coreId === coreId);
     if (target === undefined || target.coreId === self) throw refused(`${String(coreId)} is not another machine of this group`, { field: 'coreId' });
+    // The ticket is good at one address, and the member checks it still gives that one: a stale roster here vouches for nothing there.
+    const usable = ticketAddresses(target.addresses);
+    const at = url === undefined ? usable[0] : usable.find((address) => address === url);
+    if (at === undefined) throw refused(`url: expected an address of ${target.name} a key may be sent to, HTTPS when it has one and written as numbers otherwise`, { field: 'url' });
     let sub: string;
     let role: PairingRole;
     if (identity.sessionId === null) {
@@ -813,10 +830,10 @@ export class GroupStore {
     }
     const expiresAt = Date.now() + GROUP_TICKET_TTL_MS;
     const ticket = encodeTicket(
-      { v: 1, g: roster.id, iss: self, aud: target.coreId, sub, role, nonce: newToken(), exp: expiresAt },
+      { v: 1, g: roster.id, iss: self, aud: target.coreId, u: at, sub, role, nonce: newToken(), exp: expiresAt },
       (input) => this.core.coordination.signature(input),
     );
-    return { ticket, coreId: target.coreId, addresses: this.routes(target.coreId) ?? [...target.addresses], expiresAt };
+    return { ticket, coreId: target.coreId, addresses: this.routes(target.coreId) ?? [...target.addresses], url: at, expiresAt };
   }
 
   /** `hello` with a ticket: checked against the roster, then a session of this core's own, once. */
@@ -832,6 +849,8 @@ export class GroupStore {
       throw unauthorized('the group ticket expired, or the clocks of the two machines differ by more than a minute');
     }
     if (!PAIRING_ROLES.includes(payload.role)) throw unauthorized('the group ticket is malformed');
+    const given = ticketAddresses(roster.cores.find((core) => core.coreId === this.selfId())?.addresses ?? []);
+    if (!given.includes(payload.u)) throw unauthorized(`the group ticket was made for ${payload.u}, an address this machine does not give, or no longer`);
     if (payload.sub.startsWith('core:')) {
       const member = payload.sub.slice('core:'.length);
       if (payload.role !== 'owner' || !liveCores(roster).some((core) => core.coreId === member)) throw unauthorized('the group ticket names a machine that is not in this group');
@@ -849,6 +868,7 @@ export class GroupStore {
       this.saveSpent();
       const session = this.core.sessions.issue(payload.role, client, now);
       this.sessions[session.id] = payload.sub;
+      this.vias[session.id] = payload.u;
       this.saveSessions();
       return session;
     })();
@@ -872,5 +892,5 @@ export function registerGroupMethods(core: Core): void {
   core.router.register('group.join', (params) => core.group.join(params?.invite));
   core.router.register('group.leave', () => core.group.leave());
   core.router.register('group.remove', (params) => core.group.remove(params?.coreId));
-  core.router.register('group.ticket', (params, ctx) => core.group.ticket(params?.coreId, ctx.connection.identity));
+  core.router.register('group.ticket', (params, ctx) => core.group.ticket(params?.coreId, ctx.connection.identity, params?.url));
 }

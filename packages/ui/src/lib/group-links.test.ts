@@ -4,7 +4,7 @@ import { ENVIRONMENTS_STORAGE_KEY, readEnvironments, type Endpoint } from './end
 import { GroupLinks, usableAddresses } from './group-links.svelte';
 import type { Machine, Workspace } from './workspace.svelte';
 
-const core = (coreId: string, addresses: string[], rev = 1): GroupCore => ({ coreId, name: coreId.toUpperCase(), addresses, rev });
+const core = (coreId: string, addresses: string[]): GroupCore => ({ coreId, name: coreId.toUpperCase(), addresses });
 const group = (self: string, cores: GroupCore[], id = 'grp'): Group => ({ id, name: 'Home', self, cores, devices: [] });
 
 interface FakeStore {
@@ -62,7 +62,8 @@ describe('group links', () => {
     await settle();
     // The name is not tried over plain HTTP: only the addresses written as numbers.
     expect(reach).toHaveBeenCalledWith(['http://100.64.0.2:1', 'http://192.168.1.20:1']);
-    expect(storeOf(a).client!.call).toHaveBeenCalledWith('group.ticket', { coreId: 'b' });
+    // The ticket is asked for the address that answered, and is good nowhere else.
+    expect(storeOf(a).client!.call).toHaveBeenCalledWith('group.ticket', { coreId: 'b', url: 'http://192.168.1.20:1' });
     expect(added).toEqual([{ endpoint: { url: 'http://192.168.1.20:1', token: '', ticket: 'ticket-for-http://10.0.0.1:1', coreId: 'b', groupId: 'grp' }, label: 'B', quiet: true }]);
     expect(links.states).toEqual({});
   });
@@ -315,38 +316,6 @@ describe('group links', () => {
     expect(none).toEqual([]);
   });
 
-  it('never goes back to an older listing of a member once a newer one was seen', async () => {
-    const old = core('b', ['http://100.64.0.2:1'], 3);
-    const moved = core('b', ['http://10.0.0.6:1'], 4);
-    // One hand-paired machine has not caught up, the other says where b is now: the newer listing decides alone.
-    const stale = machine('http://10.0.0.1:1', { group: group('a', [members[0]!, old]) });
-    const current = machine('http://10.0.0.7:1', { group: group('c', [members[0]!, moved, core('c', ['http://10.0.0.7:1'])]) });
-    const { stub, workspace: ws, added, removed } = workspace([stale, current]);
-    const reach = vi.fn(async (addresses: string[]) => addresses[0] ?? null);
-    await new GroupLinks(ws, { reach, secure: () => false }).reconcile();
-    await settle();
-    expect(added.map((entry) => entry.endpoint.url)).toEqual(['http://10.0.0.6:1']);
-
-    // The machine that gave the newer listing drops off. The one left still lists the address b gave up:
-    // that is behind what this client saw, so b stays where it is and nothing goes to the old address.
-    stub.machines = [stale, machine('http://10.0.0.6:1', { group: null, groupKnown: false }, { coreId: 'b' })];
-    await new GroupLinks(ws, { reach, secure: () => false }).reconcile();
-    await settle();
-    expect(removed).toEqual([]);
-    expect(added).toHaveLength(1);
-    expect(reach).toHaveBeenCalledTimes(1);
-
-    // The same at the next start, whoever answers: a key saved for the address b gave up is forgotten unsent, the other is kept.
-    const key = (url: string) => ({ url, label: 'b', token: 'key', paired: true, coreId: 'b', groupId: 'grp' });
-    const saved = [key('http://10.0.0.6:1'), key('http://100.64.0.2:1')];
-    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify(saved));
-    const anchors = [{ url: 'http://10.0.0.1:1', token: 'hand' }];
-    expect(await new GroupLinks(ws, { secure: () => false, ask: async () => group('a', [members[0]!, old]) }).vet(saved, anchors)).toEqual([saved[0]]);
-    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify(saved));
-    expect(await new GroupLinks(ws, { secure: () => false, ask: async () => undefined }).vet(saved, anchors)).toEqual([saved[0]]);
-    expect(readEnvironments().map((env) => env.url)).toEqual(['http://10.0.0.6:1']);
-  });
-
   it('retries at once a member whose addresses moved under an attempt, and only once a minute', async () => {
     let now = 1_000_000;
     const a = machine('http://10.0.0.1:1', { group: group('a', members) });
@@ -355,7 +324,7 @@ describe('group links', () => {
     let rev = 1;
     const reach = vi.fn(async (addresses: string[]) => {
       rev += 1;
-      storeOf(a).group = group('a', [members[0]!, core('b', [`http://10.0.${rev}.6:1`], rev)]);
+      storeOf(a).group = group('a', [members[0]!, core('b', [`http://10.0.${rev}.6:1`])]);
       return addresses[0] ?? null;
     });
     const links = new GroupLinks(ws, { reach, secure: () => false, now: () => now });

@@ -18,7 +18,7 @@
  * which one. It keeps an allowance of its own from then on, apart from the
  * table strangers can fill, so a flood from many addresses does not turn the
  * members away with them. A member keeps a few addresses, and a new one takes
- * the place of an older one of that same member, never of another's.
+ * the place of one of that same member that went unused, never of another's.
  *
  * Requests from this machine are not counted: a reverse proxy puts every
  * remote peer behind the one loopback address, and counting there would let
@@ -31,6 +31,8 @@ const WINDOW_MS = 60_000;
 const SOURCES_MAX = 1024;
 /** Addresses kept per member: a machine has a tailnet address and a LAN one, and may move. */
 const ADDRESSES_PER_MEMBER = 4;
+/** A member's address gives its place to a newer one only once nothing was served to it for this long. */
+const CLAIM_IDLE_MS = 600_000;
 /** Members remembered. Past it a new one stays with the strangers: nobody's place is taken for it. */
 const MEMBERS_MAX = 128;
 /** A full table is searched for entries whose minute is over this often at most. */
@@ -61,7 +63,7 @@ export function senderOf(address: string): string {
 export class Refusals {
   private readonly strangers = new Map<string, Entry>();
   /** By exact address: a stranger in a member's /64 does not spend the member's allowance. Several members can sit behind one. */
-  private readonly served = new Map<string, { entry: Entry; claims: Set<string> }>();
+  private readonly served = new Map<string, { entry: Entry; claims: Set<string>; last: number }>();
   /** The addresses each member was served at, oldest first. */
   private readonly members = new Map<string, string[]>();
   private readonly crowd: Entry = { since: 0, refused: 0, pending: 0 };
@@ -101,23 +103,28 @@ export class Refusals {
 
   /**
    * A request of `member` was served to this address: the address gets an
-   * allowance of its own, held in that member's places. It goes when the last
-   * member that claims it has given its place to a newer address.
+   * allowance of its own, held in that member's places. A place is given up
+   * only by an address nothing was served to for a while, so requests of a
+   * member carried from elsewhere do not push out the address it really uses,
+   * and an address goes when the last member that claims it gave its place up.
    */
   private keep(address: string, member: string, now: number): void {
+    const kept = this.served.get(address);
+    if (kept !== undefined) kept.last = now;
     const own = this.members.get(member) ?? [];
     if (own.includes(address)) return;
     if (own.length === 0 && this.members.size >= MEMBERS_MAX) return;
     if (own.length >= ADDRESSES_PER_MEMBER) {
-      const oldest = own.shift()!;
-      const claims = this.served.get(oldest)?.claims;
+      const idle = own.find((held) => now - (this.served.get(held)?.last ?? 0) > CLAIM_IDLE_MS);
+      if (idle === undefined) return;
+      own.splice(own.indexOf(idle), 1);
+      const claims = this.served.get(idle)?.claims;
       claims?.delete(member);
-      if (claims?.size === 0) this.served.delete(oldest);
+      if (claims?.size === 0) this.served.delete(idle);
     }
     own.push(address);
     this.members.set(member, own);
-    const kept = this.served.get(address);
-    if (kept === undefined) this.served.set(address, { entry: { since: now, refused: 0, pending: 0 }, claims: new Set([member]) });
+    if (kept === undefined) this.served.set(address, { entry: { since: now, refused: 0, pending: 0 }, claims: new Set([member]), last: now });
     else kept.claims.add(member);
   }
 

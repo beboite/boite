@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { GROUP_INVITE_PREFIX, type CoordinationConfig } from '@boite/contracts';
 import { createHash } from 'node:crypto';
 import { connect } from '../src/client.ts';
-import { settle } from '../src/coordination-wire.ts';
+import { firstAnswer, settle } from '../src/coordination-wire.ts';
 import { GroupStore } from '../src/group.ts';
 import { group as groupCommand } from '../src/main.ts';
 import { Refusals, REFUSALS_PER_MINUTE, senderOf } from '../src/server/refusals.ts';
@@ -245,6 +245,31 @@ test('the shell of one member is handed an owner key by another, once per ticket
   await expect(shell.call('group.ticket', { coreId: 'f'.repeat(64) })).rejects.toThrow('not another machine');
 });
 
+test('a ticket opens only at the address it names, and the key it becomes dies when the machine stops giving that address', async () => {
+  const a = await machine();
+  const b = await machine();
+  await a.core.group.create('Home');
+  await join(a, b);
+  await waitFor(() => members(b).length === 2);
+  const shell = await a.connect();
+  // Asked for an address b does not have: a vouches for none.
+  await expect(shell.call('group.ticket', { coreId: id(b), url: 'http://10.9.9.9:1' })).rejects.toThrow('expected an address of');
+  const ticket = await shell.call('group.ticket', { coreId: id(b), url: b.url });
+  expect(ticket.url).toBe(b.url);
+  expect(parseTicket(ticket.ticket).payload.u).toBe(b.url);
+  const key = await connect(b.url, '', { ticket: ticket.ticket });
+  await hangUp(b, key);
+  // a makes another ticket on what it still lists, then b moves: it now gives an HTTPS address, and its plain HTTP one is given up.
+  const late = await shell.call('group.ticket', { coreId: id(b), url: b.url });
+  b.core.settings.set({ publicUrl: 'https://b.example' });
+  await waitFor(() => b.core.group.view('owner')!.cores.find((core) => core.coreId === id(b))!.addresses.includes('https://b.example'));
+  // Whoever now sits where b was is sent that ticket and carries it to b: it opens nothing.
+  await refusedHello(b, '', { ticket: late.ticket }, 'does not give');
+  // The key issued for the old address went with it, so sending it there gives nothing away either.
+  await refusedHello(b, key.session!.token, undefined, 'token is wrong');
+  expect(await b.connect().then((owner) => owner.call('sessions.list', {}))).toEqual([]);
+});
+
 test('a ticket is refused when forged, expired, for another machine or from outside the group', async () => {
   const a = await machine();
   const b = await machine();
@@ -448,6 +473,46 @@ test('the owner\'s app carries what two members cannot send each other directly,
   await Promise.all(forwarding);
   expect(carried.length).toBeGreaterThan(0);
   expect(carried.every((entry) => entry.signature === SEALED && !entry.body.includes('operation'))).toBe(true);
+});
+
+test('a member is asked on the address that answered last, and on the others only once that one fails or stays silent', async () => {
+  const asked: string[] = [];
+  const send = (answers: Record<string, 'ok' | 'down' | 'silent'>) => (url: string): Promise<string> => {
+    asked.push(url);
+    if (answers[url] === 'ok') return Promise.resolve(url);
+    return answers[url] === 'down' ? Promise.reject(new Error('down')) : new Promise<string>(() => undefined);
+  };
+  expect(await firstAnswer(['x', 'y', 'z'], send({ x: 'ok', y: 'ok', z: 'ok' }), 20)).toBe('x');
+  expect(asked).toEqual(['x']);
+  expect(await firstAnswer(['x', 'y', 'z'], send({ x: 'down', y: 'ok', z: 'silent' }), 20)).toBe('y');
+  expect(await firstAnswer(['x', 'y'], send({ x: 'silent', y: 'ok' }), 20)).toBe('y');
+  await expect(firstAnswer(['x', 'y'], send({ x: 'down', y: 'down' }), 20)).rejects.toBeInstanceOf(AggregateError);
+
+  // Two addresses that lead to the same core, as a tailnet name and its address do: the copy a second
+  // one would carry is a replay there, refused and counted against the sender. It is never sent.
+  const a = await machine();
+  const b = await machine();
+  await a.core.group.create('Home');
+  await join(a, b);
+  await waitFor(() => members(b).length === 2);
+  const held = b.core.group as unknown as { roster: Roster };
+  const twice = [a.url, a.url.replace('127.0.0.1', 'localhost')];
+  held.roster = { ...held.roster, cores: held.roster.cores.map((core) => (core.coreId === id(a) ? { ...core, addresses: twice } : core)) };
+  const entry = held.roster.cores.find((core) => core.coreId === id(a))!;
+  const real = globalThis.fetch;
+  const dialled: string[] = [];
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    if (String(input).endsWith('/agent-messages')) dialled.push(String(input));
+    return real(input, init);
+  }) as typeof fetch;
+  try {
+    const peer = { coreId: entry.coreId, name: entry.name, url: entry.addresses[0]!, publicKey: entry.publicKey };
+    for (let index = 0; index < 3; index += 1) expect(await b.core.coordination.request(peer, 'directory', {})).toEqual([]);
+  } finally {
+    globalThis.fetch = real;
+  }
+  expect(dialled.filter((url) => url.startsWith(a.url)).length).toBeGreaterThanOrEqual(3);
+  expect(dialled.filter((url) => url.includes('localhost'))).toEqual([]);
 });
 
 test('a roster is only taken from a member, never from a machine linked by hand', async () => {
@@ -781,20 +846,24 @@ test('requests are counted against the address they come from as they arrive, an
   for (let index = 0; index < REFUSALS_PER_MINUTE; index += 1) prefix.begin('2001:db8:1:2::bad', start)!(403);
   expect(prefix.begin('2001:db8:1:2::bad', start)).toBeNull();
   expect(prefix.begin('2001:db8:1:2::5', start)).not.toBeNull();
-  // Requests of one member carried from many addresses take that member's places, never another member's.
+  // Requests of one member carried from many addresses take neither another member's place nor the address it really uses.
   for (let index = 0; index < 200; index += 1) full.begin(`10.7.${index}.1`, start + 60_001 + index)!(200, 'member-a');
   for (let index = 0; index < REFUSALS_PER_MINUTE + 2; index += 1) full.begin(`10.8.${index}.1`, start + 61_000)?.(403);
   expect(full.begin('10.8.99.1', start + 61_000)).toBeNull();
   expect(full.begin('2001:db8:1:2::5', start + 61_000)).not.toBeNull();
-  // Two members behind one address: carrying one's requests from elsewhere does not take the address from the other.
+  expect(full.begin('10.0.5.5', start + 61_000)).not.toBeNull();
+  expect(full.begin('10.7.199.1', start + 61_000)).toBeNull();
+  // Two members behind one address. One moves away for good and its places go to its new addresses:
+  // the address stays the other member's.
   const shared = new Refusals(1);
   shared.begin('10.4.4.4', start)!(200, 'member-a');
   shared.begin('10.4.4.4', start)!(200, 'member-b');
-  for (let index = 0; index < 8; index += 1) shared.begin(`10.5.${index}.1`, start)!(200, 'member-a');
-  shared.begin('10.0.1.1', start)!(403);
-  for (let index = 0; index < REFUSALS_PER_MINUTE; index += 1) shared.begin(`10.0.2.${index}`, start)!(403);
-  expect(shared.begin('10.0.3.1', start)).toBeNull();
-  expect(shared.begin('10.4.4.4', start)).not.toBeNull();
+  const later = start + 660_000;
+  for (let index = 0; index < 4; index += 1) shared.begin(`10.5.${index}.1`, later)!(200, 'member-a');
+  shared.begin('10.0.1.1', later)!(403);
+  for (let index = 0; index < REFUSALS_PER_MINUTE; index += 1) shared.begin(`10.0.2.${index}`, later)!(403);
+  expect(shared.begin('10.0.3.1', later)).toBeNull();
+  expect(shared.begin('10.4.4.4', later)).not.toBeNull();
   // A request served that proved no name keeps no place of its own.
   const nameless = new Refusals(1);
   nameless.begin('10.9.9.9', start)!(200);

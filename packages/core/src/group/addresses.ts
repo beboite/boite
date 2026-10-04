@@ -135,3 +135,15 @@ export function advertisedAddresses(
   if (addresses.length === 0) addresses.push(origin(everywhere ? '127.0.0.1' : host, port));
   return [...new Set(addresses)].slice(0, ADDRESSES_MAX);
 }
+
+/**
+ * The addresses of a machine a client may send a ticket or a key to: the HTTPS
+ * ones when it has any, else the ones written as numbers. It is the client's
+ * own rule (`usableAddresses` in the UI), held by the core too: a ticket is
+ * made for one of them, and a key lives while the machine still gives the one
+ * it was issued for.
+ */
+export function ticketAddresses(addresses: readonly string[]): string[] {
+  const https = addresses.filter((address) => address.startsWith('https://'));
+  return https.length > 0 ? https : addresses.filter((address) => /^http:\/\/(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:]+\])(:\d+)?$/i.test(address));
+}

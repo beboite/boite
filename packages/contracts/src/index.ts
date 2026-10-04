@@ -2279,12 +2279,6 @@ export interface GroupCore {
    * HTTPS address, the tailnet name, the tailnet address, then the LAN one.
    */
   addresses: string[];
-  /**
-   * How recent what this machine published is, a counter that only grows. A
-   * client that has seen one revision never acts on an older one: a member
-   * that has not caught up may still list an address the machine gave up.
-   */
-  rev: number;
 }
 
 /** A phone or another computer paired with one member, which the group lets reach every member. */
@@ -2330,6 +2324,12 @@ export interface GroupTicket {
   coreId: string;
   /** Where that member answers, best first. */
   addresses: string[];
+  /**
+   * The one address the ticket is good at: the one asked for, else the first a
+   * key may be sent to. The member refuses a ticket made for an address it no
+   * longer gives, so one sent where the member used to be opens nothing.
+   */
+  url: string;
   expiresAt: Timestamp;
 }
 
@@ -2729,7 +2729,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   /** Removes another member: the others stop trusting it as each one hears of it. Owner only. */
   'group.remove': { params: { coreId: string }; result: Group };
   /** A ticket for the caller to connect to another member at its own role. */
-  'group.ticket': { params: { coreId: string }; result: GroupTicket };
+  'group.ticket': { params: { coreId: string; url?: string }; result: GroupTicket };
   'speech.status': { params: Record<string, never>; result: SpeechStatus };
   'speech.configure': { params: SpeechConfig & { groqKey?: string; openrouterKey?: string }; result: SpeechStatus };
   'speech.config': { params: Record<string, never>; result: SpeechConfig };

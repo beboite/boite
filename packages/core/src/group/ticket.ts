@@ -72,6 +72,8 @@ export interface TicketPayload {
   iss: string;
   /** The member the ticket opens. */
   aud: string;
+  /** The address of that member the ticket is good at. */
+  u: string;
   /** `core:<core id>` for a member's own shell, `device:<device id>` for a paired client. */
   sub: string;
   role: PairingRole;
@@ -102,12 +104,15 @@ export function parseTicket(text: string): { payload: TicketPayload; encoded: st
     if (typeof raw[field] !== 'string' || !raw[field] || (raw[field] as string).length > 300) throw bad();
   }
   if (!PAIRING_ROLES.includes(raw['role'] as PairingRole) || !Number.isSafeInteger(raw['exp'])) throw bad();
+  let address: string;
+  try { address = checkAddress(raw['u'], 'ticket'); } catch { throw bad(); }
   return {
     payload: {
       v: 1,
       g: raw['g'] as string,
       iss: raw['iss'] as string,
       aud: raw['aud'] as string,
+      u: address,
       sub: raw['sub'] as string,
       role: raw['role'] as PairingRole,
       nonce: raw['nonce'] as string,
