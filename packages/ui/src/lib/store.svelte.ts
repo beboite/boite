@@ -85,12 +85,19 @@ export class Store {
   readonly #ctx = new StoreContext(this);
   machineId = '';
   visible = true;
-  #error = $state<string | null>(null);
+  #error = $state<{ message: string; severity: 'minor' | 'major' } | null>(null);
   errorThreadId = $state<string | null>(null);
 
-  get error(): string | null { return this.#error; }
+  get error(): string | null { return this.#error?.message ?? null; }
+  get errorSeverity(): 'minor' | 'major' { return this.#error?.severity ?? 'major'; }
   set error(value: string | null) {
-    this.#error = value;
+    this.#error = value === null ? null : { message: value, severity: 'major' };
+    this.errorThreadId = null;
+  }
+
+  /** Only explicitly minor action failures expire; unknown failures remain visible. */
+  reportError(error: unknown, severity: 'minor' | 'major' = 'major'): void {
+    this.#error = { message: this.#ctx.reason(error), severity };
     this.errorThreadId = null;
   }
 
@@ -383,6 +390,7 @@ export class Store {
   openConnect(...args: Parameters<Accounts['openConnect']>) { return this.#ctx.accounts.openConnect(...args); }
   closeConnect(...args: Parameters<Accounts['closeConnect']>) { return this.#ctx.accounts.closeConnect(...args); }
   addAccount(...args: Parameters<Accounts['addAccount']>) { return this.#ctx.accounts.addAccount(...args); }
+  accountThreads(...args: Parameters<Accounts['accountThreads']>) { return this.#ctx.accounts.accountThreads(...args); }
   removeAccount(...args: Parameters<Accounts['removeAccount']>) { return this.#ctx.accounts.removeAccount(...args); }
   cancelLogin(...args: Parameters<Accounts['cancelLogin']>) { return this.#ctx.accounts.cancelLogin(...args); }
   dismissLogin(...args: Parameters<Accounts['dismissLogin']>) { return this.#ctx.accounts.dismissLogin(...args); }

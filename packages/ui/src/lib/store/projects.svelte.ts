@@ -362,7 +362,7 @@ export class Projects {
   // -------------------------------------------------------------------------
 
   /** An empty chat in a project, composer focused. Nothing reaches the core until the first send. */
-  startDraft(projectId?: ProjectId | null): void {
+  startDraft(projectId?: ProjectId | null, options: { refresh?: boolean } = {}): void {
     const s = this.ctx.store;
     const { threads, workbench } = this.ctx;
     // Named, a project; null, the drafts; unnamed, the project on screen, in
@@ -382,7 +382,7 @@ export class Projects {
     this.ctx.drafts.persist();
     if (target !== null) this.collapsedProjects = this.collapsedProjects.filter(id => id !== target);
     if (target !== null) this.rememberProject(target);
-    void this.refreshProjects();
+    if (options.refresh !== false) void this.refreshProjects();
     s.page = 'chat';
     s.sidebarOpen = false;
   }

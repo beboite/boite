@@ -10,12 +10,12 @@ import { secureId } from './secure-id';
 import type { PanelSurface } from '@boite/contracts';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { DEFAULT_BROWSER_PROFILE } from '@boite/contracts';
-import { browserBridge } from './browser-bridge';
+import { browserBridge, type BrowserEvent } from './browser-bridge';
 import { browserProfiles } from './browser-profiles.svelte';
 import { work } from './work-prefs.svelte';
 import { ZOOM_STEPS } from './zoom';
 
-export type SurfaceKind = 'agents' | 'messages' | 'trace' | 'browser' | 'changes' | 'files' | 'file' | 'tasks';
+export type SurfaceKind = 'agents' | 'messages' | 'trace' | 'browser' | 'changes' | 'files' | 'file' | 'tasks' | 'device';
 
 /** Every kind a stored layout may name, and what `parse` checks a blob against. */
 export const SURFACE_KINDS: readonly SurfaceKind[] = [
@@ -26,14 +26,15 @@ export const SURFACE_KINDS: readonly SurfaceKind[] = [
   'changes',
   'files',
   'file',
-  'tasks'
+  'tasks',
+  'device'
 ];
 
 /**
  * The kinds that get one tab and no more: asking for them again brings the tab
  * that exists forward. A browser page and a file are the two that multiply.
  */
-const SINGLETON_KINDS: readonly SurfaceKind[] = ['agents', 'messages', 'trace', 'changes', 'files', 'tasks'];
+const SINGLETON_KINDS: readonly SurfaceKind[] = ['agents', 'messages', 'trace', 'changes', 'files', 'tasks', 'device'];
 
 export interface Surface {
   id: string;
@@ -262,6 +263,21 @@ export class RightPanelStore {
     return bound;
   }
 
+  /** Browser pages keep reporting while their conversation is in the background. */
+  browserEvent(event: BrowserEvent): void {
+    const entry = Object.entries(this.threads).find(([, state]) => state.surfaces.some(surface => surface.kind === 'browser' && surface.id === event.id));
+    if (!entry) return;
+    const [key, state] = entry;
+    const panel = this.for(key);
+    if (event.type === 'new-window') {
+      const opener = state.surfaces.find(surface => surface.id === event.id)!;
+      const surface = panel.open('browser', event.url, opener.profile ?? DEFAULT_BROWSER_PROFILE);
+      browserBridge.create(surface.id, event.url, surface.profile);
+    } else if (event.type === 'url' && event.url !== 'about:blank') panel.update(event.id, { url: event.url });
+    else if (event.type === 'title') panel.update(event.id, { title: event.title });
+    else if (event.type === 'failed') console.warn(`[browser] the surface ${event.id} refused: ${event.reason}`);
+  }
+
   /** A thread that left Boite takes its panel with it, browser views included. */
   forget(threadId: string): void {
     this.#forget([threadId]);
@@ -356,6 +372,10 @@ export class BoundPanel {
   #write(next: PanelState): void {
     // A write that leaves a phone-shut panel shut keeps what the desktop stored.
     const stored = this.#root.threads[this.#key];
+    // Closing a tab destroys its page even when its panel is not mounted.
+    for (const surface of stored?.surfaces ?? []) {
+      if (surface.kind === 'browser' && !next.surfaces.some(kept => kept.id === surface.id)) browserBridge.destroy(surface.id);
+    }
     if (next.isOpen) this.#root.phoneShut.delete(this.#key);
     else if (this.#root.phoneShut.has(this.#key) && stored?.isOpen && next.surfaces.length > 0) next = { ...next, isOpen: true };
     this.#root.threads = { ...this.#root.threads, [this.#key]: next };
@@ -609,3 +629,4 @@ export class BoundPanel {
 }
 
 export const rightPanel = new RightPanelStore();
+browserBridge.on(event => rightPanel.browserEvent(event));

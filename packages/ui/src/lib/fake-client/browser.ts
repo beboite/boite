@@ -41,7 +41,7 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
     const problem = browserActionError(params.action);
     if (problem) throw refusal(problem);
     if (params.tabId !== undefined && (typeof params.tabId !== 'string' || !/^browser:[a-zA-Z0-9:-]{1,100}$/.test(params.tabId))) throw refusal('browser tabId must come from browser status or open');
-    if (!live(params.threadId) || !ctx.bus.subscribed.has(params.threadId)) {
+    if (!live(params.threadId)) {
       release(params.threadId);
       throw refusal('Open this conversation in the Boite desktop app and enable Agent browser control in Settings > Experiments.');
     }
@@ -89,7 +89,7 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
     'browser.host': async ({ threadId, enabled, allowAgentControl, remote = false, live: tab = false }) => {
       if (typeof enabled !== 'boolean' || typeof remote !== 'boolean' || typeof tab !== 'boolean') throw refusal('browser.host enabled, remote and live must be booleans');
       const thread = ctx.thread(threadId);
-      if (enabled && (thread.archived || !ctx.bus.subscribed.has(threadId))) throw refusal('browser.host needs a subscribed, active conversation');
+      if (enabled && thread.archived) throw refusal('browser.host needs an active conversation');
       if (enabled && allowAgentControl !== true && !remote) {
         release(threadId);
         throw refusal('browser.host requires explicit consent: enable Agent browser control or Live browser on other devices in Settings > Experiments on the hosting desktop');

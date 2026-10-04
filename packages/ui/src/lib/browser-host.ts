@@ -33,7 +33,8 @@ export function hostBrowser(store: Store, threadId: string): () => void {
   const panel = rightPanel.for(store.threadKey(threadId));
   let stopped = false;
   let consentRevision = 0;
-  const current = () => !stopped && (agentOn() || remoteOn()) && store.client === client && store.machineId === machine && store.openThread?.id === threadId;
+  const displayed = () => store.visible !== false && store.openThread?.id === threadId;
+  const current = () => !stopped && (agentOn() || remoteOn()) && store.client === client && store.machineId === machine;
   const off = client.on('browser.requested', request => {
     if (request.threadId !== threadId) return;
     void (async () => {
@@ -47,10 +48,10 @@ export function hostBrowser(store: Store, threadId: string): () => void {
         if (!(remote ? remoteOn() : agentOn())) throw new Error(remote ? 'browser sharing is no longer enabled on this desktop' : 'agent browser control is off on this desktop');
         if (remote) {
           const surface = panel.active;
-          if (!panel.isOpen || !surface || surface.kind !== 'browser' || (request.tabId && request.tabId !== surface.id)) throw new Error('open a browser tab in this conversation on the desktop first');
+          if (!displayed() || !panel.isOpen || !surface || surface.kind !== 'browser' || (request.tabId && request.tabId !== surface.id)) throw new Error('open a browser tab in this conversation on the desktop first');
           const revision = consentRevision;
           const assertCurrent = () => {
-            if (!current() || revision !== consentRevision || panel.active?.id !== surface.id) throw new Error('the shared browser conversation or tab changed');
+            if (!current() || !displayed() || revision !== consentRevision || panel.active?.id !== surface.id) throw new Error('the shared browser conversation or tab changed');
           };
           if (action.kind === 'remote-frame') result = { tabId: surface.id, frame: await captureRemoteBrowser(surface.id, assertCurrent, { maxWidth: action.maxWidth, quality: action.quality }) };
           else { await inputRemoteBrowser(surface.id, action.frameId, action.input, assertCurrent, url => panel.update(surface.id, { url })); result = { tabId: surface.id, value: { ok: true } }; }
@@ -67,7 +68,7 @@ export function hostBrowser(store: Store, threadId: string): () => void {
           const surface = action.kind === 'open' ? panel.active : request.tabId ? panel.surfaces.find(s => s.id === request.tabId) : panel.active;
           if (!surface || surface.kind !== 'browser') throw new Error('no browser tab in this conversation; use browser open, or pass a tabId from browser status');
           if (action.kind === 'close') {
-            browserBridge.destroy(surface.id); panel.close(surface.id); renew();
+            panel.close(surface.id); renew();
             result = { tabId: surface.id, value: { closed: true } };
           } else {
             panel.activate(surface.id);
@@ -98,11 +99,11 @@ export function hostBrowser(store: Store, threadId: string): () => void {
   // behind a shut panel, has no view to capture. The core hears at once when
   // the agent opens or closes one.
   let live = false;
-  const shared = () => isExperimentEnabled('remote-browser') && panel.isOpen && panel.active?.kind === 'browser';
+  const shared = () => isExperimentEnabled('remote-browser') && displayed() && panel.isOpen && panel.active?.kind === 'browser';
   const renew = () => {
     const agent = isExperimentEnabled('agent-browser-control'), remote = isExperimentEnabled('remote-browser');
     live = shared();
-    if (!stopped && store.client === client && store.machineId === machine && store.openThread?.id === threadId) {
+    if (!stopped && store.client === client && store.machineId === machine) {
       void client.call('browser.host', agent || remote ? { threadId, enabled: true, allowAgentControl: agent, remote, live } : { threadId, enabled: false }).catch(() => {});
     }
   };

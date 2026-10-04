@@ -122,6 +122,7 @@ and assertions when making the suite faster.
   order and the benches behind every number.
 - [Panel](docs/panel.md) and [CLI](docs/cli.md): the surfaces beside the chat
   and the `boite` command an agent uses to reach them.
+- [Devices](docs/devices.md): SDK detection, `boite device` and the Device panel.
 - [Releasing](docs/releasing.md): build artifacts, channels and installers.
 
 Keep tracked documentation in this worktree and verify source paths before

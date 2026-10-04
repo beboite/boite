@@ -35,6 +35,16 @@ page.
 
 ## Thread and tab lifetime
 
+Switching conversations or machines and hiding the panel parks browser pages
+without destroying them. Their forms, navigation history and recordings remain
+in memory. With Agent browser control enabled, a conversation opened once on
+the Windows desktop keeps its browser host while Boite stays connected, so its
+agent can continue working in the background. Closing tabs, archiving the
+conversation or quitting the shell releases their pages. Reloading the UI
+recreates pages from their stored addresses, without preserving live DOM state.
+Remote viewers still follow the conversation and tab currently shown on the
+desktop.
+
 Manual archive here or project removal clears the thread's panel and destroys
 its browser views. After the layout has been cleared, restoring the thread starts
 with a fresh panel. If another client archives the open thread, it stays on
@@ -67,6 +77,7 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 | Messages | one      | agent exchanges, filtered to all, sent or received; a chat count opens its burst |
 | Subagents | one     | the thread's workflow runs and subagents in one list, a run's graph, a subagent's conversation, see [delegation.md](delegation.md) and [workflows.md](workflows.md) |
 | Trace    | one      | the thread's processes, see [trace.md](trace.md)                              |
+| Device   | one      | the simulators and emulators open in the thread, behind an experiment, see [devices.md](devices.md) |
 
 The iframe bridge belongs to browser test fixtures; ordinary web clients have
 no native Browser surface. [Portability](portability.md#remaining-gaps) records
@@ -260,7 +271,8 @@ watching keeps the request on its panel for the next open.
 `panel` toggles the panel, `browser`, `changes`, `files`, `tasks` and `trace`
 open their surface, `close-surface` closes the active tab. The defaults are in
 [keybindings.md](keybindings.md). With the launcher showing, a single letter
-opens a surface: A, B, C, F, K, M, T. M opens Messages.
+opens a surface: A, B, C, F, K, M, T. M opens Messages. D opens Device when
+its experiment is on.
 
 ## Experimental PR review
 

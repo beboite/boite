@@ -100,6 +100,13 @@ finish; disabling the switch does not undo them. Disconnecting or changing the
 open conversation also releases the host. A phone cannot enable access on the
 hosting desktop. See the [browser CLI](cli.md#test-a-page-in-the-desktop-browser).
 
+## Device panel
+
+The Device card in the right panel, its launcher key and the panel opening on
+the Device tab when a simulator or emulator opens in the conversation. Each
+client turns it on for itself; the agent's `boite device` commands work without
+it. See [devices](devices.md).
+
 ## Resident agents
 
 The Agents page ([agents](agents.md)) and every button that leads there: the

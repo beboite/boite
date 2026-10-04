@@ -8,9 +8,9 @@
 //! A page the user browsed to must not reach a Tauri command. Plugin commands
 //! are already refused for it, because a remote origin only matches a
 //! capability that names it and the shell's capability names none, but an
-//! application command like `core_endpoint` carries the core token and no
-//! capability gates it at all. So every command of this shell asks which
-//! webview invoked it and answers only `main`, the one the Boite UI runs in.
+//! application command like `core_endpoint` carries the core token. The
+//! `allow-shell` permission grants commands to the local `main` webview only.
+//! Commands also check that caller before accessing the core or a browser.
 //!
 //! A surface reaches http, https and about, and nothing else. The command
 //! refuses another scheme by name before the webview is touched, and the
@@ -598,7 +598,9 @@ pub async fn browser_create(
         .add_child(
             builder,
             LogicalPosition::new(0.0, 0.0),
-            LogicalSize::new(1.0, 1.0),
+            // A tab first opened by a background agent has no measured UI slot.
+            // Give its hidden page a usable viewport until the panel shows it.
+            LogicalSize::new(1024.0, 768.0),
         )
         .map_err(|error| format!("the browser surface {id:?} could not be created: {error}"))?;
     view.hide()

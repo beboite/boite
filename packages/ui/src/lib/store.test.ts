@@ -1813,10 +1813,17 @@ test('account lifecycle reload preserves the running login snapshot', async ({ s
   expect(store.logins['a-claude-side']).toEqual(before);
 });
 
-test('account lifecycle refuses removal of an account referenced by an archived thread', async ({ client }) => {
-  await client.call('threads.archive', { threadId: 't-trace', archived: true });
-  await expect(client.call('accounts.remove', { accountId: 'a-echo' })).rejects.toThrow(/thread/i);
-  expect((await client.call('accounts.list', {})).some((a) => a.id === 'a-echo')).toBe(true);
+test('an account referenced by an archived thread is counted, removed, and its thread asks for another one', async ({ client }) => {
+  const account = await client.call('accounts.add', { providerId: 'echo', label: 'Spare' });
+  const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: account.id, title: 'Orphan' });
+  await client.call('threads.archive', { threadId: thread.id, archived: true });
+  expect(await client.call('accounts.threads', { accountId: account.id })).toEqual({ count: 1 });
+  await client.call('accounts.remove', { accountId: account.id });
+  expect((await client.call('accounts.list', {})).some((a) => a.id === account.id)).toBe(false);
+  await client.call('threads.archive', { threadId: thread.id, archived: false });
+  await expect(client.call('turns.start', { threadId: thread.id, prompt: 'hello' })).rejects.toThrow(/was removed/);
+  // A turn in flight is the one thing that still keeps an account.
+  await expect(client.call('accounts.remove', { accountId: 'a-echo' })).rejects.toThrow(/running a turn/);
 });
 
 test('account lifecycle cancellation removes the login and permits retry', async ({ store, client }) => {

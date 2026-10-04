@@ -101,6 +101,8 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     const thread = core.threads.require(params.threadId);
     const version = thread.selectionVersion ?? 0;
     if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== version) return core.threads.update(params);
+    // Its account was removed: nothing to discover, and the store says what still changes.
+    if (params.accountId === undefined && core.journal.getAccount(thread.accountId) === null) return core.threads.update(params);
     const account = core.accounts.require(params.accountId ?? thread.accountId);
     const provider = core.providers.require(account.providerId);
     const changedModel = account.id !== thread.accountId || (params.model !== undefined && params.model !== thread.model);

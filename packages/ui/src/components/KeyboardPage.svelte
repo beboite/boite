@@ -155,7 +155,7 @@
     try {
       await openOwnFile(path);
     } catch (error) {
-      store.error = fill(strings.keyboard.openFailed, { reason: error instanceof Error ? error.message : String(error) });
+      store.reportError(fill(strings.keyboard.openFailed, { reason: error instanceof Error ? error.message : String(error) }), 'minor');
     }
   }
 </script>

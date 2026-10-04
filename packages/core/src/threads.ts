@@ -57,6 +57,13 @@ import { ProgressState } from './threads/progress.ts';
 
 type CreateParams = RpcParams<'threads.create'>;
 
+/** The refusal of a conversation whose account `accounts.remove` deleted: it runs again once another one is chosen. */
+function accountRemoved(thread: ThreadSummary): Error {
+  return refused('accountId: the account of this conversation was removed; choose another account in it first', {
+    threadId: thread.id, accountId: thread.accountId, field: 'accountId', expected: 'an existing account',
+  });
+}
+
 /**
  * The threads of this core: what the RPC and the other modules call. Each part
  * under `threads/` owns its own state; the store builds them and hands them
@@ -389,6 +396,16 @@ export class ThreadStore {
       next.titleSource = 'user';
       next.titleState = { version: (thread.titleState?.version ?? 0) + 1, needsRefinement: false };
     }
+    if (params.accountId === undefined && this.core.journal.getAccount(thread.accountId) === null) {
+      // The account was removed: the title and the mode still change, a model needs another account first.
+      if (params.model !== undefined || params.effort !== undefined || params.speed !== undefined) throw accountRemoved(thread);
+      if (params.permissionMode !== undefined) next.permissionMode = params.permissionMode;
+      const modeChanged = next.permissionMode !== thread.permissionMode;
+      if (modeChanged) next.selectionVersion = (thread.selectionVersion ?? 0) + 1;
+      const saved = this.save(next, 'thread.updated');
+      if (modeChanged) this.runner.changePermissionMode(thread.id, next.permissionMode);
+      return saved;
+    }
     const account = this.core.accounts.require(params.accountId ?? thread.accountId);
     const switched = account.id !== thread.accountId;
     const provider = this.core.providers.require(account.providerId);
@@ -661,6 +678,7 @@ export class ThreadStore {
     if (this.core.updates.updating(thread.providerId)) {
       throw refused(`${provider.name} is updating; send this again once it is done`, { threadId, providerId: thread.providerId });
     }
+    if (this.core.journal.getAccount(thread.accountId) === null) throw accountRemoved(thread);
     assertDriverRunnable(
       provider.protocol,
       this.core.providers.summary(thread.providerId),

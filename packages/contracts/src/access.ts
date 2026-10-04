@@ -65,6 +65,9 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'threads.pullRequestReview', 'threads.pullRequestFiles', // Bounded read-only data for PRs the owner already linked.
   'browser.remoteFrame', 'browser.remoteInput', // Only the subscribed conversation's owner-enabled shared page; no scripts or host paths.
   'browser.remoteStatus', // Only whether the subscribed conversation has an owner-shared browser tab; no address or content.
+  // The Device panel on a phone. The core acts only on simulators and emulators its SDK lists, for the subscribed
+  // conversation, runs no command a device names and returns no host path: what the phone could ask of the agent.
+  'devices.list', 'devices.sessions', 'devices.frame', 'devices.input', 'devices.open', 'devices.close', 'devices.screenshot',
   'threads.create',
   'threads.get',
   'threads.capabilities', // Read-only controls for the conversation already visible; never prepares or probes a runtime.
@@ -139,6 +142,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
 export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'threads.pullRequestsChanged', // Links already readable on the subscribed conversation.
   'browser.remoteChanged', // Whether the subscribed conversation's shared browser tab exists, as browser.remoteStatus says.
+  'devices.changed', // The subscribed conversation's Device panel sessions, as devices.sessions returns them.
   'agents.changed', // Invalidation only; agents.snapshot applies the device read policy.
   // Team invalidation contains only the subscribed root ID; delegation.get enforces its read scope.
   'delegation.changed',
