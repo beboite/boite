@@ -56,6 +56,8 @@ export interface DeviceEntry {
 export interface Roster {
   id: string;
   name: string;
+  /** Omitted by older cores. Concurrent renames converge by revision, then name. */
+  nameRev?: number;
   /** The machine that started the group: the one entry that admitted itself. */
   founder: string;
   cores: CoreEntry[];
@@ -181,6 +183,7 @@ export function checkRoster(value: unknown): Roster {
   const roster: Roster = {
     id: text(raw['id'], 'roster.id', 64),
     name: text(raw['name'], 'roster.name', 80),
+    ...(raw['nameRev'] === undefined ? {} : { nameRev: revision(raw['nameRev'], 'roster.nameRev') }),
     founder: raw['founder'],
     cores: raw['cores'].map((core) => checkCore(core, 'roster.cores')),
     devices: raw['devices'].map((device) => checkDevice(device, 'roster.devices')),
@@ -237,6 +240,7 @@ function sorted(roster: Roster): Roster {
   return {
     id: roster.id,
     name: roster.name,
+    ...(roster.nameRev === undefined ? {} : { nameRev: roster.nameRev }),
     founder: roster.founder,
     cores: [...roster.cores].sort((a, b) => a.coreId.localeCompare(b.coreId)),
     devices: [...roster.devices].sort((a, b) => a.id.localeCompare(b.id)),
@@ -304,14 +308,18 @@ function mergeDevices(local: DeviceEntry[], remote: DeviceEntry[]): DeviceEntry[
 
 /**
  * The local roster with what the remote one adds. Two members that held the
- * same machines before end equal after one exchange each way. The group's id,
- * name and founder are the local ones: a roster of another group is refused
+ * same machines before end equal after one exchange each way. The group's id and
+ * founder are the local ones: a roster of another group is refused
  * before it gets here.
  */
 export function mergeRosters(local: Roster, remote: Roster): Roster {
+  const localRev = local.nameRev ?? 0;
+  const remoteRev = remote.nameRev ?? 0;
+  const named = remoteRev > localRev || (remoteRev === localRev && remoteRev > 0 && remote.name > local.name) ? remote : local;
   return sorted({
     id: local.id,
-    name: local.name,
+    name: named.name,
+    ...(named.nameRev === undefined ? {} : { nameRev: named.nameRev }),
     founder: local.founder,
     cores: mergeCores(local.cores, remote.cores),
     devices: mergeDevices(local.devices, remote.devices),

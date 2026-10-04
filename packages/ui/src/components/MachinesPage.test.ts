@@ -4,12 +4,14 @@ import { FakeClient } from '../lib/fake-client';
 import { Store, store as primary } from '../lib/store.svelte';
 import { workspace, type Machine } from '../lib/workspace.svelte';
 import { strings } from '../lib/strings';
+import { confirm } from '../lib/confirm.svelte';
 import MachinesPage from './MachinesPage.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
 let stop: (() => void) | undefined;
 const stores: Store[] = [];
 afterEach(async () => {
+  confirm.answer(false);
   if (mounted) await unmount(mounted);
   mounted = undefined;
   stop?.(); stop = undefined;
@@ -26,7 +28,7 @@ async function setup() {
   const machines: Machine[] = [];
   for (const id of ['source', 'target']) {
     const store = new Store();
-    store.attach(new FakeClient({ delayMs: 0 }));
+    store.attach(new FakeClient({ delayMs: 0, coreId: id, coreName: id, publicUrl: `https://${id}.test` }));
     await store.connect();
     stores.push(store);
     machines.push({ id, label: id, store });
@@ -35,7 +37,7 @@ async function setup() {
   workspace.active = machines[0]!.store;
   stop = workspace.settingsSync.start();
   mounted = mount(MachinesPage, { target: document.body, props: { mobile: true } });
-  flushSync();
+  await vi.waitFor(() => { flushSync(); expect(machines[0]!.store.group?.cores).toHaveLength(2); });
   return { source: machines[0]!, target: machines[1]! };
 }
 
@@ -60,7 +62,7 @@ test('sync stays on the list and the settings button edits the owning machine wi
   const thread = source.store.openThread;
   await source.store.client!.call('settings.set', { asyncQuestions: false, warmProcessMinutes: 9, agentMemoryBudgetPercent: 70 });
   await target.store.client!.call('settings.set', { warmProcessMinutes: 2, agentMemoryBudgetPercent: 40 });
-  query<HTMLInputElement>('[data-machine-id="target"] [data-testid="machine-sync"]').click();
+  query<HTMLInputElement>('[data-testid="group-sync"]').click();
   await vi.waitFor(() => expect(target.store.settings?.asyncQuestions).toBe(false));
   await vi.waitFor(() => expect(workspace.settingsSync.reports[target.id]).toBeDefined());
   flushSync();
@@ -95,7 +97,7 @@ test('sync stays on the list and the settings button edits the owning machine wi
 
   query<HTMLButtonElement>('[data-testid="machine-settings-back"]').click();
   flushSync();
-  expect(query<HTMLInputElement>('[data-machine-id="target"] [data-testid="machine-sync"]').checked).toBe(true);
+  expect(query<HTMLInputElement>('[data-testid="group-sync"]').checked).toBe(true);
   expect(workspace.active).toBe(source.store);
   query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-settings-open"]').click();
   flushSync();
@@ -126,6 +128,19 @@ test('offline and paired machines cannot be edited and a removed target never fa
   flushSync();
   expect(document.querySelector('[data-testid="machine-settings"]')).toBeNull();
   expect(workspace.active).toBe(source.store);
+});
+
+test('removing a connected row removes the group member and keeps the current conversation on its owner', async () => {
+  const { source, target } = await setup();
+  await source.store.open('t-trace');
+  const thread = source.store.openThread;
+  query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-remove"]').click();
+  await vi.waitFor(() => expect(confirm.current?.title).toContain(target.label));
+  confirm.answer(true);
+  await vi.waitFor(() => expect(workspace.machines).toHaveLength(1));
+  expect((await source.store.client!.call('group.get', {}))?.cores.map(core => core.coreId)).toEqual(['source']);
+  expect(workspace.active).toBe(source.store);
+  expect(source.store.openThread).toBe(thread);
 });
 
 test.each([

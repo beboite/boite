@@ -1,5 +1,5 @@
 import { Store, store } from './store.svelte';
-import type { AgentAddress } from '@boite/contracts';
+import type { AgentAddress, GroupCore } from '@boite/contracts';
 import {
   clearStoredEndpoint,
   forgetGroupOf,
@@ -301,6 +301,17 @@ export class Workspace {
     try { localStorage.setItem(PROFILE_KEY, JSON.stringify({ ...profiles(), [profileKey(machine)]: { label: machine.label, icon } })); } catch { /* session only */ }
     const saved = readEnvironments().find(e => e.url === machine.id);
     if (saved) upsertEnvironment({ ...saved, label: machine.label });
+    this.machines = [...this.machines];
+  }
+
+  /** A migrated connection follows group membership while retaining its existing address and display profile. */
+  markGrouped(machine: Machine, groupId: string, core: GroupCore): void {
+    machine.coreId = core.coreId;
+    machine.groupId = groupId;
+    machine.epoch = core.epoch;
+    const saved = readEnvironments().find(entry => entry.url === machine.id);
+    if (saved) upsertEnvironment({ ...saved, coreId: core.coreId, groupId, epoch: core.epoch });
+    if (machine.store === this.primary && saved) storeEndpoint({ ...saved, coreId: core.coreId, groupId, epoch: core.epoch });
     this.machines = [...this.machines];
   }
 

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, type Snippet } from 'svelte';
+  import type { ConnectionGroup } from '../lib/connection-group.svelte';
   import type { GroupCore } from '@boite/contracts';
   import { Check, Copy, LogOut, Plus, Trash2 } from '@lucide/svelte';
   import { confirm } from '../lib/confirm.svelte';
@@ -15,7 +16,7 @@
    * reached from this window, and the owner's ways in and out of it. A paired
    * phone reads the members and changes nothing.
    */
-  let { store, mobile = false }: { store: Store; mobile?: boolean } = $props();
+  let { store, mobile = false, children, migration }: { store: Store; mobile?: boolean; children?: Snippet; migration?: ConnectionGroup } = $props();
   const uid = $props.id();
   const sync = workspace.settingsSync;
   /** An address only the machine itself can dial. */
@@ -23,7 +24,20 @@
 
   let name = $state('');
   let invitation = $state('');
-  let busy = $state<'create' | 'join' | 'invite' | null>(null);
+  let busy = $state<'create' | 'join' | 'invite' | 'rename' | null>(null);
+  let editing = $state(false);
+  let editingId = $state<string | null>(null);
+  let renameInput = $state<HTMLInputElement>();
+  $effect(() => { if (editing && group?.id !== editingId) editing = false;
+    else if (editing && renameInput) { renameInput.focus(); renameInput.select(); } });
+  async function rename() {
+    if (!editing || busy || !group) return;
+    if (!name.trim()) { name = group.name; editing = false; return; }
+    const target = store;
+    await run('rename', async () => {
+      if (name.trim() === target.group?.name || await target.renameGroup(name.trim())) editing = false;
+    });
+  }
   let copied = $state(false);
   let copiedTimer: ReturnType<typeof setTimeout> | undefined;
   onDestroy(() => clearTimeout(copiedTimer));
@@ -69,7 +83,7 @@
     input.checked = synced;
   }
 
-  async function run(kind: 'create' | 'join' | 'invite', work: () => Promise<unknown>) {
+  async function run(kind: 'create' | 'join' | 'invite' | 'rename', work: () => Promise<unknown>) {
     if (busy) return;
     busy = kind;
     try {
@@ -102,7 +116,10 @@
       cancelLabel: strings.common.cancel,
       danger: true
     });
-    if (ok) await store.removeFromGroup(core.coreId);
+    if (ok) {
+      const machine = workspace.machines.find(candidate => GroupLinks.coreOf(candidate) === core.coreId);
+      if (await store.removeFromGroup(core.coreId) && machine && machine.store !== workspace.primary) await workspace.remove(machine.id);
+    }
   }
 
   async function leave() {
@@ -120,9 +137,22 @@
 
 {#if group}
   <section class="card group" class:mobile data-testid="group-card" id="settings-group">
-    <h2>{group.name}<InfoTip topic={strings.group.heading} text={strings.group.intro} /></h2>
+    <h2>
+      {#if editing}
+        <form class="rename" onsubmit={(event) => { event.preventDefault(); void rename(); }}>
+          <input bind:this={renameInput} bind:value={name} data-testid="group-rename" aria-label={strings.group.name} maxlength="80" disabled={busy === 'rename'}
+            onblur={() => void rename()} onkeydown={(event) => { if (event.key === 'Escape') { event.preventDefault(); editing = false; } else if (event.key === 'Enter') { event.preventDefault(); void rename(); } }} />
+        </form>
+      {:else if store.owner}
+        <button class="ghost group-name" data-testid="group-rename-start" title={strings.group.rename} onclick={() => { name = group!.name; editingId = group!.id; editing = true; }}>{group.name}</button>
+      {:else}{group.name}{/if}
+      <InfoTip topic={strings.group.heading} text={strings.group.intro} />
+    </h2>
+    {@render children?.()}
+    {#if children && loopback}<p class="hint">{strings.group.loopback}</p>{/if}
+    {@render progress()}
     <ul class="members" aria-label={strings.group.members}>
-      {#each members as core (core.coreId)}
+      {#each members.filter(core => !children || !workspace.machines.some(machine => GroupLinks.coreOf(machine) === core.coreId)) as core (core.coreId)}
         {@const state = status(core)}
         <li data-testid="group-member" data-core-id={core.coreId}>
           <div class="row">
@@ -179,6 +209,8 @@
 {:else if store.owner}
   <section class="card group" class:mobile data-testid="group-card" id="settings-group">
     <h2>{strings.group.heading}<InfoTip topic={strings.group.heading} text={strings.group.intro} /></h2>
+    {@render children?.()}
+    {@render progress()}
     <form onsubmit={(event) => { event.preventDefault(); void create(); }}>
       <label for="{uid}-name">{strings.group.name}</label>
       <div class="field">
@@ -198,7 +230,22 @@
       </div>
     </form>
   </section>
+{:else if children}
+  <section class="card group" class:mobile data-testid="group-card" id="settings-group">
+    <h2>{strings.group.heading}</h2>
+    {@render children()}
+  </section>
 {/if}
+
+{#snippet progress()}
+  {#if migration?.busy}<p class="hint" role="status">{strings.group.merging}</p>{/if}
+  {#if migration && migration.errors.length > 0}
+    <div class="migration-errors" role="alert" data-testid="group-migration-errors">
+      {#each migration.errors as error}<p>{error}</p>{/each}
+      <button class="ghost small" disabled={migration.busy} onclick={() => migration.retry()}>{strings.common.refresh}</button>
+    </div>
+  {/if}
+{/snippet}
 
 <style>
   .group {
@@ -208,7 +255,12 @@
   h2 {
     font-size: var(--text-base);
     margin: 0 0 12px;
+    display: flex; align-items: center; gap: 6px;
   }
+  .group-name { font: inherit; font-weight: 600; height: auto; min-height: var(--control); padding: 0 6px; margin-left: -6px; min-width: 0; overflow-wrap: anywhere; text-align: left; }
+  form.rename { margin: 0; flex: 1; min-width: 0; }
+  .rename input { width: 100%; font-weight: 600; }
+  .migration-errors { color: var(--color-danger); font-size: var(--text-sm); overflow-wrap: anywhere; }
   form,
   .invitation {
     display: flex;

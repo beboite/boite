@@ -170,10 +170,10 @@ export class Coordination {
     return checked;
   }
   untrust(coreId: string): { ok: true } {
-    this.bridge.revoke(coreId);
     this.core.journal.setSetting('coordination:peers', this.peers().filter(p => p.coreId !== coreId));
     // Still a member of this core's group: its letters keep crossing.
     if (this.trusted().some(p => p.coreId === coreId)) return { ok: true };
+    this.bridge.revoke(coreId);
     const queued = this.rows("status = 'uncertain'").map(row => JSON.parse(row.data) as AgentLetter)
       .filter(letter => letter.error === 'Queued for provider delivery' && (letter.from.coreId === coreId || letter.to.coreId === coreId));
     for (const threadId of new Set(queued.map(letter => letter.to.threadId))) this.core.threads.stopQueuedCoordination(threadId);

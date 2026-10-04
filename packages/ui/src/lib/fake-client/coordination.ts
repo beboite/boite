@@ -257,7 +257,7 @@ export function coordinationMethods(ctx: FakeContext) {
       return { ok: true };
     },
     'collaboration.bridge.register': async (params) => {
-      if (!ctx.peers.has(params.coreId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'coreId: expected a machine trusted for coordination' });
+      if (!ctx.peers.has(params.coreId) && !ctx.roster?.cores.some(core => core.coreId === params.coreId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'coreId: expected a machine trusted for coordination' });
       if (typeof params.enabled !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'enabled: expected a boolean' });
       // Fake cores already exchange messages directly in memory; no socket route is needed.
       return { ok: true };

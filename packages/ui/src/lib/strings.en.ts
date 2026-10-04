@@ -376,6 +376,8 @@ export const strings = {
     reciprocalLink: 'Configured on both machines', oneSidedLink: 'Configured on one machine only', agentLinkReachable: 'Signed connection verified', publicIdentityHint: 'The app relays signed messages between owner connections. A public HTTPS address also lets agents communicate while this app is closed.',
   },
   group: {
+    rename: 'Rename group', merging: 'Grouping connected machines',
+    otherGroup: '{machine} belongs to {group}. Leave that group on the machine to move it here.',
     heading: 'Group',
     intro: 'Machines in one group connect to each other on their own, and a phone paired with one of them reaches all of them. Every machine of a group has full control of the others: group only machines that are yours.',
     name: 'Group name', namePlaceholder: 'Home',

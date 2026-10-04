@@ -847,12 +847,17 @@ shellTest('the machine picker opens a folder on the selected core and reports a 
   const remote = await startCore();
   const remoteClient = await connect(remote.url, remote.token);
   try {
-    const grant = await remoteClient.call('pairing.grant', { role: 'owner' });
     await page?.click(testid('nav-settings'));
     await page?.click(testid('settings-tab-machines'));
-    await page?.click(testid('machine-add-open'));
-    await page?.type(testid('machine-link'), grant.url);
-    await page?.click(testid('machine-add'));
+    if (await page?.evaluate(`!!document.querySelector('[data-testid=group-name]')`)) {
+      await page?.type(testid('group-name'), 'Home');
+      await page?.click(testid('group-create'));
+    }
+    await page?.waitFor(`document.querySelector('[data-testid=group-invite]')`);
+    await page?.click(testid('group-invite'));
+    await page?.waitFor(`document.querySelector('[data-testid=group-invite-code]')?.value.startsWith('boite-group:')`);
+    const invite = await page!.evaluate<string>(`document.querySelector('[data-testid=group-invite-code]').value`);
+    await remoteClient.call('group.join', { invite });
     await page?.waitFor(`document.querySelectorAll('[data-testid=machine-card]').length === 2`);
     await page?.click(testid('settings-back'));
     // One machine draws no machine button; the second one brings it back.

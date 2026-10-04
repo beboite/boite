@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { onDestroy, untrack } from 'svelte';
+  import { ConnectionGroup } from '../lib/connection-group.svelte';
+  import { GroupLinks } from '../lib/group-links.svelte';
   import InfoTip from './InfoTip.svelte';
   import { ArrowUpRight, Download, Monitor, RefreshCw, Settings2, Trash2, ScanLine } from '@lucide/svelte';
   import { workspace, machineIcons, type Machine } from '../lib/workspace.svelte';
@@ -7,7 +10,6 @@
   import { fill, strings } from '../lib/strings';
   import MachineIcon from './MachineIcon.svelte';
   import GroupCard from './GroupCard.svelte';
-  import RemoteCoordination from './RemoteCoordination.svelte';
   import PairingCard from './PairingCard.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
   import MachineSettings from './MachineSettings.svelte';
@@ -17,11 +19,21 @@
   import { showAppUpdateUi } from '../lib/app-update.svelte';
   import PairMachine from './PairMachine.svelte';
   let { mobile = false }: { mobile?: boolean } = $props();
+  const migration = new ConnectionGroup(workspace);
+  onDestroy(() => migration.stop());
+  const groupStore = $derived((migration.source && workspace.machines.includes(migration.source) ? migration.source.store : null) ?? workspace.machines.find(machine => machine.store.group)?.store ?? workspace.active);
+  $effect(() => {
+    for (const machine of workspace.machines) {
+      void machine.store.connection;
+      void machine.store.groupKnown;
+    }
+    untrack(() => void migration.merge());
+  });
+  let memberRepair = $state(false);
   let customizing = $state<string | null>(null);
   let settingsId = $state<string | null>(null);
   let pairingForm = $state<{ startAdding: () => void }>();
   const settingsMachine = $derived(workspace.machines.find(machine => machine.id === settingsId && machine.store.owner));
-  let source = $derived(workspace.machines.find(machine => machine.store === workspace.active) ?? null);
   const sync = workspace.settingsSync;
   $effect(() => {
     const section = workspace.active.settingsSection;
@@ -30,26 +42,33 @@
       settingsId = null;
     }
   });
-  const canSync = (machine: Machine): boolean => source !== null && source !== machine
-    && source.store.owner && machine.store.owner && sync.canEnable(source, machine);
 
   /** Sign-ins happen on the machine that keeps them: its own Providers page. */
   async function openProviders(machine: Machine) {
     await workspace.select(machine.store);
     machine.store.showSettings('accounts');
   }
-  /** Forgetting a machine drops its saved address and key: getting it back takes a new pairing link made there. */
+  /** Removing a member ends its group membership and forgets its connection on this client. */
   async function removeMachine(machine: { id: string; label: string }) {
+    const owner = groupStore;
+    const groupId = owner.group?.id;
+    const member = workspace.machines.find(candidate => candidate.id === machine.id);
+    const coreId = member && GroupLinks.coreOf(member);
+    const grouped = coreId !== undefined && groupStore.group?.cores.some(core => core.coreId === coreId);
     const ok = await confirm.ask({
-      title: fill(strings.machines.removeTitle, { machine: machine.label }),
-      body: strings.machines.removeBody,
+      title: fill(grouped ? strings.group.removeTitle : strings.machines.removeTitle, { machine: machine.label }),
+      body: grouped ? strings.group.removeBody : strings.machines.removeBody,
       confirmLabel: strings.machines.remove,
       cancelLabel: strings.common.cancel,
       danger: true
     });
     if (!ok) return;
+    if (grouped && (!owner.owner || owner.group?.id !== groupId)) return;
+    if (coreId && owner.owner && owner.group?.cores.some(core => core.coreId === coreId)) {
+      const removed = coreId === owner.group.self ? await owner.leaveGroup() : await owner.removeFromGroup(coreId);
+      if (!removed) return;
+    }
     await workspace.remove(machine.id);
-
   }
 </script>
 
@@ -94,13 +113,12 @@
 
   <section class="connections-section" id="settings-machines" aria-labelledby="connections-heading">
     <h2 class="section-heading ui-label-box" id="connections-heading"><Monitor size={16} /><span class="ui-label">{strings.machines.connections}</span></h2>
-    <PairMachine {mobile} bind:this={pairingForm} />
-
-    <GroupCard store={workspace.active} {mobile} />
-
+    {#if !groupStore.owner}<PairMachine {mobile} bind:this={pairingForm} />{/if}
+    <GroupCard store={groupStore} {mobile} migration={migration}>
     <div class="machines">
       {#each workspace.machines as machine (machine.id)}
-        <section class="card machine-card" data-testid="machine-card" data-machine-id={machine.id}>
+        {@const coreId = GroupLinks.coreOf(machine)}
+        <section data-core-id={coreId} class="machine-card" data-testid="machine-card" data-group-member={coreId && groupStore.group?.cores.some(core => core.coreId === coreId) ? "true" : undefined} data-machine-id={machine.id}>
           <div class="main">
             <button
               class="ghost logo"
@@ -120,7 +138,7 @@
             </div>
             <div class="actions">
               {#if machine.store.pairingRequired}
-                <button class="ghost small" data-testid="machine-repair" onclick={() => pairingForm?.startAdding()}><ScanLine size={15} /><span class="ui-label">{strings.mobile.pairAgain}</span></button>
+                <button class="ghost small" data-testid="machine-repair" onclick={() => { if (groupStore.owner) memberRepair = true; else pairingForm?.startAdding(); }}><ScanLine size={15} /><span class="ui-label">{strings.mobile.pairAgain}</span></button>
               {:else if machine.store.connection === 'closed'}
                 <button class="ghost icon-only" aria-label={strings.common.refresh} title={strings.common.refresh} onclick={() => void machine.store.connect()}><RefreshCw size={15} /></button>
               {/if}
@@ -144,15 +162,6 @@
               </div>
             </div>
           </div>
-          {#if sync.enabled(machine) || canSync(machine)}
-            <label class="sync-option">
-              <input type="checkbox" data-testid="machine-sync" checked={sync.enabled(machine)}
-                onchange={(event) => sync.set(machine, event.currentTarget.checked ? source : null)} />
-              <span class="ui-label">{fill(strings.machines.syncFrom, { source: sync.source(machine)?.label ?? source?.label ?? '' })}</span>
-              <InfoTip topic={strings.machines.syncConfirm} text={strings.machines.syncHint} />
-            </label>
-            {#if sync.busy[machine.id]}<p class="sync-progress" role="status">{strings.machines.syncing}</p>{/if}
-          {/if}
           {#if machine.store.owner && machine.store.core}
             <button class="ghost small machine-settings-button" data-testid="machine-settings-open" disabled={machine.store.connection !== 'ready' || !machine.store.settings} onclick={() => settingsId = machine.id}>
               <Settings2 size={14} /><span class="ui-label">{strings.machines.settings}</span>
@@ -177,12 +186,9 @@
         </section>
       {/each}
     </div>
+    </GroupCard>
+    {#if memberRepair}<PairMachine {mobile} onpaired={() => memberRepair = false} />{/if}
   </section>
-
-  <!-- Links join two machines this window owns: with one, the card has nothing to offer. -->
-  {#if workspace.machines.filter(machine => machine.store.owner).length > 1}
-    <RemoteCoordination />
-  {/if}
 
 
 
@@ -199,7 +205,7 @@
     padding: 36px clamp(20px, 4vw, 64px);
   }
   .machines-page > :global(*) { max-width: var(--settings-width); }
-  .machines { margin-bottom: 20px; }
+  .machines { margin: 0; }
   .updates-section { margin: 20px 0 28px; scroll-margin-top: 84px; }
   .connections-section { scroll-margin-top: 24px; }
   .section-heading { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: var(--text-base); }
@@ -248,7 +254,8 @@
   .machine-card {
     display: flex;
     flex-direction: column;
-    padding: 12px 14px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--color-border);
   }
   .main {
     display: flex;
@@ -351,27 +358,10 @@
     box-shadow: inset 0 0 0 1px var(--color-border);
   }
 
-  label {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    width: 100%;
-    font-size: var(--text-sm);
-    color: var(--color-muted-foreground);
-  }
   input {
     width: 100%;
   }
   /* What the copy did, under the card it wrote to, and what is left to do there. */
-  .sync-option {
-    flex-direction: row;
-    align-items: center;
-    width: auto;
-    margin: 10px 0 2px 52px;
-    min-height: var(--control);
-  }
-  .sync-option input { width: auto; flex: none; }
-  .sync-progress { margin: 6px 0 2px 52px; font-size: var(--text-sm); color: var(--color-muted-foreground); }
   .machine-settings-button { align-self: flex-start; margin: 8px 0 2px 52px; }
   .sync-report {
     display: grid;
@@ -414,9 +404,7 @@
       justify-content: flex-end;
     }
     .icon-choices,
-    .sync-report,
-    .sync-option,
-    .sync-progress {
+    .sync-report {
       padding-left: 0;
       margin-left: 0;
     }

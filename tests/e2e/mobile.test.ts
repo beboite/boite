@@ -61,7 +61,7 @@ test('phone settings expose owner protection and keep paired devices out of remo
   await page.evaluate('history.back()');
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
   await page.click('[data-testid=settings-tab-machines]');
-  await page.waitFor(`document.querySelector('[data-testid=machine-add-open]')`);
+  await page.waitFor(`document.querySelector('[data-testid=group-card]')`);
   expect(await page.evaluate(`document.querySelector('[data-testid=browser-origins]') === null`)).toBe(true);
   await capture('phone-settings-machines.png');
   await page.click('[data-testid=mobile-settings-back]');

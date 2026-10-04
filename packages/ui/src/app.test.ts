@@ -2529,8 +2529,8 @@ test('automatic settings sync follows the chosen source outside settings and sto
   await remote.store.client!.call('settings.set', { warmProcessMinutes: 3, agentCpuCapPercent: 35 });
   await store.client!.call('settings.set', { asyncQuestions: false, warmProcessMinutes: 9, agentCpuCapPercent: 85 });
   store.showSettings('machines');
-  await waitFor(() => document.querySelector('[data-testid=machine-sync]') !== null);
-  const checkbox = query<HTMLInputElement>('[data-testid=machine-sync]');
+  await waitFor(() => document.querySelector('[data-testid=group-sync]') !== null);
+  const checkbox = query<HTMLInputElement>('[data-testid=group-sync]');
   expect(checkbox.type).toBe('checkbox');
   checkbox.click();
   await waitFor(() => remote.store.settings?.asyncQuestions === false);
@@ -2560,8 +2560,8 @@ test('automatic settings sync follows the chosen source outside settings and sto
   await waitFor(() => remote.store.settings?.asyncQuestions === true);
   await workspace.select(store);
   store.showSettings('machines');
-  await waitFor(() => document.querySelector('[data-testid=machine-sync]') !== null);
-  query<HTMLInputElement>('[data-testid=machine-sync]').click();
+  await waitFor(() => document.querySelector('[data-testid=group-sync]') !== null);
+  query<HTMLInputElement>('[data-testid=group-sync]').click();
   await store.client!.call('settings.set', { asyncQuestions: false });
   await new Promise(resolve => setTimeout(resolve, 300));
   expect(remote.store.settings?.asyncQuestions).toBe(true);

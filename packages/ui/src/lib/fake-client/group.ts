@@ -2,6 +2,7 @@
 import { GRANT_TTL_MS, GROUP_INVITE_PREFIX, GROUP_MAX_CORES, GROUP_TICKET_TTL_MS, RpcErrorCode, type Group, type GroupCore, type GroupDevice } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { usableAddresses } from '../group-addresses';
+import { secureId } from '../secure-id';
 import { fakeCore } from './coordination';
 import type { FakeContext, FakeMethods } from './context';
 
@@ -47,17 +48,28 @@ function announce(roster: FakeRoster, also: FakeContext[] = []): void {
     const member = fakeCore(core.coreId);
     if (member !== undefined) heard.add(member);
   }
-  for (const member of heard) member.emit('group.updated', {});
+  for (const member of heard) {
+    if (member.roster === roster) for (const core of roster.cores) member.peers.delete(core.coreId);
+    member.emit('group.updated', {});
+  }
 }
 
 export function groupMethods(ctx: FakeContext) {
   return {
     'group.get': async () => view(ctx),
+    'group.rename': async (params) => {
+      const roster = required(ctx);
+      const name = typeof params?.name === 'string' ? params.name.trim() : '';
+      if (!name || name.length > 80) throw invalid('name: expected 1 to 80 characters', 'name');
+      roster.name = name;
+      announce(roster);
+      return view(ctx)!;
+    },
     'group.create': async (params) => {
       if (ctx.roster !== null) throw refuse(`this machine already belongs to the group ${ctx.roster.name}; leave it before starting another`);
       const name = typeof params?.name === 'string' ? params.name.trim() : '';
       if (!name || name.length > 80) throw invalid('name: expected 1 to 80 characters', 'name');
-      ctx.roster = { id: `grp_fake_${++ctx.seq}`, name, cores: [card(ctx)], devices: [], invites: new Map() };
+      ctx.roster = { id: `grp_${secureId()}`, name, cores: [card(ctx)], devices: [], invites: new Map() };
       ctx.emit('group.updated', {});
       return view(ctx)!;
     },
