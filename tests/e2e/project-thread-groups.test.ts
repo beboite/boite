@@ -38,23 +38,25 @@ for (const width of [1280, 390]) {
         await page.screenshot(join(import.meta.dir, '.artifacts', `project-groups-${name}-${width}.png`));
       };
       await page.waitFor(`document.querySelector('${first}')`);
-      expect(await page.evaluate(`document.querySelector(${JSON.stringify(project(main, busy))}) === null`)).toBe(true);
-      await page.waitFor(`document.querySelectorAll('${root} ${id(width < 720 ? 'mobile-project-group' : 'project')}').length === 3`);
+      expect(await page.evaluate(`!!document.querySelector(${JSON.stringify(project(main, busy))})`)).toBe(true);
+      await page.waitFor(`document.querySelectorAll('${root} ${id(width < 720 ? 'mobile-project-group' : 'project')}').length === 4`);
       expect(await page.evaluate(`document.querySelector(${JSON.stringify(project(main, 'p-notes'))}) === null && document.querySelector(${JSON.stringify(project(main, empty))}) === null`)).toBe(true);
       expect(await page.evaluate(`document.querySelector('${root} ${id('other-projects-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
       expect(await page.evaluate(`document.querySelector('${first} ${id('project-working-toggle')}').dataset.count`)).toBe('1');
       expect(await page.evaluate(`document.querySelector('${first} ${id('project-done-toggle')}').dataset.count`)).toBe('1');
       expect(await page.evaluate(`!!document.querySelector('${row(first, 't-bench')}') && !document.querySelector('${row(first, 't-scheduler')}')`)).toBe(true);
+      await page.evaluate(`document.querySelector(${JSON.stringify(project(main, busy))}).scrollIntoView({block:'center'})`);
       await shot('folded');
 
-      // A project appears when work finishes and leaves when its only thread starts again.
+      // A project stays visible while its only conversation starts or finishes work.
       const building = project(main, busy);
       await page.evaluate(`(() => { const store = globalThis.__boiteTest.workspace.machines[0].store; store.threads = store.threads.map(t => t.id === 't-building' ? {...t, status:'idle', unread:true} : t); })()`);
       await page.waitFor(`document.querySelector('${building}:not(.inactive)')`);
       await page.waitFor(`(() => { document.querySelector('${building}')?.scrollIntoView({block:'center'}); return !!document.querySelector('${row(building, 't-building')}'); })()`);
       expect(await page.evaluate(`!!document.querySelector('${row(building, 't-building')}')`)).toBe(true);
       await page.evaluate(`(() => { const store = globalThis.__boiteTest.workspace.machines[0].store; store.threads = store.threads.map(t => t.id === 't-building' ? {...t, status:'running', unread:false} : t); })()`);
-      await page.waitFor(`!document.querySelector('${building}')`);
+      await page.waitFor(`document.querySelector('${building}:not(.inactive)')`);
+      expect(await page.evaluate(`document.querySelector('${building} ${id('project-working-toggle')}').dataset.count`)).toBe('1');
 
       await click(`${first} ${id('project-working-toggle')}`);
       await page.waitFor(`document.querySelector('${row(first, 't-scheduler')}')`);
@@ -107,11 +109,26 @@ for (const width of [1280, 390]) {
       }
 
       await click(`${root} ${id('other-projects-toggle')}`);
-      await page.waitFor(`document.querySelector('${building}.inactive')`);
+      expect(await page.evaluate(`!!document.querySelector('${building}:not(.inactive)') && !document.querySelector('${root} ${id('other-projects')} ${id(width < 720 ? 'mobile-project-group' : 'project')}[data-project-id="${busy}"]')`)).toBe(true);
       expect(await page.evaluate(`document.querySelector('${building} ${id('project-working-toggle')}').dataset.count`)).toBe('1');
       await click(`${building} ${id('project-working-toggle')}`);
       await page.waitFor(`document.querySelector('${row(building, 't-building')}')`);
       expect(await page.evaluate(`document.querySelector('${building} ${id('project-done-toggle')}').disabled`)).toBe(true);
+      // Queued and background work also keep the project outside Other projects.
+      for (const [index, renderedState] of ['queued', 'monitoring', 'background', 'working'].entries()) {
+        await page.evaluate(`(() => {
+          const states = [
+            { status: 'queued', backgroundWork: null },
+            { status: 'idle', backgroundWork: { kinds: ['monitor'], since: 1 } },
+            { status: 'idle', backgroundWork: { kinds: ['shell'], since: 1 } },
+            { status: 'running', backgroundWork: null }
+          ];
+          const store = globalThis.__boiteTest.workspace.machines[0].store;
+          store.threads = store.threads.map(t => t.id === 't-building' ? {...t, ...states[${index}]} : t);
+        })()`);
+        await page.waitFor(`document.querySelector('${row(building, 't-building')} ${id('thread-state')}[data-state="${renderedState}"]')`);
+        expect(await page.evaluate(`!document.querySelector('${root} ${id('other-projects')} [data-project-id="${busy}"]')`)).toBe(true);
+      }
       const finished = project(main, 'p-notes');
       await page.waitFor(`document.querySelector('${finished}')`);
       await click(`${finished} ${id('project-done-toggle')}`);
