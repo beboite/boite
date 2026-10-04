@@ -82,6 +82,87 @@ test('live output after published files stays at the bottom on desktop and paire
   } finally { await page?.close(); client.close(); await core.stop(); }
 }, 90_000);
 
+test('remote file previews load under the shell content security policy', async () => {
+  ensureProductionUi();
+  const core = await startCore();
+  const client = await connect(core.url, core.token);
+  let page: BrowserPage | undefined;
+  try {
+    await client.call('brain.configure', { path: null, enabled: false, boiteGuide: false });
+    const project = await client.call('projects.add', { path: core.dataDir, name: 'Remote previews' });
+    const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title: 'Review the remote capture' });
+    const picture = readFileSync(join(import.meta.dir, '../../packages/ui/public/icons/icon-192.png'));
+    writeFileSync(join(core.dataDir, 'capture.png'), picture);
+    writeFileSync(join(core.dataDir, 'large-picture.png'), Buffer.concat([picture, Buffer.alloc(6 * 1024 * 1024)]));
+    const audio = Buffer.alloc(44 + 8000);
+    audio.write('RIFF', 0); audio.writeUInt32LE(audio.length - 8, 4); audio.write('WAVEfmt ', 8);
+    audio.writeUInt32LE(16, 16); audio.writeUInt16LE(1, 20); audio.writeUInt16LE(1, 22);
+    audio.writeUInt32LE(8000, 24); audio.writeUInt32LE(16000, 28); audio.writeUInt16LE(2, 32); audio.writeUInt16LE(16, 34);
+    audio.write('data', 36); audio.writeUInt32LE(8000, 40);
+    writeFileSync(join(core.dataDir, 'preview.wav'), audio);
+    await client.call('threads.subscribe', { threadId: thread.id });
+    const done = client.next('turn.finished');
+    await client.call('turns.start', { threadId: thread.id, prompt: 'Open [the capture](capture.png) or [the audio](preview.wav) from this machine.' });
+    await done;
+    await client.call('artifacts.publish', { threadId: thread.id, path: 'large-picture.png' });
+    page = await BrowserPage.launch({ url: pairingUrlOf(core), experiments: ['chat-artifacts'], windowSize: { width: 1280, height: 900 } });
+    await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
+    // A different hostname gives the real core a remote origin without leaving loopback.
+    const remote = core.url.replace('127.0.0.1', 'localhost');
+    await page.evaluate(`localStorage.removeItem('boite.envs'); localStorage.setItem('boite.theme', 'dark'); localStorage.setItem('boite.core', ${JSON.stringify(JSON.stringify({ url: remote, token: core.token }))})`);
+    await page.navigate(core.url);
+    await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
+    const config = JSON.parse(readFileSync(join(import.meta.dir, '../../apps/shell/src-tauri/tauri.conf.json'), 'utf8'));
+    await page.evaluate(`(() => {
+      window.__policyViolations = [];
+      document.addEventListener('securitypolicyviolation', event => window.__policyViolations.push(event.effectiveDirective));
+      const policy = document.createElement('meta');
+      policy.httpEquiv = 'Content-Security-Policy';
+      policy.content = ${JSON.stringify(config.app.security.csp)};
+      document.head.append(policy);
+    })()`);
+    await page.click(`[data-thread-id="${thread.id}"]`);
+    await page.click('a[data-file-path="capture.png"]');
+    const preview = '[data-testid="chat-file"]:has([data-testid="artifact-preview"])';
+    await page.waitFor(`document.querySelector('${preview} img')?.naturalWidth > 0 || document.querySelector('${preview} [data-testid=media-fallback]')`);
+    const loaded = await page.evaluate<number>(`document.querySelector('${preview} img')?.naturalWidth ?? 0`);
+    if (loaded !== 192) await page.screenshot(join(import.meta.dir, '.artifacts', 'remote-preview-before-desktop.png'));
+    expect(await page.evaluate('window.__policyViolations')).toEqual([]);
+    expect(loaded).toBe(192);
+    const download = await page.evaluate<string>(`document.querySelector('${preview} [data-testid=artifact-download]').href`);
+    expect(new URL(download).origin).toBe(remote);
+    expect(Buffer.from(await (await fetch(download)).arrayBuffer())).toEqual(picture);
+    for (const phone of [false, true]) {
+      if (phone) await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+      await page.evaluate(`document.querySelector('${preview}').scrollIntoView({ block: 'center' })`);
+      await page.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
+      await page.screenshot(join(import.meta.dir, '.artifacts', `remote-preview-${phone ? 'phone' : 'desktop'}.png`));
+      expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    }
+    // A streamed attachment uses the same remote ticket route, including its full-size viewer.
+    const large = 'Array.from(document.querySelectorAll("[data-testid=chat-file]")).find(card => card.textContent.includes("large-picture.png"))';
+    await page.evaluate(`${large}.querySelector('[data-testid=artifact-load-image]').click()`);
+    await page.waitFor(`${large}.querySelector('img')?.naturalWidth === 192`);
+    await page.evaluate(`${large}.querySelector('[data-testid=artifact-launch]').click()`);
+    await page.waitFor('document.querySelector("[data-testid=image-viewer] img")?.naturalWidth === 192');
+    await page.click('[data-testid=image-viewer-close]');
+    await page.click('a[data-file-path="preview.wav"]');
+    await page.waitFor('document.querySelector("[data-testid=artifact-content] audio")?.readyState >= 1 || document.querySelector("[data-testid=media-fallback]")');
+    expect(await page.evaluate('document.querySelector("[data-testid=artifact-content] audio")?.readyState')).toBeGreaterThanOrEqual(1);
+    expect(await page.evaluate('window.__policyViolations')).toEqual([]);
+    expect(page.errors()).toEqual([]);
+    // An ordinary remote image still cannot bypass the ticket route.
+    const blocked = await page.evaluate<boolean>(`new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => resolve(false);
+      img.onerror = () => setTimeout(() => resolve(window.__policyViolations.includes('img-src')), 100);
+      img.src = ${JSON.stringify(`${remote}/icons/icon-192.png`)};
+    })`);
+    expect(blocked).toBe(true);
+  } finally { await page?.close(); client.close(); await core.stop(); }
+}, 90_000);
+
 test('agent deliverables and file links open in chat on desktop and paired phone', async () => {
   const core = await startCore();
   const client = await connect(core.url, core.token);
