@@ -424,9 +424,65 @@ export interface QuotaReading {
   credits?: QuotaCredits;
 }
 
+/** A credit line a subscription gateway reports, in its own unit. Unknown numbers are null. */
+export interface GatewayQuotaCredit {
+  id: string;
+  label: string;
+  unit: string | null;
+  remaining: number | null;
+  limit: number | null;
+  used: number | null;
+}
+
+/**
+ * One account of the gateway, or one average over a provider's accounts, as
+ * Douane's `GET /v1/quotas` reports it once the core bounded and checked it.
+ */
+export interface GatewayQuotaEntry {
+  id: string;
+  label: string;
+  plan: string | null;
+  /** 1 for one account, N for an average over N accounts. */
+  accounts: number;
+  status: 'ready' | 'cooldown' | 'error' | 'disabled';
+  /** Short and sanitized by the gateway, bounded again by the core. */
+  error: string | null;
+  updatedAt: Timestamp | null;
+  windows: QuotaWindow[];
+  credits: GatewayQuotaCredit[];
+}
+
+export interface GatewayQuotaProvider {
+  /** The gateway's provider id: `claude`, `codex`, `antigravity` or another of its own. */
+  providerId: string;
+  name: string;
+  display: 'accounts' | 'average';
+  entries: GatewayQuotaEntry[];
+}
+
+/** What the subscription gateway said about its own accounts' limits. */
+export interface SubscriptionProxyQuotas {
+  /**
+   * `ready`: the gateway answered. `unsupported`: it has no quotas route (CLIProxyAPI,
+   * or a Douane older than `GET /v1/quotas`), so clients embed its dashboard.
+   * `unavailable`: the read failed; `providers` keeps the last good answer. `off`:
+   * no proxy is enabled.
+   */
+  status: 'ready' | 'unsupported' | 'unavailable' | 'off';
+  providers: GatewayQuotaProvider[];
+  /** The gateway's own `updated_at`. */
+  updatedAt: Timestamp | null;
+  /** When the core last had an answer. */
+  checkedAt: Timestamp | null;
+  error: string | null;
+}
+
 /** Provider-reported limits, never inferred from Boite's token ledger. */
 export interface AccountQuota extends QuotaReading {
-  /** Account id, or `quota:antigravity-cli` for the opt-in local CLI quota source. */
+  /**
+   * Account id, `quota:antigravity-cli` for the opt-in local CLI quota source, or
+   * `proxy:<provider>:<entry>` for an entry of the subscription gateway.
+   */
   accountId: AccountId;
   providerId: ProviderId;
   providerName: string;
@@ -437,6 +493,18 @@ export interface AccountQuota extends QuotaReading {
   source?: 'observation';
   checkedAt: Timestamp | null;
   error: string | null;
+  /** Set on a subscription gateway's entry: it is not a Boite account and has no switch. */
+  gateway?: AccountQuotaGateway;
+}
+
+export interface AccountQuotaGateway {
+  kind: SubscriptionProxy['kind'];
+  entryId: string;
+  display: GatewayQuotaProvider['display'];
+  plan: string | null;
+  accounts: number;
+  status: GatewayQuotaEntry['status'];
+  credits: GatewayQuotaCredit[];
 }
 
 export type QuotaResetOutcome = 'reset' | 'nothingToReset' | 'noCredit' | 'alreadyRedeemed';
@@ -1581,6 +1649,26 @@ export interface SubscriptionProxy {
   baseUrl: string;
   /** User-facing quotas page, opened inside Boite. Never contains a token. */
   dashboardUrl: string;
+}
+
+/** The agents a subscription proxy serves; every other protocol keeps its own configuration. */
+export const SUBSCRIPTION_PROXY_PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver'];
+
+/** The enabled proxy that serves this protocol, or null. Core and clients decide alike. */
+export function subscriptionProxyOf(settings: Pick<Settings, 'subscriptionProxy'> | null | undefined, protocol: Protocol | null | undefined): SubscriptionProxy | null {
+  const proxy = settings?.subscriptionProxy;
+  return proxy?.enabled && protocol && SUBSCRIPTION_PROXY_PROTOCOLS.includes(protocol) ? proxy : null;
+}
+
+export function subscriptionProxyName(kind: SubscriptionProxy['kind']): string {
+  return kind === 'douane' ? 'Douane' : 'CLIProxyAPI';
+}
+
+/** The gateway's address as a person reads it: the API URL's origin. */
+export function subscriptionProxyOrigin(proxy: SubscriptionProxy): string {
+  // No `URL` here: contracts build without DOM or Node types. Credentials in the address never show.
+  const match = /^([a-z][a-z0-9+.-]*:\/\/)(?:[^/?#@]*@)?([^/?#@]+)/i.exec(proxy.baseUrl);
+  return match ? `${match[1]}${match[2]}`.toLowerCase() : proxy.baseUrl;
 }
 
 export type WorktreeStorage =
@@ -3384,6 +3472,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'subscriptionProxy.key': { params: { key: string | null }; result: { configured: boolean } };
   /** Owner-only, atomic configuration and optional private-key update; an omitted key keeps it. */
   'subscriptionProxy.configure': { params: { subscriptionProxy: SubscriptionProxy; key?: string | null }; result: Settings };
+  /** Owner-only. The core reads the gateway's quotas route itself; `quotas.list` carries the same entries. */
+  'subscriptionProxy.quotas': { params: { refresh?: boolean }; result: SubscriptionProxyQuotas };
   'settings.set': { params: Partial<Settings>; result: Settings };
   /** The keybindings file as last read: the path, the entries it names, and what it got wrong. */
   'keybindings.get': { params: Record<string, never>; result: Keybindings };
@@ -3433,6 +3523,8 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserR
   'quotas.updated': AccountQuota[];
   /** Owner-only partial result, correlated with the caller's quotas.list request. */
   'quotas.progress': { requestId: string; quota: AccountQuota };
+  /** Owner-only. Every answer or failure of the gateway's quotas route, whoever asked. */
+  'subscriptionProxy.quotasUpdated': SubscriptionProxyQuotas;
   /** One plugin after any change. A `url` plugin that comes back `not-installed` is gone from the list. */
   'plugins.updated': PluginState;
   /** A project `projects.add` created. A known path returns its project without one. */

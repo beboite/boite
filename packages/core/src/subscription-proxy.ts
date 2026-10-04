@@ -1,4 +1,4 @@
-import type { ModelInfo, ProviderDescriptor, SubscriptionProxy } from '@boite/contracts';
+import { subscriptionProxyOf, type ModelInfo, type ProviderDescriptor, type SubscriptionProxy } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, unavailable, RpcFailure } from './errors.ts';
 
@@ -7,8 +7,7 @@ export const PROXY_URL_ENV = 'BOITE_SUBSCRIPTION_PROXY_URL';
 export const PROXY_KEY_ENV = 'BOITE_SUBSCRIPTION_PROXY_KEY';
 
 export function activeSubscriptionProxy(core: Core, provider: ProviderDescriptor): SubscriptionProxy | null {
-  const proxy = core.settings.get().subscriptionProxy;
-  return proxy?.enabled && ['claude-sdk', 'codex-appserver'].includes(provider.protocol) ? proxy : null;
+  return subscriptionProxyOf(core.settings.get(), provider.protocol);
 }
 
 export function proxyApiUrl(proxy: SubscriptionProxy): string {
@@ -16,7 +15,7 @@ export function proxyApiUrl(proxy: SubscriptionProxy): string {
 }
 
 /** The gateway key stays out of settings snapshots, journal events and process arguments. */
-function proxyKey(core: Core): string {
+export function proxyKey(core: Core): string {
   const key = core.journal.getSetting(KEY_SETTING);
   return typeof key === 'string' && key ? key : 'boite-subscription-proxy';
 }
@@ -119,6 +118,10 @@ export function registerSubscriptionProxy(core: Core): void {
     try { writeKey(core, key); }
     catch { throw unavailable('Subscription proxy key could not be saved'); }
     return { configured: key !== null };
+  });
+  core.router.register('subscriptionProxy.quotas', ({ refresh }) => {
+    if (refresh !== undefined && typeof refresh !== 'boolean') throw invalidParams('subscriptionProxy.quotas refresh must be a boolean');
+    return core.quotas.gateway.read(refresh === true);
   });
   core.router.register('subscriptionProxy.configure', ({ subscriptionProxy, key }) => {
     if (!subscriptionProxy || typeof subscriptionProxy !== 'object') throw invalidParams('subscriptionProxy configuration is required');
