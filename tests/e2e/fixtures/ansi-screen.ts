@@ -3,7 +3,7 @@
  * the 16 ANSI colours, the 256-colour cube, a truecolor ramp, text attributes
  * and a hyperlink. `fullscreen` takes the alternate screen as vim or htop do,
  * frames it edge to edge at the size the pty reports, redrawn when it changes,
- * reports mouse clicks, and leaves on `q`.
+ * reports mouse clicks and Ctrl+D, and leaves on `q`.
  */
 
 const ESC = '\x1b';
@@ -43,6 +43,7 @@ if (mode === 'palette') {
 }
 
 let last = 'none';
+let key = 'none';
 function draw(): void {
   const { columns: cols = 80, rows = 24 } = process.stdout;
   out(`${ESC}[H${ESC}[2J`);
@@ -58,6 +59,7 @@ function draw(): void {
     `${ESC}[38;5;208m256-orange${ESC}[0m ${ESC}[38;2;120;200;255mtruecolor-sky${ESC}[0m`,
     `${ESC}[1;32m● running${ESC}[0m  ${ESC}[2mpress q to leave${ESC}[0m`,
     `mouse: ${last}`,
+    `key: ${key}`,
   ];
   lines.forEach((text, i) => out(`${ESC}[${4 + i};3H${text}`));
   out(`${ESC}[${rows};1H${ESC}[44;97m${' NORMAL '.padEnd(cols, ' ')}${ESC}[0m`);
@@ -74,6 +76,11 @@ process.stdin.on('data', (data) => {
   const click = /\x1b\[<0;(\d+);(\d+)M/.exec(text);
   if (click) {
     last = `click ${click[1]},${click[2]}`;
+    draw();
+  }
+  // Ctrl+D as a program reads it, the end of input a shell or a REPL takes it for.
+  if (text.includes('\x04')) {
+    key = 'ctrl-d';
     draw();
   }
   if (!text.includes('q')) return;

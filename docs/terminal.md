@@ -21,7 +21,9 @@ Where the shells sit (tabs, splits, shares and the active pane) is kept per
 device in localStorage, keyed by the core's data directory and the thread on its
 machine. On a reload, a reconnection or a new window, `terminals.list` says
 which shells still run: the layout drops those that ended and adds a tab for any
-it did not know, and each screen redraws from its snapshot. A thread that had
+it did not know, and each screen redraws from its snapshot. A new shell takes
+the lowest number no running shell holds, so two windows never share one by
+mistake. A thread that had
 the single shell of earlier versions finds it as its first tab.
 
 On a phone (720 px wide or less) a split is never drawn: each shell is a tab of
@@ -41,11 +43,13 @@ xterm.js. xterm loads the first time a terminal opens, never at startup.
   The first output after a quiet moment goes out at once, so a typed key echoes
   without delay; output that keeps coming is sent every 16 ms as one event.
   The 256 KiB snapshot is exactly what those events carried so far.
-- `terminals.open`, `write`, `resize` and `close` name the shell by an optional
-  `terminalId` (`term-2` to `term-16`); without it, they mean the thread's first
-  shell, so an older client keeps working. `terminals.list` returns the thread's
-  running shells, oldest first. A core without it runs a single shell per thread,
-  and the drawer then offers no tab or split.
+- `terminals.open` names the shell by an optional `terminalId`, `term-2` to
+  `term-16`, and refuses any other; without it, it opens the thread's first
+  shell, so an older client keeps working. Its answer carries the shell's `id`
+  (`terminal:<threadId>` or `terminal:<threadId>:term-N`), which `write`,
+  `resize` and `close` take. `terminals.list` returns the thread's running
+  shells, oldest first. A core without it runs a single shell per thread, and
+  the drawer then offers no tab or split.
 - `terminals.close` stops the shell and waits for it to exit.
   `terminal.exited` follows, and the drawer closes. Descendant termination
   follows the platform limits below.

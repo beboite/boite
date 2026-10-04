@@ -100,9 +100,9 @@ test("a real shell draws ANSI colours and a full-screen program edge to edge, an
       }
       await page.waitFor(`(${screenText}).includes("mouse: click")`);
     }
-    // In a full-screen program Ctrl+D is the program's, not a split.
+    // In a full-screen program Ctrl+D is the program's, not a split: it reads the byte.
     await chord(page, "d", "KeyD", 68);
-    await Bun.sleep(300);
+    await page.waitFor(`(${screenText}).includes("key: ctrl-d")`);
     expect(await page.evaluate("document.querySelectorAll('[data-testid=terminal-pane]').length")).toBe(1);
 
     await page.send("Emulation.setDeviceMetricsOverride", phone);

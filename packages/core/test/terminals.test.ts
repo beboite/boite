@@ -200,7 +200,7 @@ describe('terminals', () => {
     expect(await client.call('terminals.list', { threadId })).toEqual([]);
   }, 30_000);
 
-  test('a thread holds at most MAX_THREAD_TERMINALS shells', async () => {
+  test('a thread holds at most MAX_THREAD_TERMINALS shells, named term-2 to term-16', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
     const spawn = spyOn(harness.core.procs, 'spawnTerminal');
@@ -208,12 +208,15 @@ describe('terminals', () => {
     const chosen = process.env['BOITE_TERMINAL_SHELL'];
     process.env['BOITE_TERMINAL_SHELL'] = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh';
     try {
-      for (let i = 0; i < MAX_THREAD_TERMINALS; i++) {
-        harness.core.terminals.openThread(threadId, 80, 24, i === 0 ? undefined : `t${i}`);
+      for (let i = 1; i <= MAX_THREAD_TERMINALS; i++) {
+        harness.core.terminals.openThread(threadId, 80, 24, i === 1 ? undefined : `term-${i}`);
       }
-      expect(() => harness.core.terminals.openThread(threadId, 80, 24, 'one-more')).toThrow(/already runs 16 shells/);
+      // No other name opens a seventeenth, nor one a client would number 0.
+      for (const name of ['term-17', 'term-1', 'term-02', 'foo']) {
+        expect(() => harness.core.terminals.openThread(threadId, 80, 24, name)).toThrow(/terminalId must be term-2 to term-16/);
+      }
       // Reattaching to a running one is no new shell.
-      expect(harness.core.terminals.openThread(threadId, 80, 24, 't3').id).toBe(threadTerminalId(threadId, 't3'));
+      expect(harness.core.terminals.openThread(threadId, 80, 24, 'term-3').id).toBe(threadTerminalId(threadId, 'term-3'));
       expect(spawn).toHaveBeenCalledTimes(MAX_THREAD_TERMINALS);
     } finally {
       spawn.mockRestore();

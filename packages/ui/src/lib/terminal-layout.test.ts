@@ -22,6 +22,8 @@ describe('a thread terminal layout', () => {
     expect(layout.tabs[1]).toMatchObject({ panes: [term(2), term(4), term(3)], direction: 'column', sizes: [1 / 3, 1 / 3, 1 / 3] });
     layout = removePane(layout, term(2))!;
     expect(nextPane(thread, layout)).toBe(term(2));
+    // A shell another window opened is taken too, so a new tab here never attaches to it.
+    expect(nextPane(thread, layout, [first, term(2), threadTerminalId('t-2' as ThreadId, 'term-5')])).toBe(term(5));
     expect(paneNumber(thread, term(4))).toBe(4);
   });
 
@@ -68,6 +70,14 @@ describe('a thread terminal layout', () => {
     // An older or hand-edited value is not a layout; nothing stored means one tab per running shell.
     expect(parseLayout(thread, { tabs: [{ id: 'x', panes: ['terminal:other'], direction: 'row' }], active: 'terminal:other' })).toBeNull();
     expect(parseLayout(thread, JSON.parse(JSON.stringify(stored)))).toEqual(stored);
+    // Two tabs under one id, or a pane outside term-2 to term-16, are not a layout.
+    const tab = (id: string, pane: string) => ({ id, panes: [pane], direction: 'row', sizes: [1] });
+    expect(parseLayout(thread, { tabs: [tab('tab-1', first), tab('tab-1', term(2))], active: first })).toBeNull();
+    expect(parseLayout(thread, { tabs: [tab('tab-1', first), tab('tab-2', `${first}:foo`)], active: first })).toBeNull();
+    expect(parseLayout(thread, { tabs: [tab('tab-1', first), tab('tab-2', term(17))], active: first })).toBeNull();
+    // A share that is no fraction (1e999 is Infinity) evens the tab out instead of emptying its panes.
+    const huge = parseLayout(thread, JSON.parse('{"tabs":[{"id":"tab-1","panes":["' + first + '","' + term(2) + '"],"direction":"row","sizes":[1e999,0.5]}],"active":"' + first + '"}'));
+    expect(huge?.tabs[0]?.sizes).toEqual([0.5, 0.5]);
     expect(reconcile(thread, null, running)!.tabs).toHaveLength(2);
     expect(reconcile(thread, stored, [])).toBeNull();
   });

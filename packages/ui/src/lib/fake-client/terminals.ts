@@ -26,15 +26,10 @@ export function terminalMethods(ctx: FakeContext) {
       const thread = ctx.threads.get(params.threadId);
       if (!thread) throw ctx.notFound('thread', params.threadId);
       if (params.terminalId !== undefined && !THREAD_TERMINAL_KEY.test(params.terminalId)) {
-        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'terminalId must be 1 to 32 lowercase letters, digits or dashes', data: { field: 'terminalId', expected: String(THREAD_TERMINAL_KEY) } });
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `terminalId must be term-2 to term-${MAX_THREAD_TERMINALS}, not ${JSON.stringify(params.terminalId)}`, data: { field: 'terminalId', expected: `term-2 to term-${MAX_THREAD_TERMINALS}` } });
       }
       const id = threadTerminalId(thread.id, params.terminalId);
-      if (!ctx.terminals.has(id)) {
-        if ([...ctx.terminals.keys()].filter((key) => isThreadTerminal(thread.id, key)).length >= MAX_THREAD_TERMINALS) {
-          throw new RpcFailure({ code: RpcErrorCode.Refused, message: `the thread ${thread.id} already runs ${MAX_THREAD_TERMINALS} shells, close one first`, data: { field: 'terminalId', expected: `at most ${MAX_THREAD_TERMINALS} shells` } });
-        }
-        ctx.terminals.set(id, { cwd: thread.cwd, output: `PS ${thread.cwd}> `, line: '' });
-      }
+      if (!ctx.terminals.has(id)) ctx.terminals.set(id, { cwd: thread.cwd, output: `PS ${thread.cwd}> `, line: '' });
       const shell = ctx.terminals.get(id)!;
       return { id, cwd: shell.cwd, output: shell.output, sequence: shell.sequence ?? 0 };
     },

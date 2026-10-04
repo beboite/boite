@@ -2,7 +2,7 @@ import { RpcErrorCode, isThreadTerminal, threadTerminalId, type KeybindingComman
 import { RpcFailure } from '../client';
 import { TerminalSession, type TerminalStart } from '../terminal-session.svelte';
 import {
-  addTab, firstLayout, nextPane, panesOf, parseLayout, reconcile, removePane, resizePanes, splitPane, terminalIdOf,
+  MAX_PANES, activeTab, addTab, firstLayout, nextPane, panesOf, parseLayout, reconcile, removePane, resizePanes, splitPane, terminalIdOf,
   type SplitDirection, type TerminalLayout
 } from '../terminal-layout';
 import type { StoreContext } from './context';
@@ -19,6 +19,10 @@ export class Terminals {
   private readonly opening = new Map<string, { client: StoreContext['client']; result: Promise<TerminalState | null> }>();
   /** Clients whose core predates `terminals.list`: one shell per thread there, the first. */
   private readonly single = new WeakSet<NonNullable<StoreContext['client']>>();
+  /** Threads whose layout is being matched with `terminals.list`; their screens wait for it before attaching. */
+  private readonly settling = new Map<ThreadId, Promise<void>>();
+  /** Per thread, the new shells being numbered, one after the other. */
+  private readonly adding = new Map<ThreadId, Promise<void>>();
   /** Threads whose terminal drawer shows. The shells live in the core and outlast a hidden drawer. */
   terminalThreads = $state<ThreadId[]>([]);
   /** Each shown thread's tabs and splits, matched with the shells the core runs. */
@@ -98,6 +102,22 @@ export class Terminals {
    * loads. The view joins that request and fits the shell to its measured size.
    */
   private async arrange(threadId: ThreadId, client: NonNullable<StoreContext['client']>): Promise<void> {
+    let done!: () => void;
+    const settled = new Promise<void>((resolve) => { done = resolve; });
+    this.settling.set(threadId, settled);
+    try {
+      if (!(await this.lay(threadId, client))) return;
+    } finally {
+      if (this.settling.get(threadId) === settled) this.settling.delete(threadId);
+      done();
+    }
+    const active = this.layouts[threadId]!.active;
+    const state = await this.openTerminal(threadId, 80, 24, terminalIdOf(threadId, active));
+    if (state === null && this.ctx.client === client && this.layouts[threadId]?.active === active && panesOf(this.layouts[threadId]!).length === 1) this.hideTerminal(threadId);
+  }
+
+  /** The layout from what this device kept and what the core runs. False when the drawer is not to show. */
+  private async lay(threadId: ThreadId, client: NonNullable<StoreContext['client']>): Promise<boolean> {
     const stored = this.layouts[threadId] ?? this.readStored(threadId)?.layout ?? null;
     let running: ThreadTerminal[] | null = null;
     try {
@@ -105,21 +125,37 @@ export class Terminals {
     } catch (error) {
       if (!(error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound)) {
         if (this.ctx.client === client) { this.ctx.fail(error); this.hideTerminal(threadId); }
-        return;
+        return false;
       }
       this.single.add(client);
     }
-    if (this.ctx.client !== client || !this.terminalShown(threadId)) return;
+    if (this.ctx.client !== client || !this.terminalShown(threadId)) return false;
     // Nothing running, after a restart of the core say: one fresh shell.
-    this.setLayout(threadId, (running === null ? null : reconcile(threadId, stored, running)) ?? firstLayout(threadId));
-    const active = this.layouts[threadId]!.active;
-    const state = await this.openTerminal(threadId, 80, 24, terminalIdOf(threadId, active));
-    if (state === null && this.ctx.client === client && this.layouts[threadId]?.active === active && panesOf(this.layouts[threadId]!).length === 1) this.hideTerminal(threadId);
+    const layout = (running === null ? null : reconcile(threadId, stored, running)) ?? firstLayout(threadId);
+    this.setLayout(threadId, layout);
+    // A shell that ended while the socket was down said nothing: its screen goes with its pane.
+    for (const [id, session] of [...this.sessions]) {
+      if (isThreadTerminal(threadId, id) && !panesOf(layout).includes(id)) session.dispose();
+    }
+    return true;
+  }
+
+  /**
+   * Back on line after a drop: the shells may have ended, or others started, in
+   * between. Each shown drawer is laid out again from `terminals.list` before its
+   * screens attach, so a shell that ended is not quietly started again.
+   */
+  reconnected(client: NonNullable<StoreContext['client']>): void {
+    if (this.ctx.client !== client) return;
+    for (const threadId of this.terminalThreads) {
+      if (this.layouts[threadId] !== undefined && !this.settling.has(threadId)) void this.arrange(threadId, client);
+    }
   }
 
   hideTerminal(threadId: ThreadId): void {
     this.terminalThreads = this.terminalThreads.filter((id) => id !== threadId);
-    const layout = this.layouts[threadId];
+    // Hidden before the layout came, or after it failed: the next page must not open it again.
+    const layout = this.layouts[threadId] ?? this.readStored(threadId)?.layout;
     if (layout !== undefined) this.writeStored(threadId, { layout, open: false });
   }
 
@@ -128,6 +164,13 @@ export class Terminals {
     const client = this.ctx.client;
     const id = threadTerminalId(threadId, terminalId);
     if (!client || this.closed.get(client)?.has(id)) return Promise.resolve(null);
+    const settling = this.settling.get(threadId);
+    if (settling !== undefined) {
+      return settling.then(() => {
+        const layout = this.layouts[threadId];
+        return layout !== undefined && panesOf(layout).includes(id) ? this.openTerminal(threadId, cols, rows, terminalId) : null;
+      });
+    }
     const pending = this.opening.get(id);
     if (pending?.client === client) return pending.result;
     const params = { threadId, cols, rows, ...(terminalId === undefined ? {} : { terminalId }) };
@@ -158,31 +201,52 @@ export class Terminals {
     return result;
   }
 
-  /** A shell in a new tab at the end, as T3 Code's Ctrl+N. */
-  newTerminal(threadId: ThreadId): void {
+  /** A shell in a new tab at the end, as T3 Code's Ctrl+N. False when none can open here. */
+  newTerminal(threadId: ThreadId): boolean {
     const layout = this.layouts[threadId];
-    if (layout === undefined || !this.terminalsMultiple()) return;
-    const pane = nextPane(threadId, layout);
-    if (pane === null) return;
-    this.reopen(pane);
-    this.setLayout(threadId, addTab(layout, pane));
-    void this.openTerminal(threadId, 80, 24, terminalIdOf(threadId, pane));
+    if (layout === undefined || !this.terminalsMultiple() || nextPane(threadId, layout) === null) return false;
+    this.addShell(threadId, (current, pane) => addTab(current, pane));
+    return true;
   }
 
-
-  /** A shell beside the active one, `row` side by side and `column` stacked. A full tab takes no more. */
-  splitTerminal(threadId: ThreadId, direction: SplitDirection): void {
+  /** A shell beside the active one, `row` side by side and `column` stacked. False when the tab is full. */
+  splitTerminal(threadId: ThreadId, direction: SplitDirection): boolean {
     const layout = this.layouts[threadId];
-    if (layout === undefined || !this.terminalsMultiple()) return;
-    const pane = nextPane(threadId, layout);
-    const next = pane === null ? null : splitPane(layout, pane, direction);
-    if (pane === null || next === null) return;
-    this.reopen(pane);
-    this.setLayout(threadId, next);
-    // Started here, not when its view mounts: a reload right after still finds it.
-    void this.openTerminal(threadId, 80, 24, terminalIdOf(threadId, pane));
+    if (layout === undefined || !this.terminalsMultiple() || nextPane(threadId, layout) === null) return false;
+    if (activeTab(layout).panes.length >= MAX_PANES) return false;
+    this.addShell(threadId, (current, pane) => splitPane(current, pane, direction));
+    return true;
   }
 
+  /**
+   * Numbers a new shell past every one the core runs, not only those this
+   * window shows: another window may have opened `term-2` since, and its shell
+   * is not this tab's. One at a time per thread, so two quick presses take two.
+   */
+  private addShell(threadId: ThreadId, place: (layout: TerminalLayout, pane: string) => TerminalLayout | null): void {
+    const client = this.ctx.client;
+    if (!client) return;
+    const run = (this.adding.get(threadId) ?? Promise.resolve()).then(async () => {
+      let running: ThreadTerminal[];
+      try {
+        running = await client.call('terminals.list', { threadId });
+      } catch (error) {
+        if (this.ctx.client === client) this.ctx.fail(error);
+        return;
+      }
+      const layout = this.layouts[threadId];
+      if (this.ctx.client !== client || layout === undefined || !this.terminalShown(threadId)) return;
+      const pane = nextPane(threadId, layout, running.map((shell) => shell.id));
+      const next = pane === null ? null : place(layout, pane);
+      if (pane === null || next === null) return;
+      this.reopen(pane);
+      this.setLayout(threadId, next);
+      // Started here, not when its view mounts: a reload right after still finds it.
+      void this.openTerminal(threadId, 80, 24, terminalIdOf(threadId, pane));
+    });
+    const queued = run.finally(() => { if (this.adding.get(threadId) === queued) this.adding.delete(threadId); });
+    this.adding.set(threadId, queued);
+  }
 
   /** The pane takes the keyboard; its tab shows. */
   focusTerminal(threadId: ThreadId, pane: string): void {
@@ -229,16 +293,17 @@ export class Terminals {
   }
 
   /**
-   * A terminal command pressed in the screen of shell `id`. False when that
-   * screen is no thread's, a sign-in one: the key is then the shell's.
+   * A terminal command pressed in the screen of shell `id`. False when it does
+   * nothing there: a sign-in screen, a core with one shell per thread, a full
+   * tab or thread. The key is then the shell's, Ctrl+D its end of input.
    */
   terminalCommand(id: string, command: KeybindingCommand): boolean {
     const threadId = this.threadOf(id);
     if (threadId === undefined) return false;
     switch (command) {
-      case 'terminal-new': this.newTerminal(threadId); return true;
-      case 'terminal-split': this.splitTerminal(threadId, 'row'); return true;
-      case 'terminal-split-vertical': this.splitTerminal(threadId, 'column'); return true;
+      case 'terminal-new': return this.newTerminal(threadId);
+      case 'terminal-split': return this.splitTerminal(threadId, 'row');
+      case 'terminal-split-vertical': return this.splitTerminal(threadId, 'column');
       case 'terminal-close': void this.closeTerminal(id); return true;
       default: return false;
     }

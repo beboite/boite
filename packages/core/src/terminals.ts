@@ -166,14 +166,12 @@ export class TerminalStore {
   /** One of the thread's shells, started in its working directory the first time. */
   openThread(threadId: ThreadId, cols: number, rows: number, terminalId?: string): TerminalState {
     if (terminalId !== undefined && (typeof terminalId !== 'string' || !THREAD_TERMINAL_KEY.test(terminalId))) {
-      throw invalidParams('terminalId must be 1 to 32 lowercase letters, digits or dashes', { field: 'terminalId', expected: String(THREAD_TERMINAL_KEY) });
+      throw invalidParams(`terminalId must be term-2 to term-${MAX_THREAD_TERMINALS}, not ${JSON.stringify(terminalId)}`, { field: 'terminalId', expected: `term-2 to term-${MAX_THREAD_TERMINALS}` });
     }
     const thread = this.core.threads.require(threadId);
     if (thread.archived) throw refused(`the thread ${threadId} is archived`, { threadId, field: 'archived', expected: false });
+    // The ids bound the count: the first shell and `term-2` to `term-16`.
     const id = threadTerminalId(threadId, terminalId);
-    if (!this.sessions.has(id) && this.threadSessions(threadId).length >= MAX_THREAD_TERMINALS) {
-      throw refused(`the thread ${threadId} already runs ${MAX_THREAD_TERMINALS} shells, close one first`, { threadId, field: 'terminalId', expected: `at most ${MAX_THREAD_TERMINALS} shells` });
-    }
     return this.open(id, { cwd: thread.cwd, env: { ...process.env }, cols, rows });
   }
 

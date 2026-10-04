@@ -50,6 +50,7 @@ export function listen(ctx: StoreContext, client: Client): void {
           ctx.serverUpdater.reset();
           if (s.owner && !s.localCore) void ctx.serverUpdater.load();
           void s.reload();
+          ctx.terminals.reconnected(client);
         }
       })
     );

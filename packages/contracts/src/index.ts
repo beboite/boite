@@ -2456,8 +2456,11 @@ export interface HooksStatus {
 
 /** The most shells one thread runs at once. */
 export const MAX_THREAD_TERMINALS = 16;
-/** What a client names a thread's further shells by. */
-export const THREAD_TERMINAL_KEY = /^[a-z0-9-]{1,32}$/;
+/**
+ * What a client names a thread's further shells by: `term-2` to `term-16`, as
+ * T3 Code numbers them. With the first, that is `MAX_THREAD_TERMINALS` at most.
+ */
+export const THREAD_TERMINAL_KEY = /^term-([2-9]|1[0-6])$/;
 
 /**
  * The id of a thread's shell: `terminal:<threadId>` for its first, the one a
@@ -2991,7 +2994,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   /**
    * Attach to one of the thread's shells, starting it in the thread's working
    * directory when it does not run. Without `terminalId`, the thread's first
-   * shell; with one (`THREAD_TERMINAL_KEY`), another, up to `MAX_THREAD_TERMINALS`.
+   * shell; with one (`THREAD_TERMINAL_KEY`, `term-2` to `term-16`), another.
    */
   'terminals.open': { params: { threadId: ThreadId; cols: number; rows: number; terminalId?: string }; result: TerminalState };
   /** The thread's running shells, in the order they started. */

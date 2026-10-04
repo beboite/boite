@@ -58,11 +58,15 @@ export function firstLayout(threadId: ThreadId): TerminalLayout {
   return { tabs: [{ id: 'tab-1', panes: [pane], direction: 'row', sizes: [1] }], active: pane };
 }
 
-/** The id of the next shell: the lowest `term-N` no pane holds, as T3 Code numbers them. */
-export function nextPane(threadId: ThreadId, layout: TerminalLayout | null): string | null {
-  const panes = layout === null ? [] : panesOf(layout);
-  if (panes.length >= MAX_THREAD_TERMINALS) return null;
-  const taken = new Set(panes.map((pane) => paneNumber(threadId, pane)));
+/**
+ * The id of the next shell: the lowest `term-N` no pane holds, as T3 Code numbers
+ * them. `running` adds the shells the core runs that this layout does not show,
+ * opened by another window, so a new tab never lands on one of them.
+ */
+export function nextPane(threadId: ThreadId, layout: TerminalLayout | null, running: readonly string[] = []): string | null {
+  const panes = new Set([...(layout === null ? [] : panesOf(layout)), ...running.filter((id) => isThreadTerminal(threadId, id))]);
+  if (panes.size >= MAX_THREAD_TERMINALS) return null;
+  const taken = new Set([...panes].map((pane) => paneNumber(threadId, pane)));
   let n = 2;
   while (taken.has(n)) n++;
   return threadTerminalId(threadId, `term-${n}`);
@@ -160,13 +164,15 @@ export function parseLayout(threadId: ThreadId, value: unknown): TerminalLayout 
   const { tabs, active } = value as { tabs?: unknown; active?: unknown };
   if (!Array.isArray(tabs) || typeof active !== 'string') return null;
   const seen = new Set<string>();
+  const tabIds = new Set<string>();
   const parsed: TerminalTab[] = [];
   for (const tab of tabs) {
     const { id, panes, direction, sizes } = (tab ?? {}) as Partial<Record<keyof TerminalTab, unknown>>;
-    if (typeof id !== 'string' || !Array.isArray(panes) || panes.length === 0 || panes.length > MAX_PANES) return null;
+    if (typeof id !== 'string' || tabIds.has(id) || !Array.isArray(panes) || panes.length === 0 || panes.length > MAX_PANES) return null;
+    tabIds.add(id);
     if (direction !== 'row' && direction !== 'column') return null;
     if (!panes.every((pane): pane is string => typeof pane === 'string' && isThreadTerminal(threadId, pane) && !seen.has(pane) && Boolean(seen.add(pane)))) return null;
-    const shares = Array.isArray(sizes) && sizes.length === panes.length && sizes.every((size) => typeof size === 'number' && size > 0)
+    const shares = Array.isArray(sizes) && sizes.length === panes.length && sizes.every((size) => typeof size === 'number' && Number.isFinite(size) && size > 0 && size <= 1)
       ? (sizes as number[])
       : panes.map(() => 1);
     const total = shares.reduce((sum, size) => sum + size, 0);
