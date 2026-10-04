@@ -293,7 +293,7 @@ describe('journal', () => {
     expect(journal.listDeletedThreads().map(t => t.id).sort()).toEqual(['thr_gone', 'thr_undo']);
     journal.restoreDeletedThreads('thr_undo');
     expect(journal.getThread('thr_undo')?.archived).toBe(true);
-    expect(journal.archivedThreadCounts().get('prj')).toBe(1);
+    expect(journal.archivedThreadCounts().get('prj')).toEqual({ archived: 1, done: 0 });
     expect(journal.listMessages('thr_undo')).toHaveLength(1);
     journal.close();
     journal = new Journal(file);

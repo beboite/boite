@@ -31,7 +31,7 @@
   import DraftRow from './DraftRow.svelte';
   import ProjectTile from './ProjectTile.svelte';
   import { projectKey, projectView, type ProjectEntry } from '../lib/project-view.svelte';
-  import { activeProject, projectThreadView } from '../lib/project-threads.svelte';
+  import { activeProject, archiveCount, projectThreadView } from '../lib/project-threads.svelte';
   import { workingThread } from '../lib/recent.svelte';
   import { compareThreads } from '../lib/thread-order';
 
@@ -208,12 +208,13 @@
       {#each projects as group (projectKey(group))}
         {@const groupRows = rows.filter(row => row.machine.id === group.machine.id && row.thread.projectId === group.project.id)}
         {@const workingOpen = projectThreadView.isOpen(group, 'working')}
-        {@const doneOpen = !!group.project.archivedThreads && projectThreadView.isOpen(group, 'done')}
+        {@const doneOpen = archiveCount(group.project, 'done') > 0 && projectThreadView.isOpen(group, 'done')}
+        {@const archivedOpen = archiveCount(group.project, 'archived') > 0 && projectThreadView.isOpen(group, 'archived')}
         {@const workingRows = groupRows.filter(row => workingThread(row.thread))}
         {@const attentionRows = query || !recentPreferences.groupWorking ? groupRows : groupRows.filter(row => workingOpen ? !workingThread(row.thread) : !groupWorkingThread(group.machine.store, row.thread))}
         {@const controls = `mobile-project-${encodeURIComponent(projectKey(group))}`}
         {@const draft = group.machine.store.draftEntries.find(entry => entry.projectId === group.project.id)}
-        {#if !query || groupRows.length > 0 || (doneOpen && group.project.archivedThreads)}
+        {#if !query || groupRows.length > 0 || doneOpen || archivedOpen}
         <section class="project-group" class:inactive={!activeProject(group)} data-testid="mobile-project-group" data-project-id={group.project.id} data-machine-id={group.machine.id}>
           <div class="project-heading">
             <ProjectTile project={group.project} store={group.machine.store} /><h2>{projectName(group.project)}{#if several}<span>{group.machine.label}</span>{/if}</h2>
@@ -240,6 +241,10 @@
           <div id="{controls}-done" hidden={!doneOpen} data-testid="project-done">
             {#if doneOpen}<p class="group-label">{strings.sidebar.doneThreads}</p>{/if}
             <RecentDone entries={[group]} {scrollRoot} {now} {query} open={doneOpen} header={false} onopen={() => show('chat')} />
+          </div>
+          <div id="{controls}-archived" hidden={!archivedOpen} data-testid="project-archived">
+            {#if archivedOpen}<p class="group-label">{strings.sidebar.archivedGroup}</p>{/if}
+            <RecentDone kind="archived" entries={[group]} {scrollRoot} {now} {query} open={archivedOpen} header={false} onopen={() => show('chat')} />
           </div>
           {#if groupRows.length === 0 && !group.project.archivedThreads && !draft}<p class="empty">{strings.sidebar.noThreads}</p>{/if}
         </section>
@@ -268,6 +273,7 @@
             </RecentGroup>
           {/if}
           <RecentDone entries={recentGroups} {scrollRoot} {now} {query} onopen={() => show('chat')} />
+          <RecentDone kind="archived" entries={recentGroups} {scrollRoot} {now} {query} onopen={() => show('chat')} />
         </div>
       {/if}
     {/if}

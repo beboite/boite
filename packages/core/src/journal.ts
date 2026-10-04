@@ -166,11 +166,12 @@ export class Journal {
   }
 
   /** How many of a project's own threads are archived, sub-threads left out, per project id. */
-  archivedThreadCounts(): Map<string, number> {
+  /** Per project, its archived top-level threads and how many of them are done (`done_at` set). */
+  archivedThreadCounts(): Map<string, { archived: number; done: number }> {
     const rows = this.db
-      .query('SELECT project_id, COUNT(*) AS count FROM threads WHERE archived = 1 AND parent_thread_id IS NULL AND project_id IS NOT NULL AND id NOT IN (SELECT thread_id FROM thread_deletions) GROUP BY project_id')
-      .all() as { project_id: string; count: number }[];
-    return new Map(rows.map((row) => [row.project_id, row.count]));
+      .query('SELECT project_id, COUNT(*) AS count, COUNT(done_at) AS done FROM threads WHERE archived = 1 AND parent_thread_id IS NULL AND project_id IS NOT NULL AND id NOT IN (SELECT thread_id FROM thread_deletions) GROUP BY project_id')
+      .all() as { project_id: string; count: number; done: number }[];
+    return new Map(rows.map((row) => [row.project_id, { archived: row.count, done: row.done }]));
   }
 
   deleteProject(projectId: string): void {

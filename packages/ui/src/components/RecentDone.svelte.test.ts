@@ -18,7 +18,8 @@ afterEach(async () => {
 async function ready(id: string) {
   const client = new FakeClient({ delayMs: 0 });
   const store = new Store(); store.attach(client); await store.connect();
-  await store.archive('t-trace');
+  // Marked done; the seeded t-parser stays an ordinary archive.
+  await store.archive('t-trace', true);
   const source = { client, store, id }; sources.push(source);
   return source;
 }
@@ -35,7 +36,7 @@ test('Done loads only when expanded and restores the owning machine when thread 
   await settle();
   for (const call of calls) expect(call.mock.calls.filter(([method]) => method === 'threads.list')).toHaveLength(0);
   click('[data-testid=recent-done-toggle]'); await settle();
-  expect(document.querySelectorAll('[data-testid=done-thread]')).toHaveLength(4);
+  expect(document.querySelectorAll('[data-testid=done-thread]')).toHaveLength(2);
   click('[data-machine-id=first][data-thread-id=t-trace] [data-testid=done-thread-restore]'); await settle();
   expect((await first.client.call('threads.get', { threadId: 't-trace' })).archived).toBe(false);
   expect((await second.client.call('threads.get', { threadId: 't-trace' })).archived).toBe(true);
@@ -54,7 +55,7 @@ test('a project counter loads only its project when externally expanded', async 
   expect(call.mock.calls.filter(([method]) => method === 'threads.list')).toHaveLength(0);
   props.open = true; await settle();
   expect(call).toHaveBeenCalledWith('threads.list', { projectId: 'p-boite', includeArchived: true });
-  expect(document.querySelectorAll('[data-testid=done-thread]')).toHaveLength(2);
+  expect(document.querySelectorAll('[data-testid=done-thread]')).toHaveLength(1);
   props.open = false; await settle();
   expect(document.querySelector('[data-testid=done-thread]')).toBeNull();
 });
@@ -70,7 +71,7 @@ test('a late archive read for a previous project or machine never replaces the s
   mounted = mount(RecentDone, { target: document.body, props });
   click('[data-testid=recent-done-toggle]'); await settle();
   props.entries = [entries()[1]!]; await settle();
-  expect(document.querySelectorAll('[data-testid=done-thread]')).toHaveLength(2);
+  expect(document.querySelectorAll('[data-testid=done-thread]')).toHaveLength(1);
   release(answer); await settle();
   expect([...document.querySelectorAll('[data-testid=done-thread]')].every(row => (row as HTMLElement).dataset.machineId === 'second')).toBe(true);
 });
@@ -81,8 +82,23 @@ test('a failed machine read keeps the other completed threads usable and can be 
   mounted = mount(RecentDone, { target: document.body, props: { entries: entries(), now: Date.now() } });
   click('[data-testid=recent-done-toggle]'); await settle();
   expect(document.querySelector('[data-testid=recent-done-retry]')).not.toBeNull();
-  expect(document.querySelectorAll('[data-testid=done-thread]')).toHaveLength(2);
+  expect(document.querySelectorAll('[data-testid=done-thread]')).toHaveLength(1);
   click('[data-testid=recent-done-retry]'); await settle();
   expect(document.querySelector('[data-testid=recent-done-retry]')).toBeNull();
-  expect(document.querySelectorAll('[data-testid=done-thread]')).toHaveLength(4);
+  expect(document.querySelectorAll('[data-testid=done-thread]')).toHaveLength(2);
+});
+
+test('done and archived threads are separate lists with their own counts', async () => {
+  const source = await ready('first');
+  const project = source.store.projects.find(p => p.id === 'p-boite')!;
+  expect([project.archivedThreads, project.doneThreads]).toEqual([2, 1]);
+  mounted = mount(RecentDone, { target: document.body, props: { entries: entries(), now: Date.now(), kind: 'archived' } });
+  await settle();
+  expect(document.querySelector('[data-testid=recent-archived-toggle] .count')?.textContent).toBe('1');
+  click('[data-testid=recent-archived-toggle]'); await settle();
+  expect([...document.querySelectorAll('[data-testid=done-thread]')].map(row => (row as HTMLElement).dataset.threadId)).toEqual(['t-parser']);
+  await unmount(mounted);
+  mounted = mount(RecentDone, { target: document.body, props: { entries: entries(), now: Date.now() } });
+  click('[data-testid=recent-done-toggle]'); await settle();
+  expect([...document.querySelectorAll('[data-testid=done-thread]')].map(row => (row as HTMLElement).dataset.threadId)).toEqual(['t-trace']);
 });

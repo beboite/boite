@@ -4,12 +4,14 @@ import { RpcFailure } from '../client';
 import { pathKey } from './checks';
 import type { FakeContext } from './context';
 
-/** A project as the core answers it: the stored row plus its count of archived threads, sub-threads left out. */
+/** A project as the core answers it: the stored row plus its counts of archived and done threads, sub-threads left out. */
 export function describedProject(ctx: FakeContext, project: Project): Project {
-  const { archivedThreads: _stale, missing: _was, ...row } = project;
-  const archivedThreads = [...ctx.threads.values()].filter((t) => t.projectId === project.id && t.archived && !t.parentThreadId).length;
+  const { archivedThreads: _stale, doneThreads: _staleDone, missing: _was, ...row } = project;
+  const archived = [...ctx.threads.values()].filter((t) => t.projectId === project.id && t.archived && !t.parentThreadId);
+  const archivedThreads = archived.length;
+  const doneThreads = archived.filter((t) => t.doneAt != null).length;
   const missing = ctx.goneFolders.has(pathKey(project.path));
-  return structuredClone({ ...row, autoArchiveMergedPr: row.autoArchiveMergedPr !== false, ...(missing ? { repository: false, missing: true } : {}), ...(archivedThreads > 0 ? { archivedThreads } : {}) });
+  return structuredClone({ ...row, autoArchiveMergedPr: row.autoArchiveMergedPr !== false, ...(missing ? { repository: false, missing: true } : {}), ...(archivedThreads > 0 ? { archivedThreads } : {}), ...(doneThreads > 0 ? { doneThreads } : {}) });
 }
 
 /** The core's `folderGone`: one sentence for every method that meets a folder no longer on the disk. */

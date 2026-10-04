@@ -6,12 +6,15 @@
   import { archivedThreads } from '../lib/archive';
   import { projectName } from '../lib/format';
   import { strings } from '../lib/strings';
+  import { archiveCount, archiveKindOf, type ArchiveKind } from '../lib/project-threads.svelte';
   import RecentGroup from './RecentGroup.svelte';
   import DoneThread from './DoneThread.svelte';
   import WindowList from './WindowList.svelte';
 
-  let { entries, scrollRoot, now, query = '', open = $bindable(false), header = true, onopen, onrows }: {
+  let { entries, kind = 'done', scrollRoot, now, query = '', open = $bindable(false), header = true, onopen, onrows }: {
     entries: ProjectEntry[];
+    /** Done threads (marked done, PR merged) or those archived by hand. */
+    kind?: ArchiveKind;
     scrollRoot?: HTMLElement;
     now: number;
     query?: string;
@@ -27,7 +30,7 @@
   let retry = $state(0);
   let revision = 0;
   const measurements = new Map<string, number>();
-  const count = $derived(entries.reduce((total, { project }) => total + (project.archivedThreads ?? 0), 0));
+  const count = $derived(entries.reduce((total, { project }) => total + archiveCount(project, kind), 0));
   const rows = $derived(loaded.filter(({ thread, project, machine }) => !query || [thread.title, projectName(project), thread.branch, machine.label].some(value => value?.toLocaleLowerCase().includes(query))));
   const multi = $derived(new Set(entries.map(entry => entry.machine.id)).size > 1);
   $effect(() => {
@@ -41,7 +44,7 @@
   });
 
   $effect(() => {
-    const sources = entries.map(entry => ({ ...entry, count: entry.project.archivedThreads ?? 0,
+    const sources = entries.map(entry => ({ ...entry, count: archiveCount(entry.project, kind),
       client: entry.machine.store.client, generation: entry.machine.store.clientGeneration, connection: entry.machine.store.connection }));
     const current = ++revision;
     void retry;
@@ -61,7 +64,7 @@
       const threads = await archivedThreads(source.machine.store, ownProjects.length === 1 ? source.project.id : undefined);
       if (source.client !== source.machine.store.client || source.generation !== source.machine.store.clientGeneration) return [];
       const projects = new Map(sources.filter(entry => entry.machine.store === source.machine.store).map(entry => [entry.project.id, entry.project]));
-      return threads.flatMap(thread => {
+      return threads.filter(thread => archiveKindOf(thread) === kind).flatMap(thread => {
         const project = thread.projectId === null ? undefined : projects.get(thread.projectId);
         return project ? [{ machine: source.machine, project, thread }] : [];
       });
@@ -83,7 +86,7 @@
 {/snippet}
 
 {#if count > 0}
-  {#if header}<RecentGroup kind="done" {count} bind:open>{@render completedRows()}</RecentGroup>
+  {#if header}<RecentGroup {kind} {count} bind:open>{@render completedRows()}</RecentGroup>
   {:else if open}{@render completedRows()}{/if}
 {/if}
 

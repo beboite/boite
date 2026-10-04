@@ -1,14 +1,28 @@
-import type { ThreadSummary } from '@boite/contracts';
+import type { Project, ThreadSummary } from '@boite/contracts';
 import { projectKey, type ProjectEntry } from './project-view.svelte';
 import { groupWorkingThread, recentPreferences, workingThread } from './recent.svelte';
 import { compareThreads } from './thread-order';
 
-export type ProjectThreadKind = 'working' | 'done';
+export type ProjectThreadKind = 'working' | 'done' | 'archived';
+/** Archived conversations split in two: done ones (marked done, PR merged) leave after a delay, the others wait to be picked up again. */
+export type ArchiveKind = 'done' | 'archived';
+
+/** How many archived threads of a project are done and how many were put aside by hand. */
+export function archiveCount(project: Project, kind: ArchiveKind): number {
+  const done = project.doneThreads ?? 0;
+  return kind === 'done' ? done : Math.max(0, (project.archivedThreads ?? 0) - done);
+}
+
+/** Whether an archived thread belongs to the done list or the archived one. */
+export function archiveKindOf(thread: ThreadSummary): ArchiveKind {
+  return thread.doneAt != null ? 'done' : 'archived';
+}
 
 /** Expansion follows a project across desktop and phone, without mixing machines. */
 export class ProjectThreadView {
   working = $state<string[]>([]);
   done = $state<string[]>([]);
+  archived = $state<string[]>([]);
   otherOpen = $state(false);
 
   isOpen(entry: ProjectEntry, kind: ProjectThreadKind): boolean {

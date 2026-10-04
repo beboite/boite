@@ -1,11 +1,11 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { CheckCheck, ChevronRight, LoaderCircle } from '@lucide/svelte';
+  import { Archive, CheckCheck, ChevronRight, LoaderCircle } from '@lucide/svelte';
   import { count as formatCount } from '../lib/format';
   import { strings } from '../lib/strings';
 
   let { kind, count, open = $bindable(false), children }: {
-    kind: 'working' | 'done';
+    kind: 'working' | 'done' | 'archived';
     count: number;
     open?: boolean;
     children: Snippet;
@@ -17,8 +17,8 @@
   <button type="button" class="ghost toggle" data-testid="recent-{kind}-toggle" aria-expanded={open}
     aria-controls={uid} onclick={() => open = !open}>
     <span class="caret" class:expanded={open}><ChevronRight size={12} aria-hidden="true" /></span>
-    {#if kind === 'done'}<CheckCheck size={14} aria-hidden="true" />{:else}<LoaderCircle size={14} aria-hidden="true" />{/if}
-    <span class="label ui-label">{kind === 'done' ? strings.sidebar.doneThreads : strings.sidebar.workingThreads}</span>
+    {#if kind === 'done'}<CheckCheck size={14} aria-hidden="true" />{:else if kind === 'archived'}<Archive size={14} aria-hidden="true" />{:else}<LoaderCircle size={14} aria-hidden="true" />{/if}
+    <span class="label ui-label">{kind === 'done' ? strings.sidebar.doneThreads : kind === 'archived' ? strings.sidebar.archivedGroup : strings.sidebar.workingThreads}</span>
     <span class="count ui-label">{formatCount(count)}</span>
   </button>
   <div id={uid} hidden={!open}>
