@@ -22,6 +22,8 @@
   let content = $state<HTMLDivElement>();
   let reader = $derived(quotaReader(store.endpointUrl ?? 'here'));
   let gateway = $derived(gatewayReader(store.endpointUrl ?? 'here'));
+  /** How long a press waits for the gateway's first answer before opening the glance anyway. */
+  const KNOWN_WAIT_MS = 300;
   let rows = $derived(reader.rows === null ? null : shownQuotas(reader.rows, store.accounts));
   /** The last read's failure, cleared by the next read that lands. */
   let failed = $state('');
@@ -102,7 +104,9 @@
     const proxy = store.settings?.subscriptionProxy;
     if (proxy?.enabled && !store.owner) { page('limits'); return; }
     const client = store.client;
-    if (douane !== null && client) await gateway.known(client);
+    // A slow gateway does not hold the press: the glance opens, and the effect above
+    // moves it to the page if the answer turns out to be `unsupported`.
+    if (douane !== null && client) await Promise.race([gateway.known(client), new Promise((resolve) => setTimeout(resolve, KNOWN_WAIT_MS))]);
     if (proxy?.enabled && (proxy.kind !== 'douane' || gateway.state?.status === 'unsupported')) { page('limits'); return; }
     popover.show();
   }

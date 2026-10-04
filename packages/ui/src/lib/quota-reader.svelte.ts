@@ -1,5 +1,5 @@
-import type { Account, AccountQuota, SubscriptionProxyQuotas } from '@boite/contracts';
-import type { Client } from './client';
+import { RpcErrorCode, type Account, type AccountQuota, type SubscriptionProxyQuotas } from '@boite/contracts';
+import { RpcFailure, type Client } from './client';
 import { fill, strings } from './strings';
 
 /**
@@ -159,12 +159,19 @@ export class GatewayReader {
 
   private pending: Promise<void> | null = null;
 
-  /** A core that cannot answer, an older one included, leaves the gateway its dashboard. */
+  /**
+   * An older core, which does not know the method, leaves the gateway its dashboard.
+   * A transport failure says nothing about the gateway: the state stays as it was,
+   * so the next `known()` asks again.
+   */
   read(client: Client, refresh = false): Promise<void> {
     if (this.pending && !refresh) return this.pending;
     const running = (async () => {
       try { this.accept(await client.call('subscriptionProxy.quotas', { refresh })); }
-      catch { this.accept({ status: 'unsupported', providers: [], updatedAt: null, checkedAt: null, error: null }); }
+      catch (error) {
+        if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound)
+          this.accept({ status: 'unsupported', providers: [], updatedAt: null, checkedAt: null, error: null });
+      }
     })();
     this.pending = running;
     void running.finally(() => { if (this.pending === running) this.pending = null; });
