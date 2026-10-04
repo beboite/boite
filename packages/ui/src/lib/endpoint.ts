@@ -217,9 +217,13 @@ export function rememberSession(endpoint: Endpoint, token: string): StoredEnviro
   });
 }
 
-/** Forgets the core. Its key stays valid there until revoked; it just opens nothing from here. */
-export function removeEnvironment(url: string): StoredEnvironment[] {
-  const list = readEnvironments().filter((env) => env.url !== normalise(url));
+/**
+ * Forgets the core. Its key stays valid there until revoked; it just opens
+ * nothing from here. With `token`, only the entry that still holds that key
+ * goes: another window may have paired the machine anew since.
+ */
+export function removeEnvironment(url: string, token?: string): StoredEnvironment[] {
+  const list = readEnvironments().filter((env) => env.url !== normalise(url) || (token !== undefined && env.token !== token));
   storeEnvironments(list);
   return list;
 }

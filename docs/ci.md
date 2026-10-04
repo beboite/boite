@@ -93,7 +93,9 @@ cached download store. UI tests use at most eight workers. Core files run in
 fresh Bun processes, four at once by default; `BOITE_TEST_WORKERS` accepts 1 to
 8 and `bun run --cwd packages/core test:serial` runs one file at a time. Each
 core has a fresh data directory and port. Full per-file output and nonzero
-exit failures are retained.
+exit failures are retained. A file still running after five minutes, its event
+loop blocked where no test timeout can fire, is ended and reported with what it
+printed (`BOITE_TEST_FILE_DEADLINE_MS`).
 
 The Windows job shares release-profile Rust dependencies, builds the installer
 once, and stages its existing core beside the shell for native E2E. Installer

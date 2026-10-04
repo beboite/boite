@@ -281,11 +281,20 @@ export class GroupLinks {
     return readEnvironments().some((env) => env.url === machine.id && env.token !== '');
   }
 
+  /** The agreed addresses of a member as the rosters stand now: none once a hand-paired machine of that group no longer lists it. */
+  #allowed(coreId: string, groupId: string): string[] {
+    const anchors = this.workspace.machines.filter((machine) => machine.coreId === undefined && machine.store.connection === 'ready'
+      && machine.store.client !== null && machine.store.groupKnown && machine.store.group?.id === groupId);
+    if (anchors.some((machine) => !machine.store.group!.cores.some((listed) => listed.coreId === coreId))) return [];
+    return this.#agreed(coreId, groupId, anchors);
+  }
+
   async #connect(core: GroupCore, via: Machine, addresses: string[]): Promise<void> {
     const coreId = core.coreId;
     this.#running.add(coreId);
     this.#attempts.set(coreId, this.#now());
     let state: GroupLinkState | null = 'unreachable';
+    let moved = false;
     try {
       if (addresses.length === 0) {
         state = 'insecure';
@@ -295,6 +304,11 @@ export class GroupLinks {
       const client = via.store.client;
       const groupId = via.store.group?.id;
       if (url === null || client === null || groupId === undefined) return;
+      // The rosters may have changed while the address was tried: it must still be one every hand-paired machine allows.
+      if (!this.#allowed(coreId, groupId).includes(url)) {
+        moved = true;
+        return;
+      }
       // A machine paired by hand already sits at that address: it is that machine's to reach, with the key it has.
       if (this.workspace.machines.some((machine) => machine.id === url.replace(/\/+$/, '') && machine.coreId !== coreId)) {
         state = null;
@@ -302,6 +316,11 @@ export class GroupLinks {
       }
       // Asked for last: a ticket is good for a minute and for one socket.
       const { ticket } = await client.call('group.ticket', { coreId });
+      // Asked again now that the ticket is here: the next line sends it.
+      if (!this.#allowed(coreId, groupId).includes(url)) {
+        moved = true;
+        return;
+      }
       if (await this.workspace.add({ url, token: '', ticket, coreId, groupId }, core.name, true)) state = null;
     } catch {
       // The machine that vouches went away, or the member refused: the next pass asks again.
@@ -311,6 +330,11 @@ export class GroupLinks {
       if (state === null) delete states[coreId];
       else states[coreId] = state;
       this.states = states;
+      // The addresses changed under the attempt: the member is reached where they stand now, without the minute's wait.
+      if (moved) {
+        this.#attempts.delete(coreId);
+        void this.reconcile();
+      }
     }
   }
 }

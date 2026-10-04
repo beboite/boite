@@ -1,7 +1,7 @@
 import { RpcErrorCode, type CoreInfo, type Principal, type ThreadId } from '@boite/contracts';
 import { RpcFailure, WsClient, type Client, type ClientState, type ObservableClient } from '../client';
 import { confirm } from '../confirm.svelte';
-import { clearStoredEndpoint, forgetGroupOf, rememberSession, refreshLocalEnvironment, fromTauri, shellEndpointError, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, servesThisPage, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from '../endpoint';
+import { clearStoredEndpoint, forgetGroupOf, readStoredEndpoint, rememberSession, refreshLocalEnvironment, fromTauri, shellEndpointError, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, servesThisPage, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from '../endpoint';
 import { onboardingSeen } from '../onboarding';
 import { rightPanel } from '../right-panel.svelte';
 import { fill, strings } from '../strings';
@@ -236,6 +236,7 @@ export class Connection {
     this.ctx.store.error = null;
     this.localCore = endpoint.local === true;
     this.#keyless = endpoint.token === '' && endpoint.grant === undefined && endpoint.ticket === undefined;
+    let key = endpoint.token;
     const client = new WsClient({
       url,
       token: endpoint.token,
@@ -247,6 +248,7 @@ export class Connection {
       // The core joins the remembered environments with it, so switching
       // back later needs no new link.
       onSession: (session) => {
+        key = session.token;
         if (this.ctx.client !== client) return;
         if (rememberActive) storeEndpoint({ url, token: session.token, paired: true });
         this.environments = rememberSession(endpoint, session.token);
@@ -259,8 +261,9 @@ export class Connection {
       // retrying every ten seconds.
       onRevoked: () => {
         if (this.ctx.client !== client) return;
-        if (rememberActive) clearStoredEndpoint();
-        this.environments = removeEnvironment(url);
+        // Only the key this connection presented is dead: another window may have paired this machine anew meanwhile.
+        if (rememberActive && readStoredEndpoint()?.token === key) clearStoredEndpoint();
+        this.environments = removeEnvironment(url, key);
         this.connection = 'closed';
         this.pairingRequired = true;
         this.ctx.store.error = strings.errors.revoked;
@@ -405,7 +408,7 @@ export class Connection {
    */
   async forgetEnvironment(url: string): Promise<void> {
     this.environments = removeEnvironment(url);
-    if (this.endpointUrl === url) await this.ctx.store.useLocalCore();
+    if (this.endpointUrl === url) await this.ctx.store.useLocalCore(url);
   }
 
   /**
@@ -424,12 +427,16 @@ export class Connection {
     return this.connection === 'ready';
   }
 
-  /** Back to the core this shell started. Remembered cores stay remembered. */
-  async useLocalCore(): Promise<void> {
+  /**
+   * Back to the core this shell started. Remembered cores stay remembered.
+   * `not` is a core that was just forgotten: a page it served would resolve
+   * back to it, with no key, so the window stays closed instead.
+   */
+  async useLocalCore(not?: string): Promise<void> {
     const s = this.ctx.store;
     clearStoredEndpoint();
     const endpoint = await resolveEndpoint();
-    if (!endpoint) {
+    if (!endpoint || endpoint.url === not) {
       this.ctx.client?.close();
       s.detach();
       this.connection = 'closed';

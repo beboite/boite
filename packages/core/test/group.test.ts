@@ -742,14 +742,32 @@ test('requests are counted against the address they come from as they arrive, an
 
   // A table with no room left counts the addresses it cannot hold together, never leaves them uncounted.
   const full = new Refusals(2);
-  // A member was served before the flood: it keeps an allowance of its own.
-  full.begin('10.0.5.5', start)!(200);
+  // Two members were served before the flood, one on IPv6: each keeps an allowance of its own.
+  full.begin('10.0.5.5', start)!(200, 'member-a');
+  full.begin('2001:db8:1:2::5', start)!(200, 'member-b');
   full.begin('10.0.1.1', start)!(403);
   full.begin('10.0.1.2', start)!(403);
   for (let index = 0; index < REFUSALS_PER_MINUTE; index += 1) full.begin(`10.0.2.${index}`, start)!(403);
   expect(full.begin('10.0.3.1', start)).toBeNull();
   expect(full.begin('10.0.1.1', start)).not.toBeNull();
   expect(full.begin('10.0.5.5', start)).not.toBeNull();
+  // A stranger in that member's /64 is refused sixty times: the member's own address is not the one that pays.
+  const prefix = new Refusals();
+  prefix.begin('2001:db8:1:2::5', start)!(200, 'member-b');
+  for (let index = 0; index < REFUSALS_PER_MINUTE; index += 1) prefix.begin('2001:db8:1:2::bad', start)!(403);
+  expect(prefix.begin('2001:db8:1:2::bad', start)).toBeNull();
+  expect(prefix.begin('2001:db8:1:2::5', start)).not.toBeNull();
+  // Requests of one member carried from many addresses take that member's places, never another member's.
+  for (let index = 0; index < 200; index += 1) full.begin(`10.7.${index}.1`, start + 60_001 + index)!(200, 'member-a');
+  for (let index = 0; index < REFUSALS_PER_MINUTE + 2; index += 1) full.begin(`10.8.${index}.1`, start + 61_000)?.(403);
+  expect(full.begin('10.8.99.1', start + 61_000)).toBeNull();
+  expect(full.begin('2001:db8:1:2::5', start + 61_000)).not.toBeNull();
+  // A request served that proved no name keeps no place of its own.
+  const nameless = new Refusals(1);
+  nameless.begin('10.9.9.9', start)!(200);
+  nameless.begin('10.0.1.1', start)!(403);
+  for (let index = 0; index < REFUSALS_PER_MINUTE; index += 1) nameless.begin(`10.0.2.${index}`, start)!(403);
+  expect(nameless.begin('10.9.9.9', start)).toBeNull();
 });
 
 test('a removal needs no admission behind it, and the invitation is never a command-line argument', async () => {

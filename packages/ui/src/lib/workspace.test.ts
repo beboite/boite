@@ -232,6 +232,23 @@ test('a refused key is sent nowhere: not through a link that reopens its core, n
   await w.boot();
   expect(vet.mock.calls[0]![1]).toEqual([{ url: 'http://127.0.0.1:41000', token: 'test', local: true }]);
   expect(boot).toHaveBeenCalledTimes(2);
+
+  // A link to a core nobody knows, which the owner may decline: the stored core it would fall back on is asked about all the same.
+  delete window.__TAURI_INTERNALS__;
+  localStorage.clear();
+  endpoints.storeEndpoint({ url: 'http://10.0.0.8:1', token: 'old', paired: true });
+  upsertEnvironment({ url: 'http://10.0.0.8:1', token: 'old', paired: true, label: 'Retired', coreId: 'c', groupId: 'grp' });
+  upsertEnvironment({ url: 'https://anchor.test', token: 'hand', paired: true, label: 'Anchor' });
+  window.history.replaceState(null, '', '/?core=https%3A%2F%2Funknown.example');
+  vet.mockRestore();
+  vet = refuse();
+  boot.mockImplementation(async () => {
+    expect(endpoints.readStoredEndpoint()).toMatchObject({ url: 'https://anchor.test', token: 'hand' });
+  });
+  await w.boot();
+  window.history.replaceState(null, '', '/');
+  expect(vet).toHaveBeenCalledTimes(1);
+  expect(boot).toHaveBeenCalledTimes(3);
 });
 
 test('a window whose machine the group dropped falls back on a machine paired by hand, never on the address it dropped', async () => {
@@ -246,6 +263,29 @@ test('a window whose machine the group dropped falls back on a machine paired by
   await w.dropPrimary('http://10.0.0.8:1');
   expect(order).toEqual(['switch https://anchor.test', 'forget http://10.0.0.8:1']);
   expect(w.machines.map((machine) => [machine.id, machine.coreId])).toEqual([['https://anchor.test', undefined]]);
+});
+
+test('a window served by the machine the group dropped stays closed rather than reach it again with no key', async () => {
+  const { w, a, b } = await setup();
+  const origin = window.location.origin;
+  a.endpointUrl = origin;
+  w.machines = [{ id: origin, label: 'Dropped', store: a, coreId: 'c', groupId: 'grp' }, { id: 'https://anchor.test', label: 'Anchor', store: b }];
+  // Its saved entry is the only one: the pairing of the other machine was forgotten in another window.
+  upsertEnvironment({ url: origin, token: 'old', paired: true, label: 'Dropped', coreId: 'c', groupId: 'grp' });
+  const select = vi.spyOn(w, 'select').mockResolvedValue();
+  await w.dropPrimary(origin);
+  expect(a.connection).toBe('closed');
+  expect(a.client).toBeNull();
+  expect(endpoints.readEnvironments()).toEqual([]);
+  // The window shows the machine paired by hand that is still connected.
+  expect(select).toHaveBeenCalledWith(b);
+});
+
+test('a key refused late does not take away the pairing another window made meanwhile', () => {
+  const url = 'http://10.0.0.5:9000';
+  upsertEnvironment({ url, token: 'new-by-hand', paired: true });
+  expect(endpoints.removeEnvironment(url, 'old-from-group')).toHaveLength(1);
+  expect(endpoints.removeEnvironment(url, 'new-by-hand')).toEqual([]);
 });
 
 test('a notification link reaches the page core before a remembered machine answers', async () => {

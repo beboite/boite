@@ -676,6 +676,8 @@ export class GroupStore {
     let name: string;
     try {
       const raw = await boundedBody(request.body, JOIN_BODY_MAX);
+      // The body may have taken its time: the invitation must still be the live one before anything is opened or counted.
+      if (this.invites.get(named) !== invite || invite.expiresAt <= Date.now()) return new Response('unknown or expired invitation', { status: 403 });
       // A request recorded on the path and sent again, respaced or not, is refused before anything is
       // computed for it: its sender holds no invitation, and what it replays must not spend the allowance below.
       name = sealedName(raw);
@@ -690,8 +692,6 @@ export class GroupStore {
     if (now - this.joins.since > 60_000) this.joins = { since: now, count: 0 };
     this.joins.count += 1;
     if (this.joins.count > JOINS_PER_MINUTE) return new Response('too many join requests', { status: 429 });
-    // The body may have taken its time: the invitation must still be the live one when it is used.
-    if (this.invites.get(named) !== invite || invite.expiresAt <= now) return new Response('unknown or expired invitation', { status: 403 });
     if (this.closed || this.core.stopping) return new Response('the core is stopping', { status: 503 });
     // Remembered only once it is served, so the allowance above bounds what an invitation remembers.
     invite.seen.add(name);

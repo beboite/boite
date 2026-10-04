@@ -204,13 +204,14 @@ export class Workspace {
     }
     // The window would open on a machine whose key is held back, the stored one or the one a `?core=`
     // link names: it waits for the answer, and on a refusal that key is sent nowhere.
-    const wanted = linkedCore() ?? readStoredEndpoint()?.url ?? null;
-    const waits = wanted !== null && readEnvironments().some((e) => e.url === wanted && holdsBack(e));
+    // Both count: a link the owner declines falls back on the stored core.
+    const saved = readEnvironments();
+    const gated = [linkedCore(), readStoredEndpoint()?.url].filter((url): url is string => typeof url === 'string' && saved.some((e) => e.url === url && holdsBack(e)));
     const vetting = this.#vet().catch(() => [] as StoredEnvironment[]);
-    if (wanted !== null && waits) {
+    if (gated.length > 0) {
       const cleared = await vetting;
       if (!this.#current(lifecycle)) return;
-      if (!cleared.some((e) => e.url === wanted)) this.#openElsewhere(wanted);
+      for (const url of gated) if (!cleared.some((e) => e.url === url)) this.#openElsewhere(url);
     }
     const selected = readStoredEndpoint();
     await (thread === null ? store.boot() : store.boot(false, thread));
@@ -463,6 +464,9 @@ export class Workspace {
     const next = this.#byHand();
     if (next && next.url !== id) await store.switchEnvironment(next.url);
     await store.forgetEnvironment(id);
+    // Nothing to fall back on: the window shows a machine paired by hand that is still connected, if there is one.
+    const other = store.connection === 'ready' ? undefined : this.machines.find((m) => m.store !== store && m.coreId === undefined && m.store.connection === 'ready');
+    if (other && this.active === store) await this.select(other.store);
     const entry = this.#primaryMachine(readStoredEndpoint(), readEnvironments());
     const twin = this.machines.find((m) => m.store !== store && m.id === entry.id);
     if (twin) {

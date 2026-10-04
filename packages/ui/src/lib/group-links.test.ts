@@ -283,6 +283,38 @@ describe('group links', () => {
     expect(added.map((entry) => entry.endpoint.url)).toEqual(['https://b.example']);
   });
 
+  it('sends no ticket where an attempt was heading once the rosters changed under it', async () => {
+    const moved = [members[0]!, core('b', ['http://10.0.0.6:1'])];
+    // While the old address is being tried, the roster says b gave it up.
+    const a = machine('http://10.0.0.1:1', { group: group('a', members) });
+    const { workspace: ws, added } = workspace([a]);
+    let tried = 0;
+    const reach = vi.fn(async (addresses: string[]) => {
+      tried += 1;
+      if (tried === 1) storeOf(a).group = group('a', moved);
+      return addresses[0] ?? null;
+    });
+    await new GroupLinks(ws, { reach, secure: () => false }).reconcile();
+    await settle();
+    await settle();
+    // No ticket went to the address it left: the member was reached anew where the roster now puts it.
+    expect(reach.mock.calls.map(([addresses]) => addresses)).toEqual([['http://100.64.0.2:1', 'http://192.168.1.20:1'], ['http://10.0.0.6:1']]);
+    expect(added.map((entry) => entry.endpoint.url)).toEqual(['http://10.0.0.6:1']);
+
+    // The same while the ticket is being asked for: it is not sent.
+    const late = machine('http://10.0.0.1:1', { group: group('a', members) });
+    storeOf(late).client!.call = vi.fn(async () => {
+      storeOf(late).group = group('a', [members[0]!]);
+      return { ticket: 'ticket-too-late' };
+    });
+    const { workspace: other, added: none } = workspace([late]);
+    await new GroupLinks(other, { reach: async (addresses) => addresses[0] ?? null, secure: () => false }).reconcile();
+    await settle();
+    await settle();
+    expect(storeOf(late).client!.call).toHaveBeenCalledTimes(1);
+    expect(none).toEqual([]);
+  });
+
   it('treats a machine paired again by hand as the owner\'s own, whatever its former group says afterwards', async () => {
     // The pairing link took the group's mark off its saved entry.
     localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([{ url: 'http://100.64.0.2:1', label: 'B', token: 'key', paired: true }]));
