@@ -155,7 +155,9 @@ pub(crate) fn build_main_window<R: Runtime>(
             .inner_size(MAIN_SIZE.0, MAIN_SIZE.1)
             .min_inner_size(MAIN_MIN_SIZE.0, MAIN_MIN_SIZE.1)
             .resizable(true)
-            .decorations(cfg!(target_os = "macos"))
+            // Linux lets the window manager choose buttons, their order and
+            // title-bar actions. Windows draws its captions in the page.
+            .decorations(!cfg!(windows))
             .visible(false)
             .focused(!hidden())
             .skip_taskbar(hidden())
@@ -184,10 +186,11 @@ pub(crate) fn build_main_window<R: Runtime>(
     // macOS keeps its own frame, corners and traffic lights, drawn over the
     // top of the page: the title bar leaves them room (`TitleBar.svelte`) and
     // they sit centred in its 44 px, where the Windows caption buttons were.
+    // The multi-webview runtime ignores Wry's traffic_light_position: native
+    // layout below also reapplies the position after AppKit resizes its frame.
     #[cfg(target_os = "macos")]
     {
-        builder = builder.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true)
-            .traffic_light_position(tauri::LogicalPosition::new(16.0, 16.0));
+        builder = builder.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
     }
     builder = match work_area(app) {
         Some(area) => {
@@ -203,6 +206,25 @@ pub(crate) fn build_main_window<R: Runtime>(
         builder = builder.additional_browser_args(&args);
     }
     let window = builder.build()?;
+    #[cfg(target_os = "macos")]
+    {
+        let arrange = |window: &tauri::WebviewWindow<R>| {
+            let native = window.clone();
+            let _ = window.run_on_main_thread(move || {
+                if let Ok(pointer) = native.ns_window() {
+                    // Tauri owns this live NSWindow; AppKit access stays on its main thread.
+                    unsafe { crate::platform::macos_window::align_traffic_lights(&*pointer.cast()) };
+                }
+            });
+        };
+        arrange(&window);
+        let native = window.clone();
+        window.on_window_event(move |event| {
+            if matches!(event, tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. } | tauri::WindowEvent::Focused(true)) {
+                arrange(&native);
+            }
+        });
+    }
     // Acrylic is what a window opens on where DWM draws it, and `lib/glass.ts`
     // applies whatever the setting says as soon as the UI mounts.
     #[cfg(windows)]
@@ -303,9 +325,9 @@ const MENU_QUIT: &str = "boite-menu-quit";
 /// quit). This keeps the Edit items WKWebView needs for copy and paste, and the
 /// application menu, with Quit on a click only.
 #[cfg(target_os = "macos")]
-pub(crate) fn install_macos_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+pub(crate) fn install_macos_menu<R: Runtime>(app: &AppHandle<R>, channel: Channel) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem, PredefinedMenuItem as Item, Submenu};
-    let name = app.package_info().name.clone();
+    let name = product_label(app, channel);
     let quit = MenuItem::with_id(app, MENU_QUIT, format!("Quit {name}"), true, None::<&str>)?;
     let application = Submenu::with_items(app, &name, true, &[
         &Item::about(app, None, None)?, &Item::separator(app)?, &Item::services(app, None)?, &Item::separator(app)?,

@@ -327,9 +327,13 @@ name = "boite-shell"
 version = "2.0.0-beta.1"
 dependencies = [
  "base64 0.22.1",
+ "dirs",
  "fs2",
  "futures-util",
  "libc",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "reqwest",
  "rustls",
  "semver",

@@ -1739,7 +1739,7 @@ export const fr: Translation = {
     agentMemoryBudgetPercent: 'Budget mémoire de tous les agents, %',
     agentMemoryBudgetHint: 'Pour tous les agents ensemble, de 10 à 90 %. 60 % par défaut.',
     memoryReserveMb: 'Mémoire réservée aux autres applications, Mo',
-    memoryReserveHint: 'Gardée libre pour vos autres applications. 0 prend 10 % de la mémoire de cette machine, 3072 Mo au minimum.',
+    memoryReserveHint: 'Gardée libre pour vos autres applications. 0 garde 10 % de la RAM, au moins 3072 Mo. En dessous de 12288 Mo de RAM, il garde 25 %.',
     memoryProtection: 'Protéger la mémoire disponible',
     memoryProtectionHint: 'Au-delà d\'une limite, Boite arrête la plus grosse arborescence de processus lancée par un agent, jamais l\'agent lui-même. Désactivé, les plafonds mémoire Windows sautent aussi.',
     background: 'Arrière-plan',

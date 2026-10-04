@@ -4,6 +4,9 @@ mod local_paths;
 pub(crate) use local_paths::require_local_path;
 pub(crate) use paths::default_data_dir;
 
+#[cfg(target_os = "macos")]
+pub(crate) mod macos_window;
+
 #[cfg(windows)]
 #[path = "windows_job.rs"]
 pub(crate) mod job;
