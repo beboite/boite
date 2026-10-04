@@ -88,7 +88,7 @@
     <p class="muted">{strings.thread.noneBody}</p>
   </div>
 {:else}
-  <section class="chat" data-testid="chat">
+  <section class="chat" class:drafting={!thread} data-testid="chat">
     {#if thread?.forkOrigin}{#key thread.id}<ForkReturn {store} {thread} />{/key}{/if}
     {#if thread}
       <!-- One timeline per thread: the heights it measured and the ids that
@@ -111,29 +111,33 @@
           {#if draftChoice}<small>{strings.thread.draftMode[draftChoice.permissionMode]}</small>{/if}
           {#if store.draft?.worktree}<small>{strings.thread.inWorktree}</small>{/if}
         </div>
-        <h1 class="start" data-testid="draft-sentence">
-          <span class="ui-label">{strings.thread.start}</span>
-          {#if store.draft?.worktree}<span class="ui-label">{strings.thread.inWorktree}</span>{/if}
-          {#if draftChoice}<span class="ui-label">{strings.thread.draftMode[draftChoice.permissionMode]}</span>{/if}
-          <span class="ui-label">{strings.thread.inProject}</span>
-          <!-- It opens upward, into the empty half of the column: under the
-               heading it would land on the composer. -->
-          <span class="project-choice"><Menu
-            items={projectItems}
-            onpick={pickProject}
-            variant="text"
-            label={strings.thread.changeProject}
-            testid="draft-project"
-          >
-            {#if project}<ProjectTile {project} {store} />{:else}<FolderOpen size={15} />{/if}
-            <span class="project-label ui-label">{project ? projectName(project) : strings.drafts.name}</span>
-            <ChevronDown size={14} strokeWidth={2} />
-          </Menu></span>
+        <div class="draft-heading" data-testid="draft-sentence">
+          <h1 class="start">
+            <span class="ui-label">{strings.thread.start}</span>
+            <span class="ui-label">{strings.thread.inProject}</span>
+            <!-- It opens upward, into the empty half of the column: under the
+                 heading it would land on the composer. -->
+            <span class="project-choice"><Menu
+              items={projectItems}
+              onpick={pickProject}
+              variant="text"
+              label={strings.thread.changeProject}
+              testid="draft-project"
+            >
+              {#if project}<ProjectTile {project} {store} />{:else}<FolderOpen size={15} />{/if}
+              <span class="project-label ui-label">{project ? projectName(project) : strings.drafts.name}</span>
+              <ChevronDown size={14} strokeWidth={2} />
+            </Menu></span>
+          </h1>
           {#if draftChoice}
-            <span class="ui-label">{strings.thread.using} {modelLabel}</span>
-            {#if effortLabel}<span class="ui-label">{fill(strings.thread.onEffort, { effort: effortLabel })}</span>{/if}
+            <p class="draft-details">
+              {#if store.draft?.worktree}<span>{strings.thread.inWorktree}</span>{/if}
+              <span>{strings.thread.draftMode[draftChoice.permissionMode]}</span>
+              <span>{strings.thread.using} {modelLabel}</span>
+              {#if effortLabel}<span>{fill(strings.thread.onEffort, { effort: effortLabel })}</span>{/if}
+            </p>
           {/if}
-        </h1>
+        </div>
       </div>
     {/if}
 
@@ -166,7 +170,7 @@
   .project-choice { display: inline-flex; max-width: 100%; border: 1px dashed var(--color-muted-foreground); border-radius: var(--radius-md); }
   .project-choice:hover, .project-choice:focus-within { border-color: var(--color-accent); }
   .project-choice :global(.menu) { min-width: 0; max-width: 100%; }
-  .project-choice :global(.trigger) { min-height: var(--row); height: auto; max-width: 100%; padding: 3px 8px; gap: 6px; }
+  .project-choice :global(.trigger) { min-height: var(--row); height: auto; max-width: 100%; padding: 7px 12px; gap: 8px; }
   .project-label { min-width: 0; overflow-wrap: anywhere; }
   .mobile-welcome { display: none; }
   .none {
@@ -189,6 +193,12 @@
     min-height: 0;
   }
 
+  .chat.drafting {
+    --composer-input-height: 80px;
+    --composer-input-padding: 18px 20px 12px;
+    --composer-bar-padding: 8px 16px 16px;
+  }
+
   /* Zero basis on both halves, so the heading sits exactly as far below the
      top as the composer sits above the bottom: one centred block. */
   .draft-body {
@@ -196,7 +206,7 @@
     display: flex;
     align-items: flex-end;
     justify-content: center;
-    padding: 24px 20px 16px;
+    padding: 24px 20px 32px;
     animation: rise var(--dur-3) var(--ease-out-quint);
   }
 
@@ -214,15 +224,35 @@
     color: var(--color-muted-foreground);
   }
 
+  .draft-heading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    max-width: var(--content);
+    text-align: center;
+  }
+
+  .draft-details {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px 6px;
+    color: var(--color-muted-foreground);
+    font-size: var(--text-base);
+    line-height: 1.6;
+  }
+
   .start {
     display: flex;
     align-items: center;
     justify-content: center;
     flex-wrap: wrap;
-    gap: 2px 5px;
+    gap: 8px;
     width: 100%;
     max-width: var(--content);
-    font-size: var(--text-lg);
+    font-size: calc(var(--text-lg) * 1.2);
     font-weight: 600;
     color: var(--color-foreground);
     text-align: center;
@@ -230,8 +260,13 @@
   }
 
   @media (max-width: 720px) {
+    .chat.drafting {
+      --composer-input-height: 64px;
+      --composer-input-padding: 16px 16px 10px;
+      --composer-bar-padding: 4px 12px 12px;
+    }
     .project-choice :global(.trigger) { min-height: var(--touch-target); }
-    .start { display: none; }
+    .draft-heading { display: none; }
     .draft-tail { display: none; }
     .mobile-welcome { display: flex; flex-direction: column; align-items: center; max-width: 340px; text-align: center; gap: 14px; }
     .mobile-welcome img { border-radius: var(--radius-lg); }

@@ -868,9 +868,9 @@
 
   textarea, .input-paint {
     width: 100%;
-    min-height: 44px;
+    min-height: var(--composer-input-height, 44px);
     max-height: 200px;
-    padding: 12px 14px 6px;
+    padding: var(--composer-input-padding, 12px 14px 6px);
     border: none;
     background: transparent;
     font-size: var(--text-reading);
