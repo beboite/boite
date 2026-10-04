@@ -1,7 +1,7 @@
 import { RpcErrorCode, type CoreInfo, type Principal, type ThreadId } from '@boite/contracts';
 import { RpcFailure, WsClient, type Client, type ClientState, type ObservableClient } from '../client';
 import { confirm } from '../confirm.svelte';
-import { clearStoredEndpoint, refreshLocalEnvironment, fromTauri, shellEndpointError, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, servesThisPage, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from '../endpoint';
+import { clearStoredEndpoint, forgetGroupOf, rememberSession, refreshLocalEnvironment, fromTauri, shellEndpointError, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, servesThisPage, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from '../endpoint';
 import { onboardingSeen } from '../onboarding';
 import { rightPanel } from '../right-panel.svelte';
 import { fill, strings } from '../strings';
@@ -249,11 +249,7 @@ export class Connection {
       onSession: (session) => {
         if (this.ctx.client !== client) return;
         if (rememberActive) storeEndpoint({ url, token: session.token, paired: true });
-        this.environments = upsertEnvironment({
-          url, token: session.token, paired: true,
-          ...(endpoint.coreId === undefined ? {} : { coreId: endpoint.coreId }),
-          ...(endpoint.groupId === undefined ? {} : { groupId: endpoint.groupId })
-        });
+        this.environments = rememberSession(endpoint, session.token);
       },
       onUnauthorized: (error) => {
         if (this.ctx.client === client && !this.localCore) this.#authenticationFailed(error);
@@ -386,6 +382,7 @@ export class Connection {
   /** Point the UI at another core, from the Settings page. It stays remembered. */
   async connectTo(url: string, token: string): Promise<void> {
     storeEndpoint({ url, token });
+    forgetGroupOf(url);
     this.environments = upsertEnvironment({ url, token, paired: false });
     await this.#switchTo({ url, token });
   }

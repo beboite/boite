@@ -3,6 +3,7 @@ import {
   parsePairingLink,
   readEnvironments,
   readStoredEndpoint,
+  rememberSession,
   removeEnvironment,
   resolveEndpoint,
   storeEndpoint,
@@ -194,6 +195,15 @@ describe('environments', () => {
     expect(readEnvironments()).toEqual([
       { url: 'http://10.0.0.6:9000', label: '10.0.0.6:9000', token: 'b', paired: false }
     ]);
+  });
+
+  test('a key the group brought keeps its mark, and a pairing link opened on that machine takes the mark away', () => {
+    const url = 'http://10.0.0.5:9000';
+    rememberSession({ url, token: '', ticket: 't', coreId: 'b', groupId: 'grp' }, 'from-ticket');
+    expect(readEnvironments()).toEqual([{ url, label: '10.0.0.5:9000', token: 'from-ticket', paired: true, coreId: 'b', groupId: 'grp' }]);
+    // Paired by hand since: the group can no longer drop it.
+    rememberSession({ url, token: '', grant: 'g' }, 'from-grant');
+    expect(readEnvironments()).toEqual([{ url, label: '10.0.0.5:9000', token: 'from-grant', paired: true }]);
   });
 
   test('a paired endpoint stored before this list existed seeds one entry', () => {

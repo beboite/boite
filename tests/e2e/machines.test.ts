@@ -296,6 +296,31 @@ test('one invitation groups two real cores: the page connects the second by itse
     await page.waitFor(`document.querySelector('[data-thread-id="${tb.id}"]')`);
     expect(await b.call('sessions.list', {})).toHaveLength(1);
 
+    // The address the second machine's key was saved for is retired, and somebody else listens there.
+    // At start the first machine is asked before that key is sent: it never is, and the page reaches the second anew.
+    const heard: string[] = [];
+    const retired = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch(request, listener) {
+        return listener.upgrade(request) ? undefined : new Response('retired', { status: 404 });
+      },
+      websocket: { message(_socket, message) { heard.push(String(message)); } }
+    });
+    try {
+      await page.evaluate(`(() => {
+        const saved = JSON.parse(localStorage.getItem('boite.envs'));
+        saved.find((env) => env.url === ${JSON.stringify(second.url)}).url = 'http://127.0.0.1:${retired.port}';
+        localStorage.setItem('boite.envs', JSON.stringify(saved));
+      })()`);
+      await page.evaluate('location.reload()');
+      await page.waitFor(`${machines(2)} && globalThis.__boiteTest.workspace.machines.some(machine => machine.id === ${JSON.stringify(second.url)})`);
+      expect(heard).toEqual([]);
+      expect(await page.evaluate<string[]>(`JSON.parse(localStorage.getItem('boite.envs')).map((env) => env.url).sort()`)).toEqual([first.url, second.url].sort());
+    } finally {
+      await retired.stop(true);
+    }
+
     // A phone pairs with the first machine only, as a device, on a browser that knows neither.
     await page.evaluate('localStorage.clear()');
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });

@@ -1,6 +1,7 @@
 import { Store, store } from './store.svelte';
 import type { AgentAddress } from '@boite/contracts';
 import {
+  clearStoredEndpoint,
   forgetGroupOf,
   parsePairingLink,
   readEnvironments,
@@ -15,7 +16,7 @@ import {
 } from './endpoint';
 import { strings } from './strings';
 import { AutoSettingsSync } from './auto-settings-sync.svelte';
-import { GroupLinks } from './group-links.svelte';
+import { GroupLinks, holdsBack } from './group-links.svelte';
 
 export interface Machine {
   id: string;
@@ -135,8 +136,9 @@ export class Workspace {
 
   async #adoptPopulatedJournal(lifecycle: number): Promise<void> {
     // A fresh Dev core may have no threads while an older core on this PC has a journal.
+    // The name a core reports is its own word: a machine the group brought never becomes the page's own by claiming this PC's.
     const populated = store.localCore && store.threads.length === 0 && store.core?.hostname
-      ? this.machines.find(m => m.store !== store && m.store.connection === 'ready' && m.store.threads.length > 0 && m.store.core?.hostname === store.core?.hostname)
+      ? this.machines.find(m => m.store !== store && m.coreId === undefined && m.store.connection === 'ready' && m.store.threads.length > 0 && m.store.core?.hostname === store.core?.hostname)
       : undefined;
     if (!populated) return;
     await store.switchEnvironment(populated.id);
@@ -144,6 +146,25 @@ export class Workspace {
     populated.store.client?.close();
     populated.store.detach();
     this.machines = [{ id: populated.id, label: populated.label, icon: populated.icon, store }, ...this.machines.filter(m => m.store !== store && m !== populated)];
+  }
+
+  /** Which keys the group brought over plain HTTP may be sent where they were saved: asked before any of them is. */
+  async #vet(): Promise<StoredEnvironment[]> {
+    const saved = readEnvironments();
+    const held = saved.filter(holdsBack);
+    if (held.length === 0) return [];
+    const anchors: Endpoint[] = saved.filter((e) => e.coreId === undefined && e.token !== '').map((e) => ({ url: e.url, token: e.token, paired: e.paired }));
+    const local = window.__TAURI_INTERNALS__ ? await fromTauri().catch(() => null) : null;
+    if (local && !anchors.some((e) => e.url === local.url)) anchors.push(local);
+    return this.groups.vet(held, anchors);
+  }
+
+  /** The stored core was refused its key: the window opens on a machine paired by hand, the one serving this page first, or on the shell's own core. */
+  #openElsewhere(): void {
+    const byHand = readEnvironments().filter((e) => e.coreId === undefined && e.token !== '');
+    const next = window.__TAURI_INTERNALS__ ? undefined : byHand.find((e) => servesThisPage(e.url)) ?? byHand[0];
+    if (next) storeEndpoint({ url: next.url, token: next.token, ...(next.paired ? { paired: true } : {}) });
+    else clearStoredEndpoint();
   }
 
   /**
@@ -170,12 +191,21 @@ export class Workspace {
     } catch {
       /* session only */
     }
+    // The window would open on a machine whose key is held back: it waits for the answer, and opens elsewhere on a refusal.
+    const wanted = readStoredEndpoint();
+    const waits = wanted !== null && readEnvironments().some((e) => e.url === wanted.url && holdsBack(e));
+    const vetting = this.#vet().catch(() => [] as StoredEnvironment[]);
+    if (wanted !== null && waits) {
+      const cleared = await vetting;
+      if (!this.#current(lifecycle)) return;
+      if (!cleared.some((e) => e.url === wanted.url)) this.#openElsewhere();
+    }
     const selected = readStoredEndpoint();
-    const remembered = readEnvironments();
     await (thread === null ? store.boot() : store.boot(false, thread));
     if (!this.#current(lifecycle)) return;
     this.active = store;
-    this.machines = [this.#primaryMachine(selected, remembered)];
+    // Read after the boot: a pairing link it opened on has just made this machine one paired by hand.
+    this.machines = [this.#primaryMachine(selected, readEnvironments())];
     if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('fake') === '1') {
       if (new URLSearchParams(window.location.search).get('machines') === '1') {
         await this.#addFakeMachine(lifecycle);
@@ -188,11 +218,14 @@ export class Workspace {
     if (!store.localCore && primaryEndpoint?.url === store.endpointUrl && primaryEndpoint.token) {
       upsertEnvironment({ ...primaryEndpoint, paired: primaryEndpoint.paired ?? false, label: this.machines[0]!.label });
     }
-    await Promise.all(
-      readEnvironments()
-        .filter((e) => e.url !== store.endpointUrl)
-        .map((e) => this.add(e, e.label))
-    );
+    const others = readEnvironments().filter((e) => e.url !== store.endpointUrl);
+    await Promise.all([
+      ...others.filter((e) => !holdsBack(e)).map((e) => this.add(e, e.label)),
+      // A key held back is sent once the machines paired by hand had their say, and only where it still stands.
+      vetting.then((cleared) => Promise.all(others
+        .filter((e) => holdsBack(e) && cleared.some((kept) => kept.url === e.url) && this.#current(lifecycle))
+        .map((e) => this.add(e, e.label))))
+    ]);
     if (!this.#current(lifecycle)) return;
     await this.#adoptPopulatedJournal(lifecycle);
     if (thread === null || generation !== this.#generation || !this.#current(lifecycle) || store.openThread?.id === thread) return;
@@ -404,6 +437,24 @@ export class Workspace {
     this.machines = this.machines.filter((m) => m !== machine);
     removeEnvironment(id);
     if (this.active === machine.store) await this.select(store);
+  }
+
+  /**
+   * The machine this window opened on is no longer one to send a key to: the
+   * key is forgotten and the window goes back to its own core. The entry
+   * follows the store, and a machine already listed at that address gives way.
+   */
+  async dropPrimary(id: string): Promise<void> {
+    ++this.#generation;
+    await store.forgetEnvironment(id);
+    const entry = this.#primaryMachine(readStoredEndpoint(), readEnvironments());
+    const twin = this.machines.find((m) => m.store !== store && m.id === entry.id);
+    if (twin) {
+      this.settingsSync.forget(twin);
+      twin.store.client?.close();
+      twin.store.detach();
+    }
+    this.machines = [entry, ...this.machines.filter((m) => m.store !== store && m !== twin)];
   }
 
   async openNotification(key: string): Promise<void> {

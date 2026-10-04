@@ -356,13 +356,16 @@ export function startServer(options: ServerOptions): RunningServer {
 
       if (url.pathname === '/agent-messages' || url.pathname === JOIN_ROUTE) {
         if (core.stopping) return new Response('core stopping', { status: 503 });
-        // A stranger's refused requests are counted against its address before any is read again.
+        // A stranger's requests are counted against its address from the moment they arrive, before any body is read.
         const address = self.requestIP(request)?.address ?? null;
-        const source = address === null || isLoopbackAddress(address) ? null : address;
-        if (source !== null && refusals.blocked(source)) return new Response('too many refused requests from this address', { status: 429 });
+        const answered = address === null || isLoopbackAddress(address) ? () => undefined : refusals.begin(address);
+        if (answered === null) return new Response('too many refused requests from this address', { status: 429 });
         const response = (url.pathname === JOIN_ROUTE ? core.group.http(request) : core.coordination.http(request)).then((answer) => {
-          if (source !== null && answer.status === 403) refusals.record(source);
+          answered(Refusals.refuses(answer.status));
           return answer;
+        }, (error: unknown) => {
+          answered(true);
+          throw error;
         });
         peerRequests.add(response);
         void response.finally(() => peerRequests.delete(response)).catch(() => undefined);

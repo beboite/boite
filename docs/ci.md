@@ -106,9 +106,9 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 588,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,100,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,160,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,376,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,420,000 |
 
 The total JavaScript measure excludes native binaries and source maps. On
 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
@@ -143,6 +143,14 @@ On 2026-10-03, phone remote coding merged with main at `c3e9c37` measured
 107 KB above the combined build for the phone composer, viewer, browser sharing
 and settings. The 4,100,000-byte limit keeps 30,758 bytes above it; the entry
 and core limits are unchanged.
+On 2026-10-04, Linux builds with Bun 1.4.2 measured 4,101,987 UI bytes and
+3,336,252 emitted core JavaScript bytes at `69c4edc4`, the UI already 1,987
+bytes above its limit. Machine groups merged with that revision measured
+4,126,788 and 3,385,361: the UI gains 24,801 bytes for the group card, its
+sentences in two languages and the group links; the core gains 49,109 bytes
+for the roster, sealing, tickets and the join route. The limits become
+4,160,000 and 3,420,000 bytes, 33,212 and 34,639 bytes above these
+measurements; the entry and `main.js` limits are unchanged.
 Explain measured growth when changing a limit. Shared-runner timings are not gated. Earlier sizes and
 runner observations remain in the [dated report](../bench/results/2026-09-29-resources.md#historical-ci-measurements).
 

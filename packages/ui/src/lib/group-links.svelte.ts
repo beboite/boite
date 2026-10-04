@@ -1,11 +1,14 @@
 import { untrack } from 'svelte';
-import { RPC_PATH, type GroupCore } from '@boite/contracts';
-import { readEnvironments } from './endpoint';
+import { RPC_PATH, type Group, type GroupCore } from '@boite/contracts';
+import { WsClient } from './client';
+import { readEnvironments, removeEnvironment, type Endpoint, type StoredEnvironment } from './endpoint';
 import type { Machine, Workspace } from './workspace.svelte';
 
 /** A machine that did not answer is asked again no sooner than this. */
 const RETRY_MS = 60_000;
 const PROBE_MS = 4000;
+/** At start, how long the machines paired by hand are given to answer before a held key is used as it was left. */
+const VOUCH_WAIT_MS = 3000;
 
 /** Why a machine of the group is not connected from this client. */
 export type GroupLinkState =
@@ -21,6 +24,24 @@ export interface GroupLinkOptions {
   /** Whether this page may only open secure sockets. */
   secure?: () => boolean;
   now?: () => number;
+  /** What a machine says its group is, undefined when it gave no answer in time. Replaced in tests, which have no network. */
+  ask?: (endpoint: Endpoint, patience: number) => Promise<Group | null | undefined>;
+  /** Replaces `VOUCH_WAIT_MS` in tests. */
+  patience?: number;
+}
+
+/** One question to a machine paired by hand, on a socket made for it and closed with the answer. */
+function askGroup(endpoint: Endpoint, patience: number): Promise<Group | null | undefined> {
+  const client = new WsClient({ url: endpoint.url, token: endpoint.token, paired: endpoint.paired === true, reconnect: false });
+  return Promise.race([
+    client.connect().then(() => client.call('group.get', {})).catch(() => undefined),
+    new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), patience))
+  ]).finally(() => client.close());
+}
+
+/** A key the group brought for a plain HTTP address: at start it waits for a hand-paired machine to have its say. */
+export function holdsBack(entry: StoredEnvironment): boolean {
+  return entry.coreId !== undefined && entry.url.startsWith('http://');
 }
 
 /** Resolves with `url` once a WebSocket opens on it. No hello is sent: the socket only proves the address answers. */
@@ -98,11 +119,38 @@ export class GroupLinks {
   #reach: (addresses: string[]) => Promise<string | null>;
   #secure: () => boolean;
   #now: () => number;
+  #patience: number;
+  #ask: (endpoint: Endpoint, patience: number) => Promise<Group | null | undefined>;
 
   constructor(private readonly workspace: Workspace, options: GroupLinkOptions = {}) {
     this.#reach = options.reach ?? firstReachable;
     this.#secure = options.secure ?? (() => window.location.protocol === 'https:');
     this.#now = options.now ?? Date.now;
+    this.#patience = options.patience ?? VOUCH_WAIT_MS;
+    this.#ask = options.ask ?? askGroup;
+  }
+
+  /**
+   * At start, before a key the group brought over plain HTTP is sent anywhere:
+   * the machines paired by hand are asked, each on a socket made for the
+   * question, what their group lists. A key for an address its machine no
+   * longer gives, or for a machine the group dropped, is forgotten unsent, and
+   * `reconcile` reaches that machine anew. With nobody of that group
+   * answering, the machine that vouched being off, the key is used as it was left.
+   */
+  async vet(held: StoredEnvironment[], anchors: Endpoint[]): Promise<StoredEnvironment[]> {
+    if (held.length === 0) return [];
+    const answers = await Promise.all(anchors.map((anchor) => this.#ask(anchor, this.#patience).catch(() => undefined)));
+    return held.filter((entry) => {
+      const voices = answers.filter((answer): answer is Group => answer != null && answer.id === entry.groupId);
+      if (voices.length === 0) return true;
+      const stands = voices.every((voice) => {
+        const core = voice.cores.find((listed) => listed.coreId === entry.coreId);
+        return core !== undefined && usableAddresses(core.addresses, this.#secure()).includes(entry.url);
+      });
+      if (!stands) removeEnvironment(entry.url);
+      return stands;
+    });
   }
 
   /** Runs for the whole window: every roster change and every reconnect is looked at again. */
@@ -134,6 +182,13 @@ export class GroupLinks {
   async reconcile(): Promise<void> {
     // Remembered machines are still being added: one of them may be the member that looks missing.
     if (!this.workspace.settled) return;
+    // Paired again by hand since the group brought it, which its saved entry records: it is the owner's from then on.
+    const saved = readEnvironments();
+    for (const machine of this.workspace.machines) {
+      if (machine.coreId === undefined || !saved.some((env) => env.url === machine.id && env.coreId === undefined)) continue;
+      delete machine.coreId;
+      delete machine.groupId;
+    }
     // Only a machine that has answered about its group speaks here; one still loading neither vouches nor denies.
     const informed = this.workspace.machines.filter((machine) => machine.store.connection === 'ready' && machine.store.client !== null && machine.store.groupKnown);
     if (informed.length === 0) return;
@@ -162,8 +217,8 @@ export class GroupLinks {
       let existing = this.workspace.machines.find((machine) => GroupLinks.coreOf(machine) === coreId);
       // A key the group handed out for an address the machine no longer gives, or no longer
       // allows now that it has HTTPS, is not sent there again: the machine is reached anew.
-      if (existing?.coreId !== undefined && existing.store !== this.workspace.primary && !usableAddresses(core.addresses, this.#secure()).includes(existing.id)) {
-        await this.workspace.remove(existing.id);
+      if (existing?.coreId !== undefined && !usableAddresses(core.addresses, this.#secure()).includes(existing.id)) {
+        await this.#drop(existing);
         existing = undefined;
       }
       if (existing !== undefined && (existing.store.connection !== 'closed' || this.#holdsKey(existing))) {
@@ -195,9 +250,14 @@ export class GroupLinks {
       const orphaned = machine.store.connection === 'closed' && !this.#holdsKey(machine)
         && !informed.some((other) => other !== machine && other.coreId === undefined && other.store.group?.id === machine.groupId);
       if (!delisted && !orphaned) continue;
-      if (machine.store === this.workspace.primary) await machine.store.forgetEnvironment(machine.id);
-      else await this.workspace.remove(machine.id);
+      await this.#drop(machine);
     }
+  }
+
+  /** The machine this window opened on cannot leave the list: its key goes and the window falls back to its own core. */
+  async #drop(machine: Machine): Promise<void> {
+    if (machine.store === this.workspace.primary) await this.workspace.dropPrimary(machine.id);
+    else await this.workspace.remove(machine.id);
   }
 
   /** A remembered key reconnects by itself; a machine without one needs a ticket again. */

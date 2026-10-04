@@ -387,6 +387,45 @@ test('members reach each other for agent messages and browser origins without a 
   expect(response.status).toBe(403);
 });
 
+test('the owner\'s app carries what two members cannot send each other directly, still sealed', async () => {
+  const a = await machine();
+  const b = await machine();
+  const ownerA = await a.connect();
+  const ownerB = await b.connect();
+  const brief: CoordinationConfig = { mode: 'brief', resources: 'shared VM', remote: true, paused: false };
+  const ta = (await echoThread(a, ownerA, 'Maintenance')).threadId;
+  const tb = (await echoThread(b, ownerB, 'Relayed-title')).threadId;
+  a.core.coordination.configure(ta, brief);
+  b.core.coordination.configure(tb, brief);
+  await a.core.group.create('Home');
+  await join(a, b);
+  await waitFor(() => members(b).length === 2);
+  const carried: { body: string; signature: string }[] = [];
+  const forwarding: Promise<unknown>[] = [];
+  ownerA.on('collaboration.bridge.request', (request) => {
+    carried.push({ body: request.body, signature: request.signature });
+    forwarding.push(ownerB.call('collaboration.bridge.forward', { coreId: request.fromCoreId, body: request.body, signature: request.signature })
+      .then((response) => ownerA.call('collaboration.bridge.reply', { requestId: request.requestId, response })));
+  });
+  // No link was made by hand: being members of one group is enough for the app to relay between them.
+  expect(a.core.coordination.peers()).toEqual([]);
+  await ownerA.call('collaboration.bridge.register', { coreId: id(b), enabled: true });
+  await expect(ownerA.call('collaboration.bridge.register', { coreId: 'f'.repeat(64), enabled: true })).rejects.toThrow('trusted for coordination');
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    if (String(input).endsWith('/agent-messages')) throw new Error('no route between the two machines');
+    return real(input, init);
+  }) as typeof fetch;
+  try {
+    expect((await a.core.coordination.directory(ta)).agents.map((agent) => agent.title)).toEqual(['Relayed-title']);
+  } finally {
+    globalThis.fetch = real;
+  }
+  await Promise.all(forwarding);
+  expect(carried.length).toBeGreaterThan(0);
+  expect(carried.every((entry) => entry.signature === SEALED && !entry.body.includes('operation'))).toBe(true);
+});
+
 test('a roster is only taken from a member, never from a machine linked by hand', async () => {
   const a = await machine();
   const linked = await machine();
@@ -622,7 +661,23 @@ test('only a holder of the invitation spends the join allowance, and a pairing l
   for (let index = 0; index < 20; index += 1) expect((await attempt('0'.repeat(64))).status).toBe(403);
   for (let index = 0; index < 40; index += 1) expect((await attempt(inviteId)).status).toBe(403);
   const retry = b.core.group as unknown as { roster: Roster | null };
-  for (let index = 0; index < 30; index += 1) {
+  const real = globalThis.fetch;
+  let recorded: { body: string; headers: Headers } | undefined;
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    if (String(input).endsWith('/group/join')) recorded = { body: String(init?.body ?? ''), headers: new Headers(init?.headers) };
+    return real(input, init);
+  }) as typeof fetch;
+  try {
+    expect((await b.core.group.join(invite)).cores).toHaveLength(2);
+  } finally {
+    globalThis.fetch = real;
+  }
+  // That join, recorded on the path and sent again forty times: refused before it is opened, and never charged.
+  for (let index = 0; index < 40; index += 1) {
+    const replay = await fetch(`${a.url}/group/join`, { method: 'POST', body: recorded!.body, headers: recorded!.headers });
+    expect([replay.status, await replay.text()]).toEqual([403, 'this join request was already received']);
+  }
+  for (let index = 0; index < 29; index += 1) {
     retry.roster = null;
     expect((await b.core.group.join(invite)).cores).toHaveLength(2);
   }
@@ -661,18 +716,31 @@ test('a recorded request sent again and again never spends the member\'s allowan
   expect(await b.core.coordination.request(peer, 'directory', {})).toEqual([]);
 });
 
-test('refused requests are counted against the address they come from, for a minute', () => {
+test('requests are counted against the address they come from as they arrive, and a refusal keeps its place for a minute', () => {
   const refusals = new Refusals();
   const start = 1_000_000;
-  for (let index = 0; index < REFUSALS_PER_MINUTE - 1; index += 1) refusals.record('10.0.0.9', start);
-  expect(refusals.blocked('10.0.0.9', start)).toBe(false);
-  refusals.record('10.0.0.9', start + 1);
-  expect(refusals.blocked('10.0.0.9', start + 2)).toBe(true);
+  // Sixty requests held open at once take every place: the next is turned away before its body is read.
+  const held = Array.from({ length: REFUSALS_PER_MINUTE }, () => refusals.begin('10.0.0.9', start));
+  expect(held.every((answered) => answered !== null)).toBe(true);
+  expect(refusals.begin('10.0.0.9', start)).toBeNull();
+  // Answered well, a request gives its place back. Refused, as unproven, removed or over quota, it keeps it.
+  expect([403, 410, 429, 200, 400].map((status) => Refusals.refuses(status))).toEqual([true, true, true, false, false]);
+  held[0]!(false);
+  refusals.begin('10.0.0.9', start + 1)!(true);
+  for (const answered of held.slice(1)) answered!(true);
+  expect(refusals.begin('10.0.0.9', start + 2)).toBeNull();
   // Another address is not the one that misbehaved, and the minute ends.
-  expect(refusals.blocked('10.0.0.10', start + 2)).toBe(false);
-  expect(refusals.blocked('10.0.0.9', start + 60_001)).toBe(false);
-  refusals.record('10.0.0.9', start + 60_001);
-  expect(refusals.blocked('10.0.0.9', start + 60_002)).toBe(false);
+  refusals.begin('10.0.0.10', start + 2)!(false);
+  refusals.begin('10.0.0.9', start + 60_001)!(true);
+  expect(refusals.begin('10.0.0.9', start + 60_002)).not.toBeNull();
+
+  // A table with no room left counts the addresses it cannot hold together, never leaves them uncounted.
+  const full = new Refusals(2);
+  full.begin('10.0.1.1', start)!(true);
+  full.begin('10.0.1.2', start)!(true);
+  for (let index = 0; index < REFUSALS_PER_MINUTE; index += 1) full.begin(`10.0.2.${index}`, start)!(true);
+  expect(full.begin('10.0.3.1', start)).toBeNull();
+  expect(full.begin('10.0.1.1', start)).not.toBeNull();
 });
 
 test('a removal needs no admission behind it, and the invitation is never a command-line argument', async () => {

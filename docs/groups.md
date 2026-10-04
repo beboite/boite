@@ -170,8 +170,10 @@ exchange. A removal counts whoever reports it: in doubt a machine is out.
 Inside an epoch an entry carries a revision, for a machine republishing its
 name and addresses, and the higher one wins. A revoked device is final too.
 Removed entries are never dropped, since a missing one would let a stale copy
-bring the entry back: a group lists at most 64 machines and 400 devices over
-its life, removed ones included, and takes no new one past that.
+bring the entry back: a member admits no machine past 64 and no device past
+400 listed over the group's life, removed ones included. Two members can admit
+at the same moment before they have exchanged, so a roster received is read up
+to twice those counts, and past that it is refused whole.
 
 **Joining.** An invitation names the group, the inviting member's id, box key
 and addresses, and a one-time grant. The joining core calls `POST /group/join`
@@ -181,7 +183,9 @@ never sent: the request names the invitation by a hash and only opens for the
 machine that minted it. The member checks that the signature matches the
 announced key, adds the machine and answers with the roster, signed and sealed
 back. Thirty requests a minute that open are served, and the invitation must
-still be live when the request has been read. The joining core accepts the answer only if the key that signed it has
+still be live when the request has been read. A request already received is
+refused before anything is computed for it, so one recorded on the path and
+sent again spends nothing of those thirty. The joining core accepts the answer only if the key that signed it has
 the id the invitation named. A machine that merely sits at that address reads
 nothing and cannot answer, and a request that names no known invitation costs
 the member one lookup.
@@ -198,13 +202,18 @@ primitives (`group/seal.ts`). Who talks to whom, how much and when stays
 readable on the path: the sender's id is a header. The recipient's key is long-lived: someone who records the
 traffic and later steals that machine's key file reads what was sent to it.
 
-**Strangers.** A request on these two routes that does not prove who sent it
-is refused, after a key agreement or a signature check. Sixty refusals a
-minute from one address and that address is answered nothing more for the rest
-of the minute, before its body is read. Requests from the machine itself are
-not counted, since a reverse proxy puts every remote peer behind that one
-address. A member's own allowance, 120 requests a minute, is only spent by
-requests that are its own, fresh and not seen before.
+**Strangers.** A request on these two routes is refused when it does not
+prove who sent it, when its sender was removed or when that sender is over its
+allowance, and each refusal costs a key agreement or a signature check. An
+address has sixty places a minute: a request takes one as it arrives, gives it
+back when it is answered well and keeps it for the rest of the minute when it
+is refused. With no place left the address is answered nothing more, before
+its body is read, so sixty requests held open together gain nothing. The core
+remembers 1024 addresses at once, and the ones past that share one such
+allowance. Requests from the machine itself are not counted, since a reverse
+proxy puts every remote peer behind that one address. A member's own
+allowance, 120 requests a minute, is only spent by requests that are its own,
+fresh and not seen before.
 
 **Tickets.** A client connected to a member asks it for a ticket to another
 (`group.ticket`): the member's signed statement of who vouches, for whom, at
@@ -248,9 +257,21 @@ client was paired with by hand, the one it opened on included. A machine the
 group brought vouches for nothing: it is dropped once one of those hand-paired
 machines, in the same group, no longer lists it, whatever it and other
 machines the group brought say. A machine paired by hand is never touched,
-even when it sits at a member's address or another machine reports its name. A
-key the group handed out for an address the machine no longer gives, or no
-longer allows once it has HTTPS, is dropped and the machine reached anew.
+even when it sits at a member's address or another machine reports its name,
+and a machine the group brought never takes the place of the window's own core
+by reporting this computer's name. Opening a pairing link on a machine the
+group brought makes it one paired by hand from then on. A key the group handed
+out for an address the machine no longer gives, or no longer allows once it has
+HTTPS, is dropped and the machine reached anew, the machine the window opened
+on included: the window then goes back to its own core.
+
+At start, a key the group brought for a plain HTTP address is not sent before
+the machines paired by hand have been asked, each on a short connection of its
+own, what their group lists (`GroupLinks.vet`). A key whose address no longer
+stands is forgotten unsent. They get three seconds: when none of that group
+answers, the machine that vouched being off, the key is used as it was left, so
+someone able to keep those machines silent still gets it sent to the old
+address.
 
 ## Limits
 
@@ -287,7 +308,11 @@ leaving, origins and agent coordination without a hand-made link, a capture of
 every byte two members exchange to show none of it is readable, and one case
 per finding of the security review: an invitation reused after a removal, a
 ticket replayed after a restart, keys left by a crash, an answer landing after
-its sender was removed, a rewritten status line. The shared contract scenario in
+its sender was removed, a rewritten status line, a join recorded and sent
+again, requests held open from one address, the owner's app relaying between
+two members that cannot reach each other. `packages/ui/src/lib/group-links.test.ts`
+and `workspace.test.ts` hold the client rules: which addresses get a key, who
+says who is in a group, and what is asked before a held key is sent. The shared contract scenario in
 `tests/contract/scenarios.ts` holds the refusals on the core and on the
 in-memory client. `tests/e2e/machines.test.ts` joins two real cores from the
 page and writes desktop and phone captures.

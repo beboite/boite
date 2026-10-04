@@ -135,7 +135,7 @@ export class Coordination {
    * Every machine a letter may cross to: the hand-made links first, so the
    * permissions the owner set on one win, then the members of this core's group.
    */
-  private trusted(): CoordinationPeer[] {
+  trusted(): CoordinationPeer[] {
     const manual = this.peers();
     return [...manual, ...this.core.group.peers().filter(peer => !manual.some(known => known.coreId === peer.coreId))];
   }
@@ -883,7 +883,7 @@ export function registerCoordination(core: Core): void {
   core.router.register('collaboration.trust', p => core.coordination.trust(p.peer));
   core.router.register('collaboration.untrust', p => core.coordination.untrust(p.coreId));
   core.router.register('collaboration.bridge.register', (p, ctx) => {
-    if (!core.coordination.peers().some(peer => peer.coreId === p.coreId)) throw refused('coreId: expected a machine trusted for coordination');
+    if (!core.coordination.trusted().some(peer => peer.coreId === p.coreId)) throw refused('coreId: expected a machine trusted for coordination');
     return core.coordination.bridge.register(p.coreId, p.enabled, ctx.connection);
   });
   core.router.register('collaboration.bridge.forward', p => core.coordination.forward(p));

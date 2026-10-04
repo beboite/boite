@@ -199,6 +199,20 @@ export function forgetGroupOf(url: string): StoredEnvironment[] {
   return list;
 }
 
+/**
+ * Keeps the key a core handed back for a grant or a ticket. A grant is a
+ * pairing made by hand: whatever group brought this machine before has no say
+ * over it any more, so the mark that lets a group drop it goes.
+ */
+export function rememberSession(endpoint: Endpoint, token: string): StoredEnvironment[] {
+  if (endpoint.grant !== undefined) forgetGroupOf(endpoint.url);
+  return upsertEnvironment({
+    url: endpoint.url, token, paired: true,
+    ...(endpoint.coreId === undefined ? {} : { coreId: endpoint.coreId }),
+    ...(endpoint.groupId === undefined ? {} : { groupId: endpoint.groupId })
+  });
+}
+
 /** Forgets the core. Its key stays valid there until revoked; it just opens nothing from here. */
 export function removeEnvironment(url: string): StoredEnvironment[] {
   const list = readEnvironments().filter((env) => env.url !== normalise(url));

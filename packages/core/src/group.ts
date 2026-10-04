@@ -100,7 +100,7 @@ export class GroupStore {
   /** Session id here to the member it stands for: `core:<id>` or `device:<id>`. Local, never exchanged. */
   private sessions: Record<string, string> = {};
   /** Keyed by `inviteId`: the grant itself is kept nowhere once the invitation is handed out. */
-  private readonly invites = new Map<string, { expiresAt: number; joined: string | null; psk: Buffer }>();
+  private readonly invites = new Map<string, { expiresAt: number; joined: string | null; psk: Buffer; seen: Set<string> }>();
   private boxKey: KeyObject | null = null;
   /** Ticket nonces already exchanged, until they would have expired anyway. Kept in the journal: a restart must not make a used ticket good again. */
   private readonly spent = new Map<string, number>();
@@ -593,7 +593,7 @@ export class GroupStore {
     for (const [grant, invite] of this.invites) if (invite.expiresAt <= now) this.invites.delete(grant);
     const grant = newToken();
     const expiresAt = now + GRANT_TTL_MS;
-    this.invites.set(inviteId(grant), { expiresAt, joined: null, psk: invitePsk(grant) });
+    this.invites.set(inviteId(grant), { expiresAt, joined: null, psk: invitePsk(grant), seen: new Set() });
     return { invite: encodeInvite({ g: roster.id, n: roster.name, c: self.coreId, a: self.addresses, x: self.box, t: grant }), expiresAt };
   }
 
@@ -674,7 +674,13 @@ export class GroupStore {
     const context = { from, to: this.selfId() };
     let opened: { plaintext: string; responseKey: Buffer };
     try {
-      opened = open(await boundedBody(request.body, JOIN_BODY_MAX), this.box().key, context, invite.psk);
+      const raw = await boundedBody(request.body, JOIN_BODY_MAX);
+      // A request recorded on the path and sent again is refused before anything is computed for it:
+      // its sender holds no invitation, and what it replays must not spend the allowance below.
+      const digest = createHash('sha256').update(raw).digest('hex');
+      if (invite.seen.has(digest)) return new Response('this join request was already received', { status: 403 });
+      opened = open(raw, this.box().key, context, invite.psk);
+      invite.seen.add(digest);
     } catch {
       return new Response('unknown or expired invitation', { status: 403 });
     }

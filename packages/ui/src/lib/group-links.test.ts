@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Group, GroupCore } from '@boite/contracts';
-import { ENVIRONMENTS_STORAGE_KEY, type Endpoint } from './endpoint';
+import { ENVIRONMENTS_STORAGE_KEY, readEnvironments, type Endpoint } from './endpoint';
 import { GroupLinks, usableAddresses } from './group-links.svelte';
 import type { Machine, Workspace } from './workspace.svelte';
 
@@ -13,13 +13,13 @@ interface FakeStore {
   group: Group | null;
   groupKnown: boolean;
   endpointUrl: string | null;
-  forgetEnvironment: ReturnType<typeof vi.fn>;
+  loadGroup: ReturnType<typeof vi.fn>;
 }
 
 function machine(id: string, store: Partial<FakeStore>, brought?: { coreId: string; groupId?: string }): Machine {
   const full: FakeStore = {
     connection: 'ready', client: { call: vi.fn(async () => ({ ticket: `ticket-for-${id}` })) }, group: null, groupKnown: true, endpointUrl: id,
-    forgetEnvironment: vi.fn(async () => undefined), ...store
+    loadGroup: vi.fn(async () => undefined), ...store
   };
   return { id, label: id, store: full as unknown as Machine['store'], ...(brought === undefined ? {} : { coreId: brought.coreId, groupId: brought.groupId ?? 'grp' }) };
 }
@@ -40,7 +40,8 @@ function workspace(machines: Machine[]) {
     remove: vi.fn(async (id: string) => {
       removed.push(id);
       stub.machines = stub.machines.filter((entry) => entry.id !== id);
-    })
+    }),
+    dropPrimary: vi.fn(async (_id: string) => undefined)
   };
   return { stub, added, removed, workspace: stub as unknown as Workspace };
 }
@@ -164,10 +165,10 @@ describe('group links', () => {
   it('forgets the key of the machine this window opens on when the group that brought it dropped it', async () => {
     const opened = machine('http://100.64.0.2:1', { group: group('b', members) }, { coreId: 'b' });
     const a = machine('http://10.0.0.1:1', { group: group('a', [members[0]!]) });
-    const { workspace: ws, removed } = workspace([opened, a]);
+    const { stub, workspace: ws, removed } = workspace([opened, a]);
     const links = new GroupLinks(ws, { reach: async () => null, secure: () => false });
     await links.reconcile();
-    expect(storeOf(opened).forgetEnvironment).toHaveBeenCalledWith('http://100.64.0.2:1');
+    expect(stub.dropPrimary).toHaveBeenCalledWith('http://100.64.0.2:1');
     expect(removed).toEqual([]);
   });
 
@@ -221,6 +222,49 @@ describe('group links', () => {
     await settle();
     expect(removed).toEqual(['http://100.64.0.2:1']);
     expect(added.map((entry) => entry.endpoint.url)).toEqual(['https://b.example']);
+  });
+
+  it('stops sending the old key over HTTP when the machine this window opened on starts giving HTTPS', async () => {
+    const upgraded = [members[0]!, core('b', ['https://b.example', 'http://100.64.0.2:1'])];
+    const opened = machine('http://100.64.0.2:1', { group: group('b', upgraded) }, { coreId: 'b' });
+    const a = machine('http://10.0.0.1:1', { group: group('a', upgraded) });
+    const { stub, workspace: ws, removed, added } = workspace([opened, a]);
+    const links = new GroupLinks(ws, { reach: async (addresses) => addresses[0] ?? null, secure: () => false });
+    await links.reconcile();
+    await settle();
+    expect(stub.dropPrimary).toHaveBeenCalledWith('http://100.64.0.2:1');
+    expect(removed).toEqual([]);
+    expect(added.map((entry) => entry.endpoint.url)).toEqual(['https://b.example']);
+  });
+
+  it('sends a key the group brought over plain HTTP, at start, only where a hand-paired machine says it still stands', async () => {
+    const entry = (url: string, coreId: string, groupId = 'grp') => ({ url, label: coreId, token: 'key', paired: true, coreId, groupId });
+    const held = [entry('http://100.64.0.2:1', 'b'), entry('http://10.0.0.3:1', 'c'), entry('http://10.0.0.4:1', 'd'), entry('http://10.9.9.9:1', 'z', 'other')];
+    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify(held));
+    const { workspace: ws } = workspace([machine('http://10.0.0.1:1', {})]);
+    const roster = group('a', [...members, core('c', ['https://c.example', 'http://10.0.0.3:1'])]);
+    // One machine paired by hand answers, another is off, a third is in no group.
+    const ask = vi.fn(async (endpoint: Endpoint) => (endpoint.url === 'http://10.0.0.1:1' ? roster : endpoint.url === 'https://alone.example' ? null : undefined));
+    const anchors = [{ url: 'http://10.0.0.1:1', token: 'hand' }, { url: 'http://10.0.0.5:1', token: 'hand' }, { url: 'https://alone.example', token: 'hand' }];
+    const cleared = await new GroupLinks(ws, { secure: () => false, ask }).vet(held, anchors);
+    expect(ask).toHaveBeenCalledTimes(3);
+    // b still gives that address. c gives HTTPS now and d left the group: their keys are forgotten unsent.
+    // Nobody here speaks for the other group, so its key is used as it was left.
+    expect(cleared.map((env) => env.coreId)).toEqual(['b', 'z']);
+    expect(readEnvironments().map((env) => env.coreId)).toEqual(['b', 'z']);
+    // The machine that vouched is off: the key is used as it was left.
+    expect(await new GroupLinks(ws, { secure: () => false, ask: async () => undefined }).vet([held[0]!], anchors)).toEqual([held[0]]);
+  });
+
+  it('treats a machine paired again by hand as the owner\'s own, whatever its former group says afterwards', async () => {
+    // The pairing link took the group's mark off its saved entry.
+    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([{ url: 'http://100.64.0.2:1', label: 'B', token: 'key', paired: true }]));
+    const a = machine('http://10.0.0.1:1', { group: group('a', [members[0]!]) });
+    const repaired = machine('http://100.64.0.2:1', { group: null }, { coreId: 'b' });
+    const { workspace: ws, removed } = workspace([a, repaired]);
+    await new GroupLinks(ws, { reach: async () => null, secure: () => false }).reconcile();
+    expect(removed).toEqual([]);
+    expect(repaired.coreId).toBeUndefined();
   });
 
   it('takes the word of the hand-paired machine that no longer lists a member over the one that still does', async () => {
