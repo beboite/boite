@@ -368,9 +368,9 @@ test('a draft names its project in the heading and the dropdown moves it to anot
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
 
-  const heading = query('[data-testid=draft-empty]');
-  expect(heading.textContent).toContain('with approval requests in');
-  expect(heading.textContent).toContain('notes');
+  const heading = query('[data-testid=draft-sentence]');
+  expect(heading.querySelector('p')?.textContent).toContain('with approval requests');
+  expect(heading.querySelector('h1')?.textContent).toContain('notes');
   // The heading says the project, so the header chip no longer repeats it.
   expect(query('[data-testid=thread-header]').textContent).not.toContain('notes');
 
