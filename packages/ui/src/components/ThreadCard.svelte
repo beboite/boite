@@ -209,7 +209,7 @@
         <span class="title ui-label">{thread.title}</span>
         {#if draft}<span class="draft" data-testid="thread-draft" title={strings.sidebar.unsentDraft} aria-label={strings.sidebar.unsentDraft}><PencilLine size={12} /></span>{/if}
         {#if thread.pinned}<Pin size={12} />{/if}
-        <ThreadState {thread} {now} />
+        <ThreadState {thread} {now} subagents={owner.subagents(thread.id)} />
       </span>
       {#if pending}
         <span class="pending" data-testid="thread-pending" title={pending}><FolderInput size={12} /><span class="ui-label">{pending}</span></span>

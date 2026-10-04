@@ -1,8 +1,9 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import type { ThreadSummary } from '@boite/contracts';
+import type { ThreadId, ThreadSummary } from '@boite/contracts';
 import ThreadState from './ThreadState.svelte';
 import { projectRollup, threadState } from '../lib/thread-state';
+import { workingChildren, type WorkingChildren } from '../lib/thread-rows';
 
 type Shown = Pick<ThreadSummary, 'status' | 'unread' | 'runningSince' | 'backgroundWork' | 'lastUserMessageAt' | 'createdAt'>;
 
@@ -16,12 +17,36 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function draw(thread: Partial<Shown>): HTMLElement {
+function draw(thread: Partial<Shown>, subagents: WorkingChildren | null = null): HTMLElement {
   const shown: Shown = { status: 'idle', unread: false, runningSince: null, backgroundWork: null, lastUserMessageAt: NOW - 120_000, createdAt: NOW - 600_000, ...thread };
-  running = mount(ThreadState, { target: document.body, props: { thread: shown, now: NOW } });
+  running = mount(ThreadState, { target: document.body, props: { thread: shown, now: NOW, subagents } });
   flushSync();
   return document.body.firstElementChild as HTMLElement;
 }
+
+test('a parent whose turn ended waits on its working sub-agents with the monitor sign', () => {
+  vi.useFakeTimers({ now: NOW });
+  const children = [
+    { id: 'child-1', parentThreadId: 'parent', status: 'running', runningSince: NOW - 90_000 },
+    { id: 'child-2', parentThreadId: 'parent', status: 'queued', runningSince: null },
+    { id: 'child-3', parentThreadId: 'parent', status: 'idle', runningSince: null },
+    { id: 'child-4', parentThreadId: 'parent', status: 'running', runningSince: NOW - 10_000, archived: true },
+    { id: 'parent', parentThreadId: null, status: 'idle', runningSince: null }
+  ] as unknown as ThreadSummary[];
+  const working = workingChildren(children);
+  expect([...working.keys()]).toEqual(['parent']);
+  expect(working.get('parent' as ThreadId)).toEqual({ count: 2, since: NOW - 90_000 });
+
+  const state = draw({ status: 'idle', unread: true, backgroundWork: { kinds: ['shell'], since: NOW } }, working.get('parent' as ThreadId)!);
+  expect(state.dataset['state']).toBe('delegating');
+  expect(state.querySelector('svg')).not.toBeNull();
+  expect(state.getAttribute('title')).toBe('Waiting on 2 sub-agents\n1m 30s');
+  // Its own turn or a question for the user still come first.
+  expect(threadState({ status: 'running', unread: false }, 2)).toBe('working');
+  expect(threadState({ status: 'waiting', unread: false }, 2)).toBe('waiting');
+  expect(threadState({ status: 'idle', unread: false }, 0)).toBeNull();
+  expect(projectRollup([{ status: 'idle', unread: true }, { status: 'idle', unread: false }], thread => thread.unread ? 0 : 1)).toEqual({ kind: 'delegating', count: 1 });
+});
 
 test('each status reads as one state, and a thread at rest the user saw has none', () => {
   expect(threadState({ status: 'running', unread: false })).toBe('working');

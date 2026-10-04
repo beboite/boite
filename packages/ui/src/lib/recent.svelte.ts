@@ -41,12 +41,13 @@ export const recentPreferences = new RecentPreferences();
 /** Pins, pending input, failures and questions stay in the user's attention list. */
 export function groupWorkingThread(store: Store, thread: ThreadSummary): boolean {
   if (thread.pinned || hasUnsentDraft(store.composerStates[thread.id])) return false;
-  return workingThread(thread);
+  return workingThread(store, thread);
 }
 
-export function workingThread(thread: ThreadSummary): boolean {
-  const state = threadState(thread);
-  return state === 'working' || state === 'queued' || state === 'monitoring' || state === 'background';
+/** At work, its own turn, its delegated agents' or what it left running: nothing for the user to do yet. */
+export function workingThread(store: Pick<Store, 'subagents'>, thread: ThreadSummary): boolean {
+  const state = threadState(thread, store.subagents(thread.id)?.count ?? 0);
+  return state === 'working' || state === 'queued' || state === 'delegating' || state === 'monitoring' || state === 'background';
 }
 
 /** Marking done never interrupts a turn or discards input; Archive is a separate menu action. */
