@@ -130,6 +130,16 @@ may finish and are not undone. Commands have a 20 second deadline. macOS, Linux 
 phone client do not provide automation yet. Every provider uses this same CLI;
 no provider-specific integration or paid model call is needed for these tests.
 
+## Simulators and emulators
+
+`boite device help` lists the commands. `boite device list` shows the iOS
+Simulators and Android emulators or phones on the machine that runs the core,
+and why a platform is missing. `open` boots one, shows it in the user's Device
+panel, waits until it is ready and prints the `adb -s <serial>` or
+`xcrun simctl` prefix that drives it. `screenshot`, `tap`, `swipe`, `type`,
+`key` and `close [--shutdown]` act on it. Details and limits are in
+[devices.md](devices.md).
+
 ## Pull requests linked to a conversation
 
 `boite pr link <url>` verifies a GitHub pull request and saves its link in the

@@ -2,9 +2,11 @@ import type { AgentsRpcMethods, AgentsRpcEvents } from './agents';
 import type { WorkflowsRpcMethods, WorkflowsRpcEvents } from './workflows';
 import type { BrowserRpcMethods, BrowserRpcEvents, BrowserProfile } from './browser';
 import type { PullRequestsRpcMethods, PullRequestsRpcEvents } from './pull-requests';
+import type { MobileDevicesRpcMethods, MobileDevicesRpcEvents } from './mobile-devices';
 export * from './pull-requests';
 export * from './browser';
 export * from './browser-remote';
+export * from './mobile-devices';
 export * from './agents';
 export * from './workflows';
 export * from './workflow-plan';
@@ -2554,7 +2556,7 @@ export function normalizeCoreLogText(text: string, secrets: readonly string[] = 
   return value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').slice(0, 4096);
 }
 
-export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods {
+export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods, MobileDevicesRpcMethods {
   /** Owner-only project policy; absent policy defaults to enabled. */
   'projects.setAutoArchiveMergedPr': { params: { projectId: ProjectId; enabled: boolean }; result: Project };
   /** Owner-only, private bounded diagnostic history, including earlier runs. */
@@ -2930,7 +2932,13 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
     params: { providerId: ProviderId; label: string; useDefaultLocation?: boolean };
     result: Account;
   };
-  /** Removing a default CLI account prevents automatic adoption; an explicit add can restore it. */
+  /** How many top-level conversations still name the account, archived ones included: what a removal warns about. */
+  'accounts.threads': { params: { accountId: AccountId }; result: { count: number } };
+  /**
+   * Removing a default CLI account prevents automatic adoption; an explicit add
+   * can restore it. Refused while a turn runs on the account. Conversations that
+   * name it stay, and refuse to send until another account is chosen in them.
+   */
   'accounts.remove': { params: { accountId: AccountId }; result: { ok: true } };
   'accounts.rename': { params: { accountId: AccountId; label: string }; result: Account };
   /** Refresh the provider's login when requested; never uses a model catalogue as authentication. */
@@ -3268,7 +3276,7 @@ export type RpcMethodName = keyof RpcMethods;
 export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
 export type RpcResult<M extends RpcMethodName> = RpcMethods[M]['result'];
 
-export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserRpcEvents, PullRequestsRpcEvents {
+export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserRpcEvents, PullRequestsRpcEvents, MobileDevicesRpcEvents {
   'resources.memory': MemoryEvent;
   'thread.memory': MemoryEvent & { threadId: string };
   'delegation.changed': { threadId: ThreadId };

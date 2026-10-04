@@ -7,6 +7,7 @@ import type { Component } from 'svelte';
 import { ChartPie, Folder, FolderPlus, Gauge, GitBranch, SquareTerminal } from '@lucide/svelte';
 import type { SurfaceKind } from './right-panel.svelte';
 import { strings } from './strings';
+import { experimentOn } from './experiments.svelte';
 import { CARDS, kindName } from './surface-labels';
 import type { ControlId } from './work-prefs.svelte';
 
@@ -40,7 +41,7 @@ export function controlGroups(owner: boolean): ControlGroup[] {
     { id: 'sidebar.limits', label: strings.usage.limits, icon: Gauge },
     ...(owner ? [{ id: 'sidebar.add-project' as const, label: strings.sidebar.addProject, icon: FolderPlus }] : [])
   ];
-  const panel: ControlEntry[] = CARDS.map((card) => ({ id: `panel.${card.kind}` as ControlId, label: kindName(card.kind), icon: null, kind: card.kind }));
+  const panel: ControlEntry[] = CARDS.filter((card) => card.kind !== 'device' || experimentOn('device-panel')).map((card) => ({ id: `panel.${card.kind}` as ControlId, label: kindName(card.kind), icon: null, kind: card.kind }));
   return [
     { id: 'header', label: strings.controls.header, entries: header },
     { id: 'composer', label: strings.controls.composer, entries: [

@@ -212,9 +212,14 @@
   }
 
   async function remove(account: Account) {
+    // Asked before the dialog: archived conversations count too and are not in this client's lists.
+    const count = await store.accountThreads(account.id);
+    if (count === null) return;
+    const body = account.isolationDir === null ? strings.accounts.removeDefaultBody : strings.accounts.removeBody;
+    const warning = count === 0 ? '' : (count === 1 ? strings.accounts.removeThread : strings.accounts.removeThreads).replace('{count}', String(count));
     const accepted = await confirm.ask({
       title: strings.accounts.removeTitle.replace('{account}', account.label),
-      body: account.isolationDir === null ? strings.accounts.removeDefaultBody : strings.accounts.removeBody,
+      body: warning ? `${warning} ${body}` : body,
       confirmLabel: strings.accounts.remove,
       cancelLabel: strings.install.removeCancel,
       danger: true

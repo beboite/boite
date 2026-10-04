@@ -4,6 +4,7 @@
   import { watchBrowserHosts } from './lib/browser-hosts.svelte';
   import { browserBridge } from './lib/browser-bridge';
   import { watchRemoteBrowser } from './lib/remote-browser-watch.svelte';
+  import { watchDevices } from './lib/device-watch';
   import { browserProfiles } from './lib/browser-profiles.svelte';
   import TerminalDrawer from './components/TerminalDrawer.svelte';
   import UndoToast from './components/UndoToast.svelte';
@@ -54,6 +55,12 @@
     const threadId = store.openThread?.id;
     void store.connection;
     if (!inShell && !browserBridge.paints && threadId && store.client?.state === 'ready') return watchRemoteBrowser(store, threadId);
+  });
+  // A simulator or emulator the agent opens shows up in the panel, here and on a phone (docs/devices.md).
+  $effect(() => {
+    const threadId = store.openThread?.id;
+    void store.connection;
+    if (experimentOn('device-panel') && threadId && store.client?.state === 'ready') return watchDevices(store, threadId);
   });
   const narrow = new MediaQuery('(max-width: 720px)');
   let appRoot = $state<HTMLDivElement | undefined>(undefined);
