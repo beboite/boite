@@ -550,6 +550,39 @@ test('a member is asked on the address that answered last, and on the others onl
   expect(dialled.filter((url) => url.includes('localhost'))).toEqual([]);
 });
 
+test('a request begun for a member is never sent readable once this machine has left the group', async () => {
+  const a = await machine();
+  const b = await machine();
+  await a.core.group.create('Home');
+  await join(a, b);
+  await waitFor(() => members(b).length === 2);
+  const held = a.core.group as unknown as { roster: Roster | null };
+  const dead = 'http://127.0.0.1:1';
+  held.roster = { ...held.roster!, cores: held.roster!.cores.map((core) => (core.coreId === id(b) ? { ...core, addresses: [dead, b.url] } : core)) };
+  const entry = held.roster.cores.find((core) => core.coreId === id(b))!;
+  const real = globalThis.fetch;
+  const sent: { url: string; signature: string }[] = [];
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    if (String(input).endsWith('/agent-messages')) {
+      sent.push({ url: String(input), signature: new Headers(init?.headers).get('x-boite-signature') ?? '' });
+      // The first address is down, and before the second is tried this machine is out of the group.
+      if (sent.length === 1) {
+        held.roster = null;
+        throw new Error('down');
+      }
+    }
+    return real(input, init);
+  }) as typeof fetch;
+  try {
+    const peer = { coreId: entry.coreId, name: entry.name, url: dead, publicKey: entry.publicKey };
+    await expect(a.core.coordination.request(peer, 'directory', {})).rejects.toThrow('no longer in the group');
+  } finally {
+    globalThis.fetch = real;
+  }
+  // One request left, sealed. The second, which could only have gone readable, was never sent.
+  expect(sent).toEqual([{ url: `${dead}/agent-messages`, signature: SEALED }]);
+});
+
 test('a roster is only taken from a member, never from a machine linked by hand', async () => {
   const a = await machine();
   const linked = await machine();
@@ -670,7 +703,11 @@ test('a used invitation welcomes its machine again without writing, and never af
   await b.core.group.leave();
   expect(members(a)).toEqual([id(a)]);
   // It left, which is a removal: the invitation it came in with does not bring it back.
-  await expect(b.core.group.join(invite)).rejects.toThrow('has since been removed');
+  // Refused before anything is opened or counted: a machine that was removed cannot spend the allowance with its old invitation.
+  const joins = (): number => (a.core.group as unknown as { joins: { count: number } }).joins.count;
+  const counted = joins();
+  await expect(b.core.group.join(invite)).rejects.toThrow('no machine accepted');
+  expect(joins()).toBe(counted);
   expect(members(a)).toEqual([id(a)]);
   expect(b.core.group.view('owner')).toBeNull();
   // A fresh invitation does, under a new admission.

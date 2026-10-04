@@ -548,6 +548,29 @@ describe('WsClient', () => {
     client.close();
   });
 
+  test('a key is taken only from a core that was shown a grant: one handed back to a plain token is ignored', async () => {
+    const sockets: FakeSocket[] = [];
+    const stored: { id: string; token: string }[] = [];
+    const client = new WsClient({
+      url: 'http://192.0.2.1:8777',
+      token: 'held',
+      onSession: (session) => stored.push(session),
+      socketFactory: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+      reconnect: false
+    });
+    const connecting = client.connect();
+    const socket = take(sockets, 0);
+    socket.open();
+    socket.receive({ jsonrpc: '2.0', id: socket.frame(0).id, result: { core: CORE, principal: 'owner', session: { id: 'ses-9', token: 'unasked' } } });
+    await connecting;
+    expect(stored).toEqual([]);
+    client.close();
+  });
+
   test('a grant hello whose answer is lost is retried with the same grant and nonce', async () => {
     const sockets: FakeSocket[] = [];
     const stored: { id: string; token: string }[] = [];

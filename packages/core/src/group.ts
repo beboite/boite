@@ -33,7 +33,7 @@ import { boundedBody, MAX_BODY, PeerGone } from './coordination-wire.ts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unauthorized } from './errors.ts';
 import { advertisedAddresses, probeTailnet, tailnetAddress, ticketAddresses, type Tailnet } from './group/addresses.ts';
-import { admissionInput, checkCard, checkRoster, clockOf, CORE_ENTRIES_MAX, DEVICE_ENTRIES_MAX, digestOf, fingerprint, homeOf, liveCores, liveDevices, mergeRosters } from './group/roster.ts';
+import { admissionInput, checkCard, checkRoster, clockOf, CORE_ENTRIES_MAX, DEVICE_ENTRIES_MAX, digestOf, fingerprint, homeOf, liveCores, liveDevices, mergeRosters, groupName, peerOf } from './group/roster.ts';
 import type { CoreCard, CoreEntry, DeviceEntry, Roster } from './group/roster.ts';
 import { boxPublic, boxSigningInput, newBoxKey, open, openResponse, pack, readBoxKey, seal, SEALED, sealedName, sealResponse, unpack } from './group/seal.ts';
 import type { Sealing } from './group/seal.ts';
@@ -73,15 +73,6 @@ export interface NetworkSink {
    * core, whether through that listener or the main one.
    */
   also(host: string | null): boolean;
-}
-
-function peerOf(entry: CoreEntry): CoordinationPeer {
-  return { coreId: entry.coreId, name: entry.name, url: entry.addresses[0] ?? '', publicKey: entry.publicKey };
-}
-
-function groupName(value: unknown): string {
-  if (typeof value !== 'string' || !value.trim() || value.trim().length > 80) throw invalidParams('name: expected 1 to 80 characters', { field: 'name' });
-  return value.trim();
 }
 
 interface JoinReply { nonce: string; publicKey: string; roster?: unknown; error?: string }
@@ -693,7 +684,9 @@ export class GroupStore {
     if (this.roster === null) return new Response('this machine belongs to no group', { status: 404 });
     const from = request.headers.get('x-boite-peer') ?? '';
     const invite = this.invites.get(request.headers.get('x-boite-invite') ?? '');
-    if (invite === undefined || invite.expiresAt <= Date.now() || request.headers.get('x-boite-signature') !== SEALED || !/^[0-9a-f]{64}$/.test(from)) {
+    // An invitation whose machine was since removed is spent: asked again, it costs nothing and counts as a refusal.
+    const spent = invite?.joined != null && !liveCores(this.roster).some((core) => core.coreId === invite.joined);
+    if (invite === undefined || spent || invite.expiresAt <= Date.now() || request.headers.get('x-boite-signature') !== SEALED || !/^[0-9a-f]{64}$/.test(from)) {
       return new Response('unknown or expired invitation', { status: 403 });
     }
     const named = request.headers.get('x-boite-invite') ?? '';

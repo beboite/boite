@@ -16,6 +16,7 @@
  * only grows, and a group stops taking new entries at a bound instead.
  */
 
+import type { CoordinationPeer } from '@boite/contracts';
 import { createHash, createPublicKey, verify } from 'node:crypto';
 import { GROUP_MAX_CORES, PAIRING_ROLES, type Os, type PairingRole } from '@boite/contracts';
 import { invalidParams } from '../errors.ts';
@@ -315,4 +316,14 @@ export function mergeRosters(local: Roster, remote: Roster): Roster {
     cores: mergeCores(local.cores, remote.cores),
     devices: mergeDevices(local.devices, remote.devices),
   });
+}
+
+/** A member as agent coordination addresses it: the first address listed, the others are tried by the caller. */
+export function peerOf(entry: CoreEntry): CoordinationPeer {
+  return { coreId: entry.coreId, name: entry.name, url: entry.addresses[0] ?? '', publicKey: entry.publicKey };
+}
+
+export function groupName(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim() || value.trim().length > 80) throw invalidParams('name: expected 1 to 80 characters', { field: 'name' });
+  return value.trim();
 }

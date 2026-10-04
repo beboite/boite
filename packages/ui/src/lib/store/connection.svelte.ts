@@ -1,7 +1,7 @@
 import { RpcErrorCode, type CoreInfo, type Principal, type ThreadId } from '@boite/contracts';
 import { RpcFailure, WsClient, type Client, type ClientState, type ObservableClient } from '../client';
 import { confirm } from '../confirm.svelte';
-import { clearStoredEndpoint, forgetGroupOf, readStoredEndpoint, rememberSession, refreshLocalEnvironment, fromTauri, shellEndpointError, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, servesThisPage, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from '../endpoint';
+import { clearStoredEndpoint, forgetGroupOf, readStoredEndpoint, rememberSession, refreshLocalEnvironment, removeBrought, fromTauri, shellEndpointError, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, servesThisPage, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from '../endpoint';
 import { onboardingSeen } from '../onboarding';
 import { rightPanel } from '../right-panel.svelte';
 import { fill, strings } from '../strings';
@@ -405,9 +405,11 @@ export class Connection {
   /**
    * Drop a remembered core from this device. Its key stays valid there until
    * revoked; forgetting the core under the UI falls back to the local one.
+   * `brought` is the machine of a group it was: its entry goes only while it
+   * is still that one, not once it was paired by hand.
    */
-  async forgetEnvironment(url: string): Promise<void> {
-    this.environments = removeEnvironment(url);
+  async forgetEnvironment(url: string, brought?: string): Promise<void> {
+    this.environments = brought === undefined ? removeEnvironment(url) : removeBrought(url, brought);
     if (this.endpointUrl === url) await this.ctx.store.useLocalCore(url);
   }
 

@@ -506,7 +506,9 @@ export class WsClient implements ObservableClient {
               socket.close();
               return;
             }
-            if (result.session) {
+            // A key is only taken from a core that was shown a grant or a ticket: one that answers a
+            // plain token with a new key has no business handing it, and is not written down as paired.
+            if (result.session && grant !== null) {
               // The grant is spent: from here on this client is its session.
               this.#grant = null;
               this.#ticket = null;

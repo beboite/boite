@@ -341,17 +341,6 @@ describe('group links', () => {
     expect(reach).toHaveBeenCalledTimes(4);
   });
 
-  it('treats a machine paired again by hand as the owner\'s own, whatever its former group says afterwards', async () => {
-    // The pairing link took the group's mark off its saved entry.
-    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify([{ url: 'http://100.64.0.2:1', label: 'B', token: 'key', paired: true }]));
-    const a = machine('http://10.0.0.1:1', { group: group('a', [members[0]!]) });
-    const repaired = machine('http://100.64.0.2:1', { group: null }, { coreId: 'b' });
-    const { workspace: ws, removed } = workspace([a, repaired]);
-    await new GroupLinks(ws, { reach: async () => null, secure: () => false }).reconcile();
-    expect(removed).toEqual([]);
-    expect(repaired.coreId).toBeUndefined();
-  });
-
   it('takes the word of the hand-paired machine that no longer lists a member over the one that still does', async () => {
     const stale = machine('http://10.0.0.1:1', { group: group('a', members) });
     const current = machine('http://10.0.0.7:1', { group: group('c', [members[0]!, core('c', ['http://10.0.0.7:1'])]) });

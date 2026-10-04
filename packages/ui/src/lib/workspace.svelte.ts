@@ -3,6 +3,7 @@ import type { AgentAddress } from '@boite/contracts';
 import {
   clearStoredEndpoint,
   forgetGroupOf,
+  removeBrought,
   linkedCore,
   parsePairingLink,
   readEnvironments,
@@ -324,8 +325,13 @@ export class Workspace {
     this.restoreProfile(machine);
     this.#distinct(machine);
     // Grant and ticket credentials are persisted by WsClient's onSession, never the grant itself.
+    // A machine the group brought is written back as one: another window may have dropped its entry meanwhile.
     if (!endpoint.grant && !endpoint.ticket && !endpoint.local)
-      upsertEnvironment({ url: machine.id, token: endpoint.token, paired: endpoint.paired ?? false, label: machine.label });
+      upsertEnvironment({
+        url: machine.id, token: endpoint.token, paired: endpoint.paired ?? false, label: machine.label,
+        ...(machine.coreId === undefined ? {} : { coreId: machine.coreId }),
+        ...(machine.groupId === undefined ? {} : { groupId: machine.groupId })
+      });
     else {
       const saved = readEnvironments().find((e) => e.url === machine.id);
       if (saved) upsertEnvironment({ ...saved, label: machine.label });
@@ -455,7 +461,8 @@ export class Workspace {
     machine.store.client?.close();
     machine.store.detach();
     this.machines = this.machines.filter((m) => m !== machine);
-    removeEnvironment(id);
+    if (machine.coreId === undefined) removeEnvironment(id);
+    else removeBrought(id, machine.coreId);
     if (this.active === machine.store) await this.select(store);
   }
 
@@ -470,7 +477,7 @@ export class Workspace {
     // served would otherwise reach it again, with no key, and take it for the window's own.
     const next = this.#byHand();
     if (next && next.url !== id) await store.switchEnvironment(next.url);
-    await store.forgetEnvironment(id);
+    await store.forgetEnvironment(id, this.machines.find((m) => m.store === store)?.coreId);
     // Nothing to fall back on: the window shows a machine paired by hand that is still connected, if there is one.
     const other = store.connection === 'ready' ? undefined : this.machines.find((m) => m.store !== store && m.coreId === undefined && m.store.connection === 'ready');
     if (other && this.active === store) await this.select(other.store);

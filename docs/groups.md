@@ -89,7 +89,9 @@ others once that one has failed or stayed silent for a second, and keeps the
 first that answers with a valid signature. A machine reachable by any of the
 four is reached. Each address is sent a request of its own, signed and sealed
 for that attempt: the same request sent twice to a machine that has two
-addresses would be refused there as a replay, and counted against its sender. What it sends is sealed to that machine's key, so an address that
+addresses would be refused there as a replay, and counted against its sender.
+A request begun for a member leaves sealed or not at all, even when this
+machine leaves the group between two attempts. What it sends is sealed to that machine's key, so an address that
 leads elsewhere reads nothing and cannot answer. When none answers and the
 owner's app is connected to both machines, the app relays the sealed request,
 as it does for two machines linked by hand ([coordination](coordination.md)).
@@ -188,7 +190,9 @@ announced key, adds the machine and answers with the roster, signed and sealed
 back. Thirty requests a minute that open are served, and the invitation must
 still be live once the request has been read, before it is opened or counted. A request already served is
 refused before anything is computed for it, however its JSON is written, so
-one recorded on the path and sent again spends nothing of those thirty. The joining core accepts the answer only if the key that signed it has
+one recorded on the path and sent again spends nothing of those thirty. Neither
+does the invitation of a machine that was since removed: it is spent, and
+refused before it is read. The joining core accepts the answer only if the key that signed it has
 the id the invitation named. A machine that merely sits at that address reads
 nothing and cannot answer, and a request that names no known invitation costs
 the member one lookup.
@@ -282,7 +286,11 @@ and a machine the group brought never takes the place of the window's own core
 by reporting this computer's name. Opening a pairing link on a machine the
 group brought makes it one paired by hand from then on, and since a machine
 the group removed can make such a link itself, a link in the address bar that
-brings a key of its own for that machine, a grant or a token, asks first. A key the group handed
+brings a key of its own for that machine, a grant or a token, asks first. A
+client takes a new key only from a core it showed a grant or a ticket to. A
+machine the group drops leaves the window, and its saved entry goes only while
+it is still the one the group brought: paired by hand since, in another
+window, the entry stays. A key the group handed
 out for an address the machine no longer gives, or no longer allows once it has
 HTTPS, is dropped and the machine reached anew, the machine the window opened
 on included: the window then goes to a machine paired by hand, or to the

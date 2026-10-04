@@ -234,6 +234,16 @@ export function removeEnvironment(url: string, token?: string): StoredEnvironmen
 }
 
 /**
+ * Forgets a machine the group brought, when the saved entry is still the one
+ * the group brought: paired by hand since, in this window or another, the
+ * entry is the owner's and stays.
+ */
+export function removeBrought(url: string, coreId: string): StoredEnvironment[] {
+  const saved = readEnvironments().find((env) => env.url === normalise(url));
+  return saved === undefined || saved.coreId !== coreId ? readEnvironments() : removeEnvironment(url, saved.token);
+}
+
+/**
  * A pairing link pasted by hand: the core it names and the grant inside it.
  * The core's own link is `<origin>/?grant=`, and a `core` parameter names a
  * core other than the origin. Null when there is no http(s) URL or no grant.

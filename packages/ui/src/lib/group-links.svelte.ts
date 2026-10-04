@@ -168,13 +168,6 @@ export class GroupLinks {
   async reconcile(): Promise<void> {
     // Remembered machines are still being added: one of them may be the member that looks missing.
     if (!this.workspace.settled) return;
-    // Paired again by hand since the group brought it, which its saved entry records: it is the owner's from then on.
-    const saved = readEnvironments();
-    for (const machine of this.workspace.machines) {
-      if (machine.coreId === undefined || !saved.some((env) => env.url === machine.id && env.coreId === undefined)) continue;
-      delete machine.coreId;
-      delete machine.groupId;
-    }
     // Only a machine that has answered about its group speaks here; one still loading neither vouches nor denies.
     const informed = this.workspace.machines.filter((machine) => machine.store.connection === 'ready' && machine.store.client !== null && machine.store.groupKnown);
     if (informed.length === 0) return;

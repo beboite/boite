@@ -738,18 +738,20 @@ export class Coordination {
     this.identityKey();
     // Signed and sealed anew for every address tried, the owner's app included: the same request sent twice
     // is a replay at a machine both addresses lead to, refused there, and every operation bears being asked twice.
+    const routes = this.core.group.routes(peer.coreId);
     const attempt = async (url: string | null): Promise<Answer> => {
       const nonce = randomUUID();
       const body = JSON.stringify({ from: this.coreId, to: peer.coreId, at: Date.now(), nonce, operation, payload } satisfies Envelope);
       const signed = sign(null, Buffer.from(body), this.key!).toString('base64');
       const sealing = this.core.group.sealFor(peer.coreId, pack(body, signed));
+      // Begun for a member of the group, it ends sealed or not at all: this core may have left the group between two attempts.
+      if (routes !== null && sealing === null) throw new Error('no longer in the group this request was for');
       const wire = sealing === null ? body : sealing.body;
       const signature = sealing === null ? signed : SEALED;
       if (url !== null) return post(url, this.coreId, peer.publicKey, wire, signature, nonce, sealing);
       const response = await this.bridge.request(peer.coreId, { fromCoreId: this.coreId, toCoreId: peer.coreId, body: wire, signature });
       return settle(null, peer.publicKey, nonce, response.status, response.body, response.signature, sealing);
     };
-    const routes = this.core.group.routes(peer.coreId);
     let answer: Answer;
     if (routes === null) answer = await attempt(this.bridge.available(peer.coreId) || peer.viaClient ? null : peer.url);
     else {

@@ -304,6 +304,34 @@ test('a window served by the machine the group dropped stays closed rather than 
   expect(select).toHaveBeenCalledWith(b);
 });
 
+test('a machine the group drops goes from this window, and its saved entry only while it is still the group\'s', async () => {
+  const { w, b } = await setup();
+  const url = 'http://10.0.0.7:1';
+  w.machines = [...w.machines.filter((machine) => machine.store !== b), { id: url, label: 'Studio', store: b, coreId: 'b', groupId: 'grp' }];
+  // Another window paired it by hand meanwhile: the entry is the owner's, with a key of its own.
+  upsertEnvironment({ url, token: 'by-hand', paired: true, label: 'Studio' });
+  await w.remove(url);
+  expect(w.machines.some((machine) => machine.id === url)).toBe(false);
+  expect(endpoints.readEnvironments().find((env) => env.url === url)).toMatchObject({ token: 'by-hand' });
+  // Still the entry the group brought: it goes.
+  upsertEnvironment({ url: 'http://10.0.0.8:1', token: 'from-group', paired: true, label: 'Other', coreId: 'c', groupId: 'grp' });
+  w.machines = [...w.machines, { id: 'http://10.0.0.8:1', label: 'Other', store: new Store(), coreId: 'c', groupId: 'grp' }];
+  await w.remove('http://10.0.0.8:1');
+  expect(endpoints.readEnvironments().some((env) => env.url === 'http://10.0.0.8:1')).toBe(false);
+});
+
+test('a machine the group brought is written back as one when its entry went while it connected', async () => {
+  const { w } = await setup();
+  vi.spyOn(Store.prototype, 'connectEndpoint').mockImplementation(async function (this: Store) {
+    // Another window dropped the entry while this one was saying hello.
+    endpoints.removeEnvironment('http://10.0.0.7:1');
+    this.connection = 'ready';
+  });
+  upsertEnvironment({ url: 'http://10.0.0.7:1', token: 'from-group', paired: true, label: 'Studio', coreId: 'b', groupId: 'grp' });
+  expect(await w.add({ url: 'http://10.0.0.7:1', token: 'from-group', paired: true, coreId: 'b', groupId: 'grp' }, 'Studio', true)).toBe(true);
+  expect(endpoints.readEnvironments().find((env) => env.url === 'http://10.0.0.7:1')).toMatchObject({ coreId: 'b', groupId: 'grp' });
+});
+
 test('a key refused late does not take away the pairing another window made meanwhile', () => {
   const url = 'http://10.0.0.5:9000';
   upsertEnvironment({ url, token: 'new-by-hand', paired: true });
