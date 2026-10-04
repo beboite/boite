@@ -12,31 +12,42 @@
  * Membership is symmetric and total: any member may invite, remove and vouch.
  * It suits the machines of one owner and nothing less trusted, which keeps the
  * manual pairing link for everything else. A removal is known to each member
- * when it hears of it, so a removed machine that reaches a member which has not
- * heard yet is still listened to there (docs/groups.md).
+ * when it hears of it: until then that member still treats the removed machine
+ * as one of the group, with everything that grants. Once a member has heard, a
+ * removed machine comes back only through a new invitation (docs/groups.md).
  *
- * Nothing here encrypts. Members exchange signed requests over the addresses
- * they advertise, and privacy is the network's: Tailscale, an HTTPS address, or
- * a LAN the owner trusts, the same as a `ws://` pairing.
+ * What members say to each other is signed and sealed to the recipient
+ * (`group/seal.ts`), whatever network carries it. What a client says to a core
+ * is not: that link is as private as its transport, Tailscale, HTTPS, or a
+ * LAN the owner chose to listen on, the same as a `ws://` pairing.
  */
 
-import { randomUUID, verify } from 'node:crypto';
+import { createHash, randomUUID, verify } from 'node:crypto';
+import type { KeyObject } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
+import { join as joinPath } from 'node:path';
 import { GRANT_TTL_MS, GROUP_MAX_CORES, GROUP_TICKET_TTL_MS, PAIRING_ROLES } from '@boite/contracts';
 import type { CoordinationPeer, Group, GroupInvite, GroupTicket, PairingRole, Principal } from '@boite/contracts';
-import { boundedBody, PeerGone } from './coordination-wire.ts';
+import { boundedBody, MAX_BODY, PeerGone } from './coordination-wire.ts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unauthorized } from './errors.ts';
 import { advertisedAddresses, magicName, tailnetAddress, type Tailnet } from './group/addresses.ts';
-import { checkCore, checkRoster, clockOf, digestOf, fingerprint, homeOf, liveCores, liveDevices, mergeRosters } from './group/roster.ts';
-import type { CoreEntry, DeviceEntry, Roster } from './group/roster.ts';
+import { admissionInput, checkCard, checkRoster, clockOf, CORE_ENTRIES_MAX, DEVICE_ENTRIES_MAX, digestOf, fingerprint, homeOf, liveCores, liveDevices, mergeRosters } from './group/roster.ts';
+import type { CoreCard, CoreEntry, DeviceEntry, Roster } from './group/roster.ts';
+import { boxPublic, boxSigningInput, newBoxKey, open, openResponse, pack, readBoxKey, seal, SEALED, sealResponse, unpack } from './group/seal.ts';
+import type { Sealing } from './group/seal.ts';
 import { encodeInvite, encodeTicket, parseInvite, parseTicket, ticketSigningInput } from './group/ticket.ts';
+import type { Invite } from './group/ticket.ts';
 import { newId, newToken } from './ids.ts';
 import { currentOs } from './paths.ts';
 import type { ClientIdentity, Identity } from './sessions.ts';
 
 const SETTING = 'group';
 const SESSIONS_SETTING = 'group:sessions';
+const SPENT_SETTING = 'group:spent';
+/** Join requests a minute that name a live invitation: each costs a key agreement, and no honest group makes this many. */
+const JOINS_PER_MINUTE = 30;
 export const JOIN_ROUTE = '/group/join';
 /** What a join request and its answer are signed with, so neither passes for a coordination message. */
 const JOIN_SIGNING_PREFIX = 'boite-group-join\n';
@@ -74,13 +85,28 @@ function groupName(value: unknown): string {
 
 interface JoinReply { nonce: string; publicKey: string; roster?: unknown; error?: string }
 
+/** What names an invitation on the wire without being its grant. */
+function inviteId(grant: string): string {
+  return createHash('sha256').update(`boite-group-invite-id\n${grant}`).digest('hex');
+}
+
+/** The grant as a pre-shared key: a join request opens only for the machine that minted this invitation. */
+function invitePsk(grant: string): Buffer {
+  return createHash('sha256').update(`boite-group-invite-psk\n${grant}`).digest();
+}
+
 export class GroupStore {
   private roster: Roster | null = null;
   /** Session id here to the member it stands for: `core:<id>` or `device:<id>`. Local, never exchanged. */
   private sessions: Record<string, string> = {};
-  private readonly invites = new Map<string, { expiresAt: number; joined: string | null }>();
-  /** Ticket nonces already exchanged, until they would have expired anyway. */
+  /** Keyed by `inviteId`: the grant itself is kept nowhere once the invitation is handed out. */
+  private readonly invites = new Map<string, { expiresAt: number; joined: string | null; psk: Buffer }>();
+  private boxKey: KeyObject | null = null;
+  /** Ticket nonces already exchanged, until they would have expired anyway. Kept in the journal: a restart must not make a used ticket good again. */
   private readonly spent = new Map<string, number>();
+  /** Sessions being revoked right now: their own revocation is not started a second time from inside it. */
+  private readonly revoking = new Set<string>();
+  private joins = { since: 0, count: 0 };
   /** The roster digest each member last agreed on with this core. */
   private readonly acked = new Map<string, string>();
   /** The address each member last answered on, tried first the next time. */
@@ -108,6 +134,14 @@ export class GroupStore {
     if (typeof sessions === 'object' && sessions !== null && !Array.isArray(sessions)) {
       this.sessions = Object.fromEntries(Object.entries(sessions).filter(([, member]) => typeof member === 'string')) as Record<string, string>;
     }
+    const spent = core.journal.getSetting(SPENT_SETTING);
+    if (typeof spent === 'object' && spent !== null && !Array.isArray(spent)) {
+      const now = Date.now();
+      for (const [nonce, until] of Object.entries(spent)) if (typeof until === 'number' && until > now) this.spent.set(nonce, until);
+    }
+    // Before any socket is accepted: a crash between writing a removal and dropping
+    // the keys it kills, or between leaving and dropping them, must not leave them good.
+    this.reconcile();
   }
 
   /** Called once the server listens: a member publishes where it answers and asks the others what it missed. */
@@ -166,10 +200,18 @@ export class GroupStore {
     if (this.roster?.cores.some((core) => core.coreId === coreId)) this.good.set(coreId, url);
   }
 
-  /** The first address the group gives for this core that another device can dial, or null: what a pairing link names. */
+  /**
+   * The address a pairing link names for a machine of a group, or null. A phone
+   * opens that link and sends its grant there, so it is an address whose
+   * transport says who answers: the HTTPS one, else a literal address. Never a
+   * name over plain HTTP, which is whatever the phone's resolver says it is.
+   */
   ownAddress(): string | null {
     const mine = this.roster?.cores.find((core) => core.coreId === this.selfId());
-    return mine?.addresses.find((address) => !/^https?:\/\/(127\.0\.0\.1|\[::1\]|localhost)(:|$)/.test(address)) ?? null;
+    const dialable = mine?.addresses.filter((address) => !/^https?:\/\/(127\.0\.0\.1|\[::1\]|localhost)(:|$)/.test(address)) ?? [];
+    return dialable.find((address) => address.startsWith('https://'))
+      ?? dialable.find((address) => /^http:\/\/(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:]+\])(:\d+)?$/i.test(address))
+      ?? null;
   }
 
   /** A page served by one member opens its socket on another: the origin is a member's address. */
@@ -180,6 +222,34 @@ export class GroupStore {
   /** The session was handed out through the group, not through a pairing link made here. */
   owns(sessionId: string): boolean {
     return this.sessions[sessionId] !== undefined;
+  }
+
+  // -- Sealing: what this core says to another member, and hears from one.
+
+  /** This machine's X25519 key, made on first use and kept beside its identity key. */
+  private box(): { key: KeyObject; box: string } {
+    if (this.boxKey === null) {
+      const file = joinPath(this.core.dataDir, 'group-box-key.pem');
+      if (!existsSync(file)) {
+        writeFileSync(file, newBoxKey().export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600, flag: 'wx' });
+      }
+      this.boxKey = readBoxKey(readFileSync(file, 'utf8'));
+    }
+    return { key: this.boxKey, box: boxPublic(this.boxKey) };
+  }
+
+  /** A signed message sealed to a machine of the roster, or null for a machine outside it. */
+  sealFor(coreId: string, plaintext: string): ({ body: string } & Sealing) | null {
+    const entry = this.roster?.cores.find((core) => core.coreId === coreId);
+    if (entry === undefined) return null;
+    const context = { from: this.selfId(), to: coreId };
+    return { ...seal(plaintext, entry.box, context), context };
+  }
+
+  /** Opens what `from` sealed to this machine. Throws when it does not open. */
+  unseal(body: string, from: string): { plaintext: string } & Sealing {
+    const context = { from, to: this.selfId() };
+    return { ...open(body, this.box().key, context), context };
   }
 
   // -- This core's own entry.
@@ -203,17 +273,24 @@ export class GroupStore {
     this.onTailnet = this.core.network.also(member && this.tailnet !== null ? this.tailnet.ip : null);
   }
 
-  private card(rev: number): CoreEntry {
+  private card(): CoreCard {
     const { coreId, publicKey } = this.core.coordination.card();
     const endpoint = this.core.boundEndpoint();
+    const { box } = this.box();
     return {
       coreId,
       name: (hostname() || 'Boite').slice(0, 100),
       publicKey,
+      box,
+      boxSig: this.core.coordination.signature(boxSigningInput(coreId, box)).toString('base64'),
       addresses: advertisedAddresses({ ...endpoint, tailnet: this.onTailnet, publicUrl: this.core.settings.get().publicUrl }, this.tailnet),
       os: currentOs(),
-      rev,
     };
+  }
+
+  /** This core's word that a machine is in the group for one epoch. */
+  private admission(groupId: string, coreId: string, epoch: number): CoreEntry['admit'] {
+    return { by: this.selfId(), sig: this.core.coordination.signature(admissionInput(groupId, coreId, epoch)).toString('base64') };
   }
 
   /** The name or the addresses changed: the entry is this core's to rewrite, one revision up. */
@@ -222,7 +299,8 @@ export class GroupStore {
     if (roster === null) return;
     const mine = roster.cores.find((core) => core.coreId === this.selfId());
     if (mine === undefined || mine.removed) return;
-    const next = this.card(mine.rev);
+    // What it says of itself changes; the admission it lives under does not.
+    const next: CoreEntry = { ...this.card(), epoch: mine.epoch, admit: mine.admit, rev: mine.rev };
     if (JSON.stringify(next) === JSON.stringify(mine)) return;
     this.commit({ ...roster, cores: roster.cores.map((core) => (core === mine ? { ...next, rev: clockOf(roster) + 1 } : core)) });
   }
@@ -255,6 +333,10 @@ export class GroupStore {
     this.core.journal.setSetting(SESSIONS_SETTING, this.sessions);
   }
 
+  private saveSpent(): void {
+    this.core.journal.setSetting(SPENT_SETTING, Object.fromEntries(this.spent));
+  }
+
   /**
    * Keys the group handed out here die with what they stood for: a machine
    * removed, a device revoked on any member, a device whose own machine left.
@@ -282,7 +364,7 @@ export class GroupStore {
       }
       for (const sessionId of gone) {
         delete this.sessions[sessionId];
-        if (this.core.journal.getSession(sessionId) === null) continue;
+        if (this.revoking.has(sessionId) || this.core.journal.getSession(sessionId) === null) continue;
         try { this.core.sessions.revoke(sessionId); } catch (error) { this.core.log('warn', `group: could not revoke session ${sessionId}: ${messageOf(error)}`); }
       }
       if (gone.length > 0) this.saveSessions();
@@ -291,8 +373,13 @@ export class GroupStore {
     }
   }
 
-  /** `sessions.revoke` took a session away: a device of the group is revoked on every member. */
-  sessionRevoked(sessionId: string): void {
+  /**
+   * `sessions.revoke` is about to take a session away: a device of the group
+   * is revoked on every member. The removal is written first, so a crash
+   * before the session row goes leaves a removal the next start acts on, never
+   * a deleted session whose device the other members still let in.
+   */
+  sessionRevoking(sessionId: string): void {
     const member = this.sessions[sessionId];
     if (member !== undefined) {
       delete this.sessions[sessionId];
@@ -310,7 +397,12 @@ export class GroupStore {
     // A ticket can be exchanged here before the roster that lists its device arrives:
     // the removal is written anyway, and wins over that entry when it comes.
     const removed: DeviceEntry = { id: deviceId, name: entry?.name ?? 'device', role: entry?.role ?? 'device', rev: clockOf(roster) + 1, removed: true };
-    this.commit({ ...roster, devices: [...roster.devices.filter((device) => device.id !== deviceId), removed] });
+    this.revoking.add(sessionId);
+    try {
+      this.commit({ ...roster, devices: [...roster.devices.filter((device) => device.id !== deviceId), removed] });
+    } finally {
+      this.revoking.delete(sessionId);
+    }
   }
 
   private absorb(theirs: Roster): void {
@@ -343,19 +435,24 @@ export class GroupStore {
   private async syncWith(entry: CoreEntry): Promise<void> {
     const roster = this.roster;
     if (roster === null || this.closed) return;
+    // The answer counts only if, when it arrives, this is still the same group and
+    // the machine that answers is still one of its members: one removed while its
+    // answer was on the way has nothing left to say here.
+    const stillMember = (): boolean => this.roster !== null && !this.closed && this.roster.id === roster.id
+      && liveCores(this.roster).some((core) => core.coreId === entry.coreId);
     let answer: unknown;
     try {
       answer = await this.core.coordination.request(peerOf(entry), 'group.sync', roster);
     } catch (error) {
-      // A member says, signed, that this core was removed while it was away.
-      if (error instanceof PeerGone && this.roster !== null && !this.closed) {
-        this.core.log('warn', `${entry.name} answered that this machine was removed from the group ${this.roster.name}`);
+      // A member says, signed and sealed to this exchange, that this core was removed while it was away.
+      if (error instanceof PeerGone && stillMember()) {
+        this.core.log('warn', `${entry.name} answered that this machine was removed from the group ${roster.name}`);
         this.disband();
       }
       // Anything else is a machine that is off or unreachable: the next tick asks again.
       return;
     }
-    if (this.closed || this.roster === null) return;
+    if (!stillMember() || this.roster === null) return;
     const reply = answer as { roster?: unknown; left?: boolean } | null;
     if (reply?.left === true) {
       this.acked.set(entry.coreId, digestOf(this.roster));
@@ -410,7 +507,9 @@ export class GroupStore {
     try {
       const now = Date.now();
       for (const [grant, invite] of this.invites) if (invite.expiresAt <= now) this.invites.delete(grant);
-      for (const [nonce, until] of this.spent) if (until <= now) this.spent.delete(nonce);
+      let swept = false;
+      for (const [nonce, until] of this.spent) if (until <= now) swept = this.spent.delete(nonce) || swept;
+      if (swept) this.saveSpent();
       await this.refresh();
       this.ticks += 1;
       if (this.ticks % FULL_SYNC_TICKS === 0) this.acked.clear();
@@ -424,6 +523,8 @@ export class GroupStore {
     this.roster = roster;
     this.core.journal.setSetting(SETTING, roster);
     this.acked.clear();
+    // A roster taken whole can carry removals this machine never acted on: a device revoked while it was out of the group.
+    this.reconcile();
     this.arm();
     this.core.bus.emit('group.updated', {});
   }
@@ -449,7 +550,10 @@ export class GroupStore {
     await this.probe();
     if (this.roster !== null) throw refusal();
     this.listen(true);
-    this.adopt({ id: newId('grp_'), name: checked, cores: [this.card(1)], devices: [] });
+    const id = newId('grp_');
+    const self = this.selfId();
+    // The one machine that admits itself: the group starts with it.
+    this.adopt({ id, name: checked, founder: self, cores: [{ ...this.card(), epoch: 1, admit: this.admission(id, self, 1), rev: 1 }], devices: [] });
     return this.view('owner')!;
   }
 
@@ -462,8 +566,8 @@ export class GroupStore {
     for (const [grant, invite] of this.invites) if (invite.expiresAt <= now) this.invites.delete(grant);
     const grant = newToken();
     const expiresAt = now + GRANT_TTL_MS;
-    this.invites.set(grant, { expiresAt, joined: null });
-    return { invite: encodeInvite({ g: roster.id, n: roster.name, c: self.coreId, a: self.addresses, t: grant }), expiresAt };
+    this.invites.set(inviteId(grant), { expiresAt, joined: null, psk: invitePsk(grant) });
+    return { invite: encodeInvite({ g: roster.id, n: roster.name, c: self.coreId, a: self.addresses, x: self.box, t: grant }), expiresAt };
   }
 
   /** This core calls the member the invitation names, proves it holds its own key, and takes the roster back. */
@@ -477,13 +581,16 @@ export class GroupStore {
     this.listen(true);
     try {
       const nonce = randomUUID();
-      const body = JSON.stringify({ v: 1, grant: invite.t, group: invite.g, nonce, core: this.card(1) });
+      const context = { from: this.selfId(), to: invite.c };
+      // The grant is not in the request: it is the key the request is sealed with.
+      const body = JSON.stringify({ v: 1, group: invite.g, nonce, core: this.card() });
       const signature = this.core.coordination.signature(Buffer.from(JOIN_SIGNING_PREFIX + body)).toString('base64');
+      const sealed = { ...seal(pack(body, signature), invite.x, context, invitePsk(invite.t)), context };
       let reply: JoinReply;
       try {
-        reply = await Promise.any(invite.a.map((url) => this.askToJoin(url, invite.c, body, signature, nonce)));
+        reply = await Promise.any(invite.a.map((url) => this.askToJoin(url, invite, sealed, nonce)));
       } catch {
-        throw refused(`no machine answered the invitation at ${invite.a.join(', ')}: it may be off, or this machine cannot reach those addresses`, { field: 'invite' });
+        throw refused(`no machine accepted the invitation at ${invite.a.join(', ')}: it is off or unreachable from here, or the invitation expired or was made by another machine`, { field: 'invite' });
       }
       if (reply.error !== undefined) throw refused(reply.error, { field: 'invite' });
       const roster = checkRoster(reply.roster);
@@ -501,85 +608,103 @@ export class GroupStore {
     return this.view('owner')!;
   }
 
-  private async askToJoin(url: string, coreId: string, body: string, signature: string, nonce: string): Promise<JoinReply> {
+  private async askToJoin(url: string, invite: Invite, sealed: { body: string } & Sealing, nonce: string): Promise<JoinReply> {
     const response = await fetch(`${url}${JOIN_ROUTE}`, {
       method: 'POST',
       redirect: 'error',
       signal: AbortSignal.timeout(JOIN_TIMEOUT_MS),
-      headers: { 'content-type': 'application/json', 'x-boite-signature': signature },
-      body,
+      headers: { 'content-type': 'application/json', 'x-boite-peer': sealed.context.from, 'x-boite-invite': inviteId(invite.t), 'x-boite-signature': SEALED },
+      body: sealed.body,
     });
-    const raw = await boundedBody(response.body, 262_144);
-    const reply = JSON.parse(raw) as JoinReply;
+    const raw = await boundedBody(response.body, MAX_BODY);
+    // Only the machine that minted the invitation can answer under this key.
+    if (response.headers.get('x-boite-signature') !== SEALED) throw new Error('the answer is not sealed');
+    const { body, signature } = unpack(openResponse(raw, sealed.responseKey, sealed.context));
+    const reply = JSON.parse(body) as JoinReply;
     // The invitation names who must answer: a machine with another key is not it.
     const key = fingerprint(reply.publicKey);
-    if (key.coreId !== coreId) throw new Error('another machine answered');
-    if (!verify(null, Buffer.from(JOIN_SIGNING_PREFIX + raw), key.publicKey, Buffer.from(response.headers.get('x-boite-signature') ?? '', 'base64'))) throw new Error('invalid signature');
+    if (key.coreId !== invite.c) throw new Error('another machine answered');
+    if (!verify(null, Buffer.from(JOIN_SIGNING_PREFIX + body), key.publicKey, Buffer.from(signature, 'base64'))) throw new Error('invalid signature');
     if (reply.nonce !== nonce) throw new Error('nonce mismatch');
     return reply;
   }
 
   /**
    * The other end of `join`, on the member that minted the invitation. The
-   * caller is in no roster yet, so the grant is what lets it in and its
-   * signature only proves the key it announces is its own.
+   * caller is in no roster yet. Its request names an invitation and is sealed
+   * with that invitation's grant: a caller that does not hold it gets no
+   * answer worth reading, and nothing is computed for one that names none.
    */
   async http(request: Request): Promise<Response> {
     if (this.closed || request.method !== 'POST' || request.headers.has('origin')) return new Response('forbidden', { status: 403 });
     if (this.roster === null) return new Response('this machine belongs to no group', { status: 404 });
-    let raw: string;
-    let parsed: { grant?: unknown; group?: unknown; nonce?: unknown; core?: unknown };
-    try {
-      raw = await boundedBody(request.body, JOIN_BODY_MAX);
-      parsed = JSON.parse(raw) as typeof parsed;
-      if (typeof parsed !== 'object' || parsed === null || typeof parsed.nonce !== 'string' || parsed.nonce.length > 100) throw new Error('bad request');
-    } catch {
-      return new Response('invalid join request', { status: 400 });
+    const from = request.headers.get('x-boite-peer') ?? '';
+    const invite = this.invites.get(request.headers.get('x-boite-invite') ?? '');
+    if (invite === undefined || invite.expiresAt <= Date.now() || request.headers.get('x-boite-signature') !== SEALED || !/^[0-9a-f]{64}$/.test(from)) {
+      return new Response('unknown or expired invitation', { status: 403 });
     }
-    const nonce = parsed.nonce as string;
+    const now = Date.now();
+    if (now - this.joins.since > 60_000) this.joins = { since: now, count: 0 };
+    this.joins.count += 1;
+    if (this.joins.count > JOINS_PER_MINUTE) return new Response('too many join requests', { status: 429 });
+    const context = { from, to: this.selfId() };
+    let opened: { plaintext: string; responseKey: Buffer };
+    try {
+      opened = open(await boundedBody(request.body, JOIN_BODY_MAX), this.box().key, context, invite.psk);
+    } catch {
+      return new Response('unknown or expired invitation', { status: 403 });
+    }
     if (this.closed || this.core.stopping) return new Response('the core is stopping', { status: 503 });
     return this.core.router.trackRequest(() => {
+      let nonce = '';
       let roster: Roster | undefined;
       let error: string | undefined;
       try {
-        roster = this.admitCore(parsed, raw, request.headers.get('x-boite-signature') ?? '');
+        const { body, signature } = unpack(opened.plaintext);
+        const parsed = JSON.parse(body) as { group?: unknown; nonce?: unknown; core?: unknown };
+        if (typeof parsed !== 'object' || parsed === null || typeof parsed.nonce !== 'string' || parsed.nonce.length > 100) throw invalidParams('nonce: expected up to 100 characters');
+        nonce = parsed.nonce;
+        roster = this.admitCore(invite, parsed, body, signature, from);
       } catch (reason) {
         error = reason instanceof RpcFailure ? reason.message : 'the machine could not process the invitation';
         if (!(reason instanceof RpcFailure)) this.core.log('warn', `group join failed: ${messageOf(reason)}`);
       }
       const answer = JSON.stringify({ nonce, publicKey: this.core.coordination.card().publicKey, roster, error } satisfies JoinReply);
-      return new Response(answer, {
+      const signature = this.core.coordination.signature(Buffer.from(JOIN_SIGNING_PREFIX + answer)).toString('base64');
+      return new Response(sealResponse(pack(answer, signature), opened.responseKey, context), {
         status: error === undefined ? 200 : 400,
-        headers: {
-          'content-type': 'application/json',
-          'cache-control': 'no-store',
-          'x-boite-signature': this.core.coordination.signature(Buffer.from(JOIN_SIGNING_PREFIX + answer)).toString('base64'),
-        },
+        headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-boite-signature': SEALED },
       });
     });
   }
 
-  private admitCore(parsed: { grant?: unknown; group?: unknown; core?: unknown }, raw: string, signature: string): Roster {
+  private admitCore(invite: { joined: string | null }, parsed: { group?: unknown; core?: unknown }, body: string, signature: string, from: string): Roster {
     const roster = this.require();
-    const now = Date.now();
-    const invite = typeof parsed.grant === 'string' ? this.invites.get(parsed.grant) : undefined;
-    // The grant first: it costs a lookup, and nothing is verified for a caller that holds none.
-    if (invite === undefined || invite.expiresAt <= now || parsed.group !== roster.id) {
-      throw refused('the invitation was already used by another machine, expired, or never issued');
-    }
-    const card = checkCore({ ...(typeof parsed.core === 'object' && parsed.core !== null ? parsed.core : {}), rev: 1, removed: undefined });
-    if (!verify(null, Buffer.from(JOIN_SIGNING_PREFIX + raw), card.publicKey, Buffer.from(signature, 'base64'))) {
+    if (parsed.group !== roster.id) throw refused('the invitation is for another group');
+    const card = checkCard(parsed.core);
+    if (card.coreId !== from) throw refused('the join request names another machine than the one that sealed it');
+    if (!verify(null, Buffer.from(JOIN_SIGNING_PREFIX + body), card.publicKey, Buffer.from(signature, 'base64'))) {
       throw refused('the join request is not signed by the key it announces');
     }
     if (card.coreId === this.selfId()) throw refused('this invitation was made on this machine; paste it on the machine that joins');
-    // A lost answer is asked for again: the same machine gets the same welcome.
-    if (invite.joined !== null && invite.joined !== card.coreId) throw refused('the invitation was already used by another machine, expired, or never issued');
     const known = roster.cores.find((core) => core.coreId === card.coreId);
+    if (invite.joined !== null) {
+      if (invite.joined !== card.coreId) throw refused('the invitation was already used by another machine');
+      // A lost answer is asked for again: the same machine gets the same welcome, and nothing is written.
+      // Once that machine was removed the invitation is spent for it too: coming back takes a new one.
+      if (known === undefined || known.removed) throw refused('the invitation was already used, and the machine it admitted has since been removed: ask for a new one');
+      return roster;
+    }
     if ((known === undefined || known.removed) && liveCores(roster).length >= GROUP_MAX_CORES) {
       throw refused(`a group holds at most ${GROUP_MAX_CORES} machines`);
     }
+    if (known === undefined && roster.cores.length >= CORE_ENTRIES_MAX) {
+      throw refused(`this group has listed ${CORE_ENTRIES_MAX} machines over its life, removed ones included, and takes no new one: start a new group`);
+    }
     invite.joined = card.coreId;
-    const entry: CoreEntry = { ...card, rev: clockOf(roster) + 1 };
+    // A new epoch, signed by this member: the only way a machine enters, or comes back after a removal.
+    const epoch = (known?.epoch ?? 0) + 1;
+    const entry: CoreEntry = { ...card, epoch, admit: this.admission(roster.id, card.coreId, epoch), rev: clockOf(roster) + 1 };
     this.commit({ ...roster, cores: [...roster.cores.filter((core) => core.coreId !== card.coreId), entry] });
     return this.require();
   }
@@ -619,6 +744,9 @@ export class GroupStore {
     if (known !== undefined && !known.removed) return id;
     if (known?.removed) throw unauthorized('this device was removed from the group');
     if (liveDevices(roster).length >= DEVICES_MAX) throw refused(`a group holds at most ${DEVICES_MAX} devices; revoke one that is no longer used`);
+    if (roster.devices.length >= DEVICE_ENTRIES_MAX) {
+      throw refused(`this group has listed ${DEVICE_ENTRIES_MAX} devices over its life, revoked ones included, and takes no new one: start a new group`);
+    }
     const entry: DeviceEntry = { id, name: (name || 'device').slice(0, 100), role, rev: clockOf(roster) + 1 };
     this.commit({ ...roster, devices: [...roster.devices, entry] });
     return id;
@@ -675,11 +803,15 @@ export class GroupStore {
     } else throw unauthorized('the group ticket is malformed');
     const spent = `${payload.iss}:${payload.nonce}`;
     if (this.spent.has(spent)) throw unauthorized('the group ticket was already used');
-    this.spent.set(spent, payload.exp + CLOCK_SKEW_MS);
-    const session = this.core.sessions.issue(payload.role, client, now);
-    this.sessions[session.id] = payload.sub;
-    this.saveSessions();
-    return session;
+    // One write: the ticket is spent, the session exists and names who it stands for, or none of the three.
+    return this.core.journal.db.transaction(() => {
+      this.spent.set(spent, payload.exp + CLOCK_SKEW_MS);
+      this.saveSpent();
+      const session = this.core.sessions.issue(payload.role, client, now);
+      this.sessions[session.id] = payload.sub;
+      this.saveSessions();
+      return session;
+    })();
   }
 
   beginClose(): void {

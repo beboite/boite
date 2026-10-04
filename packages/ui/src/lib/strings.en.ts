@@ -371,7 +371,7 @@ export const strings = {
     joinHint: 'On a machine of the group, open Settings, Machines, Invite a machine, then paste the invitation here.',
     members: 'Machines of the group', self: 'This machine', connected: 'Connected', connecting: 'Connecting',
     unreachable: 'Not reachable from here. It may be off, asleep or on another network.',
-    insecure: 'This page is served over HTTPS and that machine has no HTTPS address. Open Boite from its own address, or give it a public HTTPS address.',
+    insecure: 'That machine gives no address this device may send a key to: an HTTPS address, or a numeric one when this page is not on HTTPS. Give it a public HTTPS address.',
     loopback: 'This machine listens only on itself, so the others cannot reach it. Connect it to Tailscale, or turn on listening on the network.',
     invite: 'Invite a machine', inviting: 'Preparing', inviteLabel: 'Invitation', copy: 'Copy', copied: 'Copied',
     inviteHint: 'Paste this on the machine that joins, under Join a group. It works once, for ten minutes. Whoever holds it joins the group.',

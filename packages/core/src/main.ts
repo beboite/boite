@@ -319,9 +319,12 @@ export async function group(argv: string[]): Promise<string> {
         return describeGroup(await client.call('group.create', { name: value }));
       case 'invite':
         return `${(await client.call('group.invite', {})).invite}\n`;
-      case 'join':
-        if (!value) throw new Error('group join expects the invitation "group invite" printed on a machine of the group');
-        return describeGroup(await client.call('group.join', { invite: value }));
+      case 'join': {
+        // On stdin by default: an argument stays in the process list and in the shell's history, and an invitation is a credential.
+        const invite = value ?? (await Bun.stdin.text()).trim();
+        if (!invite) throw new Error('group join reads the invitation "group invite" printed on a machine of the group from its standard input');
+        return describeGroup(await client.call('group.join', { invite }));
+      }
       case 'leave':
         await client.call('group.leave', {});
         return describeGroup(null);

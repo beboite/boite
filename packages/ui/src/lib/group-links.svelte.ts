@@ -12,7 +12,7 @@ export type GroupLinkState =
   | 'connecting'
   /** None of its addresses answered: it is off, asleep or on another network. */
   | 'unreachable'
-  /** This page is served over HTTPS and that machine gives no HTTPS address a browser may open from it. */
+  /** It gives no address this client may send a key to: see `usableAddresses`. */
   | 'insecure';
 
 export interface GroupLinkOptions {
@@ -55,9 +55,23 @@ async function firstReachable(addresses: string[]): Promise<string | null> {
   }
 }
 
-/** An HTTPS page cannot open `ws://`: only the secure addresses of a machine are of use to it. */
+/** `http://` followed by an address written as numbers, IPv4 or bracketed IPv6: nothing a resolver gets a say in. */
+const LITERAL_HTTP = /^http:\/\/(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:]+\])(:\d+)?$/i;
+
+/**
+ * The addresses of a machine this client may send a ticket and then a key to.
+ * The client link is not sealed, so the transport has to say who answers:
+ *
+ * - a machine that gives an HTTPS address is reached there and nowhere else,
+ *   so nothing on the path can talk the client down to plain HTTP;
+ * - over plain HTTP only an address written as numbers: a name is whatever the
+ *   resolver of this device says it is, and may be another host;
+ * - an HTTPS page opens secure sockets only.
+ */
 export function usableAddresses(addresses: readonly string[], secure: boolean): string[] {
-  return addresses.filter((address) => !secure || address.startsWith('https://'));
+  const https = addresses.filter((address) => address.startsWith('https://'));
+  if (https.length > 0 || secure) return https;
+  return addresses.filter((address) => LITERAL_HTTP.test(address));
 }
 
 /**
@@ -66,8 +80,11 @@ export function usableAddresses(addresses: readonly string[], secure: boolean): 
  * A machine this client holds a key for says which group it is in. For every
  * other member, that machine is asked for a ticket, the member exchanges it for
  * a key of its own, and the key is kept like any pairing's: the member is then
- * reached directly, whether or not the machine that vouched is on. A machine
- * the group brought here goes when the group no longer lists it.
+ * reached directly, whether or not the machine that vouched is on.
+ *
+ * A machine the group brought here goes when a member of that same group no
+ * longer lists it. Its own word does not count: a removed machine still lists
+ * itself. A machine paired by hand is never touched.
  */
 export class GroupLinks {
   /** Per core id, for the machines of the group this client is not connected to. */
@@ -113,33 +130,28 @@ export class GroupLinks {
   async reconcile(): Promise<void> {
     // Remembered machines are still being added: one of them may be the member that looks missing.
     if (!this.workspace.settled) return;
-    const machines = this.workspace.machines;
-    const ready = machines.filter((machine) => machine.store.connection === 'ready' && machine.store.client !== null);
-    // A machine still loading its lists has not said yet whether it is in a group.
-    if (ready.length === 0 || ready.some((machine) => !machine.store.groupKnown)) return;
+    // Only a machine that has answered about its group speaks here; one still loading neither vouches nor denies.
+    const informed = this.workspace.machines.filter((machine) => machine.store.connection === 'ready' && machine.store.client !== null && machine.store.groupKnown);
+    if (informed.length === 0) return;
 
+    await this.#prune(informed);
+
+    const machines = this.workspace.machines;
     const wanted = new Map<string, { core: GroupCore; via: Machine }>();
-    for (const via of ready) {
+    for (const via of informed) {
       const group = via.store.group;
-      // The fake core has no address to dial and stands for itself.
-      if (group === null || via.store.endpointUrl === null) continue;
+      // The fake core has no address to dial and stands for itself. A machine just pruned vouches for nothing.
+      if (group === null || via.store.endpointUrl === null || !machines.includes(via)) continue;
       for (const core of group.cores) {
         if (core.coreId !== group.self && !wanted.has(core.coreId)) wanted.set(core.coreId, { core, via });
       }
-    }
-
-    const listed = new Set(ready.flatMap((machine) => machine.store.group?.cores.map((core) => core.coreId) ?? []));
-    for (const machine of machines) {
-      // Only what the group brought goes with the group; a machine paired by hand stays.
-      if (machine.coreId === undefined || machine.store === this.workspace.primary || listed.has(machine.coreId)) continue;
-      await this.workspace.remove(machine.id);
     }
 
     const states: Record<string, GroupLinkState> = {};
     const starting: { core: GroupCore; via: Machine }[] = [];
     for (const [coreId, state] of Object.entries(this.states)) if (wanted.has(coreId)) states[coreId] = state;
     for (const [coreId, { core, via }] of wanted) {
-      const existing = this.workspace.machines.find((machine) => GroupLinks.coreOf(machine) === coreId);
+      const existing = machines.find((machine) => GroupLinks.coreOf(machine) === coreId);
       if (existing !== undefined && (existing.store.connection !== 'closed' || this.#holdsKey(existing))) {
         delete states[coreId];
         continue;
@@ -151,6 +163,25 @@ export class GroupLinks {
     // Written before any attempt starts: one that ends at once writes its own state after this.
     this.states = states;
     for (const { core, via } of starting) void this.#connect(core, via);
+  }
+
+  /**
+   * Drops what the group brought and no longer lists. The only voice that
+   * counts is another machine of the group that brought it: the machine's own
+   * roster still lists it after its removal, and a machine of another group
+   * knows nothing of this one.
+   */
+  async #prune(informed: readonly Machine[]): Promise<void> {
+    for (const machine of [...this.workspace.machines]) {
+      if (machine.coreId === undefined || machine.groupId === undefined) continue;
+      const witnesses = informed.filter((other) => other !== machine && other.store.group?.id === machine.groupId);
+      const delisted = witnesses.length > 0 && witnesses.every((other) => !other.store.group!.cores.some((core) => core.coreId === machine.coreId));
+      // Its key was taken away and nobody of that group is here to vouch again: nothing left to reconnect with.
+      const orphaned = machine.store.connection === 'closed' && !this.#holdsKey(machine) && witnesses.length === 0;
+      if (!delisted && !orphaned) continue;
+      if (machine.store === this.workspace.primary) await machine.store.forgetEnvironment(machine.id);
+      else await this.workspace.remove(machine.id);
+    }
   }
 
   /** A remembered key reconnects by itself; a machine without one needs a ticket again. */
@@ -171,10 +202,16 @@ export class GroupLinks {
       }
       const url = await this.#reach(addresses);
       const client = via.store.client;
-      if (url === null || client === null) return;
+      const groupId = via.store.group?.id;
+      if (url === null || client === null || groupId === undefined) return;
+      // A machine paired by hand already sits at that address: it is that machine's to reach, with the key it has.
+      if (this.workspace.machines.some((machine) => machine.id === url.replace(/\/+$/, '') && machine.coreId !== coreId)) {
+        state = null;
+        return;
+      }
       // Asked for last: a ticket is good for a minute and for one socket.
       const { ticket } = await client.call('group.ticket', { coreId });
-      if (await this.workspace.add({ url, token: '', ticket, coreId }, core.name, true)) state = null;
+      if (await this.workspace.add({ url, token: '', ticket, coreId, groupId }, core.name, true)) state = null;
     } catch {
       // The machine that vouches went away, or the member refused: the next pass asks again.
     } finally {

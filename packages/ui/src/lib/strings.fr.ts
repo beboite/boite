@@ -379,7 +379,7 @@ export const fr: Translation = {
     joinHint: "Sur une machine du groupe, ouvrez Réglages, Machines, Inviter une machine, puis collez l'invitation ici.",
     members: 'Machines du groupe', self: 'Cette machine', connected: 'Connectée', connecting: 'Connexion',
     unreachable: "Injoignable d'ici. Elle est peut-être éteinte, en veille ou sur un autre réseau.",
-    insecure: "Cette page est servie en HTTPS et cette machine n'a pas d'adresse HTTPS. Ouvrez Boite depuis sa propre adresse, ou donnez-lui une adresse HTTPS publique.",
+    insecure: "Cette machine ne donne aucune adresse à laquelle cet appareil peut envoyer une clé : une adresse HTTPS, ou une adresse numérique quand cette page n'est pas en HTTPS. Donnez-lui une adresse HTTPS publique.",
     loopback: "Cette machine n'écoute que sur elle-même : les autres ne peuvent pas la joindre. Connectez-la à Tailscale, ou activez l'écoute sur le réseau.",
     invite: 'Inviter une machine', inviting: 'Préparation', inviteLabel: 'Invitation', copy: 'Copier', copied: 'Copié',
     inviteHint: "Collez ceci sur la machine qui rejoint, sous Rejoindre un groupe. L'invitation sert une fois, pendant dix minutes. Qui la détient rejoint le groupe.",

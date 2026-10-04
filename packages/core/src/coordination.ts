@@ -6,6 +6,7 @@ import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscri
 import { checkMatchExtras, checkTranscript, searchContacts, searchWords, transcript } from './coordination-lookup.ts';
 import { CoordinationBridge } from './coordination-bridge.ts';
 import { boundedBody, MAX_BODY, PeerGone, PeerRefusal, post, ROUTE, settle, type Answer } from './coordination-wire.ts';
+import { pack, SEALED, sealResponse, unpack, type Sealing } from './group/seal.ts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unavailable } from './errors.ts';
 
@@ -737,16 +738,20 @@ export class Coordination {
     this.identityKey();
     const nonce = randomUUID();
     const body = JSON.stringify({ from: this.coreId, to: peer.coreId, at: Date.now(), nonce, operation, payload } satisfies Envelope);
-    const signature = sign(null, Buffer.from(body), this.key!).toString('base64');
+    const signed = sign(null, Buffer.from(body), this.key!).toString('base64');
+    // To a machine of this core's group the signed message leaves sealed, whatever carries it, the owner's app included.
+    const sealing = this.core.group.sealFor(peer.coreId, pack(body, signed));
+    const wire = sealing === null ? body : sealing.body;
+    const signature = sealing === null ? signed : SEALED;
     const relayed = async (): Promise<Answer> => {
-      const response = await this.bridge.request(peer.coreId, { fromCoreId: this.coreId, toCoreId: peer.coreId, body, signature });
-      return settle(null, peer.publicKey, nonce, response.status, response.body, response.signature);
+      const response = await this.bridge.request(peer.coreId, { fromCoreId: this.coreId, toCoreId: peer.coreId, body: wire, signature });
+      return settle(null, peer.publicKey, nonce, response.status, response.body, response.signature, sealing);
     };
     const routes = this.core.group.routes(peer.coreId);
     let answer: Answer;
-    if (routes === null) answer = this.bridge.available(peer.coreId) || peer.viaClient ? await relayed() : await post(peer.url, this.coreId, peer.publicKey, body, signature, nonce);
+    if (routes === null) answer = this.bridge.available(peer.coreId) || peer.viaClient ? await relayed() : await post(peer.url, this.coreId, peer.publicKey, wire, signature, nonce, sealing);
     else {
-      try { answer = await Promise.any(routes.map(url => post(url, this.coreId, peer.publicKey, body, signature, nonce))); }
+      try { answer = await Promise.any(routes.map(url => post(url, this.coreId, peer.publicKey, wire, signature, nonce, sealing))); }
       catch (error) {
         if (this.bridge.available(peer.coreId)) answer = await relayed();
         else throw error instanceof AggregateError ? error.errors[0] ?? new Error('peer unreachable') : error;
@@ -765,9 +770,16 @@ export class Coordination {
     if (!peer) return new Response('unknown peer', { status: 403 });
     const now = Date.now();
     let envelope: Envelope;
+    let sealing: Sealing | null = null;
     try {
-      const raw = await boundedBody(request.body);
-      if (!verify(null, Buffer.from(raw), peer.publicKey, Buffer.from(request.headers.get('x-boite-signature') ?? '', 'base64'))) throw new Error('invalid signature');
+      let raw = await boundedBody(request.body);
+      let signature = request.headers.get('x-boite-signature') ?? '';
+      if (signature === SEALED) {
+        const opened = this.core.group.unseal(raw, peer.coreId);
+        sealing = { responseKey: opened.responseKey, context: opened.context };
+        ({ body: raw, signature } = unpack(opened.plaintext));
+      }
+      if (!verify(null, Buffer.from(raw), peer.publicKey, Buffer.from(signature, 'base64'))) throw new Error('invalid signature');
       const rate = this.rates.get(peer.coreId) ?? { since: now, count: 0 };
       if (now - rate.since > 60_000) { rate.since = now; rate.count = 0; }
       this.rates.set(peer.coreId, rate);
@@ -781,7 +793,11 @@ export class Coordination {
       this.nonces.set(key, now);
     } catch { return new Response('invalid signed message', { status: 403 }); }
     if (this.core.group.removedPeer(peer.coreId) !== null && (envelope.operation === 'group.sync' || !this.trusted().some(p => p.coreId === peer.coreId))) {
-      return this.signed({ nonce: envelope.nonce, error: 'this machine was removed from the group' }, 410);
+      return this.signed({ nonce: envelope.nonce, error: 'this machine was removed from the group', gone: true }, 410, sealing);
+    }
+    // A machine trusted through the group alone speaks sealed, and the roster is never exchanged readable.
+    if (sealing === null && (envelope.operation === 'group.sync' || !this.peers().some(p => p.coreId === peer.coreId))) {
+      return this.signed({ nonce: envelope.nonce, error: 'machines of a group exchange sealed requests only' }, 400);
     }
     // Reading an unsigned body cannot hold an update. Admission may have won
     // during that await, so authenticated processing must enter the same gate.
@@ -821,12 +837,15 @@ export class Coordination {
         status = reason instanceof RpcFailure ? 400 : 500;
         error = reason instanceof RpcFailure ? reason.message : 'Machine could not process the request';
       }
-      return this.signed({ nonce: envelope.nonce, result, error }, status);
+      return this.signed({ nonce: envelope.nonce, result, error }, status, sealing);
     });
   }
-  private signed(reply: { nonce: string; result?: unknown; error?: string | undefined }, status: number): Response {
+  /** The answer, signed, and sealed back to the asker when its request came sealed. */
+  private signed(reply: { nonce: string; result?: unknown; error?: string | undefined; gone?: true }, status: number, sealing: Sealing | null = null): Response {
     const raw = JSON.stringify(reply);
-    return new Response(raw, { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-boite-signature': this.signature(Buffer.from(raw)).toString('base64') } });
+    const signature = this.signature(Buffer.from(raw)).toString('base64');
+    const body = sealing === null ? raw : sealResponse(pack(raw, signature), sealing.responseKey, sealing.context);
+    return new Response(body, { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-boite-signature': sealing === null ? signature : SEALED } });
   }
   /** The owner app forwards the original signed envelope, without changing any peer permission. */
   async forward(params: RpcParams<'collaboration.bridge.forward'>): Promise<CoordinationBridgeResponse> {

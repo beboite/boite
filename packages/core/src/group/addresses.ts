@@ -4,10 +4,15 @@
  * Tailscale is the expected network: every machine of a tailnet has a stable
  * address in 100.64.0.0/10 and, with MagicDNS, a name that follows it. Both
  * are read without the Tailscale CLI, which is not on every PATH and needs no
- * process here: the address is on a network interface, and the name is the
- * PTR record Tailscale's own resolver at 100.100.100.100 answers for it. A
- * machine with no tailnet falls back to its LAN address, as a pairing link
- * does.
+ * process here: the address is on Tailscale's own network interface, and the
+ * name is the PTR record Tailscale's resolver at 100.100.100.100 answers for
+ * it, which that interface routes to the local daemon. A machine with no
+ * tailnet falls back to its LAN address, as a pairing link does.
+ *
+ * The name is for other cores, whose requests are sealed to this machine's
+ * key: a name that resolved elsewhere would reach a machine that reads
+ * nothing. Clients are not given a name over plain HTTP (`ownAddress`,
+ * `usableAddresses` in the UI).
  */
 
 import { Resolver } from 'node:dns/promises';
@@ -31,16 +36,36 @@ export function isTailnetAddress(address: string): boolean {
   return parts.length === 4 && parts[0] === 100 && parts[1]! >= 64 && parts[1]! <= 127;
 }
 
+/** fd7a:115c:a1e0::/48, the range Tailscale hands its IPv6 addresses from. */
+function isTailnetV6(address: string): boolean {
+  return /^fd7a:115c:a1e0:/i.test(address);
+}
+
+/**
+ * Whether an interface is Tailscale's own. The address range alone is not
+ * proof: 100.64.0.0/10 is also what a carrier or another VPN hands out, and a
+ * listener opened there would face a network the owner never chose. Linux and
+ * Windows name the interface (`tailscale0`, `Tailscale`); macOS gives it a
+ * `utun` number like any tunnel, so there the Tailscale IPv6 address beside it
+ * is what tells.
+ */
+function isTailscaleInterface(name: string, entries: readonly NetworkInterfaceInfo[]): boolean {
+  if (/^tailscale/i.test(name)) return true;
+  return /^utun\d+$/.test(name) && entries.some((entry) => isTailnetV6(entry.address));
+}
+
 /** This machine's tailnet address, or null. `BOITE_TAILNET=0` answers null: tests never open a tailnet port. */
 export function tailnetAddress(
   interfaces: NodeJS.Dict<NetworkInterfaceInfo[]> = networkInterfaces(),
   env: Record<string, string | undefined> = process.env,
 ): string | null {
   if (env['BOITE_TAILNET'] === '0') return null;
-  const found = Object.values(interfaces)
-    .flatMap((entries) => entries ?? [])
-    .find((entry) => (entry.family === 'IPv4' || (entry.family as unknown) === 4) && !entry.internal && isTailnetAddress(entry.address));
-  return found?.address ?? null;
+  for (const [name, entries] of Object.entries(interfaces)) {
+    if (entries === undefined || !isTailscaleInterface(name, entries)) continue;
+    const found = entries.find((entry) => (entry.family === 'IPv4' || (entry.family as unknown) === 4) && !entry.internal && isTailnetAddress(entry.address));
+    if (found !== undefined) return found.address;
+  }
+  return null;
 }
 
 /** The name MagicDNS gives that address, or null when the tailnet has none or the resolver is silent. */

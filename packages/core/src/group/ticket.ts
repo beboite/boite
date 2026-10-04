@@ -2,9 +2,11 @@
  * The two things a group hands out as text.
  *
  * An invitation is what a machine pastes to join: the group, the member that
- * minted it, where that member answers, its key fingerprint and a one-time
- * grant. The fingerprint is what lets the joiner check who answered on a
- * network it does not trust.
+ * minted it, where that member answers, its key fingerprint, its box key and
+ * a one-time grant. The join request is sealed to that box key with the grant
+ * as a pre-shared key, and the fingerprint is what the answer's signature must
+ * match: on a network nobody trusts, only that member reads the request and
+ * only it can answer.
  *
  * A ticket is a member's signed word that a client may open one socket on
  * another member: who vouches, for whom, at which role, until when. It carries
@@ -15,6 +17,7 @@
 import { GROUP_INVITE_PREFIX, PAIRING_ROLES, type PairingRole } from '@boite/contracts';
 import { invalidParams, unauthorized } from '../errors.ts';
 import { ADDRESSES_MAX, checkAddress } from './roster.ts';
+import { checkBox } from './seal.ts';
 
 export interface Invite {
   /** Group id. */
@@ -25,6 +28,8 @@ export interface Invite {
   c: string;
   /** Where the inviting core answers. */
   a: string[];
+  /** The inviting core's box key: the join request is sealed to it, so the grant never travels readable. */
+  x: string;
   /** The one-time grant. */
   t: string;
 }
@@ -54,6 +59,7 @@ export function parseInvite(text: unknown): Invite {
     n: string(raw['n'], 80),
     c: raw['c'],
     a: raw['a'].map((address) => checkAddress(address, 'invite')),
+    x: (() => { try { return checkBox(raw['x'], 'invite'); } catch { throw bad(); } })(),
     t: string(raw['t'], 128),
   };
 }

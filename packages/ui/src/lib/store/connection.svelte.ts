@@ -249,7 +249,11 @@ export class Connection {
       onSession: (session) => {
         if (this.ctx.client !== client) return;
         if (rememberActive) storeEndpoint({ url, token: session.token, paired: true });
-        this.environments = upsertEnvironment({ url, token: session.token, paired: true, ...(endpoint.coreId === undefined ? {} : { coreId: endpoint.coreId }) });
+        this.environments = upsertEnvironment({
+          url, token: session.token, paired: true,
+          ...(endpoint.coreId === undefined ? {} : { coreId: endpoint.coreId }),
+          ...(endpoint.groupId === undefined ? {} : { groupId: endpoint.groupId })
+        });
       },
       onUnauthorized: (error) => {
         if (this.ctx.client === client && !this.localCore) this.#authenticationFailed(error);

@@ -1,8 +1,12 @@
 import { afterEach, expect, test } from 'bun:test';
 import { GROUP_INVITE_PREFIX, type CoordinationConfig } from '@boite/contracts';
+import { createHash } from 'node:crypto';
 import { connect } from '../src/client.ts';
+import { settle } from '../src/coordination-wire.ts';
+import { GroupStore } from '../src/group.ts';
 import { advertisedAddresses, isTailnetAddress, tailnetAddress } from '../src/group/addresses.ts';
 import { checkRoster, digestOf, fingerprint, liveCores, liveDevices, mergeRosters, type CoreEntry, type Roster } from '../src/group/roster.ts';
+import { boxPublic, newBoxKey, open, openResponse, pack, seal, SEALED, sealResponse, unpack } from '../src/group/seal.ts';
 import { parseInvite, parseTicket } from '../src/group/ticket.ts';
 import { isAllowedOrigin } from '../src/server.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
@@ -35,33 +39,49 @@ function members(h: TestCore): string[] {
 const id = (h: TestCore): string => h.core.coordination.card().coreId;
 
 function entry(coreId: string, rev: number, extra: Partial<CoreEntry> = {}): CoreEntry {
-  return { coreId, name: 'm', publicKey: 'k', addresses: [], rev, ...extra };
+  return { coreId, name: 'm', publicKey: 'k', box: 'b', boxSig: 's', addresses: [], epoch: 1, admit: { by: 'a', sig: 's' }, rev, ...extra };
 }
 
-test('rosters merge to the same result in either order, and a removal survives a stale copy', () => {
-  const base: Roster = { id: 'grp', name: 'Home', cores: [entry('a', 1), entry('b', 2)], devices: [] };
+test('a removal ends an epoch for good, and only a member this core already holds can open the next', () => {
+  const live = (roster: Roster) => liveCores(roster).map((core) => core.coreId);
+  const base: Roster = { id: 'grp', name: 'Home', founder: 'a', cores: [entry('a', 1), entry('b', 2)], devices: [] };
   const removed: Roster = { ...base, cores: [entry('a', 1), entry('b', 3, { removed: true })] };
-  const stale: Roster = { ...base, cores: [entry('a', 1), entry('b', 2), entry('c', 3)], devices: [{ id: 'd', name: 'phone', role: 'device', rev: 4 }] };
-  const one = mergeRosters(removed, stale);
-  const two = mergeRosters(stale, removed);
-  expect(digestOf(one)).toBe(digestOf(two));
-  expect(liveCores(one).map((core) => core.coreId)).toEqual(['a', 'c']);
-  // The stale member merged again later still cannot bring `b` back.
-  expect(liveCores(mergeRosters(one, base)).map((core) => core.coreId)).toEqual(['a', 'c']);
-  // At the same revision the removal wins on both sides.
-  const tie = mergeRosters({ ...base, cores: [entry('a', 5)] }, { ...base, cores: [entry('a', 5, { removed: true })] });
-  expect(tie.cores[0]?.removed).toBe(true);
+  // The removed machine republishes itself at any revision it likes: it stays out, whichever side merges.
+  const louder: Roster = { ...base, cores: [entry('a', 1), entry('b', 99)] };
+  expect(live(mergeRosters(removed, louder))).toEqual(['a']);
+  expect(live(mergeRosters(louder, removed))).toEqual(['a']);
+  expect(digestOf(mergeRosters(removed, louder))).toBe(digestOf(mergeRosters(louder, removed)));
+  // It admits itself for a new epoch, or shows the word of a machine this core does not hold as a member: still out.
+  const self: Roster = { ...base, cores: [entry('a', 1), entry('b', 100, { epoch: 2, admit: { by: 'b', sig: 's' } })] };
+  const stranger: Roster = { ...base, cores: [entry('a', 1), entry('b', 100, { epoch: 2, admit: { by: 'x', sig: 's' } }), entry('x', 5, { admit: { by: 'b', sig: 's' } })] };
+  expect(live(mergeRosters(removed, self))).toEqual(['a']);
+  expect(live(mergeRosters(removed, stranger))).toEqual(['a']);
+  // A member lets it back in: a new epoch under that member's word.
+  const readmitted: Roster = { ...base, cores: [entry('a', 1), entry('b', 4, { epoch: 2 })] };
+  expect(live(mergeRosters(removed, readmitted))).toEqual(['a', 'b']);
+  // A machine admitted by one just accepted in the same exchange is accepted too, in any listing order.
+  const chain: Roster = { ...base, cores: [entry('d', 6, { admit: { by: 'c', sig: 's' } }), entry('a', 1), entry('b', 2), entry('c', 5)] };
+  expect(live(mergeRosters(base, chain))).toEqual(['a', 'b', 'c', 'd']);
+  // One admitted by a machine this core already removed is not, though the removal may come in the same roster as the admission.
+  const byRemoved: Roster = { ...base, cores: [entry('a', 1), entry('b', 2), entry('e', 6, { admit: { by: 'b', sig: 's' } })] };
+  expect(live(mergeRosters(removed, byRemoved))).toEqual(['a']);
+  expect(live(mergeRosters(base, { ...byRemoved, cores: [entry('a', 1), entry('b', 7, { removed: true }), entry('e', 6, { admit: { by: 'b', sig: 's' } })] }))).toEqual(['a', 'e']);
+  // A removal reported for an epoch this core has not seen is taken as it is: nobody gets in by it.
+  expect(live(mergeRosters(base, { ...base, cores: [entry('a', 1), entry('b', 8, { epoch: 3, removed: true })] }))).toEqual(['a']);
+  // Nothing is ever dropped, and merging twice changes nothing.
+  const one = mergeRosters(removed, chain);
+  expect(one.cores.map((core) => core.coreId)).toEqual(['a', 'b', 'c', 'd']);
   expect(digestOf(mergeRosters(one, one))).toBe(digestOf(one));
   // A device's removal is final: it wins over a later word of the device, in either order.
-  const live: Roster = { ...base, devices: [{ id: 'd', name: 'phone', role: 'device', rev: 9 }] };
+  const phone: Roster = { ...base, devices: [{ id: 'd', name: 'phone', role: 'device', rev: 9 }] };
   const revoked: Roster = { ...base, devices: [{ id: 'd', name: 'device', role: 'device', rev: 2, removed: true }] };
-  expect(mergeRosters(live, revoked).devices[0]?.removed).toBe(true);
-  expect(digestOf(mergeRosters(live, revoked))).toBe(digestOf(mergeRosters(revoked, live)));
+  expect(mergeRosters(phone, revoked).devices[0]?.removed).toBe(true);
+  expect(digestOf(mergeRosters(phone, revoked))).toBe(digestOf(mergeRosters(revoked, phone)));
 });
 
 test('a device stops counting once the machine it paired with leaves', () => {
   const home = 'a'.repeat(64);
-  const roster: Roster = { id: 'grp', name: 'Home', cores: [entry(home, 1)], devices: [{ id: `${home}:ses_1`, name: 'phone', role: 'device', rev: 2 }] };
+  const roster: Roster = { id: 'grp', name: 'Home', founder: home, cores: [entry(home, 1)], devices: [{ id: `${home}:ses_1`, name: 'phone', role: 'device', rev: 2 }] };
   expect(liveDevices(roster)).toHaveLength(1);
   expect(liveDevices({ ...roster, cores: [entry(home, 3, { removed: true })] })).toHaveLength(0);
 });
@@ -76,6 +96,13 @@ test('a roster from another machine is read field by field', async () => {
   expect(() => checkRoster({ ...stored, cores: [{ ...stored.cores[0], addresses: ['http://user:pw@host:1'] }] })).toThrow('origin');
   expect(() => checkRoster({ ...stored, cores: [{ ...stored.cores[0], addresses: ['file:///etc/passwd'] }] })).toThrow('origin');
   expect(() => checkRoster({ ...stored, devices: [{ id: 'nope', name: 'x', role: 'device', rev: 1 }] })).toThrow('device');
+  // The key the others seal to is the machine's own word: another member cannot put its own there.
+  expect(() => checkRoster({ ...stored, cores: [{ ...stored.cores[0], box: boxPublic(newBoxKey()) }] })).toThrow('boxSig');
+  expect(() => checkRoster({ ...stored, cores: [{ ...stored.cores[0], box: 'short' }] })).toThrow('box');
+  // An admission is a signature: a made-up one, or one for another epoch, admits nobody.
+  expect(() => checkRoster({ ...stored, cores: [{ ...stored.cores[0], admit: { by: stored.founder, sig: 'AAAA' } }] })).toThrow('no valid admission');
+  expect(() => checkRoster({ ...stored, cores: [{ ...stored.cores[0], epoch: 2 }] })).toThrow('no valid admission');
+  expect(() => checkRoster({ ...stored, founder: 'f'.repeat(64) })).toThrow('no valid admission');
   expect(() => fingerprint('not a key')).toThrow('Ed25519');
 });
 
@@ -84,6 +111,11 @@ test('the tailnet address and name come first, then the LAN, and loopback only w
   const ts = { address: '100.101.102.103', family: 'IPv4', internal: false } as never;
   expect(tailnetAddress({ eth0: [eth], tailscale0: [ts] }, {})).toBe('100.101.102.103');
   expect(tailnetAddress({ eth0: [eth] }, {})).toBeNull();
+  // The range alone proves nothing: a carrier or another VPN hands out the same addresses.
+  expect(tailnetAddress({ eth0: [ts] }, {})).toBeNull();
+  expect(tailnetAddress({ utun4: [ts] }, {})).toBeNull();
+  expect(tailnetAddress({ utun4: [ts, { address: 'fd7a:115c:a1e0::f', family: 'IPv6', internal: false } as never] }, {})).toBe('100.101.102.103');
+  expect(tailnetAddress({ Tailscale: [ts] }, {})).toBe('100.101.102.103');
   expect(tailnetAddress({ tailscale0: [ts] }, { BOITE_TAILNET: '0' })).toBeNull();
   expect(isTailnetAddress('100.128.0.1')).toBe(false);
   const tailnet = { ip: '100.101.102.103', name: 'desk.tail.example' };
@@ -110,7 +142,7 @@ test('an invitation makes two machines members of one group, and a third joins t
   const { invite, expiresAt } = await a.core.group.invite();
   expect(invite.startsWith(GROUP_INVITE_PREFIX)).toBe(true);
   expect(expiresAt).toBeGreaterThan(Date.now());
-  expect(parseInvite(invite)).toMatchObject({ n: 'Home', c: id(a), a: [a.url] });
+  expect(parseInvite(invite)).toMatchObject({ n: 'Home', c: id(a), a: [a.url], x: (a.core.journal.getSetting('group') as Roster).cores[0]!.box });
   await expect(a.core.group.join(invite)).rejects.toThrow('already belongs');
 
   const joined = await b.core.group.join(invite);
@@ -138,10 +170,13 @@ test('an invitation is refused when it is malformed, unknown, or answered by ano
   const { invite } = await a.core.group.invite();
   const parsed = parseInvite(invite);
   const encode = (value: object) => GROUP_INVITE_PREFIX + Buffer.from(JSON.stringify({ v: 1, ...value })).toString('base64url');
-  await expect(b.core.group.join(encode({ ...parsed, t: 'f'.repeat(64) }))).rejects.toThrow('already used');
+  // A grant nobody minted names no invitation and seals with a key the inviter cannot open.
+  await expect(b.core.group.join(encode({ ...parsed, t: 'f'.repeat(64) }))).rejects.toThrow('no machine accepted');
   // The address of a core that is not the one the invitation names: its answer does not verify.
   await stranger.core.group.create('Elsewhere');
-  await expect(b.core.group.join(encode({ ...parsed, a: [stranger.url] }))).rejects.toThrow('no machine answered');
+  await expect(b.core.group.join(encode({ ...parsed, a: [stranger.url] }))).rejects.toThrow('no machine accepted');
+  // Sealed to another key than the inviter's, the request does not open there.
+  await expect(b.core.group.join(encode({ ...parsed, x: boxPublic(newBoxKey()) }))).rejects.toThrow('no machine accepted');
   expect(b.core.group.view('owner')).toBeNull();
   expect(members(a)).toEqual([id(a)]);
   // The untouched invitation still works after those attempts.
@@ -349,7 +384,7 @@ test('a roster is only taken from a member, never from a machine linked by hand'
   a.core.coordination.trust(linked.core.coordination.identity());
   const roster = a.core.journal.getSetting('group') as Roster;
   const forged = { ...roster, cores: [...roster.cores, { ...linked.core.coordination.card(), name: 'Intruder', addresses: [linked.url], rev: 50 }] };
-  await expect(linked.core.coordination.request({ ...a.core.coordination.identity() }, 'group.sync', forged)).rejects.toThrow('only a machine of this group');
+  await expect(linked.core.coordination.request({ ...a.core.coordination.identity() }, 'group.sync', forged)).rejects.toThrow('sealed requests only');
   expect(members(a)).toEqual([id(a)]);
 });
 
@@ -365,3 +400,225 @@ test('a public address replaces the loopback one in what the group gives for thi
   await updated;
   expect((await client.call('group.get', {}))?.cores[0]?.addresses).toEqual([a.url]);
 });
+
+test('a sealed message opens only for the machine it was sealed to, from the machine it says, unaltered', () => {
+  const recipient = newBoxKey();
+  const context = { from: 'a'.repeat(64), to: 'b'.repeat(64) };
+  const sealed = seal(pack('{"hello":1}', 'c2lnbmF0dXJl'), boxPublic(recipient), context);
+  expect(sealed.body).not.toContain('hello');
+  const opened = open(sealed.body, recipient, context);
+  expect(unpack(opened.plaintext)).toEqual({ body: '{"hello":1}', signature: 'c2lnbmF0dXJl' });
+  expect(opened.responseKey.equals(sealed.responseKey)).toBe(true);
+  // Another machine's key, another claimed sender, another recipient, another pre-shared key: none opens.
+  expect(() => open(sealed.body, newBoxKey(), context)).toThrow('does not open');
+  expect(() => open(sealed.body, recipient, { ...context, from: 'c'.repeat(64) })).toThrow('does not open');
+  expect(() => open(sealed.body, recipient, { ...context, to: 'c'.repeat(64) })).toThrow('does not open');
+  expect(() => open(sealed.body, recipient, context, Buffer.alloc(32, 7))).toThrow('does not open');
+  // One flipped bit of the ciphertext, or a swapped one-time key, is noticed.
+  const wire = JSON.parse(sealed.body) as { epk: string; iv: string; ct: string };
+  const flipped = Buffer.from(wire.ct, 'base64url');
+  flipped[0] = flipped[0]! ^ 1;
+  expect(() => open(JSON.stringify({ ...wire, ct: flipped.toString('base64url') }), recipient, context)).toThrow('does not open');
+  expect(() => open(JSON.stringify({ ...wire, epk: boxPublic(newBoxKey()) }), recipient, context)).toThrow('does not open');
+  expect(() => open(JSON.stringify({ ...wire, epk: Buffer.alloc(32).toString('base64url') }), recipient, context)).toThrow('key agreement');
+  expect(() => open('{"v":2}', recipient, context)).toThrow('not a sealed message');
+  // The answer opens with the key of that one exchange, in that direction only.
+  const answer = sealResponse(pack('{"ok":true}', 'c2ln'), opened.responseKey, context);
+  expect(unpack(openResponse(answer, sealed.responseKey, context)).body).toBe('{"ok":true}');
+  expect(() => openResponse(answer, seal('x', boxPublic(recipient), context).responseKey, context)).toThrow('does not open');
+  expect(() => open(JSON.stringify({ v: 1, epk: wire.epk, ...JSON.parse(answer) }), recipient, context)).toThrow('does not open');
+  // Two seals of the same text share nothing.
+  expect(seal('same', boxPublic(recipient), context).body).not.toBe(seal('same', boxPublic(recipient), context).body);
+});
+
+test('nothing a member sends another is readable on the wire, and a readable roster is refused', async () => {
+  const a = await machine();
+  const b = await machine();
+  await a.core.group.create('Maison-du-test');
+  const real = globalThis.fetch;
+  const wire: { url: string; signature: string; body: string; answer: string }[] = [];
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const response = await real(input, init);
+    const headers = new Headers(init?.headers);
+    wire.push({ url: String(input), signature: headers.get('x-boite-signature') ?? '', body: String(init?.body ?? ''), answer: await response.clone().text() });
+    return response;
+  }) as typeof fetch;
+  try {
+    await join(a, b);
+    await waitFor(() => wire.some((entry) => entry.url.endsWith('/agent-messages')));
+    const ownerA = await a.connect();
+    const ownerB = await b.connect();
+    const brief: CoordinationConfig = { mode: 'brief', resources: 'secret-resource-name', remote: true, paused: false };
+    const ta = (await echoThread(a, ownerA, 'Maintenance')).threadId;
+    const tb = (await echoThread(b, ownerB, 'Secret-thread-title')).threadId;
+    a.core.coordination.configure(ta, brief);
+    b.core.coordination.configure(tb, brief);
+    expect((await a.core.coordination.directory(ta)).agents.map((agent) => agent.title)).toEqual(['Secret-thread-title']);
+  } finally {
+    globalThis.fetch = real;
+  }
+  expect(wire.some((entry) => entry.url.endsWith('/group/join'))).toBe(true);
+  expect(wire.filter((entry) => entry.url.endsWith('/agent-messages')).length).toBeGreaterThan(1);
+  const publicKey = a.core.coordination.card().publicKey;
+  for (const entry of wire) {
+    expect(entry.signature).toBe(SEALED);
+    for (const text of [entry.body, entry.answer]) {
+      for (const secret of ['Maison-du-test', 'Secret-thread-title', 'secret-resource-name', 'BEGIN PUBLIC KEY', publicKey.split('\n')[1]!, 'group.sync', 'directory']) {
+        expect(text).not.toContain(secret);
+      }
+      expect(Object.keys(JSON.parse(text) as object).sort().join()).toMatch(/^(ct,epk,iv,v|ct,iv,v)$/);
+    }
+  }
+  // The same roster, signed but readable, is not taken: a member's word arrives sealed or not at all.
+  const self = a.core.coordination.card();
+  const body = JSON.stringify({ from: id(b), to: self.coreId, at: Date.now(), nonce: crypto.randomUUID(), operation: 'group.sync', payload: b.core.journal.getSetting('group') });
+  const clear = await fetch(`${a.url}/agent-messages`, { method: 'POST', body, headers: { 'x-boite-peer': id(b), 'x-boite-signature': b.core.coordination.signature(Buffer.from(body)).toString('base64') } });
+  expect(clear.status).toBe(400);
+  expect(await clear.json()).toMatchObject({ error: 'machines of a group exchange sealed requests only' });
+  // And a sealed body that was tampered with gets no answer at all.
+  const sealed = b.core.group.sealFor(self.coreId, pack(body, 'AAAA'))!;
+  const broken = await fetch(`${a.url}/agent-messages`, { method: 'POST', body: sealed.body.replace(/"ct":"(.)/, (_m, c: string) => `"ct":"${c === 'A' ? 'B' : 'A'}`), headers: { 'x-boite-peer': id(b), 'x-boite-signature': SEALED } });
+  expect(broken.status).toBe(403);
+  expect(await broken.text()).toBe('invalid signed message');
+});
+
+test('a used invitation welcomes its machine again without writing, and never after that machine was removed', async () => {
+  const a = await machine();
+  const b = await machine();
+  await a.core.group.create('Home');
+  const { invite } = await a.core.group.invite();
+  await b.core.group.join(invite);
+  const stored = () => digestOf(checkRoster(a.core.journal.getSetting('group')));
+  const before = stored();
+  await b.core.group.leave();
+  expect(members(a)).toEqual([id(a)]);
+  // It left, which is a removal: the invitation it came in with does not bring it back.
+  await expect(b.core.group.join(invite)).rejects.toThrow('has since been removed');
+  expect(members(a)).toEqual([id(a)]);
+  expect(b.core.group.view('owner')).toBeNull();
+  // A fresh invitation does, under a new admission.
+  const c = await machine();
+  const second = (await a.core.group.invite()).invite;
+  await c.core.group.join(second);
+  const admitted = stored();
+  expect(admitted).not.toBe(before);
+  // The answer was lost and the machine asks again: same welcome, nothing rewritten.
+  const retry = c.core.group as unknown as { roster: Roster | null };
+  retry.roster = null;
+  await c.core.group.join(second);
+  expect(members(c)).toEqual([id(a), id(c)].sort());
+  expect(stored()).toBe(admitted);
+  await b.core.group.join((await a.core.group.invite()).invite);
+  expect((a.core.journal.getSetting('group') as Roster).cores.find((core) => core.coreId === id(b))).toMatchObject({ epoch: 2, admit: { by: id(a) } });
+});
+
+test('a ticket stays spent across a restart of the machine it was used on', async () => {
+  const a = await machine();
+  const b = await machine();
+  await a.core.group.create('Home');
+  await join(a, b);
+  const ticket = a.core.group.ticket(id(b), { principal: 'owner', sessionId: null, threadId: null }).ticket;
+  const first = b.core.group.admit(ticket, { name: 'shell', version: '1' });
+  expect(first.role).toBe('owner');
+  // What a restart builds: a store reading the same journal, with nothing in memory.
+  const restarted = new GroupStore(b.core);
+  expect(() => restarted.admit(ticket, { name: 'shell', version: '1' })).toThrow('already used');
+  expect(b.core.sessions.list(null)).toHaveLength(1);
+  await restarted.close();
+});
+
+test('keys die with what they stood for even when the core stopped between the removal and the cleanup', async () => {
+  const a = await machine();
+  const b = await machine();
+  await a.core.group.create('Home');
+  await join(a, b);
+  const key = b.core.group.admit(a.core.group.ticket(id(b), { principal: 'owner', sessionId: null, threadId: null }).ticket, { name: 'shell', version: '1' });
+  const roster = b.core.journal.getSetting('group') as Roster;
+  // The removal of `a` reached the journal, the session it vouched for was not dropped yet: the core died there.
+  b.core.journal.setSetting('group', { ...roster, cores: roster.cores.map((core) => (core.coreId === id(a) ? { ...core, rev: 50, removed: true } : core)) });
+  expect(b.core.sessions.list(null).map((session) => session.id)).toEqual([key.id]);
+  const afterRemoval = new GroupStore(b.core);
+  expect(b.core.sessions.list(null)).toEqual([]);
+  await afterRemoval.close();
+  // Same for a machine that left: the group setting is gone, a key it had handed out is not.
+  const leftover = b.core.sessions.issue('owner', { name: 'shell', version: '1' });
+  b.core.journal.setSetting('group:sessions', { [leftover.id]: `core:${id(a)}` });
+  b.core.journal.deleteSetting('group');
+  const afterLeaving = new GroupStore(b.core);
+  expect(b.core.sessions.list(null)).toEqual([]);
+  await afterLeaving.close();
+});
+
+test('an answer that arrives after its sender was removed changes nothing', async () => {
+  const a = await machine();
+  const b = await machine();
+  await a.core.group.create('Home');
+  await join(a, b);
+  const coordination = a.core.coordination;
+  const real = coordination.request.bind(coordination);
+  let removedDuring = false;
+  // b holds its answer; a removes b; then the answer lands, signed by b and naming b alive at a later revision.
+  coordination.request = async (peer, operation, payload) => {
+    const answer = await real(peer, operation, payload) as { roster?: Roster };
+    if (peer.coreId !== id(b) || removedDuring || answer?.roster === undefined) return answer;
+    removedDuring = true;
+    coordination.request = real;
+    a.core.group.remove(id(b));
+    return { roster: { ...answer.roster, cores: answer.roster.cores.map((core) => (core.coreId === id(b) ? { ...core, rev: 500 } : core)) } };
+  };
+  const entryOfB = (a.core.journal.getSetting('group') as Roster).cores.find((core) => core.coreId === id(b))!;
+  await (a.core.group as unknown as { syncWith(entry: CoreEntry): Promise<void> }).syncWith(entryOfB);
+  expect(removedDuring).toBe(true);
+  expect(members(a)).toEqual([id(a)]);
+  expect((a.core.journal.getSetting('group') as Roster).cores.find((core) => core.coreId === id(b))).toMatchObject({ removed: true });
+});
+
+test('"you were removed" counts only signed inside a sealed answer, never from a status line', async () => {
+  const a = await machine();
+  const b = await machine();
+  await a.core.group.create('Home');
+  await join(a, b);
+  const nonce = 'n-1';
+  const sign = (body: string) => b.core.coordination.signature(Buffer.from(body)).toString('base64');
+  const key = b.core.coordination.card().publicKey;
+  // A genuine answer whose status somebody on the path rewrote to 410: not a removal.
+  const ok = JSON.stringify({ nonce, result: { roster: null } });
+  expect(() => settle('http://b', key, nonce, 410, ok, sign(ok))).toThrow('peer request failed');
+  // A genuine "removed" made for another machine's exchange, readable: not a removal for this one.
+  const gone = JSON.stringify({ nonce, error: 'this machine was removed from the group', gone: true });
+  expect(() => settle('http://b', key, nonce, 410, gone, sign(gone))).toThrow('peer request failed');
+  // Sealed to this exchange it is one, whatever the status line says.
+  const context = { from: id(a), to: id(b) };
+  const sealed = seal('request', (b.core.journal.getSetting('group') as Roster).cores.find((core) => core.coreId === id(b))!.box, context);
+  const answer = sealResponse(pack(gone, sign(gone)), sealed.responseKey, context);
+  expect(settle('http://b', key, nonce, 200, answer, SEALED, { responseKey: sealed.responseKey, context })).toEqual({ url: 'http://b', gone: true });
+  // And a sealed request is never answered in the clear.
+  expect(() => settle('http://b', key, nonce, 200, ok, sign(ok), { responseKey: sealed.responseKey, context })).toThrow('in the clear');
+});
+
+test('join requests that name a live invitation are counted, and a pairing link never names a machine by a plain-HTTP name', async () => {
+  const a = await machine();
+  await a.core.group.create('Home');
+  const { invite } = await a.core.group.invite();
+  const inviteId = createHash('sha256').update(`boite-group-invite-id\n${parseInvite(invite).t}`).digest('hex');
+  const attempt = (named: string) => fetch(`${a.url}/group/join`, { method: 'POST', body: '{"v":1}', headers: { 'x-boite-peer': 'c'.repeat(64), 'x-boite-invite': named, 'x-boite-signature': SEALED } });
+  // No invitation named: refused before anything is computed, and not counted.
+  for (let index = 0; index < 40; index += 1) expect((await attempt('0'.repeat(64))).status).toBe(403);
+  const statuses: number[] = [];
+  for (let index = 0; index < 32; index += 1) statuses.push((await attempt(inviteId)).status);
+  expect(statuses.slice(0, 30).every((status) => status === 403)).toBe(true);
+  expect(statuses.slice(30)).toEqual([429, 429]);
+
+  const held = a.core.group as unknown as { roster: Roster };
+  const withAddresses = (addresses: string[]) => { held.roster = { ...held.roster, cores: held.roster.cores.map((core) => ({ ...core, addresses })) }; };
+  withAddresses(['http://desk.tail.example:7000', 'http://100.101.102.103:7000', 'http://192.168.1.20:7000']);
+  expect(a.core.group.ownAddress()).toBe('http://100.101.102.103:7000');
+  expect(a.core.reachableUrl()).toBe('http://100.101.102.103:7000');
+  withAddresses(['http://desk.tail.example:7000', 'https://desk.tail.example']);
+  expect(a.core.group.ownAddress()).toBe('https://desk.tail.example');
+  withAddresses(['http://desk.tail.example:7000']);
+  expect(a.core.group.ownAddress()).toBeNull();
+  withAddresses([a.url]);
+  expect(a.core.group.ownAddress()).toBeNull();
+});
+

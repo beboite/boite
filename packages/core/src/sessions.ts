@@ -247,6 +247,8 @@ export class SessionStore {
     if (this.core.journal.getSession(sessionId) === null) {
       throw refused(`unknown session ${sessionId}`, { sessionId });
     }
+    // First: a device of the group is revoked on every member, and that is written before its session goes.
+    this.core.group.sessionRevoking(sessionId);
     this.core.journal.append({ type: 'session.revoked', threadId: null, version: 1, payload: { id: sessionId } }, () => {
       this.core.journal.deleteSession(sessionId);
     });
@@ -255,8 +257,6 @@ export class SessionStore {
     // The sockets first, so the event never reaches the client it is about.
     this.core.subscribers.closeSession(sessionId);
     this.core.bus.emit('sessions.updated', { sessionId, state: 'revoked' });
-    // After the row is gone: a device of the group is then revoked on every member.
-    this.core.group.sessionRevoked(sessionId);
   }
 
   private sweep(now: number): void {

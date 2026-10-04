@@ -23,6 +23,8 @@ export interface Machine {
   icon?: MachineIconName;
   /** Set when the group brought this machine here: its id in the roster. Such a machine goes when the group drops it. */
   coreId?: string;
+  /** The group that brought it. */
+  groupId?: string;
 }
 
 export function isThisPC(machine: Machine): boolean {
@@ -83,10 +85,14 @@ export class Workspace {
   }
 
   #primaryMachine(selected: Endpoint | null, remembered: StoredEnvironment[]): Machine {
+    // A machine the group brought stays one when it is the machine this window opens on.
+    const brought = remembered.find(e => e.url === store.endpointUrl);
     const machine: Machine = {
       id: store.endpointUrl ?? 'local',
       label: remembered.find(e => e.url === selected?.url)?.label ?? (store.localCore ? strings.machines.local : store.core?.hostname ?? hostOf(store.endpointUrl)) ?? strings.machines.local,
-      store
+      store,
+      ...(brought?.coreId === undefined ? {} : { coreId: brought.coreId }),
+      ...(brought?.groupId === undefined ? {} : { groupId: brought.groupId })
     };
     this.restoreProfile(machine);
     return machine;
@@ -294,20 +300,25 @@ export class Workspace {
     // key its core refuses, and on a phone that machine is the page's own,
     // which cannot be removed: the new link has to be able to replace the key.
     if (existing && existing.store.connection === 'ready') return fail(strings.machines.duplicate);
+    // A machine paired by hand at this address stays what it is: the group neither replaces its key nor claims it.
+    if (existing && endpoint.ticket !== undefined && existing.coreId !== endpoint.coreId) return false;
     const target = existing?.store ?? new Store();
     target.client?.close();
     target.detach();
     target.machineId = id;
     target.visible = this.active === target;
     if (!existing) {
-      const fresh: Machine = { id, label: label?.trim() || host, store: target };
+      const fresh: Machine = {
+        id, label: label?.trim() || host, store: target,
+        ...(endpoint.coreId === undefined ? {} : { coreId: endpoint.coreId }),
+        ...(endpoint.groupId === undefined ? {} : { groupId: endpoint.groupId })
+      };
       this.#distinct(fresh);
       this.machines = [...this.machines, fresh];
     }
     // Read back from the list: the name the core reports is written through the
     // reactive entry, or a card already drawn under the address keeps showing it.
     const machine = existing ?? this.machines.find((m) => m.store === target)!;
-    if (endpoint.coreId !== undefined) machine.coreId = endpoint.coreId;
     const connecting = target.connectEndpoint({ ...endpoint, url: id });
     const client = target.client;
     await connecting;
