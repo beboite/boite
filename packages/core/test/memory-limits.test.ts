@@ -12,7 +12,7 @@ describe('memory limits', () => {
       budgetMb: 19456, threadMemoryCapMb: 9728, memoryReserveMb: 3276.8,
     });
     expect(resolveMemoryLimits(AUTO, 8 * 1024 * MB)).toEqual({
-      budgetMb: 4864, threadMemoryCapMb: 2304, memoryReserveMb: 3072,
+      budgetMb: 4864, threadMemoryCapMb: 2304, memoryReserveMb: 2048,
     });
   });
 
@@ -34,6 +34,11 @@ describe('memory limits', () => {
     for (const value of [-1, 1, 512.5, 1048577, NaN, Infinity, '512']) {
       expect(checkSettingsPatch({ memoryReserveMb: value as number })).toMatchObject({ ok: false, field: 'memoryReserveMb' });
     }
+  });
+
+  test('auto reserve leaves room for agents on a small desktop and preserves an explicit reserve', () => {
+    expect(resolveMemoryLimits(AUTO, 4 * 1024 * MB).memoryReserveMb).toBe(1024);
+    expect(resolveMemoryLimits({ ...AUTO, memoryReserveMb: 3072 }, 4 * 1024 * MB).memoryReserveMb).toBe(3072);
   });
 });
 
