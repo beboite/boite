@@ -193,10 +193,14 @@ respecting the project and machine filters. A completed conversation opens for
 reading with a Move to Recent button in place of the composer. Reopening keeps
 history without restarting work.
 
-Settings > General > Conversations offers Group working threads in Recent,
+Settings > General > Conversations offers Group working threads,
 stored on this device; phone settings offer the same switch under device
-preferences. It moves running, queued and background work to a second
-collapsed section above Done. Pins, unsent drafts, failures and requests for
+preferences. Display options beside Projects and Recent offers the same switches
+with their scope and stays open while adjusting multiple options.
+It moves running, queued and background work to a collapsed section above Done
+in Recent and behind each project's working counter in Projects. Turning it
+off keeps those conversations in the main list in both views.
+Pins, unsent drafts, failures and requests for
 the user's answer remain visible. Phone search temporarily shows matching
 working conversations in the main list. Keyboard thread shortcuts follow the
 expanded rows in their displayed order. Merged-PR archiving feeds Done through
@@ -204,15 +208,18 @@ the core check below; its PR link appears under the completed title.
 
 Projects shows projects with any active conversation or a draft, including
 projects whose conversations are all working. Each project header has separate
-Working and Done counters that toggle their lists, both closed by default.
-Working includes running, queued and background work. Pins and unsent
+Working and Done counters. When working grouping is enabled, its counter toggles
+that list; Done toggles completed history. Both lists start closed. Working
+includes running, queued and background work. Pins and unsent
 drafts stay visible while Working is folded and appear once when expanded;
 questions and failures stay in the main list. Done reads only that project's
 archived summaries when expanded, with the same reading and restore actions as
 Recent. Other projects holds empty projects and projects whose conversations
 are all archived, in a closed section below the main list. Creating or restoring
 a conversation or starting a draft returns its project to the main list.
-Expansion follows the owning project between desktop and phone for
+Group other projects, in settings and the Projects grouping menu, can be disabled
+to keep every project in its normal order. Both grouping preferences persist on
+the device. Expansion follows the owning project between desktop and phone for
 the current session. Phone search exposes matching
 working conversations even when their counter is closed.
 Recent project order uses the latest user message among live conversations,
@@ -242,6 +249,11 @@ Projects default to `autoArchiveMergedPr: true`; the owner changes it through
 `projects.setAutoArchiveMergedPr`. The core can automatically archive an idle
 root conversation only for a clean linked worktree and a uniquely identified,
 merged, non-fork PR from the same repository with the exact branch tip.
+The grouping menu in both views exposes this project policy as Hide merged PR
+conversations and names the project it affects. In Recent it follows the project
+filter, or the current project when all projects are shown. Disabling reveals
+that project's automatically hidden conversations immediately, preserves manual
+archives and permits hiding them again when the policy is enabled.
 A shared checkout, reused branch history, ambiguous root holder, dirty tree or
 failed Git/GitHub read leaves the conversation visible.
 

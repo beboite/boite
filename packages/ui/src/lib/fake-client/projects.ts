@@ -19,6 +19,16 @@ export function projectMethods(ctx: FakeContext) {
       if (!project) throw ctx.notFound('project', params.projectId);
       if (typeof params.enabled !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'projects.setAutoArchiveMergedPr.enabled must be a boolean', data: { field: 'enabled', expected: 'true or false' } });
       project.autoArchiveMergedPr = params.enabled;
+      if (!params.enabled) {
+        for (const thread of ctx.threads.values()) {
+          if (thread.projectId !== project.id || !thread.archived || thread.parentThreadId || thread.archiveReason?.type !== 'pr-merged') continue;
+          thread.archived = false;
+          delete thread.archiveReason;
+          const state = ctx.mergedPrArchive.get(thread.id);
+          if (state) ctx.mergedPrArchive.set(thread.id, { ...state, generation: state.generation + 1 });
+          ctx.touch(thread);
+        }
+      }
       const summary = describedProject(ctx, project);
       ctx.emit('project.updated', summary);
       return summary;

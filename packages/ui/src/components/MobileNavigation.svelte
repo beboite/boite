@@ -62,8 +62,8 @@
   let project = $derived(store.openProject ?? store.projects.find(p => p.archived !== true));
   let actionProject = $derived(store.openProject);
   let groups = $derived(projectView.sorted(machines.flatMap(machine => machine.store.projects.filter(project => !project.archived).map(project => ({ machine, project })))));
-  let activeGroups = $derived(groups.filter(activeProject));
-  let otherGroups = $derived(groups.filter(entry => !activeProject(entry)));
+  let activeGroups = $derived(recentPreferences.groupOtherProjects ? groups.filter(activeProject) : groups);
+  let otherGroups = $derived(recentPreferences.groupOtherProjects ? groups.filter(entry => !activeProject(entry)) : []);
   let shownGroups = $derived(query ? groups : [...activeGroups, ...(projectThreadView.otherOpen ? otherGroups : [])]);
   let selected = $derived(projectView.selected(groups));
   let draftOwner = $derived(screen === 'threads' && workspace.view === 'recent' && selected ? selected.machine.store : store);
@@ -210,7 +210,7 @@
         {@const workingOpen = projectThreadView.isOpen(group, 'working')}
         {@const doneOpen = !!group.project.archivedThreads && projectThreadView.isOpen(group, 'done')}
         {@const workingRows = groupRows.filter(row => workingThread(row.thread))}
-        {@const attentionRows = query ? groupRows : groupRows.filter(row => workingOpen ? !workingThread(row.thread) : !groupWorkingThread(group.machine.store, row.thread))}
+        {@const attentionRows = query || !recentPreferences.groupWorking ? groupRows : groupRows.filter(row => workingOpen ? !workingThread(row.thread) : !groupWorkingThread(group.machine.store, row.thread))}
         {@const controls = `mobile-project-${encodeURIComponent(projectKey(group))}`}
         {@const draft = group.machine.store.draftEntries.find(entry => entry.projectId === group.project.id)}
         {#if !query || groupRows.length > 0 || (doneOpen && group.project.archivedThreads)}

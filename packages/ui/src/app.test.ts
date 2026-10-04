@@ -241,6 +241,21 @@ test('the draft worktree chip puts the first send on its own branch, and the hea
   await waitFor(() => store.draft?.worktree === true);
   expect(query<HTMLButtonElement>('[data-testid=composer-worktree]').getAttribute('aria-pressed')).toBe('true');
 
+  // A worktree belongs to the project even before a provider is configured.
+  const providers = store.providers;
+  const draftChoice = store.draftChoice;
+  try {
+    store.providers = [];
+    store.draftChoice = null;
+    flushSync();
+    expect(store.defaultChoice()).toBeNull();
+    expect(query('[data-testid=draft-sentence]').textContent).toContain('in a worktree');
+  } finally {
+    store.providers = providers;
+    store.draftChoice = draftChoice;
+    flushSync();
+  }
+
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
   input.value = 'Fix the login';
   input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -368,9 +383,9 @@ test('a draft names its project in the heading and the dropdown moves it to anot
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
 
-  const heading = query('[data-testid=draft-empty]');
-  expect(heading.textContent).toContain('with approval requests in');
-  expect(heading.textContent).toContain('notes');
+  const heading = query('[data-testid=draft-sentence]');
+  expect(heading.querySelector('p')?.textContent).toContain('with approval requests');
+  expect(heading.querySelector('h1')?.textContent).toContain('notes');
   // The heading says the project, so the header chip no longer repeats it.
   expect(query('[data-testid=thread-header]').textContent).not.toContain('notes');
 
