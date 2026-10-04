@@ -71,8 +71,11 @@ type ModelFamily = 'anthropic' | 'openai' | 'google' | 'xai' | 'meta';
 
 const ROUTE_FAMILIES: Record<string, ModelFamily> = {
   claude: 'anthropic', anthropic: 'anthropic', codex: 'openai', openai: 'openai', chatgpt: 'openai',
-  gemini: 'google', google: 'google', xai: 'xai', grok: 'xai', muse: 'meta', meta: 'meta',
+  gemini: 'google', google: 'google', xai: 'xai', grok: 'xai', muse: 'meta',
 };
+
+/** Open-weight families: offered to every harness, whatever routing prefix the gateway gives them. */
+const OPEN_MODEL = /gpt-oss|kimi|qwen|llama|deepseek|mistral|mixtral|glm/i;
 
 /**
  * The vendor whose harness a proprietary model belongs to, or null for an open
@@ -83,7 +86,7 @@ const ROUTE_FAMILIES: Record<string, ModelFamily> = {
 export function proprietaryFamily(id: string): ModelFamily | null {
   const slash = id.lastIndexOf('/');
   const name = id.slice(slash + 1);
-  if (/gpt-oss/i.test(name)) return null;
+  if (OPEN_MODEL.test(name)) return null;
   if (/claude|opus|sonnet|haiku|fable/i.test(name)) return 'anthropic';
   if (/^(?:chatgpt|gpt|codex)(?:[-_.\d]|$)|^openai(?:[-_]|$)|^o\d+(?:-|$)/i.test(name)) return 'openai';
   if (/gemini/i.test(name)) return 'google';

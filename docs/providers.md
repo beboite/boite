@@ -14,8 +14,8 @@ proprietary model stays in its own harness: Claude lists Claude models and
 Codex lists OpenAI models, whatever routing prefix the gateway gives them, while
 Grok and Muse models are listed by neither. Gemini models are offered to both,
 because Antigravity, their own harness, cannot run through a gateway. Open
-models (`gpt-oss`, Kimi, Qwen and the like) are offered to each harness whose
-API the gateway advertises for them. A name the rules do not recognize takes
+models (`gpt-oss`, Kimi, Qwen, Llama, DeepSeek, Mistral, GLM) are offered to
+each harness whose API the gateway advertises for them, under any routing prefix. A name the rules do not recognize takes
 its vendor from the routing prefix (`codex/`, `claude/`, ...). A catalog without
 endpoint metadata keeps the older rule, which matches the whole id against the
 harness's native model names. With the proxy enabled, Limits opens this page inside

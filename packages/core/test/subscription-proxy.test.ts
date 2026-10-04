@@ -128,7 +128,8 @@ test('a gateway that translates every model keeps proprietary models in their ow
   gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
     return Response.json({ data: ['claude/claude-opus-5-5', 'codex/gpt-6-sol', 'codex/codex-auto-review', 'antigravity/claude-sonnet-5-5-high',
       'antigravity/gemini-3-flash', 'antigravity/gpt-oss-120b-medium', 'xai/grok-5', 'muse/muse-code', 'kimi/kimi-k2',
-      'qwen/qwen3-gptq', 'codex/o5', 'codex/computer-use-preview', 'claude/default']
+      'qwen/qwen3-gptq', 'codex/o5', 'codex/computer-use-preview', 'claude/default', 'claude/kimi-k2', 'codex/qwen3-coder',
+      'meta/llama-4-maverick']
       .map(id => ({ id, supported_endpoint_types: anyApi })) });
   } });
   harness = await startTestCore({ settings: { subscriptionProxy: config(`http://127.0.0.1:${gateway.port}/v1`) } });
@@ -138,9 +139,11 @@ test('a gateway that translates every model keeps proprietary models in their ow
   const ids = async (providerId: 'claude' | 'codex', accountId: string) =>
     (await owner.call('providers.probe', { providerId, accountId })).models.map(model => model.id);
   expect(await ids('claude', claude.id)).toEqual(['claude/claude-opus-5-5', 'antigravity/claude-sonnet-5-5-high', 'antigravity/gemini-3-flash',
-    'antigravity/gpt-oss-120b-medium', 'kimi/kimi-k2', 'qwen/qwen3-gptq', 'claude/default']);
+    'antigravity/gpt-oss-120b-medium', 'kimi/kimi-k2', 'qwen/qwen3-gptq', 'claude/default', 'claude/kimi-k2', 'codex/qwen3-coder',
+    'meta/llama-4-maverick']);
   expect(await ids('codex', codex.id)).toEqual(['codex/gpt-6-sol', 'codex/codex-auto-review', 'antigravity/gemini-3-flash',
-    'antigravity/gpt-oss-120b-medium', 'kimi/kimi-k2', 'qwen/qwen3-gptq', 'codex/o5', 'codex/computer-use-preview']);
+    'antigravity/gpt-oss-120b-medium', 'kimi/kimi-k2', 'qwen/qwen3-gptq', 'codex/o5', 'codex/computer-use-preview', 'claude/kimi-k2',
+    'codex/qwen3-coder', 'meta/llama-4-maverick']);
 });
 
 test('legacy CLIProxy catalogs select native families and malformed gateway errors cannot echo the key', async () => {
