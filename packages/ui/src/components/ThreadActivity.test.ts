@@ -87,6 +87,9 @@ test('another thread\'s question comes up open over one folded here, as many que
   });
   const store = render({ goal: null, loop: null, tasks: [] });
   flushSync(() => { store.pendingQuestions = [question('first', 'thread'), question('second', 'other')]; });
+  expect(document.querySelector('section')!.classList.contains('inline')).toBe(true);
+  expect(document.querySelector('[data-testid=composer-reply]')!.getAttribute('data-question')).toBe('first');
+  expect(document.querySelector('[data-testid=question-reply-hint], [data-testid=question-submit]')).toBeNull();
   const fold = () => document.querySelector<HTMLButtonElement>('[data-testid=activity-question-toggle]')!;
   fold().click();
   flushSync();
@@ -95,5 +98,4 @@ test('another thread\'s question comes up open over one folded here, as many que
   expect(fold().getAttribute('aria-expanded')).toBe('true');
   expect(document.querySelector('[data-testid=activity-question]:not([hidden])')!.getAttribute('data-question')).toBe('second');
 });
-
 

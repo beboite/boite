@@ -43,6 +43,9 @@ test('desktop and paired phone replace an edited message and silently skip a que
       const old = await client.call('threads.get', { threadId: thread.id });
       page = await BrowserPage.launch({ url: mobile ? await mintPairing(core) : pairingUrlOf(core), windowSize: { width: 1280, height: 900 } });
       await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
+      await page.evaluate("localStorage.setItem('boite.locale', 'fr'); localStorage.setItem('boite.theme', 'dark')");
+      await page.send('Page.reload', {});
+      await page.waitFor('document.documentElement.lang === "fr" && document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
       await page.click(`[data-thread-id="${thread.id}"]`);
       await page.waitFor('document.querySelectorAll("[data-testid=message-edit]").length === 3');
       if (mobile) {
@@ -70,6 +73,33 @@ test('desktop and paired phone replace an edited message and silently skip a que
       expect(reply).not.toContain('Later request');
       await capture(page, `message-replaced-${mobile ? 'phone' : 'desktop'}.png`);
 
+      const question = 'Dans le projet de démonstration, souhaitez-vous conserver le menu actuel ou essayer la nouvelle navigation ? Si vous choisissez la nouvelle version, quels écrans faut-il vérifier en premier ?';
+      await client.call('questions.ask', { threadId: thread.id, text: question });
+      await page.waitFor('document.querySelector("[data-testid=composer-reply]")');
+      expect(await page.text('[data-testid=activity-question] [data-testid=question-text]')).toBe(question);
+      expect(await page.evaluate('document.querySelectorAll("[data-testid=question-text]").length')).toBe(1);
+      expect(await page.evaluate('document.querySelector("[data-testid=activity-question] [data-testid=question-reply-hint], [data-testid=activity-question] [data-testid=question-submit]")')).toBeNull();
+      expect(await page.evaluate('document.querySelector("[data-testid=composer-picker]")')).toBeNull();
+      expect((await page.text(send)).trim()).toBe('Envoyer la réponse');
+      expect(await page.evaluate('(() => { const dock = document.querySelector("[data-testid=thread-activity]").getBoundingClientRect(); const field = document.querySelector("[data-testid=composer]").getBoundingClientRect(); return dock.top >= field.top && dock.bottom <= field.bottom && document.documentElement.scrollWidth <= innerWidth; })()')).toBe(true);
+      await capture(page, `question-answer-${mobile ? 'phone' : 'desktop'}.png`);
+      const clip = await page.evaluate<{ x: number; y: number; width: number; height: number; scale: number }>('(() => { const r = document.querySelector("[data-testid=composer]").getBoundingClientRect(); return {x:r.x, y:r.y, width:r.width, height:r.height, scale:1}; })()');
+      const detail = await page.send('Page.captureScreenshot', { format: 'png', clip }) as { data: string };
+      await writeFile(join(captures, `question-detail-${mobile ? 'phone' : 'desktop'}.png`), Buffer.from(detail.data, 'base64'));
+      await page.click('[data-testid=composer-reply-ignore]');
+      await page.waitFor('!document.querySelector("[data-testid=composer-reply]") && document.querySelector("[data-testid=composer-picker]")');
+      expect(await client.call('questions.list', { threadId: thread.id })).toHaveLength(1);
+      await page.click('[data-testid=question-write]');
+      await page.waitFor('document.querySelector("[data-testid=composer-reply]")');
+      await page.type(input, 'Oui, vérifiez les réglages.');
+      const answered = client.next('turn.finished', turn => turn.threadId === thread.id);
+      await page.click(send);
+      await answered;
+      await page.waitFor('!document.querySelector("[data-testid=composer-reply]") && document.querySelector("[data-testid=composer-picker]")');
+      expect(await client.call('questions.list', { threadId: thread.id })).toEqual([]);
+      const afterAnswer = await client.call('threads.get', { threadId: thread.id });
+      expect(afterAnswer.messages.filter(message => message.role === 'user').at(-1)?.parts).toEqual([{ type: 'text', text: `> ${question}\n\nOui, vérifiez les réglages.` }]);
+
       await client.call('questions.ask', { threadId: thread.id, text: 'Which file should be checked first?', options: ['Parser', 'Renderer'] });
       await page.waitFor('document.querySelector("[data-testid=question-skip]")');
       expect(await page.evaluate('document.querySelector("[data-testid=question-skip]").disabled')).toBe(false);
@@ -79,8 +109,8 @@ test('desktop and paired phone replace an edited message and silently skip a que
       expect(await client.call('questions.list', { threadId: thread.id })).toEqual([]);
       const skipped = await client.call('threads.get', { threadId: thread.id });
       expect(skipped.status).toBe('idle');
-      expect(skipped.turns).toEqual(replaced.turns);
-      expect(skipped.messages.filter(message => message.role === 'user')).toEqual(replaced.messages.filter(message => message.role === 'user'));
+      expect(skipped.turns).toEqual(afterAnswer.turns);
+      expect(skipped.messages.filter(message => message.role === 'user')).toEqual(afterAnswer.messages.filter(message => message.role === 'user'));
       expect(page.errors()).toEqual([]);
       await page.close(); page = undefined;
     }

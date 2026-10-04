@@ -159,7 +159,7 @@
       </div>
     {/if}
 
-    {#if pending && replying}
+    {#if pending && replying && !docked}
       <p class="muted description" data-testid="question-reply-hint">{strings.chat.questionReplying}</p>
     {/if}
 
@@ -171,6 +171,7 @@
         {#if allowText && !replying && onwrite}
           <button type="button" class="ghost" data-testid="question-write" disabled={sent} onclick={onwrite}><span class="ui-label">{strings.chat.questionWrite}</span></button>
         {/if}
+        {#if !docked || !replying}
         <button
           type="button"
           class="primary"
@@ -181,6 +182,7 @@
         >
           <span class="ui-label">{strings.chat.questionAnswer}</span>
         </button>
+        {/if}
       </div>
     {:else}
       <p class="muted description" data-testid="question-cancelled">{strings.chat.questionCancelled}</p>
@@ -210,7 +212,7 @@
     border: none;
     background: transparent;
     box-shadow: none;
-    padding: 2px 8px 8px 32px;
+    padding: 4px 10px 8px;
   }
 
   /* Resolved questions use the same inset and touch target as tool disclosures. */
@@ -253,7 +255,9 @@
 
   .prompt {
     margin: 0;
-    font-weight: 600;
+    font-weight: 500;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
   .given {
