@@ -241,6 +241,21 @@ test('the draft worktree chip puts the first send on its own branch, and the hea
   await waitFor(() => store.draft?.worktree === true);
   expect(query<HTMLButtonElement>('[data-testid=composer-worktree]').getAttribute('aria-pressed')).toBe('true');
 
+  // A worktree belongs to the project even before a provider is configured.
+  const providers = store.providers;
+  const draftChoice = store.draftChoice;
+  try {
+    store.providers = [];
+    store.draftChoice = null;
+    flushSync();
+    expect(store.defaultChoice()).toBeNull();
+    expect(query('[data-testid=draft-sentence]').textContent).toContain('in a worktree');
+  } finally {
+    store.providers = providers;
+    store.draftChoice = draftChoice;
+    flushSync();
+  }
+
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
   input.value = 'Fix the login';
   input.dispatchEvent(new Event('input', { bubbles: true }));

@@ -129,12 +129,14 @@
               <ChevronDown size={14} strokeWidth={2} />
             </Menu></span>
           </h1>
-          {#if draftChoice}
+          {#if draftChoice || store.draft?.worktree}
             <p class="draft-details">
               {#if store.draft?.worktree}<span>{strings.thread.inWorktree}</span>{/if}
-              <span>{strings.thread.draftMode[draftChoice.permissionMode]}</span>
-              <span>{strings.thread.using} {modelLabel}</span>
-              {#if effortLabel}<span>{fill(strings.thread.onEffort, { effort: effortLabel })}</span>{/if}
+              {#if draftChoice}
+                <span>{strings.thread.draftMode[draftChoice.permissionMode]}</span>
+                <span>{strings.thread.using} {modelLabel}</span>
+                {#if effortLabel}<span>{fill(strings.thread.onEffort, { effort: effortLabel })}</span>{/if}
+              {/if}
             </p>
           {/if}
         </div>
