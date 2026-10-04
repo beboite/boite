@@ -191,8 +191,8 @@ back. Thirty requests a minute that open are served, and the invitation must
 still be live once the request has been read, before it is opened or counted. A request already received is
 refused before anything is computed for it, however its JSON is written, so
 one recorded on the path and sent again spends nothing of those thirty, in
-that minute or a later one. An invitation asked with 64 different requests is
-taken away. Neither
+that minute or a later one. An invitation asked with more than 64 different
+requests is taken away. Neither
 does the invitation of a machine that was since removed: it is spent, and
 refused before it is read. A request is counted only once it has proved who
 sent it, and an invitation already used is good for the machine it admitted
@@ -232,7 +232,7 @@ never of another's. A member the core never served yet can be turned away with
 the strangers while such a flood lasts. Requests from the machine itself are not
 counted, since a reverse proxy puts every remote peer behind that one address. A member's own
 allowance, 120 requests a minute, is only spent by requests that are its own,
-fresh and not seen before.
+fresh and not seen before, one turned away for that allowance included.
 
 **Tickets.** A client connected to a member asks it for a ticket to another
 (`group.ticket`): the member's signed statement of who vouches, for whom, at
@@ -303,7 +303,11 @@ saved for that address is read again, whichever window left it and wherever it
 sits, so a key left behind never passes for a pairing made by hand, and a link
 to that address asks as for a core nobody knows. A new key issued for the
 address ends that: a pairing made by hand, a link the owner said yes to, or
-the group bringing the machine back. A key the group handed
+the group bringing the machine back. A window that is open lets the machine go
+as soon as another window marks its address, and a ticket exchange that began
+before the mark and ends after it leaves no key. Only a machine something
+saved says the group brought is marked: an address a member gave, tried and
+given up, is not. A key the group handed
 out for an address the machine no longer gives, or no longer allows once it has
 HTTPS, is dropped and the machine reached anew, the machine the window opened
 on included: the window then goes to a machine paired by hand, or to the

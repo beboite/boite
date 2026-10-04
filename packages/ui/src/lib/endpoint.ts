@@ -44,15 +44,17 @@ function isEndpoint(value: unknown): value is Endpoint {
   return typeof shape['url'] === 'string' && typeof shape['token'] === 'string';
 }
 
-const DROPPED_STORAGE_KEY = 'boite.group.dropped';
+export const DROPPED_STORAGE_KEY = 'boite.group.dropped';
 const DROPPED_MAX = 256;
 
-function droppedAddresses(): string[] {
+/** Address to the moment it was dropped. */
+function droppedAddresses(): Record<string, number> {
   try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(DROPPED_STORAGE_KEY) ?? '[]');
-    return Array.isArray(parsed) ? parsed.filter((url): url is string => typeof url === 'string') : [];
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(DROPPED_STORAGE_KEY) ?? '{}');
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, number] => typeof entry[1] === 'number'));
   } catch {
-    return [];
+    return {};
   }
 }
 
@@ -64,13 +66,29 @@ function droppedAddresses(): string[] {
  */
 function setDropped(url: string, dropped: boolean): void {
   const target = normalise(url);
-  const rest = droppedAddresses().filter((known) => known !== target);
-  if (!dropped && rest.length === droppedAddresses().length) return;
+  const { [target]: was, ...rest } = droppedAddresses();
+  if (!dropped && was === undefined) return;
+  const next = dropped ? Object.entries({ ...rest, [target]: Date.now() }).slice(-DROPPED_MAX) : Object.entries(rest);
   try {
-    window.localStorage.setItem(DROPPED_STORAGE_KEY, JSON.stringify((dropped ? [...rest, target] : rest).slice(-DROPPED_MAX)));
+    window.localStorage.setItem(DROPPED_STORAGE_KEY, JSON.stringify(Object.fromEntries(next)));
   } catch {
     /* a browser that refuses storage still runs for this session */
   }
+}
+
+/** Whether the group dropped the machine at this address, and nothing brought it back since. */
+export function isDropped(url: string): boolean {
+  return droppedAddresses()[normalise(url)] !== undefined;
+}
+
+/**
+ * Whether the address was dropped after `began`. A ticket exchange that began
+ * before the drop and ends after it is for a machine that has left since: its
+ * key is not kept, and does not bring the address back.
+ */
+export function droppedSince(url: string, began: number): boolean {
+  const at = droppedAddresses()[normalise(url)];
+  return at !== undefined && at >= began;
 }
 
 export function readStoredEndpoint(): Endpoint | null {
@@ -78,7 +96,7 @@ export function readStoredEndpoint(): Endpoint | null {
     const raw = window.localStorage.getItem(ENDPOINT_STORAGE_KEY);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
-    if (!isEndpoint(parsed) || droppedAddresses().includes(normalise(parsed.url))) return null;
+    if (!isEndpoint(parsed) || isDropped(parsed.url)) return null;
     return { url: normalise(parsed.url), token: parsed.token, ...(parsed.paired === true ? { paired: true } : {}), ...brought(parsed) };
   } catch {
     return null;
@@ -160,7 +178,7 @@ export function readEnvironments(): StoredEnvironment[] {
     if (raw) {
       const parsed: unknown = JSON.parse(raw);
       const dropped = droppedAddresses();
-      if (Array.isArray(parsed)) list = parsed.filter(isEnvironment).filter((env) => !dropped.includes(env.url));
+      if (Array.isArray(parsed)) list = parsed.filter(isEnvironment).filter((env) => dropped[env.url] === undefined);
     }
   } catch {
     list = [];
@@ -279,9 +297,13 @@ export function removeEnvironment(url: string, token?: string): StoredEnvironmen
  */
 export function removeBrought(url: string, coreId: string): StoredEnvironment[] {
   const saved = readEnvironments().find((env) => env.url === normalise(url));
-  if (saved !== undefined && saved.coreId !== coreId) return readEnvironments();
+  const stored = readStoredEndpoint();
+  // Something saved must say the group brought that machine there. An address a member merely gave, and
+  // that was only tried, is not one to mark: a key the owner holds for whoever really sits there stays.
+  const mine = saved?.coreId === coreId || (stored?.url === normalise(url) && stored.coreId === coreId);
+  if (!mine || (saved !== undefined && saved.coreId !== coreId)) return readEnvironments();
   // The address is marked first: a key another window left for that machine, in the list or as the core
-  // it opens on, is not read again either, whatever it looks like.
+  // it opens on, is not read again either.
   setDropped(url, true);
   if (rawStoredUrl() === normalise(url)) clearStoredEndpoint();
   return readEnvironments();

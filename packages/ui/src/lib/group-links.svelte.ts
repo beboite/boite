@@ -1,7 +1,7 @@
 import { untrack } from 'svelte';
 import { RPC_PATH, type Group, type GroupCore } from '@boite/contracts';
 import { WsClient } from './client';
-import { readEnvironments, removeBrought, type Endpoint, type StoredEnvironment } from './endpoint';
+import { DROPPED_STORAGE_KEY, isDropped, readEnvironments, removeBrought, type Endpoint, type StoredEnvironment } from './endpoint';
 import { usableAddresses } from './group-addresses';
 import type { Machine, Workspace } from './workspace.svelte';
 
@@ -154,8 +154,12 @@ export class GroupLinks {
         untrack(() => void this.reconcile());
       });
     });
+    // Another window dropped a machine: this one lets it go too, without waiting for its own machines to say so.
+    const heard = (event: StorageEvent): void => { if (event.key === DROPPED_STORAGE_KEY) void this.reconcile(); };
+    window.addEventListener('storage', heard);
     return () => {
       clearInterval(timer);
+      window.removeEventListener('storage', heard);
       stop();
     };
   }
@@ -245,7 +249,8 @@ export class GroupLinks {
       // Its key was taken away and nobody it could be vouched by is in that group any more: nothing left to reconnect with.
       const orphaned = machine.store.connection === 'closed' && !this.#holdsKey(machine)
         && !informed.some((other) => other !== machine && other.coreId === undefined && other.store.group?.id === machine.groupId);
-      if (!delisted && !orphaned) continue;
+      // Or another window was told the group dropped it, and marked its address for every window.
+      if (!delisted && !orphaned && !isDropped(machine.id)) continue;
       await this.#drop(machine);
     }
   }

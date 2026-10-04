@@ -4,6 +4,8 @@ import {
   parsePairingLink,
   readEnvironments,
   readStoredEndpoint,
+  droppedSince,
+  isDropped,
   rememberSession,
   removeBrought,
   removeEnvironment,
@@ -295,6 +297,19 @@ describe('environments', () => {
     removeBrought(url, 'b');
     expect(readEnvironments()).toEqual([{ url, label: '10.0.0.5:9000', token: 'hand', paired: true }]);
     expect(readStoredEndpoint()).toMatchObject({ token: 'hand' });
+    // An address a member merely gave, tried and given up, is no machine the group brought: the owner's key for
+    // whoever really sits there, saved so far only as the core a window opens on, is left alone.
+    storeEndpoint({ url: 'https://d.example', token: 'approved', paired: true });
+    removeBrought('https://d.example', 'm');
+    expect(isDropped('https://d.example')).toBe(false);
+    expect(readStoredEndpoint()).toMatchObject({ url: 'https://d.example', token: 'approved' });
+    storeEndpoint({ url, token: 'hand', paired: true });
+    // A ticket exchange begun before the drop and finished after it is for a machine that has left since.
+    const began = Date.now() - 1000;
+    rememberSession({ url: 'http://10.0.0.7:9000', token: '', ticket: 't', coreId: 'e', groupId: 'grp' }, 'one');
+    expect(droppedSince('http://10.0.0.7:9000', began)).toBe(false);
+    removeBrought('http://10.0.0.7:9000', 'e');
+    expect([isDropped('http://10.0.0.7:9000'), droppedSince('http://10.0.0.7:9000', began), droppedSince('http://10.0.0.7:9000', Date.now() + 1000)]).toEqual([true, true, false]);
     // And so does the group bringing the machine back at that address.
     rememberSession({ url: 'http://10.0.0.6:9000', token: '', ticket: 't', coreId: 'c', groupId: 'grp' }, 'one');
     removeBrought('http://10.0.0.6:9000', 'c');

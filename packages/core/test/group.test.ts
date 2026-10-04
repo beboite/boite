@@ -898,6 +898,17 @@ test('a recorded request sent again and again never spends the member\'s allowan
   const entryOfA = (b.core.journal.getSetting('group') as Roster).cores.find((core) => core.coreId === id(a))!;
   const peer = { coreId: entryOfA.coreId, name: entryOfA.name, url: entryOfA.addresses[0]!, publicKey: entryOfA.publicKey };
   expect(await b.core.coordination.request(peer, 'directory', {})).toEqual([]);
+
+  // A request turned away for the quota is remembered too: recorded and sent again once the minute is over, it spends nothing of the next.
+  const rates = (a.core.coordination as unknown as { rates: Map<string, { since: number; count: number }> }).rates;
+  rates.set(id(b), { since: Date.now(), count: 120 });
+  const fresh = JSON.stringify({ from: id(b), to: id(a), at: Date.now(), nonce: crypto.randomUUID(), operation: 'directory', payload: {} });
+  const over = b.core.group.sealFor(id(a), pack(fresh, b.core.coordination.signature(Buffer.from(fresh)).toString('base64')))!;
+  const late = () => fetch(`${a.url}/agent-messages`, { method: 'POST', body: over.body, headers: { 'x-boite-peer': id(b), 'x-boite-signature': SEALED } });
+  expect((await late()).status).toBe(429);
+  rates.set(id(b), { since: Date.now(), count: 0 });
+  expect((await late()).status).toBe(403);
+  expect(rates.get(id(b))!.count).toBe(0);
 });
 
 test('requests are counted against the address they come from as they arrive, and a refusal keeps its place for a minute', () => {

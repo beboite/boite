@@ -1,7 +1,7 @@
 import { RpcErrorCode, type CoreInfo, type Principal, type ThreadId } from '@boite/contracts';
 import { RpcFailure, WsClient, type Client, type ClientState, type ObservableClient } from '../client';
 import { confirm } from '../confirm.svelte';
-import { clearStoredEndpoint, forgetGroupOf, readStoredEndpoint, rememberSession, refreshLocalEnvironment, removeBrought, fromTauri, shellEndpointError, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, servesThisPage, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from '../endpoint';
+import { clearStoredEndpoint, droppedSince, forgetGroupOf, readStoredEndpoint, rememberSession, refreshLocalEnvironment, removeBrought, fromTauri, shellEndpointError, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, servesThisPage, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from '../endpoint';
 import { onboardingSeen } from '../onboarding';
 import { rightPanel } from '../right-panel.svelte';
 import { fill, strings } from '../strings';
@@ -237,6 +237,7 @@ export class Connection {
     this.localCore = endpoint.local === true;
     this.#keyless = endpoint.token === '' && endpoint.grant === undefined && endpoint.ticket === undefined;
     let key = endpoint.token;
+    const began = Date.now();
     const client = new WsClient({
       url,
       token: endpoint.token,
@@ -250,6 +251,8 @@ export class Connection {
       onSession: (session) => {
         key = session.token;
         if (this.ctx.client !== client) return;
+        // The group dropped this machine while its ticket was being exchanged: the key is not kept, and the group links let the machine go.
+        if (endpoint.grant === undefined && droppedSince(url, began)) return;
         // A ticket leaves the machine the group's; a grant makes it the owner's.
         if (rememberActive) storeEndpoint({ url, token: session.token, paired: true, ...(endpoint.grant === undefined ? { coreId: endpoint.coreId, groupId: endpoint.groupId } : {}) });
         this.environments = rememberSession(endpoint, session.token);

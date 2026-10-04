@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Group, GroupCore } from '@boite/contracts';
-import { ENVIRONMENTS_STORAGE_KEY, readEnvironments, rememberSession, type Endpoint } from './endpoint';
+import { ENVIRONMENTS_STORAGE_KEY, readEnvironments, rememberSession, removeBrought, type Endpoint } from './endpoint';
 import { GroupLinks, usableAddresses } from './group-links.svelte';
 import type { Machine, Workspace } from './workspace.svelte';
 
@@ -340,6 +340,18 @@ describe('group links', () => {
     await settle();
     await settle();
     expect(reach).toHaveBeenCalledTimes(4);
+  });
+
+  it('lets go of a machine another window was told the group dropped, before its own machines say so', async () => {
+    const url = 'http://100.64.0.2:1';
+    // This window's hand-paired machine still lists b. Another window, sharing its storage, dropped b.
+    rememberSession({ url, token: '', ticket: 't', coreId: 'b', groupId: 'grp' }, 'key');
+    removeBrought(url, 'b');
+    const a = machine('http://10.0.0.1:1', { connection: 'ready', group: null, groupKnown: true });
+    const b = machine(url, { group: group('b', members) }, { coreId: 'b' });
+    const { workspace: ws, removed } = workspace([a, b]);
+    await new GroupLinks(ws, { reach: async () => null, secure: () => false }).reconcile();
+    expect(removed).toEqual([url]);
   });
 
   it('takes the word of the hand-paired machine that no longer lists a member over the one that still does', async () => {
