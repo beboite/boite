@@ -23,6 +23,9 @@
  * resource settings and tree termination remain owner-only.
  * speech.streamStart/Chunk/Finish permit phone dictation only through the
  * owner's configured engine; sessions and cancellation belong to one connection.
+ * threads.archive lets a paired phone mark an idle conversation done under the
+ * owner's retention policy. Direct removal and policy changes stay owner-only;
+ * restoring an archive cancels its expiry before recoverable cleanup.
  */
 
 import { AGENT_EVENTS, DEVICE_EVENTS, DEVICE_METHODS, type RpcEventName, type RpcMethodName } from '@boite/contracts';

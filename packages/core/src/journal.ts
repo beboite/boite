@@ -300,7 +300,10 @@ export class Journal {
     this.persistMessages();
     const now = Date.now();
     this.db.transaction(() => {
-      for (const thread of threads) this.db.query('INSERT INTO thread_deletions VALUES (?, ?, ?, ?)').run(thread.id, rootId, thread.archived ? 1 : 0, now);
+      for (const thread of threads) {
+        this.db.query('INSERT INTO thread_deletions VALUES (?, ?, ?, ?)').run(thread.id, rootId, thread.archived ? 1 : 0, now);
+        this.db.query('UPDATE threads SET done_at = NULL WHERE id = ?').run(thread.id);
+      }
     })();
     this.stream.forgetThreads(new Set(threads.map(t => t.id)));
   }

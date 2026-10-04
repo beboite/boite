@@ -104,3 +104,26 @@ test('done retention rejects invalid delays through RPC', async () => {
       .toMatchObject({ rpc: { code: RpcErrorCode.InvalidParams, data: { field: 'threadDoneRetentionDays' } } });
   }
 });
+
+test('failed cleanup retains the done deadline so startup retries removal', async () => {
+  const { threadId } = await echoThread(harness, client);
+  await client.call('threads.archive', { threadId, onlyIfIdle: true });
+  const doneAt = Date.now() - 4 * DAY;
+  harness.core.journal.db.query('UPDATE threads SET done_at = ? WHERE id = ?').run(doneAt, threadId);
+  const stop = spyOn(harness.core.procs, 'stopAndWait').mockRejectedValueOnce(new Error('cleanup interrupted'));
+  try {
+    await expect(deleteExpiredDoneThreads(harness.core)).rejects.toThrow('cleanup interrupted');
+    expect(harness.core.journal.getThread(threadId)?.doneAt).toBe(doneAt);
+    expect(harness.core.journal.listDeletedThreads()).toEqual([]);
+  } finally { stop.mockRestore(); }
+  const dir = mkdtempSync(join(tmpdir(), 'boite-done-retry-'));
+  harness.core.journal.db.query('VACUUM INTO ?').run(join(dir, 'journal.db'));
+  const restarted = new Core({ dataDir: dir, token: harness.token });
+  try {
+    await waitFor(() => restarted.journal.getThread(threadId) === null);
+    expect(restarted.journal.listDeletedThreads().map(row => row.id)).toContain(threadId);
+    expect(restarted.threads.restoreDeleted(threadId).doneAt).toBeUndefined();
+    await deleteExpiredDoneThreads(restarted);
+    expect(restarted.journal.getThread(threadId)).not.toBeNull();
+  } finally { await restarted.close(); rmSync(dir, { recursive: true, force: true }); }
+});

@@ -522,7 +522,9 @@ export class ThreadStore {
         const state = archiveState(this.core.journal, threadId);
         if (state.reason) this.core.journal.setSetting(archiveStateKey(threadId), { ...state, reason: undefined, generation: state.generation + 1 });
       }
-      const saved = this.save({ ...thread, archived, doneAt: archived && onlyIfIdle ? thread.doneAt ?? Date.now() : null }, 'thread.archived');
+      // Keep deletion retryable until staging commits its tombstone and clears this date.
+      const doneAt = archived && (onlyIfIdle || this.removing.has(threadId)) ? thread.doneAt ?? (onlyIfIdle ? Date.now() : null) : null;
+      const saved = this.save({ ...thread, archived, doneAt }, 'thread.archived');
       if (thread.archived !== archived && !thread.parentThreadId && thread.projectId !== null) this.core.projects.announce(thread.projectId);
       return saved;
     })());
