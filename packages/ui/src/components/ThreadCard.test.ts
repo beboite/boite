@@ -71,3 +71,25 @@ test('moving a thread clears its PR and ignores the previous checkout lookup', a
   expect(document.querySelector('[data-testid=thread-pr]')).toBeNull();
   expect(document.querySelector('.metadata')).toBeNull();
 });
+
+test('a reconnect keeps the PR line on screen while the core is asked again', async () => {
+  client = new FakeClient({ delayMs: 0 });
+  store = new Store(); store.attach(client); await store.connect();
+  const thread = store.threads.find(thread => thread.branch)!;
+  const project = store.projects.find(project => project.id === thread.projectId)!;
+  const held = { number: 181, url: 'https://github.com/example/repo/pull/181', state: 'OPEN' as const };
+  const pending = new Promise<typeof held>(() => undefined);
+  const call = vi.spyOn(client, 'call').mockResolvedValueOnce(held).mockReturnValueOnce(pending);
+  mounted = mount(ThreadCard, { target: document.body, props: { machine: { id: 'local', label: 'Local', store }, project, thread, now: Date.now(), showProject: false } });
+  await settle();
+  expect(document.querySelector('[data-testid=thread-pr]')?.textContent).toContain('#181');
+  store.connection = 'connecting';
+  await settle();
+  expect(document.querySelector('[data-testid=thread-pr]')?.textContent).toContain('#181');
+  store.connection = 'ready';
+  await settle();
+  // The second lookup is out and unanswered: the line it will confirm never left.
+  expect(call).toHaveBeenCalledTimes(2);
+  expect(document.querySelector('[data-testid=thread-pr]')?.textContent).toContain('#181');
+  expect(document.querySelector('.metadata')).not.toBeNull();
+});

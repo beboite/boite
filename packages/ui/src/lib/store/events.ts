@@ -151,6 +151,8 @@ export function listen(ctx: StoreContext, client: Client): void {
 
   on('message.started', (message) => {
     threads.invalidateSync(message.threadId);
+    // Before the push: the local row and the core's copy never share a frame.
+    ctx.composer.landed(message);
     for (const target of threads.threadSnapshots(message.threadId)) {
       const index = lastIndexById(target.messages, message.id);
       if (index >= 0) target.messages[index] = message;

@@ -120,6 +120,7 @@ export class Store {
     ctx.threads.readingThreads.clear();
     this.readingPositions.clear();
     ctx.composer.pendingSends.clear();
+    ctx.composer.staged = {};
     this.logins = {};
     ctx.accounts.loginChanges.clear();
     this.terminalThreads = [];
@@ -530,6 +531,11 @@ export class Store {
   removeQueued(...args: Parameters<Composer['removeQueued']>) { return this.#ctx.composer.removeQueued(...args); }
   get inputBoundaries() { return this.#ctx.composer.inputBoundaries; }
   get promptFocus() { return this.#ctx.composer.promptFocus; }
+  get staged() { return this.#ctx.composer.staged; }
+  stageSend(...args: Parameters<Composer['stage']>) { return this.#ctx.composer.stage(...args); }
+  unstageSend(...args: Parameters<Composer['unstage']>) { return this.#ctx.composer.unstage(...args); }
+  /** The local row the message `id` replaced in the timeline, if it was sent from here. */
+  landedFrom(id: string): string | undefined { return this.#ctx.composer.landings.get(id); }
   steer(...args: Parameters<Composer['steer']>) { return this.#ctx.composer.steer(...args); }
   sendQueuedNow(...args: Parameters<Composer['sendQueuedNow']>) { return this.#ctx.composer.sendQueuedNow(...args); }
   stop(...args: Parameters<Composer['stop']>) { return this.#ctx.composer.stop(...args); }

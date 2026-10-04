@@ -1219,20 +1219,87 @@ test.for([true, false])('an image pasted during a pending send preserves only un
   });
   press('Enter');
   await waitFor(() => store.composerStates['t-trace']!.sending);
+  // The box emptied as the prompt left: the next picture starts the next prompt.
   paste(pngFile('next.png'));
-  await waitFor(() => chips().length === 2 && input().value.includes('[Image 2]'));
+  await waitFor(() => chips().length === 1 && input().value === '[Image 1] ');
   release();
   await waitFor(() => !store.composerStates['t-trace']!.sending);
+  expect(input().value).toBe('[Image 1] ');
+  expect(store.composerStates['t-trace']!.attachments.map(item => item.name)).toEqual(['next.png']);
   if (accepted) {
-    expect(input().value).toBe('[Image 1] ');
-    expect(store.composerStates['t-trace']!.attachments.map(item => item.name)).toEqual(['next.png']);
     const sent = store.openThread!.messages.filter(message => message.role === 'user').at(-1)!;
     expect(sent.parts[0]).toEqual({ type: 'text', text: 'send this once [Image 1]' });
     expect(sent.parts.filter(part => part.type === 'image').map(part => part.alt)).toEqual(['sent.png']);
   } else {
+    // The refused prompt comes back whole at the head of the queue, held, beside the one being written.
     expect(store.error).toBe('send refused');
-    expect(input().value).toBe('send this once [Image 1] [Image 2] ');
-    expect(store.composerStates['t-trace']!.attachments.map(item => item.name)).toEqual(['sent.png', 'next.png']);
+    const state = store.composerStates['t-trace']!;
+    expect(state.paused).toBe(true);
+    expect(state.queued.map(entry => [entry.text, entry.attachments.map(item => item.name)])).toEqual([['send this once [Image 1]', ['sent.png']]]);
+  }
+});
+
+test('a draft shows its first prompt while the thread is still being created', async ({ app: _app }) => {
+  store.startDraft('p-boite');
+  await waitFor(() => store.draft !== null && store.openThread === null);
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'threads.create') await gate;
+    return call(method, params);
+  });
+  await type('first words of a new thread');
+  press('Enter');
+  const shown = () => [...document.querySelectorAll('[data-testid=message][data-role=user]')].filter(node => node.textContent?.includes('first words of a new thread'));
+  await waitFor(() => shown().length === 1);
+  expect(store.openThread).toBeNull();
+  expect(input().value).toBe('');
+  expect(document.querySelector('[data-testid=draft-empty]')).toBeNull();
+  release();
+  await waitFor(() => store.openThread !== null && !store.busy && Object.keys(store.staged).length === 0);
+  expect(shown().length).toBe(1);
+  expect(store.openThread!.messages.filter(message => message.role === 'user').length).toBe(1);
+});
+
+test.for([true, false])('a sent prompt leaves the box and shows in the timeline before the core answers, accepted=%s', async (accepted, { app: _app }) => {
+  await store.open('t-trace');
+  const before = store.openThread!.messages.length;
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'turns.start') {
+      await gate;
+      if (!accepted) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'send refused' });
+    }
+    return call(method, params);
+  });
+  await type('instant prompt');
+  press('Enter');
+  await waitFor(() => store.staged['t-trace'] !== undefined);
+  // The core has not answered: the box is already free and the prompt is on screen, unticked.
+  expect(input().value).toBe('');
+  expect(store.openThread!.messages.length).toBe(before);
+  const shown = () => [...document.querySelectorAll('[data-testid=message][data-role=user]')].filter(node => node.textContent?.includes('instant prompt'));
+  await waitFor(() => shown().length === 1);
+  expect(shown()[0]!.querySelectorAll('.tick.received').length).toBe(0);
+  // A second prompt typed meanwhile queues behind it instead of waiting for the box.
+  await type('typed behind it');
+  press('Enter');
+  await waitFor(() => store.composerStates['t-trace']!.queued.length === 1);
+  expect(input().value).toBe('');
+  release();
+  await waitFor(() => !store.composerStates['t-trace']!.sending && store.staged['t-trace'] === undefined);
+  if (accepted) {
+    await waitFor(() => shown().length === 1 && store.openThread!.messages.length > before);
+    expect(store.openThread!.messages.filter(message => message.role === 'user' && message.parts.some(part => part.type === 'text' && part.text === 'instant prompt')).length).toBe(1);
+  } else {
+    expect(store.error).toBe('send refused');
+    expect(shown().length).toBe(0);
+    expect(input().value).toBe('instant prompt');
   }
 });
 

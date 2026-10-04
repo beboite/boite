@@ -22,6 +22,7 @@
   import MessageActions from './MessageActions.svelte';
   import { turnAnswer } from '../lib/message-display';
   import { focusComposer } from '../lib/focus';
+  import { isSending } from '../lib/composer-queue';
   import { TurnProgress } from '../lib/turn-progress.svelte';
   import { ESTIMATE, GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, reaches, windowStats } from '../lib/message-window';
   import WorkflowActivity from './WorkflowActivity.svelte';
@@ -450,6 +451,14 @@
     // A message rises as it arrives at the bottom being watched. One that a
     // scroll up the history brings into the window is already there: rising
     // then animated every message a fast scroll crossed.
+    // The core's copy of a prompt sent from here replaces the row already on
+    // screen: same height, and it does not rise a second time.
+    const local = store.landedFrom?.(id);
+    if (local !== undefined && risen.has(local)) {
+      risen.add(id);
+      const height = heights.get(local);
+      if (height !== undefined && !heights.has(id)) heights.set(id, height);
+    }
     if (risen.has(id) || !pinned) node.style.animation = 'none';
     risen.add(id);
     boxes?.observe(node);
@@ -594,6 +603,15 @@
   }
   // -- end paging ------------------------------------------------------------
 
+  // The reader's own prompt takes the bottom, wherever the history was scrolled to.
+  let jumpedFor = '';
+  $effect(() => {
+    const last = messages.at(-1);
+    if (!last || !isSending(last) || last.id === jumpedFor) return;
+    jumpedFor = last.id;
+    untrack(jump);
+  });
+
   function jump() {
     releaseNavigation();
     const box = viewport;
@@ -711,7 +729,8 @@
     return thread !== null && thread.id === threadId && !thread.agentSessionId && thread.projectId !== null;
   });
   // A prompt still waiting in the queue would run after the edit, on the rewound thread.
-  const atRest = $derived(branchable && !store.busy && (store.composerStates[threadId]?.queued.length ?? 0) === 0);
+  // So would an edit started under a prompt still on its way to the core.
+  const atRest = $derived(branchable && !store.busy && (store.composerStates[threadId]?.queued.length ?? 0) === 0 && !store.composerStates[threadId]?.sending);
 
   function editMessage(message: Message): void {
     store.startEdit(threadId, message);
@@ -771,7 +790,7 @@
           {:else if startedFrom(message)}
             <SpawnMarker {store} link={startedFrom(message)!} direction="to" />
           {:else if message.role === 'user'}
-            <UserMessage {store} {message} {turn} {progress} edit={atRest ? () => editMessage(message) : undefined} />
+            <UserMessage {store} {message} {turn} {progress} edit={atRest && !isSending(message) ? () => editMessage(message) : undefined} />
           {:else}
             <AssistantMessage {store} {threadId} {message} {signedOut} showModel={firstAssistantInTurn.get(message.turnId) === message.id}
               latestInTurn={lastInTurn.get(message.turnId) === message.id} memoryEvents={memoryPlacement.inline.get(message.id) ?? []} />

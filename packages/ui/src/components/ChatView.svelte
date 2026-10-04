@@ -7,6 +7,7 @@
   import { levelName, projectName } from '../lib/format';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
+  import { DRAFT_STASH_KEY } from '../lib/prefs';
   import Composer from './Composer.svelte';
   import FolderGoneNotice from './FolderGoneNotice.svelte';
   import AgentDock from './AgentDock.svelte';
@@ -21,6 +22,20 @@
   let { store }: { store: Store } = $props();
 
   let thread = $derived(store.openThread);
+  /**
+   * The prompt on its way to the core, drawn after what the thread holds. A
+   * draft shows it too, while its thread is still being created. One whose
+   * turn the thread already holds has landed and is not drawn twice.
+   */
+  let sending = $derived.by(() => {
+    const local = store.staged[thread?.id ?? DRAFT_STASH_KEY];
+    if (!local || !thread) return local;
+    for (let at = thread.messages.length - 1; at >= Math.max(0, thread.messages.length - 8); at--) {
+      if (thread.messages[at]!.turnId === local.turnId) return undefined;
+    }
+    return local;
+  });
+  let messages = $derived(sending ? [...(thread?.messages ?? []), sending] : thread?.messages ?? []);
   // The timeline still needs agent messages after reload, even with settings hidden.
   let threadId = $derived(thread?.id);
   let agentSession = $derived(!!thread?.agentSessionId);
@@ -95,12 +110,14 @@
            already played the rise belong to that thread alone, and kept across
            a switch they grew for every message the page had ever shown. -->
       {#key thread.id}
-        {#if store.loadingThreadId === thread.id && thread.messages.length === 0}
+        {#if store.loadingThreadId === thread.id && messages.length === 0}
           <div class="draft-body" data-testid="thread-loading"><p class="muted">{strings.app.loading}</p></div>
         {:else}
-          <MessageList {store} threadId={thread.id} messages={thread.messages} />
+          <MessageList {store} threadId={thread.id} {messages} />
         {/if}
       {/key}
+    {:else if sending}
+      <MessageList {store} threadId={DRAFT_STASH_KEY} {messages} />
     {:else}
       <div class="draft-body" data-testid="draft-empty">
         <div class="mobile-welcome">
@@ -148,12 +165,12 @@
     {#if thread}<ThreadRecovery {store} />{/if}
     {#if !thread?.agentSessionId}
       {#if store.openProject?.missing === true}<FolderGoneNotice {store} project={store.openProject} />{/if}
-      {#if thread?.archived}<DoneThreadNotice {store} threadId={thread.id} />{:else}<Composer {store} centered={!thread} />{/if}
+      {#if thread?.archived}<DoneThreadNotice {store} threadId={thread.id} />{:else}<Composer {store} centered={!thread && !sending} />{/if}
     {/if}
 
     <!-- The draft's heading and composer are one block in the middle of the
          column: the body above and this tail below share the free space. -->
-    {#if !thread}
+    {#if !thread && !sending}
       <div class="draft-tail">
         <!-- In the drafts the agent gets a fresh folder; someone with work of
              their own is one click from pointing it there instead. -->
