@@ -1404,7 +1404,7 @@ export const strings = {
     startRecording: 'Record this browser tab', stopRecording: 'Stop recording', reviewRecording: 'Recorded video',
     refresh: 'Refresh', clear: 'Clear', pageEvents: 'Page events', actions: 'Actions', noEvents: 'No page events captured.', noActions: 'No actions recorded yet.',
     omitted: '{count} older or oversized events omitted.', recorded: '{seconds} seconds · {fps} fps · {mb} MB · silent {format}',
-    recordingError: 'Recording stopped after an error.', recordingLimit: 'Recording stopped by itself at the {mb} MB size limit. The video plays up to that point.',
+    recordingError: 'Recording stopped after an error.', recordingDiscarded: 'Recording discarded: the agent did not stop it before its turn ended.', recordingLimit: 'Recording stopped by itself at the {mb} MB size limit. The video plays up to that point.',
     frameRate: 'Record at {rate} frames per second', codec: 'Encode as {codec}', codecUnavailable: 'This computer cannot encode it',
     unplayable: 'This view cannot play {codec} video. Download it to watch it in another player.',
     download: 'Download video', discard: 'Discard video',

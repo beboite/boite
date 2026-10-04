@@ -7,11 +7,16 @@ import { RecordingIndicators } from './recording-indicators';
 import { isExperimentEnabled } from './experiments';
 import { recordingCodec, recordingFrameRate } from './recording-settings';
 
-interface TabTools { preset: BrowserPreset | null; orientation: 'portrait' | 'landscape'; colorScheme: 'system' | 'light' | 'dark'; recording: boolean; result: BrowserRecording | null; url: string | null }
+/**
+ * `agent`: the running recording was started by the conversation's agent, not
+ * from the menu. `discarded`: the agent's turn ended before it stopped one.
+ */
+interface TabTools { preset: BrowserPreset | null; orientation: 'portrait' | 'landscape'; colorScheme: 'system' | 'light' | 'dark'; recording: boolean; result: BrowserRecording | null; url: string | null; agent: boolean; discarded: boolean }
 const states = new SvelteMap<string, TabTools>();
 const recorders = new Map<string, BrowserRecorder>();
 const history = new Map<string, BrowserHistoryEntry[]>();
-export function browserTools(id: string): TabTools { return states.get(id) ?? { preset: null, orientation: 'portrait', colorScheme: 'system', recording: false, result: null, url: null }; }
+export const DISCARDED_RECORDING_ERROR = "the recording was discarded because the agent's turn ended while it was running: stop it with recording-stop in the turn that started it";
+export function browserTools(id: string): TabTools { return states.get(id) ?? { preset: null, orientation: 'portrait', colorScheme: 'system', recording: false, result: null, url: null, agent: false, discarded: false }; }
 function patch(id: string, values: Partial<TabTools>) { states.set(id, { ...browserTools(id), ...values }); }
 async function protocol(id: string, method: string, params: Record<string, unknown>): Promise<unknown> {
   if (!browserBridge.protocol) throw new Error('browser testing tools require the Windows desktop app');
@@ -27,7 +32,7 @@ function recorder(id: string, indicators = false): BrowserRecorder {
         return reply.data;
       },
       ...(stream ? { stream: (frameRate: number, frame: (jpeg: ArrayBuffer) => void) => stream(id, frameRate, frame) } : {}),
-    }, (recording, result) => patch(id, { recording, result, url: recorders.get(id)?.url ?? null }), indicators ? new RecordingIndicators(id) : undefined);
+    }, (recording, result) => patch(id, { recording, result, url: recorders.get(id)?.url ?? null, ...(recording || result ? {} : { agent: false }) }), indicators ? new RecordingIndicators(id) : undefined);
     recorders.set(id, value);
   }
   return value;
@@ -55,8 +60,22 @@ export async function browserDiagnostics(id: string, clear = false): Promise<Bro
   if (clear) history.delete(id);
   return result;
 }
-export async function runBrowserAction(id: string, action: BrowserAction): Promise<BrowserReply> {
+/**
+ * Stops and throws away a recording the agent started and has not stopped:
+ * nothing is kept or offered. One the user started, or one already stopped at
+ * the size limit, stays.
+ */
+export function discardAgentRecording(id: string): void {
+  const tools = browserTools(id);
+  if (!tools.agent || tools.result || !recorders.has(id)) return;
+  recorders.get(id)!.dispose(); recorders.delete(id);
+  patch(id, { recording: false, result: null, url: null, agent: false, discarded: true });
+}
+
+/** `by`: the agent, through the conversation's browser host, or the user from the menu. */
+export async function runBrowserAction(id: string, action: BrowserAction, by: 'agent' | 'user' = 'user'): Promise<BrowserReply> {
   return trackBrowserAction(id, action, async () => {
+    if ((action.kind === 'recording-stop' || action.kind === 'recording-read') && browserTools(id).discarded) throw new Error(DISCARDED_RECORDING_ERROR);
     let value: unknown = { ok: true };
     switch (action.kind) {
       case 'snapshot': {
@@ -75,7 +94,12 @@ export async function runBrowserAction(id: string, action: BrowserAction): Promi
       case 'recording-start': {
         if (action.indicators && !isExperimentEnabled('recording-indicators')) throw new Error('enable the recording-indicators experiment on this desktop first');
         if (!browserTools(id).recording && !browserTools(id).result) { recorders.get(id)?.dispose(); recorders.delete(id); }
-        await recorder(id, action.indicators !== false && isExperimentEnabled('recording-indicators')).start(action.frameRate ?? recordingFrameRate(), action.codec ?? recordingCodec()); break;
+        const next = recorder(id, action.indicators !== false && isExperimentEnabled('recording-indicators'));
+        // Marked before it starts: a turn that ends while it starts discards it too.
+        if (!browserTools(id).recording && !browserTools(id).result) patch(id, { agent: by === 'agent', discarded: false });
+        try { await next.start(action.frameRate ?? recordingFrameRate(), action.codec ?? recordingCodec()); }
+        catch (error) { if (recorders.get(id) === next && !browserTools(id).recording && !browserTools(id).result) patch(id, { agent: false }); throw error; }
+        break;
       }
       case 'recording-stop': return { tabId: id, recording: await recorder(id).stop() };
       case 'recording-read': value = await recorder(id).read(action.recordingId, action.offset, action.maxBytes); break;

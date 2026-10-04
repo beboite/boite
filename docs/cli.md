@@ -121,6 +121,17 @@ The saved video is complete up to that point, and the result's `note` says
 why it ended. There is no sound, as in T3 Code. Run `boite attach <video.mp4>`
 to show it in chat. Closing the tab discards an unfinished recording.
 
+The agent stops its own recording within the turn that started it. When that
+turn ends, however it ends (done, interrupted, failed, or the conversation
+archived or removed), the core tells the hosting desktop (`browser.turnFinished`)
+and the desktop discards any recording the agent left running: it is stopped,
+its chunks dropped, and no file is kept or offered for download. The browser
+pane says so in one line, and a later `recording-stop` or `recording-read`
+fails with an error that says the recording was discarded. A recording started
+from the browser tools menu, or one already stopped at 100 MB, is kept. A turn
+that ends while the desktop is disconnected, or before the core restarts, sends
+nothing; that recording is discarded when the conversation's next turn ends.
+
 Automation uses WebView2's native devtools channel, without a debugging port.
 Only the owner UI can register a host or answer its requests. The agent token
 can request actions for its own conversation only while the owner host has

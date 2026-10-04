@@ -25,7 +25,10 @@ export const BROWSER_HELP = `boite browser <command> [args] [tab-id] [--json]
   recording-start [tab-id] [--fps 30|60] [--codec h264|hevc|av1]
                                  record this page as a silent MP4, by default at the rate
                                  and codec set on the desktop (30 fps, H.264); a codec the
-                                 desktop cannot encode is refused; no time limit, stops at 100 MB
+                                 desktop cannot encode is refused; no time limit, stops by
+                                 itself at 100 MB and keeps the video. You MUST stop it with
+                                 recording-stop before your turn ends: a recording still
+                                 running when the turn ends is discarded, no file is kept
   recording-stop [tab-id]        stop and save the video in cwd
   screenshot [tab-id] [--output <path>] save a PNG (default: unique name in cwd)
   close [tab-id]                 close the tab

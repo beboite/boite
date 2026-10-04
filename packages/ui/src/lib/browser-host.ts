@@ -4,7 +4,7 @@ import { tick, untrack } from 'svelte';
 import type { Store } from './store.svelte';
 import { rightPanel } from './right-panel.svelte';
 import { browserBridge } from './browser-bridge';
-import { runBrowserAction, trackBrowserAction } from './browser-tools.svelte';
+import { discardAgentRecording, runBrowserAction, trackBrowserAction } from './browser-tools.svelte';
 import { captureRemoteBrowser, inputRemoteBrowser } from './browser-remote-host';
 import { isExperimentEnabled, subscribeExperiments } from './experiments';
 import { experimentOn } from './experiments.svelte';
@@ -26,7 +26,7 @@ export function hostsBrowser(store: Pick<Store, 'owner'>): boolean {
  * Either consent hosts the browser: agent control, or sharing it with paired
  * devices. Each kind of request still needs its own.
  */
-export function hostBrowser(store: Store, threadId: string): () => void {
+export function hostBrowser(store: Store, threadId: string): (closed?: boolean) => void {
   const client = store.client;
   if (!(agentOn() || remoteOn()) || !client || !hostsBrowser(store)) return () => {};
   const machine = store.machineId;
@@ -87,13 +87,16 @@ export function hostBrowser(store: Store, threadId: string): () => void {
                 if (!browserBridge.isReady(surface.id)) throw new Error('page is still loading; use snapshot to inspect its state');
                 return { tabId: surface.id, url: action.url, ...(action.kind === 'open' ? { profile: surface.profile ?? DEFAULT_BROWSER_PROFILE } : {}) };
               });
-            } else result = await runBrowserAction(surface.id, action);
+            } else result = await runBrowserAction(surface.id, action, 'agent');
           }
         }
       } catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
       await client.call('browser.complete', { requestId: request.requestId, ...(error ? { error } : { result }) }).catch(() => {});
     })();
   });
+  // The agent stops what it records before its turn ends; what it leaves running is thrown away.
+  const discard = () => { for (const surface of panel.surfaces) if (surface.kind === 'browser') discardAgentRecording(surface.id); };
+  const offTurns = client.on('browser.turnFinished', event => { if (event.threadId === threadId && current()) discard(); });
   // Paired devices show the conversation's browser tab while its view exists:
   // the panel open on a browser tab. A tab kept from an earlier session, or
   // behind a shut panel, has no view to capture. The core hears at once when
@@ -113,8 +116,10 @@ export function hostBrowser(store: Store, threadId: string): () => void {
   const timer = setInterval(renew, 10000);
   const watch = setInterval(() => { if (live !== shared()) renew(); }, 1000);
   const offExperiments = subscribeExperiments(() => { consentRevision++; renew(); });
-  return () => {
-    stopped = true; clearInterval(timer); clearInterval(watch); off(); offExperiments();
+  // `closed`: the conversation was archived or removed, which ends its turn too.
+  return (closed = false) => {
+    if (closed) discard();
+    stopped = true; clearInterval(timer); clearInterval(watch); off(); offTurns(); offExperiments();
     void client.call('browser.host', { threadId, enabled: false }).catch(() => {});
   };
 }

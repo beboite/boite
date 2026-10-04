@@ -1,4 +1,4 @@
-import { browserActionError, remoteBrowserInputError, remoteFrameOptionsError, REMOTE_URL_MAX, type RemoteBrowserFrame, type BrowserReply, type RpcParams } from '@boite/contracts';
+import { browserActionError, remoteBrowserInputError, remoteFrameOptionsError, REMOTE_URL_MAX, type RemoteBrowserFrame, type BrowserReply, type RpcParams, type Turn } from '@boite/contracts';
 import type { Core } from './core.ts';
 import type { Connection } from './router.ts';
 import { refused } from './errors.ts';
@@ -21,7 +21,22 @@ export class BrowserControl {
   /** The conversations whose viewers were last told that a shared tab exists. */
   private announced = new Set<string>();
   private closed = false;
+  private off: (() => void) | null = null;
   constructor(private core: Core, private timeout = 20000) {}
+
+  /**
+   * An agent stops its own recording. One still running when its turn ends is
+   * discarded by the desktop. A queued turn that never ran ended no agent's work.
+   * Subscribed with the first host: the core builds this before its bus.
+   */
+  private watchTurns(): void {
+    this.off ??= this.core.bus.onCommitted((name, payload) => {
+      if (name !== 'turn.finished' || !(payload as Turn).startedAt) return;
+      const { threadId } = payload as Turn, host = this.hosts.get(threadId);
+      if (!host?.agent || host.expires < Date.now()) return;
+      try { host.connection.sendEvent('browser.turnFinished', { threadId }); } catch { this.release(threadId); }
+    });
+  }
 
   host({ threadId, enabled, allowAgentControl, remote = false, live = false }: RpcParams<'browser.host'>, connection: Connection): { ok: true } {
     if (typeof enabled !== 'boolean' || typeof remote !== 'boolean' || typeof live !== 'boolean') throw refused('browser.host enabled, remote and live must be booleans');
@@ -41,6 +56,7 @@ export class BrowserControl {
       // Withdrawing one consent settles what was waiting on it.
       if (previous?.connection.id === connection.id && previous.agent && !agent) this.settle(threadId, false, 'agent browser control was turned off on the desktop');
       this.hosts.set(threadId, { connection, expires: Date.now() + 35000, agent, remote, live });
+      if (!this.closed) this.watchTurns();
       this.changed(threadId);
       if (!remote) for (const [id, value] of this.remoteFrames) if (value.threadId === threadId) this.remoteFrames.delete(id);
     }
@@ -173,5 +189,5 @@ export class BrowserControl {
     for (const id of this.remoteFrames.keys()) if (id.startsWith(`${connectionId}:`)) this.remoteFrames.delete(id);
     for (const [id, host] of this.hosts) if (host.connection.id === connectionId) this.release(id);
   }
-  close(): void { this.closed = true; for (const id of this.hosts.keys()) this.release(id); }
+  close(): void { this.closed = true; this.off?.(); for (const id of this.hosts.keys()) this.release(id); }
 }

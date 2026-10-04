@@ -1339,7 +1339,7 @@ export const fr: Translation = {
     startRecording: 'Enregistrer cet onglet', stopRecording: 'Arrêter la vidéo', reviewRecording: 'Vidéo enregistrée',
     refresh: 'Actualiser', clear: 'Effacer', pageEvents: 'Événements de la page', actions: 'Actions', noEvents: 'Aucun événement capturé.', noActions: 'Aucune action enregistrée pour le moment.',
     omitted: '{count} événements anciens ou trop volumineux omis.', recorded: '{seconds} secondes · {fps} i/s · {mb} Mo · {format} sans son',
-    recordingError: 'Enregistrement arrêté après une erreur.', recordingLimit: 'Enregistrement arrêté de lui-même à la limite de {mb} Mo. La vidéo se lit jusqu’à ce point.',
+    recordingError: 'Enregistrement arrêté après une erreur.', recordingDiscarded: 'Enregistrement jeté : l’agent ne l’a pas arrêté avant la fin de son tour.', recordingLimit: 'Enregistrement arrêté de lui-même à la limite de {mb} Mo. La vidéo se lit jusqu’à ce point.',
     frameRate: 'Enregistrer à {rate} images par seconde', codec: 'Encoder en {codec}', codecUnavailable: 'Cet ordinateur ne sait pas l’encoder',
     unplayable: 'Cette vue ne peut pas lire la vidéo {codec}. Téléchargez-la pour la regarder dans un autre lecteur.',
     download: 'Télécharger la vidéo', discard: 'Supprimer la vidéo',

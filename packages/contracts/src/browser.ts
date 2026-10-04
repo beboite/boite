@@ -106,6 +106,11 @@ export interface BrowserRpcEvents {
   'browser.requested': { threadId: string; requestId: string; tabId?: string; action: BrowserAction };
   /** For the clients subscribed to the conversation: its shared browser tab appeared or went away. */
   'browser.remoteChanged': { threadId: string; live: boolean };
+  /**
+   * For the conversation's agent-control host only: a turn that ran has ended,
+   * however it ended. The desktop discards the recordings the agent left running.
+   */
+  'browser.turnFinished': { threadId: string };
 }
 
 /** Shared by the real core, fake transport and desktop before executing input. */
