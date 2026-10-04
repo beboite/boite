@@ -90,8 +90,6 @@ import { workspace } from '../lib/workspace.svelte';
     machines: [
       { id: 'updates', label: strings.serverUpdate.updates },
       { id: 'machines', label: strings.machines.connections },
-      // MachinesPage draws the card only while this window owns two machines.
-      ...(workspace.machines.filter((machine) => machine.store.owner).length > 1 ? [{ id: 'agent-links', label: strings.machines.agentLinks }] : []),
       { id: 'devices', label: strings.settings.pairing.heading },
       { id: 'phone', label: strings.phone.heading }
     ],
@@ -123,6 +121,7 @@ import { workspace } from '../lib/workspace.svelte';
    */
   let settingsWords = $derived<[SettingsTab, string | null, string][]>([
     ['general', 'conversations', strings.settings.groupWorkingThreads],
+    ['general', 'conversations', strings.settings.groupOtherProjects],
     ['general', 'conversations', strings.settings.notifications],
     ['general', 'conversations', strings.settings.asyncQuestions],
     ['general', 'conversations', strings.settings.titleModel],

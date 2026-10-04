@@ -46,7 +46,7 @@ export async function openOwnFile(path: string): Promise<void> {
 }
 
 /**
- * One capture-phase listener on the app root for every `http(s)` link the UI
+ * One bubbling listener on the app root for every `http(s)` link the UI
  * shows, the markdown answers and the account login link included. A modified
  * click (ctrl, shift, meta or the middle button) is left to the browser, and so
  * is a link that points back at this same origin.
@@ -74,6 +74,7 @@ export function installExternalLinks(root: HTMLElement): () => void {
     void openExternal(href);
   };
 
-  root.addEventListener('click', onclick, true);
-  return () => root.removeEventListener('click', onclick, true);
+  // Let text-selection guards cancel the gesture before opening its link.
+  root.addEventListener('click', onclick);
+  return () => root.removeEventListener('click', onclick);
 }

@@ -123,20 +123,45 @@ test('real RPC discovers gateway models, separates the key and restores native a
   expect(harness.core.accounts.require(claude.id).status).toBe(nativeClaudeStatus);
 });
 
+test('a gateway that translates every model keeps proprietary models in their own harness', async () => {
+  const anyApi = ['anthropic', 'openai', 'openai-response'];
+  gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
+    return Response.json({ data: ['claude/claude-opus-5-5', 'codex/gpt-6-sol', 'codex/codex-auto-review', 'antigravity/claude-sonnet-5-5-high',
+      'antigravity/gemini-3-flash', 'antigravity/gpt-oss-120b-medium', 'xai/grok-5', 'muse/muse-code', 'kimi/kimi-k2',
+      'qwen/qwen3-gptq', 'codex/o5', 'codex/computer-use-preview', 'claude/default', 'claude/kimi-k2', 'codex/qwen3-coder',
+      'meta/llama-4-maverick']
+      .map(id => ({ id, supported_endpoint_types: anyApi })) });
+  } });
+  harness = await startTestCore({ settings: { subscriptionProxy: config(`http://127.0.0.1:${gateway.port}/v1`) } });
+  const owner = await harness.connect();
+  const claude = await owner.call('accounts.add', { providerId: 'claude', label: 'Gateway Claude' });
+  const codex = await owner.call('accounts.add', { providerId: 'codex', label: 'Gateway Codex' });
+  const ids = async (providerId: 'claude' | 'codex', accountId: string) =>
+    (await owner.call('providers.probe', { providerId, accountId })).models.map(model => model.id);
+  expect(await ids('claude', claude.id)).toEqual(['claude/claude-opus-5-5', 'antigravity/claude-sonnet-5-5-high', 'antigravity/gemini-3-flash',
+    'antigravity/gpt-oss-120b-medium', 'kimi/kimi-k2', 'qwen/qwen3-gptq', 'claude/default', 'claude/kimi-k2', 'codex/qwen3-coder',
+    'meta/llama-4-maverick']);
+  expect(await ids('codex', codex.id)).toEqual(['codex/gpt-6-sol', 'codex/codex-auto-review', 'antigravity/gemini-3-flash',
+    'antigravity/gpt-oss-120b-medium', 'kimi/kimi-k2', 'qwen/qwen3-gptq', 'codex/o5', 'codex/computer-use-preview', 'claude/kimi-k2',
+    'codex/qwen3-coder', 'meta/llama-4-maverick']);
+});
+
 test('legacy CLIProxy catalogs select native families and malformed gateway errors cannot echo the key', async () => {
   let fail = false;
   gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
     return fail ? new Response('private-token-in-body', { status: 401 }) : Response.json({ data: [
       { id: 'claude/claude-sonnet-4-5' }, { id: 'codex/gpt-5.4', display_name: 'Codex GPT 5.4',
         supportedReasoningEfforts: [{ reasoningEffort: 'high', description: 'More reasoning' }, { reasoningEffort: 'xhigh' }, { reasoningEffort: 'xhigh' }] },
-      { id: 'gemini-3-pro' },
+      { id: 'gemini-3-pro' }, { id: 'antigravity/gpt-oss-120b-medium' }, { id: 'codex/o5-mini' },
     ] });
   } });
   harness = await startTestCore({ settings: { subscriptionProxy: config(`http://127.0.0.1:${gateway.port}`, 'cliproxyapi') } });
   const owner = await harness.connect();
   const account = await owner.call('accounts.add', { providerId: 'codex', label: 'Gateway' });
   expect((await owner.call('providers.probe', { providerId: 'codex', accountId: account.id })).models).toEqual([{ id: 'codex/gpt-5.4', name: 'Codex GPT 5.4', default: true,
-    effort: { levels: [{ id: 'high', label: 'High', description: 'More reasoning' }, { id: 'xhigh', label: 'Extra high' }], default: 'high' } }]);
+    effort: { levels: [{ id: 'high', label: 'High', description: 'More reasoning' }, { id: 'xhigh', label: 'Extra high' }], default: 'high' } },
+    { id: 'antigravity/gpt-oss-120b-medium', name: 'antigravity/gpt-oss-120b-medium', default: false },
+    { id: 'codex/o5-mini', name: 'codex/o5-mini', default: false }]);
   fail = true;
   await expect(owner.call('providers.probe', { providerId: 'codex', accountId: account.id, refresh: true })).rejects.toThrow('HTTP 401');
   expect(JSON.stringify(await owner.call('core.logs', {}))).not.toContain('private-token-in-body');

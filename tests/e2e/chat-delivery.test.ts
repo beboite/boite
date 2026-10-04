@@ -78,7 +78,7 @@ test('answering the docked question shows a queued user bubble, then one sent me
   await update(`await store.client.call('questions.ask', {threadId:thread.id, text:'Which file should be checked first?', options:['Parser','Renderer']});`);
   await page.waitFor(`document.querySelector('${id('activity-question')}')`);
   await page.click(`${id('activity-question')} ${id('question-option')}`);
-  await page.click(`${id('activity-question')} ${id('question-submit')}`);
+  await page.click(id('composer-send'));
   await page.waitFor(`document.querySelector('${id('question-queued')}')`);
   for (const width of [1300, 390]) {
     await page.send('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: width < 720 });

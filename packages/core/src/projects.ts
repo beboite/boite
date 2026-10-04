@@ -388,8 +388,11 @@ export class ProjectStore {
   setAutoArchiveMergedPr(projectId: ProjectId, enabled: boolean): Project {
     this.require(projectId);
     if (typeof enabled !== 'boolean') throw refused('projects.setAutoArchiveMergedPr.enabled must be a boolean', { field: 'enabled', expected: 'true or false' });
-    this.core.journal.append({ type: 'project.autoArchiveMergedPrChanged', threadId: null, version: 1, payload: { projectId, enabled } }, () => this.core.journal.setSetting(`project-auto-archive-merged-pr:${projectId}`, enabled));
-    return this.announce(projectId);
+    return this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
+      this.core.journal.append({ type: 'project.autoArchiveMergedPrChanged', threadId: null, version: 1, payload: { projectId, enabled } }, () => this.core.journal.setSetting(`project-auto-archive-merged-pr:${projectId}`, enabled));
+      if (!enabled) this.core.threads.showMergedPrThreads(projectId);
+      return this.announce(projectId);
+    })());
   }
 
   async setWorktreeDefault(projectId: ProjectId, enabled: boolean): Promise<Project> {

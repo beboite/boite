@@ -1,13 +1,14 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { ArrowLeft, ChevronDown, FolderInput, GitBranch, Network, PanelRight, SquareTerminal } from '@lucide/svelte';
+  import { ArrowLeft, ChevronDown, FolderInput, GitBranch, Network, PanelRight, Search, SquareTerminal, UsersRound } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { archiveThread } from '../lib/archive';
-  import { canDeleteThread, deleteThread } from '../lib/thread-removal';
-  import { moveItems, pendingLine, pickMoveItem } from '../lib/thread-move.svelte';
-  import { separator, type MenuItem } from '../lib/menu';
+  import { deleteThread } from '../lib/thread-removal';
+  import { pendingLine, pickMoveItem } from '../lib/thread-move.svelte';
+  import { threadMenuItems } from '../lib/thread-menu';
+  import type { MenuItem } from '../lib/menu';
   import { strings } from '../lib/strings';
   import { work } from '../lib/work-prefs.svelte';
   import { controlMenu } from '../lib/controls';
@@ -58,27 +59,17 @@
     titleButton?.focus({ preventScroll: true });
   }
 
-  /** The title's actions: a right-click on a desktop, a tap on the title on a phone. */
-  let titleItems = $derived.by((): MenuItem[] => {
+  let agentsOn = $derived(store.panelOpen && store.panel.active?.kind === 'agents');
+  let tools = $derived.by((): MenuItem[] => {
     if (!thread) return [];
-    const retitling = store.retitling.includes(thread.id);
     return [
-      { id: 'rename', label: strings.sidebar.rename },
-      { id: 'retitle', label: retitling ? strings.sidebar.retitling : strings.sidebar.retitle, disabled: retitling },
-      { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
-      { id: 'copy', label: strings.sidebar.copyPath, title: thread.cwd },
-      ...(!thread.agentSessionId ? [{ id: 'coordination', label: strings.coordination.heading, glyph: Network }] : []),
       // A phone has no Ctrl+F: this sheet is its way to the find bar.
-      { id: 'find', label: strings.keyboard.commands.find },
-      ...(thread.parentThreadId || thread.projectId === null ? [] : moveItems(store, thread)),
-      separator(),
-      { id: 'archive', label: strings.sidebar.archive },
-      ...(canDeleteThread(store, thread) ? [{ id: 'delete', label: strings.sidebar.delete, danger: true }] : [])
+      { id: 'find', label: strings.keyboard.commands.find, glyph: Search },
+      { id: 'agents', label: strings.delegation.heading, glyph: UsersRound, active: agentsOn },
+      ...(!thread.agentSessionId ? [{ id: 'coordination', label: strings.coordination.heading, glyph: Network }] : [])
     ];
   });
-
-  let agentsOn = $derived(store.panelOpen && store.panel.active?.kind === 'agents');
-
+  let desktopItems = $derived(thread ? threadMenuItems(store, thread, { tools }) : []);
 
   /**
    * A phone's header has room for the title or for every toggle, not both: the
@@ -86,10 +77,10 @@
    */
   let phoneItems = $derived.by((): MenuItem[] => {
     if (!thread) return [];
-    const toggles: MenuItem[] = [];
-    toggles.push({ id: 'agents', label: strings.delegation.heading, active: agentsOn });
-    if (store.owner && work.shows('header.terminal')) toggles.push({ id: 'terminal', label: strings.terminal.title, active: store.terminalShown(thread.id) });
-    return toggles.length ? [...toggles, separator('sep-toggles'), ...titleItems] : titleItems;
+    return threadMenuItems(store, thread, { tools: [
+      ...tools,
+      ...(store.owner && work.shows('header.terminal') ? [{ id: 'terminal', label: strings.terminal.title, glyph: SquareTerminal, active: store.terminalShown(thread.id) }] : [])
+    ] });
   });
 
   function titleAction(action: string) {
@@ -111,9 +102,6 @@
     else if (action === 'archive') void archiveThread(store, open.id);
     else if (action === 'delete') void deleteThread(store, open);
   }
-
-  // Subagents has no header button: the title's menu and the side panel open it.
-  let desktopItems = $derived([{ id: 'agents', label: strings.delegation.heading, active: agentsOn }, separator('sep-team'), ...titleItems]);
 
   function openTitleMenu(event: MouseEvent) {
     if (!store.openThread) return;

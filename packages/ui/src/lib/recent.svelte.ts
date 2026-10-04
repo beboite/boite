@@ -9,15 +9,29 @@ export const RECENT_STORAGE_KEY = 'boite.recent.v1';
 /** A screen's attention preference, independent of its selected machine. */
 export class RecentPreferences {
   groupWorking = $state(false);
+  groupOtherProjects = $state(true);
 
   constructor() {
-    try { this.groupWorking = JSON.parse(localStorage.getItem(RECENT_STORAGE_KEY) ?? '{}').groupWorking === true; }
+    try {
+      const saved = JSON.parse(localStorage.getItem(RECENT_STORAGE_KEY) ?? '{}');
+      this.groupWorking = saved.groupWorking === true;
+      this.groupOtherProjects = saved.groupOtherProjects !== false;
+    }
     catch { /* The default also works when storage is unavailable. */ }
   }
 
   setGroupWorking(enabled: boolean): void {
     this.groupWorking = enabled;
-    try { localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify({ groupWorking: enabled })); }
+    this.#save();
+  }
+
+  setGroupOtherProjects(enabled: boolean): void {
+    this.groupOtherProjects = enabled;
+    this.#save();
+  }
+
+  #save(): void {
+    try { localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify({ groupWorking: this.groupWorking, groupOtherProjects: this.groupOtherProjects })); }
     catch { /* Keep the choice for this session. */ }
   }
 }
@@ -35,7 +49,7 @@ export function workingThread(thread: ThreadSummary): boolean {
   return state === 'working' || state === 'queued' || state === 'monitoring' || state === 'background';
 }
 
-/** Marking done never interrupts a turn or discards input; Archive remains available elsewhere. */
+/** Marking done never interrupts a turn or discards input; Archive is a separate menu action. */
 export function canMarkDone(store: Store, thread: ThreadSummary): boolean {
   return !thread.archived && store.connection === 'ready' && !['running', 'waiting', 'queued'].includes(thread.status)
     && !thread.backgroundWork?.kinds.length && !thread.pendingMove && !store.moveBlocked(thread.id)

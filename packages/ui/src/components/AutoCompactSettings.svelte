@@ -5,6 +5,7 @@
   import { fill, strings } from '../lib/strings';
   import { formatTokens } from '../lib/tokens';
   import type { Store } from '../lib/store.svelte';
+  import InfoTip from './InfoTip.svelte';
 
   /**
    * When the core compacts a conversation by itself: the moments it may pick,
@@ -67,8 +68,7 @@
   <section class="card" id="settings-auto-compact" data-testid="auto-compact-settings">
     <label for="{uid}-on" class="master">
       <span class="words">
-        <h2 id="{uid}-on-name">{strings.settings.autoCompact}</h2>
-        <span class="hint">{strings.settings.autoCompactHint}</span>
+        <h2 class="ui-label-box"><span class="ui-label" id="{uid}-on-name">{strings.settings.autoCompact}</span><InfoTip topic={strings.settings.autoCompact} text={strings.settings.autoCompactHint} /></h2>
       </span>
       <input id="{uid}-on" aria-labelledby="{uid}-on-name" type="checkbox" role="switch" data-testid="auto-compact-on"
         checked={rule !== null} disabled={!store.settings || saving} onchange={(event) => void save(event.currentTarget.checked ? FIRST : null, event.currentTarget)} />
@@ -83,8 +83,7 @@
           <label for="{uid}-{moment.id}" class="option" class:on>
             <span class="icon"><Icon size={18} strokeWidth={1.75} /></span>
             <span class="words">
-              <span class="name" id="{uid}-{moment.id}-name"><span class="ui-label">{moment.name}</span>{#if moment.recommended}<span class="badge ui-label-box"><span class="ui-label">{strings.settings.autoCompactRecommended}</span></span>{/if}</span>
-              <span class="hint">{moment.hint}</span>
+              <span class="name"><span class="ui-label" id="{uid}-{moment.id}-name">{moment.name}</span><InfoTip topic={moment.name} text={moment.hint} />{#if moment.recommended}<span class="badge ui-label-box"><span class="ui-label">{strings.settings.autoCompactRecommended}</span></span>{/if}</span>
             </span>
             <input id="{uid}-{moment.id}" aria-labelledby="{uid}-{moment.id}-name" type="checkbox" role="switch" data-testid="auto-compact-{moment.id}"
               checked={on} disabled={saving} onchange={(event) => toggleMoment(moment.id, event.currentTarget)} />
@@ -97,8 +96,7 @@
         <div class="option" class:on={rule.tokens !== null}>
           <span class="icon"><Ruler size={18} strokeWidth={1.75} /></span>
           <span class="words">
-            <label for="{uid}-threshold" class="name" id="{uid}-threshold-name"><span class="ui-label">{strings.settings.autoCompactThreshold}</span></label>
-            <span class="hint">{rule.tokens === null ? strings.settings.autoCompactThresholdOff : strings.settings.autoCompactThresholdHint}</span>
+            <label for="{uid}-threshold" class="name"><span class="ui-label" id="{uid}-threshold-name">{strings.settings.autoCompactThreshold}</span><InfoTip topic={strings.settings.autoCompactThreshold} text={rule.tokens === null ? strings.settings.autoCompactThresholdOff : strings.settings.autoCompactThresholdHint} /></label>
             {#if rule.tokens !== null}
               <span class="size">
                 <span class="presets" role="group" aria-label={strings.settings.autoCompactThreshold}>
@@ -132,11 +130,9 @@
   .master { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; cursor: pointer; }
   .master .words { display: grid; gap: 6px; flex: 1; min-width: 0; }
   .card .master h2 { margin: 0; }
-  .card .master h2 + .hint { margin: 0; }
-  .hint { font-weight: 400; }
   h3 { margin: 22px 0 10px; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
   .options { display: grid; gap: 8px; }
-  /* Icon, name and switch share the first line; what explains the option sits under the name. */
+  /* Icon, name, help and switch share the first line. */
   .option { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; column-gap: 14px; row-gap: 4px; padding: 14px 16px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-2); transition: border-color var(--dur-2), background var(--dur-2); }
   .option .words { display: contents; }
   label.option { cursor: pointer; }
@@ -146,7 +142,7 @@
   .name { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; grid-column: 2; grid-row: 1; color: var(--color-foreground); font-size: var(--text-base); font-weight: 500; }
   .badge { padding: 1px 7px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--color-accent) 14%, transparent); color: var(--color-accent); font-size: var(--text-xs); font-weight: 600; white-space: nowrap; }
   .option > input { grid-column: 3; grid-row: 1; }
-  .option .hint, .size, .field-error { grid-column: 2; }
+  .size, .field-error { grid-column: 2; }
   .size { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
   .presets { display: flex; flex-wrap: wrap; gap: 6px; }
   .chip.picked { border-color: var(--color-accent); color: var(--color-foreground); }
@@ -155,9 +151,8 @@
   input[aria-invalid='true'] { border-color: var(--color-danger); }
   .unit { color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .field-error { color: var(--color-danger); font-size: var(--text-sm); }
-  /* A phone has no width to spare beside the icon: the explanation takes the whole tile. */
+  /* The threshold controls use the whole tile on a phone. */
   @media (max-width: 720px) {
-    .option .hint, .size, .field-error { grid-column: 1 / -1; }
-    .option .hint { margin-top: 6px; }
+    .size, .field-error { grid-column: 1 / -1; }
   }
 </style>

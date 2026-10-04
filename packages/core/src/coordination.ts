@@ -5,6 +5,7 @@ import { defaultCoordinationConfig } from '@boite/contracts';
 import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscript, CoordinationBridgeResponse, CoordinationConfig, CoordinationPeer, CoordinationView, RpcParams } from '@boite/contracts';
 import { checkMatchExtras, checkTranscript, searchContacts, searchWords, transcript } from './coordination-lookup.ts';
 import { CoordinationBridge } from './coordination-bridge.ts';
+import { dropGroupRead, groupPeers, migrateGroupPeer } from './coordination-group.ts';
 import { boundedBody, firstAnswer, MAX_BODY, PeerGone, PeerRefusal, post, ROUTE, settle, type Answer } from './coordination-wire.ts';
 import { pack, SEALED, sealResponse, unpack, type Sealing } from './group/seal.ts';
 import type { Core } from './core.ts';
@@ -120,7 +121,6 @@ export class Coordination {
     this.publicKey = createPublicKey(this.key).export({ type: 'spki', format: 'pem' }).toString();
     this.coreId = createHash('sha256').update(this.publicKey).digest('hex');
   }
-
   identity(): CoordinationPeer {
     this.identityKey();
     return { coreId: this.coreId, name: this.core.info().hostname ?? 'Boite', url: coordinationUrl(this.core.settings.get().publicUrl || this.core.baseUrl()), publicKey: this.publicKey };
@@ -137,10 +137,10 @@ export class Coordination {
    */
   trusted(): CoordinationPeer[] {
     const manual = this.peers();
-    return [...manual, ...this.core.group.peers().filter(peer => !manual.some(known => known.coreId === peer.coreId))];
+    return [...manual, ...groupPeers(this.core).filter(peer => !manual.some(known => known.coreId === peer.coreId))];
   }
   async check(coreId: string): Promise<{ ok: true }> {
-    const peer = this.peers().find(p => p.coreId === coreId);
+    const peer = this.trusted().find(p => p.coreId === coreId);
     if (!peer) throw refused('machine is not trusted for coordination');
     try { await this.exchange(peer, 'directory', {}); }
     catch (error) {
@@ -167,13 +167,15 @@ export class Coordination {
     const peers = this.peers().filter(p => p.coreId !== coreId);
     if (peers.length >= 32) throw refused('at most 32 coordination peers');
     this.core.journal.setSetting('coordination:peers', [...peers, checked]);
+    if (this.core.group.peers().some(peer => peer.coreId === coreId)) migrateGroupPeer(this.core, checked);
     return checked;
   }
-  untrust(coreId: string): { ok: true } {
-    this.bridge.revoke(coreId);
+  untrust(coreId: string, preserveGroupRead = false): { ok: true } {
+    if (!preserveGroupRead) dropGroupRead(this.core, coreId);
     this.core.journal.setSetting('coordination:peers', this.peers().filter(p => p.coreId !== coreId));
     // Still a member of this core's group: its letters keep crossing.
     if (this.trusted().some(p => p.coreId === coreId)) return { ok: true };
+    this.bridge.revoke(coreId);
     const queued = this.rows("status = 'uncertain'").map(row => JSON.parse(row.data) as AgentLetter)
       .filter(letter => letter.error === 'Queued for provider delivery' && (letter.from.coreId === coreId || letter.to.coreId === coreId));
     for (const threadId of new Set(queued.map(letter => letter.to.threadId))) this.core.threads.stopQueuedCoordination(threadId);

@@ -620,8 +620,7 @@ shellTest(
     // a policy is live is the browser refusing a load, never a string read back
     // out of tauri.conf.json. `.invalid` never resolves, so a missing policy
     // ends in a failed lookup rather than a request that leaves the machine.
-    // The loopback is no longer the origin to try: the panel's file viewer
-    // draws pictures the local core serves, so `img-src` names it.
+    // File tickets may come from remote cores; other remote paths stay blocked.
     const refused = await page?.evaluate<string>(`(() => new Promise((resolve) => {
       const seen = [];
       const onViolation = (event) => seen.push(event.violatedDirective);
@@ -646,6 +645,20 @@ shellTest(
       img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
     }))()`);
     expect(inline).toBe('loaded');
+
+    const fixture = Bun.serve({
+      hostname: '127.0.0.1', port: 0,
+      fetch: () => new Response(Bun.file(join(ROOT, 'packages/ui/public/icons/icon-192.png')), { headers: { 'content-type': 'image/png' } }),
+    });
+    try {
+      const remote = await page?.evaluate<string>(`(() => new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve('loaded');
+        img.onerror = () => resolve('refused');
+        img.src = 'http://localhost:${fixture.port}/file/${'a'.repeat(64)}';
+      }))()`);
+      expect(remote).toBe('loaded');
+    } finally { fixture.stop(true); }
   },
   TIMEOUT,
 );
@@ -847,12 +860,17 @@ shellTest('the machine picker opens a folder on the selected core and reports a 
   const remote = await startCore();
   const remoteClient = await connect(remote.url, remote.token);
   try {
-    const grant = await remoteClient.call('pairing.grant', { role: 'owner' });
     await page?.click(testid('nav-settings'));
     await page?.click(testid('settings-tab-machines'));
-    await page?.click(testid('machine-add-open'));
-    await page?.type(testid('machine-link'), grant.url);
-    await page?.click(testid('machine-add'));
+    if (await page?.evaluate(`!!document.querySelector('[data-testid=group-name]')`)) {
+      await page?.type(testid('group-name'), 'Home');
+      await page?.click(testid('group-create'));
+    }
+    await page?.waitFor(`document.querySelector('[data-testid=group-invite]')`);
+    await page?.click(testid('group-invite'));
+    await page?.waitFor(`document.querySelector('[data-testid=group-invite-code]')?.value.startsWith('boite-group:')`);
+    const invite = await page!.evaluate<string>(`document.querySelector('[data-testid=group-invite-code]').value`);
+    await remoteClient.call('group.join', { invite });
     await page?.waitFor(`document.querySelectorAll('[data-testid=machine-card]').length === 2`);
     await page?.click(testid('settings-back'));
     // One machine draws no machine button; the second one brings it back.

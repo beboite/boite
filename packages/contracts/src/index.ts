@@ -2764,7 +2764,7 @@ export function normalizeCoreLogText(text: string, secrets: readonly string[] = 
 }
 
 export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods, MobileDevicesRpcMethods {
-  /** Owner-only project policy; absent policy defaults to enabled. */
+  /** Owner-only merged-PR visibility policy; absent defaults to enabled. Disabling reveals automatically hidden roots, retaining manual archives. */
   'projects.setAutoArchiveMergedPr': { params: { projectId: ProjectId; enabled: boolean }; result: Project };
   /** Owner-only, private bounded diagnostic history, including earlier runs. */
   'journal.inspect': { params: { cursor?: JournalInspectionCursor | null; limit?: number }; result: JournalInspection };
@@ -2815,6 +2815,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'group.get': { params: Record<string, never>; result: Group | null };
   /** Starts a group with this core as its only member. Refused while it belongs to one. Owner only. */
   'group.create': { params: { name: string }; result: Group };
+  /** Rename the shared group; owner only. */
+  'group.rename': { params: { name: string }; result: Group };
   /** A one-time invitation another machine joins with. Owner only. */
   'group.invite': { params: Record<string, never>; result: GroupInvite };
   /** Joins the group an invitation names: this core calls the member that minted it. Owner only. */

@@ -1,6 +1,6 @@
 import type { ThreadSummary } from '@boite/contracts';
 import { projectKey, type ProjectEntry } from './project-view.svelte';
-import { groupWorkingThread, workingThread } from './recent.svelte';
+import { groupWorkingThread, recentPreferences, workingThread } from './recent.svelte';
 import { compareThreads } from './thread-order';
 
 export type ProjectThreadKind = 'working' | 'done';
@@ -12,6 +12,7 @@ export class ProjectThreadView {
   otherOpen = $state(false);
 
   isOpen(entry: ProjectEntry, kind: ProjectThreadKind): boolean {
+    if (kind === 'working' && !recentPreferences.groupWorking) return false;
     return this[kind].includes(projectKey(entry));
   }
 
@@ -26,10 +27,10 @@ export class ProjectThreadView {
 
 export const projectThreadView = new ProjectThreadView();
 
-/** An ungrouped conversation or draft keeps its project in the main list. */
+/** A conversation or draft keeps its project visible, including folded working rows. */
 export function activeProject(entry: ProjectEntry): boolean {
   const store = entry.machine.store;
-  return store.threadsOf(entry.project.id).some(thread => !groupWorkingThread(store, thread))
+  return store.threadsOf(entry.project.id).length > 0
     || store.draftEntries.some(draft => draft.projectId === entry.project.id);
 }
 
@@ -40,6 +41,8 @@ export function projectThreadLists(entry: ProjectEntry, threads: ThreadSummary[]
   const sorted = threads.slice().sort(compareThreads);
   return {
     working: sorted.filter(workingThread),
-    attention: sorted.filter(thread => workingOpen ? !workingThread(thread) : !groupWorkingThread(entry.machine.store, thread))
+    attention: recentPreferences.groupWorking
+      ? sorted.filter(thread => workingOpen ? !workingThread(thread) : !groupWorkingThread(entry.machine.store, thread))
+      : sorted
   };
 }

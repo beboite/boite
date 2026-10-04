@@ -6,9 +6,9 @@
   import { workspace } from '../lib/workspace.svelte';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { archiveThread } from '../lib/archive';
-  import { canDeleteThread, deleteThread } from '../lib/thread-removal';
-  import { moveBlocked, moveItems, pendingLine, pickMoveItem, THREAD_DRAG_TYPE, threadDrag } from '../lib/thread-move.svelte';
-  import { separator } from '../lib/menu';
+  import { deleteThread } from '../lib/thread-removal';
+  import { moveBlocked, pendingLine, pickMoveItem, THREAD_DRAG_TYPE, threadDrag } from '../lib/thread-move.svelte';
+  import { threadMenuItems } from '../lib/thread-menu';
   import { focusOnMount } from '../lib/actions';
   import { strings } from '../lib/strings';
   import { lookupPullRequest } from '../lib/pull-request';
@@ -132,23 +132,7 @@
   function menu(event: MouseEvent) {
     contextMenu.open(
       event,
-      [
-        { id: 'open', label: strings.sidebar.open, disabled: open },
-        { id: 'rename', label: strings.sidebar.rename },
-        {
-          id: 'retitle',
-          label: owner.retitling.includes(thread.id) ? strings.sidebar.retitling : strings.sidebar.retitle,
-          disabled: owner.retitling.includes(thread.id)
-        },
-        { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
-        { id: 'pr', label: strings.machines.refreshPr, disabled: prLoading || !thread.branch || thread.branch === 'HEAD' },
-        { id: 'copy', label: strings.sidebar.copyPath, title: thread.cwd },
-        // A sub-thread moves with its parent, which is the row the sidebar lists.
-        ...(thread.parentThreadId ? [] : moveItems(owner, thread)),
-        separator(),
-        { id: 'archive', label: showDone ? strings.sidebar.markDone : strings.sidebar.archive, disabled: showDone && !doneAllowed },
-        ...(canDeleteThread(owner, thread) ? [{ id: 'delete', label: strings.sidebar.delete, danger: true }] : [])
-      ],
+      threadMenuItems(owner, thread, { open, showDone, prLoading }),
       (action) => {
         if (action === 'open') void workspace.select(owner, thread.id);
         if (action === 'rename') rename();
@@ -157,7 +141,8 @@
         if (action === 'pr') void refreshPr(true);
         if (action === 'copy') void owner.copy(thread.cwd);
         pickMoveItem(owner, thread, action);
-        if (action === 'archive') void (showDone ? markDone(owner, thread) : archiveThread(owner, thread.id));
+        if (action === 'done') void markDone(owner, thread);
+        if (action === 'archive') void archiveThread(owner, thread.id);
         if (action === 'delete') void deleteThread(owner, thread);
       }
     );

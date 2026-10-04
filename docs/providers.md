@@ -23,12 +23,21 @@ proxy off brings the local accounts back unchanged. A proxied provider with no
 local account at all has nothing to show and asks for a sign-in as before.
 
 Douane's default dashboard path is `/admin/#quotas`; CLIProxyAPI uses
-`/management.html#/quota`. With Douane, the core reads `GET /v1/quotas` with
-the proxy key and Limits shows native bars, described in
-[usage](usage.md#gateway-quotas). With CLIProxyAPI, or a Douane that answers
-404 on that route, Limits opens the dashboard inside Boite instead of the
-account popup. Desktop uses the shell's existing browser
-view, and browsers and phones use an iframe. The dashboard must permit embedding
+`/management.html#/quota`. A gateway may translate any model to any API, but a
+proprietary model stays in its own harness: Claude lists Claude models and
+Codex lists OpenAI models, whatever routing prefix the gateway gives them, while
+Grok and Muse models are listed by neither. Gemini models are offered to both,
+because Antigravity, their own harness, cannot run through a gateway. Open
+models (`gpt-oss`, Kimi, Qwen, Llama, DeepSeek, Mistral, GLM) are offered to
+each harness whose API the gateway advertises for them, under any routing
+prefix. A name the rules do not recognize takes its vendor from the routing
+prefix (`codex/`, `claude/`, ...). A catalog without endpoint metadata keeps
+the older rule, which matches the whole id against the harness's native model
+names. With Douane, the core reads `GET /v1/quotas` with the proxy key and
+Limits shows native bars, described in [usage](usage.md#gateway-quotas). With
+CLIProxyAPI, or a Douane that answers 404 on that route, Limits opens the
+dashboard inside Boite instead of the account popup. Desktop uses the shell's
+existing browser view, and browsers and phones use an iframe. The dashboard must permit embedding
 and its configured URL must be reachable from the device displaying it.
 HTTPS browser sessions require an HTTPS dashboard URL; Boite shows this before
 creating a blocked HTTP frame. Open dashboard provides a separate sign-in page,

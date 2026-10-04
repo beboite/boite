@@ -241,10 +241,10 @@ A ticket also records the file's real path, identity, size and modification
 times. Replacing or modifying the file invalidates it, including replacing an
 ancestor with a junction. An expired or invalidated ticket returns the same 404.
 
-The shell's content security policy lets pictures and media load from
-`http://127.0.0.1:*` and nothing wider. A shell driving a core on another
-machine therefore reads and edits text there, and shows no picture or video
-from it; a browser opened on that core's own address shows them.
+The shell's content security policy lets pictures and media load from the
+local core and HTTP or HTTPS `/file/` routes on remote cores. A shell driving
+another machine can preview its images, videos and audio through the same
+short-lived tickets. Other remote image paths stay blocked.
 
 The reads (`git.*`, `files.list`, `files.read`, `todos.list`, the tasks) are
 the owner's and the thread's own agent's. A paired phone also reads `git.status`,

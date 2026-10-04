@@ -40,7 +40,11 @@ test('the page carries one switch per experiment and a toggle writes the enabled
 
   const browser = query<HTMLInputElement>('[data-testid=experiment-agent-browser-control]');
   expect(browser.checked).toBe(false);
-  expect(document.getElementById(browser.getAttribute('aria-describedby')!)?.textContent).toContain('signed-in sessions');
+  const browserHelp = browser.closest('label')!.querySelector<HTMLButtonElement>('[data-testid=info-tip]')!;
+  browserHelp.click();
+  flushSync();
+  expect(document.getElementById(browserHelp.getAttribute('aria-describedby')!)?.textContent).toContain('signed-in sessions');
+  expect(browser.checked).toBe(false);
 
   grain.click();
   flushSync();

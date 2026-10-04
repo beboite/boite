@@ -733,7 +733,7 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="composer" class:dictating data-testid="composer" {ondragover} {ondrop}>
     <ThreadActivity {store} reserveInComposer={hasQueue} onroom={(height) => (activityRoom = height)} />
-    <ComposerIntent editing={!!composer?.editing} {reply} oncancel={cancelEdit} onignore={() => ignoreQuestions(store)} />
+    <ComposerIntent editing={!!composer?.editing} reply={reply?.async && reply.id === repliesOf(store).docked ? null : reply} oncancel={cancelEdit} onignore={() => ignoreQuestions(store)} />
 
     {#if side.current && side.current.threadId === store.openThread?.id}<SideAnswer {...side.current} {store} onclose={() => { side.clear(); box?.focus({ preventScroll: true }); }} />{/if}
     {#if attachments.length > 0}
@@ -797,7 +797,7 @@
       </div>
     {/if}
 
-    <ComposerBar bind:this={toolbar} {store} {key} {provider} {canSend} sendLabel={reply ? strings.composer.replySend : undefined} bind:choice bind:picking bind:dictating
+    <ComposerBar bind:this={toolbar} {store} {key} {provider} {canSend} answering={!!reply} sendLabel={reply ? strings.composer.replySend : undefined} bind:choice bind:picking bind:dictating
       onsubmit={() => void submit()}
       onfiles={(files) => void take(files)}
       onpreview={(text, status, error) => { speechPreview = text; speechStatus = status; speechError = error; }}
@@ -868,9 +868,9 @@
 
   textarea, .input-paint {
     width: 100%;
-    min-height: 44px;
+    min-height: var(--composer-input-height, 44px);
     max-height: 200px;
-    padding: 12px 14px 6px;
+    padding: var(--composer-input-padding, 12px 14px 6px);
     border: none;
     background: transparent;
     font-size: var(--text-reading);

@@ -234,7 +234,7 @@ test('a card asked without waiting says so until it is answered', () => {
   flushSync();
   const card = query('[data-testid=question-card]');
   expect(card.getAttribute('data-async')).toBe('true');
-  expect(card.textContent).toContain('Asks you, without waiting');
+  expect(card.textContent).toContain('Question');
   expect(document.querySelector('[data-testid=question-async-hint]')).not.toBeNull();
 });
 

@@ -241,6 +241,21 @@ test('the draft worktree chip puts the first send on its own branch, and the hea
   await waitFor(() => store.draft?.worktree === true);
   expect(query<HTMLButtonElement>('[data-testid=composer-worktree]').getAttribute('aria-pressed')).toBe('true');
 
+  // A worktree belongs to the project even before a provider is configured.
+  const providers = store.providers;
+  const draftChoice = store.draftChoice;
+  try {
+    store.providers = [];
+    store.draftChoice = null;
+    flushSync();
+    expect(store.defaultChoice()).toBeNull();
+    expect(query('[data-testid=draft-sentence]').textContent).toContain('in a worktree');
+  } finally {
+    store.providers = providers;
+    store.draftChoice = draftChoice;
+    flushSync();
+  }
+
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
   input.value = 'Fix the login';
   input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -368,9 +383,9 @@ test('a draft names its project in the heading and the dropdown moves it to anot
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
 
-  const heading = query('[data-testid=draft-empty]');
-  expect(heading.textContent).toContain('with approval requests in');
-  expect(heading.textContent).toContain('notes');
+  const heading = query('[data-testid=draft-sentence]');
+  expect(heading.querySelector('p')?.textContent).toContain('with approval requests');
+  expect(heading.querySelector('h1')?.textContent).toContain('notes');
   // The heading says the project, so the header chip no longer repeats it.
   expect(query('[data-testid=thread-header]').textContent).not.toContain('notes');
 
@@ -596,21 +611,27 @@ test('the reasoning slider sets the effort of the picked model, and the chip fol
   expect(store.openThread?.effort).toBe('xhigh');
 });
 
-test('project completion keeps pending work open, while header Archive can stop it', async ({ app: _app }) => {
+test('project menus keep Mark done separate from Archive, which can stop pending work', async ({ app: _app }) => {
   await waitFor(() => document.querySelectorAll('[data-testid=thread-row]').length === 4);
 
   const row = query<HTMLButtonElement>('[data-thread-id="t-bench"]');
   row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 60 }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
   const labels = Array.from(document.querySelectorAll('[data-testid=context-menu] [data-row]')).map((el) => el.textContent?.trim());
-  expect(labels).toEqual(['Open', 'Rename', 'Regenerate title', 'Pin', 'Refresh pull request', 'Copy path', 'Move to project', 'Mark done', 'Delete']);
+  expect(labels).toEqual(['Open', 'Pin', 'Mark done', 'Archive', 'Rename', 'Regenerate title', 'Move to project', 'Copy path', 'Delete']);
   expect(query('[data-testid=context-menu] [data-value=copy]').getAttribute('title')).toBe('C:\\src\\boite');
   // t-bench waits on a permission: its turn still runs, and a move would wait for it to end.
   expect(query<HTMLButtonElement>('[data-testid=context-menu] [data-value=move]').disabled).toBe(false);
-  expect(query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archive]').disabled).toBe(true);
-  press('Escape');
+  expect(query<HTMLButtonElement>('[data-testid=context-menu] [data-value=done]').disabled).toBe(true);
+  expect(query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archive]').disabled).toBe(false);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archive]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
-  row.click();
+  await waitFor(() => document.querySelector('[data-thread-id="t-bench"]') === null);
+  expect(store.pendingPermissions.some(p => p.threadId === 't-bench')).toBe(false);
+  expect(document.querySelector('[data-testid=confirm-dialog]')).toBeNull();
+  query<HTMLButtonElement>('[data-testid=undo-action]').click();
+  await waitFor(() => document.querySelector('[data-thread-id="t-bench"]') !== null);
+  query<HTMLButtonElement>('[data-thread-id="t-bench"]').click();
   await waitFor(() => store.openThread?.id === 't-bench');
   query('[data-testid=thread-title]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 60 }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
@@ -618,7 +639,7 @@ test('project completion keeps pending work open, while header Archive can stop 
 
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archive]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
-  // t-bench waits on a permission: it still archives at once, with no dialog.
+  // Restoring stopped work also keeps the header's direct archive action.
   await waitFor(() => document.querySelectorAll('[data-testid=thread-row]').length === 3);
   expect(document.querySelector('[data-thread-id="t-bench"]')).toBeNull();
   expect(document.querySelector('[data-testid=confirm-dialog]')).toBeNull();
@@ -2529,8 +2550,8 @@ test('automatic settings sync follows the chosen source outside settings and sto
   await remote.store.client!.call('settings.set', { warmProcessMinutes: 3, agentCpuCapPercent: 35 });
   await store.client!.call('settings.set', { asyncQuestions: false, warmProcessMinutes: 9, agentCpuCapPercent: 85 });
   store.showSettings('machines');
-  await waitFor(() => document.querySelector('[data-testid=machine-sync]') !== null);
-  const checkbox = query<HTMLInputElement>('[data-testid=machine-sync]');
+  await waitFor(() => document.querySelector('[data-testid=group-sync]') !== null);
+  const checkbox = query<HTMLInputElement>('[data-testid=group-sync]');
   expect(checkbox.type).toBe('checkbox');
   checkbox.click();
   await waitFor(() => remote.store.settings?.asyncQuestions === false);
@@ -2560,8 +2581,8 @@ test('automatic settings sync follows the chosen source outside settings and sto
   await waitFor(() => remote.store.settings?.asyncQuestions === true);
   await workspace.select(store);
   store.showSettings('machines');
-  await waitFor(() => document.querySelector('[data-testid=machine-sync]') !== null);
-  query<HTMLInputElement>('[data-testid=machine-sync]').click();
+  await waitFor(() => document.querySelector('[data-testid=group-sync]') !== null);
+  query<HTMLInputElement>('[data-testid=group-sync]').click();
   await store.client!.call('settings.set', { asyncQuestions: false });
   await new Promise(resolve => setTimeout(resolve, 300));
   expect(remote.store.settings?.asyncQuestions).toBe(true);
