@@ -13,10 +13,12 @@
   import { hasUnsentDraft } from '../lib/composer-queue';
   import { mobileOverlay } from '../lib/mobile-history';
   import { archiveThread } from '../lib/archive';
-  import { canMarkDone, groupWorkingThread, markDone, recentPreferences } from '../lib/recent.svelte';
-  import { canDeleteThread, deleteThread } from '../lib/thread-removal';
+  import { groupWorkingThread, markDone, recentPreferences } from '../lib/recent.svelte';
+  import { deleteThread } from '../lib/thread-removal';
+  import { pickMoveItem } from '../lib/thread-move.svelte';
+  import { threadMenuItems } from '../lib/thread-menu';
   import { projectMenu } from '../lib/project-menu';
-  import { separator, type MenuItem } from '../lib/menu';
+  import type { MenuItem } from '../lib/menu';
   import type { ThreadSummary } from '@boite/contracts';
   import Menu from './Menu.svelte';
   import ThreadState from './ThreadState.svelte';
@@ -102,22 +104,27 @@
     from = next === 'chat' && screen !== 'chat' ? screen : null;
     screen = next;
   }
-  /** What the sidebar's thread menu offers, minus what needs the desktop. */
+  /** Thread organization and lifecycle use the same groups as the desktop. */
   function rowItems(owner: Store, thread: ThreadSummary): MenuItem[] {
-    const retitling = owner.retitling.includes(thread.id);
-    return [
-      { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
-      { id: 'retitle', label: retitling ? strings.sidebar.retitling : strings.sidebar.retitle, disabled: retitling },
-      separator(),
-      { id: 'archive', label: screen === 'threads' ? strings.sidebar.markDone : strings.sidebar.archive, disabled: screen === 'threads' && !canMarkDone(owner, thread) },
-      ...(canDeleteThread(owner, thread) ? [{ id: 'delete', label: strings.sidebar.delete, danger: true }] : [])
-    ];
+    return threadMenuItems(owner, thread, { showDone: screen === 'threads' });
   }
   /** Thread ids can collide between machines: the row's own store acts. */
-  function rowAction(owner: Store, thread: ThreadSummary, action: string) {
+  async function rowAction(owner: Store, thread: ThreadSummary, action: string, machineId: string) {
     if (action === 'pin') void owner.pin(thread.id, !thread.pinned);
     else if (action === 'retitle') void owner.retitle(thread.id);
-    else if (action === 'archive') void (screen === 'threads' ? markDone(owner, thread) : archiveThread(owner, thread.id));
+    else if (action === 'rename') {
+      show('chat');
+      await workspace.select(owner, thread.id);
+      if (workspace.active === owner && owner.openThread?.id === thread.id) owner.renameRequested = true;
+    }
+    else if (action === 'copy') void owner.copy(thread.cwd);
+    else if (action === 'move' || action === 'move-cancel') {
+      const row = Array.from(document.querySelectorAll<HTMLElement>('.mobile-list [data-thread-id][data-machine-id]'))
+        .find(row => row.dataset.threadId === thread.id && row.dataset.machineId === machineId);
+      pickMoveItem(owner, thread, action, row?.querySelector<HTMLElement>('[aria-haspopup=menu]'));
+    }
+    else if (action === 'done') void markDone(owner, thread);
+    else if (action === 'archive') void archiveThread(owner, thread.id);
     else if (action === 'delete') void deleteThread(owner, thread);
   }
   async function pickProject(key: string) {
@@ -193,7 +200,7 @@
           <span class="summary"><span class="title"><span class="provider" data-testid="thread-provider" role="img" aria-label={agentLabel(row.machine.store, row.thread)}><ProviderLogo providerId={row.thread.providerId} size={13} /></span>{#if row.thread.pinned}<Pin size={12} />{/if}{row.thread.title}{#if hasUnsentDraft(row.machine.store.composerStates[row.thread.id])}<span class="draft" data-testid="thread-draft" title={strings.sidebar.unsentDraft} aria-label={strings.sidebar.unsentDraft}><PencilLine size={12} /></span>{/if}</span><span class="detail" title={row.thread.branch ?? undefined}>{[projectName(row.project), several ? row.machine.label : null, row.thread.branch].filter(Boolean).join(' · ')}</span></span>
           <ThreadState thread={row.thread} {now} />
         </button>
-        <Menu items={rowItems(row.machine.store, row.thread)} onpick={(action) => rowAction(row.machine.store, row.thread, action)} label={strings.sidebar.threadMenu} placement="bottom" variant="ghost" testid="mobile-thread-menu-{row.thread.id}"><Ellipsis size={18} /></Menu>
+        <Menu items={rowItems(row.machine.store, row.thread)} onpick={(action) => void rowAction(row.machine.store, row.thread, action, row.machine.id)} label={strings.sidebar.threadMenu} placement="bottom" variant="ghost" testid="mobile-thread-menu-{row.thread.id}"><Ellipsis size={18} /></Menu>
       </div>
     {/snippet}
     {#if screen === 'threads' && workspace.view === 'projects'}

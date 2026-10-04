@@ -49,7 +49,7 @@ export function workingThread(thread: ThreadSummary): boolean {
   return state === 'working' || state === 'queued' || state === 'monitoring' || state === 'background';
 }
 
-/** Marking done never interrupts a turn or discards input; Archive remains available elsewhere. */
+/** Marking done never interrupts a turn or discards input; Archive is a separate menu action. */
 export function canMarkDone(store: Store, thread: ThreadSummary): boolean {
   return !thread.archived && store.connection === 'ready' && !['running', 'waiting', 'queued'].includes(thread.status)
     && !thread.backgroundWork?.kinds.length && !thread.pendingMove && !store.moveBlocked(thread.id)

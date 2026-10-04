@@ -342,7 +342,7 @@ test('a phone pins and archives a thread without a right-click, from the header 
   expect(await page.evaluate(`['terminal-toggle'].map(id => document.querySelector('[data-testid=' + id + ']')?.offsetParent ?? null)`)).toEqual([null]);
   await page.click('[data-testid=thread-menu-trigger]');
   await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger-menu]')`);
-  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=thread-menu-trigger-menu] [data-value]')].map(row => row.dataset.value)`)).toEqual(['agents', 'terminal', 'rename', 'retitle', 'pin', 'copy', 'coordination', 'find', 'move', 'archive', 'delete']);
+  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=thread-menu-trigger-menu] [data-value]')].map(row => row.dataset.value)`)).toEqual(['pin', 'archive', 'rename', 'retitle', 'move', 'copy', 'find', 'agents', 'coordination', 'terminal', 'delete']);
   // The entry reads the same with or without subagents, as on the desktop title menu.
   expect(await page.evaluate(`document.querySelector('[data-testid=thread-menu-trigger-menu] [data-value=agents]').textContent.trim()`)).toBe('Subagents');
   await capture('mobile-thread-menu.png');

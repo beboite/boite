@@ -157,7 +157,7 @@
           <span class="label">
             {#if item.icon === 'settings'}<Settings size={14} strokeWidth={1.75} />{/if}
             {#if item.projectTile}<ProjectTile project={item.projectTile.project} store={item.projectTile.store} size={18} />{/if}
-            {#if item.glyph}<span class="glyph" class:live={item.live}><item.glyph size={14} strokeWidth={1.75} /></span>{/if}
+            {#if item.glyph}<span class="glyph" class:live={item.live} aria-hidden="true"><item.glyph size={16} strokeWidth={1.75} /></span>{/if}
             {#if item.status}<span class="status-dot" data-tone={item.status.tone} role="img" aria-label={item.status.label} title={item.status.label}></span>{/if}
             <span class="ui-label">{item.label}</span>
           </span>
@@ -177,8 +177,9 @@
 <style>
   .separator { height: 1px; background: var(--color-border); margin: 4px 6px; }
   .label { display: flex; align-items: center; gap: 6px; }
-  .glyph { display: inline-flex; color: var(--color-muted-foreground); margin-right: 2px; }
+  .glyph { display: inline-flex; flex: 0 0 16px; color: var(--color-muted-foreground); margin-right: 2px; }
   .glyph.live { color: var(--color-live); }
+  .item.danger .glyph { color: inherit; }
   .item.checkable { display: grid; grid-template-columns: minmax(0, 1fr) 14px; column-gap: 8px; }
   .checkable .hint { grid-column: 1; grid-row: 2; }
   .check { display: flex; grid-column: 2; grid-row: 1 / span 2; align-self: center; }

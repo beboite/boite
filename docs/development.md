@@ -176,6 +176,11 @@ continue. New work in it restores the project. Drafts cannot be archived.
 An archive or delete action on the open conversation returns to a draft in its project.
 Removing a background conversation keeps the current conversation on screen.
 
+Thread row and title menus share action groups and icons on desktop and phone:
+open/pin, completion/archive, title/move, tools, then a separate Delete group.
+Archive stays available beside Mark done in project and recent lists, including
+while work is pending. Pull request refresh appears only for a named branch.
+
 Chat text selection never activates a file, conversation or external link at
 the end of the drag. The external opener runs after the selection guards.
 Dropped text and URLs insert into writable fields; drops elsewhere cannot
