@@ -176,8 +176,11 @@ continue. New work in it restores the project. Drafts cannot be archived.
 An archive or delete action on the open conversation returns to a draft in its project.
 Removing a background conversation keeps the current conversation on screen.
 
-Chat text selection never activates a file or conversation link at the end of
-the drag. A later click or keyboard activation still opens the link. Delayed
+Chat text selection never activates a file, conversation or external link at
+the end of the drag. The external opener runs after the selection guards.
+Dropped text and URLs insert into writable fields; drops elsewhere cannot
+navigate the app. File attachments and project moves retain their own handlers.
+A later click or keyboard activation still opens the link. Delayed
 cross-machine conversation links yield to a newer conversation or draft.
 
 Recent keeps completed conversations in a collapsed Done section at the bottom.
