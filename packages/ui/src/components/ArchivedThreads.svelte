@@ -1,6 +1,7 @@
 <script lang="ts">
+  import DoneRetentionSetting from './DoneRetentionSetting.svelte';
   import { RotateCcw, Trash2 } from '@lucide/svelte';
-  import type { ThreadId, ThreadSummary } from '@boite/contracts';
+  import { DEFAULT_THREAD_DONE_RETENTION_DAYS, type ThreadId, type ThreadSummary } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
   import DeletedThreads from './DeletedThreads.svelte';
   import { archivedThreads, restoreThread } from '../lib/archive';
@@ -139,6 +140,7 @@
 
 <section class="card" id="settings-archived" data-testid="archived-threads">
   <h2 class="ui-label-box"><span class="ui-label">{strings.settings.archived.heading}</span><InfoTip topic={strings.settings.archived.heading} text={strings.settings.archived.intro} /></h2>
+  <DoneRetentionSetting {store} />
   {#if threads === null}
     <button type="button" data-testid="archived-show" disabled={loading || store.connection !== 'ready'} onclick={() => void load()}>
       <span class="ui-label">{strings.settings.archived.show}</span>
@@ -155,6 +157,9 @@
               <a href={thread.archiveReason.url} target="_blank" rel="noopener noreferrer">{fill(strings.settings.archived.mergedReason, { number: String(thread.archiveReason.number) })}</a>
               <time datetime={new Date(thread.archiveReason.archivedAt).toISOString()} title={exactTime(thread.archiveReason.archivedAt)}>{ago(thread.archiveReason.archivedAt)}</time>
             </span>
+          {/if}
+          {#if thread.doneAt != null && (store.settings?.threadDoneRetentionDays ?? DEFAULT_THREAD_DONE_RETENTION_DAYS) > 0}
+            <span class="subtle expiry" data-testid="done-expires">{fill(strings.settings.archived.deletesAt, { date: exactTime(thread.doneAt + (store.settings?.threadDoneRetentionDays ?? DEFAULT_THREAD_DONE_RETENTION_DAYS) * 86_400_000) })}</span>
           {/if}
           <span class="subtle meta" title={exactTime(thread.updatedAt)}>{projectOf(thread)} · {ago(thread.updatedAt)}</span>
           {#if restored.includes(thread.id)}
@@ -206,6 +211,8 @@
     overflow-wrap: anywhere;
     line-height: 1.5;
   }
+
+  .expiry { grid-column: 1 / -1; font-size: var(--text-sm); }
 
   .meta {
     overflow-wrap: anywhere;

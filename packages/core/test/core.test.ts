@@ -70,6 +70,7 @@ describe('settings', () => {
     const defaults = await client.call('settings.get', {});
     expect(defaults).toEqual({
       threadDeletionRetentionDays: 30,
+      threadDoneRetentionDays: 3,
       worktreeStorage: { mode: 'project', directory: null },
       warmProcessMinutes: 0,
       listenOnLan: false,

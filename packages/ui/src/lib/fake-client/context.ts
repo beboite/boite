@@ -5,6 +5,7 @@ import { observeProgress } from './progress';
 import type { FakeRoster } from './group';
 import {
   DEFAULT_THREAD_DELETION_RETENTION_DAYS,
+  DEFAULT_THREAD_DONE_RETENTION_DAYS,
   PROTOCOL_VERSION,
   SPEECH_DEFAULT_MODEL,
   normalizeCoreLogText,
@@ -278,6 +279,7 @@ export class FakeContext {
     };
     this.settings = {
       threadDeletionRetentionDays: DEFAULT_THREAD_DELETION_RETENTION_DAYS,
+      threadDoneRetentionDays: DEFAULT_THREAD_DONE_RETENTION_DAYS,
       warmProcessMinutes: 0,
       worktreeStorage: { mode: 'project', directory: null },
       listenOnLan: false,

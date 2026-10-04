@@ -5,6 +5,33 @@ import { ATTACHMENT_MAX_BYTES, DEFAULT_DELEGATION_CONFIG, MESSAGE_PAGE_MAX_BYTES
 import { FAKE_AUTO_COMPACT_SETTLE_MS } from './fake-client/turns';
 import { FakeContext } from './fake-client/context';
 
+test('done expiry mirrors the core while manual archives and restored history remain recoverable', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  expect((await client.call('settings.get', {})).threadDoneRetentionDays).toBe(3);
+  const source = await client.call('threads.get', { threadId: 't-parser' });
+  const thread = await client.call('threads.create', { projectId: source.projectId!, providerId: source.providerId, accountId: source.accountId, model: source.model ?? undefined });
+  const done = await client.call('threads.archive', { threadId: thread.id, onlyIfIdle: true });
+  expect(done.doneAt).toBeTypeOf('number');
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(done.doneAt! + 4 * 86_400_000);
+  try {
+    await client.call('settings.set', { threadDoneRetentionDays: 0 });
+    await client.sweepDoneThreads();
+    expect((await client.call('threads.list', { includeArchived: true })).some(row => row.id === thread.id)).toBe(true);
+    await client.call('settings.set', { threadDoneRetentionDays: 3 });
+    await client.sweepDoneThreads();
+    expect((await client.call('threads.list', { includeArchived: true })).some(row => row.id === thread.id)).toBe(false);
+    expect((await client.call('threads.get', { threadId: 't-parser' })).archived).toBe(true);
+    expect((await client.call('threads.deleted', {})).map(row => row.id)).toContain(thread.id);
+    expect((await client.call('threads.restore', { threadId: thread.id })).doneAt).toBeNull();
+    await client.sweepDoneThreads();
+    expect((await client.call('threads.get', { threadId: thread.id })).archived).toBe(true);
+  } finally { clock.mockRestore(); }
+  for (const value of [-1, 0.5, 3651, null, '3']) {
+    await expect(client.call('settings.set', { threadDoneRetentionDays: value as number }))
+      .rejects.toMatchObject({ code: RpcErrorCode.InvalidParams, data: { field: 'threadDoneRetentionDays' } });
+  }
+});
+
 test('banked resets refuse agent and paired transports before changing a supported account', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0, quotaExtras: true });
   const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'codex' && account.status === 'ok')!;

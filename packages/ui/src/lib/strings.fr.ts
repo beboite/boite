@@ -1818,6 +1818,9 @@ export const fr: Translation = {
     endpoint: 'Point de connexion',
     noCore: 'Pas connecté à un cœur.',
     archived: {
+      doneRetentionLabel: 'Supprimer les conversations terminées après (jours)',
+      doneRetentionHint: 'À compter du passage en terminé ou de l\'archivage automatique après une fusion de PR. 3 jours par défaut ; 0 désactive la suppression. Les archives manuelles sont conservées. Les conversations supprimées restent récupérables pendant le délai configuré.',
+      deletesAt: 'Suppression : {date}',
       heading: 'Conversations archivées',
       mergedReason: 'Archivée après la fusion de la PR #{number}',
       intro: 'L\'agent d\'une conversation archivée s\'arrête. Il repart au premier message après une restauration.',

@@ -30,6 +30,7 @@ import { SessionStore } from './sessions.ts';
 import { SettingsStore } from './settings.ts';
 import { ThreadStore } from './threads.ts';
 import { scheduleThreadDeletionRetention } from './threads/deletion-retention.ts';
+import { scheduleDoneRetention } from './threads/done-retention.ts';
 import { scheduleArtifactRetention } from './artifact-retention.ts';
 import { ArtifactPreviews } from './artifact-preview.ts';
 import { BrowserControl } from './browser.ts';
@@ -289,6 +290,7 @@ export class Core {
     this.procs.applySettings(this.settings.get());
     this.accounts.ensureDefaults();
     this.#stopDeletionRetention = scheduleThreadDeletionRetention(this);
+    this.#stopDoneRetention = scheduleDoneRetention(this);
     // The journal is open and no socket is accepted yet: whatever a dead core
     // left running or queued is closed here, or nothing ever would.
     this.threads.agentState.backgroundHistory.interruptLive();
@@ -377,6 +379,7 @@ export class Core {
 
   #stopRetention: () => void;
   #stopDeletionRetention: () => void;
+  #stopDoneRetention: () => Promise<void>;
 
   /** Share both an active wait and its completion across shutdown phases. */
   #drainPromise: Promise<void> | null = null;
@@ -394,6 +397,7 @@ export class Core {
     this.threads.autoCompact.close();
     await this.agentRuntime.close();
     this.#stopping = true;
+    await this.#stopDoneRetention();
     await this.brain.close();
     this.updates.close();
     this.serverUpdates.close();

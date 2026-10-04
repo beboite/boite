@@ -82,6 +82,15 @@ result and publishing completion once. A changed execution identity prevents a
 late result from overwriting a replacement turn or session. Shutdown ends this
 retry; startup applies the normal recovery rules to any unfinished rows.
 
+Threads marked done, including automatic archives after a PR merge, record a durable
+`doneAt` date. `threadDoneRetentionDays` defaults to 3 days; 0 disables automatic
+deletion. Startup and minute passes delete expired idle families through the normal
+recoverable deletion flow. Restore cancels expiry, and a later Mark done starts a
+fresh delay. Manual and legacy archives without a done date remain conserved.
+Paired phones can mark done under the owner's retention policy; direct deletion
+and policy changes stay owner-only. Cleanup preserves the done date until its
+recoverable deletion record commits, so interrupted cleanup can retry after restart.
+
 Deletion stops a conversation and its children before hiding them behind durable
 markers. Restore retains history and previous archive flags without restarting
 agents. The default deletion retention is 30 days; `threadDeletionRetentionDays`

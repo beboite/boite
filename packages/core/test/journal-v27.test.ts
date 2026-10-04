@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { SCHEMA_VERSION } from '../src/journal/schema.ts';
 import { Journal } from '../src/journal.ts';
 let dir: string, file: string;
 const fixture = readFileSync(new URL('./fixtures/journal-v27.sql', import.meta.url), 'utf8');
@@ -24,7 +25,7 @@ test('immutable schema27 produced by original migration preserves its data throu
   for (let pass = 0; pass < 2; pass++) {
     const journal = new Journal(file);
     try {
-      expect(journal.db.query('PRAGMA user_version').get()).toEqual({ user_version: 28 });
+      expect(journal.db.query('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
       expect(journal.db.query('SELECT * FROM turn_requests ORDER BY rowid').all()).toEqual(receipts);
       expect(journal.db.query('SELECT * FROM coordination_letters ORDER BY rowid').all()).toEqual(letters);
       expect(journal.listTurns('thr_fixture').map(turn => [turn.id, turn.status, turn.queueHold ?? null])).toEqual([['turn_done','done',null],['turn_queued','queued',null],['turn_running','running',null]]);
@@ -49,6 +50,6 @@ test('failure after adding migration28 projections rolls back real schema27 and 
   expect(raw.query("SELECT name FROM pragma_table_info('threads') WHERE name='fork_origin'").get()).toBeNull();
   expect(raw.query('SELECT COUNT(*) AS count FROM messages').get()).toEqual({ count: 5 }); raw.close();
   const retried = new Journal(file);
-  try { expect(retried.db.query('PRAGMA user_version').get()).toEqual({ user_version: 28 }); expect(retried.listMessages('thr_fixture')).toHaveLength(5); }
+  try { expect(retried.db.query('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION }); expect(retried.listMessages('thr_fixture')).toHaveLength(5); }
   finally { retried.close(); }
 });

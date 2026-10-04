@@ -125,6 +125,7 @@ import { workspace } from '../lib/workspace.svelte';
     ['general', 'conversations', strings.settings.notifications],
     ['general', 'conversations', strings.settings.asyncQuestions],
     ['general', 'conversations', strings.settings.titleModel],
+    ['general', 'archived', strings.settings.archived.doneRetentionLabel],
     // The switch lives in the shell's own card: a browser has no tray.
     ...(inShell ? [['general', 'app', strings.settings.closeToTray] as [SettingsTab, string, string]] : []),
     ['general', 'app', strings.onboarding.label],

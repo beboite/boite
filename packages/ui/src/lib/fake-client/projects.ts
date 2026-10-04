@@ -23,6 +23,7 @@ export function projectMethods(ctx: FakeContext) {
         for (const thread of ctx.threads.values()) {
           if (thread.projectId !== project.id || !thread.archived || thread.parentThreadId || thread.archiveReason?.type !== 'pr-merged') continue;
           thread.archived = false;
+          thread.doneAt = null;
           delete thread.archiveReason;
           const state = ctx.mergedPrArchive.get(thread.id);
           if (state) ctx.mergedPrArchive.set(thread.id, { ...state, generation: state.generation + 1 });

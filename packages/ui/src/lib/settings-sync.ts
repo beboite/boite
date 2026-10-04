@@ -28,6 +28,7 @@ import { connected } from './provider-setup';
 /** The settings that describe the user, not the machine they sit on. */
 export const PORTABLE_SETTINGS = [
   'threadDeletionRetentionDays',
+  'threadDoneRetentionDays',
   'focusGuard',
   'muteAgents',
   'reapOrphans',

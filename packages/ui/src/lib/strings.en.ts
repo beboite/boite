@@ -1890,6 +1890,9 @@ export const strings = {
     endpoint: 'Endpoint',
     noCore: 'Not connected to a core.',
     archived: {
+      doneRetentionLabel: 'Delete done threads after (days)',
+      doneRetentionHint: 'Counted from Mark done or an automatic archive after a PR merge. 3 days by default; 0 disables deletion. Manual archives are kept. Deleted conversations remain recoverable for the configured deletion retention.',
+      deletesAt: 'Deletion: {date}',
       heading: 'Archived threads',
       mergedReason: 'Archived after PR #{number} merged',
       intro: 'The agent of an archived thread stops. It starts again with the first message after a restore.',

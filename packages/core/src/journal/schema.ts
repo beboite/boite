@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import type { MessagePart } from '@boite/contracts';
 import { parseJson } from './rows.ts';
 
-export const SCHEMA_VERSION = 28;
+export const SCHEMA_VERSION = 29;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -371,6 +371,8 @@ export function migrate(db: Database, file: string): void {
     CREATE INDEX IF NOT EXISTS background_observations_recent ON background_observations(thread_id, json_extract(payload, '$.observedAt') DESC);`);
   if (!hasColumn('threads', 'fork_origin')) db.exec('ALTER TABLE threads ADD COLUMN fork_origin TEXT');
   if (!hasColumn('turns', 'queue_hold')) db.exec('ALTER TABLE turns ADD COLUMN queue_hold TEXT');
+  if (!hasColumn('threads', 'done_at')) db.exec('ALTER TABLE threads ADD COLUMN done_at INTEGER');
+  db.exec('CREATE INDEX IF NOT EXISTS threads_done_expiry ON threads(done_at)');
   version = Math.max(version, SCHEMA_VERSION);
   if (row?.user_version !== version) db.exec(`PRAGMA user_version = ${version}`);
 }

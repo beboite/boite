@@ -194,7 +194,12 @@ with `onlyIfIdle: true` refuses pending work or input in the conversation's
 family before changing it. Done reads archived summaries only on expansion,
 respecting the project and machine filters. A completed conversation opens for
 reading with a Move to Recent button in place of the composer. Reopening keeps
-history without restarting work.
+history without restarting work. Mark done records its own date; automatic archives
+after a merged PR do the same. Settings > General > Archived threads controls the
+delay before deletion, 3 days by default, or 0 to disable it. Restoring clears the
+date, and marking done again starts a new delay. Manual and older archives without
+a done date stay retained. Expiry runs at startup and once per minute, skips
+families with pending work or input, and uses the recoverable deletion flow below.
 
 Settings > General > Conversations offers Group working threads,
 stored on this device; phone settings offer the same switch under device

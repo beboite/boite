@@ -824,6 +824,8 @@ export interface ForkOrigin {
 }
 
 export interface ThreadSummary {
+  /** Date marked done, or automatically archived after a PR merge. Cleared on restore or manual archive. */
+  doneAt?: Timestamp | null;
   forkOrigin?: ForkOrigin;
 
   /** Durable explanation for an automatic archive; absent for manual archives and restored conversations. */
@@ -1547,6 +1549,7 @@ export interface TelemetryState {
   pendingDeletion: boolean;
 }
 
+export const DEFAULT_THREAD_DONE_RETENTION_DAYS = 3;
 export const DEFAULT_THREAD_DELETION_RETENTION_DAYS = 30;
 
 /** A recoverable conversation, with the time its whole family was deleted. */
@@ -1561,6 +1564,8 @@ export interface Settings {
   quotaOrder?: AccountId[];
   /** Days after deletion before history is purged. 0 keeps it indefinitely. Missing means 30. */
   threadDeletionRetentionDays?: number;
+  /** Days after marking done before deletion. 0 disables it. Missing means 3. */
+  threadDoneRetentionDays?: number;
   /** New worktrees only. Missing means project mode; existing checkouts keep their path. */
   worktreeStorage?: WorktreeStorage;
   /** Exact browser origins allowed to connect alongside the shell and this core's own origin. */
@@ -3367,7 +3372,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * Put a thread away, or bring it back with `archived: false`. Archiving
    * stops its turn and its sub-threads' turns at once and answers; their
    * processes end once those turns have settled. Restoring restarts nothing.
-   * `onlyIfIdle: true` refuses active work in the family before changing it.
+   * `onlyIfIdle: true` marks done, recording its expiry date after refusing active work in the family.
    */
   'threads.archive': { params: { threadId: ThreadId; archived?: boolean; onlyIfIdle?: boolean }; result: ThreadSummary };
   /**
