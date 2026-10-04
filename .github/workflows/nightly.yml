@@ -9,6 +9,10 @@ on:
         description: Optional announcement above the automatic changelog.
         type: string
         default: ''
+      dry-run:
+        description: Build and test this ref without reserving a tag, signing or publishing anything.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -18,19 +22,23 @@ defaults:
     shell: bash
 
 concurrency:
-  group: boite-de-nuit
+  # A dry run never waits behind, or replaces, a publishing nightly.
+  group: ${{ inputs.dry-run && format('boite-de-nuit-dry-run-{0}', github.ref) || 'boite-de-nuit' }}
   cancel-in-progress: false
 
 jobs:
   revision:
+    name: Version
     # Enabled by default; false is the emergency stop for both entry points.
-    if: vars.NIGHTLY_ENABLED != 'false' && github.ref == 'refs/heads/main'
+    # Only main publishes; a dry run may build any branch.
+    if: vars.NIGHTLY_ENABLED != 'false' && (github.ref == 'refs/heads/main' || inputs.dry-run)
     runs-on: ubuntu-24.04
     outputs:
       changed: ${{ steps.revision.outputs.changed }}
       reserved: ${{ steps.revision.outputs.reserved }}
       tag: ${{ steps.revision.outputs.tag }}
       version: ${{ steps.revision.outputs.version }}
+      platforms: ${{ steps.revision.outputs.platforms }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -46,31 +54,62 @@ jobs:
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/tags?per_page=100" > tags.json
           bun scripts/ci/nightly.ts released.json tags.json
 
-  verify:
+  # The commit's own CI already ran every suite (scripts/ci/changes.ts): the
+  # nightly requires it instead of running it again beside the builds.
+  ci:
+    name: CI passed
     needs: revision
     if: needs.revision.outputs.changed == 'true'
-    uses: ./.github/workflows/ci.yml
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    permissions:
+      contents: read
+      # Reruns the failed jobs of that CI run once (scripts/ci/commit-ci.ts).
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version-file: package.json
+      - name: Wait for this commit's CI to pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_CI_DRY_RUN: ${{ inputs.dry-run && '1' || '' }}
+        run: bun scripts/ci/commit-ci.ts
+
+  # Built once per platform and tested as installed; the Rust tests already
+  # passed in the commit's CI.
+  desktop:
+    name: Desktop
+    needs: revision
+    if: needs.revision.outputs.changed == 'true'
+    uses: ./.github/workflows/desktop.yml
     secrets:
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-      APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ !inputs.dry-run && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+      APPLE_CERTIFICATE: ${{ !inputs.dry-run && secrets.APPLE_CERTIFICATE || '' }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ !inputs.dry-run && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+      APPLE_SIGNING_IDENTITY: ${{ !inputs.dry-run && secrets.APPLE_SIGNING_IDENTITY || '' }}
+      APPLE_API_ISSUER: ${{ !inputs.dry-run && secrets.APPLE_API_ISSUER || '' }}
+      APPLE_API_KEY_ID: ${{ !inputs.dry-run && secrets.APPLE_API_KEY_ID || '' }}
+      APPLE_API_PRIVATE_KEY: ${{ !inputs.dry-run && secrets.APPLE_API_PRIVATE_KEY || '' }}
     with:
-      skip-server: true
-      skip-android: true
-      sign-updates: true
+      platforms: ${{ needs.revision.outputs.platforms }}
       channel: nightly
       version: ${{ needs.revision.outputs.version }}
+      sign-updates: ${{ !inputs.dry-run }}
+      rust-tests: false
+      native-e2e: true
     permissions:
       contents: read
 
   # The tag is taken once the checks pass: the release tags ruleset keeps a tag
   # from being deleted, so one taken before them outlived every failed build.
   reserve:
-    needs: [revision, verify, image, android]
+    name: Reserve tag
+    needs: [revision, ci, desktop, image, android]
+    if: ${{ !inputs.dry-run }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -86,17 +125,19 @@ jobs:
   # Signed, or the previous release's APK taken back when apps/android, the
   # host and the key are unchanged since it was built (docs/android.md).
   android:
+    name: Android
     needs: revision
     if: needs.revision.outputs.changed == 'true'
     uses: ./.github/workflows/android.yml
     secrets:
-      ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
-      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEYSTORE: ${{ !inputs.dry-run && secrets.ANDROID_KEYSTORE || '' }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ !inputs.dry-run && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
     with:
-      release: true
+      release: ${{ !inputs.dry-run }}
       version: ${{ needs.revision.outputs.version }}
 
   image:
+    name: Server image
     needs: revision
     if: needs.revision.outputs.changed == 'true'
     uses: ./.github/workflows/server.yml
@@ -104,12 +145,13 @@ jobs:
       contents: read
       packages: write
     with:
-      publish: true
+      publish: ${{ !inputs.dry-run }}
       defer-manifest: true
       channel: dev
       version: ${{ needs.revision.outputs.version }}
 
   publish-image:
+    name: Publish image
     needs: [revision, reserve, image]
     uses: ./.github/workflows/server-manifest.yml
     permissions:
@@ -124,7 +166,8 @@ jobs:
         sha-${{ github.sha }}
 
   release:
-    needs: [revision, verify, publish-image, android]
+    name: Publish release
+    needs: [revision, ci, desktop, publish-image, android]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

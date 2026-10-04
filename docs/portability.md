@@ -1,7 +1,9 @@
 # Linux and macOS readiness
 
-The native CI matrix builds Linux x64/ARM64 and macOS Intel/Apple Silicon.
-Passing it proves installation startup and a local agent turn. It does not
+The CI matrix builds Linux x64/ARM64 and macOS Intel/Apple Silicon. Intel
+macOS is cross-built on Apple Silicon and smoke-tested under Rosetta; the core
+suite still runs on an Intel runner. Passing it proves installation startup and
+a local agent turn. It does not
 prove every desktop interaction or real provider login.
 
 ## Installing a release

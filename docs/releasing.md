@@ -79,7 +79,9 @@ and add separate server targets to `latest.json`. Docker images remain separate.
 - `build:shell` runs the Tauri build with the bundle overlay and produces the
   NSIS installer on Windows, Debian and AppImage packages on Linux, or an
   application bundle and DMG on macOS. Build on the target OS and architecture;
-  staging supports Windows x64 and Linux/macOS x64 and ARM64.
+  staging supports Windows x64 and Linux/macOS x64 and ARM64. On Apple Silicon,
+  `BOITE_TARGET=x86_64-apple-darwin` builds the Intel core, sidecar and bundle
+  instead, as CI does.
 
 The shell passes Tauri's resource directory to the core through `BOITE_UI_DIR`,
 so the installed core can serve the phone UI from the macOS application bundle
@@ -191,9 +193,9 @@ that only trust the old one. No private key belongs in an artifact or Git.
 
 The Windows build uploads the installer and its `.sig`. Each Linux and macOS
 runner collects its packages with `scripts/ci/desktop-bundles.ts` into a
-`desktop-bundle-<runner>` artifact: the .deb and AppImage with their `.sig` on
-Linux, the DMG and the updater archive `Boite.app.tar.gz` with its `.sig` on
-macOS. That archive has the same name on both Mac architectures, so the script
+`desktop-bundle-<platform>` artifact, such as `desktop-bundle-macos-x64`: the
+.deb and AppImage with their `.sig` on Linux, the DMG and the updater archive
+`Boite.app.tar.gz` with its `.sig` on macOS. That archive has the same name on both Mac architectures, so the script
 renames it after the DMG beside it (`Boite_<version>_aarch64.app.tar.gz`). It
 fails the runner when a payload or a signature is missing or when a file of
 another architecture is present. Publication gathers every artifact, and

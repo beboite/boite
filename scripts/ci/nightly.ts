@@ -1,4 +1,5 @@
 import { appendFileSync, readFileSync } from 'node:fs';
+import { PORTABLE_ALL } from './changes.ts';
 
 export interface NightlyTag { name: string; commit: { sha: string } }
 export function needsNightly(sha: string, released: string[]): boolean {
@@ -31,7 +32,8 @@ if (import.meta.main) {
   const version = nightlyVersion(base, date, sha, tags);
   const tag = `v${version}`;
   const reserved = tags.some((candidate) => candidate.name === tag);
-  const output = `changed=${changed}\ntag=${tag}\nversion=${version}\nreserved=${reserved}\n`;
+  // Every portable desktop platform, as the main CI runs them, for desktop.yml's matrix.
+  const output = `changed=${changed}\ntag=${tag}\nversion=${version}\nreserved=${reserved}\nplatforms=${JSON.stringify(PORTABLE_ALL)}\n`;
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, output);
   process.stdout.write(output);
 }

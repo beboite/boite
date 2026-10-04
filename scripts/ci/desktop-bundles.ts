@@ -7,6 +7,7 @@
  */
 import { copyFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { shellTarget } from '../../apps/shell/scripts/targets';
 import { targetOf } from './updater-manifest';
 
 type Source = { from: string; to: string };
@@ -58,10 +59,12 @@ export function plan(host: string, files: string[]): Source[] {
 if (import.meta.main) {
   const output = process.argv[2];
   if (!output) throw new Error('usage: desktop-bundles.ts <output directory>');
-  const bundle = join(import.meta.dir, '../../apps/shell/src-tauri/target/release/bundle');
+  // A cross build (`BOITE_TARGET`) bundles under its triple and publishes for its architecture.
+  const { triple, cross, arch } = shellTarget();
+  const bundle = join(import.meta.dir, '../../apps/shell/src-tauri/target', ...(cross ? [triple] : []), 'release/bundle');
   const files = ['deb', 'appimage', 'dmg', 'macos'].flatMap((kind) => list(join(bundle, kind)).map((file) => `${kind}/${file}`));
   mkdirSync(output, { recursive: true });
-  for (const { from, to } of plan(`${process.platform}-${process.arch}`, files)) {
+  for (const { from, to } of plan(`${process.platform}-${arch}`, files)) {
     copyFileSync(join(bundle, from), join(output, to));
     console.log(`${from} -> ${to}`);
   }
