@@ -48,6 +48,13 @@ Three portability regressions have dedicated coverage:
   not divert the CLI entry from `PATH`. `packages/core/test/agent.test.ts`
   checks this while preserving Windows behavior.
 
+`cargo test --manifest-path apps/shell/src-tauri/Cargo.toml --test macos-window`
+checks real AppKit buttons on a hidden window at three sizes. They stay centered
+in the 44-point toolbar, keep their native order, and leave the navigation clear.
+The native layout also runs after resize, scale and focus changes; macOS owns the
+sliding title bar in fullscreen. The multi-webview runtime does not apply the
+webview builder's traffic-light position, so the shell sets their AppKit frames.
+
 ## Remaining gaps
 
 | Area | Current behavior and consequence |

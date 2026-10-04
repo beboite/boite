@@ -186,10 +186,11 @@ pub(crate) fn build_main_window<R: Runtime>(
     // macOS keeps its own frame, corners and traffic lights, drawn over the
     // top of the page: the title bar leaves them room (`TitleBar.svelte`) and
     // they sit centred in its 44 px, where the Windows caption buttons were.
+    // The multi-webview runtime ignores Wry's traffic_light_position: native
+    // layout below also reapplies the position after AppKit resizes its frame.
     #[cfg(target_os = "macos")]
     {
-        builder = builder.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true)
-            .traffic_light_position(tauri::LogicalPosition::new(16.0, 16.0));
+        builder = builder.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
     }
     builder = match work_area(app) {
         Some(area) => {
@@ -205,6 +206,25 @@ pub(crate) fn build_main_window<R: Runtime>(
         builder = builder.additional_browser_args(&args);
     }
     let window = builder.build()?;
+    #[cfg(target_os = "macos")]
+    {
+        let arrange = |window: &tauri::WebviewWindow<R>| {
+            let native = window.clone();
+            let _ = window.run_on_main_thread(move || {
+                if let Ok(pointer) = native.ns_window() {
+                    // Tauri owns this live NSWindow; AppKit access stays on its main thread.
+                    unsafe { crate::platform::macos_window::align_traffic_lights(&*pointer.cast()) };
+                }
+            });
+        };
+        arrange(&window);
+        let native = window.clone();
+        window.on_window_event(move |event| {
+            if matches!(event, tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. } | tauri::WindowEvent::Focused(true)) {
+                arrange(&native);
+            }
+        });
+    }
     // Acrylic is what a window opens on where DWM draws it, and `lib/glass.ts`
     // applies whatever the setting says as soon as the UI mounts.
     #[cfg(windows)]
