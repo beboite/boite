@@ -85,7 +85,8 @@ function memberKey(groupId: string, coreId: string): string {
 function setMark(target: string, epoch: number | null): void {
   const { [target]: was, ...rest } = droppedAddresses();
   if (epoch === null && was === undefined) return;
-  const entries = epoch === null ? Object.entries(rest) : Object.entries({ ...rest, [target]: { at: Date.now(), epoch } });
+  // A window that knew an older admission must not lower what another one recorded: the highest admission dropped stays.
+  const entries = epoch === null ? Object.entries(rest) : Object.entries({ ...rest, [target]: { at: Date.now(), epoch: Math.max(was?.epoch ?? epoch, epoch) } });
   // Addresses make room for newer ones: what was saved for an old one is long gone. Machines do not.
   const members = entries.filter(([key]) => key.startsWith('member ')).slice(0, DROPPED_MEMBERS_MAX);
   const addresses = entries.filter(([key]) => !key.startsWith('member ')).slice(-DROPPED_MAX);

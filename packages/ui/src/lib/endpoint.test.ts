@@ -331,6 +331,9 @@ describe('environments', () => {
       removeBrought(`http://10.1.${index}.1:9000`, { coreId: `m${index}`, groupId: 'grp' }, 1);
     }
     expect([isMemberDropped('grp', 'c', 3), isMemberDropped('grp', 'm0', 1), isDropped('http://10.1.299.1:9000'), isDropped('http://10.1.0.1:9000')]).toEqual([true, true, true, false]);
+    // A window that held an older admission of the machine lets it go without lowering what is recorded.
+    removeBrought('http://10.0.0.6:9000', { coreId: 'c', groupId: 'grp' }, 1);
+    expect([isMemberDropped('grp', 'c', 3), isMemberDropped('grp', 'c', 4)]).toEqual([true, false]);
     rememberSession({ url: 'http://10.0.0.6:9000', token: '', ticket: 't', coreId: 'c', groupId: 'grp', epoch: 4 }, 'four');
     // A machine that only moved leaves no mark: it may come back to the address it had.
     removeBrought('http://10.0.0.6:9000', { coreId: 'c', groupId: 'grp' });

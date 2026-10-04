@@ -235,8 +235,7 @@ allowance, 120 requests a minute, is only spent by requests that are its own,
 fresh and not seen before, one turned away for that allowance included: by
 name up to three times the allowance a minute, and past that by date, nothing
 as old as what was turned away being taken again. A request is dated against
-the clock once its body is in, and nothing dated before the core started is
-taken, since what it remembered went with the last run.
+the clock once its body is in.
 
 **Tickets.** A client connected to a member asks it for a ticket to another
 (`group.ticket`): the member's signed statement of who vouches, for whom, at
@@ -352,6 +351,11 @@ address, where it is worth nothing once the member has given that address up.
   there: a ticket, a session key and what follows are readable, and can be
   taken over, by someone on that network. Sealing it needs a secure channel
   inside the WebSocket, which a page served over plain HTTP cannot build.
+- A core remembers the requests it has seen in memory. For a minute after it
+  restarts, a request recorded on a plain HTTP path before the restart can be
+  sent to it again. Nothing is done twice by it, a letter is delivered once
+  and a roster merged again is the same roster, but it counts against the
+  allowance of the member that signed it.
 - A window trusts the machine that serves its page. A machine removed from
   the group that still serves the page a client opens decides what that page
   does, with every key saved under its address.

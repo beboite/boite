@@ -64,7 +64,6 @@ export class Coordination {
   private readonly delivering = new Set<string>();
   private readonly nonces = new Map<string, number>();
   private readonly rates = new Map<string, { since: number; count: number; floor?: number }>();
-  private readonly born = Date.now(); // nothing dated before this core started is taken: what it remembered went with the last run
   private readonly attempts = new Map<string, number>();
   /** Agents blocked in `collaboration.wait`, by thread. */
   private readonly waiters = new Map<string, Set<{ from: AgentAddress | null; done: (letters: AgentLetter[]) => void }>>();
@@ -786,7 +785,7 @@ export class Coordination {
       }
       if (!verify(null, Buffer.from(raw), peer.publicKey, Buffer.from(signature, 'base64'))) throw new Error('invalid signature');
       envelope = JSON.parse(raw) as Envelope;
-      if (envelope.from !== peer.coreId || envelope.to !== this.self('').coreId || !Number.isSafeInteger(envelope.at) || Math.abs(now - envelope.at) > 60_000 || envelope.at < this.born) throw new Error('invalid envelope');
+      if (envelope.from !== peer.coreId || envelope.to !== this.self('').coreId || !Number.isSafeInteger(envelope.at) || Math.abs(now - envelope.at) > 60_000) throw new Error('invalid envelope');
       text(envelope.nonce, 'nonce', 100);
       for (const [id, at] of this.nonces) if (now - at > 120_000) this.nonces.delete(id);
       const key = `${peer.coreId}:${envelope.nonce}`;

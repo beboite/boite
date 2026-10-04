@@ -922,12 +922,6 @@ test('a recorded request sent again and again never spends the member\'s allowan
   rates.get(id(b))!.count = 0;
   expect((await flood()).status).toBe(403);
   expect(rates.get(id(b))!.count).toBe(0);
-  // A restart forgets every name and date it held: nothing dated before it started is taken, so what was recorded before stays refused.
-  rates.clear();
-  nonces.clear();
-  (a.core.coordination as unknown as { born: number }).born = Date.now() + 1;
-  expect((await send()).status).toBe(403);
-  expect(rates.get(id(b))?.count ?? 0).toBe(0);
 });
 
 test('requests are counted against the address they come from as they arrive, and a refusal keeps its place for a minute', () => {
