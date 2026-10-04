@@ -63,7 +63,7 @@ export class Coordination {
   private readonly pending = new Set<Promise<unknown>>();
   private readonly delivering = new Set<string>();
   private readonly nonces = new Map<string, number>();
-  private readonly rates = new Map<string, { since: number; count: number }>();
+  private readonly rates = new Map<string, { since: number; count: number; floor?: number }>();
   private readonly attempts = new Map<string, number>();
   /** Agents blocked in `collaboration.wait`, by thread. */
   private readonly waiters = new Map<string, Set<{ from: AgentAddress | null; done: (letters: AgentLetter[]) => void }>>();
@@ -791,11 +791,13 @@ export class Coordination {
       const key = `${peer.coreId}:${envelope.nonce}`;
       if (this.nonces.has(key)) throw new Error('replayed request');
       const rate = this.rates.get(peer.coreId) ?? { since: now, count: 0 };
+      if (envelope.at <= (rate.floor ?? 0)) throw new Error('replayed request');
       if (now - rate.since > 60_000) { rate.since = now; rate.count = 0; }
       this.rates.set(peer.coreId, rate);
-      // Remembered before the quota decides, so a request recorded and sent again never spends the member's allowance,
-      // in this minute or, turned away here, in the next. Up to three times the quota: what one machine can make this core remember is bounded.
+      // Remembered before the quota decides, so a request recorded and sent again never spends the member's allowance, in this minute or,
+      // turned away here, in the next. Up to three times the quota by name; past that by date, nothing as old being taken again: bounded either way.
       if (++rate.count <= 360) this.nonces.set(key, now);
+      else rate.floor = Math.max(rate.floor ?? 0, envelope.at);
       if (rate.count > 120) return new Response('peer rate limit', { status: 429 });
     } catch { return new Response('invalid signed message', { status: 403 }); }
     if (this.core.group.removedPeer(peer.coreId) !== null && (envelope.operation === 'group.sync' || !this.trusted().some(p => p.coreId === peer.coreId))) {

@@ -348,7 +348,7 @@ describe('group links', () => {
     const url = 'http://100.64.0.2:1';
     rememberSession({ url, token: '', ticket: 't', coreId: 'b', groupId: 'grp', epoch: 1 }, 'key');
     // Another window, sharing this one's storage, was told the group dropped b.
-    removeBrought(url, 'b', 1);
+    removeBrought(url, { coreId: 'b', groupId: 'grp' }, 1);
     // Here the hand-paired machine has not caught up and still lists b, and b itself never says which group it is in.
     const stale = group('a', [members[0]!, core('b', [url], 1)]);
     const a = machine('http://10.0.0.1:1', { group: stale, groupKnown: false });
@@ -370,6 +370,24 @@ describe('group links', () => {
     await new GroupLinks(ws, { reach, secure: () => false }).reconcile();
     await settle();
     expect(added.map((entry) => [entry.endpoint.url, entry.endpoint.epoch])).toEqual([[url, 2]]);
+  });
+
+  it('lets go of a dropped machine under whichever of its addresses this window holds it', async () => {
+    const other = 'http://192.168.1.20:1';
+    // The window that was told had the machine at one address; this one holds it at another.
+    rememberSession({ url: 'http://100.64.0.2:1', token: '', ticket: 't', coreId: 'b', groupId: 'grp', epoch: 1 }, 'key');
+    removeBrought('http://100.64.0.2:1', { coreId: 'b', groupId: 'grp' }, 1);
+    const a = machine('http://10.0.0.1:1', { group: group('a', members) });
+    const b = machine(other, { group: group('b', members) }, { coreId: 'b' });
+    const { stub, workspace: ws, removed, added } = workspace([a, b]);
+    const reach = vi.fn(async (addresses: string[]) => addresses[0] ?? null);
+    await new GroupLinks(ws, { reach, secure: () => false }).reconcile();
+    await settle();
+    expect(removed).toEqual([other]);
+    expect(stub.remove).toHaveBeenCalledWith(other, true);
+    // The member that has not caught up lists both addresses: neither gets a ticket for the admission that was dropped.
+    expect(reach).not.toHaveBeenCalled();
+    expect(added).toEqual([]);
   });
 
   it('takes the word of the hand-paired machine that no longer lists a member over the one that still does', async () => {

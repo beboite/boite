@@ -1,7 +1,7 @@
 import { untrack } from 'svelte';
 import { RPC_PATH, type Group, type GroupCore } from '@boite/contracts';
 import { WsClient } from './client';
-import { DROPPED_STORAGE_KEY, isDropped, readEnvironments, removeBrought, type Endpoint, type StoredEnvironment } from './endpoint';
+import { DROPPED_STORAGE_KEY, isDropped, isMemberDropped, readEnvironments, removeBrought, type Endpoint, type StoredEnvironment } from './endpoint';
 import { usableAddresses } from './group-addresses';
 import type { Machine, Workspace } from './workspace.svelte';
 
@@ -136,7 +136,9 @@ export class GroupLinks {
       // Forgotten only while it is still the group's entry: the owner may have paired that machine by hand meanwhile.
       // No longer listed, the machine was dropped and its address is marked; listed elsewhere, it only moved.
       const delisted = voices.some((voice) => !voice.cores.some((listed) => listed.coreId === entry.coreId));
-      if (!stands && entry.coreId !== undefined) removeBrought(entry.url, entry.coreId, delisted ? entry.epoch ?? Number.MAX_SAFE_INTEGER : undefined);
+      if (!stands && entry.coreId !== undefined) {
+        removeBrought(entry.url, { coreId: entry.coreId, ...(entry.groupId === undefined ? {} : { groupId: entry.groupId }) }, delisted ? entry.epoch ?? Number.MAX_SAFE_INTEGER : undefined);
+      }
       return stands;
     });
   }
@@ -173,8 +175,10 @@ export class GroupLinks {
 
   async reconcile(): Promise<void> {
     // Told by another window that the group dropped a machine: it goes at once, whoever answers here and whatever this window still loads.
+    // By its address or by what it is: the machine may be held here under another address than the one that was marked.
     for (const machine of [...this.workspace.machines]) {
-      if (machine.coreId !== undefined && isDropped(machine.id, machine.epoch)) await this.#drop(machine, true);
+      if (machine.coreId === undefined) continue;
+      if (isDropped(machine.id, machine.epoch) || isMemberDropped(machine.groupId, machine.coreId, machine.epoch)) await this.#drop(machine, true);
     }
     // Remembered machines are still being added: one of them may be the member that looks missing.
     if (!this.workspace.settled) return;
@@ -193,6 +197,8 @@ export class GroupLinks {
       if (group === null || via.store.endpointUrl === null) continue;
       for (const core of group.cores) {
         if (core.coreId === group.self || wanted.has(core.coreId)) continue;
+        // The group dropped this admission of the machine: a member still listing it has not caught up.
+        if (isMemberDropped(group.id, core.coreId, core.epoch)) continue;
         // Two hand-paired machines of one group that disagree: the one that no longer lists it wins.
         if (anchors.some((other) => other.store.group?.id === group.id && !other.store.group.cores.some((listed) => listed.coreId === core.coreId))) continue;
         // An address the group dropped that machine at is not dialled on the word of a member still listing

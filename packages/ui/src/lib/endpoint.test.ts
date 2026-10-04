@@ -6,6 +6,7 @@ import {
   readStoredEndpoint,
   droppedSince,
   isDropped,
+  isMemberDropped,
   rememberSession,
   removeBrought,
   removeEnvironment,
@@ -283,7 +284,7 @@ describe('environments', () => {
     storeEndpoint({ url, token: 'first', paired: true, coreId: 'b', groupId: 'grp' });
     expect(readStoredEndpoint()).toEqual({ url, token: 'first', paired: true, coreId: 'b', groupId: 'grp' });
     rememberSession({ url, token: '', ticket: 't', coreId: 'b', groupId: 'grp' }, 'second');
-    removeBrought(url, 'b', 1);
+    removeBrought(url, { coreId: 'b', groupId: 'grp' }, 1);
     expect(readEnvironments()).toEqual([]);
     expect(readStoredEndpoint()).toBeNull();
     // From then on nothing saved for that address is read, whichever window left it and however it looks.
@@ -294,13 +295,13 @@ describe('environments', () => {
     // A new key issued for it ends that: here a pairing made by hand, which is not the group's to take.
     rememberSession({ url, token: '', grant: 'g' }, 'hand');
     storeEndpoint({ url, token: 'hand', paired: true });
-    removeBrought(url, 'b', 1);
+    removeBrought(url, { coreId: 'b', groupId: 'grp' }, 1);
     expect(readEnvironments()).toEqual([{ url, label: '10.0.0.5:9000', token: 'hand', paired: true }]);
     expect(readStoredEndpoint()).toMatchObject({ token: 'hand' });
     // An address a member merely gave, tried and given up, is no machine the group brought: the owner's key for
     // whoever really sits there, saved so far only as the core a window opens on, is left alone.
     storeEndpoint({ url: 'https://d.example', token: 'approved', paired: true });
-    removeBrought('https://d.example', 'm', 1);
+    removeBrought('https://d.example', { coreId: 'm', groupId: 'grp' }, 1);
     expect(isDropped('https://d.example')).toBe(false);
     expect(readStoredEndpoint()).toMatchObject({ url: 'https://d.example', token: 'approved' });
     storeEndpoint({ url, token: 'hand', paired: true });
@@ -308,17 +309,23 @@ describe('environments', () => {
     const began = Date.now() - 1000;
     rememberSession({ url: 'http://10.0.0.7:9000', token: '', ticket: 't', coreId: 'e', groupId: 'grp' }, 'one');
     expect(droppedSince('http://10.0.0.7:9000', began)).toBe(false);
-    removeBrought('http://10.0.0.7:9000', 'e', 1);
+    removeBrought('http://10.0.0.7:9000', { coreId: 'e', groupId: 'grp' }, 1);
     expect([isDropped('http://10.0.0.7:9000'), droppedSince('http://10.0.0.7:9000', began), droppedSince('http://10.0.0.7:9000', Date.now() + 1000)]).toEqual([true, true, false]);
     // And so does the group bringing the machine back at that address.
     rememberSession({ url: 'http://10.0.0.6:9000', token: '', ticket: 't', coreId: 'c', groupId: 'grp' }, 'one');
-    removeBrought('http://10.0.0.6:9000', 'c', 1);
+    removeBrought('http://10.0.0.6:9000', { coreId: 'c', groupId: 'grp' }, 1);
     // A member that has not caught up still lists the admission that was dropped: that is not the machine coming back.
     expect([isDropped('http://10.0.0.6:9000'), isDropped('http://10.0.0.6:9000', 1), isDropped('http://10.0.0.6:9000', 2)]).toEqual([true, true, false]);
     rememberSession({ url: 'http://10.0.0.6:9000', token: '', ticket: 't', coreId: 'c', groupId: 'grp', epoch: 2 }, 'two');
     expect(readEnvironments().find((env) => env.url === 'http://10.0.0.6:9000')).toMatchObject({ token: 'two', coreId: 'c', epoch: 2 });
+    // The machine is marked as what it is too, for a window that holds it under another address, until a later admission brings it back.
+    removeBrought('http://10.0.0.6:9000', { coreId: 'c', groupId: 'grp' }, 2);
+    expect([isMemberDropped('grp', 'c'), isMemberDropped('grp', 'c', 2), isMemberDropped('grp', 'c', 3), isMemberDropped('other', 'c')]).toEqual([true, true, false, false]);
+    expect(droppedSince('http://10.0.0.9:9000', began, { coreId: 'c', groupId: 'grp' })).toBe(true);
+    rememberSession({ url: 'http://10.0.0.6:9000', token: '', ticket: 't', coreId: 'c', groupId: 'grp', epoch: 3 }, 'three');
+    expect(isMemberDropped('grp', 'c')).toBe(false);
     // A machine that only moved leaves no mark: it may come back to the address it had.
-    removeBrought('http://10.0.0.6:9000', 'c');
+    removeBrought('http://10.0.0.6:9000', { coreId: 'c', groupId: 'grp' });
     expect([isDropped('http://10.0.0.6:9000'), readEnvironments().some((env) => env.url === 'http://10.0.0.6:9000')]).toEqual([false, false]);
   });
 

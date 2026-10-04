@@ -915,8 +915,13 @@ test('a recorded request sent again and again never spends the member\'s allowan
   const held = nonces.size;
   const more = JSON.stringify({ from: id(b), to: id(a), at: Date.now(), nonce: crypto.randomUUID(), operation: 'directory', payload: {} });
   const beyond = b.core.group.sealFor(id(a), pack(more, b.core.coordination.signature(Buffer.from(more)).toString('base64')))!;
-  expect((await fetch(`${a.url}/agent-messages`, { method: 'POST', body: beyond.body, headers: { 'x-boite-peer': id(b), 'x-boite-signature': SEALED } })).status).toBe(429);
+  const flood = () => fetch(`${a.url}/agent-messages`, { method: 'POST', body: beyond.body, headers: { 'x-boite-peer': id(b), 'x-boite-signature': SEALED } });
+  expect((await flood()).status).toBe(429);
   expect(nonces.size).toBe(held);
+  // Not remembered by name, it is by date: sent again once the minute is over, it is refused and spends nothing.
+  rates.get(id(b))!.count = 0;
+  expect((await flood()).status).toBe(403);
+  expect(rates.get(id(b))!.count).toBe(0);
 });
 
 test('requests are counted against the address they come from as they arrive, and a refusal keeps its place for a minute', () => {

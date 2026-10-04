@@ -232,8 +232,9 @@ never of another's. A member the core never served yet can be turned away with
 the strangers while such a flood lasts. Requests from the machine itself are not
 counted, since a reverse proxy puts every remote peer behind that one address. A member's own
 allowance, 120 requests a minute, is only spent by requests that are its own,
-fresh and not seen before, one turned away for that allowance included, up to
-three times the allowance a minute.
+fresh and not seen before, one turned away for that allowance included: by
+name up to three times the allowance a minute, and past that by date, nothing
+as old as what was turned away being taken again.
 
 **Tickets.** A client connected to a member asks it for a ticket to another
 (`group.ticket`): the member's signed statement of who vouches, for whom, at
@@ -298,9 +299,11 @@ machine the group drops leaves the window, and its saved entry goes only while
 it is still the one the group brought: paired by hand since, in another
 window, the entry stays. The group's mark is kept wherever a key of that
 machine is saved, the core the window opens on next included, and a link that
-reopens the machine keeps it. The address of a machine the group dropped is
-remembered, in storage every window shares (`boite.group.dropped`), with which
-admission of the machine it was (`GroupCore.epoch`). Nothing saved for that
+reopens the machine keeps it. A machine the group dropped is remembered, by
+its address and by what it is, in storage every window shares
+(`boite.group.dropped`), with which admission of it that was
+(`GroupCore.epoch`): a window that holds it under another address lets it go
+too. Nothing saved for that
 address is read again, whichever window left it and wherever it sits, so a key
 left behind never passes for a pairing made by hand, and a link to that address
 asks as for a core nobody knows. No ticket is asked for it on the word of a

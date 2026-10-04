@@ -475,7 +475,7 @@ export class Workspace {
     machine.store.detach();
     this.machines = this.machines.filter((m) => m !== machine);
     if (machine.coreId === undefined) removeEnvironment(id);
-    else removeBrought(id, machine.coreId, dropped ? machine.epoch ?? Number.MAX_SAFE_INTEGER : undefined);
+    else removeBrought(id, { coreId: machine.coreId, ...(machine.groupId === undefined ? {} : { groupId: machine.groupId }) }, dropped ? machine.epoch ?? Number.MAX_SAFE_INTEGER : undefined);
     if (this.active === machine.store) await this.select(store);
   }
 
@@ -491,7 +491,8 @@ export class Workspace {
     const next = this.#byHand();
     if (next && next.url !== id) await store.switchEnvironment(next.url);
     const was = this.machines.find((m) => m.store === store);
-    await store.forgetEnvironment(id, was?.coreId, dropped ? was?.epoch ?? Number.MAX_SAFE_INTEGER : undefined);
+    const brought = was?.coreId === undefined ? undefined : { coreId: was.coreId, ...(was.groupId === undefined ? {} : { groupId: was.groupId }) };
+    await store.forgetEnvironment(id, brought, dropped ? was?.epoch ?? Number.MAX_SAFE_INTEGER : undefined);
     // Nothing to fall back on: the window shows a machine paired by hand that is still connected, if there is one.
     const other = store.connection === 'ready' ? undefined : this.machines.find((m) => m.store !== store && m.coreId === undefined && m.store.connection === 'ready');
     if (other && this.active === store) await this.select(other.store);

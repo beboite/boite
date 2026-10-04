@@ -72,7 +72,15 @@ function droppedAddresses(): Record<string, Dropped> {
  * admitted the machine again.
  */
 function setDropped(url: string, epoch: number | null): void {
-  const target = normalise(url);
+  setMark(normalise(url), epoch);
+}
+
+/** The same machine under every address it gives: a drop heard for one of them holds for the others. */
+function memberKey(groupId: string, coreId: string): string {
+  return `member ${groupId} ${coreId}`;
+}
+
+function setMark(target: string, epoch: number | null): void {
   const { [target]: was, ...rest } = droppedAddresses();
   if (epoch === null && was === undefined) return;
   const next = epoch === null ? Object.entries(rest) : Object.entries({ ...rest, [target]: { at: Date.now(), epoch } }).slice(-DROPPED_MAX);
@@ -98,9 +106,21 @@ export function isDropped(url: string, epoch?: number): boolean {
  * before the drop and ends after it is for a machine that has left since: its
  * key is not kept, and does not bring the address back.
  */
-export function droppedSince(url: string, began: number): boolean {
-  const mark = droppedAddresses()[normalise(url)];
-  return mark !== undefined && mark.at >= began;
+export function droppedSince(url: string, began: number, member?: { coreId?: string; groupId?: string }): boolean {
+  const marks = droppedAddresses();
+  const of = member?.coreId !== undefined && member.groupId !== undefined ? marks[memberKey(member.groupId, member.coreId)] : undefined;
+  return [marks[normalise(url)], of].some((mark) => mark !== undefined && mark.at >= began);
+}
+
+/**
+ * Whether the group dropped this machine, whatever address it is reached at.
+ * With `epoch`, the admission a member lists for it now: a later one than the
+ * one dropped is the machine admitted again.
+ */
+export function isMemberDropped(groupId: string | undefined, coreId: string | undefined, epoch?: number): boolean {
+  if (groupId === undefined || coreId === undefined) return false;
+  const mark = droppedAddresses()[memberKey(groupId, coreId)];
+  return mark !== undefined && (epoch === undefined || epoch <= mark.epoch);
 }
 
 export function readStoredEndpoint(): Endpoint | null {
@@ -280,8 +300,9 @@ export function forgetGroupOf(url: string): StoredEnvironment[] {
  * over it any more, so the mark that lets a group drop it goes.
  */
 export function rememberSession(endpoint: Endpoint, token: string): StoredEnvironment[] {
-  // A new key for that address: whatever was dropped there before is past.
+  // A new key for that address, and for that machine when the group brings it: whatever was dropped before is past.
   setDropped(endpoint.url, null);
+  if (endpoint.grant === undefined && endpoint.coreId !== undefined && endpoint.groupId !== undefined) setMark(memberKey(endpoint.groupId, endpoint.coreId), null);
   if (endpoint.grant !== undefined) forgetGroupOf(endpoint.url);
   return upsertEnvironment({ url: endpoint.url, token, paired: true, ...brought(endpoint) });
 }
@@ -309,7 +330,10 @@ export function removeEnvironment(url: string, token?: string): StoredEnvironmen
  * machine, and which admission of it: its address is then marked for every
  * window. Without it the machine only moved, and nothing is marked.
  */
-export function removeBrought(url: string, coreId: string, dropped?: number): StoredEnvironment[] {
+export function removeBrought(url: string, machine: { coreId: string; groupId?: string }, dropped?: number): StoredEnvironment[] {
+  const { coreId, groupId } = machine;
+  // The machine is marked whatever is saved for this address: another window may hold it under another one.
+  if (dropped !== undefined && groupId !== undefined) setMark(memberKey(groupId, coreId), dropped);
   const saved = readEnvironments().find((env) => env.url === normalise(url));
   const stored = readStoredEndpoint();
   // Something saved must say the group brought that machine there. An address a member merely gave, and
