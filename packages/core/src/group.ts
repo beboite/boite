@@ -21,8 +21,8 @@
  * is not: that link is as private as its transport, Tailscale, HTTPS, or a
  * LAN the owner chose to listen on, the same as a `ws://` pairing.
  */
-
 import { randomUUID, verify } from 'node:crypto';
+import { migrateGroupPeer } from './coordination-group.ts';
 import type { KeyObject } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
@@ -367,7 +367,7 @@ export class GroupStore {
     this.reconciling = true;
     try {
       // Group membership replaces standing pairwise trust, which would survive a removal.
-      for (const peer of this.core.coordination.peers()) if (cores.has(peer.coreId)) this.core.coordination.untrust(peer.coreId);
+      for (const peer of this.core.coordination.peers()) if (cores.has(peer.coreId)) migrateGroupPeer(this.core, peer);
       const gone = Object.entries(this.sessions).filter(([sessionId, member]) => dead(member) || retired(sessionId)).map(([sessionId]) => sessionId);
       // A device paired here and revoked elsewhere loses its own session too.
       if (roster !== null) {

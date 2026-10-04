@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, untrack } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import { ConnectionGroup } from '../lib/connection-group.svelte';
   import { GroupLinks } from '../lib/group-links.svelte';
   import InfoTip from './InfoTip.svelte';
@@ -18,10 +18,26 @@
   import AppUpdateContent from './AppUpdateContent.svelte';
   import { showAppUpdateUi } from '../lib/app-update.svelte';
   import PairMachine from './PairMachine.svelte';
+  import type { Store } from '../lib/store.svelte';
   let { mobile = false }: { mobile?: boolean } = $props();
   const migration = new ConnectionGroup(workspace);
   onDestroy(() => migration.stop());
   const groupStore = $derived((migration.source && workspace.machines.includes(migration.source) ? migration.source.store : null) ?? workspace.machines.find(machine => machine.store.group)?.store ?? workspace.active);
+  const groupStores = $derived.by(() => {
+    const groups = new Map<string, Store>();
+    for (const store of [groupStore, ...workspace.machines.map(machine => machine.store)]) {
+      if (!store.group) continue;
+      const previous = groups.get(store.group.id);
+      if (!previous || !previous.owner && store.owner) groups.set(store.group.id, store);
+    }
+    return groups.size ? [...groups.values()] : [groupStore];
+  });
+  function machinesOf(owner: Store): Machine[] {
+    return workspace.machines.filter(machine => {
+      const groupId = machine.store.group?.id ?? machine.groupId;
+      return groupId ? groupId === owner.group?.id : owner === groupStores[0];
+    });
+  }
   $effect(() => {
     for (const machine of workspace.machines) {
       void machine.store.connection;
@@ -44,17 +60,22 @@
   });
 
   /** Sign-ins happen on the machine that keeps them: its own Providers page. */
+  async function repair() {
+    memberRepair = true;
+    await tick();
+    pairingForm?.startAdding();
+  }
+
   async function openProviders(machine: Machine) {
     await workspace.select(machine.store);
     machine.store.showSettings('accounts');
   }
   /** Removing a member ends its group membership and forgets its connection on this client. */
-  async function removeMachine(machine: { id: string; label: string }) {
-    const owner = groupStore;
+  async function removeMachine(machine: Machine, owner: Store) {
     const groupId = owner.group?.id;
     const member = workspace.machines.find(candidate => candidate.id === machine.id);
     const coreId = member && GroupLinks.coreOf(member);
-    const grouped = coreId !== undefined && groupStore.group?.cores.some(core => core.coreId === coreId);
+    const grouped = coreId !== undefined && owner.group?.cores.some(core => core.coreId === coreId);
     const ok = await confirm.ask({
       title: fill(grouped ? strings.group.removeTitle : strings.machines.removeTitle, { machine: machine.label }),
       body: grouped ? strings.group.removeBody : strings.machines.removeBody,
@@ -114,11 +135,12 @@
   <section class="connections-section" id="settings-machines" aria-labelledby="connections-heading">
     <h2 class="section-heading ui-label-box" id="connections-heading"><Monitor size={16} /><span class="ui-label">{strings.machines.connections}</span></h2>
     {#if !groupStore.owner}<PairMachine {mobile} bind:this={pairingForm} />{/if}
-    <GroupCard store={groupStore} {mobile} migration={migration}>
+    {#each groupStores as owner (owner.group?.id ?? 'ungrouped')}
+    <GroupCard store={owner} {mobile} migration={owner === groupStores[0] ? migration : undefined}>
     <div class="machines">
-      {#each workspace.machines as machine (machine.id)}
+      {#each machinesOf(owner) as machine (machine.id)}
         {@const coreId = GroupLinks.coreOf(machine)}
-        <section data-core-id={coreId} class="machine-card" data-testid="machine-card" data-group-member={coreId && groupStore.group?.cores.some(core => core.coreId === coreId) ? "true" : undefined} data-machine-id={machine.id}>
+        <section data-core-id={coreId} class="machine-card" data-testid="machine-card" data-group-member={coreId && owner.group?.cores.some(core => core.coreId === coreId) ? "true" : undefined} data-machine-id={machine.id}>
           <div class="main">
             <button
               class="ghost logo"
@@ -138,12 +160,12 @@
             </div>
             <div class="actions">
               {#if machine.store.pairingRequired}
-                <button class="ghost small" data-testid="machine-repair" onclick={() => { if (groupStore.owner) memberRepair = true; else pairingForm?.startAdding(); }}><ScanLine size={15} /><span class="ui-label">{strings.mobile.pairAgain}</span></button>
+                <button class="ghost small" data-testid="machine-repair" onclick={() => { if (groupStore.owner) void repair(); else pairingForm?.startAdding(); }}><ScanLine size={15} /><span class="ui-label">{strings.mobile.pairAgain}</span></button>
               {:else if machine.store.connection === 'closed'}
                 <button class="ghost icon-only" aria-label={strings.common.refresh} title={strings.common.refresh} onclick={() => void machine.store.connect()}><RefreshCw size={15} /></button>
               {/if}
               {#if machine.store !== primary}
-                <button class="ghost icon-only" data-testid="machine-remove" aria-label={strings.machines.remove} title={strings.machines.remove} onclick={() => void removeMachine(machine)}><Trash2 size={15} /></button>
+                <button class="ghost icon-only" data-testid="machine-remove" aria-label={strings.machines.remove} title={strings.machines.remove} onclick={() => void removeMachine(machine, owner)}><Trash2 size={15} /></button>
               {/if}
               <!-- The machine already open has nowhere to go. -->
               {#if machine.store !== workspace.active}
@@ -187,7 +209,8 @@
       {/each}
     </div>
     </GroupCard>
-    {#if memberRepair}<PairMachine {mobile} onpaired={() => memberRepair = false} />{/if}
+    {/each}
+    {#if memberRepair}<PairMachine {mobile} bind:this={pairingForm} onpaired={() => memberRepair = false} />{/if}
   </section>
 
 

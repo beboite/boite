@@ -42,7 +42,7 @@ test('a phone with no key pairs again from Machines and sees its threads', async
   expect(await page.evaluate(`document.querySelector('${id('machine-remove')}') === null`)).toBe(true);
   await page.screenshot(join(import.meta.dir, '.artifacts', 'pairing-recovery-refused-phone.png'));
 
-  await page.click(id('machine-add-open'));
+  await page.click(id('machine-repair'));
   await page.type(id('machine-link'), await mintPairing(core));
   // Before anything connects, the form names the machine the link reaches.
   await page.waitFor(`document.querySelector('${id('machine-link-target')}')?.textContent.includes(${JSON.stringify(new URL(core.url).host)})`);

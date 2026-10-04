@@ -31,7 +31,7 @@
   $effect(() => { if (editing && group?.id !== editingId) editing = false;
     else if (editing && renameInput) { renameInput.focus(); renameInput.select(); } });
   async function rename() {
-    if (!editing || busy || !group) return;
+    if (!editing || busy || !group || group.id !== editingId) return;
     if (!name.trim()) { name = group.name; editing = false; return; }
     const target = store;
     await run('rename', async () => {

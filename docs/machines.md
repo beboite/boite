@@ -77,9 +77,11 @@ A loopback core is retried regardless, since it is on the same machine.
 
 A key a remote core refuses is not retried: the machine shows as closed with
 the reason. A page opened on its own core with no key says the device holds
-none. Pasting a pairing link under Add a machine replaces the key of any
-listed machine that is not connected, the page's own included, which cannot
-be removed. Only a connected machine is refused as already connected.
+none. Click the affected machine's **Pair again** control and paste a new
+pairing link from that machine. This replaces the key of a listed machine that
+is not connected, the page's own included, which cannot be removed. Device-only
+clients can also paste the link under **Add a machine**. Only a connected
+machine is refused as already connected.
 
 The link decides which machine is reached; the name only labels it. Once a
 link is pasted the form names the host it reaches and the listed machine at

@@ -12,7 +12,9 @@ machines join when they reconnect while the page is open. Device-only
 connections retain their role and are never made group members.
 
 A machine already in another group stays there and shows the group to leave
-before moving it. Failed migrations name the machine and can be retried.
+before moving it; each existing group keeps its own name and controls.
+An existing offline group is reused when it returns, and creation waits for
+unknown owners to answer. Failed migrations name the machine and can be retried.
 Leaving or removing a migrated machine is remembered on this client, so opening
 Settings again does not join it back automatically.
 

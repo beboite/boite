@@ -569,6 +569,11 @@ test('coordination stays scoped to its core and paired devices can only inspect 
   expect((await first.call('collaboration.directory', { threadId: 't-trace' })).agents).toContainEqual(expect.objectContaining({ coreId: b.coreId, threadId: 't-trace' }));
   await expect(first.call('collaboration.read', { threadId: 't-trace', target: { coreId: b.coreId, threadId: 't-trace' } })).rejects.toThrow('not allowed to read');
   await second.call('collaboration.trust', { peer: { ...a, readThreads: true } });
+  await first.call('group.create', { name: 'Home' });
+  await second.call('group.join', { invite: (await first.call('group.invite', {})).invite });
+  expect(await first.call('collaboration.peers', {})).toEqual([]);
+  expect(await second.call('collaboration.peers', {})).toEqual([]);
+  expect((await first.call('collaboration.directory', { threadId: 't-trace' })).agents).toContainEqual(expect.objectContaining({ coreId: b.coreId, threadId: 't-trace' }));
   expect((await first.call('collaboration.read', { threadId: 't-trace', target: { coreId: b.coreId, threadId: 't-trace' } })).entries.length).toBeGreaterThan(0);
   await expect(phone.call('collaboration.bridge.register', { coreId: a.coreId, enabled: true })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
   await second.call('projects.archive', { projectId: 'p-boite', archived: true });
@@ -594,6 +599,9 @@ test('coordination stays scoped to its core and paired devices can only inspect 
   expect((await first.call('collaboration.get', { threadId: 't-trace' })).messages.find(message => message.id === pausedLetter.id)?.status).toBe('delivered');
   await first.call('collaboration.untrust', { coreId: b.coreId });
   expect(await first.call('collaboration.peers', {})).toEqual([]);
+  await first.call('group.remove', { coreId: b.coreId });
+  expect((await first.call('collaboration.directory', { threadId: 't-trace' })).agents.some(agent => agent.coreId === b.coreId)).toBe(false);
+  await expect(first.call('collaboration.send', { threadId: 't-trace', to: { coreId: b.coreId, threadId: 't-trace' }, text: 'Removed', requestId: 'removed' })).rejects.toThrow('not trusted');
   await first.call('threads.archive', { threadId: 't-trace', archived: true });
   expect((await first.call('collaboration.directory', { threadId: 't-trace' })).agents).toEqual([]);
   await expect(first.call('collaboration.send', { threadId: 't-trace', to: { coreId: a.coreId, threadId: 't-descriptors' }, text: 'Archived sender', requestId: 'archived' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });

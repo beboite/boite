@@ -24,7 +24,7 @@ afterEach(async () => {
   localStorage.clear();
 });
 
-async function setup() {
+async function setup(separate = false) {
   const machines: Machine[] = [];
   for (const id of ['source', 'target']) {
     const store = new Store();
@@ -35,9 +35,13 @@ async function setup() {
   }
   workspace.machines = machines;
   workspace.active = machines[0]!.store;
+  if (separate) {
+    await machines[0]!.store.createGroup('Home');
+    await machines[1]!.store.createGroup('Office');
+  }
   stop = workspace.settingsSync.start();
   mounted = mount(MachinesPage, { target: document.body, props: { mobile: true } });
-  await vi.waitFor(() => { flushSync(); expect(machines[0]!.store.group?.cores).toHaveLength(2); });
+  await vi.waitFor(() => { flushSync(); expect(machines[0]!.store.group?.cores).toHaveLength(separate ? 1 : 2); });
   return { source: machines[0]!, target: machines[1]! };
 }
 
@@ -141,6 +145,26 @@ test('removing a connected row removes the group member and keeps the current co
   expect((await source.store.client!.call('group.get', {}))?.cores.map(core => core.coreId)).toEqual(['source']);
   expect(workspace.active).toBe(source.store);
   expect(source.store.openThread).toBe(thread);
+});
+
+test('existing separate groups keep their own actions and removing their row leaves the correct group', async () => {
+  const { source, target } = await setup(true);
+  const cards = document.querySelectorAll<HTMLElement>('[data-testid="group-card"]');
+  expect(cards).toHaveLength(2);
+  const office = [...cards].find(card => card.querySelector('[data-testid="group-rename-start"]')?.textContent === 'Office')!;
+  expect(office.querySelector('[data-machine-id="target"]')).not.toBeNull();
+  office.querySelector<HTMLButtonElement>('[data-testid="group-rename-start"]')!.click();
+  flushSync();
+  input('[data-testid="group-rename"]', 'Work');
+  query('[data-testid="group-rename"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await vi.waitFor(() => expect(target.store.group?.name).toBe('Work'));
+  expect(source.store.group?.name).toBe('Home');
+  query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-remove"]').click();
+  await vi.waitFor(() => expect(confirm.current).not.toBeNull());
+  confirm.answer(true);
+  await vi.waitFor(() => expect(workspace.machines).toHaveLength(1));
+  expect(target.store.group).toBeNull();
+  expect(source.store.group?.name).toBe('Home');
 });
 
 test.each([

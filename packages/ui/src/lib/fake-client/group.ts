@@ -3,7 +3,7 @@ import { GRANT_TTL_MS, GROUP_INVITE_PREFIX, GROUP_MAX_CORES, GROUP_TICKET_TTL_MS
 import { RpcFailure } from '../client';
 import { usableAddresses } from '../group-addresses';
 import { secureId } from '../secure-id';
-import { fakeCore } from './coordination';
+import { fakeCore, migratePeer } from './coordination';
 import type { FakeContext, FakeMethods } from './context';
 
 /** What the members of one fake group share. Each context points at the roster of the group it is in. */
@@ -49,7 +49,10 @@ function announce(roster: FakeRoster, also: FakeContext[] = []): void {
     if (member !== undefined) heard.add(member);
   }
   for (const member of heard) {
-    if (member.roster === roster) for (const core of roster.cores) member.peers.delete(core.coreId);
+    for (const [coreId, grant] of member.groupReads) {
+      if (member.roster !== roster || !roster.cores.some(core => core.coreId === coreId && grant.epoch === core.epoch)) member.groupReads.delete(coreId);
+    }
+    if (member.roster === roster) for (const core of roster.cores) migratePeer(member, core.coreId);
     member.emit('group.updated', {});
   }
 }
@@ -61,6 +64,7 @@ export function groupMethods(ctx: FakeContext) {
       const roster = required(ctx);
       const name = typeof params?.name === 'string' ? params.name.trim() : '';
       if (!name || name.length > 80) throw invalid('name: expected 1 to 80 characters', 'name');
+      if (name === roster.name) return view(ctx)!;
       roster.name = name;
       announce(roster);
       return view(ctx)!;

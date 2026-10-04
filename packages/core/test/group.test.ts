@@ -155,6 +155,36 @@ test('the owner renames a group on either member, and the name survives synchron
   expect(restart(a).view('owner')?.name).toBe('Studio');
 });
 
+test('migration preserves granted transcript reads only for the current group admission', async () => {
+  const a = await machine();
+  const b = await machine();
+  const ownerA = await a.connect();
+  const ownerB = await b.connect();
+  const ta = (await echoThread(a, ownerA, 'Reader')).threadId;
+  const tb = (await echoThread(b, ownerB, 'Writer')).threadId;
+  const config: CoordinationConfig = { mode: 'brief', resources: '', remote: true, paused: false };
+  a.core.coordination.configure(ta, config);
+  b.core.coordination.configure(tb, config);
+  b.core.coordination.trust({ ...a.core.coordination.card(), name: 'A', url: a.url, readThreads: true });
+  await a.core.group.create('Home');
+  await join(a, b);
+  expect(b.core.coordination.peers()).toEqual([]);
+  expect((await a.core.coordination.read(ta, { coreId: id(b), threadId: tb })).contact.threadId).toBe(tb);
+  await b.core.group.close();
+  restart(b);
+  expect((await a.core.coordination.read(ta, { coreId: id(b), threadId: tb })).contact.threadId).toBe(tb);
+  await a.core.group.remove(id(b));
+  await waitFor(() => b.core.group.view('owner') === null);
+  expect(b.core.coordination.trusted()).toEqual([]);
+  await join(a, b);
+  await expect(a.core.coordination.read(ta, { coreId: id(b), threadId: tb })).rejects.toThrow('not allowed to read');
+  b.core.coordination.trust({ ...a.core.coordination.card(), name: 'A', url: a.url, readThreads: true });
+  expect(b.core.coordination.peers()).toEqual([]);
+  expect((await a.core.coordination.read(ta, { coreId: id(b), threadId: tb })).contact.threadId).toBe(tb);
+  b.core.coordination.untrust(id(a));
+  await expect(a.core.coordination.read(ta, { coreId: id(b), threadId: tb })).rejects.toThrow('not allowed to read');
+});
+
 test('a roster from another machine is read field by field', async () => {
   const a = await machine();
   await a.core.group.create('Home');

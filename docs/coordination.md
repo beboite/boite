@@ -68,26 +68,17 @@ the others' keys, over the addresses the group gives, HTTP on a tailnet or a
 LAN included, with the app closed. What follows links two machines that share
 no group.
 
-Connect both machines in Machines using owner connections. The app relays signed
-requests between these connections, including a desktop core without a public
-address. Both connections must remain open for this route. For communication
-while the app is closed, give each core an HTTPS public address in Settings,
-Machines and updates, Phone app, reachable from the other core. The app links every pair
-of owner machines it holds
-at the same time: Boite exchanges their public identities and checks the
-connection in both directions. A pair that fails shows why in the agent links
-section of Machines, and is tried again when one of them reconnects. A link
-the user removes there stays removed until the user links the pair again by
-hand. HTTP is accepted only on numeric loopback for two cores on the same
-computer.
+Opening Machines converts existing owner connections into one group. The app
+relays sealed requests between connected members when they cannot dial each
+other directly. Both owner connections must remain open for this route.
+Members that can reach each other communicate with the app closed.
 
-A connected machine in the app does not by itself establish agent coordination.
-Machines shows saved reciprocal configuration separately from a successful
-signed connection check. A failed check remains visible even when both cores
-have saved peer cards, and Link agents can repair that pair. Each core keeps
-its identity, trusted peers and read permissions in its data directory across
-restarts and updates. The app recreates its session-scoped relay when both owner
-connections reconnect; it checks the saved identities in both directions.
+The legacy collaboration API still supports manual links between machines
+sharing no group. Each core keeps its identity and configured permissions in
+its data directory. Migration replaces standing pairwise trust with group
+membership, so removing a member also ends its agent access. Existing separate
+groups retain their own controls; moving a machine requires leaving its old
+group first.
 
 Across projects and machines is enabled by default for ordinary conversations.
 Both endpoints must allow it: disabling it restricts discovery and messages to
@@ -95,14 +86,15 @@ that conversation's project on the same core. A machine link never overrides
 a conversation's explicit restrictions or pause. Removing a link revokes that
 machine's access on the selected core.
 
-Links initially allow discovery and messages. In Machines, check which linked
-machines' agents may read conversations on each destination. The checkbox names
-both machines: granting a server access to a desktop does not grant the desktop
-access to the server. Clearing it immediately denies reading and removes chat
-excerpts from searches. Identity refreshes and reconnects preserve this choice;
-removing and recreating the link starts with reading denied. Existing links also
-require this explicit grant. Only owner connections can change it. Older cores
-show a disabled checkbox until upgraded.
+Links and group membership initially allow discovery and messages. Transcript
+reading requires an explicit directional grant on the destination. Existing
+read grants survive migration and restart for the current admissions of both
+machines; removing either machine ends them. Joining again starts with reading
+denied. Owner callers can set `readThreads` through `collaboration.trust`;
+for an existing group member this updates its read grant without creating
+standing trust. `collaboration.untrust` clears the grant while group membership
+continues to authorize discovery and messages. The simplified Machines page
+has no individual agent-link controls.
 
 Each core signs requests and responses with its own Ed25519 key. Trusted public
 keys identify peers; owner tokens and provider credentials never cross this

@@ -203,15 +203,13 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     await page.click(id('settings-tab-machines'));
     const admin = await connect(restarted.url, restarted.token);
     try {
-      const session = (await admin.call('sessions.list', {}))[0]!;
-      await admin.call('sessions.revoke', { sessionId: session.id });
-      await page.waitFor(`document.querySelector('[data-testid="machine-card"][data-machine-id="${second.url}"] .status')?.textContent === 'Pair this app'`);
-      expect(await page.evaluate(`!!document.querySelector('[data-testid="machine-card"][data-machine-id="${second.url}"] [data-testid=machine-repair]')`)).toBe(true);
-      const replacement = await admin.call('pairing.grant', { role: 'owner' });
-      await page.click(`[data-machine-id="${second.url}"] ${id('machine-repair')}`);
-      await page.click(id('machine-add-open'));
-      await page.type(id('machine-link'), replacement.url);
-      await page.click(id('machine-add'));
+      const sessions = await admin.call('sessions.list', {});
+      expect(sessions.length).toBeGreaterThan(0);
+      for (const session of sessions) await admin.call('sessions.revoke', { sessionId: session.id });
+      // Its other group member can issue a replacement key without a new pairing link.
+      const previous = sessions.map(session => session.id);
+      await page.waitFor(`globalThis.__boiteTest.workspace.machines[1]?.store.client.call('sessions.list', {}).then(sessions => sessions.some(session => !${JSON.stringify(previous)}.includes(session.id))).catch(() => false)`);
+      expect((await admin.call('sessions.list', {})).some(current => !previous.includes(current.id))).toBe(true);
       await page.waitFor(`document.querySelector('[data-testid="machine-card"][data-machine-id="${second.url}"] .status')?.textContent === 'Connected'`);
       expect(await page.evaluate(`document.querySelectorAll('${id('machine-card')}').length`)).toBe(2);
     } finally { admin.close(); }

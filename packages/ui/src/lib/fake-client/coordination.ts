@@ -1,5 +1,5 @@
 /** Coordination between threads, on this core and on the other fake cores it trusts. */
-import { defaultCoordinationConfig, RpcErrorCode, type AgentContact, type AgentLetter, type AgentMatch, type CoordinationConfig, type CoordinationView, type Thread, type ThreadId } from '@boite/contracts';
+import { defaultCoordinationConfig, RpcErrorCode, type AgentContact, type AgentLetter, type AgentMatch, type CoordinationConfig, type CoordinationPeer, type CoordinationView, type Thread, type ThreadId } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { archiveProject } from './project-archive';
 import type { FakeContext, FakeMethods } from './context';
@@ -18,6 +18,29 @@ export function fakeCore(coreId: string): FakeContext | undefined {
 
 export function unregisterCore(ctx: FakeContext): void {
   if (cores.get(ctx.identity.coreId) === ctx) cores.delete(ctx.identity.coreId);
+}
+
+/** Manual links and live group admissions are the two sources of remote trust. */
+function trusted(ctx: FakeContext): CoordinationPeer[] {
+  const manual = [...ctx.peers.values()];
+  const group = ctx.roster;
+  const members = (group?.cores ?? []).filter(core => core.coreId !== ctx.identity.coreId && !ctx.peers.has(core.coreId));
+  return [...manual, ...members.map(core => {
+    const grant = ctx.groupReads.get(core.coreId);
+    return { ...cores.get(core.coreId)?.identity, coreId: core.coreId, name: core.name, url: core.addresses[0] ?? '', publicKey: cores.get(core.coreId)?.identity.publicKey ?? '',
+      readThreads: grant?.groupId === group?.id && grant?.epoch === core.epoch };
+  })];
+}
+const trusts = (ctx: FakeContext, coreId: string) => trusted(ctx).some(peer => peer.coreId === coreId);
+const reads = (ctx: FakeContext, coreId: string) => trusted(ctx).some(peer => peer.coreId === coreId && peer.readThreads === true);
+
+export function migratePeer(ctx: FakeContext, coreId: string): void {
+  const member = ctx.roster?.cores.find(core => core.coreId === coreId);
+  const peer = ctx.peers.get(coreId);
+  if (!ctx.roster || !member || !peer) return;
+  if (peer.readThreads) ctx.groupReads.set(coreId, { groupId: ctx.roster.id, epoch: member.epoch });
+  else ctx.groupReads.delete(coreId);
+  ctx.peers.delete(coreId);
 }
 
 export function coordinationConfig(ctx: FakeContext, threadId: ThreadId): CoordinationConfig {
@@ -67,9 +90,9 @@ function reachable(ctx: FakeContext, threadId: ThreadId): { contact: AgentContac
   const found = [...ctx.threads.values()]
     .filter(thread => thread.id !== threadId && !thread.archived && coordinationConfig(ctx, thread.id).mode !== 'off' && (thread.projectId === source.projectId || sourceConfig.remote && coordinationConfig(ctx, thread.id).remote))
     .map(thread => ({ contact: contactOf(ctx, thread, ctx.identity.coreId, ctx.identity.name), core: ctx }));
-  if (sourceConfig.remote) for (const peer of ctx.peers.values()) {
+  if (sourceConfig.remote) for (const peer of trusted(ctx)) {
     const target = cores.get(peer.coreId);
-    if (!target || !target.peers.has(ctx.identity.coreId)) continue;
+    if (!target || !trusts(target, ctx.identity.coreId)) continue;
     for (const thread of target.threads.values()) {
       const config = coordinationConfig(target, thread.id);
       if (!thread.archived && config.mode !== 'off' && config.remote) found.push({ contact: contactOf(target, thread, peer.coreId, peer.name), core: target });
@@ -93,7 +116,7 @@ function deliverPending(ctx: FakeContext, threadId: ThreadId): void {
     if (sourceConfig.mode === 'off') continue;
     const sameProject = sender === ctx && source.projectId === thread.projectId;
     if (!sameProject && !(config.remote && sourceConfig.remote)) continue;
-    if (sender !== ctx && !(ctx.peers.has(sender.identity.coreId) && sender.peers.has(ctx.identity.coreId))) continue;
+    if (sender !== ctx && !(trusts(ctx, sender.identity.coreId) && trusts(sender, ctx.identity.coreId))) continue;
     if (thread.projectId !== null && ctx.projects.find(project => project.id === thread.projectId)?.archived) archiveProject(ctx, thread.projectId, false);
     letter.status = 'delivered';
     sender.emit('collaboration.changed', { threadId: source.id });
@@ -131,9 +154,9 @@ export function coordinationMethods(ctx: FakeContext) {
         .filter(agent => agent.mode !== 'off')
         .sort((a, b) => (b.activeAt ?? 0) - (a.activeAt ?? 0));
       const unavailable: string[] = [];
-      if (sourceConfig.remote) for (const peer of ctx.peers.values()) {
+      if (sourceConfig.remote) for (const peer of trusted(ctx)) {
         const target = cores.get(peer.coreId);
-        if (!target || !target.peers.has(ctx.identity.coreId)) { unavailable.push(peer.name); continue; }
+        if (!target || !trusts(target, ctx.identity.coreId)) { unavailable.push(peer.name); continue; }
         for (const thread of target.threads.values()) {
           const config = coordinationConfig(target, thread.id);
           if (thread.archived || config.mode === 'off' || !config.remote) continue;
@@ -162,7 +185,7 @@ export function coordinationMethods(ctx: FakeContext) {
       if (destination === ctx && target.projectId !== source.projectId && !(config.remote && coordinationConfig(ctx, target.id).remote)) {
         throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'both threads must allow coordination across projects' });
       }
-      if (destination !== ctx && (!config.remote || !ctx.peers.has(params.to.coreId) || !destination || !destination.peers.has(ctx.identity.coreId) || !coordinationConfig(destination, target.id).remote)) {
+      if (destination !== ctx && (!config.remote || !trusts(ctx, params.to.coreId) || !destination || !trusts(destination, ctx.identity.coreId) || !coordinationConfig(destination, target.id).remote)) {
         throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'remote core is not trusted' });
       }
       const letter: AgentLetter = {
@@ -171,7 +194,7 @@ export function coordinationMethods(ctx: FakeContext) {
         to: params.to,
         toTitle: target?.title ?? ctx.peers.get(params.to.coreId)?.name ?? params.to.threadId,
         toProject: destination!.projects.find(project => project.id === target.projectId)?.name,
-        toMachine: destination === ctx ? ctx.identity.name : ctx.peers.get(params.to.coreId)?.name,
+        toMachine: destination!.identity.name,
         text: params.text.trim(),
         replyTo: params.replyTo ?? null,
         createdAt: ctx.now(),
@@ -192,7 +215,7 @@ export function coordinationMethods(ctx: FakeContext) {
       const matches: AgentMatch[] = [];
       for (const { contact, core } of reachable(ctx, params.threadId)) {
         const fields = { title: contact.title, project: contact.project ?? '', branch: contact.branch ?? '', agent: contact.agent ?? '', resources: contact.resources } as const;
-        const canRead = core === ctx || core.peers.get(ctx.identity.coreId)?.readThreads === true;
+        const canRead = core === ctx || reads(core, ctx.identity.coreId);
         const chat = canRead ? chatOf(core.thread(contact.threadId)).filter(entry => entry.role !== 'system').map(entry => entry.text) : [];
         const matched = new Set<AgentMatch['matched'][number]>();
         const chatWords: string[] = [];
@@ -213,7 +236,7 @@ export function coordinationMethods(ctx: FakeContext) {
     'collaboration.read': async (params) => {
       const found = reachable(ctx, params.threadId).find(entry => entry.contact.coreId === params.target.coreId && entry.contact.threadId === params.target.threadId);
       if (!found) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `target: ${params.target.threadId} is not a contact this thread may reach; see boite agents list` });
-      if (found.core !== ctx && found.core.peers.get(ctx.identity.coreId)?.readThreads !== true) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agents on this machine are not allowed to read conversations; enable their access in Machines on the destination' });
+      if (found.core !== ctx && !reads(found.core, ctx.identity.coreId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agents on this machine are not allowed to read conversations; enable their access in Machines on the destination' });
       const limit = params.limit ?? 30;
       const entries = chatOf(found.core.thread(found.contact.threadId)).filter(entry => (params.before === undefined || entry.at < params.before) && (entry.text.length > 0 || entry.tools.length > 0));
       return { contact: found.contact, entries: entries.slice(-limit), more: entries.length > limit };
@@ -231,9 +254,9 @@ export function coordinationMethods(ctx: FakeContext) {
     },
     'collaboration.check': async (params) => {
       const { coreId } = params;
-      const peer = ctx.peers.get(coreId);
+      const peer = trusted(ctx).find(peer => peer.coreId === coreId);
       const target = cores.get(coreId);
-      if (!peer || !target || !target.peers.has(ctx.identity.coreId) || !peer.viaClient && target.identity.url !== peer.url) {
+      if (!peer || !target || !trusts(target, ctx.identity.coreId) || !peer.viaClient && target.identity.url !== peer.url) {
         throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'machine is unreachable or mutual trust is missing' });
       }
       return { ok: true };
@@ -249,15 +272,17 @@ export function coordinationMethods(ctx: FakeContext) {
       const previous = ctx.peers.get(peer.coreId);
       const saved = { ...peer, readThreads: peer.readThreads ?? previous?.readThreads ?? false, viaClient: peer.viaClient ?? previous?.viaClient ?? false };
       ctx.peers.set(peer.coreId, structuredClone(saved));
+      migratePeer(ctx, peer.coreId);
       return structuredClone(saved);
     },
     'collaboration.untrust': async (params) => {
       const { coreId } = params;
       ctx.peers.delete(coreId);
+      ctx.groupReads.delete(coreId);
       return { ok: true };
     },
     'collaboration.bridge.register': async (params) => {
-      if (!ctx.peers.has(params.coreId) && !ctx.roster?.cores.some(core => core.coreId === params.coreId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'coreId: expected a machine trusted for coordination' });
+      if (!trusts(ctx, params.coreId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'coreId: expected a machine trusted for coordination' });
       if (typeof params.enabled !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'enabled: expected a boolean' });
       // Fake cores already exchange messages directly in memory; no socket route is needed.
       return { ok: true };
@@ -265,7 +290,7 @@ export function coordinationMethods(ctx: FakeContext) {
     'collaboration.bridge.forward': async (params) => {
       if (typeof params.body !== 'string' || new TextEncoder().encode(params.body).byteLength > 262144) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'body: expected at most 262144 bytes' });
       // Fake public identities have no signing keys. Only the simulated in-memory transport can authenticate them.
-      return { status: 403, body: ctx.peers.has(params.coreId) ? 'invalid signed message' : 'unknown peer', signature: '' };
+      return { status: 403, body: trusts(ctx, params.coreId) ? 'invalid signed message' : 'unknown peer', signature: '' };
     },
     'collaboration.bridge.reply': async (_params) => {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'requestId: expected a request sent to this owner connection' });
