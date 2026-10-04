@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick, type Snippet } from 'svelte';
-  import { Settings } from '@lucide/svelte';
+  import { Check, Settings } from '@lucide/svelte';
   import { Closing } from '../lib/closing.svelte';
   import { floating } from '../lib/floating';
   import type { MenuItem } from '../lib/menu';
@@ -140,7 +140,9 @@
           class:active={item.active}
           class:danger={item.danger}
           class:hide-mark={item.hideActiveMark}
-          role="menuitem"
+          class:checkable={item.checked !== undefined}
+          role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+          aria-checked={item.checked}
           disabled={item.disabled}
           data-row
           data-value={item.id}
@@ -157,6 +159,7 @@
           {#if item.hint}
             <span class="hint ui-label">{item.hint}</span>
           {/if}
+          {#if item.checked}<span class="check"><Check size={14} aria-hidden="true" /></span>{/if}
         </button>
         {/if}
       {/each}
@@ -169,6 +172,9 @@
   .label { display: flex; align-items: center; gap: 6px; }
   .glyph { display: inline-flex; color: var(--color-muted-foreground); margin-right: 2px; }
   .glyph.live { color: var(--color-live); }
+  .item.checkable { display: grid; grid-template-columns: minmax(0, 1fr) 14px; column-gap: 8px; }
+  .checkable .hint { grid-column: 1; grid-row: 2; }
+  .check { display: flex; grid-column: 2; grid-row: 1 / span 2; align-self: center; }
   .item.hide-mark.active { background: var(--color-active); }
   .status-dot { display: inline-block; width: 6px; height: 6px; flex: none; border-radius: 50%; margin-right: 8px; vertical-align: middle; background: var(--color-live); }
   .status-dot[data-tone='success'] { background: var(--color-success); }

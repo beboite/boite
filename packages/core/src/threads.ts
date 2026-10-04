@@ -476,6 +476,17 @@ export class ThreadStore {
     return archivedThread;
   }
 
+  /** Turning off the project filter reveals its automatic hides without dismissing the PR. */
+  showMergedPrThreads(projectId: ProjectId): void {
+    for (const thread of this.core.journal.listThreads(projectId)) {
+      if (!thread.archived || thread.parentThreadId || this.isRemoving(thread.id)) continue;
+      const state = archiveState(this.core.journal, thread.id);
+      if (state.reason?.type !== 'pr-merged') continue;
+      this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, reason: undefined, generation: state.generation + 1 });
+      this.save({ ...thread, archived: false }, 'thread.archived');
+    }
+  }
+
   archive(threadId: ThreadId, archived: boolean, onlyIfIdle = false): ThreadSummary {
     this.require(threadId);
     if (archived && onlyIfIdle) assertIdleFamily(this.core, threadId);
@@ -507,6 +518,9 @@ export class ThreadStore {
         const state = archiveState(this.core.journal, threadId);
         const dismissed = [...new Set([...(state.dismissed ?? []), ...(state.binding ? [state.binding.url] : [])])];
         this.core.journal.setSetting(archiveStateKey(threadId), { ...state, reason: undefined, generation: state.generation + 1, dismissed, restoredCheckout: { projectId: thread.projectId, cwd: thread.cwd, branch: thread.branch } });
+      } else {
+        const state = archiveState(this.core.journal, threadId);
+        if (state.reason) this.core.journal.setSetting(archiveStateKey(threadId), { ...state, reason: undefined, generation: state.generation + 1 });
       }
       const saved = this.save({ ...thread, archived }, 'thread.archived');
       if (thread.archived !== archived && !thread.parentThreadId && thread.projectId !== null) this.core.projects.announce(thread.projectId);

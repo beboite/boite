@@ -507,6 +507,28 @@ test('a stale proof cannot archive a moved or deleted root', async () => {
 });
 
 
+test('the merged PR filter reveals automatic hides, preserves manual archives and can hide again', async () => {
+  const f = await fixture();
+  const original = harness.core.threads.require(f.threadId);
+  harness.core.journal.putThread({ ...original, id: 'manually-archived', branch: 'manual', archived: true });
+  expect(await service.sweep()).toBe(1);
+  expect(harness.core.threads.require(f.threadId).archived).toBe(true);
+  const project = await f.client.call('projects.setAutoArchiveMergedPr', { projectId: f.project.id, enabled: false });
+  expect(project.autoArchiveMergedPr).toBe(false);
+  expect(harness.core.threads.require(f.threadId).archived).toBe(false);
+  expect(harness.core.threads.require('manually-archived').archived).toBe(true);
+  expect(archiveState(harness.core.journal, f.threadId).dismissed ?? []).toEqual([]);
+  expect(await service.sweep()).toBe(0);
+  await f.client.call('projects.setAutoArchiveMergedPr', { projectId: f.project.id, enabled: true });
+  expect(await service.sweep()).toBe(1);
+  expect(harness.core.threads.require(f.threadId).archived).toBe(true);
+  // An explicit archive of an automatically hidden thread becomes a manual archive.
+  await f.client.call('threads.archive', { threadId: f.threadId, archived: true });
+  await f.client.call('projects.setAutoArchiveMergedPr', { projectId: f.project.id, enabled: false });
+  expect(harness.core.threads.require(f.threadId).archived).toBe(true);
+  f.client.close();
+});
+
 test('project opt-out survives other policy writers and default access denies devices and agents', async () => {
   const f = await fixture();
   expect((await f.client.call('projects.list', {})).find(project => project.id === f.project.id)?.autoArchiveMergedPr).toBe(true);

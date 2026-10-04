@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowDownWideNarrow, ChevronDown, Folder, GripVertical, List, Plus, Search } from '@lucide/svelte';
+  import { ArrowDownWideNarrow, ChevronDown, Folder, GripVertical, List, ListFilter, Plus, Search } from '@lucide/svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { projectKey, projectView, type ProjectEntry } from '../lib/project-view.svelte';
   import { projectName } from '../lib/format';
@@ -7,10 +7,14 @@
   import type { Store } from '../lib/store.svelte';
   import Menu from './Menu.svelte';
   import ProjectTile from './ProjectTile.svelte';
+  import { recentPreferences } from '../lib/recent.svelte';
 
   let { entries, store, prefix = '' }: { entries: ProjectEntry[]; store: Store; prefix?: string } = $props();
   const selected = $derived(projectView.selected(entries));
   const target = $derived(workspace.view === 'recent' && selected ? selected.project : store.openProject ?? store.projects.find(p => !p.archived));
+  const targetOwner = $derived(workspace.view === 'recent' && selected ? selected.machine.store : store);
+  // Bind the action to its machine, project and connection even if the open menu becomes stale.
+  const mergedKey = $derived(target ? JSON.stringify(['merged', targetOwner.machineId, target.id, targetOwner.clientGeneration]) : '');
   const newLabel = $derived(target ? fill(strings.sidebar.newThreadIn, { project: projectName(target) }) : strings.sidebar.newThread);
   const mode = $derived(projectView.order === 'manual' ? strings.sidebar.customOrder : strings.sidebar.recentOrder);
   const items = $derived([
@@ -51,6 +55,19 @@
   {/if}
     <div class="actions">
     {#if entries.length}
+      <Menu items={[
+        { id: 'working', label: strings.settings.groupWorkingThreads, checked: recentPreferences.groupWorking },
+        ...(workspace.view === 'projects' ? [{ id: 'other', label: strings.settings.groupOtherProjects, checked: recentPreferences.groupOtherProjects }] : []),
+        ...(target && targetOwner.owner && target.autoArchiveMergedPr !== undefined && target.repository !== false && target.kind !== 'drafts' ? [
+          { id: 'merged-separator', label: '', separator: true },
+          { id: mergedKey, label: strings.sidebar.autoArchiveMergedPr, hint: projectName(target), checked: target.autoArchiveMergedPr,
+            disabled: targetOwner.connection !== 'ready' || targetOwner.projectAutoArchiveMergedPrBusy(target.id) }
+        ] : [])
+      ]} onpick={key => {
+        if (key === 'working') recentPreferences.setGroupWorking(!recentPreferences.groupWorking);
+        if (key === 'other') recentPreferences.setGroupOtherProjects(!recentPreferences.groupOtherProjects);
+        if (key === mergedKey && target) void targetOwner.setProjectAutoArchiveMergedPr(target.id, !target.autoArchiveMergedPr);
+      }} label={strings.sidebar.groupingOptions} placement="bottom" variant="ghost" testid={`${prefix}grouping-options`}><ListFilter size={15} /></Menu>
       <button class="ghost icon small" title={`${strings.sidebar.search}${store.keyHint('palette')}`} aria-label={strings.sidebar.search} data-testid={`${prefix}sidebar-search-open`} onclick={() => store.paletteOpen = true}><Search size={15} /></button>
       {#if !prefix}<button class="ghost icon small" title={`${newLabel}${store.keyHint('new-thread')}`} aria-label={newLabel} data-testid="new-thread" onclick={create}><Plus size={16} /></button>{/if}
     {/if}

@@ -21,13 +21,20 @@ test('working grouping retains attention for pins, drafts, questions and failure
   expect(groupWorkingThread(store, working)).toBe(false);
 });
 
-test('the device starts without working grouping, persists both choices and ignores invalid storage', () => {
+test('grouping preferences retain each other, migrate the working choice and ignore invalid storage', () => {
   const prefs = new RecentPreferences();
   expect(prefs.groupWorking).toBe(false);
+  expect(prefs.groupOtherProjects).toBe(true);
+  prefs.setGroupOtherProjects(false);
   prefs.setGroupWorking(true);
+  expect(new RecentPreferences().groupWorking).toBe(true);
+  expect(new RecentPreferences().groupOtherProjects).toBe(false);
+  prefs.setGroupOtherProjects(true);
   expect(new RecentPreferences().groupWorking).toBe(true);
   prefs.setGroupWorking(false);
   expect(new RecentPreferences().groupWorking).toBe(false);
+  localStorage.setItem(RECENT_STORAGE_KEY, '{"groupWorking":true}');
+  expect(new RecentPreferences().groupOtherProjects).toBe(true);
   localStorage.setItem(RECENT_STORAGE_KEY, 'null');
   expect(new RecentPreferences().groupWorking).toBe(false);
 });

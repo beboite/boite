@@ -410,6 +410,7 @@ export function threadMethods(ctx: FakeContext) {
       const was = thread.archived;
       thread.archived = params.archived ?? true;
       if (thread.archived) {
+        delete thread.archiveReason;
         cancelFamilySideQuestions(ctx, thread.id);
         const family = [...ctx.threads.values()].filter(member => member.id === thread.id || member.parentThreadId === thread.id);
         await Promise.all(family.map(member => putAway(ctx, member)));

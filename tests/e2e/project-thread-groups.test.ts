@@ -11,6 +11,77 @@ beforeAll(async () => { port = await freePort(); server = await startUi(port); }
 afterAll(async () => { await server?.close(); });
 
 for (const width of [1280, 390]) {
+  test(`visibility options work in both views and preserve manual archives at ${width}px`, async () => {
+    const page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent&machines=1`, windowSize: { width, height: width < 720 ? 844 : 900 } });
+    try {
+      await page.waitFor('globalThis.__boiteTest?.workspace.machines.length === 2');
+      const { main, empty, merged } = await page.evaluate<{ main: string; empty: string; merged: string }>(`(async () => {
+        const machine = globalThis.__boiteTest.workspace.machines[0], store = machine.store;
+        await store.open('t-trace');
+        store.threads = store.threads.map(t => t.id === 't-scheduler' ? {...t, status:'running', pinned:false, unread:false} : t);
+        const empty = await store.client.call('projects.add', {path:'/workspace/quiet', name:'quiet'});
+        const thread = await store.client.call('threads.create', {projectId:'p-boite', providerId:'echo', accountId:'a-echo', title:'Merged visibility fixture', worktree:{branch:'boite/visibility-options'}});
+        store.client.setMergedPrFixture(thread.id, {repository:'github.com/example/repo', branch:thread.branch, tip:'a'.repeat(40), clean:true, candidates:[{repository:'github.com/example/repo', branch:thread.branch, sha:'a'.repeat(40), number:407, url:'https://github.com/example/repo/pull/407', mergedAt:'2026-10-02T12:00:00Z', fork:false}]});
+        await store.client.sweepMergedPrArchives();
+        return {main:machine.id, empty:empty.id, merged:thread.id};
+      })()`);
+      if (width < 720) await mobileAction(page, 'mobile-conversations');
+      const root = width < 720 ? id('mobile-list') : id('sidebar'), prefix = width < 720 ? 'mobile-' : '';
+      const menu = id(`${prefix}grouping-options-menu`);
+      const row = (thread: string) => `${root} ${width < 720 ? '.row' : id('thread-row')}[data-machine-id="${main}"][data-thread-id="${thread}"]`;
+      const revealProject = (thread: string) => page.waitFor(`(() => {
+        document.querySelector('${root} ${id(width < 720 ? 'mobile-project-group' : 'project')}[data-machine-id="${main}"][data-project-id="p-boite"]')?.scrollIntoView({block:'center'});
+        return !!document.querySelector('${row(thread)}');
+      })()`);
+      const option = async (key: string) => {
+        await page.click(id(`${prefix}grouping-options`));
+        await page.click(`${menu} ${key === 'merged' ? '[data-value]:last-child' : `[data-value=${key}]`}`);
+      };
+      const shot = async (state: string) => {
+        await page.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
+        await page.screenshot(join(import.meta.dir, '.artifacts', `visibility-${state}-${width}.png`));
+      };
+      await page.click(id(`${prefix}view-projects`));
+      await revealProject('t-scheduler');
+      await option('working');
+      await page.waitFor(`!document.querySelector('${row('t-scheduler')}')`);
+      await page.click(id(`${prefix}view-recent`));
+      await page.waitFor(`document.querySelector('${root} ${id('recent-working-toggle')}')`);
+      expect(await page.evaluate(`!!document.querySelector('${row('t-scheduler')}')`)).toBe(false);
+      await option('working');
+      await page.waitFor(`document.querySelector('${row('t-scheduler')}')`);
+      await page.click(id(`${prefix}view-projects`));
+      await revealProject('t-scheduler');
+      await option('other');
+      await page.waitFor(`!document.querySelector('${root} ${id('other-projects-toggle')}') && document.querySelector('${root} [data-project-id="${empty}"]')`);
+      await option('merged');
+      await revealProject(merged);
+      expect(await page.evaluate(`globalThis.__boiteTest.workspace.machines[0].store.client.call('threads.get', {threadId:'t-parser'}).then(t=>t.archived)`)).toBe(true);
+      await shot('projects-visible');
+      await page.click(id(`${prefix}view-recent`));
+      await page.waitFor(`document.querySelector('${row(merged)}')`);
+      await option('merged');
+      expect(await page.evaluate('globalThis.__boiteTest.workspace.machines[0].store.client.sweepMergedPrArchives()')).toBe(1);
+      await page.waitFor(`!document.querySelector('${row(merged)}')`);
+      await page.click(id(`${prefix}project-filter`));
+      await page.evaluate(`Array.from(document.querySelectorAll('${id(`${prefix}project-filter-menu`)} [data-value]')).find(e => e.dataset.value === JSON.stringify(['http://builder.test', 'p-boite'])).click()`);
+      await option('merged');
+      expect(await page.evaluate('globalThis.__boiteTest.workspace.machines.map(m => m.store.projects.find(p => p.id === "p-boite").autoArchiveMergedPr)')).toEqual([true, false]);
+      await page.click(id(`${prefix}grouping-options`));
+      await page.waitFor(`document.querySelector('${menu} [role=menuitemcheckbox]')`);
+      await shot('recent-options');
+      await page.reload();
+      await page.waitFor('globalThis.__boiteTest?.workspace.machines.length === 2');
+      expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.recent.v1'))`)).toEqual({groupWorking:false, groupOtherProjects:false});
+      expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+      expect(page.errors()).toEqual([]);
+      console.log(`VISIBILITY_OPTIONS_OK width=${width} projects=ok recent=ok manual-archives=preserved owning-machine=ok persistence=ok`);
+    } catch (error) {
+      await page.screenshot(join(import.meta.dir, '.artifacts', `visibility-failure-${width}.png`)).catch(() => {});
+      throw error;
+    } finally { await page.close(); }
+  }, 60_000);
+
   test(`project counters fold work and completed history on the owning machine at ${width}px`, async () => {
     const page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent&machines=1`, windowSize: { width, height: width < 720 ? 844 : 900 } });
     try {
@@ -28,6 +99,8 @@ for (const width of [1280, 390]) {
       })()`);
       if (width < 720) await mobileAction(page, 'mobile-conversations');
       await page.click(id(width < 720 ? 'mobile-view-projects' : 'view-projects'));
+      await page.click(id(width < 720 ? 'mobile-grouping-options' : 'grouping-options'));
+      await page.click(`${id(width < 720 ? 'mobile-grouping-options-menu' : 'grouping-options-menu')} [data-value=working]`);
       const root = width < 720 ? id('mobile-list') : id('sidebar');
       const project = (machine: string, projectId: string) => `${root} ${id(width < 720 ? 'mobile-project-group' : 'project')}[data-machine-id="${machine}"][data-project-id="${projectId}"]`;
       const first = project(main, 'p-boite'), second = project(remote, 'p-boite');
