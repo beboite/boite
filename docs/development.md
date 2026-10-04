@@ -197,17 +197,17 @@ working conversations in the main list. Keyboard thread shortcuts follow the
 expanded rows in their displayed order. Merged-PR archiving feeds Done through
 the core check below; its PR link appears under the completed title.
 
-Projects shows projects with a conversation at rest, a question, a failure or a
-draft. Each project header has separate Working and Done counters that toggle
-their lists, both closed by
-default. Working includes running, queued and background work. Pins and unsent
+Projects shows projects with any active conversation or a draft, including
+projects whose conversations are all working. Each project header has separate
+Working and Done counters that toggle their lists, both closed by default.
+Working includes running, queued and background work. Pins and unsent
 drafts stay visible while Working is folded and appear once when expanded;
 questions and failures stay in the main list. Done reads only that project's
 archived summaries when expanded, with the same reading and restore actions as
 Recent. Other projects holds empty projects and projects whose conversations
-are all working or archived, in a closed section below the attention list. When
-work finishes, a question arrives or a draft starts, its project returns to the
-main list. Expansion follows the owning project between desktop and phone for
+are all archived, in a closed section below the main list. Creating or restoring
+a conversation or starting a draft returns its project to the main list.
+Expansion follows the owning project between desktop and phone for
 the current session. Phone search exposes matching
 working conversations even when their counter is closed.
 Recent project order uses the latest user message among live conversations,
