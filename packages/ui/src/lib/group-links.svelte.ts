@@ -159,11 +159,13 @@ export class GroupLinks {
       });
     });
     // Another window dropped a machine: this one lets it go too, without waiting for its own machines to say so.
+    // And what this window knew was dropped stays so, should that write have started from an older record.
     const heard = (event: StorageEvent): void => {
       if (event.key !== DROPPED_STORAGE_KEY) return;
-      keepDropped(event.oldValue);
+      keepDropped();
       void this.reconcile();
     };
+    keepDropped();
     window.addEventListener('storage', heard);
     return () => {
       clearInterval(timer);

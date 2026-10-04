@@ -306,8 +306,11 @@ its address and by what it is, in storage every window shares
 (`GroupCore.epoch`): a window that holds it under another address lets it go
 too. Addresses make room for newer ones, 256 of them; a machine dropped is
 never forgotten to make room, and the highest admission recorded as dropped is
-kept, also when two windows write at the same instant: the one that hears the
-other puts it back. Nothing saved for that
+kept. Windows share that record without a lock, so two that write at the same
+instant can erase or lower what the other recorded: a window that hears the
+record change puts back what it knew of the machines dropped. A window closed
+at that instant cannot, and an address erased that way stays erased, since a
+pairing made by hand clears it too. Nothing saved for that
 address is read again, whichever window left it and wherever it sits, so a key
 left behind never passes for a pairing made by hand, and a link to that address
 asks as for a core nobody knows. No ticket is asked for it on the word of a

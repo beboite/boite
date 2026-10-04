@@ -53,8 +53,15 @@ const DROPPED_MEMBERS_MAX = 2048;
 
 interface Dropped { at: number; epoch: number }
 
-function parseDropped(raw: string | null): Record<string, Dropped> {
+/** What this window knows was dropped: what it read or wrote, less what it cleared itself. */
+const known = new Map<string, Dropped>();
+
+/** Address to when the group dropped the machine there, and which admission of it that was. */
+function droppedAddresses(): Record<string, Dropped> {
   try {
+    const raw = window.localStorage.getItem(DROPPED_STORAGE_KEY);
+    // Storage emptied: nothing is left for this window to put back.
+    if (raw === null) known.clear();
     const parsed: unknown = JSON.parse(raw ?? '{}');
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
     return Object.fromEntries(Object.entries(parsed as Record<string, Partial<Dropped> | null>)
@@ -64,30 +71,37 @@ function parseDropped(raw: string | null): Record<string, Dropped> {
   }
 }
 
-/** Address to when the group dropped the machine there, and which admission of it that was. */
-function droppedAddresses(): Record<string, Dropped> {
+function writeDropped(marks: Record<string, Dropped>): void {
+  const entries = Object.entries(marks);
+  // Addresses make room for newer ones: what was saved for an old one is long gone. Machines do not.
+  const members = entries.filter(([key]) => key.startsWith('member ')).slice(0, DROPPED_MEMBERS_MAX);
+  const addresses = entries.filter(([key]) => !key.startsWith('member ')).slice(-DROPPED_MAX);
   try {
-    return parseDropped(window.localStorage.getItem(DROPPED_STORAGE_KEY));
+    window.localStorage.setItem(DROPPED_STORAGE_KEY, JSON.stringify(Object.fromEntries([...members, ...addresses])));
   } catch {
-    return {};
+    /* a browser that refuses storage still runs for this session */
   }
 }
 
 /**
- * Two windows that write the record at the same instant each start from what
- * they had read, and the later one can put back an older admission than the
- * other just recorded. The window that hears the record change puts back the
- * highest it had seen. `previous` is the record before that change.
+ * Windows share the record without a lock: two that write at the same instant
+ * each start from what they had read, and the later one erases or lowers what
+ * the other recorded. A window that hears the record change puts back what it
+ * knew. A lower admission is raised again. A machine's mark that went is
+ * restored: when a later admission cleared it, that admission is past the mark
+ * anyway. An address that went stays gone, since a pairing made by hand clears
+ * it and putting it back would hide that machine.
  */
-export function keepDropped(previous: string | null): void {
+export function keepDropped(): void {
   const now = droppedAddresses();
-  const lowered = Object.entries(parseDropped(previous)).filter(([key, was]) => now[key] !== undefined && now[key].epoch < was.epoch);
-  if (lowered.length === 0) return;
-  try {
-    window.localStorage.setItem(DROPPED_STORAGE_KEY, JSON.stringify({ ...now, ...Object.fromEntries(lowered.map(([key, was]) => [key, { at: now[key]!.at, epoch: was.epoch }])) }));
-  } catch {
-    /* a browser that refuses storage still runs for this session */
+  const back: Record<string, Dropped> = {};
+  for (const [key, was] of known) {
+    const mark = now[key];
+    if (mark === undefined && !key.startsWith('member ')) known.delete(key);
+    else if (mark === undefined || mark.epoch < was.epoch) back[key] = { at: Math.max(was.at, mark?.at ?? 0), epoch: was.epoch };
   }
+  for (const [key, mark] of Object.entries({ ...now, ...back })) known.set(key, mark);
+  if (Object.keys(back).length > 0) writeDropped({ ...now, ...back });
 }
 
 /**
@@ -109,17 +123,15 @@ function memberKey(groupId: string, coreId: string): string {
 
 function setMark(target: string, epoch: number | null): void {
   const { [target]: was, ...rest } = droppedAddresses();
-  if (epoch === null && was === undefined) return;
-  // A window that knew an older admission must not lower what another one recorded: the highest admission dropped stays.
-  const entries = epoch === null ? Object.entries(rest) : Object.entries({ ...rest, [target]: { at: Date.now(), epoch: Math.max(was?.epoch ?? epoch, epoch) } });
-  // Addresses make room for newer ones: what was saved for an old one is long gone. Machines do not.
-  const members = entries.filter(([key]) => key.startsWith('member ')).slice(0, DROPPED_MEMBERS_MAX);
-  const addresses = entries.filter(([key]) => !key.startsWith('member ')).slice(-DROPPED_MAX);
-  try {
-    window.localStorage.setItem(DROPPED_STORAGE_KEY, JSON.stringify(Object.fromEntries([...members, ...addresses])));
-  } catch {
-    /* a browser that refuses storage still runs for this session */
+  if (epoch === null) {
+    known.delete(target);
+    if (was !== undefined) writeDropped(rest);
+    return;
   }
+  // A window that knew an older admission must not lower what another one recorded: the highest admission dropped stays.
+  const mark = { at: Date.now(), epoch: Math.max(was?.epoch ?? epoch, known.get(target)?.epoch ?? epoch, epoch) };
+  known.set(target, mark);
+  writeDropped({ ...rest, [target]: mark });
 }
 
 /**
