@@ -1,25 +1,26 @@
 <script lang="ts">
-  import { CheckCheck, LoaderCircle } from '@lucide/svelte';
+  import { Archive, CheckCheck, LoaderCircle } from '@lucide/svelte';
   import type { ProjectEntry } from '../lib/project-view.svelte';
-  import { projectThreadView } from '../lib/project-threads.svelte';
+  import { archiveCount, projectThreadView } from '../lib/project-threads.svelte';
   import { count as formatCount, projectName } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import { recentPreferences } from '../lib/recent.svelte';
 
   let { entry, working, controls, collapsed = false, searching = false }: { entry: ProjectEntry; working: number; controls: string; collapsed?: boolean; searching?: boolean } = $props();
-  const kinds = ['working', 'done'] as const;
+  const kinds = ['working', 'done', 'archived'] as const;
+  const labels = { working: strings.sidebar.projectWorkingThreads, done: strings.sidebar.projectDoneThreads, archived: strings.sidebar.projectArchivedThreads };
 </script>
 
 <div class="counters">
   {#each kinds as kind (kind)}
-    {@const total = kind === 'working' ? working : entry.project.archivedThreads ?? 0}
+    {@const total = kind === 'working' ? working : archiveCount(entry.project, kind)}
     {@const open = total > 0 && !collapsed && !(kind === 'working' && searching) && projectThreadView.isOpen(entry, kind)}
-    {@const label = fill(kind === 'working' ? strings.sidebar.projectWorkingThreads : strings.sidebar.projectDoneThreads, { count: String(total), project: projectName(entry.project) })}
+    {@const label = fill(labels[kind], { count: String(total), project: projectName(entry.project) })}
     {@const grouped = kind !== 'working' || recentPreferences.groupWorking}
     <button type="button" class="ghost counter {kind}" class:active={open && grouped} data-testid="project-{kind}-toggle" data-count={total}
       title={label} aria-label={label} aria-expanded={grouped ? open : undefined} aria-controls={grouped ? `${controls}-${kind}` : undefined} disabled={!grouped || total === 0 || (kind === 'working' && searching)}
       onclick={() => projectThreadView.toggle(entry, kind, collapsed)}>
-      {#if kind === 'working'}<LoaderCircle size={12} aria-hidden="true" />{:else}<CheckCheck size={12} aria-hidden="true" />{/if}
+      {#if kind === 'working'}<LoaderCircle size={12} aria-hidden="true" />{:else if kind === 'done'}<CheckCheck size={12} aria-hidden="true" />{:else}<Archive size={12} aria-hidden="true" />{/if}
       <span class="ui-label">{formatCount(total)}</span>
     </button>
   {/each}

@@ -57,11 +57,19 @@ test('a project counts its archived threads, and each archive or restore announc
   await client.call('threads.archive', { threadId });
   await waitFor(() => heard.length === 1);
   expect(heard[0]).toMatchObject({ id: project.id, archivedThreads: 1 });
+  // Archived by hand, it is not done.
+  expect(heard[0]?.doneThreads).toBeUndefined();
   expect((await client.call('projects.list', {})).find((p) => p.id === project.id)?.archivedThreads).toBe(1);
 
   await client.call('threads.archive', { threadId, archived: false });
   await waitFor(() => heard.length === 2);
   expect(heard[1]?.archivedThreads).toBeUndefined();
+
+  // Marked done, it counts in both: `doneThreads` is the done share of `archivedThreads`.
+  await client.call('threads.archive', { threadId, onlyIfIdle: true });
+  await waitFor(() => heard.length === 3);
+  expect(heard[2]).toMatchObject({ id: project.id, archivedThreads: 1, doneThreads: 1 });
+  expect((await client.call('projects.list', {})).find((p) => p.id === project.id)).toMatchObject({ archivedThreads: 1, doneThreads: 1 });
 });
 
 test('a thread started in an archived project brings the project back', async () => {

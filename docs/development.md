@@ -172,7 +172,9 @@ the sidebar and offers Undo. Settings, the project menu and the palette open
 archived lists; restore keeps history without resuming work. Paired devices may
 archive and restore. Project archive only hides the project; its existing turns
 continue. New work in it restores the project. Drafts cannot be archived.
-`Project.archivedThreads` counts archived top-level threads and updates clients.
+`Project.archivedThreads` counts archived top-level threads and updates clients;
+`Project.doneThreads` is the share of them with a done date. The rest were
+archived by hand to pick up later.
 An archive or delete action on the open conversation returns to a draft in its project.
 Removing a background conversation keeps the current conversation on screen.
 
@@ -188,7 +190,9 @@ navigate the app. File attachments and project moves retain their own handlers.
 A later click or keyboard activation still opens the link. Delayed
 cross-machine conversation links yield to a newer conversation or draft.
 
-Recent keeps completed conversations in a collapsed Done section at the bottom.
+Recent keeps completed conversations in a collapsed Done section at the bottom,
+and manual archives in an Archived section after it. Done holds only
+conversations with a done date; a manual archive never lands there.
 Mark done uses the persistent archive and its undo action; `threads.archive`
 with `onlyIfIdle: true` refuses pending work or input in the conversation's
 family before changing it. Done reads archived summaries only on expansion,
@@ -216,11 +220,11 @@ the core check below; its PR link appears under the completed title.
 
 Projects shows projects with any active conversation or a draft, including
 projects whose conversations are all working. Each project header has separate
-Working and Done counters. When working grouping is enabled, its counter toggles
-that list; Done toggles completed history. Both lists start closed. Working
+Working, Done and Archived counters. When working grouping is enabled, its counter toggles
+that list; Done toggles completed history and Archived the manual archives. All lists start closed. Working
 includes running, queued and background work. Pins and unsent
 drafts stay visible while Working is folded and appear once when expanded;
-questions and failures stay in the main list. Done reads only that project's
+questions and failures stay in the main list. Done and Archived read only that project's
 archived summaries when expanded, with the same reading and restore actions as
 Recent. Other projects holds empty projects and projects whose conversations
 are all archived, in a closed section below the main list. Creating or restoring
