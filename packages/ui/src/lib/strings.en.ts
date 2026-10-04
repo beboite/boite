@@ -1806,7 +1806,7 @@ export const strings = {
     agentMemoryBudgetPercent: 'Memory budget for all agents, %',
     agentMemoryBudgetHint: 'For all agents together, from 10 to 90%. The default is 60%.',
     memoryReserveMb: 'Memory reserved for other apps, MB',
-    memoryReserveHint: 'Kept free for your other apps. 0 takes 10% of this machine\'s memory, 3072 MB at least.',
+    memoryReserveHint: 'Kept free for your other apps. 0 uses 10% of RAM, at least 3072 MB. Below 12288 MB of RAM, it uses 25%.',
     memoryProtection: 'Protect available memory',
     memoryProtectionHint: 'Over a limit, Boite stops the largest process tree an agent started, never the agent itself. Off also lifts the Windows memory caps.',
     background: 'Background',

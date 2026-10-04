@@ -173,6 +173,11 @@ caps immediately while retaining configured values. Zero quota or reserve means
 automatic sizing, not disabled protection. Resource readings remain visible;
 the OS can still refuse allocations.
 
+The automatic reserve is the larger of 10% of physical RAM and 3072 MB.
+On machines with less than 12288 MB of RAM, it uses 25% instead, so the
+desktop and a small agent can run without permanently tripping the guard.
+An explicit reserve keeps its configured value.
+
 Memory stops appear beside the interrupted tool. Persisted message/part
 boundaries keep later output from relocating the notice. Repeated notices at
 the same boundary, reason and threshold share a folded process list. Owners can

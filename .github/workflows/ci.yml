@@ -356,6 +356,9 @@ jobs:
           # Only a published package reports to the analytics relay (docs/analytics.md).
           BOITE_RELEASE_TELEMETRY: ${{ inputs.sign-updates && '1' || '' }}
       - run: bun run test:shell --release
+      - name: macOS native toolbar regression
+        if: runner.os == 'macOS'
+        run: cargo test --locked --manifest-path apps/shell/src-tauri/Cargo.toml --release --test macos-window
       - name: Build and test installed Linux package
         if: runner.os == 'Linux'
         env:
@@ -408,7 +411,7 @@ jobs:
             notarized=0
           fi
           # shellcheck disable=SC2086 # BUNDLE_CONFIGS holds several arguments.
-          bun apps/shell/scripts/tauri.ts build $BUNDLE_CONFIGS --bundles app,dmg
+          bun apps/shell/scripts/tauri.ts build $BUNDLE_CONFIGS --bundles app,dmg --verbose
           cp -R apps/shell/src-tauri/target/release/bundle/macos/Boite.app "$RUNNER_TEMP/Boite.app"
           # Dictation: without both, macOS refuses or kills the microphone request.
           plutil -extract NSMicrophoneUsageDescription raw "$RUNNER_TEMP/Boite.app/Contents/Info.plist"

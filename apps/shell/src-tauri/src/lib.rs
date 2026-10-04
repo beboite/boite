@@ -188,7 +188,7 @@ pub fn run() {
             // used to wait behind it for no reason (bench/startup.ts).
             start_core(&handle);
             #[cfg(target_os = "macos")]
-            window::install_macos_menu(&handle)?;
+            window::install_macos_menu(&handle, channel)?;
             let window = build_main_window(&handle, channel)?;
             if !hidden() {
                 // The window works without a tray: closing it then quits.
