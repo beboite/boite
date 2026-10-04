@@ -7,6 +7,38 @@ import type { Store } from './store.svelte';
 /** One input's state in the store: its text, attachments and the prompts queued behind a running turn. */
 export type ComposerState = NonNullable<Store['composerStates'][string]>;
 
+/** The id of a prompt drawn before the core has it; its turn id starts the same way until `turns.start` answers. */
+export const SENDING_PREFIX = 'local:';
+
+/** A prompt on its way to the core: it has no turn yet and cannot be edited, forked or retried. */
+export function isSending(message: Pick<Message, 'id'>): boolean {
+  return message.id.startsWith(SENDING_PREFIX);
+}
+
+/** The box gives up what just left it: its words, its files and its page references. */
+export function emptyBox(state: ComposerState): void {
+  state.text = '';
+  state.attachments = [];
+  state.previewReferences = [];
+  state.paused = false;
+}
+
+/**
+ * A prompt the core refused, or whose send was lost, back where it can be sent
+ * again. An empty box takes it. A box already holding the next prompt keeps
+ * that one, and this one waits, held, at the head of the queue.
+ */
+export function returnPrompt(state: ComposerState, text: string, attachments: Attachment[], previewReferences: PreviewReference[]): void {
+  if (state.text.length === 0 && state.attachments.length === 0 && !state.previewReferences?.length) {
+    state.text = text;
+    state.attachments = attachments;
+    state.previewReferences = previewReferences;
+    return;
+  }
+  state.queued.unshift({ text, attachments, ...(previewReferences.length ? { previewReferences } : {}) });
+  state.paused = true;
+}
+
 /**
  * Sends consecutive ordinary prompts together, within turn limits. Activity
  * commands are submitted individually. New arrivals wait for

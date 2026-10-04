@@ -11,7 +11,7 @@
   import { unresolvedAssetId } from '../lib/draft-attachments';
   import { focusWithin } from '../lib/focus';
   import { ignoreQuestions, repliesOf, replyTarget, sendAnswer } from '../lib/question-reply.svelte';
-  import { sentPrompts, type SentPrompt } from '../lib/composer-queue';
+  import { emptyBox, returnPrompt, sentPrompts, type SentPrompt } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
   import { claudeKeywords, promptSegments } from '../lib/message-display';
@@ -158,7 +158,8 @@
       (store.connection === 'ready' || (offline && !reply)) &&
       !picking &&
       !dictating &&
-      !composer?.sending
+      // A prompt on its way holds back an edit, an answer and a draft's second prompt; on a thread the next one queues.
+      !(composer?.sending && (composer.editing || reply !== null || !store.openThread))
   );
 
   // A new conversation asks what the user wants done; one under way names who reads the message.
@@ -393,21 +394,21 @@
     // A queue that still holds something takes this prompt too, whatever the
     // thread's status: sending it on its own would put it ahead of prompts the
     // user typed first. Sending is also how he resumes a queue a refusal paused.
-    if (!editedThread && (inputStore.busy || state.queued.length > 0 || offline)) {
+    if (!editedThread && (inputStore.busy || state.queued.length > 0 || state.sending || offline)) {
       // Written while the machine is away, it joins the outbox: its own request id and the chips' model and effort.
       inputStore.queuePrompt(inputKey, { text: prompt, attachments: images, afterBoundary: store.inputBoundaries[key]?.boundary, ...(references.length ? { previewReferences: references } : {}) },
         offline ? { choice: $state.snapshot(sendChoice) } : undefined);
       state.editing = null;
-      state.text = '';
-      state.attachments = [];
-      state.previewReferences = [];
-      state.paused = false;
+      emptyBox(state);
       recall = null;
       requestAnimationFrame(grow);
       return;
     }
     state.sending = true;
     const finishImageSend = trackImageSend(state, prompt, images);
+    // The box empties and the prompt joins the timeline now; the core's answer only ticks its receipts. A `/goal` writes no message.
+    const local = inputStore.stageSend(inputKey, prompt, images, references);
+    if (local) { emptyBox(state); recall = null; requestAnimationFrame(grow); }
     // A rewind can finish after navigation: the replacement belongs to the
     // captured thread and machine, whichever conversation is on screen now.
     const accepted = await (editedThread
@@ -420,16 +421,14 @@
       inputStore.draftChoice = { ...sendChoice };
     }
     finishImageSend(accepted);
-    if (accepted) {
-      // Text typed and images attached while the RPC was pending belong to the
-      // next prompt: only what went out is cleared.
+    // A command clears only what it went out with. A refused or lost prompt leaves the timeline for the box, or the head of the queue.
+    if (accepted && !local) {
       if (state.text === prompt) state.text = '';
       if (state.attachments === images) state.attachments = [];
-      if (state.previewReferences === references) state.previewReferences = [];
       state.paused = false;
-      recall = null;
-      requestAnimationFrame(grow);
-    }
+    } else if (!accepted && local) { inputStore.unstageSend(local); returnPrompt(state, prompt, images, references); }
+    if (accepted) recall = null;
+    requestAnimationFrame(grow);
     state.sending = false;
   }
 

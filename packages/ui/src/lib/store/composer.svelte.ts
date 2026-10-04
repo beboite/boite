@@ -1,7 +1,7 @@
 import { RpcErrorCode, PREVIEW_REFERENCES_PER_TURN, previewReferencesError, type PreviewReference } from '@boite/contracts';
 import { untrack } from 'svelte';
-import type { Attachment, Message, MessageId, ThreadSummary, TurnInFlightData } from '@boite/contracts';
-import { drainQueue, sentPrompt } from '../composer-queue';
+import type { Attachment, Message, MessageId, MessagePart, ThreadId, ThreadSummary, Turn, TurnInFlightData } from '@boite/contracts';
+import { drainQueue, SENDING_PREFIX, sentPrompt } from '../composer-queue';
 import { restorePreviewMentions } from '../preview-mentions';
 import { activityCommand, isActivityCommand } from '../activity-command';
 import { RpcFailure, readyAgain, wasUnanswered } from '../client';
@@ -69,6 +69,14 @@ export class Composer {
   previewUndo = new Map<string, { text: string; references: PreviewReference[] }[]>();
   composerInsertions = new Map<string, (start: number, end: number, text: string) => void>();
   pendingSends = new Map<string, { id: string; prompt: string; attachments: Attachment[]; previewReferences: PreviewReference[]; selectionVersion: number }>();
+  /**
+   * The prompt each thread (or the draft, under its own key) has on its way to
+   * the core. The timeline draws it at once with both receipts off, so a slow
+   * link, a reconnect or a thread still being created never holds the box.
+   */
+  staged = $state<Record<string, Message>>({});
+  /** The local row a landed message took the place of: the timeline keeps its height and does not replay its rise. */
+  readonly landings = new Map<string, string>();
 
   constructor(private readonly ctx: StoreContext) {}
 
@@ -259,6 +267,68 @@ export class Composer {
     draft.text = draft.text ? `${draft.text}\n\n${text}` : text;
   }
 
+  /**
+   * Puts a prompt in the timeline before the core has it. `key` is the thread,
+   * or the draft's key. A `/goal` or `/loop` writes no message, so it has no row: null.
+   */
+  stage(key: string, prompt: string, attachments: Attachment[], previewReferences: PreviewReference[]): Message | null {
+    if (isActivityCommand(prompt)) return null;
+    const id = `${SENDING_PREFIX}${secureId()}`;
+    this.staged[key] = {
+      id, threadId: key, turnId: id, role: 'user', state: 'complete', createdAt: Date.now(),
+      parts: [
+        { type: 'text', text: prompt, ...(previewReferences.length ? { displayText: prompt, previewReferences: $state.snapshot(previewReferences) } : {}) },
+        ...attachments.map((attachment): MessagePart => attachment.kind === 'file'
+          ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name }
+          : { type: 'image', mimeType: attachment.mimeType, data: attachment.data, alt: attachment.name })
+      ]
+    };
+    return this.staged[key]!;
+  }
+
+  /** The send failed or was held: its local row leaves, wherever the thread's creation moved it. */
+  unstage(message: Message): void {
+    for (const [key, held] of Object.entries(this.staged)) if (held.id === message.id) delete this.staged[key];
+  }
+
+  /** The draft became this thread: its local row follows as the thread takes the screen. */
+  private adopt(threadId: ThreadId): void {
+    const local = this.staged[DRAFT_STASH_KEY];
+    if (!local) return;
+    delete this.staged[DRAFT_STASH_KEY];
+    local.threadId = threadId;
+    this.staged[threadId] = local;
+  }
+
+  /**
+   * `turns.start` answered. The local row waits for the message only on the
+   * open thread that does not hold it yet, under the turn it now belongs to.
+   */
+  private accepted(threadId: ThreadId, turn: Turn): void {
+    const local = this.staged[threadId];
+    if (!local) return;
+    const open = this.ctx.store.openThread;
+    if (open?.id !== threadId || open.messages.some(message => message.turnId === turn.id)) delete this.staged[threadId];
+    else local.turnId = turn.id;
+  }
+
+  /** `message.started`: the core's own copy of a prompt on its way takes the local row's place. */
+  landed(message: Message): void {
+    const local = this.staged[message.threadId];
+    if (!local || message.role !== 'user') return;
+    const mine = sentPrompt(local), theirs = sentPrompt(message);
+    if (message.turnId !== local.turnId && (mine.text !== theirs.text || mine.attachments.length !== theirs.attachments.length)) return;
+    this.landings.set(message.id, local.id);
+    while (this.landings.size > 32) this.landings.delete(this.landings.keys().next().value!);
+    delete this.staged[message.threadId];
+  }
+
+  /** A thread read again from the core holds every prompt it accepted: only one still unanswered stays local. */
+  settle(threadId: ThreadId): void {
+    const local = this.staged[threadId];
+    if (local && !local.turnId.startsWith(SENDING_PREFIX)) delete this.staged[threadId];
+  }
+
   async submit(prompt: string, choice: Choice, attachments: Attachment[] = [], previewReferences: PreviewReference[] = []): Promise<boolean> {
     return (await this.submitOwned(prompt, choice, attachments, previewReferences)) !== null;
   }
@@ -313,6 +383,7 @@ export class Composer {
       if (this.composerStates[DRAFT_STASH_KEY] === composer && (!s.draft || originalDraft)) delete this.composerStates[DRAFT_STASH_KEY];
     }
     let followupNavigation: number | null = null;
+    this.adopt(created.id);
     if (originalDraft) {
       const opening = s.open(created.id);
       const openingGeneration = s.navigationGeneration;
@@ -495,7 +566,7 @@ export class Composer {
         return start();
       });
       if (this.ctx.currentClient(client, clientGeneration)) {
-        if (!request) this.pendingSends.delete(threadId);
+        if (!request) { this.pendingSends.delete(threadId); this.accepted(threadId, accepted); }
         this.promptFocus = { threadId, turnId: accepted.id, after: null };
       }
       return 'sent';
@@ -507,6 +578,8 @@ export class Composer {
         this.markInFlight(early);
         if (request) return 'wait';
         this.composerStates[early.thread.id]!.queued.unshift({ text: prompt, attachments, ...(previewReferences.length ? { previewReferences } : {}) });
+        // The queue shows it from here on.
+        delete this.staged[early.thread.id];
         return 'sent';
       }
       // An outbox prompt waits for the machine; only the core's own refusal stops it.
@@ -518,6 +591,7 @@ export class Composer {
       if (sent && wasUnanswered(error) && this.pendingSends.get(threadId) === sent) {
         this.pendingSends.delete(threadId);
         this.queuePrompt(threadId, { text: prompt, attachments, ...(previewReferences.length ? { previewReferences } : {}) }, { choice: target, id: sent.id, head: true });
+        delete this.staged[threadId];
         return 'sent';
       }
       this.ctx.fail(error);

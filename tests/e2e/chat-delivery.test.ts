@@ -95,3 +95,33 @@ test('answering the docked question shows a queued user bubble, then one sent me
   await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread.status === 'idle'`);
   expect(page.errors()).toEqual([]);
 }, 30000);
+
+test('a sent prompt is on screen, unticked, before the core answers, then is one message', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: 850, deviceScaleFactor: 1, mobile: false });
+  // The core's answer to `turns.start` waits on the test: what the page shows meanwhile is the client's own doing.
+  await update(`
+    const client = store.client, call = client.call.bind(client);
+    client.call = async (method, params) => {
+      if (method === 'turns.start') await new Promise(resolve => { globalThis.__releaseSend = resolve; });
+      return call(method, params);
+    };
+  `);
+  const mine = `Array.from(document.querySelectorAll('${id('message')}[data-role=user]')).filter(row => row.textContent.includes('Sent before the core answers'))`;
+  await page.type(id('composer-input'), 'Sent before the core answers');
+  await page.click(id('composer-send'));
+  await page.waitFor(`${mine}.length === 1`);
+  expect(await page.evaluate(`document.querySelector('${id('composer-input')}').value`)).toBe('');
+  expect(await page.evaluate(`typeof globalThis.__releaseSend`)).toBe('function');
+  for (const width of [1300, 390]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: width < 720 });
+    expect(await page.evaluate(`${mine}[0].querySelectorAll('.tick.received').length`)).toBe(0);
+    await capture(`chat-delivery-sending-${width < 720 ? 'phone' : 'desktop'}`);
+    expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  }
+  await page.evaluate('globalThis.__releaseSend()');
+  await page.waitFor(`${mine}.length === 1 && ${mine}[0].querySelectorAll('.tick.received').length > 0`);
+  await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread.status === 'idle'`);
+  expect(await page.evaluate(`${mine}.length`)).toBe(1);
+  expect(await page.evaluate(`Object.keys(globalThis.__boiteTest.workspace.active.staged).length`)).toBe(0);
+  expect(page.errors()).toEqual([]);
+}, 30000);

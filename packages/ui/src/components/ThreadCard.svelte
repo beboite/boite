@@ -11,7 +11,7 @@
   import { threadMenuItems } from '../lib/thread-menu';
   import { focusOnMount } from '../lib/actions';
   import { strings } from '../lib/strings';
-  import { lookupPullRequest } from '../lib/pull-request';
+  import { knownPullRequest, lookupPullRequest, rememberPullRequest } from '../lib/pull-request';
   import { agentLabel, projectName } from '../lib/format';
   import { hasUnsentDraft } from '../lib/composer-queue';
   import { canMarkDone, markDone } from '../lib/recent.svelte';
@@ -63,9 +63,13 @@
     if (!client || !thread.branch || thread.branch === 'HEAD' || prLoading || (!manual && (hidden || owner.connection !== 'ready' || document.hidden))) return;
     const revision = prRevision;
     const requestedOwner = owner;
+    const checkout = JSON.stringify([thread.cwd, thread.branch]);
+    const key = requestedOwner.threadKey(thread.id) + checkout;
     prLoading = true;
     try {
-      const result = await lookupPullRequest(client, thread.id, manual, JSON.stringify([thread.cwd, thread.branch]));
+      const result = await lookupPullRequest(client, thread.id, manual, checkout);
+      // The answer is this checkout's whichever card asked: one that mounts later starts from it.
+      rememberPullRequest(key, result.supported ? result.pullRequest : null);
       if (revision !== prRevision) return;
       pullRequest = result.supported ? result.pullRequest : null;
       if (!result.supported && manual) requestedOwner.error = strings.errors.pullRequestUnsupported;
@@ -87,8 +91,11 @@
       if (!stopped) timer = setTimeout(() => void poll(), 15_000);
     }
     const visible = () => { if (!document.hidden) void refreshPr(); };
+    const key = owner.threadKey(identity.id) + JSON.stringify([identity.cwd, identity.branch]);
     untrack(() => {
-      pullRequest = null;
+      // A reconnect or a remount keeps the line this checkout last had; only a
+      // moved thread or another branch starts from nothing.
+      pullRequest = knownPullRequest(key);
       prLoading = false;
       if (ready && identity.client && identity.branch && identity.branch !== 'HEAD') void poll();
     });

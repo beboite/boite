@@ -346,6 +346,7 @@ export class Threads {
       const unsubscribed: Promise<unknown> = !bundled && previous && previous !== threadId && previous !== delegation.delegationSubscribedThreadId
         ? client.call('threads.unsubscribe', { threadId: previous }).catch(() => undefined)
         : Promise.resolve();
+      this.ctx.composer.settle(threadId);
       const cached = held ?? this.readingThreads.get(threadId);
       const freshIds = new Set(thread.messages.map(m => m.id));
       if (thread.messagesFrom !== undefined && held) mergeResumed(held, thread);
@@ -767,6 +768,7 @@ export class Threads {
       delete s.composerStates[threadId];
       composer.previewUndo.delete(s.threadKey(threadId));
       composer.pendingSends.delete(threadId);
+      delete composer.staged[threadId];
       rightPanel.forget(s.threadKey(threadId));
     }
     this.readingThreads.delete(threadId);

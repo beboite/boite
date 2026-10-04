@@ -45,7 +45,8 @@ test('desktop and paired phone upload files, preserve bytes and show downloadabl
       await page.evaluate('Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))');
       await page.screenshot(join(import.meta.dir, '.artifacts', `files-${mobile ? 'phone' : 'desktop'}-draft.png`));
       await page.click('[data-testid=composer-send]');
-      await page.waitFor(`Array.from(document.querySelectorAll('[data-testid=file-part]')).some(el => el.textContent.includes(${JSON.stringify(name)}))`);
+      // The prompt is on screen before the core has it: its first receipt is what says the turn exists.
+      await page.waitFor(`Array.from(document.querySelectorAll('[data-testid=message]')).some(row => row.querySelector('[data-testid=file-part]')?.textContent.includes(${JSON.stringify(name)}) && row.querySelector('[data-testid=receipt-accepted].received'))`);
       await page.waitFor('document.querySelector("[data-testid=thread-header][data-status]")?.dataset.status === "idle"');
       const updated = await client.call('threads.get', { threadId: thread.id });
       const user = updated.messages.filter(m => m.role === 'user').at(-1)!;
