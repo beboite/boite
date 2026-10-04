@@ -48,6 +48,8 @@ function isEndpoint(value: unknown): value is Endpoint {
 
 export const DROPPED_STORAGE_KEY = 'boite.group.dropped';
 const DROPPED_MAX = 256;
+/** Machines remembered as dropped. A removal is never forgotten to make room: past this, nothing a group brings is reached by itself. */
+const DROPPED_MEMBERS_MAX = 2048;
 
 interface Dropped { at: number; epoch: number }
 
@@ -83,9 +85,12 @@ function memberKey(groupId: string, coreId: string): string {
 function setMark(target: string, epoch: number | null): void {
   const { [target]: was, ...rest } = droppedAddresses();
   if (epoch === null && was === undefined) return;
-  const next = epoch === null ? Object.entries(rest) : Object.entries({ ...rest, [target]: { at: Date.now(), epoch } }).slice(-DROPPED_MAX);
+  const entries = epoch === null ? Object.entries(rest) : Object.entries({ ...rest, [target]: { at: Date.now(), epoch } });
+  // Addresses make room for newer ones: what was saved for an old one is long gone. Machines do not.
+  const members = entries.filter(([key]) => key.startsWith('member ')).slice(0, DROPPED_MEMBERS_MAX);
+  const addresses = entries.filter(([key]) => !key.startsWith('member ')).slice(-DROPPED_MAX);
   try {
-    window.localStorage.setItem(DROPPED_STORAGE_KEY, JSON.stringify(Object.fromEntries(next)));
+    window.localStorage.setItem(DROPPED_STORAGE_KEY, JSON.stringify(Object.fromEntries([...members, ...addresses])));
   } catch {
     /* a browser that refuses storage still runs for this session */
   }
@@ -119,8 +124,11 @@ export function droppedSince(url: string, began: number, member?: { coreId?: str
  */
 export function isMemberDropped(groupId: string | undefined, coreId: string | undefined, epoch?: number): boolean {
   if (groupId === undefined || coreId === undefined) return false;
-  const mark = droppedAddresses()[memberKey(groupId, coreId)];
-  return mark !== undefined && (epoch === undefined || epoch <= mark.epoch);
+  const marks = droppedAddresses();
+  const mark = marks[memberKey(groupId, coreId)];
+  // No room left to remember a removal: one that could not be written must not look like none.
+  if (mark === undefined) return Object.keys(marks).filter((key) => key.startsWith('member ')).length >= DROPPED_MEMBERS_MAX;
+  return epoch === undefined || epoch <= mark.epoch;
 }
 
 export function readStoredEndpoint(): Endpoint | null {

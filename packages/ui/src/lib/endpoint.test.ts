@@ -324,6 +324,14 @@ describe('environments', () => {
     expect(droppedSince('http://10.0.0.9:9000', began, { coreId: 'c', groupId: 'grp' })).toBe(true);
     rememberSession({ url: 'http://10.0.0.6:9000', token: '', ticket: 't', coreId: 'c', groupId: 'grp', epoch: 3 }, 'three');
     expect(isMemberDropped('grp', 'c')).toBe(false);
+    // Many later removals make room among the addresses, never among the machines: a removal stays known.
+    removeBrought('http://10.0.0.6:9000', { coreId: 'c', groupId: 'grp' }, 3);
+    for (let index = 0; index < 300; index += 1) {
+      rememberSession({ url: `http://10.1.${index}.1:9000`, token: '', ticket: 't', coreId: `m${index}`, groupId: 'grp', epoch: 1 }, 'key');
+      removeBrought(`http://10.1.${index}.1:9000`, { coreId: `m${index}`, groupId: 'grp' }, 1);
+    }
+    expect([isMemberDropped('grp', 'c', 3), isMemberDropped('grp', 'm0', 1), isDropped('http://10.1.299.1:9000'), isDropped('http://10.1.0.1:9000')]).toEqual([true, true, true, false]);
+    rememberSession({ url: 'http://10.0.0.6:9000', token: '', ticket: 't', coreId: 'c', groupId: 'grp', epoch: 4 }, 'four');
     // A machine that only moved leaves no mark: it may come back to the address it had.
     removeBrought('http://10.0.0.6:9000', { coreId: 'c', groupId: 'grp' });
     expect([isDropped('http://10.0.0.6:9000'), readEnvironments().some((env) => env.url === 'http://10.0.0.6:9000')]).toEqual([false, false]);

@@ -234,7 +234,9 @@ counted, since a reverse proxy puts every remote peer behind that one address. A
 allowance, 120 requests a minute, is only spent by requests that are its own,
 fresh and not seen before, one turned away for that allowance included: by
 name up to three times the allowance a minute, and past that by date, nothing
-as old as what was turned away being taken again.
+as old as what was turned away being taken again. A request is dated against
+the clock once its body is in, and nothing dated before the core started is
+taken, since what it remembered went with the last run.
 
 **Tickets.** A client connected to a member asks it for a ticket to another
 (`group.ticket`): the member's signed statement of who vouches, for whom, at
@@ -303,7 +305,8 @@ reopens the machine keeps it. A machine the group dropped is remembered, by
 its address and by what it is, in storage every window shares
 (`boite.group.dropped`), with which admission of it that was
 (`GroupCore.epoch`): a window that holds it under another address lets it go
-too. Nothing saved for that
+too. Addresses make room for newer ones, 256 of them; a machine dropped is
+never forgotten to make room. Nothing saved for that
 address is read again, whichever window left it and wherever it sits, so a key
 left behind never passes for a pairing made by hand, and a link to that address
 asks as for a core nobody knows. No ticket is asked for it on the word of a
