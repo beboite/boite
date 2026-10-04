@@ -77,7 +77,10 @@ failure. It never quotes the body, which can echo a credential.
   and a `gateway` field: the plan, the entry's status (ready, cooldown, error
   or disabled), the credits, the display mode and its account count. The tray
   popup, the sidebar glance and the quota order therefore show them like any
-  account. Local Claude and Codex accounts read as unsupported meanwhile.
+  account. While Douane is enabled, the list holds only its entries: the
+  machine's own logins, whatever their provider, are neither listed nor read.
+  The gateway also reports a provider under its own id (`opencode_go`, `xai`),
+  which draws that provider's mark.
   `quotas.configure` refuses a `proxy:` id, because the gateway decides what it
   reports.
 - The cadence is the native one. A list within a minute of the last read

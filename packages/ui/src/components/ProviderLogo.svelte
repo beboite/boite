@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { providerLogos } from '../lib/provider-logos';
+  import { providerLogoOf } from '../lib/provider-logos';
 
   /**
    * The provider's own mark in its own colours, or its initial in
@@ -14,7 +14,7 @@
     size?: number;
   } = $props();
 
-  let logo = $derived(providerLogos[providerId] ?? null);
+  let logo = $derived(providerLogoOf(providerId));
   let initial = $derived((providerId.trim()[0] ?? '?').toUpperCase());
 </script>
 

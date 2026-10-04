@@ -116,13 +116,14 @@ export function sessionKey(ctx: SessionContext): string {
 /**
  * The core runs inside a Claude Code session on this machine and the CLI
  * refuses to nest: the child must not inherit the session's own markers.
+ * The account's variables are set on purpose and are kept.
  */
 export function childEnv(accountEnv: Record<string, string>): Record<string, string | undefined> {
-  const env: Record<string, string | undefined> = { ...process.env, ...accountEnv };
+  const env: Record<string, string | undefined> = { ...process.env };
   delete env['CLAUDECODE'];
   delete env['CLAUDE_PID'];
   for (const key of Object.keys(env)) {
     if (key.startsWith('CLAUDE_CODE_')) delete env[key];
   }
-  return env;
+  return { ...env, ...accountEnv };
 }
