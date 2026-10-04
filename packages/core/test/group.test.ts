@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { GROUP_INVITE_PREFIX, type CoordinationConfig } from '@boite/contracts';
 import { createHash } from 'node:crypto';
+import { writeSync } from 'node:fs';
 import { connect } from '../src/client.ts';
 import { settle } from '../src/coordination-wire.ts';
 import { GroupStore } from '../src/group.ts';
@@ -13,13 +14,21 @@ import { parseInvite, parseTicket } from '../src/group/ticket.ts';
 import { isAllowedOrigin } from '../src/server.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
+// DIAGNOSTIC, to remove: where this file stops on Windows. Written at once, whatever the event loop does next.
+const mark = (text: string): void => { writeSync(2, `[mark ${Math.round(performance.now())}] ${text}\n`); };
+
 const cores: TestCore[] = [];
 afterEach(async () => {
   const stopping = cores.splice(0);
+  mark(`afterEach: ${stopping.length} cores`);
   // Every roster exchange still in flight ends while all the servers answer. Stopping
   // a server under a request made from this same process crashed Bun on Windows.
   await Promise.all(stopping.map((core) => core.core.group.close()));
-  for (const core of stopping) await core.stop();
+  mark('afterEach: groups closed');
+  for (const core of stopping) {
+    await core.stop();
+    mark('afterEach: core stopped');
+  }
 });
 
 async function machine(): Promise<TestCore> {
@@ -195,28 +204,39 @@ test('an invitation is refused when it is malformed, unknown, or answered by ano
 });
 
 test('the shell of one member is handed an owner key by another, once per ticket', async () => {
+  mark('t7: start');
   const a = await machine();
   const b = await machine();
+  mark('t7: two cores');
   await a.core.group.create('Home');
+  mark('t7: created');
   await join(a, b);
+  mark('t7: joined');
   const shell = await a.connect();
+  mark('t7: shell connected');
   const ticket = await shell.call('group.ticket', { coreId: id(b) });
+  mark('t7: ticket');
   expect(ticket).toMatchObject({ coreId: id(b), addresses: [b.url] });
   expect(parseTicket(ticket.ticket).payload).toMatchObject({ iss: id(a), aud: id(b), sub: `core:${id(a)}`, role: 'owner' });
 
   const remote = await connect(b.url, '', { ticket: ticket.ticket });
+  mark('t7: remote connected');
   try {
     expect(remote.principal).toBe('owner');
     expect(remote.session?.token).toBeTruthy();
     expect((await remote.call('group.get', {}))?.self).toBe(id(b));
+    mark('t7: group.get');
     const listed = await remote.call('sessions.list', {});
+    mark('t7: sessions.list');
     expect(listed).toEqual([expect.objectContaining({ id: remote.session!.id, role: 'owner', group: true, current: true })]);
   } finally { remote.close(); }
   // The key the ticket became keeps working; the ticket itself is spent.
   const again = await connect(b.url, remote.session!.token);
+  mark('t7: again connected');
   expect(again.principal).toBe('owner');
   again.close();
   await expect(connect(b.url, '', { ticket: ticket.ticket })).rejects.toThrow('already used');
+  mark('t7: spent ticket refused');
   await expect(shell.call('group.ticket', { coreId: id(a) })).rejects.toThrow('not another machine');
   await expect(shell.call('group.ticket', { coreId: 'f'.repeat(64) })).rejects.toThrow('not another machine');
 });
