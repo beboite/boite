@@ -259,15 +259,37 @@ test('a ticket opens only at the address it names, and the key it becomes dies w
   expect(parseTicket(ticket.ticket).payload.u).toBe(b.url);
   const key = await connect(b.url, '', { ticket: ticket.ticket });
   await hangUp(b, key);
+  // Between a move and the next publication, b's own roster entry is behind what b gives. A ticket for the
+  // address that entry still lists is refused all the same: b reads what it gives at that moment.
+  const behind = (h: TestCore): void => {
+    const held = h.core.group as unknown as { roster: Roster };
+    held.roster = { ...held.roster, cores: held.roster.cores.map((core) => (core.coreId === id(b) ? { ...core, addresses: ['http://10.9.9.9:1'] } : core)) };
+  };
+  const rosters = [a, b].map((h) => (h.core.group as unknown as { roster: Roster }).roster);
+  behind(a);
+  behind(b);
+  await refusedHello(b, '', { ticket: (await shell.call('group.ticket', { coreId: id(b), url: 'http://10.9.9.9:1' })).ticket }, 'does not give');
+  expect(b.core.group.honours(key.session!.id)).toBe(true);
+  for (const [index, h] of [a, b].entries()) (h.core.group as unknown as { roster: Roster }).roster = rosters[index]!;
   // a makes another ticket on what it still lists, then b moves: it now gives an HTTPS address, and its plain HTTP one is given up.
   const late = await shell.call('group.ticket', { coreId: id(b), url: b.url });
   b.core.settings.set({ publicUrl: 'https://b.example' });
-  await waitFor(() => b.core.group.view('owner')!.cores.find((core) => core.coreId === id(b))!.addresses.includes('https://b.example'));
+  await waitFor(() => b.core.group.view('owner')!.cores.find((core) => core.coreId === id(b))!.addresses[0] === 'https://b.example');
   // Whoever now sits where b was is sent that ticket and carries it to b: it opens nothing.
   await refusedHello(b, '', { ticket: late.ticket }, 'does not give');
   // The key issued for the old address went with it, so sending it there gives nothing away either.
   await refusedHello(b, key.session!.token, undefined, 'token is wrong');
   expect(await b.connect().then((owner) => owner.call('sessions.list', {}))).toEqual([]);
+
+  // A key the group issued with no address remembered, as before addresses were, is revoked at the next start.
+  const c = await machine();
+  await join(a, c);
+  await waitFor(() => members(c).length === 3);
+  const old = await connect(c.url, '', { ticket: (await shell.call('group.ticket', { coreId: id(c) })).ticket });
+  await hangUp(c, old);
+  c.core.journal.deleteSetting('group:session-addresses');
+  restart(c);
+  await refusedHello(c, old.session!.token, undefined, 'token is wrong');
 });
 
 test('a ticket is refused when forged, expired, for another machine or from outside the group', async () => {
@@ -802,7 +824,7 @@ test('a recorded request sent again and again never spends the member\'s allowan
   const send = () => fetch(`${a.url}/agent-messages`, { method: 'POST', body: sealed.body, headers: { 'x-boite-peer': id(b), 'x-boite-signature': SEALED } });
   expect((await send()).status).toBe(200);
   // What somebody on the path recorded, sent 150 times: each is refused as seen before, none is charged to b.
-  for (let index = 0; index < 150; index += 1) expect((await send()).status).toBe(403);
+  for (let index = 0; index < 150; index += 1) expect((await send()).status).toBe(409);
   const entryOfA = (b.core.journal.getSetting('group') as Roster).cores.find((core) => core.coreId === id(a))!;
   const peer = { coreId: entryOfA.coreId, name: entryOfA.name, url: entryOfA.addresses[0]!, publicKey: entryOfA.publicKey };
   expect(await b.core.coordination.request(peer, 'directory', {})).toEqual([]);
@@ -864,6 +886,13 @@ test('requests are counted against the address they come from as they arrive, an
   for (let index = 0; index < REFUSALS_PER_MINUTE; index += 1) shared.begin(`10.0.2.${index}`, later)!(403);
   expect(shared.begin('10.0.3.1', later)).toBeNull();
   expect(shared.begin('10.4.4.4', later)).not.toBeNull();
+  // A copy of a request already served is the member's own traffic from an address it is known at, and a refusal from anywhere else.
+  const copies = new Refusals();
+  copies.begin('10.6.6.6', start)!(200, 'member-a');
+  for (let index = 0; index < 500; index += 1) copies.begin('10.6.6.6', start)!(409, 'member-a');
+  expect(copies.begin('10.6.6.6', start)).not.toBeNull();
+  for (let index = 0; index < REFUSALS_PER_MINUTE; index += 1) copies.begin('10.6.6.7', start)!(409, 'member-a');
+  expect(copies.begin('10.6.6.7', start)).toBeNull();
   // A request served that proved no name keeps no place of its own.
   const nameless = new Refusals(1);
   nameless.begin('10.9.9.9', start)!(200);

@@ -223,7 +223,10 @@ never of another's. A member the core never served yet can be turned away with
 the strangers while such a flood lasts. Requests from the machine itself are not
 counted, since a reverse proxy puts every remote peer behind that one address. A member's own
 allowance, 120 requests a minute, is only spent by requests that are its own,
-fresh and not seen before.
+fresh and not seen before. A copy of a request already served is answered 409.
+From an address the member is known at it is the member's own, a second
+address tried while the first was slow, and 600 a minute pass before they count
+as refusals; from anywhere else it is one.
 
 **Tickets.** A client connected to a member asks it for a ticket to another
 (`group.ticket`): the member's signed statement of who vouches, for whom, at
@@ -236,7 +239,10 @@ address it does not give, or no longer: a ticket a client was led to send where
 the member used to be opens nothing when carried to the member. The key the
 ticket becomes lives while the member still gives that address. When it
 publishes an HTTPS address, or its address changes, the keys issued for what it
-gave up are revoked, so a key sent there afterwards is worth nothing. The use and
+gave up are revoked, so a key sent there afterwards is worth nothing. Both
+checks read what the machine gives at that moment, off its interfaces and its
+settings, at every `hello`: the roster holds what it last published, which is
+behind for a few seconds after a move. The use and
 the session are one write in the journal, so a restart does not make a used
 ticket good again. A ticket is refused one minute after its date, plus one
 more for the difference between two clocks. From then on
@@ -276,7 +282,9 @@ machines the group brought say. A machine paired by hand is never touched,
 even when it sits at a member's address or another machine reports its name,
 and a machine the group brought never takes the place of the window's own core
 by reporting this computer's name. Opening a pairing link on a machine the
-group brought makes it one paired by hand from then on. A key the group handed
+group brought makes it one paired by hand from then on, and since a machine
+the group removed can mint such a link itself, a link that arrives in the
+address bar asks first. A key the group handed
 out for an address the machine no longer gives, or no longer allows once it has
 HTTPS, is dropped and the machine reached anew, the machine the window opened
 on included: the window then goes to a machine paired by hand, or to the

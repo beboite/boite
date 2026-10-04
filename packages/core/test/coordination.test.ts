@@ -278,7 +278,8 @@ test('federation rejects forged signatures, replay, sender substitution, clearte
   const request = (raw: string, sig: string) => fetch(`${two.h.url}/agent-messages`, { method: 'POST', body: raw, headers: { 'x-boite-peer': cardA.coreId, 'x-boite-signature': sig } });
   expect((await request(body, 'fake')).status).toBe(403);
   expect((await request(body, signature)).status).toBe(200);
-  expect((await request(body, signature)).status).toBe(403);
+  // A copy of a request already served has a status of its own: it is not a forgery.
+  expect((await request(body, signature)).status).toBe(409);
   expect((await request(body.replace(cardA.coreId, 'someone-else'), signature)).status).toBe(403);
   expect(() => coordinationUrl('http://192.0.2.1')).toThrow('HTTPS');
   expect(() => coordinationUrl('https://user:secret@example.test')).toThrow('credentials');

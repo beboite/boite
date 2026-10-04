@@ -87,9 +87,10 @@ export class Workspace {
     return lifecycle === this.#lifecycle;
   }
 
-  #primaryMachine(selected: Endpoint | null, remembered: StoredEnvironment[]): Machine {
-    // A machine the group brought stays one when it is the machine this window opens on.
-    const brought = remembered.find(e => e.url === store.endpointUrl);
+  #primaryMachine(selected: Endpoint | null, remembered: StoredEnvironment[], before: StoredEnvironment[] = []): Machine {
+    // A machine the group brought stays one when it is the machine this window opens on. When its saved entry
+    // went during the boot, its key refused, what the entry said before still holds: the group may drop it.
+    const brought = remembered.find(e => e.url === store.endpointUrl) ?? before.find(e => e.url === store.endpointUrl);
     const machine: Machine = {
       id: store.endpointUrl ?? 'local',
       label: remembered.find(e => e.url === selected?.url)?.label ?? (store.localCore ? strings.machines.local : store.core?.hostname ?? hostOf(store.endpointUrl)) ?? strings.machines.local,
@@ -218,7 +219,7 @@ export class Workspace {
     if (!this.#current(lifecycle)) return;
     this.active = store;
     // Read after the boot: a pairing link it opened on has just made this machine one paired by hand.
-    this.machines = [this.#primaryMachine(selected, readEnvironments())];
+    this.machines = [this.#primaryMachine(selected, readEnvironments(), saved)];
     if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('fake') === '1') {
       if (new URLSearchParams(window.location.search).get('machines') === '1') {
         await this.#addFakeMachine(lifecycle);

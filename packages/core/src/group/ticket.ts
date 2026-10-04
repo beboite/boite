@@ -14,6 +14,7 @@
  * roster.
  */
 
+import { createHash } from 'node:crypto';
 import { GROUP_INVITE_PREFIX, PAIRING_ROLES, type PairingRole } from '@boite/contracts';
 import { invalidParams, unauthorized } from '../errors.ts';
 import { ADDRESSES_MAX, checkAddress } from './roster.ts';
@@ -32,6 +33,16 @@ export interface Invite {
   x: string;
   /** The one-time grant. */
   t: string;
+}
+
+/** What names an invitation on the wire without being its grant. */
+export function inviteId(grant: string): string {
+  return createHash('sha256').update(`boite-group-invite-id\n${grant}`).digest('hex');
+}
+
+/** The grant as a pre-shared key: a join request opens only for the machine that minted this invitation. */
+export function invitePsk(grant: string): Buffer {
+  return createHash('sha256').update(`boite-group-invite-psk\n${grant}`).digest();
 }
 
 export function encodeInvite(invite: Invite): string {

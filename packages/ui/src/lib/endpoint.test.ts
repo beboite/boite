@@ -237,6 +237,27 @@ describe('environments', () => {
     expect(readStoredEndpoint()).toMatchObject({ url, token: 'new' });
   });
 
+  test('a pairing link on a machine the group brought asks the owner, one on a machine paired by hand does not', async () => {
+    const url = 'https://b.example';
+    rememberSession({ url, token: '', ticket: 't', coreId: 'b', groupId: 'grp' }, 'from-ticket');
+    const asked: string[] = [];
+    const approve = async (target: string) => { asked.push(target); return false; };
+    // The group brought it: a link, which a removed machine can mint for itself, does not make it the owner's without a yes.
+    at('/?core=https%3A%2F%2Fb.example&grant=g');
+    expect((await resolveEndpoint(false, approve))?.url).not.toBe(url);
+    expect(asked).toEqual([url]);
+    expect(readEnvironments()[0]).toMatchObject({ coreId: 'b', groupId: 'grp' });
+    // Reopened with the key it holds, no grant: nothing changes hands and nobody is asked.
+    at('/?core=https%3A%2F%2Fb.example');
+    expect(await resolveEndpoint(false, approve)).toMatchObject({ url, token: 'from-ticket' });
+    // Paired by hand: its own link goes through as before.
+    upsertEnvironment({ url: 'https://hand.example', token: 'hand', paired: true });
+    at('/?core=https%3A%2F%2Fhand.example&grant=g');
+    expect(await resolveEndpoint(false, approve)).toMatchObject({ url: 'https://hand.example', grant: 'g' });
+    expect(asked).toEqual([url]);
+    at('/');
+  });
+
   test('a link that reopens a known core is named before it is taken, a pairing link is not', () => {
     at('/?core=http%3A%2F%2F10.0.0.5%3A9000%2F');
     expect(linkedCore()).toBe('http://10.0.0.5:9000');

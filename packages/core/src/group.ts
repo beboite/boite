@@ -22,7 +22,7 @@
  * LAN the owner chose to listen on, the same as a `ws://` pairing.
  */
 
-import { createHash, randomUUID, verify } from 'node:crypto';
+import { randomUUID, verify } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
@@ -37,7 +37,7 @@ import { admissionInput, checkCard, checkRoster, clockOf, CORE_ENTRIES_MAX, DEVI
 import type { CoreCard, CoreEntry, DeviceEntry, Roster } from './group/roster.ts';
 import { boxPublic, boxSigningInput, newBoxKey, open, openResponse, pack, readBoxKey, seal, SEALED, sealedName, sealResponse, unpack } from './group/seal.ts';
 import type { Sealing } from './group/seal.ts';
-import { encodeInvite, encodeTicket, parseInvite, parseTicket, ticketSigningInput } from './group/ticket.ts';
+import { encodeInvite, encodeTicket, parseInvite, parseTicket, ticketSigningInput, inviteId, invitePsk } from './group/ticket.ts';
 import type { Invite } from './group/ticket.ts';
 import { newId, newToken } from './ids.ts';
 import { currentOs } from './paths.ts';
@@ -85,16 +85,6 @@ function groupName(value: unknown): string {
 }
 
 interface JoinReply { nonce: string; publicKey: string; roster?: unknown; error?: string }
-
-/** What names an invitation on the wire without being its grant. */
-function inviteId(grant: string): string {
-  return createHash('sha256').update(`boite-group-invite-id\n${grant}`).digest('hex');
-}
-
-/** The grant as a pre-shared key: a join request opens only for the machine that minted this invitation. */
-function invitePsk(grant: string): Buffer {
-  return createHash('sha256').update(`boite-group-invite-psk\n${grant}`).digest();
-}
 
 export class GroupStore {
   private roster: Roster | null = null;
@@ -301,6 +291,25 @@ export class GroupStore {
     };
   }
 
+  /**
+   * The addresses a ticket or a group key may name at this moment, read off
+   * the interfaces and the settings now: the roster holds what this machine
+   * last published, and between a move and the next publication it is behind.
+   */
+  private given(): string[] {
+    const ip = tailnetAddress();
+    const tailnet = ip === null ? null : { ip, name: null };
+    const listening = { ...this.core.boundEndpoint(), tailnet: this.onTailnet && ip === this.tailnet?.ip, publicUrl: this.core.settings.get().publicUrl };
+    return ticketAddresses(advertisedAddresses(listening, tailnet));
+  }
+
+  /** False for a key the group issued for an address this machine no longer gives, revoked on the spot. Any other key is none of the group's. */
+  honours(sessionId: string): boolean {
+    if (this.sessions[sessionId] === undefined || this.given().includes(this.vias[sessionId] ?? '')) return true;
+    this.reconcile();
+    return false;
+  }
+
   /** This core's word that a machine is in the group for one epoch. */
   private admission(groupId: string, coreId: string, epoch: number): CoreEntry['admit'] {
     return { by: this.selfId(), sig: this.core.coordination.signature(admissionInput(groupId, coreId, epoch)).toString('base64') };
@@ -366,9 +375,10 @@ export class GroupStore {
       const id = member.slice('device:'.length);
       return !cores.has(homeOf(id)) || roster.devices.some((device) => device.id === id && device.removed);
     };
-    // A key issued for an address this machine no longer gives is dead too: sent there now, it reaches somebody else.
-    const given = ticketAddresses(roster?.cores.find((core) => core.coreId === this.selfId())?.addresses ?? []);
-    const retired = (sessionId: string): boolean => this.vias[sessionId] !== undefined && !given.includes(this.vias[sessionId]);
+    // A key issued for an address this machine no longer gives is dead too: sent there now, it reaches somebody
+    // else. One with no address remembered was issued before addresses were, and goes the same way.
+    const given = this.given();
+    const retired = (sessionId: string): boolean => !given.includes(this.vias[sessionId] ?? '');
     this.reconciling = true;
     try {
       const gone = Object.entries(this.sessions).filter(([sessionId, member]) => dead(member) || retired(sessionId)).map(([sessionId]) => sessionId);
@@ -849,8 +859,7 @@ export class GroupStore {
       throw unauthorized('the group ticket expired, or the clocks of the two machines differ by more than a minute');
     }
     if (!PAIRING_ROLES.includes(payload.role)) throw unauthorized('the group ticket is malformed');
-    const given = ticketAddresses(roster.cores.find((core) => core.coreId === this.selfId())?.addresses ?? []);
-    if (!given.includes(payload.u)) throw unauthorized(`the group ticket was made for ${payload.u}, an address this machine does not give, or no longer`);
+    if (!this.given().includes(payload.u)) throw unauthorized(`the group ticket was made for ${payload.u}, an address this machine does not give, or no longer`);
     if (payload.sub.startsWith('core:')) {
       const member = payload.sub.slice('core:'.length);
       if (payload.role !== 'owner' || !liveCores(roster).some((core) => core.coreId === member)) throw unauthorized('the group ticket names a machine that is not in this group');
@@ -883,14 +892,4 @@ export class GroupStore {
     this.beginClose();
     await Promise.allSettled([...this.pending]);
   }
-}
-
-export function registerGroupMethods(core: Core): void {
-  core.router.register('group.get', (_params, ctx) => core.group.view(ctx.connection.identity.principal));
-  core.router.register('group.create', (params) => core.group.create(params?.name));
-  core.router.register('group.invite', () => core.group.invite());
-  core.router.register('group.join', (params) => core.group.join(params?.invite));
-  core.router.register('group.leave', () => core.group.leave());
-  core.router.register('group.remove', (params) => core.group.remove(params?.coreId));
-  core.router.register('group.ticket', (params, ctx) => core.group.ticket(params?.coreId, ctx.connection.identity, params?.url));
 }

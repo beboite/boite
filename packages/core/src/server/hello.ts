@@ -115,7 +115,8 @@ function authenticateToken(core: Core, token: string): Identity | null {
   if (sameSecret(token, core.token)) return { principal: 'owner', sessionId: null, threadId: null };
   if (token.length === 0) return null;
   const session = core.sessions.authenticate(token);
-  if (session !== null) return { principal: principalOf(session.role), sessionId: session.id, threadId: null };
+  // A key the group issued opens nothing once the address it was issued for is given up, whoever presents it.
+  if (session !== null) return core.group.honours(session.id) ? { principal: principalOf(session.role), sessionId: session.id, threadId: null } : null;
   const threadId = core.agents.authenticate(token);
   return threadId === null ? null : { principal: 'agent', sessionId: null, threadId };
 }

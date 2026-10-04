@@ -251,6 +251,17 @@ test('a refused key is sent nowhere: not through a link that reopens its core, n
   expect(boot).toHaveBeenCalledTimes(3);
 });
 
+test('a machine the group brought stays the group\'s to drop when its key is refused as the window opens on it', async () => {
+  const { w, a } = await setup();
+  a.endpointUrl = 'https://b.example';
+  upsertEnvironment({ url: 'https://b.example', token: 'old', paired: true, label: 'B', coreId: 'b', groupId: 'grp' });
+  // The hello is refused: the dead key and its saved entry go during the boot.
+  vi.spyOn(a, 'boot').mockImplementation(async () => { endpoints.removeEnvironment('https://b.example', 'old'); });
+  vi.spyOn(w, 'add').mockResolvedValue(true);
+  await w.boot();
+  expect(w.machines[0]).toMatchObject({ id: 'https://b.example', coreId: 'b', groupId: 'grp' });
+});
+
 test('a window whose machine the group dropped falls back on a machine paired by hand, never on the address it dropped', async () => {
   const { w, a } = await setup();
   a.endpointUrl = 'http://10.0.0.8:1';

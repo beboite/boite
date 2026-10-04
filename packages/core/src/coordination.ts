@@ -785,7 +785,7 @@ export class Coordination {
       text(envelope.nonce, 'nonce', 100);
       for (const [id, at] of this.nonces) if (now - at > 120_000) this.nonces.delete(id);
       const key = `${peer.coreId}:${envelope.nonce}`;
-      if (this.nonces.has(key)) throw new Error('replayed request');
+      if (this.nonces.has(key)) return new Response('this request was already received', { status: 409 });
       // The quota last: a request somebody recorded and sends again never spends the member's allowance.
       const rate = this.rates.get(peer.coreId) ?? { since: now, count: 0 };
       if (now - rate.since > 60_000) { rate.since = now; rate.count = 0; }

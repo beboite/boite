@@ -342,7 +342,11 @@ function knownEndpoint(url: string): Endpoint | null {
  * prompt typed here, so the user is asked first, and a missing asker refuses.
  */
 async function followLink(endpoint: Endpoint, approve?: (url: string) => Promise<boolean>): Promise<boolean> {
-  if (endpoint.url === normalise(window.location.origin) || knownEndpoint(endpoint.url) !== null) return true;
+  const known = endpoint.url === normalise(window.location.origin) || knownEndpoint(endpoint.url) !== null;
+  // A pairing link turns a machine the group brought into one paired by hand, out of the group's
+  // hands from then on. A machine the group removed can mint such a link itself: the owner is asked.
+  const promotes = endpoint.grant !== undefined && readEnvironments().some((env) => env.url === endpoint.url && env.coreId !== undefined);
+  if (known && !promotes) return true;
   return approve ? await approve(endpoint.url) : false;
 }
 
