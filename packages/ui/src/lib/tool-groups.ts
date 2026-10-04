@@ -4,16 +4,22 @@ import { fill, strings } from './strings';
 import { describeTool, fileName, partialSummaryOf, summaryOf, type ToolFamily } from './tool-summary';
 
 /*
- * How a message's tool calls read in the timeline: a run of
- * calls with nothing between them folds under one sentence ("Ran 3 commands,
- * read 2 files"), each call is a plain line rather than a card, and a command
- * reads as what it runs rather than as the shell that wraps it.
+ * How a message's activity reads in the timeline: a run of calls and
+ * reasoning with no answer between them folds under one sentence ("Ran 3
+ * commands, read 2 files"), each call is a plain line rather than a card, and a
+ * command reads as what it runs rather than as the shell that wraps it.
  */
 
 export type ToolPart = Extract<MessagePart, { type: 'tool' }>;
 
-/** One entry of a message's parts as the timeline draws it: a part on its own, or a run of tool calls. */
-export type PartRun = { kind: 'part'; index: number } | { kind: 'tools'; indices: number[] };
+/** A reasoning step: it folds into the activity around it like a call. */
+export type ThinkingStep = Extract<MessagePart, { type: 'thinking' }>;
+
+/** What an activity run holds: the calls and the reasoning between them. */
+export type ActivityPart = ToolPart | ThinkingStep;
+
+/** One entry of a message's parts as the timeline draws it: a part on its own, or a run of activity. */
+export type PartRun = { kind: 'part'; index: number } | { kind: 'activity'; indices: number[] };
 
 /**
  * A call that produced a diff, a page or an image stands alone: what it made is
@@ -27,49 +33,66 @@ function standsAlone(part: ToolPart): boolean {
 }
 
 /**
- * Splits the parts into runs. Blank text and empty untimed reasoning between
- * calls draw nothing; visible parts break a run to keep their timeline place.
- * A proposed plan is read, not a call to fold: it is a part of its own.
+ * Whether a reasoning step has anything to show: its words, a running clock, or
+ * at least a whole second spent. An empty step that took no time is noise.
+ */
+export function thinkingShown(part: ThinkingStep, live: boolean): boolean {
+  if (live || part.text.trim() !== '') return true;
+  return part.startedAt !== undefined && part.finishedAt != null && part.finishedAt - part.startedAt >= 1000;
+}
+
+/** Whether a run draws anything: any call does, reasoning only when `thinkingShown`. */
+export function activityShown(parts: readonly ActivityPart[], thinkingLive: boolean): boolean {
+  return parts.some((part, index) => part.type === 'tool' || thinkingShown(part, thinkingLive && index === parts.length - 1));
+}
+
+/**
+ * Splits the parts into runs. Calls and reasoning with nothing written between
+ * them are one run, drawn as one line that opens on its steps; blank text does
+ * not break it. Answer text, a call that made something and a proposed plan
+ * each keep their own place in the timeline.
  */
 export function partRuns(parts: readonly MessagePart[]): PartRun[] {
   const runs: PartRun[] = [];
-  let open: { kind: 'tools'; indices: number[] } | null = null;
-  let followsTool = false;
-  let nextVisible = 0;
-  const blank = (part: MessagePart | undefined): boolean => part !== undefined
-    && (part.type === 'text' || (part.type === 'thinking' && part.startedAt === undefined)) && part.text.trim() === '';
+  let open: { kind: 'activity'; indices: number[] } | null = null;
   parts.forEach((part, index) => {
     if (part.type === 'text' && part.text.trim() === '' && index < parts.length - 1) return;
-    if (part.type === 'thinking' && blank(part) && followsTool) {
-      // Reuse the lookahead across consecutive placeholders instead of rescanning them.
-      nextVisible = Math.max(nextVisible, index + 1);
-      while (blank(parts[nextVisible])) nextVisible++;
-      if (parts[nextVisible]?.type === 'tool') return;
-    }
-    followsTool = part.type === 'tool';
-    if (part.type !== 'tool' || planOf(part.name, part.input) !== null) {
+    const folds = part.type === 'thinking' || (part.type === 'tool' && planOf(part.name, part.input) === null);
+    if (!folds) {
       open = null;
       runs.push({ kind: 'part', index });
       return;
     }
-    if (standsAlone(part)) {
+    if (part.type === 'tool' && standsAlone(part)) {
       open = null;
-      runs.push({ kind: 'tools', indices: [index] });
+      runs.push({ kind: 'activity', indices: [index] });
       return;
     }
     if (open) {
       open.indices.push(index);
       return;
     }
-    open = { kind: 'tools', indices: [index] };
+    open = { kind: 'activity', indices: [index] };
     runs.push(open);
   });
   return runs;
 }
 
-/** The runs' keys: a run keeps its first part, so a lone call that gains a neighbour stays the same block. */
+/** The runs' keys: a run keeps its first part, so a lone step that gains a neighbour stays the same block. */
 export function runKey(run: PartRun): string {
-  return run.kind === 'part' ? `part-${run.index}` : `tools-${run.indices[0] ?? 0}`;
+  return run.kind === 'part' ? `part-${run.index}` : `activity-${run.indices[0] ?? 0}`;
+}
+
+/** First start to last finish over the steps that recorded both, or null when none did. */
+export function runSpan(parts: readonly ActivityPart[]): { start: number; end: number } | null {
+  let start = Infinity;
+  let end = -Infinity;
+  for (const part of parts) {
+    if (part.startedAt == null) continue;
+    start = Math.min(start, part.startedAt);
+    if (part.finishedAt != null) end = Math.max(end, part.finishedAt);
+  }
+  return Number.isFinite(start) ? { start, end: Number.isFinite(end) ? end : start } : null;
 }
 
 /** The shells an agent wraps its commands in, and the flag the command follows. */

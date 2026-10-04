@@ -665,11 +665,15 @@ The letter's creation time shows its age in the app's language, updates every
 minute while visible and exposes the exact date and time on hover.
 `tests/e2e/collaboration-ui.test.ts` checks desktop and phone in both themes.
 
-Each reasoning block stays folded at its position in the timeline. The core
-records its first appearance and the next part or message completion for every
-driver. Its clock runs while active and retains the final duration after reload.
-Older and imported blocks without timing metadata show no guessed duration.
-`tests/e2e/readability.test.ts` checks these steps and durations at both widths.
+Calls and reasoning with no answer text between them fold into one line,
+"Ran 6 commands" with the run's duration, that opens on its steps in order.
+While a step runs the line names it ("Running git", "Thinking") and its clock
+ticks. Reasoning with no words that took under a second is not drawn. The core
+records each block's first appearance and the next part or message completion
+for every driver, so durations survive a reload. Older and imported blocks
+without timing metadata show no guessed duration.
+`tests/e2e/readability.test.ts` and `tests/e2e/chat-delivery.test.ts` check
+these lines and durations at both widths.
 
 ### Theme colours
 
