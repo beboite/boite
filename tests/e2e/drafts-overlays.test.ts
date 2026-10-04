@@ -33,6 +33,18 @@ test('height-capped desktop popovers can scroll to their last action', async () 
       await escape(page);
       await page.waitFor(`!document.querySelector('[data-testid="${popup}"]')`);
     }
+    // Rows with a hint are taller than the minimum: capped, the list scrolls and none of them shrinks onto the next.
+    // A label's ink room overflows its row by under 3px at rest; a squashed row lost 7px or more.
+    await page.evaluate('globalThis.__boiteTest.workspace.active.startDraft(null)');
+    await page.waitFor('document.querySelector("[data-testid=draft-project]")');
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 330, deviceScaleFactor: 1, mobile: false });
+    await page.click('[data-testid=draft-project]');
+    await page.waitFor('document.querySelector("[data-testid=draft-project-menu]")');
+    await settle(page);
+    const list = await page.evaluate<{ client: number; scroll: number; squashed: number }>(`(() => { const el = document.querySelector('[data-testid=draft-project-menu]'); return { client: el.clientHeight, scroll: el.scrollHeight, squashed: Array.from(el.querySelectorAll('[data-row]')).filter(row => row.scrollHeight > row.clientHeight + 4).length }; })()`);
+    expect(list.scroll).toBeGreaterThan(list.client);
+    expect(list.squashed).toBe(0);
+    await page.screenshot(join(import.meta.dir, '.artifacts', 'draft-project-menu-short.png'));
   } finally { await page?.close(); await server.close(); }
 }, 60_000);
 
