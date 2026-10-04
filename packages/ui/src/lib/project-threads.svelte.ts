@@ -27,10 +27,10 @@ export class ProjectThreadView {
 
 export const projectThreadView = new ProjectThreadView();
 
-/** An ungrouped conversation or draft keeps its project in the main list. */
+/** A conversation or draft keeps its project visible, including folded working rows. */
 export function activeProject(entry: ProjectEntry): boolean {
   const store = entry.machine.store;
-  return store.threadsOf(entry.project.id).some(thread => !recentPreferences.groupWorking || !groupWorkingThread(store, thread))
+  return store.threadsOf(entry.project.id).length > 0
     || store.draftEntries.some(draft => draft.projectId === entry.project.id);
 }
 
