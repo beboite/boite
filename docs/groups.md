@@ -310,7 +310,10 @@ kept. Windows share that record without a lock, so two that write at the same
 instant can erase or lower what the other recorded: a window that hears the
 record change puts back what it knew of the machines dropped. A window closed
 at that instant cannot, and an address erased that way stays erased, since a
-pairing made by hand clears it too. Nothing saved for that
+pairing made by hand clears it too. The other way round, a write that started
+from an older record can put back the mark of an address a pairing made by
+hand had just cleared: that pairing is then not read, and the machine has to
+be paired again. Nothing saved for that
 address is read again, whichever window left it and wherever it sits, so a key
 left behind never passes for a pairing made by hand, and a link to that address
 asks as for a core nobody knows. No ticket is asked for it on the word of a
