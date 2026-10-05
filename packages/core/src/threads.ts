@@ -54,6 +54,7 @@ import { TurnRunner } from './threads/turn-runner.ts';
 import { markQueuedStopped } from './threads/turn-settlement.ts';
 import { ThreadFocus } from './threads/focus.ts';
 import { ProgressState } from './threads/progress.ts';
+import { checkIncognito, eraseIncognito, makeIncognitoFolder } from './threads/incognito.ts';
 
 type CreateParams = RpcParams<'threads.create'>;
 
@@ -180,6 +181,9 @@ export class ThreadStore {
     if (params.cwd !== undefined) {
       throw refused('cwd and worktree exclude each other: a worktree is the working directory', { cwd: params.cwd });
     }
+    if (params.incognito === true) {
+      throw refused('incognito and worktree exclude each other: an incognito conversation works in a folder the core makes', { field: 'incognito', expected: 'absent or false with worktree' });
+    }
     const { project, provider, account } = this.check(params);
     if (project.kind === 'drafts') {
       throw refused('a draft has no worktree: the drafts folder is not a git repository', { projectId: project.id });
@@ -199,25 +203,31 @@ export class ThreadStore {
 
   create(params: CreateParams, placed?: { id: ThreadId; branch: string | null; branchNamingPending?: boolean; parentThreadId?: ThreadId }): ThreadSummary {
     const { project, provider, account } = this.check(params);
+    const incognito = checkIncognito(params, project, placed !== undefined);
 
     const now = Date.now();
     const model = checkModel(provider, account.id, params.model ?? defaultModel(provider));
     const effort = checkEffort(provider, account.id, model, params.effort ?? null);
     const speed = checkSpeed(provider, account.id, model, params.speed ?? null);
+    const id = placed?.id ?? newId('thr_');
     // A worktree's directory is the core's own and uses the configured storage;
     // anything a client names has to be inside it. A draft with no directory
-    // named gets a new folder of its own, made once everything else passed.
+    // named gets a new folder of its own, made once everything else passed;
+    // an incognito one gets it in the data directory, away from the drafts.
     const cwd =
       params.cwd !== undefined && params.cwd.length > 0
         ? placed !== undefined
           ? params.cwd
           : checkCwd(project, params.cwd)
-        : project.kind === 'drafts'
-          ? makeDraftFolder(project.path, draftFolderName(titleOf(params.title), new Date(now)))
-          : project.path;
+        : incognito
+          ? makeIncognitoFolder(this.core.dataDir, id)
+          : project.kind === 'drafts'
+            ? makeDraftFolder(project.path, draftFolderName(titleOf(params.title), new Date(now)))
+            : project.path;
     const thread: ThreadSummary = {
-      id: placed?.id ?? newId('thr_'),
+      id,
       ...(placed?.parentThreadId ? { parentThreadId: placed.parentThreadId } : {}),
+      ...(incognito ? { incognito: true as const } : {}),
       projectId: project.id,
       title: titleOf(params.title),
       titleSource: 'prompt',
@@ -566,6 +576,7 @@ export class ThreadStore {
         this.core.terminals.stopThread(thread.id),
       ]));
       const ids = family.map(thread => thread.id);
+      if (root.incognito) return await eraseIncognito(this.core, root, ids);
       this.core.journal.append(
         { type: 'thread.removed', threadId: null, version: 1, payload: { threadIds: ids } },
         () => this.core.journal.stageThreadDeletion(threadId, family),

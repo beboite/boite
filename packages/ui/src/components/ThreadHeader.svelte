@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { ArrowLeft, ChevronDown, FolderInput, GitBranch, Network, PanelRight, Search, SquareTerminal, UsersRound } from '@lucide/svelte';
+  import { ArrowLeft, ChevronDown, FolderInput, GitBranch, Network, PanelRight, Search, SquareTerminal, UsersRound, VenetianMask } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { archiveThread } from '../lib/archive';
@@ -155,6 +155,29 @@
 
       <span class="spacer"></span>
 
+      <!-- Incognito is chosen before the first send, in the drafts only. -->
+      {#if !thread && store.draftInDrafts}
+        {@const on = store.draft?.incognito === true}
+        <button
+          type="button"
+          class="ghost trace"
+          class:on
+          title={on ? strings.drafts.incognitoStop : strings.drafts.incognitoStart}
+          aria-label={strings.drafts.incognito}
+          aria-pressed={on}
+          data-testid="draft-incognito"
+          onclick={() => store.setDraftIncognito(!on)}
+        >
+          <VenetianMask size={16} strokeWidth={1.75} />
+          <span class="label">{strings.drafts.incognito}</span>
+        </button>
+      {:else if thread?.incognito}
+        <span class="chip incognito" title={strings.drafts.incognitoOn} aria-label={strings.drafts.incognitoOn} data-testid="thread-incognito">
+          <VenetianMask size={13} strokeWidth={1.75} />
+          <span class="label">{strings.drafts.incognito}</span>
+        </span>
+      {/if}
+
       {#if thread?.parentThreadId}
         <button type="button" class="chip parent" data-testid="delegation-back-parent" onclick={() => void store.open(thread!.parentThreadId!)}>
           <ArrowLeft size={13} strokeWidth={1.75} />
@@ -266,6 +289,7 @@
     padding: 0 10px 0 8px;
   }
   .parent { gap: 4px; cursor: pointer; }
+  .incognito { gap: 4px; flex: none; }
 
   .on {
     background: var(--color-active);
@@ -296,6 +320,7 @@
     .pending { flex: none; min-width: var(--touch-target); justify-content: center; }
     .pending-text { display: none; }
     .trace { padding: 0; min-width: var(--touch-target); justify-content: center; }
+    .trace .label, .incognito .label { display: none; }
     /* The title's sheet holds these on a phone. */
     .in-title-menu { display: none; }
     .rename { width: 100%; }

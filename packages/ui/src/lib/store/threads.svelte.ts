@@ -592,6 +592,7 @@ export class Threads {
     effort?: string | null;
     speed?: string | null;
     worktree?: { branch?: string };
+    incognito?: boolean;
   }, options: { navigate?: boolean } = {}): Promise<ThreadSummary | null> {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;

@@ -25,6 +25,10 @@ import { MOVE_NOTE_PREFIX, moveNote } from './move.ts';
 import { withLoad } from './records.ts';
 
 type SessionPlan = Pick<ThreadSummary, 'sessionId' | 'sessionResumeAt'> & { session: ThreadRewind['session'] };
+/** What a fork needs of a source message to place its copy. */
+type MessageHead = Pick<Message, 'id' | 'turnId' | 'state'>;
+/** The identity a copied message takes in the fork. */
+type MessageCopy = Pick<Message, 'id' | 'threadId' | 'turnId' | 'state'>;
 
 /** The suffix a fork's title takes after its source's. */
 export const FORK_TITLE_SUFFIX = ' (fork)';
@@ -181,6 +185,9 @@ export class ThreadBranching {
     if (source.agentSessionId || source.projectId === null) {
       throw refused('a persistent agent session takes its work through Agents and cannot be forked', { threadId, field: 'threadId', expected: 'a conversation thread' });
     }
+    if (source.incognito) {
+      throw refused('an incognito conversation cannot be forked: a copy would outlive it', { threadId, field: 'threadId', expected: 'a conversation that is not incognito' });
+    }
     const rowid = this.core.journal.messageRowid(threadId, messageId);
     const target = rowid === null ? null : this.core.journal.getMessage(messageId);
     if (rowid === null || target === null) {
@@ -208,12 +215,7 @@ export class ThreadBranching {
   }
 
   private async writeFork(source: ThreadSummary, target: Message, rowid: number, placed: { id: ThreadId; title: string; cwd: string; branch: string | null; branchNamingPending: boolean }): Promise<ThreadSummary> {
-    const messages: Message[] = [];
-    for (const message of this.core.journal.walkMessages(source.id)) {
-      messages.push(message);
-      if (message.id === target.id) break;
-    }
-    const lastOfTurn = [...this.core.journal.walkTurnMessages(source.id, target.turnId)].at(-1)?.id === target.id;
+    const lastOfTurn = this.lastTurnMessage(source.id, target.turnId)?.id === target.id;
     // Codex can fork into the target cwd. Claude transcript cuts stay in their original folder.
     const checkpoint = lastOfTurn ? this.nativeForkCheckpoint(source, target.turnId) : null;
     let native: ForkedSession | null = null;
@@ -241,9 +243,15 @@ export class ThreadBranching {
         || (checkpoint && JSON.stringify(this.nativeForkCheckpoint(current, target.turnId)) !== JSON.stringify(checkpoint))))) {
         throw refused('the source thread changed while preparing its fork; retry the fork', { threadId: source.id, expected: 'the unchanged source boundary' });
       }
-      const result = this.persistFork(source, messages, [...new Set(messages.map(message => message.turnId))].flatMap(id => {
+      // Only ids and states are read here; `persistFork` copies each row's parts
+      // as stored text, with nothing parsed between this read and that write.
+      const heads = this.core.journal.db
+        .query('SELECT id, turn_id AS turnId, state FROM messages WHERE thread_id = ? AND rowid <= ? ORDER BY rowid')
+        .all(source.id, rowid) as MessageHead[];
+      const result = this.persistFork(source, heads, [...new Set(heads.map(message => message.turnId))].flatMap(id => {
         const turn = this.core.journal.getTurn(id); return turn ? [turn] : [];
-      }), placed, plan, { threadId: source.id, messageId: target.id, turnId: target.turnId, rowid });
+      }), placed, plan, { threadId: source.id, messageId: target.id, turnId: target.turnId, rowid },
+      (head, copy) => this.core.journal.copyMessage(head.id, copy));
       await native?.release().catch(cleanup => this.core.log('error', `native fork process cleanup failed: ${String(cleanup)}`, { threadId: placed.id }));
       return result;
     } catch (error) {
@@ -267,10 +275,12 @@ export class ThreadBranching {
     ];
     return this.persistFork(source, [...snapshot, ...exchange], [...turns.map(turn => ({ ...turn, checkpoint: null })), sideTurn], {
       id: newId('thr_'), title: `${source.title}${FORK_TITLE_SUFFIX}`, cwd: source.cwd, branch: source.branch, branchNamingPending: false,
-    }, null, { threadId: source.id, messageId: snapshot.at(-1)?.id ?? null, turnId: snapshot.at(-1)?.turnId ?? null, sideQuestion: true });
+    }, null, { threadId: source.id, messageId: snapshot.at(-1)?.id ?? null, turnId: snapshot.at(-1)?.turnId ?? null, sideQuestion: true },
+    (message, copy) => this.core.journal.putMessage({ ...structuredClone(message), ...copy }));
   }
 
-  private persistFork(source: ThreadSummary, messages: Message[], originals: Turn[], placed: { id: ThreadId; title: string; cwd: string; branch: string | null; branchNamingPending: boolean }, plan: SessionPlan | null, from: Record<string, unknown>): ThreadSummary {
+  /** Writes the fork; `write` stores each message's copy inside the fork's transaction. */
+  private persistFork<M extends MessageHead>(source: ThreadSummary, messages: readonly M[], originals: Turn[], placed: { id: ThreadId; title: string; cwd: string; branch: string | null; branchNamingPending: boolean }, plan: SessionPlan | null, from: Record<string, unknown>, write: (message: M, copy: MessageCopy) => void): ThreadSummary {
     const now = Date.now();
     const thread: ThreadSummary = {
       id: placed.id,
@@ -328,8 +338,7 @@ export class ThreadBranching {
         usage: null,
       });
     }
-    const copies: Message[] = messages.map((message) => ({
-      ...structuredClone(message),
+    const copies: MessageCopy[] = messages.map((message) => ({
       id: newId('msg_'),
       threadId: thread.id,
       turnId: turnIds.get(message.turnId) ?? message.turnId,
@@ -345,7 +354,7 @@ export class ThreadBranching {
       () => {
         this.core.journal.putThread(thread);
         for (const turn of turns) this.core.journal.putTurn(turn);
-        for (const message of copies) this.core.journal.putMessage(message);
+        messages.forEach((message, index) => write(message, copies[index]!));
       },
     );
     const row = withLoad(this.core, this.threads.require(thread.id));

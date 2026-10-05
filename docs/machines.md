@@ -169,11 +169,12 @@ owns HTTPS/pairing setup; [server deployment](server.md) owns host reachability.
 
 ## Two views
 
-Projects is the default. Projects appear by recent user activity, using the
-latest accepted user message among their visible threads, or creation time
-when no message exists. Assistant output and title changes leave that order
-alone. Click Projects again to switch to Custom order, then drag project
-headers to rearrange them. Their menus also offer Move project up and Move
+The sidebar's Display options menu (the sliders icon) chooses between Projects
+and Recent, above its grouping switches. Projects is the default. Projects
+appear by recent user activity, using the latest accepted user message among
+their visible threads, or creation time when no message exists. Assistant
+output and title changes leave that order alone. The order button under the
+switch toggles to Custom order; then drag project headers to rearrange them. Their menus also offer Move project up and Move
 project down, including on a phone. Switching back to recent activity keeps
 the saved custom arrangement. The view and custom order belong to this device.
 

@@ -106,7 +106,7 @@ test('remote file previews load under the shell content security policy', async 
     await client.call('turns.start', { threadId: thread.id, prompt: 'Open [the capture](capture.png) or [the audio](preview.wav) from this machine.' });
     await done;
     await client.call('artifacts.publish', { threadId: thread.id, path: 'large-picture.png' });
-    page = await BrowserPage.launch({ url: pairingUrlOf(core), experiments: ['chat-artifacts'], windowSize: { width: 1280, height: 900 } });
+    page = await BrowserPage.launch({ url: pairingUrlOf(core), windowSize: { width: 1280, height: 900 } });
     await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
     // A different hostname gives the real core a remote origin without leaving loopback.
     const remote = core.url.replace('127.0.0.1', 'localhost');
@@ -204,8 +204,6 @@ test('agent deliverables and file links open in chat on desktop and paired phone
     await client.call('artifacts.publish', { threadId: thread.id, path: 'large-picture.png' });
     for (const mobile of [false, true]) {
       page = await BrowserPage.launch({ url: mobile ? await mintPairing(core) : pairingUrlOf(core) });
-      await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
-      await page.evaluate('localStorage.setItem("boite.experiments", JSON.stringify(["chat-artifacts"])); location.reload()');
       await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
       await page.click(`[data-thread-id="${thread.id}"]`);
       await page.waitFor('document.querySelector("[data-testid=artifact-download]")');

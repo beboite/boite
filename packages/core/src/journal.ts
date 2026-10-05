@@ -13,6 +13,9 @@ import type {
   Timestamp,
   Turn,
 } from '@boite/contracts';
+import { isNativeAgentPart } from './journal/native-agent-parts.ts';
+import { TRAIL_ONLY, trailOf } from './journal/trail.ts';
+import { copyBlobs, hydrate, hydratePart, storeParts } from './journal/part-blobs.ts';
 import { migrate } from './journal/schema.ts';
 import { toAccount, toMessage, toProcess, toProject, toThread, toTurn, parseJson } from './journal/rows.ts';
 import type { AccountRow, MessageRow, ProcessRow, ProjectIconRow, ProjectRow, ThreadRow, TurnRow } from './journal/rows.ts';
@@ -78,6 +81,8 @@ export class Journal {
       // A large transaction grows the WAL file; this lets it shrink back at the next checkpoint.
       this.db.exec('PRAGMA journal_size_limit = 33554432');
       this.db.transaction(() => migrate(this.db, file))();
+      // An incognito conversation never outlives the core that held it.
+      this.purgeIncognitoThreads();
     } catch (error) {
       this.db.close(false);
       throw error;
@@ -153,6 +158,7 @@ export class Journal {
     try {
       this.flushDeltas();
       this.persistMessages();
+      this.purgeIncognitoThreads();
     } finally {
       this.stream.clear();
       this.closed = true;
@@ -231,8 +237,8 @@ export class Journal {
     this.db
       .query(
         `INSERT OR REPLACE INTO threads
-         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, parent_thread_id, prompt_cache, agent_session_id, session_resume_at, title_state, branch_naming_pending, fork_origin, done_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, parent_thread_id, prompt_cache, agent_session_id, session_resume_at, title_state, branch_naming_pending, fork_origin, done_at, incognito)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         thread.id,
@@ -265,6 +271,7 @@ export class Journal {
         thread.branchNamingPending === true ? 1 : 0,
         thread.forkOrigin ? JSON.stringify(thread.forkOrigin) : null,
         thread.doneAt ?? null,
+        thread.incognito ? 1 : 0,
       );
   }
 
@@ -329,6 +336,15 @@ export class Journal {
     })();
   }
 
+  /** Incognito conversations and the sub-threads they started. */
+  private purgeIncognitoThreads(): void {
+    // Almost always none: then the family query is never run.
+    const roots = (this.db.query('SELECT id FROM threads WHERE incognito = 1').all() as { id: string }[]).map(row => row.id);
+    if (roots.length === 0) return;
+    const children = this.db.query(`SELECT id FROM threads WHERE parent_thread_id IN (${roots.map(() => '?').join(', ')})`).all(...roots) as { id: string }[];
+    this.deleteThreads([...roots, ...children.map(row => row.id)]);
+  }
+
   /** Purge expired families atomically, using their root's deletion time. */
   purgeDeletedThreads(before: number): number {
     if (this.closed) return 0;
@@ -346,7 +362,7 @@ export class Journal {
     // table keyed by thread is cleared here, events included, so a removed
     // project's prompts and tool output leave the disk.
     this.db.transaction(() => {
-      for (const table of ['background_observations', 'turn_requests', 'turns', 'messages', 'processes', 'coordination_letters', 'coordination_wakes', 'events']) {
+      for (const table of ['background_observations', 'turn_requests', 'turns', 'messages', 'native_agent_messages', 'part_blobs', 'processes', 'coordination_letters', 'coordination_wakes', 'events']) {
         const query = this.db.query(`DELETE FROM ${table} WHERE thread_id = ?`);
         for (const id of threadIds) query.run(id);
       }
@@ -519,10 +535,32 @@ export class Journal {
         message.threadId,
         message.turnId,
         message.role,
-        JSON.stringify(message.parts),
+        storeParts(this.db, message),
         message.state,
         message.createdAt,
       );
+    if (message.parts.some(isNativeAgentPart)) this.markNativeAgents(message.id, message.threadId);
+  }
+
+  /** Names a message among those the team view reads for native agent calls (`native_agent_messages`). */
+  markNativeAgents(messageId: string, threadId: string): void {
+    this.db.query('INSERT OR IGNORE INTO native_agent_messages (message_id, thread_id) VALUES (?, ?)').run(messageId, threadId);
+  }
+
+  /**
+   * Writes a copy of message `sourceId` under a new id, thread, turn and state,
+   * keeping its role, parts and creation time. The stored parts JSON is copied
+   * as text, never parsed. A message still held open is written from memory:
+   * its row may be behind. Call after `flushDeltas` (`append` does it first).
+   */
+  copyMessage(sourceId: string, copy: Pick<Message, 'id' | 'threadId' | 'turnId' | 'state'>): void {
+    const open = this.stream.openCopy(sourceId);
+    if (open !== undefined) return this.putMessage({ ...open, ...copy });
+    this.db.query(`INSERT INTO messages (id, thread_id, turn_id, role, parts, state, created_at)
+      SELECT ?, ?, ?, role, parts, ?, created_at FROM messages WHERE id = ?`).run(copy.id, copy.threadId, copy.turnId, copy.state, sourceId);
+    this.db.query('INSERT OR IGNORE INTO native_agent_messages (message_id, thread_id) SELECT ?, ? FROM native_agent_messages WHERE message_id = ?')
+      .run(copy.id, copy.threadId, sourceId);
+    copyBlobs(this.db, sourceId, copy);
   }
 
   getMessage(messageId: string): Message | null {
@@ -530,13 +568,15 @@ export class Journal {
     const open = this.stream.openCopy(messageId);
     if (open !== undefined) return open;
     const row = this.db.query('SELECT * FROM messages WHERE id = ?').get(messageId) as MessageRow | null;
-    return row === null ? null : toMessage(row);
+    return row === null ? null : hydrate(this.db, toMessage(row));
   }
 
   /** Held parts for a selected live message, without reading or writing its stored JSON. */
   streamingMessage(messageId: string): Message | undefined {
     return this.stream.openCopy(messageId);
   }
+
+  hasOpenMessages(): boolean { return this.stream.hasOpen(); }
 
   listMessages(threadId: string): Message[] {
     this.flushDeltas();
@@ -606,7 +646,7 @@ export class Journal {
    * are an index search, descending, with no sort step and no scan of the rest of
    * the thread.
    */
-  listMessagePage(threadId: string, options: { beforeRowid?: number; limit: number; project?: Projection }): MessagePage {
+  listMessagePage(threadId: string, options: { beforeRowid?: number; limit: number; project?: Projection; toolPreviews?: boolean }): MessagePage {
     // Subscribers have already received buffered deltas. A reload must not replace
     // those messages with an older projection while the next delta is streaming.
     this.flushDeltas();
@@ -623,7 +663,7 @@ export class Journal {
       for (const row of rows) {
         if (messages.length >= limit || bytes >= MESSAGE_PAGE_MAX_BYTES) { older = true; break; }
         // One complete attachment-sized message can exceed the page budget.
-        const message = this.currentMessage(row as MessageRow);
+        const message = this.currentMessage(row as MessageRow, options.toolPreviews);
         const { sent: projected, size } = sent(message, options.project);
         const next = bytes + size + (messages.length ? 1 : 0);
         if (messages.length && next > MESSAGE_PAGE_MAX_BYTES) { older = true; break; }
@@ -643,7 +683,7 @@ export class Journal {
    * newest one returned while the thread holds newer ones, and is null once
    * the page reaches the last message.
    */
-  listMessagesForward(threadId: string, fromRowid: number, limit: number, project?: Projection): { messages: Message[]; sent: Message[]; after: string | null } {
+  listMessagesForward(threadId: string, fromRowid: number, limit: number, project?: Projection, toolPreviews = false): { messages: Message[]; sent: Message[]; after: string | null } {
     this.flushDeltas();
     const cap = Math.max(1, Math.trunc(limit));
     const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?');
@@ -652,7 +692,7 @@ export class Journal {
     try {
       for (const row of statement.iterate(threadId, fromRowid, cap + 1)) {
         if (messages.length >= cap || bytes >= MESSAGE_PAGE_MAX_BYTES) { newer = true; break; }
-        const message = this.currentMessage(row as MessageRow);
+        const message = this.currentMessage(row as MessageRow, toolPreviews);
         const { sent: projected, size } = sent(message, project);
         const next = bytes + size + (messages.length ? 1 : 0);
         if (messages.length && next > MESSAGE_PAGE_MAX_BYTES) { newer = true; break; }
@@ -671,7 +711,7 @@ export class Journal {
   }
 
   /** The complete reconnect tail, or null when its count or the serialized bytes `project` sends exceed a page. */
-  listMessagesFrom(threadId: string, fromRowid: number, limit: number, project?: Projection): { messages: Message[]; sent: Message[] } | null {
+  listMessagesFrom(threadId: string, fromRowid: number, limit: number, project?: Projection, toolPreviews = false): { messages: Message[]; sent: Message[] } | null {
     this.flushDeltas();
     const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?');
     const messages: Message[] = [], out: Message[] = [];
@@ -679,7 +719,7 @@ export class Journal {
     try {
       for (const row of statement.iterate(threadId, fromRowid, limit + 1)) {
         if (messages.length >= limit) return null;
-        const message = this.currentMessage(row as MessageRow);
+        const message = this.currentMessage(row as MessageRow, toolPreviews);
         const { sent: projected, size } = sent(message, project);
         bytes += size + (messages.length ? 1 : 0);
         if (bytes > MESSAGE_PAGE_MAX_BYTES) return null;
@@ -700,6 +740,8 @@ export class Journal {
   truncateMessages(threadId: string, fromRowid: number): { messageIds: string[]; turnIds: string[] } {
     const removed = this.messageIdsFrom(threadId, fromRowid);
     this.db.query('DELETE FROM turn_requests WHERE thread_id = ? AND message_id IN (SELECT id FROM messages WHERE thread_id = ? AND rowid >= ?)').run(threadId, threadId, fromRowid);
+    this.db.query('DELETE FROM native_agent_messages WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ? AND rowid >= ?)').run(threadId, fromRowid);
+    this.db.query('DELETE FROM part_blobs WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ? AND rowid >= ?)').run(threadId, fromRowid);
     this.db.query('DELETE FROM messages WHERE thread_id = ? AND rowid >= ?').run(threadId, fromRowid);
     for (const turnId of removed.turnIds) {
       // An unknown accepted follow-up might be the removed input. Never acknowledge it again.
@@ -725,8 +767,20 @@ export class Journal {
   }
 
   /** Only selected rows need current parts; reads leave the persistence timer alone. */
-  private currentMessage(row: MessageRow): Message {
-    return this.stream.openCopy(row.id) ?? toMessage(row);
+  private currentMessage(row: MessageRow, toolPreviews = false): Message {
+    return this.stream.openCopy(row.id) ?? hydrate(this.db, toMessage(row), toolPreviews);
+  }
+
+  /** One part of a message, reading only that part's large values. */
+  messagePart(messageId: string, find: number | ((part: MessagePart) => boolean)): { message: Pick<Message, 'id' | 'threadId'>; part: MessagePart | undefined } | null {
+    this.flushDeltas();
+    const open = this.stream.openCopy(messageId);
+    const row = open ? null : this.db.query('SELECT * FROM messages WHERE id = ?').get(messageId) as MessageRow | null;
+    const message = open ?? (row && toMessage(row));
+    if (!message) return null;
+    const index = typeof find === 'number' ? find : message.parts.findIndex(find);
+    if (index < 0 || index >= message.parts.length) return { message, part: undefined };
+    return { message, part: open ? message.parts[index]! : hydratePart(this.db, messageId, index, message.parts[index]!) };
   }
 
   setMessageState(messageId: string, state: Message['state']): void {
@@ -827,45 +881,9 @@ export class Journal {
   }
 
   private writeEvent(event: JournalEvent): void {
+    const payload = TRAIL_ONLY.has(event.type) ? trailOf(event.payload) : event.payload;
     this.db
       .query('INSERT INTO events (thread_id, ts, type, version, payload) VALUES (?, ?, ?, ?, ?)')
-      .run(event.threadId, event.ts ?? Date.now(), event.type, event.version, JSON.stringify(event.payload ?? null));
+      .run(event.threadId, event.ts ?? Date.now(), event.type, event.version, JSON.stringify(payload ?? null));
   }
-}
-
-/** How long events are kept. The projections hold the state; events are the recent trail. */
-export const EVENT_RETENTION_MS = 30 * 86_400_000;
-const RETENTION_FIRST_MS = 60_000;
-const RETENTION_EVERY_MS = 86_400_000;
-const RETENTION_BATCH = 5_000;
-
-/**
- * Prunes events past the retention a minute after start and then daily, one
- * batch per timer tick so that no pass holds the event loop on an old machine.
- * Returns the stop.
- */
-export function scheduleEventRetention(journal: Journal, onError: (message: string) => void): () => void {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const arm = (delay: number): void => {
-    timer = setTimeout(pass, delay);
-    timer.unref?.();
-  };
-  const pass = (): void => {
-    timer = null;
-    if (journal.isClosed()) return;
-    try {
-      if (journal.pruneEvents(Date.now() - EVENT_RETENTION_MS, RETENTION_BATCH) > 0) {
-        arm(10);
-        return;
-      }
-    } catch (error) {
-      onError(`journal event retention: ${messageOfError(error)}`);
-    }
-    arm(RETENTION_EVERY_MS);
-  };
-  arm(RETENTION_FIRST_MS);
-  return () => {
-    if (timer !== null) clearTimeout(timer);
-    timer = null;
-  };
 }

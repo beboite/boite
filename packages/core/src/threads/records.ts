@@ -6,9 +6,10 @@ import { notFound } from '../errors.ts';
 /** The journalled tool call a client names by message and tool id, in a thread it can read. */
 function journalledTool(core: Core, params: { threadId: ThreadId; messageId: MessageId; toolId: string }): Extract<MessagePart, { type: 'tool' }> {
   core.threads.require(params.threadId);
-  const message = core.journal.getMessage(params.messageId);
-  if (!message || message.threadId !== params.threadId) throw notFound(`message ${params.messageId} is not a message of thread ${params.threadId}`, params);
-  const part = message.parts.find(part => part.type === 'tool' && part.toolId === params.toolId);
+  // Only this tool's output is read, not every screenshot of its message.
+  const found = core.journal.messagePart(params.messageId, part => part.type === 'tool' && part.toolId === params.toolId);
+  if (!found || found.message.threadId !== params.threadId) throw notFound(`message ${params.messageId} is not a message of thread ${params.threadId}`, params);
+  const part = found.part;
   if (!part || part.type !== 'tool') throw notFound(`tool ${params.toolId} is not a tool of message ${params.messageId}`, params);
   return part;
 }

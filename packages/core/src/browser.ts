@@ -46,7 +46,7 @@ export class BrowserControl {
     const previous = this.hosts.get(threadId);
     if (enabled && allowAgentControl !== true && !remote) {
       if (previous?.connection.id === connection.id) this.release(threadId);
-      throw refused('browser.host requires explicit consent: enable Agent browser control or Live browser on other devices in Settings > Experiments on the hosting desktop');
+      throw refused('browser.host requires explicit consent: enable Agent browser control in Settings > General, or Live browser on other devices in Settings > Experiments, on the hosting desktop');
     }
     if (!enabled) {
       if (previous?.connection.id === connection.id) this.release(threadId);
@@ -129,7 +129,7 @@ export class BrowserControl {
     const host = this.hosts.get(params.threadId);
     if (host && host.expires >= Date.now() && !host.agent) {
       this.core.threads.require(params.threadId);
-      throw refused('Open this conversation in the Boite desktop app and enable Agent browser control in Settings > Experiments.');
+      throw refused('Open this conversation in the Boite desktop app and enable Agent browser control in Settings > General.');
     }
     return this.dispatch(params);
   }
@@ -144,7 +144,7 @@ export class BrowserControl {
     const host = this.hosts.get(threadId);
     if (!host || host.expires < Date.now()) {
       this.release(threadId);
-      throw refused('Open this conversation in the Boite desktop app and enable Agent browser control in Settings > Experiments.');
+      throw refused('Open this conversation in the Boite desktop app and enable Agent browser control in Settings > General.');
     }
     const capture = action.kind === 'remote-frame';
     if (this.pending.size >= 16 || [...this.pending.values()].some(p => p.threadId === threadId && p.capture === capture)) throw refused('the browser is busy; wait for the previous command');

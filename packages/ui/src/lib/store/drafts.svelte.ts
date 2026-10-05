@@ -147,7 +147,8 @@ export class Drafts {
     if (!s.draft) return;
     const key = projectKey(s.draft.projectId);
     const input = this.ctx.composer.composerStates.draft;
-    if (hasContent(input)) this.saved[key] = { draft: { ...s.draft }, choice: s.draftChoice, input: input! };
+    // An incognito draft is never set aside: leaving it lets its words go.
+    if (hasContent(input) && !s.draft.incognito) this.saved[key] = { draft: { ...s.draft }, choice: s.draftChoice, input: input! };
     else delete this.saved[key];
   }
 
@@ -156,7 +157,7 @@ export class Drafts {
     const s = this.ctx.store;
     const saved = this.saved[projectKey(projectId)];
     this.ctx.composer.composerStates.draft = saved?.input ?? empty();
-    s.draft = saved ? { ...saved.draft } : { projectId, worktree: s.projects.some(p => p.id === projectId && p.kind !== 'drafts' && p.repository !== false && p.worktreeDefault === true) };
+    s.draft = saved ? { ...saved.draft } : { projectId, worktree: s.projects.some(p => p.id === projectId && p.kind !== 'drafts' && p.repository === true && p.worktreeDefault === true) };
     s.draftChoice = saved?.choice ?? null;
   }
 
@@ -229,7 +230,8 @@ export class Drafts {
   #capture(source: Source | null, key = source ? entryKey(source.section, source.id) : ''): void {
     if (!this.#key) return;
     try {
-      const input = source && hasContent(source.input) ? savedInput(source.input, this.#assetId) : null;
+      // Nothing typed into an incognito conversation or its draft reaches the device's storage.
+      const input = source && hasContent(source.input) && !this.#incognito(source) ? savedInput(source.input, this.#assetId) : null;
       const value = input && source ? source.section === 'drafts' ? { draft: source.draft, input } : input : null;
       const stored = this.#storedAssetIds;
       // Until a strict durable write succeeds, keep inline bytes in the atomic
@@ -300,6 +302,12 @@ export class Drafts {
     this.#timer = undefined;
     this.#newAsset = false;
     if (this.#pending) this.#schedule();
+  }
+
+  #incognito(source: Source): boolean {
+    if (source.section === 'drafts') return source.draft?.incognito === true;
+    const s = this.ctx.store;
+    return s.openThread?.id === source.id ? s.openThread.incognito === true : s.threads.some(thread => thread.id === source.id && thread.incognito);
   }
 
   #assetId = (bytes: string): string => {

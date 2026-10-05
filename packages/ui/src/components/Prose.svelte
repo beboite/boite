@@ -4,6 +4,7 @@
   import { ParagraphScan, answerText } from '../lib/message-display';
   import { strings } from '../lib/strings';
   import { experimentOn } from '../lib/experiments.svelte';
+  import { featureOn } from '../lib/features.svelte';
   import type { Store } from '../lib/store.svelte';
   import ChatFile from './ChatFile.svelte';
   import { executableLink, localFileDirectory, openLocalFile, openChatFile } from '../lib/local-files';
@@ -14,7 +15,7 @@
   let { text, live = false, typing = false, bubble = false, store, threadId }: { text: string; live?: boolean; typing?: boolean; bubble?: boolean; store?: Store; threadId?: string } = $props();
   let selected = $state<{ path: string; line?: number } | null>(null);
   const directLinks = $derived(experimentOn('open-chat-links'));
-  const rich = $derived(experimentOn('chat-artifacts') || directLinks);
+  const rich = $derived(featureOn('chat-artifacts') || directLinks);
   let opening = false;
   function follow(event: MouseEvent): void {
     const anchor = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[href]') : null;

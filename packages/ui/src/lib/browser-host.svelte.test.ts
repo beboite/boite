@@ -5,6 +5,7 @@ import { browserProfiles } from './browser-profiles.svelte';
 import { hostBrowser } from './browser-host';
 import { watchBrowserHosts } from './browser-hosts.svelte';
 import { writeExperiments } from './experiments';
+import { resetFeatures, setFeature } from './features';
 import type { Store } from './store.svelte';
 import { browserBridge } from './browser-bridge';
 import { rightPanel } from './right-panel.svelte';
@@ -26,10 +27,13 @@ vi.mock('./browser-recording', () => ({ BrowserRecorder: class {
   dispose() { this.recording = false; this.disposed = true; }
 } }));
 let stop: (() => void) | undefined;
-afterEach(() => { stop?.(); stop = undefined; writeExperiments([]); rightPanel.forget('remote-thread'); vi.restoreAllMocks(); automateBrowser.mockClear(); vi.mocked(browserBridge.protocol!).mockReset(); });
+/** The two consents: the agent control switch in Settings and the browser sharing experiment. */
+function consent(agent: boolean, remote: boolean) { setFeature('agent-browser-control', agent); writeExperiments(remote ? ['remote-browser'] : []); }
+afterEach(() => { stop?.(); stop = undefined; writeExperiments([]); resetFeatures(); rightPanel.forget('remote-thread'); vi.restoreAllMocks(); automateBrowser.mockClear(); vi.mocked(browserBridge.protocol!).mockReset(); });
 
-test('the desktop grants no browser access by default and stops dispatching as soon as consent is withdrawn', async () => {
+test('the desktop grants no browser access with both consents off and stops dispatching as soon as consent is withdrawn', async () => {
   vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
+  consent(false, false);
   let requested: (request: RpcEvents['browser.requested']) => void = () => {};
   const off = vi.fn();
   const client = { call: vi.fn(async (..._args: unknown[]) => ({})), on: vi.fn((name: string, callback: typeof requested) => { if (name !== 'browser.requested') return () => {}; requested = callback; return off; }) };
@@ -37,14 +41,14 @@ test('the desktop grants no browser access by default and stops dispatching as s
   hostBrowser(store, 'thread')();
   expect(client.on).not.toHaveBeenCalled();
   expect(client.call).not.toHaveBeenCalled();
-  writeExperiments(['agent-browser-control']);
+  consent(true, false);
   stop = hostBrowser(store, 'thread');
   expect(client.call).toHaveBeenCalledWith('browser.host', { threadId: 'thread', enabled: true, allowAgentControl: true, remote: false, live: false });
-  writeExperiments(['agent-browser-control', 'remote-browser']);
+  consent(true, true);
   expect(client.call).toHaveBeenLastCalledWith('browser.host', { threadId: 'thread', enabled: true, allowAgentControl: true, remote: true, live: false });
-  writeExperiments(['agent-browser-control']);
+  consent(true, false);
   expect(client.call).toHaveBeenLastCalledWith('browser.host', { threadId: 'thread', enabled: true, allowAgentControl: true, remote: false, live: false });
-  writeExperiments([]);
+  consent(false, false);
   requested({ threadId: 'thread', requestId: 'late', action: { kind: 'screenshot' } });
   await vi.waitFor(() => expect(client.call).toHaveBeenCalledWith('browser.complete', { requestId: 'late', error: 'the browser conversation is no longer open' }));
   expect(automateBrowser).not.toHaveBeenCalled();
@@ -55,7 +59,7 @@ test('the desktop grants no browser access by default and stops dispatching as s
 
 test('an agent lists the profiles and opens a tab in the one it names, the default one otherwise', async () => {
   vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
-  writeExperiments(['agent-browser-control', 'remote-browser']);
+  consent(true, true);
   const pro = { id: 'p-0123456789ab', name: 'Pro' };
   browserProfiles.source = { settings: { browserProfiles: [pro], browserDefaultProfile: pro.id } as Settings, saveSettings: async () => true };
   let requested: (request: RpcEvents['browser.requested']) => void = () => {};
@@ -97,7 +101,7 @@ test('an agent lists the profiles and opens a tab in the one it names, the defau
 
 test('an agent can open and navigate its browser after the desktop selects another conversation', async () => {
   vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
-  writeExperiments(['agent-browser-control']);
+  consent(true, false);
   let requested: (request: RpcEvents['browser.requested']) => void = () => {};
   const client = { call: vi.fn(async (..._args: unknown[]) => ({})), on: vi.fn((name: string, callback: typeof requested) => { if (name === 'browser.requested') requested = callback; return () => {}; }) };
   const store = { client, owner: true, machineId: 'test', openThread: { id: 'remote-thread' }, threadKey: (id: string) => id } as unknown as Store;
@@ -116,7 +120,7 @@ test('an agent can open and navigate its browser after the desktop selects anoth
 
 test('hosting survives thread and machine switches, then releases on archive, disconnect and consent withdrawal', () => {
   vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
-  writeExperiments(['agent-browser-control']);
+  consent(true, false);
   const makeStore = (machineId: string) => {
     const client = { call: vi.fn(async (..._args: unknown[]) => ({})), on: vi.fn(() => vi.fn()) };
     const state = $state({ connection: 'ready', openThread: { id: 'one', archived: false }, threads: [{ id: 'one', archived: false }, { id: 'two', archived: false }] });
@@ -139,14 +143,14 @@ test('hosting survives thread and machine switches, then releases on archive, di
   expect(first.client.call).toHaveBeenCalledWith('browser.host', { threadId: 'two', enabled: false });
   first.state.connection = 'ready'; flushSync();
   expect(first.client.call).toHaveBeenLastCalledWith('browser.host', expect.objectContaining({ threadId: 'two', enabled: true }));
-  writeExperiments([]); flushSync();
+  consent(false, false); flushSync();
   expect(first.client.call).toHaveBeenLastCalledWith('browser.host', { threadId: 'two', enabled: false });
   expect(second.client.call).toHaveBeenLastCalledWith('browser.host', { threadId: 'one', enabled: false });
 });
 
 test('a recording the agent leaves running is discarded when its turn ends; one started from the menu or stopped in time is kept', async () => {
   vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
-  writeExperiments(['agent-browser-control']);
+  consent(true, false);
   const handlers = new Map<string, (payload: unknown) => void>(), completed = new Map<string, RpcParams<'browser.complete'>>();
   const client = {
     call: vi.fn(async (method: string, params: unknown) => {
@@ -201,7 +205,7 @@ test('a recording the agent leaves running is discarded when its turn ends; one 
 
 test('remote keys waiting for page validation cannot cross a consent or active-tab change', async () => {
   vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
-  writeExperiments(['agent-browser-control', 'remote-browser']);
+  consent(true, true);
   let requested: (request: RpcEvents['browser.requested']) => void = () => {};
   const completed = new Map<string, RpcParams<'browser.complete'>>();
   const client = {
@@ -221,7 +225,7 @@ test('remote keys waiting for page validation cannot cross a consent or active-t
   await vi.waitFor(() => expect(completed.get('frame')?.result?.frame?.id).toBeTruthy());
   const frameId = completed.get('frame')!.result!.frame!.id;
   for (const change of ['sharing', 'agent-control', 're-enable', 'tab', 'expired'] as const) {
-    writeExperiments(['agent-browser-control', 'remote-browser']); panel.activate(surface.id);
+    consent(true, true); panel.activate(surface.id);
     protocol.mockClear();
     let finish!: (reply: unknown) => void;
     protocol.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
@@ -230,17 +234,17 @@ test('remote keys waiting for page validation cannot cross a consent or active-t
     const now = Date.now();
     if (change === 'expired') vi.spyOn(Date, 'now').mockReturnValue(now + 6000);
     else if (change === 'tab') panel.open('browser', 'https://other.test');
-    else if (change === 'agent-control') writeExperiments(['remote-browser']);
+    else if (change === 'agent-control') consent(false, true);
     else {
-      writeExperiments(['agent-browser-control']);
-      if (change === 're-enable') writeExperiments(['agent-browser-control', 'remote-browser']);
+      consent(true, false);
+      if (change === 're-enable') consent(true, true);
     }
     finish({ result: { value: page } });
     await vi.waitFor(() => expect(completed.get(change)?.error).toContain('changed'));
     expect(protocol.mock.calls.map(call => call[1])).toEqual(['Runtime.evaluate']);
     if (change === 'expired') vi.mocked(Date.now).mockRestore();
   }
-  writeExperiments(['agent-browser-control', 'remote-browser']); panel.activate(surface.id); protocol.mockClear();
+  consent(true, true); panel.activate(surface.id); protocol.mockClear();
   requested({ threadId: 'remote-thread', requestId: 'allowed', tabId: surface.id, action: { kind: 'remote-input', frameId, input: { kind: 'key', key: 'Enter' } } });
   await vi.waitFor(() => expect(completed.get('allowed')?.result?.value).toEqual({ ok: true }));
   expect(protocol.mock.calls.map(call => call[1])).toEqual(['Runtime.evaluate', 'Input.dispatchKeyEvent', 'Input.dispatchKeyEvent']);
@@ -248,7 +252,7 @@ test('remote keys waiting for page validation cannot cross a consent or active-t
 
 test('sharing alone hosts the browser for viewers but not for the agent, and scales frames to the viewer', async () => {
   vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
-  writeExperiments(['remote-browser']);
+  consent(false, true);
   let requested: (request: RpcEvents['browser.requested']) => void = () => {};
   const completed = new Map<string, RpcParams<'browser.complete'>>();
   const client = {

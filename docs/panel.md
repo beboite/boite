@@ -19,6 +19,25 @@ encode is greyed out there. Stopping opens a video player with download and
 discard actions, or says the view cannot play the codec and keeps the download. The [CLI](cli.md) exposes the same tools
 to agents, including recording and attaching the result to chat.
 
+## Agent browser control
+
+On by default on the owner's Windows desktop, the one that hosts its
+conversations' tabs. The switch is in Settings > General > Built-in browser,
+above the browser profiles, and stays on this device. It grants the
+agent access to the open conversation's browser tabs: page text, screenshots,
+clicks, typing, navigation and JavaScript evaluation. The tabs use the existing
+browser profile, including signed-in sessions. Turn the switch off when those
+sessions must stay out of an agent's reach; the normal browser remains usable
+with it off.
+
+Only the owner UI can register that grant with the core. The core refuses
+requests without a consenting, subscribed host, and an agent token cannot
+register one or target another conversation. Turning the switch off withdraws
+the grant and rejects pending replies. Actions already dispatched to a page may
+finish; disabling the switch does not undo them. Disconnecting or changing the
+open conversation also releases the host. A phone cannot enable access on the
+hosting desktop. See the [browser CLI](cli.md#test-a-page-in-the-desktop-browser).
+
 ## Floating panel and browser overlays
 
 In the shell, the browser toolbar can detach the panel into a floating card

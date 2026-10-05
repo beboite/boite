@@ -1,9 +1,11 @@
 import type { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import type { MessagePart } from '@boite/contracts';
+import { nativeAgentPartSql } from './native-agent-parts.ts';
+import { createPartBlobs } from './part-blobs.ts';
 import { parseJson } from './rows.ts';
 
-export const SCHEMA_VERSION = 29;
+export const SCHEMA_VERSION = 31;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -373,6 +375,24 @@ export function migrate(db: Database, file: string): void {
   if (!hasColumn('turns', 'queue_hold')) db.exec('ALTER TABLE turns ADD COLUMN queue_hold TEXT');
   if (!hasColumn('threads', 'done_at')) db.exec('ALTER TABLE threads ADD COLUMN done_at INTEGER');
   db.exec('CREATE INDEX IF NOT EXISTS threads_done_expiry ON threads(done_at)');
+  // An incognito conversation of the drafts, erased when it is left.
+  if (!hasColumn('threads', 'incognito')) {
+    db.exec('ALTER TABLE threads ADD COLUMN incognito INTEGER NOT NULL DEFAULT 0');
+    version = 30;
+  }
+  // The messages that hold a native agent call, so the team view stops parsing
+  // every part of a thread. Filled once from the stored parts, then on each write.
+  // Large part values written from now on go to part_blobs; older rows keep theirs inline.
+  if (version < 31) {
+    db.transaction(() => {
+      db.exec(`CREATE TABLE IF NOT EXISTS native_agent_messages (message_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS native_agent_messages_thread ON native_agent_messages (thread_id);
+        INSERT OR IGNORE INTO native_agent_messages (message_id, thread_id)
+          SELECT DISTINCT m.id, m.thread_id FROM messages m, json_each(m.parts) p WHERE ${nativeAgentPartSql('p')};`);
+      createPartBlobs(db);
+    })();
+    version = 31;
+  }
   version = Math.max(version, SCHEMA_VERSION);
   if (row?.user_version !== version) db.exec(`PRAGMA user_version = ${version}`);
 }
@@ -416,4 +436,10 @@ export function ensureIndexes(db: Database): void {
   db.exec('CREATE INDEX IF NOT EXISTS turns_by_status ON turns (status)');
   db.exec('CREATE INDEX IF NOT EXISTS messages_by_turn ON messages (thread_id, turn_id)');
   db.exec('CREATE INDEX IF NOT EXISTS turns_by_finished ON turns (finished_at)');
+  // The few event types read back. Without them, restoring asynchronous questions
+  // at startup read the whole events table, and every thread open walked all of
+  // its thread's events for memory notices.
+  db.exec("CREATE INDEX IF NOT EXISTS events_questions_asked ON events (id) WHERE type = 'question.asked'");
+  db.exec("CREATE INDEX IF NOT EXISTS events_questions_answered ON events (thread_id, id) WHERE type = 'question.answered'");
+  db.exec("CREATE INDEX IF NOT EXISTS events_thread_memory ON events (thread_id, id) WHERE type = 'thread.memory'");
 }

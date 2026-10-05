@@ -4,7 +4,7 @@
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
-  import ThreadGroupingSettings from './ThreadGroupingSettings.svelte';
+  import ConversationSwitches from './ConversationSwitches.svelte';
   import { mobileOverlay } from '../lib/mobile-history';
   import { openTour } from '../lib/onboarding.svelte';
   import AppearancePage from './AppearancePage.svelte';
@@ -85,7 +85,7 @@
           <button class="ghost row" data-testid="settings-tab-experiments" onclick={() => store.showSettings('experiments')}>
             <FlaskConical size={20} /><span class="ui-label">{strings.settings.tabs.experiments}</span><ChevronRight size={18} />
           </button>
-          <ThreadGroupingSettings mobile />
+          <ConversationSwitches mobile />
         </div>
       </section>
       <section aria-labelledby="remote-machines">
