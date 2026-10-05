@@ -90,8 +90,8 @@
   <header class="top">
     {#if showTitle}<h1><QuotaMachineScope {store} fallback={strings.usage.limits} /></h1>{/if}
     {#if store.owner}
-      <button type="button" class="quiet icon refresh" aria-label={strings.usage.refresh} title={strings.usage.refresh} data-testid="limits-refresh" aria-busy={reader.loading} onclick={refresh}>
-        <RefreshCw size={15} strokeWidth={1.75} class={reader.loading ? 'spinning' : ''} />
+      <button type="button" class="quiet icon refresh" aria-label={strings.usage.refresh} title={strings.usage.refresh} data-testid="limits-refresh" aria-busy={reader.busy} onclick={refresh}>
+        <RefreshCw size={15} strokeWidth={1.75} class={reader.busy ? 'spinning' : ''} />
       </button>
     {/if}
   </header>
@@ -114,7 +114,7 @@
     {#each gatewayGroups as group (group.providerId)}
       <section class="gateway-group" data-testid="gateway-quotas" data-provider={group.providerId}>
         <h2 class="group-head"><ProviderLogo providerId={group.providerId} size={16} /><span class="ui-label">{group.name}</span><small class="ui-label">{fill(strings.subscriptionProxy.via, { name: proxyName })}</small></h2>
-        <UsageLimits rows={group.rows} {store} loading={reader.loading} completed={reader.completed} />
+        <UsageLimits rows={group.rows} {store} loading={reader.busy} completed={reader.landed} />
       </section>
     {/each}
     {#if gateway.state?.status === 'ready' && gatewayGroups.length === 0 && shown !== null}
@@ -136,7 +136,7 @@
       <button type="button" onclick={() => store.showSettings('accounts')}><span class="ui-label">{strings.settings.connectProvider}</span></button>
     </div>{/if}
   {:else}
-    {#if rows.length > 0}<UsageLimits {rows} {store} loading={reader.loading} completed={reader.completed} />{/if}
+    {#if rows.length > 0}<UsageLimits {rows} {store} loading={reader.busy} completed={reader.landed} />{/if}
     <section class="card tracked" data-testid="limits-tracked">
       <h2 class="ui-label-box"><span class="ui-label">{strings.quotas.tracked}</span><InfoTip topic={strings.quotas.tracked} text={strings.quotas.trackedHint} /></h2>
       {#each tracked as row (row.accountId)}

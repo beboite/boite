@@ -71,6 +71,13 @@ export function quotaCredits(row: AccountQuota) {
     credits.limit !== null && Number.isFinite(credits.limit) && credits.limit > 0 ? credits : null;
 }
 
+/**
+ * How long a refresh asked by hand looks busy at least: one turn of the
+ * refresh icon. A gateway like Douane answers from its own cache in a few
+ * milliseconds, which would otherwise show no sign that anything was read.
+ */
+export const REFRESH_SHOWN_MS = 900;
+
 export class QuotaReader {
   /** The last rows read, null until the first reading ever. */
   rows = $state.raw<AccountQuota[] | null>(null);
@@ -78,8 +85,21 @@ export class QuotaReader {
   completed = $state.raw<string[]>([]);
   /** Why the newest read failed, null once one lands. */
   error = $state<string | null>(null);
+  /** A refresh asked by hand, still inside its shown minimum. */
+  #held = $state(false);
+  #hold: ReturnType<typeof setTimeout> | undefined;
   readonly #key: string;
   #latest = 0;
+
+  /** What a view shows as reading: `loading`, or a refresh still inside its minimum. */
+  get busy(): boolean {
+    return this.loading || this.#held;
+  }
+
+  /** The accounts a view shows as landed: none until a refresh's minimum is over. */
+  get landed(): string[] {
+    return this.#held ? [] : this.completed;
+  }
 
   constructor(key: string) {
     this.#key = key;
@@ -108,6 +128,11 @@ export class QuotaReader {
     const requestId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
     this.completed = [];
     this.loading = true;
+    if (refresh) {
+      clearTimeout(this.#hold);
+      this.#held = true;
+      this.#hold = setTimeout(() => { this.#held = false; }, REFRESH_SHOWN_MS);
+    }
     const off = client.on('quotas.progress', (event) => {
       if (request !== this.#latest || event.requestId !== requestId) return;
       const rows = this.rows ?? [];
