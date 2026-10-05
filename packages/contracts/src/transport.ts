@@ -64,15 +64,14 @@ export function utf8Bytes(text: string): number {
 }
 
 /**
- * Whether the message's JSON is `max` UTF-8 bytes or more. A walk that stops
- * early clears almost every message; only one holding over a sixth of `max`
- * in content is serialized and counted.
+ * The message's JSON in UTF-8 bytes when it may reach `max`, else 0. A walk
+ * that stops early clears almost every message; only one holding over a sixth
+ * of `max` in content is serialized and counted.
  */
-function overBytes(message: Message, max: number): boolean {
-  if (!longerThan(message, Math.floor(max / 6))) return false;
+function heavyBytes(message: Message, max: number): number {
+  if (!longerThan(message, Math.floor(max / 6))) return 0;
   const text = JSON.stringify(message);
-  if (text.length >= max) return true;
-  return text.length * 3 >= max && utf8Bytes(text) >= max;
+  return text.length * 3 < max ? 0 : utf8Bytes(text);
 }
 
 /**
@@ -80,8 +79,8 @@ function overBytes(message: Message, max: number): boolean {
  * count of characters it lost in `omitted`. Only reached by a message that is
  * still too heavy once everything fetchable was deferred.
  */
-function cutTexts(message: Message, max: number): Message {
-  let excess = utf8Bytes(JSON.stringify(message)) - max + 64 * 1024;
+function cutTexts(message: Message, bytes: number, max: number): Message {
+  let excess = bytes - max + 64 * 1024;
   const parts: MessagePart[] = [...message.parts];
   const order = parts
     .map((part, index) => ({ index, length: part.type === 'text' || part.type === 'thinking' ? part.text.length : 0 }))
@@ -91,14 +90,18 @@ function cutTexts(message: Message, max: number): Message {
     if (excess <= 0) break;
     const part = parts[index]!;
     if (part.type !== 'text' && part.type !== 'thinking') continue;
-    // Each character dropped is at least one byte.
-    let keep = Math.max(0, part.text.length - excess);
-    const code = part.text.charCodeAt(keep - 1);
-    if (keep > 0 && code >= 0xd800 && code <= 0xdbff) keep--;
-    const dropped = part.text.length - keep;
-    excess -= dropped;
-    const text = part.text.slice(0, keep).split('').join('');
-    const omitted = (part.omitted ?? 0) + dropped;
+    // Back from the end by code point, counting UTF-8 bytes: the JSON escapes
+    // of what goes only make the cut more generous.
+    let keep = part.text.length, removed = 0;
+    while (keep > 0 && removed < excess) {
+      const code = part.text.charCodeAt(keep - 1);
+      const pair = keep > 1 && (code & 0xfc00) === 0xdc00 && (part.text.charCodeAt(keep - 2) & 0xfc00) === 0xd800;
+      keep -= pair ? 2 : 1;
+      removed += pair ? 4 : code < 0x80 ? 1 : code < 0x800 ? 2 : 3;
+    }
+    excess -= removed;
+    const text = part.text.slice(0, keep);
+    const omitted = (part.omitted ?? 0) + part.text.length - keep;
     if (part.type === 'thinking') parts[index] = { ...part, text, omitted };
     else {
       const { displayText, ...rest } = part;
@@ -111,13 +114,18 @@ function cutTexts(message: Message, max: number): Message {
 /**
  * One message as a client receives it for these options. With
  * `compactToolParts`, a message still over `MESSAGE_SENT_MAX_BYTES` defers
- * every finished call and image it holds, then cuts its longest texts.
+ * every finished call and image it holds, then cuts its longest texts. Each
+ * shape is measured once.
  */
 export function projectMessage(message: Message, options: TransportOptions): Message {
   const light = project(message, options, false);
-  if (!options.compactToolParts || !overBytes(light, MESSAGE_SENT_MAX_BYTES)) return light;
+  if (!options.compactToolParts) return light;
+  const max = MESSAGE_SENT_MAX_BYTES;
+  const lightBytes = heavyBytes(light, max);
+  if (lightBytes < max) return light;
   const strict = project(message, options, true);
-  return overBytes(strict, MESSAGE_SENT_MAX_BYTES) ? cutTexts(strict, MESSAGE_SENT_MAX_BYTES) : strict;
+  const strictBytes = strict === light ? lightBytes : heavyBytes(strict, max);
+  return strictBytes < max ? strict : cutTexts(strict, strictBytes, max);
 }
 
 /** The messages a client receives for these options. */

@@ -105,6 +105,8 @@ test('no message keeps a thread from opening: heavy inputs, documents and texts 
     expect(sent.find(message => message.id === 'many')!.parts.every(part => part.type === 'tool' && part.outputDeferred && part.inputDeferred)).toBe(true);
     const prose = sent.find(message => message.id === 'prose')!.parts[0]!;
     expect(prose.type === 'text' && prose.omitted! > 0 && prose.text.length + prose.omitted! === 9_000_000).toBe(true);
+    // Two bytes a character: about half of the 18 MB fits, not none of it.
+    expect(prose.type === 'text' && prose.text.length).toBeGreaterThan(3_500_000);
 
     const full = await client.call('messages.toolPart', { threadId, messageId: 'writes', toolId: 'write-3' });
     expect(full.part).toMatchObject({ input: { content: file }, documents: [{ newText: file }], output: 'written' });
