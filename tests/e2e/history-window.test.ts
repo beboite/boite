@@ -9,9 +9,10 @@ const timeline = '[data-testid=timeline]';
 test('history read above rows the window never measured stays still once the wheel stops', async () => {
   ensureProductionUi();
   const core = await startCore();
-  const client = await connect(core.url, core.token);
+  let client: Awaited<ReturnType<typeof connect>> | undefined;
   let page: BrowserPage | undefined;
   try {
+    client = await connect(core.url, core.token);
     await client.call('brain.configure', { path: null, enabled: false, boiteGuide: false });
     const project = await client.call('projects.add', { path: core.dataDir, name: 'History' });
     const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
@@ -49,5 +50,5 @@ test('history read above rows the window never measured stays still once the whe
     })`);
     expect(churn).toEqual({ rows: 0, tops: 1 });
     expect(page.errors()).toEqual([]);
-  } finally { await page?.close(); client.close(); await core.stop(); }
+  } finally { await page?.close(); client?.close(); await core.stop(); }
 }, 120_000);
