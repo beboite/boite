@@ -296,7 +296,7 @@ export class FakeContext {
     this.core = {
       version: '2.0.0-beta.1',
       protocolVersion: PROTOCOL_VERSION,
-      features: { threadSnapshots: true },
+      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true },
       os: 'windows',
       channel: 'stable',
       pid: 4242,

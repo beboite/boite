@@ -634,6 +634,42 @@ export class Journal {
     return { messages, before: older ? (messages[0]?.id ?? null) : null };
   }
 
+  /**
+   * The mirror of `listMessagePage`: the first `limit` messages from
+   * `fromRowid` on, oldest first, within the same byte budget. `after` names the
+   * newest one returned while the thread holds newer ones, and is null once
+   * the page reaches the last message.
+   */
+  listMessagesForward(threadId: string, fromRowid: number, limit: number): { messages: Message[]; after: string | null } {
+    this.flushDeltas();
+    const cap = Math.max(1, Math.trunc(limit));
+    const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?');
+    const messages: Message[] = [];
+    let bytes = 2, newer = false;
+    try {
+      for (const row of statement.iterate(threadId, fromRowid, cap + 1)) {
+        if (messages.length >= cap || bytes >= MESSAGE_PAGE_MAX_BYTES) { newer = true; break; }
+        const message = this.currentMessage(row as MessageRow);
+        const size = Buffer.byteLength(JSON.stringify(message));
+        const next = bytes + size + (messages.length ? 1 : 0);
+        if (messages.length && next > MESSAGE_PAGE_MAX_BYTES) { newer = true; break; }
+        if (size >= RPC_MAX_FRAME_BYTES) {
+          throw refused(`message ${message.id} is ${size} serialized UTF-8 bytes; expected a complete message below ${RPC_MAX_FRAME_BYTES} bytes`,
+            { threadId, messageId: message.id, field: 'messages', bytes: size, max: RPC_MAX_FRAME_BYTES, expected: `a complete message below ${RPC_MAX_FRAME_BYTES} serialized UTF-8 bytes` });
+        }
+        messages.push(message);
+        bytes = next;
+      }
+    } finally { statement.finalize(); }
+    return { messages, after: newer ? (messages.at(-1)?.id ?? null) : null };
+  }
+
+  /** How many messages of the thread sit at `fromRowid` or after it: an index count, no row is read. */
+  countMessagesFrom(threadId: string, fromRowid: number): number {
+    const row = this.db.query('SELECT count(*) AS count FROM messages WHERE thread_id = ? AND rowid >= ?').get(threadId, fromRowid) as { count: number };
+    return row.count;
+  }
+
   /** The complete reconnect tail, or null when its count or serialized bytes exceed a page. */
   listMessagesFrom(threadId: string, fromRowid: number, limit: number): Message[] | null {
     this.flushDeltas();

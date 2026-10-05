@@ -31,6 +31,7 @@
   import { glides } from '../lib/motion';
   import { BottomEdge, BottomGlide, PointerHold, keysUp, typingKey, watchWheel, wheelsUp } from '../lib/timeline-follow';
   import { selectionClicks } from '../lib/selection-clicks';
+  import { editWhole, pullNewer } from '../lib/reading-window';
   import { MediaQuery } from 'svelte/reactivity';
 
   /** A phone has no room left of the bubbles for the outline rail: it is not drawn there. */
@@ -247,6 +248,8 @@
   });
 
   const windowed = $derived(timeline.length > WINDOW_FROM);
+  /** The window was opened around a reading position and stops short of the thread's last message. */
+  const cutBelow = $derived((store.messagesAfter ?? null) !== null);
 
   function totals(list: Message[]): number[] {
     return slots.totals(list, timelineOrder);
@@ -545,12 +548,13 @@
     if (rose && pinned && distance > 1) leftBottom = true;
     if (distance <= 1 && movedDown) leftBottom = false;
     // A card shrinking can clamp scrollTop before new output grows the list again.
-    pinned = !leftBottom && (atBottom(box) || (pinned && resized && !hold.held));
+    pinned = !cutBelow && !leftBottom && (atBottom(box) || (pinned && resized && !hold.held));
     if (restoringAnchor) pinned = false;
     // Away from the bottom, the way back shows, whether or not anything new came in.
     behind = !pinned;
     if (pinned) markSeen();
     pullOlder(box);
+    pullNewer(store, box, LOAD_AT);
   }
 
   /** A wheel turned up leaves the bottom at once: waiting for the 80 px that unpin it let a
@@ -620,6 +624,8 @@
     releaseNavigation();
     const box = viewport;
     if (!box) return;
+    // A window short of the end reads the last page first, then lands at its bottom.
+    if (cutBelow) { void store.loadLatest().then(() => { if (!cutBelow) jump(); }); return; }
     reservePrompt = null;
     behind = false;
     markSeen();
@@ -736,9 +742,8 @@
   // So would an edit started under a prompt still on its way to the core.
   const atRest = $derived(branchable && !store.busy && (store.composerStates[threadId]?.queued.length ?? 0) === 0 && !store.composerStates[threadId]?.sending);
 
-  function editMessage(message: Message): void {
-    store.startEdit(threadId, message);
-    focusComposer();
+  async function editMessage(message: Message): Promise<void> {
+    if (await editWhole(store, threadId, message)) focusComposer();
   }
 
   /** The last turn again from its own prompt, on screen before the core rewinds (`retryTurn`). */
@@ -760,9 +765,7 @@
   <div class="timeline" bind:this={viewport} use:watchWheel={onwheel} use:selectionClicks {onscroll} ontouchstart={press} onpointerdown={press} onkeydown={releaseNavigation} style:padding-top="{20 + promptLead}px" style:overflow-anchor={timeline.at(-1)?.state === 'streaming' ? 'none' : undefined} data-testid="timeline" data-media-gallery>
     <div class="column">
       <!-- paging: the one line the top of the list shows while a page is in flight. -->
-      {#if store.loadingOlder}
-        <p class="loading-older" data-testid="loading-older">{strings.chat.loadingOlder}</p>
-      {/if}
+      {#if store.loadingOlder}<p class="loading-older" data-testid="loading-older">{strings.chat.loadingOlder}</p>{/if}
       {#if view.above > 0}
         <div class="spacer" data-testid="timeline-above" style="height: {view.above}px"></div>
       {/if}
@@ -789,7 +792,7 @@
           {:else if startedFrom(message)}
             <SpawnMarker {store} link={startedFrom(message)!} direction="to" />
           {:else if message.role === 'user'}
-            <UserMessage {store} {message} {turn} {progress} edit={atRest && !isSending(message) ? () => editMessage(message) : undefined} />
+            <UserMessage {store} {message} {turn} {progress} edit={atRest && !isSending(message) ? () => void editMessage(message) : undefined} />
           {:else}
             <AssistantMessage {store} {threadId} {message} {signedOut} showModel={firstAssistantInTurn.get(message.turnId) === message.id}
               latestInTurn={lastInTurn.get(message.turnId) === message.id} memoryEvents={memoryPlacement.inline.get(message.id) ?? []} />
@@ -813,6 +816,7 @@
       {#if view.below > 0}
         <div class="spacer" data-testid="timeline-below" style="height: {view.below}px"></div>
       {/if}
+      {#if store.loadingNewer}<p class="loading-older" data-testid="loading-newer">{strings.chat.loadingNewer}</p>{/if}
     </div>
     {#if promptRoom > 0}
       <div class="spacer" data-testid="prompt-room" style:height="{promptRoom}px" aria-hidden="true"></div>

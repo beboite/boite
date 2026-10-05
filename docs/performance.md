@@ -210,6 +210,18 @@ finished tool output in the same message never goes out twice. Deltas the bus
 still holds are dispatched before that resend, so they fold into the part
 instead of arriving after it as a second copy.
 
+A request frame may carry `progress: true`. A response between 64 KiB and
+16 MiB then leaves as chunk frames, each `\u001e{"id","bytes","total"}`, a
+newline and a slice of the JSON, cut between UTF-16 surrogate pairs. The client
+joins the slices and reports `bytes` against `total`, the core's own count of
+the whole response. Slices go out as the socket drains, at most 1 MiB buffered
+ahead, and every frame written meanwhile queues behind the last slice, counted
+in the 32 MiB budget, so the order on the wire is unchanged. Bun's `send`
+returned 0 (dropped) for a 31 MB frame with 29.8 MB already buffered on
+2026-10-05; slicing keeps a long answer off that path. A slice resets the
+call's 120 s timeout. The UI asks for progress on a first open's `threads.get`
+when the core advertises `chunkedAnswers`.
+
 ## What the UI asks for
 
 - Returning to a recent thread selects its cached history synchronously. The
@@ -233,9 +245,27 @@ instead of arriving after it as a second copy.
   prefixes cannot prove that the omitted text stayed unchanged.
 - File links arrive with their name, MIME type and decoded byte count. Their
   base64 data loads through `messages.attachment` when opened or downloaded.
-  User images and assistant media previews retain their bytes on first read.
+  Assistant media previews retain their bytes on first read.
   Older cores return full files, and a cached deferred file can fall back to
   their history methods after a downgrade.
+- On a core advertising `readingPages`, pages ask for `compactImages`: a
+  picture above 8 KiB of base64 arrives as its decoded size, holds a
+  thumbnail-sized place, and loads through `messages.attachment` once within
+  400 px of what the timeline shows: the observer is rooted at the scrolling
+  timeline, whose clipping would otherwise hide the margin. Edit fetches a prompt's deferred files and pictures
+  before it fills the composer.
+- While a first page downloads, the chat shows a bar and "192 kB / 1.3 MB",
+  the bytes received against the total the core put in each slice. A page
+  under 64 KiB comes whole and the bar runs without numbers; it shows after
+  150 ms, so a fast open does not flash it.
+- A first visit with a saved reading position (an anchor message, not pinned
+  to the bottom, no cached visit) asks `threads.get` for the page `around`
+  that message on a `readingPages` core: 20 messages before it and 20 from
+  it, when more than 40 follow it. `messagesAfter` is the cursor below that
+  window; `messages.list` with `after` pages down as the reader nears the
+  bottom, and "Jump to latest" replaces the window with the last page. Live
+  messages wait for the pages below, except a prompt, which brings the last
+  page with it. Positions are kept in memory for 32 threads.
 - `threads.get` takes `after`, a message the client already holds. The answer
   then starts at that message and says so in `messagesFrom`; the UI keeps what
   it had before it. With snapshot support, a SHA-256 proof covers the complete
@@ -279,6 +309,20 @@ baseline checkout. The [2026-10-02 measurements](../bench/results/2026-10-02-thr
 record samples, reading-position drift and the subsequent t3code comparison.
 `tests/e2e/thread-switch.test.ts` separately exercises the production UI with
 a real temporary core, a 750 ms snapshot delay and a large folded tool output.
+
+`bun run bench/thread-open.ts --runs 3` seeds a fresh data directory with a
+200-message thread shaped like a real long one (1.1 MB attached files every
+eighth prompt, a picture every 25th, 30 tool outputs per answer, 48.9 MB
+of parts) and times `threads.get` on loopback and through a 150 ms relay, then
+the click to the first message in headless Chrome, plain and throttled. `--base`
+skips the parameters an older core does not take. The
+[2026-10-05 report](../bench/results/2026-10-05-thread-open.md) has the numbers;
+`tests/e2e/thread-open.test.ts` captures the bar at both widths and checks
+its total against the page the core sends. `tests/e2e/thread-reopen.test.ts`
+drives the rest at phone and desktop widths on a real core: a deferred picture
+fetched while still above the screen, Edit of a prompt whose file stayed on
+the core, and a return to a message read far up, its pages below and "Jump to
+latest".
 
 `bun bench/thread-traffic.ts --rtt 150 --mbps 2 --runs 7` compares both opening
 protocols through a paced TCP relay on the same temporary core. It counts actual

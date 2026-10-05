@@ -565,6 +565,32 @@ test('scrolled up, the way to the bottom shows with nothing new below, and takes
   expect(jumpButton()).toBeNull();
 });
 
+test('a window opened around the reader pages down as they reach its bottom, and "Jump to latest" reads the last page', async ({ ready }) => {
+  window.localStorage.clear();
+  const { store: live } = await ready({ delayMs: 0, long: true });
+  live.readingPositions.set('t-long', { top: 0, pinned: false, heights: new Map(), anchor: { id: 'm-long-100', offset: 0 } });
+  await live.open('t-long');
+  expect(live.messagesAfter).toBe('m-long-119');
+  const thread = live.openThread!;
+  stubLayout(thread.messages.length * ESTIMATE);
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', get messages() { return thread.messages; } } });
+  await settle();
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  const jumpButton = () => document.querySelector<HTMLButtonElement>('[data-testid=jump-to-latest]');
+
+  // The bottom of this window is not the end of the thread: the list does not pin, and the next page comes.
+  timeline.scrollTop = scrollHeight - VIEW_HEIGHT;
+  timeline.dispatchEvent(new Event('scroll'));
+  await vi.waitFor(() => expect(thread.messages.length).toBeGreaterThan(40));
+  expect(thread.messages.at(40)?.id).toBe('m-long-120');
+  expect(jumpButton()).not.toBeNull();
+
+  jumpButton()!.click();
+  await vi.waitFor(() => expect(live.messagesAfter).toBeNull());
+  expect(thread.messages.at(-1)?.id).toBe('m-long-399');
+  expect(thread.messages.some((message) => message.id === 'm-long-100')).toBe(false);
+});
+
 test('what arrives while the reader is scrolled up is counted on the way back, and the count clears at the bottom', async ({ ready }) => {
   window.localStorage.clear();
   const { store: live, client } = await ready({ delayMs: 0, long: true });
