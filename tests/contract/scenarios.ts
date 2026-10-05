@@ -240,25 +240,20 @@ export const SCENARIOS: Record<string, Scenario> = {
     await env.call('questions.answer', { threadId: created.id, questionId: question.id, optionIds: [question.options[0]!.id] });
     await until('turn finish', async () => (await env.call('threads.get', { threadId: created.id })).turns.find(entry => entry.id === turn.id)?.status === 'done');
   },
-  'browser requests require a subscribed host and return its matching reply': async env => {
+  'the agent browser refuses bad input and shows its tabs only to subscribed viewers': async env => {
     const setup = await echo(env);
     const created = await thread(env, setup);
     const threadId = created.id;
-    await refusedWith(env.call('browser.command', { threadId, action: { kind: 'snapshot' } }), RpcErrorCode.Refused);
+    // Nothing here starts a browser: every call is refused or answered before one would.
+    await refusedWith(env.call('browser.remoteStatus', { threadId }), RpcErrorCode.Refused);
     await env.call('threads.subscribe', { threadId });
-    await refusedWith(env.call('browser.host', { threadId, enabled: true }), RpcErrorCode.Refused);
-    await refusedWith(env.call('browser.host', { threadId, enabled: true, allowAgentControl: false }), RpcErrorCode.Refused);
-    await env.call('browser.host', { threadId, enabled: true, allowAgentControl: true });
-    const off = env.on('browser.requested', request => {
-      if (request.threadId === threadId) void env.call('browser.complete', { requestId: request.requestId, result: { tabId: 'browser:test', value: 'Page text' } });
-    });
-    try {
-      same(await env.call('browser.command', { threadId, action: { kind: 'snapshot' } }), { tabId: 'browser:test', value: 'Page text' }, 'browser reply');
-      await refusedWith(env.call('browser.command', { threadId, action: { kind: 'open', url: 'file:///private' } }), RpcErrorCode.Refused);
-      await refusedWith(env.call('browser.command', { threadId, tabId: 'main', action: { kind: 'snapshot' } }), RpcErrorCode.Refused);
-      await env.call('browser.host', { threadId, enabled: false });
-      await refusedWith(env.call('browser.command', { threadId, action: { kind: 'status' } }), RpcErrorCode.Refused);
-    } finally { off(); }
+    const status = await env.call('browser.remoteStatus', { threadId });
+    same([status.live, status.tabs, typeof status.available], [false, [], 'boolean'], 'a conversation with no agent browser');
+    await refusedWith(env.call('browser.command', { threadId, action: { kind: 'open', url: 'file:///private' } }), RpcErrorCode.Refused);
+    await refusedWith(env.call('browser.command', { threadId, tabId: 'main', action: { kind: 'snapshot' } }), RpcErrorCode.Refused);
+    await refusedWith(env.call('browser.remoteFrame', { threadId, maxWidth: 99 }), RpcErrorCode.Refused);
+    await refusedWith(env.call('browser.remoteFrame', { threadId }), RpcErrorCode.Refused);
+    await refusedWith(env.call('browser.remoteInput', { threadId, frameId: 'none', input: { kind: 'key', key: 'Enter' } }), RpcErrorCode.Refused);
   },
   'YOLO keeps permission requests out of the core and fake conversation': async env => {
     const setup = await echo(env);

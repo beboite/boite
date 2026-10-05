@@ -38,13 +38,13 @@ test('the page carries one switch per experiment and a toggle writes the enabled
   expect(grain.closest('label')?.textContent).toContain('Grain theme');
   expect(window.localStorage.getItem(EXPERIMENTS_STORAGE_KEY)).toBeNull();
 
-  const browser = query<HTMLInputElement>('[data-testid=experiment-agent-browser-control]');
-  expect(browser.checked).toBe(false);
-  const browserHelp = browser.closest('label')!.querySelector<HTMLButtonElement>('[data-testid=info-tip]')!;
-  browserHelp.click();
+  const links = query<HTMLInputElement>('[data-testid=experiment-open-chat-links]');
+  expect(links.checked).toBe(false);
+  const linksHelp = links.closest('label')!.querySelector<HTMLButtonElement>('[data-testid=info-tip]')!;
+  linksHelp.click();
   flushSync();
-  expect(document.getElementById(browserHelp.getAttribute('aria-describedby')!)?.textContent).toContain('signed-in sessions');
-  expect(browser.checked).toBe(false);
+  expect(document.getElementById(linksHelp.getAttribute('aria-describedby')!)?.textContent).toContain('default app');
+  expect(links.checked).toBe(false);
 
   grain.click();
   flushSync();

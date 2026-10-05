@@ -33,13 +33,8 @@ test.skipIf(process.platform !== 'win32' || !executable)('native browser fills i
     await page.waitFor("document.querySelector('[data-testid=thread-row]')");
     await page.click('[data-testid=thread-row]');
     await page.waitFor("document.querySelector('[data-testid=timeline]')");
-    await expect(client.call('browser.command', { threadId: thread.id, action: { kind: 'status' } })).rejects.toThrow('enable Agent browser control');
-    await page.evaluate(`localStorage.setItem('boite.experiments', JSON.stringify(['agent-browser-control'])); location.reload();`);
-    await page.waitFor("document.querySelector('[data-testid=thread-row]')");
-    await page.click('[data-testid=thread-row]');
-    await page.waitFor("document.querySelector('[data-testid=timeline]')");
     for (let i = 0; i < 120; i++) { try { await client.call('browser.command', { threadId: thread.id, action: { kind: 'status' } }); break; } catch (e) { if (i === 119) throw e; await Bun.sleep(100); } }
-    console.log('Host registered');
+    console.log('Agent browser ready');
     const opened = await client.call('browser.command', { threadId: thread.id, action: { kind: 'open', url: site.url.href } });
     const tabId = opened.tabId!;
     const command = (action: BrowserAction) => client!.call('browser.command', { threadId: thread.id, tabId, action });

@@ -122,29 +122,29 @@ test('phone resolution waits for a new frame; preview zoom stays local', async (
 
 const frameAt = (id: string, extra: Record<string, unknown> = {}) => ({ id, tabId: 'browser:test', title: 'Desktop', width: 780, height: 600, at: Date.now(), base64: id === 'same' ? 'AAAA' : btoa(id), url: 'https://example.test/', ...extra });
 
-test('a PC that is not showing the tab is waited for, never asked to open one', async () => {
+test('the watched tab reaches every frame request; a refused frame says why, backs off and recovers', async () => {
   client = new FakeClient({ delayMs: 0, principal: 'session' }); store = new Store(); store.attach(client); await store.connect();
   const original = client.call.bind(client);
-  let hosted = false;
+  let open = false;
   const calls = vi.spyOn(client, 'call').mockImplementation(((method: string, params: unknown) => {
-    if (method === 'browser.remoteFrame') return hosted ? Promise.resolve(frameAt('f1')) : Promise.reject(new Error('open a browser tab in this conversation on the desktop first'));
+    if (method === 'browser.remoteFrame') return open ? Promise.resolve(frameAt('f1')) : Promise.reject(new Error('that browser tab is closed'));
     return original(method as never, params as never);
   }) as typeof client.call);
   vi.useFakeTimers();
-  app = mount(RemoteBrowser, { target: document.body, props: { store, threadId: 't-trace' } }); await settle();
+  app = mount(RemoteBrowser, { target: document.body, props: { store, threadId: 't-trace', tabId: 'browser:test' } }); await settle();
   await vi.advanceTimersByTimeAsync(1); await settle();
-  expect(document.querySelector('[data-testid=remote-browser-error]')?.textContent).toContain('not showing');
-  // The link is fine: the viewer waits for the PC rather than claiming to reconnect.
-  expect(document.querySelector('[data-testid=remote-browser-state]')?.textContent).toBe('Waiting for the desktop');
+  expect(document.querySelector('[data-testid=remote-browser-error]')?.textContent).toContain('that browser tab is closed');
   // Failing frames back off instead of flooding.
   await vi.advanceTimersByTimeAsync(5000); await settle();
-  expect(calls.mock.calls.filter(([method]) => method === 'browser.remoteFrame').length).toBeLessThan(6);
+  const frames = () => calls.mock.calls.filter(([method]) => method === 'browser.remoteFrame');
+  expect(frames().length).toBeLessThan(6);
   expect(calls.mock.calls.every(([method]) => method === 'browser.remoteFrame' || !String(method).startsWith('browser.'))).toBe(true);
-  hosted = true;
+  open = true;
   await vi.advanceTimersByTimeAsync(9000); await settle();
   expect(document.querySelector('[data-testid=remote-browser-frame]')).not.toBeNull();
   expect(document.querySelector('[data-testid=remote-browser-error]')).toBeNull();
   expect(document.querySelector<HTMLInputElement>('[data-testid=remote-browser-address]')!.value).toBe('https://example.test/');
+  expect(frames().every(([, params]) => (params as { tabId?: string }).tabId === 'browser:test')).toBe(true);
 });
 
 test('the address bar, Return and erase on an empty field reach the page', async () => {

@@ -26,15 +26,23 @@ export const strings = {
     creditUsed: '{used} used',
   },
   remoteBrowser: {
-    display: 'Display', resolution: 'Page resolution', fitPhone: 'Fit this screen', phone: 'Phone', tablet: 'Tablet', rotate: 'Rotate', width: 'Width', height: 'Height', apply: 'Apply', sharedSize: 'Resolution also changes the shared tab on the PC.', restoreSize: 'Use the PC panel size', previewZoom: 'Preview zoom (this device only)', fit: 'Fit', panHint: 'Drag to pan the preview. Use the arrows to scroll the page.',
-    hostMissing: 'The PC is not showing this conversation’s browser yet.',
+    display: 'Display', resolution: 'Page resolution', fitPhone: 'Fit this screen', phone: 'Phone', tablet: 'Tablet', rotate: 'Rotate', width: 'Width', height: 'Height', apply: 'Apply', sharedSize: 'Resolution also changes the page the agent sees.', restoreSize: 'Restore the default size', previewZoom: 'Preview zoom (this device only)', fit: 'Fit', panHint: 'Drag to pan the preview. Use the arrows to scroll the page.',
     address: 'Address', go: 'Go', back: 'Back', forward: 'Forward', reload: 'Reload', badAddress: 'Enter a web address (http or https).',
-    title: 'Live desktop browser', waiting: 'Waiting for the desktop', live: 'Live', paused: 'Paused', reconnecting: 'Reconnecting', pause: 'Pause', resume: 'Resume',
-    interact: 'Tap or swipe the shared page', image: 'Live view of the desktop browser', scrollUp: 'Scroll up', scrollDown: 'Scroll down',
+    title: 'Agent’s browser', waiting: 'Waiting for the page', live: 'Live', paused: 'Paused', reconnecting: 'Reconnecting', pause: 'Pause', resume: 'Resume',
+    interact: 'Tap or swipe the shared page', image: 'Live view of the agent’s browser', scrollUp: 'Scroll up', scrollDown: 'Scroll down',
     text: 'Tap a page field, then type here', send: 'Send text to the page', gesture: 'Tap to click. Drag to scroll. Return sends the text and Enter; ⌫ on an empty field erases in the page.'
+  },
+  /** The browser the conversation's agent drives on the machine that runs it, watched from any client. */
+  agentBrowser: {
+    cover: 'This agent controls a browser on {machine}', coverHint: 'Nothing streams to this device until you show it.',
+    show: 'Show', hide: 'Hide', hideHint: 'Stop watching and cover the view again',
+    none: 'The agent has no browser open', noneHint: 'It appears here when the agent opens a page.',
+    unavailable: 'No agent browser on {machine}', tabs: 'The agent’s tabs', untitled: 'Untitled page'
   },
   /** The Device panel: simulators and emulators an agent opened with `boite device`. */
   devicePanel: {
+    cover: 'This agent controls a device on {machine}', coverHint: 'Nothing streams to this device until you show it.',
+    show: 'Show', hide: 'Hide', hideHint: 'Stop watching and cover the view again',
     empty: 'No device is open in this conversation. An agent opens one with boite device open, or open one here.',
     onMachine: 'On this machine', open: 'Open', refresh: 'Refresh', add: 'Open a device',
     none: 'No simulators or emulators were found on this machine.',
@@ -1346,6 +1354,8 @@ export const strings = {
     traceHint: 'Processes this thread launched',
     browser: 'Browser',
     browserHint: 'A page beside the thread',
+    agentBrowser: 'Agent browser',
+    agentBrowserHint: 'The browser the agent drives, live',
     changes: 'Changes',
     changesHint: 'What the working tree has that HEAD does not',
     files: 'Files',
@@ -1355,7 +1365,7 @@ export const strings = {
     device: 'Device',
     deviceHint: 'A simulator or emulator the agent opened',
     tasksHint: "The goal, the agent's tasks and the project's todos",
-    browserAbsent: 'Opens when an agent uses the browser',
+    browserAbsent: 'Needs the desktop app',
     ownerOnly: "Only in the owner's app",
     launcher: 'Open a surface in this panel',
     untitled: 'Browser'
@@ -1462,7 +1472,7 @@ export const strings = {
     startRecording: 'Record this browser tab', stopRecording: 'Stop recording', reviewRecording: 'Recorded video',
     refresh: 'Refresh', clear: 'Clear', pageEvents: 'Page events', actions: 'Actions', noEvents: 'No page events captured.', noActions: 'No actions recorded yet.',
     omitted: '{count} older or oversized events omitted.', recorded: '{seconds} seconds · {fps} fps · {mb} MB · silent {format}',
-    recordingError: 'Recording stopped after an error.', recordingDiscarded: 'Recording discarded: the agent did not stop it before its turn ended.', recordingLimit: 'Recording stopped by itself at the {mb} MB size limit. The video plays up to that point.',
+    recordingError: 'Recording stopped after an error.', recordingLimit: 'Recording stopped by itself at the {mb} MB size limit. The video plays up to that point.',
     frameRate: 'Record at {rate} frames per second', codec: 'Encode as {codec}', codecUnavailable: 'This computer cannot encode it',
     unplayable: 'This view cannot play {codec} video. Download it to watch it in another player.',
     download: 'Download video', discard: 'Discard video',
@@ -2046,9 +2056,7 @@ export const strings = {
   },
 
   experiments: {
-    remoteBrowser: { title: 'Live browser on other devices', hint: 'On the desktop, let paired devices watch and drive a conversation’s browser tab, such as the one an agent opened. It appears by itself in that conversation on the phone. Agents do not get browser control from it.' },
     recordingIndicators: { title: 'Show actions in recordings', hint: 'Add click markers and navigation keys to browser recordings. Typed text and password input are never shown as key labels.' },
-    devicePanel: { title: 'Device panel', hint: 'Show the iOS Simulators and Android emulators an agent opens with boite device, live in the side panel of this device. Taps, swipes and text reach Android; iOS is view-only. Agents open devices without it.' },
     openChatLinks: { title: 'Open chat links in their apps', hint: 'On this desktop, clicking a local file or folder opens its default app, including shortcuts and files outside the project. Only links from this computer are opened.' },
     whip: {
       title: 'Whip',
@@ -2057,7 +2065,6 @@ export const strings = {
       drop: 'Drop the whip'
     },
     chatArtifacts: { title: 'Chat files and previews', hint: 'Open file links and preview files returned by an agent in the conversation' },
-    agentBrowserControl: { title: 'Agent browser control', hint: 'On this Windows desktop, let agents read pages, take screenshots and act in the open conversation’s browser tabs. This includes signed-in sessions and JavaScript execution. Turning this off revokes access; actions already performed are not undone.' },
     previewComments: { title: 'Preview comments', hint: 'Select an element in the integrated browser and add feedback to the conversation draft' },
     themeGrain: {
       title: 'Grain theme',

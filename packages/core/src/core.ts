@@ -33,7 +33,7 @@ import { scheduleThreadDeletionRetention } from './threads/deletion-retention.ts
 import { scheduleDoneRetention } from './threads/done-retention.ts';
 import { scheduleArtifactRetention } from './artifact-retention.ts';
 import { ArtifactPreviews } from './artifact-preview.ts';
-import { BrowserControl } from './browser.ts';
+import { AgentBrowser } from './browser.ts';
 import { MobileDevices } from './devices/control.ts';
 import { QuotaStore } from './quotas.ts';
 import { PluginStore } from './plugins.ts';
@@ -158,7 +158,7 @@ export class Core {
   readonly terminals: TerminalStore;
   readonly stopArtifactRetention: () => Promise<void>;
   readonly artifactPreviews = new ArtifactPreviews(this);
-  readonly browser = new BrowserControl(this);
+  readonly browser = new AgentBrowser(this);
   /** Simulators and emulators open in conversations' Device panels. */
   readonly devices = new MobileDevices(this);
 
@@ -388,7 +388,7 @@ export class Core {
   get stopping(): boolean { return this.#stopping; }
 
   async close(): Promise<void> {
-    this.browser.close();
+    await this.browser.close();
     this.devices.stop();
     this.artifactPreviews.stop();
     this.threads.sideQuestions.close();

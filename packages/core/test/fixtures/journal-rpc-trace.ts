@@ -1,11 +1,10 @@
 import { spyOn } from 'bun:test';
 import { FrameQueue } from '../../src/server/frame-queue.ts';
 import { ServerConnection } from '../../src/server/connection.ts';
-import { BrowserControl } from '../../src/browser.ts';
 import { Router } from '../../src/router.ts';
 
 /** Test-only bounded metadata: never retain a request, response body or credential. */
-export function rpcTrace({ label = 'journal.inspect', methods = ['hello', 'pairing.grant', 'journal.inspect'], browser = false }: { label?: string; methods?: readonly string[]; browser?: boolean } = {}) {
+export function rpcTrace({ label = 'journal.inspect', methods = ['hello', 'pairing.grant', 'journal.inspect'] }: { label?: string; methods?: readonly string[] } = {}) {
   const events: Record<string, unknown>[] = [];
   const identities = new WeakMap<object, number>();
   const roles = new WeakMap<object, string>();
@@ -82,25 +81,6 @@ export function rpcTrace({ label = 'journal.inspect', methods = ['hello', 'pairi
       return addListener.call(this, type, observed, options);
     }),
   ];
-  if (browser) {
-    const host = BrowserControl.prototype.host, release = BrowserControl.prototype.release, disconnect = BrowserControl.prototype.disconnect;
-    spies.push(
-      spyOn(BrowserControl.prototype, 'host').mockImplementation(function (this: BrowserControl, params, connection) {
-        record('browser.host', connection, { principal: connection.identity.principal, enabled: params.enabled, remote: params.remote === true, subscribed: connection.subscriptions.has(params.threadId) });
-        const result = host.call(this, params, connection);
-        record('browser.host.accepted', connection);
-        return result;
-      }),
-      spyOn(BrowserControl.prototype, 'release').mockImplementation(function (this: BrowserControl, threadId) {
-        record('browser.release', this);
-        return release.call(this, threadId);
-      }),
-      spyOn(BrowserControl.prototype, 'disconnect').mockImplementation(function (this: BrowserControl, connectionId) {
-        record('browser.disconnect', serverConnections.get(connectionId) ?? this);
-        return disconnect.call(this, connectionId);
-      }),
-    );
-  }
   let restored = false;
   return {
     restore() { if (restored) return; restored = true; for (const spy of spies.reverse()) spy.mockRestore(); },

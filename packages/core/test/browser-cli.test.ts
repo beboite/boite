@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_ENV, BROWSER_RECORDING_CHUNK_BYTES } from '@boite/contracts';
+import { AGENT_ENV, BROWSER_RECORDING_CHUNK_BYTES, type BrowserReply } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
 import { echoThread, startTestCore } from './harness.ts';
 
@@ -10,12 +10,9 @@ test('browser screenshots accept explicit destinations, preserve existing files 
   const owner = await harness.connect();
   try {
     const { threadId } = await echoThread(harness, owner);
-    await owner.call('threads.subscribe', { threadId });
-    await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: true });
     const png = readFileSync(join(import.meta.dir, '../../ui/public/icons/icon-192.png'));
-    owner.on('browser.requested', request => {
-      void owner.call('browser.complete', { requestId: request.requestId, result: { tabId: 'browser:test', screenshot: { mime: 'image/png', base64: png.toString('base64') } } });
-    });
+    // The CLI's own work: what the browser answers is the core's, tested in browser.test.ts.
+    spyOn(harness.core.browser, 'command').mockImplementation(async () => ({ tabId: 'browser:test', screenshot: { mime: 'image/png', base64: png.toString('base64') } }));
     const cwd = join(harness.dataDir, 'screenshots'); mkdirSync(cwd);
     const run = async (args: string[]) => {
       let out = '', error = '';
@@ -47,13 +44,11 @@ test('a recording starts with the requested rate and codec, is saved with the ex
   const owner = await harness.connect();
   try {
     const { threadId } = await echoThread(harness, owner);
-    await owner.call('threads.subscribe', { threadId });
-    await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: true });
     const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypisom'), Buffer.alloc(12)]);
     const webm = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(16)]);
     let mime = 'video/mp4', bytes = mp4, reason = 'stopped';
     const discarded: string[] = [], started: unknown[] = [], reads: unknown[] = [];
-    owner.on('browser.requested', request => {
+    spyOn(harness.core.browser, 'command').mockImplementation(async request => {
       const action = request.action as { kind: string; recordingId?: string; offset?: number };
       if (action.kind === 'recording-start') started.push(action);
       if (action.kind === 'recording-read') reads.push(action);
@@ -62,7 +57,7 @@ test('a recording starts with the requested rate and codec, is saved with the ex
         : action.kind === 'recording-read'
           ? { tabId: 'browser:test', value: { base64: bytes.toString('base64'), nextOffset: bytes.length, done: true } }
           : (discarded.push(action.recordingId!), { tabId: 'browser:test' });
-      void owner.call('browser.complete', { requestId: request.requestId, result: result as never }).catch(() => {});
+      return result as BrowserReply;
     });
     const cwd = join(harness.dataDir, 'recordings'); mkdirSync(cwd);
     const run = async (args = ['recording-stop']) => {
@@ -86,7 +81,7 @@ test('a recording starts with the requested rate and codec, is saved with the ex
     expect(saved.code).toBe(0);
     expect(JSON.parse(saved.out).path).toMatch(/boite-browser-[a-f0-9-]+\.mp4$/);
     expect(readFileSync(JSON.parse(saved.out).path)).toEqual(mp4);
-    // This core asks for whole chunks; the desktop sends older cores the 512 KiB they accept.
+    // The CLI asks for whole chunks.
     expect(reads[0]).toMatchObject({ offset: 0, maxBytes: BROWSER_RECORDING_CHUNK_BYTES });
     // A recording that hit the size cap is saved, with the reason spelled out.
     mime = 'video/webm'; bytes = webm; reason = 'size';

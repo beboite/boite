@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { AGENT_ENV, browserActionError, browserProfilesOf, checkSettingsPatch, findBrowserProfile, type BrowserAction } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
 import { echoThread, startTestCore } from './harness.ts';
@@ -45,20 +45,18 @@ test('an agent names a profile by keyword, id or name, and an empty or oversized
   }
 });
 
-test('boite browser lists profiles and opens a tab in a named one through the desktop host', async () => {
+test('boite browser lists profiles and asks to open a tab in a named one', async () => {
   const harness = await startTestCore();
   const owner = await harness.connect();
   try {
     const { threadId } = await echoThread(harness, owner);
-    await owner.call('threads.subscribe', { threadId });
-    await owner.call('browser.host', { threadId, enabled: true, allowAgentControl: true });
     const seen: BrowserAction[] = [];
-    owner.on('browser.requested', request => {
+    // The CLI's parsing only: the core's own profile choice is tested in browser.test.ts.
+    spyOn(harness.core.browser, 'command').mockImplementation(async request => {
       seen.push(request.action);
-      const result = request.action.kind === 'profiles'
+      return request.action.kind === 'profiles'
         ? { value: { default: 'default', profiles: [{ id: 'default', name: 'Default' }, pro] } }
         : { tabId: 'browser:test', url: 'https://tripo.ai', profile: pro.id };
-      void owner.call('browser.complete', { requestId: request.requestId, result });
     });
     const run = async (args: string[]) => {
       let out = '', error = '';

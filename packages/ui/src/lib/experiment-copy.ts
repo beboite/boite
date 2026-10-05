@@ -8,15 +8,12 @@ import { strings } from './strings';
  */
 export function experimentCopy(): Record<ExperimentId, { title: string; hint: string }> {
   return {
-    'remote-browser': strings.experiments.remoteBrowser,
     'recording-indicators': strings.experiments.recordingIndicators,
-    'device-panel': strings.experiments.devicePanel,
     'theme-grain': strings.experiments.themeGrain,
     'session-import': strings.experiments.sessionImport,
     'prompt-cache': strings.experiments.promptCache,
     'chat-artifacts': strings.experiments.chatArtifacts,
     'open-chat-links': strings.experiments.openChatLinks,
-    'agent-browser-control': strings.experiments.agentBrowserControl,
     'preview-comments': strings.experiments.previewComments,
     'resident-agents': strings.experiments.residentAgents,
     whip: strings.experiments.whip
