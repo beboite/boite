@@ -7,7 +7,7 @@ vi.mock('./browser-bridge', () => ({ browserBridge: { protocol: vi.fn(), navigat
 afterEach(() => { writeExperiments([]); vi.restoreAllMocks(); });
 
 test('remote resolution uses bounded emulation, retires old coordinates and can restore the panel size', async () => {
-  writeExperiments(['agent-browser-control', 'remote-browser']);
+  writeExperiments(['remote-browser']);
   const protocol = vi.mocked(browserBridge.protocol!);
   const page = { width: 800, height: 600, title: 'Fixture', href: 'https://example.test', origin: 1 };
   protocol.mockImplementation(async (_id, method) => method === 'Page.captureScreenshot' ? { data: 'aGVsbG8=' } : { result: { value: page } });

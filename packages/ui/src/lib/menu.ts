@@ -18,6 +18,8 @@ export interface MenuItem {
   active?: boolean;
   /** A persistent toggle, announced and drawn as a checkbox in the context menu. */
   checked?: boolean;
+  /** With `checked`: one choice of several, marked with a check instead of a switch. */
+  radio?: boolean;
   hideActiveMark?: boolean;
   icon?: 'settings';
   danger?: boolean;

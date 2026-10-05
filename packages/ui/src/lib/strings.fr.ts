@@ -83,7 +83,7 @@ export const fr: Translation = {
     accountAccess: "Accès aux comptes",
     accountAccessHint: 'Quels agents peuvent utiliser chaque compte, sous-agents compris. Retirer un accès arrête les exécutions qui s\'en servent.',
     allAgents: "Tous les agents, actuels et futurs",
-    heading: 'Agents persistants', intro: "Des agents avec leur rôle, leur mémoire et leurs missions. Les sous-agents d'une conversation apparaissent dans Sous-agents.", back: 'Retour aux conversations',
+    heading: 'Agents persistants', intro: "Des agents avec leur rôle, leur mémoire et leurs missions. Les sous-agents d'une conversation apparaissent dans Sous-agents.",
     profiles: 'Agents', groups: 'Groupes', teams: 'Équipes', missions: 'Missions', attention: 'À examiner',
     list: 'Tous les agents', create: 'Nouveau', edit: 'Modifier', save: 'Enregistrer', cancel: 'Annuler', close: 'Fermer',
     search: 'Rechercher', empty: 'Rien ici pour le moment.', select: 'Sélectionnez un élément pour voir son activité.',
@@ -578,6 +578,12 @@ export const fr: Translation = {
     projectArchivedThreads: '{project} : {count} archivées',
     otherProjects: 'Autres projets',
     groupingOptions: "Options d'affichage",
+    surface: 'Conversations ou agents',
+    threads: 'Conversations',
+    agents: 'Agents',
+    projectsView: 'Projets',
+    projectsViewHint: 'Conversations regroupées sous leur projet',
+    recentView: 'Récent',
     workingGroupingScope: 'Projets et Récent · Cet appareil',
     otherGroupingScope: 'Projets · Cet appareil',
     mergedPrScope: 'Projet : {project}',
@@ -1419,6 +1425,7 @@ export const fr: Translation = {
   },
 
   browserProfiles: {
+    card: 'Navigateur intégré',
     heading: 'Profils du navigateur',
     hint: "Chaque profil garde ses propres cookies, son stockage et ses connexions dans le navigateur intégré, y compris après un redémarrage. Un onglet privé ne garde rien une fois le dernier onglet privé fermé.",
     default: 'Par défaut',
@@ -1979,8 +1986,6 @@ export const fr: Translation = {
       action: 'Sortir le fouet',
       drop: 'Lâcher le fouet'
     },
-    chatArtifacts: { title: 'Fichiers et aperçus dans le chat', hint: 'Ouvrir les liens de fichiers et afficher les fichiers envoyés par un agent dans la conversation' },
-    agentBrowserControl: { title: 'Contrôle du navigateur par les agents', hint: 'Sur ce bureau Windows, autoriser les agents à lire, capturer et manipuler les onglets de la conversation ouverte, y compris les sessions connectées et l’exécution de JavaScript. Désactiver retire cet accès, sans annuler les actions déjà effectuées.' },
     previewComments: { title: 'Commentaires sur les aperçus', hint: 'Sélectionner un élément dans le navigateur intégré et l’ajouter au brouillon de la conversation' },
     themeGrain: {
       title: 'Thème Grain',
@@ -1998,6 +2003,12 @@ export const fr: Translation = {
       title: 'Agents',
       hint: 'Des agents résidents avec leur propre brain, leurs missions et leurs routines, depuis la barre latérale. Les agents déjà créés continuent de tourner quand ceci est désactivé'
     }
+  },
+
+  /** Finished features, on by default, each switched from the Settings page it belongs to. */
+  features: {
+    chatArtifacts: { title: 'Fichiers et aperçus dans le chat', hint: 'Ouvrir les liens de fichiers et afficher les fichiers envoyés par un agent dans la conversation' },
+    agentBrowserControl: { title: 'Contrôle du navigateur par les agents', hint: 'Sur ce bureau Windows, autoriser les agents à lire, capturer et manipuler les onglets de la conversation ouverte, y compris les sessions connectées et l’exécution de JavaScript. Désactiver retire cet accès, sans annuler les actions déjà effectuées.' }
   },
 
   quotas: {

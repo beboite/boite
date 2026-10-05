@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
+import { showThreadView } from './lib/views.ts';
 import { mobileAction } from './lib/mobile.ts';
 import { startUi } from './lib/ui.ts';
 
@@ -45,16 +46,16 @@ for (const width of [1280, 390]) {
         await page.evaluate('Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])');
         await page.screenshot(join(import.meta.dir, '.artifacts', `visibility-${state}-${width}.png`));
       };
-      await page.click(id(`${prefix}view-projects`));
+      await showThreadView(page, 'projects', prefix);
       await revealProject('t-scheduler');
       await option('working');
       await page.waitFor(`!document.querySelector('${row('t-scheduler')}')`);
-      await page.click(id(`${prefix}view-recent`));
+      await showThreadView(page, 'recent', prefix);
       await page.waitFor(`document.querySelector('${root} ${id('recent-working-toggle')}')`);
       expect(await page.evaluate(`!!document.querySelector('${row('t-scheduler')}')`)).toBe(false);
       await option('working');
       await page.waitFor(`document.querySelector('${row('t-scheduler')}')`);
-      await page.click(id(`${prefix}view-projects`));
+      await showThreadView(page, 'projects', prefix);
       await revealProject('t-scheduler');
       await option('other');
       await page.waitFor(`!document.querySelector('${root} ${id('other-projects-toggle')}') && document.querySelector('${root} [data-project-id="${empty}"]')`);
@@ -62,7 +63,7 @@ for (const width of [1280, 390]) {
       await revealProject(merged);
       expect(await page.evaluate(`globalThis.__boiteTest.workspace.machines[0].store.client.call('threads.get', {threadId:'t-parser'}).then(t=>t.archived)`)).toBe(true);
       await shot('projects-visible');
-      await page.click(id(`${prefix}view-recent`));
+      await showThreadView(page, 'recent', prefix);
       await page.waitFor(`document.querySelector('${row(merged)}')`);
       await option('merged');
       expect(await page.evaluate('globalThis.__boiteTest.workspace.machines[0].store.client.sweepMergedPrArchives()')).toBe(1);
@@ -102,7 +103,7 @@ for (const width of [1280, 390]) {
         return [first.id, second.id, empty.id, busy.id];
       })()`);
       if (width < 720) await mobileAction(page, 'mobile-conversations');
-      await page.click(id(width < 720 ? 'mobile-view-projects' : 'view-projects'));
+      await showThreadView(page, 'projects', width < 720 ? 'mobile-' : '');
       await page.click(id(width < 720 ? 'mobile-grouping-options' : 'grouping-options'));
       await page.click(`${id(width < 720 ? 'mobile-grouping-options-menu' : 'grouping-options-menu')} [data-value=working]`);
       await page.click(id(width < 720 ? 'mobile-grouping-options' : 'grouping-options'));

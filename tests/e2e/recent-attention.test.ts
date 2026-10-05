@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
+import { showThreadView } from './lib/views.ts';
 import { startUi } from './lib/ui.ts';
 
 let server: { close(): Promise<void> };
@@ -49,7 +50,7 @@ beforeEach(async () => {
   await page.navigate(url);
   await page.waitFor(`globalThis.__boiteTest?.workspace.machines.length === 2 && document.querySelectorAll('${id('thread-row')}').length === 8`);
   [main, remote] = await page.evaluate<[string, string]>('globalThis.__boiteTest.workspace.machines.map(machine => machine.id)');
-  await page.click(id('view-recent'));
+  await showThreadView(page, 'recent');
 });
 afterAll(async () => { await page?.close(); await server?.close(); });
 
