@@ -31,7 +31,7 @@
   import { glides } from '../lib/motion';
   import { BottomEdge, BottomGlide, PointerHold, keysUp, typingKey, watchWheel, wheelsUp } from '../lib/timeline-follow';
   import { selectionClicks } from '../lib/selection-clicks';
-  import { pullNewer } from '../lib/reading-window';
+  import { editWhole, pullNewer } from '../lib/reading-window';
   import { MediaQuery } from 'svelte/reactivity';
 
   /** A phone has no room left of the bubbles for the outline rail: it is not drawn there. */
@@ -742,11 +742,8 @@
   // So would an edit started under a prompt still on its way to the core.
   const atRest = $derived(branchable && !store.busy && (store.composerStates[threadId]?.queued.length ?? 0) === 0 && !store.composerStates[threadId]?.sending);
 
-  /** Pictures and files a light page left on the core come back first: the composer sends what the message holds. */
   async function editMessage(message: Message): Promise<void> {
-    if (!(await store.loadAttachments(threadId, message))) return;
-    store.startEdit(threadId, message);
-    focusComposer();
+    if (await editWhole(store, threadId, message)) focusComposer();
   }
 
   /** The last turn again from its own prompt, on screen before the core rewinds (`retryTurn`). */
