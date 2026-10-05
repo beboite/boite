@@ -267,6 +267,49 @@ describe('threads.fork', () => {
     } finally { proceed.resolve(); placement.mockRestore(); }
   });
 
+  test('copies stored parts as written, and a message still streaming from its held parts', async () => {
+    const done = Promise.withResolvers<TurnResult>();
+    let open = '', closed = '';
+    restore = setDriver('echo', { protocol: 'echo', startTurn(ctx) {
+      open = ctx.emit.startMessage('assistant');
+      ctx.emit.part(open, 0, { type: 'text', text: 'partial' });
+      closed = ctx.emit.startMessage('assistant');
+      ctx.emit.part(closed, 0, { type: 'text', text: 'é "quoted"   ✓' });
+      ctx.emit.part(closed, 1, { type: 'tool', toolId: 'tool-1', name: 'Read', input: { path: 'a.ts', n: 1.5 }, status: 'done', output: 'ok' });
+      ctx.emit.part(closed, 2, { type: 'tool', toolId: 'agent-1', name: 'Agent', input: { prompt: 'Review' }, status: 'done', output: 'Checked' });
+      ctx.emit.complete(closed, 'complete');
+      return { done: done.promise, stop: () => done.resolve({ status: 'stopped', sessionId: null, usage: null }) };
+    } });
+    const { threadId } = await echoThread(h, client, 'source');
+    const turn = await client.call('turns.start', { threadId, prompt: 'go' });
+    try {
+      await waitFor(() => closed !== '' && h.core.journal.getMessage(closed)?.state === 'complete');
+      type Row = { id: string; role: string; parts: string; state: string; created_at: number };
+      const rows = (id: string) => h.core.journal.db.query('SELECT id, role, parts, state, created_at FROM messages WHERE thread_id = ? ORDER BY rowid').all(id) as Row[];
+      // The held message's row stays behind its parts until the persist timer; nothing below awaits before the copy.
+      h.core.journal.appendDelta(threadId, open, 0, ' and more');
+      h.core.journal.flushDeltas();
+      const held = JSON.stringify(h.core.journal.streamingMessage(open)?.parts);
+      expect(held).toContain('partial and more');
+      const source = rows(threadId);
+      expect(source.find(row => row.id === open)?.parts).not.toBe(held);
+      const forking = h.core.threads.fork(threadId, closed, false);
+      const fork = await forking;
+
+      const copied = rows(fork.id);
+      expect(copied.map(row => [row.role, row.created_at])).toEqual(source.map(row => [row.role, row.created_at]));
+      expect(copied.map(row => row.parts)).toEqual(source.map(row => row.id === open ? held : row.parts));
+      expect(copied.map(row => row.state)).toEqual(['complete', 'complete', 'complete']);
+      // The team view of the fork finds the copied agent call without parsing the thread.
+      expect(h.core.journal.db.query('SELECT message_id FROM native_agent_messages WHERE thread_id = ?').all(fork.id))
+        .toEqual([{ message_id: copied.find(row => row.parts.includes('agent-1'))!.id }]);
+      expect(h.core.journal.streamingMessage(open)).toBeDefined();
+    } finally {
+      done.resolve({ status: 'done', sessionId: null, usage: null });
+      await waitFor(() => h.core.journal.getTurn(turn.id)?.finishedAt != null);
+    }
+  });
+
   test('with worktree, the fork runs in a git worktree of its own', async () => {
     recordingEcho();
     const path = join(h.dataDir, 'repo');

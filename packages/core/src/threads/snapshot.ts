@@ -5,11 +5,17 @@ import type { Core } from '../core';
 import { invalidParams, refused } from '../errors';
 import type { AgentState } from './agent-state';
 import { readMemoryEvents } from './memory-read';
+import { previewDigests } from '../journal/part-blobs';
 import { forTransport, transportProjection } from './transport';
 
 type Projection = ReturnType<typeof transportProjection>;
 type Options = Pick<RpcParams<'threads.get'>, 'limit' | 'compactTools' | 'compactFiles' | 'compactImages' | 'around' | 'sync' | 'open'>;
-const hash = (messages: Message[], options: Options) => createHash('sha256').update(`${!!options.compactTools}:${!!options.compactFiles}:${!!options.compactImages}:`).update(JSON.stringify(messages)).digest('base64url');
+// A preview read from part_blobs hashes the digest of its whole output, which the page does not carry.
+const withDigests = (_key: string, value: unknown) => {
+  const digest = value !== null && typeof value === 'object' ? previewDigests.get(value) : undefined;
+  return digest === undefined ? value : { ...value as object, outputDigest: digest };
+};
+const hash = (messages: Message[], options: Options) => createHash('sha256').update(`${!!options.compactTools}:${!!options.compactFiles}:${!!options.compactImages}:`).update(JSON.stringify(messages, withDigests)).digest('base64url');
 
 /** Validate new options before an opening can change the socket or unread state. */
 export function checkSnapshotOptions(options: Options): void {
@@ -29,8 +35,8 @@ export function threadSnapshot(core: Core, thread: ThreadSummary, after: string 
   const from = after === undefined ? null : core.journal.messageRowid(thread.id, after);
   // Budgets apply to what the client receives, so compacted output never blocks a page.
   const project = transportProjection(options);
-  const tail = from === null ? null : core.journal.listMessagesFrom(thread.id, from, limit, project);
-  const page = tail === null ? pageAround(core, thread.id, options.around, limit, project) : { messages: tail, before: null, after: null };
+  const tail = from === null ? null : core.journal.listMessagesFrom(thread.id, from, limit, project, !!options.compactTools);
+  const page = tail === null ? pageAround(core, thread.id, options.around, limit, project, !!options.compactTools) : { messages: tail, before: null, after: null };
   const turns = core.journal.listTurnsFor(thread.id, page.messages.map(message => message.turnId));
   const anchor = options.sync ? resumeAnchor({ messages: page.messages, turns }) : null;
   const anchorIndex = anchor === null ? -1 : page.messages.findIndex(message => message.id === anchor);
@@ -60,13 +66,13 @@ export function threadSnapshot(core: Core, thread: ThreadSummary, after: string 
  * written after it: then half a page before it and half from it on. A count
  * on the index decides, so the far case reads no row it does not send.
  */
-function pageAround(core: Core, threadId: string, around: string | undefined, limit: number, project: Projection): { messages: Message[]; before: string | null; after: string | null } {
+function pageAround(core: Core, threadId: string, around: string | undefined, limit: number, project: Projection, toolPreviews: boolean): { messages: Message[]; before: string | null; after: string | null } {
   const journal = core.journal;
   const rowid = around === undefined ? null : journal.messageRowid(threadId, around);
-  if (rowid === null || journal.countMessagesFrom(threadId, rowid) <= limit) return { ...journal.listMessagePage(threadId, { limit, project }), after: null };
+  if (rowid === null || journal.countMessagesFrom(threadId, rowid) <= limit) return { ...journal.listMessagePage(threadId, { limit, project, toolPreviews }), after: null };
   const half = Math.max(1, Math.floor(limit / 2));
-  const older = journal.listMessagePage(threadId, { beforeRowid: rowid, limit: half, project });
-  const newer = journal.listMessagesForward(threadId, rowid, Math.max(1, limit - half), project);
+  const older = journal.listMessagePage(threadId, { beforeRowid: rowid, limit: half, project, toolPreviews });
+  const newer = journal.listMessagesForward(threadId, rowid, Math.max(1, limit - half), project, toolPreviews);
   return { messages: [...older.messages, ...newer.messages], before: older.before, after: newer.after };
 }
 
@@ -95,8 +101,9 @@ export function messagePage(core: Core, params: RpcParams<'messages.list'>): Mes
   }
   const limit = Math.min(Math.max(1, Math.trunc(params.limit ?? MESSAGE_PAGE)), MESSAGE_PAGE_MAX);
   const project = transportProjection(params);
+  const toolPreviews = !!params.compactTools;
   const page = params.before === undefined
-    ? { ...core.journal.listMessagesForward(params.threadId, rowid + 1, limit, project), before: null }
-    : core.journal.listMessagePage(params.threadId, { beforeRowid: rowid, limit, project });
+    ? { ...core.journal.listMessagesForward(params.threadId, rowid + 1, limit, project, toolPreviews), before: null }
+    : core.journal.listMessagePage(params.threadId, { beforeRowid: rowid, limit, project, toolPreviews });
   return { ...page, messages: forTransport(page.messages, params), turns: core.journal.listTurnsFor(params.threadId, page.messages.map((message) => message.turnId)) };
 }
