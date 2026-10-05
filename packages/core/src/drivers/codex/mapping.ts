@@ -198,14 +198,14 @@ export function addCounts(a: CodexTokenCounts, b: CodexTokenCounts): CodexTokenC
 }
 
 /**
- * The turn's summed counts as a Boite `Usage`. Codex's input count already
- * holds the cache reads and writes, and `Usage.inputTokens` never does, so
- * they come out of it. Codex carries no price on the wire, so the cost stays
- * null and the UI says so.
+ * The turn's summed counts as a Boite `Usage`. The input keeps Codex's
+ * meaning and still holds the cache reads, like every Codex turn already in
+ * the journal: `usage.history` takes them out when it sums Codex rows. Codex
+ * carries no price on the wire, so the cost stays null and the UI says so.
  */
 export function mapUsage(counts: CodexTokenCounts): Usage {
   return {
-    inputTokens: Math.max(0, counts.input - counts.cached - counts.cacheWrite),
+    inputTokens: counts.input,
     outputTokens: counts.output,
     cacheReadTokens: counts.cached,
     cacheWriteTokens: counts.cacheWrite,
