@@ -194,5 +194,25 @@ describe('profile sharing', () => {
       expect(problems[0]?.message).toContain('is not valid JSON');
       expect(readFileSync(join(account, 'state.json'), 'utf8')).toBe('{ half written');
     });
+
+    test('a failed write records no hash, so a value the agent writes later stays its own', () => {
+      writeFileSync(join(source, 'state.json'), JSON.stringify({ mcpServers: servers }));
+      // A directory where the temporary copy goes makes the write fail.
+      mkdirSync(join(account, `state.json.boite-${process.pid}.tmp`));
+      expect(shareKeys(account, profile, entries).map((problem) => problem.path)).toEqual(['state.json']);
+      const markerFile = join(account, SHARE_MARKER);
+      const marker = existsSync(markerFile) ? JSON.parse(readFileSync(markerFile, 'utf8')) as { keys?: Record<string, string> } : {};
+      expect(marker.keys ?? {}).toEqual({});
+      expect(existsSync(join(account, 'state.json'))).toBe(false);
+    });
+
+    test('a key the account file only inherits counts as absent', () => {
+      const inherited: ProviderSharedKeys[] = [{ variable: 'CODEX_HOME', path: 'state.json', keys: ['toString'] }];
+      writeFileSync(join(source, 'state.json'), JSON.stringify({ toString: 'theirs' }));
+      writeFileSync(join(account, 'state.json'), JSON.stringify({}));
+      expect(shareKeys(account, profile, inherited)).toEqual([]);
+      expect(read()).toEqual({ toString: 'theirs' });
+      expect(readdirSync(account).filter((name) => name.startsWith('state.json.own-'))).toEqual([]);
+    });
   });
 });

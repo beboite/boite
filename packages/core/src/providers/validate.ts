@@ -529,6 +529,8 @@ function checkSharedKeys(
     const keys = asArray(obj['keys'], file, `${field}.keys`).map((raw, at) => {
       const key = asString(raw, file, `${field}.keys[${at}]`);
       if (key.length === 0) reject(file, `${field}.keys[${at}]`, 'a non-empty key', `${field}.keys[${at}] is empty`);
+      // Assigning it would set the merged object's prototype instead of a key.
+      if (key === '__proto__') reject(file, `${field}.keys[${at}]`, 'a key other than __proto__', `${field}.keys[${at}] cannot be __proto__`);
       return key;
     });
     if (keys.length === 0) reject(file, `${field}.keys`, 'at least one key', `${field}.keys must list at least one key`);

@@ -85,6 +85,7 @@ describe('hook descriptors', () => {
     expect(refusal(descriptor({ sharedKeys: [{ variable: 'MINE_HOME', path: 'auth.json', keys: ['a'] }] }))).toMatchObject({ field: 'sharedKeys[0].path' });
     expect(refusal(descriptor({ sharedKeys: [{ variable: 'OTHER_HOME', path: 'state.json', keys: ['a'] }] }))).toMatchObject({ field: 'sharedKeys[0].variable' });
     expect(refusal(descriptor({ sharedKeys: [{ variable: 'MINE_HOME', path: 'state.json', keys: [] }] }))).toMatchObject({ field: 'sharedKeys[0].keys' });
+    expect(refusal(descriptor({ sharedKeys: [{ variable: 'MINE_HOME', path: 'state.json', keys: ['__proto__'] }] }))).toMatchObject({ field: 'sharedKeys[0].keys[0]' });
     expect(refusal(descriptor({ sharedKeys: [{ variable: 'MINE_HOME', path: 'state.json', home: '/etc/state.json', keys: ['a'] }] })))
       .toMatchObject({ field: 'sharedKeys[0].home' });
   });

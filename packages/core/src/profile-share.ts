@@ -137,6 +137,9 @@ export function shareKeys(isolationDir: string, profile: OsProfile, entries: rea
       continue;
     }
     if (samePath(from, target)) continue;
+    // A failed write must not leave the hash of a value the file never got:
+    // the agent could write that same value later, and Boite would take it for its own.
+    const keysBefore = { ...marker.keys };
     try {
       const link = linkedParent(isolationDir, key) ?? (statEntry(target)?.isSymbolicLink() === true ? target : null);
       if (link !== null) {
@@ -145,6 +148,7 @@ export function shareKeys(isolationDir: string, profile: OsProfile, entries: rea
       }
       mergeKeys(from, target, key, entry.keys, marker);
     } catch (error) {
+      marker.keys = keysBefore;
       problems.push({ path: entry.path, message: messageOf(error) });
     }
   }
@@ -169,8 +173,9 @@ function mergeKeys(source: string, target: string, file: string, keys: readonly 
   let changed = false;
   for (const key of keys) {
     const id = `${file}#${key}`;
-    const has = ours[key];
-    const wanted = theirs[key];
+    // Own properties only: a key such as `toString` is absent, not inherited.
+    const has = Object.hasOwn(ours, key) ? ours[key] : undefined;
+    const wanted = Object.hasOwn(theirs, key) ? theirs[key] : undefined;
     if (wanted === undefined) {
       if (has !== undefined && marker.keys[id] === valueDigest(has)) {
         delete ours[key];
