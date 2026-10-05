@@ -27,6 +27,13 @@ Existing threads keep their selection. A first send probes when needed and
 refuses a preset unavailable on that account by name. Presets live in client
 configuration; descriptor lists and native probes own availability.
 
+Without a configured preset, Claude starts on Opus 5.5 at high effort, Codex
+on GPT 6.1 Sol at medium and Grok on Grok 4.7 at high (`BUILT_IN_MODELS` in
+`packages/ui/src/lib/model-defaults.ts`). Each built-in entry carries the
+effort scale its agent reported, so the composer offers reasoning levels
+before the account's catalog is read; the catalog's entry replaces it once it
+arrives.
+
 ## Picker and favorites
 
 The picker hides unnamed `default` and `auto` entries while retaining them in
@@ -179,7 +186,7 @@ and saves it with the thread's selection revision. An unavailable preset or a
 concurrent selection change refuses the send; it never silently runs the alias.
 The built-in preset is a preference, not a setting: when the account's catalog
 does not list it, the UI moves to a later revision of the same model
-(`claude-opus-5` to `claude-opus-5-5`), else to the catalog's default or first
+(`claude-opus-5-5` to `claude-opus-5-5-20261101`), else to the catalog's default or first
 current model, and the composer shows that model as soon as the catalog is
 read. A preset the user configured and a model picked by hand are still refused
 when the catalog does not list them.

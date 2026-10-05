@@ -164,7 +164,7 @@ test('a model probe that resolves after navigation cannot update the next thread
   const client = await mountAt('landing');
   await store.probeModels('claude', 'a-claude-main');
   const first = await client.call('threads.create', {
-    projectId: 'p-boite', providerId: 'claude', accountId: 'a-claude-main', model: 'claude-sonnet-5', title: 'Picker source'
+    projectId: 'p-boite', providerId: 'claude', accountId: 'a-claude-main', model: 'claude-sonnet-5-5', title: 'Picker source'
   });
   const next = await client.call('threads.create', {
     projectId: 'p-boite', providerId: 'claude', accountId: 'a-claude-main', model: 'claude-fable-5-1', title: 'Picker destination'
@@ -189,11 +189,11 @@ test('a model probe that resolves after navigation cannot update the next thread
   try {
     const update = vi.spyOn(store, 'update');
     document.querySelector<HTMLButtonElement>('[data-testid=composer-picker]')!.click();
-    await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null && document.querySelector('[data-model="claude-opus-5"]') !== null);
+    await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null && document.querySelector('[data-model="claude-opus-5-5"]') !== null);
     // Opening the picker reused the fresh catalog. Age it only after its rows
     // appeared, so the model click itself starts the held refresh.
     now += 5 * 60_000 + 1;
-    document.querySelector<HTMLButtonElement>('[data-model="claude-opus-5"]')!.click();
+    document.querySelector<HTMLButtonElement>('[data-model="claude-opus-5-5"]')!.click();
     await waitFor(() => heldProbes === 1);
 
     await store.open(next.id);
@@ -204,7 +204,7 @@ test('a model probe that resolves after navigation cannot update the next thread
     flushSync();
 
     expect(update.mock.calls.filter(([threadId]) => threadId === next.id)).toHaveLength(0);
-    expect((await client.call('threads.get', { threadId: first.id })).model).toBe('claude-sonnet-5');
+    expect((await client.call('threads.get', { threadId: first.id })).model).toBe('claude-sonnet-5-5');
     expect((await client.call('threads.get', { threadId: next.id })).model).toBe('claude-fable-5-1');
     expect(store.openThread?.model).toBe('claude-fable-5-1');
     expect(store.prefs).toEqual(prefsAtDestination);
@@ -218,7 +218,7 @@ test('a signed-in Claude seat is probed before its model and account are applied
   await waitFor(() => store.accountOf('a-claude-side')?.status === 'ok');
   await store.probeModels('claude', 'a-claude-main');
   const thread = await client.call('threads.create', {
-    projectId: 'p-boite', providerId: 'claude', accountId: 'a-claude-main', model: 'claude-sonnet-5', title: 'Second seat picker'
+    projectId: 'p-boite', providerId: 'claude', accountId: 'a-claude-main', model: 'claude-sonnet-5-5', title: 'Second seat picker'
   });
   await store.open(thread.id);
   await waitFor(() => store.openThread?.id === thread.id);

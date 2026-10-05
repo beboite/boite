@@ -203,7 +203,7 @@ test('header and project layout', async () => {
     const account = store.accountsOf('codex')[0];
     await store.createThread({projectId:store.projects[0].id,providerId:'codex',accountId:account.id,model:'default',permissionMode:'default',title:'Review the next change'});
   })()`);
-  await page.waitFor(`document.querySelector('${id('composer-picker')}').textContent.includes('GPT 5.6 Sol')`);
+  await page.waitFor(`document.querySelector('${id('composer-picker')}').textContent.includes('GPT 6.1 Sol')`);
   expect(await page.evaluate(`document.querySelector('${id('composer-picker')}').getBoundingClientRect().height`)).toBeGreaterThanOrEqual(30);
   await capture('composer-preset.png');
   await page.evaluate(`document.documentElement.dataset.theme = 'light'`);
