@@ -12,7 +12,10 @@
  * never acknowledges native mouse or text input and drops key events, so the
  * kit reports `hidden` and the caller acts through DOM events instead.
  */
-const KIT = String.raw`(() => {
+// @ts-nocheck -- the kit runs in the page's own realm and is serialized by `toString`,
+// so it reads only page globals and nothing from this module. The build minifies it
+// like the rest of the app.
+function agentKit() {
   const KEY = Symbol.for('boite.agent.v1');
   if (window[KEY]) return window[KEY];
   const K = { refs: new Map(), token: Math.random().toString(36).slice(2), leaving: false, agentAt: Date.now(), policy: { accept: true, text: null }, dialogs: [] };
@@ -340,7 +343,9 @@ const KIT = String.raw`(() => {
   };
   K.resources = () => performance.getEntriesByType('resource').length;
   return K;
-})()`;
+}
+
+const KIT = `(${agentKit.toString()})()`;
 
 /** An expression running `body` with the page's kit bound to `K`. */
 export function kit(body: string): string {
