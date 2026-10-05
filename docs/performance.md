@@ -251,7 +251,8 @@ when the core advertises `chunkedAnswers`.
 - On a core advertising `readingPages`, pages ask for `compactImages`: a
   picture above 8 KiB of base64 arrives as its decoded size, holds a
   thumbnail-sized place, and loads through `messages.attachment` once within
-  400 px of the viewport. Edit fetches a prompt's deferred files and pictures
+  400 px of what the timeline shows: the observer is rooted at the scrolling
+  timeline, whose clipping would otherwise hide the margin. Edit fetches a prompt's deferred files and pictures
   before it fills the composer.
 - While a first page downloads, the chat shows a bar and "192 kB / 1.3 MB",
   the bytes received against the total the core put in each slice. A page
@@ -317,7 +318,11 @@ the click to the first message in headless Chrome, plain and throttled. `--base`
 skips the parameters an older core does not take. The
 [2026-10-05 report](../bench/results/2026-10-05-thread-open.md) has the numbers;
 `tests/e2e/thread-open.test.ts` captures the bar at both widths and checks
-its total against the page the core sends.
+its total against the page the core sends. `tests/e2e/thread-reopen.test.ts`
+drives the rest at phone and desktop widths on a real core: a deferred picture
+fetched while still above the screen, Edit of a prompt whose file stayed on
+the core, and a return to a message read far up, its pages below and "Jump to
+latest".
 
 `bun bench/thread-traffic.ts --rtt 150 --mbps 2 --runs 7` compares both opening
 protocols through a paced TCP relay on the same temporary core. It counts actual

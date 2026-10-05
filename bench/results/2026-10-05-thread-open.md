@@ -36,8 +36,8 @@ wire. "Throttled" is Chrome's network emulation at 150 ms and 10 Mbit/s.
 | First page, relay | 351 | 508 |
 | First page with `compactImages`, loopback | 126 | 1,305 |
 | First page with `compactImages`, relay | 318 | 361 |
-| Same page `around` message 50 of 200, loopback | 115 | 1,305 |
-| Same page `around` message 50 of 200, relay | 333 | 362 |
+| Same page `around` the 101st of 200 messages, loopback | 115 | 1,305 |
+| Same page `around` the 101st of 200 messages, relay | 333 | 362 |
 | Click to first message, loopback, 3 of 3 opened | 331 | |
 | Click to first message, throttled, 3 of 3 opened | 2,140 | |
 
