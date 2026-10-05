@@ -482,6 +482,8 @@ export class Store {
   subagents(threadId: ThreadId) { return this.#ctx.threads.subagents(threadId); }
   compact(...args: Parameters<Threads['compact']>) { return this.#ctx.threads.compact(...args); }
   rewind(...args: Parameters<Threads['rewind']>) { return this.#ctx.threads.rewind(...args); }
+  /** Per thread, the message a rewind in flight removes; the timeline already hides it. */
+  get rewinding() { return this.#ctx.threads.rewinding; }
   forkSideQuestion(...args: Parameters<Threads['forkSideQuestion']>) { return this.#ctx.threads.forkSideQuestion(...args); }
   mergeBack(...args: Parameters<Threads['mergeBack']>) { return this.#ctx.threads.mergeBack(...args); }
   fork(...args: Parameters<Threads['fork']>) { return this.#ctx.threads.fork(...args); }

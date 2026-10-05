@@ -41,6 +41,11 @@ export class Threads {
   loadingThreadId = $state<ThreadId | null>(null);
   /** The threads a `threads.retitle` is out for: their menu item waits. */
   retitling = $state<ThreadId[]>([]);
+  /**
+   * The message a `threads.rewind` in flight removes, per thread: the timeline
+   * hides it and what follows at once instead of after the core restored files.
+   */
+  rewinding = $state<Record<ThreadId, MessageId>>({});
   readonly readingPositions = new Map<string, { top: number; pinned: boolean; heights: Map<string, number>; anchor?: { id: string; offset: number }; height?: number; reservePrompt?: string | null; followPrompt?: string | null }>();
   readingThreads = new Map<string, Thread>();
   subscribedThreadId: ThreadId | null = null;
@@ -148,6 +153,7 @@ export class Threads {
     const client = this.ctx.client;
     const clientGeneration = this.ctx.clientGeneration;
     if (!client || !threadId) return null;
+    this.rewinding[threadId] = messageId;
     try {
       const { thread, ...rewound } = await client.call('threads.rewind', { threadId, messageId });
       if (!this.ctx.currentClient(client, clientGeneration)) return null;
@@ -157,6 +163,9 @@ export class Threads {
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
       return null;
+    } finally {
+      // Refused, the hidden messages come back; taken, the thread no longer holds them.
+      if (this.rewinding[threadId] === messageId) delete this.rewinding[threadId];
     }
   }
 
