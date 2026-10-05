@@ -43,7 +43,9 @@ import { chromiumArgs, clearActivePort, findChromium, pipesDevTools, readSavedCo
 import { TabRecorder } from './browser/recorder.ts';
 import { EDITABLE_SCRIPT, KEY_CODES, PAGE_INFO_SCRIPT, SETTLED_VIEWPORT_SCRIPT, SNAPSHOT_SCRIPT, targetScript } from './browser/scripts.ts';
 
-const SCOPE = 'system:browser';
+/** The process scope of the agent browser's own processes, in the trace and the registry. */
+export const BROWSER_SCOPE = 'system:browser';
+const SCOPE = BROWSER_SCOPE;
 /**
  * How long a browser may take to answer after it starts. The first start of a
  * profile creates it: 20 seconds was not enough on a Windows CI runner on

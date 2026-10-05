@@ -35,7 +35,7 @@ import { scheduleThreadDeletionRetention } from './threads/deletion-retention.ts
 import { scheduleDoneRetention } from './threads/done-retention.ts';
 import { scheduleArtifactRetention } from './artifact-retention.ts';
 import { ArtifactPreviews } from './artifact-preview.ts';
-import { AgentBrowser } from './browser.ts';
+import { AgentBrowser, BROWSER_SCOPE } from './browser.ts';
 import { MobileDevices } from './devices/control.ts';
 import { QuotaStore } from './quotas.ts';
 import { PluginStore } from './plugins.ts';
@@ -191,7 +191,9 @@ export class Core {
     const scheduler = this.scheduler.state();
     const threads = this.threads;
     if (this.router.activeRequests > 0 || scheduler.running.length > 0 || scheduler.queued.length > 0
-      || this.agentRuntime.busy || this.procs.liveThreads().length > 0
+      // An agent's open tab is not work under way: its browser stays up after the turn and would hold an
+      // update back for good. Closing saves each profile's cookies; a browser command in flight is an active request.
+      || this.agentRuntime.busy || this.procs.liveThreads().some(scope => scope !== BROWSER_SCOPE)
       || threads.sideQuestions.busy
       || threads.runner.handles.size > 0 || threads.runner.steering.size > 0
       || threads.deferred.pendingWakes.size > 0 || threads.deferred.deferredAnswers.size > 0 || threads.deferred.consumed.size > 0

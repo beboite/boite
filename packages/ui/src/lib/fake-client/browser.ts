@@ -1,4 +1,4 @@
-import { browserActionError, browserCookiesError, browserProfileIdError, browserProfilesOf, DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE, remoteBrowserInputError, remoteFrameOptionsError, type AgentBrowserTab, type BrowserReply, type RemoteBrowserFrame, type RpcParams, type ThreadId } from '@boite/contracts';
+import { browserActionError, browserCookiesError, browserProfileIdError, browserProfilesOf, DEFAULT_BROWSER_PROFILE, findBrowserProfile, PRIVATE_BROWSER_PROFILE, remoteBrowserInputError, remoteFrameOptionsError, type AgentBrowserTab, type BrowserReply, type RemoteBrowserFrame, type RpcParams, type ThreadId } from '@boite/contracts';
 import { refusal } from './shared';
 import { fakeBrowserScreen, type FakePage } from './browser-screen';
 import type { FakeContext, FakeMethods } from './context';
@@ -71,11 +71,14 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
     const browser = browsers.get(threadId);
     if (action.kind === 'status') return { value: { available: true, tabs: tabsOf(browser) } };
     if (action.kind === 'profiles') {
-      return { value: { default: DEFAULT_BROWSER_PROFILE, profiles: [{ id: DEFAULT_BROWSER_PROFILE, name: 'Default', kept: true }, { id: PRIVATE_BROWSER_PROFILE, name: 'Private', kept: false }] } };
+      const { profiles, defaultId } = browserProfilesOf(ctx.settings);
+      return { value: { default: defaultId, profiles: [{ id: DEFAULT_BROWSER_PROFILE, name: 'Default', kept: true }, ...profiles.map(profile => ({ id: profile.id, name: profile.name, kept: true })), { id: PRIVATE_BROWSER_PROFILE, name: 'Private', kept: false }] } };
     }
     if (action.kind === 'open') {
-      const profile = action.profile === undefined ? DEFAULT_BROWSER_PROFILE : action.profile.trim().toLowerCase();
-      if (profile !== DEFAULT_BROWSER_PROFILE && profile !== PRIVATE_BROWSER_PROFILE) throw refusal(`no browser profile is named ${action.profile}; browser profiles lists them`);
+      // As the core resolves it: the machine's default without a name, else an id or a name in any case.
+      const known = browserProfilesOf(ctx.settings);
+      const profile = action.profile === undefined ? known.defaultId : findBrowserProfile(known.profiles, action.profile);
+      if (profile === null) throw refusal(`no browser profile is named ${action.profile}; browser profiles lists them`);
       const target = of(threadId);
       const tab: Tab = { tabId: `browser:${++seq}-${crypto.randomUUID().slice(0, 8)}`, profile, url: action.url, title: titleOf(action.url), ...VIEWPORT, taps: 0, text: '', scrollY: 0, history: [action.url], historyIndex: 0, at: Date.now() };
       target.tabs.push(tab); target.active = tab.tabId;
@@ -121,7 +124,10 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
         if (idProblem) throw refusal(idProblem);
         const { profiles } = browserProfilesOf(ctx.settings);
         if (!profiles.some(known => known.id === profile.id)) {
-          ctx.settings = { ...ctx.settings, browserProfiles: [...profiles, { id: profile.id, name: profile.name?.trim() || profile.id }] };
+          const wanted = profile.name?.trim() || profile.id, taken = new Set(profiles.map(known => known.name.toLowerCase()));
+          let name = wanted;
+          for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${wanted} ${n}`;
+          ctx.settings = { ...ctx.settings, browserProfiles: [...profiles, { id: profile.id, name }] };
           ctx.emit('settings.updated', { ...ctx.settings });
         }
       }

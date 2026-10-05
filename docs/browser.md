@@ -77,7 +77,8 @@ browser. `boite browser open <url> --profile <name>` then opens signed in.
 
 It is a copy at that moment, not a link: a later sign-in on the PC is copied
 again by hand, and a session the site ties to the PC's address or device may
-still ask again. The cookies cross the connection to that machine, so the
+still ask again. A partitioned cookie (one tied to the site that embeds it)
+is left out, since the copy cannot carry that scope. The cookies cross the connection to that machine, so the
 action is the owner's alone and never automatic. Signing in directly works
 too: show the agent's browser and sign in there.
 
@@ -87,6 +88,10 @@ the limit the window is closed. An alert is accepted and a confirm or prompt
 declined, since nobody can answer them in a headless page, and both are noted
 in the diagnostics. Downloads are refused. Archiving or removing the
 conversation closes its tabs.
+
+An open tab does not hold back an update of the core: the browser's processes
+are not counted as work under way. The update closes them, the cookies are
+saved first, and the tabs themselves are not reopened.
 
 The agent's commands of one conversation run one after the other, in order.
 `open` and `navigate` wait up to 15 seconds for the load event; a page still

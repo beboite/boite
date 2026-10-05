@@ -1,18 +1,22 @@
 import { BROWSER_COOKIES_MAX, browserCookiesError, type BrowserCookie } from '@boite/contracts';
 import { browserBridge } from './browser-bridge';
+import { windowsShell } from './shell-platform';
 import type { Store } from './store.svelte';
 
 /**
  * The cookies of a desktop profile, as the agent browser takes them. The
  * desktop's browser lists them in DevTools form; one the contract would refuse
  * (an oversized value, a path that is not one) is left out rather than failing
- * the whole copy, and a session cookie keeps no expiry date.
+ * the whole copy, as is a partitioned cookie, whose scope the copy cannot carry.
+ * A session cookie keeps no expiry date.
  */
 export function agentCookies(raw: unknown[]): BrowserCookie[] {
   const cookies: BrowserCookie[] = [];
   for (const entry of raw) {
     if (!entry || typeof entry !== 'object') continue;
     const from = entry as Record<string, unknown>;
+    // A partitioned cookie belongs to one embedding site: copied without that scope it would be sent everywhere.
+    if (from.partitionKey !== undefined || from.partitionKeyOpaque !== undefined) continue;
     const cookie: BrowserCookie = {
       name: String(from.name ?? ''), value: String(from.value ?? ''), domain: String(from.domain ?? ''), path: String(from.path ?? '/'),
       ...(typeof from.secure === 'boolean' ? { secure: from.secure } : {}),
@@ -28,7 +32,7 @@ export function agentCookies(raw: unknown[]): BrowserCookie[] {
 
 /** Whether this client holds browser profiles whose sign-ins it can read: the Windows shell. */
 export function canCopySignIns(): boolean {
-  return typeof browserBridge.cookies === 'function';
+  return windowsShell() && typeof browserBridge.cookies === 'function';
 }
 
 /**

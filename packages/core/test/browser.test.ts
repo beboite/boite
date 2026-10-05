@@ -285,3 +285,17 @@ real('a click right after the viewport changes size lands on its element, and wh
     expect(entries.some(entry => entry.kind === 'network' && entry.text.includes('404'))).toBe(true);
   } finally { page.stop(true); }
 }, 150_000);
+
+real('an open agent tab does not hold back an update of the core', async () => {
+  let stopping = 0;
+  const updating = await startTestCore({ onShutdown: () => { stopping += 1; } });
+  const client = await updating.connect();
+  try {
+    const thread = (await echoThread(updating, client)).threadId;
+    await client.call('browser.command', { threadId: thread, action: { kind: 'open', url: url() } });
+    // The browser process is alive with its tab, and nothing is running: the core may stop for an update.
+    expect(updating.core.procs.liveThreads()).toContain('system:browser');
+    expect(updating.core.requestIdleShutdown()).toBe('accepted');
+  } finally { client.close(); await updating.stop(); }
+  expect(stopping).toBeLessThanOrEqual(1);
+}, 150_000);

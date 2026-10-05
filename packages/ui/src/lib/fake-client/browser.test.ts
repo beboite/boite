@@ -80,3 +80,17 @@ test('back and forward follow the tab position when a page was visited twice', a
     expect(await step('forward')).toBe('https://b.example/');
   } finally { client.close(); }
 });
+
+test('a profile copied in is listed and opens by name, as on the core; a taken name gets a number', async () => {
+  const client = new FakeClient({ delayMs: 0 }), threadId = 't-trace';
+  const cookies = [{ name: 'sid', value: '1', domain: 'example.com', path: '/' }];
+  try {
+    await client.connect();
+    await expect(client.call('browser.command', { threadId, action: { kind: 'open', url: 'https://example.com/', profile: 'Work' } })).rejects.toThrow('no browser profile');
+    expect(await client.call('browser.importCookies', { profile: { id: 'p-work', name: 'Work' }, cookies })).toEqual({ imported: 1, profile: 'p-work' });
+    await client.call('browser.importCookies', { profile: { id: 'p-other', name: 'work' }, cookies });
+    const listed = (await client.call('browser.command', { threadId, action: { kind: 'profiles' } })).value as { profiles: Array<{ id: string; name: string }> };
+    expect(listed.profiles.map(profile => [profile.id, profile.name])).toEqual([['default', 'Default'], ['p-work', 'Work'], ['p-other', 'work 2'], ['private', 'Private']]);
+    expect((await client.call('browser.command', { threadId, action: { kind: 'open', url: 'https://example.com/', profile: 'WORK' } })).profile).toBe('p-work');
+  } finally { client.close(); }
+});
