@@ -84,7 +84,8 @@ other client's stream and request.
    asks for compacted pages, so on the 115 MiB thread it opens on one message
    and `messages.list` fails on the 33.5 MiB one: the history above it cannot
    be reached. On the other heavy threads most of the 300 to 450 ms per page is
-   parsing and stringifying outputs that are then cut to a preview.
+   parsing and stringifying outputs that are then cut to a preview. Fixed on
+   `main` by #335; this branch reads only a preview of large tool outputs.
 2. `delegation.get` parses the whole thread. `nativeAgents` runs
    `json_each` over every part of every assistant message to find Agent and
    Task tool calls. `AgentDock` calls it on each thread open and on each
@@ -111,7 +112,57 @@ other client's stream and request.
    message synchronously: 6.3 s of CPU and 931 MiB on the 115 MiB thread. An
    `INSERT INTO messages SELECT` with new ids would copy the JSON as text.
 
-Not measured here: the rewrite of a large streaming message every 0.5 to 5 s
-by `StreamBuffer.persistMessages`, which writes the whole parts array of a
-33 MiB message each time; the browser's memory with these threads open; the
-native shell; Windows.
+The rewrite of a large streaming message was measured afterwards, below.
+
+## After the fixes
+
+Same day, same command with `--journal`, on `main` at `493bf2d2` (which
+already sizes pages after compaction, #335) and on this branch. "First start"
+is a core opening the journal copy for the first time: its startup includes
+the schema 31 migration. "Settled" adds `--settle`: the migration and the move
+of every large inline value run before the core starts, the state a core
+reaches a few minutes after its first start. Load average 13 to 18.
+
+| Action | Thread | main | first start | settled |
+| --- | --- | ---: | ---: | ---: |
+| Core start to ready line | 1.7 GB copy | 1,939 ms | 7,881 ms | 380 ms |
+| `delegation.get` | 115 MiB | 1,051 ms | 473 ms | 30 ms |
+| `delegation.get` | 41 MiB | 296 ms | 62 ms | 22 ms |
+| `delegation.get` | 21 MiB | 176 ms | 36 ms | 5 ms |
+| `threads.get` reconnect tail (`after`) | 115 MiB | 20 ms | 4 ms | 3 ms |
+| `threads.get` reconnect tail (`after`) | 41 MiB | 44 ms | 4 ms | 3 ms |
+| `threads.get`, UI options, 40 messages | 115 MiB | 737 ms | 635 ms | 459 ms |
+| `threads.get`, UI options, 40 messages | 41 MiB | 259 ms | 258 ms | 146 ms |
+| `threads.get`, UI options, 40 messages | 21 MiB | 241 ms | 199 ms | 110 ms |
+| `threads.fork` from the middle, core CPU | 115 MiB | 5,160 ms | 4,110 ms | 3,020 ms |
+| `threads.fork` from the middle, RSS after | 115 MiB | 913 MiB | 111 MiB | 155 MiB |
+| Peak core RSS over the run | | 1,023 MiB | 594 MiB | 370 MiB |
+
+Medians of 6 calls, except fork (one call). The first start runs the
+migration once: it fills `native_agent_messages` from every stored part and
+builds the partial event indexes. On this journal it took 4.5 s when timed
+alone. Moving the large inline values of 919 rows took 29.7 s in total. The
+slowest row, the 33.5 MiB message, held the event loop for 2.1 s once; the
+core moves one row per 250 ms tick and waits while any message streams.
+
+The chat's 40-message page on the 115 MiB thread still answers 10.4 MiB in
+459 ms: it carries assistant videos and pictures inline, which
+`compactFiles` keeps on purpose. Fork wall time stays between 0.7 and 6.4 s:
+copying 115 MiB of values on this shared disk dominates it.
+
+A streaming message holding 93 finished screenshot reads (33 MiB) while text
+streamed for 20 s, `Journal` alone, 2026-10-05:
+
+| | before | after |
+| --- | ---: | ---: |
+| Message writes in 20 s | 5 | 30 |
+| Time inside those writes | 3,838 ms | 396 ms |
+| Process CPU | 2,509 ms | 853 ms |
+
+Before, each write took about 770 ms of event loop and the adaptive delay grew
+to its 5 s ceiling; after, the screenshots are written once and every later
+write stores the text part alone. A small message took 476 to 510 ms of CPU
+for the same 20 s.
+
+Not measured: the browser's memory with these threads open, the native shell
+and Windows.

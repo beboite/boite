@@ -41,6 +41,22 @@ bun bench/core-idle.ts 10
 The audit records samples, workload limits and remaining candidates, including
 queue admission, WebSocket fan-out and retained tool bodies in the browser.
 
+## Long threads in the journal
+
+Measured on 2026-10-05 with `bench/rpc-actions.ts --journal` on a copy of a
+1.7 GB journal ([results](../bench/results/2026-10-05-rpc-actions.md)). A turn
+that reads screenshots back keeps each PNG as base64 in its tool output; one
+message held 33.5 MiB. Large values now live in `part_blobs`
+([architecture](architecture.md)), so a streaming message rewrites only the
+parts that changed: 20 s of text on top of 93 stored screenshots spent 396 ms
+in writes instead of 3,838 ms. `delegation.get` reads the messages that
+`native_agent_messages` names instead of every part of the thread: 30 ms
+instead of 1,051 ms on a 115 MiB thread. Partial indexes on the events read
+back took the core's start on that journal from 1.9 s to 0.38 s once settled,
+and peak core RSS over the bench from 1,023 MiB to 370 MiB. The first start
+after the upgrade migrates once (7.9 s there), and the move of older inline
+values held the event loop for up to 2.1 s on its largest row.
+
 ## Concurrent agent stress
 
 ```sh

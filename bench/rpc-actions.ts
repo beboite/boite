@@ -4,6 +4,10 @@
  *
  *   bun bench/rpc-actions.ts [--journal <journal.db>] [--runs 8] [--out <file.json>]
  *
+ * `--settle` (with `--journal`) migrates the copy and moves its large inline
+ * values before the core starts, timing both, so the run measures the state a
+ * core reaches a few minutes after its first start on that journal.
+ *
  * `--journal` copies a journal into a fresh data directory first, so the core
  * reads realistic history; the copy is deleted afterwards. Without it the core
  * starts empty. The copy is taken with `VACUUM INTO`, which is consistent on a
@@ -21,6 +25,8 @@ import { join } from 'node:path';
 import { Database } from 'bun:sqlite';
 import type { RpcMethodName, RpcMethods } from '../packages/contracts/src/index.ts';
 import { connect, type CoreClient } from '../packages/core/src/client.ts';
+import { Journal } from '../packages/core/src/journal.ts';
+import { moveInlineValues } from '../packages/core/src/journal/part-blobs.ts';
 import { startCore } from '../tests/e2e/lib/core.ts';
 
 const args = process.argv.slice(2);
@@ -126,6 +132,26 @@ if (journal !== undefined) {
     .all() as { threadId: string; mib: number }[];
   db.close();
   process.stdout.write(`copied and isolated the journal in ${(performance.now() - started).toFixed(0)} ms\n`);
+  if (args.includes('--settle')) {
+    // What a core does once on this journal: the schema migration at open, then
+    // the background move of large inline values, run here to the end.
+    const opening = performance.now();
+    const settled = new Journal(copy);
+    const migratedMs = performance.now() - opening;
+    const moving = performance.now();
+    let after = 0, moved = 0, slowest = 0;
+    for (;;) {
+      const one = performance.now();
+      const next = moveInlineValues(settled.db, after, () => false);
+      if (next === null) break;
+      slowest = Math.max(slowest, performance.now() - one);
+      after = next;
+      moved += 1;
+    }
+    settled.setSetting('part-blobs:moved-through', after);
+    settled.close();
+    process.stdout.write(`settled: migration ${migratedMs.toFixed(0)} ms, ${moved} rows checked in ${(performance.now() - moving).toFixed(0)} ms, slowest ${slowest.toFixed(0)} ms\n`);
+  }
 }
 
 const spawned = performance.now();
