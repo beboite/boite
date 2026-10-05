@@ -172,7 +172,8 @@ pub(crate) async fn delete(app: &AppHandle, profile: &str) -> std::result::Resul
     if let Some(stale) = app.get_webview(&label) { let _ = stale.close(); }
     let environment = environment(app, profile).await?;
     let blank = WebviewUrl::External("about:blank".parse().map_err(|_| "about:blank is not a url".to_owned())?);
-    let builder = WebviewBuilder::new(label, blank).with_environment(environment.0);
+    // Unfocused: a hidden webview that took the keyboard would leave Settings without it.
+    let builder = WebviewBuilder::new(label, blank).with_environment(environment.0).focused(false);
     let view = window.add_child(builder, LogicalPosition::new(0.0, 0.0), LogicalSize::new(1.0, 1.0))
         .map_err(|error| format!("the browser profile {profile:?} could not be opened to delete it: {error}"))?;
     let _ = view.hide();

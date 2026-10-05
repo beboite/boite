@@ -41,6 +41,8 @@ test.skip('native browser fills its panel and floats inside the app without losi
     const opened = await client.call('browser.command', { threadId: thread.id, action: { kind: 'open', url: site.url.href } });
     const tabId = opened.tabId!;
     const command = (action: BrowserAction) => client!.call('browser.command', { threadId: thread.id, tabId, action });
+    // An agent's tab must not take the keyboard: it may belong to a conversation off screen.
+    expect((await command({ kind: 'evaluate', expression: 'document.hasFocus()' })).value).toBe(false);
     const invoke = (name: string, args: unknown) => page!.evaluate(`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(name)}, ${JSON.stringify(args)})`);
     const slot = () => page!.evaluate<{x: number; y: number; width: number; height: number}>(`document.querySelector('[data-testid=browser-slot]').getBoundingClientRect().toJSON()`);
     const panelRect = () => page!.evaluate<{x: number; y: number; width: number; height: number}>(`document.querySelector('[data-testid=right-panel]').getBoundingClientRect().toJSON()`);

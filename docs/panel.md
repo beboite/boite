@@ -41,7 +41,9 @@ Switching conversations or machines and hiding the panel parks browser pages
 without destroying them. Their forms, navigation history and recordings remain
 in memory. The agent's own tabs are not panel pages: they live in the browser
 of the machine that runs the conversation ([the agent's browser](browser.md))
-and keep working whichever client is open. Closing tabs, archiving the
+and keep working whichever client is open. A page the shell creates in the
+background never takes the keyboard or brings the window forward; it gets the
+focus when the user clicks it. Closing tabs, archiving the
 conversation or quitting the shell releases their pages. Reloading the UI
 recreates pages from their stored addresses, without preserving live DOM state.
 
@@ -133,7 +135,8 @@ Google" and most sign-in buttons do, gets a real popup window
 profile, or in the private session, and keeps `window.opener`: the sign-in
 answers the page through it and closes itself. Its title starts with the
 host it shows, since it has no address bar. Closing the tab closes its
-popups. A `target="_blank"` link, or `window.open` without a size, opens a tab
+popups. A popup from the tab on screen comes to the front; one from a tab
+off screen opens behind without the focus. A `target="_blank"` link, or `window.open` without a size, opens a tab
 in the same panel and profile instead, and that tab has no opener. So does a
 sized `window.open` while the tab already holds three popups: WebView2 has no
 popup blocker. Popups are
