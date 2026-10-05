@@ -26,6 +26,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // Coordination is visible with the conversation; only the owner enables it.
   'collaboration.get',
   'collaboration.directory',
+  // Which conversations act as stewards and over what: shown beside Communication settings. Only the owner grants or revokes.
+  'stewards.list',
   // Dictation uses the owner's configured engine. Devices cannot change paths or credentials.
   'speech.status',
   'speech.transcribe',
@@ -156,6 +158,7 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   // Invalidation naming the subscribed root; workflows.list applies the read scope.
   'workflows.changed',
   'collaboration.changed', 'thread.activity',
+  'stewards.changed', // Invalidation only, naming the steward thread; stewards.list is device-readable.
   'project.added', 'project.removed', 'project.updated',
   'thread.created', 'thread.updated', 'thread.removed', 'thread.commands', 'thread.background', 'thread.btw',
   'turn.started', 'turn.finished',

@@ -168,6 +168,10 @@ export class Store {
     this.coordinationLoading = false;
     this.coordinationSaving = false;
     this.coordinationError = null;
+    ctx.delegation.stewardsEpoch++;
+    this.stewards = null;
+    this.stewardsSaving = false;
+    this.stewardsError = null;
     ctx.delegation.delegationEpoch++;
     ctx.delegation.delegationSelectionEpoch++;
     ctx.delegation.delegationConfigureEpoch++;
@@ -593,6 +597,12 @@ export class Store {
   set coordinationSaving(value) { this.#ctx.delegation.coordinationSaving = value; }
   get coordinationError() { return this.#ctx.delegation.coordinationError; }
   set coordinationError(value) { this.#ctx.delegation.coordinationError = value; }
+  get stewards() { return this.#ctx.delegation.stewards; }
+  set stewards(value) { this.#ctx.delegation.stewards = value; }
+  get stewardsSaving() { return this.#ctx.delegation.stewardsSaving; }
+  set stewardsSaving(value) { this.#ctx.delegation.stewardsSaving = value; }
+  get stewardsError() { return this.#ctx.delegation.stewardsError; }
+  set stewardsError(value) { this.#ctx.delegation.stewardsError = value; }
   get delegation() { return this.#ctx.delegation.delegation; }
   set delegation(value) { this.#ctx.delegation.delegation = value; }
   get delegationThread() { return this.#ctx.delegation.delegationThread; }
@@ -608,6 +618,9 @@ export class Store {
 
   loadCoordination(...args: Parameters<Delegation['loadCoordination']>) { return this.#ctx.delegation.loadCoordination(...args); }
   configureCoordination(...args: Parameters<Delegation['configureCoordination']>) { return this.#ctx.delegation.configureCoordination(...args); }
+  loadStewards(...args: Parameters<Delegation['loadStewards']>) { return this.#ctx.delegation.loadStewards(...args); }
+  setSteward(...args: Parameters<Delegation['setSteward']>) { return this.#ctx.delegation.setSteward(...args); }
+  revokeSteward(...args: Parameters<Delegation['revokeSteward']>) { return this.#ctx.delegation.revokeSteward(...args); }
   loadDelegation(...args: Parameters<Delegation['loadDelegation']>) { return this.#ctx.delegation.loadDelegation(...args); }
   configureDelegation(...args: Parameters<Delegation['configureDelegation']>) { return this.#ctx.delegation.configureDelegation(...args); }
   selectDelegatedAgent(...args: Parameters<Delegation['selectDelegatedAgent']>) { return this.#ctx.delegation.selectDelegatedAgent(...args); }

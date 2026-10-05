@@ -16,6 +16,7 @@ import {
   type Account,
   type BackgroundTask,
   type AgentLetter,
+  type StewardGrant,
   type BrainStatus,
   type CoordinationConfig,
   type CoordinationPeer,
@@ -94,6 +95,8 @@ export interface FakeClientOptions {
   uninstalled?: boolean;
   /** Adds a deterministic active team for visual checks on `?fake=1&team=1`. */
   delegationDemo?: boolean;
+  /** A steward thread with a letter it sent, a notice it received and a thread its agent started, on `?fake=1&steward=1`. */
+  stewardDemo?: boolean;
   /** Who this client is. `'session'` makes it a paired phone, refused like one. */
   principal?: Principal;
   /** Stable public identity for multi-machine coordination tests. */
@@ -161,6 +164,8 @@ export class FakeContext {
   readonly delegationRequests = new Map<string, { fingerprint: string; threadId: ThreadId }>();
   readonly delegationSendRequests = new Map<string, { fingerprint: string; letter: AgentLetter }>();
   readonly letters = new Map<ThreadId, AgentLetter[]>();
+  /** Steward grants by steward thread (`stewards.ts`). */
+  readonly stewards = new Map<ThreadId, StewardGrant>();
   readonly peers = new Map<string, CoordinationPeer>();
   readonly groupReads = new Map<string, { groupId: string; epoch: number }>();
   /** The group this fake core is in, shared by reference with the other fake cores of it. */

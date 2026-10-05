@@ -193,7 +193,20 @@ Outside a thread, `boite --thread <id>` reads the owner token out of
 `core.json` like `boite-core pair` does (`--data-dir`, `--channel dev`) and
 drives that thread as the owner. That is for a person at a terminal, not for an
 agent: inside a thread, `--thread` naming another thread is refused before any
-token is read.
+token is read. `--core <url>` reaches another machine's core with its token in
+`BOITE_TOKEN` (an owner token or a paired device's session token), never on the
+command line, where a process listing would show it.
+
+The commands that drive other threads (`threads`, `thread show|send|stop|
+archive|unarchive|remove|rename`, `thread move <project> <id>`, `questions`,
+`answer`, `permissions`, `allow`, `deny`, `stewards`, `projects
+archive|unarchive|remove`) and `thread new` need no `--thread` from a terminal.
+There they use the owner methods: `thread send` is the owner's own prompt,
+queued behind a running turn, and `thread new` copies the agent of `--thread`,
+else of the project's most recent thread (`--model` replaces the model). Inside
+a thread the same words act as the [steward](stewards.md) the owner made that
+thread, held to its projects and capabilities, and its messages reach other
+threads as the steward's letters, never as the user's.
 
 ## Commands
 
@@ -207,6 +220,21 @@ boite thread new <project> <brief> [--worktree] [--title <title>]
 boite projects                   the projects added to Boite
 boite projects add <folder> [--name <name>]
                                  add an existing folder as a project
+boite projects archive|unarchive|remove <project>
+                                 the owner's; removing leaves the folder on disk
+boite threads [--project <p>] [--archived]
+                                 every thread as the owner, a steward's own
+boite thread show <id>           state, pending questions and permissions, last answer
+boite thread send <id> <text>    the owner's prompt, or the steward's letter
+boite thread stop|archive|unarchive|remove <id>
+boite thread rename <id> <title>
+boite thread move <project> <id> move another thread
+boite questions [<id>]           pending questions
+boite answer <id> <question-id> <option|text ...> [--skip]
+boite permissions [<id>]         pending tool permissions
+boite allow|deny <id> <request-id>
+boite stewards [set <thread> <project ...> [--all] [--can <a,b>] [--quiet] | revoke <thread>]
+boite steward                    this thread's steward grant
 boite attach <file>               publish a file snapshot in chat, at most 512 MB
 boite preview <file.html>          open a local HTML artifact and its neighbouring assets
 boite preview-close <file.html>    stop serving that preview

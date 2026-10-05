@@ -5,10 +5,12 @@
   import { mobileOverlay } from '../lib/mobile-history';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import { stewardChip } from '../lib/steward';
   import CoordinationPanel from './CoordinationPanel.svelte';
 
   let { store, threadId, onclose }: { store: Store; threadId: string; onclose: () => void } = $props();
   let dialog: HTMLDialogElement;
+  let steward = $derived(store.stewards?.find(grant => grant.threadId === threadId) ?? null);
 
   onMount(() => {
     const focused = focusedElement();
@@ -44,6 +46,7 @@
 <dialog bind:this={dialog} aria-labelledby="coordination-title" data-testid="coordination-dialog" onkeydown={keydown} onclick={backdrop} oncancel={(event) => { event.preventDefault(); onclose(); }}>
   <header>
     <h2 id="coordination-title">{strings.coordination.heading}</h2>
+    {#if steward}<span class="steward-chip" data-testid="steward-chip">{stewardChip(steward)}</span>{/if}
     <button type="button" class="ghost icon" aria-label={strings.imports.close} data-testid="coordination-close" onclick={onclose}><X size={16} /></button>
   </header>
   <div class="settings"><CoordinationPanel {store} {threadId} expanded /></div>
@@ -56,6 +59,8 @@
   header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--color-border); }
   h2 { font-size: var(--text-md); font-weight: 600; }
   header button { flex: none; }
+  h2 { flex: 1; min-width: 0; }
+  .steward-chip { flex: none; padding: 2px 8px; border-radius: var(--radius-sm); background: var(--color-steward-soft); color: var(--color-steward); font-size: var(--text-xs); font-weight: 500; white-space: nowrap; }
   .settings { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   @media (max-width: 720px) {
     dialog { width: calc(100vw - 20px); max-height: calc(100dvh - 20px); }

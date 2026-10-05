@@ -4,6 +4,8 @@
   import { defaultCoordinationConfig, type CoordinationConfig, type CoordinationMode } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import { stewardChip } from '../lib/steward';
+  import StewardSettings from './StewardSettings.svelte';
 
   // Expanded is the thread menu's dialog.
   let { store, threadId, expanded = false }: { store: Store; threadId: string; expanded?: boolean } = $props();
@@ -13,6 +15,7 @@
   // No budget sets Brief and Team apart any more: both are On, and a saved Team stays as it is.
   let on = $derived(config.mode !== 'off');
   let summary = $derived(on ? strings.coordination.summaryOn : strings.coordination.summaryOff);
+  let steward = $derived(store.stewards?.find(grant => grant.threadId === threadId) ?? null);
   // Read settings on demand; the dialog also needs contacts immediately.
   onMount(() => { if (expanded || store.coordination?.self.threadId !== threadId) void store.loadCoordination(threadId, expanded); });
 
@@ -54,6 +57,7 @@
     <span class="ui-label">{strings.coordination.heading}</span>
     <span class="mode ui-label-box" data-mode={config.mode}><span class="ui-label">{modeLabel(config.mode)}</span></span>
     {#if config.paused}<span class="paused ui-label-box"><span class="ui-label">{strings.coordination.paused}</span></span>{/if}
+    {#if steward}<span class="steward-chip ui-label-box" data-testid="steward-chip"><span class="ui-label">{stewardChip(steward)}</span></span>{/if}
   </summary>
 
   <div class="body">
@@ -150,6 +154,8 @@
     {/if}
 
     {#if store.coordinationError}<p class="error" role="alert">{store.coordinationError}</p>{/if}
+
+    <StewardSettings {store} {threadId} />
   </div>
 </details>
 
@@ -159,6 +165,7 @@
   .coordination > summary:hover { background: var(--color-hover); }
   .mode, .paused { padding: 2px 6px; border-radius: var(--radius-sm); background: var(--color-surface-3); color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 500; }
   .mode { margin-left: auto; }
+  .steward-chip { padding: 2px 6px; border-radius: var(--radius-sm); background: var(--color-steward-soft); color: var(--color-steward); font-size: var(--text-xs); font-weight: 500; }
   .body { padding: 0 14px 14px; border-top: 1px solid var(--color-border); max-height: min(48dvh, 480px); overflow-y: auto; overscroll-behavior: contain; }
   .summary, .empty, .notice { margin: 10px 0; color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.45; }
   .notice { padding: 8px 10px; border-left: 2px solid var(--color-edge); background: var(--color-surface-2); }

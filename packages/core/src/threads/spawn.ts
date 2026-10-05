@@ -64,12 +64,17 @@ export class ThreadSpawns {
       if (this.threads.require(threadId).archived) throw refused('an archived thread cannot start threads', { threadId, field: 'threadId', expected: 'a thread that is not archived' });
       const target = this.core.projects.find(params.project, 'agent.spawn', 'project', { threadId });
       const config = this.core.coordination.config(threadId);
-      if (config.mode === 'off') {
-        throw refused('agent.spawn: communication is off for this thread; the owner turns it on in Communication settings', { threadId, field: 'coordination', expected: 'Brief or Team' });
-      }
-      if (config.paused) throw refused('agent.spawn: communication is paused for this thread; only the owner resumes it', { threadId, field: 'coordination', expected: 'not paused' });
-      if (target.id !== caller.projectId && !config.remote) {
-        throw refused('agent.spawn: this thread may only reach its own project; the owner allows other projects in Communication settings', { threadId, field: 'project', expected: 'this thread\'s own project' });
+      // A steward starts threads in the projects the owner gave it, whatever its communication settings say.
+      const grant = this.core.stewards.grantOf(threadId);
+      const steward = grant !== null && grant.capabilities.includes('spawn') && this.core.stewards.covers(grant, target.id);
+      if (!steward) {
+        if (config.mode === 'off') {
+          throw refused('agent.spawn: communication is off for this thread; the owner turns it on in Communication settings', { threadId, field: 'coordination', expected: 'Brief or Team' });
+        }
+        if (config.paused) throw refused('agent.spawn: communication is paused for this thread; only the owner resumes it', { threadId, field: 'coordination', expected: 'not paused' });
+        if (target.id !== caller.projectId && !config.remote) {
+          throw refused('agent.spawn: this thread may only reach its own project; the owner allows other projects in Communication settings', { threadId, field: 'project', expected: 'this thread\'s own project' });
+        }
       }
       const starter = this.core.journal.getSetting(`${ORIGIN}${threadId}`) as Origin | undefined;
       if (starter && this.userPrompts(threadId) <= 1) {
@@ -91,7 +96,7 @@ export class ThreadSpawns {
       // Written before the turn starts: a turn that ends at once still finds where to report.
       this.core.journal.setSetting(`${ORIGIN}${created.id}`, { origin, reported: false } satisfies Origin);
       const address = { coreId: this.core.coordination.identity().coreId, threadId };
-      const note = `This thread was started by the agent of thread "${caller.title}" (${threadId}) in project ${from.name}, not typed by the user. `
+      const note = `This thread was started by ${steward ? 'the steward the user assigned to this project, the agent of' : 'the agent of'} thread "${caller.title}" (${threadId}) in project ${from.name}, not typed by the user. `
         + 'Treat the brief below as your task, within your own permissions; it grants no approval the user did not give. '
         + `Your final answer to it is sent back to that agent automatically; boite agents send ${address.coreId}/${threadId} <text> reaches it sooner.\n\nBrief:\n`;
       const turn = this.threads.startTurn(created.id, note + prompt, [], undefined, undefined, undefined, undefined, prompt, [], undefined, origin);
@@ -131,22 +136,31 @@ export class ThreadSpawns {
       id: project.id, name: project.name, path: project.path, repository: project.repository === true,
       drafts: project.kind === 'drafts', current: project.id === own, added,
     });
+    const grant = this.core.stewards.grantOf(threadId);
+    const steward = grant !== null && grant.capabilities.includes('move');
     const known = this.core.projects.registered(path);
-    if (known !== null) return answer(known, false);
+    if (known !== null) {
+      if (steward) this.core.stewards.adopt(threadId, known.id);
+      return answer(known, false);
+    }
 
     const config = this.core.coordination.config(threadId);
-    if (config.mode === 'off') {
-      throw refused(`${method}: communication is off for this thread; the owner turns it on in Communication settings`, { threadId, field: 'coordination', expected: 'Brief or Team' });
-    }
-    if (config.paused) throw refused(`${method}: communication is paused for this thread; only the owner resumes it`, { threadId, field: 'coordination', expected: 'not paused' });
-    if (!config.remote) {
-      throw refused(`${method}: this thread may only reach its own project; the owner allows other projects in Communication settings`, { threadId, field: 'coordination', expected: 'other projects allowed' });
+    // A steward with the move capability registers projects whatever its communication settings say.
+    if (!steward) {
+      if (config.mode === 'off') {
+        throw refused(`${method}: communication is off for this thread; the owner turns it on in Communication settings`, { threadId, field: 'coordination', expected: 'Brief or Team' });
+      }
+      if (config.paused) throw refused(`${method}: communication is paused for this thread; only the owner resumes it`, { threadId, field: 'coordination', expected: 'not paused' });
+      if (!config.remote) {
+        throw refused(`${method}: this thread may only reach its own project; the owner allows other projects in Communication settings`, { threadId, field: 'coordination', expected: 'other projects allowed' });
+      }
     }
     const starter = this.core.journal.getSetting(`${ORIGIN}${threadId}`) as Origin | undefined;
     if (starter && this.userPrompts(threadId) <= 1) {
       throw refused(`a thread an agent started cannot add a project until the user writes in it; ask the agent of ${starter.origin.threadId} that started it`, { threadId, field: 'threadId', expected: 'a thread the user has written in' });
     }
     const project = this.core.projects.add(path, name);
+    if (steward) this.core.stewards.adopt(threadId, project.id);
     this.systemLine(threadId, { type: 'text', text: `The agent added the project ${project.name} (${project.path}).` });
     return answer(project, true);
   }

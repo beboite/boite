@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Check, FileText } from '@lucide/svelte';
+  import { Check, CornerDownLeft, FileText } from '@lucide/svelte';
   import type { Message, Turn } from '@boite/contracts';
   import { bytes } from '../lib/format';
   import { decodedBytes } from '../lib/attachments';
@@ -14,7 +14,6 @@
   import MessageActions from './MessageActions.svelte';
   import MoveMarker from './MoveMarker.svelte';
   import ImageViewer from './ImageViewer.svelte';
-  import SpawnMarker from './SpawnMarker.svelte';
 
   /**
    * A prompt in the timeline: its bubble, the pictures and files it was sent
@@ -90,11 +89,27 @@
   const moved = $derived(message.parts.flatMap((part) => (part.type === 'text' && part.moved ? [part.moved] : []))[0]);
   /** The thread whose agent sent this prompt with `boite thread new`. */
   const startedBy = $derived(message.parts.flatMap((part) => (part.type === 'text' && part.startedBy ? [part.startedBy] : []))[0]);
+  /** The starting thread opens while this machine still has it. */
+  const starterPresent = $derived(!!startedBy && store.threads.some((thread) => thread.id === startedBy.threadId && !thread.archived));
 </script>
 
 {#if moved}<MoveMarker notice={moved} />{/if}
-{#if startedBy}<SpawnMarker {store} link={startedBy} direction="from" />{/if}
-<div class="bubble">
+<!-- A prompt another thread's agent wrote reads like forwarded mail, on the agents' side: never as the user's own bubble. -->
+<div class="bubble" class:agent={!!startedBy} data-testid={startedBy ? 'agent-prompt' : undefined}>
+  {#if startedBy}
+    <div class="agent-from" data-testid="spawn-marker" data-direction="from">
+      <span class="agent-icon"><CornerDownLeft size={16} strokeWidth={1.75} aria-hidden="true" /></span>
+      <span class="agent-source">
+        <span class="agent-label">{strings.chat.promptFromAgent}</span>
+        {#if starterPresent}
+          <button type="button" class="agent-link" data-testid="spawn-marker-open" title={strings.chat.openLinkedThread} onclick={() => void store.open(startedBy.threadId)}>{startedBy.title}</button>
+        {:else}
+          <strong>{startedBy.title}</strong>
+        {/if}
+        <span class="agent-project">{startedBy.project}</span>
+      </span>
+    </div>
+  {/if}
   {#each message.parts as part, index (index)}
     {#if part.type === 'text'}
       {@const prompt = promptText(part)}
@@ -135,7 +150,7 @@
   {/if}
 </div>
 {#if viewing}<ImageViewer items={viewing.items} index={viewing.index} onclose={() => viewing = null} />{/if}
-<div class="receipts" data-testid="message-receipts">
+<div class="receipts" class:agent={!!startedBy} data-testid="message-receipts">
   <MessageActions text={copyText} at={message.createdAt} {edit} />
   <span class="tick" data-testid="receipt-accepted" class:received={!!turn} title={strings.chat.accepted} aria-label={strings.chat.accepted}><Check size={12} /></span>
   <span class="tick" data-testid="receipt-responded" class:received={progress.responded(message.turnId)} title={strings.chat.responseStarted} aria-label={strings.chat.responseStarted}><Check size={12} /></span>
@@ -156,6 +171,22 @@
     border-bottom-right-radius: var(--radius-sm);
     box-shadow: var(--shadow-e1);
   }
+
+  .bubble.agent, .receipts.agent { align-self: flex-start; }
+  .bubble.agent {
+    background: var(--color-surface-2);
+    border-color: var(--color-border);
+    border-left: 2px solid var(--color-edge);
+    border-radius: var(--radius-lg);
+    border-bottom-left-radius: var(--radius-sm);
+  }
+  .agent-from { display: flex; align-items: flex-start; gap: 9px; margin-bottom: 8px; color: var(--color-muted-foreground); }
+  .agent-icon { display: flex; flex: none; margin-top: 2px; color: var(--color-foreground); }
+  .agent-source { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; font-size: var(--text-xs); }
+  .agent-source strong, .agent-link { color: var(--color-foreground); font-size: var(--text-sm); font-weight: 600; overflow-wrap: anywhere; white-space: normal; text-align: left; }
+  .agent-link { height: auto; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; }
+  .agent-link:hover { text-decoration: underline; }
+  .agent-project { overflow-wrap: anywhere; }
 
   @media (max-width: 720px) { .bubble { max-width: 90%; padding: 10px 14px; } }
 

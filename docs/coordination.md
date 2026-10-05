@@ -61,6 +61,18 @@ in Communication settings stays until you resume it. Paired devices can read the
 only an owner
 connection can change permissions.
 
+## Stewards and notices
+
+A letter from the [steward](stewards.md) the owner assigned to a thread's
+project carries `origin: 'steward'` and is labelled as the steward's in the
+timeline. The provider reads it in its own section, as direction from the
+user's delegate that is still not the user and grants no approval. Notices
+(`origin: 'notice'`) are the core telling a steward that one of its threads
+finished, failed, asked or waits on a permission. Both pass the communication
+settings of the threads involved, wait six hours instead of fifteen minutes,
+and stop when the owner revokes the grant or pauses the steward. Only the local
+core sets either origin; a remote letter's origin is never believed.
+
 ## Reaching another computer
 
 The machines of a [group](groups.md) are linked already: every member trusts
