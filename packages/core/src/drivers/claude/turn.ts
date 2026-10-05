@@ -2,6 +2,7 @@ import type { SDKAssistantMessage, SDKMessage, SDKResultMessage } from '@anthrop
 import type { MessageId, MessagePart, ToolDocument, ToolStatus, Usage } from '@boite/contracts';
 import type { PromptCacheLife, TurnContext, TurnResult } from '../types.ts';
 import {
+  apiErrorReason,
   cacheLifeOf,
   commandsOf,
   contentBlocks,
@@ -263,7 +264,7 @@ export class ClaudeTurn {
 
   private handleAssistant(message: SDKAssistantMessage): void {
     if (message.error !== undefined) {
-      this.fail(errorSentence(message.error));
+      this.fail(apiErrorReason(message.error, (message.message as { content?: unknown } | undefined)?.content));
       return;
     }
     const body = message.message as { id?: string; content?: unknown; usage?: unknown } | undefined;
