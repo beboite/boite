@@ -700,6 +700,20 @@ test.for(['goal', 'loop'] as const)('changing the other activity keeps the runni
   if (kind === 'loop') expect(activity.loop?.history?.[0]?.status).toBe('done');
 });
 
+test('a fake blocked goal waits for the reply, then runs again', async ({ createClient }) => {
+  vi.useFakeTimers();
+  const client = await createClient({ delayMs: 1 });
+  const { id: threadId } = await newThread(client);
+  await client.call('threads.activity.set', { threadId, goal: { objective: 'Which database should the billing tables use?' } });
+  await vi.runAllTimersAsync();
+  expect((await client.call('threads.get', { threadId })).activity?.goal).toMatchObject({ status: 'paused', blocked: true, iterations: 1 });
+  await client.call('turns.start', { threadId, prompt: 'Postgres' });
+  expect((await client.call('threads.get', { threadId })).activity?.goal).toMatchObject({ status: 'active', error: null });
+  await vi.runAllTimersAsync();
+  // The objective still asks, so the next goal turn blocks again.
+  expect((await client.call('threads.get', { threadId })).activity?.goal).toMatchObject({ status: 'paused', blocked: true, iterations: 2 });
+});
+
 async function newThread(client: FakeClient, projectId = 'p-boite') {
   return client.call('threads.create', { projectId, providerId: 'echo', accountId: 'a-echo' });
 }

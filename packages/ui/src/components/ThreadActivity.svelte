@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Check, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleCheck, CircleDot, ListTodo, MessageCircleQuestionMark, Pause, Play, Repeat, Target, X } from '@lucide/svelte';
+  import { Check, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleCheck, CircleDot, Hand, ListTodo, MessageCircleQuestionMark, Pause, Play, Repeat, Reply, Target, X } from '@lucide/svelte';
+  import { focusComposer } from '../lib/focus';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
   import { dockRoom, questionDock } from '../lib/question-dock.svelte';
@@ -60,6 +61,8 @@
   let tasks = $derived(activity?.tasksDismissed && visible ? [] : activity?.tasks ?? []);
   let goal = $derived(activity?.goal?.dismissed && visible ? null : activity?.goal);
   let loop = $derived(activity?.loop);
+  /** The agent stopped on a blocker: the user's next message is its answer and resumes the goal. */
+  let blocked = $derived(goal?.status === 'paused' && goal.blocked === true);
   let done = $derived(tasks.filter((task) => task.status === 'completed').length);
   let current = $derived(tasks.find((task) => task.status === 'in_progress')?.text ??
     (done === tasks.length ? strings.activity.allTasksDone : strings.activity.waitingTasks));
@@ -183,14 +186,16 @@
     {/if}
     {#each ['goal', 'loop'] as kind (kind)}
       {@const entry = kind === 'goal' ? goal : loop}
+      {@const waiting = kind === 'goal' && blocked}
       {#if entry}
-        <div class="activity-row" class:finished={entry.status === 'complete'} data-testid="activity-{kind}">
-          {#if kind === 'goal'}<Target size={16} />{:else}<Repeat size={16} />{/if}
+        <div class="entry" class:blocked={waiting}>
+        <div class="activity-row" class:finished={entry.status === 'complete'} data-testid="activity-{kind}" data-blocked={waiting || undefined}>
+          {#if waiting}<Hand size={16} />{:else if kind === 'goal'}<Target size={16} />{:else}<Repeat size={16} />{/if}
           <span class="kind ui-label">{kind === 'goal' ? strings.activity.goal : strings.activity.loop}</span>
           <span class="objective" title={'objective' in entry ? entry.objective : entry.prompt}>
             {#if 'objective' in entry}{entry.objective}{:else}{iteration(entry.iterations, entry.maxIterations)}{/if}
           </span>
-          <span class="meta status ui-label-box" class:live={entry.status === 'active'}><span class="ui-label">{strings.activity[entry.status]}</span></span>
+          {#if !waiting}<span class="meta status ui-label-box" class:live={entry.status === 'active'}><span class="ui-label">{strings.activity[entry.status]}</span></span>{/if}
           {#if entry.status !== 'complete'}
             <button type="button" class="ghost small icon" disabled={saving || store.connection !== 'ready'}
               aria-label={entry.status === 'active' ? strings.activity.pause : strings.activity.resume}
@@ -204,7 +209,14 @@
           {/if}
           <button type="button" class="ghost small icon" disabled={saving || store.connection !== 'ready'} aria-label={strings.activity.remove} title={strings.activity.remove} onclick={() => void control(kind as 'goal' | 'loop', 'remove')}><X size={16} /></button>
         </div>
-        {#if entry.error}<p class="error">{entry.error}</p>{/if}
+        {#if waiting}
+          <div class="blocker" data-testid="activity-goal-blocked">
+            <span class="waiting-dot" aria-hidden="true"></span>
+            <p><span class="ask">{strings.activity.blocked}</span> <span class="hint">{strings.activity.blockedHint}</span></p>
+            <button type="button" class="small reply" onclick={() => focusComposer()}><Reply size={14} />{strings.activity.reply}</button>
+          </div>
+        {:else if entry.error}<p class="error">{entry.error}</p>{/if}
+        </div>
       {/if}
     {/each}
     {#if tasks.length || loop}
@@ -259,7 +271,7 @@
   .activity.inline { position: relative; bottom: auto; inset-inline: auto; z-index: auto; background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; border: none; border-bottom: 1px solid var(--color-border); border-radius: 0; box-shadow: none; padding: 8px 4px 4px; }
   .activity-row { display: flex; align-items: center; gap: 8px; min-height: var(--control); min-width: 0; padding: 0 2px 0 8px; }
   /* The questions sit above the goal, the loop and the tasks, a hairline between. */
-  .questions + :is(.activity-row, .tasks-toggle) { margin-top: 4px; border-top: 1px solid var(--color-border); padding-top: 4px; }
+  .questions + :is(.entry, .tasks-toggle) { margin-top: 4px; border-top: 1px solid var(--color-border); padding-top: 4px; }
   .question-row > :global(svg) { color: var(--color-live); }
   .question-toggle { display: flex; align-items: center; gap: 6px; height: var(--control-sm); padding: 0 6px; font-weight: 400; color: var(--color-foreground); justify-content: flex-start; }
   .question-toggle > :global(svg) { flex: none; color: var(--color-muted-foreground); transition: transform var(--dur-2) var(--ease-out-quint); }
@@ -275,6 +287,21 @@
   .status { padding: 2px 8px; border-radius: var(--radius-sm); background: var(--color-surface-2); }
   .status.live { color: var(--color-accent); }
   .finished .status { color: var(--color-success); }
+  /*
+   * A blocked goal waits on the user. The question's yellow marks it in two
+   * places, the hand and a slow dot, over a faint wash; the words stay in the
+   * text colors so they read in both themes.
+   */
+  .entry.blocked { border-radius: var(--radius-md); background: color-mix(in srgb, var(--color-live) 6%, transparent); }
+  .entry.blocked .activity-row > :global(svg:first-child) { color: var(--color-live); }
+  .blocker { display: flex; align-items: center; gap: 8px; min-height: var(--control); padding: 0 4px 4px 13px; }
+  .waiting-dot { flex: none; width: 6px; height: 6px; margin-inline: 5px; border-radius: var(--radius-full); background: var(--color-live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-live) 22%, transparent); animation: waiting 1.8s ease-in-out infinite; }
+  @keyframes waiting { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+  .blocker p { flex: 1; min-width: 0; margin: 0; line-height: 1.45; overflow-wrap: anywhere; }
+  .ask { font-weight: 600; color: var(--color-foreground); }
+  .hint { color: var(--color-muted-foreground); }
+  .reply { flex: none; gap: 6px; padding-inline: 10px; border: none; border-radius: var(--radius-full); background: var(--color-accent-soft); color: var(--color-accent); font-weight: 600; }
+  .reply:hover { background: color-mix(in oklch, var(--color-accent) 28%, transparent); }
   .objective, .current { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; text-align: left; }
   .meta, .count { color: var(--color-muted-foreground); font-size: var(--text-xs); flex: none; }
   .tasks-toggle { display: flex; flex-direction: column; align-items: stretch; justify-content: center; gap: 6px; width: 100%; height: auto; min-height: var(--control); padding: 6px 8px; font-weight: 400; color: var(--color-foreground); }
@@ -301,6 +328,11 @@
   .history p { margin: 4px 0 0; white-space: pre-wrap; }
   .cadence { margin: 8px 8px 0; }
   .error { color: var(--color-danger); margin: 2px 8px 6px; overflow-wrap: anywhere; }
-  @media (max-width: 720px) { .activity-row { gap: 6px; } }
-  @media (prefers-reduced-motion: reduce) { .activity, .task-disclosure, progress::-webkit-progress-value, .toggle-line > :global(svg:last-child) { transition: none; } }
+  @media (max-width: 720px) {
+    .activity-row { gap: 6px; }
+    .blocker { align-items: flex-start; }
+    .waiting-dot { margin-top: 7px; }
+  }
+  :global(html[data-motion='reduced']) .waiting-dot { animation: none; }
+  @media (prefers-reduced-motion: reduce) { .waiting-dot { animation: none; } .activity, .task-disclosure, progress::-webkit-progress-value, .toggle-line > :global(svg:last-child) { transition: none; } }
 </style>

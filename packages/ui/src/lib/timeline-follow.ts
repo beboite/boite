@@ -82,6 +82,29 @@ export class PointerHold {
   }
 }
 
+/**
+ * Where the list last stood: its scroll events read it and every write that takes the bottom sets
+ * it, so a clamp the list already followed is not mistaken for the reader rising. A busy phone
+ * delivers the passive touchstart after the scroll it started; a pinned list kept there by the
+ * 80 px tolerance was pulled back down by the next frame of a streaming answer.
+ */
+export class BottomEdge {
+  #top = 0;
+
+  /** Takes the bottom of `box`. */
+  follow(box: HTMLElement): void {
+    box.scrollTop = box.scrollHeight;
+    this.#top = box.scrollTop;
+  }
+
+  /** Whether `box` stands higher than at its last scroll event or follow. Call it on every scroll event. */
+  rose(box: HTMLElement): boolean {
+    const rose = box.scrollTop < this.#top - 1;
+    this.#top = box.scrollTop;
+    return rose;
+  }
+}
+
 const GLIDE_MS = 380;
 
 /** The glide "Jump to latest" starts, on the app's ease-out-quint. */

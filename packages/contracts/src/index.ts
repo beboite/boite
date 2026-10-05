@@ -1265,7 +1265,11 @@ export interface AgentTask {
 }
 
 export interface ThreadActivity {
-  goal: { objective: string; status: 'active' | 'paused' | 'complete'; iterations: number; error: string | null; dismissed?: boolean } | null;
+  /**
+   * `blocked`: the agent ended a goal turn with `[BOITE_GOAL_BLOCKED]` and
+   * waits for the user. The goal is paused; the user's next message resumes it.
+   */
+  goal: { objective: string; status: 'active' | 'paused' | 'complete'; iterations: number; error: string | null; dismissed?: boolean; blocked?: boolean } | null;
   loop: { prompt: string; intervalMs: number; maxIterations?: number | null; status: 'active' | 'paused' | 'complete'; iterations: number; nextRunAt: number | null; error: string | null; history?: ActivityIteration[] } | null;
   tasks: AgentTask[];
   tasksDismissed?: boolean;

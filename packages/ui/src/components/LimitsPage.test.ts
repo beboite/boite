@@ -6,7 +6,7 @@ import { Store } from '../lib/store.svelte';
 import { strings } from '../lib/strings';
 import LimitsPage from './LimitsPage.svelte';
 import { FakeClient } from '../lib/fake-client';
-import { quotaReader } from '../lib/quota-reader.svelte';
+import { quotaReader, REFRESH_SHOWN_MS } from '../lib/quota-reader.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
 afterEach(async () => { if (mounted) await unmount(mounted); mounted = undefined; document.body.innerHTML = ''; });
@@ -109,6 +109,9 @@ test('the read waits for the socket, a failure shows with a retry, and a kept re
   const stale = { ...quota('Claude'), accountId: 'claude', status: 'unavailable', checkedAt: Date.UTC(2026, 8, 30, 9), error: 'Claude quota requests are rate limited. Retrying in five minutes.' } satisfies AccountQuota;
   const agy = { ...quota('Antigravity'), accountId: 'quota:antigravity-cli', providerId: 'antigravity', status: 'unavailable', windows: [] } satisfies AccountQuota;
   pending[1]!.resolve([stale, agy]);
+  await settle();
+  // A retry is a refresh: its answer shows once the refresh's minimum is over.
+  await new Promise((resolve) => setTimeout(resolve, REFRESH_SHOWN_MS));
   await settle();
   expect(document.querySelector('[data-testid="limits-error"]')).toBeNull();
   const [claudeCard, agyCard] = [...document.querySelectorAll<HTMLElement>('[data-testid="usage-limit-account"]')];

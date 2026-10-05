@@ -1,7 +1,7 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import type { AccountQuota, RpcEvents } from '@boite/contracts';
 import type { Client } from './client';
-import { QuotaReader } from './quota-reader.svelte';
+import { QuotaReader, REFRESH_SHOWN_MS } from './quota-reader.svelte';
 
 const row = (id: string, used = 20): AccountQuota => ({
   accountId: id, providerId: id, providerName: id, label: id, enabled: true,
@@ -36,6 +36,33 @@ test('each completed account updates while a slower account keeps its last readi
   await reading;
   expect(reader.loading).toBe(false);
   expect(f.listeners.size).toBe(0);
+});
+
+test('a refresh answered at once, as Douane does from its cache, still looks busy for one turn', async () => {
+  vi.useFakeTimers();
+  try {
+    const f = fixture();
+    const reader = new QuotaReader('instant-refresh-test');
+    reader.accept([row('douane')]);
+    const reading = reader.read(f.client, true);
+    f.emit(f.calls[0]!.requestId, row('douane', 40));
+    f.calls[0]!.resolve([row('douane', 40)]);
+    await reading;
+    expect(reader.loading).toBe(false);
+    expect(reader.rows).toEqual([row('douane', 40)]);
+    expect(reader.busy).toBe(true);
+    expect(reader.landed).toEqual([]);
+    vi.advanceTimersByTime(REFRESH_SHOWN_MS);
+    expect(reader.busy).toBe(false);
+    expect(reader.landed).toEqual(['douane']);
+    // Opening a view reads without the minimum: no grey flash on every open.
+    const opening = reader.read(f.client);
+    f.calls[1]!.resolve([row('douane', 40)]);
+    await opening;
+    expect(reader.busy).toBe(false);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test('late progress and a late final response cannot replace a newer refresh', async () => {

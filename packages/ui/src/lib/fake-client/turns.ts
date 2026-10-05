@@ -109,6 +109,9 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
   if (!activityKind && !operation && thread.activity) {
     if (thread.activity.tasks.length && thread.activity.tasks.every(task => task.status === 'completed')) thread.activity.tasksDismissed = true;
     if (thread.activity.goal?.status === 'complete') thread.activity.goal.dismissed = true;
+    // The user's answer resumes a blocked goal once this turn ends; a native command is no answer.
+    const goal = thread.activity.goal;
+    if (goal?.status === 'paused' && goal.blocked && !/^\s*\/[\w:-]+(?:\s|$)/.test(prompt)) { goal.status = 'active'; goal.error = null; delete goal.blocked; }
     ctx.publishActivity(thread);
   }
   if (!queuedTurn || !thread.messages.some(message => message.turnId === turn.id && message.role === 'user')) {

@@ -256,7 +256,11 @@
   .window.low .window-left { color: var(--color-live); }
   .empty { display: grid; justify-items: start; gap: 10px; padding: 16px 4px; }
   .empty p { margin: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
+  /* The reading on screen is the previous one until the new one lands: grey, breathing. */
   .track[aria-busy='true'] { filter: saturate(0.15); }
+  .track[aria-busy='true'] .fill { animation: breathe 1.1s ease-in-out infinite alternate; }
   @keyframes rise { from { opacity: 0; transform: translateY(-4px); } }
-  @media (prefers-reduced-motion: reduce) { .details { animation: none; } .track, .fill { transition: none; } }
+  @keyframes breathe { to { opacity: 0.45; } }
+  @media (prefers-reduced-motion: reduce) { .details, .track[aria-busy='true'] .fill { animation: none; } .track, .fill { transition: none; } }
+  :global(html[data-motion='reduced']) .track[aria-busy='true'] .fill { animation: none; }
 </style>

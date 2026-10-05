@@ -112,9 +112,13 @@
   .error { color: var(--color-danger); font-size: var(--text-sm); }
   /* The reading on screen is the previous one until the new one lands. */
   article[aria-busy='true'] .track { filter: saturate(0.15); }
+  article[aria-busy='true'] .fill { animation: breathe 1.1s ease-in-out infinite alternate; }
+  @keyframes breathe { to { opacity: 0.45; } }
   /* Dimmed like the tray's stale meters: a reading, but not a fresh one. */
   article.stale .track { opacity: 0.45; }
   @media (prefers-reduced-motion: reduce) {
     .track, .fill { transition: none; }
+    article[aria-busy='true'] .fill { animation: none; }
   }
+  :global(html[data-motion='reduced']) article[aria-busy='true'] .fill { animation: none; }
 </style>

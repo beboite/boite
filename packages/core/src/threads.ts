@@ -746,7 +746,7 @@ export class ThreadStore {
           if (moved) this.core.journal.deleteSetting(`${MOVE_NOTE_PREFIX}${threadId}`);
           if (clientRequestId) this.core.journal.putTurnRequest(threadId, clientRequestId, fingerprint, turn.id, message.id);
         });
-        const dismissal = !activity && !operation ? this.core.activity.prepareUserPrompt(threadId) : undefined;
+        const dismissal = !activity && !operation ? this.core.activity.prepareUserPrompt(threadId, !nativeCommandPrompt(prompt)) : undefined;
         this.core.bus.emit('message.started', message);
         this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
         this.setStatus(threadId, 'queued');

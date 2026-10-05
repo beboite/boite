@@ -100,7 +100,7 @@
 </script>
 <svelte:window onkeydown={(event) => { if (event.key === 'Escape') void action('hide'); }} />
 <main data-testid="quota-popup" data-frame={frame}>
-  <QuotaPopup rows={reader.rows === null ? null : rows} loading={reader.loading} completed={reader.completed} {error}
+  <QuotaPopup rows={reader.rows === null ? null : rows} loading={reader.busy} completed={reader.landed} {error}
     order={settings?.quotaOrder ?? []} {reorder} refresh={() => void refresh(true)}
     connect={() => void action('providers')} settings={() => void action('limits')} close={() => void action('hide')} />
 </main>

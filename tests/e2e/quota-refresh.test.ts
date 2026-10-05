@@ -126,8 +126,10 @@ for (const view of ['tray', 'desktop', 'phone', 'sidebar']) {
         globalThis.quotaProgress({ requestId: fixture.requestId, quota: row });
       }
     })()`);
+    // A refresh pressed by hand looks busy for one turn of its icon, even for an account that already answered.
+    expect(await filter('claude')).toBe('saturate(0.15)');
+    await page.waitFor(`getComputedStyle(document.querySelector('${track('claude')}')).filter === 'saturate(1)'`);
     await capture(`quota-${view}-partial.png`);
-    expect(await filter('claude')).toBe('saturate(1)');
     expect(await filter('codex')).toBe('saturate(0.15)');
     expect(await page.evaluate(`document.querySelector('${refresh}').getAttribute('aria-busy')`)).toBe('true');
     expect(await page.evaluate(`document.querySelector('${track('claude')} .fill').style.width`)).toBe('25%');
