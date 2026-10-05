@@ -256,6 +256,8 @@ export class Stewards {
         this.line(target.id, `${action === 'archive' ? 'Archived' : 'Unarchived'} by ${by}.`);
         break;
       case 'remove':
+        // Written first, so a restored thread still says which steward deleted it.
+        this.line(target.id, `Deleted by ${by}.`);
         await this.core.threads.remove(target.id);
         return { thread: null };
       case 'stop':

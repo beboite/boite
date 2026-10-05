@@ -90,6 +90,8 @@ test('a steward reads and drives only the threads of its projects, within the ca
   await terminal(['stewards', 'set', steward, 'test', 'Other', '--can', 'remove']);
   expect((await cli(['thread', 'remove', worker])).code).toBe(0);
   expect(h.core.journal.getThread(worker)).toBeNull();
+  h.core.threads.restoreDeleted(worker);
+  expect(lines(worker, h).some(text => text.startsWith('Deleted by the steward "Steward"'))).toBe(true);
 
   expect((await terminal(['stewards'])).out).toContain(`steward: ${steward}`);
   await terminal(['stewards', 'revoke', steward]);
