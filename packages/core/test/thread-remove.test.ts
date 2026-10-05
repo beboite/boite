@@ -88,20 +88,21 @@ test('removal stops the family and hides it until undo, preserving history and p
   expect(harness.core.journal.listMessages(threadId)).toEqual(history);
 });
 
-test('a paired device cannot delete conversations and agent sessions stay managed by Agents', async () => {
+test('a paired device deletes and restores a conversation, the deleted list stays the owner\'s, and agent sessions stay managed by Agents', async () => {
   const { threadId } = await echoThread(harness, client);
   const { grant } = await client.call('pairing.grant', {});
   const session = harness.core.sessions.exchange(grant, { name: 'phone', version: 'test' });
   const device = await connect(harness.url, session.token);
   try {
+    await device.call('threads.remove', { threadId });
+    expect(harness.core.journal.getThread(threadId)).toBeNull();
     // Match the RPC refusal directly: Bun's rejects matcher crashes on Windows
     // when these Error objects follow the family-removal scenario. A successful
     // response has no rpc error and fails the same assertion.
-    for (const method of ['threads.remove', 'threads.restore', 'threads.deleted'] as const) {
-      await expect(await device.call(method, method === 'threads.deleted' ? {} : { threadId }).catch(error => error)).toMatchObject({
-        rpc: { code: RpcErrorCode.Refused, message: `${method} is for the owner only`, data: { method, principal: 'session' } },
-      });
-    }
+    await expect(await device.call('threads.deleted', {}).catch(error => error)).toMatchObject({
+      rpc: { code: RpcErrorCode.Refused, message: 'threads.deleted is for the owner only', data: { method: 'threads.deleted', principal: 'session' } },
+    });
+    expect((await device.call('threads.restore', { threadId })).id).toBe(threadId);
   }
   finally { device.close(); }
   const thread = harness.core.threads.require(threadId);

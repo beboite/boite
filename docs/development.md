@@ -247,10 +247,11 @@ shares a 15-second PR list cache across a repository's worktrees and reads each
 worktree's own HEAD, so an agent's branch rename or switch does not lose its PR.
 Shared project-directory threads never inherit that directory's current branch.
 
-Deletion is owner-only and separate from archive. `threads.remove` stops the
-thread family and waits for processes before hiding it behind persistent
-markers. `threads.deleted` lists retained conversations and `threads.restore`
-restores history and prior archive flags. Undo toasts last eight seconds.
+Deletion is separate from archive. `threads.remove` stops the thread family and
+waits for processes before hiding it behind persistent markers.
+`threads.deleted` lists retained conversations and `threads.restore` restores
+history and prior archive flags. A paired phone may delete and undo from its
+thread menu; the deleted list and the retention period stay owner-only. Undo toasts last eight seconds.
 The default retention is 30 days; 0 disables purge. Restart and disconnection do
 not erase the markers. Files, branches, worktrees and native transcripts stay
 on disk; project removal purges that project's pending deletions.
