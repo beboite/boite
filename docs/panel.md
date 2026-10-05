@@ -116,8 +116,8 @@ profile in a WebKit data store, which needs macOS 14. The Linux shell has no
 built-in browser. `tests/e2e/browser-profiles.test.ts` checks separate cookies,
 their survival across a restart and deletion in the real shell.
 
-The agent's `boite browser profiles` and `open <url> --profile <name>` are
-described in the [CLI](cli.md).
+The agent's `boite browser profiles` and `open <url> --profile <name>`, and the
+rest of its agent-browser commands, are described in the [CLI](cli.md).
 
 ### Sign-in popups and new windows
 

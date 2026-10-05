@@ -45,7 +45,7 @@ browserBridge.on(event => {
 });
 
 export async function trackBrowserAction<T>(id: string, action: BrowserAction, run: () => Promise<T>): Promise<T> {
-  if (['snapshot', 'diagnostics', 'recording-read', 'status'].includes(action.kind)) return run();
+  if (['snapshot', 'diagnostics', 'recording-read', 'status', 'get', 'dialog', 'activate'].includes(action.kind)) return run();
   const at = Date.now(); let ok = true;
   try { return await run(); }
   catch (cause) { ok = false; throw cause; }
@@ -80,10 +80,6 @@ export async function runBrowserAction(id: string, action: BrowserAction, by: 'a
     if ((action.kind === 'recording-stop' || action.kind === 'recording-read') && browserTools(id).discarded) throw new Error(DISCARDED_RECORDING_ERROR);
     let value: unknown = { ok: true };
     switch (action.kind) {
-      case 'snapshot': {
-        const reply = await automateBrowser(id, action);
-        return { ...reply, value: { ...reply.value as object, diagnostics: await browserDiagnostics(id), settings: browserTools(id) } };
-      }
       case 'diagnostics': value = await browserDiagnostics(id, action.clear); break;
       case 'preset': {
         const size = browserPresetSize(action.preset, action.orientation);

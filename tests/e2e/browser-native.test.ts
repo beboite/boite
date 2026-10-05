@@ -63,11 +63,13 @@ test.skipIf(process.platform !== 'win32' || !executable)('native browser fills i
       }
     };
     await fillsSlot();
-    const snap = await command({ kind: 'snapshot' });
-    if (!JSON.stringify(snap).includes('#hello')) throw new Error('snapshot lacks button');
+    const snap = (await command({ kind: 'snapshot', interactive: true })).value as { text: string };
+    expect(snap.text).toContain('textbox "Votre prénom" [ref=e1]');
+    expect(snap.text).toContain('button "Saluer" [ref=e2]');
     await expect(command({ kind: 'click', selector: '.does-not-exist' })).rejects.toThrow('exactly one element');
-    await command({ kind: 'type', selector: '#name', text: 'Chris' });
-    await command({ kind: 'click', selector: '#hello' });
+    await command({ kind: 'fill', selector: '@e1', text: 'Chr' });
+    await command({ kind: 'type', selector: '@e1', text: 'is' });
+    await command({ kind: 'click', selector: '@e2' });
     if ((await command({ kind: 'evaluate', expression: 'document.querySelector("#result").textContent' })).value !== 'Bonjour Chris') throw new Error('native input failed');
     const screenshot = await command({ kind: 'screenshot' });
     if (!screenshot.screenshot) throw new Error('no screenshot');

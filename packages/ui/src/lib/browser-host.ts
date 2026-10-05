@@ -6,6 +6,7 @@ import { rightPanel } from './right-panel.svelte';
 import { browserBridge } from './browser-bridge';
 import { discardAgentRecording, runBrowserAction, trackBrowserAction } from './browser-tools.svelte';
 import { captureRemoteBrowser, inputRemoteBrowser } from './browser-remote-host';
+import { awaitDocument, documentToken } from './browser-automation';
 import { isExperimentEnabled, subscribeExperiments } from './experiments';
 import { experimentOn } from './experiments.svelte';
 
@@ -60,13 +61,16 @@ export function hostBrowser(store: Store, threadId: string): (closed?: boolean) 
         } else if (action.kind === 'profiles') {
           result = { value: { default: browserProfiles.defaultId, profiles: [DEFAULT_BROWSER_PROFILE, ...browserProfiles.list.map(p => p.id), PRIVATE_BROWSER_PROFILE].map(id => ({ id, name: browserProfiles.name(id), kept: id !== PRIVATE_BROWSER_PROFILE })) } };
         } else {
-          if (action.kind === 'open') {
+          const existing = request.tabId ? panel.surfaces.find(s => s.id === request.tabId) : panel.active;
+          // agent-browser's `open` navigates the tab it drives; a named profile opens a tab of its own.
+          const reuse = action.kind === 'open' && action.reuse && action.profile === undefined && existing?.kind === 'browser';
+          if (action.kind === 'open' && !reuse) {
             const profile = action.profile === undefined ? browserProfiles.defaultId : browserProfiles.find(action.profile);
             if (profile === null) throw new Error(`no browser profile is named ${action.profile}; browser profiles lists them`);
             panel.open('browser', action.url, profile); renew();
           }
-          const surface = action.kind === 'open' ? panel.active : request.tabId ? panel.surfaces.find(s => s.id === request.tabId) : panel.active;
-          if (!surface || surface.kind !== 'browser') throw new Error('no browser tab in this conversation; use browser open, or pass a tabId from browser status');
+          const surface = action.kind === 'open' && !reuse ? panel.active : existing;
+          if (!surface || surface.kind !== 'browser') throw new Error('no browser tab in this conversation; use browser open, or pass a tab id from browser tab list');
           if (action.kind === 'close') {
             panel.close(surface.id); renew();
             result = { tabId: surface.id, value: { closed: true } };
@@ -75,19 +79,19 @@ export function hostBrowser(store: Store, threadId: string): (closed?: boolean) 
             await tick();
             if (!current()) throw new Error('the browser conversation changed');
             browserBridge.create(surface.id, surface.url ?? '', surface.profile);
-            if (action.kind === 'navigate') {
-              browserBridge.navigate(surface.id, action.url); panel.update(surface.id, { url: action.url });
-            }
+            const navigates = action.kind === 'navigate' || reuse;
             if (action.kind === 'open' || action.kind === 'navigate') {
+              const url = action.url;
               result = await trackBrowserAction(surface.id, action, async () => {
-                const deadline = Date.now() + 12000;
-                // Navigation completion is delivered through native page-load events.
-                while (!browserBridge.isReady(surface.id) && current() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50));
+                const token = navigates ? await documentToken(surface.id) : undefined;
+                if (navigates) { browserBridge.navigate(surface.id, url); panel.update(surface.id, { url }); }
+                // The DOM, not the load event: a page whose image never finishes still answers.
+                const { state, loading } = await awaitDocument(surface.id, token);
                 if (!current()) throw new Error('the browser conversation changed');
-                if (!browserBridge.isReady(surface.id)) throw new Error('page is still loading; use snapshot to inspect its state');
-                return { tabId: surface.id, url: action.url, ...(action.kind === 'open' ? { profile: surface.profile ?? DEFAULT_BROWSER_PROFILE } : {}) };
+                return { tabId: surface.id, url: state?.url ?? url, title: state?.title, value: { ok: true, navigated: true, url: state?.url ?? url, title: state?.title, ...(loading ? { loading: true } : {}) }, ...(action.kind === 'open' ? { profile: surface.profile ?? DEFAULT_BROWSER_PROFILE } : {}) };
               });
-            } else result = await runBrowserAction(surface.id, action, 'agent');
+            } else if (action.kind === 'activate') result = { tabId: surface.id, url: surface.url, title: surface.title, value: { ok: true } };
+            else result = await runBrowserAction(surface.id, action, 'agent');
           }
         }
       } catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }

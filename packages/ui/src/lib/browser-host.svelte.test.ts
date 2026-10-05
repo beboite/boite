@@ -11,7 +11,8 @@ import { rightPanel } from './right-panel.svelte';
 import { browserTools, DISCARDED_RECORDING_ERROR, runBrowserAction } from './browser-tools.svelte';
 
 const { automateBrowser } = vi.hoisted(() => ({ automateBrowser: vi.fn(async () => ({})) }));
-vi.mock('./browser-automation', () => ({ automateBrowser }));
+// The page answers at once: the open or navigation has its DOM.
+vi.mock('./browser-automation', () => ({ automateBrowser, documentToken: vi.fn(async () => undefined), awaitDocument: vi.fn(async () => ({ state: null, loading: false })) }));
 vi.mock('./browser-bridge', () => ({ browserBridge: { protocol: vi.fn(), on: vi.fn(), destroy: vi.fn() } }));
 /** A recorder that records at once and keeps a file when stopped; browser-recording.test.ts covers the real one. */
 const { recorders } = vi.hoisted(() => ({ recorders: [] as { recording: boolean; disposed: boolean; url: string | null }[] }));

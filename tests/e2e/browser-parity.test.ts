@@ -120,6 +120,16 @@ test.skipIf(process.platform !== 'win32' || !executable)('native presets, appear
     await page.click(`[data-testid=thread-row][data-thread-id="${other.id}"]`);
     await page.waitFor(`document.querySelector('[data-testid=thread-row][data-thread-id="${other.id}"]')?.closest('.thread')?.classList.contains('open')`);
     expect((await command({ kind: 'evaluate', expression: 'globalThis.persistenceMarker' }, tabId)).value).toBe('same live page');
+    // Its tab is hidden now: WebView2 renders no frame, so native input would wait out the 15 s deadline.
+    expect((await command({ kind: 'evaluate', expression: 'document.visibilityState' }, tabId)).value).toBe('hidden');
+    const hiddenStart = Date.now();
+    const refs = ((await command({ kind: 'snapshot', interactive: true }, tabId)).value as { text: string }).text;
+    const ref = (line: string) => `@${new RegExp(`${line} \\[ref=(e\\d+)\\]`).exec(refs)?.[1]}`;
+    await command({ kind: 'fill', selector: ref('textbox "Ton message"'), text: 'Depuis un onglet caché' }, tabId);
+    await command({ kind: 'click', selector: ref('button "Afficher"') }, tabId);
+    expect((await command({ kind: 'get', what: 'text', selector: '#result' }, tabId)).value).toContain('Depuis un onglet caché');
+    expect(Date.now() - hiddenStart).toBeLessThan(5000);
+    console.log(`Hidden tab snapshot, fill and click passed in ${Date.now() - hiddenStart} ms`);
     const background = await command({ kind: 'open', url: site.url.href });
     expect(JSON.stringify(await command({ kind: 'snapshot' }, background.tabId))).toContain('ATELIER BOITE');
     await command({ kind: 'close' }, background.tabId);
