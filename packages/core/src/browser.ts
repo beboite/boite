@@ -5,11 +5,12 @@
  * conversation watches and drives its tabs through `browser.remoteFrame` and
  * `browser.remoteInput`, from this machine or another. See docs/browser.md.
  */
-import { rmSync } from 'node:fs';
+import { mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import {
   browserActionError,
+  browserProfileIdError,
   browserPresetSize,
   browserProfilesOf,
   DEFAULT_BROWSER_PROFILE,
@@ -37,7 +38,7 @@ import type { Core } from './core.ts';
 import type { Connection } from './router.ts';
 import { refused } from './errors.ts';
 import { Cdp } from './browser/cdp.ts';
-import { chromiumArgs, clearActivePort, findChromium, waitForEndpoint } from './browser/chromium.ts';
+import { chromiumArgs, findChromium } from './browser/chromium.ts';
 import { TabRecorder } from './browser/recorder.ts';
 import { EDITABLE_SCRIPT, KEY_CODES, PAGE_INFO_SCRIPT, SNAPSHOT_SCRIPT, targetScript } from './browser/scripts.ts';
 
@@ -127,6 +128,8 @@ export class AgentBrowser {
   #watch(): void {
     if (this.#watching) return;
     this.#watching = true;
+    // Folders of profiles deleted while no browser ran go with the first use after.
+    void this.#pruneProfiles(this.#core.settings.get());
     this.#off.push(this.#core.bus.onCommitted((name, payload) => {
       if (name === 'turn.finished' && (payload as Turn).startedAt) void this.#discardRunning((payload as Turn).threadId);
       if (name === 'settings.updated') void this.#pruneProfiles(payload as Settings);
@@ -206,16 +209,22 @@ export class AgentBrowser {
     const found = this.findBrowser();
     if (found.path === null) throw refused(`the agent browser cannot start on ${this.#machine}: ${found.reason}`);
     const dir = this.#profileDir(profile);
-    clearActivePort(dir);
-    const spawned = this.#core.procs.spawn(SCOPE, found.path, chromiumArgs(dir), { agentRoot: false });
+    mkdirSync(dir, { recursive: true });
+    const spawned = this.#core.procs.spawn(SCOPE, found.path, chromiumArgs(dir), { agentRoot: false, extraPipes: 2 });
     // Chromium writes to both pipes; nobody reads them, so they are drained.
     void spawned.proc.stdout.pipeTo(new WritableStream()).catch(() => {});
     void spawned.proc.stderr.pipeTo(new WritableStream()).catch(() => {});
     // Chromium's helpers exit with their parent; a clean close comes first (`#shut`).
     const kill = () => { try { spawned.proc.kill(); } catch { /* gone */ } };
     try {
-      const endpoint = await waitForEndpoint(dir, spawned.exited);
-      const cdp = await Cdp.connect(endpoint);
+      const [commands, replies] = spawned.fds ?? [];
+      if (commands === undefined || replies === undefined) throw new Error('the browser was started without its DevTools pipes');
+      const cdp = Cdp.pipe(commands, replies);
+      // The first answer says the browser is up; a browser that exits first never gives it.
+      await Promise.race([
+        cdp.send('Browser.getVersion', {}, undefined, 20_000),
+        spawned.exited.then(() => { throw new Error('the browser exited while starting; another process may hold its profile folder'); }),
+      ]);
       // Pages that open a window (a sign-in popup) are adopted as tabs of the same conversation.
       await cdp.send('Target.setDiscoverTargets', { discover: true });
       await cdp.send('Browser.setDownloadBehavior', { behavior: 'deny' }).catch(() => {});
@@ -226,7 +235,7 @@ export class AgentBrowser {
       return engine;
     } catch (error) {
       kill();
-      if (profile === PRIVATE_BROWSER_PROFILE) rmSync(dir, { recursive: true, force: true });
+      if (profile === PRIVATE_BROWSER_PROFILE) void spawned.exited.then(() => this.#removeDir(dir));
       throw refused(`the agent browser could not start on ${this.#machine}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -238,7 +247,7 @@ export class AgentBrowser {
     clearTimeout(engine.idle);
     for (const id of [...engine.tabs]) this.#drop(id);
     engine.cdp.close(); engine.kill();
-    if (engine.throwaway) void engine.exited.then(() => rmSync(engine.dir, { recursive: true, force: true }));
+    if (engine.throwaway) void engine.exited.then(() => this.#removeDir(engine.dir));
   }
 
   async #shut(engine: Engine): Promise<void> {
@@ -570,14 +579,37 @@ export class AgentBrowser {
     }
   }
 
+  /** A folder that cannot go is logged, never thrown: these run detached and must not stop the core. */
+  #removeDir(dir: string): void {
+    try { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); }
+    catch (error) { this.#core.log('warn', `could not remove the browser profile folder ${dir}: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+
+  /**
+   * A profile deleted in Settings takes its folder, cookies and logins with it:
+   * its browser closes if it runs, and its folder goes whether it ran or not.
+   * Throwaway folders of private tabs that no longer run go too.
+   */
   async #pruneProfiles(settings: Settings): Promise<void> {
-    const kept = new Set([DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE, ...browserProfilesOf(settings).profiles.map(profile => profile.id)]);
-    for (const [profile, pending] of [...this.#engines]) {
-      if (kept.has(profile)) continue;
-      const engine = await pending.catch(() => null);
-      if (!engine) continue;
-      await this.#shut(engine);
-      rmSync(engine.dir, { recursive: true, force: true });
+    try {
+      const kept = new Set([DEFAULT_BROWSER_PROFILE, ...browserProfilesOf(settings).profiles.map(profile => profile.id)]);
+      for (const [profile, pending] of [...this.#engines]) {
+        if (kept.has(profile) || profile === PRIVATE_BROWSER_PROFILE) continue;
+        const engine = await pending.catch(() => null);
+        if (engine) await this.#shut(engine);
+      }
+      const privateDir = (await this.#engines.get(PRIVATE_BROWSER_PROFILE)?.catch(() => null))?.dir;
+      const root = join(this.#core.dataDir, 'browser');
+      let names: string[];
+      try { names = readdirSync(root); } catch { return; }
+      for (const name of names) {
+        const dir = join(root, name);
+        const throwaway = /^private-[0-9a-f-]{36}$/.test(name);
+        if (throwaway ? dir === privateDir : kept.has(name) || browserProfileIdError(name) !== null) continue;
+        this.#removeDir(dir);
+      }
+    } catch (error) {
+      this.#core.log('warn', `browser profile cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

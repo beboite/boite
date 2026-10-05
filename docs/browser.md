@@ -47,7 +47,9 @@ process of its own in a throwaway folder, removed when its last tab closes.
 A process starts with the first tab that needs it, through `procs.spawn` as a
 tool process of `system:browser`, so [the trace](trace.md) shows it. It closes
 60 seconds after its last tab, and with the core. Deleting a profile in
-Settings closes its tabs and removes its folder.
+Settings closes its tabs and removes its folder; a folder whose browser had
+already closed goes at the next settings change or the first use of the agent
+browser after a restart. A folder that cannot be removed is logged.
 
 Logins live on the machine that runs the agent, not on the device that shows
 it. To sign in to a site for an agent, open the conversation's browser, show
@@ -110,10 +112,12 @@ run a script in the page. It can act in the page as a person would, signed-in
 sites included: pair only devices you would give that. `browser.remoteChanged`
 goes to the clients subscribed to the conversation.
 
-The browser's DevTools port listens on 127.0.0.1 with a random port. Any
-process of that machine can reach it, as it can reach the profile folder; an
-agent there could already start a browser of its own. Another account on a
-shared machine is not kept out by more than the port's obscurity.
+The core speaks the DevTools protocol to the browser over two pipes,
+`--remote-debugging-pipe` on the browser's descriptors 3 and 4, which
+`procs.spawn` opens with `extraPipes`. No port is open: another process of the
+machine, another account included, cannot reach the browser through it. It can
+still read the profile folder if its permissions let it, as with any browser
+profile.
 
 ## Verification
 

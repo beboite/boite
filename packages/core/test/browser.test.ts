@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { connect, type CoreClient } from '../src/client.ts';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { chromiumArgs, findChromium } from '../src/browser/chromium.ts';
@@ -186,5 +186,23 @@ test('the browser is found where each OS installs it, and BOITE_BROWSER alone wh
     expect(findChromium({}, 'linux', none)).toMatchObject({ path: null, reason: expect.stringContaining('BOITE_BROWSER') });
     expect(chromiumArgs('/profile', 'linux')).toEqual(expect.arrayContaining(['--headless=new', '--disable-software-rasterizer', '--use-angle=gl-egl', '--user-data-dir=/profile']));
     expect(chromiumArgs('/profile', 'win32')).not.toContain('--use-angle=gl-egl');
+    // The DevTools protocol goes over the browser's own pipes: no port for another process to reach.
+    expect(chromiumArgs('/profile', 'linux')).toContain('--remote-debugging-pipe');
+    expect(chromiumArgs('/profile', 'linux').some(arg => arg.startsWith('--remote-debugging-port'))).toBe(false);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a deleted profile loses its folder even when its browser had already closed', async () => {
+  const root = join(harness.dataDir, 'browser');
+  for (const name of ['default', 'p-keep', 'p-gone', 'private-00000000-0000-0000-0000-000000000000', 'Not A Profile']) mkdirSync(join(root, name), { recursive: true });
+  await owner.call('settings.set', { browserProfiles: [{ id: 'p-keep', name: 'Keep' }] });
+  // The first use of the agent browser looks at what is on disk.
+  await agent.call('browser.command', { threadId, action: { kind: 'status' } });
+  let names: string[] = [];
+  for (let i = 0; i < 50; i++) { names = readdirSync(root).sort(); if (!names.includes('p-gone')) break; await Bun.sleep(50); }
+  expect(names).toEqual(['Not A Profile', 'default', 'p-keep']);
+  // Deleting one in Settings later takes its folder too.
+  await owner.call('settings.set', { browserProfiles: [] });
+  for (let i = 0; i < 50 && readdirSync(root).includes('p-keep'); i++) await Bun.sleep(50);
+  expect(readdirSync(root).sort()).toEqual(['Not A Profile', 'default']);
 });

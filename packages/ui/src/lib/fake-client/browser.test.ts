@@ -60,3 +60,23 @@ test('archiving the conversation closes its agent browser', async () => {
     await expect(client.call('browser.command', { threadId: thread.id, action: { kind: 'status' } })).rejects.toThrow('active conversation');
   } finally { client.close(); }
 });
+
+test('back and forward follow the tab position when a page was visited twice', async () => {
+  const client = new FakeClient({ delayMs: 0 }), threadId = 't-trace';
+  try {
+    await client.connect();
+    await client.call('threads.subscribe', { threadId });
+    await client.call('browser.command', { threadId, action: { kind: 'open', url: 'https://a.example/' } });
+    await client.call('browser.command', { threadId, action: { kind: 'navigate', url: 'https://b.example/' } });
+    await client.call('browser.command', { threadId, action: { kind: 'navigate', url: 'https://a.example/' } });
+    const step = async (direction: 'back' | 'forward') => {
+      await new Promise(resolve => setTimeout(resolve, 230));
+      const frame = await client.call('browser.remoteFrame', { threadId });
+      await client.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'history', direction } });
+      return (await client.call('browser.remoteStatus', { threadId })).tabs[0]!.url;
+    };
+    expect(await step('back')).toBe('https://b.example/');
+    expect(await step('back')).toBe('https://a.example/');
+    expect(await step('forward')).toBe('https://b.example/');
+  } finally { client.close(); }
+});

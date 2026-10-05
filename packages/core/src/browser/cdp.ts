@@ -1,7 +1,9 @@
 /*
  * A DevTools protocol connection to one Chromium process, in flat session
- * mode: one WebSocket carries the browser's own commands and those of every
- * page it attached, each tagged with its `sessionId`.
+ * mode: one channel carries the browser's own commands and those of every
+ * page it attached, each tagged with its `sessionId`. The channel is the two
+ * pipes `--remote-debugging-pipe` gives (descriptors 3 and 4 of the browser,
+ * one JSON message per NUL), so no port is open for another process to use.
  */
 
 type Listener = (params: Record<string, unknown>, sessionId: string | undefined) => void;
@@ -13,29 +15,54 @@ const COMMAND_TIMEOUT_MS = 30_000;
 export class CdpError extends Error {}
 
 export class Cdp {
-  #socket: WebSocket;
+  #write: (text: string) => void;
+  #stop: () => void;
   #next = 1;
   #waiting = new Map<number, Waiting>();
   #listeners = new Map<string, Set<Listener>>();
   #closed: Error | null = null;
   readonly closed: Promise<void>;
 
-  private constructor(socket: WebSocket) {
-    this.#socket = socket;
+  private constructor(write: (text: string) => void, stop: () => void) {
+    this.#write = write; this.#stop = stop;
     let settle!: () => void;
     this.closed = new Promise(resolve => { settle = resolve; });
-    socket.addEventListener('message', event => this.#receive(String(event.data)));
-    socket.addEventListener('close', () => { this.#fail(new CdpError('the browser closed its DevTools connection')); settle(); });
-    socket.addEventListener('error', () => this.#fail(new CdpError('the browser DevTools connection failed')));
+    this.#ended = () => { this.#fail(new CdpError('the browser closed its DevTools pipe')); settle(); };
   }
+  #ended: () => void;
 
-  static connect(url: string, timeoutMs = 10_000): Promise<Cdp> {
-    return new Promise((resolve, reject) => {
-      const socket = new WebSocket(url);
-      const timer = setTimeout(() => { socket.close(); reject(new CdpError(`the browser did not accept a DevTools connection within ${timeoutMs / 1000} seconds`)); }, timeoutMs);
-      socket.addEventListener('open', () => { clearTimeout(timer); resolve(new Cdp(socket)); }, { once: true });
-      socket.addEventListener('error', () => { clearTimeout(timer); reject(new CdpError(`could not connect to the browser's DevTools at ${url}`)); }, { once: true });
+  /**
+   * `commands` is this side of the browser's descriptor 3, which it reads;
+   * `replies` this side of its descriptor 4, which it writes.
+   */
+  static pipe(commands: number, replies: number): Cdp {
+    const writer = Bun.file(commands).writer();
+    const reader = Bun.file(replies).stream().getReader();
+    const cdp = new Cdp(text => { writer.write(`${text}\0`); void Promise.resolve(writer.flush()).catch(() => {}); }, () => {
+      void reader.cancel().catch(() => {});
+      try { void Promise.resolve(writer.end()).catch(() => {}); } catch { /* already closed */ }
     });
+    void (async () => {
+      const decoder = new TextDecoder();
+      let pending: Uint8Array[] = [], size = 0;
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          let start = 0;
+          for (let at = value.indexOf(0); at !== -1; at = value.indexOf(0, start)) {
+            const part = value.subarray(start, at);
+            const whole = pending.length ? concat([...pending, part], size + part.length) : part;
+            pending = []; size = 0;
+            cdp.#receive(decoder.decode(whole));
+            start = at + 1;
+          }
+          if (start < value.length) { const rest = value.slice(start); pending.push(rest); size += rest.length; }
+        }
+      } catch { /* the pipe broke: the browser is gone */ }
+      cdp.#ended();
+    })();
+    return cdp;
   }
 
   get open(): boolean { return this.#closed === null; }
@@ -49,7 +76,7 @@ export class Cdp {
         reject(new CdpError(`the browser did not answer ${method} within ${Math.round(timeoutMs / 1000)} seconds`));
       }, timeoutMs);
       this.#waiting.set(id, { resolve: resolve as (value: Record<string, unknown>) => void, reject, timer, method });
-      this.#socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+      this.#write(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
   }
 
@@ -63,7 +90,7 @@ export class Cdp {
 
   close(): void {
     this.#fail(new CdpError('the browser connection was closed'));
-    try { this.#socket.close(); } catch { /* already gone */ }
+    this.#stop();
   }
 
   #receive(text: string): void {
@@ -89,4 +116,11 @@ export class Cdp {
     for (const waiting of this.#waiting.values()) { clearTimeout(waiting.timer); waiting.reject(error); }
     this.#waiting.clear();
   }
+}
+
+function concat(parts: Uint8Array[], size: number): Uint8Array {
+  const whole = new Uint8Array(size);
+  let at = 0;
+  for (const part of parts) { whole.set(part, at); at += part.length; }
+  return whole;
 }

@@ -3,7 +3,7 @@
  * one profile folder. The core speaks the DevTools protocol to it; nothing of
  * it is shown on screen.
  */
-import { existsSync, readFileSync, rmSync, mkdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 export interface ChromiumFound { path: string }
@@ -67,8 +67,8 @@ export function chromiumArgs(profileDir: string, platform = process.platform): s
     '--disable-renderer-backgrounding',
     '--disable-backgrounding-occluded-windows',
     '--headless=new',
-    '--remote-debugging-port=0',
-    '--remote-debugging-address=127.0.0.1',
+    // The DevTools protocol runs over descriptors 3 and 4, never a port another process could reach.
+    '--remote-debugging-pipe',
     `--user-data-dir=${profileDir}`,
     '--no-first-run',
     '--no-default-browser-check',
@@ -82,27 +82,4 @@ export function chromiumArgs(profileDir: string, platform = process.platform): s
     '--use-mock-keychain',
     'about:blank',
   ];
-}
-
-/** Where a fresh process writes its DevTools port: removed first, so a stale one is never read. */
-export function clearActivePort(profileDir: string): void {
-  mkdirSync(profileDir, { recursive: true });
-  rmSync(join(profileDir, 'DevToolsActivePort'), { force: true });
-}
-
-/** The browser endpoint once Chromium has written it: `ws://127.0.0.1:<port><path>`. */
-export async function waitForEndpoint(profileDir: string, exited: Promise<unknown>, timeoutMs = 20_000): Promise<string> {
-  const file = join(profileDir, 'DevToolsActivePort');
-  let gone = false;
-  void exited.then(() => { gone = true; });
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (gone) throw new Error('the browser exited while starting; another process may hold its profile folder');
-    try {
-      const [port, path] = readFileSync(file, 'utf8').split(/\r?\n/);
-      if (port && /^\d+$/.test(port) && path?.startsWith('/devtools/browser/')) return `ws://127.0.0.1:${port}${path}`;
-    } catch { /* not written yet */ }
-    await Bun.sleep(50);
-  }
-  throw new Error(`the browser did not open its DevTools port within ${timeoutMs / 1000} seconds`);
 }

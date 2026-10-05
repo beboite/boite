@@ -5,7 +5,7 @@ import type { FakeContext, FakeMethods } from './context';
 
 type Methods = 'browser.command' | 'browser.remoteFrame' | 'browser.remoteInput' | 'browser.remoteStatus';
 
-interface Tab extends FakePage { tabId: string; profile: string; history: string[]; at: number }
+interface Tab extends FakePage { tabId: string; profile: string; history: string[]; historyIndex: number; at: number }
 interface Browser { tabs: Tab[]; active: string | null; frames: (RemoteBrowserFrame & { taken: number })[]; requestedAt: number }
 
 const VIEWPORT = { width: 1280, height: 800 };
@@ -55,7 +55,9 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
   /** A page that moves retires the frames a viewer took of it: their taps would land elsewhere. */
   const moved = (browser: Browser, tab: Tab) => { browser.frames = browser.frames.filter(frame => frame.tabId !== tab.tabId); tab.at = Date.now(); };
   const go = (browser: Browser, tab: Tab, url: string) => {
-    tab.history = [...tab.history.slice(0, tab.history.indexOf(tab.url) + 1), url];
+    // The position is kept, not searched for: a page visited twice appears twice.
+    tab.history = [...tab.history.slice(0, tab.historyIndex + 1), url];
+    tab.historyIndex = tab.history.length - 1;
     tab.url = url; tab.title = titleOf(url); tab.taps = 0; tab.text = ''; tab.scrollY = 0;
     moved(browser, tab);
   };
@@ -75,7 +77,7 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       const profile = action.profile === undefined ? DEFAULT_BROWSER_PROFILE : action.profile.trim().toLowerCase();
       if (profile !== DEFAULT_BROWSER_PROFILE && profile !== PRIVATE_BROWSER_PROFILE) throw refusal(`no browser profile is named ${action.profile}; browser profiles lists them`);
       const target = of(threadId);
-      const tab: Tab = { tabId: `browser:${++seq}-${crypto.randomUUID().slice(0, 8)}`, profile, url: action.url, title: titleOf(action.url), ...VIEWPORT, taps: 0, text: '', scrollY: 0, history: [action.url], at: Date.now() };
+      const tab: Tab = { tabId: `browser:${++seq}-${crypto.randomUUID().slice(0, 8)}`, profile, url: action.url, title: titleOf(action.url), ...VIEWPORT, taps: 0, text: '', scrollY: 0, history: [action.url], historyIndex: 0, at: Date.now() };
       target.tabs.push(tab); target.active = tab.tabId;
       changed(threadId);
       return { tabId: tab.tabId, url: tab.url, title: tab.title, profile };
@@ -146,9 +148,9 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
         case 'reset-viewport': Object.assign(tab, VIEWPORT); moved(browser, tab); break;
         case 'navigate': go(browser, tab, input.url); changed(threadId); break;
         case 'history': {
-          const at = tab.history.indexOf(tab.url) + (input.direction === 'back' ? -1 : 1);
+          const at = tab.historyIndex + (input.direction === 'back' ? -1 : 1);
           const url = tab.history[at];
-          if (url) { tab.url = url; tab.title = titleOf(url); tab.taps = 0; tab.text = ''; moved(browser, tab); changed(threadId); }
+          if (url) { tab.historyIndex = at; tab.url = url; tab.title = titleOf(url); tab.taps = 0; tab.text = ''; tab.scrollY = 0; moved(browser, tab); changed(threadId); }
           break;
         }
         case 'reload': moved(browser, tab); break;
