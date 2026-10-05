@@ -261,7 +261,7 @@ export class TurnContexts {
       const inject = !((operation && sessionId !== null) || nativeCommandPrompt(body));
       // Echo treats "question" as a test directive, including in injected help.
       const guideEnabled = this.core.brain.config().boiteGuide !== false;
-      const coordinationGuide = inject && operation !== 'compact' && guideEnabled ? this.core.coordination.instructions(threadId) : '';
+      const coordinationGuide = inject && operation !== 'compact' && guideEnabled ? this.core.coordination.instructions(threadId) + this.core.stewards.instructions(threadId) : '';
       const guide = inject && sessionId === null && guideEnabled
         ? agentGuide(provider.protocol !== 'echo' && this.core.settings.get().asyncQuestions !== false) : '';
       const prefix = (inject ? this.core.brain.instructions(provider.id) : '') + guide;

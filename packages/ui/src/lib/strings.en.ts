@@ -1051,6 +1051,8 @@ export const strings = {
     movedByAgent: 'Moved by the agent to {project}',
     /** Above the first prompt of a thread another thread's agent started with `boite thread new`. */
     startedByAgent: 'Started by the agent of {title} in {project}',
+    /** Above the first prompt of a thread another agent started: the prompt is that agent's, not the user's. */
+    promptFromAgent: 'Sent by the agent of',
     /** A line of the starting thread's timeline: its agent started another thread. */
     agentStartedThread: 'The agent started {title} in {project}',
     openLinkedThread: 'Open this thread',
@@ -1147,7 +1149,11 @@ export const strings = {
     all: 'All', sent: 'Sent', received: 'Received', empty: 'No messages here yet.',
     forwardedOne: 'Forwarded 1 message', forwardedMany: 'Forwarded {count} messages',
     receivedOne: 'Received 1 message', receivedMany: 'Received {count} messages',
-    issueOne: '1 message needs attention', issueMany: '{count} messages need attention'
+    issueOne: '1 message needs attention', issueMany: '{count} messages need attention',
+    /** Incoming letters the steward of this thread's project sent. */
+    stewardOne: '1 message from the steward', stewardMany: '{count} messages from the steward',
+    /** What the core told this steward about the threads it looks after. */
+    noticeOne: '1 thread notice', noticeMany: '{count} thread notices'
   },
   coordination: {
     options: 'Advanced settings',
@@ -1164,6 +1170,10 @@ export const strings = {
     details: 'Show exchange',
     receivedFrom: 'Received from', sentTo: 'Your agent sent to',
     userSentTo: 'You sent to', userMessageVia: 'User message via',
+    /** A letter the steward of this thread's project sent it, and the same letter in the steward's own thread. */
+    stewardFrom: 'From the steward', stewardSentTo: 'Steward sent to',
+    /** The core told this steward what happened in a thread it looks after. */
+    noticeFrom: 'Notice from {title}',
     receivedStatus: 'Received',
     machineNotConnected: 'Connect to this machine in Settings to open its thread.',
     status: {
@@ -1173,6 +1183,30 @@ export const strings = {
     bubbleStatus: {
       queued: 'Waiting', received: 'Waiting', delivered: 'Sent', uncertain: 'Unconfirmed', expired: 'Expired', rejected: 'Failed'
     }
+  },
+  steward: {
+    heading: 'Steward',
+    enable: 'This agent looks after projects',
+    enableHint: 'It reads every thread there, steers them, answers their questions and tidies them up while you are away.',
+    ownerOnly: 'Only the owner can make an agent a steward. This device can see what it looks after.',
+    unavailable: 'A subagent or a persistent agent session cannot be a steward.',
+    allProjects: 'All projects', allProjectsHint: 'Projects added later included.',
+    projects: 'Projects', projectsEmpty: 'No project to look after on this machine.',
+    capabilities: 'What it may do',
+    risky: 'Risky',
+    capability: {
+      message: { label: 'Send messages', hint: 'Its messages reach the threads, even where communication is off.' },
+      spawn: { label: 'Start threads', hint: 'Start new threads in its projects.' },
+      archive: { label: 'Archive', hint: 'Archive and restore threads.' },
+      move: { label: 'Move', hint: 'Move threads between its projects and add project folders.' },
+      stop: { label: 'Stop and rename', hint: 'Stop a running turn and rename threads.' },
+      answer: { label: 'Answer questions', hint: 'Answer or skip the questions agents ask you.' },
+      permissions: { label: 'Answer permissions', hint: 'Allow or deny tool permission requests in your place.' },
+      remove: { label: 'Delete threads', hint: 'Delete threads. A deleted thread stays restorable for a while.' }
+    },
+    notify: 'Notify on thread events',
+    notifyHint: 'A finished turn, a failure, a question or a waiting permission wakes the steward.',
+    chipOne: 'Steward · 1 project', chipMany: 'Steward · {count} projects', chipAll: 'Steward · all projects'
   },
   delegation: {
     off: 'Off',

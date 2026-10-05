@@ -114,6 +114,8 @@ and assertions when making the suite faster.
 - [Workflows](docs/workflows.md): JSON plans of delegated steps and their graph.
 - [Model switching](docs/model-switching.md) and [context](docs/context.md):
   session reuse, queued turns and compaction.
+- [Stewards](docs/stewards.md): an agent the owner assigns to projects, its
+  capabilities, its letters and notices, and the owner's terminal commands.
 - [Phone](docs/phone.md), [Android app](docs/android.md) and [server](docs/server.md):
   pairing, the APK and deployment.
 - [Machines](docs/machines.md): connections, browser origins and thread views.

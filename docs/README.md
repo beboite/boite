@@ -16,6 +16,7 @@
 - [Context](context.md): context usage and compaction.
 - [Prompt cache timer](prompt-cache.md): how long a thread's cache stays warm, per provider, and the sources.
 - [Agent coordination](coordination.md): messages between agents, machine links and limits.
+- [Stewards](stewards.md): an agent assigned to projects that drives their threads while the owner is away.
 - [Groups](groups.md): machines that connect to each other, their phones, Tailscale addresses and trust.
 - [Persistent agents](agents.md): identities, groups, teams, missions, memory and background execution.
 - [Subagents](delegation.md): child conversations on by default, model profiles, live steering and usage.

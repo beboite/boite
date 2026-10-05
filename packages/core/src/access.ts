@@ -99,6 +99,15 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['collaboration.search', 'contacts it may already reach, found by their title, project, branch, model, resources or chat'],
   ['collaboration.read', 'the conversation of a contact it may already reach, text and tool names only; the user wants agents to help with each other'],
   ['collaboration.wait', 'blocks on its own inbox until a reply arrives'],
+  // Steward methods name the steward's own thread like every agent method; the
+  // grant the owner gave that thread is checked in stewards.ts against the
+  // project of the thread each call names. Without a grant every one is refused.
+  ['steward.get', 'its own steward grant and the projects it covers, so it knows what it may touch'],
+  ['steward.threads', 'the state of the threads in the projects the owner made it steward of, nothing outside them'],
+  ['steward.thread', 'one of those threads with its pending questions, permissions and last answer'],
+  ['steward.act', 'archiving, moving, stopping, renaming or deleting one of those threads, each only with the capability the owner granted, and a line in its timeline saying so'],
+  ['steward.answer', 'answering a question one of those threads asked, with the answer capability, marked as the steward\'s in that timeline'],
+  ['steward.permission', 'deciding a tool permission in one of those threads, only with the permissions capability the owner must grant explicitly'],
   ['agent.where', 'the thread, its project, its working directory and its branch: what the CLI prints first'],
   ['agent.projects', 'the names and folders of the projects the owner added, so it can name one to delegation.spawn or agent.move; reading them opens nothing'],
   ['agent.addProject', 'registering an existing folder as a project, which the owner sees appear and can remove; it opens no file access the agent\'s process lacks, and it stays within the communication settings and one agent generation, like agent.spawn'],

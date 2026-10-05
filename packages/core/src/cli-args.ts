@@ -22,13 +22,27 @@ export interface Parsed {
   before?: number;
   limit?: number;
   level?: 'info' | 'warn' | 'error';
+  /** `threads --project`: one project by id, name or folder. */
+  project?: string;
+  /** `threads --archived`: the archived threads instead. */
+  archived: boolean;
+  /** `answer --skip`: resolve a question without an answer. */
+  skip: boolean;
+  /** `stewards set --all`: every project. */
+  all: boolean;
+  /** `stewards set --can a,b`: the capabilities. */
+  can?: string;
+  /** `stewards set --quiet`: no notices. */
+  quiet: boolean;
+  /** Another core's address; its token comes from BOITE_TOKEN, never the command line. */
+  core?: string;
 }
 
-const BOOLEAN_OPTIONS = ['json', 'multiple', 'worktree', 'wait'] as const;
+const BOOLEAN_OPTIONS = ['json', 'multiple', 'worktree', 'wait', 'archived', 'skip', 'all', 'quiet'] as const;
 const NUMBER_OPTIONS = ['timeout', 'last', 'before'] as const;
 
 export function parse(argv: string[]): Parsed {
-  const parsed: Parsed = { positional: [], json: false, multiple: false, worktree: false, wait: false, thread: undefined, dataDir: undefined, channel: 'stable' };
+  const parsed: Parsed = { positional: [], json: false, multiple: false, worktree: false, wait: false, archived: false, skip: false, all: false, quiet: false, thread: undefined, dataDir: undefined, channel: 'stable' };
   const number = (flag: string, raw: string): number => {
     const value = Number(raw);
     if (!Number.isFinite(value) || value < 0) throw new Usage(`${flag} needs a number, got ${raw}`);
@@ -49,6 +63,9 @@ export function parse(argv: string[]): Parsed {
     else if (arg === '--request-id') parsed.requestId = next();
     else if (arg === '--title') parsed.title = next();
     else if (arg === '--name') parsed.name = next();
+    else if (arg === '--project') parsed.project = next();
+    else if (arg === '--can') parsed.can = next();
+    else if (arg === '--core') parsed.core = next();
     else if (arg === '--limit') {
       const value = number(arg, next());
       if (!Number.isInteger(value) || value < 1 || value > 200) throw new Usage('--limit needs an integer from 1 to 200');
