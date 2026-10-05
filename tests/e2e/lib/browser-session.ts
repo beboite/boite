@@ -37,7 +37,7 @@ export async function startBrowserSession(executable: string, title = 'Boite · 
     const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title });
     page = await BrowserPage.attach(port);
     await page.waitFor("typeof window.__TAURI_INTERNALS__?.invoke === 'function'");
-    await page.evaluate(`localStorage.setItem('boite.onboarding', JSON.stringify({version:6,at:Date.now()})); localStorage.setItem('boite.locale', 'fr'); localStorage.setItem('boite.experiments', ${JSON.stringify(JSON.stringify([...new Set(['agent-browser-control', ...experiments])]))}); location.reload();`);
+    await page.evaluate(`localStorage.setItem('boite.onboarding', JSON.stringify({version:6,at:Date.now()})); localStorage.setItem('boite.locale', 'fr'); localStorage.setItem('boite.experiments', ${JSON.stringify(JSON.stringify(experiments))}); location.reload();`);
     await page.waitFor("document.querySelector('[data-testid=thread-row]')");
     await page.click('[data-testid=thread-row]');
     await page.waitFor("document.querySelector('[data-testid=timeline]')");

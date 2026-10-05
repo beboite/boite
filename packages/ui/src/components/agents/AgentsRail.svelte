@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { ArrowLeft, Bell, Ellipsis, Search, Settings2, SquarePen, UserRoundPlus, Users } from '@lucide/svelte';
+  import { Bell, Ellipsis, Search, Settings2, SquarePen, UserRoundPlus, Users } from '@lucide/svelte';
   import { chatKey, previewOf, type AgentChat, type AgentEntryKind, type AgentFocus, type AgentsView } from '../../lib/agents.svelte';
   import { ago, exactTime } from '../../lib/format';
   import { separator, type MenuItem } from '../../lib/menu';
   import { fill, strings } from '../../lib/strings';
   import { workspace } from '../../lib/workspace.svelte';
   import Menu from '../Menu.svelte';
+  import SurfaceSwitch from '../SurfaceSwitch.svelte';
   import AgentAvatar from './AgentAvatar.svelte';
 
   let { view, chats, active, attention, onfocus, oncreate }: {
@@ -73,8 +74,8 @@
 </script>
 
 <aside class="agents-rail" aria-label={labels.heading}>
+  <div class="agents-switch"><SurfaceSwitch store={view.store} current="agents" /></div>
   <header>
-    <button type="button" class="ghost icon agents-leave" aria-label={labels.back} title={labels.back} onclick={() => view.store.showChat()}><ArrowLeft size={16} strokeWidth={1.75} /></button>
     <h1>{labels.heading}</h1>
     {#if multi}<span class="agents-machine">{machine?.label ?? view.store.core?.hostname ?? strings.machines.local}</span>{/if}
     <span class="agents-grow"></span>

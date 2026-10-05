@@ -3,6 +3,7 @@ import { flushSync, mount, tick, unmount } from 'svelte';
 import Prose from './Prose.svelte';
 import type { Store } from '../lib/store.svelte';
 import { writeExperiments } from '../lib/experiments';
+import { resetFeatures, setFeature } from '../lib/features';
 import { installExternalLinks } from '../lib/links';
 
 let running: Record<string, unknown> | null = null;
@@ -12,11 +13,12 @@ afterEach(() => {
   running = null;
   document.body.innerHTML = '';
   writeExperiments([]);
+  resetFeatures();
   delete window.__TAURI_INTERNALS__;
 });
 
 test('clicking a local executable opens the original file without downloading or previewing it', async () => {
-  writeExperiments(['chat-artifacts']);
+  setFeature('chat-artifacts', true);
   const invoke = vi.fn(async () => {});
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
   const store = { owner: true, localCore: true, threads: [{ id: 'game', cwd: 'C:/project' }], readFile: vi.fn() } as unknown as Store;
@@ -30,7 +32,7 @@ test('clicking a local executable opens the original file without downloading or
 });
 
 test('a native open failure is shown and never falls back to downloading', async () => {
-  writeExperiments(['chat-artifacts']);
+  setFeature('chat-artifacts', true);
   const invoke = vi.fn(async () => { throw 'game.exe: file does not exist'; });
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
   const reportError = vi.fn();
@@ -43,7 +45,7 @@ test('a native open failure is shown and never falls back to downloading', async
 });
 
 test('a local file can still open when its preview cannot be read', async () => {
-  writeExperiments(['chat-artifacts']);
+  setFeature('chat-artifacts', true);
   const invoke = vi.fn(async () => {});
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
   const store = {
@@ -69,7 +71,7 @@ function query<T extends Element>(selector: string): T {
 }
 
 test('dragging across a game path never launches it, and the next click still does', async () => {
-  writeExperiments(['chat-artifacts']);
+  setFeature('chat-artifacts', true);
   const invoke = vi.fn(async () => {});
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
   const store = { owner: true, localCore: true, threads: [{ id: 'game', cwd: 'C:/project' }] } as unknown as Store;
@@ -117,6 +119,7 @@ test.each([false, true])('selecting external link text skips navigation, then a 
 });
 
 test('the direct-link experiment opens a desktop shortcut and text outside the checkout only on a click', async () => {
+  setFeature('chat-artifacts', false);
   const invoke = vi.fn(async () => {});
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
   const store = { owner: true, localCore: true, threads: [{ id: 'local', cwd: 'E:/project' }], readFile: vi.fn() } as unknown as Store;

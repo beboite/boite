@@ -71,9 +71,9 @@ and [tool guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/mai
 
 ## Test a page in the desktop browser
 
-On Windows, enable **Agent browser control** in Settings > Experiments on the
-hosting desktop, keep the conversation open in Boite and run `boite browser help`.
-The switch is off by default. It lets the agent read and act in this conversation's
+On Windows, **Agent browser control** is on by default on the hosting desktop
+(Settings > General > Built-in browser). Keep the conversation open in Boite and
+run `boite browser help`. The switch lets the agent read and act in this conversation's
 browser tabs, including signed-in sites and JavaScript execution. It uses the
 desktop's browser profiles; this is not an isolated automation session.
 `boite browser open http://localhost:3000` opens a tab in the default profile and
@@ -328,7 +328,7 @@ sessions are refused.
 desktop and paired phones after the original changes or disappears. The thread
 must have a turn and must not be archived. Images, videos and audio appear
 inline by default. PDF and local file previews are under the
-[Chat files and previews experiment](experiments.md#chat-files-and-previews).
+[Chat files and previews](chat-files.md) switch, on by default.
 When the agent continues working after publishing, new text and tool cards
 appear below the files. Updates to tools already running stay on their original
 cards. Publishing a file does not end the turn.
