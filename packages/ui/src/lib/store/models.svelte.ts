@@ -1,5 +1,5 @@
 import type { ModelInfo, ProviderId, ProviderSummary } from '@boite/contracts';
-import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, writeModelDefaults, resolveModelDefault, type ModelDefaults } from '../model-defaults';
+import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, writeModelDefaults, resolveModelDefault, fallbackModelDefault, type ModelDefaults } from '../model-defaults';
 import { FAVORITES_KEY, isNamedModel, readFavorites, type FavoriteModel } from '../model-order';
 import { defaultPrefs, writePrefs, type ComposerPrefs } from '../prefs';
 import { strings } from '../strings';
@@ -182,8 +182,15 @@ export class Models {
 
   defaultModelOf(provider: ProviderSummary, accountId?: string): string | null {
     const models = accountId ? this.ctx.store.modelsOf(provider.id, accountId) : provider.models;
-    const preferred = this.modelDefaults[provider.id] ?? INITIAL_MODEL_DEFAULTS[provider.id];
-    return preferred?.model ?? resolveModelDefault(provider.id, models, this.modelDefaults)?.model ?? null;
+    const configured = this.modelDefaults[provider.id];
+    if (configured) return configured.model;
+    // The built-in default is a preference: once the account's own catalog is
+    // read and does not list it, the catalog decides.
+    if (accountId && this.probedModels[probeKey(provider.id, accountId)]) {
+      const fallback = fallbackModelDefault(provider.id, models);
+      if (fallback) return fallback.model;
+    }
+    return INITIAL_MODEL_DEFAULTS[provider.id]?.model ?? resolveModelDefault(provider.id, models, this.modelDefaults)?.model ?? null;
   }
 
   /** Replace old agent-selected aliases for the next prompt, preserving named choices. */
@@ -203,7 +210,8 @@ export class Models {
     const configured = this.modelDefaults[providerId] ?? INITIAL_MODEL_DEFAULTS[providerId];
     if (configured?.model === model && (!offered.some((entry) => entry.id === model) ||
       (s.providerOf(providerId)?.protocol === 'claude-sdk' && !this.probedModels[probeKey(providerId, accountId)]))) return configured.effort;
-    const preferred = resolveModelDefault(providerId, offered, this.modelDefaults);
+    const preferred = configured === this.modelDefaults[providerId] && configured
+      ? resolveModelDefault(providerId, offered, this.modelDefaults) : fallbackModelDefault(providerId, offered);
     return preferred?.model === model ? preferred.effort : offered.find((m) => m.id === model)?.effort?.default ?? null;
   }
 
@@ -221,7 +229,7 @@ export class Models {
    */
   defaultChoice(): Choice | null {
     const s = this.ctx.store;
-    if (s.draft && this.draftChoice) return this.draftChoice;
+    if (s.draft && this.draftChoice) return this.#offered(this.draftChoice);
     const remembered = this.prefs.providerId ? s.providerOf(this.prefs.providerId) : null;
     const provider =
       (remembered?.available ? remembered : null) ??
@@ -292,6 +300,19 @@ export class Models {
     writePrefs(this.prefs);
   }
 
+  /**
+   * A choice still on the built-in default, moved to what the account's
+   * catalog lists once it is read. The composer shows the model the send will
+   * use. A default the user configured, or any other model, comes back as is.
+   */
+  #offered(choice: Choice, catalog?: ModelInfo[]): Choice {
+    if (this.modelDefaults[choice.providerId] || choice.model !== INITIAL_MODEL_DEFAULTS[choice.providerId]?.model) return choice;
+    const offered = catalog ?? this.probedModels[probeKey(choice.providerId, choice.accountId)];
+    if (!offered || offered.some((model) => model.id === choice.model)) return choice;
+    const fallback = fallbackModelDefault(choice.providerId, offered);
+    return fallback ? { ...choice, model: fallback.model, effort: fallback.effort, speed: null } : choice;
+  }
+
   /** Validate a draft's choice against the owning core before creating its thread. */
   async prepareDraftChoice(choice: Choice): Promise<Choice | null> {
     const s = this.ctx.store;
@@ -323,7 +344,12 @@ export class Models {
         return null;
       }
     }
-    if (!s.modelsOf(provider.id, choice.accountId).some((model) => model.id === choice.model)) {
+    const offered = s.modelsOf(provider.id, choice.accountId);
+    if (!offered.some((model) => model.id === choice.model)) {
+      // Only the built-in default moves to what the account offers. A default
+      // the user configured, or a model he picked, is refused instead.
+      const moved = this.#offered(choice, offered);
+      if (moved !== choice) return moved;
       s.error = strings.settings.modelDefaultUnavailable.replace('{model}', choice.model).replace('{provider}', provider.name);
       return null;
     }

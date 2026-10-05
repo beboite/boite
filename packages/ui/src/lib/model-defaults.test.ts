@@ -1,7 +1,7 @@
 import { beforeEach, expect, vi } from 'vitest';
 import { test } from '../test/fake-client';
 import type { ModelInfo } from '@boite/contracts';
-import { INITIAL_MODEL_DEFAULTS, MODEL_DEFAULTS_KEY, readModelDefaults, resolveModelDefault, writeModelDefaults } from './model-defaults';
+import { INITIAL_MODEL_DEFAULTS, MODEL_DEFAULTS_KEY, readModelDefaults, resolveModelDefault, fallbackModelDefault, writeModelDefaults } from './model-defaults';
 
 beforeEach(() => localStorage.clear());
 const levels = ['low', 'medium', 'high'].map((id) => ({ id, label: id }));
@@ -200,4 +200,33 @@ test('an ACP effort probe that fails still keeps a model the catalog already lis
   vi.spyOn(client, 'call').mockRejectedValue(new Error('effort scale unavailable'));
   expect(await store.prepareDraftChoice(choice)).toEqual(choice);
   expect(store.error).toBeNull();
+});
+
+test('a built-in default the account no longer lists moves to its later revision instead of refusing the send', async ({ ready }) => {
+  const { store, client } = await ready({ delayMs: 0 });
+  const provider = store.providerOf('claude')!;
+  const account = store.accountsOf('claude')[0]!;
+  const catalog: ModelInfo[] = [
+    { id: 'claude-fable-5-1', name: 'Fable 5.1', effort: { levels, default: 'low' } },
+    { id: 'claude-opus-5-5', name: 'Opus 5.5', effort: { levels, default: 'low' } }
+  ];
+  const stale = { providerId: provider.id, accountId: account.id, model: 'claude-opus-5', effort: 'high', speed: 'fast', permissionMode: 'default' as const };
+  const call = vi.spyOn(client, 'call').mockResolvedValue({ models: catalog } as never);
+  expect(await store.prepareDraftChoice(stale)).toEqual({ ...stale, model: 'claude-opus-5-5', speed: null });
+  expect(store.error).toBeNull();
+  // The catalog is read: the composer and Settings open on the same model.
+  expect(store.defaultModelOf(provider, account.id)).toBe('claude-opus-5-5');
+  expect(store.defaultEffortOf(provider.id, account.id, 'claude-opus-5-5')).toBe('high');
+  // A draft that remembered the built-in before discovery shows what the send uses.
+  store.startDraft();
+  store.remember(stale);
+  expect(store.draftChoice?.model).toBe('claude-opus-5');
+  expect(store.defaultChoice()).toMatchObject({ model: 'claude-opus-5-5', effort: 'high', speed: null });
+  expect(fallbackModelDefault('claude', catalog.slice(0, 1))).toEqual({ model: 'claude-fable-5-1', effort: 'high' });
+  expect(fallbackModelDefault('claude', [{ id: 'default', name: 'Default', default: true }])).toBeNull();
+  // A default the user configured is still refused, never replaced.
+  store.modelDefaults = { claude: { model: 'claude-opus-5', effort: 'high' } };
+  expect(await store.prepareDraftChoice(stale)).toBeNull();
+  expect(store.error).toContain('claude-opus-5');
+  call.mockRestore();
 });
