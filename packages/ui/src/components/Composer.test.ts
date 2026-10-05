@@ -205,6 +205,63 @@ test.each([false, true])('editing replaces the sent message and later turns (nex
   if (nextDraft) expect(store.draft?.projectId).toBe(updated.projectId);
 });
 
+/** The words of every user bubble in the timeline, top to bottom. */
+function userBubbles(): string[] {
+  return Array.from(document.querySelectorAll('[data-testid=message][data-role=user] [data-testid=text-part]')).map(part => part.textContent ?? '');
+}
+
+test('an edit replaces the message on screen before the core rewinds', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await send('original request');
+  await send('later request');
+  const kept = userBubbles().slice(0, -2);
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'threads.rewind') await gate;
+    return call(method, params);
+  });
+  const row = Array.from(document.querySelectorAll('[data-testid=message][data-role=user]')).find(row => row.querySelector('[data-testid=text-part]')?.textContent === 'original request')!;
+  row.querySelector<HTMLButtonElement>('[data-testid=message-edit]')!.click();
+  await waitFor(() => input().value === 'original request');
+  await type('changed request');
+  input().focus(); press('Enter');
+  // Nothing has come back from the core: the old prompt and what followed are gone, the new one shows.
+  await waitFor(() => userBubbles().at(-1) === 'changed request');
+  expect(userBubbles()).toEqual([...kept, 'changed request']);
+  expect(input().value).toBe('');
+  release();
+  await waitFor(() => !store.busy && !store.composerStates['t-trace']!.sending && store.openThread!.messages.at(-1)?.role === 'assistant');
+  expect(userBubbles()).toEqual([...kept, 'changed request']);
+  expect(store.outgoing['t-trace']).toBeUndefined();
+});
+
+test('a new conversation shows its first prompt while the core makes the thread', async () => {
+  await mountOnFake();
+  store.startDraft();
+  await waitFor(() => store.draft !== null);
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'threads.create') await gate;
+    return call(method, params);
+  });
+  await type('start this right away');
+  press('Enter');
+  await waitFor(() => userBubbles().includes('start this right away'));
+  expect(store.openThread).toBeNull();
+  expect(input().value).toBe('');
+  release();
+  await waitFor(() => store.openThread !== null && store.openThread.messages.some(message => message.role === 'user'));
+  await waitFor(() => !store.busy);
+  expect(userBubbles()).toEqual(['start this right away']);
+});
+
 test('a turn that starts during editing does not silently turn the edit into a queued resend', async () => {
   await mountOnFake();
   await store.open('t-trace');
@@ -972,7 +1029,7 @@ test('sending waits for a file read so the attachment cannot land in the next pr
   expect(sent.parts).toContainEqual({ type: 'file', mimeType: 'text/plain', name: 'notes.txt', data: btoa('notes') });
 });
 
-test.each([true, false])('an image pasted during a pending send preserves only unsent content when accepted=%s', async accepted => {
+test.each([true, false])('a sent prompt leaves the box at once and an image pasted during the send stays for the next prompt (accepted=%s)', async accepted => {
   await mountOnFake();
   await store.open('t-trace');
   paste(pngFile('sent.png'));
@@ -993,20 +1050,29 @@ test.each([true, false])('an image pasted during a pending send preserves only u
   });
   press('Enter');
   await waitFor(() => store.composerStates['t-trace']!.sending);
+  // The prompt left the box at once and shows in the thread while the core has not answered.
+  expect(input().value).toBe('');
+  expect(chips()).toHaveLength(0);
+  const early = Array.from(document.querySelectorAll('[data-testid=message][data-role=user] [data-testid=text-part]')).at(-1);
+  expect(early?.textContent).toBe('send this once [Image 1]');
   paste(pngFile('next.png'));
-  await waitFor(() => chips().length === 2 && input().value.includes('[Image 2]'));
+  await waitFor(() => chips().length === 1 && input().value === '[Image 1] ');
   release();
   await waitFor(() => !store.composerStates['t-trace']!.sending);
+  expect(input().value).toBe('[Image 1] ');
+  expect(store.composerStates['t-trace']!.attachments.map(item => item.name)).toEqual(['next.png']);
+  const users = () => store.timelineOf(store.openThread!).filter(message => message.role === 'user');
   if (accepted) {
-    expect(input().value).toBe('[Image 1] ');
-    expect(store.composerStates['t-trace']!.attachments.map(item => item.name)).toEqual(['next.png']);
-    const sent = store.openThread!.messages.filter(message => message.role === 'user').at(-1)!;
+    await waitFor(() => users().filter(message => message.parts[0]?.type === 'text' && message.parts[0].text === 'send this once [Image 1]').length === 1 && !users().at(-1)!.id.startsWith('outgoing:'));
+    const sent = users().at(-1)!;
     expect(sent.parts[0]).toEqual({ type: 'text', text: 'send this once [Image 1]' });
     expect(sent.parts.filter(part => part.type === 'image').map(part => part.alt)).toEqual(['sent.png']);
   } else {
+    // The box holds the next prompt, so the refused one waits, held, at the head of the queue.
     expect(store.error).toBe('send refused');
-    expect(input().value).toBe('send this once [Image 1] [Image 2] ');
-    expect(store.composerStates['t-trace']!.attachments.map(item => item.name)).toEqual(['sent.png', 'next.png']);
+    expect(store.composerStates['t-trace']!.paused).toBe(true);
+    expect(store.composerStates['t-trace']!.queued.map(entry => [entry.text, entry.attachments.map(item => item.name)])).toEqual([['send this once [Image 1]', ['sent.png']]]);
+    expect(users().some(message => message.id.startsWith('outgoing:'))).toBe(false);
   }
 });
 

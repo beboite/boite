@@ -7,11 +7,14 @@
   import { levelName, projectName } from '../lib/format';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
+  import { DRAFT_STASH_KEY } from '../lib/prefs';
+  import { TurnProgress } from '../lib/turn-progress.svelte';
   import Composer from './Composer.svelte';
   import AgentDock from './AgentDock.svelte';
   import CoordinationPanel from './CoordinationPanel.svelte';
   import Menu from './Menu.svelte';
   import MessageList from './MessageList.svelte';
+  import UserMessage from './UserMessage.svelte';
 
   let { store }: { store: Store } = $props();
 
@@ -34,6 +37,10 @@
   let modelLabel = $derived(draftModel?.name ?? draftChoice?.model ?? draftProvider?.name ?? '');
 
   const OPEN_FOLDER = 'open-folder';
+
+  /** A new conversation's first prompt, on screen while the core makes its thread. */
+  let draftSent = $derived(thread ? undefined : store.outgoing[DRAFT_STASH_KEY]?.at(-1));
+  const noProgress = new TurnProgress(() => []);
 
   /**
    * Every machine's drafts first, whether the core has made them yet or not,
@@ -92,8 +99,14 @@
            already played the rise belong to that thread alone, and kept across
            a switch they grew for every message the page had ever shown. -->
       {#key thread.id}
-        <MessageList {store} threadId={thread.id} messages={thread.messages} />
+        <MessageList {store} threadId={thread.id} messages={store.timelineOf(thread)} />
       {/key}
+    {:else if draftSent}
+      <div class="draft-body">
+        <article class="draft-sent" data-testid="message" data-role="user">
+          <UserMessage {store} message={draftSent} turn={undefined} progress={noProgress} expanded={[]} ontoggle={() => {}} />
+        </article>
+      </div>
     {:else}
       <div class="draft-body" data-testid="draft-empty">
         <h1 class="start" data-testid="draft-sentence">
@@ -173,6 +186,14 @@
     justify-content: center;
     padding: 24px 20px 16px;
     animation: rise var(--dur-3) var(--ease-out-quint);
+  }
+
+  .draft-sent {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    width: 100%;
+    max-width: var(--content);
   }
 
   .draft-tail {

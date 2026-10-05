@@ -1,24 +1,6 @@
 import type { Attachment } from '@boite/contracts';
 import type { Store } from './store.svelte';
-import type { ComposerState } from './composer-queue';
 import { fill, strings } from './strings';
-
-const pendingImageSends = new WeakMap<ComposerState, { text: string; inserted: boolean; edited: boolean }>();
-
-/** Automatic image tokens must not keep already-sent prose in the next draft. */
-export function trackImageSend(state: ComposerState, prompt: string, sentImages: Attachment[]) {
-  const pending = { text: prompt, inserted: false, edited: false };
-  pendingImageSends.set(state, pending);
-  return (accepted: boolean) => {
-    if (pendingImageSends.get(state) !== pending) return;
-    pendingImageSends.delete(state);
-    if (!accepted || !pending.inserted || pending.edited || state.text !== pending.text) return;
-    state.attachments = state.attachments.filter(attachment => !sentImages.includes(attachment));
-    state.text = state.attachments.filter(attachment => attachment.kind === 'image').map((_, index) => imageLabel(index + 1)).join(' ') + ' ';
-    state.selection = { start: state.text.length, end: state.text.length };
-    state.mentionInsertion = (state.mentionInsertion ?? 0) + 1;
-  };
-}
 
 export function imageLabel(number: number): string {
   return fill(strings.composer.imageReference, { number: String(number) });
@@ -47,10 +29,7 @@ export function insertImageReference(store: Store, key: string) {
   const end = Math.max(start, Math.min(state.text.length, state.selection?.end ?? start));
   const prefix = start && !/\s/.test(state.text[start - 1]!) ? ' ' : '';
   const inserted = prefix + imageLabel(state.attachments.filter(item => item.kind === 'image').length) + ' ';
-  const pending = pendingImageSends.get(state);
-  if (pending && pending.text !== state.text) pending.edited = true;
   store.editComposerText(key, state.text.slice(0, start) + inserted + state.text.slice(end), false, { start, end });
-  if (pending) { pending.text = state.text; pending.inserted = true; }
   state.selection = { start: start + inserted.length, end: start + inserted.length };
   state.mentionInsertion = (state.mentionInsertion ?? 0) + 1;
 }

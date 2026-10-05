@@ -1,12 +1,15 @@
-import { RpcErrorCode, PREVIEW_REFERENCES_PER_TURN, previewReferencesError, type PreviewReference } from '@boite/contracts';
+import { RpcErrorCode, PREVIEW_REFERENCES_PER_TURN, previewPrompt, previewReferencesError, type PreviewReference } from '@boite/contracts';
 import { untrack } from 'svelte';
-import type { Attachment, Message, MessageId, ThreadSummary, TurnInFlightData } from '@boite/contracts';
-import { drainQueue, sentPrompt } from '../composer-queue';
+import type { Attachment, Message, MessageId, Thread, ThreadSummary, TurnInFlightData } from '@boite/contracts';
+import { drainQueue, sendRefusal, sentPrompt } from '../composer-queue';
 import { restorePreviewMentions } from '../preview-mentions';
 import { activityCommand } from '../activity-command';
 import { RpcFailure, readyAgain, wasDropped } from '../client';
 import { titleFrom } from '../format';
 import { DRAFT_STASH_KEY } from '../prefs';
+import { promptText } from '../message-display';
+import { lastIndexById } from '../thread-rows';
+import type { RewoundMessage } from './threads.svelte';
 import { editPreviewMentions, insertPreviewMention } from '../preview-mentions';
 import { showPreviewReference } from '../preview-navigation';
 import { strings } from '../strings';
@@ -16,6 +19,20 @@ import type { StoreContext } from './context';
 
 /** A prompt waiting behind a running turn, with what it was written with. */
 type QueuedPrompt = { text: string; attachments: Attachment[]; previewReferences?: PreviewReference[]; afterBoundary?: string };
+
+/** Marks the id of a prompt shown before the core answered for it. */
+const OUTGOING = 'outgoing:';
+
+/** True for a prompt this client shows while its send is out, which the core has not written yet. */
+export function isOutgoing(message: Message): boolean {
+  return message.id.startsWith(OUTGOING);
+}
+
+/** The words of a user message as the bubble shows them, which an early copy and the core's own share. */
+function shownText(message: Message): string {
+  const part = message.parts.find(part => part.type === 'text');
+  return part?.type === 'text' ? promptText(part) : '';
+}
 
 /** The refusal `turns.start` answers while the thread already runs a turn, or null for any other error. */
 function turnInFlight(error: unknown): TurnInFlightData | null {
@@ -50,6 +67,16 @@ export class Composer {
   previewUndo = new Map<string, { text: string; references: PreviewReference[] }[]>();
   composerInsertions = new Map<string, (start: number, end: number, text: string) => void>();
   pendingSends = new Map<string, { id: string; prompt: string; attachments: Attachment[]; previewReferences: PreviewReference[]; selectionVersion: number }>();
+  /**
+   * Prompts on their way to the core, per thread, shown at the end of its
+   * timeline the moment they are sent. Each keeps an `outgoing:` turn id until
+   * `turns.start` names the real turn; the core's own message then takes its place.
+   */
+  outgoing = $state<Record<string, Message[]>>({});
+  /** The message an edit or a retry replaces: it and what follows are hidden until the core cuts the thread there. */
+  replacing = $state<Record<string, MessageId>>({});
+  /** The core's message id for an early copy it replaced, so the timeline does not play its arrival twice. */
+  readonly settled = new Map<MessageId, MessageId>();
 
   constructor(private readonly ctx: StoreContext) {}
 
@@ -124,6 +151,119 @@ export class Composer {
       this.ctx.fail(error);
       return null;
     }
+  }
+
+  /** A prompt on screen before the core has it, built as the core will build its message. */
+  private showOutgoing(threadId: string, prompt: string, attachments: Attachment[], previewReferences: PreviewReference[]): MessageId {
+    const id = `${OUTGOING}${crypto.randomUUID()}`;
+    const message: Message = {
+      id,
+      threadId,
+      turnId: id,
+      role: 'user',
+      parts: [
+        { type: 'text', text: previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences: $state.snapshot(previewReferences) } : {}) },
+        ...attachments.map((attachment): Message['parts'][number] => attachment.kind === 'file'
+          ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name }
+          : { type: 'image', mimeType: attachment.mimeType, data: attachment.data, alt: attachment.name })
+      ],
+      state: 'complete',
+      createdAt: Date.now()
+    };
+    this.outgoing[threadId] = [...(this.outgoing[threadId] ?? []), message];
+    return id;
+  }
+
+  private dropOutgoing(threadId: string, id: MessageId): void {
+    const kept = (this.outgoing[threadId] ?? []).filter(message => message.id !== id);
+    if (kept.length) this.outgoing[threadId] = kept;
+    else delete this.outgoing[threadId];
+  }
+
+  /**
+   * `turns.start` took the prompt: the early copy waits for the core's message
+   * of that turn, unless the thread already holds it or is not on screen to receive it.
+   */
+  private confirmOutgoing(threadId: string, id: MessageId, turnId: string): void {
+    const early = this.outgoing[threadId]?.find(message => message.id === id);
+    if (!early) return;
+    const held = [...this.ctx.threads.threadSnapshots(threadId)];
+    const arrived = held.flatMap(thread => thread.messages).find(message => message.turnId === turnId && message.role === 'user');
+    if (arrived) this.markSettled(arrived.id, id);
+    if (arrived || held.length === 0) this.dropOutgoing(threadId, id);
+    else early.turnId = turnId;
+  }
+
+  /**
+   * A user message from the core: the early copy of the same turn gives way,
+   * or, when the message comes before `turns.start` answered, the oldest
+   * unconfirmed copy with the same words.
+   */
+  settleOutgoing(message: Message): void {
+    if (message.role !== 'user') return;
+    const early = this.outgoing[message.threadId];
+    if (!early) return;
+    const match = early.find(item => item.turnId === message.turnId) ??
+      early.find(item => item.turnId.startsWith(OUTGOING) && shownText(item) === shownText(message));
+    if (!match) return;
+    this.markSettled(message.id, match.id);
+    this.dropOutgoing(message.threadId, match.id);
+  }
+
+  /** Only the latest arrivals matter to the timeline's animation: the oldest pairs go past a hundred. */
+  private markSettled(messageId: MessageId, early: MessageId): void {
+    this.settled.set(messageId, early);
+    if (this.settled.size > 100) this.settled.delete(this.settled.keys().next().value!);
+  }
+
+  /**
+   * What a thread's timeline shows: its messages, without the one being
+   * replaced and those after it, and then the prompts still on their way.
+   * With nothing pending this is the thread's own array.
+   */
+  timelineOf(thread: Thread): Message[] {
+    const cut = this.replacing[thread.id];
+    const early = this.outgoing[thread.id];
+    if (!cut && !early?.length) return thread.messages;
+    let messages = thread.messages;
+    if (cut) {
+      const index = lastIndexById(messages, cut);
+      if (index >= 0) messages = messages.slice(0, index);
+    }
+    if (!early?.length) return messages;
+    const turns = new Set(messages.map(message => message.turnId));
+    return [...messages, ...early.filter(message => !turns.has(message.turnId))];
+  }
+
+  /**
+   * A sent message replaced, for an edit or a retry: it and what follows it
+   * leave the screen and the new prompt shows in their place at once, then the
+   * core rewinds the thread and the prompt goes out. `resend` sends what the
+   * rewind gave back instead, the retry of the same prompt. `rewound` is null
+   * when the rewind was refused and the thread still holds the message.
+   */
+  async replace(
+    threadId: string,
+    messageId: MessageId,
+    prompt: string,
+    attachments: Attachment[] = [],
+    previewReferences: PreviewReference[] = [],
+    resend = false
+  ): Promise<{ rewound: RewoundMessage | null; sent: boolean }> {
+    const shown = this.showOutgoing(threadId, prompt, attachments, previewReferences);
+    this.replacing[threadId] = messageId;
+    let rewound: RewoundMessage | null = null;
+    try {
+      rewound = await this.ctx.threads.rewind(messageId, threadId);
+    } finally {
+      if (this.replacing[threadId] === messageId) delete this.replacing[threadId];
+      if (!rewound) this.dropOutgoing(threadId, shown);
+    }
+    if (!rewound) return { rewound, sent: false };
+    const content = resend ? rewound : { prompt, attachments, previewReferences };
+    const sent = await this.ctx.store.send(content.prompt, threadId, content.attachments, content.previewReferences, shown);
+    if (!sent) this.dropOutgoing(threadId, shown);
+    return { rewound, sent };
   }
 
   registerComposerInsertion(key: string, insert: (start: number, end: number, text: string) => void): () => void {
@@ -222,25 +362,46 @@ export class Composer {
     const s = this.ctx.store;
     if (attachments.some(unresolvedAssetId)) { s.error = strings.errors.draftAttachment; return false; }
     if ((prompt.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0) || s.connection !== 'ready') return false;
+    const refusal = sendRefusal(prompt, attachments, previewReferences);
+    if (refusal) { this.ctx.fail(new Error(refusal)); return false; }
+    if (s.openThread) {
+      s.remember(choice);
+      return s.send(prompt, s.openThread.id, attachments, previewReferences);
+    }
+    // A new conversation: the prompt shows in the draft while the thread is made.
+    const early = activityCommand(prompt) ? undefined : this.showOutgoing(DRAFT_STASH_KEY, prompt, attachments, previewReferences);
+    let handed = false;
     try {
-      if (activityCommand(prompt) && previewReferences.length) throw new Error(strings.previewComments.activityUnsupported);
-      if (activityCommand(prompt) && attachments.length) throw new Error(strings.activity.noAttachments);
-    } catch (error) { this.ctx.fail(error); return false; }
+      const created = await this.createFromDraft(prompt, choice);
+      if (!created) return false;
+      if (early) {
+        const moved = this.outgoing[DRAFT_STASH_KEY]?.filter(message => message.id === early) ?? [];
+        for (const message of moved) message.threadId = created.id;
+        if (moved.length) this.outgoing[created.id] = [...(this.outgoing[created.id] ?? []), ...moved];
+        this.dropOutgoing(DRAFT_STASH_KEY, early);
+      }
+      handed = true;
+      return await s.send(prompt, created.id, attachments, previewReferences, early);
+    } finally {
+      if (early && !handed) this.dropOutgoing(DRAFT_STASH_KEY, early);
+    }
+  }
+
+  /** The thread a draft's first prompt makes, opened, its composer carried over; null when it was not made. */
+  private async createFromDraft(prompt: string, choice: Choice): Promise<ThreadSummary | null> {
+    const s = this.ctx.store;
     if (s.draft && !s.openThread) {
       const draft = s.draft;
       const selection = s.draftChoice;
       const prepared = await s.prepareDraftChoice(choice);
-      if (!prepared || s.draft !== draft || s.draftChoice !== selection || s.openThread) return false;
+      if (!prepared || s.draft !== draft || s.draftChoice !== selection || s.openThread) return null;
       choice = prepared;
     }
     s.remember(choice);
-    if (s.openThread) {
-      return s.send(prompt, s.openThread.id, attachments, previewReferences);
-    }
     const draft = s.draft;
-    if (!draft) return false;
+    if (!draft || s.openThread) return null;
     const projectId = draft.projectId ?? (await this.ctx.projects.ensureDrafts());
-    if (projectId === null || s.draft !== draft) return false;
+    if (projectId === null || s.draft !== draft) return null;
     const composer = this.composerStates[DRAFT_STASH_KEY];
     const created = await s.createThread({
       projectId,
@@ -253,13 +414,13 @@ export class Composer {
       ...(choice.model ? { model: choice.model } : {}),
       ...(draft.worktree ? { worktree: {} } : {})
     });
-    if (!created) return false;
+    if (!created) return null;
     this.ctx.drafts.forget(draft.projectId);
     if (composer) {
       this.composerStates[created.id] = composer;
       delete this.composerStates[DRAFT_STASH_KEY];
     }
-    return s.send(prompt, created.id, attachments, previewReferences);
+    return created;
   }
 
   /**
@@ -287,18 +448,28 @@ export class Composer {
     return true;
   }
 
+  /**
+   * `shown` names the early copy a caller already put on screen (`replace`);
+   * otherwise the prompt shows in the thread now, before any round trip, and
+   * leaves again if the core does not take it.
+   */
   async send(
     prompt: string,
     threadId = this.ctx.store.openThread?.id,
     attachments: Attachment[] = [],
-    previewReferences: PreviewReference[] = []
+    previewReferences: PreviewReference[] = [],
+    shown?: MessageId
   ): Promise<boolean> {
     const s = this.ctx.store;
     const connection = this.ctx.connection;
-    if (attachments.some(unresolvedAssetId)) { s.error = strings.errors.draftAttachment; return false; }
+    const drop = () => { if (shown && threadId) this.dropOutgoing(threadId, shown); };
+    if (attachments.some(unresolvedAssetId)) { s.error = strings.errors.draftAttachment; drop(); return false; }
     const client = this.ctx.client;
-    if (!client || !threadId || s.connection !== 'ready') return false;
-    if (prompt.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0) return false;
+    if (!client || !threadId || s.connection !== 'ready') { drop(); return false; }
+    if (prompt.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0) { drop(); return false; }
+    // An activity command changes the thread's loop or goal and writes no message.
+    const early = shown ?? (activityCommand(prompt) ? undefined : this.showOutgoing(threadId, prompt, attachments, previewReferences));
+    let turnId: string | null = null;
     try {
       // Reconnect snapshots must land before a new stream starts mutating the thread.
       await connection.reloading?.promise;
@@ -342,13 +513,16 @@ export class Composer {
       const start = () => client.call('turns.start', { threadId, prompt, clientRequestId: sent.id, expectedSelectionVersion: selectionVersion,
         ...(attachments.length > 0 ? { attachments } : {}), ...(previewReferences.length > 0 ? { previewReferences } : {}) });
       // A socket lost under the call loses its answer, maybe not the turn: the same request id asks once more, and the core answers with the turn it took.
-      await start().catch(async (error: unknown) => {
+      const turn = await start().catch(async (error: unknown) => {
         if (!wasDropped(error) || !(await readyAgain(client))) throw error;
         await connection.reloading?.promise;
         if (this.ctx.client !== client || this.pendingSends.get(threadId) !== sent) throw error;
         return start();
       });
-      if (this.ctx.client === client) this.pendingSends.delete(threadId);
+      if (this.ctx.client === client) {
+        this.pendingSends.delete(threadId);
+        turnId = turn.id;
+      }
       return true;
     } catch (error) {
       // A detached client's answer must not restore input or thread rows into its replacement.
@@ -360,6 +534,11 @@ export class Composer {
       }
       this.ctx.fail(error);
       return false;
+    } finally {
+      // Taken: the copy waits for the core's message. Anything else, a refusal,
+      // an activity command or a prompt held behind a turn, takes it off screen.
+      if (early && turnId) this.confirmOutgoing(threadId, early, turnId);
+      else if (early) this.dropOutgoing(threadId, early);
     }
   }
 

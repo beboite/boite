@@ -17,6 +17,8 @@
   import MemoryRow from './MemoryRow.svelte';
   import MessageActions from './MessageActions.svelte';
   import { turnAnswer } from '../lib/message-display';
+  import { sentPrompt } from '../lib/composer-queue';
+  import { isOutgoing } from '../lib/store/composer.svelte';
   import { focusComposer } from '../lib/focus';
   import { TurnProgress } from '../lib/turn-progress.svelte';
   import { ESTIMATE, GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, reaches, windowStats } from '../lib/message-window';
@@ -323,7 +325,9 @@
     // A message rises as it arrives at the bottom being watched. One that a
     // scroll up the history brings into the window is already there: rising
     // then animated every message a fast scroll crossed.
-    if (risen.has(id) || !pinned) node.style.animation = 'none';
+    // The core's message for a prompt shown early takes the copy's place without rising again.
+    const early = store.settledFrom?.(id);
+    if (risen.has(id) || (early !== undefined && risen.has(early)) || !pinned) node.style.animation = 'none';
     risen.add(id);
     boxes?.observe(node);
     return {
@@ -466,6 +470,16 @@
     }
   });
 
+  /** A prompt the user just sent takes him to the bottom, wherever he was reading. */
+  let lastSent: string | undefined;
+  $effect(() => {
+    const last = timeline.at(-1);
+    const sent = last && isOutgoing(last) ? last.id : undefined;
+    if (sent === undefined || sent === lastSent) return;
+    lastSent = sent;
+    if (!untrack(() => pinned)) untrack(jump);
+  });
+
   /** Lift a pinned tail for the dock, including a short history that previously fit. */
   $effect(() => {
     void dockRoom.height;
@@ -550,11 +564,11 @@
   async function retry(turnId: string): Promise<void> {
     const prompt = messages.find((message) => message.turnId === turnId && message.role === 'user');
     if (!prompt) return;
-    const rewound = await store.rewind(prompt.id);
-    if (!rewound) return;
-    const sent = await store.send(rewound.prompt, threadId, rewound.attachments, rewound.previewReferences);
+    // The answer leaves and the prompt shows again at once; the rewind and the send follow.
+    const again = sentPrompt(prompt);
+    const { rewound, sent } = await store.replace(threadId, prompt.id, again.text, again.attachments, again.previewReferences, true);
     // The rewind already took the prompt away: a failed send leaves it in the box, not nowhere.
-    if (!sent) store.restoreDraft(threadId, rewound.prompt, rewound.attachments, rewound.previewReferences);
+    if (rewound && !sent) store.restoreDraft(threadId, rewound.prompt, rewound.attachments, rewound.previewReferences);
   }
 
   function toggleImage(id: string): void {
@@ -601,7 +615,7 @@
           {:else if startedFrom(message)}
             <SpawnMarker {store} link={startedFrom(message)!} direction="to" />
           {:else if message.role === 'user'}
-            <UserMessage {store} {message} {turn} {progress} {expanded} ontoggle={toggleImage} edit={atRest ? () => editMessage(message) : undefined} />
+            <UserMessage {store} {message} {turn} {progress} {expanded} ontoggle={toggleImage} edit={atRest && !isOutgoing(message) ? () => editMessage(message) : undefined} />
           {:else}
             <AssistantMessage {store} {threadId} {message} {progress} {signedOut} showModel={firstAssistantInTurn.get(message.turnId) === message.id} />
           {/if}

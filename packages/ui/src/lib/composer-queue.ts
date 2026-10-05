@@ -1,5 +1,7 @@
 import type { Attachment, Message, MessageId, PreviewReference } from '@boite/contracts';
+import { activityCommand } from './activity-command';
 import { promptText } from './message-display';
+import { strings } from './strings';
 import type { Store } from './store.svelte';
 
 /** One input's state in the store: its text, attachments and the prompts queued behind a running turn. */
@@ -50,6 +52,32 @@ export async function drainQueue(store: Store, threadId: string, state: Composer
       }
     }
     state.sending = false;
+  }
+}
+
+/** Why the composer itself refuses a prompt before sending anything, or null: an activity command carries words alone. */
+export function sendRefusal(text: string, attachments: Attachment[], previewReferences: PreviewReference[]): string | null {
+  if (!activityCommand(text)) return null;
+  if (previewReferences.length) return strings.previewComments.activityUnsupported;
+  return attachments.length ? strings.activity.noAttachments : null;
+}
+
+/**
+ * A prompt the core did not take, back where the user can act on it: in the
+ * box when it is still empty, with the message it was editing, otherwise at
+ * the head of the queue, held, so nothing typed since is overwritten.
+ */
+export function giveBack(state: ComposerState, text: string, attachments: Attachment[], previewReferences: PreviewReference[], editing: MessageId | null): void {
+  if (state.text.length === 0 && state.attachments.length === 0 && !state.previewReferences?.length) {
+    state.text = text;
+    state.attachments = attachments;
+    state.previewReferences = previewReferences;
+    state.selection = { start: text.length, end: text.length };
+    state.mentionInsertion = (state.mentionInsertion ?? 0) + 1;
+    state.editing = editing;
+  } else {
+    state.queued.unshift({ text, attachments, ...(previewReferences.length ? { previewReferences } : {}) });
+    state.paused = true;
   }
 }
 

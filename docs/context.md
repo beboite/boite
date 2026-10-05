@@ -89,10 +89,13 @@ messages, so `threads.get` and `messages.list` no longer return them. The turn
 rows stay, so the usage history still counts what they spent. Every subscribed
 client gets `message.truncated` and drops the message and what follows it.
 
-The composer keeps an edit if a turn starts before it is sent: the rewind
-refusal leaves its text intact instead of queuing a duplicate. Navigating while
-the rewind is pending still sends the replacement to the original thread on
-its owning machine.
+Sending an edit or a retry changes the screen before any round trip: the
+replaced message and what follows it are hidden, and the new prompt shows in
+their place while the core rewinds the thread and restores files. The composer
+keeps an edit if a turn starts before it is sent: the rewind refusal brings the
+hidden messages back and returns the text to the box, in edit mode, instead of
+queuing a duplicate. Navigating while the rewind is pending still sends the
+replacement to the original thread on its owning machine.
 
 The core saves private file checkpoints before and after each conversation
 turn, for every driver. Editing restores the changes made by the removed

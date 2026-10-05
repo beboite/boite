@@ -75,3 +75,51 @@ test('answering the docked question shows a queued user bubble, then one sent me
   await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread.status === 'idle'`);
   expect(page.errors()).toEqual([]);
 }, 30000);
+
+test('a sent or edited prompt shows at once while the core has not answered', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: 850, deviceScaleFactor: 1, mobile: false });
+  await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread.status === 'idle'`);
+  // Every turns.start and threads.rewind waits until the test lets it through.
+  const hold = () => update(`
+    const client = store.client;
+    globalThis.__call ??= client.call.bind(client);
+    globalThis.__gate = new Promise(resolve => { globalThis.__open = resolve; });
+    client.call = async (method, params) => {
+      if (method === 'turns.start' || method === 'threads.rewind') await globalThis.__gate;
+      return globalThis.__call(method, params);
+    };
+  `);
+  const bubbles = (text: string) => `Array.from(document.querySelectorAll('[data-role=user] [data-testid=text-part]')).filter(part => part.textContent === ${JSON.stringify(text)}).length`;
+  const last = `Array.from(document.querySelectorAll('[data-role=user] [data-testid=text-part]')).at(-1)?.textContent`;
+
+  await hold();
+  await page.type(id('composer-input'), 'Show this before the core answers');
+  await page.click(id('composer-send'));
+  await page.waitFor(`${last} === 'Show this before the core answers'`, 2000);
+  for (const width of [1300, 390]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: width < 720 });
+    expect(await page.evaluate(`document.querySelector('${id('composer-input')}').value`)).toBe('');
+    expect(await page.evaluate(`document.querySelector('[data-role=user]:last-of-type ${id('receipt-accepted')}')?.classList.contains('received') ?? false`)).toBe(false);
+    await capture(`chat-delivery-sending-${width < 720 ? 'phone' : 'desktop'}`);
+  }
+  await page.evaluate('globalThis.__open()');
+  await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread.status === 'idle' && ${bubbles('Show this before the core answers')} === 1`);
+  expect(await page.evaluate<number>(bubbles('Show this before the core answers'))).toBe(1);
+
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: 850, deviceScaleFactor: 1, mobile: false });
+  await hold();
+  await page.evaluate(`(() => { const rows = document.querySelectorAll('[data-role=user]'); rows[rows.length - 1].querySelector('${id('message-edit')}').click(); return null; })()`);
+  await page.waitFor(`document.querySelector('${id('composer-input')}').value === 'Show this before the core answers'`);
+  await page.type(id('composer-input'), 'Edited before the core rewinds');
+  await page.click(id('composer-send'));
+  await page.waitFor(`${last} === 'Edited before the core rewinds' && ${bubbles('Show this before the core answers')} === 0`, 2000);
+  for (const width of [1300, 390]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: width < 720 });
+    await capture(`chat-delivery-editing-${width < 720 ? 'phone' : 'desktop'}`);
+  }
+  await page.evaluate('globalThis.__open()');
+  await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread.status === 'idle' && ${bubbles('Edited before the core rewinds')} === 1`);
+  expect(await page.evaluate<number>(bubbles('Show this before the core answers'))).toBe(0);
+  await update(`store.client.call = globalThis.__call;`);
+  expect(page.errors()).toEqual([]);
+}, 45000);

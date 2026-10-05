@@ -117,6 +117,8 @@ export function listen(ctx: StoreContext, client: Client): void {
   });
 
   on('message.started', (message) => {
+    // The prompt this client showed early gives way to the core's own.
+    ctx.composer.settleOutgoing(message);
     for (const target of threads.threadSnapshots(message.threadId)) {
       const index = lastIndexById(target.messages, message.id);
       if (index >= 0) target.messages[index] = message;

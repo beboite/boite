@@ -6,9 +6,9 @@
   import { AGENT_PREFIX, isAgentCommand, runCommand } from '../lib/commands.svelte';
   import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, mentionRows, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
   import { attachFiles } from '../lib/composer-attachments';
-  import { insertImageReference, removeImageReferences, trackImageSend } from '../lib/composer-images';
+  import { insertImageReference, removeImageReferences } from '../lib/composer-images';
   import { unresolvedAssetId } from '../lib/draft-attachments';
-  import { sentPrompts, type SentPrompt } from '../lib/composer-queue';
+  import { giveBack, sendRefusal, sentPrompts, type SentPrompt } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
   import { claudeKeywords, promptSegments } from '../lib/message-display';
@@ -137,8 +137,7 @@
       choice !== null &&
       store.connection === 'ready' &&
       !picking &&
-      !dictating &&
-      !composer?.sending
+      !dictating
   );
 
   // A new conversation asks what the user wants done; one under way names who reads the message.
@@ -363,23 +362,17 @@
     if (!canSend || !choice) return;
     const inputStore = store, inputKey = key, sendChoice = choice;
     const state = stateForInput();
-    const editedThread = state.editing ? inputStore.openThread : null;
-    // An edited message: the thread goes back to before it, then this goes out
-    // in its place. A refusal is shown and the text stays in the box.
-    if (state.editing) {
-      if (state.queued.length) { inputStore.error = strings.composer.editingQueued; return; }
-      state.sending = true;
-      const rewound = await inputStore.rewind(state.editing, inputKey);
-      state.sending = false;
-      if (!rewound) return;
-      state.editing = null;
-    }
+    const editing = state.editing ?? null;
+    const editedThread = editing ? inputStore.openThread : null;
+    if (editing && state.queued.length) { inputStore.error = strings.composer.editingQueued; return; }
+    const refusal = sendRefusal(prompt, images, references);
+    if (refusal) { inputStore.error = refusal; return; }
     // A queue that still holds something takes this prompt too, whatever the
     // thread's status: sending it on its own would put it ahead of prompts the
-    // user typed first. Sending is also how he resumes a queue a refusal paused.
-    if (!editedThread && (inputStore.busy || state.queued.length > 0)) {
+    // user typed first. A send still out is ahead of it as well. Sending is
+    // also how he resumes a queue a refusal paused.
+    if (!editing && (inputStore.busy || state.queued.length > 0 || state.sending)) {
       state.queued.push({ text: prompt, attachments: images, afterBoundary: store.inputBoundaries[key]?.boundary, ...(references.length ? { previewReferences: references } : {}) });
-      state.editing = null;
       state.text = '';
       state.attachments = [];
       state.previewReferences = [];
@@ -388,31 +381,38 @@
       requestAnimationFrame(grow);
       return;
     }
+    // The prompt leaves the box and shows in the thread before any round trip. A refusal gives it back.
+    state.text = '';
+    state.attachments = [];
+    state.previewReferences = [];
+    state.editing = null;
+    state.paused = false;
+    recall = null;
+    requestAnimationFrame(grow);
     state.sending = true;
-    const finishImageSend = trackImageSend(state, prompt, images);
-    // A rewind can finish after navigation: the replacement belongs to the
-    // captured thread and machine, whichever conversation is on screen now.
-    const accepted = await (editedThread
-      ? inputStore.send(prompt, inputKey, images, references)
-      : nextDraft
-        ? inputStore.submitAndDraft(prompt, sendChoice, images, references)
-        : inputStore.submit(prompt, sendChoice, images, references));
-    if (accepted && editedThread && nextDraft && inputStore.openThread?.id === inputKey) {
+    let accepted = false;
+    try {
+      if (editing) {
+        // The edited message and what follows leave the screen at once; the replacement belongs
+        // to the captured thread and machine, whichever conversation is on screen when the rewind ends.
+        const { rewound, sent } = await inputStore.replace(inputKey, editing, prompt, images, references);
+        // Refused, the thread still holds the message: the box edits it again.
+        if (!rewound) { giveBack(state, prompt, images, references, editing); requestAnimationFrame(grow); return; }
+        accepted = sent;
+      } else {
+        accepted = await (nextDraft
+          ? inputStore.submitAndDraft(prompt, sendChoice, images, references)
+          : inputStore.submit(prompt, sendChoice, images, references));
+      }
+    } finally {
+      state.sending = false;
+    }
+    // After a rewind the message is gone from the thread: a failed send keeps it as a plain draft.
+    if (!accepted) { giveBack(state, prompt, images, references, null); requestAnimationFrame(grow); return; }
+    if (editedThread && nextDraft && inputStore.openThread?.id === inputKey) {
       inputStore.startDraft(editedThread.projectId);
       inputStore.draftChoice = { ...sendChoice };
     }
-    finishImageSend(accepted);
-    if (accepted) {
-      // Text typed and images attached while the RPC was pending belong to the
-      // next prompt: only what went out is cleared.
-      if (state.text === prompt) state.text = '';
-      if (state.attachments === images) state.attachments = [];
-      if (state.previewReferences === references) state.previewReferences = [];
-      state.paused = false;
-      recall = null;
-      requestAnimationFrame(grow);
-    }
-    state.sending = false;
   }
 
   // -- attachments -----------------------------------------------------------------

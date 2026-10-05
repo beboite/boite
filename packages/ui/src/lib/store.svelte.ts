@@ -103,6 +103,9 @@ export class Store {
     ctx.threads.readingThreads.clear();
     this.readingPositions.clear();
     ctx.composer.pendingSends.clear();
+    ctx.composer.outgoing = {};
+    ctx.composer.replacing = {};
+    ctx.composer.settled.clear();
     this.logins = {};
     ctx.accounts.loginChanges.clear();
     this.terminalThreads = [];
@@ -459,6 +462,12 @@ export class Store {
   submit(...args: Parameters<Composer['submit']>) { return this.#ctx.composer.submit(...args); }
   submitAndDraft(...args: Parameters<Composer['submitAndDraft']>) { return this.#ctx.composer.submitAndDraft(...args); }
   send(...args: Parameters<Composer['send']>) { return this.#ctx.composer.send(...args); }
+  replace(...args: Parameters<Composer['replace']>) { return this.#ctx.composer.replace(...args); }
+  timelineOf(...args: Parameters<Composer['timelineOf']>) { return this.#ctx.composer.timelineOf(...args); }
+  /** Prompts on their way to the core, per thread; the draft's first one under `DRAFT_STASH_KEY`. */
+  get outgoing() { return this.#ctx.composer.outgoing; }
+  /** The early copy's id a message of the core replaced, if any. */
+  settledFrom(messageId: string) { return this.#ctx.composer.settled.get(messageId); }
   get inputBoundaries() { return this.#ctx.composer.inputBoundaries; }
   steer(...args: Parameters<Composer['steer']>) { return this.#ctx.composer.steer(...args); }
   sendQueuedNow(...args: Parameters<Composer['sendQueuedNow']>) { return this.#ctx.composer.sendQueuedNow(...args); }

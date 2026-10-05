@@ -55,9 +55,17 @@ A prompt whose socket went while it was being sent is not reported as an
 error at once. The failure carries `data.transport: 'dropped'`, the store waits
 up to 15 seconds for the connection to come back, then sends `turns.start`
 once more with the same `clientRequestId`. The core answers with the turn it
-already took, or starts it if the first request never arrived, and the
-composer clears as for any sent prompt. Only a refused retry, or a connection
-that does not come back in time, shows the error and keeps the text.
+already took, or starts it if the first request never arrived. Only a refused
+retry, or a connection that does not come back in time, shows the error and
+gives the text back.
+
+A prompt leaves the composer and shows at the end of its thread the moment it
+is sent, before `turns.start` answers, with its two receipts still grey. The
+first prompt of a new conversation shows in the draft while the core makes the
+thread. The core's `message.started` replaces that copy, matched by turn once
+`turns.start` answered, by its words before. A refusal removes the copy and
+returns the prompt to the box, or, when something was typed there since, to
+the head of the queue, held.
 
 Retries wait 1, 2, 4, 8, then 10 seconds, each 20 % longer or shorter at random
 so the clients of a restarted core do not all return at once. An attempt gets
