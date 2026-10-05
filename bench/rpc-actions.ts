@@ -19,7 +19,7 @@
  * Linux only: core CPU and memory come from /proc. CPU has 10 ms resolution,
  * so each row reports the total over its runs divided by the run count.
  */
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Database } from 'bun:sqlite';
@@ -38,6 +38,10 @@ const journal = flag('--journal');
 const runs = Number(flag('--runs') ?? 8);
 const out = flag('--out');
 if (process.platform !== 'linux') throw new Error('rpc-actions reads /proc: Linux only');
+if (journal !== undefined && (journal === '' || !existsSync(journal))) {
+  throw new Error(`--journal: expected the path of an existing journal.db, got ${JSON.stringify(journal)}`);
+}
+if (!Number.isInteger(runs) || runs < 1) throw new Error(`--runs: expected a positive integer, got ${flag('--runs')}`);
 
 const TICK_MS = 1000 / 100;
 
