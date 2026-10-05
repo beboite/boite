@@ -2,26 +2,23 @@
   import { BROWSER_PROFILES_MAX, checkSettingsPatch, DEFAULT_BROWSER_PROFILE, type BrowserProfile } from '@boite/contracts';
   import { tick } from 'svelte';
   import InfoTip from './InfoTip.svelte';
+  import Menu from './Menu.svelte';
+  import { canCopySignIns, copySignIns } from '../lib/browser-cookies';
+  import { workspace } from '../lib/workspace.svelte';
   import { browserBridge } from '../lib/browser-bridge';
   import { browserProfiles, newProfileId } from '../lib/browser-profiles.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import { rightPanel } from '../lib/right-panel.svelte';
   import { fill, strings } from '../lib/strings';
-  import { hostsBrowser } from '../lib/browser-host';
-  import { featureOn } from '../lib/features.svelte';
-  import { setFeature } from '../lib/features';
-  import type { Store } from '../lib/store.svelte';
 
   /**
-   * The built-in browser on this computer. On the owner's Windows desktop,
-   * the one that hosts its conversations' tabs, whether agents may drive them.
-   * Then its profiles: add, rename, delete, and the one new tabs open in.
+   * The built-in browser on this computer and its profiles: add, rename,
+   * delete, the one new tabs open in, and a copy of a profile's sign-ins to
+   * the agent browser of a machine.
    * `default` is the session tabs had before there were profiles and cannot
    * go; a private tab is chosen per tab, never here.
    */
-  let { store }: { store: Store } = $props();
   const s = $derived(strings.browserProfiles);
-  const control = $derived(strings.features.agentBrowserControl);
   const uid = $props.id();
 
   let draft = $state('');
@@ -30,6 +27,25 @@
   let problem = $state('');
   let busy = $state(false);
   let field = $state<HTMLInputElement | undefined>(undefined);
+  let notice = $state('');
+
+  /** The machines whose agent browser the owner may hand sign-ins to: connected, with full control. */
+  let targets = $derived(canCopySignIns() ? workspace.machines.filter((machine) => machine.store.owner && machine.store.connection === 'ready') : []);
+
+  /** The profile's cookies go to the agent browser of the machine picked, which makes the profile if it has none. */
+  async function copy(profile: BrowserProfile, machineId: string): Promise<void> {
+    const machine = targets.find((one) => one.id === machineId);
+    if (!machine) return;
+    busy = true;
+    problem = '';
+    notice = '';
+    try {
+      const count = await copySignIns({ id: profile.id, name: profile.name }, machine.store);
+      notice = count ? fill(s.copied, { count: String(count), name: profile.name, machine: machine.label }) : fill(s.copiedNone, { name: profile.name });
+    } catch (error) {
+      problem = fill(s.copyFailed, { reason: error instanceof Error ? error.message : String(error) });
+    } finally { busy = false; }
+  }
 
   let rows = $derived([{ id: DEFAULT_BROWSER_PROFILE, name: s.default }, ...browserProfiles.list]);
   let ready = $derived(browserProfiles.source?.settings != null);
@@ -104,15 +120,6 @@
 
 <section class="card" id="settings-browser-profiles" data-testid="browser-profiles-card">
   <h2>{s.card}</h2>
-  {#if hostsBrowser(store)}
-    <label for="{uid}-agent-control" class="switch-row">
-      <span class="text ui-label-box">
-        <span class="ui-label" id="{uid}-agent-control-name">{control.title}</span><InfoTip topic={control.title} text={control.hint} />
-      </span>
-      <input id="{uid}-agent-control" aria-labelledby="{uid}-agent-control-name" type="checkbox" role="switch" data-testid="setting-agent-browser-control"
-        checked={featureOn('agent-browser-control')} onchange={event => setFeature('agent-browser-control', event.currentTarget.checked)} />
-    </label>
-  {/if}
   <h3 class="ui-label-box"><span class="ui-label">{s.heading}</span><InfoTip topic={s.heading} text={s.hint} /></h3>
   <ul>
     {#each rows as profile (profile.id)}
@@ -129,6 +136,9 @@
             <span class="name">{profile.name}</span>
             {#if isDefault}<span class="flag" data-testid="browser-profile-default">{s.isDefault}</span>{/if}
           </span>
+          {#if targets.length}
+            <Menu items={targets.map((machine) => ({ id: machine.id, label: machine.label }))} onpick={(id) => void copy(profile, id)} label={fill(s.copySignInsHint, { name: profile.name })} variant="ghost" testid="browser-profile-copy"><span class="ui-label">{s.copySignIns}</span></Menu>
+          {/if}
           {#if !isDefault}
             <button type="button" class="small ghost" data-testid="browser-profile-make-default" disabled={busy || !ready} onclick={() => void save(browserProfiles.list, profile.id)}>{s.makeDefault}</button>
           {/if}
@@ -145,6 +155,7 @@
     <button type="submit" disabled={busy || !ready || draft.trim() === ''} data-testid="browser-profile-add">{s.add}</button>
   </form>
   {#if problem}<p class="problem" role="alert" data-testid="browser-profile-error">{problem}</p>{/if}
+  {#if notice}<p class="notice" role="status" data-testid="browser-profile-notice">{notice}</p>{/if}
 </section>
 
 <style>
@@ -170,4 +181,5 @@
   .rename { flex: 1; min-width: 0; }
   form input { flex: 1; min-width: 0; }
   .problem { margin: 8px 0 0; color: var(--color-danger); font-size: var(--text-sm); }
+  .notice { margin: 8px 0 0; color: var(--color-subtle); font-size: var(--text-sm); }
 </style>

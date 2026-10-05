@@ -126,7 +126,7 @@ import { workspace } from '../lib/workspace.svelte';
     ['general', 'conversations', strings.settings.asyncQuestions],
     ['general', 'conversations', strings.settings.titleModel],
     ['general', 'conversations', strings.features.chatArtifacts.title],
-    ...(browserBridge.paints ? [['general', 'browser-profiles', strings.features.agentBrowserControl.title], ['general', 'browser-profiles', strings.browserProfiles.heading]] as [SettingsTab, string, string][] : []),
+    ...(browserBridge.paints ? [['general', 'browser-profiles', strings.browserProfiles.heading]] as [SettingsTab, string, string][] : []),
     ['general', 'archived', strings.settings.archived.doneRetentionLabel],
     // The switch lives in the shell's own card: a browser has no tray.
     ...(inShell ? [['general', 'app', strings.settings.closeToTray] as [SettingsTab, string, string]] : []),

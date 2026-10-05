@@ -69,18 +69,19 @@ or staging path is required. See the official SDK
 [stdio guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/serving/stdio.md)
 and [tool guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/servers/tools.md).
 
-## Test a page in the desktop browser
+## Test a page in the agent browser
 
-On Windows, **Agent browser control** is on by default on the hosting desktop
-(Settings > General > Built-in browser). Keep the conversation open in Boite and
-run `boite browser help`. The switch lets the agent read and act in this conversation's
-browser tabs, including signed-in sites and JavaScript execution. It uses the
-desktop's browser profiles; this is not an isolated automation session.
+`boite browser help` lists the commands. The browser is a headless Chrome,
+Chromium, Edge or Brave on the machine that runs the conversation, started by
+its core; [the agent's browser](browser.md) says how it is found and run. No
+desktop has to be open and no setting turns it on. The user watches the tabs
+live in the conversation's panel, from any device, and can act in them.
 `boite browser open http://localhost:3000` opens a tab in the default profile and
-returns its id. `boite browser profiles` lists the profiles the user made in
-Settings > General > Browser profiles, and `open <url> --profile Pro` opens the tab in one of them,
-by name or id. `--profile private` opens a private tab that keeps nothing once
-the last private tab closes. `status` names each tab's profile.
+returns its id; `localhost` is the agent's own machine. `boite browser profiles`
+lists the profiles the user made in Settings > General > Browser profiles on
+that machine, and `open <url> --profile Pro` opens the tab in one of them, by
+name or id. `--profile private` opens a private tab that keeps nothing once the
+last private tab closes. `status` names each tab's profile and the machine.
 `snapshot` returns page text and unique CSS selectors; `click`, `type`, `press`,
 `scroll` and `evaluate` interact with that tab. Add its id as the last argument
 to target it explicitly. The agent cannot select a tab from another conversation.
@@ -93,9 +94,8 @@ and an existing file is never overwritten. Without `--output`, the command
 creates `boite-browser-<uuid>.png` in the working directory; the caller owns
 cleanup. Read it with the agent's image tool, or run `boite attach <path>` to
 display a capture inside the thread's working directory in chat.
-`resize 390 844` tests a narrow viewport. Fixed sizes retain their CSS resolution
-and scale down to fit the panel, with pointer input mapped to the displayed page.
-`reset-viewport` fills the panel again. The toolbar's size button also resets it.
+`resize 390 844` tests a narrow viewport and `reset-viewport` returns to the
+browser's window size.
 
 `preset iphone-15-pro landscape` selects a screen size and orientation.
 `appearance dark`, `light` or `system` changes the page's color scheme.
@@ -107,39 +107,29 @@ history records operation names, not typed values or evaluated code.
 `diagnostics-clear` clears both buffers.
 
 `recording-start` and `recording-stop` save a silent MP4 in the working
-directory. The shell streams the page's own frames (`Page.startScreencast`)
-and paces them to 30 frames per second, or 60, up to 1920 × 1080. The codec is
-H.264, HEVC or AV1. `recording-start --fps 60 --codec av1` overrides the rate
-and codec chosen in the desktop's browser tools menu, which default to 30 and
-H.264. A codec the desktop's engine cannot encode into MP4 is refused with the
-codecs it can; nothing records in another one. WebView2 encodes H.264 and AV1,
-not HEVC. The result's `codec` names the codec written.
+directory, made in the browser itself ([recording](browser.md#recording)), up to
+1920 × 1080. `recording-start --fps 60 --codec av1` chooses the rate and codec;
+the defaults are 30 and H.264. A codec the browser cannot encode into MP4 is
+refused with the codecs it can; nothing records in another one. The result's
+`codec` names the codec written.
 
 There is no time limit; a recording stops by itself at 100 MB (about 12 minutes
-at 30 fps, 6 at 60), which the desktop keeps in memory and sends in 4 MB chunks.
-The saved video is complete up to that point, and the result's `note` says
-why it ended. There is no sound, as in T3 Code. Run `boite attach <video.mp4>`
-to show it in chat. Closing the tab discards an unfinished recording.
+at 30 fps, 6 at 60), which the browser keeps in memory and the CLI reads in
+4 MB chunks. The saved video is complete up to that point, and the result's
+`note` says why it ended. There is no sound, as in T3 Code. Run
+`boite attach <video.mp4>` to show it in chat. Closing the tab discards an
+unfinished recording.
 
 The agent stops its own recording within the turn that started it. When that
-turn ends, however it ends (done, interrupted, failed, or the conversation
-archived or removed), the core tells the hosting desktop (`browser.turnFinished`)
-and the desktop discards any recording the agent left running: it is stopped,
-its chunks dropped, and no file is kept or offered for download. The browser
-pane says so in one line, and a later `recording-stop` or `recording-read`
-fails with an error that says the recording was discarded. A recording started
-from the browser tools menu, or one already stopped at 100 MB, is kept. A turn
-that ends while the desktop is disconnected, or before the core restarts, sends
-nothing; that recording is discarded when the conversation's next turn ends.
+turn ends, however it ends, the core stops any recording the agent left
+running and throws it away; a later `recording-stop` or `recording-read` fails
+with an error that says the recording was discarded. Archiving or removing the
+conversation closes its tabs, recordings included.
 
-Automation uses WebView2's native devtools channel, without a debugging port.
-Only the owner UI can register a host or answer its requests. The agent token
-can request actions for its own conversation only while the owner host has
-explicitly granted access. Switching off the experiment, disconnecting or
-closing the host rejects pending work. Actions already dispatched to a page
-may finish and are not undone. Commands have a 20 second deadline. macOS, Linux and the
-phone client do not provide automation yet. Every provider uses this same CLI;
-no provider-specific integration or paid model call is needed for these tests.
+Commands of one conversation run one at a time, in order. `open` and
+`navigate` answer `loading: true` for a page that has not loaded within 15
+seconds. Every provider uses this same CLI; no provider-specific integration or
+paid model call is needed for these tests.
 
 ## Simulators and emulators
 

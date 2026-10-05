@@ -511,8 +511,8 @@ superseded by main's text-alignment budget.
 
 ## The desktop browser on a phone
 
-A paired phone watching the desktop's browser tab
-([phone](phone.md#the-desktop-browser-on-a-phone)) waited a fixed 300 ms after
+A paired phone watching the desktop's browser tab, before the agent's browser
+moved to the conversation's machine ([the agent's browser](browser.md)), waited a fixed 300 ms after
 each frame, on top of the trip itself: two frames a second on a quick link. It
 now asks again as soon as a frame arrives, never closer than 250 ms to the last
 request, with one request in flight. The desktop captures the tab at q75
@@ -524,6 +524,13 @@ of added latency, and from 1.6 to 3.3 with 200 ms
 desktop's capture and shrink take 100 to 140 ms a frame. The phone decodes each
 frame before showing it, so a frame never appears half loaded; that decoding
 was not measured on an iPhone.
+
+Since 2026-10-05 the frames come from the agent's browser on the machine of the
+conversation ([the agent's browser](browser.md)). Through a scratch core on the
+Linux container `boite`, a moving page gave 4.0 frames a second with no added
+latency, 3.4 with 80 ms and 2.5 with 200 ms; the capture in the core's browser
+takes about 200 ms a frame for that page
+([results](../bench/results/2026-10-05-remote-browser-frames.md)).
 
 ## Browser recordings
 
@@ -620,7 +627,7 @@ keeps the video. `BOITE_RECORDING_PRESET` sizes the page,
 ## Benches
 
 ```sh
-bun bench/remote-browser-frames.ts --rtt 0,80,200   # frames a second a phone gets from the desktop's browser tab
+bun bench/remote-browser-frames.ts --rtt 0,80,200   # frames a second a viewer gets from the agent's browser
 bun run build:ui
 bun run bench/bandwidth.ts --rtt 150          # bytes and time per scenario behind a delayed relay
 bun run bench/bandwidth.ts --core <other checkout>/packages/core/src/main.ts --sequence sequential
@@ -654,11 +661,12 @@ RSS read from `/proc`. `--journal` runs it on a copy of a real journal taken
 with `VACUUM INTO`; the copy's projects, accounts, sessions and network
 settings are pointed at the temporary directory first.
 
-`bench/remote-browser-frames.ts` starts a scratch core and headless Chrome, plays
-a desktop host that captures and shrinks frames as the shell does, and a paired
-phone client that polls on the viewer's schedule behind an added latency.
+`bench/remote-browser-frames.ts` starts a scratch core, opens a moving page in
+the core's own browser and has a paired phone client poll it on the viewer's
+schedule behind an added latency.
 
 Results: [bench/results/2026-10-05-rpc-actions.md](../bench/results/2026-10-05-rpc-actions.md),
+[bench/results/2026-10-05-remote-browser-frames.md](../bench/results/2026-10-05-remote-browser-frames.md),
 [bench/results/2026-10-03-remote-browser-frames.md](../bench/results/2026-10-03-remote-browser-frames.md),
 [bench/results/2026-09-19-wire-and-startup.md](../bench/results/2026-09-19-wire-and-startup.md),
 [bench/results/2026-09-30-ui-frames.md](../bench/results/2026-09-30-ui-frames.md),

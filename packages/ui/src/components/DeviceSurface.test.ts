@@ -6,7 +6,7 @@ import { Store } from '../lib/store.svelte';
 import { rightPanel } from '../lib/right-panel.svelte';
 import { watchDevices } from '../lib/device-watch';
 import { offeredCards } from '../lib/surface-labels';
-import { writeExperiments } from '../lib/experiments';
+import { liveViews } from '../lib/live-view.svelte';
 import DeviceSurface from './DeviceSurface.svelte';
 
 let app: ReturnType<typeof mount> | undefined, client: FakeClient, store: Store;
@@ -15,6 +15,7 @@ const thread = 't-trace';
 
 beforeEach(async () => {
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+  liveViews.reset();
   client = new FakeClient({ delayMs: 0 }); store = new Store(); store.attach(client); await store.connect();
   await client.call('threads.subscribe', { threadId: thread });
 });
@@ -37,6 +38,11 @@ test('the panel opens an emulator, shows its screen once booted and taps in scre
   expect(document.querySelector('[data-testid=device-starting]')!.textContent).toContain('Pixel 8 API 35');
 
   await vi.advanceTimersByTimeAsync(FAKE_BOOT_MS + 300); await settle();
+  // Booted, but covered: the card names the machine and no frame is asked for until Show.
+  expect(document.querySelector('[data-testid=device-cover-text]')!.textContent).toContain('This agent controls a device on');
+  expect(calls.mock.calls.some(([method]) => method === 'devices.frame')).toBe(false);
+  document.querySelector<HTMLButtonElement>('[data-testid=device-show]')!.click(); await settle();
+  await vi.advanceTimersByTimeAsync(300); await settle();
   const image = document.querySelector<HTMLImageElement>('[data-testid=device-frame]')!;
   expect(image.src).toMatch(/^data:image\/jpeg;base64,/);
   // The screen is drawn 270 by 600: a fourth of the 1080 by 2400 phone.
@@ -58,14 +64,20 @@ test('the panel opens an emulator, shows its screen once booted and taps in scre
   field.form!.requestSubmit(); await settle();
   expect(document.querySelector('[data-testid=device-error]')!.textContent).toContain('ASCII');
 
+  // Hide covers it again and stops the frames.
+  document.querySelector<HTMLButtonElement>('[data-testid=device-hide]')!.click(); await settle();
+  expect(document.querySelector('[data-testid=device-cover]')).not.toBeNull();
+  const frames = () => calls.mock.calls.filter(([method]) => method === 'devices.frame').length;
+  const before = frames();
+  await vi.advanceTimersByTimeAsync(2000); await settle();
+  expect(frames()).toBe(before);
+
   document.querySelector<HTMLButtonElement>('[data-testid=device-close]')!.click(); await settle();
   expect(calls).toHaveBeenCalledWith('devices.close', { threadId: thread, deviceId: 'Pixel_8_API_35' });
   expect(document.querySelector('[data-testid=device-picker]')).not.toBeNull();
 });
 
-test('a device the agent opens brings the Device tab forward, and its card waits for the experiment', async () => {
-  expect(offeredCards().some(card => card.kind === 'device')).toBe(false);
-  writeExperiments(['device-panel']);
+test('a device the agent opens brings the Device tab forward, and its card is always offered', async () => {
   expect(offeredCards().some(card => card.kind === 'device')).toBe(true);
 
   const panel = rightPanel.for(store.threadKey(thread));

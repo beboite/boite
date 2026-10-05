@@ -8,9 +8,7 @@ import { strings } from './strings';
  */
 export function experimentCopy(): Record<ExperimentId, { title: string; hint: string }> {
   return {
-    'remote-browser': strings.experiments.remoteBrowser,
     'recording-indicators': strings.experiments.recordingIndicators,
-    'device-panel': strings.experiments.devicePanel,
     'theme-grain': strings.experiments.themeGrain,
     'session-import': strings.experiments.sessionImport,
     'prompt-cache': strings.experiments.promptCache,

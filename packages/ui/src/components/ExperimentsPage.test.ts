@@ -38,8 +38,14 @@ test('the page carries one switch per experiment and a toggle writes the enabled
   expect(grain.closest('label')?.textContent).toContain('Grain theme');
   expect(window.localStorage.getItem(EXPERIMENTS_STORAGE_KEY)).toBeNull();
 
+  const links = query<HTMLInputElement>('[data-testid=experiment-open-chat-links]');
+  expect(links.checked).toBe(false);
+  const linksHelp = links.closest('label')!.querySelector<HTMLButtonElement>('[data-testid=info-tip]')!;
+  linksHelp.click();
+  flushSync();
+  expect(document.getElementById(linksHelp.getAttribute('aria-describedby')!)?.textContent).toContain('default app');
+  expect(links.checked).toBe(false);
   // Graduated features have their switch in the page they belong to, not here.
-  expect(document.querySelector('[data-testid=experiment-agent-browser-control]')).toBeNull();
   expect(document.querySelector('[data-testid=experiment-chat-artifacts]')).toBeNull();
 
   grain.click();

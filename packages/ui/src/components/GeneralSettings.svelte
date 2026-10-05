@@ -58,7 +58,7 @@
   <ArchivedThreads {store} />
   <WorktreesCard {store} />
   <!-- Only a window that shows pages has profiles to keep them in. -->
-  {#if browserBridge.paints}<BrowserProfilesCard {store} />{/if}
+  {#if browserBridge.paints}<BrowserProfilesCard />{/if}
 
   <section class="card" id="settings-app">
     <h2>{strings.settings.app}</h2>

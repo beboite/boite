@@ -1,5 +1,9 @@
-import { remoteBrowserInputError, remoteFrameOptionsError, type RemoteBrowserFrame, type RemoteBrowserInput, type RemoteFrameOptions } from './browser-remote';
-/** Browser automation targets only the desktop hosting this conversation. */
+import type { RemoteBrowserFrame, RemoteBrowserInput, RemoteFrameOptions } from './browser-remote';
+/**
+ * The agent's browser runs on the machine that runs its conversation: the core
+ * starts a headless Chromium there and drives it over the DevTools protocol.
+ * Every client watches it through `browser.remoteFrame`, whatever machine it is on.
+ */
 export type BrowserAction =
   | { kind: 'status' }
   | { kind: 'profiles' }
@@ -12,8 +16,6 @@ export type BrowserAction =
   | { kind: 'appearance'; colorScheme: 'light' | 'dark' | 'system' }
   /** Without `frameRate` or `codec`, the desktop records with the ones chosen in its browser tools menu. */
   | { kind: 'recording-start'; indicators?: boolean; frameRate?: BrowserRecordingFrameRate; codec?: BrowserRecordingCodec }
-  | ({ kind: 'remote-frame' } & RemoteFrameOptions)
-  | { kind: 'remote-input'; frameId: string; input: RemoteBrowserInput }
   | { kind: 'recording-stop' }
   /** `maxBytes` caps the chunk; cores from before 100 MB recordings read 512 KiB at a time. */
   | { kind: 'recording-read'; recordingId: string; offset: number; maxBytes?: number }
@@ -86,31 +88,63 @@ export function browserPresetSize(preset: BrowserPreset, orientation?: 'portrait
   const short = Math.min(width, height), long = Math.max(width, height);
   return orientation === 'portrait' ? { width: short, height: long } : { width: long, height: short };
 }
+/** One tab of a conversation's agent browser, as its viewers list it. */
+export interface AgentBrowserTab { tabId: string; url: string; title: string; profile: string; active: boolean }
+/**
+ * What a viewer shows for a conversation: whether its agent has a browser open
+ * (`live`), the tabs, and whether this machine can run one at all. `reason`
+ * names what is missing when it cannot, such as no Chromium-based browser found.
+ */
+export interface AgentBrowserStatus { live: boolean; tabs: AgentBrowserTab[]; available: boolean; reason?: string }
 export interface BrowserRpcMethods {
   /**
-   * Only the owner can grant this. An enabled host consents to agent control,
-   * to sharing with paired devices (`remote`), or both; agents reach it only
-   * with `allowAgentControl`. `live` says the conversation's panel on that
-   * desktop has a browser tab, which paired devices then show
-   * (`browser.remoteChanged`).
+   * A frame of one of the conversation's agent tabs, the active one without
+   * `tabId`. Any client subscribed to the conversation may watch it.
    */
-  'browser.host': { params: { threadId: string; enabled: boolean; allowAgentControl?: boolean; remote?: boolean; live?: boolean }; result: { ok: true } };
-  'browser.remoteFrame': { params: { threadId: string } & RemoteFrameOptions; result: RemoteBrowserFrame };
-  /** Whether a desktop shares a browser tab of this conversation now: a viewer shows it without asking. */
-  'browser.remoteStatus': { params: { threadId: string }; result: { live: boolean } };
+  'browser.remoteFrame': { params: { threadId: string; tabId?: string } & RemoteFrameOptions; result: RemoteBrowserFrame };
+  /** Whether the conversation's agent has a browser open on this machine, and its tabs. */
+  'browser.remoteStatus': { params: { threadId: string }; result: AgentBrowserStatus };
+  /** Input on the tab a frame showed, from a viewer: never a script. */
   'browser.remoteInput': { params: { threadId: string; frameId: string; input: RemoteBrowserInput }; result: { ok: true } };
   'browser.command': { params: { threadId: string; tabId?: string; action: BrowserAction }; result: BrowserReply };
-  'browser.complete': { params: { requestId: string; result?: BrowserReply; error?: string }; result: { ok: true } };
+  /**
+   * Owner only: copies the sign-ins of one of the desktop's browser profiles
+   * into the same profile of this machine's agent browser, which is made here
+   * when it does not exist yet. The cookies are what the desktop's own browser
+   * holds for that profile; nothing is read from this machine.
+   */
+  'browser.importCookies': { params: { profile: { id: string; name?: string }; cookies: BrowserCookie[] }; result: { imported: number; profile: string } };
 }
 export interface BrowserRpcEvents {
-  'browser.requested': { threadId: string; requestId: string; tabId?: string; action: BrowserAction };
-  /** For the clients subscribed to the conversation: its shared browser tab appeared or went away. */
-  'browser.remoteChanged': { threadId: string; live: boolean };
-  /**
-   * For the conversation's agent-control host only: a turn that ran has ended,
-   * however it ended. The desktop discards the recordings the agent left running.
-   */
-  'browser.turnFinished': { threadId: string };
+  /** For the clients subscribed to the conversation: its agent's tabs changed, opened, navigated or closed. */
+  'browser.remoteChanged': { threadId: string; live: boolean; tabs: AgentBrowserTab[] };
+}
+
+/** A cookie as the DevTools protocol exchanges it. Without `expires` it lasts as long as its browser session. */
+export interface BrowserCookie {
+  name: string; value: string; domain: string; path: string;
+  secure?: boolean; httpOnly?: boolean; sameSite?: 'Strict' | 'Lax' | 'None';
+  /** Seconds since the epoch. */
+  expires?: number;
+}
+export const BROWSER_COOKIES_MAX = 5000;
+/** One cookie's name and value together, as browsers cap them. */
+export const BROWSER_COOKIE_MAX_BYTES = 4096;
+
+/** Why a list of cookies cannot be copied into a profile, or null. */
+export function browserCookiesError(cookies: unknown): string | null {
+  if (!Array.isArray(cookies) || cookies.length === 0 || cookies.length > BROWSER_COOKIES_MAX) return `cookies must list 1 to ${BROWSER_COOKIES_MAX} cookies`;
+  const text = (value: unknown, max: number, empty = false) => typeof value === 'string' && value.length <= max && (empty || value.length > 0);
+  for (const cookie of cookies as BrowserCookie[]) {
+    if (!cookie || typeof cookie !== 'object') return 'each cookie must be an object';
+    if (!text(cookie.name, 1024, true) || !text(cookie.value, BROWSER_COOKIE_MAX_BYTES, true) || cookie.name.length + cookie.value.length > BROWSER_COOKIE_MAX_BYTES) return `a cookie's name and value must be strings of at most ${BROWSER_COOKIE_MAX_BYTES} characters together`;
+    if (!text(cookie.domain, 255) || /[\s/]/.test(cookie.domain)) return 'a cookie needs the domain it belongs to';
+    if (!text(cookie.path, 2048) || !cookie.path.startsWith('/')) return 'a cookie path must start with /';
+    if ((cookie.secure !== undefined && typeof cookie.secure !== 'boolean') || (cookie.httpOnly !== undefined && typeof cookie.httpOnly !== 'boolean')) return 'cookie secure and httpOnly must be booleans';
+    if (cookie.sameSite !== undefined && !['Strict', 'Lax', 'None'].includes(cookie.sameSite)) return 'cookie sameSite must be Strict, Lax or None';
+    if (cookie.expires !== undefined && !(Number.isFinite(cookie.expires) && cookie.expires > 0)) return 'cookie expires must be a time in seconds';
+  }
+  return null;
 }
 
 /** Shared by the real core, fake transport and desktop before executing input. */
@@ -126,8 +160,6 @@ export function browserActionError(action: BrowserAction): string | null {
       if (action.frameRate !== undefined && !BROWSER_RECORDING_FRAME_RATES.includes(action.frameRate)) return `recording frameRate must be ${BROWSER_RECORDING_FRAME_RATES.join(' or ')}`;
       return action.codec === undefined || BROWSER_RECORDING_CODECS.includes(action.codec) ? null : `recording codec must be ${BROWSER_RECORDING_CODECS.join(', ')}`;
     case 'recording-stop': return null;
-    case 'remote-frame': return remoteFrameOptionsError(action);
-    case 'remote-input': return text(action.frameId, 80) ? remoteBrowserInputError(action.input) : 'remote input needs a frame id';
     case 'recording-discard': case 'recording-read':
       if (!text(action.recordingId, 80) || !/^[a-zA-Z0-9-]+$/.test(action.recordingId)) return 'recordingId must come from recording-stop';
       if (action.kind === 'recording-discard') return null;
@@ -151,10 +183,11 @@ export function browserActionError(action: BrowserAction): string | null {
 
 /**
  * Browser profiles: each keeps its own cookies, storage and logins on the
- * desktop that shows the browser. `default` is the session every tab used
- * before profiles existed, `private` an InPrivate session nothing is kept
- * from. Neither is stored: `Settings.browserProfiles` lists the ones the user
- * made, and an id names a WebView2 profile folder, so it is never reused.
+ * machine whose settings list it, in the desktop's own browser and in the
+ * agent browser its core runs. `default` is the session every tab used before
+ * profiles existed, `private` a session nothing is kept from. Neither is
+ * stored: `Settings.browserProfiles` lists the ones the user made, and an id
+ * names a profile folder, so it is never reused.
  */
 export const DEFAULT_BROWSER_PROFILE = 'default';
 export const PRIVATE_BROWSER_PROFILE = 'private';

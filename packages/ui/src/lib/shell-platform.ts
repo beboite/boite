@@ -9,3 +9,8 @@ export function linuxShell(userAgent = typeof navigator === 'undefined' ? '' : n
   return typeof window !== 'undefined' && window.__TAURI_INTERNALS__ !== undefined
     && /\bLinux\b/.test(userAgent) && !/\bAndroid\b/.test(userAgent);
 }
+
+/** Whether this page runs in the Windows desktop shell, the one whose browser is WebView2. */
+export function windowsShell(userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent): boolean {
+  return typeof window !== 'undefined' && window.__TAURI_INTERNALS__ !== undefined && /\bWindows\b/.test(userAgent);
+}

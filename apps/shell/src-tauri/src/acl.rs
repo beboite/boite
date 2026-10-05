@@ -25,7 +25,7 @@ mod tests {
         for command in ["core_endpoint", "quota_window", "plugin:event|listen", "plugin:event|unlisten"] {
             assert!(authority.resolve_access(command, "quotas", "quotas", &Origin::Local).is_some(), "quota popup cannot invoke {command}");
         }
-        for command in ["browser_create", "browser_protocol", "quit_shell", "save_attachment"] {
+        for command in ["browser_create", "browser_protocol", "browser_cookies", "quit_shell", "save_attachment"] {
             assert!(authority.resolve_access(command, "quotas", "quotas", &Origin::Local).is_none(), "quota popup can invoke {command}");
         }
     }

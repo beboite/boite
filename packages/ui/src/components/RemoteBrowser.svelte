@@ -6,8 +6,12 @@
   import { strings } from '../lib/strings';
   import { normalizeUrl } from '../lib/browser-bridge';
   import { dragScroll, FRAME_INTERVAL, frameMaxWidth, framePoint, frameQuality, nextPollDelay } from '../lib/remote-browser-view';
-  /** The PC's browser tab of this conversation, watched and driven from a paired device's panel. */
-  let { store, threadId }: { store: Store; threadId: string } = $props();
+  /**
+   * One tab of the browser the conversation's agent drives on the machine that
+   * runs it, watched and driven from any client. Without `tabId`, the agent's
+   * active tab.
+   */
+  let { store, threadId, tabId }: { store: Store; threadId: string; tabId?: string } = $props();
   let paused = $state(false), busy = $state(false), error = $state(''), text = $state('');
   let frame = $state.raw<RemoteBrowserFrame | null>(null), picture = $state<HTMLImageElement>();
   // Core timestamps use another device's clock. Retain local age for each frame,
@@ -23,8 +27,6 @@
   let frameClient = $state.raw<Store['client']>(null);
   let displaySettings = $state(false), viewportWidth = $state<number | undefined>(393), viewportHeight = $state<number | undefined>(700);
   let areaWidth = $state(0), areaHeight = $state(0), zoom = $state(0);
-  /** The PC is not showing this conversation's browser tab right now: wait for it, it is not a broken link. */
-  let hostMissing = $state(false);
   let address = $state(''), editingAddress = false, fresh = $state(true);
   const previewScale = $derived(frame ? (zoom || Math.min(areaWidth / frame.width, areaHeight / frame.height)) : 1);
   const validSize = $derived([viewportWidth, viewportHeight].every(n => typeof n === 'number' && Number.isInteger(n) && n >= 240 && n <= 3840));
@@ -45,14 +47,14 @@
     try {
       if (!client || client.state !== 'ready') throw new Error(strings.remoteBrowser.reconnecting);
       const maxWidth = frameMaxWidth(frame ? frame.width * previewScale : areaWidth, window.devicePixelRatio), quality = frameQuality(roundTrip);
-      const next = await client.call('browser.remoteFrame', { threadId, ...(maxWidth ? { maxWidth } : {}), ...(quality !== 55 ? { quality } : {}) });
+      const next = await client.call('browser.remoteFrame', { threadId, ...(tabId ? { tabId } : {}), ...(maxWidth ? { maxWidth } : {}), ...(quality !== 55 ? { quality } : {}) });
       // Decoded off the main thread before it replaces the shown frame: a drag stays smooth and Safari never paints a half-loaded image.
       if (next.base64 !== frame?.base64) await decoded(next.base64);
       if (!alive || run !== generation) return;
       if (client === store.client) {
         roundTrip = performance.now() - started; failures = 0;
         unchanged = frame && next.base64 === frame.base64 && next.width === frame.width && next.height === frame.height ? unchanged + 1 : 0;
-        receivedAt.set(next, performance.now()); frameClient = client; frame = next; error = ''; fresh = true; hostMissing = false;
+        receivedAt.set(next, performance.now()); frameClient = client; frame = next; error = ''; fresh = true;
         if (!editingAddress) address = next.url ?? '';
       }
       else { frame = null; frameClient = null; error = strings.remoteBrowser.reconnecting; }
@@ -61,11 +63,7 @@
         const reason = message(cause);
         // The core spaces frame requests; a refusal for asking early is not a failure.
         if (/wait before requesting/.test(reason)) retry = true;
-        else {
-          failures++;
-          hostMissing = /Open this conversation|open a browser tab|remote-browser experiment|browser host left/.test(reason);
-          error = hostMissing ? strings.remoteBrowser.hostMissing : reason;
-        }
+        else { failures++; error = reason; }
       }
     }
     finally { pending = false; }
@@ -112,7 +110,7 @@
     try {
       await client.call('browser.remoteInput', { threadId, frameId: target.id, input: value });
       if (alive && run === generation && client === store.client && value.kind === 'text') text = '';
-      // Those retire the frame on the PC: show it as stale until the next one.
+      // Those retire the frame on the agent's machine: show it as stale until the next one.
       if (moving) fresh = false;
       return true;
     }
@@ -197,10 +195,10 @@
     <input bind:value={address} data-testid="remote-browser-address" type="text" inputmode="url" enterkeyhint="go" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="4096" aria-label={strings.remoteBrowser.address} placeholder={strings.remoteBrowser.address} onfocus={e => { editingAddress = true; e.currentTarget.select(); }} onblur={() => { editingAddress = false; }} />
     <button type="submit" class="chip go" disabled={!usable || !address.trim()}><span class="ui-label">{strings.remoteBrowser.go}</span></button>
   </form>
-  <div class="toolbar"><span class="state ui-label" data-testid="remote-browser-state" class:live={frame && !paused && !error}>{paused ? strings.remoteBrowser.paused : hostMissing ? strings.remoteBrowser.waiting : error ? strings.remoteBrowser.reconnecting : frame ? strings.remoteBrowser.live : strings.remoteBrowser.waiting}</span>
+  <div class="toolbar"><span class="state ui-label" data-testid="remote-browser-state" class:live={frame && !paused && !error}>{paused ? strings.remoteBrowser.paused : error ? strings.remoteBrowser.reconnecting : frame ? strings.remoteBrowser.live : strings.remoteBrowser.waiting}</span>
     <button type="button" class="chip" data-testid="remote-browser-display" aria-expanded={displaySettings} onclick={() => { displaySettings = !displaySettings; if (frame) { viewportWidth = frame.width; viewportHeight = frame.height; } }}><span class="ui-label">{strings.remoteBrowser.display}</span></button>
     <button type="button" class="chip" onclick={() => { paused = !paused; }}>{#if paused}<Play size={15} />{:else}<Pause size={15} />{/if}<span class="ui-label">{paused ? strings.remoteBrowser.resume : strings.remoteBrowser.pause}</span></button></div>
-  {#if error}<div class="error" class:notice={hostMissing} role="status" data-testid="remote-browser-error"><p>{error}</p></div>{/if}
+  {#if error}<div class="error" role="status" data-testid="remote-browser-error"><p>{error}</p></div>{/if}
   <div class="viewer">
   {#if displaySettings}
     <section class="display-settings" aria-label={strings.remoteBrowser.display}>
@@ -257,6 +255,6 @@
   .options [aria-pressed=true] { color: var(--color-accent); border-color: var(--color-accent); }
   .screen { width: 100%; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; touch-action: none; cursor: crosshair; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; } .screen:disabled { opacity: 1; } .screen.stale { opacity: .55; } img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; -webkit-user-select: none; user-select: none; }
   footer { padding: 10px 16px max(12px, env(safe-area-inset-bottom)); display: grid; gap: 8px; } .keys { display: flex; gap: 6px; flex-wrap: wrap; } .chip { min-height: 44px; min-width: 44px; justify-content: center; } form { display: flex; gap: 8px; } input { min-width: 0; flex: 1; font-size: 16px; min-height: 44px; }
-  .error { display: flex; align-items: center; gap: 8px; padding: 0 16px 8px; } .error p { flex: 1; margin: 0; font-size: var(--text-sm); color: var(--color-danger); max-height: 90px; overflow: auto; overflow-wrap: anywhere; } .error.notice p { color: var(--color-muted-foreground); } .empty { margin: auto; padding: 24px; }
+  .error { display: flex; align-items: center; gap: 8px; padding: 0 16px 8px; } .error p { flex: 1; margin: 0; font-size: var(--text-sm); color: var(--color-danger); max-height: 90px; overflow: auto; overflow-wrap: anywhere; } .empty { margin: auto; padding: 24px; }
   @media (max-width: 720px) { footer small { display: none; } .nav, .toolbar, footer { padding-inline: 12px; } .nav { gap: 4px; } }
 </style>

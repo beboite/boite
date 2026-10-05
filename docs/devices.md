@@ -81,13 +81,14 @@ view-only: `simctl` has no input command, and the agent drives them itself.
 When a device opens in the conversation on screen, by the agent or by another
 client, the panel opens on the Device tab (`lib/device-watch.ts`).
 
-## Experiment
+## Shown on request
 
-The Device card, its entry in the launcher (**D**) and the automatic opening
-are behind **Device panel** in Settings > Experiments, off by default. It is a
-client setting: each desktop and phone turns it on for itself. The agent's
-commands work without it; the devices it opens wait in the conversation until
-a client shows the panel.
+The panel opens on the Device tab covered by a card that names the machine,
+"This agent controls a device on m2", and a **Show** button. No frame is
+captured or sent until the user presses it; **Hide** stops the frames again.
+The choice holds for the conversation while the app stays open. The Device
+card and its launcher key (**D**) are always offered: the agent's devices run
+on the machine of the conversation, so every client shows them the same way.
 
 ## Remote clients and phones
 

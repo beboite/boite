@@ -195,7 +195,6 @@ export function setTasks(core: Core, params: RpcParams<'threads.tasks.set'>): Th
  * here keeps the door in one file: `access.ts` says who may knock.
  */
 export function registerAgentMethods(core: Core): void {
-  core.router.register('browser.host', (params, { connection }) => core.browser.host(params, connection));
   core.router.register('browser.remoteFrame', (params, { connection }) => core.browser.remoteFrame(params, connection));
   core.router.register('browser.remoteInput', (params, { connection }) => core.browser.remoteInput(params, connection));
   core.router.register('devices.list', (params, { connection }) => core.devices.list(params, connection));
@@ -207,7 +206,7 @@ export function registerAgentMethods(core: Core): void {
   core.router.register('devices.close', (params, { connection }) => core.devices.close(params, connection));
   core.router.register('browser.remoteStatus', (params, { connection }) => core.browser.remoteStatus(params, connection));
   core.router.register('browser.command', params => core.browser.command(params));
-  core.router.register('browser.complete', (params, { connection }) => core.browser.complete(params, connection));
+  core.router.register('browser.importCookies', params => core.browser.importCookies(params));
   core.router.register('artifacts.publish', (params) => publishArtifact(core, params));
   core.router.register('artifacts.read', (params) => readArtifact(core, params));
   core.router.register('artifacts.preview', ({ threadId, path }) => {

@@ -52,7 +52,7 @@ export const FRAME_INTERVAL = 250;
  * moving page asks again as soon as the last frame took FRAME_INTERVAL, with
  * no fixed pause added to the trip: about four frames a second instead of two
  * (bench/remote-browser-frames.ts, docs/performance.md). A still
- * page slows down and a lost desktop is retried with a growing pause.
+ * page slows down and a refused or lost frame is retried with a growing pause.
  */
 export function nextPollDelay({ roundTrip, unchanged, failures }: PollState): number {
   if (failures > 0) return Math.min(8000, 1200 * 2 ** Math.min(3, failures - 1));

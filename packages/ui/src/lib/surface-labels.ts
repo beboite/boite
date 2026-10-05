@@ -4,7 +4,6 @@
  */
 import { baseName, type Surface, type SurfaceKind } from './right-panel.svelte';
 import { browserProfiles } from './browser-profiles.svelte';
-import { experimentOn } from './experiments.svelte';
 import { fill, strings } from './strings';
 import { work, type ControlId } from './work-prefs.svelte';
 
@@ -16,6 +15,7 @@ export const CARDS: { kind: SurfaceKind; key: string }[] = [
   { kind: 'agents', key: 'A' },
   { kind: 'messages', key: 'M' },
   { kind: 'browser', key: 'B' },
+  { kind: 'agent-browser', key: 'W' },
   { kind: 'device', key: 'D' },
   { kind: 'changes', key: 'C' },
   { kind: 'files', key: 'F' },
@@ -29,8 +29,6 @@ export const CARDS: { kind: SurfaceKind; key: string }[] = [
  * agent still open the surface, and an open tab stays.
  */
 export function hiddenKind(kind: SurfaceKind): boolean {
-  // An experiment: the Device panel's card shows once it is on (docs/devices.md).
-  if (kind === 'device' && !experimentOn('device-panel')) return true;
   return CARDS.some((card) => card.kind === kind) && !work.shows(`panel.${kind}` as ControlId);
 }
 
@@ -44,6 +42,7 @@ export function kindName(kind: SurfaceKind): string {
   if (kind === 'agents') return strings.delegation.heading;
   if (kind === 'messages') return strings.agentMessages.heading;
   if (kind === 'browser') return strings.rightPanel.browser;
+  if (kind === 'agent-browser') return strings.rightPanel.agentBrowser;
   if (kind === 'changes') return strings.rightPanel.changes;
   if (kind === 'files') return strings.rightPanel.files;
   if (kind === 'device') return strings.rightPanel.device;
@@ -56,6 +55,7 @@ export function kindHint(kind: SurfaceKind): string {
   if (kind === 'agents') return strings.delegation.panelHint;
   if (kind === 'messages') return strings.agentMessages.hint;
   if (kind === 'browser') return strings.rightPanel.browserHint;
+  if (kind === 'agent-browser') return strings.rightPanel.agentBrowserHint;
   if (kind === 'changes') return strings.rightPanel.changesHint;
   if (kind === 'files') return strings.rightPanel.filesHint;
   if (kind === 'device') return strings.rightPanel.deviceHint;
@@ -64,12 +64,13 @@ export function kindHint(kind: SurfaceKind): string {
 }
 
 /**
- * A page needs a webview. Paired devices follow subagents and mail, and read
- * changes and files read-only and watch the Device panel (`DEVICE_METHODS`); tasks and the trace read what
- * only the owner may ask for.
+ * A page needs a webview. Paired devices follow subagents and mail, read
+ * changes and files read-only and watch the agent's browser and the Device
+ * panel (`DEVICE_METHODS`); tasks and the trace read what only the owner may
+ * ask for.
  */
 export function available(kind: SurfaceKind, inShell: boolean, owner: boolean): boolean {
-  if (kind === 'agents' || kind === 'messages' || kind === 'changes' || kind === 'files' || kind === 'file' || kind === 'device') return true;
+  if (kind === 'agents' || kind === 'messages' || kind === 'changes' || kind === 'files' || kind === 'file' || kind === 'device' || kind === 'agent-browser') return true;
   return kind === 'browser' ? inShell : owner;
 }
 

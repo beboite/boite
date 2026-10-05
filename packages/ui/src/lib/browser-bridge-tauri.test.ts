@@ -104,3 +104,22 @@ test('native selection arms only a live surface and reports failure to its match
   expect(invoke).toHaveBeenNthCalledWith(2, 'browser_annotate', { id: 'active', requestId: 'request-a' });
   expect(events).toEqual([{ type: 'selection-failed', id: 'active', requestId: 'request-a', reason: 'injection refused' }]);
 });
+
+test('a profile\'s cookies are read through a blank view of that profile, made for it and destroyed after', async () => {
+  invoke.mockImplementation(async (command) => command === 'browser_cookies' ? { cookies: [{ name: 'sid' }] } : null);
+  const bridge = new TauriBridge();
+  expect(await bridge.cookies('p-work')).toEqual([{ name: 'sid' }]);
+  const calls = invoke.mock.calls.map(([command, args]) => [command, args?.profile, args?.url]);
+  expect(calls[0]).toEqual(['browser_create', 'p-work', '']);
+  expect(calls[1]![0]).toBe('browser_cookies');
+  await vi.waitFor(() => expect(invoke.mock.calls.at(-1)![0]).toBe('browser_destroy'));
+  // The same throwaway view for all three, and the default profile is named by leaving it out.
+  expect(new Set(invoke.mock.calls.map(([, args]) => args?.id)).size).toBe(1);
+  invoke.mockClear();
+  await bridge.cookies('default');
+  expect(invoke.mock.calls[0]![1]).not.toHaveProperty('profile');
+  // A read the shell refuses still destroys its view.
+  invoke.mockImplementation(async (command) => { if (command === 'browser_cookies') throw new Error('requires Windows WebView2'); return null; });
+  await expect(bridge.cookies('p-work')).rejects.toThrow('Windows WebView2');
+  await vi.waitFor(() => expect(invoke.mock.calls.at(-1)![0]).toBe('browser_destroy'));
+});
