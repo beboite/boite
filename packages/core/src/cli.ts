@@ -155,6 +155,15 @@ interface Target {
   threadId: string;
 }
 
+/** Loopback, Tailscale's 100.64.0.0/10 and its fd7a:115c:a1e0::/48: links that already encrypt or never leave the machine. */
+export function privateLink(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (host === 'localhost' || host === '::1' || /^127\./.test(host)) return true;
+  const v4 = /^100\.(\d+)\.\d+\.\d+$/.exec(host);
+  if (v4) return Number(v4[1]) >= 64 && Number(v4[1]) <= 127;
+  return /^fd7a:115c:a1e0:/.test(host);
+}
+
 /** The environment first; `--thread` and `core.json` when the command runs outside a thread. */
 function targetOf(parsed: Parsed, env: CliIo['env']): Target {
   const url = env[AGENT_ENV.coreUrl] || undefined;
@@ -174,8 +183,13 @@ function targetOf(parsed: Parsed, env: CliIo['env']): Target {
     // The token stays out of the command line, where any process listing would show it.
     const remoteToken = env.BOITE_TOKEN || undefined;
     if (remoteToken === undefined) throw new Error('--core needs the token in BOITE_TOKEN');
-    let origin: string;
-    try { origin = new URL(parsed.core).origin; } catch { throw new Error(`--core: expected a URL such as https://host:3773, got ${parsed.core}`); }
+    let url: URL;
+    try { url = new URL(parsed.core); } catch { throw new Error(`--core: expected a URL such as https://host:3773, got ${parsed.core}`); }
+    // The hello carries the token: cleartext only where the link is already private, loopback or a Tailscale address.
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && privateLink(url.hostname))) {
+      throw new Error(`--core: expected https://, or http:// on loopback or a Tailscale address, got ${parsed.core}`);
+    }
+    const origin = url.origin;
     if (threadId === undefined) throw new Error(`pass --thread <id> with --core for ${parsed.positional[0] ?? 'this command'}`);
     return { url: origin, token: remoteToken, threadId };
   }

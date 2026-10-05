@@ -30,7 +30,7 @@ explicit:
 | `message` | Letters that reach a thread as the steward's, even when its coordination is off or paused | yes |
 | `spawn` | `thread new` in its projects, without the communication-settings gates | yes |
 | `archive` | Archive and unarchive | yes |
-| `move` | Move threads between its projects; register a project folder, which then joins the grant | yes |
+| `move` | Move threads between its projects; register a new project folder, which then joins the grant (a folder already registered does not) | yes |
 | `stop` | Stop a running turn, rename a thread | yes |
 | `answer` | Answer or skip the questions agents ask the user | yes |
 | `permissions` | Allow or deny tool permission requests | no |
@@ -108,7 +108,9 @@ through the owner methods, and `thread send` there is the owner's own prompt,
 queued behind a running turn. `thread new <project> <brief>` copies the agent
 of `--thread`, else of the project's most recent thread; `--model` replaces the
 model. To reach another machine, pass `--core <url>` with its token in
-`BOITE_TOKEN`; the token never goes on the command line. See [the CLI](cli.md).
+`BOITE_TOKEN`; the token never goes on the command line. The URL is https, or
+http only on loopback or a Tailscale address, since the first frame carries the
+token. See [the CLI](cli.md).
 
 ## Tests
 

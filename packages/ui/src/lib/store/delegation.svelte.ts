@@ -159,7 +159,7 @@ export class Delegation {
     const epoch = this.stewardsEpoch;
     try {
       const grants = await client.call('stewards.list', {});
-      if (this.ctx.client === client && this.stewardsEpoch === epoch) this.stewards = grants;
+      if (this.ctx.client === client && this.stewardsEpoch === epoch) { this.stewards = grants; this.stewardsError = null; }
     } catch (error) {
       if (this.ctx.client === client && this.stewardsEpoch === epoch) this.stewardsError = error instanceof Error ? error.message : String(error);
     }

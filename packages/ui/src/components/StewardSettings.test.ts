@@ -84,3 +84,16 @@ test('a paired device sees the grant but cannot change it', async () => {
   await settle();
   expect(device.stewards).toEqual([steward]);
 });
+
+test('a read that succeeds after a failed one clears the error it left', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const owner = await show(client);
+  const call = client.call.bind(client);
+  let fail = true;
+  client.call = ((method: string, params: unknown) => method === 'stewards.list' && fail ? Promise.reject(new Error('core busy')) : call(method as never, params as never)) as typeof client.call;
+  await owner.loadStewards();
+  expect(owner.stewardsError).toBe('core busy');
+  fail = false;
+  await owner.loadStewards();
+  expect(owner.stewardsError).toBeNull();
+});

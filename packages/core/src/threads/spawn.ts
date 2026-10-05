@@ -139,10 +139,8 @@ export class ThreadSpawns {
     const grant = this.core.stewards.grantOf(threadId);
     const steward = grant !== null && grant.capabilities.includes('move');
     const known = this.core.projects.registered(path);
-    if (known !== null) {
-      if (steward) this.core.stewards.adopt(threadId, known.id);
-      return answer(known, false);
-    }
+    // A folder someone else registered stays outside the grant: only the owner widens it.
+    if (known !== null) return answer(known, false);
 
     const config = this.core.coordination.config(threadId);
     // A steward with the move capability registers projects whatever its communication settings say.

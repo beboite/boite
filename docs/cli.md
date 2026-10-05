@@ -195,7 +195,9 @@ drives that thread as the owner. That is for a person at a terminal, not for an
 agent: inside a thread, `--thread` naming another thread is refused before any
 token is read. `--core <url>` reaches another machine's core with its token in
 `BOITE_TOKEN` (an owner token or a paired device's session token), never on the
-command line, where a process listing would show it.
+command line, where a process listing would show it. The URL must be https, or
+http on loopback or a Tailscale address (100.64.0.0/10, fd7a:115c:a1e0::/48),
+since the first frame carries the token.
 
 The commands that drive other threads (`threads`, `thread show|send|stop|
 archive|unarchive|remove|rename`, `thread move <project> <id>`, `questions`,

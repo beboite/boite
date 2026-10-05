@@ -181,6 +181,9 @@ test('a steward starts threads and adds projects whatever its communication sett
   expect((await cli(['projects', 'add', fresh])).err).toBe('');
   const added = h.core.journal.listProjects().find(project => project.path === fresh)!;
   expect(h.core.stewards.grantOf(steward)?.projectIds).toContain(added.id);
+  // A folder the owner already registered does not join the grant.
+  expect((await cli(['projects', 'add', join(h.dataDir, 'other')])).out).toContain('Already a project');
+  expect(h.core.stewards.grantOf(steward)?.projectIds).not.toContain(h.core.journal.listProjects().find(project => project.name === 'Other')!.id);
 });
 
 test('the owner drives every thread from a terminal, and what it sends is its own prompt', async () => {
@@ -209,4 +212,8 @@ test('the owner drives every thread from a terminal, and what it sends is its ow
   let err = '';
   expect(await runCli(['threads', '--core', h.url], { out: () => undefined, err: s => { err += s; }, env: {}, cwd: h.dataDir })).toBe(1);
   expect(err).toContain('--core needs the token in BOITE_TOKEN');
+  // The token never crosses a network in cleartext.
+  err = '';
+  expect(await runCli(['threads', '--core', 'http://192.0.2.10:3773'], { out: () => undefined, err: s => { err += s; }, env: { BOITE_TOKEN: h.token }, cwd: h.dataDir })).toBe(1);
+  expect(err).toContain('expected https://, or http:// on loopback or a Tailscale address');
 });
