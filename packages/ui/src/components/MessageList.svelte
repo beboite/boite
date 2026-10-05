@@ -29,7 +29,7 @@
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
   import { glides } from '../lib/motion';
-  import { BottomGlide, PointerHold, keysUp, typingKey, watchWheel, wheelsUp } from '../lib/timeline-follow';
+  import { BottomEdge, BottomGlide, PointerHold, keysUp, typingKey, watchWheel, wheelsUp } from '../lib/timeline-follow';
   import { selectionClicks } from '../lib/selection-clicks';
   import { MediaQuery } from 'svelte/reactivity';
 
@@ -490,7 +490,7 @@
       for (const entry of entries) pending.set(entry.target, entry);
       // Pinned, the list follows what grows at its bottom in this same frame: the observer runs
       // after layout, so the new line is painted already in view (docs/performance.md).
-      if (following()) box.scrollTop = box.scrollHeight;
+      if (following()) edge.follow(box);
       if (frame) return;
       // Applying slot heights inside ResizeObserver can resize that same batch.
       frame = requestAnimationFrame(() => {
@@ -529,6 +529,7 @@
     scrolledHeight = height;
     // Pulled up by a finger or the scrollbar thumb, the list leaves the bottom as the wheel does.
     if (hold.held && box.scrollTop < scrollTop - 1) leftBottom = true;
+    const rose = edge.rose(box);
     const movedDown = box.scrollTop > scrollTop + 1;
     scrollTop = box.scrollTop;
     viewHeight = box.clientHeight;
@@ -540,6 +541,8 @@
       if (distance > 1) return;
       endGlide(false);
     }
+    // A busy phone delivers the touchstart after its scroll: a rise off the bottom is the reader too.
+    if (rose && pinned && distance > 1) leftBottom = true;
     if (distance <= 1 && movedDown) leftBottom = false;
     // A card shrinking can clamp scrollTop before new output grows the list again.
     pinned = !leftBottom && (atBottom(box) || (pinned && resized && !hold.held));
@@ -562,7 +565,7 @@
 
   /** A finger, a text selection or the scrollbar thumb holds the list where it is; the glide is what
    *  "Jump to latest" starts, whose scroll events neither unpin the list nor bring the button back. */
-  const hold = new PointerHold(), glide = new BottomGlide();
+  const hold = new PointerHold(), glide = new BottomGlide(), edge = new BottomEdge();
   function press(event: PointerEvent | TouchEvent) { releaseNavigation(); hold.press(event); }
   /** Whether the list keeps to the bottom right now: pinned, and nobody is moving it. */
   const following = () => pinned && !navigationTarget && !glide.active && !hold.held;
@@ -630,7 +633,7 @@
     behind = false;
     if (glides() && box.scrollHeight - box.clientHeight - box.scrollTop > 1) { glide.start(box, () => endGlide(true)); return; }
     pinned = true;
-    box.scrollTop = box.scrollHeight;
+    edge.follow(box);
     scrollTop = box.scrollTop;
   }
 
@@ -641,7 +644,7 @@
     const box = viewport;
     if (!box) return;
     if (arrived) {
-      box.scrollTop = box.scrollHeight;
+      edge.follow(box);
       scrollTop = box.scrollTop;
     }
     pinned = arrived || atBottom(box);
@@ -665,7 +668,7 @@
     } else if (opened || pinned) {
       // Held by the reader or on its way down, the list is still at the bottom: it takes the new height once free.
       if (opened || untrack(following)) {
-        scrolledHeight = box.scrollHeight; box.scrollTop = scrolledHeight;
+        scrolledHeight = box.scrollHeight; edge.follow(box);
         scrollTop = box.scrollTop;
       }
       pinned = true;
@@ -681,7 +684,7 @@
     void dockRoom.height;
     const box = viewport;
     if (!box || !pinned) return;
-    box.scrollTop = box.scrollHeight;
+    edge.follow(box);
     scrollTop = box.scrollTop;
   });
 
@@ -691,7 +694,7 @@
     if (!untrack(following)) return;
     const box = viewport;
     if (!box) return;
-    box.scrollTop = box.scrollHeight;
+    edge.follow(box);
   });
 
   // Finished and streaming messages are derived apart, so a delta never rescans the thread.

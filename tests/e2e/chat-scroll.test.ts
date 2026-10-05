@@ -321,4 +321,21 @@ test('a pinned conversation follows its answer on every frame, and a wheel turne
   expect(Math.abs((await page.evaluate<number>(`document.querySelector('${timeline}').scrollTop`)) - left)).toBeLessThanOrEqual(1);
   await page.click(jump);
   await page.waitFor(`!document.querySelector('${jump}') && (() => { const t = document.querySelector('${timeline}'); return t.scrollHeight - t.clientHeight - t.scrollTop < 2; })()`);
+
+  // A busy phone delivers the passive touchstart after the scroll it started: a rise with no
+  // input event yet, inside the 80 px tolerance, leaves following all the same. The finger moves
+  // the painted position, and its scroll event comes in the frame that syncs the delta, before
+  // any task of the stream can follow again: one task does both here. The glide down from the
+  // jump above ends first; the finger arriving during it stops it through its touchstart.
+  await page.evaluate('new Promise((done) => setTimeout(done, 500))');
+  expect(await page.evaluate<boolean>(`!!document.querySelector('${timeline} .prose.live')`)).toBe(true);
+  await page.evaluate(`(() => { const t = document.querySelector('${timeline}'); t.scrollTop -= 20; t.dispatchEvent(new Event('scroll')); })()`);
+  await page.waitFor(`document.querySelector('${jump}')`);
+  await page.evaluate('new Promise((done) => setTimeout(done, 300))');
+  expect(await page.evaluate<boolean>(`!!document.querySelector('${timeline} .prose.live')`)).toBe(true);
+  const rose = await page.evaluate<number>(`document.querySelector('${timeline}').scrollTop`);
+  await page.evaluate('new Promise((done) => setTimeout(done, 400))');
+  expect(Math.abs((await page.evaluate<number>(`document.querySelector('${timeline}').scrollTop`)) - rose)).toBeLessThanOrEqual(1);
+  await page.click(jump);
+  await page.waitFor(`!document.querySelector('${jump}') && (() => { const t = document.querySelector('${timeline}'); return t.scrollHeight - t.clientHeight - t.scrollTop < 2; })()`);
 }, 45_000);
