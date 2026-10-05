@@ -31,7 +31,7 @@ test('silent Codex reasoning and completed stored tools remain visible after rec
     page = await BrowserPage.launch({ url: `${origin}/?core=${encodeURIComponent(core.url)}&token=${encodeURIComponent(core.token)}` });
     await page.click('[data-testid=confirm-ok]');
     await page.click(`[data-thread-id="${thread.id}"]`);
-    await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread?.id === ${JSON.stringify(thread.id)} && !globalThis.__boiteTest.workspace.active.loadingThread`);
+    await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread?.id === ${JSON.stringify(thread.id)} && globalThis.__boiteTest.workspace.active.loadingThreadId === null`);
     await client.call('turns.start', { threadId: thread.id, prompt: '[silent-reasoning]' });
     await page.waitFor('globalThis.__boiteTest.workspace.active.openThread?.progress?.phase === "thinking"');
     expect(await page.evaluate('document.querySelector("[data-testid=turn-progress], [data-testid=turn-last-activity]") === null')).toBe(true);
@@ -53,7 +53,8 @@ test('silent Codex reasoning and completed stored tools remain visible after rec
     await page.waitFor(`document.querySelector(${JSON.stringify(working)})?.dataset.count === '1'`);
     await page.click(working);
     await page.click(`[data-thread-id="${thread.id}"]`);
-    await page.waitFor('globalThis.__boiteTest.workspace.active.openThread?.progress?.phase === "waiting"');
+    // The row already says "waiting" while its page is on the way: the messages are read once it landed.
+    await page.waitFor('globalThis.__boiteTest.workspace.active.openThread?.progress?.phase === "waiting" && globalThis.__boiteTest.workspace.active.loadingThreadId === null');
     expect(await page.evaluate('globalThis.__boiteTest.workspace.active.openThread.messages.map(message => message.id)')).toEqual(ids);
     expect(await page.evaluate('document.querySelectorAll("[data-role=assistant]").length')).toBe(1);
     expect(await page.evaluate('document.querySelector("[data-testid=chat]").textContent.includes("Message already stored.")')).toBe(true);
