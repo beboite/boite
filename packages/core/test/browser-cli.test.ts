@@ -3,6 +3,8 @@ import { mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_ENV, BROWSER_RECORDING_CHUNK_BYTES, type BrowserReply } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
+import { browserAction, browserLines } from '../src/browser-cli.ts';
+import { parse } from '../src/cli-args.ts';
 import { echoThread, startTestCore } from './harness.ts';
 
 test('browser screenshots accept explicit destinations, preserve existing files and document default cleanup', async () => {
@@ -97,4 +99,54 @@ test('a recording starts with the requested rate and codec, is saved with the ex
     expect(readdirSync(cwd).map(name => name.split('.').at(-1)).sort()).toEqual(['mp4', 'webm']);
     expect(discarded).toEqual(['r-mp4', 'r-webm']);
   } finally { owner.close(); await harness.stop(); }
+});
+
+test('the browser CLI reads agent-browser command lines into actions', () => {
+  const read = (line: string[]) => browserAction(line);
+  expect(read(['open', 'https://example.com'])).toEqual({ action: { kind: 'open', url: 'https://example.com', reuse: true } });
+  // A named profile is a tab of its own, as before.
+  expect(read(['open', 'https://example.com', '--profile', 'private']).action).toEqual({ kind: 'open', url: 'https://example.com', reuse: true, profile: 'private' });
+  expect(read(['tab', 'new', 'https://example.com']).action).toEqual({ kind: 'open', url: 'https://example.com' });
+  expect(read(['tab', 'browser:abc'])).toEqual({ action: { kind: 'activate' }, tabId: 'browser:abc' });
+  expect(read(['snapshot', '-i', '-c', '-d', '3', '-s', '#main', '-u']).action).toEqual({ kind: 'snapshot', interactive: true, compact: true, urls: true, depth: 3, selector: '#main' });
+  expect(read(['dblclick', '@e2']).action).toEqual({ kind: 'click', selector: '@e2', count: 2 });
+  // Unquoted words after the target are the text, as a shell splits them.
+  expect(read(['fill', '@e3', 'Ada', 'Lovelace']).action).toEqual({ kind: 'fill', selector: '@e3', text: 'Ada Lovelace' });
+  expect(read(['select', '@e4', 'a', 'b']).action).toEqual({ kind: 'select', selector: '@e4', values: ['a', 'b'] });
+  expect(read(['press', 'Control+a']).action).toEqual({ kind: 'press', key: 'Control+a' });
+  expect(read(['scroll', 'down', '500']).action).toEqual({ kind: 'scroll', x: 0, y: 500 });
+  expect(read(['scroll', '0', '-200']).action).toEqual({ kind: 'scroll', x: 0, y: -200 });
+  expect(read(['wait', '1500']).action).toEqual({ kind: 'wait', ms: 1500 });
+  expect(read(['wait', '--text', 'Saved', '--timeout', '4000']).action).toEqual({ kind: 'wait', text: 'Saved', timeoutMs: 4000 });
+  expect(read(['wait', '@e9']).action).toEqual({ kind: 'wait', selector: '@e9' });
+  expect(read(['get', 'attr', '@e1', 'href']).action).toEqual({ kind: 'get', what: 'attr', selector: '@e1', name: 'href' });
+  expect(read(['is', 'checked', '@e5']).action).toEqual({ kind: 'get', what: 'checked', selector: '@e5' });
+  expect(read(['eval', 'document.title']).action).toEqual({ kind: 'evaluate', expression: 'document.title' });
+  expect(read(['dialog', 'accept', 'hello']).action).toEqual({ kind: 'dialog', decision: 'accept', text: 'hello' });
+  expect(read(['set', 'viewport', '390', '844']).action).toEqual({ kind: 'resize', width: 390, height: 844 });
+  expect(read(['set', 'media', 'dark']).action).toEqual({ kind: 'appearance', colorScheme: 'dark' });
+  expect(read(['back']).action).toEqual({ kind: 'history', direction: 'back' });
+  // The tab id that used to follow the arguments still selects the tab.
+  expect(read(['click', '#go', 'browser:abc'])).toEqual({ action: { kind: 'click', selector: '#go' }, tabId: 'browser:abc' });
+  expect(read(['screenshot', 'browser:abc', '--output', 'a.png'])).toEqual({ action: { kind: 'screenshot' }, tabId: 'browser:abc', output: 'a.png' });
+  expect(read(['screenshot', 'page.png']).output).toBe('page.png');
+  expect(() => read(['press', 'Hyper+q'])).toThrow('unsupported browser key');
+  expect(() => read(['wait', '--text', 'a', '--url', 'b'])).toThrow('exactly one condition');
+  expect(() => read(['click'])).toThrow('needs a target');
+  expect(() => read(['frobnicate'])).toThrow('unknown browser command');
+  // Boite's own connection flags stay global after the browser command.
+  expect(parse(['browser', 'snapshot', '-i', '--core', 'https://host.test', '--channel', 'dev'])).toMatchObject({ positional: ['browser', 'snapshot', '-i'], core: 'https://host.test', channel: 'dev' });
+});
+
+test('browser output is agent-browser text: a check, the page reached and the dialogs answered', () => {
+  const lines = (action: Parameters<typeof browserLines>[0], value: unknown, extra = {}) => browserLines(action, { tabId: 'browser:t', value, ...extra });
+  expect(lines({ kind: 'snapshot' }, { text: '- button "Go" [ref=e1]', refs: 1 })).toEqual(['- button "Go" [ref=e1]']);
+  expect(lines({ kind: 'click', selector: '@e1' }, { ok: true })).toEqual(['✓ Done']);
+  expect(lines({ kind: 'click', selector: '@e1' }, { ok: true, navigated: true, url: 'https://x.test/done', title: 'Done page', dialogs: [{ type: 'confirm', message: 'Sure?', accepted: true }] }))
+    .toEqual(['✓ Done page', '  https://x.test/done', '  confirm "Sure?" accepted']);
+  expect(lines({ kind: 'open', url: 'https://x.test', reuse: true }, { ok: true, navigated: true, url: 'https://x.test/', title: 'X', loading: true })[2]).toContain('still loading');
+  expect(lines({ kind: 'select', selector: '@e2', values: ['2'] }, { ok: true, value: ['Two'] })).toEqual(['✓ Selected Two']);
+  expect(lines({ kind: 'get', what: 'text', selector: '@e1' }, 'plain words')).toEqual(['plain words']);
+  expect(lines({ kind: 'get', what: 'checked', selector: '@e1' }, false)).toEqual(['false']);
+  expect(lines({ kind: 'status' }, { tabs: [{ tabId: 'browser:t', url: 'https://x.test/', title: 'X', profileName: 'Privé', active: true }] })).toEqual(['* browser:t  X  https://x.test/  [Privé]']);
 });

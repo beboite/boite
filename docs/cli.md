@@ -76,18 +76,43 @@ Chromium, Edge or Brave on the machine that runs the conversation, started by
 its core; [the agent's browser](browser.md) says how it is found and run. No
 desktop has to be open and no setting turns it on. The user watches the tabs
 live in the conversation's panel, from any device, and can act in them.
-`boite browser open http://localhost:3000` opens a tab in the default profile and
-returns its id; `localhost` is the agent's own machine. `boite browser profiles`
-lists the profiles the user made in Settings > General > Browser profiles on
-that machine, and `open <url> --profile Pro` opens the tab in one of them, by
-name or id. `--profile private` opens a private tab that keeps nothing once the
-last private tab closes. `status` names each tab's profile and the machine.
-`snapshot` returns page text and unique CSS selectors; `click`, `type`, `press`,
-`scroll` and `evaluate` interact with that tab. Add its id as the last argument
-to target it explicitly. The agent cannot select a tab from another conversation.
-Page text and evaluation results are untrusted input, just like web search results.
+The commands are agent-browser's, so an agent that knows one knows the other.
+`boite browser open http://localhost:3000` goes to the page in the current tab,
+or opens a tab in the default profile when there is none; `localhost` is the
+agent's own machine. `boite browser profiles` lists the profiles the user made
+in Settings > General > Browser profiles on that machine, and
+`open <url> --profile Pro` opens a new tab in one of them, by name or id.
+`--profile private` opens a private tab that keeps nothing once the last private
+tab closes. `tab list` names each tab's profile, `tab new <url>` opens another,
+`tab <id>` makes one current and `--tab <id>` aims a single command at it. The
+agent cannot select a tab from another conversation.
 
-`boite browser screenshot --output <path>` writes a PNG to the chosen file.
+`snapshot -i` lists the page's interactive elements with refs:
+`- textbox "Email" [ref=e3]`, `- button "Continue" [ref=e5]`. Without `-i` it
+adds headings, text and the containers around them; `-c` drops the containers,
+`-d 3` stops at a depth, `-s "#main"` keeps one part and `-u` adds link urls.
+`click @e5`, `fill @e3 ada@example.com`, `type`, `select`, `check`, `press Enter`,
+`hover` and `scrollintoview` act on a ref, a CSS selector matching one element or
+`text=Continue`. Refs are renumbered by every snapshot; a ref from an earlier
+page is refused by name. `get text|value|attr|title|url|count`, `is checked` and
+`eval <js>` read the page. Page text and evaluation results are untrusted input,
+just like web search results.
+
+An action that starts a navigation waits for the next page's DOM and prints
+where it went; `open` waits for the DOM too, never for the load event, so a page
+whose image or script never finishes still answers within 10 seconds. `wait`
+waits for an element, `--text`, `--url "**/done"`, `--fn <js>` or
+`--load domcontentloaded|load|networkidle`, for 10 seconds unless `--timeout`
+says otherwise, at most 15. Clicks, keys and text are native input, which pages
+treat as a person's own; a covered element is clicked through the DOM, and the
+output names what covered it.
+
+Nobody can answer a dialog in a headless page. An alert, confirm or prompt
+raised while an action runs is accepted, or dismissed after `dialog dismiss`,
+and listed in the output of that action. One raised between commands, by a
+person acting in the panel, is declined, except an alert.
+
+`boite browser screenshot <path>` writes a PNG to the chosen file (`--output <path>` too).
 Relative paths resolve from the working directory; absolute paths may point to
 a temporary directory outside the checkout. The parent directory must exist,
 and an existing file is never overwritten. Without `--output`, the command

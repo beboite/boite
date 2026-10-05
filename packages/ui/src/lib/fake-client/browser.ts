@@ -74,6 +74,12 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       const { profiles, defaultId } = browserProfilesOf(ctx.settings);
       return { value: { default: defaultId, profiles: [{ id: DEFAULT_BROWSER_PROFILE, name: 'Default', kept: true }, ...profiles.map(profile => ({ id: profile.id, name: profile.name, kept: true })), { id: PRIVATE_BROWSER_PROFILE, name: 'Private', kept: false }] } };
     }
+    const current = browser?.tabs.find(one => one.tabId === browser.active);
+    if (action.kind === 'open' && action.reuse && action.profile === undefined && browser && current) {
+      // agent-browser's `open` drives the current tab, as the core's does.
+      go(browser, current, action.url); changed(threadId);
+      return { tabId: current.tabId, url: current.url, title: current.title, profile: current.profile, value: { ok: true, navigated: true, url: current.url, title: current.title } };
+    }
     if (action.kind === 'open') {
       // As the core resolves it: the machine's default without a name, else an id or a name in any case.
       const known = browserProfilesOf(ctx.settings);
@@ -97,9 +103,12 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
         return reply({ closed: true });
       }
       case 'navigate': go(browser, tab, action.url); browser.active = tab.tabId; changed(threadId); return { tabId: tab.tabId, url: tab.url, title: tab.title };
-      case 'snapshot': return { tabId: tab.tabId, url: tab.url, title: tab.title, value: { url: tab.url, title: tab.title, text: `${tab.title}\nTaps: ${tab.taps}\n${tab.text}`, elements: [] } };
+      // The core's snapshot format, agent-browser's: one line per node, refs on what can be acted on.
+      case 'snapshot': return { tabId: tab.tabId, url: tab.url, title: tab.title, value: { url: tab.url, title: tab.title, refs: 2, text: [`- heading ${JSON.stringify(tab.title)} [ref=e1] [level=1]`, `- text: Taps: ${tab.taps}`, `- textbox [ref=e2]: ${JSON.stringify(tab.text)}`].join('\n') } };
+      case 'activate': browser.active = tab.tabId; changed(threadId); return { tabId: tab.tabId, url: tab.url, title: tab.title, value: { ok: true } };
       case 'screenshot': return { tabId: tab.tabId, screenshot: { mime: 'image/png', base64: PIXEL_PNG } };
       case 'click': tab.taps++; return reply();
+      case 'fill': tab.text = action.text; return reply();
       case 'type': tab.text += action.text; return reply();
       case 'press': if (action.key === 'Backspace') tab.text = tab.text.slice(0, -1); return reply();
       case 'scroll': tab.scrollY = Math.max(0, action.y); return reply();

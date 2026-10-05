@@ -21,11 +21,25 @@ const PAGE = `<!doctype html><title>Fixture</title>
 <a id="pop" href="#" style="position:absolute;left:100px;top:300px" onclick="window.open('/popup','x','width=400,height=300');return false">Popup</a>
 <script>console.error('boom'); fetch('/missing?token=secret');</script>`;
 
+// agent-browser's commands: refs, a form that navigates, dialogs, a covered element.
+const SHOP = `<!doctype html><title>Shop</title>
+<h1>Shop</h1>
+<form action="/sent"><label>Name <input name="name"></label><button>Send</button></form>
+<select id="size"><option>Small</option><option value="l">Large</option></select>
+<label><input type="checkbox" id="gift" checked> Gift</label>
+<button id="ask" onclick="this.textContent = confirm('Sure?') ? 'yes' : 'no'">Ask</button>
+<button id="later" onclick="setTimeout(() => { document.title = confirm('Later?') ? 'later yes' : 'later no' }, 400)">Later</button>
+<button id="hidden-under" style="position:absolute;left:0;top:400px;width:120px;height:40px">Under</button>
+<div id="cover" style="position:absolute;left:0;top:400px;width:200px;height:60px;background:#ccc">Cover</div>
+<p id="note">Free delivery</p>`;
+
 let site: ReturnType<typeof Bun.serve>;
 beforeAll(() => {
   site = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: request => {
     const path = new URL(request.url).pathname;
     if (path === '/') return new Response(PAGE, { headers: { 'content-type': 'text/html' } });
+    if (path === '/shop') return new Response(SHOP, { headers: { 'content-type': 'text/html' } });
+    if (path === '/sent') return new Response(`<title>Sent</title><h1>Thanks ${new URL(request.url).searchParams.get('name')}</h1>`, { headers: { 'content-type': 'text/html' } });
     if (path === '/popup') return new Response('<title>Popup</title>popup', { headers: { 'content-type': 'text/html' } });
     if (path === '/moving') return new Response('<title>Moving</title><div id=box style="width:80px;height:80px;background:red;position:absolute"></div><script>let x=0;setInterval(()=>{x=(x+7)%600;box.style.left=x+"px"},16)</script>', { headers: { 'content-type': 'text/html' } });
     return new Response('missing', { status: 404 });
@@ -68,12 +82,13 @@ real('an agent opens, reads and drives a page in the browser of its own machine'
   const status = (await agent.call('browser.command', { threadId, action: { kind: 'status' } })).value as { available: boolean; tabs: Array<{ tabId: string; url: string; title: string; active: boolean }> };
   expect(status.available).toBe(true);
   expect(status.tabs).toMatchObject([{ tabId: open.tabId, url: url(), title: 'Fixture', active: true }]);
-  const snapshot = (await agent.call('browser.command', { threadId, action: { kind: 'snapshot' } })).value as { title: string; elements: Array<{ selector: string }>; diagnostics: { entries: Array<{ kind: string; text: string; url?: string }> } };
+  const snapshot = (await agent.call('browser.command', { threadId, action: { kind: 'snapshot', interactive: true } })).value as { title: string; text: string };
   expect(snapshot.title).toBe('Fixture');
-  expect(snapshot.elements.map(element => element.selector)).toContain('#go');
-  expect(snapshot.diagnostics.entries).toContainEqual(expect.objectContaining({ kind: 'console', text: 'boom' }));
+  expect(snapshot.text).toContain('- button "Go" [ref=e1]');
+  const diagnostics = (await agent.call('browser.command', { threadId, action: { kind: 'diagnostics' } })).value as { entries: Array<{ kind: string; text: string; url?: string }> };
+  expect(diagnostics.entries).toContainEqual(expect.objectContaining({ kind: 'console', text: 'boom' }));
   // The query string carried a token: diagnostics keep the address without it.
-  expect(snapshot.diagnostics.entries).toContainEqual(expect.objectContaining({ kind: 'network', url: url('/missing') }));
+  expect(diagnostics.entries).toContainEqual(expect.objectContaining({ kind: 'network', url: url('/missing') }));
   await agent.call('browser.command', { threadId, action: { kind: 'click', selector: '#go' } });
   expect(await evaluate('document.title')).toBe('clicked');
   await agent.call('browser.command', { threadId, action: { kind: 'type', selector: '#name', text: 'hello' } });
@@ -129,6 +144,54 @@ real('a viewer on another device watches and drives the tab, and hears it come a
     await owner.call('threads.archive', { threadId });
     expect((await gone).tabs).toEqual([]);
   } finally { phone.close(); }
+}, 150_000);
+
+real('an agent drives a page with agent-browser commands: refs, forms, dialogs and covered elements', async () => {
+  const command = async (action: BrowserAction): Promise<unknown> => (await agent.call('browser.command', { threadId, action })).value;
+  const opened = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/shop'), reuse: true } });
+  const { text } = await command({ kind: 'snapshot', interactive: true }) as { text: string };
+  expect(text.split('\n')).toEqual([
+    '- heading "Shop" [ref=e1] [level=1]',
+    '- textbox "Name" [ref=e2]',
+    '- button "Send" [ref=e3]',
+    '- combobox [ref=e4]: "Small" [options=["Small","Large"]]',
+    '- checkbox "Gift" [ref=e5] [checked]',
+    '- button "Ask" [ref=e6]',
+    '- button "Later" [ref=e7]',
+    '- button "Under" [ref=e8]',
+  ]);
+  await command({ kind: 'fill', selector: '@e2', text: 'Ada' });
+  await command({ kind: 'type', selector: '@e2', text: ' L' });
+  expect(await command({ kind: 'get', what: 'value', selector: '@e2' })).toBe('Ada L');
+  expect(await command({ kind: 'select', selector: '@e4', values: ['Large'] })).toMatchObject({ value: ['Large'] });
+  expect(await evaluate('document.querySelector("#size").value')).toBe('l');
+  await command({ kind: 'uncheck', selector: '@e5' });
+  expect(await command({ kind: 'get', what: 'checked', selector: '#gift' })).toBe(false);
+  // A dialog the command raised is answered by the policy and reported with it.
+  expect(await command({ kind: 'click', selector: '@e6' })).toMatchObject({ dialogs: [{ type: 'confirm', message: 'Sure?', accepted: true }] });
+  expect(await command({ kind: 'get', what: 'text', selector: '#ask' })).toBe('yes');
+  await command({ kind: 'dialog', decision: 'dismiss' });
+  expect(await command({ kind: 'click', selector: '@e6' })).toMatchObject({ dialogs: [{ type: 'confirm', accepted: false }] });
+  await command({ kind: 'dialog', decision: 'accept' });
+  // One raised after the command ended, as a person's tap would, is declined and not the agent's.
+  const later = await command({ kind: 'click', selector: '@e7' }) as { dialogs?: unknown };
+  expect(later.dialogs).toBeUndefined();
+  await command({ kind: 'wait', text: 'Free', timeoutMs: 1000 });
+  await Bun.sleep(700);
+  expect(await command({ kind: 'get', what: 'title' })).toBe('later no');
+  // A covered element is reached through the DOM, and the agent hears what covered it.
+  expect(await command({ kind: 'click', selector: '@e8' })).toMatchObject({ note: expect.stringContaining('covered by div#cover') });
+  await expect(command({ kind: 'click', selector: '@e70' })).rejects.toThrow('unknown ref @e70');
+  await expect(command({ kind: 'click', selector: 'button' })).rejects.toThrow('matched 4');
+  // Enter submits the form natively; the command waits for the next page and says where it went.
+  await command({ kind: 'focus', selector: '@e2' });
+  expect(await command({ kind: 'press', key: 'Enter' })).toMatchObject({ navigated: true, title: 'Sent', url: url('/sent?name=Ada+L') });
+  await expect(command({ kind: 'click', selector: '@e3' })).rejects.toThrow('belongs to an earlier page');
+  // open drives the current tab, as agent-browser's does.
+  const again = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/shop'), reuse: true } });
+  expect(again.tabId).toBe(opened.tabId);
+  expect(await command({ kind: 'history', direction: 'back' })).toMatchObject({ navigated: true, title: 'Sent' });
+  await expect(command({ kind: 'wait', selector: '#never', timeoutMs: 300 })).rejects.toThrow('wait timed out after 300 ms');
 }, 150_000);
 
 real('a window a page opens joins the conversation as a tab of its own', async () => {

@@ -56,6 +56,8 @@ export function parse(argv: string[]): Parsed {
       index += 1;
       return value;
     };
+    // `boite browser` takes agent-browser's own flags (-i, --text, --timeout...); only these stay global.
+    if (parsed.positional[0] === 'browser' && parsed.positional.length > 1 && !['--json', '--thread', '--data-dir', '--core', '--channel'].includes(arg)) { parsed.positional.push(arg); continue; }
     const boolean = BOOLEAN_OPTIONS.find(key => arg === `--${key}`);
     const numeric = NUMBER_OPTIONS.find(key => arg === `--${key}`);
     if (boolean !== undefined) parsed[boolean] = true;
@@ -83,14 +85,12 @@ export function parse(argv: string[]): Parsed {
       if (channel !== 'stable' && channel !== 'dev') throw new Usage(`unknown channel ${channel}`);
       parsed.channel = channel;
     } else if (arg === '--help' || arg === '-h') throw new Usage('');
-    else if (arg === '--output' && (parsed.positional[0] === 'browser' || parsed.positional[0] === 'device') && parsed.positional[1] === 'screenshot') parsed.positional.push(arg, next());
+    else if (arg === '--output' && parsed.positional[0] === 'device' && parsed.positional[1] === 'screenshot') parsed.positional.push(arg, next());
     else if (arg === '--platform' && parsed.positional[0] === 'device' && parsed.positional[1] === 'open') parsed.positional.push(arg, next());
     else if (arg === '--shutdown' && parsed.positional[0] === 'device' && parsed.positional[1] === 'close') parsed.positional.push(arg);
-    else if (arg === '--profile' && parsed.positional[0] === 'browser' && parsed.positional[1] === 'open') parsed.positional.push(arg, next());
     else if (arg === '--model') parsed.model = next();
     else if (arg === '--effort') parsed.effort = next();
     else if (arg === '--profile') parsed.profile = next();
-    else if ((arg === '--fps' || arg === '--codec') && parsed.positional[0] === 'browser' && parsed.positional[1] === 'recording-start') parsed.positional.push(arg, next());
     else if (arg.startsWith('--')) throw new Usage(`unknown flag ${arg}`);
     else parsed.positional.push(arg);
   }

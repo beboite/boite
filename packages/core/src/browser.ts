@@ -26,6 +26,7 @@ import {
   type AgentBrowserTab,
   type BrowserAction,
   type BrowserDiagnostic,
+  type BrowserDialog,
   type BrowserHistoryEntry,
   type BrowserPreset,
   type BrowserReply,
@@ -41,7 +42,8 @@ import { refused } from './errors.ts';
 import { Cdp } from './browser/cdp.ts';
 import { chromiumArgs, clearActivePort, findChromium, pipesDevTools, readSavedCookies, waitForEndpoint, writeSavedCookies } from './browser/chromium.ts';
 import { TabRecorder } from './browser/recorder.ts';
-import { EDITABLE_SCRIPT, KEY_CODES, PAGE_INFO_SCRIPT, SETTLED_VIEWPORT_SCRIPT, SNAPSHOT_SCRIPT, targetScript } from './browser/scripts.ts';
+import { EDITABLE_SCRIPT, KEY_CODES, PAGE_INFO_SCRIPT, SETTLED_VIEWPORT_SCRIPT } from './browser/scripts.ts';
+import { automate, awaitDocument, documentToken, PAGE_ACTIONS, type AgentPage } from './browser/automation.ts';
 
 /** The process scope of the agent browser's own processes, in the trace and the registry. */
 export const BROWSER_SCOPE = 'system:browser';
@@ -56,8 +58,13 @@ const TABS_PER_THREAD = 8;
 const TABS_MAX = 24;
 /** A browser process with no tab left is closed after this long: the next `open` starts it again. */
 const IDLE_CLOSE_MS = 60_000;
-/** How long `open` and `navigate` wait for the page's load event before answering that it still loads. */
-const LOAD_WAIT_MS = 15_000;
+/**
+ * How long `open` and `navigate` wait for the next page's DOM before answering
+ * that it still loads. The load event can wait on an image or a script that
+ * never finishes; agent-browser's commands work on the DOM.
+ */
+const DOM_WAIT_MS = 10_000;
+const DIALOGS_MAX = 20;
 /** A frame is shared by every viewer of the tab that asks within this long. */
 const FRAME_REUSE_MS = 150;
 const FRAME_LIFE_MS = 5000;
@@ -89,8 +96,6 @@ interface Tab {
   sessionId: string;
   url: string;
   title: string;
-  loaded: boolean;
-  loadWaiters: Set<() => void>;
   preset: BrowserPreset | null;
   orientation: 'portrait' | 'landscape';
   colorScheme: 'system' | 'light' | 'dark';
@@ -103,6 +108,9 @@ interface Tab {
   discarded: boolean;
   frame: { at: number; key: string; promise: Promise<{ frame: RemoteBrowserFrame; page: PageInfo }> } | null;
   off: Array<() => void>;
+  /** An agent command is running: the dialogs it raises follow `page.dialogPolicy`. */
+  acting: boolean;
+  page: AgentPage;
 }
 
 interface Viewer { requestedAt: number; frames: Array<{ frame: RemoteBrowserFrame; page: PageInfo }> }
@@ -307,9 +315,13 @@ export class AgentBrowser {
   async #attach(engine: Engine, threadId: ThreadId, targetId: string, url: string): Promise<Tab> {
     const { sessionId } = await engine.cdp.send<{ sessionId: string }>('Target.attachToTarget', { targetId, flatten: true });
     const tab: Tab = {
-      id: `browser:${crypto.randomUUID()}`, threadId, engine, targetId, sessionId, url, title: '', loaded: false, loadWaiters: new Set(),
+      id: `browser:${crypto.randomUUID()}`, threadId, engine, targetId, sessionId, url, title: '',
       preset: null, orientation: 'portrait', colorScheme: 'system', diagnostics: [], dropped: 0, history: [], requests: new Map(),
-      recorder: null, discarded: false, frame: null, off: [],
+      recorder: null, discarded: false, frame: null, off: [], acting: false,
+      page: {
+        send: (method, params = {}, timeoutMs) => engine.cdp.send(method, params, sessionId, timeoutMs),
+        dialogs: [], dialogPolicy: { accept: true, text: null },
+      },
     };
     const on = (method: string, listener: (params: Record<string, unknown>) => void) =>
       tab.off.push(engine.cdp.on(method, (params, session) => { if (session === sessionId) listener(params); }));
@@ -317,17 +329,24 @@ export class AgentBrowser {
       tab.diagnostics.push({ at: Date.now(), ...entry, text: entry.text.slice(0, 2000) });
       if (tab.diagnostics.length > DIAGNOSTICS_MAX) { tab.diagnostics.shift(); tab.dropped++; }
     };
-    on('Page.loadEventFired', () => { tab.loaded = true; for (const done of tab.loadWaiters) done(); tab.loadWaiters.clear(); });
-    on('Page.frameStartedLoading', params => { if (params.frameId === targetId) tab.loaded = false; });
     on('Page.frameNavigated', params => {
       const frame = params.frame as { parentId?: string; url: string };
       if (!frame.parentId) { tab.url = frame.url; tab.frame = null; this.#changed(threadId); }
     });
     on('Page.javascriptDialogOpening', params => {
-      // Nobody can answer a dialog in a headless page: an alert is accepted, a question declined.
-      const type = String(params.type);
-      note({ kind: 'console', level: 'info', text: `${type} dialog: ${String(params.message ?? '')}` });
-      void engine.cdp.send('Page.handleJavaScriptDialog', { accept: type === 'alert' || type === 'beforeunload' }, sessionId).catch(() => {});
+      // Nobody can answer a dialog in a headless page. One an agent command raised follows
+      // `dialog accept|dismiss` and is reported to it; any other alert is accepted and a
+      // question declined, so a person acting in the panel never confirms by accident.
+      const type = String(params.type), message = String(params.message ?? '');
+      note({ kind: 'console', level: 'info', text: `${type} dialog: ${message}` });
+      const policy = tab.page.dialogPolicy;
+      const accept = tab.acting && type !== 'beforeunload' ? policy.accept : type === 'alert' || type === 'beforeunload';
+      const promptText = accept && type === 'prompt' ? policy.text ?? String(params.defaultPrompt ?? '') : undefined;
+      if (tab.acting && (type === 'alert' || type === 'confirm' || type === 'prompt')) {
+        tab.page.dialogs.push({ type, message: message.slice(0, 500), accepted: accept, ...(type === 'prompt' ? { value: accept ? promptText ?? '' : null } : {}) });
+        if (tab.page.dialogs.length > DIALOGS_MAX) tab.page.dialogs.shift();
+      }
+      void engine.cdp.send('Page.handleJavaScriptDialog', { accept, ...(promptText === undefined ? {} : { promptText }) }, sessionId).catch(() => {});
     });
     on('Runtime.consoleAPICalled', params => {
       const args = (params.args as Array<{ value?: unknown; description?: string }> | undefined) ?? [];
@@ -395,7 +414,6 @@ export class AgentBrowser {
     if (!tab) return;
     this.#tabs.delete(id);
     for (const off of tab.off) off();
-    for (const done of tab.loadWaiters) done();
     void tab.recorder?.dispose();
     tab.engine.tabs.delete(id);
     this.#idle(tab.engine);
@@ -416,28 +434,17 @@ export class AgentBrowser {
     this.#drop(tab.id);
   }
 
-  #waitForLoad(tab: Tab): Promise<boolean> {
-    if (tab.loaded) return Promise.resolve(true);
-    return new Promise(resolve => {
-      const done = () => { clearTimeout(timer); tab.loadWaiters.delete(done); resolve(this.#tabs.has(tab.id) && tab.loaded); };
-      const timer = setTimeout(done, LOAD_WAIT_MS);
-      tab.loadWaiters.add(done);
-    });
-  }
-
   async #navigate(tab: Tab, url: string): Promise<BrowserReply> {
-    tab.loaded = false;
-    const reply = await tab.engine.cdp.send<{ errorText?: string }>('Page.navigate', { url }, tab.sessionId);
+    const token = await documentToken(tab.page);
+    const reply = await tab.engine.cdp.send<{ errorText?: string; loaderId?: string }>('Page.navigate', { url }, tab.sessionId);
     if (reply.errorText) throw refused(`${url} could not be opened: ${reply.errorText}`);
-    const loaded = await this.#waitForLoad(tab);
-    // The target's own title arrives a moment after the load event: the page knows it now.
-    if (loaded) {
-      const title = await this.#evaluate(tab, 'document.title', 3000).catch(() => null);
-      if (typeof title === 'string') tab.title = title.slice(0, 200);
-    }
-    // Viewers hear the loaded page before the agent's answer: a cover never names the blank page it started on.
+    // A move within the same document has no loader and no new DOM to wait for.
+    const { state, loading } = reply.loaderId ? await awaitDocument(tab.page, token, DOM_WAIT_MS) : { state: null, loading: false };
+    if (state) { tab.url = state.url; tab.title = state.title.slice(0, 200); }
+    // Viewers hear the page before the agent's answer: a cover never names the blank page it started on.
     this.#changed(tab.threadId, true);
-    return { tabId: tab.id, url: tab.url || url, title: tab.title, ...(loaded ? {} : { value: { loading: true, note: 'the page is still loading; use snapshot to inspect its state' } }) };
+    const at = tab.url || url;
+    return { tabId: tab.id, url: at, title: tab.title, value: { ok: true, navigated: true, url: at, title: tab.title, ...(loading ? { loading: true, note: 'the page is still loading; use snapshot to inspect its state' } : {}) } };
   }
 
   // ---------- agent commands ----------
@@ -469,13 +476,26 @@ export class AgentBrowser {
         const { profiles, defaultId } = browserProfilesOf(this.#core.settings.get());
         return { value: { machine: this.#machine, default: defaultId, profiles: [DEFAULT_BROWSER_PROFILE, ...profiles.map(profile => profile.id), PRIVATE_BROWSER_PROFILE].map(id => ({ id, name: this.#profileName(id), kept: id !== PRIVATE_BROWSER_PROFILE })) } };
       }
-      case 'open': return this.#open(threadId, action);
+      case 'open': {
+        // agent-browser's `open` drives the current tab; a named profile opens a tab of its own.
+        const current = action.reuse && action.profile === undefined ? this.#threads.get(threadId)?.active : null;
+        const tab = current ? this.#tabs.get(current) : undefined;
+        if (!tab) return this.#open(threadId, action);
+        return { ...await this.#command(tab, action, () => this.#navigate(tab, action.url)), profile: tab.engine.profile };
+      }
       default: break;
     }
     const tab = this.#tabOf(threadId, tabId);
     const state = this.#thread(threadId);
     if (state.active !== tab.id) { state.active = tab.id; this.#changed(threadId); }
-    return this.#track(tab, action, () => this.#act(tab, action));
+    return this.#command(tab, action, () => this.#act(tab, action));
+  }
+
+  /** An agent command on a tab: recorded, and the dialogs it raises are its own. */
+  async #command<T>(tab: Tab, action: BrowserAction, run: () => Promise<T>): Promise<T> {
+    tab.acting = true;
+    try { return await this.#track(tab, action, run); }
+    finally { tab.acting = false; }
   }
 
   #profileName(id: string): string {
@@ -496,12 +516,12 @@ export class AgentBrowser {
     let tab: Tab;
     try { tab = await this.#attach(engine, threadId, targetId, 'about:blank'); }
     catch (error) { await engine.cdp.send('Target.closeTarget', { targetId }).catch(() => {}); this.#idle(engine); throw error; }
-    return { ...await this.#track(tab, action, () => this.#navigate(tab, action.url)), profile };
+    return { ...await this.#command(tab, action, () => this.#navigate(tab, action.url)), profile };
   }
 
   /** Keeps operation names only: typed values and evaluated code can hold passwords. */
   async #track<T>(tab: Tab, action: BrowserAction, run: () => Promise<T>): Promise<T> {
-    if (['snapshot', 'diagnostics', 'recording-read'].includes(action.kind)) return run();
+    if (['snapshot', 'get', 'diagnostics', 'recording-read'].includes(action.kind)) return run();
     const at = Date.now(); let ok = true, error: string | undefined;
     try { return await run(); }
     catch (cause) { ok = false; error = cause instanceof Error ? cause.message.slice(0, 300) : String(cause).slice(0, 300); throw cause; }
@@ -545,21 +565,14 @@ export class AgentBrowser {
   async #act(tab: Tab, action: BrowserAction): Promise<BrowserReply> {
     const done = (value: unknown = { ok: true }): BrowserReply => ({ tabId: tab.id, value });
     if ((action.kind === 'recording-stop' || action.kind === 'recording-read') && tab.discarded) throw refused(DISCARDED_RECORDING_ERROR);
+    if (PAGE_ACTIONS.has(action.kind)) {
+      try { return await automate(tab.page, tab.id, action); }
+      catch (error) { throw refused(error instanceof Error ? error.message : String(error)); }
+    }
     switch (action.kind) {
       case 'navigate': return this.#navigate(tab, action.url);
-      case 'snapshot': {
-        const value = await this.#evaluate(tab, SNAPSHOT_SCRIPT) as Record<string, unknown>;
-        return done({ ...value, diagnostics: this.#diagnostics(tab), settings: { preset: tab.preset, orientation: tab.orientation, colorScheme: tab.colorScheme, recording: !!tab.recorder?.running } });
-      }
+      case 'activate': return { tabId: tab.id, url: tab.url, title: tab.title, value: { ok: true } };
       case 'evaluate': return done(await this.#evaluate(tab, action.expression, 30_000));
-      case 'click': await this.#click(tab, await this.#evaluate(tab, targetScript(action.selector, false)) as { x: number; y: number }); return done();
-      case 'type':
-        await this.#evaluate(tab, targetScript(action.selector, true));
-        if (action.text) await this.#send(tab, 'Input.insertText', { text: action.text });
-        else await this.#key(tab, 'Backspace');
-        return done();
-      case 'press': await this.#key(tab, action.key); return done();
-      case 'scroll': await this.#evaluate(tab, `window.scrollBy(${action.x}, ${action.y})`); return done();
       // The page takes a few frames to reach a new size: the next command meets it laid out.
       case 'resize':
         await this.#send(tab, 'Emulation.setDeviceMetricsOverride', { width: action.width, height: action.height, deviceScaleFactor: 1, mobile: false });

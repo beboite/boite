@@ -290,7 +290,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     browser: async () => {
       if (rest[0] === 'help') { print([BROWSER_HELP], { help: BROWSER_HELP }); return; }
       const result = await browserCommand(rest, io, client, threadId);
-      print([JSON.stringify(result, null, 2)], result);
+      print(result.lines, result.value);
     },
     device: async () => {
       const result = await deviceCommand(rest, io, client, threadId, parsed.timeout);

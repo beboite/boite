@@ -32,7 +32,7 @@ test('the agent opens, drives and closes its tabs; subscribed viewers hear each 
 
     await client.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'tap', x: 0.5, y: 0.2, width: frame.width, height: frame.height } });
     await client.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'text', text: 'Bonjour' } });
-    expect((await client.call('browser.command', { threadId, tabId: docs.tabId, action: { kind: 'snapshot' } })).value).toMatchObject({ text: expect.stringContaining('Taps: 1\nBonjour') });
+    expect((await client.call('browser.command', { threadId, tabId: docs.tabId, action: { kind: 'snapshot' } })).value).toMatchObject({ text: expect.stringContaining('- text: Taps: 1\n- textbox [ref=e2]: "Bonjour"') });
     await expect(client.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'tap', x: 0.5, y: 0.2, width: 10, height: 10 } })).rejects.toThrow('viewport changed');
     // A page that moves retires the frames taken of it.
     await client.call('browser.remoteInput', { threadId, frameId: frame.id, input: { kind: 'viewport', width: 393, height: 700 } });
@@ -41,6 +41,8 @@ test('the agent opens, drives and closes its tabs; subscribed viewers hear each 
     await client.call('browser.command', { threadId, tabId: shop.tabId, action: { kind: 'close' } });
     expect(await client.call('browser.remoteStatus', { threadId })).toMatchObject({ live: true, tabs: [{ tabId: docs.tabId, active: true }] });
     await expect(client.call('browser.remoteFrame', { threadId, tabId: shop.tabId })).rejects.toThrow('closed');
+    // agent-browser's open drives the current tab instead of adding one.
+    expect((await client.call('browser.command', { threadId, action: { kind: 'open', url: 'https://example.com/next', reuse: true } })).tabId).toBe(docs.tabId);
     await client.call('browser.command', { threadId, action: { kind: 'close' } });
     expect(changes.at(-1)).toEqual({ threadId, live: false, tabs: [] });
   } finally { client.close(); }

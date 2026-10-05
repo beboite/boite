@@ -124,8 +124,8 @@ The agent's browser runs on the machine of its conversation and keeps its own
 copy of each profile there. **Copy sign-ins to agents**, on a profile's row in
 the Windows desktop app, sends that profile's cookies to a machine's agent
 browser ([the agent's browser](browser.md#copying-a-desktop-profiles-sign-ins)).
-The agent's `boite browser profiles` and `open <url> --profile <name>` are
-described in the [CLI](cli.md).
+The agent's `boite browser profiles`, `open <url> --profile <name>` and the rest
+of its agent-browser commands are described in the [CLI](cli.md).
 
 ### Sign-in popups and new windows
 

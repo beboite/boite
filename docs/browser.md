@@ -11,7 +11,9 @@ a phone. Nothing depends on which client is open, and no setting turns it on.
 `packages/core/src/browser.ts` owns the tabs, `browser/chromium.ts` finds and
 starts the browser, `browser/cdp.ts` is the protocol connection,
 `browser/recorder.ts` records and `browser/scripts.ts` holds what is evaluated
-in a page.
+in a page for viewers. `browser/automation.ts` runs agent-browser's commands
+with `browser/page-kit.ts`, the script that reads a page into a snapshot with
+refs and finds `@eN`, CSS and `text=` targets.
 
 ## Which browser
 
@@ -84,9 +86,11 @@ too: show the agent's browser and sign in there.
 
 A conversation has at most 8 tabs and a machine 24. A page that opens a
 window, a sign-in popup for instance, adds a tab to the same conversation; past
-the limit the window is closed. An alert is accepted and a confirm or prompt
-declined, since nobody can answer them in a headless page, and both are noted
-in the diagnostics. Downloads are refused. Archiving or removing the
+the limit the window is closed. Nobody can answer a dialog in a headless page.
+One raised while an agent command runs follows `dialog accept|dismiss`
+(accept until told otherwise) and is listed in that command's output; any
+other alert is accepted and a confirm or prompt declined, so a person acting in
+the panel never confirms by accident. All are noted in the diagnostics. Downloads are refused. Archiving or removing the
 conversation closes its tabs.
 
 An open tab does not hold back an update of the core: the browser's processes
@@ -94,8 +98,13 @@ are not counted as work under way. The update closes them, the cookies are
 saved first, and the tabs themselves are not reopened.
 
 The agent's commands of one conversation run one after the other, in order.
-`open` and `navigate` wait up to 15 seconds for the load event; a page still
-loading by then is returned with `loading: true` rather than an error.
+`open` and `navigate` wait up to 10 seconds for the next page's DOM, never for
+the load event, which an image or a script that never finishes can hold back;
+a page still loading by then is returned with `loading: true` rather than an
+error. A click, a key or a fill that starts a navigation waits the same way and
+reports where the page went. Clicks, keys and text are native input; an element
+something covers is clicked through the DOM, and the agent hears what covered
+it.
 
 ## Recording
 
@@ -159,8 +168,9 @@ agent browser of a Windows machine other people have an account on.
 ## Verification
 
 `packages/core/test/browser.test.ts` drives a real headless Chromium when the
-machine has one: opening, reading, clicking and typing, presets and color
-scheme, diagnostics without query strings, a token kept to its conversation,
+machine has one: opening, reading, clicking and typing, agent-browser's
+refs, fill, select, check, a form submitted with Enter, dialogs inside and
+outside a command and a covered element, presets and color scheme, diagnostics without query strings, a token kept to its conversation,
 a paired viewer's frames and taps, a popup becoming a tab, cookies kept per
 profile across a restart, a profile copied in by the owner, an MP4 recording
 read back, a recording discarded at the end of a turn, and a machine without a

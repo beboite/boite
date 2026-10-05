@@ -7,10 +7,17 @@ import type { RemoteBrowserFrame, RemoteBrowserInput, RemoteFrameOptions } from 
 export type BrowserAction =
   | { kind: 'status' }
   | { kind: 'profiles' }
-  /** `profile` is a profile's name or id, `default` or `private`; absent opens the default profile. */
-  | { kind: 'open'; url: string; profile?: string }
+  /**
+   * `profile` is a profile's name or id, `default` or `private`; absent opens the default profile.
+   * `reuse` navigates the active tab when there is one, as agent-browser's `open` does.
+   */
+  | { kind: 'open'; url: string; profile?: string; reuse?: boolean }
   | { kind: 'navigate'; url: string }
-  | { kind: 'snapshot' }
+  /** Makes the command's tab the active one. */
+  | { kind: 'activate' }
+  | { kind: 'history'; direction: 'back' | 'forward' | 'reload' }
+  /** agent-browser's snapshot options: -i, -c, -d, -s and -u. */
+  | { kind: 'snapshot'; interactive?: boolean; compact?: boolean; depth?: number; selector?: string; urls?: boolean }
   | { kind: 'diagnostics'; clear?: boolean }
   | { kind: 'preset'; preset: BrowserPreset; orientation?: 'portrait' | 'landscape' }
   | { kind: 'appearance'; colorScheme: 'light' | 'dark' | 'system' }
@@ -20,15 +27,39 @@ export type BrowserAction =
   /** `maxBytes` caps the chunk; cores from before 100 MB recordings read 512 KiB at a time. */
   | { kind: 'recording-read'; recordingId: string; offset: number; maxBytes?: number }
   | { kind: 'recording-discard'; recordingId: string }
-  | { kind: 'click'; selector: string }
-  | { kind: 'type'; selector: string; text: string }
-  | { kind: 'press'; key: 'Enter' | 'Tab' | 'Escape' | 'Backspace' | 'ArrowDown' | 'ArrowUp' }
-  | { kind: 'scroll'; x: number; y: number }
+  /**
+   * `selector` is an `@eN` ref from the last snapshot, a CSS selector matching
+   * one element, or `text=...`. `count: 2` double-clicks.
+   */
+  | { kind: 'click'; selector: string; count?: 1 | 2 }
+  | { kind: 'hover' | 'focus' | 'check' | 'uncheck' | 'scrollintoview'; selector: string }
+  /** `fill` replaces the field's text, `type` adds to it. */
+  | { kind: 'fill' | 'type'; selector: string; text: string }
+  | { kind: 'select'; selector: string; values: string[] }
+  /** A key name or a combination such as `Control+a`. */
+  | { kind: 'press'; key: string }
+  | { kind: 'scroll'; x: number; y: number; selector?: string }
+  | { kind: 'get'; what: BrowserGetProperty; selector?: string; name?: string }
+  /** Exactly one condition, or `ms` alone for a fixed delay. */
+  | { kind: 'wait'; ms?: number; selector?: string; text?: string; url?: string; fn?: string; load?: 'load' | 'domcontentloaded' | 'networkidle'; timeoutMs?: number }
+  /** How the page's next alert, confirm and prompt are answered, or `status` for the recent ones. */
+  | { kind: 'dialog'; decision: 'accept' | 'dismiss' | 'status'; text?: string }
   | { kind: 'evaluate'; expression: string }
   | { kind: 'screenshot' }
   | { kind: 'resize'; width: number; height: number }
   | { kind: 'reset-viewport' }
   | { kind: 'close' };
+
+export const BROWSER_GET_PROPERTIES = ['text', 'html', 'value', 'attr', 'title', 'url', 'count', 'box', 'visible', 'enabled', 'checked'] as const;
+export type BrowserGetProperty = typeof BROWSER_GET_PROPERTIES[number];
+/** A wait or a command's own settling never outlasts the core's 20 s browser deadline. */
+export const BROWSER_WAIT_MAX_MS = 15000;
+/** Key names a press accepts, beside single characters and F1 to F12, after optional modifiers. */
+export const BROWSER_KEYS = ['Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', 'Space', 'Insert'] as const;
+const KEY_PATTERN = new RegExp(`^(?:(?:Control|Ctrl|Alt|Shift|Meta|Cmd)\\+)*(?:${BROWSER_KEYS.join('|')}|F(?:[1-9]|1[0-2])|[^\\s+]|\\+)$`);
+/** What a command that acts on the page reports: where it ended and what the page asked. */
+export interface BrowserActionResult { ok: true; url?: string; title?: string; navigated?: boolean; loading?: boolean; note?: string; dialogs?: BrowserDialog[]; value?: unknown }
+export interface BrowserDialog { type: 'alert' | 'confirm' | 'prompt'; message: string; accepted: boolean; value?: string | null }
 
 export interface BrowserReply {
   tabId?: string;
@@ -165,17 +196,49 @@ export function browserActionError(action: BrowserAction): string | null {
       if (action.kind === 'recording-discard') return null;
       if (!Number.isSafeInteger(action.offset) || action.offset < 0 || action.offset > BROWSER_RECORDING_MAX_BYTES) return `recording offset must be an integer within ${BROWSER_RECORDING_MAX_BYTES / 1024 / 1024} MB`;
       return action.maxBytes === undefined || (Number.isSafeInteger(action.maxBytes) && action.maxBytes > 0 && action.maxBytes <= BROWSER_RECORDING_CHUNK_BYTES) ? null : `recording maxBytes must be an integer from 1 to ${BROWSER_RECORDING_CHUNK_BYTES}`;
-    case 'status': case 'profiles': case 'snapshot': case 'screenshot': case 'close': case 'reset-viewport': return null;
+    case 'status': case 'profiles': case 'screenshot': case 'close': case 'reset-viewport': case 'activate': return null;
+    case 'snapshot':
+      if (action.depth !== undefined && !(Number.isInteger(action.depth) && action.depth >= 1 && action.depth <= 50)) return 'snapshot depth must be an integer from 1 to 50';
+      if (action.selector !== undefined && !text(action.selector, 4000)) return 'snapshot selector must contain 1 to 4000 characters';
+      return [action.interactive, action.compact, action.urls].every(flag => flag === undefined || typeof flag === 'boolean') ? null : 'snapshot flags must be booleans';
+    case 'history': return ['back', 'forward', 'reload'].includes(action.direction) ? null : 'history direction must be back, forward or reload';
     case 'open': case 'navigate': {
       if (action.kind === 'open' && action.profile !== undefined && !text(action.profile, BROWSER_PROFILE_NAME_MAX)) return `browser profile must be a profile name or id of 1 to ${BROWSER_PROFILE_NAME_MAX} characters, default or private`;
+      if (action.kind === 'open' && action.reuse !== undefined && typeof action.reuse !== 'boolean') return 'browser open reuse must be a boolean';
       if (text(action.url, 16384) && /^https?:\/\/[^\s/?#]+(?:[/?#][^\s]*)?$/i.test(action.url)) return null;
       return 'browser url must be an absolute HTTP or HTTPS address';
     }
-    case 'click': return text(action.selector, 4000) ? null : 'browser selector must contain 1 to 4000 characters';
-    case 'type': return text(action.selector, 4000) && typeof action.text === 'string' && action.text.length <= 20000 ? null : 'browser type needs a selector and at most 20000 text characters';
+    case 'click':
+      if (action.count !== undefined && action.count !== 1 && action.count !== 2) return 'browser click count must be 1 or 2';
+      return text(action.selector, 4000) ? null : 'browser selector must contain 1 to 4000 characters';
+    case 'hover': case 'focus': case 'check': case 'uncheck': case 'scrollintoview':
+      return text(action.selector, 4000) ? null : 'browser selector must contain 1 to 4000 characters';
+    case 'fill': case 'type': return text(action.selector, 4000) && typeof action.text === 'string' && action.text.length <= 20000 ? null : `browser ${action.kind} needs a selector and at most 20000 text characters`;
+    case 'select': return text(action.selector, 4000) && Array.isArray(action.values) && action.values.length >= 1 && action.values.length <= 50 && action.values.every(value => typeof value === 'string' && value.length <= 1000) ? null : 'browser select needs a selector and 1 to 50 values';
     case 'evaluate': return text(action.expression, 32000) ? null : 'browser expression must contain 1 to 32000 characters';
-    case 'press': return ['Enter', 'Tab', 'Escape', 'Backspace', 'ArrowDown', 'ArrowUp'].includes(action.key) ? null : 'unsupported browser key';
-    case 'scroll': return [action.x, action.y].every(n => Number.isFinite(n) && Math.abs(n) <= 100000) ? null : 'browser scroll coordinates must be finite and within 100000 pixels';
+    case 'press': return typeof action.key === 'string' && KEY_PATTERN.test(action.key) ? null : `unsupported browser key ${JSON.stringify(action.key)}: a character, F1 to F12 or ${BROWSER_KEYS.join(', ')}, after optional Control+, Alt+, Shift+ or Meta+`;
+    case 'scroll':
+      if (action.selector !== undefined && !text(action.selector, 4000)) return 'browser selector must contain 1 to 4000 characters';
+      return [action.x, action.y].every(n => Number.isFinite(n) && Math.abs(n) <= 100000) ? null : 'browser scroll coordinates must be finite and within 100000 pixels';
+    case 'get': {
+      if (!BROWSER_GET_PROPERTIES.includes(action.what)) return `browser get reads ${BROWSER_GET_PROPERTIES.join(', ')}`;
+      if (action.selector !== undefined && !text(action.selector, 4000)) return 'browser selector must contain 1 to 4000 characters';
+      if ((action.what === 'count' || action.what === 'visible' || action.what === 'enabled' || action.what === 'checked' || action.what === 'box') && action.selector === undefined) return `browser get ${action.what} needs a selector`;
+      if (action.what === 'attr' && !text(action.name, 200)) return 'browser get attr needs a selector and an attribute name';
+      return null;
+    }
+    case 'wait': {
+      const conditions = [action.selector, action.text, action.url, action.fn, action.load].filter(value => value !== undefined);
+      if (action.timeoutMs !== undefined && !(Number.isInteger(action.timeoutMs) && action.timeoutMs >= 100 && action.timeoutMs <= BROWSER_WAIT_MAX_MS)) return `browser wait timeout must be an integer from 100 to ${BROWSER_WAIT_MAX_MS} ms`;
+      if (action.ms !== undefined) return conditions.length === 0 && Number.isInteger(action.ms) && action.ms >= 0 && action.ms <= BROWSER_WAIT_MAX_MS ? null : `browser wait takes a delay from 0 to ${BROWSER_WAIT_MAX_MS} ms, or one condition`;
+      if (conditions.length !== 1) return 'browser wait needs exactly one condition: a selector, --text, --url, --fn or --load';
+      if (action.load !== undefined && !['load', 'domcontentloaded', 'networkidle'].includes(action.load)) return 'browser wait --load must be load, domcontentloaded or networkidle';
+      if (action.fn !== undefined) return text(action.fn, 32000) ? null : 'browser wait --fn must contain 1 to 32000 characters';
+      return [action.selector, action.text, action.url].every(value => value === undefined || text(value, 4000)) ? null : 'browser wait condition must contain 1 to 4000 characters';
+    }
+    case 'dialog':
+      if (!['accept', 'dismiss', 'status'].includes(action.decision)) return 'browser dialog must be accept, dismiss or status';
+      return action.text === undefined || (action.decision === 'accept' && typeof action.text === 'string' && action.text.length <= 20000) ? null : 'browser dialog text goes with accept and holds at most 20000 characters';
     case 'resize': return [action.width, action.height].every(n => Number.isInteger(n) && n >= 240 && n <= 3840) ? null : 'browser dimensions must be integers between 240 and 3840';
     default: return 'unknown browser action';
   }
