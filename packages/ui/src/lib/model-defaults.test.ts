@@ -217,6 +217,11 @@ test('a built-in default the account no longer lists moves to its later revision
   // The catalog is read: the composer and Settings open on the same model.
   expect(store.defaultModelOf(provider, account.id)).toBe('claude-opus-5-5');
   expect(store.defaultEffortOf(provider.id, account.id, 'claude-opus-5-5')).toBe('high');
+  // A draft that remembered the built-in before discovery shows what the send uses.
+  store.startDraft();
+  store.remember(stale);
+  expect(store.draftChoice?.model).toBe('claude-opus-5');
+  expect(store.defaultChoice()).toMatchObject({ model: 'claude-opus-5-5', effort: 'high', speed: null });
   expect(fallbackModelDefault('claude', catalog.slice(0, 1))).toEqual({ model: 'claude-fable-5-1', effort: 'high' });
   expect(fallbackModelDefault('claude', [{ id: 'default', name: 'Default', default: true }])).toBeNull();
   // A default the user configured is still refused, never replaced.

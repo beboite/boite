@@ -180,7 +180,9 @@ concurrent selection change refuses the send; it never silently runs the alias.
 The built-in preset is a preference, not a setting: when the account's catalog
 does not list it, the UI moves to a later revision of the same model
 (`claude-opus-5` to `claude-opus-5-5`), else to the catalog's default or first
-current model. Only a preset the user configured is refused.
+current model, and the composer shows that model as soon as the catalog is
+read. A preset the user configured and a model picked by hand are still refused
+when the catalog does not list them.
 The picker also ignores saved presets containing these aliases.
 
 Schema 9 adds `threads.session_generation`, `threads.selection_version` and

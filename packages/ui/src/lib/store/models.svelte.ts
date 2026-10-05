@@ -229,7 +229,7 @@ export class Models {
    */
   defaultChoice(): Choice | null {
     const s = this.ctx.store;
-    if (s.draft && this.draftChoice) return this.draftChoice;
+    if (s.draft && this.draftChoice) return this.#offered(this.draftChoice);
     const remembered = this.prefs.providerId ? s.providerOf(this.prefs.providerId) : null;
     const provider =
       (remembered?.available ? remembered : null) ??
@@ -300,6 +300,19 @@ export class Models {
     writePrefs(this.prefs);
   }
 
+  /**
+   * A choice still on the built-in default, moved to what the account's
+   * catalog lists once it is read. The composer shows the model the send will
+   * use. A default the user configured, or any other model, comes back as is.
+   */
+  #offered(choice: Choice, catalog?: ModelInfo[]): Choice {
+    if (this.modelDefaults[choice.providerId] || choice.model !== INITIAL_MODEL_DEFAULTS[choice.providerId]?.model) return choice;
+    const offered = catalog ?? this.probedModels[probeKey(choice.providerId, choice.accountId)];
+    if (!offered || offered.some((model) => model.id === choice.model)) return choice;
+    const fallback = fallbackModelDefault(choice.providerId, offered);
+    return fallback ? { ...choice, model: fallback.model, effort: fallback.effort, speed: null } : choice;
+  }
+
   /** Validate a draft's choice against the owning core before creating its thread. */
   async prepareDraftChoice(choice: Choice): Promise<Choice | null> {
     const s = this.ctx.store;
@@ -335,9 +348,8 @@ export class Models {
     if (!offered.some((model) => model.id === choice.model)) {
       // Only the built-in default moves to what the account offers. A default
       // the user configured, or a model he picked, is refused instead.
-      const fallback = !this.modelDefaults[provider.id] && choice.model === INITIAL_MODEL_DEFAULTS[provider.id]?.model
-        ? fallbackModelDefault(provider.id, offered) : null;
-      if (fallback) return { ...choice, model: fallback.model, effort: fallback.effort, speed: null };
+      const moved = this.#offered(choice, offered);
+      if (moved !== choice) return moved;
       s.error = strings.settings.modelDefaultUnavailable.replace('{model}', choice.model).replace('{provider}', provider.name);
       return null;
     }
