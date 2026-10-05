@@ -81,10 +81,14 @@ pub(super) fn new_window(app: &AppHandle, surface: &str, private: bool, url: Url
 /// InPrivate state, which is the surface's.
 fn open_popup(app: &AppHandle, surface: &str, private: bool, url: &Url, features: NewWindowFeatures) -> Result<WebviewWindow, String> {
     let label = popup_label(surface);
+    // A sign-in from the tab on screen comes to the front. One from a tab an
+    // agent drives off screen opens without taking the focus.
+    let on_screen = super::label_of(surface).is_ok_and(|view| super::surfaces().visible(&view));
     let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(checked_url(surface, BLANK)?))
         .window_features(features)
         .title(popup_title(Some(url), ""))
         .visible(!crate::window::hidden())
+        .focused(on_screen)
         .disable_drag_drop_handler()
         .incognito(private);
     // Owned by the Boite window, so it stays above it and minimizes with it.
