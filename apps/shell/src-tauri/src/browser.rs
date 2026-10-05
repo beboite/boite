@@ -456,7 +456,12 @@ pub async fn browser_create(
     let mut builder = WebviewBuilder::new(label.clone(), WebviewUrl::External(initial))
         // A file dragged onto the page is the page's business, not the folder
         // drop the shell listens for on the main webview.
-        .disable_drag_drop_handler();
+        .disable_drag_drop_handler()
+        // Tauri focuses a new webview by default, and WebView2's `MoveFocus`
+        // then takes the keyboard from the composer and can activate the
+        // window. An agent opens tabs for conversations that are not on screen,
+        // from any connected machine: the page gets the focus on a click.
+        .focused(false);
 
     // The same profile the main webview runs on, deliberately. A second user
     // data folder is a second WebView2 browser process: another hundred

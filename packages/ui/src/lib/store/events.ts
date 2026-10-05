@@ -92,6 +92,10 @@ export function listen(ctx: StoreContext, client: Client): void {
   on('collaboration.changed', ({ threadId }) => {
     if (s.openThread?.id === threadId) void s.loadCoordination(threadId, false);
   });
+  // Invalidation only: grants already read are read again, an unread list stays unread.
+  on('stewards.changed', () => {
+    if (s.stewards !== null) void s.loadStewards();
+  });
   on('workflows.changed', ({ threadId }) => {
     const open = s.openThread;
     if (open && (threadId === open.id || threadId === open.parentThreadId)) void s.loadWorkflows(open.id);

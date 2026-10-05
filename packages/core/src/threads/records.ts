@@ -5,9 +5,10 @@ import { notFound } from '../errors.ts';
 
 export function readToolOutput(core: Core, params: RpcParams<'messages.toolOutput'>): { output: string | null } {
   core.threads.require(params.threadId);
-  const message = core.journal.getMessage(params.messageId);
-  if (!message || message.threadId !== params.threadId) throw notFound(`message ${params.messageId} is not a message of thread ${params.threadId}`, params);
-  const part = message.parts.find(part => part.type === 'tool' && part.toolId === params.toolId);
+  // Only this tool's output is read, not every screenshot of its message.
+  const found = core.journal.messagePart(params.messageId, part => part.type === 'tool' && part.toolId === params.toolId);
+  if (!found || found.message.threadId !== params.threadId) throw notFound(`message ${params.messageId} is not a message of thread ${params.threadId}`, params);
+  const part = found.part;
   if (!part || part.type !== 'tool') throw notFound(`tool ${params.toolId} is not a tool of message ${params.messageId}`, params);
   return { output: part.output };
 }

@@ -94,3 +94,32 @@ test.each([
   link.click();
   expect(onopen).toHaveBeenCalledWith(address);
 });
+
+test.each([
+  { direction: 'incoming', self: received.to, label: 'From the steward', title: received.from.title },
+  { direction: 'outgoing', self: received.from, label: 'Steward sent to', title: received.toTitle },
+])('a steward letter reads as the steward\'s, $direction, never on the user\'s side', ({ self, label, title }) => {
+  component = mount(ForwardedAgentMessage, { target: document.body, props: { letter: { ...received, origin: 'steward' }, self } });
+  flushSync();
+  const bubble = document.querySelector<HTMLElement>('[data-testid="forwarded-agent-message"]')!;
+  expect(bubble.classList.contains('steward')).toBe(true);
+  expect(bubble.classList.contains('user')).toBe(false);
+  expect(bubble.querySelector('.forward-label')?.textContent).toBe(label);
+  expect(bubble.querySelector('strong')?.textContent).toBe(title);
+  expect(bubble.querySelector('svg.lucide-user-cog')).not.toBeNull();
+});
+
+test('a notice is a compact event line naming the thread it is about, and opens it', () => {
+  const onopen = vi.fn();
+  const notice: AgentLetter = { ...received, origin: 'notice', text: 'Turn done in "Deployment agent".\nBranch pushed.' };
+  component = mount(ForwardedAgentMessage, { target: document.body, props: { letter: notice, self: received.to, onopen } });
+  flushSync();
+  expect(document.querySelector('[data-testid="forwarded-agent-message"]')).toBeNull();
+  const line = document.querySelector<HTMLElement>('[data-testid="agent-notice"]')!;
+  expect(line.querySelector('svg.lucide-bell-ring')).not.toBeNull();
+  expect(line.querySelector('[data-testid="agent-letter-open"]')?.textContent?.trim()).toBe('Notice from Deployment agent');
+  expect(line.querySelector('.notice-body')?.textContent).toBe(notice.text);
+  expect(line.querySelector('[data-testid="agent-letter-status"]')).toBeNull();
+  line.querySelector<HTMLButtonElement>('[data-testid="agent-letter-open"]')!.click();
+  expect(onopen).toHaveBeenCalledWith(received.from);
+});

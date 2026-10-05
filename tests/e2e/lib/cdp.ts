@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION } from '../../../packages/ui/src/lib/onboarding.ts';
 import type { Subprocess } from 'bun';
-import { E2E_DIR_PREFIX, killProcessTreeAsync, removeDirectory } from './cleanup.ts';
+import { E2E_DIR_PREFIX, killProcessTreeAsync, removeDirectory, watchParentDeath, type ParentDeathWatch } from './cleanup.ts';
 
 /**
  * Marks the tour seen before any script of the page runs, and only where no
@@ -111,7 +111,7 @@ export async function closeAllBrowsers(): Promise<void> {
  * before its profile is removed: a profile deleted under a live browser was
  * the 0.5 GB each full run used to leave behind in the temp folder.
  */
-async function stopBrowser(proc: Subprocess, userDataDir: string | null): Promise<void> {
+async function stopBrowser(proc: Subprocess, userDataDir: string | null, watch: ParentDeathWatch | null): Promise<void> {
   if (proc.exitCode === null) {
     // POSIX's captured-PID kill cannot reap Chrome's children. SIGTERM lets
     // Chrome do that itself, including when startup failed before CDP opened.
@@ -121,12 +121,16 @@ async function stopBrowser(proc: Subprocess, userDataDir: string | null): Promis
   }
   const exited = await Promise.race([proc.exited.then(() => true), Bun.sleep(EXIT_TIMEOUT_MS).then(() => false)]);
   if (!exited) console.warn(`e2e: browser ${proc.pid} still running ${EXIT_TIMEOUT_MS} ms after its kill`);
+  // A browser that would not exit keeps its watchdog, which still takes it
+  // down if this process dies.
+  else watch?.release();
   if (userDataDir !== null) await removeDirectory(userDataDir);
 }
 
 export class BrowserPage {
   #socket: WebSocket;
   #proc: Subprocess | null;
+  #watch: ParentDeathWatch | null;
   #userDataDir: string | null;
   #nextId = 1;
   #pending = new Map<number, Pending>();
@@ -142,9 +146,10 @@ export class BrowserPage {
   /** The browser's pid, null for a page `attach` drives. */
   get pid(): number | null { return this.#proc?.pid ?? null; }
 
-  private constructor(socket: WebSocket, proc: Subprocess | null, userDataDir: string | null) {
+  private constructor(socket: WebSocket, proc: Subprocess | null, userDataDir: string | null, watch: ParentDeathWatch | null = null) {
     this.#socket = socket;
     this.#proc = proc;
+    this.#watch = watch;
     this.#userDataDir = userDataDir;
     socket.addEventListener('message', (event: MessageEvent) => {
       this.#receive(typeof event.data === 'string' ? event.data : '');
@@ -202,6 +207,9 @@ export class BrowserPage {
       stderr: 'pipe',
       windowsHide: true,
     });
+    // Linux and macOS: a test process killed outright still takes its browser
+    // and profile with it. Windows keeps the tree kill of `stopBrowser`.
+    const watch = watchParentDeath(proc.pid, ownsUserDataDir ? userDataDir : null);
 
     // Drain continuously: a full pipe must never hold Chrome's startup.
     // Keep a bounded tail for failures instead of discarding GPU/crash errors.
@@ -219,7 +227,7 @@ export class BrowserPage {
     try {
       const target = await waitForPageTarget(port, '', proc, true);
       const socket = await openSocket(target);
-      page = new BrowserPage(socket, proc, ownsUserDataDir ? userDataDir : null);
+      page = new BrowserPage(socket, proc, ownsUserDataDir ? userDataDir : null, watch);
       open.add(page);
       await page.send('Page.enable', {});
       await page.send('Runtime.enable', {});
@@ -237,7 +245,7 @@ export class BrowserPage {
       return page;
     } catch (error) {
       if (page !== null) await page.close();
-      else await stopBrowser(proc, ownsUserDataDir ? userDataDir : null);
+      else await stopBrowser(proc, ownsUserDataDir ? userDataDir : null, watch);
       await drainErrors.catch(() => undefined);
       const log = join(import.meta.dir, '..', '.artifacts', `browser-${proc.pid}.log`);
       mkdirSync(dirname(log), { recursive: true });
@@ -437,7 +445,7 @@ export class BrowserPage {
       /* already gone */
     }
     open.delete(this);
-    if (this.#proc !== null) await stopBrowser(this.#proc, this.#userDataDir);
+    if (this.#proc !== null) await stopBrowser(this.#proc, this.#userDataDir, this.#watch);
     else if (this.#userDataDir !== null) await removeDirectory(this.#userDataDir);
   }
 

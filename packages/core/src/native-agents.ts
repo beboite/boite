@@ -1,5 +1,7 @@
 import { collectNativeAgents, collectProcessAgents, type BackgroundTask, type MessagePart, type NativeAgent, type ProcessRecord, type Turn } from '@boite/contracts';
 import type { Journal } from './journal.ts';
+import { nativeAgentPartSql } from './journal/native-agent-parts.ts';
+import { hydratePart } from './journal/part-blobs.ts';
 import { toProcess, type ProcessRow } from './journal/rows.ts';
 
 interface Entry {
@@ -30,14 +32,14 @@ export function nativeAgents(journal: Journal, threadId: string, background: Bac
       }
     });
   }
-  const rows = journal.db.query(`SELECT m.rowid AS messageOrder, CAST(p.key AS INTEGER) AS partIndex,
+  // Only the messages written with a native agent call are parsed, not every part of the thread.
+  const rows = journal.db.query(`SELECT m.id AS messageId, m.rowid AS messageOrder, CAST(p.key AS INTEGER) AS partIndex,
       p.value AS part, m.created_at AS at, m.turn_id AS turnId, t.status AS turnStatus
-    FROM messages m JOIN turns t ON t.id = m.turn_id, json_each(m.parts) p
-    WHERE m.thread_id = ? AND m.role = 'assistant' AND json_extract(p.value, '$.type') = 'tool'
+    FROM native_agent_messages n JOIN messages m ON m.id = n.message_id JOIN turns t ON t.id = m.turn_id, json_each(m.parts) p
+    WHERE n.thread_id = ? AND m.thread_id = n.thread_id AND m.role = 'assistant' AND ${nativeAgentPartSql('p')}
       AND m.id NOT IN (SELECT value FROM json_each(?))
-      AND (json_type(p.value, '$.nativeAgents') = 'array' OR lower(json_extract(p.value, '$.name')) IN ('agent', 'task', 'subagent'))
-    ORDER BY m.rowid, CAST(p.key AS INTEGER)`).all(threadId, JSON.stringify(heldIds)) as (Omit<Entry, 'part'> & { part: string })[];
-  for (const row of rows) entries.push({ ...row, part: JSON.parse(row.part) as MessagePart });
+    ORDER BY m.rowid, CAST(p.key AS INTEGER)`).all(threadId, JSON.stringify(heldIds)) as (Omit<Entry, 'part'> & { part: string; messageId: string })[];
+  for (const { messageId, ...row } of rows) entries.push({ ...row, part: hydratePart(journal.db, messageId, row.partIndex, JSON.parse(row.part) as MessagePart) });
   entries.sort((left, right) => left.messageOrder - right.messageOrder || left.partIndex - right.partIndex);
   // Read CLI candidates and their parents, rather than every shell, build and
   // browser command line in a long conversation. Running children have no age limit.

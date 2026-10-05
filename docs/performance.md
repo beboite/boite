@@ -41,6 +41,22 @@ bun bench/core-idle.ts 10
 The audit records samples, workload limits and remaining candidates, including
 queue admission, WebSocket fan-out and retained tool bodies in the browser.
 
+## Long threads in the journal
+
+Measured on 2026-10-05 with `bench/rpc-actions.ts --journal` on a copy of a
+1.7 GB journal ([results](../bench/results/2026-10-05-rpc-actions.md)). A turn
+that reads screenshots back keeps each PNG as base64 in its tool output; one
+message held 33.5 MiB. Large values now live in `part_blobs`
+([architecture](architecture.md)), so a streaming message rewrites only the
+parts that changed: 20 s of text on top of 93 stored screenshots spent 396 ms
+in writes instead of 3,838 ms. `delegation.get` reads the messages that
+`native_agent_messages` names instead of every part of the thread: 30 ms
+instead of 1,051 ms on a 115 MiB thread. Partial indexes on the events read
+back took the core's start on that journal from 1.9 s to 0.38 s once settled,
+and peak core RSS over the bench from 1,023 MiB to 370 MiB. The first start
+after the upgrade migrates once (7.9 s there), and the move of older inline
+values held the event loop for up to 2.1 s on its largest row.
+
 ## Concurrent agent stress
 
 ```sh
@@ -592,6 +608,7 @@ bun run bench/startup.ts --exe <boite-shell.exe> --runs 7
 bun bench/ui-frames.ts --noblur                # fps and main thread per UI scenario, software compositing
 bun bench/ui-frames.ts --ui <other checkout>/packages/ui --cpu 4 --size 1920x1080@1.5
 bun bench/ui-frames.ts --trace --only "typing,long thread scroll"   # layouts per window, and how many a script forced
+bun bench/rpc-actions.ts --journal <journal.db> --runs 6   # latency, core CPU, bytes and RSS per RPC (Linux)
 ```
 
 `bench/bandwidth.ts` puts a TCP relay between the client and the core, counts
@@ -611,11 +628,18 @@ filters off, `--ui` measures another checkout. `--trace` counts the layouts of
 each window and those a script forced, numbers that hold on a busy machine;
 `--profile <dir>` writes a CPU profile per scenario.
 
+`bench/rpc-actions.ts` starts a core as a child process and times the boot
+calls, the reads of a thread and the common writes, with the core's CPU and
+RSS read from `/proc`. `--journal` runs it on a copy of a real journal taken
+with `VACUUM INTO`; the copy's projects, accounts, sessions and network
+settings are pointed at the temporary directory first.
+
 `bench/remote-browser-frames.ts` starts a scratch core and headless Chrome, plays
 a desktop host that captures and shrinks frames as the shell does, and a paired
 phone client that polls on the viewer's schedule behind an added latency.
 
-Results: [bench/results/2026-10-03-remote-browser-frames.md](../bench/results/2026-10-03-remote-browser-frames.md),
+Results: [bench/results/2026-10-05-rpc-actions.md](../bench/results/2026-10-05-rpc-actions.md),
+[bench/results/2026-10-03-remote-browser-frames.md](../bench/results/2026-10-03-remote-browser-frames.md),
 [bench/results/2026-09-19-wire-and-startup.md](../bench/results/2026-09-19-wire-and-startup.md),
 [bench/results/2026-09-30-ui-frames.md](../bench/results/2026-09-30-ui-frames.md),
 [bench/results/2026-09-30-typing-and-scroll.md](../bench/results/2026-09-30-typing-and-scroll.md).

@@ -199,6 +199,9 @@
   --color-accent-soft: color-mix(in oklch, var(--color-accent) 18%, transparent);
   --color-accent-ink: #101013;
   --color-reasoning: var(--color-accent);
+  /* What a steward sends: the accent turned away round the wheel, so its letters never read as the user's own. */
+  --color-steward: oklch(66% 0.15 calc(var(--accent-hue) + 150));
+  --color-steward-soft: color-mix(in oklch, var(--color-steward) 14%, transparent);
   --accent-spectrum: linear-gradient(to right, oklch(68% .19 0), oklch(68% .19 60), oklch(68% .19 120), oklch(68% .19 180), oklch(68% .19 240), oklch(68% .19 300), oklch(68% .19 360));
   --picker-white: #ffffff;
   --picker-black: #000000;
@@ -725,6 +728,7 @@ html[data-chat-width='full'] {
 @supports not (color: color-mix(in oklch, red 50%, blue)) {
   :root {
     --color-accent-soft: oklch(68% 0.19 var(--accent-hue) / 0.18);
+    --color-steward-soft: oklch(66% 0.15 calc(var(--accent-hue) + 150) / 0.14);
   }
 }
 

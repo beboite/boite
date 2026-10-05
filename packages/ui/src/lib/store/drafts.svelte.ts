@@ -157,7 +157,7 @@ export class Drafts {
     const s = this.ctx.store;
     const saved = this.saved[projectKey(projectId)];
     this.ctx.composer.composerStates.draft = saved?.input ?? empty();
-    s.draft = saved ? { ...saved.draft } : { projectId, worktree: s.projects.some(p => p.id === projectId && p.kind !== 'drafts' && p.repository !== false && p.worktreeDefault === true) };
+    s.draft = saved ? { ...saved.draft } : { projectId, worktree: s.projects.some(p => p.id === projectId && p.kind !== 'drafts' && p.repository === true && p.worktreeDefault === true) };
     s.draftChoice = saved?.choice ?? null;
   }
 

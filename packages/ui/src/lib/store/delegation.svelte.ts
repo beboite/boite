@@ -7,6 +7,8 @@ import type {
   DelegatedAgent,
   DelegationConfig,
   DelegationView,
+  StewardGrant,
+  StewardGrantInput,
   Thread,
   ThreadId,
   ThreadSummary
@@ -83,6 +85,11 @@ export class Delegation {
   delegationEpoch = 0;
   delegationSelectionEpoch = 0;
   delegationConfigureEpoch = 0;
+  /** Every steward grant on this machine, read when Communication settings open. Null until read. */
+  stewards = $state<StewardGrant[] | null>(null);
+  stewardsSaving = $state(false);
+  stewardsError = $state<string | null>(null);
+  stewardsEpoch = 0;
   /** The one child transcript shown in Agents, beside the normal open-thread subscription. */
   delegationSubscribedThreadId: ThreadId | null = null;
   private readonly coordinationRefresh = new ViewRefresh();
@@ -141,6 +148,51 @@ export class Delegation {
       if (this.ctx.client === client && s.openThread?.id === threadId) this.coordinationError = error instanceof Error ? error.message : String(error);
     } finally {
       if (this.ctx.client === client && this.coordinationEpoch === epoch) this.coordinationSaving = false;
+    }
+  }
+
+  /** Reads every grant; a `stewards.changed` reads them again once they were read. */
+  async loadStewards(): Promise<void> {
+    const s = this.ctx.store;
+    const client = this.ctx.client;
+    if (!client || untrack(() => s.connection) !== 'ready') return;
+    const epoch = this.stewardsEpoch;
+    try {
+      const grants = await client.call('stewards.list', {});
+      if (this.ctx.client === client && this.stewardsEpoch === epoch) { this.stewards = grants; this.stewardsError = null; }
+    } catch (error) {
+      if (this.ctx.client === client && this.stewardsEpoch === epoch) this.stewardsError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  /** Makes a thread's agent the steward of projects, or replaces its grant. Owner only. */
+  async setSteward(grant: StewardGrantInput): Promise<void> {
+    await this.saveSteward(async client => {
+      const saved = await client.call('stewards.set', { grant });
+      return [...(this.stewards ?? []).filter(entry => entry.threadId !== saved.threadId), saved];
+    });
+  }
+
+  async revokeSteward(threadId: ThreadId): Promise<void> {
+    await this.saveSteward(async client => {
+      await client.call('stewards.revoke', { threadId });
+      return (this.stewards ?? []).filter(entry => entry.threadId !== threadId);
+    });
+  }
+
+  private async saveSteward(write: (client: Client) => Promise<StewardGrant[]>): Promise<void> {
+    const client = this.ctx.client;
+    if (!client || !this.ctx.store.owner || this.stewardsSaving) return;
+    const epoch = ++this.stewardsEpoch;
+    this.stewardsSaving = true;
+    this.stewardsError = null;
+    try {
+      const grants = await write(client);
+      if (this.ctx.client === client && this.stewardsEpoch === epoch) this.stewards = grants;
+    } catch (error) {
+      if (this.ctx.client === client) this.stewardsError = error instanceof Error ? error.message : String(error);
+    } finally {
+      if (this.ctx.client === client && this.stewardsEpoch === epoch) this.stewardsSaving = false;
     }
   }
 

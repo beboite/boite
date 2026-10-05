@@ -24,6 +24,7 @@ import { browserCommand, BROWSER_HELP } from './browser-cli.ts';
 import { deviceCommand } from './device-cli.ts';
 import { agentsCommand, AgentsUsage, WAIT_MAX_S } from './agents-cli.ts';
 import { parse, requiredText, Usage, type Parsed } from './cli-args.ts';
+import { CONTROL_HELP, controlCommand, isControlCommand, ownerThreadNew, ownerWithoutThread, type Caller } from './control-cli.ts';
 
 export interface CliIo {
   out(text: string): void;
@@ -44,6 +45,9 @@ export const USAGE = `usage: boite <command> [args] [--json]
   projects                       the projects added to Boite
   projects add <folder>          add an existing folder as a project, so thread
                                  new and thread move can name it (--name <name>)
+  projects archive|unarchive|remove <p>
+                                 the owner's; removing leaves the folder on disk
+${CONTROL_HELP}
   attach <file>                  publish a file in chat, up to 512 MB
   show <file>[:line]             open a file in the panel, at a line
   diff [file]                    open the changes, or one file's diff
@@ -118,6 +122,13 @@ export const USAGE = `usage: boite <command> [args] [--json]
   workflow save <name> <plan|run-id>
   workflow start <template>      run a kept plan by name or id
 
+  Outside a thread, threads, thread, questions, answer, permissions, allow,
+  deny, stewards and projects need no --thread: the owner drives every thread,
+  and a message it sends is its own prompt. Inside a thread they act as the
+  steward the owner made it, and its messages reach threads as the steward's.
+
+  --core <url>                   another core, with its token in BOITE_TOKEN
+                                 (an owner token, or a paired device's session)
   --thread <id> --data-dir <dir> --channel <stable|dev>
                                  drive a thread from outside it, as the owner`;
 
@@ -144,6 +155,15 @@ interface Target {
   threadId: string;
 }
 
+/** Loopback, Tailscale's 100.64.0.0/10 and its fd7a:115c:a1e0::/48: links that already encrypt or never leave the machine. */
+export function privateLink(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (host === 'localhost' || host === '::1' || /^127\./.test(host)) return true;
+  const v4 = /^100\.(\d+)\.\d+\.\d+$/.exec(host);
+  if (v4) return Number(v4[1]) >= 64 && Number(v4[1]) <= 127;
+  return /^fd7a:115c:a1e0:/.test(host);
+}
+
 /** The environment first; `--thread` and `core.json` when the command runs outside a thread. */
 function targetOf(parsed: Parsed, env: CliIo['env']): Target {
   const url = env[AGENT_ENV.coreUrl] || undefined;
@@ -155,9 +175,24 @@ function targetOf(parsed: Parsed, env: CliIo['env']): Target {
     if (parsed.thread !== undefined && parsed.thread !== own) {
       throw new Error(`this CLI speaks for thread ${own}, not thread ${parsed.thread}`);
     }
+    if (parsed.core !== undefined) throw new Error(`this CLI speaks for thread ${own} on its own core; --core is for a terminal`);
     return { url, token, threadId: own };
   }
-  const threadId = parsed.thread ?? own ?? (['server', 'logs', 'journal-check'].includes(parsed.positional[0] ?? '') ? '' : undefined);
+  const threadId = parsed.thread ?? own ?? (['server', 'logs', 'journal-check'].includes(parsed.positional[0] ?? '') || ownerWithoutThread(parsed) ? '' : undefined);
+  if (parsed.core !== undefined) {
+    // The token stays out of the command line, where any process listing would show it.
+    const remoteToken = env.BOITE_TOKEN || undefined;
+    if (remoteToken === undefined) throw new Error('--core needs the token in BOITE_TOKEN');
+    let url: URL;
+    try { url = new URL(parsed.core); } catch { throw new Error(`--core: expected a URL such as https://host:3773, got ${parsed.core}`); }
+    // The hello carries the token: cleartext only where the link is already private, loopback or a Tailscale address.
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && privateLink(url.hostname))) {
+      throw new Error(`--core: expected https://, or http:// on loopback or a Tailscale address, got ${parsed.core}`);
+    }
+    const origin = url.origin;
+    if (threadId === undefined) throw new Error(`pass --thread <id> with --core for ${parsed.positional[0] ?? 'this command'}`);
+    return { url: origin, token: remoteToken, threadId };
+  }
   if (threadId === undefined) {
     throw new Error(`not inside a Boite thread (${AGENT_ENV.threadId} is not set); pass --thread <id>`);
   }
@@ -219,8 +254,12 @@ function changeRow(change: GitChange): string {
 
 type Printer = (lines: string[], value: unknown) => void;
 
-async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: string, print: Printer): Promise<void> {
+async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: string, print: Printer, caller: Caller): Promise<void> {
   const [command, ...rest] = parsed.positional;
+  if (isControlCommand(parsed)) {
+    await controlCommand(client, caller, threadId, parsed, print);
+    return;
+  }
   const want = (index: number, what: string): string => {
     const value = rest[index];
     if (value === undefined || value.length === 0) throw new Usage(`${command} needs ${what}`);
@@ -320,6 +359,18 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       );
     },
     projects: async () => {
+      if (caller === 'owner' && threadId === '') {
+        if (rest.length > 0 && rest[0] !== 'add') throw new Usage(`projects: unknown action ${rest[0]}`);
+        if (rest[0] === 'add') {
+          const folder = requiredText(rest, 1, 'projects add needs a folder');
+          const project = await client.call('projects.add', { path: absolute(io.cwd, folder), ...(parsed.name === undefined ? {} : { name: parsed.name }) });
+          print([`project: ${project.id}`, `name: ${project.name}`, `path: ${project.path}`, `git: ${project.repository ? 'yes' : 'no'}`], project);
+          return;
+        }
+        const projects = await client.call('projects.list', {});
+        print(projects.filter(p => p.archived !== true).map(p => `${p.id} ${JSON.stringify(p.name)} ${p.path}${p.repository ? '' : ' no-git'}${p.kind === 'drafts' ? ' drafts' : ''}`), projects);
+        return;
+      }
       if (rest.length > 0) {
         if (rest[0] !== 'add') throw new Usage(`projects: unknown action ${rest[0]}`);
         const folder = rest.slice(1).join(' ').trim();
@@ -336,6 +387,11 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     },
     thread: async () => {
       const action = want(0, 'move or new');
+      if (action === 'new' && caller === 'owner') {
+        // From a terminal the brief is the user's own prompt, not an agent's.
+        await ownerThreadNew(client, parsed, rest, print);
+        return;
+      }
       if (action === 'new') {
         const project = want(1, 'a project name, id or folder (boite projects lists them)');
         const prompt = requiredText(rest, 2, 'thread new needs a brief after the project');
@@ -490,7 +546,10 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
       if (parsed.positional.length !== 1 || parsed.json) throw new Usage('boite mcp takes no positional arguments or --json');
       const { runBoiteMcp } = await import('./mcp/server.ts');
       await runBoiteMcp(client, target.threadId, io.err, () => connect(target.url, target.token, { client: { name: 'mcp-wait', version: CORE_VERSION }, requestTimeoutMs: 3_605_000 }));
-    } else await run(parsed, io, client, target.threadId, print);
+    } else {
+      const caller: Caller = io.env[AGENT_ENV.coreUrl] && io.env[AGENT_ENV.token] && io.env[AGENT_ENV.threadId] ? 'steward' : 'owner';
+      await run(parsed, io, client, target.threadId, print, caller);
+    }
     return 0;
   } catch (error) {
     if (error instanceof Usage) {
