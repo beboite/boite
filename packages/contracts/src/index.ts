@@ -252,6 +252,28 @@ export interface ProviderShare {
 }
 
 /**
+ * Top-level keys of a JSON file an isolated account keeps as its own, set from
+ * the user's copy of that file before every spawn. The agent writes the rest of
+ * the file itself (its sign-in identity, per-project state), so the file is
+ * never copied whole. Claude keeps its user-scope MCP servers this way, under
+ * `mcpServers` in `.claude.json`.
+ */
+export interface ProviderSharedKeys {
+  /** An isolation variable of the profile; the account's file is `path` under the account's value of it. */
+  variable: string;
+  /** Relative to the variable's directory, no `..`. */
+  path: string;
+  /**
+   * The user's file when the variable is not set, starting with `~/`, for an
+   * agent that keeps it elsewhere than `path` under the variable's default:
+   * Claude reads `~/.claude.json`, not `~/.claude/.claude.json`.
+   */
+  home?: string;
+  /** Top-level keys, each replaced whole. */
+  keys: string[];
+}
+
+/**
  * Where the agent reads the user's own hooks, so Settings can say how many it
  * has. `events` is a JSON file, or every `.json` file of a directory, shaped
  * `{ "hooks": { "<Event>": [{ "hooks": [ ... ] }] } }`; each inner entry is one
@@ -350,6 +372,8 @@ export interface ProviderDescriptor {
   seedFiles?: Record<string, string>;
   /** What an isolated account shares with the provider's own profile. Absent shares nothing. */
   shared?: ProviderShare[];
+  /** Keys of a JSON file the account keeps as its own, taken from the user's copy of that file. */
+  sharedKeys?: ProviderSharedKeys[];
   /** Where the user's own hooks live. Only with `capabilities.hooks`. */
   hookSources?: ProviderHookSource[];
   /** Dialect fixes the driver of this protocol applies for this agent only. */

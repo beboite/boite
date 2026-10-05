@@ -10,7 +10,7 @@ import { probeThreadId } from './providers/probe.ts';
 import { activeSubscriptionProxy, subscriptionProxyEnv } from './subscription-proxy.ts';
 import { agentEnv, hostAgentsEnabled, launchPrefix, profileFor, resolveExecutable } from './providers/resolve.ts';
 import { browserNoopPath, browserNoopScript, currentOs, homePath } from './paths.ts';
-import { ISOLATION_DEFAULTS, shareProfile, unshareProfile, type ShareProblem } from './profile-share.ts';
+import { ISOLATION_DEFAULTS, shareKeys, shareProfile, unshareProfile, type ShareProblem } from './profile-share.ts';
 import type { SpawnedPipedProcess } from './procs.ts';
 
 /** The thread a login process is traced under. It is a name, never a real thread. */
@@ -333,7 +333,9 @@ export class AccountStore {
     if (isolationDir === null) return [];
     mkdirSync(isolationDir, { recursive: true });
     // `BOITE_HOST_AGENTS=0` keeps a test core away from the developer's own profile too.
-    const problems = hostAgentsEnabled() ? shareProfile(isolationDir, profile, provider.shared ?? []) : [];
+    const problems = hostAgentsEnabled()
+      ? [...shareProfile(isolationDir, profile, provider.shared ?? []), ...shareKeys(isolationDir, profile, provider.sharedKeys ?? [])]
+      : [];
     const said = problems.map((problem) => `${problem.path}: ${problem.message}`).join('; ');
     if (said !== (this.shareLog.get(account.id) ?? '')) {
       this.shareLog.set(account.id, said);

@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import type { OsProfile, ProviderShare } from '@boite/contracts';
+import type { OsProfile, ProviderShare, ProviderSharedKeys } from '@boite/contracts';
 import { messageOf } from './errors.ts';
 import { currentOs, homePath } from './paths.ts';
 
@@ -48,6 +48,8 @@ interface Marker {
   links: string[];
   /** Copies Boite wrote, with the sha256 of what it wrote, so a later edit by anyone else is told apart. */
   files: Record<string, string>;
+  /** Keys Boite set in a JSON file, as `<file>#<key>`, with the sha256 of the value it set. */
+  keys: Record<string, string>;
 }
 
 /** The provider's own directory behind an isolation variable: the environment's value, else its default. */
@@ -105,6 +107,110 @@ export function shareProfile(isolationDir: string, profile: OsProfile, shares: r
   }
   if (JSON.stringify(marker) !== before) writeFileSync(join(isolationDir, SHARE_MARKER), JSON.stringify(marker, null, 2), 'utf8');
   return problems;
+}
+
+/**
+ * Sets the listed top-level keys of a JSON file the account keeps as its own
+ * from the user's copy of that file, leaving every other key to the agent.
+ * The user's value wins over the agent's, as for a copied file. A key the user
+ * no longer has goes from the account when it still holds what Boite set. A
+ * value Boite never set is written aside once as `<name>.own-<time>`, never
+ * dropped. The file is written only when a key changes, so an agent that
+ * rewrites it on every run is not raced at every spawn.
+ */
+export function shareKeys(isolationDir: string, profile: OsProfile, entries: readonly ProviderSharedKeys[]): ShareProblem[] {
+  const problems: ShareProblem[] = [];
+  const marker = readMarker(isolationDir);
+  const before = JSON.stringify(marker);
+  for (const entry of entries) {
+    const template = profile.isolation[entry.variable];
+    if (template === undefined) continue;
+    const from = keysSource(entry);
+    if (from === null) {
+      problems.push({ path: entry.path, message: `Boite does not know where ${entry.variable} points when it is not set` });
+      continue;
+    }
+    const target = join(template.split('{isolationDir}').join(isolationDir), entry.path);
+    const key = relative(isolationDir, target).split(sep).join('/');
+    if (key.startsWith('..') || key.length === 0) {
+      problems.push({ path: entry.path, message: `${target} is outside the account directory` });
+      continue;
+    }
+    if (samePath(from, target)) continue;
+    try {
+      const link = linkedParent(isolationDir, key) ?? (statEntry(target)?.isSymbolicLink() === true ? target : null);
+      if (link !== null) {
+        problems.push({ path: entry.path, message: `${link} is a link, so ${target} would be written outside the account directory` });
+        continue;
+      }
+      mergeKeys(from, target, key, entry.keys, marker);
+    } catch (error) {
+      problems.push({ path: entry.path, message: messageOf(error) });
+    }
+  }
+  if (JSON.stringify(marker) !== before) writeFileSync(join(isolationDir, SHARE_MARKER), JSON.stringify(marker, null, 2), 'utf8');
+  return problems;
+}
+
+/** The user's own file: under the variable when the environment sets it, else `home`, else under the variable's default. */
+function keysSource(entry: ProviderSharedKeys): string | null {
+  const set = process.env[entry.variable];
+  if (set !== undefined && set.length > 0) return join(set, entry.path);
+  if (entry.home !== undefined) return join(homePath(), ...entry.home.slice(2).split('/'));
+  const home = variableHome(entry.variable);
+  return home === null ? null : join(home, entry.path);
+}
+
+function mergeKeys(source: string, target: string, file: string, keys: readonly string[], marker: Marker): void {
+  const theirs = statEntry(source, true) === undefined ? {} : readObject(source);
+  const current = statEntry(target);
+  const ours = current === undefined ? {} : readObject(target);
+  const own: Record<string, unknown> = {};
+  let changed = false;
+  for (const key of keys) {
+    const id = `${file}#${key}`;
+    const has = ours[key];
+    const wanted = theirs[key];
+    if (wanted === undefined) {
+      if (has !== undefined && marker.keys[id] === valueDigest(has)) {
+        delete ours[key];
+        changed = true;
+      }
+      delete marker.keys[id];
+      continue;
+    }
+    const hash = valueDigest(wanted);
+    if (has === undefined || valueDigest(has) !== hash) {
+      if (has !== undefined && marker.keys[id] === undefined) own[key] = has;
+      ours[key] = wanted;
+      changed = true;
+    }
+    marker.keys[id] = hash;
+  }
+  // The file may carry secrets (an MCP server's environment): a new one is the
+  // owner's alone, an existing one keeps its mode.
+  const mode = current === undefined ? 0o600 : current.mode & 0o777;
+  if (Object.keys(own).length > 0) writeFileSync(aside(target), `${JSON.stringify(own, null, 2)}\n`, { mode });
+  if (!changed) return;
+  mkdirSync(dirname(target), { recursive: true });
+  const temp = `${target}.boite-${process.pid}.tmp`;
+  writeFileSync(temp, `${JSON.stringify(ours, null, 2)}\n`, { mode });
+  renameSync(temp, target);
+}
+
+function readObject(path: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'));
+  } catch (error) {
+    throw new Error(`${path} is not valid JSON: ${messageOf(error)}`);
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error(`${path} does not hold a JSON object`);
+  return parsed as Record<string, unknown>;
+}
+
+function valueDigest(value: unknown): string {
+  return digest(Buffer.from(JSON.stringify(value), 'utf8'));
 }
 
 /**
@@ -229,14 +335,18 @@ function readMarker(isolationDir: string): Marker {
   try {
     const raw = JSON.parse(readFileSync(join(isolationDir, SHARE_MARKER), 'utf8')) as Partial<Marker>;
     const links = Array.isArray(raw.links) ? raw.links.filter((link): link is string => typeof link === 'string') : [];
-    const files: Record<string, string> = {};
-    if (typeof raw.files === 'object' && raw.files !== null) {
-      for (const [key, hash] of Object.entries(raw.files)) if (typeof hash === 'string') files[key] = hash;
-    }
-    return { links, files };
+    return { links, files: hashes(raw.files), keys: hashes(raw.keys) };
   } catch {
-    return { links: [], files: {} };
+    return { links: [], files: {}, keys: {} };
   }
+}
+
+function hashes(value: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (typeof value === 'object' && value !== null) {
+    for (const [key, hash] of Object.entries(value)) if (typeof hash === 'string') out[key] = hash;
+  }
+  return out;
 }
 
 /**

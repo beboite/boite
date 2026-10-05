@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { OsProfile, ProviderShare } from '@boite/contracts';
-import { SHARE_MARKER, shareProfile, unshareProfile } from '../src/profile-share.ts';
+import type { OsProfile, ProviderShare, ProviderSharedKeys } from '@boite/contracts';
+import { SHARE_MARKER, shareKeys, shareProfile, unshareProfile } from '../src/profile-share.ts';
 import { removeDir } from './harness.ts';
 
 const profile: OsProfile = {
@@ -142,5 +142,57 @@ describe('profile sharing', () => {
     const aside = readdirSync(account).find((name) => name.startsWith('hooks.json.own-'));
     expect(lstatSync(join(account, aside!)).isSymbolicLink()).toBe(true);
     expect(readdirSync(outside)).toEqual([]);
+  });
+
+  describe('shared keys', () => {
+    // `home` names the user's file only when the variable is unset; here it is set.
+    const entries: ProviderSharedKeys[] = [{ variable: 'CODEX_HOME', path: 'state.json', home: '~/.nowhere.json', keys: ['mcpServers'] }];
+    const servers = { ssh: { type: 'stdio', command: 'ssh-mcp', env: { TOKEN: 'x' } } };
+    const read = (): Record<string, unknown> => JSON.parse(readFileSync(join(account, 'state.json'), 'utf8')) as Record<string, unknown>;
+
+    test('sets the key from the user\'s file and leaves the agent\'s own keys alone', () => {
+      writeFileSync(join(source, 'state.json'), JSON.stringify({ mcpServers: servers, oauthAccount: { email: 'user' } }));
+      writeFileSync(join(account, 'state.json'), JSON.stringify({ oauthAccount: { email: 'account' }, projects: { a: 1 } }));
+
+      expect(shareKeys(account, profile, entries)).toEqual([]);
+      expect(read()).toEqual({ oauthAccount: { email: 'account' }, projects: { a: 1 }, mcpServers: servers });
+
+      // Nothing changed: the agent's later rewrite is not touched.
+      writeFileSync(join(account, 'state.json'), JSON.stringify({ mcpServers: servers, projects: { a: 2 } }));
+      expect(shareKeys(account, profile, entries)).toEqual([]);
+      expect(read()).toEqual({ mcpServers: servers, projects: { a: 2 } });
+    });
+
+    test('follows the user\'s edits and removals, and keeps a value Boite never set aside', () => {
+      writeFileSync(join(account, 'state.json'), JSON.stringify({ mcpServers: { mine: { command: 'own' } } }));
+      writeFileSync(join(source, 'state.json'), JSON.stringify({ mcpServers: servers }));
+      expect(shareKeys(account, profile, entries)).toEqual([]);
+      const aside = readdirSync(account).filter((name) => name.startsWith('state.json.own-'));
+      expect(aside).toHaveLength(1);
+      expect(JSON.parse(readFileSync(join(account, aside[0]!), 'utf8'))).toEqual({ mcpServers: { mine: { command: 'own' } } });
+      expect(read()).toEqual({ mcpServers: servers });
+
+      const more = { ...servers, semble: { command: 'semble' } };
+      writeFileSync(join(source, 'state.json'), JSON.stringify({ mcpServers: more }));
+      expect(shareKeys(account, profile, entries)).toEqual([]);
+      expect(read()).toEqual({ mcpServers: more });
+      expect(readdirSync(account).filter((name) => name.startsWith('state.json.own-'))).toHaveLength(1);
+
+      writeFileSync(join(source, 'state.json'), JSON.stringify({}));
+      expect(shareKeys(account, profile, entries)).toEqual([]);
+      expect(read()).toEqual({});
+    });
+
+    test('creates no file when the user has none, and reports a file that is not JSON instead of overwriting it', () => {
+      expect(shareKeys(account, profile, entries)).toEqual([]);
+      expect(existsSync(join(account, 'state.json'))).toBe(false);
+
+      writeFileSync(join(source, 'state.json'), JSON.stringify({ mcpServers: servers }));
+      writeFileSync(join(account, 'state.json'), '{ half written');
+      const problems = shareKeys(account, profile, entries);
+      expect(problems.map((problem) => problem.path)).toEqual(['state.json']);
+      expect(problems[0]?.message).toContain('is not valid JSON');
+      expect(readFileSync(join(account, 'state.json'), 'utf8')).toBe('{ half written');
+    });
   });
 });

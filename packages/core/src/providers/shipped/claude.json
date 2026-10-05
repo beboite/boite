@@ -49,6 +49,9 @@
       "paths": ["settings.json", "CLAUDE.md", "skills", "plugins", "agents", "commands", "hooks", "output-styles"]
     }
   ],
+  "sharedKeys": [
+    { "variable": "CLAUDE_CONFIG_DIR", "path": ".claude.json", "home": "~/.claude.json", "keys": ["mcpServers"] }
+  ],
   "hookSources": [
     { "variable": "CLAUDE_CONFIG_DIR", "path": "settings.json", "format": "events" }
   ],
