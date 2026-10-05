@@ -798,6 +798,10 @@ export const strings = {
     active: 'Active',
     paused: 'Paused',
     complete: 'Complete',
+    /** A goal whose agent stopped on a blocker and waits for the user's answer. */
+    blocked: 'Needs your answer',
+    blockedHint: 'The agent is blocked and waiting for you. Your next message resumes the goal.',
+    reply: 'Reply',
     pause: 'Pause',
     resume: 'Resume',
     remove: 'Remove',

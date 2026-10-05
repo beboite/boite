@@ -96,8 +96,8 @@ export class ActivityStore {
     // A finished loop cannot resume, so pausing it would leave it stuck on `paused`.
     if (params.action === 'pause' && item.status === 'complete') throw refused(`this ${params.kind} is complete; there is nothing to pause`);
     if (params.action === 'remove') state[params.kind] = null;
-    else if (params.action === 'complete' && state.goal) state.goal.status = 'complete';
-    else { item.status = params.action === 'resume' ? 'active' : 'paused'; item.error = null; if (params.kind === 'goal' && state.goal) state.goal.dismissed = false; }
+    else if (params.action === 'complete' && state.goal) { state.goal.status = 'complete'; delete state.goal.blocked; }
+    else { item.status = params.action === 'resume' ? 'active' : 'paused'; item.error = null; if (params.kind === 'goal' && state.goal) { state.goal.dismissed = false; delete state.goal.blocked; } }
     if (params.action === 'remove' || params.action === 'complete') {
       const key = `${params.threadId}:${params.kind}`;
       this.generations.set(key, (this.generations.get(key) ?? 0) + 1);
@@ -121,19 +121,25 @@ export class ActivityStore {
     this.save(threadId);
   }
 
-  /** A new user request retires the finished overlay without deleting its history. */
-  userPrompt(threadId: string): void {
-    this.prepareUserPrompt(threadId)?.();
+  /**
+   * A new user request retires the finished overlay without deleting its
+   * history, and answers a blocked goal: the goal resumes after that turn.
+   */
+  userPrompt(threadId: string, answers = true): void {
+    this.prepareUserPrompt(threadId, answers)?.();
   }
 
   /** Write the dismissal row in the caller's transaction; apply memory and notify after commit. */
-  prepareUserPrompt(threadId: string): (() => void) | undefined {
+  prepareUserPrompt(threadId: string, answers = true): (() => void) | undefined {
     const previous = this.states.get(threadId);
     if (!previous) return;
     const state = { ...previous, goal: previous.goal ? { ...previous.goal } : null };
     let changed = false;
     if (state.tasks.length && state.tasks.every(task => task.status === 'completed') && !state.tasksDismissed) { state.tasksDismissed = true; changed = true; }
     if (state.goal?.status === 'complete' && !state.goal.dismissed) { state.goal.dismissed = true; changed = true; }
+    // The reply turn runs first; its `turn.finished` schedules the next goal turn.
+    // A native command such as `/cost` is not an answer.
+    if (answers && state.goal?.status === 'paused' && state.goal.blocked) { state.goal.status = 'active'; state.goal.error = null; delete state.goal.blocked; changed = true; }
     if (!changed) return;
     this.core.journal.setSetting(`activity:${threadId}`, state);
     return () => {
@@ -186,7 +192,8 @@ export class ActivityStore {
     if (!state) return;
     if (owned?.kind === 'goal' && current && state.goal?.status === 'active') {
       const signal = this.goalResult(turn);
-      if (signal === 'blocked') { state.goal.status = 'paused'; state.goal.error = 'The agent reported a blocker. Read its answer before resuming.'; this.save(turn.threadId); }
+      // Clients that know `blocked` show their own words; the error serves older ones.
+      if (signal === 'blocked') { state.goal.status = 'paused'; state.goal.blocked = true; state.goal.error = 'The agent reported a blocker. Reply to resume.'; this.save(turn.threadId); }
       else if (signal === 'complete') { state.goal.status = 'complete'; this.save(turn.threadId); }
     }
     // Let the scheduler release its running slot and clients submit queued user input first.

@@ -59,7 +59,11 @@
             <Target size={13} strokeWidth={1.75} />
             <span class="text ui-label" title={activity.goal.objective}>{activity.goal.objective}</span>
             <span class="meta ui-label">{fill(strings.tasks.iterations, { count: String(activity.goal.iterations) })}</span>
-            <span class="state ui-label-box" class:live={activity.goal.status === 'active'}><span class="ui-label">{strings.activity[activity.goal.status]}</span></span>
+            {#if activity.goal.status === 'paused' && activity.goal.blocked}
+              <span class="state blocked ui-label-box" title={strings.activity.blockedHint} data-testid="tasks-goal-blocked"><span class="ui-label">{strings.activity.blocked}</span></span>
+            {:else}
+              <span class="state ui-label-box" class:live={activity.goal.status === 'active'}><span class="ui-label">{strings.activity[activity.goal.status]}</span></span>
+            {/if}
           </div>
         {/if}
         {#if activity?.loop}
@@ -320,6 +324,12 @@
 
   .state.live {
     color: var(--color-accent);
+  }
+
+  .state.blocked {
+    color: var(--color-live);
+    background: color-mix(in srgb, var(--color-live) 16%, transparent);
+    font-weight: 600;
   }
 
   .mark {
