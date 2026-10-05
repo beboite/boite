@@ -188,8 +188,12 @@ test('the browser is found where each OS installs it, and BOITE_BROWSER alone wh
     expect(chromiumArgs('/profile', 'linux')).toEqual(expect.arrayContaining(['--headless=new', '--disable-software-rasterizer', '--use-angle=gl-egl', '--user-data-dir=/profile']));
     expect(chromiumArgs('/profile', 'win32')).not.toContain('--use-angle=gl-egl');
     // The DevTools protocol goes over the browser's own pipes: no port for another process to reach.
-    expect(chromiumArgs('/profile', 'linux')).toContain('--remote-debugging-pipe');
-    expect(chromiumArgs('/profile', 'linux').some(arg => arg.startsWith('--remote-debugging-port'))).toBe(false);
+    for (const platform of ['linux', 'darwin'] as const) {
+      expect(chromiumArgs('/profile', platform)).toContain('--remote-debugging-pipe');
+      expect(chromiumArgs('/profile', platform).some(arg => arg.startsWith('--remote-debugging-port'))).toBe(false);
+    }
+    // Bun cannot open the pipe descriptors on Windows: a random port there, on loopback only.
+    expect(chromiumArgs('/profile', 'win32')).toEqual(expect.arrayContaining(['--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1']));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

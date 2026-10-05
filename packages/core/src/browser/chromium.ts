@@ -3,7 +3,7 @@
  * one profile folder. The core speaks the DevTools protocol to it; nothing of
  * it is shown on screen.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export interface ChromiumFound { path: string }
@@ -68,7 +68,8 @@ export function chromiumArgs(profileDir: string, platform = process.platform): s
     '--disable-backgrounding-occluded-windows',
     '--headless=new',
     // The DevTools protocol runs over descriptors 3 and 4, never a port another process could reach.
-    '--remote-debugging-pipe',
+    // Bun cannot open those descriptors on Windows: there it is a random loopback port.
+    ...(pipesDevTools(platform) ? ['--remote-debugging-pipe'] : ['--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1']),
     `--user-data-dir=${profileDir}`,
     '--no-first-run',
     '--no-default-browser-check',
@@ -102,4 +103,31 @@ export function keepSession(profileDir: string): void {
     mkdirSync(join(profileDir, 'Default'), { recursive: true });
     writeFileSync(file, JSON.stringify({ ...preferences, session: { ...session, restore_on_startup: 1 } }));
   } catch { /* the browser starts with what it has */ }
+}
+
+/** Whether the DevTools protocol goes over the browser's own pipes on this OS, rather than a loopback port. */
+export function pipesDevTools(platform = process.platform): boolean {
+  return platform !== 'win32';
+}
+
+/** Where a fresh process writes its DevTools port: removed first, so a stale one is never read. */
+export function clearActivePort(profileDir: string): void {
+  rmSync(join(profileDir, 'DevToolsActivePort'), { force: true });
+}
+
+/** The browser endpoint once Chromium has written it: `ws://127.0.0.1:<port><path>`. */
+export async function waitForEndpoint(profileDir: string, exited: Promise<unknown>, timeoutMs = 20_000): Promise<string> {
+  const file = join(profileDir, 'DevToolsActivePort');
+  let gone = false;
+  void exited.then(() => { gone = true; });
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (gone) throw new Error('the browser exited while starting; another process may hold its profile folder');
+    try {
+      const [port, path] = readFileSync(file, 'utf8').split(/\r?\n/);
+      if (port && /^\d+$/.test(port) && path?.startsWith('/devtools/browser/')) return `ws://127.0.0.1:${port}${path}`;
+    } catch { /* not written yet */ }
+    await Bun.sleep(50);
+  }
+  throw new Error(`the browser did not open its DevTools port within ${timeoutMs / 1000} seconds`);
 }

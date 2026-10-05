@@ -4,6 +4,8 @@
  * page it attached, each tagged with its `sessionId`. The channel is the two
  * pipes `--remote-debugging-pipe` gives (descriptors 3 and 4 of the browser,
  * one JSON message per NUL), so no port is open for another process to use.
+ * On Windows, where Bun cannot open those descriptors, it is a WebSocket to a
+ * random loopback port instead.
  */
 
 type Listener = (params: Record<string, unknown>, sessionId: string | undefined) => void;
@@ -63,6 +65,22 @@ export class Cdp {
       cdp.#ended();
     })();
     return cdp;
+  }
+
+  /** The Windows transport: the browser's WebSocket endpoint on 127.0.0.1. */
+  static connect(url: string, timeoutMs = 10_000): Promise<Cdp> {
+    return new Promise((resolve, reject) => {
+      const socket = new WebSocket(url);
+      const timer = setTimeout(() => { socket.close(); reject(new CdpError(`the browser did not accept a DevTools connection within ${timeoutMs / 1000} seconds`)); }, timeoutMs);
+      socket.addEventListener('error', () => { clearTimeout(timer); reject(new CdpError(`could not connect to the browser's DevTools at ${url}`)); }, { once: true });
+      socket.addEventListener('open', () => {
+        clearTimeout(timer);
+        const cdp = new Cdp(text => socket.send(text), () => { try { socket.close(); } catch { /* already gone */ } });
+        socket.addEventListener('message', event => cdp.#receive(String(event.data)));
+        socket.addEventListener('close', () => cdp.#ended());
+        resolve(cdp);
+      }, { once: true });
+    });
   }
 
   get open(): boolean { return this.#closed === null; }

@@ -133,12 +133,18 @@ run a script in the page. It can act in the page as a person would, signed-in
 sites included: pair only devices you would give that. `browser.remoteChanged`
 goes to the clients subscribed to the conversation.
 
-The core speaks the DevTools protocol to the browser over two pipes,
-`--remote-debugging-pipe` on the browser's descriptors 3 and 4, which
-`procs.spawn` opens with `extraPipes`. No port is open: another process of the
-machine, another account included, cannot reach the browser through it. It can
-still read the profile folder if its permissions let it, as with any browser
-profile.
+On Linux and macOS the core speaks the DevTools protocol to the browser over
+two pipes, `--remote-debugging-pipe` on the browser's descriptors 3 and 4,
+which `procs.spawn` opens with `extraPipes`. No port is open: another process
+of the machine, another account included, cannot reach the browser through
+it. It can still read the profile folder if its permissions let it, as with
+any browser profile.
+
+On Windows Bun cannot open those descriptors (`EBADF`, CI on 2026-10-05), so
+the browser listens on a random port of 127.0.0.1 and the core connects to it.
+That port has no authentication: a process of the same PC that finds it can
+drive the browser, signed-in profiles included. Do not copy sign-ins into the
+agent browser of a Windows machine other people have an account on.
 
 ## Verification
 

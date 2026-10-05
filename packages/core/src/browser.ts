@@ -39,7 +39,7 @@ import type { Core } from './core.ts';
 import type { Connection } from './router.ts';
 import { refused } from './errors.ts';
 import { Cdp } from './browser/cdp.ts';
-import { chromiumArgs, findChromium, keepSession } from './browser/chromium.ts';
+import { chromiumArgs, clearActivePort, findChromium, keepSession, pipesDevTools, waitForEndpoint } from './browser/chromium.ts';
 import { TabRecorder } from './browser/recorder.ts';
 import { EDITABLE_SCRIPT, KEY_CODES, PAGE_INFO_SCRIPT, SNAPSHOT_SCRIPT, targetScript } from './browser/scripts.ts';
 
@@ -212,16 +212,21 @@ export class AgentBrowser {
     const dir = this.#profileDir(profile);
     mkdirSync(dir, { recursive: true });
     if (profile !== PRIVATE_BROWSER_PROFILE) keepSession(dir);
-    const spawned = this.#core.procs.spawn(SCOPE, found.path, chromiumArgs(dir), { agentRoot: false, extraPipes: 2 });
+    const piped = pipesDevTools();
+    if (!piped) clearActivePort(dir);
+    const spawned = this.#core.procs.spawn(SCOPE, found.path, chromiumArgs(dir), { agentRoot: false, ...(piped ? { extraPipes: 2 } : {}) });
     // Chromium writes to both pipes; nobody reads them, so they are drained.
     void spawned.proc.stdout.pipeTo(new WritableStream()).catch(() => {});
     void spawned.proc.stderr.pipeTo(new WritableStream()).catch(() => {});
     // Chromium's helpers exit with their parent; a clean close comes first (`#shut`).
     const kill = () => { try { spawned.proc.kill(); } catch { /* gone */ } };
     try {
-      const [commands, replies] = spawned.fds ?? [];
-      if (commands === undefined || replies === undefined) throw new Error('the browser was started without its DevTools pipes');
-      const cdp = Cdp.pipe(commands, replies);
+      let cdp: Cdp;
+      if (piped) {
+        const [commands, replies] = spawned.fds ?? [];
+        if (commands === undefined || replies === undefined) throw new Error('the browser was started without its DevTools pipes');
+        cdp = Cdp.pipe(commands, replies);
+      } else cdp = await Cdp.connect(await waitForEndpoint(dir, spawned.exited));
       // The first answer says the browser is up; a browser that exits first never gives it.
       await Promise.race([
         cdp.send('Browser.getVersion', {}, undefined, 20_000),
