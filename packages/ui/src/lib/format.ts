@@ -65,6 +65,18 @@ export function bytes(value: number | null | undefined): string {
   return `${tenths.format(value / (1024 * 1024 * 1024))} ${units.gigabytes}`;
 }
 
+/**
+ * A size being downloaded, read against another: whole kilobytes under a
+ * megabyte, then megabytes to one decimal, so "1.2 MB / 3.4 MB" moves while
+ * it loads instead of sitting on "1 MB / 3 MB".
+ */
+export function transferBytes(value: number): string {
+  const units = strings.units;
+  const { tenths, whole } = formatters();
+  if (value < 1024 * 1024) return `${whole.format(Math.ceil(value / 1024))} ${units.kilobytes}`;
+  return `${tenths.format(value / (1024 * 1024))} ${units.megabytes}`;
+}
+
 export function millis(value: number | null | undefined): string {
   const units = strings.units;
   if (value === null || value === undefined) return strings.common.none;

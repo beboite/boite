@@ -10,7 +10,9 @@ import type {
   ThreadSummary
 } from '@boite/contracts';
 import { readingCacheBytes, READING_CACHE_BYTES } from '../reading-cache';
-import { INITIAL_MESSAGE_PAGE, MESSAGE_PAGE_MAX, previewToolOutputs, previewFileData } from '@boite/contracts';
+import { INITIAL_MESSAGE_PAGE, MESSAGE_PAGE_MAX, previewToolOutputs, previewFileData, previewImageData } from '@boite/contracts';
+import { lightPage, NewerPages, setMessagesAfter, type ReadingPosition } from './reading-pages.svelte';
+export type { ReadingPosition } from './reading-pages.svelte';
 import { forgetArchivedThread } from '../archive-history';
 import { rightPanel } from '../right-panel.svelte';
 import { workingChildren, type WorkingChildren, lastIndexById, mergeResumed, patchRow, reconcileThread, resumeRequest, threadsByProject } from '../thread-rows';
@@ -24,7 +26,7 @@ export type RewoundMessage = Omit<ThreadRewind, 'thread'>;
 
 /** The row part of a thread, without what only an open thread carries. */
 function summaryOf(thread: Thread): ThreadSummary {
-  const { memoryEvents: _memoryEvents, messages: _messages, turns: _turns, commands: _commands, background: _background, backgroundHistory: _history, activity: _activity, messagesBefore: _before, messagesFrom: _from, messagesSync: _sync, messagesUnchanged: _unchanged, ...summary } = thread;
+  const { memoryEvents: _memoryEvents, messages: _messages, turns: _turns, commands: _commands, background: _background, backgroundHistory: _history, activity: _activity, messagesBefore: _before, messagesAfter: _after, messagesFrom: _from, messagesSync: _sync, messagesUnchanged: _unchanged, ...summary } = thread;
   return summary;
 }
 
@@ -39,6 +41,10 @@ export class Threads {
   /** True while a page of older messages is in flight, so the timeline can say so. */
   loadingOlder = $state(false);
   loadingThreadId = $state<ThreadId | null>(null);
+  /** How much of the loading thread's page arrived, against the core's own total; null until a slice says it. */
+  loadingBytes = $state<{ threadId: ThreadId; received: number; total: number } | null>(null);
+  /** The pages below a window opened around a reading position. */
+  readonly newer: NewerPages;
   /** The threads a `threads.retitle` is out for: their menu item waits. */
   retitling = $state<ThreadId[]>([]);
   /**
@@ -46,7 +52,7 @@ export class Threads {
    * hides it and what follows at once instead of after the core restored files.
    */
   rewinding = $state<Record<ThreadId, MessageId>>({});
-  readonly readingPositions = new Map<string, { top: number; pinned: boolean; heights: Map<string, number>; anchor?: { id: string; offset: number }; height?: number; reservePrompt?: string | null; followPrompt?: string | null }>();
+  readonly readingPositions = new Map<string, ReadingPosition>();
   readingThreads = new Map<string, Thread>();
   subscribedThreadId: ThreadId | null = null;
   /** The newest navigation intent, including drafts, pages and detached clients. */
@@ -57,7 +63,7 @@ export class Threads {
   /** Refreshing this visit keeps disclosures; leaving it invalidates their pending fetches. */
   #toolOutputVisit = 0;
 
-  constructor(private readonly ctx: StoreContext) {}
+  constructor(private readonly ctx: StoreContext) { this.newer = new NewerPages(ctx); }
 
   async capabilities(threadId: ThreadId) {
     const client = this.ctx.client;
@@ -89,7 +95,9 @@ export class Threads {
     this.#openTarget = null;
     this.#olderGeneration++;
     this.loadingOlder = false;
+    this.newer.reset();
     this.loadingThreadId = null;
+    this.loadingBytes = null;
     return ++this.openGeneration;
   }
 
@@ -100,7 +108,9 @@ export class Threads {
     // gives its full output back to the core before it enters this cache.
     this.readingThreads.delete(thread.id);
     const previews = previewToolOutputs(thread.messages);
-    const messages = this.ctx.store.core?.features?.threadSnapshots ? previewFileData(previews) : previews;
+    const features = this.ctx.store.core?.features;
+    const files = features?.threadSnapshots ? previewFileData(previews) : previews;
+    const messages = features?.readingPages ? previewImageData(files) : files;
     const snapshot = messages.every((message, index) => message === thread.messages[index]) ? thread : { ...thread, messages };
     const bytes = readingCacheBytes(messages);
     if (bytes <= READING_CACHE_BYTES) this.readingThreads.set(thread.id, snapshot);
@@ -228,6 +238,7 @@ export class Threads {
     for (const held of this.threadSnapshots(thread.id)) {
       delete held.messagesFrom;
       delete held.messagesSync;
+      delete held.messagesAfter;
       Object.assign(held, structuredClone(thread));
     }
   }
@@ -268,6 +279,7 @@ export class Threads {
         held.messages = fresh.messages;
         held.turns = fresh.turns;
         held.messagesBefore = fresh.messagesBefore;
+        setMessagesAfter(held, fresh.messagesAfter);
       }
     } catch (error) {
       if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
@@ -324,12 +336,19 @@ export class Threads {
       // what it cannot vouch for: a reconnect on a long conversation used to
       // download its last 120 messages again for the two that were new.
       const resume = resumeRequest(threadId, held);
-      const fetched = client.call('threads.get', { ...resume, limit: held ? MESSAGE_PAGE_MAX : INITIAL_MESSAGE_PAGE, compactTools: true,
+      // A long thread left away from its end opens where the reader was: the
+      // page around the message at the top of their view, not the last one.
+      const features = s.core?.features;
+      const saved = held || !features?.readingPages ? undefined : this.readingPositions.get(threadId);
+      const around = saved && !saved.pinned ? saved.anchor?.id : undefined;
+      const fetched = client.call('threads.get', { ...resume, limit: held ? MESSAGE_PAGE_MAX : INITIAL_MESSAGE_PAGE, ...lightPage(this.ctx), ...(around ? { around } : {}),
         ...(bundled ? {
-          compactFiles: true,
           sync: held?.messagesSync && held.messagesSync.from === resume.after ? held.messagesSync : true,
           open: { ...(previous && previous !== threadId && previous !== delegation.delegationSubscribedThreadId ? { previous } : {}), ...(options.requests === false ? { requests: false } : {}), markRead: true }
         } : {})
+      }, held || !features?.chunkedAnswers ? {} : {
+        // The loading view counts the page in as the core slices it.
+        onProgress: (received, total) => { if (newest() && this.loadingThreadId === threadId) this.loadingBytes = { threadId, received, total }; }
       });
       if (options.requests !== false) {
         permissionRead = this.ctx.requests.permissionRead(client, threadId, bundled ? () => fetched.then(thread => thread.opened?.permissions ?? []) : undefined);
@@ -371,11 +390,15 @@ export class Threads {
         thread.messagesBefore = cached.messagesBefore;
       } else {
         this.readingThreads.delete(threadId);
-        this.readingPositions.delete(threadId);
+        // A page around the reader's message keeps their place; any other starts at the end.
+        if (!around || !freshIds.has(around)) this.readingPositions.delete(threadId);
       }
+      // A window that now reaches the end says so, over the cursor a held copy had.
+      if (held && thread.messagesAfter === undefined) delete held.messagesAfter;
       this.#show(held ? reconcileThread(held, thread) : thread, navigate, true);
       loaded = true;
       this.loadingThreadId = null;
+      this.loadingBytes = null;
       // The thread may already be waiting on a request this page never saw,
       // and may have had one settled where this client could not hear it.
       const permissions = await permissionsAsked;
@@ -410,7 +433,7 @@ export class Threads {
       summaryRead.cancel();
       permissionRead?.cancel();
       questionRead?.cancel();
-      if (newest()) this.loadingThreadId = null;
+      if (newest()) { this.loadingThreadId = null; this.loadingBytes = null; }
       await deselected;
     }
   }
@@ -504,7 +527,7 @@ export class Threads {
     const navigation = this.openGeneration;
     const current = () => generation === this.#olderGeneration && this.ctx.currentNavigation(client, navigation);
     try {
-      const page = await client.call('messages.list', { threadId: open.id, before: cursor, compactTools: true, ...(this.ctx.store.core?.features?.threadSnapshots ? { compactFiles: true } : {}) });
+      const page = await client.call('messages.list', { threadId: open.id, before: cursor, ...lightPage(this.ctx) });
       const still = this.openThread;
       if (!current() || !still || still.id !== open.id || still.messagesBefore !== cursor) return 0;
       const known = new Set(still.messages.map((m) => m.id));
@@ -830,7 +853,7 @@ export class Threads {
       if (this.ctx.currentClient(client, generation) && this.#toolOutputVisit === visit) {
         for (const message of this.messages(threadId, messageId)) {
           const part = message.parts[partIndex];
-          if (part?.type === 'file' && part.dataDeferred) { part.data = data; delete part.dataDeferred; }
+          if ((part?.type === 'file' || part?.type === 'image') && part.dataDeferred) { part.data = data; delete part.dataDeferred; }
         }
       }
       return data;

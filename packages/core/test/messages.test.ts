@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { MESSAGE_PAGE, MESSAGE_PAGE_MAX, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES } from '@boite/contracts';
-import type { Message } from '@boite/contracts';
+import type { Message, MessagePart } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { echoThread, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -287,3 +287,85 @@ describe('message paging', () => {
     expect(harness.core.journal.listMessages(threadId)).toHaveLength(300);
   });
 });
+
+/** A failed call's message, or 'none'. */
+async function refusal(call: Promise<unknown>): Promise<string> {
+  try {
+    await call;
+    return 'none';
+  } catch (error) {
+    return (error as Error).message;
+  }
+}
+
+describe('opening where the reader was', () => {
+  test('around a message far up, the page is centred on it and pages down to the end without a gap', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    seed(threadId, 300);
+
+    const thread = await client.call('threads.get', { threadId, around: 'msg_0100' });
+    const half = Math.floor(MESSAGE_PAGE / 2);
+    expect(thread.messages).toHaveLength(MESSAGE_PAGE);
+    expect(ids(thread.messages).at(0)).toBe(`msg_${String(100 - half).padStart(4, '0')}`);
+    expect(ids(thread.messages)).toContain('msg_0100');
+    expect(thread.messagesBefore).toBe(ids(thread.messages)[0]!);
+    expect(thread.messagesAfter).toBe(ids(thread.messages).at(-1)!);
+
+    const walked = [...ids(thread.messages)];
+    let cursor = thread.messagesAfter ?? null;
+    while (cursor !== null) {
+      const page = await client.call('messages.list', { threadId, after: cursor });
+      expect(page.before).toBeNull();
+      walked.push(...ids(page.messages));
+      cursor = page.after ?? null;
+    }
+    expect(walked.at(-1)).toBe('msg_0299');
+    expect(new Set(walked).size).toBe(walked.length);
+    expect(walked).toEqual([...walked].sort());
+    expect(walked).toHaveLength(300 - (100 - half));
+  });
+
+  test('a message the last page holds, or one the thread does not, opens on the last page', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    seed(threadId, 300);
+
+    for (const around of ['msg_0250', 'msg_nope']) {
+      const thread = await client.call('threads.get', { threadId, around });
+      expect(ids(thread.messages).at(-1)).toBe('msg_0299');
+      expect(thread.messagesBefore).toBe('msg_0180');
+      expect(thread.messagesAfter).toBeUndefined();
+    }
+  });
+
+  test('messages.list takes exactly one cursor', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    seed(threadId, 5);
+    const expected = 'messages.list takes exactly one cursor: before, for older messages, or after, for newer ones';
+    expect(await refusal(client.call('messages.list', { threadId, before: 'msg_0003', after: 'msg_0001' }))).toBe(expected);
+    expect(await refusal(client.call('messages.list', { threadId }))).toBe(expected);
+    expect(await refusal(client.call('messages.list', { threadId, after: 'msg_nope' }))).toBe(`message msg_nope is not a message of thread ${threadId}`);
+  });
+
+  test('compactImages leaves a large picture on the core with its size, and messages.attachment reads it back', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const big = 'A'.repeat(12_000);
+    const parts: MessagePart[] = [
+      { type: 'text', text: 'look' },
+      { type: 'image', mimeType: 'image/png', data: big, alt: null },
+      { type: 'image', mimeType: 'image/png', data: 'B'.repeat(16), alt: 'icon' },
+    ];
+    harness.core.journal.putMessage({ id: 'msg_pictures', threadId, turnId: 'trn_seed', role: 'user', parts, state: 'complete', createdAt: 5_000 });
+
+    const light = (await client.call('threads.get', { threadId, compactImages: true })).messages.find((message) => message.id === 'msg_pictures')!;
+    expect(light.parts[1]).toEqual({ type: 'image', mimeType: 'image/png', data: '', alt: null, bytes: 9_000, dataDeferred: true });
+    expect(light.parts[2]).toEqual(parts[2]!);
+    expect((await client.call('messages.attachment', { threadId, messageId: 'msg_pictures', partIndex: 1 })).data).toBe(big);
+    // Without the flag the page is what it always was.
+    expect((await client.call('threads.get', { threadId })).messages.find((message) => message.id === 'msg_pictures')!.parts).toEqual(parts);
+  });
+});
+

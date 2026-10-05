@@ -10,6 +10,7 @@
   import { claudeKeywords, promptCommand, promptSegments, promptText } from '../lib/message-display';
   import type { TurnProgress } from '../lib/turn-progress.svelte';
   import PreviewReferences from './PreviewReferences.svelte';
+  import OmittedPart from './OmittedPart.svelte';
   import MessageActions from './MessageActions.svelte';
   import MoveMarker from './MoveMarker.svelte';
   import ImageViewer from './ImageViewer.svelte';
@@ -37,9 +38,14 @@
 
   type ImagePart = Extract<Message['parts'][number], { type: 'image' }>;
 
-  /** The pictures a prompt was sent with; an assistant message never has one. */
-  function imagesOf(message: Message): ImagePart[] {
-    return message.parts.filter((part): part is ImagePart => part.type === 'image');
+  /** The pictures a prompt was sent with, each with its place among the parts; an assistant message never has one. */
+  function imagesOf(message: Message): { image: ImagePart; index: number }[] {
+    return message.parts.flatMap((part, index) => (part.type === 'image' ? [{ image: part, index }] : []));
+  }
+
+  /** A picture a light page left on the core, read once its place nears the screen. */
+  function loadImage(index: number): void {
+    store.loadMessageAttachment(message.threadId, message.id, index).catch((error: unknown) => { store.reportError(error, 'minor'); });
   }
 
   type FilePart = Extract<Message['parts'][number], { type: 'file' }>;
@@ -105,7 +111,10 @@
   {/each}
   {#if images.length > 0}
     <div class="images">
-      {#each images as image, at (at)}
+      {#each images as { image, index }, at (at)}
+        {#if image.dataDeferred}
+          <OmittedPart bytes={image.bytes ?? 0} load={() => loadImage(index)} />
+        {:else}
         <button
           type="button"
           class="shot"
@@ -120,6 +129,7 @@
             alt={image.alt ?? ''}
           />
         </button>
+        {/if}
       {/each}
     </div>
   {/if}

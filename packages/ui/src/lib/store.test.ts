@@ -1511,6 +1511,118 @@ describe('Store', () => {
     expect(await store.loadOlder()).toBe(0);
   });
 
+  test('a thread left away from its end reopens around the reader\'s message, pages down to the end, and jumps to the last page', async ({ createStore }) => {
+    const { client, store } = createStore({ delayMs: 0, long: true });
+    store.attach(client);
+    await store.connect();
+    store.readingPositions.set('t-long', { top: 5_000, pinned: false, heights: new Map(), anchor: { id: 'm-long-100', offset: 12 } });
+
+    await store.open('t-long');
+    const ids = () => (store.openThread?.messages ?? []).map((message) => message.id);
+    // Half the first page above the reader's message, half from it on.
+    expect(ids()).toHaveLength(40);
+    expect(ids().at(0)).toBe('m-long-80');
+    expect(store.messagesBefore).toBe('m-long-80');
+    expect(store.messagesAfter).toBe('m-long-119');
+    // The place is kept: the timeline puts the reader's message back where it was.
+    expect(store.readingPositions.get('t-long')?.anchor?.id).toBe('m-long-100');
+
+    while (store.messagesAfter !== null) expect(await store.loadNewer()).toBeGreaterThan(0);
+    const numbers = ids().map((id) => Number(id.replace('m-long-', '')));
+    expect(numbers).toEqual(Array.from({ length: 320 }, (_, index) => index + 80));
+    expect(await store.loadNewer()).toBe(0);
+
+    // Opened around the reader's message again, "jump to latest" swaps the window for the last page.
+    const again = new Store();
+    again.attach(client);
+    await again.connect();
+    again.readingPositions.set('t-long', { top: 5_000, pinned: false, heights: new Map(), anchor: { id: 'm-long-100', offset: 12 } });
+    await again.open('t-long');
+    expect(again.messagesAfter).toBe('m-long-119');
+    await again.loadLatest();
+    const latest = (again.openThread?.messages ?? []).map((message) => message.id);
+    expect(latest.at(0)).toBe('m-long-360');
+    expect(latest.at(-1)).toBe('m-long-399');
+    expect(again.messagesAfter).toBeNull();
+    expect(again.messagesBefore).toBe('m-long-360');
+    expect(again.readingPositions.has('t-long')).toBe(false);
+  });
+
+  test('a pinned reader, or one whose message is gone, opens on the last page', async ({ createStore }) => {
+    const { client } = createStore({ delayMs: 0, long: true });
+    for (const position of [{ pinned: true, id: 'm-long-100' }, { pinned: false, id: 'm-long-gone' }]) {
+      const store = new Store();
+      store.attach(client);
+      await store.connect();
+      store.readingPositions.set('t-long', { top: 5_000, pinned: position.pinned, heights: new Map(), anchor: { id: position.id, offset: 0 } });
+      await store.open('t-long');
+      expect(store.openThread?.messages.at(-1)?.id).toBe('m-long-399');
+      expect(store.messagesAfter).toBeNull();
+    }
+  });
+
+  test('the loading thread reports the bytes the core counted, and a thread already in hand asks for none', async ({ createStore }) => {
+    const { client, store } = createStore({ delayMs: 0, long: true });
+    store.attach(client);
+    await store.connect();
+    const call = client.call.bind(client);
+    const seen: unknown[] = [];
+    let asked = 0;
+    client.call = ((method, params, options) => {
+      if (method !== 'threads.get' || !options?.onProgress) return call(method, params, options);
+      asked += 1;
+      // As the client does for each slice of a long answer.
+      options.onProgress(1_000, 4_000);
+      seen.push({ loading: store.loadingThreadId, bytes: store.loadingBytes });
+      return call(method, params);
+    }) as typeof client.call;
+
+    await store.open('t-long');
+    expect(seen).toEqual([{ loading: 't-long', bytes: { threadId: 't-long', received: 1_000, total: 4_000 } }]);
+    expect(store.loadingBytes).toBeNull();
+    // The same thread again is on screen already: nothing to count.
+    await store.open('t-long');
+    expect(asked).toBe(1);
+  });
+
+  test('a prompt that lands under a window cut above the end brings the last page, the prompt with it', async ({ createStore }) => {
+    const { client, store } = createStore({ delayMs: 0, long: true });
+    store.attach(client);
+    await store.connect();
+    store.readingPositions.set('t-long', { top: 5_000, pinned: false, heights: new Map(), anchor: { id: 'm-long-100', offset: 0 } });
+    await store.open('t-long');
+    expect(store.messagesAfter).toBe('m-long-119');
+
+    await client.call('turns.start', { threadId: 't-long', prompt: 'and now?' });
+    await vi.waitFor(() => expect(store.messagesAfter).toBeNull());
+    const messages = store.openThread?.messages ?? [];
+    expect(messages.some((message) => message.role === 'user' && message.parts.some((part) => part.type === 'text' && part.text === 'and now?'))).toBe(true);
+    // No gap: the window is the last page, not the old one with the prompt glued under it.
+    expect(messages.some((message) => message.id === 'm-long-100')).toBe(false);
+    expect(messages.some((message) => message.id === 'm-long-399')).toBe(true);
+  });
+
+  test('a large picture stays on the core until it is asked for, and Edit fetches it first', async ({ createStore }) => {
+    const { client, store } = createStore({ delayMs: 0 });
+    store.attach(client);
+    await store.connect();
+    await store.open('t-trace');
+    const data = 'A'.repeat(12_000);
+    await client.call('turns.start', { threadId: 't-trace', prompt: 'look', attachments: [{ kind: 'image', mimeType: 'image/png', data, name: 'shot' }] });
+
+    const fresh = new Store();
+    fresh.attach(client);
+    await fresh.connect();
+    await fresh.open('t-trace');
+    const message = fresh.openThread!.messages.findLast((entry) => entry.parts.some((part) => part.type === 'image'))!;
+    const index = message.parts.findIndex((part) => part.type === 'image');
+    expect(message.parts[index]).toMatchObject({ type: 'image', data: '', bytes: 9_000, dataDeferred: true });
+
+    expect(await fresh.loadAttachments('t-trace', message)).toBe(true);
+    expect(message.parts[index]).toMatchObject({ type: 'image', data });
+    expect(message.parts[index]).not.toHaveProperty('dataDeferred');
+  });
+
   test('a short thread opens whole, with no cursor to walk', async ({ store }) => {
     await store.open('t-trace');
 

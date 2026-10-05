@@ -14,6 +14,7 @@
   import AgentDock from './AgentDock.svelte';
   import Menu from './Menu.svelte';
   import MessageList from './MessageList.svelte';
+  import ThreadLoading from './ThreadLoading.svelte';
   import ThreadRecovery from './ThreadRecovery.svelte';
   import BackgroundHistory from './BackgroundHistory.svelte';
   import ForkReturn from './ForkReturn.svelte';
@@ -119,7 +120,7 @@
            a switch they grew for every message the page had ever shown. -->
       {#key thread.id}
         {#if store.loadingThreadId === thread.id && messages.length === 0}
-          <div class="draft-body" data-testid="thread-loading"><p class="muted">{strings.app.loading}</p></div>
+          <ThreadLoading progress={store.loadingBytes?.threadId === thread.id ? store.loadingBytes : null} />
         {:else}
           <MessageList {store} threadId={thread.id} {messages} />
         {/if}

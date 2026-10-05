@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
-import { PROTOCOL_VERSION, RPC_MAX_FRAME_BYTES, RpcCloseCode, RpcErrorCode, type CoreInfo } from '@boite/contracts';
+import { PROTOCOL_VERSION, RPC_CHUNK_MARK, RPC_MAX_FRAME_BYTES, RpcCloseCode, RpcErrorCode, type CoreInfo } from '@boite/contracts';
 import { RpcFailure, WsClient, defaultBackoff, openDeadline, readyAgain, rpcUrl, wasDropped, type SocketLike } from './client';
 
 const CORE: CoreInfo = {
@@ -777,6 +777,37 @@ describe('WsClient', () => {
 
     socket.receive({ jsonrpc: '2.0', id: request.id, result: [] });
     await expect(pending).resolves.toEqual([]);
+  });
+
+  test('an answer in slices reports each one against the total, outlives the call timeout while it arrives, and resolves once joined', async () => {
+    vi.useFakeTimers();
+    const { client, socket } = connected();
+    try {
+      socket.open();
+      socket.receive({ id: socket.frame(0).id, result: { core: CORE, principal: 'owner' } });
+      await client.connect();
+      const seen: [number, number][] = [];
+      const pending = client.call('threads.list', {}, { onProgress: (received, total) => seen.push([received, total]) });
+      const request = JSON.parse(socket.sent[1]!) as { id: number; progress?: boolean };
+      // Asking for progress is what makes the core slice the answer.
+      expect(request.progress).toBe(true);
+      const whole = JSON.stringify({ jsonrpc: '2.0', id: request.id, result: [{ title: 'é'.repeat(30) }] });
+      const bytes = new TextEncoder().encode(whole).length;
+      const cuts = [0, 20, 45, whole.length];
+      for (let index = 0; index + 1 < cuts.length; index += 1) {
+        const body = whole.slice(cuts[index], cuts[index + 1]);
+        // Each slice lands just before the call would have expired.
+        await vi.advanceTimersByTimeAsync(110_000);
+        socket.onmessage?.({ data: `${RPC_CHUNK_MARK}${JSON.stringify({ id: request.id, bytes: new TextEncoder().encode(body).length, total: bytes })}\n${body}` });
+      }
+      expect(await pending).toEqual([{ title: 'é'.repeat(30) }]);
+      expect(seen.map(([, total]) => total)).toEqual([bytes, bytes, bytes]);
+      expect(seen.at(-1)).toEqual([bytes, bytes]);
+      expect(seen.map(([received]) => received)).toEqual([...seen.map(([received]) => received)].sort((a, b) => a - b));
+      // A call that asked nothing sends no flag.
+      void client.call('projects.list', {}).catch(() => undefined);
+      expect('progress' in JSON.parse(socket.sent[2]!)).toBe(false);
+    } finally { client.close(); vi.useRealTimers(); }
   });
 
   test('a notification reaches its handler', async () => {

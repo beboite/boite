@@ -156,7 +156,11 @@ export function listen(ctx: StoreContext, client: Client): void {
     for (const target of threads.threadSnapshots(message.threadId)) {
       const index = lastIndexById(target.messages, message.id);
       if (index >= 0) target.messages[index] = message;
-      else target.messages.push(message);
+      // A window opened around a reading position stops short of the end: what
+      // starts now comes with the pages below it, not after a gap.
+      else if ((target.messagesAfter ?? null) === null) target.messages.push(message);
+      // A prompt sent meanwhile lands on the last page: the window jumps there.
+      else if (message.role === 'user' && target === threads.openThread) void threads.newer.loadLatest();
     }
   });
 
