@@ -75,6 +75,8 @@ export class Journal {
       // A large transaction grows the WAL file; this lets it shrink back at the next checkpoint.
       this.db.exec('PRAGMA journal_size_limit = 33554432');
       this.db.transaction(() => migrate(this.db, file))();
+      // An incognito conversation never outlives the core that held it.
+      this.purgeIncognitoThreads();
     } catch (error) {
       this.db.close(false);
       throw error;
@@ -150,6 +152,7 @@ export class Journal {
     try {
       this.flushDeltas();
       this.persistMessages();
+      this.purgeIncognitoThreads();
     } finally {
       this.stream.clear();
       this.closed = true;
@@ -228,8 +231,8 @@ export class Journal {
     this.db
       .query(
         `INSERT OR REPLACE INTO threads
-         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, parent_thread_id, prompt_cache, agent_session_id, session_resume_at, title_state, branch_naming_pending, fork_origin, done_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, parent_thread_id, prompt_cache, agent_session_id, session_resume_at, title_state, branch_naming_pending, fork_origin, done_at, incognito)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         thread.id,
@@ -262,6 +265,7 @@ export class Journal {
         thread.branchNamingPending === true ? 1 : 0,
         thread.forkOrigin ? JSON.stringify(thread.forkOrigin) : null,
         thread.doneAt ?? null,
+        thread.incognito ? 1 : 0,
       );
   }
 
@@ -324,6 +328,15 @@ export class Journal {
       this.db.query('DELETE FROM thread_deletions WHERE root_id = ?').run(rootId);
       return rows.map(row => row.thread_id);
     })();
+  }
+
+  /** Incognito conversations and the sub-threads they started. */
+  private purgeIncognitoThreads(): void {
+    // Almost always none: then the family query is never run.
+    const roots = (this.db.query('SELECT id FROM threads WHERE incognito = 1').all() as { id: string }[]).map(row => row.id);
+    if (roots.length === 0) return;
+    const children = this.db.query(`SELECT id FROM threads WHERE parent_thread_id IN (${roots.map(() => '?').join(', ')})`).all(...roots) as { id: string }[];
+    this.deleteThreads([...roots, ...children.map(row => row.id)]);
   }
 
   /** Purge expired families atomically, using their root's deletion time. */

@@ -263,6 +263,12 @@ export function threadMethods(ctx: FakeContext) {
       const model = checkModel(provider, account.id, models, params.model ?? defaultModel(provider), ctx.modelCatalogs.has(provider.id + '::' + account.id));
       const effort = checkEffort(provider, models, model, params.effort ?? null);
       checkSpeed(ctx, params.providerId, params.accountId, model, params.speed ?? null);
+      if (params.incognito === true) {
+        // The core's refusals, by field: the drafts only, and a folder it makes itself.
+        if (project.kind !== 'drafts') throw refusal('an incognito conversation starts in the drafts project only', { projectId: project.id, field: 'incognito', expected: 'the drafts project' });
+        if (params.worktree !== undefined) throw refusal('incognito and worktree exclude each other: an incognito conversation works in a folder the core makes', { field: 'incognito', expected: 'absent or false with worktree' });
+        if (params.cwd) throw refusal('incognito and cwd exclude each other: an incognito conversation works in a folder the core makes', { field: 'cwd', expected: 'absent with incognito' });
+      }
       if (params.cwd !== undefined && params.cwd.length > 0 && params.worktree === undefined) checkCwd(project.path, params.cwd);
       const at = ctx.now();
       const title = params.title !== undefined && params.title.length > 0 ? params.title : 'New thread';
@@ -272,11 +278,14 @@ export function threadMethods(ctx: FakeContext) {
       const placed = params.worktree === undefined ? null : fakeWorktree(project.path, title, params.worktree.branch, ctx.settings.worktreeStorage, project.id);
       if (placed) registerFakeWorktree(ctx, project.id, placed);
       // The core makes a dated folder per draft; the fake only names it.
-      const draftFolder = project.kind === 'drafts' && !params.cwd
+      const id = `t-${++ctx.seq}`;
+      const draftFolder = params.incognito === true ? `${DATA_DIR}/incognito/${id}`
+        : project.kind === 'drafts' && !params.cwd
         ? fakeDraftFolder(project.path, title, new Date(at), new Set([...ctx.threads.values()].map((thread) => thread.cwd)))
         : null;
       const thread: Thread = {
-        id: `t-${++ctx.seq}`,
+        id,
+        ...(params.incognito === true ? { incognito: true as const } : {}),
         projectId: params.projectId,
         title,
         titleSource: 'prompt',
@@ -498,10 +507,13 @@ export function threadMethods(ctx: FakeContext) {
           ctx.threads.delete(thread.id);
           clearTimeout(ctx.activityTimers.get(thread.id));
           ctx.activityTimers.delete(thread.id);
-          ctx.emit('thread.removed', { threadId: thread.id, undoable: true });
+          ctx.emit('thread.removed', { threadId: thread.id, undoable: !root.incognito });
         }
-        ctx.deletedThreads.set(threadId, { threads: family, archived, deletedAt: Date.now() });
-        ctx.emit('thread.deletionsUpdated', {});
+        // As the core: an incognito conversation is erased, with nothing to restore.
+        if (!root.incognito) {
+          ctx.deletedThreads.set(threadId, { threads: family, archived, deletedAt: Date.now() });
+          ctx.emit('thread.deletionsUpdated', {});
+        }
         if (root.projectId !== null) announceProject(ctx, root.projectId);
         return { ok: true };
       } finally {
@@ -682,6 +694,7 @@ export function threadMethods(ctx: FakeContext) {
     'threads.fork': async (params) => {
       const source = ctx.thread(params.threadId);
       if (source.agentSessionId || source.projectId === null) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a persistent agent session takes its work through Agents and cannot be forked', data: { threadId: source.id, field: 'threadId', expected: 'a conversation thread' } });
+      if (source.incognito) throw refusal('an incognito conversation cannot be forked: a copy would outlive it', { threadId: source.id, field: 'threadId', expected: 'a conversation that is not incognito' });
       const at = source.messages.findIndex((message) => message.id === params.messageId);
       const target = source.messages[at];
       if (!target) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `message ${params.messageId} is not a message of thread ${source.id}`, data: { threadId: source.id, field: 'messageId', messageId: params.messageId, expected: 'a message of this thread' } });

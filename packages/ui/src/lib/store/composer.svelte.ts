@@ -373,7 +373,8 @@ export class Composer {
       effort: choice.effort,
       speed: choice.speed ?? null,
       ...(choice.model ? { model: choice.model } : {}),
-      ...(draft.worktree ? { worktree: {} } : {})
+      ...(draft.worktree ? { worktree: {} } : {}),
+      ...(draft.incognito && s.draftInDrafts ? { incognito: true } : {})
     }, { navigate: false });
     if (!created || !owner()) return null;
     const originalDraft = current() && s.draft === draft && !s.openThread;

@@ -58,3 +58,29 @@ reports failure until that read has succeeded.
 If neither IndexedDB nor the synchronous backup can save the input,
 `flushDrafts` returns false and the input remains visible. A completed
 IndexedDB write can succeed even when the synchronous backup is unavailable.
+
+## Incognito
+
+A conversation that should leave nothing behind starts incognito: turn on
+`Incognito` at the right of the draft's header before the first send.
+The switch is offered in the drafts only, and a draft taken to a project leaves
+it behind.
+
+- `threads.create` with `incognito: true` gives the thread a folder of the
+  core's data directory, `incognito/<thread id>`, instead of a dated folder in
+  Documents. It is refused on any other project, and with `cwd` or `worktree`.
+  A paired phone may start one too: it can call `threads.remove`, so leaving
+  erases it there as well.
+- The thread carries `incognito: true`. The sidebar, the command palette and
+  the phone's lists leave it out, and the device's unsent-text journal keeps
+  nothing typed into it or into its draft.
+- Leaving it erases it. Opening another thread or a new draft, archiving it or
+  deleting it makes the client call `threads.remove`, and the core deletes its
+  history, events included, and its folder at once. `thread.removed` says
+  `undoable: false`, and the deleted list never shows it.
+- A core that stops, or starts after a crash, erases every incognito
+  conversation it still holds and the whole `incognito` folder.
+- Forking or moving one is refused: either would keep a copy.
+
+What the agent's own CLI writes outside that folder, such as its session
+transcripts in its home directory, is out of Boite's reach and stays.
