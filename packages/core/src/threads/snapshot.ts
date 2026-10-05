@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
-import { MESSAGE_PAGE, MESSAGE_PAGE_MAX, previewToolOutputs, previewFileData, resumeAnchor, snapshotOptionsProblem } from '@boite/contracts';
+import { MESSAGE_PAGE, MESSAGE_PAGE_MAX, resumeAnchor, snapshotOptionsProblem } from '@boite/contracts';
 import type { Message, RpcParams, Thread, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core';
 import { invalidParams, refused } from '../errors';
 import type { AgentState } from './agent-state';
 import { readMemoryEvents } from './memory-read';
+import { forTransport, transportProjection } from './transport';
 
 type Options = Pick<RpcParams<'threads.get'>, 'limit' | 'compactTools' | 'compactFiles' | 'sync' | 'open'>;
 const hash = (messages: Message[], options: Options) => createHash('sha256').update(`${!!options.compactTools}:${!!options.compactFiles}:`).update(JSON.stringify(messages)).digest('base64url');
@@ -25,8 +26,10 @@ export function threadSnapshot(core: Core, thread: ThreadSummary, after: string 
   core.journal.flushDeltas();
   core.bus.flush();
   const from = after === undefined ? null : core.journal.messageRowid(thread.id, after);
-  const tail = from === null ? null : core.journal.listMessagesFrom(thread.id, from, limit);
-  const page = tail === null ? core.journal.listMessagePage(thread.id, { limit }) : { messages: tail, before: null };
+  // Budgets apply to what the client receives, so compacted tool output never blocks a page.
+  const project = transportProjection(options);
+  const tail = from === null ? null : core.journal.listMessagesFrom(thread.id, from, limit, project);
+  const page = tail === null ? core.journal.listMessagePage(thread.id, { limit, project }) : { messages: tail, before: null };
   const turns = core.journal.listTurnsFor(thread.id, page.messages.map(message => message.turnId));
   const anchor = options.sync ? resumeAnchor({ messages: page.messages, turns }) : null;
   const anchorIndex = anchor === null ? -1 : page.messages.findIndex(message => message.id === anchor);
@@ -34,13 +37,13 @@ export function threadSnapshot(core: Core, thread: ThreadSummary, after: string 
   const known = options.sync && options.sync !== true ? options.sync : undefined;
   const unchanged = tail !== null && after !== undefined && known?.from === after &&
     known.hash === (proof?.from === after ? proof.hash : hash(tail, options));
-  const messages = unchanged ? [] : options.compactTools ? previewToolOutputs(page.messages) : page.messages;
+  const messages = unchanged ? [] : forTransport(page.messages, options);
   return {
     ...thread,
     ...(tail === null || after === undefined ? {} : { messagesFrom: after }),
     ...(proof ? { messagesSync: proof } : {}),
     ...(unchanged ? { messagesUnchanged: true as const } : {}),
-    messages: options.compactFiles ? previewFileData(messages) : messages,
+    messages,
     memoryEvents: readMemoryEvents(core.journal, thread.id),
     commands: state.commands.get(thread.id) ?? [],
     background: state.background.get(thread.id) ?? [],

@@ -1,7 +1,8 @@
 import { archiveState, archiveStateKey } from './merged-pr-archive-state.ts';
 import { assertIdleFamily } from './threads/completion.ts';
+import { forTransport, transportProjection } from './threads/transport.ts';
 import { repositoryOf, type MergedPrProof } from './pull-requests.ts';
-import { previewToolOutputs, previewFileData, previewReferencesError, previewPrompt, MESSAGE_PAGE, MESSAGE_PAGE_MAX, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type AgentProfile } from '@boite/contracts';
+import { previewReferencesError, previewPrompt, MESSAGE_PAGE, MESSAGE_PAGE_MAX, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type AgentProfile } from '@boite/contracts';
 import type {
   Account,
   AccountId,
@@ -176,9 +177,8 @@ export class ThreadStore {
     }
     const asked = params.limit ?? MESSAGE_PAGE;
     const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
-    const page = this.core.journal.listMessagePage(params.threadId, { beforeRowid: rowid, limit });
-    const messages = params.compactTools ? previewToolOutputs(page.messages) : page.messages;
-    return { ...page, messages: params.compactFiles ? previewFileData(messages) : messages, turns: this.core.journal.listTurnsFor(params.threadId, page.messages.map((message) => message.turnId)) };
+    const page = this.core.journal.listMessagePage(params.threadId, { beforeRowid: rowid, limit, project: transportProjection(params) });
+    return { ...page, messages: forTransport(page.messages, params), turns: this.core.journal.listTurnsFor(params.threadId, page.messages.map((message) => message.turnId)) };
   }
 
   // -- writes ---------------------------------------------------------------

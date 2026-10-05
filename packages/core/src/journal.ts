@@ -26,6 +26,11 @@ export interface JournalOptions {
   onError?: (message: string) => void;
 }
 
+/** Serialized UTF-8 size of a message as a client receives it. */
+function sentBytes(message: Message, project?: (message: Message) => Message): number {
+  return Buffer.byteLength(JSON.stringify(project ? project(message) : message));
+}
+
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
 export interface MessagePage {
   messages: Message[];
@@ -592,7 +597,9 @@ export class Journal {
   /**
    * One page of a thread's messages, oldest first: the last `limit` of them, or
    * the last `limit` written before `beforeRowid`, within the serialized byte
-   * budget except for one complete transportable message. `before` names the oldest one
+   * budget except for one complete transportable message. `project` is what the
+   * caller will send for each message (compacted tool output, deferred files):
+   * budgets and the frame ceiling apply to that, not to the stored row. `before` names the oldest one
    * returned while the thread still holds older ones, and is null once the page
    * reaches the first message.
    *
@@ -600,7 +607,7 @@ export class Journal {
    * are an index search, descending, with no sort step and no scan of the rest of
    * the thread.
    */
-  listMessagePage(threadId: string, options: { beforeRowid?: number; limit: number }): MessagePage {
+  listMessagePage(threadId: string, options: { beforeRowid?: number; limit: number; project?: (message: Message) => Message }): MessagePage {
     // Subscribers have already received buffered deltas. A reload must not replace
     // those messages with an older projection while the next delta is streaming.
     this.flushDeltas();
@@ -617,7 +624,7 @@ export class Journal {
       for (const row of rows) {
         if (messages.length >= limit || bytes >= MESSAGE_PAGE_MAX_BYTES) { older = true; break; }
         const message = this.currentMessage(row as MessageRow);
-        const size = Buffer.byteLength(JSON.stringify(message));
+        const size = sentBytes(message, options.project);
         const next = bytes + size + (messages.length ? 1 : 0);
         if (messages.length && next > MESSAGE_PAGE_MAX_BYTES) { older = true; break; }
         // One complete attachment-sized message can exceed the page budget.
@@ -634,8 +641,8 @@ export class Journal {
     return { messages, before: older ? (messages[0]?.id ?? null) : null };
   }
 
-  /** The complete reconnect tail, or null when its count or serialized bytes exceed a page. */
-  listMessagesFrom(threadId: string, fromRowid: number, limit: number): Message[] | null {
+  /** The complete reconnect tail, or null when its count or the serialized bytes `project` sends exceed a page. */
+  listMessagesFrom(threadId: string, fromRowid: number, limit: number, project?: (message: Message) => Message): Message[] | null {
     this.flushDeltas();
     const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?');
     const messages: Message[] = [];
@@ -644,7 +651,7 @@ export class Journal {
       for (const row of statement.iterate(threadId, fromRowid, limit + 1)) {
         if (messages.length >= limit) return null;
         const message = this.currentMessage(row as MessageRow);
-        bytes += Buffer.byteLength(JSON.stringify(message)) + (messages.length ? 1 : 0);
+        bytes += sentBytes(message, project) + (messages.length ? 1 : 0);
         if (bytes > MESSAGE_PAGE_MAX_BYTES) return null;
         messages.push(message);
       }

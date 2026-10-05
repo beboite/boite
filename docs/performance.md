@@ -249,9 +249,12 @@ instead of arriving after it as a second copy.
   and 12 MiB of serialized UTF-8 message data, including JSON escaping and array
   separators. The journal iterates its thread index and stops at the count or
   byte boundary, retaining complete messages and a gapless backwards cursor.
-  Current buffered parts count toward the budget. One complete attachment-sized
-  message can exceed 12 MiB so pagination advances; a message or complete RPC
-  response above 16 MiB is refused explicitly rather than losing content.
+  Current buffered parts count toward the budget. Both budgets measure each
+  message as the client receives it: with `compactTools` a finished tool's
+  output counts as its 1 KiB preview, so a turn whose stored image reads total
+  18 MB still opens. One complete attachment-sized message can exceed 12 MiB
+  so pagination advances; a message or complete RPC response above 16 MiB as
+  sent is refused explicitly rather than losing content.
   Turns, thread metadata and memory events also occupy that RPC response budget.
 - On a reconnect, the open thread's `threads.get` leaves before the boot lists,
   so the missed text does not wait for the slowest of them. The fresh
