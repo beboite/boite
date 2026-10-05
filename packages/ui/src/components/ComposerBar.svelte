@@ -89,9 +89,11 @@
       active: displayedMode === mode
     }))
   );
-  // The worktree switch exists where the core can honour it: a draft on a git repository.
+  // The worktree switch exists where the core can honour it: a draft on a
+  // folder the core found a `.git` in. No answer yet, or an older core that
+  // never gives one, is no repository: a switch the core would refuse is noise.
   let draftRepository = $derived(
-    work.shows('composer.worktree') && store.draft && !store.draftInDrafts ? store.projects.find((project) => project.id === store.draft?.projectId)?.repository !== false : false
+    work.shows('composer.worktree') && store.draft && !store.draftInDrafts ? store.projects.find((project) => project.id === store.draft?.projectId)?.repository === true : false
   );
 
   // The reasoning chip belongs to the model the choice is on, and a model that

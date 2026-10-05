@@ -40,7 +40,7 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
     ...(owner.owner
       ? [
           ...(experimentOn('session-import') ? [{ id: 'import', label: strings.sidebar.importSession, glyph: Import }] : []),
-          ...(project.kind !== 'drafts' && project.repository !== false ? [{ id: 'worktree-default', label: strings.sidebar.worktreeDefault, glyph: GitBranch, checked: project.worktreeDefault === true }, { id: 'worktrees', label: strings.settings.worktrees.heading, glyph: GitBranch }] : []),
+          ...(project.kind !== 'drafts' && project.repository === true ? [{ id: 'worktree-default', label: strings.sidebar.worktreeDefault, glyph: GitBranch, checked: project.worktreeDefault === true }, { id: 'worktrees', label: strings.settings.worktrees.heading, glyph: GitBranch }] : []),
           ...(project.kind !== 'drafts' && project.repository !== false && project.autoArchiveMergedPr !== undefined ? [{
             id: 'auto-archive-merged-pr', label: strings.sidebar.autoArchiveMergedPr, glyph: Archive,
             get checked() { return (owner.projects.find(current => current.id === project.id)?.autoArchiveMergedPr ?? project.autoArchiveMergedPr) === true; },
