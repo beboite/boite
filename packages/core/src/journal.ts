@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES } from '@boite/contracts';
+import { MESSAGE_PAGE_MAX_BYTES } from '@boite/contracts';
 import type {
   Account,
   DeletedThreadSummary,
@@ -22,21 +22,19 @@ import type { AccountRow, MessageRow, ProcessRow, ProjectIconRow, ProjectRow, Th
 import type { DetectedIcon as StoredProjectIcon } from './project-icons.ts';
 import { messageOfError, StreamBuffer } from './journal/stream-buffer.ts';
 import { usageByBucket, usageByThread, type UsageSumRow, type UsageThreadRow } from './journal/usage-sums.ts';
-import { refused } from './errors.ts';
+import { sent, type Projection } from './journal/sent.ts';
 
 export interface JournalOptions {
   /** Where a write that fails on a timer, with no caller to throw to, is reported. */
   onError?: (message: string) => void;
 }
 
-/** Serialized UTF-8 size of a message as a client receives it. */
-function sentBytes(message: Message, project?: (message: Message) => Message): number {
-  return Buffer.byteLength(JSON.stringify(project ? project(message) : message));
-}
-
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
 export interface MessagePage {
+  /** The rows as journalled: a resume proof covers what a page deferred too. */
   messages: Message[];
+  /** The same messages as `project` sends them; the stored ones when the read is internal. */
+  sent: Message[];
   before: string | null;
 }
 
@@ -638,8 +636,9 @@ export class Journal {
    * One page of a thread's messages, oldest first: the last `limit` of them, or
    * the last `limit` written before `beforeRowid`, within the serialized byte
    * budget except for one complete transportable message. `project` is what the
-   * caller will send for each message (compacted tool output, deferred files):
-   * budgets and the frame ceiling apply to that, not to the stored row. `before` names the oldest one
+   * caller sends for each message (compacted tool parts, deferred files): the
+   * page holds that, and budgets and the frame ceiling apply to it, not to the
+   * stored row. Without it the read is internal and unbounded in bytes. `before` names the oldest one
    * returned while the thread still holds older ones, and is null once the page
    * reaches the first message.
    *
@@ -647,7 +646,7 @@ export class Journal {
    * are an index search, descending, with no sort step and no scan of the rest of
    * the thread.
    */
-  listMessagePage(threadId: string, options: { beforeRowid?: number; limit: number; project?: (message: Message) => Message; toolPreviews?: boolean }): MessagePage {
+  listMessagePage(threadId: string, options: { beforeRowid?: number; limit: number; project?: Projection; toolPreviews?: boolean }): MessagePage {
     // Subscribers have already received buffered deltas. A reload must not replace
     // those messages with an older projection while the next delta is streaming.
     this.flushDeltas();
@@ -658,27 +657,24 @@ export class Journal {
     const rows = options.beforeRowid === undefined
       ? statement.iterate(threadId, limit + 1)
       : statement.iterate(threadId, options.beforeRowid, limit + 1);
-    const messages: Message[] = [];
+    const messages: Message[] = [], out: Message[] = [];
     let bytes = 2, older = false;
     try {
       for (const row of rows) {
         if (messages.length >= limit || bytes >= MESSAGE_PAGE_MAX_BYTES) { older = true; break; }
+        // One complete attachment-sized message can exceed the page budget.
         const message = this.currentMessage(row as MessageRow, options.toolPreviews);
-        const size = sentBytes(message, options.project);
+        const { sent: projected, size } = sent(message, options.project);
         const next = bytes + size + (messages.length ? 1 : 0);
         if (messages.length && next > MESSAGE_PAGE_MAX_BYTES) { older = true; break; }
-        // One complete attachment-sized message can exceed the page budget.
-        // Never pretend a message too large for any RPC frame was sent.
-        if (size >= RPC_MAX_FRAME_BYTES) {
-          throw refused(`message ${message.id} is ${size} serialized UTF-8 bytes; expected a complete message below ${RPC_MAX_FRAME_BYTES} bytes`,
-            { threadId, messageId: message.id, field: 'messages', bytes: size, max: RPC_MAX_FRAME_BYTES, expected: `a complete message below ${RPC_MAX_FRAME_BYTES} serialized UTF-8 bytes` });
-        }
         messages.push(message);
+        out.push(projected);
         bytes = next;
       }
     } finally { statement.finalize(); }
     messages.reverse();
-    return { messages, before: older ? (messages[0]?.id ?? null) : null };
+    out.reverse();
+    return { messages, sent: out, before: older ? (messages[0]?.id ?? null) : null };
   }
 
   /**
@@ -687,28 +683,25 @@ export class Journal {
    * newest one returned while the thread holds newer ones, and is null once
    * the page reaches the last message.
    */
-  listMessagesForward(threadId: string, fromRowid: number, limit: number, project?: (message: Message) => Message, toolPreviews = false): { messages: Message[]; after: string | null } {
+  listMessagesForward(threadId: string, fromRowid: number, limit: number, project?: Projection, toolPreviews = false): { messages: Message[]; sent: Message[]; after: string | null } {
     this.flushDeltas();
     const cap = Math.max(1, Math.trunc(limit));
     const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?');
-    const messages: Message[] = [];
+    const messages: Message[] = [], out: Message[] = [];
     let bytes = 2, newer = false;
     try {
       for (const row of statement.iterate(threadId, fromRowid, cap + 1)) {
         if (messages.length >= cap || bytes >= MESSAGE_PAGE_MAX_BYTES) { newer = true; break; }
         const message = this.currentMessage(row as MessageRow, toolPreviews);
-        const size = sentBytes(message, project);
+        const { sent: projected, size } = sent(message, project);
         const next = bytes + size + (messages.length ? 1 : 0);
         if (messages.length && next > MESSAGE_PAGE_MAX_BYTES) { newer = true; break; }
-        if (size >= RPC_MAX_FRAME_BYTES) {
-          throw refused(`message ${message.id} is ${size} serialized UTF-8 bytes; expected a complete message below ${RPC_MAX_FRAME_BYTES} bytes`,
-            { threadId, messageId: message.id, field: 'messages', bytes: size, max: RPC_MAX_FRAME_BYTES, expected: `a complete message below ${RPC_MAX_FRAME_BYTES} serialized UTF-8 bytes` });
-        }
         messages.push(message);
+        out.push(projected);
         bytes = next;
       }
     } finally { statement.finalize(); }
-    return { messages, after: newer ? (messages.at(-1)?.id ?? null) : null };
+    return { messages, sent: out, after: newer ? (messages.at(-1)?.id ?? null) : null };
   }
 
   /** How many messages of the thread sit at `fromRowid` or after it: an index count, no row is read. */
@@ -718,20 +711,22 @@ export class Journal {
   }
 
   /** The complete reconnect tail, or null when its count or the serialized bytes `project` sends exceed a page. */
-  listMessagesFrom(threadId: string, fromRowid: number, limit: number, project?: (message: Message) => Message, toolPreviews = false): Message[] | null {
+  listMessagesFrom(threadId: string, fromRowid: number, limit: number, project?: Projection, toolPreviews = false): { messages: Message[]; sent: Message[] } | null {
     this.flushDeltas();
     const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?');
-    const messages: Message[] = [];
+    const messages: Message[] = [], out: Message[] = [];
     let bytes = 2;
     try {
       for (const row of statement.iterate(threadId, fromRowid, limit + 1)) {
         if (messages.length >= limit) return null;
         const message = this.currentMessage(row as MessageRow, toolPreviews);
-        bytes += sentBytes(message, project) + (messages.length ? 1 : 0);
+        const { sent: projected, size } = sent(message, project);
+        bytes += size + (messages.length ? 1 : 0);
         if (bytes > MESSAGE_PAGE_MAX_BYTES) return null;
         messages.push(message);
+        out.push(projected);
       }
-      return messages;
+      return { messages, sent: out };
     } finally { statement.finalize(); }
   }
 

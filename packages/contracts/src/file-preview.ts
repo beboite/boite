@@ -25,11 +25,11 @@ export const IMAGE_INLINE_CHARS = 8 * 1024;
  * Large images of a page left on the core, as `previewFileData` leaves files:
  * the text paints first and the picture is read when it nears the screen.
  */
-export function previewImageData(messages: Message[]): Message[] {
+export function previewImageData(messages: Message[], inline = IMAGE_INLINE_CHARS): Message[] {
   return messages.map(message => {
     let changed = false;
     const parts = message.parts.map(part => {
-      if (part.type !== 'image' || part.dataDeferred || part.data.length <= IMAGE_INLINE_CHARS) return part;
+      if (part.type !== 'image' || part.dataDeferred || part.data.length <= inline) return part;
       changed = true;
       return { ...part, data: '', bytes: base64Bytes(part.data), dataDeferred: true as const };
     });

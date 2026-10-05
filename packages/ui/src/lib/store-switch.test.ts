@@ -3,6 +3,10 @@ import { test } from '../test/fake-client';
 import { RpcErrorCode } from '@boite/contracts';
 import { RpcFailure } from './client';
 
+/** A card's fetch: `messages.toolPart` on a core with `deferredToolParts`, `messages.toolOutput` before it. */
+const toolRead = (method: string) => method === 'messages.toolOutput' || method === 'messages.toolPart';
+const asRead = (method: string, read: Promise<{ output: string }>) => method === 'messages.toolPart' ? read.then(({ output }) => ({ part: { output } })) : read;
+
 test('returning to a cached thread paints its history before the core replies', async ({ ready }) => {
   const { store, client } = await ready({ delayMs: 0, long: true });
   await store.open('t-long');
@@ -137,7 +141,7 @@ test('a tool disclosure shares its fetch and an obsolete result cannot fill anot
   const call = client.call.bind(client);
   let release!: (value: { output: string }) => void;
   const gate = new Promise<{ output: string }>(resolve => { release = resolve; });
-  const spy = vi.spyOn(client, 'call').mockImplementation((method, params) => method === 'messages.toolOutput' ? gate as never : call(method, params));
+  const spy = vi.spyOn(client, 'call').mockImplementation((method, params) => toolRead(method) ? asRead(method, gate) as never : call(method, params));
   try {
     await store.open('t-bench');
     const message = store.openThread!.messages.at(-1)!;
@@ -158,7 +162,7 @@ test('a return starts its own tool fetch while the previous visit is still loadi
   let release!: (value: { output: string }) => void;
   const gate = new Promise<{ output: string }>(resolve => { release = resolve; });
   let asked = 0;
-  const spy = vi.spyOn(client, 'call').mockImplementation((method, params) => method === 'messages.toolOutput' ? (++asked === 1 ? gate : Promise.resolve({ output: 'current output' })) as never : call(method, params));
+  const spy = vi.spyOn(client, 'call').mockImplementation((method, params) => toolRead(method) ? asRead(method, ++asked === 1 ? gate : Promise.resolve({ output: 'current output' })) as never : call(method, params));
   let previous: Promise<void> | undefined;
   try {
     await store.open('t-trace');
@@ -217,7 +221,7 @@ test('a background refresh of the same visit preserves an in-flight tool disclos
   let release!: (value: { output: string }) => void;
   const gate = new Promise<{ output: string }>(resolve => { release = resolve; });
   const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
-    if (method === 'messages.toolOutput') return gate as never;
+    if (toolRead(method)) return asRead(method, gate) as never;
     const result = await call(method, params);
     if (method === 'threads.get') {
       const thread = result as import('@boite/contracts').Thread;
@@ -240,7 +244,7 @@ test('a background refresh of the same visit preserves an in-flight tool disclos
 test('a cached disclosure can read its output from a core without the new tool method', async ({ ready }) => {
   const { store, client } = await ready({ delayMs: 0 });
   const call = client.call.bind(client);
-  const spy = vi.spyOn(client, 'call').mockImplementation((method, params) => method === 'messages.toolOutput'
+  const spy = vi.spyOn(client, 'call').mockImplementation((method, params) => toolRead(method)
     ? Promise.reject(new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: 'old core' })) : call(method, params));
   try {
     await store.open('t-trace');
@@ -298,7 +302,7 @@ test('a compact refresh cannot certify a hydrated output from its matching prefi
   part.output = prefix + 'before'; part.status = 'done'; part.finishedAt = 123;
   const call = client.call.bind(client);
   const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
-    if (method === 'messages.toolOutput') return { output: prefix + 'after!' } as never;
+    if (toolRead(method)) return asRead(method, Promise.resolve({ output: prefix + 'after!' })) as never;
     if (method !== 'threads.get') return call(method, params);
     const thread = await call('threads.get', { threadId: 't-trace', compactTools: true });
     const tool = thread.messages.find(row => row.id === message.id)!.parts.find(item => item.type === 'tool' && item.toolId === part.toolId)!;

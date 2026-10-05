@@ -15,7 +15,7 @@ import { modelsOf, checkSpeed, discoverSelection } from './provider-catalog';
 import { delegationConfig, stopDelegation } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
 import { registerFakeWorktree, requireFakeCwd } from './worktrees';
-import { previewToolOutputs, previewFileData, previewImageData, resumeAnchor, snapshotOptionsProblem } from '@boite/contracts';
+import { forTransport, projectMessage, resumeAnchor, snapshotOptionsProblem, type TransportOptions } from '@boite/contracts';
 import { dropWaitingMove, fakeMoveNote } from './thread-move';
 import { cancelFamilySideQuestions, cancelSide, sideQuestionMethods } from './side-questions';
 
@@ -76,7 +76,7 @@ function pageOf(
   messages: Message[],
   end: number,
   limit: number,
-  project: Projection = message => message
+  project?: Projection
 ): { messages: Message[]; before: MessageId | null } {
   let start = end, bytes = 2;
   while (start > 0 && end - start < limit && bytes < MESSAGE_PAGE_MAX_BYTES) {
@@ -112,22 +112,16 @@ function aroundOf(messages: Message[], around: string | undefined, limit: number
   return { messages: [...older.messages, ...newer.messages], before: older.before, after: newer.after };
 }
 
-/** As the core sends them: tool output previews, then files, then large pictures, left on the core as the caller asked. */
-function forTransport(messages: Message[], options: { compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean }): Message[] {
-  const tools = options.compactTools ? previewToolOutputs(messages) : messages;
-  const files = options.compactFiles ? previewFileData(tools) : tools;
-  return options.compactImages ? previewImageData(files) : files;
-}
-
 type Projection = (message: Message) => Message;
 
 /** The core's rule: page budgets measure a message as the client receives it. */
-function projection(options: { compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean }): Projection {
-  return message => forTransport([message], options)[0]!;
+function projection(options: TransportOptions): Projection {
+  return message => projectMessage(message, options);
 }
 
-function sentBytes(message: Message, project: Projection): number {
-  return new TextEncoder().encode(JSON.stringify(project(message))).byteLength;
+/** As the core counts it: a read with no projection is internal and never measured. */
+function sentBytes(message: Message, project: Projection | undefined): number {
+  return project ? new TextEncoder().encode(JSON.stringify(project(message))).byteLength : 0;
 }
 
 function tailOf(messages: Message[], from: number, limit = MESSAGE_PAGE, project: Projection = message => message): Message[] | null {
@@ -142,13 +136,22 @@ function tailOf(messages: Message[], from: number, limit = MESSAGE_PAGE, project
 
 /** Opaque fixture proofs. The real core uses native SHA-256 over the same complete message data. */
 function snapshotHash(messages: Message[], options: RpcParams<'threads.get'>): string {
-  const json = `${!!options.compactTools}:${!!options.compactFiles}:${!!options.compactImages}:` + JSON.stringify(messages);
+  const json = `${!!options.compactTools}:${!!options.compactFiles}:${!!options.compactImages}:${!!options.compactToolParts}:` + JSON.stringify(messages);
   let a = 0x811c9dc5, b = 0x9e3779b9;
   for (let i = 0; i < json.length; i++) {
     a = Math.imul(a ^ json.charCodeAt(i), 0x01000193);
     b = Math.imul(b ^ json.charCodeAt(i), 0x85ebca6b);
   }
   return (a >>> 0).toString(16).padStart(8, '0') + (b >>> 0).toString(16).padStart(8, '0');
+}
+
+/** The tool call a client names, as `readToolPart` finds it in the core's journal. */
+function toolOf(thread: Thread, params: { threadId: string; messageId: string; toolId: string }): Extract<Message['parts'][number], { type: 'tool' }> {
+  const message = thread.messages.find(message => message.id === params.messageId);
+  if (!message) throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `message ${params.messageId} is not a message of thread ${params.threadId}` });
+  const part = message.parts.find(part => part.type === 'tool' && part.toolId === params.toolId);
+  if (!part || part.type !== 'tool') throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `tool ${params.toolId} is not a tool of message ${params.messageId}` });
+  return part;
 }
 
 /** The fake has no wire; check the same reply envelope before copying a page. */
@@ -356,6 +359,7 @@ export function threadMethods(ctx: FakeContext) {
         ...(tail !== null ? { messagesFrom: params.after } : {}), ...(proof ? { messagesSync: proof } : {}), ...(unchanged ? { messagesUnchanged: true as const } : {}) };
       if (!params.open) return pagingReply(snapshot);
       ctx.bus.subscribed.add(thread.id);
+      ctx.bus.transport = { compactTools: params.compactTools, compactToolParts: params.compactToolParts };
       if (params.open.previous && params.open.previous !== thread.id) ctx.bus.subscribed.delete(params.open.previous);
       if (params.open.markRead && thread.unread) { thread.unread = false; ctx.touch(thread); }
       snapshot.unread = thread.unread;
@@ -384,13 +388,8 @@ export function threadMethods(ctx: FakeContext) {
       const turns = new Set(page.messages.map((message) => message.turnId));
       return pagingReply({ ...page, turns: thread.turns.filter((turn) => turns.has(turn.id)) });
     },
-    'messages.toolOutput': async (params) => {
-      const message = ctx.thread(params.threadId).messages.find(message => message.id === params.messageId);
-      if (!message) throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `message ${params.messageId} is not a message of thread ${params.threadId}` });
-      const part = message.parts.find(part => part.type === 'tool' && part.toolId === params.toolId);
-      if (!part || part.type !== 'tool') throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `tool ${params.toolId} is not a tool of message ${params.messageId}` });
-      return { output: part.output };
-    },
+    'messages.toolOutput': async (params) => ({ output: toolOf(ctx.thread(params.threadId), params).output }),
+    'messages.toolPart': async (params) => pagingReply({ part: toolOf(ctx.thread(params.threadId), params) }),
     'messages.attachment': async params => {
       const thread = ctx.thread(params.threadId);
       if (!Number.isSafeInteger(params.partIndex) || params.partIndex < 0) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'messages.attachment.partIndex: expected a nonnegative integer', data: { field: 'partIndex', expected: 'a nonnegative integer' } });

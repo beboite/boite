@@ -7,7 +7,7 @@ import { defaultModel, needsModelDiscovery } from './selection.ts';
 import { LinkedPullRequests } from '../linked-pull-requests.ts';
 import { threadCapabilities } from './capabilities.ts';
 import { steerUser } from './user-steering.ts';
-import { readToolOutput } from './records.ts';
+import { readToolOutput, readToolPart } from './records.ts';
 import { readMessageAttachment } from './attachment-read.ts';
 
 /**
@@ -88,6 +88,8 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     const thread = core.threads.get(params.threadId, params.after, params);
     if (!params.open) return thread;
     ctx.connection.subscriptions.add(params.threadId);
+    // Live tool parts reach this socket the way its pages do.
+    ctx.connection.transport = { compactTools: params.compactTools, compactToolParts: params.compactToolParts };
     if (params.open.previous && params.open.previous !== params.threadId) ctx.connection.subscriptions.delete(params.open.previous);
     if (params.open.markRead) { core.threads.markRead(params.threadId); thread.unread = false; }
     return { ...thread, opened: params.open.requests === false ? {} : {
@@ -96,6 +98,7 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
   });
   core.router.register('messages.list', (params) => core.threads.messages(params));
   core.router.register('messages.toolOutput', (params) => readToolOutput(core, params));
+  core.router.register('messages.toolPart', (params) => readToolPart(core, params));
   core.router.register('messages.attachment', params => readMessageAttachment(core, params));
   core.router.register('threads.update', async (params) => {
     const thread = core.threads.require(params.threadId);

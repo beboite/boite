@@ -42,7 +42,7 @@ so retrying the same request does not silently create another child or letter.
 `boite_merge_back` sends a supplied summary (maximum 4000 characters) to the
 fork's recorded source under coordination policy; it does not merge files.
 Tool-output disclosure is omitted because the agent RPC policy does not grant
-`messages.toolOutput` access.
+`messages.toolOutput` or `messages.toolPart` access.
 
 `boite_delegate_wait` waits for direct children for 10 minutes by default,
 with `timeoutMs` from 0 to 3600000. Each wait owns a separate authenticated RPC

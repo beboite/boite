@@ -998,6 +998,8 @@ export const strings = {
     toolInput: 'Input',
     toolOutput: 'Output',
     toolDocuments: 'Documents',
+    /** Under a text the core cut because its message was too heavy to send whole. */
+    textOmitted: 'This message is too long to show in full. {count} characters are left out.',
     /** The chip on a folded card: `1 diff`, `2 diffs`, `1 doc`, `3 docs`. */
     documentChip: {
       diff: '{count} diff',
