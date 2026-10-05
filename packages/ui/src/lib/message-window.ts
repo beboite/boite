@@ -96,6 +96,25 @@ export class SlotTotals {
   }
 }
 
+/**
+ * The observed sizes that still count once their frame comes. A row the window
+ * dropped since the observer ran keeps the box it reported: discarding it left
+ * the row's slot at the estimate, so the spacer that replaced it was shorter
+ * than the row, the browser's scroll anchoring moved the list, the window
+ * mounted the row again for one frame, and the cycle never ended. A detached
+ * row counts only while its message is still `listed` and no element on screen
+ * reports the same message.
+ */
+export function measurable(entries: ResizeObserverEntry[], listed: (id: string) => boolean): ResizeObserverEntry[] {
+  const mid = (entry: ResizeObserverEntry) => (entry.target as HTMLElement).dataset?.['mid'];
+  const shown = new Set(entries.filter(entry => entry.target.isConnected).map(mid));
+  return entries.filter((entry) => {
+    if (entry.target.isConnected) return true;
+    const id = mid(entry);
+    return !!id && !shown.has(id) && (entry.borderBoxSize?.[0]?.blockSize ?? 0) > 0 && listed(id);
+  });
+}
+
 /** The last message whose top is at or above `at`. The totals only ever grow. */
 export function atOrBefore(total: number[], count: number, at: number): number {
   let low = 0;

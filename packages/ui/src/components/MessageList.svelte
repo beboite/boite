@@ -25,7 +25,7 @@
   import { isSending } from '../lib/composer-queue';
   import { retryTurn } from '../lib/composer-edit';
   import { TurnProgress } from '../lib/turn-progress.svelte';
-  import { ESTIMATE, GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, reaches, windowStats } from '../lib/message-window';
+  import { ESTIMATE, GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, measurable, reaches, windowStats } from '../lib/message-window';
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
   import { glides } from '../lib/motion';
@@ -495,7 +495,7 @@
       // Applying slot heights inside ResizeObserver can resize that same batch.
       frame = requestAnimationFrame(() => {
         frame = 0;
-        const batch = [...pending.values()].filter(entry => entry.target.isConnected);
+        const batch = measurable([...pending.values()], id => slots.indexOf(timeline, id) >= 0);
         pending.clear();
         // Estimated rows can be taller than their slot totals. Keep the actual
         // visible message, then align it after Svelte updates the spacers.
