@@ -950,6 +950,7 @@ export const fr: Translation = {
     toolInput: 'Entrée',
     toolOutput: 'Sortie',
     toolDocuments: 'Documents',
+    textOmitted: 'Ce message est trop long pour être affiché en entier. {count} caractères ne sont pas affichés.',
     documentChip: {
       diff: '{count} diff',
       diffs: '{count} diffs',

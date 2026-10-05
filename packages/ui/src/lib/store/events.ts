@@ -8,6 +8,7 @@ import { lastIndexById } from '../thread-rows';
 import { strings } from '../strings';
 import { installStatesOf } from './accounts.svelte';
 import { observable } from './connection.svelte';
+import { lightPage } from './reading-pages.svelte';
 import type { StoreContext } from './context';
 import { probeKey } from './models.svelte';
 import { sameProcess } from './workbench.svelte';
@@ -145,7 +146,7 @@ export function listen(ctx: StoreContext, client: Client): void {
     const held = [...threads.threadSnapshots(threadId)];
     if (held.length) return lastAgentText(held[0]!.messages.filter(message => message.turnId === turnId));
     if (!current()) return null;
-    const thread = await client.call('threads.get', { threadId, limit: 4, compactTools: true });
+    const thread = await client.call('threads.get', { threadId, limit: 4, ...lightPage(ctx) });
     return lastAgentText(thread.messages.filter(message => message.turnId === turnId));
   };
 

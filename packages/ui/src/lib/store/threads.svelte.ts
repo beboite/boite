@@ -10,7 +10,8 @@ import type {
   ThreadSummary
 } from '@boite/contracts';
 import { readingCacheBytes, READING_CACHE_BYTES } from '../reading-cache';
-import { INITIAL_MESSAGE_PAGE, MESSAGE_PAGE_MAX, previewToolOutputs, previewFileData, previewImageData } from '@boite/contracts';
+import type { ToolPart } from '../tool-groups';
+import { INITIAL_MESSAGE_PAGE, MESSAGE_PAGE_MAX, forTransport } from '@boite/contracts';
 import { lightPage, NewerPages, setMessagesAfter, type ReadingPosition } from './reading-pages.svelte';
 export type { ReadingPosition } from './reading-pages.svelte';
 import { forgetArchivedThread } from '../archive-history';
@@ -107,10 +108,7 @@ export class Threads {
     // Keep more small visits within the same 16 MiB budget. An expanded tool
     // gives its full output back to the core before it enters this cache.
     this.readingThreads.delete(thread.id);
-    const previews = previewToolOutputs(thread.messages);
-    const features = this.ctx.store.core?.features;
-    const files = features?.threadSnapshots ? previewFileData(previews) : previews;
-    const messages = features?.readingPages ? previewImageData(files) : files;
+    const messages = forTransport(thread.messages, lightPage(this.ctx));
     const snapshot = messages.every((message, index) => message === thread.messages[index]) ? thread : { ...thread, messages };
     const bytes = readingCacheBytes(messages);
     if (bytes <= READING_CACHE_BYTES) this.readingThreads.set(thread.id, snapshot);
@@ -547,7 +545,10 @@ export class Threads {
   }
 
   readonly #toolOutputs = new Map<string, { client: NonNullable<StoreContext['client']>; generation: number; promise: Promise<void> }>();
-  /** Hydrate only a disclosure the reader opened, shared by duplicate requests. */
+  /**
+   * Hydrate only a card the reader opened, shared by duplicate requests: its
+   * output, and on a core with `deferredToolParts` its input and documents.
+   */
   loadToolOutput(threadId: ThreadId, messageId: MessageId, toolId: string): Promise<void> {
     const key = JSON.stringify([threadId, messageId, toolId]);
     const client = this.ctx.client;
@@ -555,20 +556,25 @@ export class Threads {
     const generation = this.#toolOutputVisit;
     const held = this.#toolOutputs.get(key);
     if (held?.client === client && held.generation === generation) return held.promise;
-    const loading = client.call('messages.toolOutput', { threadId, messageId, toolId }).catch(async error => {
+    const whole = this.ctx.store.core?.features?.deferredToolParts === true;
+    const read = whole
+      ? client.call('messages.toolPart', { threadId, messageId, toolId }).then(({ part }) => part as Partial<ToolPart>)
+      : client.call('messages.toolOutput', { threadId, messageId, toolId }).then(({ output }): Partial<ToolPart> => ({ output }));
+    const loading = read.catch(async (error): Promise<Partial<ToolPart> | null> => {
       if (!(error instanceof RpcFailure) || error.code !== RpcErrorCode.MethodNotFound) throw error;
-      if (this.ctx.client !== client || generation !== this.#toolOutputVisit) return { output: null };
+      if (this.ctx.client !== client || generation !== this.#toolOutputVisit) return null;
       const message = await this.#fullMessage(client, threadId, messageId, generation);
       const part = message?.parts.find(part => part.type === 'tool' && part.toolId === toolId);
       if (part?.type !== 'tool') throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `tool ${toolId} is not a tool of message ${messageId}` });
-      return { output: part.output };
-    }).then(({ output }) => {
-      if (this.ctx.client !== client || generation !== this.#toolOutputVisit) return;
+      return part;
+    }).then(full => {
+      if (!full || this.ctx.client !== client || generation !== this.#toolOutputVisit) return;
       for (const message of this.messages(threadId, messageId)) {
         for (const part of message.parts) {
-          if (part.type !== 'tool' || part.toolId !== toolId || !part.outputDeferred) continue;
-          part.output = output;
-          delete part.outputDeferred;
+          if (part.type !== 'tool' || part.toolId !== toolId) continue;
+          if (part.outputDeferred && full.output !== undefined) { part.output = full.output; delete part.outputDeferred; }
+          if (part.inputDeferred && 'input' in full) { part.input = full.input; delete part.inputDeferred; }
+          if (part.documentsDeferred && full.documents !== undefined) { part.documents = full.documents; delete part.documentsDeferred; }
         }
       }
     }).finally(() => { if (this.#toolOutputs.get(key)?.promise === loading) this.#toolOutputs.delete(key); });

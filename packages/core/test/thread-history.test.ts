@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { INITIAL_MESSAGE_PAGE, RPC_MAX_FRAME_BYTES, TOOL_OUTPUT_PREVIEW_CHARS, type Message } from '@boite/contracts';
+import { INITIAL_MESSAGE_PAGE, MESSAGE_SENT_MAX_BYTES, RPC_MAX_FRAME_BYTES, TOOL_OUTPUT_PREVIEW_CHARS, type Message } from '@boite/contracts';
 import { echoThread, startTestCore } from './harness';
 
 test('a compact first page keeps complete history and retrieves tool output on demand over RPC', async () => {
@@ -61,5 +61,59 @@ test('a message whose stored tool outputs exceed one frame opens compacted and r
     expect(resumed.messages.map(message => message.id)).toEqual(['images', 'after-images']);
     expect(await client.call('messages.toolOutput', { threadId, messageId: 'images', toolId: 'read-29' })).toEqual({ output: image });
     await expect(client.call('messages.list', { threadId, before: 'after-images' })).rejects.toThrow('message images is');
+  } finally { await harness.stop(); }
+});
+
+test('no message keeps a thread from opening: heavy inputs, documents and texts are deferred or cut, and live parts follow', async () => {
+  const harness = await startTestCore();
+  try {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    // A Write carries the whole file in its input, and its diff carries it again.
+    const file = 'generated line\n'.repeat(400_000);
+    const writes = Array.from({ length: 4 }, (_, index) => ({ type: 'tool' as const, toolId: `write-${index}`, name: 'Write', status: 'done' as const,
+      input: { file_path: `out-${index}.txt`, content: file }, output: 'written',
+      documents: [{ kind: 'diff' as const, path: `out-${index}.txt`, oldText: '', newText: file }] }));
+    // Calls under every per-call threshold whose sum still outweighs a message's budget.
+    const many = Array.from({ length: 300 }, (_, index) => ({ type: 'tool' as const, toolId: `grep-${index}`, name: 'Grep', status: 'done' as const,
+      input: { pattern: `p${index}`, note: 'n'.repeat(15_000) }, output: 'o'.repeat(15_000) }));
+    const parts: Record<string, Message['parts']> = { writes, many, prose: [{ type: 'text', text: 'é'.repeat(9_000_000) }], last: [{ type: 'text', text: 'last' }] };
+    harness.core.journal.append({ type: 'message.started', threadId, version: 1, payload: {} }, () => {
+      for (const [index, id] of Object.keys(parts).entries()) {
+        harness.core.journal.putMessage({ id, threadId, turnId: 'heavy-turn', role: 'assistant', state: 'complete', createdAt: index, parts: parts[id]! });
+      }
+    });
+    expect(Buffer.byteLength(JSON.stringify(harness.core.journal.getMessage('writes')))).toBeGreaterThan(2 * RPC_MAX_FRAME_BYTES);
+    // Before `compactToolParts`, the whole thread failed on the first heavy message.
+    await expect(client.call('threads.get', { threadId, compactTools: true })).rejects.toThrow('message ');
+
+    const light = { compactTools: true, compactToolParts: true } as const;
+    const opened = await client.call('threads.get', { threadId, limit: 1, ...light, open: {} });
+    const pages = [opened.messages];
+    for (let before = opened.messagesBefore; before;) {
+      const page = await client.call('messages.list', { threadId, before, limit: 1, ...light });
+      pages.unshift(page.messages);
+      before = page.before;
+    }
+    const sent = pages.flat();
+    expect(sent.map(message => message.id).slice(-4)).toEqual(['writes', 'many', 'prose', 'last']);
+    for (const message of sent) expect(Buffer.byteLength(JSON.stringify(message))).toBeLessThan(MESSAGE_SENT_MAX_BYTES);
+    const write = sent.find(message => message.id === 'writes')!.parts[0]!;
+    expect(write).toMatchObject({ inputDeferred: true, documentsDeferred: true, documents: [{ kind: 'diff', path: 'out-0.txt', oldText: '', newText: '' }] });
+    expect(write.type === 'tool' && (write.input as { file_path: string }).file_path).toBe('out-0.txt');
+    // Each call alone was light: only the message's total deferred them.
+    expect(sent.find(message => message.id === 'many')!.parts.every(part => part.type === 'tool' && part.outputDeferred && part.inputDeferred)).toBe(true);
+    const prose = sent.find(message => message.id === 'prose')!.parts[0]!;
+    expect(prose.type === 'text' && prose.omitted! > 0 && prose.text.length + prose.omitted! === 9_000_000).toBe(true);
+
+    const full = await client.call('messages.toolPart', { threadId, messageId: 'writes', toolId: 'write-3' });
+    expect(full.part).toMatchObject({ input: { content: file }, documents: [{ newText: file }], output: 'written' });
+    expect(full.part).not.toHaveProperty('inputDeferred');
+    await expect(client.call('messages.toolPart', { threadId, messageId: 'writes', toolId: 'missing' })).rejects.toThrow('not a tool of message');
+
+    // A call that finishes while the thread is open reaches this socket the same way.
+    const live = client.next('message.part', event => event.messageId === 'last');
+    harness.core.bus.emit('message.part', { threadId, messageId: 'last', partIndex: 1, part: writes[0]! });
+    expect((await live).part).toMatchObject({ inputDeferred: true, documentsDeferred: true });
   } finally { await harness.stop(); }
 });

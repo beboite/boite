@@ -1137,7 +1137,11 @@ export const ARTIFACT_MAX_BYTES = 512 * 1024 * 1024;
 export interface ArtifactContent { url: string; bytes: number; mimeType: string; name: string; }
 
 export type MessagePart =
-  | { type: 'text'; text: string; complete?: boolean; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number }; moved?: MoveNotice; startedBy?: ThreadLink; started?: ThreadLink }
+  /**
+   * `omitted`: characters a page left out of the end of `text` because the
+   * message was too heavy to send whole (`MESSAGE_SENT_MAX_BYTES`). Never persisted.
+   */
+  | { type: 'text'; text: string; complete?: boolean; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number }; moved?: MoveNotice; startedBy?: ThreadLink; started?: ThreadLink; omitted?: number }
   /**
    * An image the user sent with the prompt, journalled with the message. A page
    * asked with `compactImages` leaves a large one's `data` empty, with
@@ -1148,7 +1152,7 @@ export type MessagePart =
   /** An immutable published file; resolve its bytes with artifacts.read, never as a disk path. */
   | { type: 'artifact'; id: string; mimeType: string; bytes: number; name: string }
   /** The model's reasoning as the provider streams it, folded in the UI. */
-  | { type: 'thinking'; text: string; startedAt?: Timestamp; finishedAt?: Timestamp | null }
+  | { type: 'thinking'; text: string; startedAt?: Timestamp; finishedAt?: Timestamp | null; omitted?: number }
   | {
       type: 'tool';
       toolId: string;
@@ -1157,8 +1161,12 @@ export type MessagePart =
       /** The input's JSON as the model streams it, before `input` is complete. Absent or null once `input` is final. */
       inputText?: string | null;
       output: string | null;
-      /** A bounded output preview. Fetch messages.toolOutput when its disclosure opens. Never persisted. */
+      /** A bounded output preview. Fetch messages.toolPart when its disclosure opens. Never persisted. */
       outputDeferred?: true;
+      /** `input` is a preview cut to its first strings and entries (`compactToolParts`). Never persisted. */
+      inputDeferred?: true;
+      /** `documents` are stubs with their kind, path, title or caption and no content (`compactToolParts`). Never persisted. */
+      documentsDeferred?: true;
       status: ToolStatus;
       /** A command's exit code when the provider reports it. Absent on older rows and other tools. */
       exitCode?: number | null;
@@ -1216,7 +1224,8 @@ export interface Message {
 export const MESSAGE_PAGE = 120;
 /** The first paint needs a small tail; older history uses the ordinary page size. */
 export const INITIAL_MESSAGE_PAGE = 40;
-export { previewToolOutputs, TOOL_OUTPUT_INLINE_CHARS, TOOL_OUTPUT_PREVIEW_CHARS } from './message-preview';
+export { previewToolOutputs, previewToolPart, inputPreview, longerThan, TOOL_OUTPUT_INLINE_CHARS, TOOL_OUTPUT_PREVIEW_CHARS, TOOL_INPUT_INLINE_CHARS, TOOL_INPUT_PREVIEW_CHARS, TOOL_DOCUMENTS_INLINE_CHARS } from './message-preview';
+export { forTransport, projectMessage, MESSAGE_SENT_MAX_BYTES, type TransportOptions } from './transport.ts';
 export { lastAgentText, notificationExcerpt, requestExcerpt, NOTIFICATION_TEXT_CHARS } from './notification-text';
 /**
  * The core's generic notification body, named so a phone can show it in the
@@ -1918,6 +1927,8 @@ export interface CoreInfo {
     chunkedAnswers?: boolean;
     /** `threads.get` takes `around` and `compactImages`; `messages.list` takes `after`. */
     readingPages?: boolean;
+    /** `threads.get` and `messages.list` take `compactToolParts`; `messages.toolPart` exists. No message is refused for its size then. */
+    deferredToolParts?: boolean;
   };
   os: Os;
   /** The install this core belongs to. `--channel` on its command line decides. */
@@ -3317,11 +3328,14 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * it, with `messagesAfter` set; otherwise it is the last page, which holds
    * it. An `around` the thread does not hold gets the last page; `after` wins
    * over it. `compactImages` defers large images as `compactFiles` defers
-   * files. Both need `features.readingPages`.
+   * files. Both need `features.readingPages`. `compactToolParts` leaves long
+   * tool inputs and heavy documents on the core as well, and caps each message
+   * at `MESSAGE_SENT_MAX_BYTES`; it needs `features.deferredToolParts`. A
+   * subscription opened with it receives live tool parts the same way.
    */
   'threads.get': {
     params: {
-      threadId: ThreadId; after?: MessageId; around?: MessageId; limit?: number; compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean;
+      threadId: ThreadId; after?: MessageId; around?: MessageId; limit?: number; compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean; compactToolParts?: boolean;
       /** Request a resume proof, or reuse a proof previously supplied by this core. */
       sync?: true | MessageSync;
       /** Subscribe after a successful snapshot, optionally replacing the previous subscription and acknowledging unread content. */
@@ -3333,8 +3347,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * One page of older messages, oldest first inside the page: what was written
    * before `before`, at most `limit` (`MESSAGE_PAGE` by default, `MESSAGE_PAGE_MAX`
    * whatever is asked), within `MESSAGE_PAGE_MAX_BYTES`. One complete message
-   * can exceed the page byte budget for progress; a message or full response
-   * exceeding `RPC_MAX_FRAME_BYTES` is refused by name, never truncated.
+   * can exceed the page byte budget for progress. Without `compactToolParts`, a
+   * message or full response exceeding `RPC_MAX_FRAME_BYTES` is refused by
+   * name, never truncated; with it, the message is cut to `MESSAGE_SENT_MAX_BYTES`.
    * The result's own `before` is the next cursor, null once
    * the first message of the thread is in hand. An unknown thread is a not-found;
    * a `before` that is not a message of that thread is refused by name.
@@ -3345,13 +3360,22 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * message, and its `before` is null. Exactly one of the two is given.
    */
   'messages.list': {
-    params: { threadId: ThreadId; before?: MessageId; after?: MessageId; limit?: number; compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean };
+    params: { threadId: ThreadId; before?: MessageId; after?: MessageId; limit?: number; compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean; compactToolParts?: boolean };
     result: { messages: Message[]; before: MessageId | null; after?: MessageId | null; turns?: Turn[] };
   };
   /** The full output of a tool already visible in this conversation. No filesystem path is accepted. */
   'messages.toolOutput': {
     params: { threadId: ThreadId; messageId: MessageId; toolId: string };
     result: { output: string | null };
+  };
+  /**
+   * The whole tool call a page deferred (`outputDeferred`, `inputDeferred`,
+   * `documentsDeferred`), as journalled. No filesystem path is accepted. A call
+   * too heavy for one frame is refused by name; the thread around it still reads.
+   */
+  'messages.toolPart': {
+    params: { threadId: ThreadId; messageId: MessageId; toolId: string };
+    result: { part: Extract<MessagePart, { type: 'tool' }> };
   };
   /** Read one journalled attachment on demand. No filesystem path or executable is accepted. */
   'messages.attachment': {

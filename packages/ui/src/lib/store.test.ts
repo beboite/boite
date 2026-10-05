@@ -1116,7 +1116,10 @@ test.for(['input', 'inputText', 'output', 'documents'])('reading cache excludes 
   await store.open('t-scheduler');
   await store.open('t-bench');
   const cached = store.openThread!.messages.find(message => message.id === 'cached-only');
+  // What a page would defer stays a preview in the cache; a streaming input has nothing to fetch back.
   if (field === 'output') expect(cached?.parts[0]).toMatchObject({ outputDeferred: true, output: large.slice(0, 1024) });
+  else if (field === 'input') expect(cached?.parts[0]).toMatchObject({ inputDeferred: true, input: { nested: { text: large.slice(0, 1024) } } });
+  else if (field === 'documents') expect(cached?.parts[0]).toMatchObject({ documentsDeferred: true, documents: [{ kind: 'markdown', text: '' }] });
   else expect(cached).toBeUndefined();
 });
 

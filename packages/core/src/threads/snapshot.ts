@@ -5,11 +5,12 @@ import type { Core } from '../core';
 import { invalidParams, refused } from '../errors';
 import type { AgentState } from './agent-state';
 import { readMemoryEvents } from './memory-read';
-import { forTransport, transportProjection } from './transport';
+import { transportProjection } from './transport';
 
 type Projection = ReturnType<typeof transportProjection>;
-type Options = Pick<RpcParams<'threads.get'>, 'limit' | 'compactTools' | 'compactFiles' | 'compactImages' | 'around' | 'sync' | 'open'>;
-const hash = (messages: Message[], options: Options) => createHash('sha256').update(`${!!options.compactTools}:${!!options.compactFiles}:${!!options.compactImages}:`).update(JSON.stringify(messages)).digest('base64url');
+type Options = Pick<RpcParams<'threads.get'>, 'limit' | 'compactTools' | 'compactFiles' | 'compactImages' | 'compactToolParts' | 'around' | 'sync' | 'open'>;
+/** Over the messages as sent: the same rows read with other options are another proof. */
+const hash = (messages: Message[], options: Options) => createHash('sha256').update(`${!!options.compactTools}:${!!options.compactFiles}:${!!options.compactImages}:${!!options.compactToolParts}:`).update(JSON.stringify(messages)).digest('base64url');
 
 /** Validate new options before an opening can change the socket or unread state. */
 export function checkSnapshotOptions(options: Options): void {
@@ -27,23 +28,24 @@ export function threadSnapshot(core: Core, thread: ThreadSummary, after: string 
   core.journal.flushDeltas();
   core.bus.flush();
   const from = after === undefined ? null : core.journal.messageRowid(thread.id, after);
-  // Budgets apply to what the client receives, so compacted output never blocks a page.
+  // Budgets apply to what the client receives, so compacted parts never block
+  // a page. The proof covers the stored rows, deferred content included.
   const project = transportProjection(options);
   const tail = from === null ? null : core.journal.listMessagesFrom(thread.id, from, limit, project);
-  const page = tail === null ? pageAround(core, thread.id, options.around, limit, project) : { messages: tail, before: null, after: null };
+  const page = tail === null ? pageAround(core, thread.id, options.around, limit, project) : { ...tail, before: null, after: null };
   const turns = core.journal.listTurnsFor(thread.id, page.messages.map(message => message.turnId));
   const anchor = options.sync ? resumeAnchor({ messages: page.messages, turns }) : null;
   const anchorIndex = anchor === null ? -1 : page.messages.findIndex(message => message.id === anchor);
   const proof = anchor === null ? undefined : { from: anchor, hash: hash(page.messages.slice(anchorIndex), options) };
   const known = options.sync && options.sync !== true ? options.sync : undefined;
   const unchanged = tail !== null && after !== undefined && known?.from === after &&
-    known.hash === (proof?.from === after ? proof.hash : hash(tail, options));
+    known.hash === (proof?.from === after ? proof.hash : hash(tail.messages, options));
   return {
     ...thread,
     ...(tail === null || after === undefined ? {} : { messagesFrom: after }),
     ...(proof ? { messagesSync: proof } : {}),
     ...(unchanged ? { messagesUnchanged: true as const } : {}),
-    messages: unchanged ? [] : forTransport(page.messages, options),
+    messages: unchanged ? [] : page.sent,
     memoryEvents: readMemoryEvents(core.journal, thread.id),
     commands: state.commands.get(thread.id) ?? [],
     background: state.background.get(thread.id) ?? [],
@@ -60,14 +62,14 @@ export function threadSnapshot(core: Core, thread: ThreadSummary, after: string 
  * written after it: then half a page before it and half from it on. A count
  * on the index decides, so the far case reads no row it does not send.
  */
-function pageAround(core: Core, threadId: string, around: string | undefined, limit: number, project: Projection): { messages: Message[]; before: string | null; after: string | null } {
+function pageAround(core: Core, threadId: string, around: string | undefined, limit: number, project: Projection): { messages: Message[]; sent: Message[]; before: string | null; after: string | null } {
   const journal = core.journal;
   const rowid = around === undefined ? null : journal.messageRowid(threadId, around);
   if (rowid === null || journal.countMessagesFrom(threadId, rowid) <= limit) return { ...journal.listMessagePage(threadId, { limit, project }), after: null };
   const half = Math.max(1, Math.floor(limit / 2));
   const older = journal.listMessagePage(threadId, { beforeRowid: rowid, limit: half, project });
   const newer = journal.listMessagesForward(threadId, rowid, Math.max(1, limit - half), project);
-  return { messages: [...older.messages, ...newer.messages], before: older.before, after: newer.after };
+  return { messages: [...older.messages, ...newer.messages], sent: [...older.sent, ...newer.sent], before: older.before, after: newer.after };
 }
 
 /** A page of `messages.list`, with the turns its messages belong to. */
@@ -95,8 +97,11 @@ export function messagePage(core: Core, params: RpcParams<'messages.list'>): Mes
   }
   const limit = Math.min(Math.max(1, Math.trunc(params.limit ?? MESSAGE_PAGE)), MESSAGE_PAGE_MAX);
   const project = transportProjection(params);
-  const page = params.before === undefined
-    ? { ...core.journal.listMessagesForward(params.threadId, rowid + 1, limit, project), before: null }
-    : core.journal.listMessagePage(params.threadId, { beforeRowid: rowid, limit, project });
-  return { ...page, messages: forTransport(page.messages, params), turns: core.journal.listTurnsFor(params.threadId, page.messages.map((message) => message.turnId)) };
+  const turns = (stored: Message[]) => core.journal.listTurnsFor(params.threadId, stored.map((message) => message.turnId));
+  if (params.before === undefined) {
+    const page = core.journal.listMessagesForward(params.threadId, rowid + 1, limit, project);
+    return { messages: page.sent, before: null, after: page.after, turns: turns(page.messages) };
+  }
+  const page = core.journal.listMessagePage(params.threadId, { beforeRowid: rowid, limit, project });
+  return { messages: page.sent, before: page.before, turns: turns(page.messages) };
 }

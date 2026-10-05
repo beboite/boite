@@ -54,6 +54,28 @@ test('a folded output fetches on disclosure, reports failure and retries on reop
   expect(document.querySelector('[role=alert]')).toBeNull();
 });
 
+test('a write whose input and diff stayed on the core waits folded, names its file and fetches only once opened', () => {
+  const loadOutput = vi.fn().mockReturnValue(new Promise(() => {}));
+  running = mount(ToolCard, { target: document.body, props: {
+    name: 'Write', input: { file_path: '/repo/out.txt', content: 'cut' }, inputDeferred: true, output: 'written', status: 'done',
+    documents: [{ kind: 'diff', path: '/repo/out.txt', oldText: '', newText: '' }], documentsDeferred: true, loadOutput,
+  } });
+  flushSync();
+  const toggle = query<HTMLButtonElement>('[data-testid=tool-toggle]');
+  // A whole diff would open the card and fetch megabytes for every write on screen.
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(loadOutput).not.toHaveBeenCalled();
+  expect(toggle.textContent).toContain('out.txt');
+  expect(query('[data-testid=tool-document-chip]').textContent).toBe('1 diff');
+  expect(document.querySelector('[data-testid=tool-diff-counts]')).toBeNull();
+  toggle.click(); flushSync();
+  expect(loadOutput).toHaveBeenCalledTimes(1);
+  expect(document.querySelector('[data-testid=tool-output-loading]')).not.toBeNull();
+  // Neither the cut input nor the empty stub is drawn as if it were the call.
+  expect(document.querySelector('[data-testid=tool-input]')).toBeNull();
+  expect(document.querySelector('[data-testid=tool-document]')).toBeNull();
+});
+
 test('a command stays a folded, stable line while its arguments stream', () => {
   const props = { name: 'Bash', input: {}, inputText: '{"command":"gi', output: null, status: 'running' as const };
   running = mount(ToolCard, { target: document.body, props });

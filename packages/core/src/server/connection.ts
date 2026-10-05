@@ -1,4 +1,4 @@
-import { RPC_CHUNK_BYTES, RPC_CHUNK_MARK, RPC_MAX_FRAME_BYTES, RpcErrorCode, type RpcError, type RpcEventName, type RpcEvents, type ThreadId } from '@boite/contracts';
+import { RPC_CHUNK_BYTES, RPC_CHUNK_MARK, RPC_MAX_FRAME_BYTES, RpcErrorCode, previewToolPart, type MessagePart, type RpcError, type RpcEventName, type RpcEvents, type ThreadId, type TransportOptions } from '@boite/contracts';
 import type { ServerWebSocket } from 'bun';
 import type { Core } from '../core.ts';
 import { newId } from '../ids.ts';
@@ -31,6 +31,7 @@ export class ServerConnection implements Connection {
   authenticated = false;
   /** Owner until hello says otherwise; nothing reads it before `authenticated` is true. */
   identity: Identity = { principal: 'owner', sessionId: null, threadId: null };
+  transport: TransportOptions = {};
 
   private socket: ServerWebSocket<SocketData> | null = null;
   private congested = false;
@@ -60,12 +61,26 @@ export class ServerConnection implements Connection {
 
   sendEvent<E extends RpcEventName>(name: E, payload: RpcEvents[E]): void {
     if (this.closed) return;
+    if (name === 'message.part') payload = this.livePart(payload as RpcEvents['message.part']) as RpcEvents[E];
     if (name === 'message.delta' && this.remote && !this.congested) {
       this.pace(payload as RpcEvents['message.delta']);
       return;
     }
     this.flushPaced();
     this.sendNow(name, payload);
+  }
+
+  /**
+   * A finished tool call as this socket's pages send it: a 30 MB output or
+   * Write reaches the client as its preview, and the card fetches the rest
+   * with `messages.toolPart` when it opens. Sent whole, it would cost the
+   * frame limit and close the socket.
+   */
+  private livePart(event: RpcEvents['message.part']): RpcEvents['message.part'] {
+    const part = event.part;
+    if (part.type !== 'tool' || !(this.transport.compactTools || this.transport.compactToolParts)) return event;
+    const light: MessagePart = previewToolPart(part, { inputs: !!this.transport.compactToolParts });
+    return light === part ? event : { ...event, part: light };
   }
 
   /**
@@ -329,7 +344,7 @@ export class ServerConnection implements Connection {
       const sent = this.write({
         jsonrpc: '2.0',
         method: 'message.part',
-        params: { threadId: message.threadId, messageId, partIndex, part },
+        params: this.livePart({ threadId: message.threadId, messageId, partIndex, part }),
       });
       if (sent === 0) { this.close(1013, 'catch-up dropped; reconnect'); return; }
       // -1 is queued, not lost: Bun delivers it. The keys left wait for the next drain.

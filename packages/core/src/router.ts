@@ -1,5 +1,5 @@
 import { RpcErrorCode } from '@boite/contracts';
-import type { RpcEventName, RpcEvents, RpcMethodName, RpcMethods, ThreadId } from '@boite/contracts';
+import type { RpcEventName, RpcEvents, RpcMethodName, RpcMethods, ThreadId, TransportOptions } from '@boite/contracts';
 import { assertAllowed } from './access.ts';
 import { RpcFailure } from './errors.ts';
 import type { Identity } from './sessions.ts';
@@ -10,6 +10,8 @@ export interface Connection {
   readonly subscriptions: Set<ThreadId>;
   /** Who said hello: the owner, or a paired session by id. */
   readonly identity: Identity;
+  /** What the client's last opened page left on the core: live tool parts follow the same rule. */
+  transport?: TransportOptions;
   sendEvent<E extends RpcEventName>(name: E, payload: RpcEvents[E]): void;
   close(code: number, reason?: string): void;
   /** Release held requests when this socket leaves, without stopping their work. */

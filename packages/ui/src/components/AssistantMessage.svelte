@@ -6,6 +6,7 @@
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { formatTokens } from '../lib/tokens';
+  import { count } from '../lib/format';
   import { promptText, visibleAnswer } from '../lib/message-display';
   import { isNamedModel } from '../lib/model-order';
   import { planOf } from '../lib/plan';
@@ -53,6 +54,12 @@
   const caretAt = $derived(message.state === 'streaming' ? lastTextIndex(message) : -1);
   const runs = $derived(memoryPartRuns(message.parts, memoryEvents));
   const isBackground = (toolId: string) => store.openThread?.background?.some((task) => task.toolId === toolId) ?? false;
+  // A proposed plan is read from its call's input: a page that cut it is completed at once.
+  $effect(() => {
+    for (const part of message.parts) {
+      if (part.type === 'tool' && part.inputDeferred && part.name === 'ExitPlanMode') void store.loadToolOutput(threadId, message.id, part.toolId).catch(() => {});
+    }
+  });
 </script>
 
 {#if showModel && message.role === 'assistant' && execution}
@@ -88,6 +95,7 @@
       {#if part.type === 'text'}
         <Prose text={shownText} live={index === caretAt && part.complete !== true} bubble={message.role === 'assistant'}
           typing={!compacting && latestInTurn && message.role === 'assistant' && store.connection === 'ready' && store.openThread?.status === 'running' && index === message.parts.length - 1 && index === caretAt && part.complete !== true} {store} {threadId} />
+        {#if part.omitted}<p class="omitted" data-testid="text-omitted">{fill(strings.chat.textOmitted, { count: count(part.omitted) })}</p>{/if}
 
       {:else if part.type === 'file' || part.type === 'artifact'}
         <ChatFile file={part} {store} {threadId} messageId={message.id} partIndex={index} />
@@ -196,6 +204,8 @@
     max-width: var(--prose);
   }
 
+
+  .omitted { margin-top: 4px; font-size: var(--text-xs); color: var(--color-muted-foreground); }
 
   .error {
     padding: 8px 12px;

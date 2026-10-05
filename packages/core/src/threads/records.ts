@@ -1,15 +1,25 @@
 import { archiveState } from '../merged-pr-archive-state.ts';
-import type { RpcParams, ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
+import type { MessageId, MessagePart, RpcParams, ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { notFound } from '../errors.ts';
 
-export function readToolOutput(core: Core, params: RpcParams<'messages.toolOutput'>): { output: string | null } {
+/** The journalled tool call a client names by message and tool id, in a thread it can read. */
+function journalledTool(core: Core, params: { threadId: ThreadId; messageId: MessageId; toolId: string }): Extract<MessagePart, { type: 'tool' }> {
   core.threads.require(params.threadId);
   const message = core.journal.getMessage(params.messageId);
   if (!message || message.threadId !== params.threadId) throw notFound(`message ${params.messageId} is not a message of thread ${params.threadId}`, params);
   const part = message.parts.find(part => part.type === 'tool' && part.toolId === params.toolId);
   if (!part || part.type !== 'tool') throw notFound(`tool ${params.toolId} is not a tool of message ${params.messageId}`, params);
-  return { output: part.output };
+  return part;
+}
+
+export function readToolOutput(core: Core, params: RpcParams<'messages.toolOutput'>): { output: string | null } {
+  return { output: journalledTool(core, params).output };
+}
+
+/** The whole call, for a card whose page deferred its output, input or documents. */
+export function readToolPart(core: Core, params: RpcParams<'messages.toolPart'>): { part: Extract<MessagePart, { type: 'tool' }> } {
+  return { part: journalledTool(core, params) };
 }
 
 // The thread row as every part of the store writes it: one event, the row, and the clients told.

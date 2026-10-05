@@ -1,7 +1,7 @@
 import { expect, vi } from 'vitest';
 import { test } from '../test/fake-client';
 import type { FakeClient } from './fake-client';
-import { ATTACHMENT_MAX_BYTES, DEFAULT_DELEGATION_CONFIG, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, SPEECH_DEFAULT_MODEL, TODO_TEXT_MAX, type RpcEvents, type RpcMethodName, type Turn } from '@boite/contracts';
+import { ATTACHMENT_MAX_BYTES, DEFAULT_DELEGATION_CONFIG, MESSAGE_PAGE_MAX_BYTES, MESSAGE_SENT_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, SPEECH_DEFAULT_MODEL, TODO_TEXT_MAX, type RpcEvents, type RpcMethodName, type Turn } from '@boite/contracts';
 import { FAKE_AUTO_COMPACT_SETTLE_MS } from './fake-client/turns';
 import { FakeContext } from './fake-client/context';
 
@@ -137,6 +137,13 @@ test('fake pages keep a complete legal attachment bundle above the byte budget a
   await client.call('turns.start', { threadId: thread.id, prompt: 'x'.repeat(RPC_MAX_FRAME_BYTES) });
   await client.settled();
   await expect(client.call('threads.get', { threadId: thread.id })).rejects.toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'messages', expected: `a complete message below ${RPC_MAX_FRAME_BYTES} serialized UTF-8 bytes` } });
+  // A client that sends `compactToolParts` reads the same thread, the prompt cut and saying so.
+  const latest = await client.call('threads.get', { threadId: thread.id, compactToolParts: true, limit: 1 });
+  const light = await client.call('messages.list', { threadId: thread.id, before: latest.messagesBefore!, limit: 1, compactToolParts: true });
+  const prompt = light.messages.find(message => message.role === 'user' && message.parts.some(part => part.type === 'text' && part.omitted))!;
+  const text = prompt.parts.find(part => part.type === 'text')!;
+  expect(text.type === 'text' && text.text.length + text.omitted! === RPC_MAX_FRAME_BYTES).toBe(true);
+  expect(new TextEncoder().encode(JSON.stringify(prompt)).byteLength).toBeLessThan(MESSAGE_SENT_MAX_BYTES);
 });
 
 test('fake paging refuses oversized response metadata even when its messages fit the page budget', async ({ createClient }) => {

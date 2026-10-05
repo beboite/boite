@@ -44,7 +44,7 @@ describe('journal streaming', () => {
       () => journal.getMessage('msg_read'),
       () => journal.listMessages('thr_test')[0],
       () => journal.listMessagePage('thr_test', { limit: 10 }).messages[0],
-      () => journal.listMessagesFrom('thr_test', rowid, 10)?.[0],
+      () => journal.listMessagesFrom('thr_test', rowid, 10)?.messages[0],
       () => [...journal.walkMessages('thr_test')][0],
       () => [...journal.walkTurnMessages('thr_test', 'trn_read')][0],
     ];

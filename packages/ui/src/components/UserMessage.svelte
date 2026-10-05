@@ -1,11 +1,11 @@
 <script lang="ts">
   import { Check, FileText } from '@lucide/svelte';
   import type { Message, Turn } from '@boite/contracts';
-  import { bytes } from '../lib/format';
+  import { bytes, count } from '../lib/format';
   import { decodedBytes } from '../lib/attachments';
   import { browserDownload, decodeBase64, saveAttachment } from '../lib/attachment-save';
   import { galleryFrom, media, viewerHost, type Gallery, type MediaItem } from '../lib/media-gallery';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { claudeKeywords, promptCommand, promptSegments, promptText } from '../lib/message-display';
   import type { TurnProgress } from '../lib/turn-progress.svelte';
@@ -102,6 +102,7 @@
         ? claudeKeywords(store.providerOf(turn.execution.providerId)?.protocol, turn.execution.model)
         : claudeKeywords(store.providerOf(store.openThread?.providerId ?? '')?.protocol, store.openThread?.model)}
       <p class="user-text" data-testid="text-part">{#if part.previewReferences?.length}<PreviewReferences text={prompt} references={part.previewReferences} {store} threadId={message.threadId} {keywords} />{:else}{#each promptSegments(prompt, promptCommand(prompt), keywords) as segment, at (at)}{#if segment.kind === 'command'}<span class="command">{segment.text}</span>{:else if segment.kind === 'plain'}{segment.text}{:else}<span class="keyword-{segment.kind}" data-testid="keyword-highlight">{segment.text}</span>{/if}{/each}{/if}</p>
+      {#if part.omitted}<p class="text-omitted" data-testid="text-omitted">{fill(strings.chat.textOmitted, { count: count(part.omitted) })}</p>{/if}
     {:else if part.type === 'file'}
       <a class="file-attachment" data-testid="file-part" href={part.dataDeferred ? '#' : `data:application/octet-stream;base64,${part.data}`} download={part.name ?? strings.composer.attachAlt} onclick={(event) => openFile(event, part)}>
         <FileText size={20} strokeWidth={1.5} />
@@ -142,6 +143,8 @@
 </div>
 
 <style>
+  .text-omitted { margin: 4px 0 0; font-size: var(--text-xs); color: var(--color-muted-foreground); }
+
   .receipts { display: flex; align-items: center; gap: 1px; margin: 4px 2px 0; color: var(--color-muted-foreground); }
   .receipts .tick { display: flex; opacity: .45; }
   .receipts .received { color: var(--color-accent); opacity: 1; }

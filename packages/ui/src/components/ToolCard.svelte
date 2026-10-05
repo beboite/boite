@@ -23,6 +23,8 @@
     inputText = null,
     output,
     outputDeferred = false,
+    inputDeferred = false,
+    documentsDeferred = false,
     loadOutput,
     status,
     exitCode = null,
@@ -37,6 +39,11 @@
     inputText?: string | null;
     output: string | null;
     outputDeferred?: boolean;
+    /** `input` is a preview: the line reads from it, the body waits for the whole call. */
+    inputDeferred?: boolean;
+    /** `documents` are stubs naming their kind and path: the body waits for the whole call. */
+    documentsDeferred?: boolean;
+    /** Fetches what the page left on the core: output, input and documents. */
     loadOutput?: () => Promise<void>;
     status: ToolStatus;
     exitCode?: number | null;
@@ -108,14 +115,15 @@
    */
   let diffs = $derived.by<Diff[]>(() => {
     const attached = documents.filter((doc): doc is Diff => doc.kind === 'diff');
-    if (attached.length > 0 || streaming || failed) return attached;
+    // A cut input would spell out a cut change.
+    if (attached.length > 0 || streaming || failed || inputDeferred) return attached;
     const change = describeTool(name, input).change;
     return change ? [{ kind: 'diff', ...change }] : [];
   });
   let others = $derived(documents.filter((doc) => doc.kind !== 'diff'));
   let compact = $derived(!nested && documents.length === 0 && diffs.length === 0);
   let label = $derived(streaming ? liveLabel(part) : compact ? status === 'running' ? liveLabel(part) : runSummary([part]) : line.text);
-  let counts = $derived(diffs.reduce((sum, doc) => {
+  let counts = $derived(documentsDeferred ? { added: 0, removed: 0 } : diffs.reduce((sum, doc) => {
     const one = diffCounts(diffRows(doc.oldText, doc.newText));
     return { added: sum.added + one.added, removed: sum.removed + one.removed };
   }, { added: 0, removed: 0 }));
@@ -125,10 +133,12 @@
    */
   let headless = $derived(new Set(diffs.map((doc) => doc.path)).size <= 1 && line.text.includes(fileName(diffs[0]?.path ?? '')));
 
-  // Input stays behind the disclosure while it arrives. A successful edit opens on its diff.
+  // Input stays behind the disclosure while it arrives. A successful edit opens
+  // on its diff, unless the diff stayed on the core: a heavy one waits for a click.
   let toggled = $state<boolean | null>(null);
-  let shown = $derived(toggled ?? (diffs.length > 0 && !failed));
-  let chip = $derived(others.length > 0 && !shown ? chipFor(others) : '');
+  let shown = $derived(toggled ?? (diffs.length > 0 && !failed && !documentsDeferred));
+  let chip = $derived(shown ? '' : documentsDeferred ? chipFor(documents) : others.length > 0 ? chipFor(others) : '');
+  let deferred = $derived(outputDeferred || inputDeferred || documentsDeferred);
 
   let inputJson = $derived(streaming ? '' : json(input));
   /**
@@ -144,9 +154,9 @@
   let loading = $state(false);
   let loadError = $state<string | null>(null);
   $effect(() => {
-    if (!outputDeferred) attempted = false;
+    if (!deferred) attempted = false;
     if (shown) built = true;
-    if (!shown || !outputDeferred || !loadOutput || attempted) return;
+    if (!shown || !deferred || !loadOutput || attempted) return;
     attempted = true;
     loading = true;
     void loadOutput().catch(reason => { loadError = reason instanceof Error ? reason.message : String(reason); }).finally(() => { loading = false; });
@@ -200,7 +210,9 @@
           {#if failed && errorPreview}
             <p class="error-preview" data-testid="tool-error-preview">{errorPreview}</p>
           {/if}
-          {#if diffs.length > 0}
+          {#if documentsDeferred}
+            <!-- Stubs only: the body is drawn once the whole call is here. -->
+          {:else if diffs.length > 0}
             <!-- A file change reads as its diff: the input only restates it. -->
             {#if failed}
               {#if !outputDeferred}<pre class="mono" data-testid="tool-output">{output ?? strings.chat.noOutput}</pre>{/if}
@@ -223,7 +235,7 @@
               <pre
                 class="mono"
                 data-testid="tool-input">{inputText}<span class="cursor" aria-label={strings.chat.streaming}></span></pre>
-            {:else}
+            {:else if !inputDeferred}
               <pre class="mono" class:clamped data-testid="tool-input">{inputJson}</pre>
               {#if clamped}
                 <button
