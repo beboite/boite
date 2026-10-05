@@ -147,7 +147,8 @@ export class Drafts {
     if (!s.draft) return;
     const key = projectKey(s.draft.projectId);
     const input = this.ctx.composer.composerStates.draft;
-    if (hasContent(input)) this.saved[key] = { draft: { ...s.draft }, choice: s.draftChoice, input: input! };
+    // An incognito draft is never set aside: leaving it lets its words go.
+    if (hasContent(input) && !s.draft.incognito) this.saved[key] = { draft: { ...s.draft }, choice: s.draftChoice, input: input! };
     else delete this.saved[key];
   }
 
@@ -156,7 +157,7 @@ export class Drafts {
     const s = this.ctx.store;
     const saved = this.saved[projectKey(projectId)];
     this.ctx.composer.composerStates.draft = saved?.input ?? empty();
-    s.draft = saved ? { ...saved.draft } : { projectId, worktree: s.projects.some(p => p.id === projectId && p.kind !== 'drafts' && p.repository !== false && p.worktreeDefault === true) };
+    s.draft = saved ? { ...saved.draft } : { projectId, worktree: s.projects.some(p => p.id === projectId && p.kind !== 'drafts' && p.repository === true && p.worktreeDefault === true) };
     s.draftChoice = saved?.choice ?? null;
   }
 
@@ -176,9 +177,12 @@ export class Drafts {
       .filter(entry => entry.draft.projectId === null || s.projects.some(p => p.id === entry.draft.projectId && !p.archived))
       .map(entry => ({ projectId: entry.draft.projectId, text: entry.input.text, active: false }));
     if (s.draft) {
-      const entry = { projectId: s.draft.projectId, text: this.ctx.composer.composerStates.draft?.text ?? '', active: true };
+      // The open draft gets a row only once it holds something: an empty one is just the composer.
+      const input = this.ctx.composer.composerStates.draft;
+      const entry = { projectId: s.draft.projectId, text: input?.text ?? '', active: true };
       const index = entries.findIndex(item => item.projectId === entry.projectId);
-      if (index < 0) entries.push(entry); else entries[index] = entry;
+      if (!hasContent(input)) { if (index >= 0) entries.splice(index, 1); }
+      else if (index < 0) entries.push(entry); else entries[index] = entry;
     }
     return entries;
   }
@@ -226,7 +230,8 @@ export class Drafts {
   #capture(source: Source | null, key = source ? entryKey(source.section, source.id) : ''): void {
     if (!this.#key) return;
     try {
-      const input = source && hasContent(source.input) ? savedInput(source.input, this.#assetId) : null;
+      // Nothing typed into an incognito conversation or its draft reaches the device's storage.
+      const input = source && hasContent(source.input) && !this.#incognito(source) ? savedInput(source.input, this.#assetId) : null;
       const value = input && source ? source.section === 'drafts' ? { draft: source.draft, input } : input : null;
       const stored = this.#storedAssetIds;
       // Until a strict durable write succeeds, keep inline bytes in the atomic
@@ -297,6 +302,12 @@ export class Drafts {
     this.#timer = undefined;
     this.#newAsset = false;
     if (this.#pending) this.#schedule();
+  }
+
+  #incognito(source: Source): boolean {
+    if (source.section === 'drafts') return source.draft?.incognito === true;
+    const s = this.ctx.store;
+    return s.openThread?.id === source.id ? s.openThread.incognito === true : s.threads.some(thread => thread.id === source.id && thread.incognito);
   }
 
   #assetId = (bytes: string): string => {

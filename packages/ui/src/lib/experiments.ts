@@ -3,7 +3,9 @@
  * or go away, turned on per machine from Settings, Experiments. The enabled ids
  * live in `localStorage` under `boite.experiments` as a JSON array of strings,
  * the way the theme lives under `boite.theme` and the window material under
- * `boite.glass`. These are client preferences, not core settings.
+ * `boite.glass`. These are client preferences, not core settings. A finished
+ * experiment graduates to `features.ts`: on by default, switched in its own
+ * Settings page.
  *
  * Nothing in this module imports a feature it gates. The dependency runs the
  * other way, `theme.ts` asks here whether `theme-grain` is on and subscribes so
@@ -15,12 +17,12 @@
  * the dedicated Agents interface.
  */
 
-export type ExperimentId = 'theme-grain' | 'session-import' | 'prompt-cache' | 'chat-artifacts' | 'open-chat-links' | 'preview-comments' | 'resident-agents' | 'whip' | 'recording-indicators';
+export type ExperimentId = 'theme-grain' | 'session-import' | 'prompt-cache' | 'open-chat-links' | 'preview-comments' | 'resident-agents' | 'whip' | 'recording-indicators';
 
 export const EXPERIMENTS_STORAGE_KEY = 'boite.experiments';
 
 /** Every experiment this build ships, in the order the page lists them. */
-export const EXPERIMENT_IDS: ExperimentId[] = ['theme-grain', 'session-import', 'prompt-cache', 'chat-artifacts', 'open-chat-links', 'preview-comments', 'resident-agents', 'whip', 'recording-indicators'];
+export const EXPERIMENT_IDS: ExperimentId[] = ['theme-grain', 'session-import', 'prompt-cache', 'open-chat-links', 'preview-comments', 'resident-agents', 'whip', 'recording-indicators'];
 
 type Listener = (enabled: ExperimentId[]) => void;
 

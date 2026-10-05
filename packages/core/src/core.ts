@@ -28,6 +28,7 @@ import { Router } from './router.ts';
 import { Scheduler } from './scheduler.ts';
 import { SessionStore } from './sessions.ts';
 import { SettingsStore } from './settings.ts';
+import { eraseIncognitoRoot } from './threads/incognito.ts';
 import { ThreadStore } from './threads.ts';
 import { scheduleThreadDeletionRetention } from './threads/deletion-retention.ts';
 import { scheduleDoneRetention } from './threads/done-retention.ts';
@@ -249,6 +250,8 @@ export class Core {
     this.bus.onError = (message) => this.log('error', message);
     this.journal = new Journal(join(this.dataDir, 'journal.db'), { onError: (message) => this.log('error', message) });
     this.stopArtifactRetention = scheduleArtifactRetention(this);
+    // The journal just erased every incognito conversation; their folders follow.
+    eraseIncognitoRoot(this.dataDir, (message) => console.error(message));
     this.#stopRetention = scheduleEventRetention(this.journal, (message) => this.log('error', message));
     this.router = new Router();
     this.settings = new SettingsStore(this);
@@ -428,6 +431,8 @@ export class Core {
     this.#stopDeletionRetention();
     await this.stopArtifactRetention();
     this.journal.close();
+    // Every agent is stopped by now, so nothing holds an incognito folder.
+    eraseIncognitoRoot(this.dataDir, (message) => console.error(message));
     this.logs.record('info', 'Core stopped', { source: 'core', event: 'core.stopped' });
     await this.logs.close();
   }

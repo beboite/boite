@@ -318,7 +318,7 @@ sessions are refused.
 desktop and paired phones after the original changes or disappears. The thread
 must have a turn and must not be archived. Images, videos and audio appear
 inline by default. PDF and local file previews are under the
-[Chat files and previews experiment](experiments.md#chat-files-and-previews).
+[Chat files and previews](chat-files.md) switch, on by default.
 When the agent continues working after publishing, new text and tool cards
 appear below the files. Updates to tools already running stay on their original
 cards. Publishing a file does not end the turn.

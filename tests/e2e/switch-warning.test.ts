@@ -86,7 +86,7 @@ test('native speed switches keep Codex unblocked and warn only when enabling Cla
     await page.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: name === 'phone' });
     await page.navigate(url);
     await page.waitFor(`document.querySelector('[data-testid="composer-picker"]')`);
-    for (const [provider, model, speeds] of [['codex', 'codex-demo', ['fast', 'ultrafast', null]], ['claude', 'claude-opus-5', ['fast', null]]] as const) {
+    for (const [provider, model, speeds] of [['codex', 'codex-demo', ['fast', 'ultrafast', null]], ['claude', 'claude-opus-5-5', ['fast', null]]] as const) {
       await page.evaluate(`(async () => { const store = ${STORE}; store.openThread.context = { tokens: 0, window: 1000000, at: Date.now() }; document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); })()`);
       await page.click('[data-testid="composer-picker"]');
       await page.click(`[data-provider="${provider}"]`);

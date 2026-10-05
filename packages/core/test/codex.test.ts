@@ -1033,7 +1033,7 @@ describe('codex driver', () => {
     expect((await finished).usage).toBeNull();
   });
 
-  test('the turn usage carries the tokens the agent reported, with no price', async () => {
+  test('the turn usage sums every model request of the turn once, with no price, and the history counts its cache once', async () => {
     const client = await startCore();
     const threadId = await codexThread(client);
 
@@ -1042,13 +1042,19 @@ describe('codex driver', () => {
 
     const done = await finished;
     expect(done.status).toBe('done');
+    // Two requests (8 + 20 input, 2 + 15 cached, 1 written, 4 + 6 output),
+    // neither the thread's earlier history nor the repeated update. The input
+    // keeps Codex's meaning: it still holds the cache reads.
     expect(done.usage).toEqual({
-      inputTokens: 8,
-      outputTokens: 4,
-      cacheReadTokens: 2,
+      inputTokens: 28,
+      outputTokens: 10,
+      cacheReadTokens: 17,
       cacheWriteTokens: 1,
       costUsdEquivalent: null,
     });
+    // The usage page takes the cache reads out of Codex input once.
+    const history = await client.call('usage.history', { edges: [0, Date.now() + 60_000] });
+    expect(history.rows.map((row) => row.usage.inputTokens)).toEqual([11]);
   });
 
   test('stopping a turn interrupts it and the agent process is gone', async () => {

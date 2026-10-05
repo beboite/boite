@@ -47,7 +47,7 @@ test('an old default alias uses the configured target without changing an explic
   const { store } = await ready({ delayMs: 0 });
   const account = store.accountsOf('codex')[0]!;
   const alias = { providerId: 'codex', accountId: account.id, model: 'default', effort: null, permissionMode: 'default' as const };
-  expect(store.composerChoice(alias)).toMatchObject({ model: 'gpt-5.6-sol', effort: 'medium' });
+  expect(store.composerChoice(alias)).toMatchObject({ model: 'gpt-6.1-sol', effort: 'medium' });
   const explicit = { ...alias, model: 'codex-demo', effort: 'low' };
   expect(store.composerChoice(explicit)).toEqual(explicit);
   store.setModelDefault('codex', account.id, 'default', null);
@@ -93,7 +93,7 @@ test('a configured default survives reconnect and wins over the previous thread 
   const account = store.accountsOf('claude')[0]!;
   await store.probeModels('claude', account.id);
   const models = store.modelsOf('claude', account.id);
-  const preferred = models.find((model) => model.id === 'claude-opus-5')!;
+  const preferred = models.find((model) => model.id === 'claude-opus-5-5')!;
   expect(preferred).toBeTruthy();
   store.remember({ providerId: provider.id, accountId: account.id, model: models[0]!.id, effort: null, permissionMode: 'plan' });
   store.setModelDefault(provider.id, account.id, preferred.id, 'medium');
@@ -113,17 +113,19 @@ test('the first ACP draft probes its default model scale and preserves a later e
   store.prefs.providerId = provider.id;
   store.prefs.accountId = account.id;
   store.startDraft();
-  expect(store.defaultChoice()).toMatchObject({ model: 'claude-opus-5', effort: 'high' });
-  expect(store.modelOf(store.defaultChoice())?.name).toBe('Opus 5');
+  expect(store.defaultChoice()).toMatchObject({ model: 'claude-opus-5-5', effort: 'high' });
+  // Before the catalog is read, the built-in default already offers its reasoning levels.
+  expect(store.modelOf(store.defaultChoice())).toMatchObject({ name: 'Opus 5.5', effort: { default: 'high' } });
+  expect(store.modelOf(store.defaultChoice())?.effort?.levels.map((level) => level.id)).toContain('max');
   expect(store.modelsOf(provider.id, account.id).map((model) => model.id)).toEqual(['default']);
   const call = vi.spyOn(client, 'call').mockResolvedValue({ models: [
-    { id: 'claude-opus-5', name: 'Opus 5', effort: { levels, default: 'low' } }
+    { id: 'claude-opus-5-5', name: 'Opus 5.5', effort: { levels, default: 'low' } }
   ] } as never);
   // Changing permissions must not skip the first model probe.
   store.remember({ ...store.defaultChoice()!, permissionMode: 'bypassPermissions' });
   const prepared = await store.prepareDraftChoice(store.defaultChoice()!);
-  expect(call).toHaveBeenCalledWith('providers.probe', { providerId: provider.id, accountId: account.id, model: 'claude-opus-5' });
-  expect(prepared).toMatchObject({ model: 'claude-opus-5', effort: 'high' });
+  expect(call).toHaveBeenCalledWith('providers.probe', { providerId: provider.id, accountId: account.id, model: 'claude-opus-5-5' });
+  expect(prepared).toMatchObject({ model: 'claude-opus-5-5', effort: 'high' });
   const explicit = { ...prepared!, effort: 'low' };
   store.remember(explicit);
   expect(await store.prepareDraftChoice(explicit)).toEqual(explicit);
@@ -208,25 +210,25 @@ test('a built-in default the account no longer lists moves to its later revision
   const account = store.accountsOf('claude')[0]!;
   const catalog: ModelInfo[] = [
     { id: 'claude-fable-5-1', name: 'Fable 5.1', effort: { levels, default: 'low' } },
-    { id: 'claude-opus-5-5', name: 'Opus 5.5', effort: { levels, default: 'low' } }
+    { id: 'claude-opus-5-5-20261101', name: 'Opus 5.5', effort: { levels, default: 'low' } }
   ];
-  const stale = { providerId: provider.id, accountId: account.id, model: 'claude-opus-5', effort: 'high', speed: 'fast', permissionMode: 'default' as const };
+  const stale = { providerId: provider.id, accountId: account.id, model: 'claude-opus-5-5', effort: 'high', speed: 'fast', permissionMode: 'default' as const };
   const call = vi.spyOn(client, 'call').mockResolvedValue({ models: catalog } as never);
-  expect(await store.prepareDraftChoice(stale)).toEqual({ ...stale, model: 'claude-opus-5-5', speed: null });
+  expect(await store.prepareDraftChoice(stale)).toEqual({ ...stale, model: 'claude-opus-5-5-20261101', speed: null });
   expect(store.error).toBeNull();
   // The catalog is read: the composer and Settings open on the same model.
-  expect(store.defaultModelOf(provider, account.id)).toBe('claude-opus-5-5');
-  expect(store.defaultEffortOf(provider.id, account.id, 'claude-opus-5-5')).toBe('high');
+  expect(store.defaultModelOf(provider, account.id)).toBe('claude-opus-5-5-20261101');
+  expect(store.defaultEffortOf(provider.id, account.id, 'claude-opus-5-5-20261101')).toBe('high');
   // A draft that remembered the built-in before discovery shows what the send uses.
   store.startDraft();
   store.remember(stale);
-  expect(store.draftChoice?.model).toBe('claude-opus-5');
-  expect(store.defaultChoice()).toMatchObject({ model: 'claude-opus-5-5', effort: 'high', speed: null });
+  expect(store.draftChoice?.model).toBe('claude-opus-5-5');
+  expect(store.defaultChoice()).toMatchObject({ model: 'claude-opus-5-5-20261101', effort: 'high', speed: null });
   expect(fallbackModelDefault('claude', catalog.slice(0, 1))).toEqual({ model: 'claude-fable-5-1', effort: 'high' });
   expect(fallbackModelDefault('claude', [{ id: 'default', name: 'Default', default: true }])).toBeNull();
   // A default the user configured is still refused, never replaced.
-  store.modelDefaults = { claude: { model: 'claude-opus-5', effort: 'high' } };
+  store.modelDefaults = { claude: { model: 'claude-opus-5-5', effort: 'high' } };
   expect(await store.prepareDraftChoice(stale)).toBeNull();
-  expect(store.error).toContain('claude-opus-5');
+  expect(store.error).toContain('claude-opus-5-5');
   call.mockRestore();
 });

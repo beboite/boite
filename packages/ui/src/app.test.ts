@@ -212,12 +212,14 @@ test('New thread opens a draft and the first send creates the thread titled from
 
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  expect(document.querySelector('[data-testid=draft-row]')).not.toBeNull();
+  // An empty draft is only the composer: the sidebar lists it once something is typed.
+  expect(document.querySelector('[data-testid=draft-row]')).toBeNull();
   expect(store.openThread).toBeNull();
 
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
   input.value = 'Rename the scheduler caps\nand nothing else';
   input.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => document.querySelector('[data-testid=draft-row]')?.textContent?.includes('Rename the scheduler caps') === true);
   await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
   query<HTMLButtonElement>('[data-testid=composer-send]').click();
 
@@ -277,15 +279,18 @@ test('the draft worktree chip puts the first send on its own branch, and the hea
   expect(store.openThread?.cwd).toBe(cwd);
 });
 
-test('a draft on a folder that is not a repository offers no worktree switch', async ({ app: _app }) => {
+test('a draft offers the worktree switch only on a folder where git was found', async ({ app: _app }) => {
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-worktree]') !== null);
   const project = store.projects.find((one) => one.id === store.draft?.projectId);
   if (!project) throw new Error('the draft has no project');
   project.repository = false;
   await waitFor(() => document.querySelector('[data-testid=composer-worktree]') === null);
-  // A core older than the field says nothing, and the switch stays.
+  // No answer yet, or a core older than the field: no `.git` was found, so no switch either.
   delete project.repository;
+  flushSync();
+  expect(document.querySelector('[data-testid=composer-worktree]')).toBeNull();
+  project.repository = true;
   await waitFor(() => document.querySelector('[data-testid=composer-worktree]') !== null);
 });
 
@@ -357,6 +362,9 @@ test('the sidebar draft row hands the keyboard back to the composer', async ({ a
 
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
+  // The row appears with the first typed text.
+  store.editComposerText('draft', 'Half a thought');
+  await waitFor(() => document.querySelector('[data-testid=draft-row]') !== null);
 
   // Something else in the page holds the keyboard, the way it does after a click.
   const gear = query<HTMLButtonElement>('[data-testid=nav-settings]');
@@ -370,6 +378,7 @@ test('the sidebar draft row hands the keyboard back to the composer', async ({ a
   expect(store.draft).not.toBeNull();
 
   // The store is the singleton every test shares: the draft goes back out.
+  store.editComposerText('draft', '');
   store.draft = null;
 });
 
@@ -399,14 +408,17 @@ test('a draft names its project in the heading and the dropdown moves it to anot
   expect(places.map((row) => JSON.parse(row.dataset['value']!)[1])).toEqual([null, 'p-boite', 'p-notes']);
   expect(rows.at(-1)?.dataset['value']).toBe('open-folder');
 
+  store.editComposerText('draft', 'Move me along');
   places[1]?.click();
   await waitFor(() => store.draft?.projectId === 'p-boite');
   await waitFor(() => (query('[data-testid=draft-empty]').textContent ?? '').includes('boite'));
   // The draft row moved with it, and the composer took the keyboard back.
-  expect(query('[data-testid=project][data-project-id=p-boite]').querySelector('[data-testid=draft-row]')).not.toBeNull();
+  await waitFor(() => query('[data-testid=project][data-project-id=p-boite]').querySelector('[data-testid=draft-row]') !== null);
+  expect(query('[data-testid=project][data-project-id=p-notes]').querySelector('[data-testid=draft-row]')).toBeNull();
   await waitFor(() => document.activeElement === document.querySelector('[data-testid=composer-input]'));
 
   // The store is the singleton every test shares: the draft goes back out.
+  store.editComposerText('draft', '');
   store.draft = null;
 });
 
@@ -418,7 +430,7 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   await waitFor(() => store.draft !== null);
 
   // A draft opens on the first available provider, its default model.
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5.5') === true);
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
@@ -428,7 +440,7 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   expect(tiles()).toEqual(['favorites', 'claude', 'echo', 'opencode', 'codex', 'pi', 'grok', 'muse', 'antigravity-cli', 'more']);
   // Claude is the shown one and has two logins, so they sit beside its name.
   expect(seats()).toEqual(['claude::a-claude-main', 'claude::a-claude-side']);
-  expect(shownModels()).toEqual(['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5']);
+  expect(shownModels()).toEqual(['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5']);
 
   // One account: nothing beside the name.
   query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=echo]').click();
@@ -443,10 +455,10 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   // The second account of the same provider, then a model: one thread with both.
   query<HTMLButtonElement>('[data-instance="claude::a-claude-side"]').click();
   await waitFor(() => document.querySelector('[data-instance="claude::a-claude-side"]')?.getAttribute('aria-pressed') === 'true' &&
-    store.probedModels['claude::a-claude-side'] !== undefined && document.querySelector('[data-model="claude-opus-5"]') !== null);
-  query<HTMLButtonElement>('[data-model="claude-opus-5"]').click();
+    store.probedModels['claude::a-claude-side'] !== undefined && document.querySelector('[data-model="claude-opus-5-5"]') !== null);
+  query<HTMLButtonElement>('[data-model="claude-opus-5-5"]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
-  expect(query('[data-testid=composer-picker]').textContent).toContain('Opus 5 · Second seat');
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Opus 5.5 · Second seat');
 
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
   input.value = 'On the second seat';
@@ -455,13 +467,13 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   query<HTMLButtonElement>('[data-testid=composer-send]').click();
   await waitFor(() => store.openThread !== null && store.draft === null);
   expect(store.openThread?.accountId).toBe('a-claude-side');
-  expect(store.openThread?.model).toBe('claude-opus-5');
+  expect(store.openThread?.model).toBe('claude-opus-5-5');
 });
 
 test('the picker reads an ACP agent models, showing the descriptor and a probing line meanwhile', async ({ app: _app }) => {
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5.5') === true);
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
@@ -504,7 +516,7 @@ test('the picker reads an ACP agent models, showing the descriptor and a probing
 test('past twelve models the column gets a search field, prefix groups and keyboard picking', async ({ app: _app }) => {
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5.5') === true);
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
@@ -571,7 +583,7 @@ test('past twelve models the column gets a search field, prefix groups and keybo
 test('the reasoning slider sets the effort of the picked model, and the chip follows', async ({ app: _app }) => {
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5.5') === true);
 
   await waitFor(() => document.querySelector('[data-testid=composer-effort]') !== null);
   query<HTMLButtonElement>('[data-testid=composer-effort]').click();
@@ -587,7 +599,7 @@ test('the reasoning slider sets the effort of the picked model, and the chip fol
   // Picking a level keeps the popover open: it is a setting of the model, not a choice of its own.
   expect(document.querySelector('[data-testid=composer-effort-menu]')).not.toBeNull();
   // The level reads on its own chip; the picker's label names the model alone.
-  expect(query('[data-testid=composer-picker]').textContent).toContain('Opus 5');
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Opus 5.5');
   expect(query('[data-testid=composer-picker]').textContent).not.toContain('Xhigh');
   await waitFor(() => query('[data-testid=composer-effort]').textContent?.trim() === 'Xhigh');
 
@@ -1796,7 +1808,7 @@ test('a provider Boite installs waits in Settings, one tile away, and joins the 
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu] [data-provider=antigravity]') !== null);
   query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=antigravity]').click();
   // Its models are read once it is shown: Claude's leave the column first.
-  await waitFor(() => shownModels().length > 0 && !shownModels().includes('claude-opus-5'));
+  await waitFor(() => shownModels().length > 0 && !shownModels().includes('claude-opus-5-5'));
 
   expect(shownModels()).not.toContain('default');
   query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-model]').click();

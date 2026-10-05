@@ -1,11 +1,12 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { connect } from '../src/client.ts';
 import type { CoreClient } from '../src/client.ts';
 import { xdgDocuments } from '../src/platform/folders.ts';
 import { draftFolderName } from '../src/threads/inputs.ts';
-import { startTestCore } from './harness.ts';
+import { Journal } from '../src/journal.ts';
+import { startTestCore, testProject, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 let harness: TestCore;
@@ -85,8 +86,74 @@ describe('the drafts project', () => {
     try {
       const drafts = await phone.call('projects.drafts', {});
       expect(drafts.kind).toBe('drafts');
+      // An incognito one too: the phone can erase it when it leaves.
+      const accountId = await echoAccount();
+      const secret = await phone.call('threads.create', { projectId: drafts.id, providerId: 'echo', accountId, incognito: true });
+      await phone.call('threads.remove', { threadId: secret.id });
+      expect(existsSync(secret.cwd)).toBe(false);
     } finally {
       phone.close();
+    }
+  });
+});
+
+/** The message a refused call answers with; a call that succeeds fails the test. */
+async function refusal(call: Promise<unknown>): Promise<string> {
+  return call.then(() => { throw new Error('the call was expected to be refused'); }, (error: Error) => error.message);
+}
+
+describe('an incognito draft', () => {
+  test('works in a folder of the data directory and is refused anywhere but the drafts', async () => {
+    const drafts = await client.call('projects.drafts', {});
+    const accountId = await echoAccount();
+    const thread = await client.call('threads.create', { projectId: drafts.id, providerId: 'echo', accountId, title: 'Secret', incognito: true });
+    expect(thread.incognito).toBe(true);
+    expect(thread.cwd).toBe(join(harness.dataDir, 'incognito', thread.id));
+    expect(existsSync(thread.cwd)).toBe(true);
+    // Nothing lands in the drafts folder the user browses.
+    expect(readdirSync(drafts.path)).toEqual([]);
+    expect((await client.call('threads.list', {})).find((row) => row.id === thread.id)?.incognito).toBe(true);
+
+    const project = await testProject(harness, client);
+    expect(await refusal(client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, incognito: true }))).toMatch(/drafts project only/);
+    expect(await refusal(client.call('threads.create', { projectId: drafts.id, providerId: 'echo', accountId, incognito: true, cwd: drafts.path }))).toMatch(/incognito and cwd exclude each other/);
+    expect(await refusal(client.call('threads.create', { projectId: drafts.id, providerId: 'echo', accountId, incognito: true, worktree: {} }))).toMatch(/incognito and worktree exclude each other/);
+    expect(await refusal(client.call('threads.move', { threadId: thread.id, projectId: project.id }))).toMatch(/incognito conversation cannot be moved/);
+  });
+
+  test('is erased with its folder when removed, with nothing to restore', async () => {
+    const drafts = await client.call('projects.drafts', {});
+    const accountId = await echoAccount();
+    const thread = await client.call('threads.create', { projectId: drafts.id, providerId: 'echo', accountId, incognito: true });
+    writeFileSync(join(thread.cwd, 'notes.txt'), 'private');
+    await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
+    await waitFor(() => harness.core.journal.getThread(thread.id)?.status === 'idle' && harness.core.journal.listMessages(thread.id).length >= 2);
+    const [message] = harness.core.journal.listMessages(thread.id);
+    expect(await refusal(client.call('threads.fork', { threadId: thread.id, messageId: message!.id }))).toMatch(/incognito conversation cannot be forked/);
+
+    const removed: { threadId: string; undoable?: boolean }[] = [];
+    client.on('thread.removed', (event) => removed.push(event));
+    await client.call('threads.remove', { threadId: thread.id });
+    await waitFor(() => removed.length === 1);
+    expect(removed).toEqual([{ threadId: thread.id, undoable: false }]);
+    expect(harness.core.journal.getThread(thread.id)).toBeNull();
+    expect(harness.core.journal.listMessages(thread.id)).toEqual([]);
+    expect(existsSync(thread.cwd)).toBe(false);
+    expect(await client.call('threads.deleted', {})).toEqual([]);
+  });
+
+  test('does not survive a core that stopped without leaving it', async () => {
+    const drafts = await client.call('projects.drafts', {});
+    const accountId = await echoAccount();
+    const kept = await client.call('threads.create', { projectId: drafts.id, providerId: 'echo', accountId, title: 'Kept' });
+    const thread = await client.call('threads.create', { projectId: drafts.id, providerId: 'echo', accountId, incognito: true });
+    // The next core opens the same journal, as after a crash: its start erases the conversation.
+    const next = new Journal(join(harness.dataDir, 'journal.db'));
+    try {
+      expect(next.getThread(thread.id)).toBeNull();
+      expect(next.getThread(kept.id)?.title).toBe('Kept');
+    } finally {
+      next.close();
     }
   });
 });

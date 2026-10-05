@@ -10,7 +10,7 @@
   import { strings } from '../lib/strings';
   import { openTour } from '../lib/onboarding.svelte';
   import type { Store } from '../lib/store.svelte';
-  import ThreadGroupingSettings from './ThreadGroupingSettings.svelte';
+  import ConversationSwitches from './ConversationSwitches.svelte';
 
   /**
    * What the app does for the person in front of it: how a thread
@@ -35,7 +35,7 @@
 
   <section class="card" id="settings-conversations">
     <h2>{strings.settings.conversations}</h2>
-    <ThreadGroupingSettings />
+    <ConversationSwitches />
     <label for="{uid}-notifications" class="switch-row">
       <span class="text ui-label-box">
         <span class="ui-label" id="{uid}-notifications-name">{strings.settings.notifications}</span><InfoTip topic={strings.settings.notifications} text={strings.settings.notificationsHint} />

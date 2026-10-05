@@ -4,12 +4,17 @@ Enable these separately in Settings > Experiments. Switches are off by default
 and belong to this client device. They do not change another machine's settings.
 A phone has its own Experiments row under Settings, This phone.
 
+A finished experiment leaves this page: it turns on by default and its switch
+moves to the Settings page it belongs to, as [chat files and previews](chat-files.md)
+did. The agent's browser needs no switch: it runs on the machine of the
+conversation ([the agent's browser](browser.md)).
+
 ## Open chat links
 
-`open-chat-links` enables the same rich link parsing as `chat-artifacts`:
-Markdown file links, bare web URLs, absolute paths, `file:///` links and paths
-inside inline code. Either switch enables this parsing; enabling both adds no
-further link types.
+`open-chat-links` enables the same rich link parsing as
+[Chat files and previews](chat-files.md): Markdown file links, bare web URLs,
+absolute paths, `file:///` links and paths inside inline code. Either switch
+enables this parsing; enabling both adds no further link types.
 
 On the owning local desktop, this switch also makes an explicit click open a
 file or folder in its associated application, including Windows shortcuts and
@@ -38,55 +43,11 @@ returning it to its original position. Throwing the rope does neither. Maximized
 that ignore positioning shake the interface instead. Hits do not overlap.
 Reduced motion disables new throws and stops any visible rope.
 
-## Chat files and previews
-
-An agent can run `boite attach "reports/review.pdf"` to deliver a file in its
-conversation. The core snapshots up to 512 MB from the thread's working directory.
-Files up to 5 MB remain inline; larger files live in the core's `artifacts`
-directory and the message stores a reference. Downloads support HTTP ranges,
-so videos can seek without loading the entire file. The UI renews download
-tickets while the card is mounted. Unreferenced snapshots and interrupted
-copies older than a day are removed by daily maintenance; forks retain their
-referenced files. The reference scan runs in a worker so large journals do not
-block the core's event loop. A pass that overlaps journal writes skips deletion
-to avoid acting on stale references. User uploads still have their separate 5 MB limit.
-Relative and absolute paths must
-stay inside that directory, including resolved symlinks. A missing file,
-directory, oversized file or archived thread is refused. The thread must have
-at least one turn. Every provider can use this CLI command.
-
-Published files remain downloadable after the source is edited or deleted,
-after a core restart, and with this experiment switched off. Paired phones can
-download the published snapshot. They cannot publish or browse arbitrary host
-files through the file APIs.
-
-Published images, videos and audio appear directly in the conversation without
-an experiment. Media keeps its aspect ratio in a bounded card; videos have
-playback, seeking and fullscreen controls and never autoplay. Images open in a
-keyboard-accessible viewer with zoom, fit and download controls. Images larger
-than 5 MB show their name, size and download first. Click Load image or the
-filename to load them; opening a conversation does not fetch them automatically.
-If decoding fails, the card keeps its download and offers a retry. Published PDFs
-have an optional inline preview with `chat-artifacts`; other types remain
-downloadable. Mutable file editing and viewing belong to the
-[right panel](panel.md).
-
-With either `chat-artifacts` or `open-chat-links` enabled, answers recognize
-Markdown links, bare URLs, absolute paths, `file:///` links and inline-code file
-paths. Use angle brackets for spaces, such as `<reports/review one.pdf>`, and
-`:line` or `#Lline` for source locations. Files resolve through the message's
-owning thread and machine; preview paths stay inside its working directory.
-The local desktop's explicit open action follows the rules in
-[Open chat links](#open-chat-links).
-
-Captures: [chat media on desktop](images/chat-media-desktop.png) · [chat media on a phone](images/chat-media-phone.png)
-Remote images are links, so reading an answer does not fetch a tracking image.
-Executable URL schemes and arbitrary HTML are not rendered.
 
 ## Resident agents
 
 The Agents page ([agents](agents.md)) and every button that leads there: the
-sidebar icon, the phone tab, the command palette row and the link from an agent's
+Threads and Agents switch at the top of the sidebar, the phone menu entry, the command palette row and the link from an agent's
 own thread. Turning
 the switch off closes the page if it is open. It hides the page only: agents
 already made keep their routines and missions on the core, which knows nothing

@@ -10,7 +10,7 @@ beforeAll(async () => {
   server = await startUi(port);
   // The Agents page is an experiment; the rest of this file drives it.
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1`, experiments: ['resident-agents'] });
-  await page.waitFor(`document.querySelector('[data-testid="nav-agents"]')`);
+  await page.waitFor(`document.querySelector('[data-testid="view-agents"]')`);
 }, 60000);
 
 async function missionJourney() {
@@ -80,7 +80,7 @@ async function settled() {
 async function capture(name: string) { await settled(); await page.screenshot(join(import.meta.dir, '.artifacts', name)); }
 
 test('create, converse, configure the resident engine and follow background work on desktop and phone', async () => {
-  await page.click('[data-testid="nav-agents"]');
+  await page.click('[data-testid="view-agents"]');
   await page.waitFor(`document.querySelector('[data-testid="agents-page"]')`);
   await capture('agents-welcome-desktop.png');
   await page.click('[data-testid="agents-create"]');
@@ -131,7 +131,7 @@ test('create, converse, configure the resident engine and follow background work
   })()`);
   await page.waitFor(`!document.querySelector('[data-testid="agents-page"]')`);
   await page.waitFor(`(async () => { const { workspace } = window.__boiteTest; return (await workspace.active.client.call('agents.snapshot', {})).work.every(w => w.status === 'done'); })()`);
-  await page.click('[data-testid="nav-agents"]');
+  await page.click('[data-testid="view-agents"]');
   await page.waitFor(`document.querySelector('[data-testid="agent-entry-' + window.__agentsFixture.group.id + '"]')`);
   await capture('agents-directory-desktop.png');
   await page.evaluate(`window.__boiteTest.setTheme('light')`);
@@ -162,7 +162,7 @@ test('memory past the snapshot window stays reachable through Load earlier', asy
   })()`);
   // A new agents page starts from one bounded snapshot, not from what this page saw being created.
   await page.waitFor(`!document.querySelector('[data-testid="agents-page"]')`);
-  await page.click('[data-testid="nav-agents"]');
+  await page.click('[data-testid="view-agents"]');
   await page.waitFor(`document.querySelector('[data-testid="agent-entry-' + window.__agentsFixture.first.id + '"]')`);
   await page.evaluate(`document.querySelector('[data-testid="agent-entry-' + window.__agentsFixture.first.id + '"]').click()`);
   await page.click('[data-testid="agent-tab-memory"]');

@@ -60,7 +60,8 @@ export function reconcileRows(held: readonly ThreadSummary[], fresh: ThreadSumma
 export function threadsByProject(threads: readonly ThreadSummary[]): Map<ProjectId, ThreadSummary[]> {
   const groups = new Map<ProjectId, ThreadSummary[]>();
   for (const thread of threads) {
-    if (thread.archived || thread.parentThreadId || thread.projectId === null) continue;
+    // An incognito conversation stays off the lists: it lives on its own screen only.
+    if (thread.archived || thread.parentThreadId || thread.projectId === null || thread.incognito) continue;
     const group = groups.get(thread.projectId);
     if (group) group.push(thread);
     else groups.set(thread.projectId, [thread]);

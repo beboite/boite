@@ -99,7 +99,7 @@ test(
     await page.type(testid('project-path'), projectDir);
     await clickWhenEnabled(testid('project-add'));
     await page.waitFor(`${textOf('project-row')}.includes(${JSON.stringify(basename(projectDir))})`);
-    await page.waitFor(`document.querySelector('${testid('draft-row')}')`);
+    await page.waitFor(`document.querySelector('${testid('draft-empty')}')`);
     expect(await page.evaluate<number>(`document.querySelectorAll('${testid('thread-row')}').length`)).toBe(0);
 
     // The picker: the echo tile on the rail, then its one model on the right, which closes it.

@@ -2,6 +2,7 @@ import { mobileAction } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp';
+import { showThreadView } from './lib/views.ts';
 import { startDevUi } from './lib/ui.ts';
 let server: { close(): Promise<void> };
 let page: BrowserPage;
@@ -39,7 +40,7 @@ test('connecting another machine keeps thread rows at their single-machine heigh
   // In Projects the header names the machine; a row repeating it would only take room from the title.
   expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('thread-row')}')).every(e => !e.querySelector('.machine'))`)).toBe(true);
   expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('project-row')}')).every(e => e.querySelector('${id('project-host')}[title][aria-label]'))`)).toBe(true);
-  await page.click(id('view-recent'));
+  await showThreadView(page, 'recent');
   await page.waitFor(`Array.from(document.querySelectorAll('${id('thread-row')}')).every(e => e.querySelector('.headline .machine[title][aria-label]'))`);
   await page.click(id('project-filter'));
   await page.evaluate(`Array.from(document.querySelectorAll('${id('project-filter-menu')} [data-value]')).find(e => e.dataset.value === JSON.stringify(['http://builder.test', 'p-notes'])).click()`);
@@ -48,7 +49,7 @@ test('connecting another machine keeps thread rows at their single-machine heigh
   await capture('readability-thread-filtered');
   await page.click(id('project-filter'));
   await page.click(`${id('project-filter-menu')} [data-value=all]`);
-  await page.click(id('view-projects'));
+  await showThreadView(page, 'projects');
   await page.evaluate(`globalThis.__boiteTest.workspace.active.setSidebarWidth(208)`);
   await page.waitFor(`document.querySelector('${id('sidebar')}').getBoundingClientRect().width <= 210`);
   await capture('readability-thread-narrow');
@@ -282,7 +283,7 @@ test('PR links appear during work without remounting and disappear after a move 
   expect(await page.evaluate(sharedRowsHaveNoPr)).toBe(true);
   expect(await prBeforeBranch(id('sidebar'))).toBe(true);
   await capture('pr-links-desktop');
-  await page.click(id('view-recent'));
+  await showThreadView(page, 'recent');
   await page.waitFor(`document.querySelector('${id('sidebar')} ${id('thread-project')}')`);
   expect(await prBeforeBranch(id('sidebar'))).toBe(true);
   await capture('pr-links-recent');
@@ -310,7 +311,7 @@ test('PR links appear during work without remounting and disappear after a move 
     const summary = store.threads.find(thread => thread.id === 't-trace');
     summary.status = 'idle';
   })()`);
-  await page.click(id('view-projects'));
+  await showThreadView(page, 'projects');
   await page.send('Emulation.setDeviceMetricsOverride', { width:390, height:844, deviceScaleFactor:1, mobile:true });
   await mobileAction(page, 'mobile-conversations');
   await page.waitFor(`Array.from(document.querySelectorAll('${id('mobile-list')} .thread')).filter(row => row.textContent.includes('shared-folder conversation')).length === 2`);

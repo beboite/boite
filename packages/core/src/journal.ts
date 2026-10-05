@@ -26,6 +26,11 @@ export interface JournalOptions {
   onError?: (message: string) => void;
 }
 
+/** Serialized UTF-8 size of a message as a client receives it. */
+function sentBytes(message: Message, project?: (message: Message) => Message): number {
+  return Buffer.byteLength(JSON.stringify(project ? project(message) : message));
+}
+
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
 export interface MessagePage {
   messages: Message[];
@@ -75,6 +80,8 @@ export class Journal {
       // A large transaction grows the WAL file; this lets it shrink back at the next checkpoint.
       this.db.exec('PRAGMA journal_size_limit = 33554432');
       this.db.transaction(() => migrate(this.db, file))();
+      // An incognito conversation never outlives the core that held it.
+      this.purgeIncognitoThreads();
     } catch (error) {
       this.db.close(false);
       throw error;
@@ -150,6 +157,7 @@ export class Journal {
     try {
       this.flushDeltas();
       this.persistMessages();
+      this.purgeIncognitoThreads();
     } finally {
       this.stream.clear();
       this.closed = true;
@@ -228,8 +236,8 @@ export class Journal {
     this.db
       .query(
         `INSERT OR REPLACE INTO threads
-         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, parent_thread_id, prompt_cache, agent_session_id, session_resume_at, title_state, branch_naming_pending, fork_origin, done_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, parent_thread_id, prompt_cache, agent_session_id, session_resume_at, title_state, branch_naming_pending, fork_origin, done_at, incognito)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         thread.id,
@@ -262,6 +270,7 @@ export class Journal {
         thread.branchNamingPending === true ? 1 : 0,
         thread.forkOrigin ? JSON.stringify(thread.forkOrigin) : null,
         thread.doneAt ?? null,
+        thread.incognito ? 1 : 0,
       );
   }
 
@@ -324,6 +333,15 @@ export class Journal {
       this.db.query('DELETE FROM thread_deletions WHERE root_id = ?').run(rootId);
       return rows.map(row => row.thread_id);
     })();
+  }
+
+  /** Incognito conversations and the sub-threads they started. */
+  private purgeIncognitoThreads(): void {
+    // Almost always none: then the family query is never run.
+    const roots = (this.db.query('SELECT id FROM threads WHERE incognito = 1').all() as { id: string }[]).map(row => row.id);
+    if (roots.length === 0) return;
+    const children = this.db.query(`SELECT id FROM threads WHERE parent_thread_id IN (${roots.map(() => '?').join(', ')})`).all(...roots) as { id: string }[];
+    this.deleteThreads([...roots, ...children.map(row => row.id)]);
   }
 
   /** Purge expired families atomically, using their root's deletion time. */
@@ -592,7 +610,9 @@ export class Journal {
   /**
    * One page of a thread's messages, oldest first: the last `limit` of them, or
    * the last `limit` written before `beforeRowid`, within the serialized byte
-   * budget except for one complete transportable message. `before` names the oldest one
+   * budget except for one complete transportable message. `project` is what the
+   * caller will send for each message (compacted tool output, deferred files):
+   * budgets and the frame ceiling apply to that, not to the stored row. `before` names the oldest one
    * returned while the thread still holds older ones, and is null once the page
    * reaches the first message.
    *
@@ -600,7 +620,7 @@ export class Journal {
    * are an index search, descending, with no sort step and no scan of the rest of
    * the thread.
    */
-  listMessagePage(threadId: string, options: { beforeRowid?: number; limit: number }): MessagePage {
+  listMessagePage(threadId: string, options: { beforeRowid?: number; limit: number; project?: (message: Message) => Message }): MessagePage {
     // Subscribers have already received buffered deltas. A reload must not replace
     // those messages with an older projection while the next delta is streaming.
     this.flushDeltas();
@@ -617,7 +637,7 @@ export class Journal {
       for (const row of rows) {
         if (messages.length >= limit || bytes >= MESSAGE_PAGE_MAX_BYTES) { older = true; break; }
         const message = this.currentMessage(row as MessageRow);
-        const size = Buffer.byteLength(JSON.stringify(message));
+        const size = sentBytes(message, options.project);
         const next = bytes + size + (messages.length ? 1 : 0);
         if (messages.length && next > MESSAGE_PAGE_MAX_BYTES) { older = true; break; }
         // One complete attachment-sized message can exceed the page budget.
@@ -640,7 +660,7 @@ export class Journal {
    * newest one returned while the thread holds newer ones, and is null once
    * the page reaches the last message.
    */
-  listMessagesForward(threadId: string, fromRowid: number, limit: number): { messages: Message[]; after: string | null } {
+  listMessagesForward(threadId: string, fromRowid: number, limit: number, project?: (message: Message) => Message): { messages: Message[]; after: string | null } {
     this.flushDeltas();
     const cap = Math.max(1, Math.trunc(limit));
     const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?');
@@ -650,7 +670,7 @@ export class Journal {
       for (const row of statement.iterate(threadId, fromRowid, cap + 1)) {
         if (messages.length >= cap || bytes >= MESSAGE_PAGE_MAX_BYTES) { newer = true; break; }
         const message = this.currentMessage(row as MessageRow);
-        const size = Buffer.byteLength(JSON.stringify(message));
+        const size = sentBytes(message, project);
         const next = bytes + size + (messages.length ? 1 : 0);
         if (messages.length && next > MESSAGE_PAGE_MAX_BYTES) { newer = true; break; }
         if (size >= RPC_MAX_FRAME_BYTES) {
@@ -670,8 +690,8 @@ export class Journal {
     return row.count;
   }
 
-  /** The complete reconnect tail, or null when its count or serialized bytes exceed a page. */
-  listMessagesFrom(threadId: string, fromRowid: number, limit: number): Message[] | null {
+  /** The complete reconnect tail, or null when its count or the serialized bytes `project` sends exceed a page. */
+  listMessagesFrom(threadId: string, fromRowid: number, limit: number, project?: (message: Message) => Message): Message[] | null {
     this.flushDeltas();
     const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?');
     const messages: Message[] = [];
@@ -680,7 +700,7 @@ export class Journal {
       for (const row of statement.iterate(threadId, fromRowid, limit + 1)) {
         if (messages.length >= limit) return null;
         const message = this.currentMessage(row as MessageRow);
-        bytes += Buffer.byteLength(JSON.stringify(message)) + (messages.length ? 1 : 0);
+        bytes += sentBytes(message, project) + (messages.length ? 1 : 0);
         if (bytes > MESSAGE_PAGE_MAX_BYTES) return null;
         messages.push(message);
       }

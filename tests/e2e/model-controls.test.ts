@@ -156,7 +156,7 @@ test.each(['glass', 'grain'])('pointer clicks open and select models with %s', a
   await pointerClick('[data-testid=new-thread]');
   await pointerClick('[data-testid=composer-picker]');
   await pointerClick('[data-provider=claude]');
-  await pointerClick('[data-model=claude-sonnet-5]');
+  await pointerClick('[data-model=claude-sonnet-5-5]');
   await page.waitFor(`document.querySelector('[data-testid=composer-picker]')?.textContent.includes('Sonnet')`);
   await pointerClick('[data-testid=composer-picker]');
   await capture(`picker-pointer-draft-${material}.png`);
@@ -248,7 +248,7 @@ test('the accent persists and colours the effort track continuously to the thumb
   expect(await page.evaluate(`document.documentElement.style.getPropertyValue('--accent-hue')`)).toBe('300');
   await page.click('[data-testid=composer-picker]');
   await page.click('[data-provider=claude]');
-  await page.click('[data-model=claude-opus-5]');
+  await page.click('[data-model=claude-opus-5-5]');
   await page.waitFor(`document.querySelector('[data-testid=composer-picker]')?.textContent.includes('Opus')`);
   await page.click('[data-testid=composer-effort]');
   await page.waitFor(`document.querySelector('[data-testid=effort-speed]')`);
@@ -332,8 +332,8 @@ test('speed controls follow the selected model and Codex never offers Ultrathink
   await page.evaluate(`document.dispatchEvent(new PointerEvent('pointerdown', { bubbles:true }))`);
   await page.click('[data-testid=composer-picker]');
   await page.click('[data-provider=claude]');
-  await page.waitFor(`document.querySelector('[data-model=claude-opus-5]')`);
-  await page.click('[data-model=claude-opus-5]');
+  await page.waitFor(`document.querySelector('[data-model=claude-opus-5-5]')`);
+  await page.click('[data-model=claude-opus-5-5]');
   await page.waitFor(`document.querySelector('[data-testid=composer-picker]')?.textContent.includes('Opus')`);
   await page.click('[data-testid=composer-effort]');
   await page.waitFor(`document.querySelector('[data-value=ultrathink]')`);
@@ -357,7 +357,7 @@ test('the draft keeps a compact composer separate from the fixed favorites menu'
   await page.click('[data-testid=composer-picker]');
   await page.click('[data-provider=claude]');
   await page.waitFor(`document.querySelector('[data-favorite-model="claude-fable-5-1"]')`);
-  for (const model of ['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5']) {
+  for (const model of ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5']) {
     await page.click(`[data-favorite-model="${model}"]`);
   }
   await page.click('[data-provider=favorites]');

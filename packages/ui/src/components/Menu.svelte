@@ -146,7 +146,8 @@
           class:danger={item.danger}
           class:hide-mark={item.hideActiveMark}
           class:checkable={item.checked !== undefined}
-          role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+          class:radio={item.radio}
+          role={item.checked === undefined ? 'menuitem' : item.radio ? 'menuitemradio' : 'menuitemcheckbox'}
           aria-checked={item.checked}
           disabled={item.disabled}
           data-row
@@ -164,7 +165,7 @@
           {#if item.hint}
             <span class="hint ui-label">{item.hint}</span>
           {/if}
-          {#if switches && item.checked !== undefined}
+          {#if switches && item.checked !== undefined && !item.radio}
             <span class="switch" class:on={item.checked} aria-hidden="true"></span>
           {:else if item.checked}<span class="check"><Check size={14} aria-hidden="true" /></span>{/if}
         </button>
@@ -186,6 +187,7 @@
   .heading { padding: 8px 10px 10px; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 500; }
   .popover.switches { width: min(300px, calc(100vw - 24px)); padding: 6px; border-radius: var(--radius-lg); }
   .switches .item.checkable { grid-template-columns: minmax(0, 1fr) 36px; min-height: 56px; padding: 9px 10px; column-gap: 12px; }
+  .switches .item.radio .check { justify-self: center; }
   .switches .label { gap: 9px; }
   .switches .glyph { margin-right: 0; }
   .switches .hint { padding-left: 23px; font-size: var(--text-xs); }

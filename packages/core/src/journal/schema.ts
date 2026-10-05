@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import type { MessagePart } from '@boite/contracts';
 import { parseJson } from './rows.ts';
 
-export const SCHEMA_VERSION = 29;
+export const SCHEMA_VERSION = 30;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -373,6 +373,11 @@ export function migrate(db: Database, file: string): void {
   if (!hasColumn('turns', 'queue_hold')) db.exec('ALTER TABLE turns ADD COLUMN queue_hold TEXT');
   if (!hasColumn('threads', 'done_at')) db.exec('ALTER TABLE threads ADD COLUMN done_at INTEGER');
   db.exec('CREATE INDEX IF NOT EXISTS threads_done_expiry ON threads(done_at)');
+  // An incognito conversation of the drafts, erased when it is left.
+  if (!hasColumn('threads', 'incognito')) {
+    db.exec('ALTER TABLE threads ADD COLUMN incognito INTEGER NOT NULL DEFAULT 0');
+    version = 30;
+  }
   version = Math.max(version, SCHEMA_VERSION);
   if (row?.user_version !== version) db.exec(`PRAGMA user_version = ${version}`);
 }

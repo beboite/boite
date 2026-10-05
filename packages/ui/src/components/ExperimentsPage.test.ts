@@ -45,6 +45,8 @@ test('the page carries one switch per experiment and a toggle writes the enabled
   flushSync();
   expect(document.getElementById(linksHelp.getAttribute('aria-describedby')!)?.textContent).toContain('default app');
   expect(links.checked).toBe(false);
+  // Graduated features have their switch in the page they belong to, not here.
+  expect(document.querySelector('[data-testid=experiment-chat-artifacts]')).toBeNull();
 
   grain.click();
   flushSync();

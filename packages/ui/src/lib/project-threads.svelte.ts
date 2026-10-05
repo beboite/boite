@@ -41,10 +41,11 @@ export class ProjectThreadView {
 
 export const projectThreadView = new ProjectThreadView();
 
-/** A conversation or draft keeps its project visible, including folded working rows. */
+/** A conversation or draft keeps its project visible, including folded working rows. The open draft counts before it has text, though it lists no row yet. */
 export function activeProject(entry: ProjectEntry): boolean {
   const store = entry.machine.store;
   return store.threadsOf(entry.project.id).length > 0
+    || store.draft?.projectId === entry.project.id
     || store.draftEntries.some(draft => draft.projectId === entry.project.id);
 }
 

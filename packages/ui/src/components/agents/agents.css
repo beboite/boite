@@ -9,7 +9,10 @@
 .agents-rail { --ring: var(--color-frame); width: var(--sidebar); flex: none; display: flex; flex-direction: column; min-height: 0; }
 .agents-rail > header { display: flex; align-items: center; gap: 2px; padding: 12px 8px 8px 12px; min-height: 52px; box-sizing: border-box; }
 .agents-rail h1 { font-size: var(--text-md); font-weight: 600; padding-left: 4px; }
-.agents-leave + h1 { padding-left: 2px; }
+/* Where the sidebar draws the same switch, so it stays put between the two pages. */
+.agents-switch { padding: 8px 10px 0; }
+.agents-switch:empty { display: none; }
+.agents-switch + header { padding-top: 6px; min-height: 46px; }
 .agents-grow { flex: 1; }
 .agents-machine { min-width: 0; margin-left: 8px; padding: 2px 8px; border-radius: var(--radius-sm); background: var(--color-surface-3); color: var(--color-muted-foreground); font-size: var(--text-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .agents-rail .menu .trigger.ghost, .agents-detail-head .menu .trigger.ghost { width: var(--control); padding: 0; }
@@ -201,7 +204,6 @@ fieldset.card { border: 1px solid var(--color-border); padding: var(--settings-p
   .agents-page.detail-open .agents-main { display: flex; flex: 1; }
   .agents-page.empty:not(.detail-open) .agents-rail { flex: none; }
   .agents-page.empty:not(.detail-open) .agents-main { display: flex; flex: 1; }
-  .agents-rail > header > .agents-leave { display: none; }
   .agents-rail > header { padding: 10px 8px 8px 16px; }
   .agents-rail .menu .trigger.ghost, .agents-detail-head .menu .trigger.ghost, .agents-detail-head > button.icon { width: var(--control-touch); height: var(--control-touch); }
   .agents-row { min-height: 72px; }

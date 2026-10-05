@@ -647,8 +647,9 @@ export interface Project {
   autoArchiveMergedPr?: boolean;
   /**
    * The folder holds a `.git`, read on every answer rather than stored: the
-   * test `threads.create.worktree` applies. Absent from a core older than this
-   * field, which a client reads as unknown and keeps the worktree switch for.
+   * test `threads.create.worktree` applies. Absent before the core's first
+   * check of the folder answers, and from a core older than this field: a
+   * client offers worktrees only on `true`.
    */
   repository?: boolean;
   /**
@@ -845,6 +846,14 @@ export interface ThreadSummary {
   projectId: ProjectId | null;
   /** Only persistent agent sessions have no project. */
   agentSessionId?: string;
+  /**
+   * An incognito conversation of the drafts. It works in a folder of the
+   * core's data directory rather than the drafts folder, lists stay quiet
+   * about it, and `threads.remove` erases it with that folder at once, with no
+   * undo. A core that stops or starts erases every incognito conversation it
+   * still holds. Absent on ordinary conversations and on older cores.
+   */
+  incognito?: true;
   title: string;
   titleSource: TitleSource;
   /** Durable title revision and whether the first answer should resolve a vague initial subject. Missing on older cores. */
@@ -3294,6 +3303,12 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
        * Excludes `cwd`. Refused on the drafts project, which is not a repository.
        */
       worktree?: { branch?: string };
+      /**
+       * Start an incognito conversation (`ThreadSummary.incognito`). Accepted
+       * on the drafts project only, and refused with `cwd` or `worktree`: the
+       * core makes its folder.
+       */
+      incognito?: boolean;
     };
     result: ThreadSummary;
   };
@@ -3450,6 +3465,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * Hide a conversation and its sub-threads after stopping their work. The
    * owner can restore their history across restarts until the configured
    * retention expires, measured from deletion. Files and Git branches remain.
+   * An incognito conversation is erased at once instead, its folder with it,
+   * and its `thread.removed` says `undoable: false`.
    */
   'threads.remove': { params: { threadId: ThreadId }; result: { ok: true } };
   /** Owner-only recoverable deleted conversations, newest first. */

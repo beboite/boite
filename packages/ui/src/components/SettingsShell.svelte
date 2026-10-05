@@ -64,7 +64,7 @@ import { workspace } from '../lib/workspace.svelte';
       { id: 'conversations', label: strings.settings.conversations },
       { id: 'archived', label: strings.settings.archived.heading },
       ...(store.owner ? [{ id: 'worktrees', label: strings.settings.worktrees.heading }] : []),
-      ...(browserBridge.paints ? [{ id: 'browser-profiles', label: strings.browserProfiles.heading }] : []),
+      ...(browserBridge.paints ? [{ id: 'browser-profiles', label: strings.browserProfiles.card }] : []),
       { id: 'app', label: strings.settings.app },
       ...(store.owner ? [{ id: 'privacy', label: strings.telemetry.heading }] : [])
     ],
@@ -125,6 +125,8 @@ import { workspace } from '../lib/workspace.svelte';
     ['general', 'conversations', strings.settings.notifications],
     ['general', 'conversations', strings.settings.asyncQuestions],
     ['general', 'conversations', strings.settings.titleModel],
+    ['general', 'conversations', strings.features.chatArtifacts.title],
+    ...(browserBridge.paints ? [['general', 'browser-profiles', strings.browserProfiles.heading]] as [SettingsTab, string, string][] : []),
     ['general', 'archived', strings.settings.archived.doneRetentionLabel],
     // The switch lives in the shell's own card: a browser has no tray.
     ...(inShell ? [['general', 'app', strings.settings.closeToTray] as [SettingsTab, string, string]] : []),
