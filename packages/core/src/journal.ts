@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES } from '@boite/contracts';
+import { MESSAGE_PAGE_MAX_BYTES } from '@boite/contracts';
 import type {
   Account,
   DeletedThreadSummary,
@@ -19,31 +19,11 @@ import type { AccountRow, MessageRow, ProcessRow, ProjectIconRow, ProjectRow, Th
 import type { DetectedIcon as StoredProjectIcon } from './project-icons.ts';
 import { messageOfError, StreamBuffer } from './journal/stream-buffer.ts';
 import { usageByBucket, usageByThread, type UsageSumRow, type UsageThreadRow } from './journal/usage-sums.ts';
-import { refused } from './errors.ts';
+import { sent, type Projection } from './journal/sent.ts';
 
 export interface JournalOptions {
   /** Where a write that fails on a timer, with no caller to throw to, is reported. */
   onError?: (message: string) => void;
-}
-
-/** Serialized UTF-8 size of a message as a client receives it. */
-type Projection = (message: Message) => Message;
-
-/**
- * The message as the client receives it, and its serialized UTF-8 bytes. A
- * read with no projection is internal: nothing is sent and nothing is measured.
- */
-function sent(message: Message, project: Projection | undefined): { sent: Message; size: number } {
-  if (!project) return { sent: message, size: 0 };
-  const projected = project(message);
-  const size = Buffer.byteLength(JSON.stringify(projected));
-  // Unreachable with `compactToolParts`, which cuts a message to MESSAGE_SENT_MAX_BYTES.
-  // Never pretend a message too large for any RPC frame was sent.
-  if (size >= RPC_MAX_FRAME_BYTES) {
-    throw refused(`message ${message.id} is ${size} serialized UTF-8 bytes; expected a complete message below ${RPC_MAX_FRAME_BYTES} bytes`,
-      { threadId: message.threadId, messageId: message.id, field: 'messages', bytes: size, max: RPC_MAX_FRAME_BYTES, expected: `a complete message below ${RPC_MAX_FRAME_BYTES} serialized UTF-8 bytes` });
-  }
-  return { sent: projected, size };
 }
 
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
