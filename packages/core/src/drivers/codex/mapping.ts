@@ -153,16 +153,62 @@ function collaborationView(item: CodexItem): ToolView {
   return { name: 'Agent', input: { action: item.tool, agents: ids, prompt: item.prompt, model: item.model }, output: stringify(states), status: itemStatus(item.status), nativeAgents };
 }
 
-/**
- * `TokenUsageBreakdown.last`, the numbers of the turn that just ran. Codex
- * carries no price on the wire, so the cost stays null and the UI says so.
- */
-export function mapUsage(last: CodexTokenUsage): Usage {
+/** The four counts of a `TokenUsageBreakdown`, with Codex's own meaning: `input` includes both cache counts. */
+export interface CodexTokenCounts {
+  input: number;
+  cached: number;
+  cacheWrite: number;
+  output: number;
+}
+
+export function countsOf(usage: CodexTokenUsage): CodexTokenCounts {
   return {
-    inputTokens: last.inputTokens ?? 0,
-    outputTokens: last.outputTokens ?? 0,
-    cacheReadTokens: last.cachedInputTokens ?? 0,
-    cacheWriteTokens: last.cacheWriteInputTokens ?? 0,
+    input: usage.inputTokens ?? 0,
+    cached: usage.cachedInputTokens ?? 0,
+    cacheWrite: usage.cacheWriteInputTokens ?? 0,
+    output: usage.outputTokens ?? 0,
+  };
+}
+
+/**
+ * What one `thread/tokenUsage/updated` adds to a turn. `last` is a single
+ * model request, and a turn makes one per tool round, so the turn sums them.
+ * `total` is cumulative for the Codex thread: its growth since the turn's
+ * previous update counts each request once, even when Codex repeats an update.
+ * The first update of a turn, or a `total` that went down, falls back to `last`.
+ */
+export function usageDelta(
+  previousTotal: CodexTokenCounts | null,
+  total: CodexTokenUsage | undefined,
+  last: CodexTokenUsage,
+): CodexTokenCounts {
+  if (previousTotal === null || !total) return countsOf(last);
+  const now = countsOf(total);
+  const delta = {
+    input: now.input - previousTotal.input,
+    cached: now.cached - previousTotal.cached,
+    cacheWrite: now.cacheWrite - previousTotal.cacheWrite,
+    output: now.output - previousTotal.output,
+  };
+  return Object.values(delta).some((n) => n < 0) ? countsOf(last) : delta;
+}
+
+export function addCounts(a: CodexTokenCounts, b: CodexTokenCounts): CodexTokenCounts {
+  return { input: a.input + b.input, cached: a.cached + b.cached, cacheWrite: a.cacheWrite + b.cacheWrite, output: a.output + b.output };
+}
+
+/**
+ * The turn's summed counts as a Boite `Usage`. Codex's input count already
+ * holds the cache reads and writes, and `Usage.inputTokens` never does, so
+ * they come out of it. Codex carries no price on the wire, so the cost stays
+ * null and the UI says so.
+ */
+export function mapUsage(counts: CodexTokenCounts): Usage {
+  return {
+    inputTokens: Math.max(0, counts.input - counts.cached - counts.cacheWrite),
+    outputTokens: counts.output,
+    cacheReadTokens: counts.cached,
+    cacheWriteTokens: counts.cacheWrite,
     costUsdEquivalent: null,
   };
 }

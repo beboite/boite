@@ -10,7 +10,9 @@ import { subscriptionProxyCodexArgs } from '../../subscription-proxy.ts';
 import type { QuestionAsk, SessionContext, TurnContext } from '../types.ts';
 import { exitWithin } from '../exit.ts';
 import {
+  addCounts,
   answerTextOf,
+  countsOf,
   imageInputsOf,
   mapUsage,
   modelOf,
@@ -19,6 +21,7 @@ import {
   servedOf,
   textOf,
   toolViewOf,
+  usageDelta,
 } from './mapping.ts';
 import type { CodexHookRun, CodexHooksListed, CodexItem, CodexQuestion, CodexThreadOpened, CodexTokenUsage, CodexTurnError, CodexTurnRecord, Timer } from './protocol.ts';
 import {
@@ -693,10 +696,16 @@ export class CodexSession {
   /** Usage also arrives while the session has no active turn. */
   private reportUsage(params: Record<string, unknown>): void {
     if (params['threadId'] !== this.threadId) return;
-    const usage = params['tokenUsage'] as { last?: CodexTokenUsage; modelContextWindow?: number } | undefined;
+    const usage = params['tokenUsage'] as { total?: CodexTokenUsage; last?: CodexTokenUsage; modelContextWindow?: number } | undefined;
     const last = usage?.last;
     if (!last) return;
-    if (this.current && params['turnId'] === this.current.turnId) this.current.usage = mapUsage(last);
+    const turn = this.current;
+    if (turn && params['turnId'] === turn.turnId) {
+      const delta = usageDelta(turn.usageTotal, usage.total, last);
+      turn.usageCounts = turn.usageCounts ? addCounts(turn.usageCounts, delta) : delta;
+      turn.usageTotal = usage.total ? countsOf(usage.total) : null;
+      turn.usage = mapUsage(turn.usageCounts);
+    }
     const tokens = last.totalTokens ?? (typeof last.inputTokens === 'number' && typeof last.outputTokens === 'number' ? last.inputTokens + last.outputTokens : null);
     if (tokens !== null) {
       const cache = last.cachedInputTokens ?? 0;
