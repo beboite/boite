@@ -30,7 +30,7 @@ or an unexpected skip blocks it, including jobs whose dependency never started.
 | `tests/stress/`, `bench/agent-stress.ts`, `bench/lib/` | Full type checks, UI tests and stress |
 | Other `bench/` files, `scripts/architecture/` | Full type checks and UI tests |
 | Core, contracts, dependencies, shared builds, other workflows and unknown paths | All checks |
-| Release, nightly or manual full run | All checks, except jobs the caller replaces through explicit inputs |
+| Release or manual full run | All checks, except jobs the caller replaces through explicit inputs |
 
 The changes job always installs frozen dependencies, runs `bun audit`, local
 link checks, `bun test scripts/ci ./bench ./apps/shell/scripts`, architecture
@@ -57,11 +57,30 @@ and [portability](portability.md) for what these fixtures cannot prove.
 
 ### Run modes and platforms
 
-PRs against any branch use `pr` mode. Main pushes use `warm`: they run affected
-core and E2E suites too, add Linux ARM64 and macOS Intel desktop legs, and save
-caches. A push event does not prove that an equivalent PR tree passed. Tags,
-reusable full calls and manual runs use `full`. PR portable desktop legs are
-Linux x64 and macOS ARM64; warm/full runs use both architectures of each OS.
+PRs against any branch use `pr` mode and compare with their base. Main pushes
+use `warm`: they run affected core and E2E suites too, add Linux ARM64 and macOS
+Intel desktop legs, and save caches. A push event does not prove that an
+equivalent PR tree passed. A main push compares with the last main commit whose
+CI passed, not with the previous push, so the changes of a cancelled or failed
+run are tested again. A green main commit therefore has every suite passing on
+a tree no later change affected, as far as the path rules above hold; the
+nightly publishes on that. Without an answer from the API, the run selects every
+check. Tags, reusable full calls and manual runs use `full`. PR portable
+desktop legs are Linux x64 and macOS ARM64; warm/full runs use both
+architectures of each OS.
+
+`desktop.yml` holds the desktop builds: the Windows installer job and one job
+per portable platform, named after it (`Desktop / macOS x64`). `ci.yml` calls
+it with the Rust tests; the nightly calls it without them. Only `CI required`
+and `PR title` are required checks, so a display name can change freely, except
+the `release.yml` job names that `server-provenance.ts` checks.
+
+Intel macOS packages are cross-built on the Apple Silicon runner with
+`BOITE_TARGET=x86_64-apple-darwin`. The core compiles for `bun-darwin-x64`, and
+the Rust tests and installed smoke check run as Intel binaries under Rosetta.
+Only the core suite still runs on an Intel runner. On 2026-10-04 the Intel
+desktop leg took 14.0 minutes and the Apple Silicon one 8.1 (nightly run
+37234148865, the longest job of that run).
 
 Core changes run the full core suite on Windows, Linux x64/ARM64 and macOS
 ARM64/Intel in every mode. Linux desktop packages build on Ubuntu 22.04,
@@ -77,7 +96,13 @@ a running publication finishes, while newer pending work can supersede older
 pending work.
 
 Artifact uploads retry once, replacing a name reserved by the failed attempt.
-A second failure fails the job. Tests and builds are not retried.
+A second failure fails the job. Tests and builds are not retried, with one
+exception. `scripts/ci/hdiutil-retry.ts` bundles the macOS application again,
+three attempts at most, when hdiutil reports `Resource busy`. That runner
+fault (actions/runner-images#7522) failed the Apple Silicon DMG of nightly
+37213994348 and cost a rerun. Before retrying, it detaches what the failed
+attempt left attached and removes its partial DMGs. Any other failure ends
+the step.
 
 ## Build cost
 
@@ -218,16 +243,30 @@ can shorten elapsed time while increasing total runner minutes.
 
 The nightly runs at 03:23 UTC and accepts manual dispatches on `main`.
 `NIGHTLY_ENABLED=false` disables both; removing it or setting it to `true`
-enables them. An already published commit skips verification and image builds.
-An unpublished or failed build is eligible next time.
+enables them. An already published commit skips every build. An unpublished or
+failed build is eligible next time.
+
+The nightly does not run CI again. Its `CI passed` job (`scripts/ci/commit-ci.ts`)
+waits for the `ci` run that pushing this commit to main started. It reruns that
+run's failed jobs once and fails unless the run ends green; a commit with no
+such run after ten minutes fails. Beside it, `desktop.yml` builds and signs
+each desktop package once and tests what ships: installer regressions and
+native shell E2E on Windows, the installed Debian package, the extracted
+AppImage and the macOS bundle. The Rust tests are skipped because the commit's
+CI already ran them.
+
+A dispatch with `dry-run` builds any branch with throwaway signing keys and an
+unsigned APK, even a commit that already has a nightly. It accepts that
+branch's pull request CI run without rerunning it, skips reservation and every
+publication, and has its own concurrency group.
 
 Versions use `2.0.0-nightly.YYYYMMDD.N`, taking the base from the manifest and
 resetting the counter each UTC day. For example, September 15's first build is
 `2.0.0-nightly.20260915.1`, then `.2` for a new commit. Build inputs stamp the
 version; source manifests retain theirs.
 
-Verification, native image builds and Android run alongside one another. Only
-after all pass does reservation bind the tag to the exact commit. A publishing
+The CI check, desktop builds, native image builds and Android run alongside one
+another. Only after all pass does reservation bind the tag to the exact commit. A publishing
 failure keeps that tag for retry, including on a later day. A reserved tag alone
 is not a successful release. `server-manifest.yml` promotes the tested digests
 to `nightly`, the version and commit tags after reservation. It never moves

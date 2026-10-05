@@ -16,6 +16,10 @@ if (process.platform === 'linux') {
 }
 // The Windows sidecar is the runtime plus a `core` directory (stage-sidecar.ts): a build that bundles names it too.
 const args = process.argv.slice(2);
+// A cross build (Intel macOS from Apple Silicon) names its triple once, in BOITE_TARGET, for the core and the shell alike.
+if (process.env.BOITE_TARGET && ['build', 'bundle'].includes(args[0] ?? '') && !args.includes('--target')) {
+  args.push('--target', process.env.BOITE_TARGET);
+}
 if (process.env.BOITE_SIGN_UPDATES === '1') {
   if (!process.env.TAURI_SIGNING_PRIVATE_KEY) throw new Error('TAURI_SIGNING_PRIVATE_KEY is required for signed update artifacts');
   // An absent password makes minisign read the terminal, even for an unencrypted key.

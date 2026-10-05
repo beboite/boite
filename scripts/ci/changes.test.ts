@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { affectedChecks, ciMode, needsCodeChecks, needsWorkflowLint, plan } from './changes.ts';
+import { affectedChecks, ciMode, lastGreen, needsCodeChecks, needsWorkflowLint, plan } from './changes.ts';
 
 const none = { core: false, web: false, desktop: false, server: false, android: false, telemetry: false, e2eTypes: false, stress: false };
 const allChecks = { core: true, web: true, desktop: true, server: true, android: true, telemetry: true, e2eTypes: true, stress: true };
@@ -89,14 +89,28 @@ test('main pushes run affected tests while warming the extra portable architectu
   const all = affectedChecks(['packages/core/src/main.ts']);
   const pr = plan(all, 'pr');
   expect(pr).toMatchObject({ core: true, web: true, desktop: true, server: true, e2e: true });
-  expect(JSON.parse(pr.portable)).toEqual(['ubuntu-22.04', 'macos-15']);
+  const runners = (portable: string) => JSON.parse(portable).map((platform: { runner: string; target?: string }) => platform.target ?? platform.runner);
+  expect(runners(pr.portable)).toEqual(['ubuntu-22.04', 'macos-15']);
   const warm = plan(all, 'warm');
   expect(warm).toMatchObject({ core: true, web: true, desktop: true, server: true, e2e: true, stress: true });
-  expect(JSON.parse(warm.portable)).toEqual(['ubuntu-22.04', 'ubuntu-22.04-arm', 'macos-15', 'macos-15-intel']);
+  // Intel macOS is cross-built on Apple Silicon: no portable leg waits for an Intel runner.
+  expect(runners(warm.portable)).toEqual(['ubuntu-22.04', 'ubuntu-22.04-arm', 'macos-15', 'x86_64-apple-darwin']);
+  expect(JSON.parse(warm.portable).map((platform: { runner: string }) => platform.runner)).not.toContain('macos-15-intel');
   const full = plan(all, 'full');
   expect(full).toMatchObject({ core: true, e2e: true });
   expect(JSON.parse(full.portable)).toHaveLength(4);
   expect(plan(affectedChecks(['README.md']), 'warm')).toMatchObject({ ...none, e2e: false });
+});
+
+test('a main push compares with the last main commit whose CI passed, skipping cancelled and failed runs', () => {
+  const head = 'h'.repeat(40);
+  const [green, older] = ['g', 'o'].map((letter) => letter.repeat(40));
+  // The API lists only passing runs, newest first: a cancelled or failed push is absent, so its changes stay in the diff.
+  const ancestors = new Set([green, older]);
+  expect(lastGreen([{ head_sha: green }, { head_sha: older }], head, (sha) => ancestors.has(sha))).toBe(green);
+  // A rerun of the head's own passing run, or a newer commit's run, is no base.
+  expect(lastGreen([{ head_sha: head }, { head_sha: 'n'.repeat(40) }, { head_sha: older }], head, (sha) => ancestors.has(sha))).toBe(older);
+  expect(lastGreen([], head, () => true)).toBeUndefined();
 });
 
 test('focused checks are covered by the full core and web jobs when both apply', () => {
@@ -111,10 +125,10 @@ test.skipIf(!python)('the actual required gate rejects failed, cancelled and une
   const match = /          python3 - <<'PY'\n([\s\S]+?)          PY/.exec(workflow);
   if (!match) throw new Error('ci.yml: missing required gate Python script');
   const script = match[1]!.replace(/^ {10}/gm, '');
-  const names = ['core', 'web', 'desktop', 'desktop-portable', 'server', 'android', 'telemetry', 'e2e-types', 'stress', 'e2e'];
-  const outputFor = (name: string) => name === 'desktop-portable' ? 'desktop' : name === 'e2e-types' ? 'e2eTypes' : name;
+  const names = ['core', 'web', 'desktop', 'server', 'android', 'telemetry', 'e2e-types', 'stress', 'e2e'];
+  const outputFor = (name: string) => name === 'e2e-types' ? 'e2eTypes' : name;
   const cases: { jobs: object; success: boolean }[] = [];
-  for (const selected of [names, ['web', 'telemetry'], ['desktop', 'desktop-portable', 'e2e-types', 'e2e'], ['web', 'stress'], []]) {
+  for (const selected of [names, ['web', 'telemetry'], ['desktop', 'e2e-types', 'e2e'], ['web', 'stress'], []]) {
     const outputs = Object.fromEntries(names.map(name => [outputFor(name), String(selected.includes(name))]));
     const jobs = { changes: { result: 'success', outputs }, ...Object.fromEntries(names.map(name => [name, {
       result: selected.includes(name) ? 'success' : 'skipped',

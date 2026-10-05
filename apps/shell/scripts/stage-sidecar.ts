@@ -30,17 +30,18 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requirePinnedBun } from '../../../scripts/ci/bun-version.ts';
 import { readSignature, signatureProblem } from './runtime-signature.ts';
-import { nativeTarget } from './targets.ts';
+import { shellTarget } from './targets.ts';
 
-/** Only the platforms whose compiled core this repository actually produces. */
-const { triple, suffix } = nativeTarget();
+/** Only the platforms whose compiled core this repository actually produces; `BOITE_TARGET` picks a cross build. */
+const { triple, suffix, cross } = shellTarget();
 
 const here = dirname(fileURLToPath(import.meta.url));
 const shell = resolve(here, '..');
 const repo = resolve(shell, '..', '..');
 const coreDist = join(repo, 'packages', 'core', 'dist');
 const binaries = join(shell, 'src-tauri', 'binaries');
-const release = join(shell, 'src-tauri', 'target', 'release');
+// `tauri build --target <triple>` writes under the triple's own directory.
+const release = join(shell, 'src-tauri', 'target', ...(cross ? [triple] : []), 'release');
 const shellExe = join(release, process.platform === 'win32' ? 'boite-shell.exe' : 'boite-shell');
 
 function refuse(message: string): never {
@@ -196,7 +197,7 @@ const metadata = Bun.spawnSync(['cargo', 'metadata', '--no-deps', '--format-vers
 });
 if (metadata.exitCode !== 0) refuse(`cargo metadata failed: ${metadata.stderr.toString()}`);
 const target = JSON.parse(metadata.stdout.toString()).target_directory as string;
-const builtShell = join(target, 'release', `boite-shell${suffix}`);
+const builtShell = join(target, ...(cross ? [triple] : []), 'release', `boite-shell${suffix}`);
 if (resolve(builtShell) !== resolve(shellExe) && existsSync(builtShell)) {
   mkdirSync(release, { recursive: true });
   copyFileSync(builtShell, shellExe);

@@ -35,16 +35,6 @@ on:
       skip-server:
         type: boolean
         default: false
-      # The nightly builds, signs and publishes the APK itself.
-      skip-android:
-        type: boolean
-        default: false
-      channel:
-        type: string
-        default: stable
-      version:
-        type: string
-        default: ''
       sign-updates:
         type: boolean
         default: false
@@ -61,13 +51,18 @@ env:
 
 jobs:
   changes:
+    name: Plan and repository checks
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # A main push compares with the last main commit whose CI passed (changes.ts).
+      actions: read
     outputs:
       core: ${{ steps.filter.outputs.core }}
       web: ${{ steps.filter.outputs.web }}
       desktop: ${{ steps.filter.outputs.desktop }}
       server: ${{ steps.filter.outputs.server == 'true' && !inputs.skip-server }}
-      android: ${{ steps.filter.outputs.android == 'true' && !inputs.skip-android }}
+      android: ${{ steps.filter.outputs.android }}
       e2e: ${{ steps.filter.outputs.e2e }}
       telemetry: ${{ steps.filter.outputs.telemetry }}
       e2eTypes: ${{ steps.filter.outputs.e2eTypes }}
@@ -83,7 +78,8 @@ jobs:
           bun-version-file: package.json
       - id: filter
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
           FORCE_CHECKS: ${{ inputs.force || github.ref_type == 'tag' || (github.event_name != 'push' && github.event_name != 'pull_request') }}
         run: bun scripts/ci/changes.ts
       - run: bun install --frozen-lockfile
@@ -104,12 +100,18 @@ jobs:
           "$RUNNER_TEMP/actionlint"
 
   core:
+    name: Core tests (${{ matrix.name }})
     needs: changes
     if: needs.changes.outputs.core == 'true'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, windows-2025, macos-15, macos-15-intel]
+        include:
+          - { os: ubuntu-24.04, name: Linux x64 }
+          - { os: ubuntu-24.04-arm, name: Linux arm64 }
+          - { os: windows-2025, name: Windows x64 }
+          - { os: macos-15, name: macOS arm64 }
+          - { os: macos-15-intel, name: macOS x64 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -120,6 +122,7 @@ jobs:
       - run: bun run --cwd packages/core test
 
   web:
+    name: Type checks and UI tests
     needs: changes
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-24.04
@@ -145,6 +148,7 @@ jobs:
           key: vitest-${{ runner.os }}-${{ hashFiles('bun.lock', 'packages/ui/vitest.config.ts', 'packages/ui/svelte.config.js', 'packages/ui/icon-plugin.ts') }}-${{ github.sha }}
 
   telemetry:
+    name: Telemetry relay tests
     needs: changes
     if: needs.changes.outputs.telemetry == 'true'
     runs-on: ubuntu-24.04
@@ -157,6 +161,7 @@ jobs:
       - run: bun test packages/core/test/telemetry.test.ts
 
   e2e-types:
+    name: E2E type check
     needs: changes
     if: needs.changes.outputs.e2eTypes == 'true'
     runs-on: ubuntu-24.04
@@ -169,6 +174,7 @@ jobs:
       - run: bun run check:e2e
 
   stress:
+    name: Stress fixtures
     needs: changes
     if: needs.changes.outputs.stress == 'true'
     runs-on: windows-2025
@@ -193,76 +199,27 @@ jobs:
           retention-days: 7
 
   desktop:
+    name: Desktop
     needs: changes
     if: needs.changes.outputs.desktop == 'true'
-    runs-on: windows-2025
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
-        with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
-        with:
-          workspaces: apps/shell/src-tauri -> target
-          shared-key: desktop-release-v1
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Set nightly artifact version
-        if: inputs.channel == 'nightly' && inputs.version != ''
-        env:
-          NIGHTLY_VERSION: ${{ inputs.version }}
-        run: bun scripts/ci/nightly-build.ts
-      - name: Build installer once
-        env:
-          BUILD_CHANNEL: ${{ inputs.channel || 'stable' }}
-          BOITE_SIGN_UPDATES: ${{ inputs.sign-updates && '1' || '0' }}
-          # Only a published installer reports to the analytics relay; a pull
-          # request's build stays silent (docs/analytics.md).
-          BOITE_RELEASE_TELEMETRY: ${{ inputs.sign-updates && '1' || '' }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
-        run: |
-          if ($env:BUILD_CHANNEL -eq 'nightly') {
-            bun run build:shell:nightly
-          } elseif ($env:BUILD_CHANNEL -eq 'stable') {
-            bun run build:shell
-          } else {
-            throw "Unsupported build channel: $env:BUILD_CHANNEL"
-          }
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          bun run apps/shell/scripts/stage-sidecar.ts
-      - name: Check bundle size budgets
-        run: bun scripts/ci/budgets.ts
-      - name: Windows installer regression tests
-        env:
-          BOITE_CI_INSTALLER_REQUIRED: '1'
-        run: bun test scripts/ci/installer-shortcuts.test.ts scripts/ci/installer-hooks.test.ts scripts/ci/stop-core.test.ts
-      - run: bun run test:shell --release
-      - name: Native shell end-to-end tests
-        if: needs.changes.outputs.e2e == 'true'
-        env:
-          BOITE_E2E_PREBUILT_UI: '1'
-        run: bun test tests/e2e/shell.test.ts
-      - uses: ./.github/actions/upload-artifact
-        with:
-          name: windows-installer
-          path: |
-            apps/shell/src-tauri/target/release/bundle/nsis/*.exe
-            apps/shell/src-tauri/target/release/bundle/nsis/*.sig
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
-      - uses: ./.github/actions/upload-artifact
-        if: failure() || cancelled()
-        with:
-          name: desktop-failure-captures
-          path: tests/e2e/.artifacts/
-          include-hidden-files: true
-          retention-days: 7
+    uses: ./.github/workflows/desktop.yml
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+      APPLE_CERTIFICATE: ${{ inputs.sign-updates && secrets.APPLE_CERTIFICATE || '' }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ inputs.sign-updates && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+      APPLE_SIGNING_IDENTITY: ${{ inputs.sign-updates && secrets.APPLE_SIGNING_IDENTITY || '' }}
+      APPLE_API_ISSUER: ${{ inputs.sign-updates && secrets.APPLE_API_ISSUER || '' }}
+      APPLE_API_KEY_ID: ${{ inputs.sign-updates && secrets.APPLE_API_KEY_ID || '' }}
+      APPLE_API_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.APPLE_API_PRIVATE_KEY || '' }}
+    with:
+      platforms: ${{ needs.changes.outputs.portable }}
+      sign-updates: ${{ inputs.sign-updates == true }}
+      native-e2e: ${{ needs.changes.outputs.e2e == 'true' }}
+    permissions:
+      contents: read
 
   e2e:
+    name: E2E ${{ matrix.shard }}/3
     needs: changes
     if: needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true'
     strategy:
@@ -279,11 +236,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - name: Set nightly test version
-        if: inputs.channel == 'nightly' && inputs.version != ''
-        env:
-          NIGHTLY_VERSION: ${{ inputs.version }}
-        run: bun scripts/ci/nightly-build.ts
       - run: bun run build:ui
       - name: Prepare end-to-end tests
         run: bun tests/e2e/lib/warm.ts $env:BOITE_E2E_FAKE_UI
@@ -302,159 +254,8 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
-  desktop-portable:
-    needs: changes
-    if: needs.changes.outputs.desktop == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: ${{ fromJSON(needs.changes.outputs.portable) }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-      - name: Install Linux shell dependencies
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb dbus-x11 xdg-utils
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
-        with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
-        with:
-          workspaces: apps/shell/src-tauri -> target
-          # Per runner: a cache built on Ubuntu 24.04 restored on 22.04 left crates rustc could not load.
-          shared-key: desktop-portable-${{ matrix.os }}-v1
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Set nightly artifact version
-        if: inputs.channel == 'nightly' && inputs.version != ''
-        env:
-          NIGHTLY_VERSION: ${{ inputs.version }}
-        run: bun scripts/ci/nightly-build.ts
-      - name: Choose channel and updater signing key
-        env:
-          BUILD_CHANNEL: ${{ inputs.channel || 'stable' }}
-          SIGN_UPDATES: ${{ inputs.sign-updates && '1' || '0' }}
-        run: |
-          case "$BUILD_CHANNEL" in
-            stable) configs='--config src-tauri/tauri.bundle.conf.json' ;;
-            nightly) configs='--config src-tauri/tauri.bundle.conf.json --config src-tauri/tauri.nightly.conf.json' ;;
-            *) echo "Unsupported build channel: $BUILD_CHANNEL" >&2; exit 1 ;;
-          esac
-          echo "BUNDLE_CONFIGS=$configs" >> "$GITHUB_ENV"
-          echo "BOITE_SIGN_UPDATES=1" >> "$GITHUB_ENV"
-          # An unpublished build signs with a throwaway key, so every run proves
-          # the signed updater payloads a release needs from this runner.
-          if [ "$SIGN_UPDATES" != 1 ]; then
-            bun run --cwd apps/shell tauri signer generate --ci -w "$RUNNER_TEMP/throwaway-updater.key" > /dev/null
-            echo "THROWAWAY_UPDATER_KEY=$RUNNER_TEMP/throwaway-updater.key" >> "$GITHUB_ENV"
-          fi
-      - run: bun run stage:core
-        env:
-          # Only a published package reports to the analytics relay (docs/analytics.md).
-          BOITE_RELEASE_TELEMETRY: ${{ inputs.sign-updates && '1' || '' }}
-      - run: bun run test:shell --release
-      - name: macOS native toolbar regression
-        if: runner.os == 'macOS'
-        run: cargo test --locked --manifest-path apps/shell/src-tauri/Cargo.toml --release --test macos-window
-      - name: Build and test installed Linux package
-        if: runner.os == 'Linux'
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
-        run: |
-          export TAURI_SIGNING_PRIVATE_KEY="${TAURI_SIGNING_PRIVATE_KEY:-${THROWAWAY_UPDATER_KEY:-}}"
-          # shellcheck disable=SC2086 # BUNDLE_CONFIGS holds several arguments.
-          bun apps/shell/scripts/tauri.ts build $BUNDLE_CONFIGS --bundles deb
-          sudo dpkg -i apps/shell/src-tauri/target/release/bundle/deb/*.deb
-          dbus-run-session -- xvfb-run -a bun scripts/ci/desktop-smoke.ts /usr/bin/boite-shell
-      - name: Bundle and test Linux AppImage
-        if: runner.os == 'Linux'
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
-        run: |
-          export TAURI_SIGNING_PRIVATE_KEY="${TAURI_SIGNING_PRIVATE_KEY:-${THROWAWAY_UPDATER_KEY:-}}"
-          # shellcheck disable=SC2086 # BUNDLE_CONFIGS holds several arguments.
-          bun apps/shell/scripts/tauri.ts bundle $BUNDLE_CONFIGS --bundles appimage --verbose
-          mkdir "$RUNNER_TEMP/appimage"
-          appimage=$(realpath apps/shell/src-tauri/target/release/bundle/appimage/*.AppImage)
-          (cd "$RUNNER_TEMP/appimage" && "$appimage" --appimage-extract > /dev/null)
-          if [ "$(uname -m)" = aarch64 ]; then
-            cmp packages/core/dist/boite-core "$RUNNER_TEMP/appimage/squashfs-root/usr/bin/boite-core"
-          fi
-          dbus-run-session -- xvfb-run -a bun scripts/ci/desktop-smoke.ts "$RUNNER_TEMP/appimage/squashfs-root/AppRun"
-      - name: Build and test macOS application bundle
-        if: runner.os == 'macOS'
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
-          DEVELOPER_ID_CERTIFICATE: ${{ inputs.sign-updates && secrets.APPLE_CERTIFICATE || '' }}
-          DEVELOPER_ID_PASSWORD: ${{ inputs.sign-updates && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-          DEVELOPER_ID_IDENTITY: ${{ inputs.sign-updates && secrets.APPLE_SIGNING_IDENTITY || '' }}
-          NOTARY_ISSUER: ${{ inputs.sign-updates && secrets.APPLE_API_ISSUER || '' }}
-          NOTARY_KEY_ID: ${{ inputs.sign-updates && secrets.APPLE_API_KEY_ID || '' }}
-          NOTARY_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.APPLE_API_PRIVATE_KEY || '' }}
-        run: |
-          export TAURI_SIGNING_PRIVATE_KEY="${TAURI_SIGNING_PRIVATE_KEY:-${THROWAWAY_UPDATER_KEY:-}}"
-          if [ -n "$DEVELOPER_ID_CERTIFICATE" ] && [ -n "$DEVELOPER_ID_PASSWORD" ] && [ -n "$DEVELOPER_ID_IDENTITY" ] \
-            && [ -n "$NOTARY_ISSUER" ] && [ -n "$NOTARY_KEY_ID" ] && [ -n "$NOTARY_PRIVATE_KEY" ]; then
-            # Tauri imports the certificate into a temporary keychain, signs the
-            # app and its sidecar, then notarizes and staples with the API key.
-            printf '%s' "$NOTARY_PRIVATE_KEY" > "$RUNNER_TEMP/AuthKey_$NOTARY_KEY_ID.p8"
-            export APPLE_CERTIFICATE="$DEVELOPER_ID_CERTIFICATE" APPLE_CERTIFICATE_PASSWORD="$DEVELOPER_ID_PASSWORD"
-            export APPLE_SIGNING_IDENTITY="$DEVELOPER_ID_IDENTITY" APPLE_API_ISSUER="$NOTARY_ISSUER"
-            export APPLE_API_KEY="$NOTARY_KEY_ID" APPLE_API_KEY_PATH="$RUNNER_TEMP/AuthKey_$NOTARY_KEY_ID.p8"
-            notarized=1
-          else
-            # Ad-hoc: Gatekeeper asks once before the first start (README).
-            export APPLE_SIGNING_IDENTITY='-'
-            notarized=0
-          fi
-          # shellcheck disable=SC2086 # BUNDLE_CONFIGS holds several arguments.
-          bun apps/shell/scripts/tauri.ts build $BUNDLE_CONFIGS --bundles app,dmg --verbose
-          cp -R apps/shell/src-tauri/target/release/bundle/macos/Boite.app "$RUNNER_TEMP/Boite.app"
-          # Dictation: without both, macOS refuses or kills the microphone request.
-          plutil -extract NSMicrophoneUsageDescription raw "$RUNNER_TEMP/Boite.app/Contents/Info.plist"
-          codesign -d --entitlements - --xml "$RUNNER_TEMP/Boite.app" | grep -q com.apple.security.device.audio-input
-          if [ "$notarized" = 1 ]; then
-            xcrun stapler validate "$RUNNER_TEMP/Boite.app"
-            spctl --assess --type execute --verbose "$RUNNER_TEMP/Boite.app"
-          fi
-          bun scripts/ci/desktop-smoke.ts "$RUNNER_TEMP/Boite.app/Contents/MacOS/boite-shell"
-      - name: Collect release bundles
-        run: bun scripts/ci/desktop-bundles.ts "$RUNNER_TEMP/desktop-bundles"
-      - name: Bundle and sign standalone Linux server
-        if: runner.os == 'Linux'
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
-        run: |
-          if [ -n "${THROWAWAY_UPDATER_KEY:-}" ]; then
-            unset TAURI_SIGNING_PRIVATE_KEY
-            export TAURI_SIGNING_PRIVATE_KEY_PATH="$THROWAWAY_UPDATER_KEY"
-          fi
-          file=$(bun scripts/ci/server-bundle.ts "$RUNNER_TEMP/desktop-bundles")
-          version=$(bun -e 'console.log(require("./package.json").version)')
-          bun run --cwd apps/shell tauri signer sign --password '' --app-version "$version" "$file"
-      - name: Diagnose Linux packaging failures
-        if: failure() && runner.os == 'Linux'
-        run: |
-          patchelf --version
-          for binary in packages/core/dist/boite-core apps/shell/src-tauri/target/release/bundle/appimage/Boite.AppDir/usr/bin/boite-core; do
-            if [ -f "$binary" ]; then
-              file "$binary"
-              ldd "$binary" || true
-            fi
-          done
-      # release.yml and nightly.yml publish every desktop-bundle-* artifact.
-      - uses: ./.github/actions/upload-artifact
-        with:
-          name: desktop-bundle-${{ matrix.os }}
-          path: ${{ runner.temp }}/desktop-bundles/
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
-
   server:
+    name: Server
     needs: changes
     if: needs.changes.outputs.server == 'true'
     permissions:
@@ -462,6 +263,7 @@ jobs:
     uses: ./.github/workflows/server-verify.yml
 
   android:
+    name: Android
     needs: changes
     if: needs.changes.outputs.android == 'true'
     uses: ./.github/workflows/android.yml
@@ -469,7 +271,7 @@ jobs:
   required:
     name: CI required
     if: always()
-    needs: [changes, core, web, telemetry, e2e-types, stress, desktop, e2e, desktop-portable, server, android]
+    needs: [changes, core, web, telemetry, e2e-types, stress, desktop, e2e, server, android]
     runs-on: ubuntu-24.04
     steps:
       - name: Require all applicable checks
@@ -480,8 +282,8 @@ jobs:
           import json, os
           jobs = json.loads(os.environ['RESULTS'])
           assert jobs['changes']['result'] == 'success', jobs
-          for name in ('core', 'web', 'telemetry', 'e2e-types', 'stress', 'desktop', 'desktop-portable', 'server', 'android'):
-              output = {'desktop-portable': 'desktop', 'e2e-types': 'e2eTypes'}.get(name, name)
+          for name in ('core', 'web', 'telemetry', 'e2e-types', 'stress', 'desktop', 'server', 'android'):
+              output = {'e2e-types': 'e2eTypes'}.get(name, name)
               required = jobs['changes']['outputs'][output] == 'true'
               assert jobs[name]['result'] == ('success' if required else 'skipped'), jobs
           e2e_required = jobs['changes']['outputs']['desktop'] == 'true' and jobs['changes']['outputs']['e2e'] == 'true'

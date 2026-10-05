@@ -55,6 +55,8 @@ jobs:
       skip-server: true
     permissions:
       contents: read
+      # ci.yml's planning job reads past runs on main pushes; it needs the grant to start.
+      actions: read
 
   image:
     needs: version
