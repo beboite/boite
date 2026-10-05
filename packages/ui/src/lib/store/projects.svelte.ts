@@ -403,7 +403,7 @@ export class Projects {
     const drafts = target === null || project?.kind === 'drafts';
     this.ctx.drafts.forget(draft.projectId);
     const { incognito, ...kept } = draft;
-    this.draft = { ...kept, ...(incognito && drafts ? { incognito } : {}), projectId: target, worktree: drafts || project?.repository === false ? false : draft.worktreeExplicit ? draft.worktree : project?.worktreeDefault === true };
+    this.draft = { ...kept, ...(incognito && drafts ? { incognito } : {}), projectId: target, worktree: drafts || project?.repository !== true ? false : draft.worktreeExplicit ? draft.worktree : project?.worktreeDefault === true };
     if (target === null) return;
     this.rememberProject(target);
     this.collapsedProjects = this.collapsedProjects.filter((id) => id !== target);

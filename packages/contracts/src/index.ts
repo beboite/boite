@@ -647,8 +647,9 @@ export interface Project {
   autoArchiveMergedPr?: boolean;
   /**
    * The folder holds a `.git`, read on every answer rather than stored: the
-   * test `threads.create.worktree` applies. Absent from a core older than this
-   * field, which a client reads as unknown and keeps the worktree switch for.
+   * test `threads.create.worktree` applies. Absent before the core's first
+   * check of the folder answers, and from a core older than this field: a
+   * client offers worktrees only on `true`.
    */
   repository?: boolean;
   /**
