@@ -997,6 +997,7 @@ export const fr: Translation = {
     moveHide: "Masquer ce qui a été dit à l'agent",
     movedByAgent: "Déplacé par l'agent vers {project}",
     startedByAgent: "Lancé par l'agent de {title} dans {project}",
+    promptFromAgent: "Envoyé par l'agent de",
     agentStartedThread: "L'agent a lancé {title} dans {project}",
     openLinkedThread: 'Ouvrir ce thread',
     hookBlocked: 'Un hook a bloqué ce message',
@@ -1079,7 +1080,9 @@ export const fr: Translation = {
     all: 'Tous', sent: 'Envoyés', received: 'Reçus', empty: 'Aucun message ici pour le moment.',
     forwardedOne: '1 message transmis', forwardedMany: '{count} messages transmis',
     receivedOne: '1 message reçu', receivedMany: '{count} messages reçus',
-    issueOne: '1 message à vérifier', issueMany: '{count} messages à vérifier'
+    issueOne: '1 message à vérifier', issueMany: '{count} messages à vérifier',
+    stewardOne: '1 message du gardien', stewardMany: '{count} messages du gardien',
+    noticeOne: '1 avis de conversation', noticeMany: '{count} avis de conversation'
   },
   coordination: {
     options: 'Réglages avancés',
@@ -1096,6 +1099,8 @@ export const fr: Translation = {
     details: "Afficher l'échange",
     receivedFrom: 'Reçu de', sentTo: 'Votre agent a envoyé à',
     userSentTo: 'Vous avez envoyé à', userMessageVia: 'Message utilisateur via',
+    stewardFrom: 'Du gardien', stewardSentTo: 'Le gardien a envoyé à',
+    noticeFrom: 'Avis de {title}',
     receivedStatus: 'Reçu',
     machineNotConnected: 'Connectez cette machine dans les réglages pour ouvrir son fil.',
     status: {
@@ -1105,6 +1110,30 @@ export const fr: Translation = {
     bubbleStatus: {
       queued: 'En attente', received: 'En attente', delivered: 'Envoyé', uncertain: 'Non confirmé', expired: 'Expiré', rejected: 'Échec'
     }
+  },
+  steward: {
+    heading: 'Gardien',
+    enable: "Cet agent veille sur des projets",
+    enableHint: "Il lit toutes leurs conversations, les guide, répond à leurs questions et les range pendant votre absence.",
+    ownerOnly: "Seul le propriétaire peut nommer un gardien. Cet appareil peut voir ce qu'il surveille.",
+    unavailable: "Un sous-agent ou une session d'agent persistante ne peut pas être gardien.",
+    allProjects: 'Tous les projets', allProjectsHint: 'Y compris les projets ajoutés plus tard.',
+    projects: 'Projets', projectsEmpty: 'Aucun projet à surveiller sur cette machine.',
+    capabilities: "Ce qu'il peut faire",
+    risky: 'Risqué',
+    capability: {
+      message: { label: 'Envoyer des messages', hint: 'Ses messages atteignent les conversations, même sans communication activée.' },
+      spawn: { label: 'Lancer des conversations', hint: 'Lancer de nouvelles conversations dans ses projets.' },
+      archive: { label: 'Archiver', hint: 'Archiver et restaurer des conversations.' },
+      move: { label: 'Déplacer', hint: 'Déplacer des conversations entre ses projets et ajouter des dossiers de projet.' },
+      stop: { label: 'Arrêter et renommer', hint: 'Arrêter un tour en cours et renommer des conversations.' },
+      answer: { label: 'Répondre aux questions', hint: 'Répondre aux questions que les agents vous posent, ou les passer.' },
+      permissions: { label: 'Répondre aux permissions', hint: "Autoriser ou refuser les demandes d'outils à votre place." },
+      remove: { label: 'Supprimer des conversations', hint: 'Supprimer des conversations. Une conversation supprimée reste restaurable un temps.' }
+    },
+    notify: 'Prévenir des événements',
+    notifyHint: 'Un tour terminé, un échec, une question ou une permission en attente réveille le gardien.',
+    chipOne: 'Gardien · 1 projet', chipMany: 'Gardien · {count} projets', chipAll: 'Gardien · tous les projets'
   },
   delegation: {
     off: 'Désactivés',

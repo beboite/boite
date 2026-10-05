@@ -2365,8 +2365,14 @@ export interface AgentTranscript {
   more: boolean;
 }
 export interface AgentLetter {
-  /** Authenticated source of delegation mail. Older coordination mail is agent-authored. */
-  origin?: 'user' | 'agent' | 'result';
+  /**
+   * Who the core says wrote it. Missing on older coordination mail: another
+   * agent. `user` and `result` are delegation mail. `steward` comes from the
+   * steward the owner assigned to the recipient's project, `notice` is the core
+   * telling a steward what happened in a thread it looks after. None of them is
+   * a message the user typed.
+   */
+  origin?: 'user' | 'agent' | 'result' | 'steward' | 'notice';
   id: string;
   from: AgentContact;
   to: AgentAddress;
@@ -2379,6 +2385,84 @@ export interface AgentLetter {
   expiresAt: Timestamp;
   status: 'queued' | 'received' | 'delivered' | 'uncertain' | 'expired' | 'rejected';
   error: string | null;
+}
+/**
+ * What a steward may do to the threads of the projects it looks after.
+ * Reading them, their state and their requests comes with any grant.
+ */
+export type StewardCapability =
+  /** Messages that reach the thread as the steward's, even when its coordination is off. */
+  | 'message'
+  /** Start threads in its projects, without the communication-settings gates. */
+  | 'spawn'
+  /** Archive and unarchive. */
+  | 'archive'
+  /** Move threads between its projects, and register a new project folder. */
+  | 'move'
+  /** Stop a running turn and rename a thread. */
+  | 'stop'
+  /** Answer and skip the questions agents ask the user. */
+  | 'answer'
+  /** Allow or deny tool permission requests. Never granted by default. */
+  | 'permissions'
+  /** Delete threads. Never granted by default; a deleted thread stays restorable for a while. */
+  | 'remove';
+export const STEWARD_CAPABILITIES: readonly StewardCapability[] = ['message', 'spawn', 'archive', 'move', 'stop', 'answer', 'permissions', 'remove'];
+/** What a new grant carries until the owner picks otherwise: everything but permissions and deletion. */
+export const STEWARD_DEFAULT_CAPABILITIES: readonly StewardCapability[] = ['message', 'spawn', 'archive', 'move', 'stop', 'answer'];
+/**
+ * The owner assigns the agent of one thread to look after projects while they
+ * are away: it reads every thread there, steers them, answers what they ask
+ * and tidies them up, within `capabilities`. One grant per steward thread.
+ */
+export interface StewardGrant {
+  /** The steward's own conversation. */
+  threadId: ThreadId;
+  /** The projects it looks after. Empty with `allProjects`. */
+  projectIds: ProjectId[];
+  /** Every project, those added later included. */
+  allProjects: boolean;
+  capabilities: StewardCapability[];
+  /**
+   * The core sends the steward a notice when a thread it looks after finishes
+   * a turn, fails, asks a question or waits on a permission; an idle steward
+   * wakes to read it.
+   */
+  notify: boolean;
+  grantedAt: Timestamp;
+  updatedAt: Timestamp;
+}
+export type StewardGrantInput = Pick<StewardGrant, 'threadId' | 'projectIds' | 'allProjects' | 'capabilities' | 'notify'>;
+/** One thread as a steward sees it in the projects it looks after. */
+export interface StewardThread {
+  id: ThreadId;
+  title: string;
+  projectId: ProjectId | null;
+  project: string | null;
+  status: ThreadStatus;
+  archived: boolean;
+  branch: string | null;
+  /** The steward's own conversation. */
+  self: boolean;
+  /** Unanswered questions and permission requests. */
+  questions: number;
+  permissions: number;
+  pullRequest: ThreadSummary['pullRequest'] | null;
+  updatedAt: Timestamp;
+  lastCompletedAt: Timestamp | null;
+}
+export interface StewardThreadDetail {
+  thread: StewardThread;
+  questions: QuestionRequest[];
+  permissions: PermissionRequest[];
+  /** The last assistant text, cut at 4,000 characters. */
+  lastAnswer: string | null;
+}
+export type StewardAction = 'archive' | 'unarchive' | 'remove' | 'stop' | 'rename' | 'move';
+/** What the steward reads about itself. Null grant: this thread is no steward. */
+export interface StewardView {
+  grant: StewardGrant | null;
+  projects: { id: ProjectId; name: string; path: string }[];
 }
 /** Public contact card. No owner token or private signing key crosses a core. */
 export interface CoordinationPeer {
@@ -2873,6 +2957,34 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * and hands them over as delivered: they are not injected into the turn a second time.
    */
   'collaboration.wait': { params: { threadId: ThreadId; from?: AgentAddress; timeoutMs: number }; result: { letters: AgentLetter[] } };
+  /** Every steward grant on this core. */
+  'stewards.list': { params: Record<string, never>; result: StewardGrant[] };
+  /**
+   * Make the agent of `threadId` the steward of projects, or replace its grant.
+   * Refused for a delegated child, a persistent agent session, an archived
+   * thread, an unknown project or capability, and an empty project list
+   * without `allProjects`.
+   */
+  'stewards.set': { params: { grant: StewardGrantInput }; result: StewardGrant };
+  /** Remove a thread's steward grant. Its letters already delivered stay in the timelines. */
+  'stewards.revoke': { params: { threadId: ThreadId }; result: { ok: true } };
+  /** The calling thread's own grant and the projects it covers. */
+  'steward.get': { params: { threadId: ThreadId }; result: StewardView };
+  /** The threads of the projects it looks after, the most recently active first. `project` narrows to one (id, name or folder). */
+  'steward.threads': { params: { threadId: ThreadId; project?: string; archived?: boolean }; result: StewardThread[] };
+  /** One thread it looks after, with its pending questions, permissions and last answer. */
+  'steward.thread': { params: { threadId: ThreadId; target: ThreadId }; result: StewardThreadDetail };
+  /**
+   * Act on a thread it looks after, within its capabilities: `rename` takes
+   * `title`, `move` takes `project` (a project it also looks after). Every
+   * action leaves a system line in the target's timeline naming the steward.
+   * The steward's own thread is refused.
+   */
+  'steward.act': { params: { threadId: ThreadId; target: ThreadId; action: StewardAction; title?: string; project?: string }; result: { thread: StewardThread | null } };
+  /** Answer a pending question of a thread it looks after, as the owner would from the card. */
+  'steward.answer': { params: { threadId: ThreadId; target: ThreadId; questionId: RequestId; optionIds: string[]; text?: string; skip?: boolean }; result: { ok: true } };
+  /** Allow or deny a pending permission request of a thread it looks after. Needs the `permissions` capability. */
+  'steward.permission': { params: { threadId: ThreadId; target: ThreadId; requestId: RequestId; decision: 'allow' | 'deny' }; result: { ok: true } };
   'collaboration.identity': { params: Record<string, never>; result: CoordinationPeer };
   'collaboration.peers': { params: Record<string, never>; result: CoordinationPeer[] };
   'collaboration.check': { params: { coreId: string }; result: { ok: true } };
@@ -3608,6 +3720,8 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserR
   'thread.memory': MemoryEvent & { threadId: string };
   'delegation.changed': { threadId: ThreadId };
   'collaboration.changed': { threadId: ThreadId };
+  /** A steward grant was set or revoked; `stewards.list` reads the rest. */
+  'stewards.changed': { threadId: ThreadId };
   /** Sent directly to the owner connection registered for the target core. */
   'collaboration.bridge.request': { requestId: string; fromCoreId: string; toCoreId: string; body: string; signature: string };
   'thread.activity': { threadId: ThreadId; activity: ThreadActivity };

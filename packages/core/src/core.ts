@@ -46,6 +46,7 @@ import { SpeechStore } from './speech.ts';
 import { Telemetry } from './telemetry.ts';
 import { HarnessUpdates } from './providers/updates.ts';
 import { Coordination } from './coordination.ts';
+import { Stewards } from './stewards.ts';
 import { GroupStore, type NetworkSink } from './group.ts';
 import { Delegation } from './delegation.ts';
 import { Workflows } from './workflows.ts';
@@ -150,6 +151,7 @@ export class Core {
   readonly updates: HarnessUpdates;
   readonly serverUpdates: ServerUpdates;
   readonly coordination: Coordination;
+  readonly stewards: Stewards;
   /** The machines this core trusts as one owner's, and what it hands their clients. */
   readonly group: GroupStore;
   readonly delegation: Delegation;
@@ -276,6 +278,7 @@ export class Core {
     this.updates = new HarnessUpdates(this);
     this.serverUpdates = new ServerUpdates(this, options.serverUpdates);
     this.coordination = new Coordination(this);
+    this.stewards = new Stewards(this);
     this.group = new GroupStore(this);
     this.group.restore();
     this.delegation = new Delegation(this);
@@ -409,6 +412,7 @@ export class Core {
     this.serverUpdates.close();
     await this.drain();
     await this.delegation.close();
+    this.stewards.close();
     await this.coordination.close();
     await this.group.close();
     await this.speech.close();

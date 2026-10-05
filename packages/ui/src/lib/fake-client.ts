@@ -22,6 +22,7 @@ import { FakeContext, type FakeClientOptions, type FakeMethods } from './fake-cl
 import { hookMethods, recordHookRun } from './fake-client/hooks';
 import { logMethods } from './fake-client/logs';
 import { coordinationMethods, registerCore, unregisterCore } from './fake-client/coordination';
+import { seedStewardDemo, stewardMethods } from './fake-client/stewards';
 import { delegationMethods, seedDelegationDemo } from './fake-client/delegation';
 import { groupMethods } from './fake-client/group';
 import { pairingMethods } from './fake-client/pairing';
@@ -88,6 +89,7 @@ export class FakeClient implements ObservableClient {
     registerCore(ctx);
     seed(ctx);
     if (options.delegationDemo) seedDelegationDemo(ctx);
+    if (options.stewardDemo) seedStewardDemo(ctx);
     if (options.uninstalled) {
       ctx.providers = ctx.providers.filter(provider => provider.id !== 'echo').map(provider => ({
         ...provider, available: false, executable: null,
@@ -356,7 +358,7 @@ export class FakeClient implements ObservableClient {
   #answer(ctx: FakeContext): FakeMethods {
     const threads = threadMethods(ctx);
     const projects = projectMethods(ctx);
-    return {
+    const methods: FakeMethods = {
       'core.shutdown': async () => { ctx.agents.close(); await Promise.all([...ctx.threads.keys()].map(id => ctx.stopTurn(id))); setTimeout(() => this.close(), 25); return { ok: true }; },
       'hello': async (params) => {
         return { core: ctx.core, principal: ctx.bus.principal };
@@ -385,6 +387,7 @@ export class FakeClient implements ObservableClient {
       ...speechMethods(ctx),
       ...delegationMethods(ctx),
       ...coordinationMethods(ctx),
+      ...stewardMethods(ctx, () => methods),
       ...groupMethods(ctx),
       ...todoMethods(ctx),
       ...workdirMethods(ctx),
@@ -393,5 +396,6 @@ export class FakeClient implements ObservableClient {
       ...pullRequestMethods(ctx),
       ...worktreeMethods(ctx),
     };
+    return methods;
   }
 }
