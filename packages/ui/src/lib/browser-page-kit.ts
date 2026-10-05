@@ -18,12 +18,14 @@
 function agentKit() {
   const KEY = Symbol.for('boite.agent.v1');
   if (window[KEY]) return window[KEY];
-  const K = { refs: new Map(), token: Math.random().toString(36).slice(2), leaving: false, agentAt: Date.now(), policy: { accept: true, text: null }, dialogs: [] };
+  const K = { refs: new Map(), token: Math.random().toString(36).slice(2), leaving: false, acting: 0, policy: { accept: true, text: null }, dialogs: [] };
   Object.defineProperty(window, KEY, { value: K, configurable: true });
   addEventListener('beforeunload', () => { K.leaving = true; }, true);
-  // Dialogs answer at once while an agent acts on the page, so none opens over the desktop.
+  // A dialog raised while an agent command runs is answered at once, so none opens over
+  // the desktop. `acting` is that command's deadline: the person using the tab between
+  // commands gets the page's real dialogs.
   const native = { alert: window.alert, confirm: window.confirm, prompt: window.prompt };
-  const recent = () => Date.now() - K.agentAt < 60000;
+  const recent = () => Date.now() < K.acting;
   const note = (type, message, accepted, value) => { K.dialogs.push({ type, message: String(message ?? '').slice(0, 500), accepted, ...(value === undefined ? {} : { value }) }); if (K.dialogs.length > 20) K.dialogs.shift(); };
   window.alert = function (message) { if (!recent()) return native.alert.apply(this, arguments); note('alert', message, true); };
   window.confirm = function (message) { if (!recent()) return native.confirm.apply(this, arguments); note('confirm', message, K.policy.accept); return K.policy.accept; };
@@ -108,7 +110,7 @@ function agentKit() {
   };
 
   K.snapshot = (opts = {}) => {
-    K.agentAt = Date.now(); K.refs = new Map(); let n = 0;
+    K.refs = new Map(); let n = 0;
     const out = []; let size = 0; const MAX = opts.maxChars || 40000; let truncated = false;
     const emit = (depth, text) => {
       if (truncated) return;
@@ -177,7 +179,6 @@ function agentKit() {
   };
 
   K.find = target => {
-    K.agentAt = Date.now();
     const t = String(target).trim();
     const ref = /^@?(e\d+)$/.exec(t);
     if (ref) {
@@ -257,7 +258,6 @@ function agentKit() {
 
   // DOM-level actions: the same effects, as events the page receives without a rendered frame.
   K.dom = (kind, target, arg) => {
-    K.agentAt = Date.now();
     if (kind === 'press') {
       const parts = arg.split('+'); const last = parts.pop(); const key = last === 'Space' ? ' ' : last;
       const mods = { ctrlKey: parts.some(p => /^(control|ctrl)$/i.test(p)), altKey: parts.some(p => /^alt$/i.test(p)), shiftKey: parts.some(p => /^shift$/i.test(p)), metaKey: parts.some(p => /^(meta|cmd|command)$/i.test(p)) };
@@ -295,7 +295,6 @@ function agentKit() {
   K.value = target => { const el = K.find(target); return el.isContentEditable ? el.innerText : el.value; };
   K.checked = target => checked(K.find(target));
   K.select = (target, values) => {
-    K.agentAt = Date.now();
     const el = K.find(target);
     if (el.tagName !== 'SELECT') throw new Error('select needs a <select> element; for a custom list, click it and then click the option');
     const wanted = values.map(v => String(v).trim());
@@ -310,7 +309,6 @@ function agentKit() {
     return Array.from(el.selectedOptions).map(o => o.text.trim());
   };
   K.get = (what, target, attr) => {
-    K.agentAt = Date.now();
     switch (what) {
       case 'title': return document.title;
       case 'url': return location.href;
@@ -329,7 +327,7 @@ function agentKit() {
     }
     throw new Error('unknown property ' + what);
   };
-  K.scroll = (x, y, target) => { K.agentAt = Date.now(); const el = target ? K.find(target) : null; if (el) el.scrollBy(x, y); else scrollBy(x, y); return { x: scrollX, y: scrollY }; };
+  K.scroll = (x, y, target) => { const el = target ? K.find(target) : null; if (el) el.scrollBy(x, y); else scrollBy(x, y); return { x: scrollX, y: scrollY }; };
   K.scrollIntoView = target => { K.find(target).scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }); return true; };
   K.focus = target => { K.find(target).focus(); return true; };
   const glob = pattern => new RegExp('^' + pattern.replace(/[.+^$(){}|[\]\\?]/g, '\\$&').replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*') + '$');

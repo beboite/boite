@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { AGENT_ENV, BROWSER_RECORDING_CHUNK_BYTES } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
 import { browserAction, browserLines } from '../src/browser-cli.ts';
+import { parse } from '../src/cli-args.ts';
 import { echoThread, startTestCore } from './harness.ts';
 
 test('browser screenshots accept explicit destinations, preserve existing files and document default cleanup', async () => {
@@ -138,6 +139,8 @@ test('the browser CLI reads agent-browser command lines into actions', () => {
   expect(() => read(['wait', '--text', 'a', '--url', 'b'])).toThrow('exactly one condition');
   expect(() => read(['click'])).toThrow('needs a target');
   expect(() => read(['frobnicate'])).toThrow('unknown browser command');
+  // Boite's own connection flags stay global after the browser command.
+  expect(parse(['browser', 'snapshot', '-i', '--core', 'https://host.test', '--channel', 'dev'])).toMatchObject({ positional: ['browser', 'snapshot', '-i'], core: 'https://host.test', channel: 'dev' });
 });
 
 test('browser output is agent-browser text: a check, the page reached and the dialogs answered', () => {

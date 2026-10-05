@@ -102,9 +102,10 @@ where it went; `open` waits for the DOM too, never for the load event, so a page
 whose image or script never finishes still answers within 10 seconds. `wait`
 waits for an element, `--text`, `--url "**/done"`, `--fn <js>` or
 `--load domcontentloaded|load|networkidle`, for 10 seconds unless `--timeout`
-says otherwise, at most 15. A page's alert, confirm and prompt are answered at
-once, so none opens over the desktop: accepted by default, dismissed after
-`dialog dismiss`, and listed in the output of the action that raised them.
+says otherwise, at most 15. An alert, confirm or prompt raised while an action
+runs is answered at once, so none opens over the desktop: accepted by default,
+dismissed after `dialog dismiss`, and listed in the output of that action.
+Between commands the page's dialogs reach the person using the tab.
 
 The conversation's tab keeps working while the desktop shows another
 conversation or sits in the tray. WebView2 then renders no frame and would

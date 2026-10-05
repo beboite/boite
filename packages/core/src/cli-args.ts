@@ -56,8 +56,8 @@ export function parse(argv: string[]): Parsed {
       index += 1;
       return value;
     };
-    // `boite browser` takes agent-browser's own flags (-i, --text, --timeout...); only these three stay global.
-    if (parsed.positional[0] === 'browser' && parsed.positional.length > 1 && !['--json', '--thread', '--data-dir'].includes(arg)) { parsed.positional.push(arg); continue; }
+    // `boite browser` takes agent-browser's own flags (-i, --text, --timeout...); only these stay global.
+    if (parsed.positional[0] === 'browser' && parsed.positional.length > 1 && !['--json', '--thread', '--data-dir', '--core', '--channel'].includes(arg)) { parsed.positional.push(arg); continue; }
     const boolean = BOOLEAN_OPTIONS.find(key => arg === `--${key}`);
     const numeric = NUMBER_OPTIONS.find(key => arg === `--${key}`);
     if (boolean !== undefined) parsed[boolean] = true;

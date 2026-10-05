@@ -36,13 +36,16 @@ interface PageState { url: string; title: string; ready: DocumentReadyState; hid
 async function state(id: string): Promise<PageState | null> {
   try { return await page<PageState>(id, 'return K.state()', 2000); } catch { return null; }
 }
+/** Starts a command that may raise dialogs: they are answered until `done` or for 30 s at most. */
 async function begin(id: string): Promise<PageState> {
   for (let i = 0; i < 20; i++) {
-    try { return await page<PageState>(id, 'K.leaving = false; K.agentAt = Date.now(); return K.state()', 2000); }
+    try { return await page<PageState>(id, 'K.leaving = false; K.acting = Date.now() + 30000; return K.state()', 2000); }
     catch { await sleep(100); }
   }
   throw new Error('the page does not answer; it may still be loading, use wait --load domcontentloaded');
 }
+/** Hands the page's dialogs back to the person. A page that navigated has a new kit and nothing to clear. */
+const done = (id: string) => page(id, 'K.acting = 0; return true', 2000).catch(() => undefined);
 
 /**
  * Waits for a document other than `token`'s to have its DOM, never for the
@@ -189,7 +192,7 @@ async function wait(id: string, action: Extract<BrowserAction, { kind: 'wait' }>
 }
 
 export async function automateBrowser(id: string, action: BrowserAction): Promise<BrowserReply> {
-  const done = (result: BrowserActionResult): BrowserReply => ({ tabId: id, value: result });
+  const reply = (result: BrowserActionResult): BrowserReply => ({ tabId: id, value: result });
   switch (action.kind) {
     case 'snapshot': {
       const options = js({ interactive: action.interactive, compact: action.compact, depth: action.depth, selector: action.selector, urls: action.urls });
@@ -200,39 +203,45 @@ export async function automateBrowser(id: string, action: BrowserAction): Promis
     case 'get': return { tabId: id, value: await page(id, `return K.get(${js(action.what)}, ${js(action.selector ?? null)}, ${js(action.name ?? null)})`) };
     case 'click': case 'press': case 'check': case 'uncheck': case 'select': {
       const before = await begin(id);
-      let note: string | undefined, value: unknown;
-      if (action.kind === 'click') note = await click(id, action.selector, action.count ?? 1);
-      else if (action.kind === 'check' || action.kind === 'uncheck') note = await check(id, action.selector, action.kind === 'check');
-      else if (action.kind === 'select') value = await page(id, `return K.select(${js(action.selector)}, ${js(action.values)})`);
-      else if (action.kind === 'press' && before.hidden) await page(id, `return K.dom('press', null, ${js(action.key)})`);
-      else if (action.kind === 'press') await nativePress(id, action.key);
-      const result = await settle(id, before);
-      return done({ ...result, ...(note ? { note } : {}), ...(value === undefined ? {} : { value }) });
+      try {
+        let note: string | undefined, value: unknown;
+        if (action.kind === 'click') note = await click(id, action.selector, action.count ?? 1);
+        else if (action.kind === 'check' || action.kind === 'uncheck') note = await check(id, action.selector, action.kind === 'check');
+        else if (action.kind === 'select') value = await page(id, `return K.select(${js(action.selector)}, ${js(action.values)})`);
+        else if (action.kind === 'press' && before.hidden) await page(id, `return K.dom('press', null, ${js(action.key)})`);
+        else if (action.kind === 'press') await nativePress(id, action.key);
+        const result = await settle(id, before);
+        return reply({ ...result, ...(note ? { note } : {}), ...(value === undefined ? {} : { value }) });
+      } finally { await done(id); }
     }
     case 'fill': case 'type': {
       await begin(id);
-      const note = await write(id, action.kind, action.selector, action.text);
-      return done({ ok: true, ...(note ? { note } : {}) });
+      try {
+        const note = await write(id, action.kind, action.selector, action.text);
+        return reply({ ok: true, ...(note ? { note } : {}) });
+      } finally { await done(id); }
     }
     case 'hover': {
       const point = await page<Point>(id, `return K.point(${js(action.selector)}, 'hover')`);
       if (point && !point.covered) await protocol(id, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y, button: 'none' });
       else await page(id, `return K.dom('hover', ${js(action.selector)})`);
-      return done({ ok: true });
+      return reply({ ok: true });
     }
-    case 'focus': await page(id, `return K.focus(${js(action.selector)})`); return done({ ok: true });
-    case 'scrollintoview': await page(id, `return K.scrollIntoView(${js(action.selector)})`); return done({ ok: true });
-    case 'scroll': return done({ ok: true, value: await page(id, `return K.scroll(${action.x}, ${action.y}, ${js(action.selector ?? null)})`) });
-    case 'wait': return done(await wait(id, action));
+    case 'focus': await page(id, `return K.focus(${js(action.selector)})`); return reply({ ok: true });
+    case 'scrollintoview': await page(id, `return K.scrollIntoView(${js(action.selector)})`); return reply({ ok: true });
+    case 'scroll': return reply({ ok: true, value: await page(id, `return K.scroll(${action.x}, ${action.y}, ${js(action.selector ?? null)})`) });
+    case 'wait': return reply(await wait(id, action));
     case 'history': {
       const before = await begin(id);
-      await evaluate(id, action.direction === 'back' ? 'history.back()' : action.direction === 'forward' ? 'history.forward()' : 'location.reload()');
-      return done(await settle(id, before, 800));
+      try {
+        await evaluate(id, action.direction === 'back' ? 'history.back()' : action.direction === 'forward' ? 'history.forward()' : 'location.reload()');
+        return reply(await settle(id, before, 800));
+      } finally { await done(id); }
     }
     case 'dialog': {
       if (action.decision === 'status') return { tabId: id, value: await page(id, 'return { next: K.policy.accept ? "accept" : "dismiss", recent: K.dialogs }') };
-      await page(id, `K.agentAt = Date.now(); K.policy = { accept: ${action.decision === 'accept'}, text: ${js(action.text ?? null)} }; return true`);
-      return done({ ok: true, note: `the page's next alert, confirm and prompt will be ${action.decision === 'accept' ? 'accepted' : 'dismissed'}` });
+      await page(id, `K.policy = { accept: ${action.decision === 'accept'}, text: ${js(action.text ?? null)} }; return true`);
+      return reply({ ok: true, note: `alerts, confirms and prompts raised by the next actions will be ${action.decision === 'accept' ? 'accepted' : 'dismissed'}` });
     }
     case 'resize':
       await protocol(id, 'Emulation.setDeviceMetricsOverride', { width: action.width, height: action.height, deviceScaleFactor: 1, mobile: false }); break;

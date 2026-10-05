@@ -15,11 +15,14 @@ vi.mock('./browser-bridge', () => ({
 const { automateBrowser } = await import('./browser-automation');
 
 let hidden = false;
+// The page's real confirm, which a person using the tab must keep getting.
+const userConfirm = vi.fn(() => false);
 const native = () => calls.filter(call => call.method.startsWith('Input.')).map(call => call.method);
 const run = async (action: Parameters<typeof automateBrowser>[1]) => (await automateBrowser('browser:t', action)).value as Record<string, unknown>;
 
 beforeEach(() => {
-  calls.length = 0; hidden = false;
+  calls.length = 0; hidden = false; userConfirm.mockClear();
+  window.confirm = userConfirm;
   delete (window as unknown as Record<symbol, unknown>)[Symbol.for('boite.agent.v1')];
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => hidden ? 'hidden' : 'visible' });
   // jsdom lays nothing out: every element has a box and is visible unless display:none.
@@ -77,7 +80,7 @@ test('a tab the desktop does not display is driven through DOM events, never nat
   expect(native()).toEqual([]);
 });
 
-test('a displayed tab gets native input at the element, and a page dialog is answered and reported', async () => {
+test('a displayed tab gets native input at the element, and only dialogs raised during a command are answered', async () => {
   await run({ kind: 'snapshot', interactive: true });
   document.querySelector('#ask')!.setAttribute('data-target', '');
   const clicked = run({ kind: 'click', selector: '@e7' });
@@ -86,9 +89,15 @@ test('a displayed tab gets native input at the element, and a page dialog is ans
   (document.querySelector('#ask') as HTMLButtonElement).click();
   expect(await clicked).toMatchObject({ ok: true, dialogs: [{ type: 'confirm', message: 'Sure?', accepted: true }] });
   expect(calls.find(call => call.params.type === 'mousePressed')?.params).toMatchObject({ x: 60, y: 35, button: 'left' });
-  await run({ kind: 'dialog', decision: 'dismiss' });
+  // Between commands the person using the tab gets the page's own dialog.
   (document.querySelector('#ask') as HTMLButtonElement).click();
-  expect(document.querySelector('#ask')!.textContent).toBe('no');
+  expect(userConfirm).toHaveBeenCalledWith('Sure?');
+  await run({ kind: 'dialog', decision: 'dismiss' });
+  const dismissed = run({ kind: 'click', selector: '@e7' });
+  await vi.waitFor(() => expect(native().filter(method => method === 'Input.dispatchMouseEvent')).toHaveLength(6));
+  (document.querySelector('#ask') as HTMLButtonElement).click();
+  expect(await dismissed).toMatchObject({ dialogs: [{ type: 'confirm', message: 'Sure?', accepted: false }] });
+  expect(userConfirm).toHaveBeenCalledTimes(1);
 });
 
 test('a covered element is clicked through the DOM and says what covered it', async () => {
