@@ -112,8 +112,11 @@ shell's single browser process (`src/platform/webview_profiles.rs`): the
 debugging port is unchanged, and WebView2 removes a deleted profile's folder
 when that process exits, which is why an id is never reused. macOS keeps each
 profile in a WebKit data store, which needs macOS 14. The Linux shell has no
-built-in browser. `tests/e2e/browser-profiles.test.ts` checks separate cookies,
-their survival across a restart and deletion in the real shell.
+built-in browser. `tests/e2e/browser-profiles.test.ts` checked separate cookies,
+their survival across a restart and deletion in the real shell. It drove the
+shell's tabs through `browser.command`, which now reaches the core's browser, so
+it and `browser-native.test.ts` are skipped until they are rewritten on the
+shell's `browser_protocol` command on a Windows machine.
 
 The agent's browser runs on the machine of its conversation and keeps its own
 copy of each profile there. **Copy sign-ins to agents**, on a profile's row in
@@ -149,8 +152,9 @@ runtime already reports Chrome there, in the header and in
 `navigator.userAgentData`. Edge's user agent would double the "Microsoft Edge"
 brand. A DevTools override changes the headers of cross-site frames but not
 their `navigator.userAgentData`, and that mismatch is the kind bot checks such as
-Turnstile reject. `tests/e2e/browser-profiles.test.ts` checks the popup's opener,
-profile and missing bridge, and the `_blank` tab.
+Turnstile reject. `tests/e2e/browser-profiles.test.ts` checked the popup's opener,
+profile and missing bridge, and the `_blank` tab, before it was skipped (see
+Browser profiles above).
 
 ### Local HTML artifacts
 

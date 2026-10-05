@@ -8,7 +8,10 @@ import { connect } from '../../packages/core/src/client.ts';
 import { runCli } from '../../packages/core/src/cli.ts';
 import type { BrowserAction } from '../../packages/contracts/src/index.ts';
 const executable = process.env.BOITE_E2E_SHELL_EXE;
-test.skipIf(process.platform !== 'win32' || !executable)('native browser fills its panel and floats inside the app without losing page state', async () => {
+// Not run since the agent's browser moved to the core: this test drove the shell's own WebView2 tabs
+// through `browser.command`, which now reaches the core's headless browser instead. It has to be
+// rewritten on the shell's `browser_protocol` command, on a Windows machine that can run it.
+test.skip('native browser fills its panel and floats inside the app without losing page state', async () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'boite-e2e-browser-control-'));
   const projectDir = join(dataDir, 'project'); mkdirSync(projectDir);
   const captures = join(import.meta.dir, '.artifacts'); mkdirSync(captures, { recursive: true });
