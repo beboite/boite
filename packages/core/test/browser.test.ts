@@ -3,6 +3,7 @@ import { connect, type CoreClient } from '../src/client.ts';
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { AgentBrowser } from '../src/browser.ts';
 import { chromiumArgs, findChromium } from '../src/browser/chromium.ts';
 import { echoThread, startTestCore, type TestCore } from './harness.ts';
 
@@ -206,3 +207,25 @@ test('a deleted profile loses its folder even when its browser had already close
   for (let i = 0; i < 50 && readdirSync(root).includes('p-keep'); i++) await Bun.sleep(50);
   expect(readdirSync(root).sort()).toEqual(['Not A Profile', 'default']);
 });
+
+real('each profile keeps its own cookies, across a restart of the browser; a private tab keeps none', async () => {
+  await owner.call('settings.set', { browserProfiles: [{ id: 'p-pro', name: 'Pro' }] });
+  const visit = async (browser: AgentBrowser, profile: string, write?: string) => {
+    const { tabId } = await browser.command({ threadId, action: { kind: 'open', url: url(), profile } });
+    if (write) await browser.command({ threadId, tabId, action: { kind: 'evaluate', expression: `document.cookie = 'login=${write}; max-age=3600'` } });
+    const cookie = (await browser.command({ threadId, tabId, action: { kind: 'evaluate', expression: 'document.cookie' } })).value;
+    await browser.command({ threadId, tabId, action: { kind: 'close' } });
+    return cookie;
+  };
+  expect(await visit(harness.core.browser, 'default', 'nuno')).toBe('login=nuno');
+  expect(await visit(harness.core.browser, 'Pro', 'work')).toBe('login=work');
+  expect(await visit(harness.core.browser, 'private', 'ghost')).toBe('login=ghost');
+  // Every browser process ends, as when the core stops; the next ones read the same folders.
+  await harness.core.browser.close();
+  const again = new AgentBrowser(harness.core);
+  try {
+    expect(await visit(again, 'default')).toBe('login=nuno');
+    expect(await visit(again, 'Pro')).toBe('login=work');
+    expect(await visit(again, 'private')).toBe('');
+  } finally { await again.close(); }
+}, 90_000);
