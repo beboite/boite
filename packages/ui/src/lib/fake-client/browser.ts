@@ -48,7 +48,7 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
     if (params.tabId !== undefined && (typeof params.tabId !== 'string' || !/^browser:[a-zA-Z0-9:-]{1,100}$/.test(params.tabId))) throw refusal('browser tabId must come from browser status or open');
     if (!live(params.threadId)) {
       release(params.threadId);
-      throw refusal('Open this conversation in the Boite desktop app and enable Agent browser control in Settings > Experiments.');
+      throw refusal('Open this conversation in the Boite desktop app and enable Agent browser control in Settings > General.');
     }
     const capture = params.action.kind === 'remote-frame';
     if (pending.size >= 16 || [...pending.values()].some(p => p.threadId === params.threadId && p.capture === capture)) throw refusal('the browser is busy; wait for the previous command');
@@ -97,7 +97,7 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       if (enabled && thread.archived) throw refusal('browser.host needs an active conversation');
       if (enabled && allowAgentControl !== true && !remote) {
         release(threadId);
-        throw refusal('browser.host requires explicit consent: enable Agent browser control or Live browser on other devices in Settings > Experiments on the hosting desktop');
+        throw refusal('browser.host requires explicit consent: enable Agent browser control in Settings > General, or Live browser on other devices in Settings > Experiments, on the hosting desktop');
       }
       if (!enabled) { release(threadId); return { ok: true }; }
       const agent = allowAgentControl === true;
@@ -111,7 +111,7 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       const host = hosts.get(params.threadId);
       if (host && host.expires >= Date.now() && !host.agent) {
         ctx.thread(params.threadId);
-        throw refusal('Open this conversation in the Boite desktop app and enable Agent browser control in Settings > Experiments.');
+        throw refusal('Open this conversation in the Boite desktop app and enable Agent browser control in Settings > General.');
       }
       return dispatch(params);
     },

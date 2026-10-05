@@ -153,27 +153,34 @@ test('the Limits page turns the monitoring of each account on and off', async ()
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
 }, 30_000);
 
-test('the experiment exposes Agents in the desktop footer and phone menu', async () => {
+test('the experiment adds the Threads and Agents switch on the desktop and Agents in the phone menu', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
   await page.navigate(`${uiUrl}/?fake=1&open=recent`);
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
-  expect(await page.evaluate(`document.querySelector('${id('nav-agents')}') === null`)).toBe(true);
+  // Off, there is one place to be: no switch at all.
+  expect(await page.evaluate(`document.querySelector('${id('view-agents')}') === null && document.querySelector('${id('view-threads')}') === null`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('${id('mobile-agents')}') === null`)).toBe(true);
   await capture('agents-launcher-disabled-desktop.png');
   await page.click(id('nav-settings')); await page.click(id('settings-tab-experiments'));
   await page.click(id('experiment-resident-agents'));
   await page.click(id('settings-back'));
-  await page.waitFor(`document.querySelector('${id('nav-agents')}')`);
-  expect(await page.evaluate(`!!document.querySelector('.foot ${id('nav-agents')}')`)).toBe(true);
+  await page.waitFor(`document.querySelector('${id('sidebar')} ${id('view-agents')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('sidebar')} ${id('view-threads')}').getAttribute('aria-pressed')`)).toBe('true');
   await capture('agents-launcher-enabled-desktop.png');
-  await page.click(id('nav-agents'));
+  await page.click(id('view-agents'));
+  await page.waitFor(`document.querySelector('${id('agents-page')} ${id('view-agents')}')?.getAttribute('aria-pressed') === 'true'`);
+  await capture('agents-switch-agents-desktop.png');
+  // The same switch leads back to the threads.
+  await page.click(id('view-threads'));
+  await page.waitFor(`!document.querySelector('${id('agents-page')}') && document.querySelector('${id('sidebar')} ${id('view-agents')}')`);
+  await page.click(id('view-agents'));
   await page.waitFor(`document.querySelector('${id('agents-page')}')`);
   // Switched off while it is open, the page closes with it.
   await page.evaluate(`import('/src/lib/experiments.ts').then(({ setExperiment }) => setExperiment('resident-agents', false))`);
-  await page.waitFor(`!document.querySelector('${id('agents-page')}') && document.querySelector('${id('nav-settings')}') && !document.querySelector('${id('nav-agents')}')`);
+  await page.waitFor(`!document.querySelector('${id('agents-page')}') && document.querySelector('${id('nav-settings')}') && !document.querySelector('${id('view-agents')}')`);
   // Switched on again, the chat stays where it is: nobody navigated to the page.
   await page.evaluate(`import('/src/lib/experiments.ts').then(({ setExperiment }) => setExperiment('resident-agents', true))`);
-  await page.waitFor(`document.querySelector('${id('nav-agents')}')`);
+  await page.waitFor(`document.querySelector('${id('view-agents')}')`);
   expect(await page.evaluate(`document.querySelector('${id('agents-page')}') === null`)).toBe(true);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await page.click(id('mobile-menu'));

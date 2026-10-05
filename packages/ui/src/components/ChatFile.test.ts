@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import ChatFile from './ChatFile.svelte';
-import { writeExperiments } from '../lib/experiments';
+import { resetFeatures, setFeature } from '../lib/features';
 import type { Store } from '../lib/store.svelte';
 
 let running: Record<string, unknown> | null = null;
@@ -17,7 +17,7 @@ afterEach(() => {
   if (running) unmount(running, { outro: false });
   running = null;
   document.body.innerHTML = '';
-  writeExperiments([]);
+  resetFeatures();
   delete window.__TAURI_INTERNALS__;
   URL.createObjectURL = createObjectURL;
   URL.revokeObjectURL = revokeObjectURL;
@@ -33,7 +33,7 @@ function query<T extends Element>(selector: string): T {
 }
 
 test('a picture opens full size from its preview and from its name, and Escape closes it', async () => {
-  writeExperiments([]);
+  setFeature('chat-artifacts', false);
   running = mount(ChatFile, { target: document.body, props: { file: photo } });
   flushSync();
   expect(document.querySelector('[data-testid=artifact-preview]')).toBeNull();
@@ -110,7 +110,7 @@ test('a failed attachment refresh does not save bytes from the previous successf
 });
 
 test('a disk snapshot uses its owning store and streams its download without a full-body fetch', async () => {
-  writeExperiments([]);
+  setFeature('chat-artifacts', false);
   const invoke = vi.fn(async () => ({ path: 'C:/Downloads/clip.mp4', opened: false }));
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
   const url = `http://127.0.0.1:4311/file/${'a'.repeat(64)}`;
@@ -139,7 +139,7 @@ test('a media decoding failure keeps download available and can retry the previe
 });
 
 test.each([false, true])('large images wait for a click, with rich previews %j', async rich => {
-  writeExperiments(rich ? ['chat-artifacts'] : []);
+  setFeature('chat-artifacts', rich);
   const url = `https://core.example/file/${'b'.repeat(64)}`;
   const file = { type: 'artifact' as const, id: 'large-image', name: 'panorama.png', mimeType: 'image/png', bytes: 60 * 1024 * 1024 };
   const readArtifact = vi.fn(async () => ({ ok: true, value: { ...file, url } }));

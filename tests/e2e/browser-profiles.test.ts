@@ -69,7 +69,7 @@ test.skipIf(process.platform !== 'win32' || !executable)('browser profiles keep 
     const project = await client!.call('projects.add', { path: projectDir, name: 'Browser profiles' });
     const account = (await client!.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
     const thread = await client!.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title: 'Browser profiles' });
-    await page!.evaluate(`localStorage.setItem('boite.experiments', JSON.stringify(['agent-browser-control'])); location.reload();`);
+    await page!.evaluate('location.reload()');
     await openThread(thread.id);
     const command = (tabId: string, action: BrowserAction) => client!.call('browser.command', { threadId: thread.id, tabId, action });
     const open = async (path: string, profile?: string) => {

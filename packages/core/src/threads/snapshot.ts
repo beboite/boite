@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
-import { MESSAGE_PAGE, MESSAGE_PAGE_MAX, previewToolOutputs, previewFileData, previewImageData, resumeAnchor, snapshotOptionsProblem } from '@boite/contracts';
+import { MESSAGE_PAGE, MESSAGE_PAGE_MAX, resumeAnchor, snapshotOptionsProblem } from '@boite/contracts';
 import type { Message, RpcParams, Thread, ThreadSummary, Turn } from '@boite/contracts';
 import type { Core } from '../core';
 import { invalidParams, refused } from '../errors';
 import type { AgentState } from './agent-state';
 import { readMemoryEvents } from './memory-read';
+import { forTransport, transportProjection } from './transport';
 
+type Projection = ReturnType<typeof transportProjection>;
 type Options = Pick<RpcParams<'threads.get'>, 'limit' | 'compactTools' | 'compactFiles' | 'compactImages' | 'around' | 'sync' | 'open'>;
 const hash = (messages: Message[], options: Options) => createHash('sha256').update(`${!!options.compactTools}:${!!options.compactFiles}:${!!options.compactImages}:`).update(JSON.stringify(messages)).digest('base64url');
 
@@ -25,8 +27,10 @@ export function threadSnapshot(core: Core, thread: ThreadSummary, after: string 
   core.journal.flushDeltas();
   core.bus.flush();
   const from = after === undefined ? null : core.journal.messageRowid(thread.id, after);
-  const tail = from === null ? null : core.journal.listMessagesFrom(thread.id, from, limit);
-  const page = tail === null ? pageAround(core, thread.id, options.around, limit) : { messages: tail, before: null, after: null };
+  // Budgets apply to what the client receives, so compacted output never blocks a page.
+  const project = transportProjection(options);
+  const tail = from === null ? null : core.journal.listMessagesFrom(thread.id, from, limit, project);
+  const page = tail === null ? pageAround(core, thread.id, options.around, limit, project) : { messages: tail, before: null, after: null };
   const turns = core.journal.listTurnsFor(thread.id, page.messages.map(message => message.turnId));
   const anchor = options.sync ? resumeAnchor({ messages: page.messages, turns }) : null;
   const anchorIndex = anchor === null ? -1 : page.messages.findIndex(message => message.id === anchor);
@@ -34,13 +38,12 @@ export function threadSnapshot(core: Core, thread: ThreadSummary, after: string 
   const known = options.sync && options.sync !== true ? options.sync : undefined;
   const unchanged = tail !== null && after !== undefined && known?.from === after &&
     known.hash === (proof?.from === after ? proof.hash : hash(tail, options));
-  const messages = unchanged ? [] : options.compactTools ? previewToolOutputs(page.messages) : page.messages;
   return {
     ...thread,
     ...(tail === null || after === undefined ? {} : { messagesFrom: after }),
     ...(proof ? { messagesSync: proof } : {}),
     ...(unchanged ? { messagesUnchanged: true as const } : {}),
-    messages: compactAttachments(messages, options),
+    messages: unchanged ? [] : forTransport(page.messages, options),
     memoryEvents: readMemoryEvents(core.journal, thread.id),
     commands: state.commands.get(thread.id) ?? [],
     background: state.background.get(thread.id) ?? [],
@@ -52,24 +55,18 @@ export function threadSnapshot(core: Core, thread: ThreadSummary, after: string 
   };
 }
 
-/** Files and large images of a page left on the core, as the caller asked. */
-export function compactAttachments(messages: Message[], options: Pick<Options, 'compactFiles' | 'compactImages'>): Message[] {
-  const files = options.compactFiles ? previewFileData(messages) : messages;
-  return options.compactImages ? previewImageData(files) : files;
-}
-
 /**
  * The last page, unless `around` names a message with more than `limit`
  * written after it: then half a page before it and half from it on. A count
  * on the index decides, so the far case reads no row it does not send.
  */
-function pageAround(core: Core, threadId: string, around: string | undefined, limit: number): { messages: Message[]; before: string | null; after: string | null } {
+function pageAround(core: Core, threadId: string, around: string | undefined, limit: number, project: Projection): { messages: Message[]; before: string | null; after: string | null } {
   const journal = core.journal;
   const rowid = around === undefined ? null : journal.messageRowid(threadId, around);
-  if (rowid === null || journal.countMessagesFrom(threadId, rowid) <= limit) return { ...journal.listMessagePage(threadId, { limit }), after: null };
+  if (rowid === null || journal.countMessagesFrom(threadId, rowid) <= limit) return { ...journal.listMessagePage(threadId, { limit, project }), after: null };
   const half = Math.max(1, Math.floor(limit / 2));
-  const older = journal.listMessagePage(threadId, { beforeRowid: rowid, limit: half });
-  const newer = journal.listMessagesForward(threadId, rowid, Math.max(1, limit - half));
+  const older = journal.listMessagePage(threadId, { beforeRowid: rowid, limit: half, project });
+  const newer = journal.listMessagesForward(threadId, rowid, Math.max(1, limit - half), project);
   return { messages: [...older.messages, ...newer.messages], before: older.before, after: newer.after };
 }
 
@@ -97,9 +94,9 @@ export function messagePage(core: Core, params: RpcParams<'messages.list'>): Mes
     });
   }
   const limit = Math.min(Math.max(1, Math.trunc(params.limit ?? MESSAGE_PAGE)), MESSAGE_PAGE_MAX);
+  const project = transportProjection(params);
   const page = params.before === undefined
-    ? { ...core.journal.listMessagesForward(params.threadId, rowid + 1, limit), before: null }
-    : core.journal.listMessagePage(params.threadId, { beforeRowid: rowid, limit });
-  const messages = params.compactTools ? previewToolOutputs(page.messages) : page.messages;
-  return { ...page, messages: compactAttachments(messages, params), turns: core.journal.listTurnsFor(params.threadId, page.messages.map((message) => message.turnId)) };
+    ? { ...core.journal.listMessagesForward(params.threadId, rowid + 1, limit, project), before: null }
+    : core.journal.listMessagePage(params.threadId, { beforeRowid: rowid, limit, project });
+  return { ...page, messages: forTransport(page.messages, params), turns: core.journal.listTurnsFor(params.threadId, page.messages.map((message) => message.turnId)) };
 }

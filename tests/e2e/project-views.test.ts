@@ -2,6 +2,7 @@ import { mobileAction } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
+import { showThreadView } from './lib/views.ts';
 import { startUi } from './lib/ui.ts';
 
 let server: { close(): Promise<void> };
@@ -22,7 +23,7 @@ beforeAll(async () => {
 afterAll(async () => { await page?.close(); await server?.close(); });
 
 test('recent view filters one owning project and creates its draft', async () => {
-  await page.click(id('view-recent'));
+  await showThreadView(page, 'recent');
   await capture('project-views-desktop.png');
   expect(await page.evaluate(`!!document.querySelector('${id('project-filter')}')`)).toBe(true);
   await page.click(id('project-filter'));
@@ -95,7 +96,7 @@ test('copy path stays readable with a long working directory in conversation men
 }, 20_000);
 
 test('projects follow user activity, then keep a dragged custom order after reload', async () => {
-  await page.click(id('view-projects'));
+  await showThreadView(page, 'projects');
   await page.evaluate(`(() => { const s = globalThis.__boiteTest.workspace.machines[1].store; s.threads = s.threads.map(t => t.projectId === 'p-notes' ? {...t, lastUserMessageAt: Date.now() + 1000} : t); })()`);
   const keys = () => page.evaluate<string[]>(`Array.from(document.querySelectorAll('${id('project')}')).map(e => JSON.stringify([e.dataset.machineId, e.dataset.projectId]))`);
   await page.waitFor(`document.querySelector('${id('project')}')?.dataset.projectId === 'p-notes'`);
@@ -103,8 +104,8 @@ test('projects follow user activity, then keep a dragged custom order after relo
   const activityOrder = await keys();
   await page.evaluate(`(() => { const s = globalThis.__boiteTest.workspace.machines[0].store; s.threads = s.threads.map(t => ({...t, updatedAt: Date.now() + 10000})); })()`);
   expect(await keys()).toEqual(activityOrder);
-  await page.click(id('view-projects'));
-  expect(await page.evaluate(`document.querySelector('${id('view-projects')}').dataset.order`)).toBe('manual');
+  await page.click(id('project-sort'));
+  expect(await page.evaluate(`document.querySelector('${id('project-sort')}').dataset.order`)).toBe('manual');
   const before = await keys();
   await page.click(id('project-menu'));
   expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('context-menu')} [data-value]')).map(e => e.dataset.value)`)).toEqual(['new', 'copy', 'archived', 'manage']);
@@ -121,9 +122,9 @@ test('projects follow user activity, then keep a dragged custom order after relo
   expect(await keys()).toEqual(before);
   await page.evaluate(`(() => { const rows = document.querySelectorAll('${id('project')}'); const dataTransfer = new DataTransfer(); rows[3].querySelector('${id('project-row')}').dispatchEvent(new DragEvent('dragstart', {bubbles:true, dataTransfer})); rows[0].dispatchEvent(new DragEvent('dragover', {bubbles:true, cancelable:true, dataTransfer})); rows[0].dispatchEvent(new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer})); })()`);
   expect(await keys()).toEqual([before[3]!, ...before.slice(0, 3)]);
-  await page.click(id('view-projects'));
+  await page.click(id('project-sort'));
   expect(await keys()).toEqual(activityOrder);
-  await page.click(id('view-projects'));
+  await page.click(id('project-sort'));
   expect(await keys()).toEqual([before[3]!, ...before.slice(0, 3)]);
   await capture('project-order-desktop.png');
   await page.navigate(url);
@@ -163,12 +164,12 @@ test('phone exposes project filtering and custom-order controls without overflow
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await mobileAction(page, 'mobile-conversations');
   await page.waitFor(`document.querySelector('${id('mobile-list')}')`);
-  await page.click(id('mobile-view-recent'));
+  await showThreadView(page, 'recent', 'mobile-');
   await page.click(id('mobile-project-filter'));
   await page.evaluate(`Array.from(document.querySelectorAll('${id('mobile-project-filter-menu')} [data-value]')).find(e => e.dataset.value === JSON.stringify(['http://builder.test', 'p-notes'])).click()`);
   await page.waitFor(`document.querySelectorAll('${id('mobile-list')} .thread').length === 1`);
   await capture('project-filter-phone.png');
-  await page.click(id('mobile-view-projects'));
+  await showThreadView(page, 'projects', 'mobile-');
   await page.waitFor(`document.querySelectorAll('${id('mobile-project-group')}').length === 4`);
   await page.click(id('mobile-project-order'));
   await page.click(`${id('mobile-project-order-menu')} [data-value=down]`);
@@ -176,16 +177,16 @@ test('phone exposes project filtering and custom-order controls without overflow
   await page.evaluate(`localStorage.setItem('boite.locale', 'fr')`);
   await page.navigate(url);
   await mobileAction(page, 'mobile-conversations');
-  await page.waitFor(`document.querySelector('${id('mobile-view-projects')}')?.textContent.includes('Projets')`);
+  await page.waitFor(`document.querySelector('${id('mobile-grouping-options')}')?.getAttribute('aria-label').startsWith('Options')`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 1, mobile: true });
   await capture('project-order-phone-fr.png');
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   await page.navigate(url);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: 850, deviceScaleFactor: 1, mobile: false });
-  await page.waitFor(`document.querySelector('${id('view-projects')}')`);
+  await page.waitFor(`document.querySelector('${id('grouping-options')}')`);
   await page.evaluate(`globalThis.__boiteTest.workspace.active.setSidebarWidth(208)`);
   await page.waitFor(`document.querySelector('${id('sidebar')}')?.getBoundingClientRect().width === 208`);
   await capture('project-order-narrow-fr.png');
-  expect(await page.evaluate(`(() => { const views = Array.from(document.querySelectorAll('${id('sidebar')} .toolbar .view')); return views.length === 2 && views.every(e => e.scrollWidth <= e.clientWidth); })()`)).toBe(true);
+  expect(await page.evaluate(`(() => { const tools = document.querySelector('${id('sidebar')} .project-views .tools'); return !!tools && tools.scrollWidth <= tools.clientWidth; })()`)).toBe(true);
   expect(page.errors()).toEqual([]);
 }, 20_000);

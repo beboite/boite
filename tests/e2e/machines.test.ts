@@ -2,6 +2,7 @@ import { mobileAction } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { basename, join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
+import { showThreadView } from './lib/views.ts';
 import { startUi } from './lib/ui.ts';
 import { startCore, type RunningCore } from './lib/core.ts';
 import { connect } from '../../packages/core/src/client.ts';
@@ -44,7 +45,7 @@ test('project and recent cards show both hosts, PRs and user-message ordering on
   await page.click('[data-testid=machine-status-menu] [data-value=all]');
   await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 8`);
   await capture('projects-machines-desktop.png');
-  await page.click(id('view-recent'));
+  await showThreadView(page, 'recent');
   const rows = await page.evaluate<string[]>(
     `Array.from(document.querySelectorAll('${id('thread-row')}')).map(e => e.dataset.threadId)`
   );

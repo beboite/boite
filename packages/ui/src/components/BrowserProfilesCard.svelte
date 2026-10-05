@@ -7,13 +7,21 @@
   import { confirm } from '../lib/confirm.svelte';
   import { rightPanel } from '../lib/right-panel.svelte';
   import { fill, strings } from '../lib/strings';
+  import { hostsBrowser } from '../lib/browser-host';
+  import { featureOn } from '../lib/features.svelte';
+  import { setFeature } from '../lib/features';
+  import type { Store } from '../lib/store.svelte';
 
   /**
-   * The built-in browser's profiles on this computer: add, rename, delete, and
-   * the one new tabs open in. `default` is the session tabs had before there
-   * were profiles and cannot go; a private tab is chosen per tab, never here.
+   * The built-in browser on this computer. On the owner's Windows desktop,
+   * the one that hosts its conversations' tabs, whether agents may drive them.
+   * Then its profiles: add, rename, delete, and the one new tabs open in.
+   * `default` is the session tabs had before there were profiles and cannot
+   * go; a private tab is chosen per tab, never here.
    */
+  let { store }: { store: Store } = $props();
   const s = $derived(strings.browserProfiles);
+  const control = $derived(strings.features.agentBrowserControl);
   const uid = $props.id();
 
   let draft = $state('');
@@ -95,7 +103,17 @@
 </script>
 
 <section class="card" id="settings-browser-profiles" data-testid="browser-profiles-card">
-  <h2>{s.heading}<InfoTip topic={s.heading} text={s.hint} /></h2>
+  <h2>{s.card}</h2>
+  {#if hostsBrowser(store)}
+    <label for="{uid}-agent-control" class="switch-row">
+      <span class="text ui-label-box">
+        <span class="ui-label" id="{uid}-agent-control-name">{control.title}</span><InfoTip topic={control.title} text={control.hint} />
+      </span>
+      <input id="{uid}-agent-control" aria-labelledby="{uid}-agent-control-name" type="checkbox" role="switch" data-testid="setting-agent-browser-control"
+        checked={featureOn('agent-browser-control')} onchange={event => setFeature('agent-browser-control', event.currentTarget.checked)} />
+    </label>
+  {/if}
+  <h3 class="ui-label-box"><span class="ui-label">{s.heading}</span><InfoTip topic={s.heading} text={s.hint} /></h3>
   <ul>
     {#each rows as profile (profile.id)}
       {@const builtIn = profile.id === DEFAULT_BROWSER_PROFILE}
@@ -130,6 +148,7 @@
 </section>
 
 <style>
+  h3 { margin: 4px 0 10px; font-size: var(--text-sm); font-weight: 500; color: var(--color-muted-foreground); }
   ul { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
   li {
     display: flex;
