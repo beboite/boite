@@ -288,12 +288,11 @@
   .status.live { color: var(--color-accent); }
   .finished .status { color: var(--color-success); }
   /*
-   * A blocked goal waits on the user. The question's yellow marks it in three
-   * small places, the edge, the hand and a slow dot, over a faint wash; the
-   * words stay in the text colors so they read in both themes.
+   * A blocked goal waits on the user. The question's yellow marks it in two
+   * places, the hand and a slow dot, over a faint wash; the words stay in the
+   * text colors so they read in both themes.
    */
-  .entry.blocked { position: relative; border-radius: var(--radius-md); background: color-mix(in srgb, var(--color-live) 6%, transparent); }
-  .entry.blocked::before { content: ''; position: absolute; inset-block: 8px; inset-inline-start: 0; width: 3px; border-radius: var(--radius-full); background: var(--color-live); }
+  .entry.blocked { border-radius: var(--radius-md); background: color-mix(in srgb, var(--color-live) 6%, transparent); }
   .entry.blocked .activity-row > :global(svg:first-child) { color: var(--color-live); }
   .blocker { display: flex; align-items: center; gap: 8px; min-height: var(--control); padding: 0 4px 4px 13px; }
   .waiting-dot { flex: none; width: 6px; height: 6px; margin-inline: 5px; border-radius: var(--radius-full); background: var(--color-live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-live) 22%, transparent); animation: waiting 1.8s ease-in-out infinite; }
