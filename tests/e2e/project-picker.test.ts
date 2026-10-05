@@ -24,7 +24,7 @@ test('project picker browses folders, opens a draft, and fits a phone', async ()
   await page.evaluate(`Array.from(document.querySelectorAll('.folder')).find(e => e.textContent.includes('notes')).click()`);
   await page.waitFor(`document.querySelector('[data-testid=project-path]')?.value === '/workspace/notes'`);
   await page.click('[data-testid=project-add]');
-  await page.waitFor(`!document.querySelector('[data-testid=project-picker]') && document.querySelector('[data-testid=draft-row]')`);
+  await page.waitFor(`!document.querySelector('[data-testid=project-picker]') && document.querySelector('[data-testid=draft-empty]')`);
   await page.click('[data-testid=add-project]');
   await page.waitFor(`document.querySelector('[data-testid=project-path]')?.value === '/workspace'`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });

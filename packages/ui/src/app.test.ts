@@ -212,12 +212,14 @@ test('New thread opens a draft and the first send creates the thread titled from
 
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  expect(document.querySelector('[data-testid=draft-row]')).not.toBeNull();
+  // An empty draft is only the composer: the sidebar lists it once something is typed.
+  expect(document.querySelector('[data-testid=draft-row]')).toBeNull();
   expect(store.openThread).toBeNull();
 
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
   input.value = 'Rename the scheduler caps\nand nothing else';
   input.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => document.querySelector('[data-testid=draft-row]')?.textContent?.includes('Rename the scheduler caps') === true);
   await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
   query<HTMLButtonElement>('[data-testid=composer-send]').click();
 
@@ -357,6 +359,9 @@ test('the sidebar draft row hands the keyboard back to the composer', async ({ a
 
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
+  // The row appears with the first typed text.
+  store.editComposerText('draft', 'Half a thought');
+  await waitFor(() => document.querySelector('[data-testid=draft-row]') !== null);
 
   // Something else in the page holds the keyboard, the way it does after a click.
   const gear = query<HTMLButtonElement>('[data-testid=nav-settings]');
@@ -370,6 +375,7 @@ test('the sidebar draft row hands the keyboard back to the composer', async ({ a
   expect(store.draft).not.toBeNull();
 
   // The store is the singleton every test shares: the draft goes back out.
+  store.editComposerText('draft', '');
   store.draft = null;
 });
 
@@ -399,14 +405,17 @@ test('a draft names its project in the heading and the dropdown moves it to anot
   expect(places.map((row) => JSON.parse(row.dataset['value']!)[1])).toEqual([null, 'p-boite', 'p-notes']);
   expect(rows.at(-1)?.dataset['value']).toBe('open-folder');
 
+  store.editComposerText('draft', 'Move me along');
   places[1]?.click();
   await waitFor(() => store.draft?.projectId === 'p-boite');
   await waitFor(() => (query('[data-testid=draft-empty]').textContent ?? '').includes('boite'));
   // The draft row moved with it, and the composer took the keyboard back.
-  expect(query('[data-testid=project][data-project-id=p-boite]').querySelector('[data-testid=draft-row]')).not.toBeNull();
+  await waitFor(() => query('[data-testid=project][data-project-id=p-boite]').querySelector('[data-testid=draft-row]') !== null);
+  expect(query('[data-testid=project][data-project-id=p-notes]').querySelector('[data-testid=draft-row]')).toBeNull();
   await waitFor(() => document.activeElement === document.querySelector('[data-testid=composer-input]'));
 
   // The store is the singleton every test shares: the draft goes back out.
+  store.editComposerText('draft', '');
   store.draft = null;
 });
 

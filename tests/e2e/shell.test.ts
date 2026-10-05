@@ -689,7 +689,7 @@ shellTest(
     await page?.waitFor(`window.__projectDialog !== null`);
     expect(await page?.evaluate(`window.__projectDialog.options.directory`)).toBe(true);
     await page?.waitFor(`${textOf('project-row')}.includes(${JSON.stringify(basename(projectDir))})`);
-    await page?.waitFor(`document.querySelector('${testid('draft-row')}')`);
+    await page?.waitFor(`document.querySelector('${testid('draft-empty')}')`);
 
     await page?.click(testid('composer-picker'));
     await page?.waitFor(`document.querySelector('${testid('composer-picker-menu')}')`);
@@ -884,12 +884,12 @@ shellTest('the machine picker opens a folder on the selected core and reports a 
     await page?.waitFor(`!document.querySelector('[data-testid=pick-project]') && !document.querySelector('[data-testid=project-add]').disabled`);
     await page?.type(testid('project-path'), remote.dataDir);
     await page?.click(testid('project-add'));
-    await page?.waitFor(`!document.querySelector('[data-testid=project-picker]') && document.querySelector('[data-testid=draft-row]')`);
+    await page?.waitFor(`!document.querySelector('[data-testid=project-picker]') && document.querySelector('[data-testid=draft-empty]')`);
     expect((await remoteClient.call('projects.list', {})).map(p => p.path)).toContain(remote.dataDir);
     // Deliver the same native event as a folder dragged onto the remote view.
     // Its Windows path must be opened by the local core, not the selected one.
     await page?.evaluate(`window.__TAURI_INTERNALS__.invoke('plugin:event|emit', { event:'tauri://drag-drop', payload:{paths:[${JSON.stringify(projectDir)}],position:{x:0,y:0}} })`);
-    await page?.waitFor(`document.querySelector('[data-testid=draft-row]') && document.querySelector('[data-testid=thread-row]')?.textContent.includes('shell turn')`);
+    await page?.waitFor(`document.querySelector('[data-testid=draft-empty]') && document.querySelector('[data-testid=thread-row]')?.textContent.includes('shell turn')`);
     expect((await remoteClient.call('projects.list', {})).map(p => p.path)).not.toContain(projectDir);
     await page?.click(testid('thread-row'));
     await page?.waitFor(`document.querySelector('[data-testid=thread-title]')?.textContent.includes('shell turn')`);

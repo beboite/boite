@@ -176,9 +176,12 @@ export class Drafts {
       .filter(entry => entry.draft.projectId === null || s.projects.some(p => p.id === entry.draft.projectId && !p.archived))
       .map(entry => ({ projectId: entry.draft.projectId, text: entry.input.text, active: false }));
     if (s.draft) {
-      const entry = { projectId: s.draft.projectId, text: this.ctx.composer.composerStates.draft?.text ?? '', active: true };
+      // The open draft gets a row only once it holds something: an empty one is just the composer.
+      const input = this.ctx.composer.composerStates.draft;
+      const entry = { projectId: s.draft.projectId, text: input?.text ?? '', active: true };
       const index = entries.findIndex(item => item.projectId === entry.projectId);
-      if (index < 0) entries.push(entry); else entries[index] = entry;
+      if (!hasContent(input)) { if (index >= 0) entries.splice(index, 1); }
+      else if (index < 0) entries.push(entry); else entries[index] = entry;
     }
     return entries;
   }
