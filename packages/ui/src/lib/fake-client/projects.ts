@@ -165,7 +165,7 @@ export function projectMethods(ctx: FakeContext) {
         titleSource: 'agent',
         providerId: 'claude',
         accountId: params.accountId,
-        model: 'claude-sonnet-5',
+        model: 'claude-sonnet-5-5',
         effort: null,
         cwd: project.path,
         branch: null,

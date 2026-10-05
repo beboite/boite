@@ -106,8 +106,8 @@ export function seedDelegationDemo(ctx: FakeContext): void {
   ctx.threads.set(cliId, { ...ctx.thread(nativeId), id: cliId, title: 'Review the gameplay audit', turns: [], messages: [], background: [] });
   const shell = { threadId: cliId, pid: 6400, parentPid: 1, exe: 'pwsh.exe', commandLine: 'pwsh.exe review.ps1', startedAt: demoAt, exitedAt: demoAt + 2000, exitCode: 0, cpuMs: null, peakMemoryBytes: null, ioBytes: null };
   ctx.processes.push(shell, { ...shell, pid: 6401, parentPid: shell.pid, exe: 'claude.exe', commandLine: 'claude.exe --print --model claude-opus-5-5 --effort xhigh "Review the gameplay audit"', startedAt: demoAt + 1000, exitedAt: null, exitCode: null });
-  const reviewer: DelegationProfile = { id: 'reviewer', name: 'Reviewer', providerId: 'claude', accountId: 'a-claude-main', model: 'claude-sonnet-5', effort: 'high' };
-  const implementer: DelegationProfile = { id: 'implementer', name: 'Implementer', providerId: 'codex', accountId: 'a-codex', model: 'gpt-5.6-sol', effort: 'medium' };
+  const reviewer: DelegationProfile = { id: 'reviewer', name: 'Reviewer', providerId: 'claude', accountId: 'a-claude-main', model: 'claude-sonnet-5-5', effort: 'high' };
+  const implementer: DelegationProfile = { id: 'implementer', name: 'Implementer', providerId: 'codex', accountId: 'a-codex', model: 'gpt-6.1-sol', effort: 'medium' };
   ctx.delegationConfigs.set(root.id, { enabled: true, paused: false, profiles: [reviewer, implementer] });
   const make = (id: string, title: string, task: string, status: Thread['status'], answer: string, profile: DelegationProfile): Thread => {
     const turn: Turn = { id: `turn-${id}`, threadId: id, status: status === 'running' ? 'running' : 'done', queuedAt: demoAt, startedAt: demoAt + 1000, finishedAt: status === 'running' ? null : demoAt + 30_000, usage: status === 'running' ? null : { inputTokens: 820, outputTokens: 260, cacheReadTokens: 1200, cacheWriteTokens: 0, costUsdEquivalent: 0.012 }, error: null };

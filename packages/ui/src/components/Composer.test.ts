@@ -428,7 +428,9 @@ function effortDots(): (string | null)[] {
 async function openDraft(): Promise<void> {
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5.5') === true);
+  // The built-in default shows its scale before discovery; wait for the account's own catalog.
+  await waitFor(() => { const choice = store.defaultChoice(); return !!choice && store.modelsOf(choice.providerId, choice.accountId).length > 0; });
 }
 
 test('the reasoning chip reads the model default level and saves the pick on the open thread', async ({ app: _app }) => {
@@ -464,7 +466,7 @@ test('the reasoning chip remembers the level a draft picks', async ({ app: _app 
   query<HTMLButtonElement>('[data-testid=composer-effort-menu] [data-value=xhigh]').click();
   await waitFor(() => store.prefs.effort === 'xhigh');
   expect(JSON.parse(window.localStorage.getItem(PREFS_STORAGE_KEY) ?? 'null')).toMatchObject({
-    model: 'claude-opus-5',
+    model: 'claude-opus-5-5',
     effort: 'xhigh'
   });
   await waitFor(() => effortChip()?.textContent?.trim() === 'Xhigh');
@@ -526,9 +528,11 @@ test('a first run shows the reasoning, mode and worktree chips at their defaults
   work.load();
   await mountOnFake();
   store.startDraft('p-boite');
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5.5') === true);
   // The calm preset hides nothing from the bar: every chip is there at the model's default.
   await waitFor(() => effortChip() !== null);
+  // The built-in entry shows the scale at once; the account's catalog adds the fast mode.
+  await waitFor(() => store.modelOf(store.defaultChoice())?.speeds !== undefined);
   query('[data-testid=composer-mode]');
   expect(query('[data-testid=composer-worktree]').getAttribute('aria-pressed')).toBe('false');
   expect(document.querySelector('[data-testid=composer-more]')).toBeNull();
@@ -536,7 +540,7 @@ test('a first run shows the reasoning, mode and worktree chips at their defaults
   effortChip()!.click();
   await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') !== null);
   expect(document.querySelector('[data-testid=composer-pin-effort]')).toBeNull();
-  // Opus 5 has a fast mode: its switch sits in the popover's heading, before the level.
+  // Opus 5.5 has a fast mode: its switch sits in the popover's heading, before the level.
   const heading = query('[data-testid=composer-effort-menu] .heading');
   expect(heading.firstElementChild?.getAttribute('data-testid')).toBe('effort-speed');
   expect(document.querySelector('[data-testid=effort-fast-mark]')).toBeNull();

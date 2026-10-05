@@ -66,16 +66,16 @@ afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
 test('the draft sentence follows worktree, permissions, model and effort on desktop and phone', async () => {
   await page.click(id('new-thread'));
-  await page.waitFor(`document.querySelector('${id('draft-sentence')}')?.textContent.includes('Opus 5')`);
+  await page.waitFor(`document.querySelector('${id('draft-sentence')}')?.textContent.includes('Opus 5.5')`);
   await page.click(id('composer-worktree'));
   await page.click(id('composer-mode'));
   await page.click(`${id('composer-mode-menu')} [data-value="bypassPermissions"]`);
   await page.click(id('composer-picker'));
-  await page.click(`${id('composer-picker-menu')} [data-model="claude-sonnet-5"]`);
-  await page.waitFor(`document.querySelector('${id('draft-sentence')}').textContent.includes('Sonnet 5')`);
+  await page.click(`${id('composer-picker-menu')} [data-model="claude-sonnet-5-5"]`);
+  await page.waitFor(`document.querySelector('${id('draft-sentence')}').textContent.includes('Sonnet 5.5')`);
   await page.waitFor(`!document.querySelector('${id('composer-picker-menu')}')`);
   await page.click(id('composer-picker'));
-  await page.click(`${id('composer-picker-menu')} [data-model="claude-opus-5"]`);
+  await page.click(`${id('composer-picker-menu')} [data-model="claude-opus-5-5"]`);
   await page.waitFor(`!document.querySelector('${id('composer-picker-menu')}')`);
   await page.click(id('composer-effort'));
   await page.click(`${id('composer-effort-menu')} [data-value="medium"]`);
@@ -86,7 +86,7 @@ test('the draft sentence follows worktree, permissions, model and effort on desk
   const sentence = await page.evaluate<string>(`document.querySelector('${id('draft-sentence')}').textContent`);
   expect(sentence).toContain('in a worktree');
   expect(sentence).toContain('with all permissions');
-  expect(sentence).toContain('Opus 5');
+  expect(sentence).toContain('Opus 5.5');
   expect(sentence).toContain('High effort');
   await capture('composer-draft-desktop');
   await size(true);
@@ -106,9 +106,9 @@ test('default models can be changed on each provider row in Providers', async ()
     await page.waitFor(`document.querySelector('[data-default-provider="${provider}"]')`);
   }
   expect(await page.evaluate(`document.querySelector('${id('model-defaults-settings')}') === null`)).toBe(true);
-  expect(await page.evaluate(`document.querySelector('[data-default-provider="codex"]').textContent`)).toContain('GPT 5.6 Sol');
+  expect(await page.evaluate(`document.querySelector('[data-default-provider="codex"]').textContent`)).toContain('GPT 6.1 Sol');
   expect(await page.evaluate(`document.querySelector('[data-default-provider="codex"]').textContent`)).toContain('medium');
-  expect(await page.evaluate(`document.querySelector('[data-default-provider="grok"]').textContent`)).toContain('Grok 4.6');
+  expect(await page.evaluate(`document.querySelector('[data-default-provider="grok"]').textContent`)).toContain('Grok 4.7');
   expect(await page.evaluate(`document.querySelector('[data-default-provider="grok"]').textContent`)).toContain('high');
   const row = '[data-default-provider="claude"]';
   await page.click(`${row} ${id('composer-picker')}`);
@@ -119,12 +119,12 @@ test('default models can be changed on each provider row in Providers', async ()
   // With no composer around it, the menu opens under its own button.
   expect(await page.evaluate(`document.querySelector('${id('composer-picker-menu')}').getBoundingClientRect().top >= document.querySelector('${row} ${id('composer-picker')}').getBoundingClientRect().bottom`)).toBe(true);
   await capture('model-default-single');
-  await page.click(`${id('composer-picker-menu')} [data-model="claude-sonnet-5"]`);
-  await page.waitFor(`document.querySelector('${row} ${id('composer-picker')}').textContent.includes('Sonnet 5')`);
-  expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.model-defaults:v1')).claude.model`)).toBe('claude-sonnet-5');
+  await page.click(`${id('composer-picker-menu')} [data-model="claude-sonnet-5-5"]`);
+  await page.waitFor(`document.querySelector('${row} ${id('composer-picker')}').textContent.includes('Sonnet 5.5')`);
+  expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.model-defaults:v1')).claude.model`)).toBe('claude-sonnet-5-5');
   await page.waitFor(`!document.querySelector('${id('composer-picker-menu')}')`);
   await page.click(`${row} ${id('composer-picker')}`);
-  await page.click(`${id('composer-picker-menu')} [data-model="claude-opus-5"]`);
+  await page.click(`${id('composer-picker-menu')} [data-model="claude-opus-5-5"]`);
   await capture('model-defaults-desktop');
   // Put the rows back the way the page opens, for the tests that follow.
   for (const provider of ['claude', 'codex', 'grok']) await page.click(`${id('provider-settings')}[data-provider-id="${provider}"] ${id('provider-details-toggle')}`);
