@@ -1,4 +1,4 @@
-import type { PermissionMode, ProjectId, ProviderId, ThreadId } from '@boite/contracts';
+import type { Message, PermissionMode, ProjectId, ProviderId, ThreadId } from '@boite/contracts';
 import type { Client } from './client';
 import { readModelDefaults } from './model-defaults';
 import { readFavorites } from './model-order';
@@ -9,6 +9,7 @@ import type { Connection } from './store/connection.svelte';
 import { StoreContext } from './store/context';
 import type { Delegation } from './store/delegation.svelte';
 import { listen } from './store/events';
+import { loadAttachments } from './store/reading-pages.svelte';
 import type { Imports } from './store/imports.svelte';
 import type { Layout } from './store/layout.svelte';
 import type { Models } from './store/models.svelte';
@@ -491,6 +492,14 @@ export class Store {
   loadToolOutput(...args: Parameters<Threads['loadToolOutput']>) { return this.#ctx.threads.loadToolOutput(...args); }
   loadMessageAttachment(...args: Parameters<Threads['loadMessageAttachment']>) { return this.#ctx.threads.loadMessageAttachment(...args); }
   get loadingThreadId() { return this.#ctx.threads.loadingThreadId; }
+  /** How much of the loading thread arrived, against the core's total; null until the first slice. */
+  get loadingBytes() { return this.#ctx.threads.loadingBytes; }
+  /** The cursor below a window opened around a reading position, null at the thread's end. */
+  get messagesAfter() { return this.#ctx.threads.openThread?.messagesAfter ?? null; }
+  get loadingNewer() { return this.#ctx.threads.newer.loading; }
+  loadNewer() { return this.#ctx.threads.newer.loadNewer(); }
+  loadLatest() { return this.#ctx.threads.newer.loadLatest(); }
+  loadAttachments(threadId: ThreadId, message: Message) { return loadAttachments(this.#ctx, threadId, message); }
   loadOlder(...args: Parameters<Threads['loadOlder']>) { return this.#ctx.threads.loadOlder(...args); }
   createThread(...args: Parameters<Threads['createThread']>) { return this.#ctx.threads.createThread(...args); }
   update(...args: Parameters<Threads['update']>) { return this.#ctx.threads.update(...args); }

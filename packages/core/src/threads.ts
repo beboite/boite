@@ -1,8 +1,7 @@
 import { archiveState, archiveStateKey } from './merged-pr-archive-state.ts';
 import { assertIdleFamily } from './threads/completion.ts';
-import { forTransport, transportProjection } from './threads/transport.ts';
 import { repositoryOf, type MergedPrProof } from './pull-requests.ts';
-import { previewReferencesError, previewPrompt, MESSAGE_PAGE, MESSAGE_PAGE_MAX, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type AgentProfile } from '@boite/contracts';
+import { previewReferencesError, previewPrompt, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type AgentProfile } from '@boite/contracts';
 import type {
   Account,
   AccountId,
@@ -48,7 +47,7 @@ import { saveThread, setThreadStatus, withLoad } from './threads/records.ts';
 import { ThreadRecovery } from './threads/recovery.ts';
 import { ThreadTitles } from './threads/retitle.ts';
 import { SideQuestions } from './threads/side-questions.ts';
-import { threadSnapshot } from './threads/snapshot.ts';
+import { messagePage, threadSnapshot, type MessagePage } from './threads/snapshot.ts';
 import { checkEffort, checkModel, checkSpeed, checkStoredEffort, checkStoredSpeed, defaultModel } from './threads/selection.ts';
 import { TurnContexts } from './threads/turn-context.ts';
 import { TurnRunner } from './threads/turn-runner.ts';
@@ -153,32 +152,19 @@ export class ThreadStore {
    * one page here; the rest is walked back through `messages`, whose cursor is
    * `messagesBefore`.
    */
-  get(threadId: ThreadId, after?: MessageId, options: Pick<RpcParams<'threads.get'>, 'limit' | 'compactTools' | 'compactFiles' | 'sync' | 'open'> = {}): Thread {
+  get(threadId: ThreadId, after?: MessageId, options: Pick<RpcParams<'threads.get'>, 'limit' | 'compactTools' | 'compactFiles' | 'compactImages' | 'around' | 'sync' | 'open'> = {}): Thread {
     return threadSnapshot(this.core, this.withLoad(this.require(threadId)), after, options, this.agentState);
   }
 
   /**
-   * One page of messages older than `before`, oldest first inside the page. An
-   * unknown thread is a not-found; a cursor that is not a message of that thread
-   * is refused by name rather than answered with an empty page.
+   * One page of messages older than `before`, oldest first inside the page, or
+   * newer than `after`. An unknown thread is a not-found; a cursor that is not
+   * a message of that thread is refused by name rather than answered with an
+   * empty page, and so is a call with both cursors or neither.
    */
-  messages(params: RpcParams<'messages.list'>): {
-    messages: Message[];
-    before: MessageId | null;
-    turns: Turn[];
-  } {
+  messages(params: RpcParams<'messages.list'>): MessagePage {
     this.require(params.threadId);
-    const rowid = this.core.journal.messageRowid(params.threadId, params.before);
-    if (rowid === null) {
-      throw refused(`message ${params.before} is not a message of thread ${params.threadId}`, {
-        threadId: params.threadId,
-        before: params.before,
-      });
-    }
-    const asked = params.limit ?? MESSAGE_PAGE;
-    const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
-    const page = this.core.journal.listMessagePage(params.threadId, { beforeRowid: rowid, limit, project: transportProjection(params) });
-    return { ...page, messages: forTransport(page.messages, params), turns: this.core.journal.listTurnsFor(params.threadId, page.messages.map((message) => message.turnId)) };
+    return messagePage(this.core, params);
   }
 
   // -- writes ---------------------------------------------------------------
@@ -760,7 +746,7 @@ export class ThreadStore {
           if (moved) this.core.journal.deleteSetting(`${MOVE_NOTE_PREFIX}${threadId}`);
           if (clientRequestId) this.core.journal.putTurnRequest(threadId, clientRequestId, fingerprint, turn.id, message.id);
         });
-        const dismissal = !activity && !operation ? this.core.activity.prepareUserPrompt(threadId) : undefined;
+        const dismissal = !activity && !operation ? this.core.activity.prepareUserPrompt(threadId, !nativeCommandPrompt(prompt)) : undefined;
         this.core.bus.emit('message.started', message);
         this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
         this.setStatus(threadId, 'queued');

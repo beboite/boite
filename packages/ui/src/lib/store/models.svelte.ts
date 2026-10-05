@@ -1,5 +1,5 @@
 import type { ModelInfo, ProviderId, ProviderSummary } from '@boite/contracts';
-import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, writeModelDefaults, resolveModelDefault, fallbackModelDefault, type ModelDefaults } from '../model-defaults';
+import { BUILT_IN_MODELS, DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, writeModelDefaults, resolveModelDefault, fallbackModelDefault, type ModelDefaults } from '../model-defaults';
 import { FAVORITES_KEY, isNamedModel, readFavorites, type FavoriteModel } from '../model-order';
 import { defaultPrefs, writePrefs, type ComposerPrefs } from '../prefs';
 import { strings } from '../strings';
@@ -82,9 +82,11 @@ export class Models {
     const offered = this.ctx.store.modelsOf(choice.providerId, choice.accountId).find((m) => m.id === choice.model);
     if (offered) return offered;
     const preferred = this.modelDefaults[choice.providerId] ?? INITIAL_MODEL_DEFAULTS[choice.providerId];
-    // Display the configured target before probing. It never joins modelsOf's selectable list.
-    return choice.model && choice.model === preferred?.model
-      ? { id: choice.model, name: DEFAULT_MODEL_NAMES[choice.model] ?? choice.model } : null;
+    // Display the configured target before probing, with the built-in effort
+    // scale when it is the built-in model. It never joins modelsOf's selectable list.
+    if (!choice.model || choice.model !== preferred?.model) return null;
+    const builtIn = BUILT_IN_MODELS[choice.providerId];
+    return builtIn?.id === choice.model ? builtIn : { id: choice.model, name: DEFAULT_MODEL_NAMES[choice.model] ?? choice.model };
   }
 
   /**

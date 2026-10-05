@@ -15,7 +15,7 @@ import { modelsOf, checkSpeed, discoverSelection } from './provider-catalog';
 import { delegationConfig, stopDelegation } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
 import { registerFakeWorktree, requireFakeCwd } from './worktrees';
-import { previewToolOutputs, previewFileData, resumeAnchor, snapshotOptionsProblem } from '@boite/contracts';
+import { previewToolOutputs, previewFileData, previewImageData, resumeAnchor, snapshotOptionsProblem } from '@boite/contracts';
 import { dropWaitingMove, fakeMoveNote } from './thread-move';
 import { cancelFamilySideQuestions, cancelSide, sideQuestionMethods } from './side-questions';
 
@@ -75,12 +75,13 @@ export function createAgentSession(ctx: FakeContext, agent: AgentProfile, sessio
 function pageOf(
   messages: Message[],
   end: number,
-  limit: number
+  limit: number,
+  project: Projection = message => message
 ): { messages: Message[]; before: MessageId | null } {
   let start = end, bytes = 2;
   while (start > 0 && end - start < limit && bytes < MESSAGE_PAGE_MAX_BYTES) {
     const message = messages[start - 1]!;
-    const size = new TextEncoder().encode(JSON.stringify(message)).byteLength;
+    const size = sentBytes(message, project);
     const next = bytes + size + (start < end ? 1 : 0);
     if (start < end && next > MESSAGE_PAGE_MAX_BYTES) break;
     if (size >= RPC_MAX_FRAME_BYTES) {
@@ -95,11 +96,45 @@ function pageOf(
   return { messages: page, before: start > 0 ? (page[0]?.id ?? null) : null };
 }
 
-function tailOf(messages: Message[], from: number, limit = MESSAGE_PAGE): Message[] | null {
+/** The core's page from `from` on, at most `limit`, and the cursor below it while more follow. */
+function forwardOf(messages: Message[], from: number, limit: number): { messages: Message[]; after: string | null } {
+  const page = messages.slice(from, from + limit);
+  return { messages: page, after: from + limit < messages.length ? (page.at(-1)?.id ?? null) : null };
+}
+
+/** The core's page around a reading position: half a page above `at`, half from it on, once more than a page follows it. */
+function aroundOf(messages: Message[], around: string | undefined, limit: number, project: Projection): { messages: Message[]; before: string | null; after: string | null } | null {
+  const at = around === undefined ? -1 : messages.findIndex(message => message.id === around);
+  if (at < 0 || messages.length - at <= limit) return null;
+  const half = Math.max(1, Math.floor(limit / 2));
+  const older = pageOf(messages, at, half, project);
+  const newer = forwardOf(messages, at, Math.max(1, limit - half));
+  return { messages: [...older.messages, ...newer.messages], before: older.before, after: newer.after };
+}
+
+/** As the core sends them: tool output previews, then files, then large pictures, left on the core as the caller asked. */
+function forTransport(messages: Message[], options: { compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean }): Message[] {
+  const tools = options.compactTools ? previewToolOutputs(messages) : messages;
+  const files = options.compactFiles ? previewFileData(tools) : tools;
+  return options.compactImages ? previewImageData(files) : files;
+}
+
+type Projection = (message: Message) => Message;
+
+/** The core's rule: page budgets measure a message as the client receives it. */
+function projection(options: { compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean }): Projection {
+  return message => forTransport([message], options)[0]!;
+}
+
+function sentBytes(message: Message, project: Projection): number {
+  return new TextEncoder().encode(JSON.stringify(project(message))).byteLength;
+}
+
+function tailOf(messages: Message[], from: number, limit = MESSAGE_PAGE, project: Projection = message => message): Message[] | null {
   if (messages.length - from > limit) return null;
   let bytes = 2;
   for (let at = from; at < messages.length; at += 1) {
-    bytes += new TextEncoder().encode(JSON.stringify(messages[at])).byteLength + (at > from ? 1 : 0);
+    bytes += sentBytes(messages[at]!, project) + (at > from ? 1 : 0);
     if (bytes > MESSAGE_PAGE_MAX_BYTES) return null;
   }
   return messages.slice(from);
@@ -107,7 +142,7 @@ function tailOf(messages: Message[], from: number, limit = MESSAGE_PAGE): Messag
 
 /** Opaque fixture proofs. The real core uses native SHA-256 over the same complete message data. */
 function snapshotHash(messages: Message[], options: RpcParams<'threads.get'>): string {
-  const json = `${!!options.compactTools}:${!!options.compactFiles}:` + JSON.stringify(messages);
+  const json = `${!!options.compactTools}:${!!options.compactFiles}:${!!options.compactImages}:` + JSON.stringify(messages);
   let a = 0x811c9dc5, b = 0x9e3779b9;
   for (let i = 0; i < json.length; i++) {
     a = Math.imul(a ^ json.charCodeAt(i), 0x01000193);
@@ -297,17 +332,19 @@ export function threadMethods(ctx: FakeContext) {
       // The core's rule: from the named message on, unless it is unknown or
       // the tail exceeds a page's count or bytes, and then a full page.
       const from = params.after === undefined ? -1 : thread.messages.findIndex((message) => message.id === params.after);
-      const tail = from === -1 ? null : tailOf(thread.messages, from, limit);
-      const page = tail === null ? pageOf(thread.messages, thread.messages.length, limit) : { messages: tail, before: null };
+      const project = projection(params);
+      const tail = from === -1 ? null : tailOf(thread.messages, from, limit, project);
+      const page = tail !== null ? { messages: tail, before: null, after: null }
+        : aroundOf(thread.messages, params.around, limit, project) ?? { ...pageOf(thread.messages, thread.messages.length, limit, project), after: null };
       const sent = new Set(page.messages.map(message => message.turnId));
       const turns = thread.turns.filter(turn => turn.status === 'queued' || turn.status === 'running' || sent.has(turn.id));
       const anchor = params.sync ? resumeAnchor({ messages: page.messages, turns }) : null;
       const proof = anchor === null ? undefined : { from: anchor, hash: snapshotHash(page.messages.slice(page.messages.findIndex(message => message.id === anchor)), params) };
       const known = params.sync && params.sync !== true ? params.sync : undefined;
       const unchanged = tail !== null && params.after !== undefined && known?.from === params.after && known.hash === (proof?.from === params.after ? proof.hash : snapshotHash(tail, params));
-      const snapshot = { ...thread, turns, messages: unchanged ? [] : params.compactTools ? previewToolOutputs(page.messages) : page.messages, messagesBefore: page.before,
+      const snapshot = { ...thread, turns, messages: unchanged ? [] : forTransport(page.messages, params), messagesBefore: page.before,
+        ...(page.after === null ? {} : { messagesAfter: page.after }),
         ...(tail !== null ? { messagesFrom: params.after } : {}), ...(proof ? { messagesSync: proof } : {}), ...(unchanged ? { messagesUnchanged: true as const } : {}) };
-      if (params.compactFiles) snapshot.messages = previewFileData(snapshot.messages);
       if (!params.open) return pagingReply(snapshot);
       ctx.bus.subscribed.add(thread.id);
       if (params.open.previous && params.open.previous !== thread.id) ctx.bus.subscribed.delete(params.open.previous);
@@ -321,19 +358,20 @@ export function threadMethods(ctx: FakeContext) {
     },
     'messages.list': async (params) => {
       const thread = ctx.thread(params.threadId);
-      const at = thread.messages.findIndex((message) => message.id === params.before);
+      const cursor = params.before ?? params.after;
+      if ((params.before === undefined) === (params.after === undefined)) throw refusal('messages.list takes exactly one cursor: before, for older messages, or after, for newer ones');
+      const at = thread.messages.findIndex((message) => message.id === cursor);
       if (at < 0) {
         throw new RpcFailure({
           code: RpcErrorCode.Refused,
-          message: `message ${params.before} is not a message of thread ${params.threadId}`,
-          data: { threadId: params.threadId, before: params.before }
+          message: `message ${cursor} is not a message of thread ${params.threadId}`,
+          data: { threadId: params.threadId, ...(params.before === undefined ? { after: cursor } : { before: cursor }) }
         });
       }
       const asked = params.limit ?? MESSAGE_PAGE;
       const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
-      const page = pageOf(thread.messages, at, limit);
-      if (params.compactTools) page.messages = previewToolOutputs(page.messages);
-      if (params.compactFiles) page.messages = previewFileData(page.messages);
+      const page = params.before === undefined ? { ...forwardOf(thread.messages, at + 1, limit), before: null } : pageOf(thread.messages, at, limit, projection(params));
+      page.messages = forTransport(page.messages, params);
       const turns = new Set(page.messages.map((message) => message.turnId));
       return pagingReply({ ...page, turns: thread.turns.filter((turn) => turns.has(turn.id)) });
     },

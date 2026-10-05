@@ -1,5 +1,6 @@
 import {
   PROTOCOL_VERSION,
+  RPC_CHUNK_MARK,
   RPC_MAX_FRAME_BYTES,
   RPC_PATH,
   RpcCloseCode,
@@ -33,9 +34,18 @@ export class RpcFailure extends Error {
   }
 }
 
+/**
+ * `onProgress` hears how many bytes of the answer arrived and how many it
+ * weighs, the core's own count, as each slice lands. A short answer, or one
+ * from a core that sends answers whole, reports nothing before it resolves.
+ */
+export interface CallOptions {
+  onProgress?: (received: number, total: number) => void;
+}
+
 export interface Client {
   connect(): Promise<CoreInfo>;
-  call<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>>;
+  call<M extends RpcMethodName>(method: M, params: RpcParams<M>, options?: CallOptions): Promise<RpcResult<M>>;
   on<E extends RpcEventName>(event: E, handler: EventHandler<E>): () => void;
   readonly state: ClientState;
   /** Who the core took this client for on the last hello; null before one. */
@@ -141,6 +151,27 @@ interface Pending {
   method: RpcMethodName;
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
+  /** Each slice that lands restarts the call's clock: an answer still arriving is not a dead socket. */
+  touch: () => void;
+  onProgress?: (received: number, total: number) => void;
+  /** The slices of a chunked answer received so far, and their bytes. */
+  slices?: string[];
+  received?: number;
+}
+
+/** The header of a chunk frame, or null when `raw` is not one. */
+function chunkHeader(raw: string): { id: number; bytes: number; total: number; body: number } | null {
+  if (!raw.startsWith(RPC_CHUNK_MARK)) return null;
+  const end = raw.indexOf('\n');
+  if (end < 0) return null;
+  try {
+    const header = JSON.parse(raw.slice(RPC_CHUNK_MARK.length, end)) as Record<string, unknown>;
+    const { id, bytes, total } = header;
+    if (typeof id !== 'number' || typeof bytes !== 'number' || typeof total !== 'number') return null;
+    return { id, bytes, total, body: end + 1 };
+  } catch {
+    return null;
+  }
 }
 
 function transportFailure(message: string): RpcFailure {
@@ -384,14 +415,14 @@ export class WsClient implements ObservableClient {
     return opening;
   }
 
-  call<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> {
+  call<M extends RpcMethodName>(method: M, params: RpcParams<M>, options: CallOptions = {}): Promise<RpcResult<M>> {
     // Forget locally even when an offline host cannot acknowledge the unsubscribe.
     if (method === 'threads.unsubscribe') this.#subscribed.delete((params as RpcParams<'threads.unsubscribe'>).threadId);
     const socket = this.#socket;
     if (!socket || this.#state !== 'ready') {
       return Promise.reject(transportFailure('not connected'));
     }
-    return this.#send(socket, method, params).then((value) => {
+    return this.#send(socket, method, params, options.onProgress).then((value) => {
       if (method === 'threads.subscribe') {
         this.#subscribed.add((params as RpcParams<'threads.subscribe'>).threadId);
       } else if (method === 'threads.get' && (value as RpcResult<'threads.get'>).opened) {
@@ -422,9 +453,11 @@ export class WsClient implements ObservableClient {
   #send<M extends RpcMethodName>(
     socket: SocketLike,
     method: M,
-    params: RpcParams<M>
+    params: RpcParams<M>,
+    onProgress?: (received: number, total: number) => void
   ): Promise<RpcResult<M>> {
-    const frame = JSON.stringify({ jsonrpc: '2.0', id: this.#nextId, method, params });
+    // Asking for progress is what makes the core slice a long answer.
+    const frame = JSON.stringify({ jsonrpc: '2.0', id: this.#nextId, method, params, ...(onProgress ? { progress: true } : {}) });
     const size = frameBytes(frame);
     if (size > RPC_MAX_FRAME_BYTES) {
       // The core would close the socket on it before reading a byte, and every
@@ -437,17 +470,21 @@ export class WsClient implements ObservableClient {
     }
     const id = this.#nextId++;
     return new Promise<RpcResult<M>>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const expire = () => {
         this.#pending.delete(id);
         reject(unansweredFailure(method));
         // A call that never answers is the first sign of a half-open socket:
         // ask once, and replace the socket if nothing at all comes back.
         if (method !== 'hello') this.#suspect(socket);
-      }, method === 'delegation.wait' ? Math.min(3_600_000, Math.max(0, (params as RpcParams<'delegation.wait'>).timeoutMs ?? 600_000)) + 5000 : 120_000);
+      };
+      const wait = method === 'delegation.wait' ? Math.min(3_600_000, Math.max(0, (params as RpcParams<'delegation.wait'>).timeoutMs ?? 600_000)) + 5000 : 120_000;
+      let timer = setTimeout(expire, wait);
       const pending: Pending = {
         method,
         resolve: (value) => { clearTimeout(timer); resolve(value as RpcResult<M>); },
-        reject: (error) => { clearTimeout(timer); reject(error); }
+        reject: (error) => { clearTimeout(timer); reject(error); },
+        touch: () => { clearTimeout(timer); timer = setTimeout(expire, wait); },
+        ...(onProgress ? { onProgress } : {})
       };
       this.#pending.set(id, pending);
       try { socket.send(frame); }
@@ -703,6 +740,11 @@ export class WsClient implements ObservableClient {
     this.#lastFrameAt = Date.now();
     this.#probe?.settle(true);
     if (typeof raw !== 'string') return;
+    const chunk = chunkHeader(raw);
+    if (chunk) {
+      this.#receiveChunk(chunk, raw);
+      return;
+    }
     let frame: unknown;
     try {
       frame = JSON.parse(raw);
@@ -737,5 +779,23 @@ export class WsClient implements ObservableClient {
     const set = this.#handlers.get(method);
     if (!set) return;
     for (const handler of [...set]) handler(record['params']);
+  }
+
+  /**
+   * One slice of an answer: counted, kept, and once the last one landed the
+   * joined text goes through `#receive` as the frame the core would have sent
+   * whole. A slice for a call nobody waits for any more is dropped.
+   */
+  #receiveChunk(chunk: { id: number; bytes: number; total: number; body: number }, raw: string): void {
+    const pending = this.#pending.get(chunk.id);
+    if (!pending) return;
+    pending.touch();
+    (pending.slices ??= []).push(raw.slice(chunk.body));
+    pending.received = (pending.received ?? 0) + chunk.bytes;
+    pending.onProgress?.(Math.min(pending.received, chunk.total), chunk.total);
+    if (pending.received < chunk.total) return;
+    const whole = pending.slices.join('');
+    delete pending.slices;
+    this.#receive(whole);
   }
 }

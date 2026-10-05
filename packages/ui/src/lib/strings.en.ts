@@ -798,6 +798,10 @@ export const strings = {
     active: 'Active',
     paused: 'Paused',
     complete: 'Complete',
+    /** A goal whose agent stopped on a blocker and waits for the user's answer. */
+    blocked: 'Waiting for your answer',
+    blockedHint: 'Your next message resumes the goal.',
+    reply: 'Reply',
     pause: 'Pause',
     resume: 'Resume',
     remove: 'Remove',
@@ -1084,6 +1088,13 @@ export const strings = {
     jumpToLatest: 'Jump to latest',
     /** The one line at the top of the timeline while an older page is being fetched. */
     loadingOlder: 'Loading earlier messages',
+    loadingNewer: 'Loading later messages',
+    /** The view a thread shows while its page downloads. */
+    opening: 'Loading the conversation',
+    /** Received against the total, both already formatted: "1.2 MB / 3.4 MB". */
+    openingProgress: '{received} / {total}',
+    /** What a picture left on the core says until it is fetched: "Loading 240 kB". */
+    partLoading: 'Loading {size}',
     outline: 'Messages in this conversation',
     messageGroup: 'Browse {count} messages',
     earlierMessages: 'Load earlier messages',

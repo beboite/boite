@@ -3,9 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { MessageId, RpcEvents } from '@boite/contracts';
+import { RPC_CHUNK_BYTES, RPC_CHUNK_MARK, type MessageId, type RpcEvents } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { isLoopbackHost, ServerConnection, staticResponse } from '../src/server.ts';
+import { slices } from '../src/server/connection.ts';
 import { startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -97,6 +98,110 @@ describe('what a remote client is sent', () => {
     connection.close(1000, 'gone');
     await Bun.sleep(120);
     expect(sent).toEqual([]);
+  });
+});
+
+describe('an answer a client counts', () => {
+  /** `buffered` is what the fake socket says is still waiting to leave. */
+  function raw(remote: boolean, congestionTimeoutMs?: number): { connection: ServerConnection; frames: string[]; socket: { buffered: number; closed: number | null } } {
+    const frames: string[] = [];
+    const socket = { buffered: 0, closed: null as number | null };
+    const connection = new ServerConnection(harness.core, remote, congestionTimeoutMs);
+    connection.attach({
+      send: (frame: string) => { frames.push(frame); return frame.length; },
+      getBufferedAmount: () => socket.buffered,
+      close: (code: number) => { socket.closed = code; },
+    } as unknown as Parameters<ServerConnection['attach']>[0]);
+    return { connection, frames, socket };
+  }
+
+  test('a long answer to a request that asked for progress leaves in counted slices that join into the frame', () => {
+    const { connection, frames } = raw(false);
+    // Non-ASCII text, so bytes and characters differ and a slice may end inside a pair.
+    const result = { text: 'é😀'.repeat(RPC_CHUNK_BYTES) };
+    connection.sendResponse({ jsonrpc: '2.0', id: 9, result }, true);
+    const whole = JSON.stringify({ jsonrpc: '2.0', id: 9, result });
+    expect(frames.length).toBeGreaterThan(2);
+    let joined = '';
+    let counted = 0;
+    for (const frame of frames) {
+      expect(frame.startsWith(RPC_CHUNK_MARK)).toBe(true);
+      const cut = frame.indexOf('\n');
+      const header = JSON.parse(frame.slice(RPC_CHUNK_MARK.length, cut)) as { id: number; bytes: number; total: number };
+      const body = frame.slice(cut + 1);
+      expect(header).toEqual({ id: 9, bytes: Buffer.byteLength(body), total: Buffer.byteLength(whole) });
+      // No slice starts or ends on half a surrogate pair.
+      expect(Buffer.from(body).toString()).toBe(body);
+      joined += body;
+      counted += header.bytes;
+    }
+    expect(joined).toBe(whole);
+    expect(counted).toBe(Buffer.byteLength(whole));
+    connection.close(1000, 'done');
+  });
+
+  test('slices wait for the socket to drain, and every frame written meanwhile leaves after the last one', () => {
+    const { connection, frames, socket } = raw(false);
+    socket.buffered = 2 * 1024 * 1024;
+    connection.sendResponse({ jsonrpc: '2.0', id: 4, result: 'x'.repeat(RPC_CHUNK_BYTES * 3) }, true);
+    connection.sendEvent('turn.finished', { threadId: 'thr_a' } as unknown as RpcEvents['turn.finished']);
+    connection.sendResponse({ jsonrpc: '2.0', id: 5, result: null });
+    // A socket that far behind gets nothing more until it drains.
+    expect(frames).toEqual([]);
+    socket.buffered = 0;
+    connection.drain();
+    const kinds = frames.map((frame) => {
+      if (frame.startsWith(RPC_CHUNK_MARK)) return 'slice';
+      const parsed = JSON.parse(frame) as { method?: string; id?: number };
+      return parsed.method ?? `response ${parsed.id}`;
+    });
+    expect(kinds).toEqual(['slice', 'slice', 'slice', 'slice', 'turn.finished', 'response 5']);
+    // Empty again, a frame goes straight out.
+    connection.sendResponse({ jsonrpc: '2.0', id: 6, result: null });
+    expect(frames).toHaveLength(7);
+    connection.close(1000, 'done');
+  });
+
+  test('a long answer on a slow socket keeps the connection while each drain takes more of it', async () => {
+    const { connection, frames, socket } = raw(true, 100);
+    socket.buffered = 2 * 1024 * 1024;
+    connection.sendResponse({ jsonrpc: '2.0', id: 3, result: 'x'.repeat(RPC_CHUNK_BYTES * 40) }, true);
+    // Each drain lets out some slices; together they take longer than the congestion limit.
+    for (let round = 0; round < 6 && frames.length < 41; round += 1) {
+      await Bun.sleep(60);
+      socket.buffered = 0;
+      const before = frames.length;
+      // Bun reports the buffer filling again as the slices leave.
+      const send = frames.push.bind(frames);
+      frames.push = (...items: string[]) => { socket.buffered += 300 * 1024; return send(...items); };
+      connection.drain();
+      frames.push = send;
+      expect(frames.length).toBeGreaterThan(before);
+    }
+    expect(socket.closed).toBeNull();
+    socket.buffered = 0;
+    connection.drain();
+    expect(frames.join('').length).toBeGreaterThan(RPC_CHUNK_BYTES * 40);
+    expect(socket.closed).toBeNull();
+    connection.close(1000, 'done');
+  });
+
+  test('a short answer, or one nobody counts, goes whole', () => {
+    const { connection, frames } = raw(false);
+    connection.sendResponse({ jsonrpc: '2.0', id: 1, result: { ok: true } }, true);
+    connection.sendResponse({ jsonrpc: '2.0', id: 2, result: 'x'.repeat(RPC_CHUNK_BYTES * 3) });
+    expect(frames).toHaveLength(2);
+    expect(frames.every((frame) => frame.startsWith('{'))).toBe(true);
+    connection.close(1000, 'done');
+  });
+
+  test('slices never split a surrogate pair', () => {
+    const text = 'a😀'.repeat(10);
+    for (const size of [1, 2, 3, 4]) {
+      const pieces = [...slices(text, size)];
+      expect(pieces.join('')).toBe(text);
+      for (const piece of pieces) expect(Buffer.from(piece).toString()).toBe(piece);
+    }
   });
 });
 

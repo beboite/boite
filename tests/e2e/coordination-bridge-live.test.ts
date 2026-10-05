@@ -76,7 +76,7 @@ test('the owner app relays signed reads, preserves directional grants on reload,
     await pc.call('collaboration.untrust', { coreId: cardServer!.coreId });
     await expect(server.call('collaboration.read', { threadId: threads[1]!.id, target: address })).rejects.toThrow('not allowed to read');
     await page.click(`[data-thread-id="${threads[0]!.id}"]`);
-    await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread?.id === ${JSON.stringify(threads[0]!.id)} && !globalThis.__boiteTest.workspace.active.loadingThread`);
+    await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread?.id === ${JSON.stringify(threads[0]!.id)} && globalThis.__boiteTest.workspace.active.loadingThreadId === null`);
     await page.type('[data-testid=composer-input]', 'Prepare the filesystem [think][sleep:60000]');
     await page.click('[data-testid=composer-send]');
     await page.waitFor('globalThis.__boiteTest.workspace.active.openThread?.progress?.phase === "thinking"');

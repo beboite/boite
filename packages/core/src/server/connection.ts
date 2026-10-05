@@ -1,4 +1,4 @@
-import { RPC_MAX_FRAME_BYTES, RpcErrorCode, type RpcError, type RpcEventName, type RpcEvents, type ThreadId } from '@boite/contracts';
+import { RPC_CHUNK_BYTES, RPC_CHUNK_MARK, RPC_MAX_FRAME_BYTES, RpcErrorCode, type RpcError, type RpcEventName, type RpcEvents, type ThreadId } from '@boite/contracts';
 import type { ServerWebSocket } from 'bun';
 import type { Core } from '../core.ts';
 import { newId } from '../ids.ts';
@@ -9,6 +9,8 @@ const REMOTE_DELTA_WINDOW_MS = 80;
 export const OUTBOUND_MAX_BUFFERED_BYTES = 32 * 1024 * 1024;
 export const OUTBOUND_MAX_PENDING_PARTS = 1024;
 export const OUTBOUND_CONGESTION_TIMEOUT_MS = 10_000;
+/** How far a chunked answer runs ahead of the socket before it waits for a drain. */
+const CHUNK_BACKLOG = 1024 * 1024;
 
 export interface SocketData {
   connection: ServerConnection;
@@ -40,6 +42,9 @@ export class ServerConnection implements Connection {
   private readonly catchUp = new Set<string>();
   private readonly paced = new Map<string, RpcEvents['message.delta']>();
   private paceTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Frames waiting behind a chunked answer that is still leaving, in order; null when none is. */
+  private outbox: Iterator<string>[] | null = null;
+  private outboxBytes = 0;
 
   /**
    * `remote` is a client that reached the core by a name other than this
@@ -118,7 +123,8 @@ export class ServerConnection implements Connection {
     if (name === 'message.delta') this.queueCatchUp(payload as RpcEvents['message.delta']);
   }
 
-  sendResponse(response: OutgoingResponse): void {
+  /** `chunked`: the request asked for `progress`, and a long answer leaves in counted slices. */
+  sendResponse(response: OutgoingResponse, chunked = false): void {
     if (this.closed) return;
     this.flushPaced();
     if (this.closed) return;
@@ -139,7 +145,62 @@ export class ServerConnection implements Connection {
         }
       }
     }
-    if (this.write(response, serialized) === 0) this.close(1013, 'connection dropped a response; reconnect');
+    const sent = chunked && bytes > RPC_CHUNK_BYTES && bytes <= RPC_MAX_FRAME_BYTES
+      ? this.writeChunked(response.id, serialized, bytes)
+      : this.write(response, serialized);
+    if (sent === 0) this.close(1013, 'connection dropped a response; reconnect');
+  }
+
+  /**
+   * The answer as `RPC_CHUNK_MARK` frames of about `RPC_CHUNK_BYTES` each. The
+   * browser hands a frame over only once all of it arrived: slices are what lets
+   * the page say "1.2 MB / 3.4 MB" while a long thread loads. They leave as the
+   * socket drains, never more than `CHUNK_BACKLOG` ahead of it, and every frame
+   * written meanwhile waits behind them, so a client never sees an event before
+   * the snapshot that does not hold it. Returns 0 when the connection gave up.
+   */
+  private writeChunked(id: number | string, text: string, bytes: number): number {
+    if (this.closed || this.socket === null) return 0;
+    if (this.bufferedAmount() + this.outboxBytes + bytes > OUTBOUND_MAX_BUFFERED_BYTES) {
+      this.close(1013, 'connection exceeded outgoing buffer limit; reconnect');
+      return 0;
+    }
+    this.outboxBytes += bytes;
+    const frames = chunkFrames(id, text, bytes);
+    if (this.outbox !== null) {
+      this.outbox.push(frames);
+      return 1;
+    }
+    this.outbox = [frames];
+    return this.pump();
+  }
+
+  /** Sends what the outbox holds while the socket keeps up: -1 when it waits for a drain, 0 when a frame was dropped, 1 once empty. */
+  private pump(): number {
+    while (this.outbox !== null && this.socket !== null && !this.closed) {
+      const head = this.outbox[0];
+      if (head === undefined) {
+        this.outbox = null;
+        this.outboxBytes = 0;
+        break;
+      }
+      if (this.bufferedAmount() > CHUNK_BACKLOG) {
+        this.markCongested();
+        return -1;
+      }
+      const next = head.next();
+      if (next.done === true) {
+        this.outbox.shift();
+        continue;
+      }
+      this.outboxBytes = Math.max(0, this.outboxBytes - Buffer.byteLength(next.value));
+      if (this.socket.send(next.value, this.remote) === 0) {
+        this.outbox = null;
+        this.outboxBytes = 0;
+        return 0;
+      }
+    }
+    return 1;
   }
 
   onClose(callback: () => void): () => void {
@@ -166,6 +227,8 @@ export class ServerConnection implements Connection {
     this.catchUp.clear();
     this.catchUpBytes = 0;
     this.pacedBytes = 0;
+    this.outbox = null;
+    this.outboxBytes = 0;
     const socket = this.socket;
     this.socket = null;
     socket?.close(code, reason);
@@ -195,9 +258,15 @@ export class ServerConnection implements Connection {
       this.close(1009, 'event exceeds the 16 MiB frame limit');
       return 0;
     }
-    if (this.bufferedAmount() + bytes > OUTBOUND_MAX_BUFFERED_BYTES) {
+    if (this.bufferedAmount() + this.outboxBytes + bytes > OUTBOUND_MAX_BUFFERED_BYTES) {
       this.close(1013, 'connection exceeded outgoing buffer limit; reconnect');
       return 0;
+    }
+    // Behind a chunked answer still leaving, in the order it was written.
+    if (this.outbox !== null) {
+      this.outbox.push([text][Symbol.iterator]());
+      this.outboxBytes += bytes;
+      return 1;
     }
     const sent = this.socket.send(text, this.remote);
     if (sent < 0 || this.bufferedAmount() > 0) this.markCongested();
@@ -225,6 +294,19 @@ export class ServerConnection implements Connection {
 
   drain(): void {
     if (this.closed || this.core.journal.isClosed()) return;
+    // A chunked answer leaves first; what it held back goes with it.
+    if (this.outbox !== null) {
+      // The socket took slices since the last drain: the congestion clock
+      // counts from now, so a long answer on a slow link is not cut off.
+      if (this.congestionTimer !== null) clearTimeout(this.congestionTimer);
+      this.congestionTimer = null;
+      if (this.pump() === 0) {
+        this.close(1013, 'connection dropped a response; reconnect');
+        return;
+      }
+      this.markCongested();
+      if (this.outbox !== null) return;
+    }
     if (this.bufferedAmount() > 0) return;
     // The bus holds up to 16 ms of text the journal flush below folds into the
     // part. Dispatched now, while still congested, it lands in the catch-up
@@ -253,5 +335,28 @@ export class ServerConnection implements Connection {
       // -1 is queued, not lost: Bun delivers it. The keys left wait for the next drain.
       if (sent < 0) { this.markCongested(); return; }
     }
+  }
+}
+
+/**
+ * `text` cut into pieces of about `size` UTF-16 units, never between the two
+ * halves of a surrogate pair: a lone half would reach the client as U+FFFD.
+ */
+export function* slices(text: string, size: number): Generator<string> {
+  for (let start = 0; start < text.length;) {
+    let end = Math.min(text.length, start + size);
+    const last = text.charCodeAt(end - 1);
+    // Ending on a high half: stop before it, or take the pair when it is all the slice holds.
+    if (end < text.length && last >= 0xd800 && last <= 0xdbff) end += end - 1 > start ? -1 : 1;
+    yield text.slice(start, end);
+    start = end;
+  }
+}
+
+/** The chunk frames of one answer, made one at a time as the socket takes them. */
+function* chunkFrames(id: number | string, text: string, total: number): Generator<string> {
+  for (const slice of slices(text, RPC_CHUNK_BYTES)) {
+    const header = JSON.stringify({ id, bytes: Buffer.byteLength(slice), total });
+    yield `${RPC_CHUNK_MARK}${header}\n${slice}`;
   }
 }

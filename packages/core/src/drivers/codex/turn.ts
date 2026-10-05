@@ -1,5 +1,6 @@
 import type { MessageId, MessagePart, ToolStatus, Usage } from '@boite/contracts';
 import type { PromptCacheLife, TurnContext, TurnResult } from '../types.ts';
+import type { CodexTokenCounts } from './mapping.ts';
 import type { CodexTurnRecord, ToolView } from './protocol.ts';
 
 // ---------------------------------------------------------------------------
@@ -56,6 +57,10 @@ export class CodexTurn {
   /** The Codex turn id, known once `turn/start` answers. */
   turnId: string | null = null;
   usage: Usage | null = null;
+  /** Every model request of this turn so far, in Codex's counts. */
+  usageCounts: CodexTokenCounts | null = null;
+  /** The thread's cumulative `total` at this turn's latest usage update. */
+  usageTotal: CodexTokenCounts | null = null;
   /** The published prompt cache lifetime of the model this turn ran on. */
   cacheLife: PromptCacheLife | null = null;
   decided = false;

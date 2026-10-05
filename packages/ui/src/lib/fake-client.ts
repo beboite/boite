@@ -1,5 +1,6 @@
 import { sweepMergedPrFixtures, type MergedPrFixture } from './fake-client/merged-pr-archive';
 import {
+  RPC_CHUNK_BYTES,
   RpcErrorCode,
   type CoreInfo,
   type CoreLogContext,
@@ -13,7 +14,7 @@ import {
   type RpcResult,
   type ThreadId,
 } from '@boite/contracts';
-import { RpcFailure, type ClientState, type EventHandler, type ObservableClient } from './client';
+import { RpcFailure, type CallOptions, type ClientState, type EventHandler, type ObservableClient } from './client';
 import { accountMethods } from './fake-client/accounts';
 import { activityMethods, pauseActivity } from './fake-client/activity';
 import { brainMethods } from './fake-client/brain';
@@ -54,6 +55,19 @@ import { journalInspectionMethods } from './fake-client/journal-inspection';
 import { forkReturnMethods } from './fake-client/fork-return';
 
 export type { FakeClientOptions } from './fake-client/context';
+
+/**
+ * What the core's chunk frames would have told `onProgress` about `result`:
+ * nothing for an answer that fits in one slice, else each slice's running
+ * count against the whole. The size is the result's JSON, without the few
+ * bytes of the response envelope the core also counts.
+ */
+function reportSlices(result: unknown, onProgress: (received: number, total: number) => void): void {
+  const total = new TextEncoder().encode(JSON.stringify(result) ?? '').byteLength;
+  if (total <= RPC_CHUNK_BYTES) return;
+  for (let received = RPC_CHUNK_BYTES; received < total; received += RPC_CHUNK_BYTES) onProgress(received, total);
+  onProgress(total, total);
+}
 
 /**
  * The in-memory client: the whole RPC contract answered by one fake core,
@@ -220,7 +234,7 @@ export class FakeClient implements ObservableClient {
     return [...this.#ctx.bus.clientSubscribed];
   }
 
-  async call<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> {
+  async call<M extends RpcMethodName>(method: M, params: RpcParams<M>, options: CallOptions = {}): Promise<RpcResult<M>> {
     const { bus } = this.#ctx;
     const generation = this.#transportGeneration;
     if (bus.state !== 'ready' && method !== 'hello') {
@@ -240,6 +254,7 @@ export class FakeClient implements ObservableClient {
     if (bus.principal === 'session' && method === 'agents.message.send' && (params as RpcParams<'agents.message.send'>).threadId !== undefined) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agents.message.send: paired devices must omit threadId and speak as the user' });
     if (bus.principal === 'session' && method === 'git.diff' && ![undefined, '', 'HEAD'].includes((params as RpcParams<'git.diff'>).ref)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'git.diff: paired devices compare the working tree with HEAD only' });
     const result = await bus.hold(this.#dispatch(method, params)) as RpcResult<M>;
+    if (options.onProgress) reportSlices(result, options.onProgress);
     // The real client writes its set from the answer, never from the request.
     if (method === 'threads.subscribe') {
       bus.clientSubscribed.add((params as RpcParams<'threads.subscribe'>).threadId);

@@ -430,31 +430,24 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         await Bun.sleep(80);
         notify('thread/tokenUsage/updated', { threadId, turnId, tokenUsage: { last: { inputTokens: 80, cachedInputTokens: 20, outputTokens: 10 }, modelContextWindow: 200000 } });
         return;
-      case 'usage':
-        notify('thread/tokenUsage/updated', {
-          threadId,
-          turnId,
-          tokenUsage: {
-            total: {
-              totalTokens: 12,
-              inputTokens: 8,
-              cachedInputTokens: 2,
-              cacheWriteInputTokens: 1,
-              outputTokens: 4,
-              reasoningOutputTokens: 0,
-            },
-            last: {
-              totalTokens: 12,
-              inputTokens: 8,
-              cachedInputTokens: 2,
-              cacheWriteInputTokens: 1,
-              outputTokens: 4,
-              reasoningOutputTokens: 0,
-            },
-            modelContextWindow: null,
-          },
-        });
+      case 'usage': {
+        // Like a real turn: one update per model request, `last` for that
+        // request alone, `total` cumulative over the thread's earlier turns
+        // too, and the final update sent twice.
+        const first = { totalTokens: 12, inputTokens: 8, cachedInputTokens: 2, cacheWriteInputTokens: 1, outputTokens: 4, reasoningOutputTokens: 0 };
+        const second = { totalTokens: 26, inputTokens: 20, cachedInputTokens: 15, cacheWriteInputTokens: 0, outputTokens: 6, reasoningOutputTokens: 0 };
+        const history = { inputTokens: 1000, cachedInputTokens: 500, cacheWriteInputTokens: 0, outputTokens: 100 };
+        const sum = (...parts: Record<string, number>[]) => {
+          const out: Record<string, number> = {};
+          for (const part of parts) for (const [key, value] of Object.entries(part)) out[key] = (out[key] ?? 0) + value;
+          return out;
+        };
+        notify('thread/tokenUsage/updated', { threadId, turnId, tokenUsage: { total: sum(history, first), last: first, modelContextWindow: null } });
+        const final = { threadId, turnId, tokenUsage: { total: sum(history, first, second), last: second, modelContextWindow: null } };
+        notify('thread/tokenUsage/updated', final);
+        notify('thread/tokenUsage/updated', final);
         break;
+      }
       case 'slow':
         log('waiting for interrupt');
         await awaitInterrupt(turnId);

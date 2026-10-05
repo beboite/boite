@@ -33,7 +33,7 @@ export const CLAUDE_MODELS: ModelInfo[] = [
     }
   },
   {
-    id: 'claude-opus-5', name: 'Opus 5', speeds: [{ id: 'fast', label: 'Fast' }], effort: {
+    id: 'claude-opus-5-5', name: 'Opus 5.5', speeds: [{ id: 'fast', label: 'Fast' }], effort: {
       levels: [
         { id: 'low', label: 'Low' },
         { id: 'medium', label: 'Medium' },
@@ -46,7 +46,7 @@ export const CLAUDE_MODELS: ModelInfo[] = [
     }
   },
   {
-    id: 'claude-sonnet-5', name: 'Sonnet 5', default: true, effort: {
+    id: 'claude-sonnet-5-5', name: 'Sonnet 5.5', default: true, effort: {
       levels: [
         { id: 'low', label: 'Low' },
         { id: 'medium', label: 'Medium' },

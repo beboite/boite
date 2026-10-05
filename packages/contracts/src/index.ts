@@ -1138,8 +1138,12 @@ export interface ArtifactContent { url: string; bytes: number; mimeType: string;
 
 export type MessagePart =
   | { type: 'text'; text: string; complete?: boolean; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number }; moved?: MoveNotice; startedBy?: ThreadLink; started?: ThreadLink }
-  /** An image the user sent with the prompt, journalled with the message. */
-  | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null }
+  /**
+   * An image the user sent with the prompt, journalled with the message. A page
+   * asked with `compactImages` leaves a large one's `data` empty, with
+   * `dataDeferred` and its decoded `bytes`: `messages.attachment` reads it.
+   */
+  | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null; dataDeferred?: true; bytes?: number }
   | { type: 'file'; mimeType: string; data: string; name: string | null; dataDeferred?: true; bytes?: number }
   /** An immutable published file; resolve its bytes with artifacts.read, never as a disk path. */
   | { type: 'artifact'; id: string; mimeType: string; bytes: number; name: string }
@@ -1261,7 +1265,11 @@ export interface AgentTask {
 }
 
 export interface ThreadActivity {
-  goal: { objective: string; status: 'active' | 'paused' | 'complete'; iterations: number; error: string | null; dismissed?: boolean } | null;
+  /**
+   * `blocked`: the agent ended a goal turn with `[BOITE_GOAL_BLOCKED]` and
+   * waits for the user. The goal is paused; the user's next message resumes it.
+   */
+  goal: { objective: string; status: 'active' | 'paused' | 'complete'; iterations: number; error: string | null; dismissed?: boolean; blocked?: boolean } | null;
   loop: { prompt: string; intervalMs: number; maxIterations?: number | null; status: 'active' | 'paused' | 'complete'; iterations: number; nextRunAt: number | null; error: string | null; history?: ActivityIteration[] } | null;
   tasks: AgentTask[];
   tasksDismissed?: boolean;
@@ -1312,6 +1320,13 @@ export interface Thread extends ThreadSummary {
    * takes as `before`.
    */
   messagesBefore: MessageId | null;
+  /**
+   * The newest message `messages` carries, when the page was cut around a
+   * message and the thread has newer ones after it: the cursor `messages.list`
+   * takes as `after`. Absent or null when the page reaches the last message,
+   * which is the only page live messages are appended to.
+   */
+  messagesAfter?: MessageId | null;
   /** The turns `messages` refers to, plus any still queued or running; never the whole history. */
   turns: Turn[];
 }
@@ -1897,7 +1912,13 @@ export interface CoreInfo {
   bundleHash?: string;
   protocolVersion: typeof PROTOCOL_VERSION;
   /** Optional optimizations. Their absence keeps older cores and clients interoperable. */
-  features?: { threadSnapshots?: boolean };
+  features?: {
+    threadSnapshots?: boolean;
+    /** Answers a request that carries `progress` in counted slices (`RPC_CHUNK_MARK`). */
+    chunkedAnswers?: boolean;
+    /** `threads.get` takes `around` and `compactImages`; `messages.list` takes `after`. */
+    readingPages?: boolean;
+  };
   os: Os;
   /** The install this core belongs to. `--channel` on its command line decides. */
   channel: Channel;
@@ -3290,10 +3311,17 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * seen finish, or its last one. An `after` the thread does not hold, or one
    * with more than a page's count or serialized byte budget behind it, is
    * answered with the full page, without `messagesFrom`.
+   *
+   * `around` is the message a reader was last looking at. When more than
+   * `limit` messages were written after it, the answer is the page centred on
+   * it, with `messagesAfter` set; otherwise it is the last page, which holds
+   * it. An `around` the thread does not hold gets the last page; `after` wins
+   * over it. `compactImages` defers large images as `compactFiles` defers
+   * files. Both need `features.readingPages`.
    */
   'threads.get': {
     params: {
-      threadId: ThreadId; after?: MessageId; limit?: number; compactTools?: boolean; compactFiles?: boolean;
+      threadId: ThreadId; after?: MessageId; around?: MessageId; limit?: number; compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean;
       /** Request a resume proof, or reuse a proof previously supplied by this core. */
       sync?: true | MessageSync;
       /** Subscribe after a successful snapshot, optionally replacing the previous subscription and acknowledging unread content. */
@@ -3310,10 +3338,15 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * The result's own `before` is the next cursor, null once
    * the first message of the thread is in hand. An unknown thread is a not-found;
    * a `before` that is not a message of that thread is refused by name.
+   *
+   * `after` instead of `before` asks for the messages written after it, the
+   * page a reader scrolls down into from a page cut by `around`. The result's
+   * `after` is then the next cursor, null once the page reaches the last
+   * message, and its `before` is null. Exactly one of the two is given.
    */
   'messages.list': {
-    params: { threadId: ThreadId; before: MessageId; limit?: number; compactTools?: boolean; compactFiles?: boolean };
-    result: { messages: Message[]; before: MessageId | null; turns?: Turn[] };
+    params: { threadId: ThreadId; before?: MessageId; after?: MessageId; limit?: number; compactTools?: boolean; compactFiles?: boolean; compactImages?: boolean };
+    result: { messages: Message[]; before: MessageId | null; after?: MessageId | null; turns?: Turn[] };
   };
   /** The full output of a tool already visible in this conversation. No filesystem path is accepted. */
   'messages.toolOutput': {
@@ -3702,7 +3735,27 @@ export interface RpcRequest<M extends RpcMethodName = RpcMethodName> {
   id: number | string;
   method: M;
   params: RpcParams<M>;
+  /**
+   * The client counts what it has received of this answer: one longer than
+   * `RPC_CHUNK_BYTES` then comes as chunk frames (`RPC_CHUNK_MARK`). A core
+   * without `features.chunkedAnswers` ignores the key and answers in one frame.
+   */
+  progress?: true;
 }
+
+/**
+ * The first character of a chunk frame. A text frame that starts with it is
+ * not JSON: it is one slice of an answer to a request that asked for
+ * `progress`, as `\u001e{"id":7,"bytes":65536,"total":3400000}\n<slice>`. The
+ * slices of one answer go out in order, and every other frame the core writes
+ * meanwhile waits behind them; joined, they are the response frame the core
+ * would have sent whole. `bytes` is the UTF-8 size of this slice and `total`
+ * that of the whole frame, so a client shows how much of the answer it holds
+ * without decoding anything twice.
+ */
+export const RPC_CHUNK_MARK = '\u001e';
+/** Answers above this many UTF-8 bytes go out as chunk frames of about this size, to a request that asked for `progress`. */
+export const RPC_CHUNK_BYTES = 64 * 1024;
 
 export interface RpcError {
   code: number;
@@ -3806,4 +3859,4 @@ export function supportsSideQuestions(protocol: Protocol): boolean {
 export { sideQuestionSnapshot } from './side-question-snapshot.ts';
 export { deriveThreadCapabilities, protocolSupportsSteering, type ThreadCapabilitySnapshot } from './thread-capabilities.ts';
 export { resumeAnchor, snapshotOptionsProblem } from './thread-sync.ts';
-export { previewFileData } from './file-preview.ts';
+export { previewFileData, previewImageData } from './file-preview.ts';
