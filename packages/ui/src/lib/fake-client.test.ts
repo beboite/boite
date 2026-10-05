@@ -704,13 +704,13 @@ test('a fake blocked goal waits for the reply, then runs again', async ({ create
   vi.useFakeTimers();
   const client = await createClient({ delayMs: 1 });
   const { id: threadId } = await newThread(client);
-  await client.call('threads.activity.set', { threadId, goal: { objective: 'Pick a database\n[BOITE_GOAL_BLOCKED]' } });
+  await client.call('threads.activity.set', { threadId, goal: { objective: 'Which database should the billing tables use?' } });
   await vi.runAllTimersAsync();
   expect((await client.call('threads.get', { threadId })).activity?.goal).toMatchObject({ status: 'paused', blocked: true, iterations: 1 });
   await client.call('turns.start', { threadId, prompt: 'Postgres' });
   expect((await client.call('threads.get', { threadId })).activity?.goal).toMatchObject({ status: 'active', error: null });
   await vi.runAllTimersAsync();
-  // The echo agent repeats the objective, so the next goal turn blocks again.
+  // The objective still asks, so the next goal turn blocks again.
   expect((await client.call('threads.get', { threadId })).activity?.goal).toMatchObject({ status: 'paused', blocked: true, iterations: 2 });
 });
 

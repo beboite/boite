@@ -195,7 +195,7 @@
           <span class="objective" title={'objective' in entry ? entry.objective : entry.prompt}>
             {#if 'objective' in entry}{entry.objective}{:else}{iteration(entry.iterations, entry.maxIterations)}{/if}
           </span>
-          <span class="meta status ui-label-box" class:live={entry.status === 'active'}><span class="ui-label">{waiting ? strings.activity.blocked : strings.activity[entry.status]}</span></span>
+          {#if !waiting}<span class="meta status ui-label-box" class:live={entry.status === 'active'}><span class="ui-label">{strings.activity[entry.status]}</span></span>{/if}
           {#if entry.status !== 'complete'}
             <button type="button" class="ghost small icon" disabled={saving || store.connection !== 'ready'}
               aria-label={entry.status === 'active' ? strings.activity.pause : strings.activity.resume}
@@ -211,8 +211,9 @@
         </div>
         {#if waiting}
           <div class="blocker" data-testid="activity-goal-blocked">
-            <p>{strings.activity.blockedHint}</p>
-            <button type="button" class="ghost small" onclick={() => focusComposer()}><Reply size={14} />{strings.activity.reply}</button>
+            <span class="waiting-dot" aria-hidden="true"></span>
+            <p><span class="ask">{strings.activity.blocked}</span> <span class="hint">{strings.activity.blockedHint}</span></p>
+            <button type="button" class="small reply" onclick={() => focusComposer()}><Reply size={14} />{strings.activity.reply}</button>
           </div>
         {:else if entry.error}<p class="error">{entry.error}</p>{/if}
         </div>
@@ -286,13 +287,22 @@
   .status { padding: 2px 8px; border-radius: var(--radius-sm); background: var(--color-surface-2); }
   .status.live { color: var(--color-accent); }
   .finished .status { color: var(--color-success); }
-  /* A blocked goal waits on the user: the question's color, a tinted card and the way out. */
-  .entry.blocked { border-radius: var(--radius-md); background: color-mix(in srgb, var(--color-live) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-live) 35%, transparent); }
-  .entry.blocked .activity-row > :global(svg:first-child), .entry.blocked .kind { color: var(--color-live); }
-  .entry.blocked .status { color: var(--color-live); background: color-mix(in srgb, var(--color-live) 16%, transparent); font-weight: 600; }
-  .blocker { display: flex; align-items: center; gap: 8px; padding: 0 2px 6px 32px; }
-  .blocker p { flex: 1; min-width: 0; margin: 0; color: var(--color-foreground); line-height: 1.45; overflow-wrap: anywhere; }
-  .blocker button { flex: none; gap: 6px; color: var(--color-live); }
+  /*
+   * A blocked goal waits on the user. The question's yellow marks it in three
+   * small places, the edge, the hand and a slow dot, over a faint wash; the
+   * words stay in the text colors so they read in both themes.
+   */
+  .entry.blocked { position: relative; border-radius: var(--radius-md); background: color-mix(in srgb, var(--color-live) 6%, transparent); }
+  .entry.blocked::before { content: ''; position: absolute; inset-block: 8px; inset-inline-start: 0; width: 3px; border-radius: var(--radius-full); background: var(--color-live); }
+  .entry.blocked .activity-row > :global(svg:first-child) { color: var(--color-live); }
+  .blocker { display: flex; align-items: center; gap: 8px; min-height: var(--control); padding: 0 4px 4px 13px; }
+  .waiting-dot { flex: none; width: 6px; height: 6px; margin-inline: 5px; border-radius: var(--radius-full); background: var(--color-live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-live) 22%, transparent); animation: waiting 1.8s ease-in-out infinite; }
+  @keyframes waiting { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+  .blocker p { flex: 1; min-width: 0; margin: 0; line-height: 1.45; overflow-wrap: anywhere; }
+  .ask { font-weight: 600; color: var(--color-foreground); }
+  .hint { color: var(--color-muted-foreground); }
+  .reply { flex: none; gap: 6px; padding-inline: 10px; border: none; border-radius: var(--radius-full); background: var(--color-accent-soft); color: var(--color-accent); font-weight: 600; }
+  .reply:hover { background: color-mix(in oklch, var(--color-accent) 28%, transparent); }
   .objective, .current { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; text-align: left; }
   .meta, .count { color: var(--color-muted-foreground); font-size: var(--text-xs); flex: none; }
   .tasks-toggle { display: flex; flex-direction: column; align-items: stretch; justify-content: center; gap: 6px; width: 100%; height: auto; min-height: var(--control); padding: 6px 8px; font-weight: 400; color: var(--color-foreground); }
@@ -321,9 +331,9 @@
   .error { color: var(--color-danger); margin: 2px 8px 6px; overflow-wrap: anywhere; }
   @media (max-width: 720px) {
     .activity-row { gap: 6px; }
-    /* The line under it already asks for the answer; the objective keeps the room. */
-    .entry.blocked .status { display: none; }
-    .blocker { padding-left: 30px; }
+    .blocker { align-items: flex-start; }
+    .waiting-dot { margin-top: 7px; }
   }
-  @media (prefers-reduced-motion: reduce) { .activity, .task-disclosure, progress::-webkit-progress-value, .toggle-line > :global(svg:last-child) { transition: none; } }
+  :global(html[data-motion='reduced']) .waiting-dot { animation: none; }
+  @media (prefers-reduced-motion: reduce) { .waiting-dot { animation: none; } .activity, .task-disclosure, progress::-webkit-progress-value, .toggle-line > :global(svg:last-child) { transition: none; } }
 </style>

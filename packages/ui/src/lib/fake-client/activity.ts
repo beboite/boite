@@ -72,12 +72,13 @@ export function finishActivityTurn(ctx: FakeContext, turn: Turn): void {
     }
     if (turn.status !== 'done' && (!owned || current)) pauseActivity(ctx, thread);
     else {
-      // The in-memory agent completes its fake goal after one echo turn, unless
-      // its answer ends on the blocker marker, the way the core reads it.
+      // The in-memory agent completes its fake goal after one echo turn. An
+      // objective that asks a question stands for an agent that cannot answer
+      // it alone: the goal stops on a blocker, as a real one ending its answer
+      // on the marker would.
       const goal = thread.activity.goal;
       if (owned?.kind === 'goal' && current && goal?.status === 'active') {
-        const said = thread.messages.filter(message => message.turnId === turn.id && message.role === 'assistant').flatMap(message => message.parts.flatMap(part => part.type === 'text' ? [part.text] : [])).join('\n');
-        if (/^\s*\[BOITE_GOAL_BLOCKED\]\s*$/m.test(said.trim().split(/\r?\n/).at(-1) ?? '')) { goal.status = 'paused'; goal.blocked = true; goal.error = 'The agent reported a blocker. Reply to resume.'; }
+        if (goal.objective.trim().endsWith('?')) { goal.status = 'paused'; goal.blocked = true; goal.error = 'The agent reported a blocker. Reply to resume.'; }
         else goal.status = 'complete';
         ctx.publishActivity(thread);
       }

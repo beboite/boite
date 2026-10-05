@@ -106,9 +106,9 @@ test('a blocked goal asks for an answer and its reply button focuses the compose
   document.body.append(box);
   const row = document.querySelector('[data-testid=activity-goal]')!;
   expect(row.getAttribute('data-blocked')).toBe('true');
-  expect(row.textContent).toContain('Needs your answer');
-  expect(document.querySelector('.error')).toBeNull();
+    expect(document.querySelector('.error')).toBeNull();
   const hint = document.querySelector('[data-testid=activity-goal-blocked]')!;
+  expect(hint.textContent).toContain('Waiting for your answer');
   expect(hint.textContent).toContain('Your next message resumes the goal');
   hint.querySelector('button')!.click();
   expect(document.activeElement).toBe(box);

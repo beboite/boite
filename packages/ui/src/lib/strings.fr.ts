@@ -777,7 +777,7 @@ export const fr: Translation = {
     paused: 'En pause',
     complete: 'Terminée',
     blocked: 'Attend votre réponse',
-    blockedHint: "L'agent est bloqué et vous attend. Votre prochain message relance l'objectif.",
+    blockedHint: "Votre prochain message relance l'objectif.",
     reply: 'Répondre',
     pause: 'Mettre en pause',
     resume: 'Reprendre',
