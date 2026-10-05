@@ -135,7 +135,7 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 588,000 |
 | UI files, excluding `.br` and `.gz` copies | 4,200,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,460,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,500,000 |
 
 The total JavaScript measure excludes native binaries and source maps. On
 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
@@ -149,6 +149,14 @@ Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured
 3,961,330 UI bytes and 3,239,585 emitted core JavaScript bytes on the same day.
 Reproduce it with `bun run build:ui && bun run build:core && bun scripts/ci/budgets.ts`.
+
+On 2026-10-05, Linux core builds with Bun 1.4.2 measured 3,433,125 bytes of
+emitted core JavaScript at `7d762e4e` and 3,468,191 bytes with the agent
+browser on the conversation's machine ([the agent's browser](browser.md)): the
+DevTools client, the browser launcher, the in-browser recorder and the page
+scripts, less the removed desktop relay. The limit rises from 3,460,000 to
+3,500,000 bytes, leaving 31,809 bytes of headroom; the other limits are
+unchanged.
 
 On 2026-10-03, `290ba1f3` measured 3,977,635 UI bytes. Adding project Working
 and Done counters, folded project lists and their empty states measured
