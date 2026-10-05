@@ -27,7 +27,8 @@ const page = <T>(id: string, body: string, timeout = 8000) => {
   return Promise.race([evaluate(id, kit(body), timeout), late]).finally(() => clearTimeout(timer)) as Promise<T>;
 };
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-const js = JSON.stringify;
+/** A value as a JavaScript literal; the characters JSON leaves unescaped are escaped too. */
+const js = (value: unknown) => (JSON.stringify(value) ?? 'undefined').replace(/[<>\/\u2028\u2029]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
 
 interface PageState { url: string; title: string; ready: DocumentReadyState; hidden: boolean; token: string; leaving: boolean; dialogs: number }
 
