@@ -99,3 +99,34 @@ test('new conversation drafts retain their project and text after navigation and
   restored.startDraft(b!.id);
   expect(restored.composerStates.draft?.text).toBe('Second project prompt');
 });
+
+test('an incognito draft starts a hidden conversation that leaving erases, and the device keeps none of its words', async () => {
+  const store = await ready('one');
+  store.startDraft(null);
+  expect(store.draftInDrafts).toBe(true);
+  store.setDraftIncognito(true);
+  store.editComposerText('draft', 'Unsent secret');
+  // A draft taken to a project leaves the switch behind; back in the drafts it is chosen again.
+  store.setDraftProject(store.projects.find(p => p.kind !== 'drafts')!.id);
+  expect(store.draft?.incognito).toBeUndefined();
+  store.setDraftProject(null);
+  store.setDraftIncognito(true);
+  expect(store.draft?.incognito).toBe(true);
+  expect(localStorage.getItem(Object.keys(localStorage).find(key => key.startsWith('boite.unsent'))!) ?? '').not.toContain('Unsent secret');
+
+  expect(await store.submit('Secret plan', store.defaultChoice()!)).toBe(true);
+  const thread = store.openThread!;
+  expect(thread.incognito).toBe(true);
+  expect(thread.cwd).toContain('/incognito/');
+  // Off every list: the sidebar groups and the device's saved text.
+  expect(store.threadsOf(thread.projectId!).some(row => row.id === thread.id)).toBe(false);
+  store.editComposerText(thread.id, 'Typed while incognito');
+  expect((await ready('one')).composerStates[thread.id]).toBeUndefined();
+
+  // Leaving is enough: the core erases it, with nothing to restore.
+  store.startDraft(null);
+  await vi.waitFor(() => expect(store.threads.some(row => row.id === thread.id)).toBe(false));
+  expect(store.draft?.incognito).toBeUndefined();
+  expect((await store.client!.call('threads.list', {})).some(row => row.id === thread.id)).toBe(false);
+  expect(await store.client!.call('threads.deleted', {})).toEqual([]);
+});

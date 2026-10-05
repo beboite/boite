@@ -230,6 +230,9 @@ export class ThreadMove {
       });
     }
     if (thread.archived) throw refused('cannot move an archived thread', { threadId, field: 'threadId', expected: 'a thread that is not archived' });
+    if (thread.incognito) {
+      throw refused('an incognito conversation cannot be moved: it is erased when it is left', { threadId, field: 'threadId', expected: 'a conversation that is not incognito' });
+    }
     const target = this.core.projects.require(projectId);
     if (target.id === thread.projectId) {
       throw refused(`thread ${threadId} is already in project ${target.name}`, { threadId, projectId, field: 'projectId', expected: 'another project than the thread\'s own' });

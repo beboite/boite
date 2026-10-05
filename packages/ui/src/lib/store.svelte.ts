@@ -45,6 +45,11 @@ export interface Draft {
   worktree: boolean;
   /** The composer switch was chosen explicitly; project changes preserve it. */
   worktreeExplicit?: true;
+  /**
+   * The first send starts an incognito conversation. Only in the drafts: the
+   * draft drops it on its way to a project, and it is never saved on the device.
+   */
+  incognito?: true;
 }
 
 /** What the composer sends a message with. */
@@ -124,6 +129,7 @@ export class Store {
     this.sidebarCollapsed = layout.sidebarCollapsed;
     listen(ctx, client);
     ctx.off.push(ctx.composer.watchQueues());
+    ctx.off.push(ctx.threads.watchIncognito());
   }
 
   detach(): void {
@@ -398,6 +404,7 @@ export class Store {
   refreshProjectIcon(...args: Parameters<Projects['refreshProjectIcon']>) { return this.#ctx.projects.refreshProjectIcon(...args); }
   startDraft(...args: Parameters<Projects['startDraft']>) { return this.#ctx.projects.startDraft(...args); }
   setDraftProject(...args: Parameters<Projects['setDraftProject']>) { return this.#ctx.projects.setDraftProject(...args); }
+  setDraftIncognito(...args: Parameters<Projects['setDraftIncognito']>) { return this.#ctx.projects.setDraftIncognito(...args); }
   setDraftWorktree(...args: Parameters<Projects['setDraftWorktree']>) { return this.#ctx.projects.setDraftWorktree(...args); }
 
   // -------------------------------------------------------------------------

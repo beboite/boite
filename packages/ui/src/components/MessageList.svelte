@@ -620,7 +620,7 @@
                 <MessageActions
                   text={() => answerOf(turn.id)}
                   retry={atRest && store.openThread?.turns.at(-1)?.id === turn.id ? () => void retry(turn.id) : undefined}
-                  fork={branchable && message.state !== 'streaming' ? (worktree) => void store.fork(message.id, { worktree }) : undefined}
+                  fork={branchable && !store.openThread?.incognito && message.state !== 'streaming' ? (worktree) => void store.fork(message.id, { worktree }) : undefined}
                 />
               {/snippet}
             </TurnSummary>

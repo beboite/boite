@@ -43,6 +43,7 @@ function check(ctx: FakeContext, thread: Thread, projectId: string, stopBackgrou
     throw refuse('a sub-thread moves with its parent; move the parent thread instead', { threadId, parentThreadId: thread.parentThreadId, field: 'threadId', expected: 'a thread that is not a sub-thread' });
   }
   if (thread.archived) throw refuse('cannot move an archived thread', { threadId, field: 'threadId', expected: 'a thread that is not archived' });
+  if (thread.incognito) throw refuse('an incognito conversation cannot be moved: it is erased when it is left', { threadId, field: 'threadId', expected: 'a conversation that is not incognito' });
   const target = ctx.projects.find((p) => p.id === projectId);
   if (!target) throw ctx.notFound('project', projectId);
   if (target.id === thread.projectId) {

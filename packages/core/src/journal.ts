@@ -74,6 +74,8 @@ export class Journal {
       ensureIndexes(this.db);
       // A hard stop leaves markers on disk; an old session never offers undo.
       this.purgeDeletedThreads();
+      // An incognito conversation never outlives the core that held it.
+      this.purgeIncognitoThreads();
     } catch (error) {
       this.db.close(false);
       throw error;
@@ -150,6 +152,7 @@ export class Journal {
       this.flushDeltas();
       this.persistMessages();
       this.purgeDeletedThreads();
+      this.purgeIncognitoThreads();
     } finally {
       this.stream.clear();
       this.closed = true;
@@ -224,8 +227,8 @@ export class Journal {
     this.db
       .query(
         `INSERT OR REPLACE INTO threads
-         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, parent_thread_id, prompt_cache, agent_session_id, session_resume_at, title_state)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, parent_thread_id, prompt_cache, agent_session_id, session_resume_at, title_state, incognito)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         thread.id,
@@ -255,6 +258,7 @@ export class Journal {
         thread.agentSessionId ?? null,
         thread.sessionResumeAt ?? null,
         thread.titleState ? JSON.stringify(thread.titleState) : null,
+        thread.incognito ? 1 : 0,
       );
   }
 
@@ -304,6 +308,15 @@ export class Journal {
       this.db.query('DELETE FROM thread_deletions WHERE root_id = ?').run(rootId);
       return rows.map(row => row.thread_id);
     })();
+  }
+
+  /** Incognito conversations and the sub-threads they started. */
+  private purgeIncognitoThreads(): void {
+    // Almost always none: then the family query is never run.
+    const roots = (this.db.query('SELECT id FROM threads WHERE incognito = 1').all() as { id: string }[]).map(row => row.id);
+    if (roots.length === 0) return;
+    const children = this.db.query(`SELECT id FROM threads WHERE parent_thread_id IN (${roots.map(() => '?').join(', ')})`).all(...roots) as { id: string }[];
+    this.deleteThreads([...roots, ...children.map(row => row.id)]);
   }
 
   private purgeDeletedThreads(): void {

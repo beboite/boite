@@ -89,7 +89,8 @@ export class Drafts {
     if (!s.draft) return;
     const key = projectKey(s.draft.projectId);
     const input = this.ctx.composer.composerStates.draft;
-    if (hasContent(input)) this.saved[key] = { draft: { ...s.draft }, choice: s.draftChoice, input: input! };
+    // An incognito draft is never set aside: leaving it lets its words go.
+    if (hasContent(input) && !s.draft.incognito) this.saved[key] = { draft: { ...s.draft }, choice: s.draftChoice, input: input! };
     else delete this.saved[key];
   }
 
@@ -122,11 +123,14 @@ export class Drafts {
   /** Called synchronously on typing, and reactively for queue, send and navigation changes. */
   persist(): void {
     if (!this.#key || !this.#hydrated) return;
+    // Nothing typed into an incognito conversation reaches the device's storage.
+    const incognito = this.#incognitoThreads();
     const inputs = Object.fromEntries(Object.entries(this.ctx.composer.composerStates)
-      .filter(([id, input]) => id !== 'draft' && hasContent(input)).map(([id, input]) => [id, savedInput(input, this.#assetId)]));
+      .filter(([id, input]) => id !== 'draft' && !incognito.has(id) && hasContent(input)).map(([id, input]) => [id, savedInput(input, this.#assetId)]));
     const drafts = { ...this.saved };
     const current = this.ctx.store.draft;
-    if (current) {
+    if (current?.incognito) delete drafts[projectKey(current.projectId)];
+    else if (current) {
       const input = this.ctx.composer.composerStates.draft;
       const key = projectKey(current.projectId);
       if (hasContent(input)) drafts[key] = { draft: current, choice: null, input: input! };
@@ -147,6 +151,13 @@ export class Drafts {
       this.#pending = { key: this.#key!, value: { ...full, updatedAt } };
       this.#schedule();
     });
+  }
+
+  #incognitoThreads(): Set<string> {
+    const s = this.ctx.store;
+    const ids = new Set(s.threads.filter(thread => thread.incognito).map(thread => thread.id));
+    if (s.openThread?.incognito) ids.add(s.openThread.id);
+    return ids;
   }
 
   #assetId = (bytes: string): string => {

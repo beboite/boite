@@ -139,6 +139,9 @@ export class ThreadBranching {
     if (source.agentSessionId || source.projectId === null) {
       throw refused('a persistent agent session takes its work through Agents and cannot be forked', { threadId, field: 'threadId', expected: 'a conversation thread' });
     }
+    if (source.incognito) {
+      throw refused('an incognito conversation cannot be forked: a copy would outlive it', { threadId, field: 'threadId', expected: 'a conversation that is not incognito' });
+    }
     const rowid = this.core.journal.messageRowid(threadId, messageId);
     const target = rowid === null ? null : this.core.journal.getMessage(messageId);
     if (rowid === null || target === null) {

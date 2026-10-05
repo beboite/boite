@@ -15,7 +15,8 @@ import { rightPanel } from '../right-panel.svelte';
 import { lastIndexById, mergeResumed, patchRow, resumeRequest, threadsByProject } from '../thread-rows';
 import type { StoreContext } from './context';
 import { RpcErrorCode } from '@boite/contracts';
-import { RpcFailure } from '../client';
+import { RpcFailure, type Client } from '../client';
+import { untrack } from 'svelte';
 import { strings } from '../strings';
 
 /** What a rewind hands back to the composer: the removed message's content, and how the agent forgets it. */
@@ -47,7 +48,42 @@ export class Threads {
   /** What that newest run is opening, so an older one knows what to give back. */
   #openTarget: ThreadId | null = null;
 
+  /** The incognito conversation on screen, and the client that opened it. */
+  #incognito: { id: ThreadId; client: Client } | null = null;
+
   constructor(private readonly ctx: StoreContext) {}
+
+  /**
+   * Leaving an incognito conversation erases it: another thread, a draft, an
+   * archive, anything that takes it off the screen. Only the client that holds
+   * it asks, so a switch to another core never reaches the wrong one; a core
+   * that never hears it erases the conversation when it stops or starts.
+   */
+  watchIncognito(): () => void {
+    return $effect.root(() => {
+      $effect(() => {
+        const open = this.openThread;
+        const id = open?.incognito ? open.id : null;
+        untrack(() => {
+          const left = this.#incognito;
+          if (left?.id === id) return;
+          this.#incognito = id && this.ctx.client ? { id, client: this.ctx.client } : null;
+          if (left) void this.#erase(left);
+        });
+      });
+    });
+  }
+
+  async #erase({ id, client }: { id: ThreadId; client: Client }): Promise<void> {
+    if (this.ctx.client !== client || client.state !== 'ready') return;
+    try {
+      await client.call('threads.remove', { threadId: id });
+      if (this.ctx.client === client) await this.removed(id);
+    } catch (error) {
+      // Already gone, from another device or a restarted core: nothing left to erase.
+      if (this.ctx.client === client && !(error instanceof RpcFailure && error.code === RpcErrorCode.NotFound)) this.ctx.fail(error);
+    }
+  }
 
   rememberReadingThread(): void {
     const thread = this.openThread;
@@ -333,6 +369,7 @@ export class Threads {
     effort?: string | null;
     speed?: string | null;
     worktree?: { branch?: string };
+    incognito?: boolean;
   }): Promise<ThreadSummary | null> {
     const client = this.ctx.client;
     if (!client) return null;
@@ -490,6 +527,8 @@ export class Threads {
     this.forgetThread(threadId);
     if (this.#openTarget === threadId) { this.openGeneration++; this.#openTarget = null; }
     if (s.delegationThread?.id === threadId) s.delegationThread = null;
+    // Erased already: its leaving asks for nothing more.
+    if (this.#incognito?.id === threadId) this.#incognito = null;
     if (this.openThread?.id !== threadId) return;
     this.openThread = null;
     await this.unsubscribe();

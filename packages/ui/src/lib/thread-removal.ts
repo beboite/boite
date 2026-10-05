@@ -14,6 +14,8 @@ export function canDeleteThread(store: Store, thread: ThreadSummary): boolean {
 export async function deleteThread(store: Store, thread: ThreadSummary): Promise<boolean> {
   if (!canDeleteThread(store, thread)) return false;
   if (!(await store.removeThread(thread.id))) return false;
+  // An incognito conversation is erased by the core: there is nothing to bring back.
+  if (thread.incognito) { await tick(); focusComposer(); return true; }
   undo.offer(fill(strings.sidebar.deletedToast, { title: thread.title }), async () => {
     if (!(await store.restoreDeletedThread(thread.id))) throw new Error(store.error ?? strings.connection.unavailable);
     await workspace.select(store, thread.id);

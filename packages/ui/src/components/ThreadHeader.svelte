@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { ArrowLeft, ChevronDown, FolderInput, GitBranch, PanelRight, SquareTerminal, UsersRound } from '@lucide/svelte';
+  import { ArrowLeft, ChevronDown, FolderInput, GitBranch, PanelRight, SquareTerminal, UsersRound, VenetianMask } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { archiveThread } from '../lib/archive';
@@ -55,16 +55,19 @@
   let titleItems = $derived.by((): MenuItem[] => {
     if (!thread) return [];
     const retitling = store.retitling.includes(thread.id);
+    // An incognito conversation lives on this screen only: no pin, move or
+    // archive keeps it, and deleting it is what leaving does anyway.
+    const kept = !thread.incognito;
     return [
       { id: 'rename', label: strings.sidebar.rename },
       { id: 'retitle', label: retitling ? strings.sidebar.retitling : strings.sidebar.retitle, disabled: retitling },
-      { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
+      ...(kept ? [{ id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin }] : []),
       { id: 'copy', label: strings.sidebar.copyPath, hint: thread.cwd },
       // A phone has no Ctrl+F: this sheet is its way to the find bar.
       { id: 'find', label: strings.keyboard.commands.find },
-      ...(thread.parentThreadId || thread.projectId === null ? [] : moveItems(store, thread)),
+      ...(thread.parentThreadId || thread.projectId === null || !kept ? [] : moveItems(store, thread)),
       separator(),
-      { id: 'archive', label: strings.sidebar.archive },
+      ...(kept ? [{ id: 'archive', label: strings.sidebar.archive }] : []),
       ...(canDeleteThread(store, thread) ? [{ id: 'delete', label: strings.sidebar.delete, danger: true }] : [])
     ];
   });
@@ -168,6 +171,30 @@
       {/if}
 
       <span class="spacer"></span>
+
+      <!-- Incognito is chosen before the first send, in the drafts, by the
+           owner: leaving erases the conversation, and only the owner may. -->
+      {#if !thread && store.draftInDrafts && store.owner}
+        {@const on = store.draft?.incognito === true}
+        <button
+          type="button"
+          class="ghost trace"
+          class:on
+          title={on ? strings.drafts.incognitoStop : strings.drafts.incognitoStart}
+          aria-label={strings.drafts.incognito}
+          aria-pressed={on}
+          data-testid="draft-incognito"
+          onclick={() => store.setDraftIncognito(!on)}
+        >
+          <VenetianMask size={16} strokeWidth={1.75} />
+          <span class="label">{strings.drafts.incognito}</span>
+        </button>
+      {:else if thread?.incognito}
+        <span class="chip incognito" title={strings.drafts.incognitoOn} aria-label={strings.drafts.incognitoOn} data-testid="thread-incognito">
+          <VenetianMask size={13} strokeWidth={1.75} />
+          <span class="label">{strings.drafts.incognito}</span>
+        </span>
+      {/if}
 
       {#if thread?.parentThreadId}
         <button type="button" class="chip parent" data-testid="delegation-back-parent" onclick={() => void store.open(thread!.parentThreadId!)}>
@@ -287,6 +314,7 @@
     padding: 0 10px 0 8px;
   }
   .parent { gap: 4px; cursor: pointer; }
+  .incognito { gap: 4px; flex: none; }
 
   .on {
     background: var(--color-active);
@@ -316,7 +344,7 @@
     .pending { flex: none; min-width: var(--touch-target); justify-content: center; }
     .pending-text { display: none; }
     .trace { padding: 0; min-width: var(--touch-target); justify-content: center; }
-    .trace .label { display: none; }
+    .trace .label, .incognito .label { display: none; }
     /* The title's sheet holds these on a phone. */
     .in-title-menu { display: none; }
     .rename { width: 100%; }

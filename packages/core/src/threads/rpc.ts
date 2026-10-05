@@ -33,9 +33,14 @@ export function registerThreadMethods(core: Core): void {
   core.router.register('threads.rewind', (params) => core.threads.rewind(params.threadId, params.messageId));
   core.router.register('threads.fork', (params) => core.threads.fork(params.threadId, params.messageId, params.worktree === true));
   core.router.register('threads.list', (params) => core.threads.list(params));
-  core.router.register('threads.create', (params) =>
-    params.worktree === undefined ? core.threads.create(params) : core.threads.createInWorktree(params),
-  );
+  core.router.register('threads.create', (params, ctx) => {
+    // Leaving erases it through `threads.remove`, which is the owner's alone:
+    // a paired device could start one it can never erase.
+    if (params.incognito === true && ctx.connection.identity.principal !== 'owner') {
+      throw refused('an incognito conversation is the owner\'s: a paired device cannot erase it when it leaves', { field: 'incognito', expected: 'an owner connection' });
+    }
+    return params.worktree === undefined ? core.threads.create(params) : core.threads.createInWorktree(params);
+  });
   core.router.register('threads.get', (params) => core.threads.get(params.threadId, params.after));
   core.router.register('messages.list', (params) => core.threads.messages(params));
   core.router.register('threads.update', (params) => core.threads.update(params));

@@ -45,7 +45,7 @@
   /** Every live thread, most recent first; the list cuts it to the recents until something is typed. */
   let threadItems = $derived.by((): PaletteItem[] =>
     (workspace.machines.length ? workspace.machines : [{ id: '', label: '', store }]).flatMap(machine => [...machine.store.threads]
-      .filter((t) => !t.archived)
+      .filter((t) => !t.archived && !t.incognito)
       .map((t) => ({
         id: `thread:${machine.store.threadKey(t.id)}`,
         kind: 'thread' as const,

@@ -640,6 +640,14 @@ export interface ThreadSummary {
   projectId: ProjectId | null;
   /** Only persistent agent sessions have no project. */
   agentSessionId?: string;
+  /**
+   * An incognito conversation of the drafts. It works in a folder of the
+   * core's data directory rather than the drafts folder, lists stay quiet
+   * about it, and `threads.remove` erases it with that folder at once, with no
+   * undo. A core that stops or starts erases every incognito conversation it
+   * still holds. Absent on ordinary conversations and on older cores.
+   */
+  incognito?: true;
   title: string;
   titleSource: TitleSource;
   /** Durable title revision and whether the first answer should resolve a vague initial subject. Missing on older cores. */
@@ -2408,6 +2416,13 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
        * Excludes `cwd`. Refused on the drafts project, which is not a repository.
        */
       worktree?: { branch?: string };
+      /**
+       * Start an incognito conversation (`ThreadSummary.incognito`). Accepted
+       * from the owner on the drafts project only, since leaving it calls the
+       * owner-only `threads.remove`, and refused with `cwd` or `worktree`: the
+       * core makes its folder.
+       */
+      incognito?: boolean;
     };
     result: ThreadSummary;
   };
@@ -2515,6 +2530,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
    * Hide a conversation and its sub-threads after stopping their work. The
    * owner can restore their history until this core stops; shutdown or the
    * next startup purges unrestored deletions. Files and Git branches remain.
+   * An incognito conversation is erased at once instead, its folder with it,
+   * and its `thread.removed` says `undoable: false`.
    */
   'threads.remove': { params: { threadId: ThreadId }; result: { ok: true } };
   /** Owner-only conversations deleted during this core session, newest first. */

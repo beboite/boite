@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ChevronDown, FolderOpen } from '@lucide/svelte';
+  import { ChevronDown, FolderOpen, VenetianMask } from '@lucide/svelte';
   import type { ProjectId } from '@boite/contracts';
   import { separator, type MenuItem } from '../lib/menu';
   import { fill, strings } from '../lib/strings';
@@ -132,7 +132,13 @@
       <div class="draft-tail">
         <!-- In the drafts the agent gets a fresh folder; someone with work of
              their own is one click from pointing it there instead. -->
-        {#if store.draftInDrafts && store.owner}
+        {#if store.draftInDrafts && store.draft?.incognito}
+          <!-- What the header's switch means, said where the eyes are. -->
+          <p class="incognito-note" data-testid="draft-incognito-note">
+            <VenetianMask size={14} strokeWidth={1.75} />
+            {strings.drafts.incognitoOn}
+          </p>
+        {:else if store.draftInDrafts && store.owner}
           <button type="button" class="ghost small open-folder" data-testid="draft-open-folder" onclick={() => (store.projectPickerOpen = true)}>
             <FolderOpen size={14} strokeWidth={1.75} />
             {strings.drafts.openFolder}
@@ -182,6 +188,16 @@
     justify-content: center;
     align-items: flex-start;
   }
+
+  /* Inline, so the mark stays with the first word when the line wraps on a phone. */
+  .incognito-note {
+    margin: 10px 20px 0;
+    font-size: var(--text-sm);
+    color: var(--color-muted-foreground);
+    text-align: center;
+  }
+
+  .incognito-note :global(svg) { vertical-align: -2px; margin-right: 4px; }
 
   .open-folder {
     margin-top: 10px;
