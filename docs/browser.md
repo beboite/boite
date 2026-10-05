@@ -52,8 +52,29 @@ already closed goes at the next settings change or the first use of the agent
 browser after a restart. A folder that cannot be removed is logged.
 
 Logins live on the machine that runs the agent, not on the device that shows
-it. To sign in to a site for an agent, open the conversation's browser, show
-it and sign in there; the profile keeps the session for the next tabs.
+it. A profile keeps them, session cookies included: each profile folder is
+told to keep its session (`session.restore_on_startup` in its preferences), so
+a sign-in whose cookie has no expiry date is still there after the browser
+process closed. On Chrome 153, without that preference such a cookie was gone
+at the next start; the pages the session brings back are closed at once.
+
+### Copying a desktop profile's sign-ins
+
+The desktop's own browser keeps its profiles in WebView2, on the PC. The
+agent browser cannot read them, so Settings > General > Browser profiles has
+**Copy sign-ins to agents** on each profile, in the Windows desktop app. It
+lists the connected machines the user owns; picking one reads that profile's
+cookies on the PC (`browser_cookies`, through a blank view of the profile
+made for the read and destroyed after) and sends them to that machine's core
+(`browser.importCookies`, owner only). The core adds the profile to its own
+list under the same id and name when it has none, and hands the cookies to its
+browser. `boite browser open <url> --profile <name>` then opens signed in.
+
+It is a copy at that moment, not a link: a later sign-in on the PC is copied
+again by hand, and a session the site ties to the PC's address or device may
+still ask again. The cookies cross the connection to that machine, so the
+action is the owner's alone and never automatic. Signing in directly works
+too: show the agent's browser and sign in there.
 
 A conversation has at most 8 tabs and a machine 24. A page that opens a
 window, a sign-in popup for instance, adds a tab to the same conversation; past
@@ -124,11 +145,14 @@ profile.
 `packages/core/test/browser.test.ts` drives a real headless Chromium when the
 machine has one: opening, reading, clicking and typing, presets and color
 scheme, diagnostics without query strings, a token kept to its conversation,
-a paired viewer's frames and taps, a popup becoming a tab, an MP4 recording
+a paired viewer's frames and taps, a popup becoming a tab, cookies kept per
+profile across a restart, a profile copied in by the owner, an MP4 recording
 read back, a recording discarded at the end of a turn, and a machine without a
 browser. `browser-cli.test.ts` checks the CLI's files with the browser stubbed.
 `tests/e2e/agent-browser-core.test.ts` runs the whole path on a real core: the
 owner's desktop at 1280 × 900 and a paired phone at 390 × 844 see the cover,
 show the page and tap it, and the tap reaches the page. `browser-remote.test.ts`
 covers the same views on the fake client.
-The tests ran on Linux; Windows and macOS discovery is checked by path only.
+The same tests pass on the Linux, Windows and macOS CI jobs. Reading a
+WebView2 profile's cookies in the Windows shell is covered by unit tests of
+the bridge with the shell stubbed, not by a run on Windows.

@@ -20,6 +20,20 @@ pub async fn browser_protocol(app: AppHandle, webview: Webview, id: String, meth
     { let _ = (view, method, params); Err("browser automation currently requires Windows WebView2".into()) }
 }
 
+/// Every cookie of the profile a view runs in, for the owner copying that
+/// profile's sign-ins to the browser of the machine its agents work on. Its own
+/// command, never a `browser_protocol` method: only this exact read is allowed,
+/// and only from the main UI.
+#[tauri::command]
+pub async fn browser_cookies(app: AppHandle, webview: Webview, id: String) -> Result<Value, String> {
+    only_main(&webview)?;
+    let view = view_of(&app, &id)?;
+    #[cfg(windows)]
+    { crate::platform::browser_control::call(view, "Network.getAllCookies".to_string(), serde_json::json!({})).await }
+    #[cfg(not(windows))]
+    { let _ = view; Err("reading a browser profile's cookies currently requires Windows WebView2".into()) }
+}
+
 /// The rates a recording may ask for, as `BROWSER_RECORDING_FRAME_RATES` in the contracts.
 const FRAME_RATES: [u32; 2] = [30, 60];
 

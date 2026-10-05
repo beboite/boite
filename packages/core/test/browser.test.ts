@@ -229,3 +229,31 @@ real('each profile keeps its own cookies, across a restart of the browser; a pri
     expect(await visit(again, 'private')).toBe('');
   } finally { await again.close(); }
 }, 90_000);
+
+real('the owner copies a desktop profile into the agent browser: the profile is made here, its sign-ins open with it and outlive a restart', async () => {
+  const cookies = [
+    { name: 'session', value: 'no-expiry', domain: '127.0.0.1', path: '/' },
+    { name: 'kept', value: 'a-month', domain: '127.0.0.1', path: '/', expires: Math.floor(Date.now() / 1000) + 30 * 86400, sameSite: 'Lax' as const },
+  ];
+  // Sign-ins are the owner's to hand over: never an agent's, never into a private tab, never malformed.
+  await expect(agent.call('browser.importCookies', { profile: { id: 'p-work', name: 'Work' }, cookies })).rejects.toThrow("agent's methods");
+  await expect(owner.call('browser.importCookies', { profile: { id: 'private' }, cookies })).rejects.toThrow('private');
+  await expect(owner.call('browser.importCookies', { profile: { id: 'p-work' }, cookies: [{ ...cookies[0]!, path: 'nope' }] })).rejects.toThrow('path');
+  expect(await owner.call('browser.importCookies', { profile: { id: 'p-work', name: 'Work' }, cookies })).toEqual({ imported: 2, profile: 'p-work' });
+  expect((await owner.call('settings.get', {})).browserProfiles).toEqual([{ id: 'p-work', name: 'Work' }]);
+  const read = async (browser: AgentBrowser, profile: string) => {
+    const { tabId } = await browser.command({ threadId, action: { kind: 'open', url: url(), profile } });
+    const value = (await browser.command({ threadId, tabId, action: { kind: 'evaluate', expression: 'document.cookie.split("; ").sort().join("; ")' } })).value;
+    await browser.command({ threadId, tabId, action: { kind: 'close' } });
+    return value;
+  };
+  expect(await read(harness.core.browser, 'Work')).toBe('kept=a-month; session=no-expiry');
+  expect(await read(harness.core.browser, 'default')).toBe('');
+  // A cookie without an expiry date is a sign-in too: it is still there after every browser process ended.
+  await harness.core.browser.close();
+  const again = new AgentBrowser(harness.core);
+  try {
+    expect(await read(again, 'Work')).toBe('kept=a-month; session=no-expiry');
+    expect(((await again.command({ threadId, action: { kind: 'status' } })).value as { tabs: unknown[] }).tabs).toEqual([]);
+  } finally { await again.close(); }
+}, 90_000);

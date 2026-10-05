@@ -107,10 +107,44 @@ export interface BrowserRpcMethods {
   /** Input on the tab a frame showed, from a viewer: never a script. */
   'browser.remoteInput': { params: { threadId: string; frameId: string; input: RemoteBrowserInput }; result: { ok: true } };
   'browser.command': { params: { threadId: string; tabId?: string; action: BrowserAction }; result: BrowserReply };
+  /**
+   * Owner only: copies the sign-ins of one of the desktop's browser profiles
+   * into the same profile of this machine's agent browser, which is made here
+   * when it does not exist yet. The cookies are what the desktop's own browser
+   * holds for that profile; nothing is read from this machine.
+   */
+  'browser.importCookies': { params: { profile: { id: string; name?: string }; cookies: BrowserCookie[] }; result: { imported: number; profile: string } };
 }
 export interface BrowserRpcEvents {
   /** For the clients subscribed to the conversation: its agent's tabs changed, opened, navigated or closed. */
   'browser.remoteChanged': { threadId: string; live: boolean; tabs: AgentBrowserTab[] };
+}
+
+/** A cookie as the DevTools protocol exchanges it. Without `expires` it lasts as long as its browser session. */
+export interface BrowserCookie {
+  name: string; value: string; domain: string; path: string;
+  secure?: boolean; httpOnly?: boolean; sameSite?: 'Strict' | 'Lax' | 'None';
+  /** Seconds since the epoch. */
+  expires?: number;
+}
+export const BROWSER_COOKIES_MAX = 5000;
+/** One cookie's name and value together, as browsers cap them. */
+export const BROWSER_COOKIE_MAX_BYTES = 4096;
+
+/** Why a list of cookies cannot be copied into a profile, or null. */
+export function browserCookiesError(cookies: unknown): string | null {
+  if (!Array.isArray(cookies) || cookies.length === 0 || cookies.length > BROWSER_COOKIES_MAX) return `cookies must list 1 to ${BROWSER_COOKIES_MAX} cookies`;
+  const text = (value: unknown, max: number, empty = false) => typeof value === 'string' && value.length <= max && (empty || value.length > 0);
+  for (const cookie of cookies as BrowserCookie[]) {
+    if (!cookie || typeof cookie !== 'object') return 'each cookie must be an object';
+    if (!text(cookie.name, 1024, true) || !text(cookie.value, BROWSER_COOKIE_MAX_BYTES, true) || cookie.name.length + cookie.value.length > BROWSER_COOKIE_MAX_BYTES) return `a cookie's name and value must be strings of at most ${BROWSER_COOKIE_MAX_BYTES} characters together`;
+    if (!text(cookie.domain, 255) || /[\s/]/.test(cookie.domain)) return 'a cookie needs the domain it belongs to';
+    if (!text(cookie.path, 2048) || !cookie.path.startsWith('/')) return 'a cookie path must start with /';
+    if ((cookie.secure !== undefined && typeof cookie.secure !== 'boolean') || (cookie.httpOnly !== undefined && typeof cookie.httpOnly !== 'boolean')) return 'cookie secure and httpOnly must be booleans';
+    if (cookie.sameSite !== undefined && !['Strict', 'Lax', 'None'].includes(cookie.sameSite)) return 'cookie sameSite must be Strict, Lax or None';
+    if (cookie.expires !== undefined && !(Number.isFinite(cookie.expires) && cookie.expires > 0)) return 'cookie expires must be a time in seconds';
+  }
+  return null;
 }
 
 /** Shared by the real core, fake transport and desktop before executing input. */

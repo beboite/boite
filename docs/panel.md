@@ -115,6 +115,10 @@ profile in a WebKit data store, which needs macOS 14. The Linux shell has no
 built-in browser. `tests/e2e/browser-profiles.test.ts` checks separate cookies,
 their survival across a restart and deletion in the real shell.
 
+The agent's browser runs on the machine of its conversation and keeps its own
+copy of each profile there. **Copy sign-ins to agents**, on a profile's row in
+the Windows desktop app, sends that profile's cookies to a machine's agent
+browser ([the agent's browser](browser.md#copying-a-desktop-profiles-sign-ins)).
 The agent's `boite browser profiles` and `open <url> --profile <name>` are
 described in the [CLI](cli.md).
 

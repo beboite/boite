@@ -1444,7 +1444,12 @@ export const fr: Translation = {
     tooMany: '{count} profils de navigateur au plus.',
     deleteTitle: 'Supprimer le profil {name} ?',
     deleteBody: 'Ses onglets ouverts se ferment, et ses cookies, son stockage et ses connexions sont effacés de cet ordinateur. Impossible de revenir en arrière.',
-    deleteFailed: "Le profil a été retiré, mais ses données n'ont pas pu être effacées : {reason}"
+    deleteFailed: "Le profil a été retiré, mais ses données n'ont pas pu être effacées : {reason}",
+    copySignIns: 'Copier les connexions vers les agents',
+    copySignInsHint: 'Envoyer les cookies de {name} au navigateur de l’agent d’une machine, dans le même profil',
+    copied: '{count} cookies de {name} copiés vers {machine}.',
+    copiedNone: '{name} n’a aucun cookie à copier.',
+    copyFailed: 'Les connexions n’ont pas pu être copiées : {reason}'
   },
 
   terminal: {

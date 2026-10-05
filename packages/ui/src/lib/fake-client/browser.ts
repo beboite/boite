@@ -1,9 +1,9 @@
-import { browserActionError, DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE, remoteBrowserInputError, remoteFrameOptionsError, type AgentBrowserTab, type BrowserReply, type RemoteBrowserFrame, type RpcParams, type ThreadId } from '@boite/contracts';
+import { browserActionError, browserCookiesError, browserProfileIdError, browserProfilesOf, DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE, remoteBrowserInputError, remoteFrameOptionsError, type AgentBrowserTab, type BrowserReply, type RemoteBrowserFrame, type RpcParams, type ThreadId } from '@boite/contracts';
 import { refusal } from './shared';
 import { fakeBrowserScreen, type FakePage } from './browser-screen';
 import type { FakeContext, FakeMethods } from './context';
 
-type Methods = 'browser.command' | 'browser.remoteFrame' | 'browser.remoteInput' | 'browser.remoteStatus';
+type Methods = 'browser.command' | 'browser.importCookies' | 'browser.remoteFrame' | 'browser.remoteInput' | 'browser.remoteStatus';
 
 interface Tab extends FakePage { tabId: string; profile: string; history: string[]; historyIndex: number; at: number }
 interface Browser { tabs: Tab[]; active: string | null; frames: (RemoteBrowserFrame & { taken: number })[]; requestedAt: number }
@@ -111,6 +111,22 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
 
   return {
     'browser.command': command,
+    // The profile is made here as the core makes it; the cookies themselves are counted, not kept: fake pages have no sign-in.
+    'browser.importCookies': async ({ profile, cookies }) => {
+      const problem = browserCookiesError(cookies);
+      if (problem) throw refusal(problem);
+      if (profile.id === PRIVATE_BROWSER_PROFILE) throw refusal('a private tab keeps nothing: copy sign-ins into a named profile or the default one');
+      if (profile.id !== DEFAULT_BROWSER_PROFILE) {
+        const idProblem = browserProfileIdError(profile.id);
+        if (idProblem) throw refusal(idProblem);
+        const { profiles } = browserProfilesOf(ctx.settings);
+        if (!profiles.some(known => known.id === profile.id)) {
+          ctx.settings = { ...ctx.settings, browserProfiles: [...profiles, { id: profile.id, name: profile.name?.trim() || profile.id }] };
+          ctx.emit('settings.updated', { ...ctx.settings });
+        }
+      }
+      return { imported: cookies.length, profile: profile.id };
+    },
     'browser.remoteStatus': async ({ threadId }) => {
       watching(threadId);
       const tabs = tabsOf(browsers.get(threadId));

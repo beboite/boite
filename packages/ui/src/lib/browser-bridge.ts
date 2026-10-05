@@ -48,6 +48,8 @@ export interface BrowserBridge {
   create(id: string, url: string, profile?: string): void;
   /** Erases a profile's cookies, storage and sign-ins on this computer. Only the shell has any. */
   deleteProfile?(profile: string): Promise<void>;
+  /** Every cookie the profile holds on this computer, as the DevTools protocol lists them. Only the Windows shell reads any. */
+  cookies?(profile: string): Promise<unknown[]>;
   navigate(id: string, url: string): void;
   back(id: string): void;
   forward(id: string): void;

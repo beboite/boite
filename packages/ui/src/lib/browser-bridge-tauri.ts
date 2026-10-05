@@ -17,7 +17,7 @@
  * the shell this module is a class nobody constructs.
  */
 import type { BrowserBridge, BrowserEvent, SurfaceRect } from './browser-bridge';
-import type { PreviewReference } from '@boite/contracts';
+import { DEFAULT_BROWSER_PROFILE, type PreviewReference } from '@boite/contracts';
 import { currentZoom } from './zoom';
 import { fitBrowserViewport } from './browser-viewport';
 
@@ -112,6 +112,19 @@ export class TauriBridge implements BrowserBridge {
   async deleteProfile(profile: string): Promise<void> {
     const invoke = await this.#ready();
     await invoke<null>('browser_profile_delete', { profile });
+  }
+
+  /**
+   * Read through a view of that profile made for the purpose, blank and never
+   * placed, then destroyed: no tab of the user's is touched.
+   */
+  async cookies(profile: string): Promise<unknown[]> {
+    const id = `browser:cookies-${crypto.randomUUID()}`;
+    this.create(id, '', profile === DEFAULT_BROWSER_PROFILE ? undefined : profile);
+    try {
+      const reply = await (this.#queues.get(id) ?? Promise.resolve()).then(async () => (await this.#ready())<{ cookies?: unknown }>('browser_cookies', { id }));
+      return Array.isArray(reply?.cookies) ? reply.cookies : [];
+    } finally { this.destroy(id); }
   }
 
   navigate(id: string, url: string): void {

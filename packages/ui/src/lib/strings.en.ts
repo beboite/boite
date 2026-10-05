@@ -1518,7 +1518,12 @@ export const strings = {
     tooMany: 'At most {count} browser profiles.',
     deleteTitle: 'Delete the profile {name}?',
     deleteBody: 'Its open tabs close, and its cookies, storage and sign-ins are erased from this computer. This cannot be undone.',
-    deleteFailed: 'The profile was removed, but its data could not be erased: {reason}'
+    deleteFailed: 'The profile was removed, but its data could not be erased: {reason}',
+    copySignIns: 'Copy sign-ins to agents',
+    copySignInsHint: 'Send the cookies of {name} to the agent browser of a machine, into the same profile',
+    copied: '{count} cookies of {name} copied to {machine}.',
+    copiedNone: '{name} holds no cookie to copy.',
+    copyFailed: 'The sign-ins could not be copied: {reason}'
   },
 
   terminal: {

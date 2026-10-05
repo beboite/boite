@@ -10,6 +10,7 @@ import { hostname } from 'node:os';
 import { join } from 'node:path';
 import {
   browserActionError,
+  browserCookiesError,
   browserProfileIdError,
   browserPresetSize,
   browserProfilesOf,
@@ -38,7 +39,7 @@ import type { Core } from './core.ts';
 import type { Connection } from './router.ts';
 import { refused } from './errors.ts';
 import { Cdp } from './browser/cdp.ts';
-import { chromiumArgs, findChromium } from './browser/chromium.ts';
+import { chromiumArgs, findChromium, keepSession } from './browser/chromium.ts';
 import { TabRecorder } from './browser/recorder.ts';
 import { EDITABLE_SCRIPT, KEY_CODES, PAGE_INFO_SCRIPT, SNAPSHOT_SCRIPT, targetScript } from './browser/scripts.ts';
 
@@ -210,6 +211,7 @@ export class AgentBrowser {
     if (found.path === null) throw refused(`the agent browser cannot start on ${this.#machine}: ${found.reason}`);
     const dir = this.#profileDir(profile);
     mkdirSync(dir, { recursive: true });
+    if (profile !== PRIVATE_BROWSER_PROFILE) keepSession(dir);
     const spawned = this.#core.procs.spawn(SCOPE, found.path, chromiumArgs(dir), { agentRoot: false, extraPipes: 2 });
     // Chromium writes to both pipes; nobody reads them, so they are drained.
     void spawned.proc.stdout.pipeTo(new WritableStream()).catch(() => {});
@@ -225,6 +227,11 @@ export class AgentBrowser {
         cdp.send('Browser.getVersion', {}, undefined, 20_000),
         spawned.exited.then(() => { throw new Error('the browser exited while starting; another process may hold its profile folder'); }),
       ]);
+      // A kept session brings back the pages it had: the agent's tabs are opened by its commands only.
+      const { targetInfos } = await cdp.send<{ targetInfos: Array<{ targetId: string; type: string; url: string }> }>('Target.getTargets');
+      for (const target of targetInfos) {
+        if (target.type === 'page' && target.url !== 'about:blank') await cdp.send('Target.closeTarget', { targetId: target.targetId }).catch(() => {});
+      }
       // Pages that open a window (a sign-in popup) are adopted as tabs of the same conversation.
       await cdp.send('Target.setDiscoverTargets', { discover: true });
       await cdp.send('Browser.setDownloadBehavior', { behavior: 'deny' }).catch(() => {});
@@ -611,6 +618,39 @@ export class AgentBrowser {
     } catch (error) {
       this.#core.log('warn', `browser profile cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  /**
+   * The owner's desktop hands over the sign-ins of one of its profiles. A
+   * profile this machine does not list yet is added under the same id and
+   * name, so `open --profile` names it here as on the desktop.
+   */
+  async importCookies({ profile, cookies }: RpcParams<'browser.importCookies'>): Promise<{ imported: number; profile: string }> {
+    if (!profile || typeof profile !== 'object' || typeof profile.id !== 'string') throw refused('browser.importCookies needs the profile to copy into');
+    const problem = browserCookiesError(cookies);
+    if (problem) throw refused(problem);
+    if (this.#closed) throw refused('the core is shutting down');
+    const id = profile.id;
+    if (id === PRIVATE_BROWSER_PROFILE) throw refused('a private tab keeps nothing: copy sign-ins into a named profile or the default one');
+    if (id !== DEFAULT_BROWSER_PROFILE) {
+      const idProblem = browserProfileIdError(id);
+      if (idProblem) throw refused(idProblem);
+      const settings = this.#core.settings.get(), { profiles } = browserProfilesOf(settings);
+      if (!profiles.some(known => known.id === id)) {
+        const wanted = typeof profile.name === 'string' && profile.name.trim() ? profile.name.trim() : id;
+        const taken = new Set(profiles.map(known => known.name.toLowerCase()));
+        let name = wanted;
+        for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${wanted} ${n}`;
+        this.#core.settings.set({ browserProfiles: [...profiles, { id, name }] });
+      }
+    }
+    this.#watch();
+    const engine = await this.#engine(id);
+    clearTimeout(engine.idle);
+    try { await engine.cdp.send('Storage.setCookies', { cookies }); }
+    catch (error) { throw refused(`the browser refused these cookies: ${error instanceof Error ? error.message : String(error)}`); }
+    finally { this.#idle(engine); }
+    return { imported: cookies.length, profile: id };
   }
 
   // ---------- viewers ----------
