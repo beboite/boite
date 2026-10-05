@@ -19,25 +19,6 @@ encode is greyed out there. Stopping opens a video player with download and
 discard actions, or says the view cannot play the codec and keeps the download. The [CLI](cli.md) exposes the same tools
 to agents, including recording and attaching the result to chat.
 
-## Agent browser control
-
-On by default on the owner's Windows desktop, the one that hosts its
-conversations' tabs. The switch is in Settings > General > Built-in browser,
-above the browser profiles, and stays on this device. It grants the
-agent access to the open conversation's browser tabs: page text, screenshots,
-clicks, typing, navigation and JavaScript evaluation. The tabs use the existing
-browser profile, including signed-in sessions. Turn the switch off when those
-sessions must stay out of an agent's reach; the normal browser remains usable
-with it off.
-
-Only the owner UI can register that grant with the core. The core refuses
-requests without a consenting, subscribed host, and an agent token cannot
-register one or target another conversation. Turning the switch off withdraws
-the grant and rejects pending replies. Actions already dispatched to a page may
-finish; disabling the switch does not undo them. Disconnecting or changing the
-open conversation also releases the host. A phone cannot enable access on the
-hosting desktop. See the [browser CLI](cli.md#test-a-page-in-the-desktop-browser).
-
 ## Floating panel and browser overlays
 
 In the shell, the browser toolbar can detach the panel into a floating card
@@ -58,15 +39,13 @@ page.
 
 Switching conversations or machines and hiding the panel parks browser pages
 without destroying them. Their forms, navigation history and recordings remain
-in memory. With Agent browser control enabled, a conversation opened once on
-the Windows desktop keeps its browser host while Boite stays connected, so its
-agent can continue working in the background. A page created or driven
-there never takes the keyboard or brings the window forward; it gets the focus
-when the user clicks it. Closing tabs, archiving the
+in memory. The agent's own tabs are not panel pages: they live in the browser
+of the machine that runs the conversation ([the agent's browser](browser.md))
+and keep working whichever client is open. A page the shell creates in the
+background never takes the keyboard or brings the window forward; it gets the
+focus when the user clicks it. Closing tabs, archiving the
 conversation or quitting the shell releases their pages. Reloading the UI
 recreates pages from their stored addresses, without preserving live DOM state.
-Remote viewers still follow the conversation and tab currently shown on the
-desktop.
 
 Manual archive here or project removal clears the thread's panel and destroys
 its browser views. After the layout has been cleared, restoring the thread starts
@@ -92,7 +71,8 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 
 | Surface  | Tab      | What it shows                                                                 |
 | -------- | -------- | ----------------------------------------------------------------------------- |
-| Browser  | many     | a shell child webview with persistent cookies; test fixtures use an iframe |
+| Browser  | many     | the user's own pages, in a shell child webview with persistent cookies; test fixtures use an iframe |
+| Agent browser | one | the agent's tabs on the conversation's machine, covered until Show, then live; see [browser.md](browser.md) |
 | Changes  | one      | `git.status` of the working directory, a file's diff on click                 |
 | Files    | one      | the working directory as a tree, `files.list` one directory at a time         |
 | File     | per path | a text editor with save, an image viewer with zoom and pan, a video or audio player |
@@ -100,7 +80,7 @@ it, and the menu's last row, Choose the buttons, leads back to the switches.
 | Messages | one      | agent exchanges, filtered to all, sent or received; a chat count opens its burst |
 | Subagents | one     | the thread's workflow runs and subagents in one list, a run's graph, a subagent's conversation, see [delegation.md](delegation.md) and [workflows.md](workflows.md) |
 | Trace    | one      | the thread's processes, see [trace.md](trace.md)                              |
-| Device   | one      | the simulators and emulators open in the thread, behind an experiment, see [devices.md](devices.md) |
+| Device   | one      | the simulators and emulators open in the thread, covered until Show, see [devices.md](devices.md) |
 
 The iframe bridge belongs to browser test fixtures; ordinary web clients have
 no native Browser surface. [Portability](portability.md#remaining-gaps) records
@@ -134,11 +114,18 @@ shell's single browser process (`src/platform/webview_profiles.rs`): the
 debugging port is unchanged, and WebView2 removes a deleted profile's folder
 when that process exits, which is why an id is never reused. macOS keeps each
 profile in a WebKit data store, which needs macOS 14. The Linux shell has no
-built-in browser. `tests/e2e/browser-profiles.test.ts` checks separate cookies,
-their survival across a restart and deletion in the real shell.
+built-in browser. `tests/e2e/browser-profiles.test.ts` checked separate cookies,
+their survival across a restart and deletion in the real shell. It drove the
+shell's tabs through `browser.command`, which now reaches the core's browser, so
+it and `browser-native.test.ts` are skipped until they are rewritten on the
+shell's `browser_protocol` command on a Windows machine.
 
-The agent's `boite browser profiles` and `open <url> --profile <name>`, and the
-rest of its agent-browser commands, are described in the [CLI](cli.md).
+The agent's browser runs on the machine of its conversation and keeps its own
+copy of each profile there. **Copy sign-ins to agents**, on a profile's row in
+the Windows desktop app, sends that profile's cookies to a machine's agent
+browser ([the agent's browser](browser.md#copying-a-desktop-profiles-sign-ins)).
+The agent's `boite browser profiles`, `open <url> --profile <name>` and the rest
+of its agent-browser commands are described in the [CLI](cli.md).
 
 ### Sign-in popups and new windows
 
@@ -168,8 +155,9 @@ runtime already reports Chrome there, in the header and in
 `navigator.userAgentData`. Edge's user agent would double the "Microsoft Edge"
 brand. A DevTools override changes the headers of cross-site frames but not
 their `navigator.userAgentData`, and that mismatch is the kind bot checks such as
-Turnstile reject. `tests/e2e/browser-profiles.test.ts` checks the popup's opener,
-profile and missing bridge, and the `_blank` tab.
+Turnstile reject. `tests/e2e/browser-profiles.test.ts` checked the popup's opener,
+profile and missing bridge, and the `_blank` tab, before it was skipped (see
+Browser profiles above).
 
 ### Local HTML artifacts
 
@@ -295,8 +283,8 @@ watching keeps the request on its panel for the next open.
 `panel` toggles the panel, `browser`, `changes`, `files`, `tasks` and `trace`
 open their surface, `close-surface` closes the active tab. The defaults are in
 [keybindings.md](keybindings.md). With the launcher showing, a single letter
-opens a surface: A, B, C, F, K, M, T. M opens Messages. D opens Device when
-its experiment is on.
+opens a surface: A, B, C, D, F, K, M, T, W. M opens Messages, D the Device
+surface and W the Agent browser.
 
 ## Experimental PR review
 

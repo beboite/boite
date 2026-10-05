@@ -135,7 +135,7 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 588,000 |
 | UI files, excluding `.br` and `.gz` copies | 4,225,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,505,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,550,000 |
 
 The total JavaScript measure excludes native binaries and source maps. On
 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
@@ -157,6 +157,13 @@ labels and their translations add about 22,700 UI bytes, and the grant checks,
 notices and control CLI about 40,800 core bytes. The UI limit rises to
 4,225,000 and the core JavaScript limit to 3,505,000, leaving about 19 KB and
 17 KB of headroom.
+
+The agent browser on the conversation's machine ([the agent's browser](browser.md))
+then measured 3,531,655 bytes of emitted core JavaScript on the same day: the
+DevTools client, the browser launcher, the in-browser recorder and the page
+scripts add about 44,100 bytes, less the removed desktop relay. The core
+JavaScript limit rises to 3,550,000, leaving 18,345 bytes of headroom; the
+other limits are unchanged.
 
 On 2026-10-03, `290ba1f3` measured 3,977,635 UI bytes. Adding project Working
 and Done counters, folded project lists and their empty states measured

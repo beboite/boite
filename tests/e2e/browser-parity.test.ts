@@ -6,7 +6,7 @@ import { runCli } from '../../packages/core/src/cli.ts';
 import type { BrowserDiagnostics } from '../../packages/contracts/src/index.ts';
 
 const executable = process.env.BOITE_E2E_SHELL_EXE;
-test.skipIf(process.platform !== 'win32' || !executable)('native presets, appearance, diagnostics, recording and chat publication work together', async () => {
+test.skipIf(process.platform !== 'win32' || !executable)('in the desktop app, the agent browser presets, appearance, diagnostics, recording and chat publication work together', async () => {
   const fixture = readFileSync(join(import.meta.dir, 'fixtures/browser-parity.html'), 'utf8');
   const site = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
     const path = new URL(request.url).pathname;
@@ -56,7 +56,7 @@ test.skipIf(process.platform !== 'win32' || !executable)('native presets, appear
     })).toBe(0);
     const recorded = JSON.parse(lines.join('')) as { path: string; mime: string; bytes: number; durationMs: number };
     expect(recorded.bytes).toBeGreaterThan(1000); expect(recorded.durationMs).toBeGreaterThan(1000);
-    // WebView2 encodes H.264 into MP4, which iPhones play; a desktop from before codecs made WebM without it.
+    // The core's browser encodes H.264 into MP4, which iPhones play.
     const extension = recorded.mime === 'video/mp4' ? 'mp4' : 'webm';
     expect(recorded.path.endsWith(`.${extension}`)).toBe(true);
     const bytes = readFileSync(recorded.path);
@@ -88,28 +88,16 @@ test.skipIf(process.platform !== 'win32' || !executable)('native presets, appear
     } finally { await page.send('Runtime.releaseObject', { objectId: global.result.objectId }); }
     expect(decoded.width).toBeGreaterThan(200); expect(decoded.height).toBeGreaterThan(200);
     expect(Number.isFinite(decoded.duration)).toBe(true); expect(decoded.seeked).toBeGreaterThan(0);
-    console.log(`Native recording decoded: ${recorded.bytes} bytes, ${decoded.width}x${decoded.height}`);
+    console.log(`Recording decoded: ${recorded.bytes} bytes, ${decoded.width}x${decoded.height}`);
     const turn = await session.client.call('turns.start', { threadId: session.threadId, prompt: 'Vidéo du test du navigateur' });
     for (let i = 0; i < 100; i++) { if ((await session.client.call('threads.get', { threadId: session.threadId })).turns.find(t => t.id === turn.id)?.status === 'done') break; await Bun.sleep(50); }
     expect(await runCli(['attach', recorded.path, '--thread', session.threadId, '--data-dir', session.dataDir, '--json'], { cwd: session.projectDir, env: { BOITE_DATA_DIR: session.dataDir }, out: () => {}, err: text => { throw new Error(text); } })).toBe(0);
     expect(JSON.stringify((await session.client.call('threads.get', { threadId: session.threadId })).messages)).toContain(recorded.mime);
-    // Dismiss the review opened on stop, then exercise visible controls.
-    await page.evaluate(`document.querySelector('[data-testid=browser-tools-dialog]')?.dispatchEvent(new Event('cancel'));true`);
-    await page.click('[data-testid=browser-tools]');
-    await page.click('[data-value="preset:ipad-mini"]');
-    expect((await command({ kind: 'evaluate', expression: '[innerWidth,innerHeight]' }, id)).value).toEqual([768, 1024]);
-    await page.click('[data-testid=browser-tools]'); await page.click('[data-value="appearance:dark"]');
-    expect((await command({ kind: 'evaluate', expression: `matchMedia('(prefers-color-scheme: dark)').matches` }, id)).value).toBe(true);
-    await page.click('[data-testid=browser-tools]'); await page.click('[data-value="diagnostics"]');
-    await page.waitFor("document.querySelector('[data-testid=browser-tools-dialog][open]')");
-    await page.screenshot(join(captures, 'browser-parity-diagnostics.png'));
-    await page.evaluate(`document.querySelector('[data-testid=browser-tools-dialog]').dispatchEvent(new Event('cancel'));true`);
-    await command({ kind: 'reset-viewport' }, id);
     // Closing an active recording must release it and leave a new tab usable.
     await command({ kind: 'recording-start' }, id); await command({ kind: 'close' }, id);
     await command({ kind: 'open', url: site.url.href });
     expect(JSON.stringify(await command({ kind: 'snapshot' }))).toContain('ATELIER BOITE');
-    console.log('Visible controls and recording teardown passed');
+    console.log('Recording teardown passed');
     // A second conversation must leave the first page and its host available.
     const before = await command({ kind: 'status' });
     const tabId = (before.value as { tabs: { tabId: string }[] }).tabs[0]!.tabId;
@@ -120,22 +108,12 @@ test.skipIf(process.platform !== 'win32' || !executable)('native presets, appear
     await page.click(`[data-testid=thread-row][data-thread-id="${other.id}"]`);
     await page.waitFor(`document.querySelector('[data-testid=thread-row][data-thread-id="${other.id}"]')?.closest('.thread')?.classList.contains('open')`);
     expect((await command({ kind: 'evaluate', expression: 'globalThis.persistenceMarker' }, tabId)).value).toBe('same live page');
-    // Its tab is hidden now: WebView2 renders no frame, so native input would wait out the 15 s deadline.
-    expect((await command({ kind: 'evaluate', expression: 'document.visibilityState' }, tabId)).value).toBe('hidden');
-    const hiddenStart = Date.now();
-    const refs = ((await command({ kind: 'snapshot', interactive: true }, tabId)).value as { text: string }).text;
-    const ref = (line: string) => `@${new RegExp(`${line} \\[ref=(e\\d+)\\]`).exec(refs)?.[1]}`;
-    await command({ kind: 'fill', selector: ref('textbox "Ton message"'), text: 'Depuis un onglet caché' }, tabId);
-    await command({ kind: 'click', selector: ref('button "Afficher"') }, tabId);
-    expect((await command({ kind: 'get', what: 'text', selector: '#result' }, tabId)).value).toContain('Depuis un onglet caché');
-    expect(Date.now() - hiddenStart).toBeLessThan(5000);
-    console.log(`Hidden tab snapshot, fill and click passed in ${Date.now() - hiddenStart} ms`);
     const background = await command({ kind: 'open', url: site.url.href });
     expect(JSON.stringify(await command({ kind: 'snapshot' }, background.tabId))).toContain('ATELIER BOITE');
     await command({ kind: 'close' }, background.tabId);
     await page.click(`[data-testid=thread-row][data-thread-id="${session.threadId}"]`);
     await page.waitFor(`document.querySelector('[data-testid=thread-row][data-thread-id="${session.threadId}"]')?.closest('.thread')?.classList.contains('open')`);
     expect((await command({ kind: 'evaluate', expression: 'globalThis.persistenceMarker' }, tabId)).value).toBe('same live page');
-    console.log('Native background open, snapshot, close and live page persistence passed');
+    console.log('Background open, snapshot, close and live page persistence passed');
   } finally { await session.close(); site.stop(true); }
 }, 120_000);

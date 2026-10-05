@@ -1,39 +1,22 @@
 /**
- * The script an agent command runs inside a browser surface's page, through
+ * The script an agent command runs inside an agent browser page, through
  * `Runtime.evaluate`. It speaks agent-browser's vocabulary: a snapshot lists
  * the page as an accessibility-style tree whose elements carry `[ref=eN]`,
  * and every command takes `@eN`, a CSS selector or `text=...`.
  *
  * The page is untrusted. The kit keeps its state on a symbol of the page's
  * window, never in the DOM, so the page's own markup and observers are left
- * alone, and returns plain data only.
- *
- * A surface the desktop does not display has no rendered frame. Chromium then
- * never acknowledges native mouse or text input and drops key events, so the
- * kit reports `hidden` and the caller acts through DOM events instead.
+ * alone, and returns plain data only. Native input is the caller's; the kit's
+ * DOM actions reach an element something covers.
  */
 // @ts-nocheck -- the kit runs in the page's own realm and is serialized by `toString`,
-// so it reads only page globals and nothing from this module. The build minifies it
-// like the rest of the app.
+// so it reads only page globals and nothing from this module.
 function agentKit() {
   const KEY = Symbol.for('boite.agent.v1');
   if (window[KEY]) return window[KEY];
-  const K = { refs: new Map(), token: Math.random().toString(36).slice(2), leaving: false, acting: 0, policy: { accept: true, text: null }, dialogs: [] };
+  const K = { refs: new Map(), token: Math.random().toString(36).slice(2), leaving: false };
   Object.defineProperty(window, KEY, { value: K, configurable: true });
   addEventListener('beforeunload', () => { K.leaving = true; }, true);
-  // A dialog raised while an agent command runs is answered at once, so none opens over
-  // the desktop. `acting` is that command's deadline: the person using the tab between
-  // commands gets the page's real dialogs.
-  const native = { alert: window.alert, confirm: window.confirm, prompt: window.prompt };
-  const recent = () => Date.now() < K.acting;
-  const note = (type, message, accepted, value) => { K.dialogs.push({ type, message: String(message ?? '').slice(0, 500), accepted, ...(value === undefined ? {} : { value }) }); if (K.dialogs.length > 20) K.dialogs.shift(); };
-  window.alert = function (message) { if (!recent()) return native.alert.apply(this, arguments); note('alert', message, true); };
-  window.confirm = function (message) { if (!recent()) return native.confirm.apply(this, arguments); note('confirm', message, K.policy.accept); return K.policy.accept; };
-  window.prompt = function (message, fallback) {
-    if (!recent()) return native.prompt.apply(this, arguments);
-    const value = K.policy.accept ? (K.policy.text ?? fallback ?? '') : null;
-    note('prompt', message, K.policy.accept, value); return value;
-  };
 
   const IMPLICIT = { A: 'link', BUTTON: 'button', SELECT: 'combobox', TEXTAREA: 'textbox', SUMMARY: 'button', H1: 'heading', H2: 'heading', H3: 'heading', H4: 'heading', H5: 'heading', H6: 'heading', IMG: 'img', NAV: 'navigation', MAIN: 'main', FORM: 'form', UL: 'list', OL: 'list', LI: 'listitem', TABLE: 'table', TR: 'row', TD: 'cell', TH: 'columnheader', DIALOG: 'dialog', IFRAME: 'iframe', OPTION: 'option', ASIDE: 'complementary' };
   const INPUT = { checkbox: 'checkbox', radio: 'radio', button: 'button', submit: 'button', reset: 'button', image: 'button', range: 'slider', number: 'spinbutton', search: 'searchbox', file: 'button' };
@@ -202,8 +185,7 @@ function agentKit() {
     return nodes[0];
   };
 
-  K.state = () => ({ url: location.href, title: document.title, ready: document.readyState, hidden: document.visibilityState === 'hidden', token: K.token, leaving: K.leaving, dialogs: K.dialogs.length });
-  K.dialogsSince = count => K.dialogs.slice(count);
+  K.state = () => ({ url: location.href, title: document.title, ready: document.readyState, token: K.token, leaving: K.leaving });
 
   // Where to send native input, or null when the page must be driven through the DOM.
   K.point = async (target, mode) => {
@@ -256,7 +238,7 @@ function agentKit() {
   const KEYCODES = { Enter: 13, Tab: 9, Escape: 27, Backspace: 8, Delete: 46, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, Home: 36, End: 35, PageUp: 33, PageDown: 34, ' ': 32 };
   const focusable = () => Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),select,textarea,[tabindex],[contenteditable=true]')).filter(el => !el.disabled && el.tabIndex >= 0 && visible(el));
 
-  // DOM-level actions: the same effects, as events the page receives without a rendered frame.
+  // DOM-level actions: the same effects as native input, for an element something covers.
   K.dom = (kind, target, arg) => {
     if (kind === 'press') {
       const parts = arg.split('+'); const last = parts.pop(); const key = last === 'Space' ? ' ' : last;

@@ -79,6 +79,8 @@
       inputText={part.inputText}
       output={part.output}
       outputDeferred={part.outputDeferred ?? false}
+      inputDeferred={part.inputDeferred ?? false}
+      documentsDeferred={part.documentsDeferred ?? false}
       loadOutput={loadOutput ? () => loadOutput!(part.toolId) : undefined}
       status={part.status}
       exitCode={part.exitCode}

@@ -18,6 +18,12 @@ export interface SpawnOptions {
   agentRoot?: boolean;
   cwd?: string | undefined;
   env?: Record<string, string | undefined> | undefined;
+  /**
+   * `spawn` only: this many more pipes, the child's descriptors 3, 4 and on,
+   * whose ends this process holds in `fds`. The agent browser speaks the
+   * DevTools protocol over two of them instead of a port anyone could reach.
+   */
+  extraPipes?: number;
 }
 
 export type ChildProcess = Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
@@ -32,6 +38,8 @@ export interface SpawnedProcess {
   record: ProcessRecord;
   proc: ChildProcess;
   exited: Promise<number>;
+  /** This side of each `extraPipes` pipe, in order: the child's descriptor 3 first. */
+  fds?: number[];
 }
 
 export interface SpawnedPipedProcess {
@@ -260,16 +268,18 @@ export class ProcRegistry {
   spawn(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedProcess {
     this.assertAccepting();
     const env: Record<string, string | undefined> = { ...process.env, ...(opts.env ?? {}) };
+    const extra = Math.max(0, Math.floor(opts.extraPipes ?? 0));
     const proc = Bun.spawn({
       cmd: [cmd, ...args],
       cwd: opts.cwd,
       env,
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
+      ...(extra
+        ? { stdio: ['ignore', 'pipe', 'pipe', ...Array.from({ length: extra }, () => 'pipe' as const)] as ['ignore', 'pipe', 'pipe'] }
+        : { stdin: 'ignore' as const, stdout: 'pipe' as const, stderr: 'pipe' as const }),
       windowsHide: true,
       detached: OWN_GROUP,
-    });
+    }) as ChildProcess;
+    const fds = extra ? (proc.stdio as unknown[]).slice(3).map(Number) : undefined;
 
     const record = this.register(threadId, proc.pid, cmd, args, {
       root: opts.agentRoot !== false,
@@ -288,7 +298,7 @@ export class ProcRegistry {
       return code;
     });
 
-    return { record, proc, exited };
+    return { record, proc, exited, ...(fds ? { fds } : {}) };
   }
 
   /**

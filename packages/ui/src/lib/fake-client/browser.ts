@@ -1,129 +1,192 @@
-import { browserActionError, remoteBrowserInputError, remoteFrameOptionsError, REMOTE_URL_MAX, type RemoteBrowserFrame, type BrowserReply, type RpcParams } from '@boite/contracts';
+import { browserActionError, browserCookiesError, browserProfileIdError, browserProfilesOf, DEFAULT_BROWSER_PROFILE, findBrowserProfile, PRIVATE_BROWSER_PROFILE, remoteBrowserInputError, remoteFrameOptionsError, type AgentBrowserTab, type BrowserReply, type RemoteBrowserFrame, type RpcParams, type ThreadId } from '@boite/contracts';
 import { refusal } from './shared';
+import { fakeBrowserScreen, type FakePage } from './browser-screen';
 import type { FakeContext, FakeMethods } from './context';
 
-type Methods = 'browser.host' | 'browser.command' | 'browser.complete' | 'browser.remoteFrame' | 'browser.remoteInput' | 'browser.remoteStatus';
+type Methods = 'browser.command' | 'browser.importCookies' | 'browser.remoteFrame' | 'browser.remoteInput' | 'browser.remoteStatus';
 
-/** Mirrors packages/core/src/browser.ts for one client that is both the desktop and the viewer. */
+interface Tab extends FakePage { tabId: string; profile: string; history: string[]; historyIndex: number; at: number }
+interface Browser { tabs: Tab[]; active: string | null; frames: (RemoteBrowserFrame & { taken: number })[]; requestedAt: number }
+
+const VIEWPORT = { width: 1280, height: 800 };
+/** A 1×1 PNG: what `screenshot` hands the agent here. */
+const PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z/C/HgAGgwJ/lK3Q6wAAAABJRU5ErkJggg==';
+const TAB_ID = /^browser:[a-zA-Z0-9:-]{1,100}$/;
+
+/** The fake page's title: its host and path, as a page with no `<title>` reads in a tab. */
+function titleOf(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.host}${parsed.pathname === '/' ? '' : parsed.pathname}`;
+  } catch { return url; }
+}
+
+/**
+ * Mirrors the core's agent browser (packages/core/src/browser/) on a machine
+ * with a Chromium-based browser: the conversation's agent opens and drives
+ * headless tabs, and every client subscribed to the conversation watches them
+ * through frames. Pages are drawn, not loaded: a frame shows the address, the
+ * taps it took and the text typed into it.
+ */
 export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
-  const hosts = new Map<string, { expires: number; agent: boolean; live: boolean }>();
-  const shared = new Set<string>(), frames = new Map<string, RemoteBrowserFrame[]>();
-  const requestedAt = new Map<string, number>(), announced = new Set<string>();
-  const pending = new Map<string, { threadId: string; capture: boolean; resolve(value: BrowserReply): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
-  const settle = (threadId: string | undefined, all: boolean, reason: string) => {
-    for (const [id, item] of pending) if ((!threadId || item.threadId === threadId) && (all || !item.capture)) {
-      clearTimeout(item.timer); pending.delete(id); item.reject(refusal(reason));
-    }
+  const browsers = new Map<ThreadId, Browser>();
+  let seq = 0;
+  const of = (threadId: ThreadId): Browser => {
+    let browser = browsers.get(threadId);
+    if (!browser) { browser = { tabs: [], active: null, frames: [], requestedAt: 0 }; browsers.set(threadId, browser); }
+    return browser;
   };
-  const release = (threadId?: string) => {
-    if (threadId) { hosts.delete(threadId); shared.delete(threadId); frames.delete(threadId); requestedAt.delete(threadId); } else { hosts.clear(); shared.clear(); frames.clear(); requestedAt.clear(); }
-    for (const id of threadId ? [threadId] : [...announced]) changed(id);
-    settle(threadId, true, 'the browser host left this conversation');
+  const tabsOf = (browser: Browser | undefined): AgentBrowserTab[] => (browser?.tabs ?? []).map(tab => ({ tabId: tab.tabId, url: tab.url, title: tab.title, profile: tab.profile, active: tab.tabId === browser?.active }));
+  const changed = (threadId: ThreadId) => {
+    const browser = browsers.get(threadId);
+    ctx.emitToThread(threadId, 'browser.remoteChanged', { threadId, live: (browser?.tabs.length ?? 0) > 0, tabs: tabsOf(browser) });
   };
-  ctx.bus.onState(state => { if (state !== 'ready') release(); });
-  ctx.bus.on('thread.updated', thread => { if (thread.archived) release(thread.id); });
-  ctx.bus.on('thread.removed', ({ threadId }) => release(threadId));
-  // The desktop discards the recordings an agent left running when a turn that ran ends.
-  ctx.bus.on('turn.finished', turn => {
-    const host = hosts.get(turn.threadId);
-    if (turn.startedAt && host?.agent && host.expires >= Date.now()) ctx.bus.deliver('browser.turnFinished', { threadId: turn.threadId });
-  });
-  const live = (threadId: string) => (hosts.get(threadId)?.expires ?? 0) >= Date.now();
-  const showing = (threadId: string) => live(threadId) && shared.has(threadId) && !!hosts.get(threadId)?.live;
-  function changed(threadId: string) {
-    const now = showing(threadId);
-    if (now === announced.has(threadId)) return;
-    if (now) announced.add(threadId); else announced.delete(threadId);
-    ctx.emitToThread(threadId, 'browser.remoteChanged', { threadId, live: now });
-  }
-  const allowed = (threadId: string) => {
+  const closeAll = (threadId: ThreadId) => {
+    if (!browsers.get(threadId)?.tabs.length) { browsers.delete(threadId); return; }
+    browsers.delete(threadId);
+    changed(threadId);
+  };
+  ctx.bus.on('thread.updated', thread => { if (thread.archived) closeAll(thread.id); });
+  ctx.bus.on('thread.removed', ({ threadId }) => closeAll(threadId));
+
+  const watching = (threadId: ThreadId) => {
     if (ctx.thread(threadId).archived || !ctx.bus.subscribed.has(threadId)) throw refusal('subscribe to the active conversation before watching its browser');
-    if (!live(threadId)) throw refusal('Open this conversation in the Boite desktop app to share its browser.');
-    if (!shared.has(threadId)) throw refusal('Enable the remote-browser experiment on the hosting desktop first.');
   };
-  const dispatch = (params: RpcParams<'browser.command'>): Promise<BrowserReply> => {
-    if (ctx.thread(params.threadId).archived) throw refusal('browser.command needs an active conversation');
-    const problem = browserActionError(params.action);
+  /** A page that moves retires the frames a viewer took of it: their taps would land elsewhere. */
+  const moved = (browser: Browser, tab: Tab) => { browser.frames = browser.frames.filter(frame => frame.tabId !== tab.tabId); tab.at = Date.now(); };
+  const go = (browser: Browser, tab: Tab, url: string) => {
+    // The position is kept, not searched for: a page visited twice appears twice.
+    tab.history = [...tab.history.slice(0, tab.historyIndex + 1), url];
+    tab.historyIndex = tab.history.length - 1;
+    tab.url = url; tab.title = titleOf(url); tab.taps = 0; tab.text = ''; tab.scrollY = 0;
+    moved(browser, tab);
+  };
+
+  const command = async (params: RpcParams<'browser.command'>): Promise<BrowserReply> => {
+    const { threadId, action } = params;
+    if (ctx.thread(threadId).archived) throw refusal('browser.command needs an active conversation');
+    const problem = browserActionError(action);
     if (problem) throw refusal(problem);
-    if (params.tabId !== undefined && (typeof params.tabId !== 'string' || !/^browser:[a-zA-Z0-9:-]{1,100}$/.test(params.tabId))) throw refusal('browser tabId must come from browser status or open');
-    if (!live(params.threadId)) {
-      release(params.threadId);
-      throw refusal('Open this conversation in the Boite desktop app and enable Agent browser control in Settings > General.');
+    if (params.tabId !== undefined && (typeof params.tabId !== 'string' || !TAB_ID.test(params.tabId))) throw refusal('browser tabId must come from browser status or open');
+    const browser = browsers.get(threadId);
+    if (action.kind === 'status') return { value: { available: true, tabs: tabsOf(browser) } };
+    if (action.kind === 'profiles') {
+      const { profiles, defaultId } = browserProfilesOf(ctx.settings);
+      return { value: { default: defaultId, profiles: [{ id: DEFAULT_BROWSER_PROFILE, name: 'Default', kept: true }, ...profiles.map(profile => ({ id: profile.id, name: profile.name, kept: true })), { id: PRIVATE_BROWSER_PROFILE, name: 'Private', kept: false }] } };
     }
-    const capture = params.action.kind === 'remote-frame';
-    if (pending.size >= 16 || [...pending.values()].some(p => p.threadId === params.threadId && p.capture === capture)) throw refusal('the browser is busy; wait for the previous command');
-    const requestId = crypto.randomUUID();
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { pending.delete(requestId); reject(refusal('the desktop browser did not answer within 20 seconds')); }, 20000);
-      pending.set(requestId, { threadId: params.threadId, capture, resolve, reject, timer });
-      ctx.bus.deliver('browser.requested', { ...params, requestId });
-    });
+    const current = browser?.tabs.find(one => one.tabId === browser.active);
+    if (action.kind === 'open' && action.reuse && action.profile === undefined && browser && current) {
+      // agent-browser's `open` drives the current tab, as the core's does.
+      go(browser, current, action.url); changed(threadId);
+      return { tabId: current.tabId, url: current.url, title: current.title, profile: current.profile, value: { ok: true, navigated: true, url: current.url, title: current.title } };
+    }
+    if (action.kind === 'open') {
+      // As the core resolves it: the machine's default without a name, else an id or a name in any case.
+      const known = browserProfilesOf(ctx.settings);
+      const profile = action.profile === undefined ? known.defaultId : findBrowserProfile(known.profiles, action.profile);
+      if (profile === null) throw refusal(`no browser profile is named ${action.profile}; browser profiles lists them`);
+      const target = of(threadId);
+      const tab: Tab = { tabId: `browser:${++seq}-${crypto.randomUUID().slice(0, 8)}`, profile, url: action.url, title: titleOf(action.url), ...VIEWPORT, taps: 0, text: '', scrollY: 0, history: [action.url], historyIndex: 0, at: Date.now() };
+      target.tabs.push(tab); target.active = tab.tabId;
+      changed(threadId);
+      return { tabId: tab.tabId, url: tab.url, title: tab.title, profile };
+    }
+    const tab = browser?.tabs.find(one => one.tabId === (params.tabId ?? browser.active));
+    if (!browser || !tab) throw refusal('no browser tab in this conversation; use browser open, or pass a tabId from browser status');
+    const reply = (value: unknown = { ok: true }): BrowserReply => ({ tabId: tab.tabId, value });
+    switch (action.kind) {
+      case 'close': {
+        browser.tabs = browser.tabs.filter(one => one !== tab); moved(browser, tab);
+        if (browser.active === tab.tabId) browser.active = browser.tabs.at(-1)?.tabId ?? null;
+        if (browser.tabs.length === 0) browsers.delete(threadId);
+        changed(threadId);
+        return reply({ closed: true });
+      }
+      case 'navigate': go(browser, tab, action.url); browser.active = tab.tabId; changed(threadId); return { tabId: tab.tabId, url: tab.url, title: tab.title };
+      // The core's snapshot format, agent-browser's: one line per node, refs on what can be acted on.
+      case 'snapshot': return { tabId: tab.tabId, url: tab.url, title: tab.title, value: { url: tab.url, title: tab.title, refs: 2, text: [`- heading ${JSON.stringify(tab.title)} [ref=e1] [level=1]`, `- text: Taps: ${tab.taps}`, `- textbox [ref=e2]: ${JSON.stringify(tab.text)}`].join('\n') } };
+      case 'activate': browser.active = tab.tabId; changed(threadId); return { tabId: tab.tabId, url: tab.url, title: tab.title, value: { ok: true } };
+      case 'screenshot': return { tabId: tab.tabId, screenshot: { mime: 'image/png', base64: PIXEL_PNG } };
+      case 'click': tab.taps++; return reply();
+      case 'fill': tab.text = action.text; return reply();
+      case 'type': tab.text += action.text; return reply();
+      case 'press': if (action.key === 'Backspace') tab.text = tab.text.slice(0, -1); return reply();
+      case 'scroll': tab.scrollY = Math.max(0, action.y); return reply();
+      case 'evaluate': return reply(null);
+      case 'resize': tab.width = action.width; tab.height = action.height; moved(browser, tab); return reply({ width: tab.width, height: tab.height });
+      case 'reset-viewport': Object.assign(tab, VIEWPORT); moved(browser, tab); return reply(VIEWPORT);
+      case 'diagnostics': return reply({ entries: [], dropped: 0, history: [] });
+      case 'preset': case 'appearance': return reply();
+      default: throw refusal(`${action.kind} is not available in the demo browser`);
+    }
   };
-  const methods: ReturnType<typeof browserMethods> = {
-    'browser.remoteFrame': async ({ threadId, maxWidth, quality }) => {
-      allowed(threadId);
+
+  return {
+    'browser.command': command,
+    // The profile is made here as the core makes it; the cookies themselves are counted, not kept: fake pages have no sign-in.
+    'browser.importCookies': async ({ profile, cookies }) => {
+      const problem = browserCookiesError(cookies);
+      if (problem) throw refusal(problem);
+      if (profile.id === PRIVATE_BROWSER_PROFILE) throw refusal('a private tab keeps nothing: copy sign-ins into a named profile or the default one');
+      if (profile.id !== DEFAULT_BROWSER_PROFILE) {
+        const idProblem = browserProfileIdError(profile.id);
+        if (idProblem) throw refusal(idProblem);
+        const { profiles } = browserProfilesOf(ctx.settings);
+        if (!profiles.some(known => known.id === profile.id)) {
+          const wanted = profile.name?.trim() || profile.id, taken = new Set(profiles.map(known => known.name.toLowerCase()));
+          let name = wanted;
+          for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${wanted} ${n}`;
+          ctx.settings = { ...ctx.settings, browserProfiles: [...profiles, { id: profile.id, name }] };
+          ctx.emit('settings.updated', { ...ctx.settings });
+        }
+      }
+      return { imported: cookies.length, profile: profile.id };
+    },
+    'browser.remoteStatus': async ({ threadId }) => {
+      watching(threadId);
+      const tabs = tabsOf(browsers.get(threadId));
+      return { live: tabs.length > 0, tabs, available: true };
+    },
+    'browser.remoteFrame': async ({ threadId, tabId, maxWidth, quality }) => {
+      watching(threadId);
       const options = { ...(maxWidth === undefined ? {} : { maxWidth }), ...(quality === undefined ? {} : { quality }) };
       const problem = remoteFrameOptionsError(options);
       if (problem) throw refusal(problem);
-      if (Date.now() - (requestedAt.get(threadId) ?? 0) < 220) throw refusal('wait before requesting another browser frame');
-      requestedAt.set(threadId, Date.now());
-      const state = frames.get(threadId) ?? [];
-      frames.set(threadId, state);
-      const reply = await dispatch({ threadId, action: { kind: 'remote-frame', ...options } }); allowed(threadId);
-      if (frames.get(threadId) !== state) throw refusal('the shared browser changed');
-      const frame = reply.frame;
-      if (!frame || typeof frame.id !== 'string' || frame.id.length > 80 || !/^browser:[a-zA-Z0-9:-]{1,100}$/.test(frame.tabId) ||
-        typeof frame.base64 !== 'string' || frame.base64.length > 2 * 1024 * 1024 || !/^[A-Za-z0-9+/]+={0,2}$/.test(frame.base64) ||
-        ![frame.width, frame.height].every(n => Number.isInteger(n) && n > 0 && n <= 16384)) throw refusal('the desktop returned an invalid browser frame');
-      frame.title = String(frame.title ?? '').slice(0, 200); frame.at = Date.now();
-      if (frame.url !== undefined) frame.url = String(frame.url).slice(0, REMOTE_URL_MAX);
-      state.push({ ...frame, base64: '' });
-      frames.set(threadId, state.filter(f => Date.now() - f.at < 5000).slice(-8)); return frame;
+      const browser = browsers.get(threadId);
+      const tab = browser?.tabs.find(one => one.tabId === (tabId ?? browser.active));
+      if (!browser || !tab) throw refusal(tabId ? 'that browser tab is closed' : 'the agent has no browser tab open in this conversation');
+      if (Date.now() - browser.requestedAt < 220) throw refusal('wait before requesting another browser frame');
+      browser.requestedAt = Date.now();
+      const frame: RemoteBrowserFrame = { id: crypto.randomUUID(), tabId: tab.tabId, title: tab.title, width: tab.width, height: tab.height, base64: fakeBrowserScreen(tab), at: Date.now(), url: tab.url };
+      browser.frames = [...browser.frames.filter(one => Date.now() - one.taken < 5000).slice(-7), { ...frame, base64: '', taken: Date.now() }];
+      return frame;
     },
     'browser.remoteInput': async ({ threadId, frameId, input }) => {
-      allowed(threadId); const problem = remoteBrowserInputError(input); if (problem) throw refusal(problem);
-      const frame = frames.get(threadId)?.find(f => f.id === frameId && Date.now() - f.at < 5000);
-      if (!frame) throw refusal('refresh the live browser before interacting');
+      watching(threadId);
+      const problem = remoteBrowserInputError(input);
+      if (problem) throw refusal(problem);
+      const browser = browsers.get(threadId);
+      const frame = browser?.frames.find(one => one.id === frameId && Date.now() - one.taken < 5000);
+      const tab = frame && browser?.tabs.find(one => one.tabId === frame.tabId);
+      if (!browser || !frame || !tab) throw refusal('the page changed; refresh the live browser before interacting');
       if (input.kind === 'tap' && (input.width !== frame.width || input.height !== frame.height)) throw refusal('the browser viewport changed; refresh before tapping');
-      await dispatch({ threadId, tabId: frame.tabId, action: { kind: 'remote-input', frameId, input } }); return { ok: true };
-    },
-    'browser.remoteStatus': async ({ threadId }) => {
-      if (ctx.thread(threadId).archived || !ctx.bus.subscribed.has(threadId)) throw refusal('subscribe to the active conversation before watching its browser');
-      return { live: showing(threadId) };
-    },
-    'browser.host': async ({ threadId, enabled, allowAgentControl, remote = false, live: tab = false }) => {
-      if (typeof enabled !== 'boolean' || typeof remote !== 'boolean' || typeof tab !== 'boolean') throw refusal('browser.host enabled, remote and live must be booleans');
-      const thread = ctx.thread(threadId);
-      if (enabled && thread.archived) throw refusal('browser.host needs an active conversation');
-      if (enabled && allowAgentControl !== true && !remote) {
-        release(threadId);
-        throw refusal('browser.host requires explicit consent: enable Agent browser control in Settings > General, or Live browser on other devices in Settings > Experiments, on the hosting desktop');
+      switch (input.kind) {
+        case 'tap': tab.taps++; break;
+        case 'text': tab.text += input.text; break;
+        case 'key': if (input.key === 'Backspace') tab.text = tab.text.slice(0, -1); break;
+        case 'scroll': tab.scrollY = Math.max(0, tab.scrollY + input.y); break;
+        case 'viewport': tab.width = input.width; tab.height = input.height; moved(browser, tab); break;
+        case 'reset-viewport': Object.assign(tab, VIEWPORT); moved(browser, tab); break;
+        case 'navigate': go(browser, tab, input.url); changed(threadId); break;
+        case 'history': {
+          const at = tab.historyIndex + (input.direction === 'back' ? -1 : 1);
+          const url = tab.history[at];
+          if (url) { tab.historyIndex = at; tab.url = url; tab.title = titleOf(url); tab.taps = 0; tab.text = ''; tab.scrollY = 0; moved(browser, tab); changed(threadId); }
+          break;
+        }
+        case 'reload': moved(browser, tab); break;
       }
-      if (!enabled) { release(threadId); return { ok: true }; }
-      const agent = allowAgentControl === true;
-      if (hosts.get(threadId)?.agent && !agent) settle(threadId, false, 'agent browser control was turned off on the desktop');
-      hosts.set(threadId, { expires: Date.now() + 35000, agent, live: tab });
-      if (remote) shared.add(threadId); else { shared.delete(threadId); frames.delete(threadId); requestedAt.delete(threadId); }
-      changed(threadId);
-      return { ok: true };
-    },
-    'browser.command': async params => {
-      const host = hosts.get(params.threadId);
-      if (host && host.expires >= Date.now() && !host.agent) {
-        ctx.thread(params.threadId);
-        throw refusal('Open this conversation in the Boite desktop app and enable Agent browser control in Settings > General.');
-      }
-      return dispatch(params);
-    },
-    'browser.complete': async ({ requestId, result, error }) => {
-      const item = pending.get(requestId);
-      if (!item) throw refusal('browser.complete request does not belong to this desktop');
-      pending.delete(requestId); clearTimeout(item.timer);
-      if (error !== undefined) item.reject(refusal(String(error).slice(0, 4000)));
-      else if (!result || typeof result !== 'object' || JSON.stringify(result).length > 8 * 1024 * 1024) item.reject(refusal('browser result must be an object smaller than 8 MB'));
-      else item.resolve(result);
       return { ok: true };
     },
   };
-  return methods;
 }

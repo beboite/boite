@@ -15,7 +15,12 @@ import { browserProfiles } from './browser-profiles.svelte';
 import { work } from './work-prefs.svelte';
 import { ZOOM_STEPS } from './zoom';
 
-export type SurfaceKind = 'agents' | 'messages' | 'trace' | 'browser' | 'changes' | 'files' | 'file' | 'tasks' | 'device';
+/**
+ * `browser` is a page in this desktop's own webview, the user's browser.
+ * `agent-browser` watches the headless browser the conversation's agent drives
+ * on the machine that runs it, from any client.
+ */
+export type SurfaceKind = 'agents' | 'messages' | 'trace' | 'browser' | 'agent-browser' | 'changes' | 'files' | 'file' | 'tasks' | 'device';
 
 /** Every kind a stored layout may name, and what `parse` checks a blob against. */
 export const SURFACE_KINDS: readonly SurfaceKind[] = [
@@ -23,6 +28,7 @@ export const SURFACE_KINDS: readonly SurfaceKind[] = [
   'messages',
   'trace',
   'browser',
+  'agent-browser',
   'changes',
   'files',
   'file',
@@ -34,7 +40,7 @@ export const SURFACE_KINDS: readonly SurfaceKind[] = [
  * The kinds that get one tab and no more: asking for them again brings the tab
  * that exists forward. A browser page and a file are the two that multiply.
  */
-const SINGLETON_KINDS: readonly SurfaceKind[] = ['agents', 'messages', 'trace', 'changes', 'files', 'tasks', 'device'];
+const SINGLETON_KINDS: readonly SurfaceKind[] = ['agents', 'messages', 'trace', 'agent-browser', 'changes', 'files', 'tasks', 'device'];
 
 export interface Surface {
   id: string;

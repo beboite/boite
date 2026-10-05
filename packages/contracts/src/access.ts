@@ -68,8 +68,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'threads.pullRequest', // Read-only branch metadata shown on the same phone thread cards.
   'threads.pullRequests', // Read-only conversation links, including dependency order, on phones.
   'threads.pullRequestReview', 'threads.pullRequestFiles', // Bounded read-only data for PRs the owner already linked.
-  'browser.remoteFrame', 'browser.remoteInput', // Only the subscribed conversation's owner-enabled shared page; no scripts or host paths.
-  'browser.remoteStatus', // Only whether the subscribed conversation has an owner-shared browser tab; no address or content.
+  'browser.remoteFrame', 'browser.remoteInput', // Only the subscribed conversation's agent browser; taps, keys and http(s) addresses, no scripts or host paths.
+  'browser.remoteStatus', // The subscribed conversation's agent tabs (address and title) and whether this machine has a browser.
   // The Device panel on a phone. The core acts only on simulators and emulators its SDK lists, for the subscribed
   // conversation, runs no command a device names and returns no host path: what the phone could ask of the agent.
   'devices.list', 'devices.sessions', 'devices.frame', 'devices.input', 'devices.open', 'devices.close', 'devices.screenshot',
@@ -81,6 +81,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'threads.activity.control',
   'messages.list',
   'messages.toolOutput', // Read only the output of a tool in the conversation the phone can already read.
+  'messages.toolPart', // The whole journalled tool call a phone's page deferred, in a conversation it can already read.
   'messages.attachment', // Only journalled bytes in a conversation already readable from the phone.
   'artifacts.read', // Download only snapshots already published in a visible conversation, never host paths.
   'threads.update',
@@ -150,7 +151,7 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
 /** Push events must not bypass the read permissions enforced on RPC calls. */
 export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'threads.pullRequestsChanged', // Links already readable on the subscribed conversation.
-  'browser.remoteChanged', // Whether the subscribed conversation's shared browser tab exists, as browser.remoteStatus says.
+  'browser.remoteChanged', // The subscribed conversation's agent tabs, as browser.remoteStatus says.
   'devices.changed', // The subscribed conversation's Device panel sessions, as devices.sessions returns them.
   'agents.changed', // Invalidation only; agents.snapshot applies the device read policy.
   // Team invalidation contains only the subscribed root ID; delegation.get enforces its read scope.

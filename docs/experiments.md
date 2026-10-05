@@ -5,8 +5,9 @@ and belong to this client device. They do not change another machine's settings.
 A phone has its own Experiments row under Settings, This phone.
 
 A finished experiment leaves this page: it turns on by default and its switch
-moves to the Settings page it belongs to. [Chat files and previews](chat-files.md)
-and [agent browser control](panel.md#agent-browser-control) did.
+moves to the Settings page it belongs to, as [chat files and previews](chat-files.md)
+did. The agent's browser needs no switch: it runs on the machine of the
+conversation ([the agent's browser](browser.md)).
 
 ## Open chat links
 
@@ -42,12 +43,6 @@ returning it to its original position. Throwing the rope does neither. Maximized
 that ignore positioning shake the interface instead. Hits do not overlap.
 Reduced motion disables new throws and stops any visible rope.
 
-## Device panel
-
-The Device card in the right panel, its launcher key and the panel opening on
-the Device tab when a simulator or emulator opens in the conversation. Each
-client turns it on for itself; the agent's `boite device` commands work without
-it. See [devices](devices.md).
 
 ## Resident agents
 

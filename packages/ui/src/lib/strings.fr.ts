@@ -35,14 +35,21 @@ export const fr: Translation = {
     creditUsed: '{used} utilisés',
   },
   remoteBrowser: {
-    display: 'Affichage', resolution: 'Résolution de la page', fitPhone: 'Adapter à cet écran', phone: 'Téléphone', tablet: 'Tablette', rotate: 'Pivoter', width: 'Largeur', height: 'Hauteur', apply: 'Appliquer', sharedSize: 'La résolution change aussi l’onglet partagé sur le PC.', restoreSize: 'Reprendre la taille du panneau PC', previewZoom: 'Zoom de l’aperçu (cet appareil seulement)', fit: 'Ajuster', panHint: 'Glissez pour déplacer l’aperçu. Utilisez les flèches pour défiler dans la page.',
-    hostMissing: 'Le PC n’affiche pas encore le navigateur de cette conversation.',
+    display: 'Affichage', resolution: 'Résolution de la page', fitPhone: 'Adapter à cet écran', phone: 'Téléphone', tablet: 'Tablette', rotate: 'Pivoter', width: 'Largeur', height: 'Hauteur', apply: 'Appliquer', sharedSize: 'La résolution change aussi la page que voit l’agent.', restoreSize: 'Revenir à la taille par défaut', previewZoom: 'Zoom de l’aperçu (cet appareil seulement)', fit: 'Ajuster', panHint: 'Glissez pour déplacer l’aperçu. Utilisez les flèches pour défiler dans la page.',
     address: 'Adresse', go: 'Aller', back: 'Précédent', forward: 'Suivant', reload: 'Recharger', badAddress: 'Saisissez une adresse web (http ou https).',
-    title: 'Navigateur du PC en direct', waiting: 'En attente du PC', live: 'En direct', paused: 'En pause', reconnecting: 'Reconnexion', pause: 'Pause', resume: 'Reprendre',
-    interact: 'Toucher ou faire défiler la page partagée', image: 'Vue en direct du navigateur du PC', scrollUp: 'Défiler vers le haut', scrollDown: 'Défiler vers le bas',
+    title: 'Navigateur de l’agent', waiting: 'En attente de la page', live: 'En direct', paused: 'En pause', reconnecting: 'Reconnexion', pause: 'Pause', resume: 'Reprendre',
+    interact: 'Toucher ou faire défiler la page partagée', image: 'Vue en direct du navigateur de l’agent', scrollUp: 'Défiler vers le haut', scrollDown: 'Défiler vers le bas',
     text: 'Touchez un champ de la page, puis écrivez ici', send: 'Envoyer le texte à la page', gesture: 'Touchez pour cliquer. Glissez pour défiler. Retour envoie le texte puis Entrée ; ⌫ sur un champ vide efface dans la page.'
   },
+  agentBrowser: {
+    cover: 'Cet agent contrôle un navigateur sur {machine}', coverHint: 'Rien n’est diffusé vers cet appareil avant que vous l’affichiez.',
+    show: 'Afficher', hide: 'Masquer', hideHint: 'Arrêter de regarder et recouvrir la vue',
+    none: 'L’agent n’a pas de navigateur ouvert', noneHint: 'Il apparaît ici quand l’agent ouvre une page.',
+    unavailable: 'Pas de navigateur d’agent sur {machine}', tabs: 'Onglets de l’agent', untitled: 'Page sans titre'
+  },
   devicePanel: {
+    cover: 'Cet agent contrôle un appareil sur {machine}', coverHint: 'Rien n’est diffusé vers cet appareil avant que vous l’affichiez.',
+    show: 'Afficher', hide: 'Masquer', hideHint: 'Arrêter de regarder et recouvrir la vue',
     empty: "Aucun appareil n'est ouvert dans cette conversation. Un agent en ouvre un avec boite device open, ou ouvrez-en un ici.",
     onMachine: 'Sur cette machine', open: 'Ouvrir', refresh: 'Actualiser', add: 'Ouvrir un appareil',
     none: 'Aucun simulateur ni émulateur trouvé sur cette machine.',
@@ -960,6 +967,7 @@ export const fr: Translation = {
     toolInput: 'Entrée',
     toolOutput: 'Sortie',
     toolDocuments: 'Documents',
+    textOmitted: 'Ce message est trop long pour être affiché en entier. {count} caractères ne sont pas affichés.',
     documentChip: {
       diff: '{count} diff',
       diffs: '{count} diffs',
@@ -1319,6 +1327,8 @@ export const fr: Translation = {
     traceHint: 'Processus lancés par cette conversation',
     browser: 'Navigateur',
     browserHint: 'Une page à côté de la conversation',
+    agentBrowser: 'Navigateur de l’agent',
+    agentBrowserHint: 'Le navigateur que l’agent pilote, en direct',
     changes: 'Modifications',
     changesHint: "Ce que la copie de travail a et que HEAD n'a pas",
     files: 'Fichiers',
@@ -1328,7 +1338,7 @@ export const fr: Translation = {
     tasksHint: "L'objectif, les tâches de l'agent et les todos du projet",
     device: 'Appareil',
     deviceHint: "Un simulateur ou un émulateur ouvert par l'agent",
-    browserAbsent: 'S’ouvre quand un agent utilise le navigateur',
+    browserAbsent: 'Nécessite l’application de bureau',
     ownerOnly: "Seulement dans l'application du propriétaire",
     launcher: 'Ouvrir une surface dans ce panneau',
     untitled: 'Navigateur'
@@ -1428,7 +1438,7 @@ export const fr: Translation = {
     startRecording: 'Enregistrer cet onglet', stopRecording: 'Arrêter la vidéo', reviewRecording: 'Vidéo enregistrée',
     refresh: 'Actualiser', clear: 'Effacer', pageEvents: 'Événements de la page', actions: 'Actions', noEvents: 'Aucun événement capturé.', noActions: 'Aucune action enregistrée pour le moment.',
     omitted: '{count} événements anciens ou trop volumineux omis.', recorded: '{seconds} secondes · {fps} i/s · {mb} Mo · {format} sans son',
-    recordingError: 'Enregistrement arrêté après une erreur.', recordingDiscarded: 'Enregistrement jeté : l’agent ne l’a pas arrêté avant la fin de son tour.', recordingLimit: 'Enregistrement arrêté de lui-même à la limite de {mb} Mo. La vidéo se lit jusqu’à ce point.',
+    recordingError: 'Enregistrement arrêté après une erreur.', recordingLimit: 'Enregistrement arrêté de lui-même à la limite de {mb} Mo. La vidéo se lit jusqu’à ce point.',
     frameRate: 'Enregistrer à {rate} images par seconde', codec: 'Encoder en {codec}', codecUnavailable: 'Cet ordinateur ne sait pas l’encoder',
     unplayable: 'Cette vue ne peut pas lire la vidéo {codec}. Téléchargez-la pour la regarder dans un autre lecteur.',
     download: 'Télécharger la vidéo', discard: 'Supprimer la vidéo',
@@ -1475,7 +1485,12 @@ export const fr: Translation = {
     tooMany: '{count} profils de navigateur au plus.',
     deleteTitle: 'Supprimer le profil {name} ?',
     deleteBody: 'Ses onglets ouverts se ferment, et ses cookies, son stockage et ses connexions sont effacés de cet ordinateur. Impossible de revenir en arrière.',
-    deleteFailed: "Le profil a été retiré, mais ses données n'ont pas pu être effacées : {reason}"
+    deleteFailed: "Le profil a été retiré, mais ses données n'ont pas pu être effacées : {reason}",
+    copySignIns: 'Copier les connexions vers les agents',
+    copySignInsHint: 'Envoyer les cookies de {name} au navigateur de l’agent d’une machine, dans le même profil',
+    copied: '{count} cookies de {name} copiés vers {machine}.',
+    copiedNone: '{name} n’a aucun cookie à copier.',
+    copyFailed: 'Les connexions n’ont pas pu être copiées : {reason}'
   },
 
   terminal: {
@@ -2005,9 +2020,7 @@ export const fr: Translation = {
   },
 
   experiments: {
-    remoteBrowser: { title: 'Navigateur en direct à distance', hint: 'Sur le PC, laisser les appareils associés voir et piloter l’onglet navigateur d’une conversation, comme celui qu’un agent a ouvert. Il apparaît de lui-même dans cette conversation sur le téléphone. Cette option ne donne pas le contrôle du navigateur aux agents.' },
     recordingIndicators: { title: 'Actions visibles dans les vidéos', hint: 'Ajouter des repères de clics et les touches de navigation aux enregistrements. Le texte saisi et les mots de passe ne sont jamais affichés comme libellés de touches.' },
-    devicePanel: { title: 'Panneau Appareil', hint: "Afficher en direct dans le panneau latéral de cet appareil les simulateurs iOS et émulateurs Android qu'un agent ouvre avec boite device. Les touchers, glissements et textes atteignent Android ; iOS est en lecture seule. Les agents ouvrent des appareils sans lui." },
     openChatLinks: { title: 'Ouvrir les liens du chat dans leurs applications', hint: 'Sur ce bureau, un clic sur un fichier ou dossier local ouvre son application, y compris les raccourcis et les fichiers hors du projet. Seuls les liens de cet ordinateur sont ouverts.' },
     whip: {
       title: 'Fouet',
@@ -2037,7 +2050,6 @@ export const fr: Translation = {
   /** Finished features, on by default, each switched from the Settings page it belongs to. */
   features: {
     chatArtifacts: { title: 'Fichiers et aperçus dans le chat', hint: 'Ouvrir les liens de fichiers et afficher les fichiers envoyés par un agent dans la conversation' },
-    agentBrowserControl: { title: 'Contrôle du navigateur par les agents', hint: 'Sur ce bureau Windows, autoriser les agents à lire, capturer et manipuler les onglets de la conversation ouverte, y compris les sessions connectées et l’exécution de JavaScript. Désactiver retire cet accès, sans annuler les actions déjà effectuées.' }
   },
 
   quotas: {

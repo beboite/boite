@@ -210,7 +210,11 @@ response is serialized once; paced deltas still flush before it.
 
 Each connection admits a frame only when Bun's `getBufferedAmount()` plus
 that frame's serialized UTF-8 size fits within 32 MiB. Events also obey the
-16 MiB frame limit; oversized events close with 1009. A backed-up socket
+16 MiB frame limit; oversized events close with 1009. A socket whose last
+`threads.get` with `open` asked for `compactTools` or `compactToolParts`
+receives each finished tool call's `message.part` the way its pages carry it,
+so a call that ends with a 30 MB output or Write reaches it as a preview
+instead of closing it. A backed-up socket
 closes with reconnectable 1013 after 10 seconds without draining, or before
 a frame would exceed the byte budget. Further sends are ignored and timers
 and pending parts are cleared. This closes only that client; the journal and
@@ -253,10 +257,18 @@ when the core advertises `chunkedAnswers`.
   visit allows up to 200 messages to catch up before falling back to a tail.
   These limits affect the displayed window; the journal retains the history.
 - Completed tool outputs above 16,384 characters arrive as 1,024-character
-  previews. Opening the tool retrieves its complete output with
-  `messages.toolOutput`. Inputs, diffs, documents and running tools remain
-  complete. Older cores that ignore the preview option still return full output;
-  disclosures fall back to their existing history methods if needed.
+  previews. On a core advertising `deferredToolParts`, pages also ask for
+  `compactToolParts`: an input above 16,384 serialized characters arrives cut to
+  about 4,096, its first strings and entries, with `inputDeferred`, and
+  documents above 65,536 characters together arrive as stubs that keep their
+  kind, path, title or caption, with `documentsDeferred`. A Write of a large
+  file carries that file in its input and again in its diff. The card's line
+  reads from the preview; a card with deferred documents stays folded and shows
+  its document chip. Opening it retrieves the whole call with
+  `messages.toolPart`, `messages.toolOutput` on older cores. A proposed plan
+  whose input was cut is completed as soon as it is drawn. Running tools remain
+  complete. Older cores that ignore the preview options still return full
+  content; disclosures fall back to their existing history methods if needed.
   An expanded output refreshes after compact revalidation: matching preview
   prefixes cannot prove that the omitted text stayed unchanged.
 - File links arrive with their name, MIME type and decoded byte count. Their
@@ -299,8 +311,16 @@ when the core advertises `chunkedAnswers`.
   message as the client receives it: with `compactTools` a finished tool's
   output counts as its 1 KiB preview, so a turn whose stored image reads total
   18 MB still opens. One complete attachment-sized message can exceed 12 MiB
-  so pagination advances; a message or complete RPC response above 16 MiB as
-  sent is refused explicitly rather than losing content.
+  so pagination advances. With `compactToolParts`, no message is refused for
+  its size: one still above 8 MiB once compacted (`MESSAGE_SENT_MAX_BYTES`)
+  has every finished call and image it holds deferred whatever their size, then
+  its longest texts cut, each with the count of characters it lost in
+  `omitted`, which the chat states under the text. Without that option, a
+  message or complete RPC response above 16 MiB as sent is refused explicitly
+  rather than losing content. Internal reads of the journal (a fork's boundary,
+  a memory notice's anchor) send nothing and are neither measured nor refused.
+  The size check walks a message and stops early; only a message holding more
+  than about 1.3 MiB of content is serialized to be counted.
   Turns, thread metadata and memory events also occupy that RPC response budget.
 - On a reconnect, the open thread's `threads.get` leaves before the boot lists,
   so the missed text does not wait for the slowest of them. The fresh
@@ -491,8 +511,8 @@ superseded by main's text-alignment budget.
 
 ## The desktop browser on a phone
 
-A paired phone watching the desktop's browser tab
-([phone](phone.md#the-desktop-browser-on-a-phone)) waited a fixed 300 ms after
+A paired phone watching the desktop's browser tab, before the agent's browser
+moved to the conversation's machine ([the agent's browser](browser.md)), waited a fixed 300 ms after
 each frame, on top of the trip itself: two frames a second on a quick link. It
 now asks again as soon as a frame arrives, never closer than 250 ms to the last
 request, with one request in flight. The desktop captures the tab at q75
@@ -504,6 +524,13 @@ of added latency, and from 1.6 to 3.3 with 200 ms
 desktop's capture and shrink take 100 to 140 ms a frame. The phone decodes each
 frame before showing it, so a frame never appears half loaded; that decoding
 was not measured on an iPhone.
+
+Since 2026-10-05 the frames come from the agent's browser on the machine of the
+conversation ([the agent's browser](browser.md)). Through a scratch core on the
+Linux container `boite`, a moving page gave 4.0 frames a second with no added
+latency, 3.4 with 80 ms and 2.5 with 200 ms; the capture in the core's browser
+takes about 200 ms a frame for that page
+([results](../bench/results/2026-10-05-remote-browser-frames.md)).
 
 ## Browser recordings
 
@@ -600,7 +627,7 @@ keeps the video. `BOITE_RECORDING_PRESET` sizes the page,
 ## Benches
 
 ```sh
-bun bench/remote-browser-frames.ts --rtt 0,80,200   # frames a second a phone gets from the desktop's browser tab
+bun bench/remote-browser-frames.ts --rtt 0,80,200   # frames a second a viewer gets from the agent's browser
 bun run build:ui
 bun run bench/bandwidth.ts --rtt 150          # bytes and time per scenario behind a delayed relay
 bun run bench/bandwidth.ts --core <other checkout>/packages/core/src/main.ts --sequence sequential
@@ -634,11 +661,12 @@ RSS read from `/proc`. `--journal` runs it on a copy of a real journal taken
 with `VACUUM INTO`; the copy's projects, accounts, sessions and network
 settings are pointed at the temporary directory first.
 
-`bench/remote-browser-frames.ts` starts a scratch core and headless Chrome, plays
-a desktop host that captures and shrinks frames as the shell does, and a paired
-phone client that polls on the viewer's schedule behind an added latency.
+`bench/remote-browser-frames.ts` starts a scratch core, opens a moving page in
+the core's own browser and has a paired phone client poll it on the viewer's
+schedule behind an added latency.
 
 Results: [bench/results/2026-10-05-rpc-actions.md](../bench/results/2026-10-05-rpc-actions.md),
+[bench/results/2026-10-05-remote-browser-frames.md](../bench/results/2026-10-05-remote-browser-frames.md),
 [bench/results/2026-10-03-remote-browser-frames.md](../bench/results/2026-10-03-remote-browser-frames.md),
 [bench/results/2026-09-19-wire-and-startup.md](../bench/results/2026-09-19-wire-and-startup.md),
 [bench/results/2026-09-30-ui-frames.md](../bench/results/2026-09-30-ui-frames.md),

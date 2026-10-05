@@ -1,14 +1,17 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { Camera, Circle, CornerDownLeft, Delete, Pause, Play, Plus, Power, RefreshCw, RotateCw, Send, Square, Triangle, X } from '@lucide/svelte';
+  import { Camera, Circle, CornerDownLeft, Delete, EyeOff, Pause, Play, Plus, Power, RefreshCw, RotateCw, Send, Smartphone, Square, Triangle, X } from '@lucide/svelte';
   import type { MobileDevice, MobileDeviceFrame, MobileDeviceInput, MobileDeviceList, MobileDeviceSession } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
   import { FRAME_INTERVAL, frameMaxWidth, framePoint, frameQuality, nextPollDelay } from '../lib/remote-browser-view';
+  import { liveViews, machineName } from '../lib/live-view.svelte';
   /**
    * The simulators and emulators open in this conversation, live (docs/devices.md).
    * The core captures their screen; this polls JPEG frames the way the phone's
    * browser view does, so it works the same on the desktop and on a paired phone.
+   * No frame is asked for until the user shows the device: a card covers it
+   * and names the machine it runs on.
    */
   let { store, threadId }: { store: Store; threadId: string } = $props();
   let sessions = $state.raw<MobileDeviceSession[]>([]), selected = $state<string | null>(null);
@@ -19,7 +22,10 @@
   let roundTrip = 0, unchanged = 0, failures = 0;
   let pointer: { x: number; y: number; at: number; frame: MobileDeviceFrame } | undefined;
   const session = $derived(sessions.find(one => one.deviceId === selected) ?? sessions[0] ?? null);
-  const showing = $derived(session?.state === 'ready' ? session : null);
+  const key = $derived(store.threadKey(threadId));
+  const revealed = $derived(liveViews.shown('device', key));
+  const machine = $derived(machineName(store));
+  const showing = $derived(session?.state === 'ready' && revealed ? session : null);
   const usable = $derived(!!showing && !!frame && frame.deviceId === showing.deviceId && !paused && !busy && store.connection === 'ready');
   const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 
@@ -131,7 +137,8 @@
       for (const name of ['pageshow', 'online', 'focus'] as const) window.removeEventListener(name, back);
     };
   });
-  // A new device, a device that finished starting, a pause or a reconnect restarts the frames.
+  function hide() { liveViews.hide('device', key); stop(); frame = null; }
+  // A new device, a device that finished starting, a pause, the cover lifted or a reconnect restarts the frames.
   $effect(() => {
     const ready = store.connection === 'ready', id = showing?.deviceId;
     if (paused || !id) { untrack(stop); return; }
@@ -190,6 +197,7 @@
         <button type="button" class="chip" aria-label={strings.devicePanel.add} title={strings.devicePanel.add} aria-pressed={picking} data-testid="device-add" onclick={() => { picking = !picking; if (picking) void refresh(); }}><Plus size={16} /></button>
       </div>
       <div class="actions">
+        {#if showing}<button type="button" class="chip" data-testid="device-hide" aria-label={strings.devicePanel.hideHint} title={strings.devicePanel.hideHint} onclick={hide}><EyeOff size={15} /><span class="ui-label">{strings.devicePanel.hide}</span></button>{/if}
         <button type="button" class="chip" disabled={!showing} aria-label={paused ? strings.remoteBrowser.resume : strings.remoteBrowser.pause} title={paused ? strings.remoteBrowser.resume : strings.remoteBrowser.pause} onclick={() => { paused = !paused; }}>{#if paused}<Play size={15} />{:else}<Pause size={15} />{/if}</button>
         <button type="button" class="chip" disabled={!showing || busy} aria-label={strings.devicePanel.screenshot} title={strings.devicePanel.screenshot} data-testid="device-screenshot" onclick={() => void screenshot()}><Camera size={16} /></button>
         <button type="button" class="chip" disabled={!session || busy || session.state === 'booting'} aria-label={strings.devicePanel.shutdown} title={strings.devicePanel.shutdown} data-testid="device-shutdown" onclick={() => void close(true)}><Power size={16} /></button>
@@ -226,6 +234,16 @@
     <div class="viewer" bind:clientWidth={areaWidth}>
       {#if session.state === 'booting'}
         <p class="muted center" data-testid="device-starting">{fill(strings.devicePanel.starting, { name: session.name })}</p>
+      {:else if !revealed && session.state === 'ready'}
+        <div class="cover" data-testid="device-cover">
+          <div class="card">
+            <Smartphone size={22} strokeWidth={1.75} />
+            <p class="heading" data-testid="device-cover-text">{fill(strings.devicePanel.cover, { machine })}</p>
+            <p class="muted">{session.name}</p>
+            <p class="muted">{strings.devicePanel.coverHint}</p>
+            <button type="button" class="primary" data-testid="device-show" onclick={() => liveViews.show('device', key)}><span class="ui-label">{strings.devicePanel.show}</span></button>
+          </div>
+        </div>
       {:else if session.state === 'failed'}
         <div class="center"><p class="error">{fill(strings.devicePanel.failed, { name: session.name })}</p>{#if session.error}<p class="muted detail">{session.error}</p>{/if}</div>
       {:else if frame && frame.deviceId === session.deviceId}
@@ -275,6 +293,9 @@
   li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-2); }
   .name { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
   .viewer { position: relative; flex: 1; min-height: 80px; display: flex; overflow: hidden; background: var(--color-background); }
+  .cover { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; }
+  .card { display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 360px; width: 100%; padding: 20px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-2); box-shadow: var(--shadow-e2); }
+  .card p { margin: 0; overflow-wrap: anywhere; } .card .heading { font-weight: 600; } .card button { min-height: 44px; min-width: 120px; justify-content: center; }
   .center { margin: auto; padding: 24px; text-align: center; } .center .error { padding: 0; } .detail { margin: 8px 0 0; overflow-wrap: anywhere; }
   .screen { position: relative; flex: 1; height: auto; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; touch-action: none; cursor: crosshair; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
   .screen:disabled { opacity: 1; } .screen.view-only { cursor: default; } .screen.stale { opacity: .55; }

@@ -123,13 +123,16 @@ test('the panel opens on its launcher, and the workbench surfaces fit both width
     'launch-agents',
     'launch-messages',
     'launch-browser',
+    'launch-agent-browser',
+    'launch-device',
     'launch-changes',
     'launch-files',
     'launch-tasks',
     'launch-trace'
   ]);
-  // Web clients open the experimental remote viewer hosted by the desktop.
+  // The fixture's iframe bridge paints the user's Browser; every client watches the agent's.
   expect(await page.evaluate(`document.querySelector('${id('launch-browser')}').disabled`)).toBe(false);
+  expect(await page.evaluate(`document.querySelector('${id('launch-agent-browser')}').disabled`)).toBe(false);
   expect(await page.evaluate(`document.querySelector('${id('launch-changes')}').disabled`)).toBe(false);
   await capture('panel-launcher.png');
 

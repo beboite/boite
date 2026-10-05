@@ -38,6 +38,9 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+/** A read bound for a client that compacts nothing: measured and bounded as sent. */
+const sent = (message: Message): Message => message;
+
 describe('journal', () => {
   test('legacy input receipts bind only exact unique messages and ambiguous cuts retain replay protection after reopen', () => {
     const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -197,27 +200,27 @@ describe('journal', () => {
   test('a history snapshot includes deltas already delivered to subscribers', () => {
     journal.putMessage(sampleMessage('streaming-snapshot'));
     journal.appendDelta('thr_test', 'streaming-snapshot', 0, 'already delivered');
-    expect(journal.listMessagePage('thr_test', { limit: 120 }).messages[0]?.parts)
+    expect(journal.listMessagePage('thr_test', { limit: 120, project: sent }).messages[0]?.parts)
       .toEqual([{ type: 'text', text: 'already delivered' }]);
     journal.putMessage({ ...sampleMessage('older-large'), state: 'complete', parts: [{ type: 'text', text: 'x'.repeat(7 * 1024 * 1024) }] });
     journal.putMessage(sampleMessage('latest-live'));
     journal.appendDelta('thr_test', 'latest-live', 0, 'y'.repeat(7 * 1024 * 1024));
-    const page = journal.listMessagePage('thr_test', { limit: 120 });
+    const page = journal.listMessagePage('thr_test', { limit: 120, project: sent });
     expect(page.messages.map(message => message.id)).toEqual(['latest-live']);
     expect(page.before).toBe('latest-live');
     expect((page.messages[0]?.parts[0] as { text: string }).text.length).toBe(7 * 1024 * 1024);
-    expect(journal.listMessagesFrom('thr_test', journal.messageRowid('thr_test', 'older-large')!, 120) === null).toBe(true);
-    const delta = journal.listMessagesFrom('thr_test', journal.messageRowid('thr_test', 'latest-live')!, 120);
-    expect(delta?.[0]?.parts).toEqual(page.messages[0]?.parts);
+    expect(journal.listMessagesFrom('thr_test', journal.messageRowid('thr_test', 'older-large')!, 120, sent) === null).toBe(true);
+    const delta = journal.listMessagesFrom('thr_test', journal.messageRowid('thr_test', 'latest-live')!, 120, sent);
+    expect(delta?.messages[0]?.parts).toEqual(page.messages[0]?.parts);
     const older = { ...journal.getMessage('older-large')!, parts: [{ type: 'text' as const, text: '' }] };
-    const padding = 'a'.repeat(MESSAGE_PAGE_MAX_BYTES - Buffer.byteLength(JSON.stringify([older, delta![0]])));
+    const padding = 'a'.repeat(MESSAGE_PAGE_MAX_BYTES - Buffer.byteLength(JSON.stringify([older, delta!.messages[0]])));
     journal.db.query('UPDATE messages SET parts = ? WHERE id = ?').run(JSON.stringify([{ type: 'text', text: padding }]), older.id);
-    const exact = journal.listMessagesFrom('thr_test', journal.messageRowid('thr_test', older.id)!, 120);
-    expect(exact?.length).toBe(2);
-    expect(Buffer.byteLength(JSON.stringify(exact))).toBe(MESSAGE_PAGE_MAX_BYTES);
+    const exact = journal.listMessagesFrom('thr_test', journal.messageRowid('thr_test', older.id)!, 120, sent);
+    expect(exact?.messages.length).toBe(2);
+    expect(Buffer.byteLength(JSON.stringify(exact?.sent))).toBe(MESSAGE_PAGE_MAX_BYTES);
     journal.appendDelta('thr_test', 'latest-live', 0, '!');
-    expect(journal.listMessagesFrom('thr_test', journal.messageRowid('thr_test', older.id)!, 120) === null).toBe(true);
-    const resized = journal.listMessagePage('thr_test', { limit: 120 }).messages;
+    expect(journal.listMessagesFrom('thr_test', journal.messageRowid('thr_test', older.id)!, 120, sent) === null).toBe(true);
+    const resized = journal.listMessagePage('thr_test', { limit: 120, project: sent }).messages;
     expect(resized.map(message => message.id)).toEqual(['latest-live']);
     expect(resized[0]?.parts[0]?.type === 'text' && resized[0].parts[0].text.endsWith('!')).toBe(true);
   });
@@ -225,18 +228,20 @@ describe('journal', () => {
   test('a single message can exceed the page budget for progress but an untransportable message is refused by name', () => {
     const data = 'A'.repeat(Math.ceil(5 * 1024 * 1024 / 3) * 4 - 1) + '=';
     journal.putMessage({ ...sampleMessage('legal-attachment'), state: 'complete', parts: ['first.bin', 'second.bin'].map(name => ({ type: 'file', name, mimeType: 'application/octet-stream', data })) });
-    const page = journal.listMessagePage('thr_test', { limit: 120 });
+    const page = journal.listMessagePage('thr_test', { limit: 120, project: sent });
     expect(page.messages.map(message => message.id)).toEqual(['legal-attachment']);
     expect(page.before).toBeNull();
     const bytes = Buffer.byteLength(JSON.stringify(page.messages));
     expect(bytes).toBeGreaterThan(MESSAGE_PAGE_MAX_BYTES);
     expect(bytes).toBeLessThan(RPC_MAX_FRAME_BYTES);
-    const tailTooLarge = journal.listMessagesFrom('thr_test', journal.messageRowid('thr_test', 'legal-attachment')!, 120) === null;
+    const tailTooLarge = journal.listMessagesFrom('thr_test', journal.messageRowid('thr_test', 'legal-attachment')!, 120, sent) === null;
     journal.putMessage({ ...sampleMessage('oversized-message'), state: 'complete', parts: [{ type: 'text', text: 'x'.repeat(RPC_MAX_FRAME_BYTES) }] });
-    expect(() => journal.listMessagePage('thr_test', { limit: 120 })).toThrow('message oversized-message');
-    try { journal.listMessagePage('thr_test', { limit: 120 }); }
+    expect(() => journal.listMessagePage('thr_test', { limit: 120, project: sent })).toThrow('message oversized-message');
+    try { journal.listMessagePage('thr_test', { limit: 120, project: sent }); }
     catch (error) { expect(error).toMatchObject({ data: { field: 'messages', messageId: 'oversized-message', expected: `a complete message below ${RPC_MAX_FRAME_BYTES} serialized UTF-8 bytes` } }); }
     expect(tailTooLarge).toBe(true);
+    // An internal read (a fork's boundary, a memory notice's anchor) sends nothing and is never refused.
+    expect(journal.listMessagePage('thr_test', { limit: 1 }).messages.map(message => message.id)).toEqual(['oversized-message']);
   });
 
   test('corrupt JSON names its table, row and column', () => {

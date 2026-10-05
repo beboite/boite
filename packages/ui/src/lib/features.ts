@@ -6,18 +6,16 @@
  * booleans, so a feature nobody touched follows its default.
  *
  * Like `experiments.ts`, nothing here reaches the core and nothing here
- * imports a feature it gates. Agent browser control still registers a
- * revocable owner grant with the core while the desktop hosts a conversation;
- * `browser-host.ts` subscribes here to withdraw it when the switch goes off.
+ * imports a feature it gates.
  */
 
-export type FeatureId = 'chat-artifacts' | 'agent-browser-control';
+export type FeatureId = 'chat-artifacts';
 
 export const FEATURES_STORAGE_KEY = 'boite.features';
 
-export const FEATURE_IDS: FeatureId[] = ['chat-artifacts', 'agent-browser-control'];
+export const FEATURE_IDS: FeatureId[] = ['chat-artifacts'];
 
-const DEFAULTS: Record<FeatureId, boolean> = { 'chat-artifacts': true, 'agent-browser-control': true };
+const DEFAULTS: Record<FeatureId, boolean> = { 'chat-artifacts': true };
 
 type Listener = (features: Record<FeatureId, boolean>) => void;
 

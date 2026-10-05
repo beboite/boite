@@ -19,15 +19,17 @@ export interface ReadingPosition {
 
 /**
  * What a page read from the core may leave there until it is looked at: long
- * tool outputs always, files and large pictures on a core that says it can
- * hand them back one by one.
+ * tool outputs always; files, large pictures, long tool inputs and heavy
+ * documents on a core that says it can hand them back one by one.
  */
-export function lightPage(ctx: StoreContext): { compactTools: true; compactFiles?: true; compactImages?: true } {
+export function lightPage(ctx: StoreContext): { compactTools: true; compactFiles?: true; compactImages?: true; compactToolParts?: true } {
   const features = ctx.store.core?.features;
   return {
     compactTools: true,
     ...(features?.threadSnapshots ? { compactFiles: true as const } : {}),
     ...(features?.readingPages ? { compactImages: true as const } : {}),
+    // Long tool inputs and diffs too, and no message too heavy to open.
+    ...(features?.deferredToolParts ? { compactToolParts: true as const } : {}),
   };
 }
 

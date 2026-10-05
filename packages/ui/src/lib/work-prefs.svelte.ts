@@ -31,6 +31,7 @@ export const CONTROL_IDS = [
   'panel.agents',
   'panel.messages',
   'panel.browser',
+  'panel.agent-browser',
   'panel.changes',
   'panel.files',
   'panel.tasks',

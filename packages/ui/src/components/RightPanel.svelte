@@ -17,8 +17,7 @@
   import type { Store } from '../lib/store.svelte';
   import { offeredCards, available as availableTo, kindName, label, tooltip, unavailable } from '../lib/surface-labels';
   import BrowserSurface from './BrowserSurface.svelte';
-  import RemoteBrowser from './RemoteBrowser.svelte';
-  import { remoteLive } from '../lib/remote-browser-watch.svelte';
+  import AgentBrowserSurface from './AgentBrowserSurface.svelte';
   import DelegationSurface from './DelegationSurface.svelte';
   import AgentMessagesSurface from './AgentMessagesSurface.svelte';
   import ChangesSurface from './ChangesSurface.svelte';
@@ -61,9 +60,9 @@
   let active = $derived(panel.active);
   let empty = $derived(surfaces.length === 0);
 
-  /** A web client shows the PC's browser tab only while the agent has one in this conversation. */
+  /** The user's own browser needs the shell's webview, or the iframe a test page paints. */
   function available(kind: SurfaceKind): boolean {
-    if (kind === 'browser' && !inShell) return !!store.openThread && (browserBridge.paints || remoteLive.has(store.threadKey(store.openThread.id)));
+    if (kind === 'browser' && !inShell) return browserBridge.paints;
     return availableTo(kind, inShell, store.owner);
   }
 
@@ -394,11 +393,11 @@
     {:else if active?.kind === 'trace'}
       <TraceSurface {store} />
     {:else if active?.kind === 'browser'}
-      {#key active.id}
-        {#if !inShell && !browserBridge.paints && store.openThread}
-          <RemoteBrowser {store} threadId={store.openThread.id} />
-        {:else}<BrowserSurface surface={active} {panel} {store} />{/if}
-      {/key}
+      {#key active.id}<BrowserSurface surface={active} {panel} {store} />{/key}
+    {:else if active?.kind === 'agent-browser'}
+      {#if store.openThread}
+        {#key store.threadKey(store.openThread.id)}<AgentBrowserSurface {store} threadId={store.openThread.id} />{/key}
+      {/if}
     {:else if active?.kind === 'changes'}
       <ChangesSurface {store} surface={active} {panel} />
     {:else if active?.kind === 'files'}

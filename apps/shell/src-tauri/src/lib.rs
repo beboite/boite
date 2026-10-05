@@ -171,6 +171,7 @@ pub fn run() {
             browser::browser_destroy,
             browser::browser_profile_delete,
             browser_control::browser_protocol,
+            browser_control::browser_cookies,
             browser_control::browser_screencast_start,
             browser_control::browser_screencast_stop,
         ])

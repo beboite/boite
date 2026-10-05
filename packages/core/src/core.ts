@@ -35,7 +35,7 @@ import { scheduleThreadDeletionRetention } from './threads/deletion-retention.ts
 import { scheduleDoneRetention } from './threads/done-retention.ts';
 import { scheduleArtifactRetention } from './artifact-retention.ts';
 import { ArtifactPreviews } from './artifact-preview.ts';
-import { BrowserControl } from './browser.ts';
+import { AgentBrowser, BROWSER_SCOPE } from './browser.ts';
 import { MobileDevices } from './devices/control.ts';
 import { QuotaStore } from './quotas.ts';
 import { PluginStore } from './plugins.ts';
@@ -162,7 +162,7 @@ export class Core {
   readonly terminals: TerminalStore;
   readonly stopArtifactRetention: () => Promise<void>;
   readonly artifactPreviews = new ArtifactPreviews(this);
-  readonly browser = new BrowserControl(this);
+  readonly browser = new AgentBrowser(this);
   /** Simulators and emulators open in conversations' Device panels. */
   readonly devices = new MobileDevices(this);
 
@@ -193,7 +193,9 @@ export class Core {
     const scheduler = this.scheduler.state();
     const threads = this.threads;
     if (this.router.activeRequests > 0 || scheduler.running.length > 0 || scheduler.queued.length > 0
-      || this.agentRuntime.busy || this.procs.liveThreads().length > 0
+      // An agent's open tab is not work under way: its browser stays up after the turn and would hold an
+      // update back for good. Closing saves each profile's cookies; a browser command in flight is an active request.
+      || this.agentRuntime.busy || this.procs.liveThreads().some(scope => scope !== BROWSER_SCOPE)
       || threads.sideQuestions.busy
       || threads.runner.handles.size > 0 || threads.runner.steering.size > 0
       || threads.deferred.pendingWakes.size > 0 || threads.deferred.deferredAnswers.size > 0 || threads.deferred.consumed.size > 0
@@ -349,7 +351,7 @@ export class Core {
       version: this.version,
       ...(this.bundleHash ? { bundleHash: this.bundleHash } : {}),
       protocolVersion: PROTOCOL_VERSION,
-      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true },
+      features: { threadSnapshots: true, chunkedAnswers: true, readingPages: true, deferredToolParts: true },
       hostname: hostname(),
       os: currentOs(),
       channel: this.channel,
@@ -397,7 +399,7 @@ export class Core {
   get stopping(): boolean { return this.#stopping; }
 
   async close(): Promise<void> {
-    this.browser.close();
+    await this.browser.close();
     this.devices.stop();
     this.artifactPreviews.stop();
     this.threads.sideQuestions.close();

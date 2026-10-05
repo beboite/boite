@@ -20,7 +20,7 @@
   import { experimentOn } from '../lib/experiments.svelte';
   import { validPreviewSelection } from '../lib/preview-comments';
   import BrowserTools from './BrowserTools.svelte';
-  import { browserTools, runBrowserAction } from '../lib/browser-tools.svelte';
+  import { runBrowserAction } from '../lib/browser-tools.svelte';
   const previewStrings = $derived(strings.previewComments);
 
   let { surface, panel, store }: { surface: Surface; panel: BoundPanel; store: Store } = $props();
@@ -307,7 +307,6 @@
 
   {#if loading}<span class="loading" role="status" aria-label={strings.browser.loading} data-testid="browser-loading"></span>{/if}
   {#if problem}<p class="problem" role="alert" data-testid="browser-error">{problem}</p>{/if}
-  {#if browserTools(id).discarded}<p class="annotation-notice" role="status" data-testid="browser-recording-discarded">{strings.browserTools.recordingDiscarded}</p>{/if}
 
   {#if enabled && (request || notice)}
     <p class="annotation-notice" role="status">{request ? previewStrings.picking : notice}</p>
