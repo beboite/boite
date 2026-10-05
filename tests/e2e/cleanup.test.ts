@@ -85,4 +85,50 @@ test('pages closed together leave no profile and no browser behind', async () =>
 
   expect(profiles.filter((dir) => existsSync(dir))).toEqual([]);
   expect(pids.filter(alive)).toEqual([]);
+  expect(watchdogsOfThisProcess()).toEqual([]);
+}, 60_000);
+
+/** Read-only: the parent-death watchdogs this process started and that still run. */
+function watchdogsOfThisProcess(): string[] {
+  if (process.platform === 'win32') return [];
+  const listed = Bun.spawnSync(['ps', '-A', '-o', 'pid=,ppid=,args=']).stdout.toString();
+  return listed.split('\n').map((line) => line.trim().split(/\s+/))
+    .filter(([, ppid, ...args]) => ppid === String(process.pid) && args.includes('boite-e2e-watchdog'))
+    .map(([pid]) => pid ?? '');
+}
+
+test.skipIf(process.platform === 'win32')('a test process killed outright takes its browsers and profiles with it', async () => {
+  // Without the watchdog, Chrome is reparented to init when its test process
+  // dies and runs on with its profile: what leaked 2.4 GB on 2026-10-05.
+  const script = `import { BrowserPage } from ${JSON.stringify(join(import.meta.dir, 'lib', 'cdp.ts'))};
+const pages = await Promise.all([0, 1].map(() => BrowserPage.launch({ url: 'about:blank' })));
+console.log(JSON.stringify(pages.map((page) => ({ pid: page.pid, profile: page.profileDir }))));
+setInterval(() => {}, 60_000);`;
+  // Outside the checkout: the child must not load the suite's preload.
+  const child = Bun.spawn({ cmd: [process.execPath, '-e', script], cwd: tmpdir(), stdout: 'pipe', stderr: 'pipe' });
+  let launched: { pid: number; profile: string }[] = [];
+  try {
+    const reader = child.stdout.getReader();
+    let out = '';
+    while (!out.includes('\n')) {
+      const chunk = await reader.read();
+      if (chunk.done) throw new Error(`the child exited before launching: ${await new Response(child.stderr).text()}`);
+      out += new TextDecoder().decode(chunk.value);
+    }
+    launched = JSON.parse(out.slice(0, out.indexOf('\n'))) as typeof launched;
+    expect(launched.map(({ pid }) => alive(pid))).toEqual([true, true]);
+
+    child.kill('SIGKILL');
+    await child.exited;
+    const deadline = Date.now() + 10_000;
+    const left = () => launched.filter(({ pid, profile }) => alive(pid) || existsSync(profile));
+    while (left().length > 0 && Date.now() < deadline) await Bun.sleep(100);
+    expect(left()).toEqual([]);
+  } finally {
+    child.kill('SIGKILL');
+    // Only pids this test captured, and only if the watchdog failed.
+    for (const { pid } of launched) if (alive(pid)) process.kill(pid, 'SIGKILL');
+    // Its renderers still write for a moment after the browser goes.
+    for (const { profile } of launched) await removeDirectory(profile, 5_000);
+  }
 }, 60_000);

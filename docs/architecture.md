@@ -67,6 +67,26 @@ older than 30 days in batches of 5,000 while retaining the latest agents revisio
 Project removal explicitly clears thread-keyed tables; foreign keys are disabled.
 A newer journal schema is refused before writing, with the file and both versions.
 
+`message.started`, `message.part` and `artifact.published` events keep only the
+first 1,024 characters of each string: the message row holds the content, and
+nothing reads those events back. The types that are read back (`question.asked`,
+`question.answered`, `thread.memory`) keep their whole payload and have partial
+indexes, so startup and a thread open no longer scan the events table.
+
+A tool output, tool input text, file or image of 32 KiB or more is stored in
+`part_blobs`, one row per value, and its part in the message row names it under
+`$blob`. Journal reads put the values back. A page asked with `compactTools`
+reads only the first 1,024 characters of a finished tool's output; its resume
+proof hashes a digest of the whole value. A streaming message stores only the
+parts that changed since its last committed write. Rows written before schema
+31 kept their values inline; three minutes after startup the core moves them
+one message per tick, pauses while a message streams, and records the last
+rowid done in the `part-blobs:moved-through` setting.
+
+`native_agent_messages` names the messages holding an Agent, Task or subagent
+call, or a `nativeAgents` list, so `delegation.get` parses those messages only.
+Schema 31 fills it once from the stored parts; writes keep it current.
+
 Text deltas coalesce per thread every 16 ms. Streaming message parts stay in
 memory and overlay stored rows on reads. Writes normally happen at most every
 500 ms, adapt to slow storage up to 5 seconds, and also happen on completion,
