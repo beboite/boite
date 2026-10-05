@@ -35,6 +35,20 @@ describe('claude driver', () => {
     expect((await client.call('accounts.list', {})).find(account => account.id === accountId)?.status).toBe('unauthenticated');
   });
 
+  test('an API error keeps the reason the CLI wrote with it', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const said = 'Request too large (max 32MB). Accumulated images and attachments in the conversation pushed the request over the limit.';
+    scripted(fake => {
+      // What CLI 2.1.289 emits when a proxy answers 413 to a request carrying screenshots.
+      fake.emit(sdk({ ...(assistant('sess-413', [{ type: 'text', text: said }]) as object), error: 'invalid_request', is_api_error_message: true }));
+      fake.emit(sdk({ ...(success('sess-413') as object), is_error: true, result: said, api_error_status: 413 }));
+      fake.end();
+    });
+    expect(await runTurn(client, threadId, 'show the screenshots')).toBe('error');
+    expect(harness.core.journal.listTurns(threadId).at(-1)?.error).toBe(`Claude refused the request as invalid. ${said}`);
+  });
+
   test('an OAuth failure before the first prompt marks the focused account signed out', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

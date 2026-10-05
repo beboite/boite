@@ -228,6 +228,20 @@ export function authenticationFailureOf(message: SDKMessage): string | null {
   return isAuthenticationFailure(reason) ? reason : null;
 }
 
+/**
+ * The error sentence, then the text the CLI wrote with it. The code alone
+ * hides the cause: a request over a proxy's body limit and a malformed one
+ * are both `invalid_request`, and only the text says "Request too large".
+ */
+export function apiErrorReason(error: SDKAssistantMessageError, content: unknown): string {
+  const sentence = errorSentence(error);
+  const said = contentBlocks(content)
+    .map((block) => (block.type === 'text' ? (block.text ?? '').trim() : ''))
+    .filter((text) => text.length > 0)
+    .join(' ');
+  return said.length === 0 || said === sentence ? sentence : `${sentence} ${said}`;
+}
+
 /** The CLI's `task_type` as the kinds the UI draws. */
 export function backgroundKind(type: string): BackgroundTask['kind'] {
   switch (type) {
