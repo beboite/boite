@@ -3,7 +3,7 @@
   import { Check, Download, FileText, Image, Film, Music2, Maximize2, RefreshCw, X } from '@lucide/svelte';
   import { ATTACHMENT_MAX_BYTES, FILE_TICKET_TTL_MS, type MessagePart } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
-  import { experimentOn } from '../lib/experiments.svelte';
+  import { featureOn } from '../lib/features.svelte';
   import { fill, strings } from '../lib/strings';
   import { bytes, millis } from '../lib/format';
   import { localFileDirectory, openLocalFile } from '../lib/local-files';
@@ -43,7 +43,7 @@
   let body: Uint8Array<ArrayBuffer> | null = null;
   const directory = $derived(!file && path ? localFileDirectory(store, threadId) : null);
   const name = $derived(file?.name ?? path?.split('/').at(-1) ?? strings.composer.attachAlt);
-  const rich = $derived(experimentOn('chat-artifacts'));
+  const rich = $derived(featureOn('chat-artifacts'));
   const image = $derived(/^image\/(png|jpeg|gif|webp|avif|bmp)$/.test(mime));
   const pdf = $derived(mime === 'application/pdf');
   const audio = $derived(mime.startsWith('audio/'));

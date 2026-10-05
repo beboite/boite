@@ -8,8 +8,10 @@ import { discardAgentRecording, runBrowserAction, trackBrowserAction } from './b
 import { captureRemoteBrowser, inputRemoteBrowser } from './browser-remote-host';
 import { isExperimentEnabled, subscribeExperiments } from './experiments';
 import { experimentOn } from './experiments.svelte';
+import { isFeatureEnabled, subscribeFeatures } from './features';
+import { featureOn } from './features.svelte';
 
-const agentOn = () => experimentOn('agent-browser-control');
+const agentOn = () => featureOn('agent-browser-control');
 const remoteOn = () => experimentOn('remote-browser');
 
 /**
@@ -104,7 +106,7 @@ export function hostBrowser(store: Store, threadId: string): (closed?: boolean) 
   let live = false;
   const shared = () => isExperimentEnabled('remote-browser') && displayed() && panel.isOpen && panel.active?.kind === 'browser';
   const renew = () => {
-    const agent = isExperimentEnabled('agent-browser-control'), remote = isExperimentEnabled('remote-browser');
+    const agent = isFeatureEnabled('agent-browser-control'), remote = isExperimentEnabled('remote-browser');
     live = shared();
     if (!stopped && store.client === client && store.machineId === machine) {
       void client.call('browser.host', agent || remote ? { threadId, enabled: true, allowAgentControl: agent, remote, live } : { threadId, enabled: false }).catch(() => {});
@@ -115,11 +117,12 @@ export function hostBrowser(store: Store, threadId: string): (closed?: boolean) 
   untrack(renew);
   const timer = setInterval(renew, 10000);
   const watch = setInterval(() => { if (live !== shared()) renew(); }, 1000);
-  const offExperiments = subscribeExperiments(() => { consentRevision++; renew(); });
+  const consentChanged = () => { consentRevision++; renew(); };
+  const offExperiments = subscribeExperiments(consentChanged), offFeatures = subscribeFeatures(consentChanged);
   // `closed`: the conversation was archived or removed, which ends its turn too.
   return (closed = false) => {
     if (closed) discard();
-    stopped = true; clearInterval(timer); clearInterval(watch); off(); offTurns(); offExperiments();
+    stopped = true; clearInterval(timer); clearInterval(watch); off(); offTurns(); offExperiments(); offFeatures();
     void client.call('browser.host', { threadId, enabled: false }).catch(() => {});
   };
 }

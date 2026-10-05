@@ -207,7 +207,7 @@ families with pending work or input, and uses the recoverable deletion flow belo
 
 Settings > General > Conversations offers Group working threads,
 stored on this device; phone settings offer the same switch under device
-preferences. Display options beside Projects and Recent offers the same switches
+preferences. The sidebar's Display options menu, which also chooses Projects or Recent, offers the same switches
 with their scope and stays open while adjusting multiple options.
 It moves running, queued and background work to a collapsed section above Done
 in Recent and behind each project's working counter in Projects. Turning it

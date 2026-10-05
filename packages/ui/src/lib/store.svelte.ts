@@ -3,6 +3,7 @@ import type { Client } from './client';
 import { readModelDefaults } from './model-defaults';
 import { readFavorites } from './model-order';
 import { readLayout, readPrefs } from './prefs';
+import { watchIncognito } from './store/incognito.svelte';
 import type { Accounts } from './store/accounts.svelte';
 import type { Composer } from './store/composer.svelte';
 import type { Connection } from './store/connection.svelte';
@@ -46,6 +47,11 @@ export interface Draft {
   worktree: boolean;
   /** The composer switch was chosen explicitly; project changes preserve it. */
   worktreeExplicit?: true;
+  /**
+   * The first send starts an incognito conversation. Only in the drafts: the
+   * draft drops it on its way to a project, and it is never saved on the device.
+   */
+  incognito?: true;
 }
 
 /** What the composer sends a message with. */
@@ -143,6 +149,7 @@ export class Store {
     this.sidebarCollapsed = layout.sidebarCollapsed;
     listen(ctx, client);
     ctx.off.push(ctx.composer.watchQueues());
+    ctx.off.push(watchIncognito(ctx));
   }
 
   detach(): void {
@@ -457,6 +464,7 @@ export class Store {
   refreshProjectIcon(...args: Parameters<Projects['refreshProjectIcon']>) { return this.#ctx.projects.refreshProjectIcon(...args); }
   startDraft(...args: Parameters<Projects['startDraft']>) { return this.#ctx.projects.startDraft(...args); }
   setDraftProject(...args: Parameters<Projects['setDraftProject']>) { return this.#ctx.projects.setDraftProject(...args); }
+  setDraftIncognito(...args: Parameters<Projects['setDraftIncognito']>) { return this.#ctx.projects.setDraftIncognito(...args); }
   setDraftWorktree(...args: Parameters<Projects['setDraftWorktree']>) { return this.#ctx.projects.setDraftWorktree(...args); }
 
   // -------------------------------------------------------------------------

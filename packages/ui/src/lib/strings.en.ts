@@ -75,7 +75,7 @@ export const strings = {
     accountAccess: "Account access",
     accountAccessHint: 'Which agents may use each account, subagents included. Removing access stops the executions that use it.',
     allAgents: "All agents, including future agents",
-    heading: 'Persistent agents', intro: 'Agents with their own roles, memory and missions. Conversation subagents appear in Subagents.', back: 'Back to chat',
+    heading: 'Persistent agents', intro: 'Agents with their own roles, memory and missions. Conversation subagents appear in Subagents.',
     profiles: 'Agents', groups: 'Groups', teams: 'Teams', missions: 'Missions', attention: 'Needs attention',
     list: 'All agents', create: 'New', edit: 'Edit', save: 'Save', cancel: 'Cancel', close: 'Close',
     search: 'Search', empty: 'Nothing here yet. Create your first entry.', select: 'Choose an entry to see its activity.',
@@ -521,7 +521,11 @@ export const strings = {
     name: 'Drafts',
     hint: 'A folder of its own for each conversation, in Documents/Boite',
     openFolder: 'Work in a folder of mine',
-    pickFolder: 'Open a folder'
+    pickFolder: 'Open a folder',
+    incognito: 'Incognito',
+    incognitoStart: 'Start this conversation incognito: nothing of it is kept once you leave it',
+    incognitoStop: 'Start an ordinary conversation instead',
+    incognitoOn: 'Incognito: this conversation and its folder are erased when you leave it'
   },
   firstRun: {
     heading: 'Open a project',
@@ -573,6 +577,14 @@ export const strings = {
     projectArchivedThreads: '{project}: {count} archived',
     otherProjects: 'Other projects',
     groupingOptions: 'Display options',
+    /** The sidebar's top switch between the thread list and the Agents page. */
+    surface: 'Threads or agents',
+    threads: 'Threads',
+    agents: 'Agents',
+    /** The two ways the display options can list threads. */
+    projectsView: 'Projects',
+    projectsViewHint: 'Threads grouped under their project',
+    recentView: 'Recent',
     workingGroupingScope: 'Projects and Recent · This device',
     otherGroupingScope: 'Projects · This device',
     mergedPrScope: 'Project: {project}',
@@ -1488,6 +1500,8 @@ export const strings = {
   },
 
   browserProfiles: {
+    /** The card in Settings, General: agent control and the profiles below it. */
+    card: 'Built-in browser',
     heading: 'Browser profiles',
     hint: 'Each profile keeps its own cookies, storage and sign-ins in the built-in browser, and keeps them after a restart. A private tab keeps nothing once the last private tab closes.',
     default: 'Default',
@@ -2056,8 +2070,6 @@ export const strings = {
       action: 'Throw the whip',
       drop: 'Drop the whip'
     },
-    chatArtifacts: { title: 'Chat files and previews', hint: 'Open file links and preview files returned by an agent in the conversation' },
-    agentBrowserControl: { title: 'Agent browser control', hint: 'On this Windows desktop, let agents read pages, take screenshots and act in the open conversation’s browser tabs. This includes signed-in sessions and JavaScript execution. Turning this off revokes access; actions already performed are not undone.' },
     previewComments: { title: 'Preview comments', hint: 'Select an element in the integrated browser and add feedback to the conversation draft' },
     themeGrain: {
       title: 'Grain theme',
@@ -2075,6 +2087,12 @@ export const strings = {
       title: 'Agents',
       hint: 'Resident agents with their own brain, missions and routines, from the sidebar. Agents you already made keep running while this is off'
     }
+  },
+
+  /** Finished features, on by default, each switched from the Settings page it belongs to. */
+  features: {
+    chatArtifacts: { title: 'Chat files and previews', hint: 'Open file links and preview files returned by an agent in the conversation' },
+    agentBrowserControl: { title: 'Agent browser control', hint: 'On this Windows desktop, let agents read pages, take screenshots and act in the open conversation’s browser tabs. This includes signed-in sessions and JavaScript execution. Turning this off revokes access; actions already performed are not undone.' }
   },
 
   quotas: {

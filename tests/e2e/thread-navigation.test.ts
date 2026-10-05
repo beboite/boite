@@ -34,7 +34,7 @@ async function drag(page: BrowserPage, selector: string) {
 }
 
 test('closing an image and dragging chat text or a thread link preserves the conversation', async () => {
-  const page = await BrowserPage.launch({ url, windowSize: { width: 1280, height: 900 }, experiments: ['chat-artifacts'] });
+  const page = await BrowserPage.launch({ url, windowSize: { width: 1280, height: 900 } });
   try {
     await page.waitFor(`${state}.openThread`);
     await page.evaluate(`(async () => {

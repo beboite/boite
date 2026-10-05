@@ -3,6 +3,7 @@ import type { Store } from './store.svelte';
 import { hostBrowser, hostsBrowser } from './browser-host';
 import { rightPanel } from './right-panel.svelte';
 import { experimentOn } from './experiments.svelte';
+import { featureOn } from './features.svelte';
 
 /** Keep visited conversations hosted until archive, disconnect or consent withdrawal. */
 export function watchBrowserHosts(stores: () => Store[]): () => void {
@@ -14,7 +15,7 @@ export function watchBrowserHosts(stores: () => Store[]): () => void {
   };
   const stop = $effect.root(() => {
     $effect(() => {
-      const enabled = experimentOn('agent-browser-control') || experimentOn('remote-browser');
+      const enabled = featureOn('agent-browser-control') || experimentOn('remote-browser');
       const ready = stores().filter(store => enabled && store.connection === 'ready' && store.client && hostsBrowser(store));
       const snapshots = ready.map(store => {
         const alive = new Set(store.threads.filter(thread => !thread.archived).map(thread => thread.id));
