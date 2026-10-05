@@ -390,7 +390,7 @@
     const state = stateForInput();
     if (side.submit(inputStore, inputKey, prompt)) { requestAnimationFrame(grow); return; }
     const editedThread = state.editing ? inputStore.openThread : null;
-    if (state.editing && !await rewindComposerEdit(inputStore, inputKey, state)) return;
+    const edited = state.editing ? await rewindComposerEdit(inputStore, inputKey, state, prompt, images, references) : null; if (edited === false) return;
     // A queue that still holds something takes this prompt too, whatever the
     // thread's status: sending it on its own would put it ahead of prompts the
     // user typed first. Sending is also how he resumes a queue a refusal paused.
@@ -407,7 +407,7 @@
     state.sending = true;
     const finishImageSend = trackImageSend(state, prompt, images);
     // The box empties and the prompt joins the timeline now; the core's answer only ticks its receipts. A `/goal` writes no message.
-    const local = inputStore.stageSend(inputKey, prompt, images, references);
+    const local = edited ? edited.local : inputStore.stageSend(inputKey, prompt, images, references);
     if (local) { emptyBox(state); recall = null; requestAnimationFrame(grow); }
     // A rewind can finish after navigation: the replacement belongs to the
     // captured thread and machine, whichever conversation is on screen now.

@@ -8,6 +8,7 @@
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { DRAFT_STASH_KEY } from '../lib/prefs';
+  import { lastIndexById } from '../lib/thread-rows';
   import Composer from './Composer.svelte';
   import FolderGoneNotice from './FolderGoneNotice.svelte';
   import AgentDock from './AgentDock.svelte';
@@ -35,7 +36,14 @@
     }
     return local;
   });
-  let messages = $derived(sending ? [...(thread?.messages ?? []), sending] : thread?.messages ?? []);
+  /** An edit or a retry in flight: the message it replaces and what follows leave the screen before the core answers. */
+  let kept = $derived.by(() => {
+    const held = thread?.messages ?? [];
+    const cut = thread ? store.rewinding[thread.id] : undefined;
+    const at = cut === undefined ? -1 : lastIndexById(held, cut);
+    return at < 0 ? held : held.slice(0, at);
+  });
+  let messages = $derived(sending ? [...kept, sending] : kept);
   // The timeline still needs agent messages after reload, even with settings hidden.
   let threadId = $derived(thread?.id);
   let agentSession = $derived(!!thread?.agentSessionId);

@@ -416,6 +416,30 @@ test('retry sits on the last finished turn only and sends its prompt again in pl
   expect(store.openThread!.turns.some((turn) => turn.id === answered)).toBe(false);
 });
 
+test('a retry takes the answer off screen before the core rewinds', async () => {
+  await openIdleThread();
+  const before = userTexts();
+  const answers = document.querySelectorAll('[data-testid=turn-summary]').length;
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'threads.rewind') await gate;
+    return call(method, params);
+  });
+  const summaries = document.querySelectorAll('[data-testid=turn-summary]');
+  (summaries[summaries.length - 1]!.querySelector('[data-testid=message-retry]') as HTMLButtonElement).click();
+  const bubbles = () => Array.from(document.querySelectorAll('[data-testid=message][data-role=user] [data-testid=text-part]')).map(part => part.textContent);
+  // Nothing back from the core yet: the last answer is gone and its prompt shows once, as sent again.
+  await waitFor(() => document.querySelectorAll('[data-testid=turn-summary]').length === answers - 1);
+  expect(bubbles().filter(text => text === before.at(-1))).toHaveLength(1);
+  expect(bubbles().at(-1)).toBe(before.at(-1));
+  release();
+  await waitFor(() => document.querySelectorAll('[data-testid=turn-summary][data-status=done]').length === answers && !store.busy);
+  expect(userTexts()).toEqual(before);
+});
+
 test('a retry whose resend fails leaves its prompt in the box', async () => {
   await openIdleThread();
   const before = userTexts();

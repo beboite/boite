@@ -229,6 +229,41 @@ test('a turn that starts during editing does not silently turn the edit into a q
   expect(store.composerStates['t-trace']!.queued).toEqual([]);
   expect(input().value).toBe('changed request');
   expect(store.openThread!.messages.some(message => message.id === messageId)).toBe(true);
+  // What the refused edit hid is back on screen, and its replacement is gone.
+  expect(userBubbles()).toContain('original request');
+  expect(userBubbles()).not.toContain('changed request');
+});
+
+/** The words of every user bubble on screen, top to bottom. */
+function userBubbles(): string[] {
+  return Array.from(document.querySelectorAll('[data-testid=message][data-role=user] [data-testid=text-part]')).map(part => part.textContent ?? '');
+}
+
+test('an edit replaces the message on screen before the core rewinds', async ({ app: _app }) => {
+  await store.open('t-trace');
+  await send('original request');
+  await send('later request');
+  const kept = userBubbles().slice(0, -2);
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'threads.rewind') await gate;
+    return call(method, params);
+  });
+  const row = Array.from(document.querySelectorAll('[data-testid=message][data-role=user]')).find(row => row.querySelector('[data-testid=text-part]')?.textContent === 'original request')!;
+  row.querySelector<HTMLButtonElement>('[data-testid=message-edit]')!.click();
+  await waitFor(() => input().value === 'original request');
+  await type('changed request');
+  input().focus(); press('Enter');
+  // The core has not answered: the old prompt and what followed are gone, the new one shows, the box is empty.
+  await waitFor(() => userBubbles().at(-1) === 'changed request');
+  expect(userBubbles()).toEqual([...kept, 'changed request']);
+  expect(input().value).toBe('');
+  release();
+  await waitFor(() => !store.busy && !store.composerStates['t-trace']!.sending && store.openThread!.messages.at(-1)?.role === 'assistant');
+  expect(userBubbles()).toEqual([...kept, 'changed request']);
 });
 
 test('an edit submitted before navigation replaces the original thread on its owning machine', async ({ app: _app }) => {

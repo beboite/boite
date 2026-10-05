@@ -23,6 +23,7 @@
   import { turnAnswer } from '../lib/message-display';
   import { focusComposer } from '../lib/focus';
   import { isSending } from '../lib/composer-queue';
+  import { retryTurn } from '../lib/composer-edit';
   import { TurnProgress } from '../lib/turn-progress.svelte';
   import { ESTIMATE, GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, reaches, windowStats } from '../lib/message-window';
   import WorkflowActivity from './WorkflowActivity.svelte';
@@ -737,15 +738,10 @@
     focusComposer();
   }
 
-  /** The last turn again from its own prompt: the answer and what followed it leave, the same prompt goes out. */
+  /** The last turn again from its own prompt, on screen before the core rewinds (`retryTurn`). */
   async function retry(turnId: string): Promise<void> {
     const prompt = messages.find((message) => message.turnId === turnId && message.role === 'user');
-    if (!prompt) return;
-    const rewound = await store.rewind(prompt.id);
-    if (!rewound) return;
-    const sent = await store.send(rewound.prompt, threadId, rewound.attachments, rewound.previewReferences);
-    // The rewind already took the prompt away: a failed send leaves it in the box, not nowhere.
-    if (!sent) store.restoreDraft(threadId, rewound.prompt, rewound.attachments, rewound.previewReferences);
+    if (prompt) await retryTurn(store, threadId, prompt);
   }
 
 </script>

@@ -97,6 +97,43 @@ test('answering the docked question shows a queued user bubble, then one sent me
   expect(page.errors()).toEqual([]);
 }, 30000);
 
+test('an edited prompt replaces the old one on screen before the core rewinds', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: 850, deviceScaleFactor: 1, mobile: false });
+  await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread.status === 'idle'`);
+  const bubbles = (text: string) => `Array.from(document.querySelectorAll('[data-role=user] ${id('text-part')}')).filter(part => part.textContent === ${JSON.stringify(text)}).length`;
+  const last = `Array.from(document.querySelectorAll('[data-role=user] ${id('text-part')}')).at(-1)?.textContent`;
+  await page.type(id('composer-input'), 'Edit me afterwards');
+  await page.click(id('composer-send'));
+  await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread.status === 'idle' && ${bubbles('Edit me afterwards')} === 1 && document.querySelectorAll('${id('message-edit')}').length > 0`);
+  // The rewind waits on the test: what the page shows meanwhile is the client's own doing.
+  await update(`
+    const client = store.client;
+    globalThis.__plainCall = client.call;
+    const call = client.call.bind(client);
+    client.call = async (method, params) => {
+      if (method === 'threads.rewind') await new Promise(resolve => { globalThis.__releaseRewind = resolve; });
+      return call(method, params);
+    };
+  `);
+  await page.evaluate(`(() => { const rows = document.querySelectorAll('${id('message')}[data-role=user]'); rows[rows.length - 1].querySelector('${id('message-edit')}').click(); return null; })()`);
+  await page.waitFor(`document.querySelector('${id('composer-input')}').value === 'Edit me afterwards'`);
+  await page.type(id('composer-input'), 'Edited before the core rewinds');
+  await page.click(id('composer-send'));
+  await page.waitFor(`${last} === 'Edited before the core rewinds' && ${bubbles('Edit me afterwards')} === 0`, 2000);
+  expect(await page.evaluate(`typeof globalThis.__releaseRewind`)).toBe('function');
+  expect(await page.evaluate(`document.querySelector('${id('composer-input')}').value`)).toBe('');
+  for (const width of [1300, 390]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: width < 720 });
+    await capture(`chat-delivery-editing-${width < 720 ? 'phone' : 'desktop'}`);
+    expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  }
+  await page.evaluate('globalThis.__releaseRewind()');
+  await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread.status === 'idle' && ${bubbles('Edited before the core rewinds')} === 1`);
+  expect(await page.evaluate<number>(bubbles('Edit me afterwards'))).toBe(0);
+  await update(`store.client.call = globalThis.__plainCall;`);
+  expect(page.errors()).toEqual([]);
+}, 30000);
+
 test('a sent prompt is on screen, unticked, before the core answers, then is one message', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: 850, deviceScaleFactor: 1, mobile: false });
   // The core's answer to `turns.start` waits on the test: what the page shows meanwhile is the client's own doing.
