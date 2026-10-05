@@ -96,7 +96,7 @@ real('an agent opens, reads and drives a page in the browser of its own machine'
   await expect(owner.call('browser.command', { threadId: other, tabId: open.tabId, action: { kind: 'snapshot' } })).rejects.toThrow('no browser tab');
   await agent.call('browser.command', { threadId, action: { kind: 'close' } });
   expect(((await agent.call('browser.command', { threadId, action: { kind: 'status' } })).value as { tabs: unknown[] }).tabs).toEqual([]);
-}, 60_000);
+}, 150_000);
 
 real('a viewer on another device watches and drives the tab, and hears it come and go', async () => {
   const { grant } = await owner.call('pairing.grant', {});
@@ -129,7 +129,7 @@ real('a viewer on another device watches and drives the tab, and hears it come a
     await owner.call('threads.archive', { threadId });
     expect((await gone).tabs).toEqual([]);
   } finally { phone.close(); }
-}, 60_000);
+}, 150_000);
 
 real('a window a page opens joins the conversation as a tab of its own', async () => {
   await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
@@ -140,7 +140,7 @@ real('a window a page opens joins the conversation as a tab of its own', async (
     tabs = ((await agent.call('browser.command', { threadId, action: { kind: 'status' } })).value as { tabs: typeof tabs }).tabs;
   }
   expect(tabs.map(tab => tab.url)).toEqual([url(), url('/popup')]);
-}, 60_000);
+}, 150_000);
 
 real('a recording is an MP4 made in the browser itself, and one left running when the turn ends is thrown away', async () => {
   await agent.call('browser.command', { threadId, action: { kind: 'open', url: url('/moving') } });
@@ -160,7 +160,7 @@ real('a recording is an MP4 made in the browser itself, and one left running whe
   await owner.call('turns.start', { threadId, prompt: 'hello' });
   await finished; await Bun.sleep(300);
   await expect(agent.call('browser.command', { threadId, action: { kind: 'recording-stop' } })).rejects.toThrow('discarded');
-}, 60_000);
+}, 150_000);
 
 test('without a Chromium-based browser the status says why and nothing opens', async () => {
   const previous = process.env.BOITE_BROWSER;
@@ -234,7 +234,7 @@ real('each profile keeps its own cookies, across a restart of the browser; a pri
     expect(await visit(again, 'Pro')).toBe('login=work');
     expect(await visit(again, 'private')).toBe('');
   } finally { await again.close(); }
-}, 90_000);
+}, 150_000);
 
 real('the owner copies a desktop profile into the agent browser: the profile is made here, its sign-ins open with it and outlive a restart', async () => {
   const cookies = [
@@ -262,7 +262,7 @@ real('the owner copies a desktop profile into the agent browser: the profile is 
     expect(await read(again, 'Work')).toBe('kept=a-month; session=no-expiry');
     expect(((await again.command({ threadId, action: { kind: 'status' } })).value as { tabs: unknown[] }).tabs).toEqual([]);
   } finally { await again.close(); }
-}, 90_000);
+}, 150_000);
 
 real('a click right after the viewport changes size lands on its element, and what the page then logs is kept', async () => {
   const fixture = readFileSync(join(import.meta.dir, '../../../tests/e2e/fixtures/browser-parity.html'), 'utf8');
@@ -284,4 +284,4 @@ real('a click right after the viewport changes size lands on its element, and wh
     expect(entries.some(entry => entry.kind === 'exception' && entry.text.includes('Erreur volontaire'))).toBe(true);
     expect(entries.some(entry => entry.kind === 'network' && entry.text.includes('404'))).toBe(true);
   } finally { page.stop(true); }
-}, 60_000);
+}, 150_000);

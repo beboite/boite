@@ -44,7 +44,9 @@ Each [browser profile](panel.md#browser-profiles) of the machine's settings is
 one browser process with its own folder, `<data dir>/browser/<profile id>`,
 which keeps its cookies and logins across restarts. A private tab gets a
 process of its own in a throwaway folder, removed when its last tab closes.
-A process starts with the first tab that needs it, through `procs.spawn` as a
+A process starts with the first tab that needs it, and has 60 seconds to
+answer: a profile's first start creates it, which took over 20 seconds on a
+Windows CI runner. It is started through `procs.spawn` as a
 tool process of `system:browser`, so [the trace](trace.md) shows it. It closes
 60 seconds after its last tab, and with the core. Deleting a profile in
 Settings closes its tabs and removes its folder; a folder whose browser had

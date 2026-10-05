@@ -44,6 +44,12 @@ import { TabRecorder } from './browser/recorder.ts';
 import { EDITABLE_SCRIPT, KEY_CODES, PAGE_INFO_SCRIPT, SETTLED_VIEWPORT_SCRIPT, SNAPSHOT_SCRIPT, targetScript } from './browser/scripts.ts';
 
 const SCOPE = 'system:browser';
+/**
+ * How long a browser may take to answer after it starts. The first start of a
+ * profile creates it: 20 seconds was not enough on a Windows CI runner on
+ * 2026-10-05, where the next start took two.
+ */
+const START_TIMEOUT_MS = 60_000;
 const TABS_PER_THREAD = 8;
 const TABS_MAX = 24;
 /** A browser process with no tab left is closed after this long: the next `open` starts it again. */
@@ -225,10 +231,10 @@ export class AgentBrowser {
         const [commands, replies] = spawned.fds ?? [];
         if (commands === undefined || replies === undefined) throw new Error('the browser was started without its DevTools pipes');
         cdp = Cdp.pipe(commands, replies);
-      } else cdp = await Cdp.connect(await waitForEndpoint(dir, spawned.exited));
+      } else cdp = await Cdp.connect(await waitForEndpoint(dir, spawned.exited, START_TIMEOUT_MS));
       // The first answer says the browser is up; a browser that exits first never gives it.
       await Promise.race([
-        cdp.send('Browser.getVersion', {}, undefined, 20_000),
+        cdp.send('Browser.getVersion', {}, undefined, START_TIMEOUT_MS),
         spawned.exited.then(() => { throw new Error('the browser exited while starting; another process may hold its profile folder'); }),
       ]);
       // The cookies this profile held when its browser last closed, session cookies included.
