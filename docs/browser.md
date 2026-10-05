@@ -52,11 +52,14 @@ already closed goes at the next settings change or the first use of the agent
 browser after a restart. A folder that cannot be removed is logged.
 
 Logins live on the machine that runs the agent, not on the device that shows
-it. A profile keeps them, session cookies included: each profile folder is
-told to keep its session (`session.restore_on_startup` in its preferences), so
-a sign-in whose cookie has no expiry date is still there after the browser
-process closed. On Chrome 153, without that preference such a cookie was gone
-at the next start; the pages the session brings back are closed at once.
+it. The core keeps each profile's cookies itself, in `boite-cookies.json` in
+the profile folder, readable by its own account only: saved when a tab closes
+and before the browser process ends, handed back when it starts. The browser's
+own cookie file was not enough: on the Windows and macOS CI runners of
+2026-10-05 a cookie set in a tab was gone after the process closed, and a
+cookie with no expiry date is never written by a browser at all. A private
+tab's cookies are never saved. A core killed outright keeps what was saved at
+the last tab closed.
 
 ### Copying a desktop profile's sign-ins
 

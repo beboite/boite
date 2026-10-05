@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
+import type { BrowserAction } from '@boite/contracts';
 import { connect, type CoreClient } from '../src/client.ts';
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { AgentBrowser } from '../src/browser.ts';
@@ -104,7 +105,8 @@ real('a viewer on another device watches and drives the tab, and hears it come a
     await expect(phone.call('browser.remoteStatus', { threadId })).rejects.toThrow('subscribe');
     await phone.call('threads.subscribe', { threadId });
     expect(await phone.call('browser.remoteStatus', { threadId })).toEqual({ live: false, tabs: [], available: true });
-    const shown = phone.next('browser.remoteChanged', event => event.threadId === threadId && event.live);
+    // A cold browser start can take longer than the default wait on a slow runner.
+    const shown = phone.next('browser.remoteChanged', event => event.threadId === threadId && event.live, 30_000);
     const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
     expect((await shown).tabs[0]).toMatchObject({ tabId, profile: 'default', active: true });
     const frame = await phone.call('browser.remoteFrame', { threadId });
@@ -123,7 +125,7 @@ real('a viewer on another device watches and drives the tab, and hears it come a
     await expect(phone.call('browser.remoteInput', { threadId, frameId: small.id, input: { kind: 'navigate', url: 'javascript:alert(1)' } })).rejects.toThrow('HTTP');
     // A viewer never gets the agent's own command, which can run scripts.
     await expect(phone.call('browser.command', { threadId, action: { kind: 'evaluate', expression: '1' } })).rejects.toThrow();
-    const gone = phone.next('browser.remoteChanged', event => event.threadId === threadId && !event.live);
+    const gone = phone.next('browser.remoteChanged', event => event.threadId === threadId && !event.live, 30_000);
     await owner.call('threads.archive', { threadId });
     expect((await gone).tabs).toEqual([]);
   } finally { phone.close(); }
@@ -261,3 +263,25 @@ real('the owner copies a desktop profile into the agent browser: the profile is 
     expect(((await again.command({ threadId, action: { kind: 'status' } })).value as { tabs: unknown[] }).tabs).toEqual([]);
   } finally { await again.close(); }
 }, 90_000);
+
+real('a click right after the viewport changes size lands on its element, and what the page then logs is kept', async () => {
+  const fixture = readFileSync(join(import.meta.dir, '../../../tests/e2e/fixtures/browser-parity.html'), 'utf8');
+  const page = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: request => new URL(request.url).pathname === '/'
+    ? new Response(fixture, { headers: { 'content-type': 'text/html;charset=utf-8' } }) : new Response('missing', { status: 404 }) });
+  try {
+    const command = (action: BrowserAction) => agent.call('browser.command', { threadId, action });
+    await command({ kind: 'open', url: page.url.href });
+    await command({ kind: 'preset', preset: 'iphone-15-pro' });
+    expect(await evaluate('[innerWidth,innerHeight]')).toEqual([393, 852]);
+    await command({ kind: 'preset', preset: 'iphone-15-pro', orientation: 'landscape' });
+    expect(await evaluate('[innerWidth,innerHeight]')).toEqual([852, 393]);
+    await command({ kind: 'reset-viewport' });
+    // The button sits elsewhere at each size: aimed at the old layout, the click missed it.
+    await command({ kind: 'click', selector: '#diagnostic' });
+    await Bun.sleep(150);
+    const { entries } = (await command({ kind: 'diagnostics' })).value as { entries: Array<{ kind: string; text: string }> };
+    expect(entries.some(entry => entry.kind === 'console' && entry.text.includes('Diagnostic volontaire'))).toBe(true);
+    expect(entries.some(entry => entry.kind === 'exception' && entry.text.includes('Erreur volontaire'))).toBe(true);
+    expect(entries.some(entry => entry.kind === 'network' && entry.text.includes('404'))).toBe(true);
+  } finally { page.stop(true); }
+}, 60_000);

@@ -39,9 +39,9 @@ import type { Core } from './core.ts';
 import type { Connection } from './router.ts';
 import { refused } from './errors.ts';
 import { Cdp } from './browser/cdp.ts';
-import { chromiumArgs, clearActivePort, findChromium, keepSession, pipesDevTools, waitForEndpoint } from './browser/chromium.ts';
+import { chromiumArgs, clearActivePort, findChromium, pipesDevTools, readSavedCookies, waitForEndpoint, writeSavedCookies } from './browser/chromium.ts';
 import { TabRecorder } from './browser/recorder.ts';
-import { EDITABLE_SCRIPT, KEY_CODES, PAGE_INFO_SCRIPT, SNAPSHOT_SCRIPT, targetScript } from './browser/scripts.ts';
+import { EDITABLE_SCRIPT, KEY_CODES, PAGE_INFO_SCRIPT, SETTLED_VIEWPORT_SCRIPT, SNAPSHOT_SCRIPT, targetScript } from './browser/scripts.ts';
 
 const SCOPE = 'system:browser';
 const TABS_PER_THREAD = 8;
@@ -211,7 +211,6 @@ export class AgentBrowser {
     if (found.path === null) throw refused(`the agent browser cannot start on ${this.#machine}: ${found.reason}`);
     const dir = this.#profileDir(profile);
     mkdirSync(dir, { recursive: true });
-    if (profile !== PRIVATE_BROWSER_PROFILE) keepSession(dir);
     const piped = pipesDevTools();
     if (!piped) clearActivePort(dir);
     const spawned = this.#core.procs.spawn(SCOPE, found.path, chromiumArgs(dir), { agentRoot: false, ...(piped ? { extraPipes: 2 } : {}) });
@@ -232,11 +231,9 @@ export class AgentBrowser {
         cdp.send('Browser.getVersion', {}, undefined, 20_000),
         spawned.exited.then(() => { throw new Error('the browser exited while starting; another process may hold its profile folder'); }),
       ]);
-      // A kept session brings back the pages it had: the agent's tabs are opened by its commands only.
-      const { targetInfos } = await cdp.send<{ targetInfos: Array<{ targetId: string; type: string; url: string }> }>('Target.getTargets');
-      for (const target of targetInfos) {
-        if (target.type === 'page' && target.url !== 'about:blank') await cdp.send('Target.closeTarget', { targetId: target.targetId }).catch(() => {});
-      }
+      // The cookies this profile held when its browser last closed, session cookies included.
+      const saved = profile === PRIVATE_BROWSER_PROFILE ? [] : readSavedCookies(dir);
+      if (saved.length) await cdp.send('Storage.setCookies', { cookies: saved }).catch(error => this.#core.log('warn', `the saved cookies of browser profile ${profile} were refused: ${error instanceof Error ? error.message : String(error)}`));
       // Pages that open a window (a sign-in popup) are adopted as tabs of the same conversation.
       await cdp.send('Target.setDiscoverTargets', { discover: true });
       await cdp.send('Browser.setDownloadBehavior', { behavior: 'deny' }).catch(() => {});
@@ -268,10 +265,27 @@ export class AgentBrowser {
       if (current === engine) this.#engines.delete(engine.profile);
     }
     clearTimeout(engine.idle);
-    // A clean close writes the profile's cookies; the kill is for a browser that does not.
+    await this.#saveCookies(engine);
+    // A clean close lets the browser write its own files; the kill is for one that does not end.
     await engine.cdp.send('Browser.close', {}, undefined, 3000).catch(() => {});
-    await Promise.race([engine.exited, Bun.sleep(3000)]);
+    await Promise.race([engine.exited, Bun.sleep(5000)]);
     this.#lost(engine);
+  }
+
+  /**
+   * The core keeps each profile's cookies itself. A browser writes its own
+   * late and, on Windows and macOS, lost them when it closed a minute after
+   * its last tab; one without an expiry date is never written by it at all.
+   * Saved when a tab closes and before the process ends, restored at start.
+   */
+  async #saveCookies(engine: Engine): Promise<void> {
+    if (engine.throwaway || !engine.cdp.open) return;
+    try {
+      const { cookies } = await engine.cdp.send<{ cookies: Record<string, unknown>[] }>('Storage.getCookies', {}, undefined, 5000);
+      writeSavedCookies(engine.dir, cookies);
+    } catch (error) {
+      this.#core.log('warn', `the cookies of browser profile ${engine.profile} could not be saved: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   #idle(engine: Engine): void {
@@ -388,6 +402,8 @@ export class AgentBrowser {
   }
 
   async #closeTab(tab: Tab): Promise<void> {
+    // While the page is still there: what it signed in to is on disk before anything can end the browser.
+    await this.#saveCookies(tab.engine);
     await tab.engine.cdp.send('Target.closeTarget', { targetId: tab.targetId }).catch(() => {});
     this.#drop(tab.id);
   }
@@ -507,6 +523,11 @@ export class AgentBrowser {
     await this.#send(tab, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
   }
 
+  /** Waits for the page's viewport to hold its size; a page that cannot answer is left as it is. */
+  async #settle(tab: Tab): Promise<void> {
+    await this.#evaluate(tab, SETTLED_VIEWPORT_SCRIPT, 3000).catch(() => {});
+  }
+
   #diagnostics(tab: Tab, clear = false) {
     const result = { entries: [...tab.diagnostics], dropped: tab.dropped, history: [...tab.history] };
     if (clear) { tab.diagnostics = []; tab.dropped = 0; tab.history = []; }
@@ -531,16 +552,18 @@ export class AgentBrowser {
         return done();
       case 'press': await this.#key(tab, action.key); return done();
       case 'scroll': await this.#evaluate(tab, `window.scrollBy(${action.x}, ${action.y})`); return done();
+      // The page takes a few frames to reach a new size: the next command meets it laid out.
       case 'resize':
         await this.#send(tab, 'Emulation.setDeviceMetricsOverride', { width: action.width, height: action.height, deviceScaleFactor: 1, mobile: false });
-        tab.preset = null; tab.frame = null; return done();
+        tab.preset = null; tab.frame = null; await this.#settle(tab); return done();
       case 'reset-viewport':
         await this.#send(tab, 'Emulation.clearDeviceMetricsOverride');
-        tab.preset = null; tab.frame = null; return done();
+        tab.preset = null; tab.frame = null; await this.#settle(tab); return done();
       case 'preset': {
         const size = browserPresetSize(action.preset, action.orientation);
         await this.#send(tab, 'Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false });
         tab.preset = action.preset; tab.orientation = size.width > size.height ? 'landscape' : 'portrait'; tab.frame = null;
+        await this.#settle(tab);
         return done(size);
       }
       case 'appearance':
@@ -653,8 +676,9 @@ export class AgentBrowser {
     const engine = await this.#engine(id);
     clearTimeout(engine.idle);
     try { await engine.cdp.send('Storage.setCookies', { cookies }); }
-    catch (error) { throw refused(`the browser refused these cookies: ${error instanceof Error ? error.message : String(error)}`); }
-    finally { this.#idle(engine); }
+    catch (error) { this.#idle(engine); throw refused(`the browser refused these cookies: ${error instanceof Error ? error.message : String(error)}`); }
+    await this.#saveCookies(engine);
+    this.#idle(engine);
     return { imported: cookies.length, profile: id };
   }
 

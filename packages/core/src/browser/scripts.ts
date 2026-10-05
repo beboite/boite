@@ -27,9 +27,17 @@ export function targetScript(selector: string, typing: boolean): string {
     if (nodes.length !== 1) throw new Error('selector must match exactly one element; matched ' + nodes.length);
     const el = nodes[0];
     if (el.disabled || el.readOnly) throw new Error('element is disabled or read-only');
-    el.scrollIntoView({block:'center', inline:'center'});
-    // Native input uses the composited page, which can lag behind DOM scrolling.
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    el.scrollIntoView({block:'center', inline:'center', behavior:'instant'});
+    // Native input uses the composited page, which can lag behind DOM scrolling, and a viewport
+    // that was just resized is still laying out: aim only once the element has stopped moving.
+    let seen = '';
+    for (let i = 0; i < 20; i++) {
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const box = el.getBoundingClientRect();
+      const now = [innerWidth, innerHeight, box.left, box.top, box.width, box.height].join();
+      if (now === seen) break;
+      seen = now;
+    }
     const r = el.getBoundingClientRect(), s = getComputedStyle(el);
     if (!r.width || !r.height || s.visibility === 'hidden') throw new Error('element is hidden');
     const x = Math.max(0, Math.min(innerWidth - 1, r.left + r.width / 2));
@@ -48,3 +56,15 @@ export const EDITABLE_SCRIPT = `(() => { let e=document.activeElement; while(e?.
 export const PAGE_INFO_SCRIPT = '({width:innerWidth,height:innerHeight,title:document.title,href:location.href,origin:performance.timeOrigin,dpr:devicePixelRatio||1})';
 
 export const KEY_CODES = { Enter: 13, Tab: 9, Escape: 27, Backspace: 8, ArrowDown: 40, ArrowUp: 38 } as const;
+
+/** Resolves once the page's viewport has held one size for two frames, and returns it: a resize is not instant. */
+export const SETTLED_VIEWPORT_SCRIPT = `(async () => {
+  let seen = '';
+  for (let i = 0; i < 30; i++) {
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const now = innerWidth + 'x' + innerHeight;
+    if (now === seen) break;
+    seen = now;
+  }
+  return { width: innerWidth, height: innerHeight };
+})()`;

@@ -3,7 +3,7 @@
  * one profile folder. The core speaks the DevTools protocol to it; nothing of
  * it is shown on screen.
  */
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export interface ChromiumFound { path: string }
@@ -85,24 +85,31 @@ export function chromiumArgs(profileDir: string, platform = process.platform): s
   ];
 }
 
+/** A profile's cookies as the core saved them, beside the browser's own files. */
+const COOKIE_FILE = 'boite-cookies.json';
+
 /**
- * Asks the profile to keep its session, as "Continue where you left off"
- * does: a sign-in whose cookie has no expiry date would otherwise be gone each
- * time the browser process closes, a minute after its last tab. Measured on
- * Chrome 153: without it a session cookie is lost at the restart, with it kept.
- * Called before the process starts; a profile whose preferences cannot be read
- * is left as it is.
+ * What the profile's browser held when it last closed, in the form
+ * `Storage.setCookies` takes. An unreadable file reads as none.
  */
-export function keepSession(profileDir: string): void {
-  const file = join(profileDir, 'Default', 'Preferences');
+export function readSavedCookies(profileDir: string): Record<string, unknown>[] {
   try {
-    let preferences: Record<string, unknown> = {};
-    if (existsSync(file)) preferences = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-    const session = (preferences.session && typeof preferences.session === 'object' ? preferences.session : {}) as Record<string, unknown>;
-    if (session.restore_on_startup === 1) return;
-    mkdirSync(join(profileDir, 'Default'), { recursive: true });
-    writeFileSync(file, JSON.stringify({ ...preferences, session: { ...session, restore_on_startup: 1 } }));
-  } catch { /* the browser starts with what it has */ }
+    const saved: unknown = JSON.parse(readFileSync(join(profileDir, COOKIE_FILE), 'utf8'));
+    return Array.isArray(saved) ? saved.filter((cookie): cookie is Record<string, unknown> => !!cookie && typeof cookie === 'object') : [];
+  } catch { return []; }
+}
+
+/**
+ * Writes every cookie of a profile where only this account reads it, whole or
+ * not at all. `cookies` are DevTools `Cookie` objects: the fields that only
+ * describe them are dropped, and a session cookie keeps no expiry date.
+ */
+export function writeSavedCookies(profileDir: string, cookies: Record<string, unknown>[]): void {
+  const kept = cookies.map(({ size: _size, session, expires, ...cookie }) => (session === true || typeof expires !== 'number' || expires <= 0 ? cookie : { ...cookie, expires }));
+  const file = join(profileDir, COOKIE_FILE), partial = `${file}.part`;
+  mkdirSync(profileDir, { recursive: true });
+  writeFileSync(partial, JSON.stringify(kept), { mode: 0o600 });
+  renameSync(partial, file);
 }
 
 /** Whether the DevTools protocol goes over the browser's own pipes on this OS, rather than a loopback port. */
