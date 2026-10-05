@@ -114,6 +114,36 @@ test('goal continues across turns, reports tasks and stops only on completion', 
   expect(thread.messages.filter(message => message.role === 'user').map(message => message.parts.filter(part => part.type === 'image').length)).toEqual([1, 0]);
 });
 
+test('a blocked goal waits for the user and resumes after the reply', async () => {
+  const client = await h.connect();
+  const { threadId } = await echoThread(h, client);
+  const prompts: string[] = [];
+  restore = setDriver('echo', {
+    protocol: 'echo',
+    startTurn(ctx) {
+      prompts.push(ctx.prompt);
+      const text = prompts.length === 1 ? 'Which database?\n[BOITE_GOAL_BLOCKED]' : prompts.length === 2 ? 'Noted.' : 'Done.\n[BOITE_GOAL_COMPLETE]';
+      const id = ctx.emit.startMessage('assistant');
+      ctx.emit.part(id, 0, { type: 'text', text });
+      ctx.emit.complete(id, 'complete');
+      return { stop() {}, done: Promise.resolve({ status: 'done', sessionId: 'goal-session', usage: null }) };
+    },
+  });
+  await client.call('threads.activity.set', { threadId, goal: { objective: 'Migrate' } });
+  await waitFor(() => h.core.activity.get(threadId).goal?.blocked === true && h.core.threads.get(threadId).status === 'idle');
+  expect(h.core.activity.get(threadId).goal).toMatchObject({ status: 'paused', blocked: true });
+  // A native command is not an answer and leaves the goal waiting.
+  const command = h.core.threads.startTurn(threadId, '/cost');
+  await waitFor(() => h.core.journal.getTurn(command.id)?.finishedAt !== null);
+  expect(h.core.activity.get(threadId).goal).toMatchObject({ status: 'paused', blocked: true });
+  h.core.threads.startTurn(threadId, 'Postgres');
+  await waitFor(() => h.core.activity.get(threadId).goal?.status === 'complete');
+  expect(prompts.slice(1, 3)).toEqual(['/cost', 'Postgres']);
+  expect(prompts[3]).toContain('Migrate');
+  expect(h.core.activity.get(threadId).goal).toMatchObject({ status: 'complete', iterations: 2, error: null });
+  expect(h.core.activity.get(threadId).goal?.blocked).toBeUndefined();
+});
+
 test('counted loops run consecutive iterations, retain each result and stop at the requested count', async () => {
   const client = await h.connect();
   const { threadId } = await echoThread(h, client);

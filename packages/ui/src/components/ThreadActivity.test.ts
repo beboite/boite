@@ -99,3 +99,17 @@ test('another thread\'s question comes up open over one folded here, as many que
   expect(document.querySelector('[data-testid=activity-question]:not([hidden])')!.getAttribute('data-question')).toBe('second');
 });
 
+test('a blocked goal asks for an answer and its reply button focuses the composer', () => {
+  const box = document.createElement('textarea');
+  box.dataset.testid = 'composer-input';
+  render({ goal: { objective: 'Migrate', status: 'paused', iterations: 1, error: 'The agent reported a blocker. Reply to resume.', blocked: true }, loop: null, tasks: [] });
+  document.body.append(box);
+  const row = document.querySelector('[data-testid=activity-goal]')!;
+  expect(row.getAttribute('data-blocked')).toBe('true');
+    expect(document.querySelector('.error')).toBeNull();
+  const hint = document.querySelector('[data-testid=activity-goal-blocked]')!;
+  expect(hint.textContent).toContain('Waiting for your answer');
+  expect(hint.textContent).toContain('Your next message resumes the goal');
+  hint.querySelector('button')!.click();
+  expect(document.activeElement).toBe(box);
+});
