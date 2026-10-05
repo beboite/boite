@@ -1,5 +1,5 @@
 import type { ModelInfo, ProviderId, ProviderSummary } from '@boite/contracts';
-import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, writeModelDefaults, resolveModelDefault, type ModelDefaults } from '../model-defaults';
+import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, writeModelDefaults, resolveModelDefault, fallbackModelDefault, type ModelDefaults } from '../model-defaults';
 import { FAVORITES_KEY, isNamedModel, readFavorites, type FavoriteModel } from '../model-order';
 import { defaultPrefs, writePrefs, type ComposerPrefs } from '../prefs';
 import { strings } from '../strings';
@@ -182,8 +182,15 @@ export class Models {
 
   defaultModelOf(provider: ProviderSummary, accountId?: string): string | null {
     const models = accountId ? this.ctx.store.modelsOf(provider.id, accountId) : provider.models;
-    const preferred = this.modelDefaults[provider.id] ?? INITIAL_MODEL_DEFAULTS[provider.id];
-    return preferred?.model ?? resolveModelDefault(provider.id, models, this.modelDefaults)?.model ?? null;
+    const configured = this.modelDefaults[provider.id];
+    if (configured) return configured.model;
+    // The built-in default is a preference: once the account's own catalog is
+    // read and does not list it, the catalog decides.
+    if (accountId && this.probedModels[probeKey(provider.id, accountId)]) {
+      const fallback = fallbackModelDefault(provider.id, models);
+      if (fallback) return fallback.model;
+    }
+    return INITIAL_MODEL_DEFAULTS[provider.id]?.model ?? resolveModelDefault(provider.id, models, this.modelDefaults)?.model ?? null;
   }
 
   /** Replace old agent-selected aliases for the next prompt, preserving named choices. */
@@ -203,7 +210,8 @@ export class Models {
     const configured = this.modelDefaults[providerId] ?? INITIAL_MODEL_DEFAULTS[providerId];
     if (configured?.model === model && (!offered.some((entry) => entry.id === model) ||
       (s.providerOf(providerId)?.protocol === 'claude-sdk' && !this.probedModels[probeKey(providerId, accountId)]))) return configured.effort;
-    const preferred = resolveModelDefault(providerId, offered, this.modelDefaults);
+    const preferred = configured === this.modelDefaults[providerId] && configured
+      ? resolveModelDefault(providerId, offered, this.modelDefaults) : fallbackModelDefault(providerId, offered);
     return preferred?.model === model ? preferred.effort : offered.find((m) => m.id === model)?.effort?.default ?? null;
   }
 
@@ -323,7 +331,13 @@ export class Models {
         return null;
       }
     }
-    if (!s.modelsOf(provider.id, choice.accountId).some((model) => model.id === choice.model)) {
+    const offered = s.modelsOf(provider.id, choice.accountId);
+    if (!offered.some((model) => model.id === choice.model)) {
+      // Only the built-in default moves to what the account offers. A default
+      // the user configured, or a model he picked, is refused instead.
+      const fallback = !this.modelDefaults[provider.id] && choice.model === INITIAL_MODEL_DEFAULTS[provider.id]?.model
+        ? fallbackModelDefault(provider.id, offered) : null;
+      if (fallback) return { ...choice, model: fallback.model, effort: fallback.effort, speed: null };
       s.error = strings.settings.modelDefaultUnavailable.replace('{model}', choice.model).replace('{provider}', provider.name);
       return null;
     }

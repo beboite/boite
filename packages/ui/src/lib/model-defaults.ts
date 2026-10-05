@@ -47,3 +47,20 @@ export function resolveModelDefault(providerId: string, models: ModelInfo[], def
   return { model: model.id, effort: model.effort?.levels.some((level) => level.id === effort)
     ? effort ?? null : model.effort?.default ?? null };
 }
+
+/**
+ * What replaces a built-in default the account's catalog does not list: a
+ * later revision of the same model (`claude-opus-5` to `claude-opus-5-5`),
+ * else the catalog's own default, its first current model, its first model.
+ * A default the user configured is never replaced this way.
+ */
+export function fallbackModelDefault(providerId: string, models: ModelInfo[]): ModelDefault | null {
+  const named = models.filter(isNamedModel);
+  const builtIn = INITIAL_MODEL_DEFAULTS[providerId];
+  const model = named.find((m) => m.id === builtIn?.model) ??
+    named.find((m) => builtIn && m.id.startsWith(`${builtIn.model}-`)) ??
+    named.find((m) => m.default) ?? named.find((m) => !m.legacy) ?? named[0];
+  if (!model) return null;
+  return { model: model.id, effort: model.effort?.levels.some((level) => level.id === builtIn?.effort)
+    ? builtIn!.effort : model.effort?.default ?? null };
+}

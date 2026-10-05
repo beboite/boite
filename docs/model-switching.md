@@ -177,6 +177,10 @@ selected. Before sending on an old thread, the UI verifies the preset against th
 account's model catalog
 and saves it with the thread's selection revision. An unavailable preset or a
 concurrent selection change refuses the send; it never silently runs the alias.
+The built-in preset is a preference, not a setting: when the account's catalog
+does not list it, the UI moves to a later revision of the same model
+(`claude-opus-5` to `claude-opus-5-5`), else to the catalog's default or first
+current model. Only a preset the user configured is refused.
 The picker also ignores saved presets containing these aliases.
 
 Schema 9 adds `threads.session_generation`, `threads.selection_version` and
