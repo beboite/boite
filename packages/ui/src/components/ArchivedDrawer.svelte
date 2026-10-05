@@ -92,7 +92,7 @@
               disabled={restoring !== null}
               onclick={() => void restore(thread)}><RotateCcw size={13} /><span class="ui-label">{strings.sidebar.restoreThread}</span></button
             >
-            {#if canDeleteThread(store, thread)}
+            {#if canDeleteThread(thread)}
               <button class="ghost small danger" data-testid="archived-drawer-delete"
                 aria-label={strings.sidebar.delete} title={strings.sidebar.delete} disabled={restoring !== null}
                 onclick={() => void remove(thread)}><Trash2 size={13} /><span class="ui-label">{strings.sidebar.delete}</span></button>

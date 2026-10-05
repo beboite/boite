@@ -363,6 +363,23 @@ test('a phone pins and archives a thread without a right-click, from the header 
   expect(page.errors()).toEqual([]);
 }, 20_000);
 
+test('a paired phone deletes a thread from its list and the toast offers undo', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.navigate(`${origin}/?fake=1&open=recent&principal=session`);
+  await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger]')?.offsetParent`);
+  expect(await page.evaluate('__boiteTest.workspace.active.owner')).toBe(false);
+  const id = await page.evaluate<string>('__boiteTest.workspace.active.openThread.id');
+  await navigateMobile('mobile-conversations');
+  await page.click(`[data-testid=mobile-thread-menu-${id}]`);
+  await page.waitFor(`document.querySelector('[data-testid=mobile-thread-menu-${id}-menu] [data-value=delete]')`);
+  await capture('mobile-paired-thread-delete-menu.png');
+  await page.click(`[data-testid=mobile-thread-menu-${id}-menu] [data-value=delete]`);
+  await page.waitFor(`!document.querySelector('[data-testid=mobile-thread-${id}]') && !__boiteTest.workspace.active.threads.some(t => t.id === ${JSON.stringify(id)})`);
+  await capture('mobile-paired-thread-deleted.png');
+  expect(await page.evaluate('__boiteTest.workspace.active.error')).toBeNull();
+  expect(page.errors()).toEqual([]);
+}, 20_000);
+
 test('a phone header shows the label of a draft and a truncated French title at 360 px', async () => {
   const origin = await page.evaluate<string>('location.origin');
   await page.navigate(`${origin}/?fake=1&open=recent`);

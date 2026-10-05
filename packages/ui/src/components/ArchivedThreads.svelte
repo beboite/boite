@@ -171,7 +171,7 @@
               <RotateCcw size={14} /><span class="ui-label">{strings.settings.archived.restore}</span>
             </button>
           {/if}
-          {#if canDeleteThread(store, thread)}
+          {#if canDeleteThread(thread)}
             <button type="button" class="ghost small danger" data-testid="archived-delete"
               aria-label={strings.sidebar.delete} title={strings.sidebar.delete} disabled={restoring !== null}
               onclick={() => void remove(thread)}><Trash2 size={14} /><span class="ui-label">{strings.sidebar.delete}</span></button>

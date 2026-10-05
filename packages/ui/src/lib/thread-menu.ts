@@ -34,6 +34,6 @@ export function threadMenuItems(store: Store, thread: ThreadSummary, options: Th
     ...(options.prLoading === undefined || !thread.branch || thread.branch === 'HEAD' ? [] : [{ id: 'pr', label: strings.machines.refreshPr, glyph: GitPullRequest, disabled: options.prLoading }]),
     ...(options.tools ?? [])
   ];
-  if (canDeleteThread(store, thread)) items.push(separator('sep-delete'), { id: 'delete', label: strings.sidebar.delete, glyph: Trash2, danger: true });
+  if (canDeleteThread(thread)) items.push(separator('sep-delete'), { id: 'delete', label: strings.sidebar.delete, glyph: Trash2, danger: true });
   return items;
 }

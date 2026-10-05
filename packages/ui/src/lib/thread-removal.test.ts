@@ -166,3 +166,16 @@ test('an older core keeps the conversation and explains which machine needs an u
   expect(store.error).toBe(strings.sidebar.deleteUnavailable);
   expect(undo.current).toBeNull();
 });
+
+test('a paired phone deletes a conversation and undo brings it back', async () => {
+  const store = new Store();
+  stores.push(store);
+  store.attach(new FakeClient({ delayMs: 0, principal: 'session' }));
+  await store.connect();
+  expect(store.owner).toBe(false);
+  expect(await deleteThread(store, store.threads.find(t => t.id === 't-trace')!)).toBe(true);
+  expect(store.threads.some(t => t.id === 't-trace')).toBe(false);
+  await undo.take();
+  expect(store.threads.some(t => t.id === 't-trace')).toBe(true);
+  expect(store.error).toBeNull();
+});

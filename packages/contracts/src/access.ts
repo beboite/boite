@@ -94,6 +94,10 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'threads.fork',
   'threads.mergeBack', // A paired owner can return bounded conclusions to the recorded fork source.
   'threads.archive',
+  // Deleting from the phone's thread menu, and its undo. Project files stay and
+  // the conversation is kept for the owner's retention period; the list of
+  // deleted conversations and that period stay on the owner's settings page.
+  'threads.remove', 'threads.restore',
   // Moving a thread from the sidebar or its menu. The device names a project it
   // already lists, never a path: the core picks the folder or makes the
   // worktree, as it does for `threads.create` and `threads.fork`.
