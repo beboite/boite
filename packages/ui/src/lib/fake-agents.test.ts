@@ -68,3 +68,30 @@ test('the fake bounds its snapshot and pages older memories by cursor, like the 
   expect(seen.size).toBe(AGENT_HISTORY_PAGE + 25);
   expect(() => fake.call('agents.history', { kind: 'memory', agentId: 'agent_1' })).toThrow('agentId');
 });
+
+test('the fake entrusts a thread like the core: refusals, the take-over message, then one done message', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true }); await client.connect();
+  try {
+    const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
+    const agent = await client.call('agents.profile.save', { value: { name: 'Ada', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' as const }, status: 'active' as const, tools: ['messages'], accountIntegration: 'provider' as const } });
+    const threads = await client.call('threads.list', { includeArchived: true });
+    const child = threads.find(t => t.parentThreadId)!;
+    const thread = threads.find(t => !t.parentThreadId && !t.agentSessionId && !t.archived && t.projectId && t.status === 'idle')!;
+    await expect(client.call('agents.entrust', { threadId: 'nowhere', agentId: agent.id })).rejects.toThrow('threadId');
+    await expect(client.call('agents.entrust', { threadId: child.id, agentId: agent.id })).rejects.toThrow('delegated child');
+    await expect(client.call('agents.entrust', { threadId: thread.id, agentId: 'nobody' })).rejects.toThrow('agentId');
+    await expect(client.call('agents.entrust', { threadId: thread.id, agentId: agent.id, objective: 'x'.repeat(4001) })).rejects.toThrow('objective');
+    const entry = await client.call('agents.entrust', { threadId: thread.id, agentId: agent.id, objective: 'Ship it' });
+    expect(entry).toMatchObject({ threadId: thread.id, agentId: agent.id, objective: 'Ship it' });
+    const about = async () => (await client.call('agents.snapshot', {})).messages.filter(m => m.thread?.id === thread.id).map(m => m.thread!.event);
+    await expect.poll(about).toEqual(['entrusted', 'done']);
+    const snapshot = await client.call('agents.snapshot', {});
+    const done = snapshot.messages.find(m => m.thread?.event === 'done')!;
+    expect(done).toMatchObject({ senderId: agent.id, scope: { kind: 'agent', id: agent.id }, recipientIds: [] });
+    const opened = await client.call('threads.get', { threadId: thread.id });
+    const last = opened.messages.filter(m => m.role === 'assistant').at(-1)!;
+    expect(done.text).toBe(last.parts.flatMap(p => p.type === 'text' ? [p.text] : []).join('\n'));
+    expect(snapshot.entrusted).toEqual([]);
+    expect(opened.activity?.goal?.status).toBe('complete');
+  } finally { client.close(); }
+});
