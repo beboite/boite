@@ -212,3 +212,26 @@ test('a cancel drops the waiting move; a stopped turn still applies one; nothing
   await vi.waitFor(async () => expect((await client.call('threads.get', { threadId: PLAIN })).projectId).toBe('p-boite'), { timeout: 2000 });
   expect((await client.call('threads.get', { threadId: PLAIN })).turns.find((t) => t.id === held.turnId)?.status).toBe('stopped');
 });
+
+test('the row carries the pending note until the next message; a move back or the agent\'s own move drops it', async () => {
+  const client = await fake();
+  const heard: (string | null)[] = [];
+  client.on('thread.updated', (thread) => { if (thread.id === PLAIN) heard.push(thread.moveNote?.to.projectId ?? null); });
+  const moved = await client.call('threads.move', { threadId: PLAIN, projectId: 'p-boite' });
+  expect(moved.moveNote).toMatchObject({ from: { projectId: 'p-notes' }, to: { projectId: 'p-boite' } });
+  expect(moved.moveNote?.note).toContain('Your working directory is now C:\\src\\boite.');
+  expect(heard.at(-1)).toBe('p-boite');
+  expect((await client.call('threads.list', {})).find((t) => t.id === PLAIN)?.moveNote?.to.projectId).toBe('p-boite');
+
+  const first = await client.call('turns.start', { threadId: PLAIN, prompt: 'carry on' });
+  await finished(client, PLAIN, first.id);
+  expect(heard.at(-1)).toBeNull();
+  expect((await client.call('threads.get', { threadId: PLAIN })).moveNote ?? null).toBeNull();
+
+  expect((await client.call('threads.move', { threadId: PLAIN, projectId: 'p-notes' })).moveNote?.to.projectId).toBe('p-notes');
+  expect((await client.call('threads.move', { threadId: PLAIN, projectId: 'p-boite' })).moveNote).toBeNull();
+  expect((await client.call('threads.move', { threadId: PLAIN, projectId: 'p-notes' })).moveNote?.to.projectId).toBe('p-notes');
+  await client.call('agent.move', { threadId: PLAIN, project: 'boite' });
+  expect((await client.call('threads.get', { threadId: PLAIN })).moveNote).toBeNull();
+  expect(heard.at(-1)).toBeNull();
+});

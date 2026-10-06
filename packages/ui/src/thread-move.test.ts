@@ -209,8 +209,17 @@ test('the next prompt shows the accent marker that opens on the note; an agent m
   await workspace.select(store, 't-descriptors');
   await waitFor(() => store.openThread?.id === 't-descriptors');
   await moveThread(store, 't-descriptors', 'p-boite');
+  // Until the next prompt, the foot of the thread says the agent will be told, and what.
+  await waitFor(() => document.querySelector('[data-testid=move-pending]') !== null);
+  expect(query('[data-testid=move-pending]').textContent?.trim()).toBe('Moved to boite · the agent will be told with your next message');
+  query<HTMLButtonElement>('[data-testid=move-pending-toggle]').click();
+  await waitFor(() => document.querySelector('[data-testid=move-pending-note]') !== null);
+  expect(query('[data-testid=move-pending-note]').textContent).toContain('Your working directory is now C:\\src\\boite.');
+  expect(document.querySelector('[data-testid=move-marker]')).toBeNull();
+
   await store.client!.call('turns.start', { threadId: 't-descriptors', prompt: 'where am I' });
   await waitFor(() => document.querySelector('[data-testid=move-marker-toggle]') !== null);
+  await waitFor(() => document.querySelector('[data-testid=move-pending]') === null);
   expect(query('[data-testid=move-marker]').textContent?.trim()).toBe('Move explained to the agent');
   query<HTMLButtonElement>('[data-testid=move-marker-toggle]').click();
   await waitFor(() => document.querySelector('[data-testid=move-note]') !== null);
@@ -220,4 +229,17 @@ test('the next prompt shows the accent marker that opens on the note; an agent m
   await store.client!.call('agent.move', { threadId: 't-descriptors', project: 'notes' });
   await waitFor(() => document.querySelector('[data-testid=move-marker][data-by=agent]') !== null);
   expect(query('[data-testid=move-marker][data-by=agent]').textContent?.trim()).toBe('Moved by the agent to notes');
+  expect(document.querySelector('[data-testid=move-pending]')).toBeNull();
+});
+
+test('a move back to where the thread was takes the pending notice away', async () => {
+  await mountOnFake();
+  await workspace.select(store, 't-descriptors');
+  await waitFor(() => store.openThread?.id === 't-descriptors');
+  await moveThread(store, 't-descriptors', 'p-boite');
+  await waitFor(() => document.querySelector('[data-testid=move-pending]') !== null);
+  await moveThread(store, 't-descriptors', 'p-notes');
+  await waitFor(() => store.openThread?.projectId === 'p-notes');
+  await waitFor(() => document.querySelector('[data-testid=move-pending]') === null);
+  expect(store.openThread?.moveNote ?? null).toBeNull();
 });

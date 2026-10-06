@@ -8,10 +8,10 @@ import { newId } from '../ids.ts';
 import type { ThreadStore } from '../threads.ts';
 import type { PlacedWorktree } from '../worktree.ts';
 import { draftFolderName, makeDraftFolder } from './inputs.ts';
-import { saveThread, withLoad } from './records.ts';
+import { MOVE_NOTE_PREFIX, saveThread, withLoad } from './records.ts';
 
-/** The journal setting holding the note a thread's next message carries to its agent. */
-export const MOVE_NOTE_PREFIX = 'move-note:';
+// The note lives with the row's other reads (`withLoad` shows it to clients).
+export { MOVE_NOTE_PREFIX, pendingMoveNote as pendingMove } from './records.ts';
 
 /**
  * Whether the agent's own session survives a change of folder. Codex's
@@ -365,10 +365,4 @@ export class ThreadMove {
     const notice: MoveNotice = { from: origin, to, note: moveNote(origin, to, branch), at: Date.now() };
     this.core.journal.setSetting(key, notice);
   }
-}
-
-/** The note waiting for a thread's next message, or null. */
-export function pendingMove(core: Core, threadId: ThreadId): MoveNotice | null {
-  const value = core.journal.getSetting(`${MOVE_NOTE_PREFIX}${threadId}`) as MoveNotice | undefined;
-  return value ?? null;
 }

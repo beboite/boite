@@ -1052,6 +1052,10 @@ export const strings = {
     moveExplained: 'Move explained to the agent',
     moveShow: 'Show what the agent was told',
     moveHide: 'Hide what the agent was told',
+    /** At the foot of a thread the user moved: the note rides on the next prompt, not sent yet. */
+    movePending: 'Moved to {project} · the agent will be told with your next message',
+    movePendingShow: 'Show what the agent will be told',
+    movePendingHide: 'Hide what the agent will be told',
     /** A line of the timeline: the agent moved its own thread with `boite thread move`. */
     movedByAgent: 'Moved by the agent to {project}',
     /** Above the first prompt of a thread another thread's agent started with `boite thread new`. */

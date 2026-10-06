@@ -761,6 +761,8 @@ export class ThreadStore {
         const dismissal = !activity && !operation ? this.core.activity.prepareUserPrompt(threadId, !nativeCommandPrompt(prompt)) : undefined;
         this.core.bus.emit('message.started', message);
         this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
+        // A status that stays queued tells nobody: the row still loses its pending move note.
+        if (moved && this.core.journal.getThread(threadId)?.status === 'queued') this.core.bus.emit('thread.updated', this.withLoad(this.require(threadId)));
         this.setStatus(threadId, 'queued');
         return { reservation, dismissal };
       })();

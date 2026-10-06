@@ -110,14 +110,14 @@ function move(ctx: FakeContext, threadId: ThreadId, projectId: string, stopBackg
       one.context = null;
       one.promptCache = null;
     }
+    // The note each moved thread's next message carries, as the core's `move-note:` setting, read back as `moveNote`.
     if (by === 'user') {
-      const earlier = ctx.moveNotes.get(one.id);
+      const earlier = one.moveNote ?? null;
       const origin = earlier?.from ?? { ...from, cwd: one.cwd };
-      if (origin.cwd === cwd) ctx.moveNotes.delete(one.id);
-      else ctx.moveNotes.set(one.id, { from: origin, to, note: fakeMoveNote(origin, to, branch), at: ctx.now() } satisfies MoveNotice);
+      one.moveNote = origin.cwd === cwd ? null : { from: origin, to, note: fakeMoveNote(origin, to, branch), at: ctx.now() } satisfies MoveNotice;
     } else {
       // The agent asked and knows where it goes: nothing waits for its next message.
-      ctx.moveNotes.delete(one.id);
+      one.moveNote = null;
     }
     one.projectId = target.id;
     one.cwd = cwd;

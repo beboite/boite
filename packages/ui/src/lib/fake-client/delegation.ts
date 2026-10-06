@@ -146,7 +146,7 @@ export function workflowChild(ctx: FakeContext, root: Thread, profile: ChildRout
     ...root, id, parentThreadId: root.id, title, titleSource: 'user',
     providerId: profile.providerId, accountId: profile.accountId, model: profile.model, effort: profile.effort,
     status: 'running', unread: false, archived: false, pinned: false,
-    sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, activity: undefined,
+    sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, activity: undefined, moveNote: null,
     createdAt: at, updatedAt: at, messagesBefore: null, turns: [turn], commands: [],
     messages: [{ id: `m-${id}-task`, threadId: id, turnId: turn.id, role: 'user', parts: [{ type: 'text', text: task }], state: 'complete', createdAt: at }]
   };
@@ -336,7 +336,7 @@ export function delegationMethods(ctx: FakeContext) {
         effort: params.model === undefined && params.effort !== undefined ? params.effort : profile.effort,
         speed: null,
         status: 'idle', unread: false, archived: false, pinned: false,
-        sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null,
+        sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, moveNote: null,
         createdAt: at, updatedAt: at, messagesBefore: null, messages: [], turns: [], commands: []
       };
       delete child.pullRequest;

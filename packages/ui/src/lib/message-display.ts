@@ -1,4 +1,4 @@
-import type { Message, MessagePart } from '@boite/contracts';
+import type { Message, MessagePart, MoveNotice, ThreadLink, ThreadSummary } from '@boite/contracts';
 
 /** Older cores journalled the whole goal instruction as a user message. */
 export function visibleUserText(text: string): string {
@@ -156,6 +156,30 @@ export class ParagraphScan {
     this.#result = tail ? [...this.#done, tail] : [...this.#done];
     return this.#result;
   }
+}
+
+/** The core's line for a move the agent asked for itself (`boite thread move`), drawn as a marker, not a message. */
+export function movedBy(message: Message): MoveNotice | null {
+  if (message.role !== 'system') return null;
+  for (const part of message.parts) if (part.type === 'text' && part.moved?.by === 'agent') return part.moved;
+  return null;
+}
+
+/** The core's line for a thread the agent started (`boite thread new`). */
+export function startedFrom(message: Message): ThreadLink | null {
+  if (message.role !== 'system') return null;
+  for (const part of message.parts) if (part.type === 'text' && part.started) return part.started;
+  return null;
+}
+
+/**
+ * A move the user made that the agent hears of with the next prompt, for the
+ * foot of the open thread: null once that prompt went (its own marker takes
+ * over), after a move back, after a move the agent made, and for another thread.
+ */
+export function pendingMoveOf(thread: Pick<ThreadSummary, 'id' | 'moveNote'> | null, threadId: string): MoveNotice | null {
+  if (!thread || thread.id !== threadId) return null;
+  return thread.moveNote ?? null;
 }
 
 /** Everything the agent wrote in one turn, its tool cards left out: what a copy of the answer takes. */
