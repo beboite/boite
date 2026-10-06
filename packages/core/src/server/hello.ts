@@ -110,11 +110,12 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
  * Where this socket's prompts come from, for the agent's note. Only the
  * user's apps count: an agent's `boite` call or a test says nothing. The
  * shell on this machine's loopback is on this machine, whose name the core
- * knows better than the client does.
+ * knows better than the client does. Control, format and line or paragraph
+ * separator characters go: the name lands inside a line of the agent's prompt.
  */
 export function sentFromOf(identity: Identity, name: string, device: unknown, remote: boolean): SentFrom | null {
   if (identity.principal === 'agent' || (name !== 'shell' && name !== 'pwa')) return null;
-  const said = typeof device === 'string' ? device.replace(/[\p{Cc}\p{Cf}]/gu, '').trim() : '';
+  const said = typeof device === 'string' ? device.replace(/[\p{C}\p{Zl}\p{Zp}]/gu, '').trim() : '';
   const named = said.length > 0 && said.length <= CLIENT_DEVICE_MAX ? said : null;
   return { client: name, device: named ?? (name === 'shell' && !remote ? hostname() : null) };
 }
