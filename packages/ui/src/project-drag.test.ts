@@ -146,7 +146,11 @@ test('in the manual order a header dragged with the mouse moves its project; a s
   window.dispatchEvent(pointer('pointermove', 10, 20));
   await waitFor(() => section(first).classList.contains('insert-before'));
   window.dispatchEvent(pointer('pointerup', 10, 20));
-  const ending = new MouseEvent('click', { bubbles: true, cancelable: true });
+  // A click from a script or the keyboard still goes through, however soon.
+  const scripted = new MouseEvent('click', { bubbles: true, cancelable: true });
+  document.body.dispatchEvent(scripted);
+  expect(scripted.defaultPrevented).toBe(false);
+  const ending = new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 });
   header(second).dispatchEvent(ending);
   expect(ending.defaultPrevented).toBe(true);
   await waitFor(() => order()[0] === second);
@@ -154,6 +158,19 @@ test('in the manual order a header dragged with the mouse moves its project; a s
   expect(dragging()).toBe(false);
   expect(document.querySelector('[data-testid=project-drag-ghost]')).toBeNull();
   expect(document.querySelector('.insert-before, .insert-after, .lifted')).toBeNull();
+
+  // A drag no click ends (cancelled, or released off the header) leaves the guard to the next press: that press's click opens.
+  header(first).dispatchEvent(pointer('pointerdown', 10, 20));
+  window.dispatchEvent(pointer('pointermove', 10, 80));
+  await waitFor(() => dragging());
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  window.dispatchEvent(pointer('pointerup', 10, 80));
+  expect(dragging()).toBe(false);
+  header(first).dispatchEvent(pointer('pointerdown', 10, 20));
+  window.dispatchEvent(pointer('pointerup', 10, 20));
+  const next = new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 });
+  document.body.dispatchEvent(next);
+  expect(next.defaultPrevented).toBe(false);
 });
 
 test('a finger drags a project header only after holding it still; a finger that travels first scrolls', async () => {

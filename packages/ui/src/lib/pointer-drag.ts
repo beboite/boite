@@ -125,10 +125,22 @@ export function startPointerDrag(event: PointerEvent, handlers: PointerDragHandl
     if (!dragging) return;
     dragging = false;
     root.classList.remove(handlers.rootClass);
-    // The click that ends a drag opens nothing; none comes when the pointer left the element.
-    const swallow = (e: MouseEvent): void => { e.preventDefault(); e.stopPropagation(); };
-    window.addEventListener('click', swallow, { capture: true, once: true });
-    setTimeout(() => window.removeEventListener('click', swallow, true), 0);
+    // The click that ends a drag opens nothing. None comes when the pointer left
+    // the element, so the guard lasts until the next press rather than a timer:
+    // a throttled timer could still be armed for the next real click, or gone
+    // before a late one. A click without a press (keyboard, script) goes through.
+    const disarm = (): void => {
+      window.removeEventListener('click', swallow, true);
+      window.removeEventListener('pointerdown', disarm, true);
+    };
+    const swallow = (e: MouseEvent): void => {
+      if (e.detail === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      disarm();
+    };
+    window.addEventListener('click', swallow, true);
+    window.addEventListener('pointerdown', disarm, true);
     handlers.end(drop);
   };
   const up = (e: PointerEvent): void => {
