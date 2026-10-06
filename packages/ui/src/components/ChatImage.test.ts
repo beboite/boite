@@ -65,6 +65,33 @@ test('a deferred picture has its size and its blur before a byte arrives, asks f
   expect(loadMessageAttachment).toHaveBeenCalledTimes(1);
 });
 
+test('a picture whose fetch failed asks again when it comes back near the screen, and loses the failure once it loads', async () => {
+  const show = observeBy();
+  const image = reactive<ImagePart>({ type: 'image', mimeType: 'image/png', data: '', alt: null, dataDeferred: true, bytes: 70, width: 1, height: 1 });
+  let attempts = 0;
+  const loadMessageAttachment = vi.fn(async () => {
+    attempts += 1;
+    if (attempts === 1) throw new Error('the connection dropped');
+    image.data = PIXEL;
+    delete image.dataDeferred;
+    return PIXEL;
+  });
+  const store = { loadMessageAttachment, reportError: vi.fn() } as unknown as Store;
+  running = mount(ChatImage, { target: document.body, props: { store, threadId: 't', messageId: 'm', partIndex: 1, image } });
+  flushSync();
+  const box = document.querySelector<HTMLElement>('[data-testid=image-box]')!;
+
+  show(true);
+  await vi.waitFor(() => expect(box.dataset['state']).toBe('failed'));
+  expect(box.title).not.toBe('');
+  // Scrolled away and back: the observer still watches, and the picture asks again.
+  show(false);
+  show(true);
+  await vi.waitFor(() => expect(document.querySelector('[data-testid=image-part]')).not.toBeNull());
+  expect(loadMessageAttachment).toHaveBeenCalledTimes(2);
+  await vi.waitFor(() => expect(box.title).toBe(''));
+});
+
 test('a picture that came with its bytes reads its size from their header and asks for nothing', () => {
   observeBy();
   const loadMessageAttachment = vi.fn();

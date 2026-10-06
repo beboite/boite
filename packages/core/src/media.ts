@@ -50,7 +50,15 @@ export class MediaPreviews {
   lookup(threadId: string): ImagePreviews {
     let known: { messageId: string; parts: Map<number, string | null> } | null = null;
     return (messageId, partIndex, data) => {
-      if (known?.messageId !== messageId) known = { messageId, parts: mediaPreviews(this.core.journal.db, messageId) };
+      if (known?.messageId !== messageId) {
+        try {
+          known = { messageId, parts: mediaPreviews(this.core.journal.db, messageId) };
+        } catch (error) {
+          // A page goes out without its blurs rather than not at all.
+          this.core.log('warn', `media previews of message ${messageId} could not be read: ${messageOf(error)}`);
+          return null;
+        }
+      }
       if (known.parts.has(partIndex)) return known.parts.get(partIndex) ?? null;
       this.enqueue(threadId, messageId, partIndex, data);
       return null;
@@ -67,6 +75,15 @@ export class MediaPreviews {
    * sent before it.
    */
   async warm(threadId: ThreadId, near?: MessageId, limit?: number): Promise<void> {
+    // The blurs are optional: a failure here never costs the reader the page.
+    try {
+      await this.warmPage(threadId, near, limit);
+    } catch (error) {
+      this.core.log('warn', `media previews for thread ${threadId} were not prepared: ${messageOf(error)}`);
+    }
+  }
+
+  private async warmPage(threadId: ThreadId, near?: MessageId, limit?: number): Promise<void> {
     const journal = this.core.journal;
     if (journal.getThread(threadId) === null) return;
     const rowid = near === undefined ? null : journal.messageRowid(threadId, near);

@@ -39,12 +39,15 @@
   /** The box's width: the picture's own, shrunk to `maxHeight` keeping its proportions. The column still caps it. */
   const width = $derived(size === null ? null : maxHeight === null ? size.width : Math.min(size.width, (maxHeight * size.width) / size.height));
 
-  // A picture asks for its bytes once; the store shares one request per part.
+  // A picture asks for its bytes once while a request runs or after one
+  // succeeded; a failed one asks again the next time it nears the screen.
   let asked = false;
   function load(): void {
     if (asked || !image.dataDeferred) return;
     asked = true;
-    store.loadMessageAttachment(threadId, messageId, partIndex).catch((error: unknown) => {
+    store.loadMessageAttachment(threadId, messageId, partIndex).then(() => {
+      failed = false;
+    }, (error: unknown) => {
       failed = true;
       asked = false;
       store.reportError(error, 'minor');

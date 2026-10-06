@@ -81,6 +81,18 @@ describe('deferred pictures', () => {
     expect(full).toEqual({ type: 'image', mimeType: 'image/png', data: SHOT, alt: 'msg_shot.png' });
   });
 
+  test('a light page still opens, sized and without blurs, when the blurs cannot be read', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    seed(threadId);
+    harness.core.journal.db.exec('DROP TABLE media_previews');
+    const light = await client.call('threads.get', { threadId, compactImages: true });
+    const shot = light.messages.find((message) => message.id === 'msg_shot')!.parts[1];
+    expect(shot).toMatchObject({ dataDeferred: true, width: 320, height: 180 });
+    expect(shot).not.toHaveProperty('preview');
+    expect((await client.call('messages.list', { threadId, before: 'msg_tall', compactImages: true })).messages).toHaveLength(1);
+  });
+
   test('the blurs of a rewound message and of a deleted thread leave the journal with them', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
