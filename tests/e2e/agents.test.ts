@@ -209,13 +209,14 @@ test('memory past the snapshot window stays reachable through Load earlier', asy
 
 test('a thread entrusted from its menu carries on, and its agent reports in its conversation', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
-  const threadId = await page.evaluate<string>(`(async () => {
+  // The thread's id stays in the page: the expressions below read it there rather than splicing it into code.
+  await page.evaluate(`(async () => {
     const store = window.__boiteTest.workspace.active;
     const thread = store.threads.find(t => t.title === 'Finish the trace tab');
+    window.__entrustThreadId = thread.id;
     await store.open(thread.id);
-    return thread.id;
   })()`);
-  await page.waitFor(`window.__boiteTest.workspace.active.openThread?.id === ${JSON.stringify(threadId)}`);
+  await page.waitFor(`window.__boiteTest.workspace.active.openThread?.id === window.__entrustThreadId`);
   // The title's menu offers the agents once the directory has read them.
   await page.waitFor(`(() => { const store = window.__boiteTest.workspace.active; return store.page === 'chat'; })()`);
   await page.click('[data-testid="thread-menu-trigger"]');
@@ -223,7 +224,7 @@ test('a thread entrusted from its menu carries on, and its agent reports in its 
   await page.click('[data-value="entrust"]');
   await page.waitFor(`document.querySelector('[data-value="' + window.__agentsFixture.first.id + '"]')`);
   await page.evaluate(`document.querySelector('[data-value="' + window.__agentsFixture.first.id + '"]').click()`);
-  await page.waitFor(`(async () => { const s = await window.__boiteTest.workspace.active.client.call('agents.snapshot', {}); return s.messages.filter(m => m.thread?.id === ${JSON.stringify(threadId)}).map(m => m.thread.event).join() === 'entrusted,done'; })()`);
+  await page.waitFor(`(async () => { const s = await window.__boiteTest.workspace.active.client.call('agents.snapshot', {}); return s.messages.filter(m => m.thread?.id === window.__entrustThreadId).map(m => m.thread.event).join() === 'entrusted,done'; })()`);
   await page.evaluate(`window.__boiteTest.workspace.active.showAgents(window.__agentsFixture.first.id)`);
   await page.waitFor(`document.querySelectorAll('[data-testid="agent-thread-event"]').length === 2`);
   expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="agent-thread-event"]')).map(e => e.dataset.event)`)).toEqual(['entrusted', 'done']);
@@ -231,5 +232,5 @@ test('a thread entrusted from its menu carries on, and its agent reports in its 
   await page.evaluate(`document.querySelector('[data-testid="agent-thread-event"][data-event="done"]').scrollIntoView({ block: 'center' })`);
   await capture('agents-entrusted-desktop.png');
   await page.click('[data-testid="agent-thread-event"][data-event="done"] [data-testid="agent-thread-event-open"]');
-  await page.waitFor(`window.__boiteTest.workspace.active.page === 'chat' && window.__boiteTest.workspace.active.openThread?.id === ${JSON.stringify(threadId)}`);
+  await page.waitFor(`window.__boiteTest.workspace.active.page === 'chat' && window.__boiteTest.workspace.active.openThread?.id === window.__entrustThreadId`);
 }, 60000);
