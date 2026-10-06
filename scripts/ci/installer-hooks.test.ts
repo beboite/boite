@@ -26,10 +26,21 @@ function kill(pid: number) {
   Bun.spawnSync(['taskkill', '/T', '/F', '/PID', String(pid)], { stdout: 'ignore', stderr: 'ignore', windowsHide: true });
 }
 
-afterAll(() => {
+afterAll(async () => {
   for (const pid of started) kill(pid);
-  if (scratch) rmSync(scratch, { recursive: true, force: true });
   if (ready) Bun.spawnSync(['reg', 'delete', `HKCU\\${UNINSTKEY}`, '/f'], { stdout: 'ignore', stderr: 'ignore', windowsHide: true });
+  // Windows lets go of a killed process's executable a moment after taskkill
+  // returns: the copies under the scratch directory stay locked until then.
+  for (let attempt = 0; scratch; attempt++) {
+    try {
+      rmSync(scratch, { recursive: true, force: true });
+      break;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if ((code !== 'EPERM' && code !== 'EBUSY') || attempt >= 40) throw error;
+      await Bun.sleep(250);
+    }
+  }
 }, 30_000);
 
 function makensis(script: string): string {
