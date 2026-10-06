@@ -8,6 +8,7 @@ mod attachments;
 #[cfg(test)]
 mod acl;
 mod attachment_download;
+mod autostart;
 mod browser;
 mod browser_control;
 mod channel;
@@ -67,9 +68,7 @@ fn notify(app: AppHandle, webview: Webview, title: String, body: String, thread_
 /// waits for the lock instead, and the variable goes no further than here.
 const RESTARTED_AFTER_UPDATE: &str = "BOITE_RESTARTED_AFTER_UPDATE";
 
-fn acquire_after_update(directory: &std::path::Path) -> std::io::Result<Option<std::fs::File>> {
-    let restarted = std::env::var_os(RESTARTED_AFTER_UPDATE).is_some();
-    std::env::remove_var(RESTARTED_AFTER_UPDATE);
+fn acquire_after_update(directory: &std::path::Path, restarted: bool) -> std::io::Result<Option<std::fs::File>> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
         let acquired = instance::acquire(directory)?;
@@ -92,13 +91,18 @@ pub fn run() {
     let context = shell_context();
     let channel = Channel::of_identifier(&context.config().identifier);
     let directory = resolve_data_dir(channel);
-    let _instance = match acquire_after_update(&directory) {
+    let restarted = std::env::var_os(RESTARTED_AFTER_UPDATE).is_some();
+    std::env::remove_var(RESTARTED_AFTER_UPDATE);
+    // Started by the login entry: the core starts, the window waits in the tray.
+    let at_login = autostart::launched_at_login(std::env::args_os(), restarted);
+    let _instance = match acquire_after_update(&directory, restarted) {
         Ok(Some(file)) => Some(file),
         // Another instance already owns this data directory: it shows its
         // window, which may be in the tray or behind others, and this process
-        // has nothing left to do. Automation never raises a window.
+        // has nothing left to do. Automation never raises a window, and
+        // neither does a login start finding Boite already running.
         Ok(None) => {
-            if !hidden() {
+            if !hidden() && !at_login {
                 if let Err(error) = instance::wake(&directory) {
                     eprintln!("[shell] Boite is already running, but it could not be asked to show its window: {error}");
                 }
@@ -125,6 +129,11 @@ pub fn run() {
     let failures = directory.clone();
     let preferences_path = directory.join("shell-settings.json");
     let close_to_tray = close_to_tray_or_default(&preferences_path);
+    let login_item = platform::login::login_program().map(|program| platform::login::LoginItem {
+        name: context.package_info().name.clone(),
+        identifier: context.config().identifier.clone(),
+        program,
+    });
     let app_updater = updater::AppUpdater::new(context.package_info().version.to_string(), directory.clone(),
         updater::replaceable_package() && !cfg!(debug_assertions)
             && channel == Channel::Stable && !hidden());
@@ -150,6 +159,7 @@ pub fn run() {
             notify,
             presence::user_presence,
             closing::close_behavior,
+            autostart::launch_at_login,
             updater::app_update_status,
             updater::app_update_check,
             updater::app_update_download,
@@ -177,6 +187,14 @@ pub fn run() {
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
+            match login_item {
+                Ok(item) => { app.manage(item); }
+                Err(error) => eprintln!("[shell] starting at login cannot be offered: {error}"),
+            }
+            // Decided before anything can reveal the window: the tray is built
+            // after it, and a start with no tray shows the window below.
+            let in_tray = autostart::starts_in_tray(at_login, true, hidden());
+            if in_tray { handle.state::<Reveal>().stay_hidden(); }
             let launch = Launch::new(channel, directory.clone(), handle.path().resource_dir().ok(),
                 handle.package_info().version.to_string());
             app.manage(CoreState::new(launch));
@@ -198,6 +216,12 @@ pub fn run() {
                 if let Err(error) = build_tray(&handle, channel) {
                     record_failure(&directory, &format!("the tray icon could not be created, so closing the window quits Boite: {error}"));
                 }
+            }
+            if in_tray {
+                if autostart::starts_in_tray(at_login, handle.tray_by_id("boite").is_some(), hidden()) {
+                    // Nothing on screen: the page does not paint until the tray shows it.
+                    browser::park_all(&handle);
+                } else { show_main(&handle); }
             }
 
             let closing = handle.clone();

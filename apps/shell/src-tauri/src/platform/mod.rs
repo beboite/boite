@@ -43,6 +43,7 @@ pub(crate) mod browser_page;
 pub(crate) mod browser_screencast;
 #[cfg(windows)]
 pub(crate) mod webview_profiles;
+pub(crate) mod login;
 
 pub(crate) fn open_file(path: &std::path::Path) -> Result<(), String> {
     tauri_plugin_opener::open_path(path, None::<&str>)

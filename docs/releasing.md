@@ -282,6 +282,17 @@ restores the main window. Hover/click opens a quota popup that polls only while
 visible and is destroyed 45 seconds after hiding. Hidden/minimized Windows
 pages and browser panels stop painting and see `document.hidden`.
 
+General settings can also start the shell at login with `--autostart`: a
+quoted `Run` value named after the product under
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, an XDG
+`<identifier>.desktop` (the `$APPIMAGE` file for an AppImage) or a LaunchAgent
+`<identifier>.plist`. That start runs the core and keeps the window in the tray;
+with no tray, or after an update restart, the window shows. The switch reads
+off when the entry names another executable or Task Manager disabled it, and
+switching it on rewrites both. The NSIS uninstaller deletes the `Run` value;
+updates keep it. Hidden test shells refuse to change it
+(`src/autostart.rs`, `src/platform/login.rs`).
+
 `shell.lock` permits one shell per data directory. A second launch uses the
 loopback port/token in `shell-wake` to show the existing window. Hidden test
 shells never request it. Setup failures and panics go to `shell-error.log`;

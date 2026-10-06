@@ -1955,6 +1955,8 @@ export const strings = {
     background: 'Background',
     closeToTray: 'Keep Boite running when the window closes',
     closeToTrayHint: 'Hides to the notification area and keeps turns running. Quit always stops Boite.',
+    launchAtLogin: 'Start Boite when I sign in',
+    launchAtLoginHint: 'Boite starts in the notification area with its core running, so this computer can run agents and answer your other devices without its window. Applies to this user account.',
     notifications: 'Notify me when a thread finishes or asks something',
     notificationsHint: 'Only for a thread you are not looking at. This machine only.',
     notificationsDenied: 'Notifications are blocked for Boite on this system; allow them in its settings.',

@@ -381,6 +381,10 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     const settingsPath = join(ownDataDir, 'shell-settings.json');
     await waitUntil(() => existsSync(settingsPath), 5000);
     expect(JSON.parse(readFileSync(settingsPath, 'utf8')).close_to_tray).toBe(true);
+    // The login switch reads this user's real entry; a test shell never writes it.
+    await ownPage.waitFor(`document.querySelector('[data-testid="launch-at-login"]') && !document.querySelector('[data-testid="launch-at-login"]').disabled`);
+    expect(await ownPage.evaluate(`document.querySelector('[data-testid="shell-settings"]').parentElement.querySelector('[role="alert"]')?.textContent ?? ''`)).toBe('');
+    expect(await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('launch_at_login', {enabled:true}).then(() => 'written', error => String(error))`)).toContain('BOITE_SHELL_HIDDEN');
     // The tour leaves the title bar above its scrim: the window still drags and closes.
     await ownPage.click('[data-testid="settings-tour"]');
     await ownPage.waitFor(`document.querySelector('[data-testid="onboarding-step"]')`);

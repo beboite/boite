@@ -4,27 +4,42 @@
   import { strings } from '../lib/strings';
 
   const uid = $props.id();
-  let enabled = $state(false);
-  let ready = $state(false);
-  let error = $state('');
-  async function update(value?: boolean) {
-    ready = false;
-    try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      enabled = await invoke<boolean>('close_behavior', value === undefined ? {} : { enabled: value });
-      error = '';
-    } catch (cause) { error = String(cause); }
-    finally { ready = true; }
+
+  /** One switch the shell owns: its command reads the value, or sets it and answers what holds. */
+  function shellSwitch(command: string) {
+    const state = $state({ enabled: false, ready: false, error: '' });
+    /** `input` is the switch the user flipped: it shows what the shell holds afterwards, even when the change failed. */
+    async function update(value?: boolean, input?: HTMLInputElement) {
+      state.ready = false;
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        state.enabled = await invoke<boolean>(command, value === undefined ? {} : { enabled: value });
+        state.error = '';
+      } catch (cause) { state.error = String(cause); }
+      finally {
+        state.ready = true;
+        if (input) input.checked = state.enabled;
+      }
+    }
+    return { state, update };
   }
-  onMount(() => { void update(); });
+
+  const tray = shellSwitch('close_behavior');
+  const login = shellSwitch('launch_at_login');
+  onMount(() => { void tray.update(); void login.update(); });
 </script>
 
-<!-- A row of General's App card, not a card of its own: one switch does not need a frame. -->
+<!-- Rows of General's App card, not a card of their own: two switches do not need a frame. -->
 <label for="{uid}-close-to-tray" class="switch-row" data-testid="shell-settings">
   <span class="text ui-label-box"><span class="ui-label" id="{uid}-close-to-tray-name">{strings.settings.closeToTray}</span><InfoTip topic={strings.settings.closeToTray} text={strings.settings.closeToTrayHint} /></span>
-  <input id="{uid}-close-to-tray" aria-labelledby="{uid}-close-to-tray-name" type="checkbox" role="switch" data-testid="close-to-tray" checked={enabled} disabled={!ready} onchange={(event) => void update(event.currentTarget.checked)} />
+  <input id="{uid}-close-to-tray" aria-labelledby="{uid}-close-to-tray-name" type="checkbox" role="switch" data-testid="close-to-tray" checked={tray.state.enabled} disabled={!tray.state.ready} onchange={(event) => void tray.update(event.currentTarget.checked, event.currentTarget)} />
 </label>
-{#if error}<p class="error" role="alert">{error}</p>{/if}
+{#if tray.state.error}<p class="error" role="alert">{tray.state.error}</p>{/if}
+<label for="{uid}-launch-at-login" class="switch-row">
+  <span class="text ui-label-box"><span class="ui-label" id="{uid}-launch-at-login-name">{strings.settings.launchAtLogin}</span><InfoTip topic={strings.settings.launchAtLogin} text={strings.settings.launchAtLoginHint} /></span>
+  <input id="{uid}-launch-at-login" aria-labelledby="{uid}-launch-at-login-name" type="checkbox" role="switch" data-testid="launch-at-login" checked={login.state.enabled} disabled={!login.state.ready} onchange={(event) => void login.update(event.currentTarget.checked, event.currentTarget)} />
+</label>
+{#if login.state.error}<p class="error" role="alert">{login.state.error}</p>{/if}
 <style>
   .error { margin: 0 0 12px; color: var(--color-danger); font-size: var(--text-sm); }
 </style>
