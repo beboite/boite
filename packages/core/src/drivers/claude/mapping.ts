@@ -187,7 +187,12 @@ export function contextWindowOf(result: SDKResultMessage, model: string | null):
   return typeof window === 'number' && Number.isFinite(window) && window > 0 ? window : null;
 }
 
+/** What an API error code means, or the generic sentence for a code that says nothing. */
 export function errorSentence(error: SDKAssistantMessageError): string {
+  return namedErrorSentence(error) ?? (error === 'unknown' ? 'Claude stopped on an API error and gave no reason.' : `Claude stopped on an API error (${error}).`);
+}
+
+function namedErrorSentence(error: SDKAssistantMessageError): string | null {
   switch (error) {
     case 'authentication_failed':
       return 'Claude could not authenticate this account. Sign in again to reconnect.';
@@ -210,7 +215,7 @@ export function errorSentence(error: SDKAssistantMessageError): string {
     case 'server_error':
       return 'Claude returned a server error.';
     default:
-      return `Claude failed with ${error}.`;
+      return null;
   }
 }
 
@@ -232,14 +237,18 @@ export function authenticationFailureOf(message: SDKMessage): string | null {
  * The error sentence, then the text the CLI wrote with it. The code alone
  * hides the cause: a request over a proxy's body limit and a malformed one
  * are both `invalid_request`, and only the text says "Request too large".
+ * A code the CLI could not name (`unknown`, as when a proxy cuts the stream)
+ * adds nothing, so the text alone is the reason.
  */
 export function apiErrorReason(error: SDKAssistantMessageError, content: unknown): string {
-  const sentence = errorSentence(error);
   const said = contentBlocks(content)
     .map((block) => (block.type === 'text' ? (block.text ?? '').trim() : ''))
     .filter((text) => text.length > 0)
     .join(' ');
-  return said.length === 0 || said === sentence ? sentence : `${sentence} ${said}`;
+  if (said.length === 0) return errorSentence(error);
+  const sentence = namedErrorSentence(error);
+  if (sentence === null) return said;
+  return said === sentence ? sentence : `${sentence} ${said}`;
 }
 
 /** The CLI's `task_type` as the kinds the UI draws. */
