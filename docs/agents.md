@@ -8,22 +8,22 @@ stopped work item says the agent was paused or archived.
 
 ## The page
 
-The page is cut like the chat. Its list stands where the thread list does,
-with two views on top: Agents (the agents in one card, groups and teams in
-another) and Planning (every routine, grouped as today, tomorrow, this week,
-later, paused and done). A row reads like a thread row: the agent's picture
-where the provider logo goes, its name, and on the right the same state a
-thread shows, Working with its time while its thread runs a turn, Needs you
-while a decision waits, or when it last moved. The line under it says what the
-agent is doing, else the last message, else its next routine. The foot holds
-the engine settings, the way back to the conversations and Settings.
+The page is a chat. Its list stands where the thread list does, under the
+Threads and Agents switch: one card with every conversation, agents and groups
+together, newest first. A row reads like a thread row: the agent's picture
+where the provider logo goes, its name, the same state a thread shows on the
+right (Working with its time, Needs you while it waits on the user, or when it
+last moved) and the last thing said under it. The foot holds the engine
+settings and Settings.
 
-A conversation reads like a thread: the user's messages in bubbles, each
-agent's answer as prose under its picture and name, and the thread composer at
-the bottom. While an agent works, a line says so with the elapsed time and opens
-the thread it works in. A decision it asked for stands in the conversation as a
-question with its answers to pick and a free answer. The header names the views
-in words (Chat, Planning, Memory, Settings for an agent); Activity and Missions
+A conversation is the whole page, drawn with the thread's bubbles and
+composer: the user asks, the agent answers in its bubble, works (three dots in
+a bubble, with a button into the thread it works in) and comes back with the
+result. A planned task's result is labelled with the task's name. A question
+the agent asks stands in the conversation with its answers to pick and a free
+answer. A group names who speaks and shows only deliveries that failed. The
+header keeps the picture, the name and how the agent stands; its planned tasks
+have a button with their count, and memory, settings, activity and missions
 wait in its menu.
 
 A new agent needs a name and what it does; its robot, model and permissions
@@ -43,21 +43,43 @@ The colours are `--robot-1` to `--robot-9` and a few shared tones in `app.css`.
 The face moves with the agent: it blinks at rest, glances from side to side
 while it works and hops while it waits on the user. Reduced motion stills it.
 
-### Threads an agent runs
+### Threads an agent runs or carries
 
 An agent works in threads of its own (`agentSessionId`). The thread list shows
-it: an Agents in charge card above the projects lists every agent whose thread
-runs, is queued or waits on the user, with the same state words as a thread
-row, under the [stewards](stewards.md) of that machine. A row opens the thread, or the agent's conversation when it waits on an
-answer given there. A project thread an agent runs, a mission task in a
-worktree for example, wears the agent's picture in place of the provider
-logo, and so does a delegated child of such a thread. Opening an agent's thread
+it: an Agents in charge card above the projects lists the [stewards](stewards.md)
+of that machine, every entrusted thread with its agent, and every agent whose
+own thread runs, is queued or waits on the user, with the same state words as a
+thread row. A row opens the thread, or the agent's conversation when it waits
+on an answer given there. A project thread an agent runs, a mission task in a
+worktree for example, wears the agent's picture in place of the provider logo,
+and so does a delegated child of such a thread. Opening an agent's thread
 shows, where the composer would be, whose thread it is and the way to the
 agent's conversation, where the user talks to it.
 
-The thread list reads this from the agents snapshot (`lib/agent-directory.svelte.ts`),
-loaded only once a thread of that machine belongs to an agent and refreshed on
-`agents.changed` at most every 1.5 seconds.
+### Entrusting a thread
+
+Any kept thread of a project can be handed to an agent from its menus (row,
+title, phone sheet): Entrust to an agent, then the agent. `agents.entrust`
+(owner only, `packages/core/src/agents/entrust.ts`) refuses a delegated child,
+an agent session, an archived thread, a thread outside a project and an agent
+that is not active, naming the field. The thread keeps its own model and
+session. A goal starts on it (Take over this work where it stands and carry it
+to a verified result, unless another objective is given), the agent's name and
+instructions join each of its turns, and the agent posts in its own
+conversation that it takes the thread over. When the goal is met the agent
+posts the thread's final answer as a Done card and the entrustment ends; when
+the thread needs the user, or a turn fails, it posts that too and the
+entrustment stays, so the user's answer in the thread resumes the goal. Each
+card opens the thread. While entrusted, the thread wears the agent's picture
+in the list and an Entrusted to chip in its header, whose menu opens the agent
+or takes the thread back; taking it back removes the goal without a message.
+Archiving or removing the thread ends the entrustment. The snapshot carries
+the list as `entrusted`, and a message about a thread carries `thread` with
+its id, title and event; clients write the sentence from the event.
+
+The thread list reads all this from the agents snapshot
+(`lib/agent-directory.svelte.ts`), loaded only with the Agents experiment on
+and refreshed on `agents.changed` at most every 1.5 seconds.
 
 ## Conversations and teams
 
@@ -106,7 +128,8 @@ A retry with the same request id returns the original artifact after completion.
 The interface exposes results and the execution without requiring process logs.
 
 An agent calls `boite agent decide` to release its slot and request a durable
-human decision. Needs attention shows the prompt and choices. An answer creates
+human decision. The prompt and its choices stand in the conversation where the
+work was asked, and the agent's row reads Needs you. An answer creates
 one continuation in the same context. Native tool approvals still use the
 existing permission cards and provider process.
 
@@ -228,7 +251,9 @@ zone is the device's and is never asked; a routine saved elsewhere names its
 zone in that sentence and keeps it until its time changes. The name is
 optional: it defaults to the first words of the task. Plan, beside a direct
 conversation's composer, turns what is written there into a task for that
-agent. Each routine shows its next run and how its last run went, with Run
+agent; the header's planned tasks button lists them. A routine's result comes
+back in the agent's conversation labelled with the routine's name. Each
+routine shows its next run and how its last run went, with Run
 now, Pause or Resume, Edit and the way into that run's thread.
 
 Models and limits separates the required default route, allowed main routes,
@@ -306,8 +331,12 @@ The UI journey creates and converses with an agent, leaves the page, edits
 memory and brain files, plans a routine on chosen weekdays and reads its
 sentence, inspects model limits, accepts a task, finds the agent waiting in the
 thread list's Agents in charge card, opens its thread and its conversation from
-there, and answers a decision. `robots.test.ts`, `schedule.test.ts` and
-`agents.test.ts` cover robot codes, schedule sentences, the rows an agent at
-work lights and the thread list's directory. Captures are under
+there, answers a decision in the conversation, then entrusts a thread from its
+title menu and finds the take-over and Done cards in the agent's
+conversation. `robots.test.ts`, `schedule.test.ts`, `thread-entrust.test.ts` and
+`agents.test.ts` cover robot codes, schedule sentences, the entrust menu rows,
+the rows an agent at work lights and the thread list's directory;
+`agents-entrust.test.ts` covers the core's refusals, goal, persona, outcome
+messages and clean-up. Captures are under
 `tests/e2e/.artifacts`. The shell journey finishes work after shell exit,
 adopts the same PID and stops it explicitly. Real-provider inference is opt-in.

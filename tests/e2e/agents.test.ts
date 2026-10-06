@@ -13,10 +13,16 @@ beforeAll(async () => {
   await page.waitFor(`document.querySelector('[data-testid="view-agents"]')`);
 }, 60000);
 
+/** A conversation is the page; its other panes wait in the header's menu. */
+async function openPane(pane: string) {
+  await page.click('[data-testid="agent-panes"]');
+  await page.click(`[data-value="${pane}"]`);
+}
+
 async function missionJourney() {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.evaluate(`document.querySelector('[data-testid="agent-entry-' + window.__agentsFixture.first.id + '"]').click()`);
-  await page.click('[data-testid="agent-tab-memory"]');
+  await openPane('memory');
   await page.click('[data-testid="agent-memory-add"]');
   await page.type('.agent-knowledge form input', 'Prototype preference');
   await page.type('.agent-knowledge form textarea', 'Prefer small offline prototypes.');
@@ -31,7 +37,7 @@ async function missionJourney() {
 
   // A mission starts inside the conversation it belongs to, with that conversation's team and members.
   await page.evaluate(`document.querySelector('[data-testid="agent-entry-' + window.__agentsFixture.group.id + '"]').click()`);
-  await page.click('[data-testid="agent-tab-missions"]');
+  await openPane('missions');
   await page.click('[data-testid="agent-mission-new"]');
   await page.type('[data-testid="agent-name"]', 'Prototype review');
   await page.type('[data-testid="agent-editor"] textarea', 'Describe a small playable prototype.');
@@ -80,9 +86,9 @@ async function missionJourney() {
   expect(await page.evaluate(`document.querySelector('.agent-ask').textContent`)).toContain('Which prototype should I explore?');
   await capture('agents-decision-desktop.png');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  await page.click('[data-testid="agents-attention"]').catch(async () => { await page.click('.agents-main .agent-mobile-back'); await page.click('[data-testid="agents-attention"]'); });
+  // The question stands in the conversation where it was asked, on a phone too.
   await page.waitFor(`document.querySelector('.agents-main [data-testid="agent-decision"]')`);
-  await capture('agents-attention-phone.png');
+  await capture('agents-decision-phone.png');
   await page.evaluate(`Array.from(document.querySelectorAll('.agents-main [data-testid="agent-decision"] button')).find(b => b.textContent === 'Puzzle').click()`);
   await page.waitFor(`!document.querySelector('[data-testid="agent-decision"]')`);
   expect(await page.evaluate(`(async () => { const { workspace } = window.__boiteTest; return (await workspace.active.client.call('agents.snapshot', {})).decisions.at(-1).answer; })()`)).toBe('Puzzle');
@@ -100,7 +106,7 @@ test('create, converse, configure the resident engine and follow background work
   await capture('agents-welcome-desktop.png');
   await page.click('[data-testid="agents-create"]');
   await page.waitFor(`document.querySelector('[data-testid="agents-create-menu"]')`);
-  expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="agents-create-menu"] [data-value]')).map(i => i.dataset.value)`)).toEqual(['profile', 'group', 'routine']);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="agents-create-menu"] [data-value]')).map(i => i.dataset.value)`)).toEqual(['profile', 'group']);
   await page.click('[data-value="profile"]');
   await page.type('[data-testid="agent-name"]', 'Mira');
   await page.type('textarea', 'Explore ideas and report useful findings.');
@@ -112,7 +118,7 @@ test('create, converse, configure the resident engine and follow background work
   await page.waitFor(`document.querySelectorAll('.agent-message').length >= 2`);
   expect(await page.evaluate(`document.querySelector('[data-testid="agent-transcript"]').textContent`)).toContain('Mira');
   await capture('agents-conversation-desktop.png');
-  await page.click('[data-testid="agent-tab-memory"]');
+  await openPane('memory');
   await page.waitFor(`document.querySelector('[data-testid="agent-brain-memory"]')`);
   await page.type('[data-testid="agent-brain-memory"]', 'Keep prototypes private until reviewed.');
   await page.click('[data-testid="agent-brain"] button.primary');
@@ -126,7 +132,7 @@ test('create, converse, configure the resident engine and follow background work
   await page.click('[data-testid="routine-save"]');
   await page.waitFor(`document.querySelector('[data-testid="agent-routines"] article')?.textContent.includes('Morning review')`);
   await capture('agents-routines-desktop.png');
-  await page.click('[data-testid="agent-tab-settings"]');
+  await openPane('settings');
   await page.waitFor(`document.querySelector('[data-testid="agent-runtime"]')`);
   await capture('agents-runtime-desktop.png');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
@@ -182,7 +188,7 @@ test('memory past the snapshot window stays reachable through Load earlier', asy
   await page.click('[data-testid="view-agents"]');
   await page.waitFor(`document.querySelector('[data-testid="agent-entry-' + window.__agentsFixture.first.id + '"]')`);
   await page.evaluate(`document.querySelector('[data-testid="agent-entry-' + window.__agentsFixture.first.id + '"]').click()`);
-  await page.click('[data-testid="agent-tab-memory"]');
+  await openPane('memory');
   await page.waitFor(`document.querySelector('[data-testid="agent-memories-older"]')`);
   const bulk = `Array.from(document.querySelectorAll('.agent-knowledge summary')).filter(s => s.textContent.includes('Bulk note')).length`;
   expect(await page.evaluate(bulk)).toBe(50);
@@ -199,4 +205,31 @@ test('memory past the snapshot window stays reachable through Load earlier', asy
   await page.evaluate(`document.querySelector('.agent-knowledge summary').scrollIntoView({ block: 'center' })`);
   await capture('agents-history-loaded-phone.png');
   expect(await page.evaluate(`document.querySelector('.agent-knowledge').textContent`)).toContain('Prototype preference');
+}, 60000);
+
+test('a thread entrusted from its menu carries on, and its agent reports in its conversation', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  const threadId = await page.evaluate<string>(`(async () => {
+    const store = window.__boiteTest.workspace.active;
+    const thread = store.threads.find(t => t.title === 'Finish the trace tab');
+    await store.open(thread.id);
+    return thread.id;
+  })()`);
+  await page.waitFor(`window.__boiteTest.workspace.active.openThread?.id === ${JSON.stringify(threadId)}`);
+  // The title's menu offers the agents once the directory has read them.
+  await page.waitFor(`(() => { const store = window.__boiteTest.workspace.active; return store.page === 'chat'; })()`);
+  await page.click('[data-testid="thread-menu-trigger"]');
+  await page.waitFor(`document.querySelector('[data-value="entrust"]')`);
+  await page.click('[data-value="entrust"]');
+  await page.waitFor(`document.querySelector('[data-value="' + window.__agentsFixture.first.id + '"]')`);
+  await page.evaluate(`document.querySelector('[data-value="' + window.__agentsFixture.first.id + '"]').click()`);
+  await page.waitFor(`(async () => { const s = await window.__boiteTest.workspace.active.client.call('agents.snapshot', {}); return s.messages.filter(m => m.thread?.id === ${JSON.stringify(threadId)}).map(m => m.thread.event).join() === 'entrusted,done'; })()`);
+  await page.evaluate(`window.__boiteTest.workspace.active.showAgents(window.__agentsFixture.first.id)`);
+  await page.waitFor(`document.querySelectorAll('[data-testid="agent-thread-event"]').length === 2`);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="agent-thread-event"]')).map(e => e.dataset.event)`)).toEqual(['entrusted', 'done']);
+  expect(await page.evaluate(`document.querySelector('[data-testid="agent-thread-event"][data-event="entrusted"]').textContent`)).toContain('I am taking over "Finish the trace tab".');
+  await page.evaluate(`document.querySelector('[data-testid="agent-thread-event"][data-event="done"]').scrollIntoView({ block: 'center' })`);
+  await capture('agents-entrusted-desktop.png');
+  await page.click('[data-testid="agent-thread-event"][data-event="done"] [data-testid="agent-thread-event-open"]');
+  await page.waitFor(`window.__boiteTest.workspace.active.page === 'chat' && window.__boiteTest.workspace.active.openThread?.id === ${JSON.stringify(threadId)}`);
 }, 60000);

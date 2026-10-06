@@ -29,7 +29,7 @@
 <div class="agent-routines" data-testid="agent-routines">
   <div class="agent-card-head agent-pane-head">
     <div>
-      <h2>{labels.planning}</h2>
+      <h2>{labels.planned}</h2>
       <p class="hint">{labels.routineHint}</p>
     </div>
     {#if view.store.owner && !showForm}<button type="button" class="small" onclick={() => { adding = true; }} data-testid="routine-add"><CalendarClock size={14} strokeWidth={1.75} />{labels.when.newRoutine}</button>{/if}

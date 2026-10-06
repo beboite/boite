@@ -3,13 +3,8 @@ import type { Store } from './store.svelte';
 
 export type AgentEntryKind = Extract<AgentEntityKind, 'profile' | 'group' | 'team' | 'mission'>;
 export type AgentSelection = { kind: AgentEntryKind; id: string };
-/**
- * What the agents page shows: one record, the work waiting on the user, the
- * engine settings, one routine, or the form that plans a new one.
- */
-export type AgentFocus = AgentSelection | { kind: 'attention' | 'engine' | 'planning' } | { kind: 'routine'; id: string };
-/** The two views of the agents list: the agents, and what they have planned. */
-export type RailMode = 'agents' | 'planning';
+/** What the agents page shows: one record, or the engine settings. */
+export type AgentFocus = AgentSelection | { kind: 'engine' };
 
 export type AgentChatKind = 'profile' | 'group' | 'team';
 export type AgentChatStatus = 'waiting' | 'running' | 'paused' | 'idle';

@@ -6,19 +6,19 @@
   import { experimentOn } from '../lib/experiments.svelte';
   import { stewardChip } from '../lib/steward';
   import { stewardsWithThreads } from '../lib/steward-view';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
   import AgentAvatar from './agents/AgentAvatar.svelte';
   import ThreadState from './ThreadState.svelte';
 
   /**
    * The agents in charge on one machine, above its projects in the thread
-   * list: every steward, which looks after whole projects, and every
-   * persistent agent with a turn under way or a question for the user. Each
-   * row reads like a thread row: a picture, a name, the state of the thread
-   * it works in. A row opens that thread, or a persistent agent's
-   * conversation when it waits on an answer given there. Nothing shows while
-   * no agent is in charge, and the agents snapshot loads only once a thread
-   * of that machine belongs to a persistent agent.
+   * list: every steward, which looks after whole projects; every thread
+   * entrusted to an agent; every persistent agent with a turn under way or a
+   * question for the user. Each row reads like a thread row: a picture, a
+   * name, the state of the thread. A row opens that thread, or a persistent
+   * agent's conversation when it waits on an answer given there. Nothing
+   * shows while no agent is in charge; the agents snapshot loads only with
+   * the Agents experiment on.
    */
   let { machine, now, showMachine = false }: { machine: Machine; now: number; showMachine?: boolean } = $props();
   const store = $derived(machine.store);
@@ -37,18 +37,27 @@
   $effect(() => {
     if (store.connection === 'ready' && store.stewards === null) untrack(() => void store.loadStewards());
   });
-  const busy = $derived(experimentOn('resident-agents') ? directory.atWork : []);
+  /** Entrusted threads first, then the agents busy in their own threads, without a thread twice. */
+  const entrusted = $derived(experimentOn('resident-agents') ? directory.entrusted : []);
+  const busy = $derived(experimentOn('resident-agents') ? directory.atWork.filter(w => !entrusted.some(e => e.thread.id === w.thread.id)) : []);
   const stewards = $derived(stewardsWithThreads(store));
   const open = (threadId: string) => workspace.active === store && store.openThread?.id === threadId;
 </script>
 
-{#if busy.length || stewards.length}
+{#if busy.length || stewards.length || entrusted.length}
   <section class="at-work" aria-label={strings.agents.inCharge} data-testid="agents-at-work">
     <h2><span class="ui-label">{strings.agents.inCharge}</span>{#if showMachine}<span class="machine ui-label">{machine.label}</span>{/if}</h2>
     {#each stewards as { grant, thread } (thread.id)}
       <button type="button" class="ghost row steward" class:open={open(thread.id)} title={`${thread.title} · ${stewardChip(grant)}`} onclick={() => void workspace.select(store, thread.id)} data-testid="steward-at-work" data-thread-id={thread.id}>
         <AgentAvatar kind="profile" id={thread.id} name={thread.title} status={thread.status === 'waiting' ? 'waiting' : thread.status === 'running' || thread.status === 'queued' ? 'running' : 'idle'} size={20} />
         <span class="text"><span class="name ui-label">{thread.title}</span><span class="detail ui-label">{stewardChip(grant)}</span></span>
+        <ThreadState {thread} {now} />
+      </button>
+    {/each}
+    {#each entrusted as { agent, thread } (thread.id)}
+      <button type="button" class="ghost row" class:open={open(thread.id)} title={fill(strings.agents.entrustedTo, { name: agent.name })} onclick={() => void workspace.select(store, thread.id)} data-testid="entrusted-at-work" data-thread-id={thread.id}>
+        <AgentAvatar kind="profile" id={agent.id} name={agent.name} avatar={agent.avatar} status={thread.status === 'waiting' ? 'waiting' : thread.status === 'running' || thread.status === 'queued' ? 'running' : 'idle'} size={20} />
+        <span class="text"><span class="name ui-label">{agent.name}</span><span class="detail entrusted ui-label">{thread.title}</span></span>
         <ThreadState {thread} {now} />
       </button>
     {/each}
@@ -70,5 +79,6 @@
   .row.open { background: var(--color-active); }
   .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-foreground); font-weight: 500; }
+  .detail.entrusted { color: var(--color-muted-foreground); }
   .detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); font-weight: 500; color: var(--color-steward); }
 </style>

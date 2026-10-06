@@ -1,4 +1,4 @@
-import type { AgentProfile, AgentsSnapshot, ThreadSummary } from '@boite/contracts';
+import type { AgentEntrustment, AgentProfile, AgentsSnapshot, ThreadSummary } from '@boite/contracts';
 import { experimentOn } from './experiments.svelte';
 import type { Store } from './store.svelte';
 
@@ -15,12 +15,14 @@ export interface AgentAtWork {
 }
 
 /**
- * Which persistent agent owns a thread, for the views outside the Agents page:
- * the thread list draws that agent's picture on its rows and lists the agents
- * at work, the chat says whose thread it is. A thread names its agent session
- * (`agentSessionId`), a delegated child its parent; the session names the
- * agent. Nothing loads until one of this machine's threads belongs to an agent,
- * and then only the agents snapshot, at most once per `SETTLE_MS`.
+ * Which persistent agent owns or carries a thread, for the views outside the
+ * Agents page: the thread list draws that agent's picture on its rows and lists
+ * the agents in charge, the chat says whose thread it is, and the thread menu
+ * lists the agents a thread can be entrusted to. A thread names its agent
+ * session (`agentSessionId`), a delegated child its parent; the session names
+ * the agent. An entrusted thread is named in the snapshot's `entrusted`. Only
+ * with the Agents experiment on, the agents snapshot loads, at most once per
+ * `SETTLE_MS`.
  */
 export class AgentDirectory {
   snapshot = $state.raw<AgentsSnapshot | null>(null);
@@ -33,9 +35,12 @@ export class AgentDirectory {
 
   constructor(private readonly store: Store) {}
 
-  /** Whether anything on this machine belongs to an agent, so the directory is worth loading. */
+  /**
+   * Whether the directory is worth loading: with the Agents experiment on, a
+   * thread can be entrusted to an agent and the thread menu lists them.
+   */
   get needed(): boolean {
-    return experimentOn('resident-agents') && this.store.threads.some(t => t.agentSessionId);
+    return experimentOn('resident-agents');
   }
 
   /** Keeps the directory current while the caller is mounted. Returns the release. */
@@ -70,6 +75,11 @@ export class AgentDirectory {
     if (this.users > 0) this.attach();
   }
 
+  /** Reads the snapshot again now, after a change this client made. */
+  reload(): void {
+    if (this.users > 0) void this.load();
+  }
+
   private schedule(): void {
     if (this.timer) return;
     this.timer = setTimeout(() => { this.timer = null; void this.load(); }, SETTLE_MS);
@@ -89,6 +99,27 @@ export class AgentDirectory {
       this.loading = false;
       if (this.again) { this.again = false; this.schedule(); }
     }
+  }
+
+  /** The agents a thread can be entrusted to: every active one. */
+  get agents(): AgentProfile[] {
+    return this.snapshot?.profiles.filter(a => a.status === 'active') ?? [];
+  }
+
+  /** The agent a thread was entrusted to, and the entrustment. */
+  entrustmentOf(threadId: string): { entrustment: AgentEntrustment; agent: AgentProfile } | null {
+    const entrustment = this.snapshot?.entrusted?.find(e => e.threadId === threadId);
+    const agent = entrustment ? this.snapshot?.profiles.find(a => a.id === entrustment.agentId) : undefined;
+    return entrustment && agent ? { entrustment, agent } : null;
+  }
+
+  /** Every entrusted thread of this machine with its agent, newest first. */
+  get entrusted(): { agent: AgentProfile; thread: ThreadSummary }[] {
+    return [...(this.snapshot?.entrusted ?? [])].sort((a, b) => b.at - a.at).flatMap(e => {
+      const agent = this.snapshot?.profiles.find(a => a.id === e.agentId);
+      const thread = this.store.threads.find(t => t.id === e.threadId && !t.archived);
+      return agent && thread ? [{ agent, thread }] : [];
+    });
   }
 
   /** The agent a thread belongs to, through its session or its parent's. */

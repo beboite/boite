@@ -1,12 +1,11 @@
 <script lang="ts">
   import { secureId } from '../../lib/secure-id';
   import { tick, untrack } from 'svelte';
-  import { ArrowUp, CalendarClock, SquareArrowOutUpRight } from '@lucide/svelte';
-  import type { AgentScope, ThreadSummary } from '@boite/contracts';
+  import { ArrowUp, CalendarClock, CircleCheck, CircleQuestionMark, CircleStop, Handshake, SquareArrowOutUpRight } from '@lucide/svelte';
+  import type { AgentConversationMessage, AgentScope, ThreadSummary } from '@boite/contracts';
   import { chatKey, type AgentsView } from '../../lib/agents.svelte';
   import { fill, strings } from '../../lib/strings';
   import { formatLocale } from '../../lib/i18n.svelte';
-  import { elapsed } from '../../lib/format';
   import Prose from '../Prose.svelte';
   import AgentAvatar from './AgentAvatar.svelte';
   import AgentWorkCard from './AgentWorkCard.svelte';
@@ -47,14 +46,6 @@
     const at = newest?.createdAt;
     if (at) untrack(() => view.markRead(chatKey(scope.kind === 'agent' ? 'profile' : 'group', scope.id), at));
   });
-  /** The live line's own second while an agent works. */
-  let clock = $state(Date.now());
-  $effect(() => {
-    if (!live) return;
-    const timer = setInterval(() => { clock = Date.now(); }, 1000);
-    return () => clearInterval(timer);
-  });
-
   /**
    * The first render and the user's own message scroll to the bottom. An agent's
    * message does only for a reader already there, measured before it is drawn;
@@ -71,6 +62,18 @@
   });
   const profileOf = (id: string) => view.snapshot?.profiles.find(a => a.id === id);
   const nameOf = (id: string) => profileOf(id)?.name ?? id;
+  /**
+   * The routine a message reports on: a reply from a run no message of the
+   * user started. Its name when that routine's last run is the one, an empty
+   * string for an older run, null for any other message.
+   */
+  function plannedOf(message: AgentConversationMessage): string | null {
+    if (message.replyTo !== null || message.sourceRunId === null || scope.kind !== 'agent') return null;
+    const run = view.seen.runs.find(r => r.id === message.sourceRunId);
+    const work = run ? view.seen.work.find(w => w.id === run.workId) : undefined;
+    if (!work || work.messageId !== null || work.taskId !== null || work.purpose === 'compaction') return null;
+    return view.snapshot?.routines.find(r => r.lastWorkId === work.id)?.name ?? '';
+  }
   const time = (at: number) => new Date(at).toLocaleTimeString(formatLocale(), { hour: '2-digit', minute: '2-digit' });
   const day = (at: number) => new Date(at).toLocaleDateString(formatLocale(), { weekday: 'long', day: 'numeric', month: 'long' });
   const placeholder = $derived(agent ? fill(labels.messageTo, { name: agent.name }) : group ? fill(labels.messageTo, { name: group.name }) : labels.message);
@@ -98,49 +101,71 @@
       {#if view.hasOlder(key, 'message')}<button type="button" class="ghost small agent-older" disabled={view.loadingOlder === key} onclick={() => void view.loadOlder(key, history, messages)} data-testid="agent-messages-older">{labels.loadEarlier}</button>{/if}
       {#each messages as message, index (message.id)}
         {@const previous = messages[index - 1]}
+        {@const next = messages[index + 1]}
         {@const mine = message.senderId === null}
         {@const newDay = !previous || day(previous.createdAt) !== day(message.createdAt)}
         {@const first = newDay || previous.senderId !== message.senderId}
+        {@const lastOfRun = !next || next.senderId !== message.senderId || day(next.createdAt) !== day(message.createdAt)}
         {#if newDay}<p class="agent-day"><span>{day(message.createdAt)}</span></p>{/if}
         {#if mine}
-          <article class="agent-message from-user">
+          {@const failed = view.seen.deliveries.filter(d => d.messageId === message.id && (d.status === 'failed' || d.status === 'limited'))}
+          <article class="agent-message from-user" class:first>
             <span class="agent-sr-only">{labels.user}</span>
             <div class="bubble"><p class="user-text">{message.text}</p></div>
-            <footer><time datetime={new Date(message.createdAt).toISOString()}>{time(message.createdAt)}</time>
-              {#if group && message.recipientIds.length}{#each view.seen.deliveries.filter(d => d.messageId === message.id) as delivery (delivery.id)}<span>· {nameOf(delivery.agentId)} {labels[delivery.status].toLowerCase()}</span>{/each}{/if}
-            </footer>
+            {#if lastOfRun || failed.length}
+              <footer>
+                {#if lastOfRun}<time datetime={new Date(message.createdAt).toISOString()}>{time(message.createdAt)}</time>{/if}
+                {#each failed as delivery (delivery.id)}<span class="failed">{fill(labels.deliveryFailed, { name: nameOf(delivery.agentId) })}</span>{/each}
+              </footer>
+            {/if}
           </article>
         {:else}
           {@const sender = profileOf(message.senderId!)}
-          <article class="agent-message from-agent" class:first>
-            {#if first}
+          {@const planned = plannedOf(message)}
+          <article class="agent-message from-agent" class:first data-event={message.thread?.event}>
+            {#if group && first}
               <header>
-                <AgentAvatar kind="profile" id={message.senderId!} name={sender?.name ?? ''} avatar={sender?.avatar} size={22} />
+                <AgentAvatar kind="profile" id={message.senderId!} name={sender?.name ?? ''} avatar={sender?.avatar} size={20} />
                 <strong>{nameOf(message.senderId!)}</strong>
-                <time datetime={new Date(message.createdAt).toISOString()}>{time(message.createdAt)}</time>
               </header>
             {:else}<span class="agent-sr-only">{nameOf(message.senderId!)}</span>{/if}
-            <div class="answer"><Prose text={message.text} store={view.store} bubble /></div>
+            {#if message.thread}
+              {@const event = message.thread}
+              <div class="thread-event" data-event={event.event} data-testid="agent-thread-event">
+                <p class="thread-event-line">
+                  {#if event.event === 'done'}<CircleCheck size={15} strokeWidth={1.75} />{:else if event.event === 'blocked'}<CircleQuestionMark size={15} strokeWidth={1.75} />{:else if event.event === 'stopped'}<CircleStop size={15} strokeWidth={1.75} />{:else}<Handshake size={15} strokeWidth={1.75} />{/if}
+                  <span>{fill(labels.threadEvent[event.event], { title: event.title })}</span>
+                </p>
+                {#if event.event !== 'entrusted' && message.text.trim()}<div class="thread-event-text"><Prose text={message.text} store={view.store} /></div>{/if}
+                {#if view.store.threads.some(t => t.id === event.id)}
+                  <button type="button" class="ghost small" onclick={() => void view.store.open(event.id)} data-testid="agent-thread-event-open"><SquareArrowOutUpRight size={13} strokeWidth={1.75} /><span class="ui-label">{labels.openThread}</span></button>
+                {/if}
+              </div>
+            {:else}
+              {#if planned !== null}<p class="planned-label" data-testid="agent-planned-result"><CalendarClock size={13} strokeWidth={1.75} /><span>{planned || labels.plannedResult}</span></p>{/if}
+              <div class="answer"><Prose text={message.text} store={view.store} bubble /></div>
+            {/if}
+            {#if lastOfRun}<footer><time datetime={new Date(message.createdAt).toISOString()}>{time(message.createdAt)}</time></footer>{/if}
           </article>
         {/if}
       {:else}
         <div class="agent-chat-empty">
           {#if agent}<AgentAvatar kind="profile" id={agent.id} name={agent.name} avatar={agent.avatar} size={72} />{/if}
           <p>{agent ? fill(labels.sayHello, { name: agent.name }) : labels.noMessagesYet}</p>
-          {#if agent && onschedule && view.store.owner}<button type="button" class="small" onclick={() => onschedule('')}><CalendarClock size={14} strokeWidth={1.75} />{labels.when.newRoutine}</button>{/if}
         </div>
       {/each}
 
       {#each pending as work (work.id)}<AgentWorkCard {view} {work} compact />{/each}
 
       {#if live}
-        <div class="agent-live" data-status={live.status} data-testid="agent-live">
+        <!-- What a messenger shows while the other side types: the agent at work, with the way into its thread. -->
+        <div class="agent-typing" data-status={live.status} data-testid="agent-live">
           <AgentAvatar kind="profile" id={worker?.id ?? ''} name={worker?.name ?? ''} avatar={worker?.avatar} status={live.status === 'waiting' ? 'waiting' : 'running'} size={22} />
-          <span class="agent-live-text">
-            {fill(live.status === 'waiting' ? labels.liveWaiting : live.status === 'queued' ? labels.liveQueued : labels.liveWorking, { name: worker?.name ?? '' })}
-            {#if live.runningSince && live.status === 'running'}<span class="muted"> · {elapsed(clock - live.runningSince)}</span>{/if}
-          </span>
-          <button type="button" class="ghost small" onclick={() => void view.store.open(live.id)} data-testid="agent-live-open"><SquareArrowOutUpRight size={13} strokeWidth={1.75} />{labels.seeThread}</button>
+          <div class="typing-bubble">
+            {#if live.status === 'waiting'}<span>{fill(labels.liveWaiting, { name: worker?.name ?? '' })}</span>
+            {:else}<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="typing-text">{fill(labels.liveWorking, { name: worker?.name ?? '' })}</span>{/if}
+          </div>
+          <button type="button" class="ghost icon small" title={labels.seeThread} aria-label={labels.seeThread} onclick={() => void view.store.open(live.id)} data-testid="agent-live-open"><SquareArrowOutUpRight size={14} strokeWidth={1.75} /></button>
         </div>
       {/if}
     </div>

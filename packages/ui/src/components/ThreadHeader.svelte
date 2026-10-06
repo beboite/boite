@@ -1,6 +1,8 @@
 <script lang="ts">
   import AgentAvatar from './agents/AgentAvatar.svelte';
   import { stewardOfThread } from '../lib/steward-view';
+  import { agentDirectory } from '../lib/agent-directory.svelte';
+  import { entrust, pickEntrustItem } from '../lib/thread-entrust';
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { ArrowLeft, ChevronDown, FolderInput, GitBranch, Network, PanelRight, Search, SquareTerminal, UsersRound, VenetianMask } from '@lucide/svelte';
@@ -101,6 +103,7 @@
     }
     // From a phone's sheet the picker hangs under the title; from a right-click, where that menu stood.
     else if (pickMoveItem(store, open, action, document.querySelector<HTMLElement>('[data-testid="thread-menu-trigger"]'))) return;
+    else if (pickEntrustItem(store, open, action, document.querySelector<HTMLElement>('[data-testid="thread-menu-trigger"]'))) return;
     else if (action === 'archive') void archiveThread(store, open.id);
     else if (action === 'delete') void deleteThread(store, open);
   }
@@ -110,6 +113,8 @@
     contextMenu.open(event, desktopItems, titleAction);
   }
 
+  /** The agent this thread was entrusted to, if any. */
+  let carrier = $derived(thread ? agentDirectory(store).entrustmentOf(thread.id) : null);
   /** The steward looking after this thread, if its project has one. */
   let watcher = $derived(thread ? stewardOfThread(store, thread) : null);
 </script>
@@ -187,6 +192,14 @@
           <ArrowLeft size={13} strokeWidth={1.75} />
           <span class="ui-label">{strings.delegation.parent}</span>
         </button>
+      {/if}
+      {#if carrier}
+        <!-- The agent this thread was entrusted to: open it, or take the thread back. -->
+        <Menu items={[{ id: 'open', label: fill(strings.agents.openAgent, { name: carrier.agent.name }) }, ...(store.owner ? [{ id: 'back', label: strings.agents.takeBack }] : [])]}
+          onpick={id => { if (id === 'open') store.showAgents(carrier!.agent.id); else void entrust(store, thread!.id, null); }}
+          label={fill(strings.agents.entrustedTo, { name: carrier.agent.name })} placement="bottom" variant="ghost" testid="thread-entrusted-chip">
+          <span class="entrusted"><AgentAvatar kind="profile" id={carrier.agent.id} name={carrier.agent.name} avatar={carrier.agent.avatar} size={16} /><span class="steward-name ui-label">{fill(strings.agents.entrustedTo, { name: carrier.agent.name })}</span></span>
+        </Menu>
       {/if}
       {#if watcher}
         <!-- The steward that looks after this thread's project: what it may do here is its grant's. -->
@@ -293,6 +306,7 @@
   }
 
   .steward { flex: 0 1 auto; min-width: 0; max-width: 220px; gap: 6px; padding-left: 4px; border-color: color-mix(in oklch, var(--color-steward) 45%, transparent); background: var(--color-steward-soft); color: var(--color-steward); cursor: pointer; }
+  .entrusted { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 220px; color: var(--color-accent); font-weight: 500; }
   .steward-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .branch-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .branch :global(svg) { flex: none; }

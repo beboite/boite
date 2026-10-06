@@ -21,6 +21,7 @@
   import AgentAvatar from './agents/AgentAvatar.svelte';
   import { agentDirectory } from '../lib/agent-directory.svelte';
   import { stewardChip } from '../lib/steward';
+  import { pickEntrustItem } from '../lib/thread-entrust';
   let {
     machine,
     project,
@@ -56,7 +57,8 @@
   /** The logo tells the rows apart; its tooltip names the provider and the model. */
   let agent = $derived(agentLabel(owner, thread));
   /** A persistent agent's thread wears that agent's picture where the provider's logo goes. */
-  let runner = $derived(thread.agentSessionId || thread.parentThreadId ? agentDirectory(owner).ownerOf(thread) : null);
+  /** An entrusted thread wears its agent's picture too. */
+  let runner = $derived(thread.agentSessionId || thread.parentThreadId ? agentDirectory(owner).ownerOf(thread) : agentDirectory(owner).entrustmentOf(thread.id)?.agent ?? null);
   /** A steward's own thread wears the robot its id draws, the picture its projects show. */
   let steward = $derived(owner.stewards?.find(grant => grant.threadId === thread.id) ?? null);
   // A move asked for while the turn runs, until the turn ends and applies it.
@@ -155,6 +157,7 @@
         if (action === 'pr') void refreshPr(true);
         if (action === 'copy') void owner.copy(thread.cwd);
         pickMoveItem(owner, thread, action);
+        pickEntrustItem(owner, thread, action);
         if (action === 'done') void markDone(owner, thread);
         if (action === 'archive') void archiveThread(owner, thread.id);
         if (action === 'delete') void deleteThread(owner, thread);
