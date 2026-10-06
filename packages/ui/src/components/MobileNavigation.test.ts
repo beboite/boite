@@ -111,15 +111,25 @@ test('a parent on another machine shows its working sub-agents, counted, and Rec
     expect(chip()?.getAttribute('aria-pressed')).toBe('true');
     expect(rows()).toEqual([parent.id]);
 
-    // The Projects list reads the same store: the same radar there.
+    // Opening the parent and coming Back finds the list still filtered.
+    document.querySelector<HTMLButtonElement>(`[data-testid="mobile-thread-${parent.id}"]`)!.click(); await settle();
+    expect(document.querySelector('.mobile-list')).toBeNull();
+    document.querySelector<HTMLButtonElement>('[data-testid=mobile-back]')!.click(); await settle();
+    expect(chip()?.getAttribute('aria-pressed')).toBe('true');
+    expect(rows()).toEqual([parent.id]);
+
+    // The Projects list reads the same store: the same radar there. Back in Recent, the filter holds.
     workspace.view = 'projects'; await settle();
     expect(state()?.dataset['state']).toBe('delegating');
     workspace.view = 'recent'; await settle();
+    expect(chip()?.getAttribute('aria-pressed')).toBe('true');
+    expect(rows()).toEqual([parent.id]);
 
-    // The last sub-agent ends: the parent is done, the chip and its filter go.
+    // The last sub-agent ends: the radar, the chip and its filter go. The parent was read when opened, so nothing replaces the radar.
     for (const row of remote.threads) if (row.parentThreadId === parent.id) { row.status = 'idle'; row.runningSince = null; }
     await settle();
-    expect(state()?.dataset['state']).toBe('done');
+    expect(document.querySelector(`[data-thread-id="${parent.id}"]`)).not.toBeNull();
+    expect(state()).toBeNull();
     expect(chip()).toBeNull();
     expect(rows().length).toBe(everything);
   } finally {

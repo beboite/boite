@@ -92,7 +92,8 @@
   let atWorkOnly = $state(false);
   const atWorkShown = $derived(atWorkOnly && atWorkRows.length > 0);
   // The chip goes with the last of that work: the filter does not come back by itself with the next turn.
-  $effect(() => { if (atWorkOnly && atWorkRows.length === 0) atWorkOnly = false; });
+  // Only the Recent list watches it: opening a conversation, searching or visiting Projects keeps the filter.
+  $effect(() => { if (atWorkOnly && inRecent && !query && atWorkRows.length === 0) atWorkOnly = false; });
   const working = $derived(groupWorking && !atWorkShown ? rows.filter(row => groupWorkingThread(row.machine.store, row.thread)) : []);
   const attention = $derived(atWorkShown ? atWorkRows : groupWorking ? rows.filter(row => !groupWorkingThread(row.machine.store, row.thread)) : rows);
 
