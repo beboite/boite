@@ -13,8 +13,8 @@
 
   /**
    * A conversation with an agent or a group, drawn the way a thread is: the
-   * user's messages in bubbles on the right, the agents' answers as prose under
-   * their picture and name, a line while one of them works with the way into
+   * user's messages in bubbles on the right, the agents' answers in the
+   * thread's answer bubbles under their picture and name, a line while one of them works with the way into
    * the thread it works in, and the thread's composer at the bottom. Decisions
    * an agent asked for stand in the conversation they belong to. Opening it
    * marks it read up to its newest message.
@@ -120,7 +120,7 @@
                 <time datetime={new Date(message.createdAt).toISOString()}>{time(message.createdAt)}</time>
               </header>
             {:else}<span class="agent-sr-only">{nameOf(message.senderId!)}</span>{/if}
-            <div class="answer"><Prose text={message.text} store={view.store} /></div>
+            <div class="answer"><Prose text={message.text} store={view.store} bubble /></div>
           </article>
         {/if}
       {:else}
