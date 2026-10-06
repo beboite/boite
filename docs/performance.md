@@ -277,11 +277,34 @@ when the core advertises `chunkedAnswers`.
   Older cores return full files, and a cached deferred file can fall back to
   their history methods after a downgrade.
 - On a core advertising `readingPages`, pages ask for `compactImages`: a
-  picture above 8 KiB of base64 arrives as its decoded size, holds a
-  thumbnail-sized place, and loads through `messages.attachment` once within
-  400 px of what the timeline shows: the observer is rooted at the scrolling
-  timeline, whose clipping would otherwise hide the margin. Edit fetches a prompt's deferred files and pictures
-  before it fills the composer.
+  picture above 8 KiB of base64 arrives as its decoded size, and loads through
+  `messages.attachment` once within 400 px of what the timeline shows. The
+  observer is rooted at the scrolling timeline, whose clipping would otherwise
+  hide the margin. Edit fetches a prompt's deferred files and pictures before
+  it fills the composer.
+- A deferred picture also carries its `width` and `height`, read from its
+  header (`packages/contracts/src/image-size.ts`): PNG, GIF, WebP and JPEG, with
+  JPEG's EXIF orientation applied as a browser applies it. It also carries
+  `preview`, a ThumbHash blur of at most 32 px that `Bun.Image.placeholder()`
+  makes, about 1.2 KB. The core makes three at a time on Bun's image worker,
+  refuses pictures above 8K UHD, and keeps them in `media_previews`
+  (`packages/core/src/media.ts`).
+- A light read first makes the blurs of the messages around its page that no
+  read looked at before, waiting 1.5 s at most. It does this before the page is
+  read, never between the read and the answer, so the answer still holds every
+  event sent before it. A picture without a blur yet is sent without one and
+  queued.
+- `ChatImage.svelte` draws each picture in a box of its own proportions from
+  the first frame: the blur, then the picture fading in over it. A picture that
+  came with its bytes reads its size from their header. Nothing around the box
+  moves when the bytes land. An unmeasured prompt counts its thumbnails on top
+  of the 80 px estimate (`estimateSlot`). A height measured above the reader
+  goes back into `scrollTop` inside the `ResizeObserver` callback, before paint.
+  A frame later, the list was painted pushed down by what a picture added, then
+  put back. `tests/e2e/media.test.ts` checks this on a real core with 24
+  screenshots: the fetches on opening, and the reader's text keeping its
+  position to the pixel while the scrolled pictures land.
+
 - While a first page downloads, the chat shows a bar and "192 kB / 1.3 MB",
   the bytes received against the total the core put in each slice. A page
   under 64 KiB comes whole and the bar runs without numbers; it shows after

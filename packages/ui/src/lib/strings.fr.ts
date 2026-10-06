@@ -982,6 +982,7 @@ export const fr: Translation = {
     },
     documentImage: "Ce que l'outil a produit",
     imagePart: 'Image envoyée avec le message',
+    imageUnavailable: "Cette image n'a pas pu être chargée. Revenez dessus pour réessayer.",
     diffHidden: '{count} lignes inchangées',
     diffIgnoreWhitespace: 'Ignorer les changements d’espaces',
     diffSideBySide: 'Ancien et nouveau côte à côte',

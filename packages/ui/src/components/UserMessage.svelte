@@ -10,7 +10,8 @@
   import { claudeKeywords, promptCommand, promptSegments, promptText } from '../lib/message-display';
   import type { TurnProgress } from '../lib/turn-progress.svelte';
   import PreviewReferences from './PreviewReferences.svelte';
-  import OmittedPart from './OmittedPart.svelte';
+  import ChatImage from './ChatImage.svelte';
+  import { THUMB_HEIGHT } from '../lib/message-window';
   import MessageActions from './MessageActions.svelte';
   import MoveMarker from './MoveMarker.svelte';
   import ImageViewer from './ImageViewer.svelte';
@@ -40,11 +41,6 @@
   /** The pictures a prompt was sent with, each with its place among the parts; an assistant message never has one. */
   function imagesOf(message: Message): { image: ImagePart; index: number }[] {
     return message.parts.flatMap((part, index) => (part.type === 'image' ? [{ image: part, index }] : []));
-  }
-
-  /** A picture a light page left on the core, read once its place nears the screen. */
-  function loadImage(index: number): void {
-    store.loadMessageAttachment(message.threadId, message.id, index).catch((error: unknown) => { store.reportError(error, 'minor'); });
   }
 
   type FilePart = Extract<Message['parts'][number], { type: 'file' }>;
@@ -128,8 +124,11 @@
   {#if images.length > 0}
     <div class="images">
       {#each images as { image, index }, at (at)}
+        <!-- One box from the blur to the picture: the button arrives with the bytes and changes no size. -->
         {#if image.dataDeferred}
-          <OmittedPart bytes={image.bytes ?? 0} load={() => loadImage(index)} />
+          <span class="shot" title={image.alt ?? strings.chat.imagePart}>
+            <ChatImage {store} threadId={message.threadId} messageId={message.id} partIndex={index} {image} maxHeight={THUMB_HEIGHT} />
+          </span>
         {:else}
         <button
           type="button"
@@ -139,11 +138,7 @@
           onclick={(event) => show(galleryFrom(event.currentTarget, viewed(image, at)))}
           data-testid="image-open"
         >
-          <img
-            data-testid="image-part"
-            src="data:{image.mimeType};base64,{image.data}"
-            alt={image.alt ?? ''}
-          />
+          <ChatImage {store} threadId={message.threadId} messageId={message.id} partIndex={index} {image} maxHeight={THUMB_HEIGHT} />
         </button>
         {/if}
       {/each}
@@ -234,11 +229,10 @@
     border-color: var(--color-edge);
   }
 
-  .shot img {
+  /* Its bytes still on the core: a box to wait in, nothing to open yet. */
+  span.shot {
     display: block;
-    max-width: 100%;
-    max-height: 240px;
-    object-fit: contain;
+    cursor: default;
   }
 
 </style>

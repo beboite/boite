@@ -1,0 +1,80 @@
+import { afterEach, expect, test, vi } from 'vitest';
+import { flushSync, mount, unmount } from 'svelte';
+import type { Message } from '@boite/contracts';
+import ChatImage from './ChatImage.svelte';
+import { reactive } from '../test/reactive.svelte';
+import type { Store } from '../lib/store.svelte';
+
+type ImagePart = Extract<Message['parts'][number], { type: 'image' }>;
+
+const PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+let running: Record<string, unknown> | null = null;
+const observer = globalThis.IntersectionObserver;
+afterEach(() => {
+  if (running) unmount(running);
+  running = null;
+  globalThis.IntersectionObserver = observer;
+  document.body.innerHTML = '';
+});
+
+/** An IntersectionObserver that reports what the test says, when it says it. */
+function observeBy(): (visible: boolean) => void {
+  const callbacks: IntersectionObserverCallback[] = [];
+  globalThis.IntersectionObserver = class {
+    constructor(callback: IntersectionObserverCallback) { callbacks.push(callback); }
+    observe() {}
+    disconnect() {}
+  } as unknown as typeof IntersectionObserver;
+  return (visible) => {
+    for (const callback of callbacks) callback([{ isIntersecting: visible } as IntersectionObserverEntry], {} as IntersectionObserver);
+    flushSync();
+  };
+}
+
+test('a deferred picture has its size and its blur before a byte arrives, asks for the bytes only near the screen, and keeps its box when they land', async () => {
+  const show = observeBy();
+  const image = reactive<ImagePart>({ type: 'image', mimeType: 'image/png', data: '', alt: 'shot', dataDeferred: true, bytes: 70, width: 1280, height: 720, preview: 'data:image/png;base64,PREVIEW' });
+  // As the store does: the bytes go into the part it holds.
+  const loadMessageAttachment = vi.fn(async () => { image.data = PIXEL; delete image.dataDeferred; return PIXEL; });
+  const store = { loadMessageAttachment, reportError: vi.fn() } as unknown as Store;
+  running = mount(ChatImage, { target: document.body, props: { store, threadId: 't', messageId: 'm', partIndex: 1, image, maxHeight: 240 } });
+  flushSync();
+
+  const box = document.querySelector<HTMLElement>('[data-testid=image-box]')!;
+  // 240 px high keeping 16:9 is 427 px wide, and the column may still shrink it.
+  const width = `${(240 * 1280) / 720}px`;
+  expect(box.style.width).toBe(width);
+  expect(box.style.aspectRatio).toBe('1280 / 720');
+  expect(document.querySelector('[data-testid=image-preview]')?.getAttribute('src')).toBe('data:image/png;base64,PREVIEW');
+  expect(document.querySelector('[data-testid=image-part]')).toBeNull();
+  // Far from the screen, nothing is fetched.
+  expect(loadMessageAttachment).not.toHaveBeenCalled();
+
+  show(true);
+  expect(loadMessageAttachment).toHaveBeenCalledWith('t', 'm', 1);
+  await vi.waitFor(() => expect(document.querySelector('[data-testid=image-part]')?.getAttribute('src')).toBe(`data:image/png;base64,${PIXEL}`));
+  // The blur stays under the picture until it decoded, then goes, and the box never changed.
+  expect(box.dataset['state']).toBe('loading');
+  document.querySelector('[data-testid=image-part]')!.dispatchEvent(new Event('load'));
+  flushSync();
+  expect(box.dataset['state']).toBe('shown');
+  expect(document.querySelector('[data-testid=image-preview]')).toBeNull();
+  expect(box.style.width).toBe(width);
+  show(true);
+  expect(loadMessageAttachment).toHaveBeenCalledTimes(1);
+});
+
+test('a picture that came with its bytes reads its size from their header and asks for nothing', () => {
+  observeBy();
+  const loadMessageAttachment = vi.fn();
+  const store = { loadMessageAttachment, reportError: vi.fn() } as unknown as Store;
+  const image = reactive<ImagePart>({ type: 'image', mimeType: 'image/png', data: PIXEL, alt: null });
+  running = mount(ChatImage, { target: document.body, props: { store, threadId: 't', messageId: 'm', partIndex: 0, image, maxHeight: null } });
+  flushSync();
+  const box = document.querySelector<HTMLElement>('[data-testid=image-box]')!;
+  expect(box.style.aspectRatio).toBe('1 / 1');
+  expect(box.style.width).toBe('1px');
+  expect(document.querySelector('[data-testid=image-part]')?.getAttribute('src')).toBe(`data:image/png;base64,${PIXEL}`);
+  expect(loadMessageAttachment).not.toHaveBeenCalled();
+});

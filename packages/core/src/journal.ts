@@ -362,7 +362,7 @@ export class Journal {
     // table keyed by thread is cleared here, events included, so a removed
     // project's prompts and tool output leave the disk.
     this.db.transaction(() => {
-      for (const table of ['background_observations', 'turn_requests', 'turns', 'messages', 'native_agent_messages', 'part_blobs', 'processes', 'coordination_letters', 'coordination_wakes', 'events']) {
+      for (const table of ['background_observations', 'turn_requests', 'turns', 'messages', 'native_agent_messages', 'part_blobs', 'media_previews', 'processes', 'coordination_letters', 'coordination_wakes', 'events']) {
         const query = this.db.query(`DELETE FROM ${table} WHERE thread_id = ?`);
         for (const id of threadIds) query.run(id);
       }
@@ -742,6 +742,7 @@ export class Journal {
     this.db.query('DELETE FROM turn_requests WHERE thread_id = ? AND message_id IN (SELECT id FROM messages WHERE thread_id = ? AND rowid >= ?)').run(threadId, threadId, fromRowid);
     this.db.query('DELETE FROM native_agent_messages WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ? AND rowid >= ?)').run(threadId, fromRowid);
     this.db.query('DELETE FROM part_blobs WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ? AND rowid >= ?)').run(threadId, fromRowid);
+    this.db.query('DELETE FROM media_previews WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ? AND rowid >= ?)').run(threadId, fromRowid);
     this.db.query('DELETE FROM messages WHERE thread_id = ? AND rowid >= ?').run(threadId, fromRowid);
     for (const turnId of removed.turnIds) {
       // An unknown accepted follow-up might be the removed input. Never acknowledge it again.

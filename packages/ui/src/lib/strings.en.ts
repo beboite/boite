@@ -1027,6 +1027,8 @@ export const strings = {
     documentImage: 'What the tool produced',
     /** An image the user sent with the prompt, when it came with no name. */
     imagePart: 'Image sent with the prompt',
+    /** A picture whose bytes could not be fetched from its machine. */
+    imageUnavailable: 'This picture could not be loaded. Scroll back to it to retry.',
     diffHidden: '{count} unchanged lines',
     diffIgnoreWhitespace: 'Ignore whitespace changes',
     diffSideBySide: 'Old and new side by side',

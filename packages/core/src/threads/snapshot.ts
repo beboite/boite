@@ -38,7 +38,7 @@ export function threadSnapshot(core: Core, thread: ThreadSummary, after: string 
   const from = after === undefined ? null : core.journal.messageRowid(thread.id, after);
   // Budgets apply to what the client receives, so compacted parts never block
   // a page. The proof covers the stored rows, deferred content included.
-  const project = transportProjection(options);
+  const project = transportProjection(options, options.compactImages ? core.media.lookup(thread.id) : undefined);
   const tail = from === null ? null : core.journal.listMessagesFrom(thread.id, from, limit, project, toolPreviews(options));
   const page = tail === null ? pageAround(core, thread.id, options.around, limit, project, toolPreviews(options)) : { ...tail, before: null, after: null };
   const turns = core.journal.listTurnsFor(thread.id, page.messages.map(message => message.turnId));
@@ -104,7 +104,7 @@ export function messagePage(core: Core, params: RpcParams<'messages.list'>): Mes
     });
   }
   const limit = Math.min(Math.max(1, Math.trunc(params.limit ?? MESSAGE_PAGE)), MESSAGE_PAGE_MAX);
-  const project = transportProjection(params);
+  const project = transportProjection(params, params.compactImages ? core.media.lookup(params.threadId) : undefined);
   const previews = toolPreviews(params);
   const turns = (stored: Message[]) => core.journal.listTurnsFor(params.threadId, stored.map((message) => message.turnId));
   if (params.before === undefined) {
