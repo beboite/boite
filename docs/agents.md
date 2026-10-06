@@ -6,6 +6,59 @@ and scoped memory when its provider, account or model changes. Pausing or
 archiving an identity stops its current execution and prevents new work; the
 stopped work item says the agent was paused or archived.
 
+## The page
+
+The page is cut like the chat. Its list stands where the thread list does,
+with two views on top: Agents (the agents in one card, groups and teams in
+another) and Planning (every routine, grouped as today, tomorrow, this week,
+later, paused and done). A row reads like a thread row: the agent's picture
+where the provider logo goes, its name, and on the right the same state a
+thread shows, Working with its time while its thread runs a turn, Needs you
+while a decision waits, or when it last moved. The line under it says what the
+agent is doing, else the last message, else its next routine. The foot holds
+the engine settings, the way back to the conversations and Settings.
+
+A conversation reads like a thread: the user's messages in bubbles, each
+agent's answer as prose under its picture and name, and the thread composer at
+the bottom. While an agent works, a line says so with the elapsed time and opens
+the thread it works in. A decision it asked for stands in the conversation as a
+question with its answers to pick and a free answer. The header names the views
+in words (Chat, Planning, Memory, Settings for an agent); Activity and Missions
+wait in its menu.
+
+A new agent needs a name and what it does; its robot, model and permissions
+come filled in, and role, tools and the rest wait under More options.
+
+### Robots
+
+An agent's picture is a small robot drawn in SVG (`RobotFace.svelte`). It has
+a style (Bubble, Capsule or Retro), a shape, one of nine colours, eyes and an
+accessory. The robot is stored in the existing `avatar` field as
+`bot:<style>.<shape>.<colour>.<eyes>.<accessory>`, for example `bot:b.0.4.0.1`,
+so no record changed. An empty avatar draws the robot the agent's id gives, the
+same on every client; one or two characters (an emoji, initials) stay text, and
+a code this build cannot read stays text too. Shuffle draws a new robot in the
+same style; Customize opens one row per part, each choice drawn on the robot.
+The colours are `--robot-1` to `--robot-9` and a few shared tones in `app.css`.
+The face moves with the agent: it blinks at rest, glances from side to side
+while it works and hops while it waits on the user. Reduced motion stills it.
+
+### Threads an agent runs
+
+An agent works in threads of its own (`agentSessionId`). The thread list shows
+it: an Agents at work card above the projects lists every agent whose thread
+runs, is queued or waits on the user, with the same state words as a thread
+row. A row opens the thread, or the agent's conversation when it waits on an
+answer given there. A project thread an agent runs, a mission task in a
+worktree for example, wears the agent's picture in place of the provider
+logo, and so does a delegated child of such a thread. Opening an agent's thread
+shows, where the composer would be, whose thread it is and the way to the
+agent's conversation, where the user talks to it.
+
+The thread list reads this from the agents snapshot (`lib/agent-directory.svelte.ts`),
+loaded only once a thread of that machine belongs to an agent and refreshed on
+`agents.changed` at most every 1.5 seconds.
+
 ## Conversations and teams
 
 A group is a shared conversation without a required project. Each agent/group
@@ -157,11 +210,25 @@ date, an interval in minutes, or a daily local time with an IANA timezone. The
 core wakes them without an idle model loop. One unfinished occurrence blocks
 the next. After downtime, at most one overdue occurrence enters the durable
 queue; missed intervals are not replayed. Daily routines run once per local
-date, even when clocks move back. A skipped local time runs the following day.
+date, even when clocks move back. A skipped local time runs on the next
+scheduled day. A daily routine can be limited to chosen weekdays, for example
+Monday, Wednesday and Friday at 09:00; the weekday is read in its timezone.
 Pausing the identity or the engine also holds its routines. A single-date
 routine is done once it ran, on schedule or through Run now: the card reads
 Done and offers no Resume, and only a new date schedules it again, even one
 saved while the routine is paused.
+
+Planning a task asks two things: what to do, and when, picked from Once (with
+In an hour, This evening and Tomorrow morning), Every day, Some days (a toggle
+per weekday) and Repeatedly (15 minutes to a day, or any number of minutes). A
+sentence under the choices says what will happen and when it runs next before
+anything is saved, for example "Every Monday and Friday at 6:00 PM". The time
+zone is the device's and is never asked; a routine saved elsewhere names its
+zone in that sentence and keeps it until its time changes. The name is
+optional: it defaults to the first words of the task. Plan, beside a direct
+conversation's composer, turns what is written there into a task for that
+agent. Each routine shows its next run and how its last run went, with Run
+now, Pause or Resume, Edit and the way into that run's thread.
 
 Models and limits separates the required default route, allowed main routes,
 and allowed subagent profiles. A route names a provider, account and model.
@@ -185,11 +252,12 @@ the brain and policy, converse and handle decisions on the selected host.
 
 ## Interface and storage
 
-The directory opens conversations, activity, scoped memory, routines, the
-individual brain and model limits. The machine picker selects the owning core;
-closing this client does not stop that core. Disconnection marks the last state
-as stale. Portrait experiments and the graphical studio are deliberately
-deferred. The scene source remains available, but has no navigation entry.
+The page opens conversations, activity, scoped memory, routines, the
+individual brain and model limits. With several machines, the menu at the top
+of the list selects the owning core; closing this client does not stop that
+core. Disconnection marks the last state as stale. The graphical studio is
+deliberately deferred. The scene source remains available, but has no
+navigation entry.
 
 Contracts live in `packages/contracts/src/agents.ts`. Schema 16 combines domain
 records, receipts and projectless managed threads with prompt-cache and native
@@ -237,7 +305,11 @@ serialization, CLI tools, interrupted runs and workspace preparation recovery.
 same-millisecond cursors, session paging, the query plan of each targeted read
 and the migration from schema 15.
 The UI journey creates and converses with an agent, leaves the page, edits
-memory and brain files, creates a routine, inspects model limits, accepts a task
-and answers a decision. Captures are under
+memory and brain files, plans a routine on chosen weekdays and reads its
+sentence, inspects model limits, accepts a task, finds the agent waiting in the
+thread list's Agents at work card, opens its thread and its conversation from
+there, and answers a decision. `robots.test.ts`, `schedule.test.ts` and
+`agents.test.ts` cover robot codes, schedule sentences, the rows an agent at
+work lights and the thread list's directory. Captures are under
 `tests/e2e/.artifacts`. The shell journey finishes work after shell exit,
 adopts the same PID and stops it explicitly. Real-provider inference is opt-in.

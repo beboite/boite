@@ -7,6 +7,9 @@
   import EffortSlider from '../EffortSlider.svelte';
   import Menu from '../Menu.svelte';
   import InfoTip from '../InfoTip.svelte';
+  import { encodeRobot, robotOf, seededRobot } from '../../lib/robots';
+  import AgentAvatar from './AgentAvatar.svelte';
+  import RobotPicker from './RobotPicker.svelte';
 
   /**
    * Creates a record, or edits one in its Settings tab (`embedded`). An agent's model, effort and
@@ -40,6 +43,10 @@
   let description = $state(team?.description ?? '');
   let selection = $state<ExecutionSelection>({ ...(profile?.selection ?? { providerId: defaultAccount?.providerId ?? '', accountId: defaultAccount?.id ?? '', model: defaultModels.find(m => m.default)?.id ?? defaultModels[0]?.id ?? null, effort: null, permissionMode: 'default' }) });
   let tools = $state<string[]>(profile?.tools ?? [...TOOLS]);
+  /** A new agent gets a robot of its own at once; an existing one shows the robot it wears. */
+  let robot = $state(robotOf(profile?.id ?? '', profile?.avatar ?? '') ?? seededRobot(profile?.id ?? crypto.randomUUID()));
+  let robotTouched = $state(!profile);
+  let dressing = $state(false);
   let status = $state(profile?.status ?? 'active');
   let accountIntegration = $state(profile?.accountIntegration ?? 'provider');
   let memberIds = $state(group?.memberIds ?? team?.members.map(m => m.agentId) ?? mission?.agentIds ?? initial.preset?.memberIds ?? []);
@@ -81,11 +88,11 @@
     // field this form edits is unchanged. Anything else keeps the revision it read, so a stale
     // form is refused rather than written over newer values.
     const latest = stored();
-    const edited = (r: AgentProfile) => JSON.stringify([r.name, r.domain, r.instructions, r.status, r.tools, r.accountIntegration]);
+    const edited = (r: AgentProfile) => JSON.stringify([r.name, r.domain, r.instructions, r.avatar, r.status, r.tools, r.accountIntegration]);
     const rebase = kind === 'profile' && latest && profile && edited(latest as AgentProfile) === edited(profile);
     const version = initial.record ? { id: initial.record.id, expectedRevision: (rebase ? latest : initial.record).revision } : {};
     let result: AgentEntities[AgentEntryKind] | null = null;
-    if (kind === 'profile') result = await view.call('agents.profile.save', { ...version, value: { name, domain, instructions, avatar: profile?.avatar ?? '', selection: creating || !rebase ? selection : (latest as AgentProfile).selection, status, tools, accountIntegration } });
+    if (kind === 'profile') result = await view.call('agents.profile.save', { ...version, value: { name, domain, instructions, avatar: robotTouched ? encodeRobot(robot) : profile?.avatar ?? '', selection: creating || !rebase ? selection : (latest as AgentProfile).selection, status, tools, accountIntegration } });
     if (kind === 'group') result = await view.call('agents.group.save', { ...version, value: { name, memberIds, mode, maxTurns, maxTurnsPerAgent: perAgent, paused } });
     if (kind === 'team') result = await view.call('agents.team.save', { ...version, value: { name, description, members: memberIds.map(agentId => ({ agentId, responsibility: responsibilities[agentId] ?? '' })), groupId, projectIds, paused } });
     if (kind === 'mission') result = await view.call('agents.mission.save', { ...version, value: { title: name, objective, expectedResult, agentIds: memberIds, teamId, projectId, status: (latest as AgentMission | undefined)?.status ?? mission?.status ?? 'open', maxTurns, maxDurationMs: Math.round(minutes * 60000), maxTokens: tokens || null, resourceIds: resourceIds.filter(id => resourceOptions.some(r => r.id === id)) } });
@@ -120,11 +127,25 @@
 <form class="agents-form" onsubmit={event => { event.preventDefault(); void save(); }} data-testid="agent-editor">
   <section class="card">
     {#if embedded}<h2>{heading ?? labels.identity}</h2>{/if}
-    <label class="agent-field">{labels.name}<input required maxlength="200" bind:value={name} data-testid="agent-name" /></label>
+    {#if kind === 'profile'}
+      {#if dressing}
+        <RobotPicker {robot} onpick={next => { robot = next; robotTouched = true; }} />
+        <button type="button" class="ghost small agent-add" onclick={() => { dressing = false; }}>{labels.robot.done}</button>
+      {:else}
+        <div class="agent-portrait">
+          <AgentAvatar kind="profile" id={profile?.id ?? ''} {name} avatar={robotTouched ? encodeRobot(robot) : profile?.avatar ?? ''} size={64} />
+          <div class="agent-actions">
+            <button type="button" class="small" onclick={() => { robot = seededRobot(crypto.randomUUID(), robot.family); robotTouched = true; }} data-testid="robot-shuffle">{labels.robot.shuffle}</button>
+            <button type="button" class="ghost small" onclick={() => { dressing = true; }} data-testid="robot-customize">{labels.robot.customize}</button>
+          </div>
+        </div>
+      {/if}
+    {/if}
+    <label class="agent-field">{labels.name}<input required maxlength="200" bind:value={name} placeholder={kind === 'profile' ? labels.namePlaceholder : ''} data-testid="agent-name" /></label>
 
     {#if kind === 'profile'}
-      <label class="agent-field">{labels.domain}<input bind:value={domain} maxlength="500" placeholder={labels.rolePlaceholder} /></label>
-      <label class="agent-field">{labels.instructions}<textarea bind:value={instructions} rows="5" maxlength="32000"></textarea></label>
+      {#if embedded}<label class="agent-field">{labels.domain}<input bind:value={domain} maxlength="500" placeholder={labels.rolePlaceholder} /></label>{/if}
+      <label class="agent-field">{creating ? labels.whatItDoes : labels.instructions}<textarea bind:value={instructions} rows="5" maxlength="32000" placeholder={labels.instructionsPlaceholder} data-testid="agent-instructions"></textarea></label>
       {#if embedded}
         <div class="agent-field"><span>{labels.status}</span>
           <Menu placement="bottom" label={labels.status} items={(['active', 'paused', 'archived'] as const).map(id => ({ id, label: labels[id], active: status === id }))} onpick={id => { status = id as AgentProfile['status']; }}>{labels[status]}</Menu>
@@ -178,6 +199,7 @@
   <details class="card agent-more">
     <summary>{labels.advanced}</summary>
     {#if kind === 'profile'}
+      <label class="agent-field">{labels.domain}<input bind:value={domain} maxlength="500" placeholder={labels.rolePlaceholder} /></label>
       <fieldset class="agent-field"><legend>{labels.tools}</legend>
         <div class="agent-checks">{#each TOOLS as tool (tool)}<label class="agent-chip-check"><input type="checkbox" checked={tools.includes(tool)} onchange={() => { tools = toggle(tools, tool); }} />{labels[tool]}</label>{/each}</div>
       </fieldset>

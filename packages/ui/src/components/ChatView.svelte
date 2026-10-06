@@ -9,6 +9,7 @@
   import { workspace } from '../lib/workspace.svelte';
   import Composer from './Composer.svelte';
   import AgentDock from './AgentDock.svelte';
+  import AgentOwnerBar from './AgentOwnerBar.svelte';
   import CoordinationPanel from './CoordinationPanel.svelte';
   import Menu from './Menu.svelte';
   import MessageList from './MessageList.svelte';
@@ -122,7 +123,9 @@
     {/if}
 
     {#if thread}<AgentDock {store} threadId={thread.id} />{/if}
-    {#if !thread?.agentSessionId}
+    {#if thread?.agentSessionId}
+      <AgentOwnerBar {store} {thread} />
+    {:else}
       <Composer {store} centered={!thread} />
     {/if}
 

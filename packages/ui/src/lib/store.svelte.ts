@@ -227,6 +227,8 @@ export class Store {
   set settingsTab(value) { this.#ctx.layout.settingsTab = value; }
   get settingsSection() { return this.#ctx.layout.settingsSection; }
   set settingsSection(value) { this.#ctx.layout.settingsSection = value; }
+  get agentsTarget() { return this.#ctx.layout.agentsTarget; }
+  set agentsTarget(value) { this.#ctx.layout.agentsTarget = value; }
   get sidebarOpen() { return this.#ctx.layout.sidebarOpen; }
   set sidebarOpen(value) { this.#ctx.layout.sidebarOpen = value; }
   get sidebarCollapsed() { return this.#ctx.layout.sidebarCollapsed; }

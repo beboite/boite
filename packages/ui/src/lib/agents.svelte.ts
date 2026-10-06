@@ -1,10 +1,15 @@
-import type { AgentEntityKind, AgentsSnapshot, RpcParams, RpcResult, AgentsRpcMethods, AgentHistoryCursor, AgentHistoryKind, AgentRecord, AgentsHistoryPage, AgentConversationMessage, AgentMission, AgentScope, AgentTeam } from '@boite/contracts';
+import type { AgentEntityKind, AgentsSnapshot, RpcParams, RpcResult, AgentsRpcMethods, AgentHistoryCursor, AgentHistoryKind, AgentRecord, AgentsHistoryPage, AgentConversationMessage, AgentMission, AgentScope, AgentTeam, ThreadSummary } from '@boite/contracts';
 import type { Store } from './store.svelte';
 
 export type AgentEntryKind = Extract<AgentEntityKind, 'profile' | 'group' | 'team' | 'mission'>;
 export type AgentSelection = { kind: AgentEntryKind; id: string };
-/** What the agents page shows: one record, the work waiting on the user, or the engine settings. */
-export type AgentFocus = AgentSelection | { kind: 'attention' | 'engine' };
+/**
+ * What the agents page shows: one record, the work waiting on the user, the
+ * engine settings, one routine, or the form that plans a new one.
+ */
+export type AgentFocus = AgentSelection | { kind: 'attention' | 'engine' | 'planning' } | { kind: 'routine'; id: string };
+/** The two views of the agents list: the agents, and what they have planned. */
+export type RailMode = 'agents' | 'planning';
 
 export type AgentChatKind = 'profile' | 'group' | 'team';
 export type AgentChatStatus = 'waiting' | 'running' | 'paused' | 'idle';
@@ -121,19 +126,38 @@ export function agentChats(snapshot: AgentsSnapshot, messages: AgentConversation
   return [...chats.values()].sort((a, b) => b.at - a.at || a.name.localeCompare(b.name));
 }
 
-/** The agent's own avatar when it is one or two characters (an emoji, a letter), else the initials of its first two words. */
-export function avatarText(name: string, avatar = ''): string {
-  const own = avatar.trim();
-  if (own && [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(own)].length <= 2) return own;
-  return name.trim().split(/\s+/).filter(Boolean).slice(0, 2).map(word => Array.from(word)[0]).join('').toUpperCase() || '?';
+const LIVE: ReadonlySet<ThreadSummary['status']> = new Set(['running', 'queued', 'waiting']);
+
+/**
+ * The thread each conversation's agents work in right now, keyed like the
+ * chat list: what a row's state and a conversation's live line read, so an
+ * agent at work says so the way a thread does. One waiting on the user wins
+ * over one running, which wins over one queued.
+ */
+export function liveThreads(snapshot: AgentsSnapshot, threads: readonly ThreadSummary[]): Map<string, ThreadSummary> {
+  const byGroup = teamsByGroup(snapshot);
+  const rank = (t: ThreadSummary) => (t.status === 'waiting' ? 0 : t.status === 'running' ? 1 : 2);
+  const live = new Map<string, ThreadSummary>();
+  const put = (key: string | null, thread: ThreadSummary) => {
+    if (!key) return;
+    const held = live.get(key);
+    if (!held || rank(thread) < rank(held)) live.set(key, thread);
+  };
+  for (const thread of threads) {
+    if (!thread.agentSessionId || !LIVE.has(thread.status) || thread.archived) continue;
+    const session = snapshot.sessions.find(s => s.id === thread.agentSessionId);
+    if (!session) continue;
+    put(chatKey('profile', session.agentId), thread);
+    if (session.scope.kind === 'group') put(chatKey('group', session.scope.id), thread);
+    if (session.scope.kind === 'mission') {
+      const mission = snapshot.missions.find(m => m.id === session.scope.id);
+      put(mission ? missionHome(snapshot, mission, byGroup) : null, thread);
+    }
+  }
+  return live;
 }
 
-/** One of the eight series tints, the same for an id on every client. */
-export function tintOf(id: string): string {
-  let hash = 0;
-  for (const c of id) hash = (hash * 31 + c.codePointAt(0)!) | 0;
-  return `var(--series-${(Math.abs(hash) % 8) + 1})`;
-}
+export { avatarText, tintOf } from './robots';
 
 /** A message as a one-line preview: markdown marks out, every run of blanks one space. */
 export function previewOf(text: string): string {

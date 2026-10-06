@@ -14,7 +14,11 @@ export interface AgentBrain {
   memory: string;
   revision: string;
 }
-export type AgentSchedule = { kind: 'once'; at: number } | { kind: 'interval'; everyMinutes: number } | { kind: 'daily'; time: string; timezone: string };
+/**
+ * A daily schedule with `days` runs only on those weekdays, numbered 0 (Sunday) to 6 in
+ * its timezone. Absent means every day; the core drops a list of all seven.
+ */
+export type AgentSchedule = { kind: 'once'; at: number } | { kind: 'interval'; everyMinutes: number } | { kind: 'daily'; time: string; timezone: string; days?: number[] };
 export interface AgentRoutine extends AgentRecord {
   agentId: string;
   name: string;

@@ -8,7 +8,9 @@ function nextOccurrence(schedule: AgentSchedule, after: number): number | null {
   if (schedule.kind === 'once') return schedule.at > after ? schedule.at : null;
   if (schedule.kind === 'interval') return after + schedule.everyMinutes * 60000;
   const [h = 0, m = 0] = schedule.time.split(':').map(Number), next = new Date(after); next.setHours(h, m, 0, 0);
-  return next.getTime() > after ? next.getTime() : next.getTime() + 86400000;
+  if (next.getTime() <= after) next.setDate(next.getDate() + 1);
+  for (let i = 0; i < 7 && schedule.days?.length && !schedule.days.includes(next.getDay()); i++) next.setDate(next.getDate() + 1);
+  return next.getTime();
 }
 
 const OPEN_WORK: AgentWork['status'][] = ['pending', 'running', 'waiting', 'paused', 'interrupted', 'error'];

@@ -17,6 +17,8 @@
   import MachineIcon from './MachineIcon.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import ThreadState from './ThreadState.svelte';
+  import AgentAvatar from './agents/AgentAvatar.svelte';
+  import { agentDirectory } from '../lib/agent-directory.svelte';
   let {
     machine,
     project,
@@ -48,6 +50,8 @@
   let meta = $derived(showProject || pullRequest !== null);
   /** The logo tells the rows apart; its tooltip names the provider and the model. */
   let agent = $derived(agentLabel(owner, thread));
+  /** A persistent agent's thread wears that agent's picture where the provider's logo goes. */
+  let runner = $derived(thread.agentSessionId || thread.parentThreadId ? agentDirectory(owner).ownerOf(thread) : null);
   // A move asked for while the turn runs, until the turn ends and applies it.
   let pending = $derived(pendingLine(thread));
 
@@ -187,9 +191,15 @@
             <MachineIcon icon={machine.icon} os={owner.core?.os} />
           </span>
         {/if}
-        <span class="provider" data-testid="thread-provider" title={agent} aria-label={agent}>
-          <ProviderLogo providerId={thread.providerId} size={12} />
-        </span>
+        {#if runner}
+          <span class="provider" data-testid="thread-agent" title={`${runner.name} · ${agent}`} aria-label={runner.name}>
+            <AgentAvatar kind="profile" id={runner.id} name={runner.name} avatar={runner.avatar} size={16} />
+          </span>
+        {:else}
+          <span class="provider" data-testid="thread-provider" title={agent} aria-label={agent}>
+            <ProviderLogo providerId={thread.providerId} size={12} />
+          </span>
+        {/if}
         <span class="title">{thread.title}</span>
         {#if draft}<span class="draft" data-testid="thread-draft" title={strings.sidebar.unsentDraft} aria-label={strings.sidebar.unsentDraft}><PencilLine size={12} /></span>{/if}
         {#if thread.pinned}<Pin size={12} />{/if}
