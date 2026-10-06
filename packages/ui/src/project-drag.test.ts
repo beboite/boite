@@ -7,6 +7,7 @@ import { writeExperiments } from './lib/experiments';
 import { closeTour } from './lib/onboarding.svelte';
 import { work } from './lib/work-prefs.svelte';
 import { projectView } from './lib/project-view.svelte';
+import { projectThreadView } from './lib/project-threads.svelte';
 import { PROJECT_HOLD, reorders } from './lib/project-drag.svelte';
 
 /*
@@ -31,6 +32,7 @@ afterEach(() => {
   workspace.view = 'projects';
   projectView.order = 'recent';
   projectView.keys = [];
+  projectThreadView.otherOpen = false;
 });
 
 async function waitFor(check: () => boolean, attempts = 2000): Promise<void> {
@@ -171,6 +173,46 @@ test('in the manual order a header dragged with the mouse moves its project; a s
   const next = new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 });
   document.body.dispatchEvent(next);
   expect(next.defaultPrevented).toBe(false);
+});
+
+test('a header drags only among the projects of its own fold', async () => {
+  await mountOnFake();
+  projectView.order = 'manual';
+  const [first, second] = order() as [string, string];
+  // A project without conversations goes to the open Other fold, under the active ones.
+  const template = store.projects.find((project) => project.id === first)!;
+  store.projects = [...store.projects, { ...template, id: 'quiet-project', name: 'Quiet', createdAt: 0 }];
+  projectThreadView.otherOpen = true;
+  await waitFor(() => order().length === 3);
+  expect(order()).toEqual([first, second, 'quiet-project']);
+  place(section(first), 0);
+  place(section(second), 110);
+  place(section('quiet-project'), 220);
+  let target: Element | null = null;
+  under(() => target);
+
+  // Over an active project the quiet one shows no line, and its release changes nothing, saved or drawn.
+  header('quiet-project').dispatchEvent(pointer('pointerdown', 10, 250));
+  target = section(first);
+  window.dispatchEvent(pointer('pointermove', 10, 80));
+  await waitFor(dragging);
+  window.dispatchEvent(pointer('pointermove', 10, 20));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(document.querySelector('.insert-before, .insert-after')).toBeNull();
+  window.dispatchEvent(pointer('pointerup', 10, 20));
+  expect(dragging()).toBe(false);
+  expect(projectView.keys).toEqual([]);
+  expect(order()).toEqual([first, second, 'quiet-project']);
+
+  // Within its fold a project still moves.
+  header(second).dispatchEvent(pointer('pointerdown', 10, 150));
+  window.dispatchEvent(pointer('pointermove', 10, 80));
+  await waitFor(dragging);
+  window.dispatchEvent(pointer('pointermove', 10, 20));
+  await waitFor(() => section(first).classList.contains('insert-before'));
+  window.dispatchEvent(pointer('pointerup', 10, 20));
+  await waitFor(() => order()[0] === second);
+  expect(order()).toEqual([second, first, 'quiet-project']);
 });
 
 test('a finger drags a project header only after holding it still; a finger that travels first scrolls', async () => {

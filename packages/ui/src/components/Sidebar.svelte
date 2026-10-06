@@ -124,22 +124,30 @@
   function addProject() {
     store.projectPickerOpen = true;
   }
+  /**
+   * The projects a project moves among: its own fold, active or other, in the
+   * order drawn. A move across the folds would change nothing on screen, since
+   * each fold keeps its projects, but would still reorder the saved keys.
+   */
+  function foldOf(entry: ProjectEntry): ProjectEntry[] {
+    return recentPreferences.groupOtherProjects && !activeProject(entry) ? otherGroups : activeGroups;
+  }
   function openProjectMenu(event: MouseEvent, machine: Machine, project: Project) {
-    const key = projectKey({ machine, project });
+    const entry = { machine, project }, key = projectKey(entry), fold = foldOf(entry);
     projectMenu(event, machine.store, project, projectView.order === 'manual' ? {
-      up: shownGroups[0] !== undefined && projectKey(shownGroups[0]) !== key,
-      down: shownGroups.at(-1) !== undefined && projectKey(shownGroups.at(-1)!) !== key,
-      move: direction => projectView.step(shownGroups, key, direction)
+      up: fold[0] !== undefined && projectKey(fold[0]) !== key,
+      down: fold.at(-1) !== undefined && projectKey(fold.at(-1)!) !== key,
+      move: direction => projectView.step(foldOf(entry), key, direction)
     } : undefined);
   }
-  /** A project header dragged to a new place among the projects on screen, in the manual order. */
+  /** A project header dragged to a new place among the projects of its fold, in the manual order. */
   function dragProject(event: PointerEvent, entry: ProjectEntry) {
     const key = projectKey(entry);
     startProjectDrag(event, {
       key,
       look: { name: projectName(entry.project), project: entry.project, store: entry.machine.store },
-      order: () => shownGroups.map(projectKey),
-      drop: (target, after) => projectView.move(shownGroups, key, target, after),
+      order: () => foldOf(entry).map(projectKey),
+      drop: (target, after) => projectView.move(foldOf(entry), key, target, after),
     });
   }
   function startResize(event: PointerEvent) {
