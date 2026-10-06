@@ -75,6 +75,20 @@ describe('hook descriptors', () => {
     expect(refusal(descriptor({ hookSources: [{ variable: 'MINE_HOME', path: 'hooks', format: 'events' }] }, false)))
       .toMatchObject({ field: 'hookSources', expected: 'capabilities.hooks set to true' });
   });
+
+  test('shared keys load as written and are refused where a share would be', () => {
+    const loaded = validateDescriptor(descriptor({
+      sharedKeys: [{ variable: 'MINE_HOME', path: 'state.json', home: '~/.mine.json', keys: ['servers', 'servers'] }],
+    }), 'mine.json', new Set(), tmpdir());
+    expect(loaded.sharedKeys).toEqual([{ variable: 'MINE_HOME', path: 'state.json', home: '~/.mine.json', keys: ['servers'] }]);
+
+    expect(refusal(descriptor({ sharedKeys: [{ variable: 'MINE_HOME', path: 'auth.json', keys: ['a'] }] }))).toMatchObject({ field: 'sharedKeys[0].path' });
+    expect(refusal(descriptor({ sharedKeys: [{ variable: 'OTHER_HOME', path: 'state.json', keys: ['a'] }] }))).toMatchObject({ field: 'sharedKeys[0].variable' });
+    expect(refusal(descriptor({ sharedKeys: [{ variable: 'MINE_HOME', path: 'state.json', keys: [] }] }))).toMatchObject({ field: 'sharedKeys[0].keys' });
+    expect(refusal(descriptor({ sharedKeys: [{ variable: 'MINE_HOME', path: 'state.json', keys: ['__proto__'] }] }))).toMatchObject({ field: 'sharedKeys[0].keys[0]' });
+    expect(refusal(descriptor({ sharedKeys: [{ variable: 'MINE_HOME', path: 'state.json', home: '/etc/state.json', keys: ['a'] }] })))
+      .toMatchObject({ field: 'sharedKeys[0].home' });
+  });
 });
 
 describe('hook sources', () => {

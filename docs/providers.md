@@ -231,7 +231,7 @@ An `update` block says how the user's own install updates itself; see
 
 ## Hooks and shared configuration
 
-Two optional descriptor fields carry the user's own configuration to isolated
+Three optional descriptor fields carry the user's own configuration to isolated
 accounts and tell Settings where the agent's hooks are ([hooks.md](hooks.md)).
 Codex's:
 
@@ -257,6 +257,13 @@ Codex's:
   for a file another agent owns: Grok reads Claude's `~/.claude/settings.json`.
   `format` is `events`, a JSON file or directory of them shaped like Claude's
   `hooks` block, or `modules`, a directory of plugin scripts.
+- `sharedKeys[]` names top-level keys of a JSON file the account keeps as its
+  own, set from the user's copy before every spawn. Claude's user-scope MCP
+  servers live under `mcpServers` in `.claude.json`, beside its sign-in
+  identity, so that file is never copied whole:
+  `{ "variable": "CLAUDE_CONFIG_DIR", "path": ".claude.json", "home": "~/.claude.json", "keys": ["mcpServers"] }`.
+  The user's file is `path` under the variable when the core's environment sets
+  it, else `home`, else `path` under the variable's default.
 
 A share or a source is refused at load when a path is absolute or has a `..`,
 `.` or empty segment, when no profile isolates its variable, when a share's
@@ -266,7 +273,8 @@ inside a file the account keeps to itself: `auth.session`, a profile's
 `session` or a `seedFiles` entry. That is why OpenCode, whose config and data
 homes are the same directory, lists `opencode/opencode.json` and its siblings
 one by one and never `opencode`, which holds `opencode/auth.json`.
-`hookSources` also needs `capabilities.hooks`.
+`hookSources` also needs `capabilities.hooks`. A `sharedKeys` file obeys the
+same limits as a shared path, and needs at least one key and a `home` under `~/`.
 
 The [account sharing guide](accounts.md#what-an-isolated-account-shares)
 lists shipped configuration paths and link/copy behavior. [Hooks](hooks.md)
