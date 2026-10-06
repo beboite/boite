@@ -321,7 +321,9 @@ export const fr: Translation = {
     }
   },
   mobile: {
-    clearSearch: 'Effacer la recherche', draftTitle: 'Que voulez-vous faire ?', draftHint: 'Lancez une tâche, posez une question ou reprenez votre travail.',
+    clearSearch: 'Effacer la recherche',
+    atWork: '{count} en cours', atWorkFilter: 'Afficher seulement les conversations en cours',
+    draftTitle: 'Que voulez-vous faire ?', draftHint: 'Lancez une tâche, posez une question ou reprenez votre travail.',
     pairTitle: 'Votre Boite, sur votre téléphone',
     pairBody: 'Connectez votre ordinateur pour retrouver ici vos projets, vos conversations et vos agents.',
     pairStep: 'Sur votre ordinateur, ouvrez Réglages → Machines et mises à jour et créez un code d’appairage.',
@@ -660,6 +662,8 @@ export const fr: Translation = {
       delegating: 'Sous-agents',
       delegatingOne: 'Attend 1 sous-agent',
       delegatingMany: 'Attend {count} sous-agents',
+      subagentsOne: '1 sous-agent',
+      subagentsMany: '{count} sous-agents',
       monitoring: 'Surveille',
       monitoringFor: 'Surveille depuis {elapsed}',
       background: 'En arrière-plan',
