@@ -13,6 +13,7 @@ commands.allow = [
   "notify",
   "user_presence",
   "close_behavior",
+  "launch_at_login",
   "app_update_status",
   "app_update_check",
   "app_update_download",
