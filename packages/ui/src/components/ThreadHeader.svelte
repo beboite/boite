@@ -1,4 +1,6 @@
 <script lang="ts">
+  import AgentAvatar from './agents/AgentAvatar.svelte';
+  import { stewardOfThread } from '../lib/steward-view';
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { ArrowLeft, ChevronDown, FolderInput, GitBranch, Network, PanelRight, Search, SquareTerminal, UsersRound, VenetianMask } from '@lucide/svelte';
@@ -9,7 +11,7 @@
   import { pendingLine, pickMoveItem } from '../lib/thread-move.svelte';
   import { threadMenuItems } from '../lib/thread-menu';
   import type { MenuItem } from '../lib/menu';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
   import { work } from '../lib/work-prefs.svelte';
   import { controlMenu } from '../lib/controls';
   import type { Store } from '../lib/store.svelte';
@@ -108,6 +110,8 @@
     contextMenu.open(event, desktopItems, titleAction);
   }
 
+  /** The steward looking after this thread, if its project has one. */
+  let watcher = $derived(thread ? stewardOfThread(store, thread) : null);
 </script>
 
 <div class="thread-header" data-testid="thread-header" data-status={thread?.status}>
@@ -182,6 +186,13 @@
         <button type="button" class="chip parent" data-testid="delegation-back-parent" onclick={() => void store.open(thread!.parentThreadId!)}>
           <ArrowLeft size={13} strokeWidth={1.75} />
           <span class="ui-label">{strings.delegation.parent}</span>
+        </button>
+      {/if}
+      {#if watcher}
+        <!-- The steward that looks after this thread's project: what it may do here is its grant's. -->
+        <button type="button" class="chip steward" title={fill(strings.steward.lookedAfterBy, { name: watcher.thread.title })} data-testid="thread-steward-chip" onclick={() => void store.open(watcher.thread.id)}>
+          <AgentAvatar kind="profile" id={watcher.thread.id} name={watcher.thread.title} size={16} />
+          <span class="steward-name ui-label">{fill(strings.steward.chipFor, { name: watcher.thread.title })}</span>
         </button>
       {/if}
       {#if thread?.branch && work.shows('header.branch')}
@@ -281,6 +292,8 @@
     font-size: var(--text-sm);
   }
 
+  .steward { flex: 0 1 auto; min-width: 0; max-width: 220px; gap: 6px; padding-left: 4px; border-color: color-mix(in oklch, var(--color-steward) 45%, transparent); background: var(--color-steward-soft); color: var(--color-steward); cursor: pointer; }
+  .steward-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .branch-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .branch :global(svg) { flex: none; }
 

@@ -137,12 +137,13 @@ export const fr: Translation = {
     createAgent: 'Créer un agent', noAgents: 'Aucun agent pour l’instant', more: 'Plus', noMatch: 'Aucun résultat',
     noMessagesYet: 'Aucun message pour l’instant', noMissions: 'Aucune mission pour l’instant', previewFrom: '{name} : {text}', unread: '{count} non lus',
     backToChat: 'Retour à la discussion', backTo: 'Retour à {name}', editRoles: 'Modifier les rôles', startChat: 'Démarrer la discussion',
+    inCharge: 'Agents aux commandes',
     asks: '{name} vous demande',
     planning: 'Planning', messageTo: 'Écrire à {name}', sayHello: 'Dites bonjour à {name}, ou planifiez une tâche qu’il fera tout seul.',
     liveWorking: '{name} travaille', liveWaiting: '{name} a besoin de vous', liveQueued: '{name} va commencer', seeThread: 'Ouvrir son thread',
     welcomeHint: 'Un agent garde son nom, sa mémoire et ses tâches. Parlez-lui, ou planifiez du travail qu’il fera seul.',
     namePlaceholder: 'Mira, Scout, Pixel', whatItDoes: 'Ce qu’il fait', instructionsPlaceholder: 'Par exemple : chaque matin, lis les nouvelles issues et résume-les en cinq lignes.',
-    atWork: 'Agents au travail', ownedBy: '{name} gère ce thread', ownedHint: 'Parlez à {name} dans sa discussion. Ce thread montre ce qu’il fait.', openAgent: 'Ouvrir {name}',
+    ownedBy: '{name} gère ce thread', ownedHint: 'Parlez à {name} dans sa discussion. Ce thread montre ce qu’il fait.', openAgent: 'Ouvrir {name}',
     robot: {
       family: 'Style', shape: 'Forme', color: 'Couleur', eyes: 'Yeux', top: 'Accessoire', shuffle: 'Mélanger', customize: 'Personnaliser', done: 'Terminé',
       option: '{part} {n}', families: { bubble: 'Bulle', capsule: 'Capsule', retro: 'Rétro' },
@@ -1146,6 +1147,8 @@ export const fr: Translation = {
     }
   },
   steward: {
+    chipFor: 'Gardien : {name}',
+    lookedAfterBy: 'Suivi par {name}',
     heading: 'Gardien',
     enable: "Cet agent veille sur des projets",
     enableHint: "Il lit toutes leurs conversations, les guide, répond à leurs questions et les range pendant votre absence.",

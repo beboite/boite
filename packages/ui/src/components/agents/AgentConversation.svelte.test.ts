@@ -69,8 +69,8 @@ test('HTTP agent sending keeps its secure request id for an uncertain retry', as
   vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) });
   const call = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'm-sent' });
   const view = {
-    seen: { messages: [], deliveries: [] }, snapshot: { profiles: [{ id: 'a-ada', name: 'Ada' }], groups: [] },
-    pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call,
+    seen: { messages: [], deliveries: [], decisions: [] }, snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '' }], groups: [], work: [], sessions: [] },
+    store: { owner: true }, pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call,
   };
   mounted = mount(AgentConversation, { target: document.body, props: { view: view as unknown as AgentsView, scope } });
   await settle();

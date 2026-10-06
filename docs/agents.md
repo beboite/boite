@@ -46,9 +46,9 @@ while it works and hops while it waits on the user. Reduced motion stills it.
 ### Threads an agent runs
 
 An agent works in threads of its own (`agentSessionId`). The thread list shows
-it: an Agents at work card above the projects lists every agent whose thread
+it: an Agents in charge card above the projects lists every agent whose thread
 runs, is queued or waits on the user, with the same state words as a thread
-row. A row opens the thread, or the agent's conversation when it waits on an
+row, under the [stewards](stewards.md) of that machine. A row opens the thread, or the agent's conversation when it waits on an
 answer given there. A project thread an agent runs, a mission task in a
 worktree for example, wears the agent's picture in place of the provider
 logo, and so does a delegated child of such a thread. Opening an agent's thread
@@ -305,7 +305,7 @@ and the migration from schema 15.
 The UI journey creates and converses with an agent, leaves the page, edits
 memory and brain files, plans a routine on chosen weekdays and reads its
 sentence, inspects model limits, accepts a task, finds the agent waiting in the
-thread list's Agents at work card, opens its thread and its conversation from
+thread list's Agents in charge card, opens its thread and its conversation from
 there, and answers a decision. `robots.test.ts`, `schedule.test.ts` and
 `agents.test.ts` cover robot codes, schedule sentences, the rows an agent at
 work lights and the thread list's directory. Captures are under

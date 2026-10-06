@@ -130,12 +130,13 @@ export const strings = {
     createAgent: 'Create an agent', noAgents: 'No agents yet', more: 'More', noMatch: 'Nothing matches',
     noMessagesYet: 'No messages yet', noMissions: 'No missions yet', previewFrom: '{name}: {text}', unread: '{count} unread',
     backToChat: 'Back to the conversation', backTo: 'Back to {name}', editRoles: 'Edit roles', startChat: 'Start the conversation',
+    inCharge: 'Agents in charge',
     asks: '{name} asks you',
     planning: 'Planning', messageTo: 'Message {name}', sayHello: 'Say hello to {name}, or plan a task it will do on its own.',
     liveWorking: '{name} is working', liveWaiting: '{name} needs you', liveQueued: '{name} is about to start', seeThread: 'Open its thread',
     welcomeHint: 'An agent keeps its name, its memory and its tasks. Talk to it, or plan work it does on its own.',
     namePlaceholder: 'Mira, Scout, Pixel', whatItDoes: 'What it does', instructionsPlaceholder: 'For example: every morning, read the new issues and sum them up in five lines.',
-    atWork: 'Agents at work', ownedBy: '{name} runs this thread', ownedHint: 'Talk to {name} in its conversation. This thread shows what it does.', openAgent: 'Open {name}',
+    ownedBy: '{name} runs this thread', ownedHint: 'Talk to {name} in its conversation. This thread shows what it does.', openAgent: 'Open {name}',
     robot: {
       family: 'Style', shape: 'Shape', color: 'Color', eyes: 'Eyes', top: 'Accessory', shuffle: 'Shuffle', customize: 'Customize', done: 'Done',
       option: '{part} {n}', families: { bubble: 'Bubble', capsule: 'Capsule', retro: 'Retro' },
@@ -1213,6 +1214,8 @@ export const strings = {
     }
   },
   steward: {
+    chipFor: 'Steward: {name}',
+    lookedAfterBy: 'Looked after by {name}',
     heading: 'Steward',
     enable: 'This agent looks after projects',
     enableHint: 'It reads every thread there, steers them, answers their questions and tidies them up while you are away.',

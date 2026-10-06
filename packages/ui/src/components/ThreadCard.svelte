@@ -20,6 +20,7 @@
   import ThreadState from './ThreadState.svelte';
   import AgentAvatar from './agents/AgentAvatar.svelte';
   import { agentDirectory } from '../lib/agent-directory.svelte';
+  import { stewardChip } from '../lib/steward';
   let {
     machine,
     project,
@@ -56,6 +57,8 @@
   let agent = $derived(agentLabel(owner, thread));
   /** A persistent agent's thread wears that agent's picture where the provider's logo goes. */
   let runner = $derived(thread.agentSessionId || thread.parentThreadId ? agentDirectory(owner).ownerOf(thread) : null);
+  /** A steward's own thread wears the robot its id draws, the picture its projects show. */
+  let steward = $derived(owner.stewards?.find(grant => grant.threadId === thread.id) ?? null);
   // A move asked for while the turn runs, until the turn ends and applies it.
   let pending = $derived(pendingLine(thread));
   let doneAllowed = $derived(canMarkDone(owner, thread));
@@ -207,7 +210,11 @@
             <MachineIcon icon={machine.icon} os={owner.core?.os} />
           </span>
         {/if}
-        {#if runner}
+        {#if steward}
+          <span class="provider" data-testid="thread-steward" title={`${stewardChip(steward)} · ${agent}`} aria-label={stewardChip(steward)}>
+            <AgentAvatar kind="profile" id={thread.id} name={thread.title} size={16} />
+          </span>
+        {:else if runner}
           <span class="provider" data-testid="thread-agent" title={`${runner.name} · ${agent}`} aria-label={runner.name}>
             <AgentAvatar kind="profile" id={runner.id} name={runner.name} avatar={runner.avatar} size={16} />
           </span>
