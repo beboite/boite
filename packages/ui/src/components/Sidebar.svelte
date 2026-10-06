@@ -19,7 +19,8 @@
   import { sidebarRows } from '../lib/sidebar-rows.svelte';
   import { projectMenu } from '../lib/project-menu';
   import { work } from '../lib/work-prefs.svelte';
-  import { PROJECT_DRAG_TYPE, projectActivity, projectKey, projectView, type ProjectEntry } from '../lib/project-view.svelte';
+  import { projectActivity, projectKey, projectView, type ProjectEntry } from '../lib/project-view.svelte';
+  import { projectDrag, startProjectDrag } from '../lib/project-drag.svelte';
   import { activeProject, archiveCount, projectThreadLists, projectThreadView, type ArchiveKind } from '../lib/project-threads.svelte';
   import ProjectViews from './ProjectViews.svelte';
   import RecentGroup from './RecentGroup.svelte';
@@ -123,43 +124,31 @@
   function addProject() {
     store.projectPickerOpen = true;
   }
+  /**
+   * The projects a project moves among: its own fold, active or other, in the
+   * order drawn. A move across the folds would change nothing on screen, since
+   * each fold keeps its projects, but would still reorder the saved keys.
+   */
+  function foldOf(entry: ProjectEntry): ProjectEntry[] {
+    return recentPreferences.groupOtherProjects && !activeProject(entry) ? otherGroups : activeGroups;
+  }
   function openProjectMenu(event: MouseEvent, machine: Machine, project: Project) {
-    const key = projectKey({ machine, project });
+    const entry = { machine, project }, key = projectKey(entry), fold = foldOf(entry);
     projectMenu(event, machine.store, project, projectView.order === 'manual' ? {
-      up: shownGroups[0] !== undefined && projectKey(shownGroups[0]) !== key,
-      down: shownGroups.at(-1) !== undefined && projectKey(shownGroups.at(-1)!) !== key,
-      move: direction => projectView.step(shownGroups, key, direction)
+      up: fold[0] !== undefined && projectKey(fold[0]) !== key,
+      down: fold.at(-1) !== undefined && projectKey(fold.at(-1)!) !== key,
+      move: direction => projectView.step(foldOf(entry), key, direction)
     } : undefined);
   }
-  /** The project a dragged project row hovers while the user reorders them; a dragged thread's target is `threadDrag.over`. */
-  let dropOver = $state<string | null>(null);
-  let draggedProject = $state<string | null>(null);
-  let dropAfter = $state(false);
-  function dragProject(event: DragEvent, machine: Machine, project: Project) {
-    if (projectView.order !== 'manual' || !event.dataTransfer) { event.preventDefault(); return; }
-    draggedProject = projectKey({ machine, project });
-    event.dataTransfer.setData(PROJECT_DRAG_TYPE, draggedProject);
-    event.dataTransfer.effectAllowed = 'move';
-  }
-  function dragOver(event: DragEvent, key: string) {
-    if (!draggedProject || !event.dataTransfer?.types.includes(PROJECT_DRAG_TYPE)) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-    dropOver = key;
-    const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    dropAfter = event.clientY > bounds.top + bounds.height / 2;
-  }
-  function dragLeave(event: DragEvent, key: string) {
-    // Leaving for a child of the same section is not leaving it.
-    if (event.relatedTarget instanceof Node && (event.currentTarget as HTMLElement).contains(event.relatedTarget)) return;
-    if (dropOver === key) dropOver = null;
-  }
-  function drop(event: DragEvent, machine: Machine, project: Project) {
-    if (!draggedProject || !event.dataTransfer?.types.includes(PROJECT_DRAG_TYPE)) return;
-    event.preventDefault();
-    projectView.move(shownGroups, draggedProject, projectKey({ machine, project }), dropAfter);
-    draggedProject = null;
-    dropOver = null;
+  /** A project header dragged to a new place among the projects of its fold, in the manual order. */
+  function dragProject(event: PointerEvent, entry: ProjectEntry) {
+    const key = projectKey(entry);
+    startProjectDrag(event, {
+      key,
+      look: { name: projectName(entry.project), project: entry.project, store: entry.machine.store },
+      order: () => foldOf(entry).map(projectKey),
+      drop: (target, after) => projectView.move(foldOf(entry), key, target, after),
+    });
   }
   function startResize(event: PointerEvent) {
     if (event.button !== 0) return;
@@ -189,7 +178,7 @@
   data-testid="sidebar"
 >
   <div class="views"><ProjectViews entries={groups} {store} /></div>
-  <div class="scroll" class:recent={workspace.view === 'recent'} bind:this={scrollRoot} onscroll={() => { if (showRows && scrollRoot) savedScroll = scrollRoot.scrollTop; }}>
+  <div class="scroll" class:recent={workspace.view === 'recent'} data-project-list bind:this={scrollRoot} onscroll={() => { if (showRows && scrollRoot) savedScroll = scrollRoot.scrollTop; }}>
     {#if showRows}
     {#if groups.length === 0}<p class="empty">{strings.sidebar.noProjects}</p>{/if}
     {#if workspace.view === 'recent'}
@@ -234,31 +223,31 @@
         {@const rollup = collapsed ? projectRollup(owner.threadsOf(project.id), thread => owner.subagents(thread.id)?.count ?? 0) : null}
         {@const draftHere = owner.draftEntries.find(entry => entry.projectId === project.id)}
         {@const dropKey = threadDropKey(machine.id, project.id)}
+        {@const key = projectKey(entry)}
         <section
           class="project"
           class:inactive={!activeProject(entry)}
-          class:drop={dropOver === dropKey || threadDrag.over === dropKey}
+          class:drop={threadDrag.over === dropKey}
           class:candidate={takesDrop(threadDrag.current, machine.id, project.id)}
-          class:reordering={dropOver === dropKey && draggedProject !== null}
-          class:after={dropAfter}
+          class:lifted={projectDrag.current === key}
+          class:insert-before={projectDrag.over === key && !projectDrag.after}
+          class:insert-after={projectDrag.over === key && projectDrag.after}
           data-testid="project"
           data-project-id={project.id}
           data-machine-id={machine.id}
+          data-project-key={key}
           data-project-name={projectName(project)}
-          aria-label={dropOver === dropKey || threadDrag.over === dropKey ? fill(strings.threadMove.dropHere, { project: projectName(project) }) : undefined}
-          ondragover={(event) => dragOver(event, dropKey)}
-          ondragleave={(event) => dragLeave(event, dropKey)}
-          ondrop={(event) => drop(event, machine, project)}
+          aria-label={threadDrag.over === dropKey ? fill(strings.threadMove.dropHere, { project: projectName(project) }) : undefined}
         >
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div class="head" oncontextmenu={(e) => openProjectMenu(e, machine, project)}>
             <button
               class="ghost toggle"
+              class:grab={projectView.order === 'manual'}
               data-testid="project-row"
               data-project-id={project.id}
-              draggable={projectView.order === 'manual'}
-              ondragstart={(event) => dragProject(event, machine, project)}
-              ondragend={() => { draggedProject = null; dropOver = null; }}
+              onpointerdown={(event) => dragProject(event, entry)}
+              ondragstart={(event) => event.preventDefault()}
               aria-expanded={!collapsed}
               title={multi ? `${project.path} · ${machine.label}` : project.path}
               onclick={() => owner.toggleProject(project.id)}
@@ -416,9 +405,33 @@
   .project.candidate.drop {
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 22%, transparent);
   }
-  .project.reordering { box-shadow: inset 0 2px var(--color-accent); }
-  .project.reordering.after { box-shadow: inset 0 -2px var(--color-accent); }
-  .toggle[draggable='true'] { cursor: grab; }
+  /* A project on the move leaves a faded slot; a line between two sections says where it lands. */
+  .project { position: relative; }
+  .project.lifted { opacity: 0.4; }
+  .project.insert-before::before,
+  .project.insert-after::after {
+    content: '';
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    height: 2px;
+    border-radius: var(--radius-full);
+    background: var(--color-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
+    pointer-events: none;
+    animation: insert-in var(--dur-2) var(--ease-out-quint);
+  }
+  /* Centred in the 10px gap outside the 1px border. */
+  .project.insert-before::before { top: -7px; }
+  .project.insert-after::after { bottom: -7px; }
+  @keyframes insert-in { from { opacity: 0; transform: scaleX(0.6); } }
+  /* In the manual order the header is a handle: a grab hand, and no phone callout on the long press that lifts it. */
+  .toggle.grab { cursor: grab; -webkit-touch-callout: none; user-select: none; }
+  :global(html.project-dragging),
+  :global(html.project-dragging *) {
+    cursor: grabbing !important;
+    user-select: none;
+  }
   .head {
     display: flex;
     align-items: center;
