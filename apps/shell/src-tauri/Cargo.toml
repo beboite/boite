@@ -22,7 +22,7 @@ tauri = { version = "2", features = ["tray-icon", "unstable"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 # Pinned to a minor: `configure_client` hands us its reqwest builder.
-tauri-plugin-updater = "~2.12"
+tauri-plugin-updater = "~2.13"
 reqwest = { version = "0.13", default-features = false, features = ["json", "gzip"] }
 # The crypto provider reqwest's rustls needs, the one the updater plugin uses.
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
@@ -39,7 +39,7 @@ tauri = { version = "2", features = ["test"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-dirs = "6"
+dirs = "7"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
@@ -54,19 +54,19 @@ harness = false
 # The Job Object that ties the core's life to this process. Only the calls in
 # `src/platform/` are asked for.
 [target.'cfg(windows)'.dependencies]
-webview2-com = "0.38"
-windows = "0.61"
+webview2-com = "0.39"
+windows = "0.62"
 # `implement`, for the environment wrapper that opens a named browser profile.
-windows-core = "0.61"
+windows-core = "0.62"
 # Screencast frames arrive as base64 JPEG; the recorder receives raw bytes.
-base64 = "0.22"
+base64 = "0.23"
 # A toast when a thread finishes or asks something while the window is not the
 # one the user is looking at. The UI decides when; Rust carries the toast and
 # hands a click back as `notification://open`, which the notification plugin
 # cannot do on a desktop.
 tauri-winrt-notification = "0.8"
 # The Windows build, which decides the window materials the setting offers.
-windows-version = "0.1"
+windows-version = "0.100"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Dwm",
