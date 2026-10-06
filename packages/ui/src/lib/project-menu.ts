@@ -22,6 +22,14 @@ export async function confirmRemoveProject(owner: Store, project: Project): Prom
   if (sure) await owner.removeProject(project.id);
 }
 
+/** Puts a project out of the list and offers to bring it back. An archived or unknown project is left alone. */
+export async function archiveProjectWithUndo(owner: Store, project: Project): Promise<void> {
+  if (!owner.projects.some(p => p.id === project.id && !p.archived) || !(await owner.archiveProject(project.id, true))) return;
+  undo.offer(fill(strings.sidebar.projectArchivedToast, { project: projectName(project) }), async () => {
+    await owner.archiveProject(project.id, false);
+  });
+}
+
 export function projectMenu(event: MouseEvent, owner: Store, project: Project, reorder?: {
   up: boolean;
   down: boolean;
@@ -75,10 +83,7 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
         if (workspace.active !== owner) await workspace.select(owner);
         owner.showSettings('general', 'archived');
       }
-      if (action === 'archive-project' && owner.projects.some(p => p.id === project.id && !p.archived) && (await owner.archiveProject(project.id, true)))
-        undo.offer(fill(strings.sidebar.projectArchivedToast, { project: projectName(project) }), async () => {
-          await owner.archiveProject(project.id, false);
-        });
+      if (action === 'archive-project') await archiveProjectWithUndo(owner, project);
       if (action === 'worktree-default') {
         const current = owner.projects.find(p => p.id === project.id);
         if (current) await owner.setProjectWorktreeDefault(project.id, current.worktreeDefault !== true);

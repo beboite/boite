@@ -25,8 +25,7 @@
   import RecentGroup from './RecentGroup.svelte';
   import RecentDone from './RecentDone.svelte';
   import ProjectThreadCounters from './ProjectThreadCounters.svelte';
-  import OtherProjects from './OtherProjects.svelte';
-  import ArchivedProjects from './ArchivedProjects.svelte';
+  import ProjectShelf from './ProjectShelf.svelte';
   import LimitsGlance from './LimitsGlance.svelte';
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
@@ -60,7 +59,6 @@
   let groups = $derived(projectView.sorted(all.filter(({ project }) => project.archived !== true)));
   let activeGroups = $derived(recentPreferences.groupOtherProjects ? groups.filter(activeProject) : groups);
   let otherGroups = $derived(recentPreferences.groupOtherProjects ? groups.filter(entry => !activeProject(entry)) : []);
-  let shownGroups = $derived([...activeGroups, ...(projectThreadView.otherOpen ? otherGroups : [])]);
   let previousLeader: { key: string; activity: number } | undefined;
   $effect(() => {
     const first = activeGroups[0];
@@ -107,7 +105,7 @@
   $effect(() => {
     sidebarRows.list = (workspace.view === 'recent'
       ? [...attention, ...(workingOpen ? working : [])].map(({ machine, thread }) => ({ store: machine.store, threadId: thread.id })).concat(doneRows, archivedRows)
-      : shownGroups.flatMap(entry => {
+      : activeGroups.flatMap(entry => {
           if (entry.machine.store.isCollapsed(entry.project.id)) return [];
           const open = projectThreadView.isOpen(entry, 'working');
           const lists = projectThreadLists(entry, entry.machine.store.threadsOf(entry.project.id), open);
@@ -126,9 +124,9 @@
   function openProjectMenu(event: MouseEvent, machine: Machine, project: Project) {
     const key = projectKey({ machine, project });
     projectMenu(event, machine.store, project, projectView.order === 'manual' ? {
-      up: shownGroups[0] !== undefined && projectKey(shownGroups[0]) !== key,
-      down: shownGroups.at(-1) !== undefined && projectKey(shownGroups.at(-1)!) !== key,
-      move: direction => projectView.step(shownGroups, key, direction)
+      up: activeGroups[0] !== undefined && projectKey(activeGroups[0]) !== key,
+      down: activeGroups.at(-1) !== undefined && projectKey(activeGroups.at(-1)!) !== key,
+      move: direction => projectView.step(activeGroups, key, direction)
     } : undefined);
   }
   /** The project a dragged project row hovers while the user reorders them; a dragged thread's target is `threadDrag.over`. */
@@ -157,7 +155,7 @@
   function drop(event: DragEvent, machine: Machine, project: Project) {
     if (!draggedProject || !event.dataTransfer?.types.includes(PROJECT_DRAG_TYPE)) return;
     event.preventDefault();
-    projectView.move(shownGroups, draggedProject, projectKey({ machine, project }), dropAfter);
+    projectView.move(activeGroups, draggedProject, projectKey({ machine, project }), dropAfter);
     draggedProject = null;
     dropOver = null;
   }
@@ -221,8 +219,8 @@
           <DraftRow owner={machine.store} {entry} />
         {/each}
       {/each}
-      {#snippet projectRows(entries: ProjectEntry[])}
-      {#each entries as entry (projectKey(entry))}
+      <!-- Idle projects sit as compact rows in their fold below, so Alt+digit and reordering count only these. -->
+      {#each activeGroups as entry (projectKey(entry))}
         {@const { machine, project } = entry}
         {@const owner = machine.store}
         {@const workingOpen = projectThreadView.isOpen(entry, 'working')}
@@ -242,6 +240,7 @@
           class:reordering={dropOver === dropKey && draggedProject !== null}
           class:after={dropAfter}
           data-testid="project"
+          data-thread-drop
           data-project-id={project.id}
           data-machine-id={machine.id}
           data-project-name={projectName(project)}
@@ -309,12 +308,10 @@
           </div>
         </section>
       {/each}
-      {/snippet}
-      {@render projectRows(activeGroups)}
       {#if groups.length > 0 && activeGroups.length === 0}<p class="none">{strings.sidebar.noActiveProjects}</p>{/if}
       <div class="project-folds">
-        <OtherProjects count={otherGroups.length}>{@render projectRows(otherGroups)}</OtherProjects>
-        <ArchivedProjects entries={shelved} {multi} />
+        <ProjectShelf kind="idle" entries={otherGroups} {multi} {now} {scrollRoot} />
+        <ProjectShelf kind="archived" entries={shelved} {multi} {now} {scrollRoot} />
       </div>
     {/if}
     {/if}
