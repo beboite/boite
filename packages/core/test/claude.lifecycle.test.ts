@@ -49,6 +49,23 @@ describe('claude driver', () => {
     expect(harness.core.journal.listTurns(threadId).at(-1)?.error).toBe(`Claude refused the request as invalid. ${said}`);
   });
 
+  test('an API error the CLI cannot name shows its text, once', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const said = 'API Error: upstream stream interrupted';
+    scripted(fake => {
+      // A proxy cut the stream: the CLI has no code for it, only its text.
+      fake.emit(sdk({ ...(assistant('sess-cut', [{ type: 'text', text: said }]) as object), error: 'unknown', is_api_error_message: true }));
+      fake.emit(sdk({ ...(success('sess-cut') as object), is_error: true, result: said }));
+      fake.end();
+    });
+    expect(await runTurn(client, threadId, 'go on')).toBe('error');
+    expect(harness.core.journal.listTurns(threadId).at(-1)?.error).toBe(said);
+    const thread = await client.call('threads.get', { threadId });
+    const parts: MessagePart[] = thread.messages[thread.messages.length - 1]?.parts ?? [];
+    expect(parts.filter(part => part.type === 'error')).toEqual([{ type: 'error', message: said }]);
+  });
+
   test('an OAuth failure before the first prompt marks the focused account signed out', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

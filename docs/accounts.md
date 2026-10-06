@@ -61,8 +61,14 @@ before every spawn (`packages/core/src/profile-share.ts`):
   Boite put there.
 - A path with a link between it and the account directory is not shared, since
   whatever went through the link would land outside the account.
-- `.boite-shared.json` in the account directory records the links and the hash
-  of each copy, which is how Boite tells its own work from the account's.
+- A JSON file the agent keeps for itself shares only the keys its descriptor
+  names under `sharedKeys`: Claude's `.claude.json` takes `mcpServers` from
+  `~/.claude.json` and keeps its own sign-in identity and project state. Each
+  key follows the copy rules above, the user's value winning, and the file is
+  written only when a key changed.
+- `.boite-shared.json` in the account directory records the links, the hash
+  of each copy and of each shared key, which is how Boite tells its own work
+  from the account's.
 
 A path that fails is logged once and shown under the account in Settings >
 Brain > Hooks; the spawn goes on without it. The login files never move: a
@@ -72,7 +78,7 @@ core (`BOITE_HOST_AGENTS=0`) shares nothing.
 
 | Provider | Shared configuration paths |
 | --- | --- |
-| Claude | `settings.json`, `CLAUDE.md`, `skills`, `plugins`, `agents`, `commands`, `hooks`, `output-styles` |
+| Claude | `settings.json`, `CLAUDE.md`, `skills`, `plugins`, `agents`, `commands`, `hooks`, `output-styles`; the `mcpServers` key of `.claude.json` |
 | Codex | `config.toml`, `hooks.json`, `AGENTS.md`, `skills`, `rules`, `prompts`, `plugins` |
 | Grok | `config.toml`, `hooks`, `AGENTS.md`, `AGENT.md`, `skills`, `trusted_folders.toml`, `installed-plugins` |
 | pi | `settings.json`, `AGENTS.md`, `extensions`, `skills`, `prompts`, `themes` |

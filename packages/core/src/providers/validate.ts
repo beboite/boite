@@ -15,6 +15,7 @@ import type {
   ProviderQuirk,
   ProviderRejected,
   ProviderShare,
+  ProviderSharedKeys,
 } from '@boite/contracts';
 import { expandDescriptor, OS_KEYS } from './expand.ts';
 import { isNpmSpec } from './npm.ts';
@@ -47,6 +48,7 @@ const DESCRIPTOR_KEYS = [
   'isolation',
   'seedFiles',
   'shared',
+  'sharedKeys',
   'hookSources',
   'quirks',
   'models',
@@ -433,6 +435,43 @@ function overlaps(a: string, b: string): boolean {
 }
 
 /**
+ * The isolation variable a share writes under, with its prefixes under
+ * `{isolationDir}`. A profile that points the variable elsewhere would get the
+ * share outside the account's directory, where no login or seed file is checked.
+ */
+function checkShareVariable(value: unknown, file: string, field: string, profiles: ProviderDescriptor['profiles']): [string, string[]] {
+  const variable = asString(value, file, field);
+  const prefixes = isolationPrefixes(profiles, variable);
+  if (prefixes === null) {
+    reject(file, field, 'an isolation variable of one of the profiles', `${field} names ${variable}, which no profile isolates`);
+  }
+  for (const [os, profile] of Object.entries(profiles)) {
+    const template = profile?.isolation[variable];
+    if (template === undefined || template.startsWith('{isolationDir}')) continue;
+    reject(
+      file,
+      field,
+      `a variable every profile sets under {isolationDir}`,
+      `${field} names ${variable}, which the ${os} profile sets to ${template}, outside the account directory`,
+    );
+  }
+  return [variable, prefixes];
+}
+
+/** A shared path under the variable, refused when it is, holds or sits in a file each account keeps to itself. */
+function checkSharePath(value: unknown, file: string, field: string, variable: string, prefixes: string[], guarded: string[]): string {
+  const path = checkRelative(value, file, field, variable);
+  for (const prefix of prefixes) {
+    const full = prefix.length === 0 ? path : `${prefix}/${path}`;
+    const hit = guarded.find((other) => overlaps(full, other));
+    if (hit !== undefined) {
+      reject(file, field, 'a path apart from every login and seed file', `${field} (${path}) overlaps ${hit}, which each account keeps to itself`);
+    }
+  }
+  return path;
+}
+
+/**
  * What an isolated account takes from the provider's own profile. A path that
  * is, holds or sits in a login file or a seed file is refused: sharing it would
  * hand every account the user's own login, or fight the seed for the file.
@@ -447,39 +486,10 @@ function checkShared(
     const field = `shared[${index}]`;
     const obj = asObject(entry, file, field);
     checkKeys(obj, ['variable', 'paths', 'retarget'], file, field);
-    const variable = asString(obj['variable'], file, `${field}.variable`);
-    const prefixes = isolationPrefixes(profiles, variable);
-    if (prefixes === null) {
-      reject(file, `${field}.variable`, 'an isolation variable of one of the profiles', `${field}.variable names ${variable}, which no profile isolates`);
-    }
-    // A profile that points the variable elsewhere would get the share outside
-    // the account's directory, where no login or seed file is checked.
-    for (const [os, profile] of Object.entries(profiles)) {
-      const template = profile?.isolation[variable];
-      if (template === undefined || template.startsWith('{isolationDir}')) continue;
-      reject(
-        file,
-        `${field}.variable`,
-        `a variable every profile sets under {isolationDir}`,
-        `${field}.variable names ${variable}, which the ${os} profile sets to ${template}, outside the account directory`,
-      );
-    }
-    const paths = asArray(obj['paths'], file, `${field}.paths`).map((raw, at) => {
-      const path = checkRelative(raw, file, `${field}.paths[${at}]`, variable);
-      for (const prefix of prefixes) {
-        const full = prefix.length === 0 ? path : `${prefix}/${path}`;
-        const hit = guarded.find((other) => overlaps(full, other));
-        if (hit !== undefined) {
-          reject(
-            file,
-            `${field}.paths[${at}]`,
-            'a path apart from every login and seed file',
-            `${field}.paths[${at}] (${path}) overlaps ${hit}, which each account keeps to itself`,
-          );
-        }
-      }
-      return path;
-    });
+    const [variable, prefixes] = checkShareVariable(obj['variable'], file, `${field}.variable`, profiles);
+    const paths = asArray(obj['paths'], file, `${field}.paths`).map((raw, at) =>
+      checkSharePath(raw, file, `${field}.paths[${at}]`, variable, prefixes, guarded),
+    );
     if (paths.length === 0) reject(file, `${field}.paths`, 'at least one path', `${field}.paths must list at least one path`);
     const share: ProviderShare = { variable, paths };
     if (obj['retarget'] !== undefined) {
@@ -496,6 +506,41 @@ function checkShared(
       share.retarget = retarget;
     }
     return share;
+  });
+}
+
+/**
+ * Keys of a JSON file an isolated account keeps, taken from the user's copy.
+ * The file obeys the same limits as a shared path: under the account's
+ * directory and apart from every login and seed file.
+ */
+function checkSharedKeys(
+  value: unknown,
+  file: string,
+  profiles: ProviderDescriptor['profiles'],
+  guarded: string[],
+): ProviderSharedKeys[] {
+  return asArray(value, file, 'sharedKeys').map((entry, index) => {
+    const field = `sharedKeys[${index}]`;
+    const obj = asObject(entry, file, field);
+    checkKeys(obj, ['variable', 'path', 'home', 'keys'], file, field);
+    const [variable, prefixes] = checkShareVariable(obj['variable'], file, `${field}.variable`, profiles);
+    const path = checkSharePath(obj['path'], file, `${field}.path`, variable, prefixes, guarded);
+    const keys = asArray(obj['keys'], file, `${field}.keys`).map((raw, at) => {
+      const key = asString(raw, file, `${field}.keys[${at}]`);
+      if (key.length === 0) reject(file, `${field}.keys[${at}]`, 'a non-empty key', `${field}.keys[${at}] is empty`);
+      // Assigning it would set the merged object's prototype instead of a key.
+      if (key === '__proto__') reject(file, `${field}.keys[${at}]`, 'a key other than __proto__', `${field}.keys[${at}] cannot be __proto__`);
+      return key;
+    });
+    if (keys.length === 0) reject(file, `${field}.keys`, 'at least one key', `${field}.keys must list at least one key`);
+    const out: ProviderSharedKeys = { variable, path, keys: [...new Set(keys)] };
+    if (obj['home'] !== undefined) {
+      const home = asString(obj['home'], file, `${field}.home`);
+      if (!home.startsWith('~/')) reject(file, `${field}.home`, 'a path starting with ~/', `${field}.home must start with ~/: ${home}`);
+      out.home = `~/${checkRelative(home.slice(2), file, `${field}.home`, 'the home directory')}`;
+    }
+    return out;
   });
 }
 
@@ -686,6 +731,7 @@ export function validateDescriptor(
       ...(obj['isolation'] === undefined ? {} : { isolation: checkIsolation(obj['isolation'], file) }),
       ...(seedFiles === undefined ? {} : { seedFiles }),
       ...(obj['shared'] === undefined ? {} : { shared: checkShared(obj['shared'], file, profiles, guarded) }),
+      ...(obj['sharedKeys'] === undefined ? {} : { sharedKeys: checkSharedKeys(obj['sharedKeys'], file, profiles, guarded) }),
       ...(obj['hookSources'] === undefined ? {} : { hookSources: checkHookSources(obj['hookSources'], file, profiles, capabilities.hooks) }),
       ...(obj['quirks'] === undefined ? {} : { quirks: checkQuirks(obj['quirks'], file) }),
       models: checkModels(obj['models'], file, protocol as Protocol),
