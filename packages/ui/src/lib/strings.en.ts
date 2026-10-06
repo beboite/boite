@@ -514,6 +514,7 @@ export const strings = {
     connecting: 'Connecting',
     ready: 'Connected',
     closed: 'Disconnected',
+    offline: 'Offline',
     label: 'Connection'
   },
 

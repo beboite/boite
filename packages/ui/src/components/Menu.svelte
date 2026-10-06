@@ -200,6 +200,7 @@
   .status-dot { display: inline-block; width: 6px; height: 6px; flex: none; border-radius: 50%; margin-right: 8px; vertical-align: middle; background: var(--color-live); }
   .status-dot[data-tone='success'] { background: var(--color-success); }
   .status-dot[data-tone='danger'] { background: var(--color-danger); }
+  .status-dot[data-tone='neutral'] { background: var(--color-muted-foreground); }
   .menu {
     position: relative;
     display: inline-flex;

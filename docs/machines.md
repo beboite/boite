@@ -75,6 +75,14 @@ link is not cut off every time. While the browser reports itself offline, a
 remote host is not retried at all: the `online` event starts the next attempt.
 A loopback core is retried regardless, since it is on the same machine.
 
+A remote machine that cannot be reached is not a fault in itself: a laptop
+switched off between uses shows a grey "Offline" dot in the footer's machine
+menu and the button keeps its normal icon. The button turns into a warning, and
+the dot red, only when the user must act or depends on the missing machine: a
+machine that refused this device's key, the machine the window runs on, this
+PC's own core, or a machine whose last known threads still had a turn queued,
+running or waiting when the connection went.
+
 A key a remote core refuses is not retried: the machine shows as closed with
 the reason. A page opened on its own core with no key says the device holds
 none. Click the affected machine's **Pair again** control and paste a new

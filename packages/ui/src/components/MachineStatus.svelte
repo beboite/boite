@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { isThisPC, workspace } from '../lib/workspace.svelte';
+  import { isThisPC, machineHealth, workspace } from '../lib/workspace.svelte';
   import { Monitor, TriangleAlert } from '@lucide/svelte';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -10,20 +10,23 @@
    * The footer's machine button. One machine that is connected says nothing, so
    * nothing is drawn; a second machine, a filter or a connection in trouble
    * brings back one icon, the count or the chosen machine's name beside it
-   * only while it filters the list.
+   * only while it filters the list. A remote machine that is merely switched
+   * off is grey in the menu and raises no warning (`machineHealth`).
    */
   let { store, filter = null, onfilter }: { store: Store; filter?: string | null; onfilter?: (id: string | null) => void } = $props();
 
   const machines = $derived([...(workspace.machines.length ? workspace.machines : [{ id: 'current', label: strings.machines.local, store }])]
     .sort((a, b) => Number(isThisPC(b)) - Number(isThisPC(a))));
-  const issues = $derived(machines.filter(m => m.store.connection === 'closed' || (m.store.booted && m.store.connection !== 'ready')).length);
+  const health = $derived(new Map(machines.map(m => [m, machineHealth(m, store)])));
+  const issues = $derived(machines.filter(m => health.get(m) === 'lost').length);
+  const tones = { ready: 'success', connecting: 'warning', offline: 'neutral', lost: 'danger' } as const;
   const chosen = $derived(filter === null ? null : machines.find(m => m.id === filter) ?? null);
   const shown = $derived(machines.length > 1 || issues > 0 || chosen !== null);
   const label = $derived(issues > 0 ? `${strings.machines.filter} · ${issues} ${strings.connection.issues}` : strings.machines.filter);
   const items = $derived<MenuItem[]>([
     ...(machines.length > 1 ? [
       { id: 'all', label: strings.machines.all, active: filter === null, hideActiveMark: true },
-      ...machines.map(m => ({ id: m.id, label: m.label, status: { tone: m.store.connection === 'ready' ? 'success' as const : m.store.connection === 'closed' ? 'danger' as const : 'warning' as const, label: strings.connection[m.store.connection] }, active: m.id === filter })),
+      ...machines.map(m => ({ id: m.id, label: m.label, status: { tone: tones[health.get(m)!], label: health.get(m) === 'offline' ? strings.connection.offline : strings.connection[m.store.connection] }, active: m.id === filter })),
       separator('manage-separator')
     ] : []),
     { id: 'manage', label: strings.connection.manage, icon: 'settings' }

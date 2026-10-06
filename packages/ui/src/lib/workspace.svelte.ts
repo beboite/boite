@@ -1,5 +1,5 @@
 import { Store, store } from './store.svelte';
-import type { AgentAddress, GroupCore } from '@boite/contracts';
+import { threadActive, type AgentAddress, type GroupCore } from '@boite/contracts';
 import {
   clearStoredEndpoint,
   forgetGroupOf,
@@ -37,6 +37,24 @@ export function isThisPC(machine: Machine): boolean {
   if (machine.store.localCore) return true;
   try { return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(machine.store.endpointUrl ?? machine.id).hostname); }
   catch { return false; }
+}
+
+/**
+ * What a machine's connection means to the user. A remote machine that is
+ * simply switched off, a laptop opened now and then, is `offline` and stays
+ * quiet: nothing was lost. It is `lost`, the state worth a warning, when the
+ * user must act or depends on it: a machine that refused this device's key, the
+ * machine this window runs on, this PC's own core, or a machine whose last
+ * known threads still had a turn queued, running or waiting when it went away.
+ */
+export type MachineHealth = 'ready' | 'connecting' | 'offline' | 'lost';
+
+export function machineHealth(machine: Machine, primary: Store): MachineHealth {
+  const s = machine.store;
+  if (s.connection === 'ready') return 'ready';
+  if (s.connection !== 'closed' && !s.booted) return 'connecting';
+  const needed = s.pairingRequired || s === primary || isThisPC(machine) || s.threads.some(t => threadActive(t.status));
+  return needed ? 'lost' : 'offline';
 }
 
 export const machineIcons = ['desktop', 'laptop', 'server', 'rack', 'cloud', 'cpu'] as const;

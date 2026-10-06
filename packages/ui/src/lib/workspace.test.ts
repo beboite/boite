@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { Workspace } from './workspace.svelte';
+import { machineHealth, Workspace } from './workspace.svelte';
 import { Store, store as primary } from './store.svelte';
 import { FakeClient } from './fake-client';
 import { upsertEnvironment } from './endpoint';
@@ -391,6 +391,30 @@ test('a notification link from another remembered machine opens there once it co
   await w.boot(id);
   expect(w.active).toBe(b);
   expect(b.openThread?.id).toBe(id);
+});
+
+test('a remote machine switched off is offline, and lost only while the user depends on it', async () => {
+  const { a, b } = await setup();
+  const remote = { id: 'http://laptop.test', label: 'Laptop', store: b };
+  b.localCore = false;
+  b.endpointUrl = remote.id;
+  b.booted = true;
+  b.connection = 'closed';
+  b.threads = b.threads.map(t => ({ ...t, status: 'idle' as const }));
+  expect(machineHealth(remote, a)).toBe('offline');
+  // A key the machine refused needs the user to pair again.
+  const refused = vi.spyOn(b, 'pairingRequired', 'get').mockReturnValue(true);
+  expect(machineHealth(remote, a)).toBe('lost');
+  refused.mockRestore();
+  // A turn that was running when it went away is work cut off, which is worth a warning.
+  b.threads = [{ ...b.threads[0]!, status: 'running' }, ...b.threads.slice(1)];
+  expect(machineHealth(remote, a)).toBe('lost');
+  // The machine this window runs on is always needed.
+  a.booted = true;
+  a.connection = 'closed';
+  expect(machineHealth({ id: 'local', label: 'Local', store: a }, a)).toBe('lost');
+  a.connection = 'ready';
+  expect(machineHealth({ id: 'local', label: 'Local', store: a }, a)).toBe('ready');
 });
 
 async function setup() {
