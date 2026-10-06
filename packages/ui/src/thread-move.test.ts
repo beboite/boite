@@ -134,7 +134,7 @@ test('a row dragged with the mouse onto another project moves there; a short pre
   window.dispatchEvent(pointer('pointermove', 10, 80));
   await waitFor(() => boite.classList.contains('drop'));
   window.dispatchEvent(pointer('pointerup', 10, 80));
-  const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+  const click = new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 });
   query('[data-thread-id="t-descriptors"]').dispatchEvent(click);
   expect(click.defaultPrevented).toBe(true);
   await waitFor(() => inProject('t-descriptors', 'p-boite'));
