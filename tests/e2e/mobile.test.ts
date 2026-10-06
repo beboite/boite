@@ -201,8 +201,10 @@ test('the panel sheet, Agents and Settings keep clear of a notch and the status 
     await page.click('[data-testid=panel-close]');
     await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
     await page.click('[data-testid=mobile-agents]');
-    await page.waitFor(`document.querySelector('.agents-page h1')`);
-    expect(await top('.agents-page h1')).toBeGreaterThanOrEqual(47);
+    // The agents list opens on its two views, the row nearest the notch.
+    await page.waitFor(`document.querySelector('.agents-page .agents-views')`);
+    expect(await top('.agents-page .agents-views')).toBeGreaterThanOrEqual(47);
+    await capture('mobile-safe-agents.png');
     await page.click('[data-testid=mobile-settings]');
     await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home] h1')`);
     expect(await top('[data-testid=mobile-settings-home] h1')).toBeGreaterThanOrEqual(47);
