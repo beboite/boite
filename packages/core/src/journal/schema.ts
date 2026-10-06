@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite';
 
-export const SCHEMA_VERSION = 25;
+export const SCHEMA_VERSION = 26;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -360,6 +360,17 @@ export function migrate(db: Database, file: string): void {
   if (!db.query("SELECT 1 FROM pragma_table_info('projects') WHERE name = 'worktree_default'").get()) {
     db.exec('ALTER TABLE projects ADD COLUMN worktree_default INTEGER NOT NULL DEFAULT 0');
     version = 25;
+  }
+  // The blur each picture of a message is drawn with before its bytes arrive,
+  // keyed by message and slot (`p<part>`, `p<part>d<document>`). The empty slot
+  // says every picture of that message was looked at. Derived from the
+  // messages and made again when missing, so it is written without an event.
+  if (!db.query("SELECT 1 FROM sqlite_master WHERE name = 'media_previews'").get()) {
+    db.exec(`CREATE TABLE media_previews (
+      message_id TEXT NOT NULL, slot TEXT NOT NULL, thread_id TEXT NOT NULL, preview TEXT,
+      PRIMARY KEY (message_id, slot)
+    ) WITHOUT ROWID; CREATE INDEX media_previews_by_thread ON media_previews (thread_id);`);
+    version = 26;
   }
   version = Math.max(version, SCHEMA_VERSION);
   db.exec(`PRAGMA user_version = ${version}`);

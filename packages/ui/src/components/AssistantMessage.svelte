@@ -4,6 +4,7 @@
   import type { Account, Message } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import { provideMediaSource } from '../lib/media-source';
   import { formatTokens } from '../lib/tokens';
   import { promptText, visibleAnswer } from '../lib/message-display';
   import { isNamedModel } from '../lib/model-order';
@@ -39,6 +40,9 @@
     signedOut: Account | null;
     showModel: boolean;
   } = $props();
+
+  // A tool card is handed its documents only; its pictures are fetched from this message.
+  provideMediaSource({ get store() { return store; }, get threadId() { return message.threadId; }, get messageId() { return message.id; } });
 
   function lastTextIndex(message: Message): number {
     return message.parts.findLastIndex(part => part.type === 'text');

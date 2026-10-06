@@ -887,12 +887,15 @@ test('a pasted image becomes a chip, comes off again, and rides the prompt', asy
 
   const sent = store.openThread!.messages.filter((m) => m.role === 'user').at(-1)!;
   expect(sent.parts[0]).toEqual({ type: 'text', text: 'look at this' });
+  // The thread holds a reference sized from the header; the bytes come back whole on request.
   expect(sent.parts[1]).toEqual({
     type: 'image',
     mimeType: 'image/png',
-    data: PIXEL,
-    alt: 'pixel.png'
+    data: '',
+    alt: 'pixel.png',
+    media: { slot: 'p1', bytes: atob(PIXEL).length, width: 1, height: 1, preview: null }
   });
+  expect(await store.media.bytes({ threadId: sent.threadId, messageId: sent.id, slot: 'p1' })).toEqual({ mimeType: 'image/png', data: PIXEL });
   // The timeline draws it under the text of that bubble.
   await waitFor(() => document.querySelectorAll('[data-testid=image-part]').length === 1);
 
@@ -969,7 +972,9 @@ test('sending waits for a file read so the attachment cannot land in the next pr
   press('Enter');
   await waitFor(() => store.openThread!.messages.length > before && !store.busy);
   const sent = store.openThread!.messages.filter(m => m.role === 'user').at(-1)!;
-  expect(sent.parts).toContainEqual({ type: 'file', mimeType: 'text/plain', name: 'notes.txt', data: btoa('notes') });
+  const file = sent.parts.findIndex((part) => part.type === 'file');
+  expect(sent.parts[file]).toEqual({ type: 'file', mimeType: 'text/plain', name: 'notes.txt', data: '', media: { slot: `p${file}`, bytes: 5, width: null, height: null, preview: null } });
+  expect((await store.media.bytes({ threadId: sent.threadId, messageId: sent.id, slot: `p${file}` })).data).toBe(btoa('notes'));
 });
 
 test.each([true, false])('an image pasted during a pending send preserves only unsent content when accepted=%s', async accepted => {

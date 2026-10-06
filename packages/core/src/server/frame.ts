@@ -41,7 +41,7 @@ export async function handleFrame(core: Core, connection: ServerConnection, raw:
 
   try {
     const result = await core.router.dispatch(method, frame.params, { connection });
-    connection.sendResponse({ jsonrpc: '2.0', id, result });
+    connection.sendResponse({ jsonrpc: '2.0', id, result: connection.media ? core.media.result(method, result) : result });
   } catch (error) {
     if (error instanceof RpcFailure) {
       connection.sendResponse({ jsonrpc: '2.0', id, error: error.toError() });

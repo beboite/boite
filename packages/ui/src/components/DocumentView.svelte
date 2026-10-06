@@ -1,11 +1,14 @@
 <script lang="ts">
   import type { ToolDocument } from '@boite/contracts';
+  import { mediaSource } from '../lib/media-source';
   import { strings } from '../lib/strings';
+  import ChatImage from './ChatImage.svelte';
   import DiffView from './DiffView.svelte';
   import Prose from './Prose.svelte';
 
   /** One document a tool call produced, under the card's input and output. */
   let { doc }: { doc: ToolDocument } = $props();
+  const source = mediaSource();
 </script>
 
 <div class="document" data-testid="tool-document" data-kind={doc.kind}>
@@ -18,6 +21,18 @@
     <div class="markdown">
       <Prose text={doc.text} />
     </div>
+  {:else if source}
+    <span class="shot">
+      <ChatImage
+        store={source.store}
+        threadId={source.threadId}
+        messageId={source.messageId}
+        mimeType={doc.mimeType}
+        data={doc.data}
+        media={doc.media}
+        alt={doc.alt ?? strings.chat.documentImage}
+      />
+    </span>
   {:else}
     <img
       class="shot"
@@ -42,6 +57,7 @@
 
   .shot {
     display: block;
+    width: fit-content;
     max-width: 100%;
     height: auto;
     /* A one-pixel image would otherwise be invisible; the box is what reads. */
@@ -49,5 +65,6 @@
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
     background: var(--color-surface);
+    overflow: hidden;
   }
 </style>

@@ -26,6 +26,8 @@ export class ServerConnection implements Connection {
   authenticated = false;
   /** Owner until hello says otherwise; nothing reads it before `authenticated` is true. */
   identity: Identity = { principal: 'owner', sessionId: null, threadId: null };
+  /** Set by a hello with `media: 'ref'`: image and file bytes stay off this socket (`MediaIndex`). */
+  media = false;
 
   private socket: ServerWebSocket<SocketData> | null = null;
   private congested = false;
@@ -87,7 +89,8 @@ export class ServerConnection implements Connection {
       this.queueCatchUp(payload as RpcEvents['message.delta']);
       return;
     }
-    const sent = this.write({ jsonrpc: '2.0', method: name, params: payload });
+    const params = this.media ? this.core.media.event(name, payload) : payload;
+    const sent = this.write({ jsonrpc: '2.0', method: name, params });
     if (sent > 0) return;
     if (sent === 0) {
       this.close(1013, 'connection dropped a frame; reconnect');
@@ -147,10 +150,11 @@ export class ServerConnection implements Connection {
       const part = message?.parts[partIndex];
       this.catchUp.delete(key);
       if (message === null || part === undefined) continue;
+      const params = { threadId: message.threadId, messageId, partIndex, part };
       const sent = this.write({
         jsonrpc: '2.0',
         method: 'message.part',
-        params: { threadId: message.threadId, messageId, partIndex, part },
+        params: this.media ? this.core.media.event('message.part', params) : params,
       });
       if (sent === 0) { this.close(1013, 'catch-up dropped; reconnect'); return; }
       // -1 is queued, not lost: Bun delivers it. The keys left wait for the next drain.

@@ -10,6 +10,8 @@ export interface Connection {
   readonly subscriptions: Set<ThreadId>;
   /** Who said hello: the owner, or a paired session by id. */
   readonly identity: Identity;
+  /** Said hello with `media: 'ref'`: its messages carry `MediaRef`s, and their bytes come from `messages.media`. */
+  readonly media?: boolean;
   sendEvent<E extends RpcEventName>(name: E, payload: RpcEvents[E]): void;
   close(code: number, reason?: string): void;
 }

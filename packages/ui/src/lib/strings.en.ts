@@ -760,6 +760,8 @@ export const strings = {
     documentImage: 'What the tool produced',
     /** An image the user sent with the prompt, when it came with no name. */
     imagePart: 'Image sent with the prompt',
+    /** A picture whose bytes could not be fetched from its machine. */
+    imageUnavailable: 'This picture could not be loaded. Open the thread again to retry.',
     diffHidden: '{count} unchanged lines',
     diffIgnoreWhitespace: 'Ignore whitespace changes',
     diffSideBySide: 'Old and new side by side',
@@ -1084,6 +1086,8 @@ export const strings = {
     imagePreview: 'Preview {image}',
     imagePreviewClose: 'Close image preview',
     attachPending: 'Reload to recover',
+    /** A sent message's attachment back in the box while its bytes come from its machine. */
+    attachFetching: 'Loading from the thread',
     attachUnnamed: 'the attachment',
     attachFormat: '{name} is {type}, and an image must be one of {formats}.',
     attachTooLarge: '{name} is too big: a file may weigh {max} at most.',
@@ -1890,6 +1894,8 @@ export const strings = {
   errors: {
     draftStorage: 'This device could not save your draft. Keep this window open and copy your text before closing it.',
     draftAttachment: 'An attachment could not be read from storage. Reload to recover it, or remove it before sending.',
+    sentMediaLoading: 'The pictures and files of this message are still loading. Send again in a moment.',
+    sentMediaUnavailable: 'A picture or file of this message could not be loaded. Remove it, or edit the message again.',
     draftExists: 'This project already has a draft. Open or send it before moving another draft here.',
     prefix: 'Error',
     activityUnsupported: 'This core does not support goals or loops. Update Boite on {machine}, then reconnect. Your command has not been sent.',

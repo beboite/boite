@@ -1669,10 +1669,18 @@ test('a tool card shows the diff, the markdown and the image it produced', async
   expect(markdown.querySelector('h3')?.textContent).toBe('README');
   expect(markdown.querySelector('li')?.textContent).toBe('the first item');
 
-  // The image: a data url built from the base64, and the alt the core sent.
-  const image = query<HTMLImageElement>('[data-testid=tool-document][data-kind=image] img');
-  expect(image.getAttribute('src')?.startsWith('data:image/png;base64,iVBORw0KGgo')).toBe(true);
+  // The image: the thread carried a reference, the box has its size before any
+  // byte, and the bytes come from messages.media as a blob url with the alt the core sent.
+  const box = query<HTMLElement>('[data-testid=tool-document][data-kind=image] .media');
+  expect(box.style.aspectRatio).toBe('1 / 1');
+  await waitFor(() => document.querySelector('[data-testid=tool-document][data-kind=image] img.picture') !== null);
+  const image = query<HTMLImageElement>('[data-testid=tool-document][data-kind=image] img.picture');
+  expect(image.getAttribute('src')?.startsWith('blob:')).toBe(true);
   expect(image.alt).toBe('one pixel');
+  const { resolveObjectURL } = await import('node:buffer');
+  const blob = resolveObjectURL(image.getAttribute('src')!);
+  expect(blob?.type).toBe('image/png');
+  expect(new TextDecoder().decode(new Uint8Array(await blob!.arrayBuffer()).subarray(1, 4))).toBe('PNG');
 });
 
 test('a provider Boite installs waits in Settings, one tile away, and joins the rail once signed in', async () => {

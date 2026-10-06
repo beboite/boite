@@ -10,7 +10,7 @@ import { DRAFT_STASH_KEY } from '../prefs';
 import { editPreviewMentions, insertPreviewMention } from '../preview-mentions';
 import { showPreviewReference } from '../preview-navigation';
 import { strings } from '../strings';
-import { unresolvedAssetId } from '../draft-attachments';
+import { sentMediaSlot, unresolvedAssetId } from '../draft-attachments';
 import type { Choice } from '../store.svelte';
 import type { StoreContext } from './context';
 
@@ -162,6 +162,33 @@ export class Composer {
     state.attachments = prompt.attachments;
     state.selection = { start: restored.text.length, end: restored.text.length };
     state.editing = message.id;
+    void this.recoverSentMedia(threadId, message.id);
+  }
+
+  /**
+   * The bytes of a sent prompt's pictures and files put back in the box, each
+   * in place of its placeholder: they came with the thread as references.
+   * Until then the box cannot send, and a placeholder the user removed, or an
+   * edit he left, takes nothing.
+   */
+  async recoverSentMedia(threadId: string, messageId: MessageId): Promise<void> {
+    const s = this.ctx.store;
+    const slots = (this.composerStates[threadId]?.attachments ?? []).flatMap((attachment) => sentMediaSlot(attachment) ?? []);
+    await Promise.all(slots.map(async (slot) => {
+      let data: string;
+      try {
+        ({ data } = await s.media.bytes({ threadId, messageId, slot }));
+      } catch {
+        s.error = strings.errors.sentMediaUnavailable;
+        return;
+      }
+      const state = this.composerStates[threadId];
+      if (!state || state.editing !== messageId) return;
+      const at = state.attachments.findIndex((attachment) => sentMediaSlot(attachment) === slot);
+      const held = state.attachments[at];
+      if (!held) return;
+      state.attachments[at] = { kind: held.kind, mimeType: held.mimeType, data, name: held.name } as Attachment;
+    }));
   }
 
   /**

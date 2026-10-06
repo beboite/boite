@@ -254,38 +254,49 @@
   /**
    * A rendered message's real height replaces its estimate. One that sits above
    * what the user is reading would push the text down as it lands, so the same
-   * delta goes back into `scrollTop` and the viewport does not move.
+   * delta goes back into `scrollTop` and the viewport does not move. That much
+   * runs inside the observer's callback, after layout and before paint: put off
+   * to the next frame, the text was painted once pushed down and once put back,
+   * a jump of the height an image added. Moving `scrollTop` changes no box, so
+   * it cannot resize the batch it answers. Everything that redraws the window
+   * waits for the frame (`settle`).
    */
-  function onMeasured(entries: ResizeObserverEntry[]): void {
+  function measure(entries: ResizeObserverEntry[]): boolean {
     const box = viewport;
-    const lastId = timeline.at(-1)?.id;
     let shift = 0;
     let moved = false;
     for (const entry of entries) {
       const node = entry.target as HTMLElement;
-      if (node === box) {
-        viewHeight = node.clientHeight;
-        continue;
-      }
+      if (node === box) continue;
       const id = node.dataset['mid'];
       if (!id) continue;
       // The observer already measured the box; reading `offsetHeight` again
       // would lay out, mid-scroll, whatever the window just mounted.
       const next = Math.round(entry.borderBoxSize?.[0]?.blockSize ?? node.offsetHeight) + GAP;
-      const previous = heights.get(id) ?? ESTIMATE;
+      const at = slots.indexOf(timeline, id);
+      const previous = heights.get(id) ?? (at < 0 ? ESTIMATE : slots.slotAt(timeline, at));
       if (previous === next) continue;
       heights.set(id, next);
       moved = true;
-      const at = slots.indexOf(timeline, id);
       if (at < 0) continue;
       // Everything from here down is worth a different number now.
       if (at < slots.dirty) slots.dirty = at;
       if (at < view.first) shift += next - previous;
-      if (id === lastId) noteTail(next);
     }
-    if (!moved) return;
-    measured += 1;
     if (box && shift !== 0 && !pinned) box.scrollTop += shift;
+    return moved;
+  }
+
+  /** The frame after a measurement: the viewport's height, the pin's tail and the window on real numbers. */
+  function settle(entries: ResizeObserverEntry[], moved: boolean): void {
+    const box = viewport;
+    const lastId = timeline.at(-1)?.id;
+    for (const entry of entries) {
+      const node = entry.target as HTMLElement;
+      if (node === box) viewHeight = node.clientHeight;
+      else if (node.dataset['mid'] === lastId && lastId !== undefined) noteTail(heights.get(lastId) ?? ESTIMATE);
+    }
+    if (moved) measured += 1;
   }
 
   /** The bottom message's height, at most ten times a second: what the pin follows. */
@@ -349,15 +360,18 @@
     if (typeof ResizeObserver === 'undefined') return;
     let frame = 0;
     const pending = new Map<Element, ResizeObserverEntry>();
+    let moved = false;
     const observer = new ResizeObserver(entries => {
+      if (measure(entries.filter(entry => entry.target.isConnected))) moved = true;
       for (const entry of entries) pending.set(entry.target, entry);
       if (frame) return;
-      // Applying slot heights inside ResizeObserver can resize that same batch.
+      // Redrawing the window inside ResizeObserver can resize that same batch.
       frame = requestAnimationFrame(() => {
         frame = 0;
         const batch = [...pending.values()].filter(entry => entry.target.isConnected);
         pending.clear();
-        onMeasured(batch);
+        settle(batch, moved);
+        moved = false;
         restoreAnchor();
       });
     });
@@ -570,7 +584,7 @@
     hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = 0; pinned = false; pullOlder(viewport); } }} />
   <!-- Input releases restored and navigation anchors; programmatic corrections keep them. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="timeline" bind:this={viewport} {onscroll} onwheel={releaseNavigation} ontouchstart={releaseNavigation} onpointerdown={releaseNavigation} onkeydown={releaseNavigation} data-testid="timeline">
+  <div class="timeline" data-media-root bind:this={viewport} {onscroll} onwheel={releaseNavigation} ontouchstart={releaseNavigation} onpointerdown={releaseNavigation} onkeydown={releaseNavigation} data-testid="timeline">
     <div class="column">
       <!-- paging: the one line the top of the list shows while a page is in flight. -->
       {#if store.loadingOlder}

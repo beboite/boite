@@ -17,7 +17,8 @@ let client: CoreClient;
 
 beforeAll(async () => {
   harness = await startTestCore();
-  client = await harness.connect();
+  // As the UI says hello: pictures and files come as references.
+  client = await harness.connect({ media: 'ref' });
 });
 
 afterAll(async () => {

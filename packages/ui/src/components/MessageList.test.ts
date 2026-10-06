@@ -368,6 +368,68 @@ test('a long thread renders a window of messages and carries the rest in the spa
   expect(below?.style.height).toBe(`${(500 - 266) * ESTIMATE}px`);
 });
 
+test('a message measured above the reader is paid back in scrollTop inside the observer callback, not a frame later', async () => {
+  const messages = thread(500);
+  stubLayout(messages.length * ESTIMATE);
+  let measure: ResizeObserverCallback | null = null;
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: ResizeObserverCallback) { measure = callback; }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  });
+  // Frames are held: what happens before one runs is what the first paint shows.
+  const frames: FrameRequestCallback[] = [];
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback));
+  vi.stubGlobal('cancelAnimationFrame', () => undefined);
+  try {
+    running = mount(MessageList, { target: document.body, props: { store, threadId: 't-long', messages } });
+    await settle();
+    const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+    timeline.scrollTop = 20_000;
+    timeline.dispatchEvent(new Event('scroll'));
+    await settle();
+    // m-242 is the overscan above m-250, the first message on screen.
+    const above = articles()[0]!;
+    expect(above.dataset['mid']).toBe('m-242');
+
+    measure!([{ target: above, borderBoxSize: [{ blockSize: 400, inlineSize: 600 }] } as unknown as ResizeObserverEntry], {} as ResizeObserver);
+    expect(timeline.scrollTop).toBe(20_000 + 400 + 24 - ESTIMATE);
+
+    // The frame redraws the window on the real number and moves nothing twice.
+    for (const frame of frames.splice(0)) frame(0);
+    await settle();
+    expect(timeline.scrollTop).toBe(20_000 + 400 + 24 - ESTIMATE);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+test('a prompt not measured yet counts its pictures at their thumbnail height, from the size its references carry', async () => {
+  const messages = thread(500);
+  messages[10] = {
+    ...messages[10]!,
+    role: 'user',
+    parts: [
+      { type: 'text', text: 'two screenshots' },
+      { type: 'image', mimeType: 'image/png', data: '', alt: null, media: { slot: 'p1', bytes: 1, width: 1280, height: 720, preview: null } },
+      { type: 'image', mimeType: 'image/png', data: '', alt: null, media: { slot: 'p2', bytes: 1, width: 300, height: 100, preview: null } }
+    ]
+  };
+  stubLayout(messages.length * ESTIMATE);
+  running = mount(MessageList, { target: document.body, props: { store, threadId: 't-long', messages } });
+  await settle();
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  timeline.scrollTop = 20_000;
+  timeline.dispatchEvent(new Event('scroll'));
+  await settle();
+
+  // A 240 px thumbnail for the tall one, its own 100 px for the short one, and
+  // a row's frame each: 360 px more above, so 20000 px is message 245, not 250.
+  expect(articles()[0]?.dataset['mid']).toBe('m-237');
+  expect(spacer('timeline-above')?.style.height).toBe(`${237 * ESTIMATE + 250 + 110}px`);
+});
+
 test('scrolled up, the way to the bottom shows with nothing new below, and takes the reader there', async () => {
   const messages = thread(200);
   stubLayout(messages.length * ESTIMATE);

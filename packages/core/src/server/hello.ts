@@ -16,7 +16,7 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
     return;
   }
   const params = rawParams as
-    | { token?: unknown; grant?: unknown; nonce?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown } }
+    | { token?: unknown; grant?: unknown; nonce?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown }; media?: unknown }
     | undefined;
   const refuse = (message: string, reason: string): void => {
     connection.sendResponse({ jsonrpc: '2.0', id, error: { code: RpcErrorCode.Unauthorized, message } });
@@ -84,6 +84,8 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
     return;
   }
   connection.identity = identity;
+  // An agent reads its thread through the CLI, which prints what it is sent.
+  connection.media = params?.media === 'ref' && identity.principal !== 'agent';
   connection.authenticated = true;
   connection.sendResponse({
     jsonrpc: '2.0',

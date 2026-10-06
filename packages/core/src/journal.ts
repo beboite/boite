@@ -318,7 +318,7 @@ export class Journal {
     // table keyed by thread is cleared here, events included, so a removed
     // project's prompts and tool output leave the disk.
     this.db.transaction(() => {
-      for (const table of ['turn_requests', 'turns', 'messages', 'processes', 'coordination_letters', 'coordination_wakes', 'events']) {
+      for (const table of ['turn_requests', 'turns', 'messages', 'media_previews', 'processes', 'coordination_letters', 'coordination_wakes', 'events']) {
         const query = this.db.query(`DELETE FROM ${table} WHERE thread_id = ?`);
         for (const id of threadIds) query.run(id);
       }
@@ -578,6 +578,8 @@ export class Journal {
   truncateMessages(threadId: string, fromRowid: number): { messageIds: string[]; turnIds: string[] } {
     const removed = this.messageIdsFrom(threadId, fromRowid);
     this.db.query('DELETE FROM messages WHERE thread_id = ? AND rowid >= ?').run(threadId, fromRowid);
+    const previews = this.db.query('DELETE FROM media_previews WHERE message_id = ?');
+    for (const messageId of removed.messageIds) previews.run(messageId);
     for (const turnId of removed.turnIds) this.db.query('DELETE FROM turn_requests WHERE thread_id = ? AND turn_id = ?').run(threadId, turnId);
     return removed;
   }
@@ -589,6 +591,35 @@ export class Journal {
       .query('SELECT id, turn_id FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid')
       .all(threadId, fromRowid) as { id: string; turn_id: string }[];
     return { messageIds: rows.map((row) => row.id), turnIds: [...new Set(rows.map((row) => row.turn_id))] };
+  }
+
+  // -- media previews -------------------------------------------------------
+
+  /** The ids of a page, newest first, without reading a part: what `MediaIndex.warm` walks. */
+  messageIdsBefore(threadId: string, beforeRowid: number | null, limit: number): string[] {
+    const rows = beforeRowid === null
+      ? this.db.query('SELECT id FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT ?').all(threadId, limit)
+      : this.db.query('SELECT id FROM messages WHERE thread_id = ? AND rowid < ? ORDER BY rowid DESC LIMIT ?').all(threadId, beforeRowid, limit);
+    return (rows as { id: string }[]).map((row) => row.id);
+  }
+
+  /** Those of `messageIds` whose pictures were never all looked at. */
+  unscannedMedia(messageIds: string[]): string[] {
+    const scanned = this.db.query("SELECT 1 FROM media_previews WHERE message_id = ? AND slot = ''");
+    return messageIds.filter((id) => scanned.get(id) === null);
+  }
+
+  /** The blur of each picture of a message, by slot; null for one that cannot have any. */
+  mediaPreviews(messageId: string): Map<string, string | null> {
+    const rows = this.db.query("SELECT slot, preview FROM media_previews WHERE message_id = ? AND slot <> ''").all(messageId) as { slot: string; preview: string | null }[];
+    return new Map(rows.map((row) => [row.slot, row.preview]));
+  }
+
+  /** `slot` '' marks the message looked at. Nothing is written for a message that left the thread meanwhile. */
+  putMediaPreview(threadId: string, messageId: string, slot: string, preview: string | null): void {
+    this.db
+      .query('INSERT OR REPLACE INTO media_previews (message_id, slot, thread_id, preview) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM messages WHERE id = ? AND thread_id = ?)')
+      .run(messageId, slot, threadId, preview, messageId, threadId);
   }
 
   setMessagePart(messageId: string, partIndex: number, part: MessagePart): void {

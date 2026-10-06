@@ -339,6 +339,22 @@ test('Edit on a sent prompt fills the box in edit mode; sending replaces it and 
   await waitFor(() => document.querySelector('[data-testid=composer-editing]') === null);
 });
 
+test('Editing a prompt sent with a picture fetches its bytes back before the box can send it again', async () => {
+  const threadId = await openIdleThread();
+  const pixel = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  await store.send('with a picture', threadId, [{ kind: 'image', mimeType: 'image/png', data: pixel, name: 'pixel.png' }], []);
+  await waitFor(() => !store.busy && userTexts().at(-1) === 'with a picture');
+  const sent = store.openThread!.messages.filter((m) => m.role === 'user').at(-1)!;
+  // The thread holds a reference, not the bytes.
+  expect(sent.parts.find((part) => part.type === 'image')).toMatchObject({ data: '', media: { width: 1, height: 1 } });
+
+  store.startEdit(threadId, sent);
+  // Until the bytes are back, the picture is a placeholder the box refuses to send.
+  expect(store.composerStates[threadId]!.attachments[0]).toMatchObject({ kind: 'image', data: '' });
+  await waitFor(() => store.composerStates[threadId]!.attachments[0]?.data === pixel);
+  expect(store.composerStates[threadId]!.attachments[0]).toEqual({ kind: 'image', mimeType: 'image/png', data: pixel, name: 'pixel.png' });
+});
+
 test('ArrowUp in an empty box of a thread at rest recalls the last prompt to edit, Escape leaves it untouched', async () => {
   await openIdleThread();
   const before = userTexts();

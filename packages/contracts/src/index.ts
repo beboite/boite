@@ -834,8 +834,31 @@ export type ToolDocument =
   /** A file the tool wrote: the two texts, the UI computes the line diff. */
   | { kind: 'diff'; path: string; oldText: string; newText: string }
   | { kind: 'markdown'; title: string | null; text: string }
-  /** `data` is base64 with no `data:` prefix. The core caps it before it is journalled. */
-  | { kind: 'image'; mimeType: string; data: string; alt: string | null };
+  /**
+   * `data` is base64 with no `data:` prefix. The core caps it before it is
+   * journalled. With `media` set, `data` is empty: see `MediaRef`.
+   */
+  | { kind: 'image'; mimeType: string; data: string; alt: string | null; media?: MediaRef };
+
+/**
+ * What stands in for the bytes of an image or a file when the client said
+ * hello with `media: 'ref'`. The part keeps its type and names, its `data` is
+ * the empty string, and the bytes come from `messages.media` once the part is
+ * about to show. A thread of a hundred screenshots then opens on a few
+ * kilobytes, and the size and the blur below let the client lay each picture
+ * out before a byte of it arrived.
+ */
+export interface MediaRef {
+  /** Where the bytes sit in the message, which `messages.media` takes: `p<part>`, or `p<part>d<document>` for a tool's image. */
+  slot: string;
+  /** Decoded size in bytes. */
+  bytes: number;
+  /** The size the picture is drawn at, read from its header with JPEG's EXIF orientation applied. Null for a file or a header the core cannot read. */
+  width: number | null;
+  height: number | null;
+  /** A ThumbHash render of at most 32 px as a `data:image/png` URL, to show blurred until the bytes land. Null until the core made one, or when it cannot decode the image. */
+  preview: string | null;
+}
 
 export { IMAGE_MIME_TYPES, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, RPC_MAX_FRAME_BYTES } from './attachment-limits.ts';
 import type { ImageMimeType } from './attachment-limits.ts';
@@ -919,9 +942,9 @@ export interface PendingMove {
 
 export type MessagePart =
   | { type: 'text'; text: string; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number }; moved?: MoveNotice; startedBy?: ThreadLink; started?: ThreadLink }
-  /** An image the user sent with the prompt, journalled with the message. */
-  | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null }
-  | { type: 'file'; mimeType: string; data: string; name: string | null }
+  /** An image the user sent with the prompt, journalled with the message. With `media` set, `data` is empty: see `MediaRef`. */
+  | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null; media?: MediaRef }
+  | { type: 'file'; mimeType: string; data: string; name: string | null; media?: MediaRef }
   /** The model's reasoning as the provider streams it, folded in the UI. */
   | { type: 'thinking'; text: string }
   | {
@@ -2120,6 +2143,15 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
       nonce?: string;
       protocolVersion: number;
       client: { name: string; version: string };
+      /**
+       * `ref`: this client reads image and file bytes with `messages.media`,
+       * so every message it is sent carries a `MediaRef` in their place
+       * (`threads.get`, `messages.list`, `threads.rewind`'s thread,
+       * `artifacts.publish`, `message.started`, `message.part`). Absent, the
+       * bytes ride in the parts as before: the CLI and older clients say
+       * nothing. An agent's connection is never given references.
+       */
+      media?: 'ref';
     };
     result: {
       core: CoreInfo;
@@ -2434,6 +2466,16 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   'messages.list': {
     params: { threadId: ThreadId; before: MessageId; limit?: number };
     result: { messages: Message[]; before: MessageId | null; turns?: Turn[] };
+  };
+  /**
+   * The bytes a `MediaRef` stands for: `slot` of message `messageId` in
+   * `threadId`, base64 with no `data:` prefix, and its type as journalled. A
+   * message that is not one of that thread's is a not-found, and so is a slot
+   * that names no image, file or tool image in it, each by field.
+   */
+  'messages.media': {
+    params: { threadId: ThreadId; messageId: MessageId; slot: string };
+    result: { mimeType: string; data: string };
   };
   'threads.update': {
     params: {
@@ -2850,6 +2892,7 @@ export const CLIENT_NAMES = ['shell', 'pwa', 'cli', 'test', 'bench'] as const;
 export type ClientName = (typeof CLIENT_NAMES)[number];
 
 export { attachmentError } from './attachment-validation.ts';
+export { MEDIA_SLOT_PATTERN, imageSize, mediaAt, mediaBytes, mediaSlot, messageWithMediaRefs, partWithMediaRefs, type MediaPreviews } from './media.ts';
 export { BROWSER_ORIGINS_MAX, checkSettingsPatch, type SettingsPatchCheck } from './settings-validation.ts';
 export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';

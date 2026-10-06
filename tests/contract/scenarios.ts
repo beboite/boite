@@ -323,6 +323,24 @@ export const SCENARIOS: Record<string, Scenario> = {
     same([again.id, third.id], [first.id, first.id], 'the ids');
     same(added.events.filter((event) => (event.payload as { id: string }).id === first.id).length, 1, 'project.added for the folder');
   },
+  'a picture sent with a prompt comes back as a reference with its size, and messages.media hands back its bytes': async (env) => {
+    const setup = await echo(env);
+    const { id: threadId } = await thread(env, setup);
+    // A 3 by 2 PNG: the size is read from its header, not decoded.
+    const data = 'iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAIAAAASFvFNAAAAF0lEQVR42mP4z8DAAMFcInIaRjZuAVEAM1kEwFyb4YwAAAAASUVORK5CYII=';
+    await env.call('turns.start', { threadId, prompt: 'see', attachments: [{ kind: 'image', mimeType: 'image/png', data, name: 'dot.png' }] });
+    await until('the turn to finish', async () => !['queued', 'running', 'waiting'].includes((await summary(env, threadId)).status));
+    const opened = await env.call('threads.get', { threadId });
+    const prompt = opened.messages.find((message) => message.role === 'user');
+    const at = prompt?.parts.findIndex((part) => part.type === 'image') ?? -1;
+    const image = prompt?.parts[at];
+    check(prompt !== undefined && image?.type === 'image', 'the prompt keeps its image part');
+    same({ data: image.data, slot: image.media?.slot, width: image.media?.width, height: image.media?.height, bytes: image.media?.bytes }, { data: '', slot: `p${at}`, width: 3, height: 2, bytes: 80 }, 'the reference');
+    same(await env.call('messages.media', { threadId, messageId: prompt.id, slot: `p${at}` }), { mimeType: 'image/png', data }, 'the bytes');
+    await refusedWith(env.call('messages.media', { threadId, messageId: prompt.id, slot: 'image' }), RpcErrorCode.InvalidParams, ['field']);
+    const text = await refusedWith(env.call('messages.media', { threadId, messageId: prompt.id, slot: `p${prompt.parts.findIndex((part) => part.type === 'text')}` }), RpcErrorCode.NotFound, ['field']);
+    same(text.field, 'slot', 'the refused field');
+  },
   'projects.refreshIcon answers the project, and projects.icon refuses one with no image by field': async (env) => {
     const project = await env.call('projects.add', { path: await env.newFolder() });
     const refreshed = await env.call('projects.refreshIcon', { projectId: project.id });

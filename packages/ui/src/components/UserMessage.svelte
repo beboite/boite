@@ -8,7 +8,9 @@
   import type { Store } from '../lib/store.svelte';
   import { claudeKeywords, promptCommand, promptSegments, promptText } from '../lib/message-display';
   import type { TurnProgress } from '../lib/turn-progress.svelte';
+  import ChatImage from './ChatImage.svelte';
   import PreviewReferences from './PreviewReferences.svelte';
+  import { THUMB_HEIGHT } from '../lib/message-window';
   import MessageActions from './MessageActions.svelte';
   import MoveMarker from './MoveMarker.svelte';
   import SpawnMarker from './SpawnMarker.svelte';
@@ -39,6 +41,7 @@
 
   type ImagePart = Extract<Message['parts'][number], { type: 'image' }>;
 
+
   /** The pictures a prompt was sent with; an assistant message never has one. */
   function imagesOf(message: Message): ImagePart[] {
     return message.parts.filter((part): part is ImagePart => part.type === 'image');
@@ -46,12 +49,35 @@
 
   type FilePart = Extract<Message['parts'][number], { type: 'file' }>;
 
-  /** In the shell the link saves the file into Downloads and opens it; a browser downloads it. */
+  /** What the file's link points at: its bytes inline, or nothing until they are fetched. */
+  function fileHref(part: FilePart): string | undefined {
+    return part.data.length > 0 ? `data:application/octet-stream;base64,${part.data}` : undefined;
+  }
+
+  /**
+   * In the shell the link saves the file into Downloads and opens it; a browser
+   * downloads it. A file sent as a reference is fetched first: its bytes never
+   * came with the thread.
+   */
   async function openFile(event: MouseEvent, part: FilePart): Promise<void> {
-    if (window.__TAURI_INTERNALS__ === undefined) return;
+    const shell = window.__TAURI_INTERNALS__ !== undefined;
+    if (!shell && part.data.length > 0) return;
     event.preventDefault();
+    const name = part.name ?? strings.composer.attachAlt;
     try {
-      await saveAttachment(part.name ?? strings.composer.attachAlt, decodeBase64(part.data), true);
+      const data = part.data.length > 0 || !part.media
+        ? part.data
+        : (await store.media.bytes({ threadId: message.threadId, messageId: message.id, slot: part.media.slot })).data;
+      if (shell) {
+        await saveAttachment(name, decodeBase64(data), true);
+        return;
+      }
+      const url = URL.createObjectURL(new Blob([decodeBase64(data)], { type: 'application/octet-stream' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = name;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (error) {
       store.error = error instanceof Error ? error.message : String(error);
     }
@@ -76,9 +102,9 @@
         : claudeKeywords(store.providerOf(store.openThread?.providerId ?? '')?.protocol, store.openThread?.model)}
       <p class="user-text" data-testid="text-part">{#if part.previewReferences?.length}<PreviewReferences text={prompt} references={part.previewReferences} {store} threadId={message.threadId} {keywords} />{:else}{#each promptSegments(prompt, promptCommand(prompt), keywords) as segment, at (at)}{#if segment.kind === 'command'}<span class="command">{segment.text}</span>{:else if segment.kind === 'plain'}{segment.text}{:else}<span class="keyword-{segment.kind}" data-testid="keyword-highlight">{segment.text}</span>{/if}{/each}{/if}</p>
     {:else if part.type === 'file'}
-      <a class="file-attachment" data-testid="file-part" href="data:application/octet-stream;base64,{part.data}" download={part.name ?? strings.composer.attachAlt} onclick={(event) => openFile(event, part)}>
+      <a class="file-attachment" data-testid="file-part" href={fileHref(part) ?? '#'} download={part.name ?? strings.composer.attachAlt} onclick={(event) => openFile(event, part)}>
         <FileText size={20} strokeWidth={1.5} />
-        <span><span>{part.name ?? strings.composer.attachAlt}</span><small>{bytes(decodedBytes(part.data))}</small></span>
+        <span><span>{part.name ?? strings.composer.attachAlt}</span><small>{bytes(part.media?.bytes ?? decodedBytes(part.data))}</small></span>
       </a>
     {/if}
   {/each}
@@ -86,17 +112,24 @@
     <div class="images">
       {#each images as image, at (at)}
         {@const id = `${message.id}:${at}`}
+        {@const full = expanded.includes(id)}
         <button
           type="button"
           class="shot"
-          class:full={expanded.includes(id)}
+          class:full
           title={image.alt ?? strings.chat.imagePart}
           onclick={() => ontoggle(id)}
         >
-          <img
-            data-testid="image-part"
-            src="data:{image.mimeType};base64,{image.data}"
+          <ChatImage
+            {store}
+            threadId={message.threadId}
+            messageId={message.id}
+            mimeType={image.mimeType}
+            data={image.data}
+            media={image.media}
             alt={image.alt ?? ''}
+            maxHeight={full ? null : THUMB_HEIGHT}
+            testid="image-part"
           />
         </button>
       {/each}
@@ -164,19 +197,8 @@
     border-color: var(--color-edge);
   }
 
-  .shot img {
-    display: block;
-    max-width: 100%;
-    max-height: 240px;
-    object-fit: contain;
-  }
-
   /* Clicked once, the picture is worth its own size instead of a thumbnail. */
   .shot.full {
     cursor: zoom-out;
-  }
-
-  .shot.full img {
-    max-height: none;
   }
 </style>

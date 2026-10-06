@@ -58,6 +58,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'threads.activity.set',
   'threads.activity.control',
   'messages.list',
+  // The pictures and files of the messages a device already reads, one at a time once on screen.
+  'messages.media',
   'threads.update',
   'threads.retitle',
   'threads.compact', // A paired device can request the same session maintenance as the desktop.

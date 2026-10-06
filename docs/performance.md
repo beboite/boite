@@ -215,6 +215,53 @@ instead of arriving after it as a second copy.
   256 KB, is a `projects.icon` call made once per project and version, when a
   tile first draws it; a list never carries it ([project icons](project-icons.md)).
 
+## Pictures and files
+
+A message keeps its images and files in its parts as base64, and the journal
+stays that way: drivers, rewinds, imports and the CLI read messages whole. A
+client that says hello with `media: 'ref'`, which the UI always does, is sent
+every message without those bytes. Each image, file and tool image carries a
+`MediaRef` instead: its slot, its decoded size, its width and height, and a
+blur. The bytes come one slot at a time from `messages.media`, when the
+picture nears the screen. The CLI and older clients say nothing in hello and
+still get the bytes. An agent connection never gets references.
+
+- The width and height are read from the image header on every send
+  (`packages/contracts/src/media.ts`). This covers PNG, GIF, WebP and JPEG,
+  with JPEG's EXIF orientation applied as a browser applies it. Only the start
+  of the base64 is decoded.
+- The blur is `Bun.Image.placeholder()`: a ThumbHash render of at most 32 px
+  as a PNG data URL, about 1.2 KB. Bun makes it on its image worker, three at
+  a time, refusing pictures above 8K UHD, and the core keeps it in
+  `media_previews`. `threads.get` and `messages.list` make the blurs of the
+  page they are about to read for messages no client was sent before, waiting
+  1.5 s at most. That happens before the page is read, never between the read
+  and the answer, so the answer still holds every event sent before it. A
+  picture without a blur yet goes out with none and is queued.
+- The UI draws each picture in a box of its own proportions from the first
+  frame (`ChatImage.svelte`): the blur first, then the picture fading in over
+  it. Nothing around the box moves when the bytes land. The box asks for its
+  bytes when an `IntersectionObserver` rooted on the timeline sees it within
+  1,000 px. Requests run three at a time per machine, newest first, and one
+  whose picture left the window before its turn is dropped. The bytes become a
+  `blob:` url, which every CSP of the app accepts, kept up to 96 MB once
+  nothing shows them (`lib/media.ts`).
+- An unmeasured prompt is estimated with its thumbnails on top of 80 px
+  (`estimateSlot`), and a height measured above the reader is paid back in
+  `scrollTop` inside the `ResizeObserver` callback, before paint. Done a frame
+  later, the list was painted pushed down by the height an image added, then put
+  back.
+- Editing a sent prompt, or recalling it with ArrowUp, puts its pictures and
+  files back as placeholders. The box cannot send until their bytes are fetched
+  back.
+
+`tests/e2e/media.test.ts` seeds 24 prompts with a 960 by 540 screenshot each on
+a real core and reads them in headless Chrome. It compares the `threads.get`
+answer with and without references, counts the fetches on opening, and checks
+that the text the reader is on keeps its position to the pixel while the
+pictures of the scrolled page land. It writes desktop and phone captures of
+the blur and of the loaded pictures.
+
 ## Static files
 
 The UI build writes a `.br` and a `.gz` beside every text file of 1 KB or more

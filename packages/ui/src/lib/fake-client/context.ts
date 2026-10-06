@@ -48,6 +48,7 @@ import { RpcFailure } from '../client';
 import { FakeAgents } from '../fake-agents';
 import type { FakeFinishedTurn } from '../fake-usage';
 import { finishActivityTurn } from './activity';
+import { fakeMediaEvent } from './media';
 import { FakeBus } from './bus';
 import { FAKE_TREE } from './files';
 import { seedHooks } from './hooks';
@@ -308,7 +309,7 @@ export class FakeContext {
       if (agentThread?.agentSessionId) this.agents.finished(turn, agentThread.messages.filter(m => m.turnId === turn.id && m.role === 'assistant').flatMap(m => m.parts.flatMap(p => p.type === 'text' ? [p.text] : [])).join('\n'));
       finishActivityTurn(this, turn);
     }
-    this.bus.deliver(event, payload);
+    this.bus.deliver(event, fakeMediaEvent(event, payload));
   }
 
   emitToThread<E extends RpcEventName>(threadId: ThreadId, event: E, payload: RpcEvents[E]): void {

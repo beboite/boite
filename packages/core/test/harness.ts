@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Settings } from '@boite/contracts';
 import { connect } from '../src/client.ts';
-import type { CoreClient } from '../src/client.ts';
+import type { ConnectOptions, CoreClient } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
 import { startServer } from '../src/server.ts';
@@ -15,7 +15,7 @@ export interface TestCore {
   url: string;
   token: string;
   dataDir: string;
-  connect(): Promise<CoreClient>;
+  connect(options?: ConnectOptions): Promise<CoreClient>;
   stop(): Promise<void>;
 }
 
@@ -85,8 +85,8 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
     url: server.url,
     token,
     dataDir,
-    async connect(): Promise<CoreClient> {
-      const client = await connect(server.url, token);
+    async connect(options?: ConnectOptions): Promise<CoreClient> {
+      const client = await connect(server.url, token, options);
       clients.push(client);
       return client;
     },

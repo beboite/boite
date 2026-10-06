@@ -7,7 +7,7 @@
   import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, mentionRows, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
   import { attachFiles } from '../lib/composer-attachments';
   import { insertImageReference, removeImageReferences, trackImageSend } from '../lib/composer-images';
-  import { unresolvedAssetId } from '../lib/draft-attachments';
+  import { sentMediaSlot, unresolvedAssetId } from '../lib/draft-attachments';
   import { sentPrompts, type SentPrompt } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
@@ -356,7 +356,7 @@
   }
 
   async function submit(nextDraft = false) {
-    if (attachments.some(unresolvedAssetId)) { store.error = strings.errors.draftAttachment; return; }
+    if (attachments.some(unresolvedAssetId)) { store.error = attachments.some((attachment) => sentMediaSlot(attachment) !== null) ? strings.errors.sentMediaLoading : strings.errors.draftAttachment; return; }
     const prompt = text;
     const images = attachments;
     const references = previewReferences;
@@ -527,6 +527,7 @@
     if (edit) state.attachments = prompt.attachments;
     else if (state.editing) state.attachments = [];
     state.editing = edit ? prompt.id : null;
+    if (edit) void store.recoverSentMedia(key, prompt.id);
   }
 
   /** Leaves edit mode: the box empties, nothing was rewound. */

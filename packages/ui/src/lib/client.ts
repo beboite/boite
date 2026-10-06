@@ -528,7 +528,9 @@ export class WsClient implements ObservableClient {
     return {
       ...(this.#grant === null ? { token: this.#options.token } : { grant: this.#grant, nonce: this.#nonce }),
       protocolVersion: PROTOCOL_VERSION,
-      client: { name: this.#options.clientName, version: this.#options.version }
+      client: { name: this.#options.clientName, version: this.#options.version },
+      // Pictures and files arrive as references and are read once on screen (`lib/media.ts`).
+      media: 'ref'
     };
   }
 

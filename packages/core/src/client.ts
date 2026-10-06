@@ -21,6 +21,8 @@ export interface ConnectOptions {
   nonce?: string;
   /** Extra upgrade headers. The bench names a `Host` here to be served as a remote client. */
   headers?: Record<string, string>;
+  /** Said in hello: image and file bytes are read with `messages.media` instead of riding in each message. */
+  media?: 'ref';
 }
 
 export interface CoreClient {
@@ -150,6 +152,7 @@ export async function connect(url: string, token: string, options: ConnectOption
     ...(options.grant === undefined ? { token } : { grant: options.grant, ...(options.nonce === undefined ? {} : { nonce: options.nonce }) }),
     protocolVersion: PROTOCOL_VERSION,
     client: options.client ?? { name: 'test', version: '2.0.0-beta.1' },
+    ...(options.media === undefined ? {} : { media: options.media }),
   }, Math.max(1, deadline - Date.now())).catch(error => { socket.close(); throw error; })) as { core: CoreInfo; principal: Principal; session?: { id: string; token: string }; threadId?: ThreadId };
   if (hello.core.protocolVersion !== PROTOCOL_VERSION) {
     socket.close();

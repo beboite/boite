@@ -3,7 +3,7 @@
   import type { Attachment } from '@boite/contracts';
   import { bytes } from '../lib/format';
   import { decodedBytes } from '../lib/attachments';
-  import { unresolvedAssetId } from '../lib/draft-attachments';
+  import { sentMediaSlot, unresolvedAssetId } from '../lib/draft-attachments';
   import { fill, strings } from '../lib/strings';
   import { imageLabel } from '../lib/composer-images';
   import { Closing } from '../lib/closing.svelte';
@@ -57,7 +57,8 @@
   {#each attachments as attachment, at (attachment)}
     {@const label = attachment.name ?? strings.composer.attachAlt}
     {@const pending = unresolvedAssetId(attachment)}
-    <div class="attachment" class:highlighted={highlighted === attachment} class:selected={visible === attachment && preview.shown} class:document={attachment.kind === 'file' || !!pending} data-testid="composer-attachment" title={pending ? strings.errors.draftAttachment : attachment.kind === 'image' ? `${imageLabel(images.indexOf(attachment) + 1)} · ${label}` : label}>
+    {@const fetching = sentMediaSlot(attachment) !== null}
+    <div class="attachment" class:highlighted={highlighted === attachment} class:selected={visible === attachment && preview.shown} class:document={attachment.kind === 'file' || !!pending} data-testid="composer-attachment" title={fetching ? strings.composer.attachFetching : pending ? strings.errors.draftAttachment : attachment.kind === 'image' ? `${imageLabel(images.indexOf(attachment) + 1)} · ${label}` : label}>
       {#if attachment.kind === 'image' && !pending}
         <button type="button" class="image-open" data-testid="composer-image-open"
           aria-label={fill(strings.composer.imagePreview, { image: imageLabel(images.indexOf(attachment) + 1) })}
@@ -66,7 +67,7 @@
         </button>
       {:else}
         <FileText size={20} strokeWidth={1.5} />
-        <span class="file-info"><span>{label}</span><small>{pending ? strings.composer.attachPending : bytes(decodedBytes(attachment.data))}</small></span>
+        <span class="file-info"><span>{label}</span><small>{fetching ? strings.composer.attachFetching : pending ? strings.composer.attachPending : bytes(decodedBytes(attachment.data))}</small></span>
       {/if}
       <button
         type="button"

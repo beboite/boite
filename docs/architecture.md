@@ -102,7 +102,10 @@ activity (goal, loop, tasks) is a `settings` row with no event: its payload held
 the whole loop history and nothing read it back. A project's detected icon is
 a `project_icons` row with
 no event either: it is derived from the folder and detected again on request
-([project icons](project-icons.md)). A journal written by a newer release is refused at open
+([project icons](project-icons.md)). The blur each picture of a message is drawn
+with before its bytes arrive is a `media_previews` row, keyed by message and slot,
+with no event: it is made again from the message when missing ([performance](performance.md#pictures-and-files)).
+A journal written by a newer release is refused at open
 with the file and both schema versions, before any write. Foreign keys are off,
 so the `ON DELETE CASCADE` clauses are dead; project removal clears every
 thread-keyed table itself. A write that fails on a timer (a full disk, an I/O

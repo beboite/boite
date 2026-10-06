@@ -37,6 +37,7 @@ import { threadMoveMethods } from './fake-client/thread-move';
 import { spawnMethods } from './fake-client/spawn';
 import { todoMethods } from './fake-client/todos';
 import { workdirMethods } from './fake-client/workdir';
+import { fakeMediaResult, mediaMethods } from './fake-client/media';
 import { worktreeMethods } from './fake-client/worktrees';
 
 export type { FakeClientOptions } from './fake-client/context';
@@ -181,7 +182,8 @@ export class FakeClient implements ObservableClient {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is for the owner only` });
     }
     if (bus.principal === 'session' && method === 'agents.message.send' && (params as RpcParams<'agents.message.send'>).threadId !== undefined) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agents.message.send: paired devices must omit threadId and speak as the user' });
-    const result = await bus.hold(this.#dispatch(method, params)) as RpcResult<M>;
+    // As the core answers a client that said hello with `media: 'ref'`, which the UI does.
+    const result = fakeMediaResult(method, await bus.hold(this.#dispatch(method, params))) as RpcResult<M>;
     // The real client writes its set from the answer, never from the request.
     if (method === 'threads.subscribe') {
       bus.clientSubscribed.add((params as RpcParams<'threads.subscribe'>).threadId);
@@ -299,6 +301,7 @@ export class FakeClient implements ObservableClient {
       ...todoMethods(ctx),
       ...workdirMethods(ctx),
       ...worktreeMethods(ctx),
+      ...mediaMethods(ctx),
     };
   }
 }

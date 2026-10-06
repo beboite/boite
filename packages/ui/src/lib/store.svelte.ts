@@ -20,6 +20,7 @@ import type { Terminals } from './store/terminals.svelte';
 import type { Threads } from './store/threads.svelte';
 import type { Workbench } from './store/workbench.svelte';
 import type { Workflows } from './store/workflows.svelte';
+import { MediaCache } from './media';
 
 export type Page = 'chat' | 'settings' | 'agents';
 export type SettingsTab = 'home' | 'advanced' | 'brain' | 'voice' | 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'limits' | 'resources' | 'experiments';
@@ -86,6 +87,8 @@ export class Store {
   machineId = '';
   visible = true;
   error = $state<string | null>(null);
+  /** The bytes of this machine's pictures and files, fetched as they near the screen. */
+  readonly media = new MediaCache(() => this.#ctx.client);
 
   threadKey(id: string): string { return this.machineId ? JSON.stringify([this.machineId, id]) : id; }
 
@@ -452,6 +455,7 @@ export class Store {
   registerComposerInsertion(...args: Parameters<Composer['registerComposerInsertion']>) { return this.#ctx.composer.registerComposerInsertion(...args); }
   editComposerText(...args: Parameters<Composer['editComposerText']>) { return this.#ctx.composer.editComposerText(...args); }
   startEdit(...args: Parameters<Composer['startEdit']>) { return this.#ctx.composer.startEdit(...args); }
+  recoverSentMedia(...args: Parameters<Composer['recoverSentMedia']>) { return this.#ctx.composer.recoverSentMedia(...args); }
   restoreDraft(...args: Parameters<Composer['restoreDraft']>) { return this.#ctx.composer.restoreDraft(...args); }
   addPreviewReference(...args: Parameters<Composer['addPreviewReference']>) { return this.#ctx.composer.addPreviewReference(...args); }
   revealPreviewReference(...args: Parameters<Composer['revealPreviewReference']>) { return this.#ctx.composer.revealPreviewReference(...args); }

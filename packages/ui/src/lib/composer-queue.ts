@@ -1,5 +1,6 @@
 import type { Attachment, Message, MessageId, PreviewReference } from '@boite/contracts';
 import { promptText } from './message-display';
+import { sentMediaPlaceholder } from './draft-attachments';
 import type { Store } from './store.svelte';
 
 /** One input's state in the store: its text, attachments and the prompts queued behind a running turn. */
@@ -65,8 +66,12 @@ export interface SentPrompt {
 export function sentPrompt(message: Message): SentPrompt {
   const attachments: Attachment[] = [];
   for (const part of message.parts) {
-    if (part.type === 'image') attachments.push({ kind: 'image', mimeType: part.mimeType, data: part.data, name: part.alt });
-    else if (part.type === 'file') attachments.push({ kind: 'file', mimeType: part.mimeType, data: part.data, name: part.name });
+    let attachment: Attachment;
+    if (part.type === 'image') attachment = { kind: 'image', mimeType: part.mimeType, data: part.data, name: part.alt };
+    else if (part.type === 'file') attachment = { kind: 'file', mimeType: part.mimeType, data: part.data, name: part.name };
+    else continue;
+    // The bytes stayed on the machine: the box holds a placeholder until they are fetched.
+    attachments.push(part.media && part.data.length === 0 ? sentMediaPlaceholder(attachment, part.media.slot) : attachment);
   }
   return {
     id: message.id,

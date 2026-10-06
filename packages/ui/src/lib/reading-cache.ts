@@ -7,7 +7,7 @@ export const READING_CACHE_MESSAGES = 2000;
 function documentChars(document: ToolDocument): number {
   if (document.kind === 'diff') return document.oldText.length + document.newText.length;
   if (document.kind === 'markdown') return document.text.length;
-  return document.data.length;
+  return document.data.length + (document.media?.preview?.length ?? 0);
 }
 
 /** The characters a part holds, read from its strings rather than from a JSON copy of it. */
@@ -19,7 +19,7 @@ function partChars(part: MessagePart): number {
       return part.text.length;
     case 'image':
     case 'file':
-      return part.data.length;
+      return part.data.length + (part.media?.preview?.length ?? 0);
     case 'tool': {
       let chars = (part.output?.length ?? 0) + (part.inputText?.length ?? 0) + (JSON.stringify(part.input ?? null)?.length ?? 0);
       for (const document of part.documents ?? []) chars += documentChars(document);

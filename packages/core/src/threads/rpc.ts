@@ -36,8 +36,17 @@ export function registerThreadMethods(core: Core): void {
   core.router.register('threads.create', (params) =>
     params.worktree === undefined ? core.threads.create(params) : core.threads.createInWorktree(params),
   );
-  core.router.register('threads.get', (params) => core.threads.get(params.threadId, params.after));
-  core.router.register('messages.list', (params) => core.threads.messages(params));
+  // The blurs of a page are made before it is read, never between the read
+  // and the answer (`MediaIndex.warm`).
+  core.router.register('threads.get', async (params, ctx) => {
+    if (ctx.connection.media === true) await core.media.warm(params.threadId);
+    return core.threads.get(params.threadId, params.after);
+  });
+  core.router.register('messages.list', async (params, ctx) => {
+    if (ctx.connection.media === true) await core.media.warm(params.threadId, params.before, params.limit);
+    return core.threads.messages(params);
+  });
+  core.router.register('messages.media', (params) => core.media.read(params));
   core.router.register('threads.update', (params) => core.threads.update(params));
   core.router.register('threads.retitle', (params) => core.threads.retitle(params.threadId));
   core.router.register('threads.archive', (params) =>
