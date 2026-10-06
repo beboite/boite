@@ -95,7 +95,8 @@ and group executions default to ten minutes, configurable per identity.
 Closing the page stops rendering. Quitting the shell leaves its core running
 in the user's session. Reopening adopts that core. Background settings exposes
 owner-only Stop this core, which stops all work and disconnects clients. There
-is no OS service or automatic start at login. Tests and benchmarks use
+is no OS service. General settings can start the shell at login, which starts
+the core and leaves the window in the tray. Tests and benchmarks use
 `BOITE_CORE_RESIDENT=0` when they need shell-owned shutdown.
 
 After restart, accepted work that never started is eligible again. Started

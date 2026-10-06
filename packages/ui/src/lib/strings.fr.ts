@@ -1867,6 +1867,8 @@ export const fr: Translation = {
     background: 'Arrière-plan',
     closeToTray: 'Garder Boite en marche quand la fenêtre se ferme',
     closeToTrayHint: 'Réduit Boite dans la zone de notification et laisse les tours continuer. Quitter arrête toujours Boite.',
+    launchAtLogin: "Lancer Boite à l'ouverture de session",
+    launchAtLoginHint: "Boite démarre dans la zone de notification avec son cœur actif : cet ordinateur peut faire tourner des agents et répondre à vos autres appareils sans ouvrir sa fenêtre. S'applique à ce compte utilisateur.",
     notifications: "Me prévenir quand une conversation se termine ou pose une question",
     notificationsHint: 'Seulement pour une conversation que vous ne regardez pas. Cette machine seulement.',
     notificationsDenied: 'Les notifications sont bloquées pour Boite sur ce système ; autorisez-les dans ses réglages.',

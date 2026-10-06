@@ -89,6 +89,12 @@ impl Reveal {
     pub(crate) fn anyway(&self) -> bool {
         !self.shown.swap(true, Ordering::SeqCst)
     }
+
+    /// A start into the tray: no timer and no painted page reveals the window.
+    /// The tray, a second launch or the dock still show it with `show_main`.
+    pub(crate) fn stay_hidden(&self) {
+        self.shown.store(true, Ordering::SeqCst);
+    }
 }
 
 /// The page says it has painted its first frame. Only the main page asks.
@@ -312,6 +318,9 @@ mod tests {
         let reveal = Reveal::default();
         assert!(reveal.anyway());
         assert!(!reveal.painted() && !reveal.due());
+        let reveal = Reveal::default();
+        reveal.stay_hidden();
+        assert!(!reveal.painted() && !reveal.due() && !reveal.anyway(), "a start into the tray revealed the window");
     }
 }
 
