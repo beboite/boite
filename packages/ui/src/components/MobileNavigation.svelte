@@ -148,14 +148,20 @@
     else store.startDraft(project?.id);
     show('chat');
   }
+  /** The projects a project moves among: its own fold as drawn, or the one list a search shows. */
+  function foldOf(entry: ProjectEntry): ProjectEntry[] {
+    if (query) return groups;
+    return recentPreferences.groupOtherProjects && !activeProject(entry) ? otherGroups : activeGroups;
+  }
   function openProjectMenu(event: MouseEvent) {
     if (!actionProject) return;
     const entry = shownGroups.find(group => group.machine.store === store && group.project.id === actionProject.id);
     const key = entry ? projectKey(entry) : null;
-    projectMenu(event, store, actionProject, projectView.order === 'manual' && key !== null ? {
-      up: projectKey(shownGroups[0]!) !== key,
-      down: projectKey(shownGroups[shownGroups.length - 1]!) !== key,
-      move: direction => projectView.step(shownGroups, key, direction)
+    const fold = entry ? foldOf(entry) : [];
+    projectMenu(event, store, actionProject, projectView.order === 'manual' && entry && key !== null ? {
+      up: projectKey(fold[0]!) !== key,
+      down: projectKey(fold[fold.length - 1]!) !== key,
+      move: direction => projectView.step(foldOf(entry), key, direction)
     } : undefined);
   }
 </script>
@@ -232,9 +238,9 @@
             <ProjectThreadCounters entry={group} working={group.machine.store.threadsOf(group.project.id).filter(thread => workingThread(group.machine.store, thread)).length} {controls} searching={!!query} />
             {#if projectView.order === 'manual'}
               <Menu items={[
-                { id: 'up', label: strings.sidebar.moveProjectUp, disabled: projectKey(shownGroups[0]!) === projectKey(group) },
-                { id: 'down', label: strings.sidebar.moveProjectDown, disabled: projectKey(shownGroups[shownGroups.length - 1]!) === projectKey(group) }
-              ]} onpick={action => projectView.step(shownGroups, projectKey(group), action === 'up' ? -1 : 1)} label={strings.sidebar.customOrder} placement="bottom" variant="ghost" testid="mobile-project-order"><Ellipsis size={18} /></Menu>
+                { id: 'up', label: strings.sidebar.moveProjectUp, disabled: projectKey(foldOf(group)[0]!) === projectKey(group) },
+                { id: 'down', label: strings.sidebar.moveProjectDown, disabled: projectKey(foldOf(group).at(-1)!) === projectKey(group) }
+              ]} onpick={action => projectView.step(foldOf(group), projectKey(group), action === 'up' ? -1 : 1)} label={strings.sidebar.customOrder} placement="bottom" variant="ghost" testid="mobile-project-order"><Ellipsis size={18} /></Menu>
             {/if}
           </div>
           {#if draft && !query}<DraftRow owner={group.machine.store} entry={draft} />{/if}
