@@ -920,6 +920,14 @@ export interface ThreadSummary {
    * restart, and missing on older cores.
    */
   pendingMove?: PendingMove | null;
+  /**
+   * The note the thread's next message will carry to its agent after the user
+   * moved it (`threads.move`), so the open thread can say the agent has not
+   * been told yet. Null once that message is sent, after a move back to the
+   * folder the note started from, and after a move the agent made itself.
+   * Survives a core restart; missing on older cores.
+   */
+  moveNote?: MoveNotice | null;
   /** Answers accepted by the core, waiting for the running agent or the next turn. In memory only. */
   pendingAnswers?: string[];
   unread: boolean;

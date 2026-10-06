@@ -11,6 +11,7 @@
 
   import ConfirmDialog from './components/ConfirmDialog.svelte';
   import ContextMenu from './components/ContextMenu.svelte';
+  import ThreadDragGhost from './components/ThreadDragGhost.svelte';
   import DropOverlay from './components/DropOverlay.svelte';
 
   import Sidebar from './components/Sidebar.svelte';
@@ -690,6 +691,7 @@
 </div>
 
 <ContextMenu />
+<ThreadDragGhost />
 {#if tour && deferred.Onboarding}{@const Onboarding = deferred.Onboarding}<Onboarding {store} />{/if}
 {#if deferred.ProjectPicker}{@const ProjectPicker = deferred.ProjectPicker}<ProjectPicker {store} />{/if}
 <ConfirmDialog />

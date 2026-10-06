@@ -198,7 +198,6 @@ export function purgeDeletedThreads(ctx: FakeContext): void {
       ctx.mergedPrArchive.delete(thread.id);
       ctx.processes = ctx.processes.filter(p => p.threadId !== thread.id && !isThreadTerminal(thread.id, p.threadId));
       ctx.coordination.delete(thread.id);
-      ctx.moveNotes.delete(thread.id);
       ctx.delegationConfigs.delete(thread.id);
       ctx.delegationAgents.delete(thread.id);
       ctx.delegationLetters.delete(thread.id);
@@ -674,8 +673,7 @@ export function threadMethods(ctx: FakeContext) {
       if (moved?.type === 'text' && moved.moved) {
         const origin = moved.moved.from;
         const here: MoveEnd = { projectId: thread.projectId ?? '', name: ctx.projects.find((p) => p.id === thread.projectId)?.name ?? thread.projectId ?? '', cwd: thread.cwd };
-        if (origin.cwd === here.cwd) ctx.moveNotes.delete(thread.id);
-        else ctx.moveNotes.set(thread.id, { from: origin, to: here, note: fakeMoveNote(origin, here, thread.branch), at: ctx.now() });
+        thread.moveNote = origin.cwd === here.cwd ? null : { from: origin, to: here, note: fakeMoveNote(origin, here, thread.branch), at: ctx.now() };
       }
       const gone = new Set(removed.map((entry) => entry.id));
       const kept = new Set(thread.messages.map(entry => entry.turnId));

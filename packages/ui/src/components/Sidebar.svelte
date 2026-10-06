@@ -14,7 +14,7 @@
   import { compareThreads } from '../lib/thread-order';
   import { projectRollup } from '../lib/thread-state';
   import { groupWorkingThread, recentPreferences } from '../lib/recent.svelte';
-  import { moveThread, takesDrop, THREAD_DRAG_TYPE, threadDrag } from '../lib/thread-move.svelte';
+  import { dropKey as threadDropKey, takesDrop, threadDrag } from '../lib/thread-move.svelte';
   import { controlMenu } from '../lib/controls';
   import { sidebarRows } from '../lib/sidebar-rows.svelte';
   import { projectMenu } from '../lib/project-menu';
@@ -131,7 +131,7 @@
       move: direction => projectView.step(shownGroups, key, direction)
     } : undefined);
   }
-  /** The project a dragged thread row hovers, drawn with the accent outline; only another project of the row's machine takes it. */
+  /** The project a dragged project row hovers while the user reorders them; a dragged thread's target is `threadDrag.over`. */
   let dropOver = $state<string | null>(null);
   let draggedProject = $state<string | null>(null);
   let dropAfter = $state(false);
@@ -141,19 +141,13 @@
     event.dataTransfer.setData(PROJECT_DRAG_TYPE, draggedProject);
     event.dataTransfer.effectAllowed = 'move';
   }
-  function dragOver(event: DragEvent, machine: Machine, project: Project, key: string) {
-    if (draggedProject && event.dataTransfer?.types.includes(PROJECT_DRAG_TYPE)) {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      dropOver = key;
-      const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
-      dropAfter = event.clientY > bounds.top + bounds.height / 2;
-      return;
-    }
-    if (!event.dataTransfer?.types.includes(THREAD_DRAG_TYPE) || !takesDrop(threadDrag.current, machine.id, project.id)) return;
+  function dragOver(event: DragEvent, key: string) {
+    if (!draggedProject || !event.dataTransfer?.types.includes(PROJECT_DRAG_TYPE)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
     dropOver = key;
+    const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    dropAfter = event.clientY > bounds.top + bounds.height / 2;
   }
   function dragLeave(event: DragEvent, key: string) {
     // Leaving for a child of the same section is not leaving it.
@@ -161,19 +155,11 @@
     if (dropOver === key) dropOver = null;
   }
   function drop(event: DragEvent, machine: Machine, project: Project) {
-    if (draggedProject && event.dataTransfer?.types.includes(PROJECT_DRAG_TYPE)) {
-      event.preventDefault();
-      projectView.move(shownGroups, draggedProject, projectKey({ machine, project }), dropAfter);
-      draggedProject = null;
-      dropOver = null;
-      return;
-    }
-    const drag = threadDrag.current;
-    dropOver = null;
-    threadDrag.current = null;
-    if (!takesDrop(drag, machine.id, project.id) || drag === null) return;
+    if (!draggedProject || !event.dataTransfer?.types.includes(PROJECT_DRAG_TYPE)) return;
     event.preventDefault();
-    void moveThread(machine.store, drag.threadId, project.id);
+    projectView.move(shownGroups, draggedProject, projectKey({ machine, project }), dropAfter);
+    draggedProject = null;
+    dropOver = null;
   }
   function startResize(event: PointerEvent) {
     if (event.button !== 0) return;
@@ -247,18 +233,20 @@
         {@const collapsed = owner.isCollapsed(project.id)}
         {@const rollup = collapsed ? projectRollup(owner.threadsOf(project.id), thread => owner.subagents(thread.id)?.count ?? 0) : null}
         {@const draftHere = owner.draftEntries.find(entry => entry.projectId === project.id)}
-        {@const dropKey = `${machine.id}:${project.id}`}
+        {@const dropKey = threadDropKey(machine.id, project.id)}
         <section
           class="project"
           class:inactive={!activeProject(entry)}
-          class:drop={dropOver === dropKey}
+          class:drop={dropOver === dropKey || threadDrag.over === dropKey}
+          class:candidate={takesDrop(threadDrag.current, machine.id, project.id)}
           class:reordering={dropOver === dropKey && draggedProject !== null}
           class:after={dropAfter}
           data-testid="project"
           data-project-id={project.id}
           data-machine-id={machine.id}
-          aria-label={dropOver === dropKey ? fill(strings.threadMove.dropHere, { project: projectName(project) }) : undefined}
-          ondragover={(event) => dragOver(event, machine, project, dropKey)}
+          data-project-name={projectName(project)}
+          aria-label={dropOver === dropKey || threadDrag.over === dropKey ? fill(strings.threadMove.dropHere, { project: projectName(project) }) : undefined}
+          ondragover={(event) => dragOver(event, dropKey)}
           ondragleave={(event) => dragLeave(event, dropKey)}
           ondrop={(event) => drop(event, machine, project)}
         >
@@ -404,10 +392,29 @@
     border-radius: var(--radius-lg);
     background: color-mix(in srgb, var(--color-surface-2) 55%, transparent);
   }
-  /* A thread row dragged over a project it can move to. */
+  .project {
+    transition:
+      border-color var(--dur-2) var(--ease-out-quint),
+      background var(--dur-2) var(--ease-out-quint),
+      box-shadow var(--dur-2) var(--ease-out-quint),
+      opacity var(--dur-2) var(--ease-out-quint);
+  }
+  /* While a thread row travels, every project it can land on shows a dashed edge; the others step back. */
+  :global(html.thread-dragging) .project:not(.candidate) {
+    opacity: 0.6;
+  }
+  .project.candidate {
+    border-style: dashed;
+    border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+  }
+  /* The one under the mouse takes the row: solid accent edge, soft fill and a ring. */
   .project.drop {
+    border-style: solid;
     border-color: var(--color-accent);
     background: var(--color-accent-soft);
+  }
+  .project.candidate.drop {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 22%, transparent);
   }
   .project.reordering { box-shadow: inset 0 2px var(--color-accent); }
   .project.reordering.after { box-shadow: inset 0 -2px var(--color-accent); }

@@ -1,5 +1,5 @@
 import { archiveState } from '../merged-pr-archive-state.ts';
-import type { MessageId, MessagePart, RpcParams, ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
+import type { MessageId, MessagePart, MoveNotice, RpcParams, ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { notFound } from '../errors.ts';
 
@@ -41,6 +41,15 @@ export function saveThread(core: Core, thread: ThreadSummary, eventType: string)
   return summary;
 }
 
+/** The journal setting holding the note a thread's next message carries to its agent (`threads/move.ts`). */
+export const MOVE_NOTE_PREFIX = 'move-note:';
+
+/** The note waiting for a thread's next message, or null. */
+export function pendingMoveNote(core: Core, threadId: ThreadId): MoveNotice | null {
+  const value = core.journal.getSetting(`${MOVE_NOTE_PREFIX}${threadId}`) as MoveNotice | undefined;
+  return value ?? null;
+}
+
 /** The row as a client sees it: the stored summary plus what only lives in memory. */
 export function withLoad(core: Core, thread: ThreadSummary): ThreadSummary {
   const busy = thread.status === 'running' || thread.status === 'waiting';
@@ -53,6 +62,7 @@ export function withLoad(core: Core, thread: ThreadSummary): ThreadSummary {
     progress: busy ? core.threads?.progress?.get(thread.id) ?? null : null,
     backgroundWork: tasks.length === 0 ? null : { kinds: tasks.map(task => task.kind), since: Math.min(...tasks.map(task => task.startedAt)) },
     pendingMove: core.threads?.moves?.pendingOf(thread.id) ?? null,
+    moveNote: thread.agentSessionId ? null : pendingMoveNote(core, thread.id),
     pendingAnswers: [...(core.threads?.deferred?.deferredAnswers.get(thread.id) ?? [])],
   };
 }

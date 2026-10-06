@@ -177,6 +177,42 @@ describe('threads.move', () => {
     expect(seen.at(-1)?.sessionId).toBe(`native-${seen.length - 1}`);
   });
 
+  test('the row shows the pending note until the next message carries it; a move back drops it', async () => {
+    recordingEcho();
+    const alpha = await folderProject('alpha');
+    const beta = await folderProject('beta');
+    const gamma = await folderProject('gamma');
+    const moving = await thread(alpha.id);
+    expect(moving.moveNote ?? null).toBeNull();
+
+    const other = await h.connect();
+    const heard: ThreadSummary[] = [];
+    other.on('thread.updated', (summary) => {
+      if (summary.id === moving.id) heard.push(summary);
+    });
+    const moved = await client.call('threads.move', { threadId: moving.id, projectId: beta.id });
+    const pending = { from: { projectId: alpha.id, name: 'alpha', cwd: alpha.path }, to: { projectId: beta.id, name: 'beta', cwd: beta.path } };
+    expect(moved.moveNote).toMatchObject(pending);
+    expect(moved.moveNote?.note).toContain(`Your working directory is now ${beta.path}.`);
+    expect(moved.moveNote?.by).toBeUndefined();
+    await waitFor(() => heard.some((summary) => summary.moveNote?.to.projectId === beta.id));
+    expect((await other.call('threads.list', { projectId: beta.id })).find((one) => one.id === moving.id)?.moveNote).toMatchObject(pending);
+    expect((await other.call('threads.get', { threadId: moving.id })).moveNote).toMatchObject(pending);
+
+    // The message carries it: the row loses it, and the message has the marker.
+    await run(moving.id, 'go on');
+    await waitFor(() => heard.at(-1)?.moveNote === null);
+    const got = await other.call('threads.get', { threadId: moving.id });
+    expect(got.moveNote).toBeNull();
+    const prompt = got.messages.filter((message) => message.role === 'user').at(-1)?.parts[0];
+    expect(prompt?.type === 'text' ? prompt.moved : undefined).toMatchObject(pending);
+
+    // A move away and back again has nothing to say.
+    expect((await client.call('threads.move', { threadId: moving.id, projectId: gamma.id })).moveNote).toMatchObject({ from: { cwd: beta.path }, to: { cwd: gamma.path } });
+    expect((await client.call('threads.move', { threadId: moving.id, projectId: beta.id })).moveNote).toBeNull();
+    await waitFor(() => heard.at(-1)?.projectId === beta.id && heard.at(-1)?.moveNote === null);
+  });
+
   test('two moves before a message keep the first origin; moving back clears the note', async () => {
     const { seen } = recordingEcho();
     const alpha = await folderProject('alpha');
@@ -573,6 +609,21 @@ describe('boite thread move', () => {
     expect(h.core.threads.require(moving.id).projectId).toBe(beta.id);
     const byId = await boite(moving.id, ['thread', 'move', alpha.id, '--json']);
     expect(JSON.parse(byId.out)).toMatchObject({ when: 'done', projectId: alpha.id, cwd: alpha.path });
+  });
+
+  test('a move the agent made leaves no pending note, even over the user\'s', async () => {
+    recordingEcho();
+    const alpha = await folderProject('alpha');
+    const beta = await folderProject('beta');
+    const gamma = await folderProject('gamma');
+    const moving = await thread(alpha.id);
+    expect((await boite(moving.id, ['thread', 'move', 'beta'])).code).toBe(0);
+    expect(await client.call('threads.get', { threadId: moving.id })).toMatchObject({ projectId: beta.id, moveNote: null });
+
+    expect((await client.call('threads.move', { threadId: moving.id, projectId: gamma.id })).moveNote).toMatchObject({ to: { projectId: gamma.id } });
+    expect((await boite(moving.id, ['thread', 'move', 'alpha'])).code).toBe(0);
+    const row = (await client.call('threads.list', { projectId: alpha.id })).find((one) => one.id === moving.id);
+    expect(row?.moveNote).toBeNull();
   });
 
   test('refuses an unknown project and the thread\'s own, by field', async () => {

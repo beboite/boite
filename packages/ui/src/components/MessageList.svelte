@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { ArrowDown } from '@lucide/svelte';
-  import type { Message, MoveNotice, ThreadLink } from '@boite/contracts';
+  import type { Message } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import MessageTurnSummary from './MessageTurnSummary.svelte';
@@ -20,7 +20,7 @@
   import MemoryRow from './MemoryRow.svelte';
   import { placeMemoryEvents } from '../lib/memory-timeline';
   import MessageActions from './MessageActions.svelte';
-  import { turnAnswer } from '../lib/message-display';
+  import { movedBy, pendingMoveOf, startedFrom, turnAnswer } from '../lib/message-display';
   import { focusComposer } from '../lib/focus';
   import { isSending } from '../lib/composer-queue';
   import { retryTurn } from '../lib/composer-edit';
@@ -94,20 +94,6 @@
   const memoryRows = $derived(new Map(memoryPlacement.standalone.map((event, index) => [`memory:${event.at}:${event.kind}:${index}`, event])));
   const timelineOrder = $derived(timeline.map(message => message.id).join('\0'));
   const savedReading = untrack(() => store.readingPositions?.get(threadId));
-
-  /** The core's line for a move the agent asked for itself (`boite thread move`), drawn as a marker, not a message. */
-  function movedBy(message: Message): MoveNotice | null {
-    if (message.role !== 'system') return null;
-    for (const part of message.parts) if (part.type === 'text' && part.moved?.by === 'agent') return part.moved;
-    return null;
-  }
-
-  /** The core's line for a thread the agent started (`boite thread new`). */
-  function startedFrom(message: Message): ThreadLink | null {
-    if (message.role !== 'system') return null;
-    for (const part of message.parts) if (part.type === 'text' && part.started) return part.started;
-    return null;
-  }
 
   /** How often the bottom message's height is allowed to speak to the pin. */
   const TAIL_GAP_MS = 100;
@@ -250,6 +236,8 @@
   const windowed = $derived(timeline.length > WINDOW_FROM);
   /** The window was opened around a reading position and stops short of the thread's last message. */
   const cutBelow = $derived((store.messagesAfter ?? null) !== null);
+  /** A move the user made, said at the foot of the thread until the prompt that tells the agent goes. */
+  const pendingMove = $derived(cutBelow || isSending(timeline.at(-1) ?? { id: '' }) ? null : pendingMoveOf(store.openThread, threadId));
 
   function totals(list: Message[]): number[] {
     return slots.totals(list, timelineOrder);
@@ -817,6 +805,7 @@
         <div class="spacer" data-testid="timeline-below" style="height: {view.below}px"></div>
       {/if}
       {#if store.loadingNewer}<p class="loading-older" data-testid="loading-newer">{strings.chat.loadingNewer}</p>{/if}
+      {#if pendingMove}<MoveMarker notice={pendingMove} pending />{/if}
     </div>
     {#if promptRoom > 0}
       <div class="spacer" data-testid="prompt-room" style:height="{promptRoom}px" aria-hidden="true"></div>

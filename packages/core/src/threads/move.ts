@@ -8,10 +8,10 @@ import { newId } from '../ids.ts';
 import type { ThreadStore } from '../threads.ts';
 import type { PlacedWorktree } from '../worktree.ts';
 import { draftFolderName, makeDraftFolder } from './inputs.ts';
-import { saveThread, withLoad } from './records.ts';
+import { MOVE_NOTE_PREFIX, saveThread, withLoad } from './records.ts';
 
-/** The journal setting holding the note a thread's next message carries to its agent. */
-export const MOVE_NOTE_PREFIX = 'move-note:';
+// The note lives with the row's other reads (`withLoad` shows it to clients).
+export { MOVE_NOTE_PREFIX, pendingMoveNote as pendingMove } from './records.ts';
 
 /**
  * Whether the agent's own session survives a change of folder. Codex's
@@ -31,7 +31,7 @@ function whereOf(to: MoveEnd, branch: string | null): string {
 
 /** The sentence the agent reads before its next prompt. */
 export function moveNote(from: MoveEnd, to: MoveEnd, branch: string | null): string {
-  return `This thread moved from project ${from.name} (${from.cwd}) to project ${to.name} (${to.cwd}). Your working directory is now ${whereOf(to, branch)}. Files you changed in the old folder stay there.\n\n`;
+  return `This thread moved from project ${from.name} (${from.cwd}) to project ${to.name} (${to.cwd}). Your working directory is now ${whereOf(to, branch)}.\n- Run every command and resolve every relative path from this new directory.\n- File contents, paths, git state and command results from earlier in this conversation describe the old folder: read files again here before relying on them.\n- Changes made in the old folder stayed there and were not carried over. Leave the old folder alone unless the user asks.\n- Follow this project's own instructions (CLAUDE.md, AGENTS.md or the like), not the old project's.\n\n`;
 }
 
 /** What a fresh session's history says about a move the agent asked for itself. */
@@ -365,10 +365,4 @@ export class ThreadMove {
     const notice: MoveNotice = { from: origin, to, note: moveNote(origin, to, branch), at: Date.now() };
     this.core.journal.setSetting(key, notice);
   }
-}
-
-/** The note waiting for a thread's next message, or null. */
-export function pendingMove(core: Core, threadId: ThreadId): MoveNotice | null {
-  const value = core.journal.getSetting(`${MOVE_NOTE_PREFIX}${threadId}`) as MoveNotice | undefined;
-  return value ?? null;
 }

@@ -9,7 +9,7 @@ import type { FakeContext, FakeMethods } from './context';
 
 /** The core's sentence, word for word, so a capture reads what the agent reads. */
 export function fakeMoveNote(from: MoveEnd, to: MoveEnd, branch: string | null): string {
-  return `This thread moved from project ${from.name} (${from.cwd}) to project ${to.name} (${to.cwd}). Your working directory is now ${whereOf(to, branch)}. Files you changed in the old folder stay there.\n\n`;
+  return `This thread moved from project ${from.name} (${from.cwd}) to project ${to.name} (${to.cwd}). Your working directory is now ${whereOf(to, branch)}.\n- Run every command and resolve every relative path from this new directory.\n- File contents, paths, git state and command results from earlier in this conversation describe the old folder: read files again here before relying on them.\n- Changes made in the old folder stayed there and were not carried over. Leave the old folder alone unless the user asks.\n- Follow this project's own instructions (CLAUDE.md, AGENTS.md or the like), not the old project's.\n\n`;
 }
 
 /** What the history of a thread the agent moved itself says, as the core's `agentMoveNote`. */
@@ -110,14 +110,14 @@ function move(ctx: FakeContext, threadId: ThreadId, projectId: string, stopBackg
       one.context = null;
       one.promptCache = null;
     }
+    // The note each moved thread's next message carries, as the core's `move-note:` setting, read back as `moveNote`.
     if (by === 'user') {
-      const earlier = ctx.moveNotes.get(one.id);
+      const earlier = one.moveNote ?? null;
       const origin = earlier?.from ?? { ...from, cwd: one.cwd };
-      if (origin.cwd === cwd) ctx.moveNotes.delete(one.id);
-      else ctx.moveNotes.set(one.id, { from: origin, to, note: fakeMoveNote(origin, to, branch), at: ctx.now() } satisfies MoveNotice);
+      one.moveNote = origin.cwd === cwd ? null : { from: origin, to, note: fakeMoveNote(origin, to, branch), at: ctx.now() } satisfies MoveNotice;
     } else {
       // The agent asked and knows where it goes: nothing waits for its next message.
-      ctx.moveNotes.delete(one.id);
+      one.moveNote = null;
     }
     one.projectId = target.id;
     one.cwd = cwd;

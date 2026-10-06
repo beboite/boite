@@ -7,7 +7,7 @@
   import { contextMenu } from '../lib/context-menu.svelte';
   import { archiveThread } from '../lib/archive';
   import { deleteThread } from '../lib/thread-removal';
-  import { moveBlocked, pendingLine, pickMoveItem, THREAD_DRAG_TYPE, threadDrag } from '../lib/thread-move.svelte';
+  import { moveBlocked, pendingLine, pickMoveItem, startThreadDrag, threadDrag } from '../lib/thread-move.svelte';
   import { threadMenuItems } from '../lib/thread-menu';
   import { focusOnMount } from '../lib/actions';
   import { strings } from '../lib/strings';
@@ -129,12 +129,10 @@
     await tick();
     row?.focus({ preventScroll: true });
   }
-  /** A row dragged onto another project's section moves there; the project reads `threadDrag` while it is over it. */
-  function dragStart(event: DragEvent) {
-    if (!event.dataTransfer) return;
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData(THREAD_DRAG_TYPE, JSON.stringify({ machineId: machine.id, threadId: thread.id }));
-    threadDrag.current = { machineId: machine.id, threadId: thread.id, projectId: thread.projectId };
+  /** A top-level row moves to another project when dragged onto its section, unless a sub-thread still works. */
+  let movable = $derived(!thread.parentThreadId && !moveBlocked(owner, thread.id));
+  function dragStart(event: PointerEvent) {
+    if (movable) startThreadDrag(event, owner, { machineId: machine.id, threadId: thread.id, projectId: thread.projectId }, { title: thread.title, providerId: thread.providerId });
   }
   function menu(event: MouseEvent) {
     contextMenu.open(
@@ -178,9 +176,9 @@
     class:meta
     class:offline={owner.connection !== 'ready'}
     class:dragging={threadDrag.current?.threadId === thread.id && threadDrag.current.machineId === machine.id}
-    draggable={!thread.parentThreadId && !moveBlocked(owner, thread.id)}
-    ondragstart={dragStart}
-    ondragend={() => (threadDrag.current = null)}
+    data-movable={movable}
+    onpointerdown={dragStart}
+    ondragstart={(event) => event.preventDefault()}
     oncontextmenu={menu}
   >
     <button
@@ -251,8 +249,20 @@
   .thread.open {
     background: var(--color-active);
   }
+  /* The row left behind while its card travels: an empty slot, so the list does not jump. */
   .thread.dragging {
-    opacity: 0.5;
+    background: color-mix(in srgb, var(--color-accent) 6%, transparent);
+    outline: 1px dashed color-mix(in srgb, var(--color-accent) 55%, transparent);
+    outline-offset: -1px;
+  }
+  .thread.dragging > * {
+    opacity: 0.35;
+  }
+  /* A row on the move: the hand closes over the whole page, and no text gets selected on the way. */
+  :global(html.thread-dragging),
+  :global(html.thread-dragging *) {
+    cursor: grabbing !important;
+    user-select: none;
   }
   /* Its machine dropped: the row still opens, to read what is held and queue a prompt. */
   .thread.offline .row,
