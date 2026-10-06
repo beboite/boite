@@ -541,6 +541,14 @@ Function .onInit
   ${If} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
     StrCpy $UpdateMode 1
   ${EndIf}
+  ; So does the executable of an install made under an earlier binary name
+  ; (Boite Dev shipped boite-shell.exe). Taken for a fresh install, it would
+  ; offer that install's old uninstaller first, and its links and pins with it.
+  ReadRegStr $OldMainBinaryName SHCTX "${UNINSTKEY}" "MainBinaryName"
+  ${If} $OldMainBinaryName != ""
+  ${AndIf} ${FileExists} "$INSTDIR\$OldMainBinaryName"
+    StrCpy $UpdateMode 1
+  ${EndIf}
 FunctionEnd
 
 
@@ -662,7 +670,10 @@ Section Install
     !insertmacro NSIS_HOOK_PREINSTALL
   !endif
 
-  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  ; The hooks close this install's shell by its path; this matches a name.
+  !ifndef BOITE_HOOKS_CLOSE_SHELL
+    !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  !endif
 
   ; Copy main executable
   File "${MAINBINARYSRCPATH}"
@@ -799,7 +810,9 @@ Section Uninstall
     !insertmacro NSIS_HOOK_PREUNINSTALL
   !endif
 
-  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  !ifndef BOITE_HOOKS_CLOSE_SHELL
+    !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  !endif
 
   ; Delete the app directory and its content from disk
   ; Copy main executable

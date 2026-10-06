@@ -166,10 +166,20 @@ bun run build:shell:dev     # Boite Dev, com.boite.two.dev, boite2-dev
 The dev build passes a second overlay, `apps/shell/src-tauri/tauri.dev.conf.json`,
 after the bundle one. The Tauri CLI takes `--config` more than once and merges
 in the order given, so the dev overlay carries only what differs: the product
-name, the identifier and `bundle.icon` pointing at `icons/`, the black mark on
-white. The release uses `icons-dev/`, the white mark on black. These asset
-directory names are historical. Two identifiers mean two NSIS product
-codes, so the second installer installs beside the first instead of over it.
+name, the identifier, the main binary name and `bundle.icon` pointing at
+`icons/`, the black mark on white. The release uses `icons-dev/`, the white
+mark on black. These asset directory names are historical. Two identifiers
+mean two NSIS product codes, so the second installer installs beside the first
+instead of over it.
+
+Boite Dev's window is `boite-dev-shell.exe` (`mainBinaryName`), Boite's stays
+`boite-shell.exe`. Tauri renames the executable Cargo built (`boite-shell`)
+before bundling, so after `build:shell:dev` the Cargo target holds
+`boite-dev-shell.exe` and no `boite-shell.exe`: the end to end suite and
+`stage:core` never pick up a Dev shell. The installers close only the shell
+running from their own directory (see [Desktop updates](updates.md)), and a Boite Dev
+installed before the rename is updated in place: its `boite-shell.exe` is
+closed and deleted, and its links and login entry move to the new file.
 
 The shell derives its channel from the identifier's `.dev` suffix and passes
 `--channel dev` to its core. Shell and core must select the same directory:
@@ -237,7 +247,8 @@ The bundle target is NSIS, the identifier is `com.boite.two` and the product
 name is `Boite`. The install is per user and asks for no elevation.
 `%LOCALAPPDATA%\Boite` ends up holding:
 
-- `boite-shell.exe`, the window and the tray icon.
+- `boite-shell.exe`, the window and the tray icon (`boite-dev-shell.exe` in
+  `%LOCALAPPDATA%\Boite Dev`).
 - `boite-core.exe`, the sidecar it starts: Bun's baseline runtime under the core's name.
   Run by hand with no script it is `bun`, so a subcommand goes after the bundle:
   `boite-core.exe core\main.js pair --owner`.

@@ -15,6 +15,12 @@ Local changes preserve pinned shortcuts during updates:
   the current executable. Binary-name migrations still update old links.
 - The finish-page checkbox can recreate a missing desktop link on request;
   automatic update calls still leave missing links absent.
+- `.onInit` also counts the executable of the previous install's registered
+  `MainBinaryName` as an update, so a binary rename (Boite Dev's
+  `boite-shell.exe` to `boite-dev-shell.exe`) keeps the in-place path.
+- The install and uninstall sections skip `CheckIfAppIsRunning`, which finds
+  and kills processes by file name, when `hooks.nsh` defines
+  `BOITE_HOOKS_CLOSE_SHELL`: the hooks close this install's shell by its path.
 
 When updating the Tauri CLI, compare this file with the new upstream template
 and reapply these changes. Keep its MIT notice. Run `bun run build:shell` and
