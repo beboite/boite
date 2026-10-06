@@ -103,6 +103,16 @@ fn xml_escape(text: &str) -> String {
     text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
+/// Whether `launchctl print-disabled gui/<uid>` lists `label` as disabled:
+/// `"<label>" => disabled` on current macOS, `=> true` on older releases.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn launchd_disabled(output: &str, label: &str) -> bool {
+    let key = format!("\"{label}\"");
+    output.lines().map(str::trim).filter_map(|line| line.strip_prefix(key.as_str()))
+        .filter_map(|rest| rest.trim_start().strip_prefix("=>"))
+        .any(|state| matches!(state.trim(), "disabled" | "true"))
+}
+
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn launch_agent(item: &LoginItem) -> String {
     format!(
@@ -291,8 +301,25 @@ mod backend {
 
 #[cfg(target_os = "macos")]
 mod backend {
-    use super::{launch_agent, read_file, remove_file, write_file, LoginItem};
+    use super::{launch_agent, launchd_disabled, read_file, remove_file, write_file, LoginItem};
     use std::path::PathBuf;
+    use std::process::Command;
+
+    /// The user's launchd domain, `gui/<uid>`.
+    fn domain() -> String {
+        // SAFETY: getuid has no preconditions and cannot fail.
+        format!("gui/{}", unsafe { libc::getuid() })
+    }
+
+    /// `launchctl disable` (or System Settings) keeps an agent from loading
+    /// even when its plist is in place. A launchctl that cannot be asked
+    /// leaves the plist as the answer.
+    fn disabled(item: &LoginItem) -> bool {
+        match Command::new("/bin/launchctl").args(["print-disabled", &domain()]).output() {
+            Ok(output) => launchd_disabled(&String::from_utf8_lossy(&output.stdout), &item.identifier),
+            Err(error) => { eprintln!("[shell] launchctl print-disabled could not run: {error}"); false }
+        }
+    }
 
     fn file(item: &LoginItem) -> Result<PathBuf, String> {
         let home = std::env::var_os("HOME").ok_or("HOME is not set, so the LaunchAgents folder cannot be found")?;
@@ -300,9 +327,18 @@ mod backend {
     }
 
     pub(super) fn enabled(item: &LoginItem) -> Result<bool, String> {
-        Ok(read_file(&file(item)?)?.is_some_and(|text| text == launch_agent(item)))
+        Ok(read_file(&file(item)?)?.is_some_and(|text| text == launch_agent(item)) && !disabled(item))
     }
-    pub(super) fn enable(item: &LoginItem) -> Result<(), String> { write_file(&file(item)?, &launch_agent(item)) }
+    pub(super) fn enable(item: &LoginItem) -> Result<(), String> {
+        write_file(&file(item)?, &launch_agent(item))?;
+        if !disabled(item) { return Ok(()); }
+        // The switch is the user asking again, as on Windows.
+        let target = format!("{}/{}", domain(), item.identifier);
+        let status = Command::new("/bin/launchctl").args(["enable", &target]).status()
+            .map_err(|error| format!("launchctl enable {target} could not run: {error}"))?;
+        if !status.success() { return Err(format!("launchctl enable {target} failed: {status}")); }
+        Ok(())
+    }
     pub(super) fn disable(item: &LoginItem) -> Result<(), String> { remove_file(&file(item)?) }
 }
 
@@ -390,6 +426,16 @@ mod tests {
         assert!(agent.contains("<string>--autostart</string>"));
         assert!(agent.contains("<key>RunAtLoad</key>\n  <true/>"));
         assert!(agent.contains("<string>com.boite.two.test</string>"));
+    }
+
+    #[test]
+    fn a_launchd_override_turns_the_agent_off() {
+        let output = "disabled services = {\n\t\"com.apple.Siri\" => disabled\n\t\"com.boite.two\" => enabled\n\t\"com.boite.two.dev\" => disabled\n}\n";
+        assert!(!launchd_disabled(output, "com.boite.two"));
+        assert!(launchd_disabled(output, "com.boite.two.dev"));
+        assert!(!launchd_disabled(output, "com.boite"), "a label that is only a prefix is another agent");
+        assert!(launchd_disabled("\t\"com.boite.two\" => true\n", "com.boite.two"), "older macOS prints true");
+        assert!(!launchd_disabled("", "com.boite.two"));
     }
 
     /// The real XDG files, in a scratch directory: on, read back, off.

@@ -8,14 +8,18 @@
   /** One switch the shell owns: its command reads the value, or sets it and answers what holds. */
   function shellSwitch(command: string) {
     const state = $state({ enabled: false, ready: false, error: '' });
-    async function update(value?: boolean) {
+    /** `input` is the switch the user flipped: it shows what the shell holds afterwards, even when the change failed. */
+    async function update(value?: boolean, input?: HTMLInputElement) {
       state.ready = false;
       try {
         const { invoke } = await import('@tauri-apps/api/core');
         state.enabled = await invoke<boolean>(command, value === undefined ? {} : { enabled: value });
         state.error = '';
       } catch (cause) { state.error = String(cause); }
-      finally { state.ready = true; }
+      finally {
+        state.ready = true;
+        if (input) input.checked = state.enabled;
+      }
     }
     return { state, update };
   }
@@ -28,12 +32,12 @@
 <!-- Rows of General's App card, not a card of their own: two switches do not need a frame. -->
 <label for="{uid}-close-to-tray" class="switch-row" data-testid="shell-settings">
   <span class="text ui-label-box"><span class="ui-label" id="{uid}-close-to-tray-name">{strings.settings.closeToTray}</span><InfoTip topic={strings.settings.closeToTray} text={strings.settings.closeToTrayHint} /></span>
-  <input id="{uid}-close-to-tray" aria-labelledby="{uid}-close-to-tray-name" type="checkbox" role="switch" data-testid="close-to-tray" checked={tray.state.enabled} disabled={!tray.state.ready} onchange={(event) => void tray.update(event.currentTarget.checked)} />
+  <input id="{uid}-close-to-tray" aria-labelledby="{uid}-close-to-tray-name" type="checkbox" role="switch" data-testid="close-to-tray" checked={tray.state.enabled} disabled={!tray.state.ready} onchange={(event) => void tray.update(event.currentTarget.checked, event.currentTarget)} />
 </label>
 {#if tray.state.error}<p class="error" role="alert">{tray.state.error}</p>{/if}
 <label for="{uid}-launch-at-login" class="switch-row">
   <span class="text ui-label-box"><span class="ui-label" id="{uid}-launch-at-login-name">{strings.settings.launchAtLogin}</span><InfoTip topic={strings.settings.launchAtLogin} text={strings.settings.launchAtLoginHint} /></span>
-  <input id="{uid}-launch-at-login" aria-labelledby="{uid}-launch-at-login-name" type="checkbox" role="switch" data-testid="launch-at-login" checked={login.state.enabled} disabled={!login.state.ready} onchange={(event) => void login.update(event.currentTarget.checked)} />
+  <input id="{uid}-launch-at-login" aria-labelledby="{uid}-launch-at-login-name" type="checkbox" role="switch" data-testid="launch-at-login" checked={login.state.enabled} disabled={!login.state.ready} onchange={(event) => void login.update(event.currentTarget.checked, event.currentTarget)} />
 </label>
 {#if login.state.error}<p class="error" role="alert">{login.state.error}</p>{/if}
 <style>
