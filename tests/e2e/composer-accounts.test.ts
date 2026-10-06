@@ -51,11 +51,12 @@ test('queued prompts keep their thread, and browser project and account actions 
     await page.waitFor('Array.from(document.querySelectorAll("[data-testid=message][data-role=assistant]")).some(el => el.textContent.includes("queued only for A"))');
     await page.waitFor('document.querySelector("[data-testid=thread-header][data-status]")?.dataset.status === "idle"');
     const userMessages = (await client.call('threads.get', { threadId: a.id })).messages.filter(message => message.role === 'user');
+    // The page says hello as the web app in a desktop browser, and each prompt keeps that origin for the agent.
+    const sentFrom = { client: 'pwa', device: 'browser' } as const;
     expect(userMessages.map(message => message.parts)).toEqual([
-      [{ type: 'text', text: 'hold here [permission]' }],
-      [{ type: 'text', text: 'queued only for A\n\nsecond queued for A\n\nthird queued for A' }]
+      [{ type: 'text', text: 'hold here [permission]', sentFrom }],
+      [{ type: 'text', text: 'queued only for A\n\nsecond queued for A\n\nthird queued for A', sentFrom }]
     ]);
-    expect(userMessages.at(-1)?.parts).toEqual([{ type: 'text', text: 'queued only for A\n\nsecond queued for A\n\nthird queued for A' }]);
     await page.screenshot(join(artifacts, 'composer-queued-batch.png'));
     expect((await client.call('threads.get', { threadId: b.id })).messages).toHaveLength(0);
 

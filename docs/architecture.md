@@ -43,6 +43,19 @@ The owner token is 32 random bytes generated on first start and stored in
 | Session | Paired-device token; limited to `DEVICE_METHODS` and `DEVICE_EVENTS` |
 | Agent | In-memory per-thread token supplied to a launched process; limited to `AGENT_METHODS` and its authenticated thread |
 
+`hello` also names the client and, optionally, its `device`: the shell sends
+the computer's name, which its own core reported, and the web app sends `phone`
+or `browser`. Only the shell and the web app of the owner or a paired device
+count. A prompt they start with `turns.start` keeps that origin on its text
+part as `sentFrom`, which the UI does not show. Before the prompt the core adds
+one line telling the agent where it came from, such as `[Boite: the user sent
+this from the Boite desktop app on the computer "office-pc". ...]`. It says
+this when the agent session starts and when the origin differs from the
+previous prompt that had one, not on every turn. Turning off the Boite guide
+turns it off too. A shell on the loopback that
+names no device is given the core's hostname. The name is whatever the client
+said, so it is information for the agent and never grants anything.
+
 Device and agent event lists live in `packages/contracts/src/access.ts`; agent
 method reasons live in `packages/core/src/access.ts`. New methods remain
 owner-only unless the access lists explicitly permit them. The router and

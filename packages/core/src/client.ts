@@ -11,7 +11,7 @@ import type {
 } from '@boite/contracts';
 
 export interface ConnectOptions {
-  client?: { name: string; version: string };
+  client?: { name: string; version: string; device?: string };
   timeoutMs?: number;
   /** Response deadline for ordinary RPC calls; the handshake uses timeoutMs. */
   requestTimeoutMs?: number;

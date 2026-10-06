@@ -1145,12 +1145,27 @@ export interface PendingMove {
 export const ARTIFACT_MAX_BYTES = 512 * 1024 * 1024;
 export interface ArtifactContent { url: string; bytes: number; mimeType: string; name: string; }
 
+/**
+ * The app a user prompt was sent from, as its connection said hello
+ * (`hello` `client`). Carried by the prompt's text part and never shown: the
+ * core tells the agent in one line when a session starts and when the
+ * origin changes. `device` is the computer's name for the shell, `phone` or
+ * `browser` for the web app, null when the client did not say.
+ */
+export interface SentFrom {
+  client: 'shell' | 'pwa';
+  device: string | null;
+}
+
+/** The longest `hello` `client.device` the core keeps. */
+export const CLIENT_DEVICE_MAX = 64;
+
 export type MessagePart =
   /**
    * `omitted`: characters a page left out of the end of `text` because the
    * message was too heavy to send whole (`MESSAGE_SENT_MAX_BYTES`). Never persisted.
    */
-  | { type: 'text'; text: string; complete?: boolean; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number }; moved?: MoveNotice; startedBy?: ThreadLink; started?: ThreadLink; omitted?: number }
+  | { type: 'text'; text: string; complete?: boolean; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number }; moved?: MoveNotice; startedBy?: ThreadLink; started?: ThreadLink; sentFrom?: SentFrom; omitted?: number }
   /**
    * An image the user sent with the prompt, journalled with the message. A page
    * asked with `compactImages` leaves a large one's `data` empty, with
@@ -3091,6 +3106,11 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * token. Without a nonce a grant is strictly one-shot. A nonce of another
    * length, or one sent with a token, is refused with `InvalidParams` naming
    * `nonce`, before the grant is spent.
+   *
+   * `client.device` names what the client runs on, for the agent's note on
+   * where a prompt came from (`SentFrom`): the computer's name for the
+   * shell, `phone` or `browser` for the web app. At most
+   * `CLIENT_DEVICE_MAX` characters; anything else is ignored.
    */
   hello: {
     params: {
@@ -3099,7 +3119,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
       ticket?: string;
       nonce?: string;
       protocolVersion: number;
-      client: { name: string; version: string };
+      client: { name: string; version: string; device?: string };
     };
     result: {
       core: CoreInfo;

@@ -114,6 +114,8 @@ export interface WsClientOptions {
   onUnauthorized?: (error: RpcFailure) => void;
   clientName?: ClientName;
   version?: string;
+  /** What this client runs on, read at every hello (`hello` `client.device`); null says nothing. */
+  device?: () => string | null;
   socketFactory?: SocketFactory;
   reconnect?: boolean;
   /** Milliseconds before reconnect attempt `n`, zero based. */
@@ -274,9 +276,10 @@ function browserSocket(url: string): SocketLike {
 }
 
 export class WsClient implements ObservableClient {
-  #options: Required<Omit<WsClientOptions, 'clientName' | 'version' | 'grant' | 'ticket' | 'paired' | 'onSession' | 'onRevoked' | 'onUnauthorized'>> & {
+  #options: Required<Omit<WsClientOptions, 'clientName' | 'version' | 'device' | 'grant' | 'ticket' | 'paired' | 'onSession' | 'onRevoked' | 'onUnauthorized'>> & {
     clientName: ClientName;
     version: string;
+    device: () => string | null;
   };
   /** Spent on the first hello that answers; a refused grant is not retried. */
   #grant: string | null;
@@ -320,6 +323,7 @@ export class WsClient implements ObservableClient {
       token: options.token,
       clientName: options.clientName ?? 'shell',
       version: options.version ?? '2.0.0-beta.1',
+      device: options.device ?? (() => null),
       socketFactory: options.socketFactory ?? browserSocket,
       reconnect: options.reconnect ?? true,
       backoff: options.backoff ?? defaultBackoff
@@ -609,11 +613,12 @@ export class WsClient implements ObservableClient {
   }
 
   #helloParams(): RpcParams<'hello'> {
+    const device = this.#options.device();
     return {
       ...(this.#ticket !== null ? { ticket: this.#ticket }
         : this.#grant === null ? { token: this.#options.token } : { grant: this.#grant, nonce: this.#nonce }),
       protocolVersion: PROTOCOL_VERSION,
-      client: { name: this.#options.clientName, version: this.#options.version }
+      client: { name: this.#options.clientName, version: this.#options.version, ...(device ? { device } : {}) }
     };
   }
 

@@ -474,13 +474,14 @@ describe('WsClient', () => {
     expect(states).toEqual(['connecting', 'ready']);
     client.close();
   });
-  test('hello is the first frame, and it carries the token', async () => {
+  test('hello is the first frame, and it carries the token and the device', async () => {
     const sockets: FakeSocket[] = [];
     const client = new WsClient({
       url: 'http://127.0.0.1:8777',
       token: 'secret',
       clientName: 'shell',
       version: '2.0.0-beta.1',
+      device: () => 'office-pc',
       socketFactory: () => {
         const socket = new FakeSocket();
         sockets.push(socket);
@@ -499,7 +500,7 @@ describe('WsClient', () => {
     expect(hello.params).toEqual({
       token: 'secret',
       protocolVersion: PROTOCOL_VERSION,
-      client: { name: 'shell', version: '2.0.0-beta.1' }
+      client: { name: 'shell', version: '2.0.0-beta.1', device: 'office-pc' }
     });
 
     live.receive({ jsonrpc: '2.0', id: hello.id, result: { core: CORE, principal: 'owner' } });

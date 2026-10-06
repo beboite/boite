@@ -1,6 +1,7 @@
 import { RpcErrorCode, type CoreInfo, type Principal, type ThreadId } from '@boite/contracts';
 import { RpcFailure, WsClient, type Client, type ClientState, type ObservableClient } from '../client';
 import { confirm } from '../confirm.svelte';
+import { deviceLabel, noteThisComputer } from '../device';
 import { clearStoredEndpoint, droppedSince, forgetGroupOf, readStoredEndpoint, rememberSession, refreshLocalEnvironment, removeBrought, fromTauri, shellEndpointError, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, servesThisPage, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from '../endpoint';
 import { onboardingSeen } from '../onboarding';
 import { rightPanel } from '../right-panel.svelte';
@@ -276,7 +277,8 @@ export class Connection {
         this.ctx.store.error = strings.errors.revoked;
       },
       clientName: window.__TAURI_INTERNALS__ === undefined ? 'pwa' : 'shell',
-      version: UI_VERSION
+      version: UI_VERSION,
+      device: deviceLabel
     });
     this.ctx.store.attach(client);
   }
@@ -365,6 +367,7 @@ export class Connection {
       const core = await client.connect();
       if (!this.ctx.currentClient(client, generation)) return;
       this.core = core;
+      if (this.localCore) noteThisComputer(core.hostname);
       this.connection = client.state;
       this.principal = client.principal;
       this.pairingRequired = false;
