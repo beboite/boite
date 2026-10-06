@@ -261,11 +261,12 @@ export class TurnContexts {
     const origin = input.sentFrom;
     const compose = (body: string, sessionId: string | null): string => {
       const inject = !((operation && sessionId !== null) || nativeCommandPrompt(body));
-      // Said when a session starts and when the user changes app or computer, not on every turn.
-      const said = origin && inject && (sessionId === null || !sameOrigin(origin, this.sentFromBefore(threadId, origin.messageId)))
-        ? sentFromNote(origin.from) : '';
       // Echo treats "question" as a test directive, including in injected help.
       const guideEnabled = this.core.brain.config().boiteGuide !== false;
+      // Said when a session starts and when the user changes app or computer, not on every turn.
+      // Boite's own text, so the guide switch turns it off with the rest.
+      const said = origin && inject && guideEnabled && (sessionId === null || !sameOrigin(origin, this.sentFromBefore(threadId, origin.messageId)))
+        ? sentFromNote(origin.from) : '';
       const coordinationGuide = inject && operation !== 'compact' && guideEnabled ? this.core.coordination.instructions(threadId) + this.core.stewards.instructions(threadId) : '';
       const guide = inject && sessionId === null && guideEnabled
         ? agentGuide(provider.protocol !== 'echo' && this.core.settings.get().asyncQuestions !== false) : '';

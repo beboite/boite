@@ -67,7 +67,7 @@ test('the picker changes native protocols in one conversation and carries histor
   await page.waitFor(`document.querySelectorAll('[data-testid="message"][data-role="assistant"]').length === 2`);
   await page.waitFor(`Array.from(document.querySelectorAll('[data-testid="message"][data-role="assistant"]')).at(-1)?.textContent.includes('azure-42')`);
   const thread = await client.call('threads.get', { threadId });
-  expect(thread.messages.filter((message) => message.role === 'user').at(-1)?.parts).toEqual([{ type: 'text', text: 'Continue using the release code.' }]);
+  expect(thread.messages.filter((message) => message.role === 'user').at(-1)?.parts).toEqual([{ type: 'text', text: 'Continue using the release code.', sentFrom: { client: 'pwa', device: 'browser' } }]);
   expect((await client.call('threads.list', {}))).toHaveLength(1);
   await page.evaluate('document.fonts.ready');
   await capture('model-switch-conversation.png');

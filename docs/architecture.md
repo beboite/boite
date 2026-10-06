@@ -51,7 +51,8 @@ part as `sentFrom`, which the UI does not show. Before the prompt the core adds
 one line telling the agent where it came from, such as `[Boite: the user sent
 this from the Boite desktop app on the computer "office-pc". ...]`. It says
 this when the agent session starts and when the origin differs from the
-previous prompt that had one, not on every turn. A shell on the loopback that
+previous prompt that had one, not on every turn. Turning off the Boite guide
+turns it off too. A shell on the loopback that
 names no device is given the core's hostname. The name is whatever the client
 said, so it is information for the agent and never grants anything.
 

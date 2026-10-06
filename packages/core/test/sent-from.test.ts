@@ -8,7 +8,7 @@ import { sentFromOf } from '../src/server/hello.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 let h: TestCore;
-beforeEach(async () => { h = await startTestCore(); });
+beforeEach(async () => { h = await startTestCore({ boiteGuide: true }); });
 afterEach(async () => { await h.stop(); });
 
 const NOTE = 'the user sent this from';
@@ -50,6 +50,10 @@ test('the agent hears which app sent a prompt when its session starts and when t
     const users = h.core.journal.listMessages(threadId).filter(m => m.role === 'user').map(m => m.parts[0]);
     expect(users[0]).toEqual({ type: 'text', text: 'one', sentFrom: { client: 'shell', device: 'office-pc' } });
     expect(users[3]).toEqual({ type: 'text', text: 'four' });
+
+    // The Boite guide switch silences it with the rest of Boite's text.
+    await office.call('brain.configure', { path: null, enabled: false, boiteGuide: false });
+    expect(await send(office, 'seven')).toBe('seven');
   } finally {
     restore();
     for (const client of clients) client.close();

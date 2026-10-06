@@ -66,7 +66,8 @@ test('desktop and paired phone replace an edited message and silently skip a que
       expect(replaced.messages.slice(0, kept.length).map(message => message.id)).toEqual(kept);
       expect(replaced.turns).toHaveLength(2);
       expect(replaced.messages.slice(kept.length).some(message => old.messages.some(previous => previous.id === message.id))).toBe(false);
-      expect(replaced.messages.filter(message => message.role === 'user').at(-1)?.parts).toEqual([{ type: 'text', text: 'Changed request' }]);
+      // The edit is sent by the page, so it keeps the web app as its origin: a phone or a browser by viewport.
+      expect(replaced.messages.filter(message => message.role === 'user').at(-1)?.parts).toEqual([{ type: 'text', text: 'Changed request', sentFrom: { client: 'pwa', device: expect.any(String) } }]);
       const reply = replaced.messages.filter(message => message.role === 'assistant').at(-1)!.parts.filter(part => part.type === 'text').map(part => part.text).join('');
       expect(reply).toContain('Changed request');
       expect(reply).not.toContain('Original request');
