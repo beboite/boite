@@ -717,7 +717,9 @@ export const strings = {
     stopWork: 'Stop it',
     keep: 'Keep them',
     /** Said by a project while a thread is dragged over it. */
-    dropHere: 'Move the thread to {project}'
+    dropHere: 'Move the thread to {project}',
+    /** Under the card a dragged row becomes, while no project would take it. */
+    dragHint: 'Drop on another project'
   },
 
   palette: {

@@ -696,7 +696,8 @@ export const fr: Translation = {
     stopMonitors: 'Arrêter les moniteurs',
     stopWork: "L'arrêter",
     keep: 'Les garder',
-    dropHere: 'Déplacer la conversation vers {project}'
+    dropHere: 'Déplacer la conversation vers {project}',
+    dragHint: 'Déposer sur un autre projet'
   },
 
   palette: {

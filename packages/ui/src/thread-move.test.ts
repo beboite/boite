@@ -6,7 +6,7 @@ import { workspace } from './lib/workspace.svelte';
 import { writeExperiments } from './lib/experiments';
 import { closeTour } from './lib/onboarding.svelte';
 import { work } from './lib/work-prefs.svelte';
-import { moveThread, THREAD_DRAG_TYPE } from './lib/thread-move.svelte';
+import { moveThread } from './lib/thread-move.svelte';
 
 /*
  * Moving a thread to another project from the whole app over the in-memory
@@ -60,21 +60,17 @@ async function mountOnFake(search = '/?fake=1&open=recent'): Promise<void> {
   workspace.view = 'projects';
 }
 
-/** A drag event carrying a stand-in DataTransfer: jsdom has none. */
-function drag(type: string, types: string[] = [THREAD_DRAG_TYPE]): DragEvent {
-  const data = new Map<string, string>();
-  const transfer = {
-    types,
-    effectAllowed: 'all',
-    dropEffect: 'none',
-    setData: (kind: string, value: string) => data.set(kind, value),
-    getData: (kind: string) => data.get(kind) ?? '',
-  };
-  const event = new Event(type, { bubbles: true, cancelable: true }) as DragEvent;
-  Object.defineProperty(event, 'dataTransfer', { value: transfer });
+/** A mouse pointer event at a point: jsdom has no PointerEvent. */
+function pointer(type: string, x: number, y: number): MouseEvent {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y });
+  Object.defineProperties(event, { pointerType: { value: 'mouse' }, pointerId: { value: 1 } });
   return event;
 }
 
+/** jsdom lays nothing out: the element "under" the pointer is whatever the test says. */
+function under(element: () => Element | null): void {
+  Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => element() });
+}
 const card = (threadId: string) => query(`[data-thread-id="${threadId}"]`).closest('.thread') as HTMLElement;
 const inProject = (threadId: string, projectId: string) =>
   document.querySelector(`section[data-project-id="${projectId}"] [data-thread-id="${threadId}"]`) !== null;
@@ -96,42 +92,62 @@ test('the row menu opens a picker of the other projects, and a pick moves the ro
   expect(store.threads.find((t) => t.id === 't-descriptors')).toMatchObject({ projectId: 'p-boite', cwd: 'C:\\src\\boite' });
 });
 
-test('a row dropped on another project moves there; its own project and a foreign drag are ignored', async () => {
+test('a row dragged with the mouse onto another project moves there; a short press, its own project and Escape do not', async () => {
   await mountOnFake();
   await waitFor(() => inProject('t-descriptors', 'p-notes'));
   const move = vi.spyOn(store, 'move');
   const notes = query('section[data-project-id="p-notes"]');
   const boite = query('section[data-project-id="p-boite"]');
+  let target: Element | null = null;
+  under(() => target);
 
-  // Something else dragged over the sidebar (a file) is not a thread.
-  const file = drag('dragover', ['Files']);
-  boite.dispatchEvent(file);
-  expect(file.defaultPrevented).toBe(false);
+  // A press that does not travel is a click: no drag, no move.
+  card('t-descriptors').dispatchEvent(pointer('pointerdown', 10, 10));
+  window.dispatchEvent(pointer('pointermove', 12, 11));
+  expect(document.documentElement.classList.contains('thread-dragging')).toBe(false);
+  window.dispatchEvent(pointer('pointerup', 12, 11));
 
-  const start = drag('dragstart');
-  card('t-descriptors').dispatchEvent(start);
-  expect(start.dataTransfer?.getData(THREAD_DRAG_TYPE)).toContain('t-descriptors');
-
-  const home = drag('dragover');
-  notes.dispatchEvent(home);
-  expect(home.defaultPrevented).toBe(false);
-
-  const over = drag('dragover');
-  boite.dispatchEvent(over);
-  expect(over.defaultPrevented).toBe(true);
+  // Over its own project nothing is outlined; Escape drops the drag over another one.
+  card('t-descriptors').dispatchEvent(pointer('pointerdown', 10, 10));
+  target = notes.querySelector('[data-testid=project-row]');
+  window.dispatchEvent(pointer('pointermove', 10, 40));
+  await waitFor(() => card('t-descriptors').classList.contains('dragging'));
+  expect(document.documentElement.classList.contains('thread-dragging')).toBe(true);
+  expect(notes.classList.contains('drop')).toBe(false);
+  // The row becomes a card under the mouse, which asks for another project; the projects it can land on show it.
+  expect(query('[data-testid=thread-drag-ghost]').textContent).toContain('Drop on another project');
+  expect(boite.classList.contains('candidate')).toBe(true);
+  expect(notes.classList.contains('candidate')).toBe(false);
+  target = boite;
+  window.dispatchEvent(pointer('pointermove', 10, 80));
   await waitFor(() => boite.classList.contains('drop'));
+  expect(query('[data-testid=thread-drag-hint]').textContent?.trim()).toBe('boite');
+  const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  window.dispatchEvent(escape);
+  expect(escape.defaultPrevented).toBe(true);
+  await waitFor(() => !boite.classList.contains('drop'));
+  window.dispatchEvent(pointer('pointerup', 10, 80));
+  expect(move).not.toHaveBeenCalled();
 
-  boite.dispatchEvent(drag('drop'));
+  // Released over another project of its machine: the row moves there, and the click that ends the drag opens nothing.
+  card('t-descriptors').dispatchEvent(pointer('pointerdown', 10, 10));
+  window.dispatchEvent(pointer('pointermove', 10, 80));
+  await waitFor(() => boite.classList.contains('drop'));
+  window.dispatchEvent(pointer('pointerup', 10, 80));
+  const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+  query('[data-thread-id="t-descriptors"]').dispatchEvent(click);
+  expect(click.defaultPrevented).toBe(true);
   await waitFor(() => inProject('t-descriptors', 'p-boite'));
   expect(move).toHaveBeenCalledWith('t-descriptors', 'p-boite', undefined);
   expect(boite.classList.contains('drop')).toBe(false);
+  expect(document.documentElement.classList.contains('thread-dragging')).toBe(false);
+  expect(document.querySelector('[data-testid=thread-drag-ghost]')).toBeNull();
 });
-
 test('a running thread stays draggable; its move asks first, waits for the turn, and Cancel move drops it', async () => {
   await mountOnFake();
   await waitFor(() => document.querySelector('[data-thread-id="t-bench"]') !== null);
   // t-bench waits on a permission: its turn still runs.
-  expect(card('t-bench').getAttribute('draggable')).toBe('true');
+  expect(card('t-bench').dataset['movable']).toBe('true');
   await workspace.select(store, 't-bench');
   await waitFor(() => store.openThread?.id === 't-bench');
 
@@ -162,7 +178,7 @@ test('a working sub-thread keeps the move out, and a move asked anyway says to s
   await waitFor(() => document.querySelector('[data-thread-id="t-descriptors"]') !== null);
   const parent = store.threads.find((t) => t.id === 't-descriptors')!;
   store.threads = [...store.threads, { ...parent, id: 't-child', title: 'child', parentThreadId: 't-descriptors', status: 'running' }];
-  await waitFor(() => card('t-descriptors').getAttribute('draggable') === 'false');
+  await waitFor(() => card('t-descriptors').dataset['movable'] === 'false');
   const move = vi.spyOn(store, 'move');
   expect(await moveThread(store, 't-descriptors', 'p-boite')).toBe(false);
   expect(move).not.toHaveBeenCalled();

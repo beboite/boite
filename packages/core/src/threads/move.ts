@@ -31,7 +31,7 @@ function whereOf(to: MoveEnd, branch: string | null): string {
 
 /** The sentence the agent reads before its next prompt. */
 export function moveNote(from: MoveEnd, to: MoveEnd, branch: string | null): string {
-  return `This thread moved from project ${from.name} (${from.cwd}) to project ${to.name} (${to.cwd}). Your working directory is now ${whereOf(to, branch)}. Files you changed in the old folder stay there.\n\n`;
+  return `This thread moved from project ${from.name} (${from.cwd}) to project ${to.name} (${to.cwd}). Your working directory is now ${whereOf(to, branch)}.\n- Run every command and resolve every relative path from this new directory.\n- File contents, paths, git state and command results from earlier in this conversation describe the old folder: read files again here before relying on them.\n- Changes made in the old folder stayed there and were not carried over. Leave the old folder alone unless the user asks.\n- Follow this project's own instructions (CLAUDE.md, AGENTS.md or the like), not the old project's.\n\n`;
 }
 
 /** What a fresh session's history says about a move the agent asked for itself. */

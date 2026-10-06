@@ -46,7 +46,7 @@ test('a moved thread works in the target folder, drops its session, and tells th
   const messages = (await client.call('threads.get', { threadId: PLAIN })).messages;
   const prompt = messages.find((m) => m.turnId === first.id && m.role === 'user')?.parts[0];
   expect(prompt).toMatchObject({ type: 'text', text: 'carry on', moved: { from: { projectId: 'p-notes', cwd: 'C:\\src\\notes' }, to: { projectId: 'p-boite', cwd: 'C:\\src\\boite' } } });
-  expect(textOf(messages, first.id, 'assistant')).toBe('This thread moved from project notes (C:\\src\\notes) to project boite (C:\\src\\boite). Your working directory is now C:\\src\\boite. Files you changed in the old folder stay there.\n\ncarry on');
+  expect(textOf(messages, first.id, 'assistant')).toBe('This thread moved from project notes (C:\\src\\notes) to project boite (C:\\src\\boite). Your working directory is now C:\\src\\boite.\n- Run every command and resolve every relative path from this new directory.\n- File contents, paths, git state and command results from earlier in this conversation describe the old folder: read files again here before relying on them.\n- Changes made in the old folder stayed there and were not carried over. Leave the old folder alone unless the user asks.\n- Follow this project\'s own instructions (CLAUDE.md, AGENTS.md or the like), not the old project\'s.\n\ncarry on');
 
   const second = await client.call('turns.start', { threadId: PLAIN, prompt: 'and again' });
   await finished(client, PLAIN, second.id);
