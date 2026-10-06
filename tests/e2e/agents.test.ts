@@ -65,10 +65,25 @@ async function missionJourney() {
     const run = (await c.call('agents.snapshot', {})).runs.find(r => r.status === 'running');
     await c.call('agents.decision.request', { threadId: run.threadId, prompt: 'Which prototype should I explore?', options: ['Puzzle', 'Simulation'], requestId: 'e2e_decision_request' });
   })()`);
-  await page.click('[data-testid="agents-attention"]');
-  await page.waitFor(`document.querySelector('[data-testid="agent-decision"]')`);
+  // The thread list shows the agent waiting on the user; its thread says whose it is and leads back to it.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.evaluate(`window.__boiteTest.workspace.active.showChat()`);
+  await page.waitFor(`document.querySelector('[data-testid="agents-at-work"]')?.textContent.includes('Mira')`);
+  await page.waitFor(`document.querySelector('[data-testid="agents-at-work"]').textContent.includes('Needs you')`);
+  await capture('agents-at-work-desktop.png');
+  await page.evaluate(`(async () => { const { workspace } = window.__boiteTest; const snap = await workspace.active.client.call('agents.snapshot', {}); const work = snap.work.find(w => w.id === snap.decisions.at(-1).workId); await workspace.active.open(snap.runs.find(r => r.id === work.runId).threadId); })()`);
+  await page.waitFor(`document.querySelector('[data-testid="agent-owner-bar"]')?.textContent.includes('Mira runs this thread')`);
+  expect(await page.evaluate(`!!document.querySelector('[data-testid="composer"]')`)).toBe(false);
+  await capture('agents-owned-thread-desktop.png');
+  await page.click('[data-testid="agent-owner-open"]');
+  await page.waitFor(`document.querySelector('.agent-ask [data-testid="agent-decision"]')?.textContent.includes('Puzzle')`);
+  expect(await page.evaluate(`document.querySelector('.agent-ask').textContent`)).toContain('Which prototype should I explore?');
+  await capture('agents-decision-desktop.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.click('[data-testid="agents-attention"]').catch(async () => { await page.click('.agents-main .agent-mobile-back'); await page.click('[data-testid="agents-attention"]'); });
+  await page.waitFor(`document.querySelector('.agents-main [data-testid="agent-decision"]')`);
   await capture('agents-attention-phone.png');
-  await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="agent-decision"] button')).find(b => b.textContent === 'Puzzle').click()`);
+  await page.evaluate(`Array.from(document.querySelectorAll('.agents-main [data-testid="agent-decision"] button')).find(b => b.textContent === 'Puzzle').click()`);
   await page.waitFor(`!document.querySelector('[data-testid="agent-decision"]')`);
   expect(await page.evaluate(`(async () => { const { workspace } = window.__boiteTest; return (await workspace.active.client.call('agents.snapshot', {})).decisions.at(-1).answer; })()`)).toBe('Puzzle');
 }
@@ -85,7 +100,7 @@ test('create, converse, configure the resident engine and follow background work
   await capture('agents-welcome-desktop.png');
   await page.click('[data-testid="agents-create"]');
   await page.waitFor(`document.querySelector('[data-testid="agents-create-menu"]')`);
-  expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="agents-create-menu"] [data-value]')).map(i => i.dataset.value)`)).toEqual(['profile', 'group']);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="agents-create-menu"] [data-value]')).map(i => i.dataset.value)`)).toEqual(['profile', 'group', 'routine']);
   await page.click('[data-value="profile"]');
   await page.type('[data-testid="agent-name"]', 'Mira');
   await page.type('textarea', 'Explore ideas and report useful findings.');
@@ -104,8 +119,10 @@ test('create, converse, configure the resident engine and follow background work
   await page.waitFor(`!document.querySelector('[data-testid="agent-brain"] button.primary').disabled`);
   await capture('agents-brain-desktop.png');
   await page.click('[data-testid="agent-tab-routines"]');
-  await page.type('[data-testid="routine-name"]', 'Morning review');
-  await page.type('[data-testid="routine-prompt"]', 'Review current ideas and prepare one proposal.');
+  await page.type('[data-testid="routine-prompt"]', 'Morning review of current ideas, then one proposal.');
+  await page.click('[data-testid="schedule-mode-days"]');
+  await page.click('[data-testid="schedule-day-6"]');
+  expect(await page.evaluate(`document.querySelector('[data-testid="schedule-summary"]').textContent`)).toMatch(/^ ?Every Monday, .*Friday,? and Saturday at 9:00 AM · Next: /);
   await page.click('[data-testid="routine-save"]');
   await page.waitFor(`document.querySelector('[data-testid="agent-routines"] article')?.textContent.includes('Morning review')`);
   await capture('agents-routines-desktop.png');
@@ -121,8 +138,8 @@ test('create, converse, configure the resident engine and follow background work
     const { workspace } = window.__boiteTest;
     const c = workspace.active.client;
     const first = (await c.call('agents.snapshot', {})).profiles[0];
-    const second = await c.call('agents.profile.save', { value: { ...first, name: 'Atlas', domain: 'Implementation' } });
-    const third = await c.call('agents.profile.save', { value: { ...first, name: 'Lin', domain: 'Review' } });
+    const second = await c.call('agents.profile.save', { value: { ...first, name: 'Atlas', domain: 'Implementation', avatar: '' } });
+    const third = await c.call('agents.profile.save', { value: { ...first, name: 'Lin', domain: 'Review', avatar: '' } });
     const group = await c.call('agents.group.save', { value: { name: 'Ideas table', memberIds: [first.id, second.id, third.id], mode: 'round', maxTurns: 6, maxTurnsPerAgent: 2, paused: false } });
     const team = await c.call('agents.team.save', { value: { name: 'Prototype studio', description: 'Private experiments and small prototypes.', members: [{ agentId: first.id, responsibility: 'Explore' }, { agentId: second.id, responsibility: 'Build' }, { agentId: third.id, responsibility: 'Review' }], projectIds: [], groupId: group.id, paused: false } });
     window.__agentsFixture = { group, team, first, second, third };

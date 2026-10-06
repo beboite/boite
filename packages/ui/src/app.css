@@ -292,6 +292,30 @@
   --text-reading: 15px;
   --leading-reading: 1.6;
 
+  /*
+   * The agents' robots (components/agents/RobotFace.svelte). A robot is a
+   * picture on its own tinted disc, so one set serves both themes: nine body
+   * colours and the few fixed tones every robot shares.
+   */
+  --robot-1: #ff8a7a;
+  --robot-2: #ffb35c;
+  --robot-3: #ffd44d;
+  --robot-4: #6fd6a0;
+  --robot-5: #6cbcff;
+  --robot-6: #8f9bff;
+  --robot-7: #c294ff;
+  --robot-8: #ff92c2;
+  --robot-9: #8e98ab;
+  --robot-ink: #1d1f24;
+  --robot-shine: #ffffff;
+  --robot-face: #fff6e9;
+  --robot-screen: #1f2533;
+  --robot-led: #8ff5d0;
+  --robot-blush: #ff7a9a;
+  --robot-leaf: #59c97b;
+  --robot-halo: #ffd447;
+  --robot-bulb: #ff6b6b;
+
   --titlebar: 44px;
   /* A caption button, Windows' own width, the bar's full height. */
   --caption: 46px;

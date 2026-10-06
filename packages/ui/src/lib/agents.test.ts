@@ -1,6 +1,8 @@
 import { expect, test, vi } from 'vitest';
 import type { AgentEntities, AgentScope, AgentsSnapshot } from '@boite/contracts';
-import { AgentsView, agentChats, attentionOf, avatarText, missionPreset, missionsOf, previewOf } from './agents.svelte';
+import { AgentsView, agentChats, attentionOf, avatarText, liveThreads, missionPreset, missionsOf, previewOf } from './agents.svelte';
+import { AgentDirectory } from './agent-directory.svelte';
+import type { ThreadSummary } from '@boite/contracts';
 import { FakeAgents } from './fake-agents';
 import type { Store } from './store.svelte';
 
@@ -161,6 +163,49 @@ test('running and waiting work lights the conversation it belongs to and the age
   expect(of('profile:atlas').status).toBe('running');
   expect(of('profile:mira').status).toBe('waiting');
   expect(chats[0]!.id).toBe('table');
+});
+
+/** The threads agent sessions run in: Atlas in the group, Mira alone (waiting on the user), and Mira's archived one. */
+function sessionThreads() {
+  const { snapshot } = directory();
+  const record = { revision: 1, createdAt: 1, updatedAt: 1 };
+  const sessions = [
+    { ...record, id: 's-atlas-table', agentId: 'atlas', scope: { kind: 'group' as const, id: 'table' }, threadId: 't-atlas' },
+    { ...record, id: 's-mira', agentId: 'mira', scope: { kind: 'agent' as const, id: 'mira' }, threadId: 't-mira' },
+    { ...record, id: 's-mira-old', agentId: 'mira', scope: { kind: 'mission' as const, id: 'm-studio' }, threadId: 't-old' }
+  ];
+  const thread = (id: string, agentSessionId: string, status: ThreadSummary['status'], archived = false) => ({ id, agentSessionId, status, archived, runningSince: 100, parentThreadId: null } as unknown as ThreadSummary);
+  const threads = [thread('t-atlas', 's-atlas-table', 'running'), thread('t-mira', 's-mira', 'waiting'), thread('t-old', 's-mira-old', 'running', true), thread('t-plain', '', 'running')];
+  return { snapshot: { ...snapshot, sessions }, threads };
+}
+
+test('an agent at work lights its own row and the conversation its session belongs to', () => {
+  const { snapshot, threads } = sessionThreads();
+  const live = liveThreads(snapshot, threads);
+  expect(live.get('profile:atlas')?.id).toBe('t-atlas');
+  expect(live.get('group:table')?.id).toBe('t-atlas');
+  expect(live.get('profile:mira')?.id).toBe('t-mira');
+  // An archived session thread and an ordinary thread light nothing.
+  expect([...live.values()].some(t => t.id === 't-old' || t.id === 't-plain')).toBe(false);
+});
+
+test('the thread list names the agent of a thread and lists the agents at work, the one waiting on the user first', () => {
+  const { snapshot, threads } = sessionThreads();
+  const store = { threads: [...threads, { id: 't-child', parentThreadId: 't-atlas', status: 'running', archived: false } as unknown as ThreadSummary] } as unknown as Store;
+  const directory = new AgentDirectory(store);
+  expect(directory.ownerOf(threads[0]!)).toBeNull();
+  directory.snapshot = snapshot;
+  expect(directory.ownerOf(threads[0]!)?.name).toBe('Atlas');
+  // A delegated child belongs to its parent's agent.
+  expect(directory.ownerOf(store.threads.at(-1)!)?.name).toBe('Atlas');
+  expect(directory.ownerOf(threads[3]!)).toBeNull();
+  expect(directory.atWork.map(w => [w.agent.name, w.waiting])).toEqual([['Mira', true], ['Atlas', false]]);
+  // Work waiting on a decision counts after its turn ended: the thread is idle, the agent still needs the user.
+  const idle = threads.map(t => (t.id === 't-mira' ? { ...t, status: 'idle' as const } : t));
+  const waiting = { ...snapshot, runs: [{ id: 'r1', threadId: 't-mira' } as unknown as AgentsSnapshot['runs'][number]], work: [{ id: 'w1', agentId: 'mira', status: 'waiting', runId: 'r1' } as unknown as AgentsSnapshot['work'][number]] };
+  const later = new AgentDirectory({ threads: idle } as unknown as Store);
+  later.snapshot = waiting;
+  expect(later.atWork.map(w => [w.agent.name, w.thread.status, w.waiting])).toEqual([['Mira', 'waiting', true], ['Atlas', 'running', false]]);
 });
 
 test('a conversation lists its missions and starts a new one with its members and team', () => {

@@ -30,6 +30,7 @@
   import LimitsGlance from './LimitsGlance.svelte';
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
+  import AgentsAtWork from './AgentsAtWork.svelte';
   import DraftRow from './DraftRow.svelte';
   import MachineIcon from './MachineIcon.svelte';
   import ProjectTile from './ProjectTile.svelte';
@@ -205,6 +206,9 @@
   <div class="views"><ProjectViews entries={groups} {store} /></div>
   <div class="scroll" class:recent={workspace.view === 'recent'} bind:this={scrollRoot} onscroll={() => { if (showRows && scrollRoot) savedScroll = scrollRoot.scrollTop; }}>
     {#if showRows}
+    {#if experimentOn('resident-agents')}
+      {#each visible as machine (machine.id)}<AgentsAtWork {machine} {now} showMachine={multi} />{/each}
+    {/if}
     {#if groups.length === 0}<p class="empty">{strings.sidebar.noProjects}</p>{/if}
     {#if workspace.view === 'recent'}
       {#each visible as machine (machine.id)}
