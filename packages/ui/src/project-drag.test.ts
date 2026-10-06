@@ -67,9 +67,9 @@ async function mountOnFake(): Promise<void> {
 }
 
 /** A pointer event at a point: jsdom has no PointerEvent. */
-function pointer(type: string, x: number, y: number, pointerType = 'mouse'): MouseEvent {
+function pointer(type: string, x: number, y: number, pointerType = 'mouse', pointerId = 1): MouseEvent {
   const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y });
-  Object.defineProperties(event, { pointerType: { value: pointerType }, pointerId: { value: 1 } });
+  Object.defineProperties(event, { pointerType: { value: pointerType }, pointerId: { value: pointerId } });
   return event;
 }
 
@@ -213,6 +213,38 @@ test('a header drags only among the projects of its own fold', async () => {
   window.dispatchEvent(pointer('pointerup', 10, 20));
   await waitFor(() => order()[0] === second);
   expect(order()).toEqual([second, first, 'quiet-project']);
+});
+
+test('only the pointer that started a drag ends it, and leaving the window cancels it', async () => {
+  await mountOnFake();
+  projectView.order = 'manual';
+  const [first, second] = order() as [string, string];
+  place(section(first), 0);
+  place(section(second), 110);
+  under(() => section(first));
+
+  // Another pointer's release over the first project's upper half drops nothing: the drag goes on.
+  header(second).dispatchEvent(pointer('pointerdown', 10, 150));
+  window.dispatchEvent(pointer('pointermove', 10, 20));
+  await waitFor(() => section(first).classList.contains('insert-before'));
+  window.dispatchEvent(pointer('pointerup', 10, 20, 'touch', 7));
+  window.dispatchEvent(pointer('pointercancel', 10, 20, 'pen', 8));
+  expect(dragging()).toBe(true);
+
+  // The window loses focus: the drag ends there, and the release that comes later moves nothing.
+  window.dispatchEvent(new Event('blur'));
+  expect(dragging()).toBe(false);
+  await waitFor(() => !section(first).classList.contains('insert-before'));
+  window.dispatchEvent(pointer('pointerup', 10, 20));
+  expect(order()).toEqual([first, second]);
+  expect(projectView.keys).toEqual([]);
+
+  // The next press drags again.
+  header(second).dispatchEvent(pointer('pointerdown', 10, 150));
+  window.dispatchEvent(pointer('pointermove', 10, 20));
+  await waitFor(() => section(first).classList.contains('insert-before'));
+  window.dispatchEvent(pointer('pointerup', 10, 20));
+  await waitFor(() => order()[0] === second);
 });
 
 test('a finger drags a project header only after holding it still; a finger that travels first scrolls', async () => {

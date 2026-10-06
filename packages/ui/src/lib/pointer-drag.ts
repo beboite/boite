@@ -115,6 +115,7 @@ export function startPointerDrag(event: PointerEvent, handlers: PointerDragHandl
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);
     window.removeEventListener('pointercancel', cancel);
+    window.removeEventListener('blur', blur);
     window.removeEventListener('keydown', escape, true);
     window.removeEventListener('touchmove', touchmove);
     window.removeEventListener('contextmenu', contextmenu, true);
@@ -149,6 +150,10 @@ export function startPointerDrag(event: PointerEvent, handlers: PointerDragHandl
   const cancel = (e: PointerEvent): void => {
     if (e.pointerId === pointer) finish(null);
   };
+  // A window left mid-drag may never see its release: the next one, anywhere, would drop there.
+  // Losing the pointer capture alone does not cancel: a windowed list may unmount the dragged
+  // row as it scrolls, and the window's own events still carry the drag.
+  const blur = (): void => finish(null);
   // Escape ends the drag only: elsewhere on the page it stops the turn.
   const escape = (e: KeyboardEvent): void => {
     if (e.key !== 'Escape' || !dragging) return;
@@ -159,6 +164,7 @@ export function startPointerDrag(event: PointerEvent, handlers: PointerDragHandl
   window.addEventListener('pointermove', move);
   window.addEventListener('pointerup', up);
   window.addEventListener('pointercancel', cancel);
+  window.addEventListener('blur', blur);
   window.addEventListener('keydown', escape, true);
   if (held) {
     window.addEventListener('touchmove', touchmove, { passive: false });
