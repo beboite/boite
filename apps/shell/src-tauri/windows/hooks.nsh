@@ -74,7 +74,9 @@
   IfSilent boite_shell_stop
   StrCmp $PassiveMode "1" boite_shell_stop
   !insertmacro BOITE_SHELL_SCRIPT find
-  StrCmp $0 "0" 0 boite_shell_closed
+  ; Only a confirmed "none running" (1) skips the question. A failed check (2)
+  ; or a script that did not start ("error") asks, then goes through the stop.
+  StrCmp $0 "1" boite_shell_closed
   nsis_tauri_utils::StrReplace "$(appRunningOkKill)" "{{product_name}}" "${PRODUCTNAME}"
   Pop $1
   MessageBox MB_OKCANCEL $1 IDOK boite_shell_accepted
