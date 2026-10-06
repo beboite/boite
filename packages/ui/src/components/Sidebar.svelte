@@ -88,6 +88,8 @@
   let workingOpen = $state(false);
   let doneRows = $state.raw<{ store: Store; threadId: ThreadId }[]>([]);
   let archivedRows = $state.raw<{ store: Store; threadId: ThreadId }[]>([]);
+  /** Conversations drawn under idle projects whose history is unfolded, after the listed projects. */
+  let idleRows = $state.raw<{ store: Store; threadId: ThreadId }[]>([]);
   let projectDoneRows = $state.raw<Record<string, { store: Store; threadId: ThreadId }[]>>({});
   const doneObservers = new Map<string, (rows: { store: Store; threadId: ThreadId }[]) => void>();
   function doneObserver(entry: ProjectEntry, kind: ArchiveKind) {
@@ -102,7 +104,7 @@
   }
   let working = $derived(recentPreferences.groupWorking ? recent.filter(({ machine, thread }) => groupWorkingThread(machine.store, thread)) : []);
   let attention = $derived(recentPreferences.groupWorking ? recent.filter(({ machine, thread }) => !groupWorkingThread(machine.store, thread)) : recent);
-  // Alt+1 to Alt+9 count the rows as drawn: this view, open projects only.
+  // Alt+1 to Alt+9 count the rows as drawn: this view, open projects, then unfolded idle history.
   $effect(() => {
     sidebarRows.list = (workspace.view === 'recent'
       ? [...attention, ...(workingOpen ? working : [])].map(({ machine, thread }) => ({ store: machine.store, threadId: thread.id })).concat(doneRows, archivedRows)
@@ -112,7 +114,7 @@
           const lists = projectThreadLists(entry, entry.machine.store.threadsOf(entry.project.id), open);
           return [...lists.attention, ...(open ? lists.working : [])].map(thread => ({ store: entry.machine.store, threadId: thread.id }))
             .concat(...(['done', 'archived'] as const).map(kind => projectThreadView.isOpen(entry, kind) ? projectDoneRows[JSON.stringify([kind, projectKey(entry)])] ?? [] : []));
-        })
+        }).concat(idleRows)
     ).slice(0, 9);
   });
   $effect(() => {
@@ -291,7 +293,7 @@
       {/each}
       {#if groups.length > 0 && activeGroups.length === 0}<p class="none">{strings.sidebar.noActiveProjects}</p>{/if}
       <div class="project-folds">
-        <ProjectShelf kind="idle" entries={otherGroups} {multi} {now} {scrollRoot} />
+        <ProjectShelf kind="idle" entries={otherGroups} {multi} {now} {scrollRoot} onrows={rows => idleRows = rows} />
         <ProjectShelf kind="archived" entries={shelved} {multi} {now} {scrollRoot} />
       </div>
     {/if}

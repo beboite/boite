@@ -1,9 +1,10 @@
 <script lang="ts">
   import { Archive, ArchiveRestore, CheckCheck, Ellipsis, FolderX, Trash2 } from '@lucide/svelte';
-  import type { Project } from '@boite/contracts';
+  import type { Project, ThreadId } from '@boite/contracts';
   import { count as formatCount, projectName } from '../lib/format';
   import { archiveProjectWithUndo, confirmRemoveProject, projectMenu } from '../lib/project-menu';
-  import type { ProjectEntry } from '../lib/project-view.svelte';
+  import { projectKey, type ProjectEntry } from '../lib/project-view.svelte';
+  import type { Store } from '../lib/store.svelte';
   import { archiveCount, projectThreadView, type ProjectShelfKind } from '../lib/project-threads.svelte';
   import { fill, strings } from '../lib/strings';
   import { dropKey, takesDrop, threadDrag } from '../lib/thread-move.svelte';
@@ -21,18 +22,20 @@
    * anything. An idle project that still has done or archived conversations
    * shows their counts, which unfold that history under its row. With several
    * machines the rows group under their machine. `onopen` runs once a draft or
-   * a conversation opens from the fold, so the phone can show it.
+   * a conversation opens from the fold, so the phone can show it. `onrows`
+   * receives the history conversations drawn, in order, for Alt+digit.
    */
-  let { kind, entries, multi, now, scrollRoot, onopen }: {
+  type Row = { store: Store; threadId: ThreadId };
+  let { kind, entries, multi, now, scrollRoot, onopen, onrows }: {
     kind: ProjectShelfKind;
     entries: ProjectEntry[];
     multi: boolean;
     now: number;
     scrollRoot?: HTMLElement;
     onopen?: () => void;
+    onrows?: (rows: Row[]) => void;
   } = $props();
   const history = ['done', 'archived'] as const;
-  const historyLabels = { done: strings.sidebar.projectDoneThreads, archived: strings.sidebar.projectArchivedThreads };
   const uid = $props.id();
   const open = $derived(projectThreadView.shelf[kind]);
   /** Rows render from the first opening on, so a fold nobody opens loads no project icons. */
@@ -55,6 +58,26 @@
   });
 
   const key = (machine: Machine, project: Project) => dropKey(machine.id, project.id);
+
+  /** The rows each unfolded history last drew, by list and project; a closed one is skipped below rather than cleared. */
+  let historyRows = $state.raw<Record<string, Row[]>>({});
+  const observers = new Map<string, (rows: Row[]) => void>();
+  const historyKey = (entry: ProjectEntry, list: (typeof history)[number]) => JSON.stringify([list, projectKey(entry)]);
+  function observer(entry: ProjectEntry, list: (typeof history)[number]) {
+    const at = historyKey(entry, list);
+    if (!observers.has(at)) observers.set(at, rows => { historyRows = { ...historyRows, [at]: rows }; });
+    return observers.get(at)!;
+  }
+  let reported: Row[] = [];
+  $effect(() => {
+    const visible = !open || kind !== 'idle' ? [] : groups.flatMap(({ machine, projects }) => projects.flatMap(project => history.flatMap(list => {
+      const entry = { machine, project };
+      return archiveCount(project, list) > 0 && projectThreadView.isOpen(entry, list) ? historyRows[historyKey(entry, list)] ?? [] : [];
+    })));
+    if (visible.length === reported.length && visible.every((row, index) => row.store === reported[index]?.store && row.threadId === reported[index]?.threadId)) return;
+    reported = visible;
+    onrows?.(visible);
+  });
 
   async function run(machine: Machine, project: Project, action: () => Promise<unknown>) {
     if (busy !== null) return;
@@ -132,7 +155,7 @@
                   </button>
                   {#each kept as list (list)}
                     {@const total = archiveCount(project, list)}
-                    {@const label = fill(historyLabels[list], { count: String(total), project: projectName(project) })}
+                    {@const label = fill(list === 'done' ? strings.sidebar.projectDoneThreads : strings.sidebar.projectArchivedThreads, { count: String(total), project: projectName(project) })}
                     <button type="button" class="ghost counter {list}" class:active={projectThreadView.isOpen(entry, list)} data-testid="project-{list}-toggle" data-count={total}
                       title={label} aria-label={label} aria-expanded={projectThreadView.isOpen(entry, list)} aria-controls="{controls}-{list}"
                       onclick={() => projectThreadView.toggle(entry, list)}>
@@ -187,7 +210,7 @@
                 {#each kept as list (list)}
                   {#if projectThreadView.isOpen(entry, list)}
                     <div id="{controls}-{list}" class="history" data-testid="project-{list}">
-                      <RecentDone kind={list} entries={[entry]} {scrollRoot} {now} open header={false} {onopen} />
+                      <RecentDone kind={list} entries={[entry]} {scrollRoot} {now} open header={false} {onopen} onrows={observer(entry, list)} />
                     </div>
                   {/if}
                 {/each}
