@@ -3,12 +3,12 @@
   import WindowList from './WindowList.svelte';
   import MobileMenu from './MobileMenu.svelte';
   import ThreadHeader from './ThreadHeader.svelte';
-  import { Activity, ArrowLeft, ChevronDown, Ellipsis, FolderCog, MessageSquare, PencilLine, Pin, Plus, Search, X } from '@lucide/svelte';
+  import { Activity, ArrowLeft, ChevronDown, Ellipsis, FolderCog, MessageSquare, PencilLine, Pin, Plus, Radar, Search, X } from '@lucide/svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import MobileConnect from './MobileConnect.svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
   import { agentLabel, projectName } from '../lib/format';
   import { hasUnsentDraft } from '../lib/composer-queue';
   import { mobileOverlay } from '../lib/mobile-history';
@@ -87,8 +87,15 @@
   const recentGroups = $derived(selected ? [selected] : groups);
   let workingOpen = $state(false);
   const groupWorking = $derived(inRecent && recentPreferences.groupWorking && !query);
-  const working = $derived(groupWorking ? rows.filter(row => groupWorkingThread(row.machine.store, row.thread)) : []);
-  const attention = $derived(groupWorking ? rows.filter(row => !groupWorkingThread(row.machine.store, row.thread)) : rows);
+  /** Recent's rows whose agent, sub-agents or background work are still going: the "at work" filter. */
+  const atWorkRows = $derived(inRecent && !query ? rows.filter(row => workingThread(row.machine.store, row.thread)) : []);
+  let atWorkOnly = $state(false);
+  const atWorkShown = $derived(atWorkOnly && atWorkRows.length > 0);
+  // The chip goes with the last of that work: the filter does not come back by itself with the next turn.
+  // Only the Recent list watches it: opening a conversation, searching or visiting Projects keeps the filter.
+  $effect(() => { if (atWorkOnly && inRecent && !query && atWorkRows.length === 0) atWorkOnly = false; });
+  const working = $derived(groupWorking && !atWorkShown ? rows.filter(row => groupWorkingThread(row.machine.store, row.thread)) : []);
+  const attention = $derived(atWorkShown ? atWorkRows : groupWorking ? rows.filter(row => !groupWorkingThread(row.machine.store, row.thread)) : rows);
 
   /** The list a conversation was opened from: Back returns to it. The landing conversation has none, so Back leaves. */
   let from = $state<'threads' | 'activity' | null>(null);
@@ -193,12 +200,15 @@
       <div class="heading-row"><h1>{screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}</h1>{#if screen === 'activity'}<button class="ghost icon" aria-label={strings.sidebar.search} onclick={() => store.paletteOpen = true}><Search size={18} /></button>{/if}</div>
       {#if screen === 'threads'}<ProjectViews entries={groups} {store} prefix="mobile-" />{/if}
       <div class="search"><Search size={17} /><input type="search" bind:value={search} aria-label={strings.mobile.search} placeholder={strings.mobile.search} data-testid="mobile-search" />{#if search}<button class="ghost icon" aria-label={strings.mobile.clearSearch} onclick={() => search = ''}><X size={16} /></button>{/if}</div>
+      {#if atWorkRows.length > 0}
+        <button class="ghost at-work" class:on={atWorkShown} aria-pressed={atWorkShown} title={strings.mobile.atWorkFilter} data-testid="mobile-at-work" onclick={() => atWorkOnly = !atWorkShown}><Radar size={14} aria-hidden="true" /><span class="ui-label">{fill(strings.mobile.atWork, { count: String(atWorkRows.length) })}</span></button>
+      {/if}
     </div>
     {#snippet threadRow(row: typeof rows[number])}
       <div class="row" data-thread-id={row.thread.id} data-machine-id={row.machine.id}>
         <button class="ghost thread" class:offline={row.machine.store.connection !== 'ready'} data-testid="mobile-thread-{row.thread.id}" onclick={() => { show('chat'); void workspace.select(row.machine.store, row.thread.id); }}>
           <span class="summary"><span class="title"><span class="provider" data-testid="thread-provider" role="img" aria-label={agentLabel(row.machine.store, row.thread)}><ProviderLogo providerId={row.thread.providerId} size={13} /></span>{#if row.thread.pinned}<Pin size={12} />{/if}{row.thread.title}{#if hasUnsentDraft(row.machine.store.composerStates[row.thread.id])}<span class="draft" data-testid="thread-draft" title={strings.sidebar.unsentDraft} aria-label={strings.sidebar.unsentDraft}><PencilLine size={12} /></span>{/if}</span><span class="detail" title={row.thread.branch ?? undefined}>{[projectName(row.project), several ? row.machine.label : null, row.thread.branch].filter(Boolean).join(' · ')}</span></span>
-          <ThreadState thread={row.thread} {now} subagents={row.machine.store.subagents(row.thread.id)} />
+          <ThreadState thread={row.thread} {now} subagents={row.machine.store.subagents(row.thread.id)} countSubagents />
         </button>
         <Menu items={rowItems(row.machine.store, row.thread)} onpick={(action) => void rowAction(row.machine.store, row.thread, action, row.machine.id)} label={strings.sidebar.threadMenu} placement="bottom" variant="ghost" testid="mobile-thread-menu-{row.thread.id}"><Ellipsis size={18} /></Menu>
       </div>
@@ -260,10 +270,10 @@
         {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
       </WindowList>
     {:else}
-      <WindowList items={attention} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements(screen)}>
+      <WindowList items={attention} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements(atWorkShown ? 'at-work' : screen)}>
         {#snippet row(entry)}{@render threadRow(entry)}{/snippet}
       </WindowList>
-      {#if inRecent}
+      {#if inRecent && !atWorkShown}
         <div class="recent-folds">
           {#if working.length > 0}
             <RecentGroup kind="working" count={working.length} bind:open={workingOpen}>
@@ -303,6 +313,8 @@
     .search input { flex: 1; min-width: 0; border: 0; background: transparent; min-height: 44px; font-size: 16px; padding: 8px 0; }
     .search:focus-within { border-color: var(--color-accent); }
     .search input:focus { outline: none; }
+    .at-work { display: inline-flex; gap: 6px; align-items: center; height: auto; min-height: var(--touch-target); margin-top: 10px; padding: 0 12px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-2); color: var(--color-accent); font-size: var(--text-sm); font-weight: 500; }
+    .at-work.on { border-color: var(--color-accent); background: var(--color-surface); }
     .brand-icon { flex: none; border-radius: var(--radius-md); }
     .home { flex: none; padding: 0; }
     .brand strong { display: block; font-size: var(--text-md); font-weight: 600; letter-spacing: -0.3px; }

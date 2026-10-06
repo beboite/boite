@@ -317,7 +317,10 @@ export const strings = {
     }
   },
   mobile: {
-    clearSearch: 'Clear search', draftTitle: 'What would you like to do?', draftHint: 'Start a task, ask a question, or pick up your work.',
+    clearSearch: 'Clear search',
+    /** Recent's filter: the conversations whose agent or sub-agents are still at work. */
+    atWork: '{count} at work', atWorkFilter: 'Show only the conversations at work',
+    draftTitle: 'What would you like to do?', draftHint: 'Start a task, ask a question, or pick up your work.',
     pairTitle: 'Your Boite, on your phone',
     pairBody: 'Connect to your computer to find your projects, conversations and agents here.',
     pairStep: 'On your computer, open Settings → Machines and updates and create a pairing code.',
@@ -668,6 +671,9 @@ export const strings = {
       delegating: 'Sub-agents',
       delegatingOne: 'Waiting on 1 sub-agent',
       delegatingMany: 'Waiting on {count} sub-agents',
+      /** What a phone row shows beside the radar: how many sub-agents are at work. */
+      subagentsOne: '1 sub-agent',
+      subagentsMany: '{count} sub-agents',
       /** The turn ended, the agent still watches something: a monitor it left going. */
       monitoring: 'Monitoring',
       monitoringFor: 'Monitoring for {elapsed}',
