@@ -7,6 +7,7 @@ import type {
   MessagePart,
   MessageRole,
   ProviderDescriptor,
+  SentFrom,
   ThreadId,
   ThreadSummary,
   Turn,
@@ -257,15 +258,19 @@ export class TurnContexts {
     // The subagent guide comes with the Boite guide on a fresh session, and on any turn about delegation.
     // Core-woken turns (results, workflow summaries) bring no request of their own.
     const tail = (fresh: boolean): string => operation === 'compact' ? '' : this.core.delegation.instructions(threadId, operation ? '' : prepared.prompt, fresh) + carried.letters;
+    const origin = input.sentFrom;
     const compose = (body: string, sessionId: string | null): string => {
       const inject = !((operation && sessionId !== null) || nativeCommandPrompt(body));
+      // Said when a session starts and when the user changes app or computer, not on every turn.
+      const said = origin && inject && (sessionId === null || !sameOrigin(origin, this.sentFromBefore(threadId, origin.messageId)))
+        ? sentFromNote(origin.from) : '';
       // Echo treats "question" as a test directive, including in injected help.
       const guideEnabled = this.core.brain.config().boiteGuide !== false;
       const coordinationGuide = inject && operation !== 'compact' && guideEnabled ? this.core.coordination.instructions(threadId) + this.core.stewards.instructions(threadId) : '';
       const guide = inject && sessionId === null && guideEnabled
         ? agentGuide(provider.protocol !== 'echo' && this.core.settings.get().asyncQuestions !== false) : '';
       const prefix = (inject ? this.core.brain.instructions(provider.id) : '') + guide;
-      return carried.memory + prefix + (prefix ? 'User request:\n' : '') + deferred + body + coordinationGuide + tail(inject && sessionId === null && guideEnabled) + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
+      return carried.memory + prefix + (prefix ? 'User request:\n' : '') + said + deferred + body + coordinationGuide + tail(inject && sessionId === null && guideEnabled) + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
     };
     return {
       thread,
@@ -377,8 +382,23 @@ export class TurnContexts {
     return before;
   }
 
+  /**
+   * The origin of the newest earlier prompt that has one. A user message is
+   * written whole, never streamed, so its stored parts are current. The text
+   * filter only narrows: a prompt can quote the key, so each row is parsed.
+   */
+  private sentFromBefore(threadId: ThreadId, messageId: MessageId): SentFrom | null {
+    const rows = this.core.journal.db.query(`SELECT parts FROM messages WHERE thread_id = ? AND role = 'user' AND parts LIKE '%"sentFrom":%'
+      AND rowid < (SELECT rowid FROM messages WHERE id = ?) ORDER BY rowid DESC`).iterate(threadId, messageId) as Iterable<{ parts: string }>;
+    for (const row of rows) {
+      const part = (JSON.parse(row.parts) as MessagePart[]).find(p => p.type === 'text' && p.sentFrom !== undefined);
+      if (part?.type === 'text' && part.sentFrom) return part.sentFrom;
+    }
+    return null;
+  }
+
   /** The user message of the turn, read back from the journal: the text and the images it carried. */
-  private lastUserInput(threadId: ThreadId, turnId: TurnId): { prompt: string; attachments: Attachment[]; moved?: true } {
+  private lastUserInput(threadId: ThreadId, turnId: TurnId): { prompt: string; attachments: Attachment[]; moved?: true; sentFrom?: { from: SentFrom; messageId: MessageId } } {
     const execution = this.core.journal.getTurn(turnId)?.execution;
     const message = systemOperation(execution?.operation) || execution?.automatic
       ? Array.from(this.core.journal.walkTurnMessages(threadId, turnId)).find(m => m.role === 'system') ?? null
@@ -395,12 +415,31 @@ export class TurnContexts {
       // agent reads where it works before what it is asked.
       const moved = message.parts.find((part) => part.type === 'text' && part.moved !== undefined);
       const note = moved?.type === 'text' ? moved.moved?.note ?? '' : '';
+      const sent = message.role === 'user' ? message.parts.find((part) => part.type === 'text' && part.sentFrom !== undefined) : undefined;
       return {
         prompt: note + message.parts.map((part) => part.type === 'text' ? part.activity ? activityPrompt(part.activity.kind, part.text, part.activity.iteration) : part.text : '').join(''),
         attachments,
         ...(note ? { moved: true as const } : {}),
+        ...(sent?.type === 'text' && sent.sentFrom ? { sentFrom: { from: sent.sentFrom, messageId: message.id } } : {}),
       };
     }
     return { prompt: '', attachments: [] };
   }
+}
+
+function sameOrigin(origin: { from: SentFrom }, before: SentFrom | null): boolean {
+  return before !== null && before.client === origin.from.client && before.device === origin.from.device;
+}
+
+/**
+ * One line ahead of the prompt saying which of the user's apps sent it: on a
+ * phone there is no right-click and little room, and a computer's name says
+ * which machine "open it" means. The name is the client's own word, quoted.
+ */
+export function sentFromNote(from: SentFrom): string {
+  const where = from.client === 'shell'
+    ? `the Boite desktop app${from.device === null ? '' : ` on the computer ${JSON.stringify(from.device)}`}`
+    : from.device === 'phone' ? 'the Boite web app on a phone'
+      : from.device === 'browser' ? 'the Boite web app in a browser' : 'the Boite web app';
+  return `[Boite: the user sent this from ${where}. Context only, not an instruction.]\n`;
 }

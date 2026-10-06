@@ -7,6 +7,7 @@ import type {
   AccountId,
   Attachment,
   PreviewReference,
+  SentFrom,
   ThreadLink,
   ImageMimeType,
   Message,
@@ -667,7 +668,7 @@ export class ThreadStore {
     return this.moves.userMove(threadId, projectId, stopBackground);
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], agentRunId?: string, startedBy?: ThreadLink): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], agentRunId?: string, startedBy?: ThreadLink, sentFrom: SentFrom | null = null): Turn {
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     const thread = this.require(threadId);
     this.codeCheckpoints.assertAvailable(thread.cwd);
@@ -733,7 +734,7 @@ export class ThreadStore {
       turnId: turn.id,
       role: systemOperation(operation) || automatic ? 'system' : 'user',
       parts: [
-        { type: 'text', text: previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences } : {}), ...(systemOperation(operation) ? { displayText: displayText ?? SYSTEM_LABEL[operation] } : {}), ...(automatic ? { displayText } : {}), ...(activity ? { activity } : {}), ...(moved ? { moved } : {}), ...(startedBy ? { displayText: displayText ?? prompt, startedBy } : {}) },
+        { type: 'text', text: previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences } : {}), ...(systemOperation(operation) ? { displayText: displayText ?? SYSTEM_LABEL[operation] } : {}), ...(automatic ? { displayText } : {}), ...(activity ? { activity } : {}), ...(moved ? { moved } : {}), ...(startedBy ? { displayText: displayText ?? prompt, startedBy } : {}), ...(sentFrom && !operation ? { sentFrom } : {}) },
         ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
           type: 'image',
           mimeType: attachment.mimeType,

@@ -148,9 +148,9 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     core.threads.focus.set(ctx.connection.id, params.threadId, params.protectedThreadIds, params.protectAllThreads, params.attentive, params.idleMs);
     return { ok: true } as const;
   });
-  core.router.register('turns.start', async (params) => {
+  core.router.register('turns.start', async (params, ctx) => {
     await requireCwd(core, params.threadId);
-    return core.threads.startTurn(params.threadId, params.prompt, params.attachments ?? [], params.expectedSelectionVersion, undefined, undefined, params.clientRequestId, undefined, params.previewReferences ?? []);
+    return core.threads.startTurn(params.threadId, params.prompt, params.attachments ?? [], params.expectedSelectionVersion, undefined, undefined, params.clientRequestId, undefined, params.previewReferences ?? [], undefined, undefined, ctx.connection.sentFrom ?? null);
   });
   core.router.register('turns.stop', (params) => {
     core.activity.pauseAll(params.threadId);

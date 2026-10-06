@@ -1,4 +1,4 @@
-import { RPC_CHUNK_BYTES, RPC_CHUNK_MARK, RPC_MAX_FRAME_BYTES, RpcErrorCode, previewToolPart, type MessagePart, type RpcError, type RpcEventName, type RpcEvents, type ThreadId, type TransportOptions } from '@boite/contracts';
+import { RPC_CHUNK_BYTES, RPC_CHUNK_MARK, RPC_MAX_FRAME_BYTES, RpcErrorCode, previewToolPart, type MessagePart, type RpcError, type RpcEventName, type RpcEvents, type SentFrom, type ThreadId, type TransportOptions } from '@boite/contracts';
 import type { ServerWebSocket } from 'bun';
 import type { Core } from '../core.ts';
 import { newId } from '../ids.ts';
@@ -32,6 +32,7 @@ export class ServerConnection implements Connection {
   /** Owner until hello says otherwise; nothing reads it before `authenticated` is true. */
   identity: Identity = { principal: 'owner', sessionId: null, threadId: null };
   transport: TransportOptions = {};
+  sentFrom: SentFrom | null = null;
 
   private socket: ServerWebSocket<SocketData> | null = null;
   private congested = false;

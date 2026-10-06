@@ -1,5 +1,6 @@
 import { lastAgentText, requestExcerpt, type ProviderInstallState, type RpcEventName, type ThreadId, type TurnId } from '@boite/contracts';
 import type { Client, EventHandler } from '../client';
+import { noteThisComputer } from '../device';
 import { finishNotifies } from '../notify';
 import { resetPullRequestSupport } from '../pull-request';
 import { rightPanel } from '../right-panel.svelte';
@@ -42,6 +43,7 @@ export function listen(ctx: StoreContext, client: Client): void {
           models.effortAttempts.clear();
           s.error = null;
           s.core = client.core;
+          if (ctx.connection.localCore) noteThisComputer(s.core?.hostname);
           undo.discardExpired(s, s.core?.startedAt);
           // `WsClient` writes its principal from the hello answer before it
           // reports `ready`, and this handler runs before `connect()` returns:

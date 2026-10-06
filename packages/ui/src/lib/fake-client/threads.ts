@@ -642,6 +642,9 @@ export function threadMethods(ctx: FakeContext) {
       const messageIndex = thread.messages.length;
       const turn = ctx.startTurn(params.threadId, params.prompt, params.attachments ?? [], rootId ? 'delegation' : undefined, undefined, undefined, params.previewReferences ?? []);
       if (rootId) ctx.delegationTurns.set(rootId, (ctx.delegationTurns.get(rootId) ?? 0) + 1);
+      // As the core's hello records it: the owner is the desktop app, a paired session the phone.
+      const sent = thread.messages[messageIndex]!.parts[0];
+      if (sent?.type === 'text') sent.sentFrom = ctx.bus.principal === 'session' ? { client: 'pwa', device: 'phone' } : { client: 'shell', device: null };
       if (key) ctx.turnRequests.set(key, { content, turn, messageId: thread.messages[messageIndex]!.id });
       return turn;
     },

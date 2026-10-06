@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { PROTOCOL_VERSION, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
+import { hostname } from 'node:os';
+import { CLIENT_DEVICE_MAX, PROTOCOL_VERSION, RpcCloseCode, RpcErrorCode, type SentFrom } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
 import { NONCE_MAX, NONCE_MIN, nonceProblem, principalOf, type Identity } from '../sessions.ts';
@@ -16,7 +17,7 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
     return;
   }
   const params = rawParams as
-    | { token?: unknown; grant?: unknown; ticket?: unknown; nonce?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown } }
+    | { token?: unknown; grant?: unknown; ticket?: unknown; nonce?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown; device?: unknown } }
     | undefined;
   const refuse = (message: string, reason: string): void => {
     connection.sendResponse({ jsonrpc: '2.0', id, error: { code: RpcErrorCode.Unauthorized, message } });
@@ -89,6 +90,7 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
   }
   if (wrongProtocol()) return;
   connection.identity = identity;
+  connection.sentFrom = sentFromOf(identity, client.name, params?.client?.device, connection.remote);
   connection.authenticated = true;
   connection.sendResponse({
     jsonrpc: '2.0',
@@ -102,6 +104,19 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
       ...(identity.threadId === null ? {} : { threadId: identity.threadId }),
     },
   });
+}
+
+/**
+ * Where this socket's prompts come from, for the agent's note. Only the
+ * user's apps count: an agent's `boite` call or a test says nothing. The
+ * shell on this machine's loopback is on this machine, whose name the core
+ * knows better than the client does.
+ */
+export function sentFromOf(identity: Identity, name: string, device: unknown, remote: boolean): SentFrom | null {
+  if (identity.principal === 'agent' || (name !== 'shell' && name !== 'pwa')) return null;
+  const said = typeof device === 'string' ? device.replace(/[\p{Cc}\p{Cf}]/gu, '').trim() : '';
+  const named = said.length > 0 && said.length <= CLIENT_DEVICE_MAX ? said : null;
+  return { client: name, device: named ?? (name === 'shell' && !remote ? hostname() : null) };
 }
 
 /** Equal without the time taken saying how much of the owner token matched. */
