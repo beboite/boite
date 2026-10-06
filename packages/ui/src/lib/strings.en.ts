@@ -344,7 +344,10 @@ export const strings = {
     }
   },
   mobile: {
-    clearSearch: 'Clear search', draftTitle: 'What would you like to do?', draftHint: 'Start a task, ask a question, or pick up your work.',
+    clearSearch: 'Clear search',
+    /** Recent's filter: the conversations whose agent or sub-agents are still at work. */
+    atWork: '{count} at work', atWorkFilter: 'Show only the conversations at work',
+    draftTitle: 'What would you like to do?', draftHint: 'Start a task, ask a question, or pick up your work.',
     pairTitle: 'Your Boite, on your phone',
     pairBody: 'Connect to your computer to find your projects, conversations and agents here.',
     pairStep: 'On your computer, open Settings → Machines and updates and create a pairing code.',
@@ -695,6 +698,9 @@ export const strings = {
       delegating: 'Sub-agents',
       delegatingOne: 'Waiting on 1 sub-agent',
       delegatingMany: 'Waiting on {count} sub-agents',
+      /** What a phone row shows beside the radar: how many sub-agents are at work. */
+      subagentsOne: '1 sub-agent',
+      subagentsMany: '{count} sub-agents',
       /** The turn ended, the agent still watches something: a monitor it left going. */
       monitoring: 'Monitoring',
       monitoringFor: 'Monitoring for {elapsed}',
@@ -744,7 +750,9 @@ export const strings = {
     stopWork: 'Stop it',
     keep: 'Keep them',
     /** Said by a project while a thread is dragged over it. */
-    dropHere: 'Move the thread to {project}'
+    dropHere: 'Move the thread to {project}',
+    /** Under the card a dragged row becomes, while no project would take it. */
+    dragHint: 'Drop on another project'
   },
 
   palette: {
@@ -1077,6 +1085,10 @@ export const strings = {
     moveExplained: 'Move explained to the agent',
     moveShow: 'Show what the agent was told',
     moveHide: 'Hide what the agent was told',
+    /** At the foot of a thread the user moved: the note rides on the next prompt, not sent yet. */
+    movePending: 'Moved to {project} · the agent will be told with your next message',
+    movePendingShow: 'Show what the agent will be told',
+    movePendingHide: 'Hide what the agent will be told',
     /** A line of the timeline: the agent moved its own thread with `boite thread move`. */
     movedByAgent: 'Moved by the agent to {project}',
     /** Above the first prompt of a thread another thread's agent started with `boite thread new`. */

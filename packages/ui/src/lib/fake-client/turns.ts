@@ -71,8 +71,8 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
 
   const at = ctx.now();
   // As the core: the first message after a move carries the note, unless it is a compact or a slash command.
-  const moved = operation === 'compact' || prompt.trimStart().startsWith('/') ? undefined : ctx.moveNotes.get(threadId);
-  if (moved) ctx.moveNotes.delete(threadId);
+  const moved = operation === 'compact' || prompt.trimStart().startsWith('/') ? undefined : thread.moveNote ?? undefined;
+  if (moved) thread.moveNote = null;
   const execution: NonNullable<Turn['execution']> = {
       providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
       effort: thread.effort, speed: thread.speed ?? null, permissionMode: thread.permissionMode, sessionId: thread.sessionId,

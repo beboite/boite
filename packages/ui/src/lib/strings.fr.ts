@@ -348,7 +348,9 @@ export const fr: Translation = {
     }
   },
   mobile: {
-    clearSearch: 'Effacer la recherche', draftTitle: 'Que voulez-vous faire ?', draftHint: 'Lancez une tâche, posez une question ou reprenez votre travail.',
+    clearSearch: 'Effacer la recherche',
+    atWork: '{count} en cours', atWorkFilter: 'Afficher seulement les conversations en cours',
+    draftTitle: 'Que voulez-vous faire ?', draftHint: 'Lancez une tâche, posez une question ou reprenez votre travail.',
     pairTitle: 'Votre Boite, sur votre téléphone',
     pairBody: 'Connectez votre ordinateur pour retrouver ici vos projets, vos conversations et vos agents.',
     pairStep: 'Sur votre ordinateur, ouvrez Réglages → Machines et mises à jour et créez un code d’appairage.',
@@ -687,6 +689,8 @@ export const fr: Translation = {
       delegating: 'Sous-agents',
       delegatingOne: 'Attend 1 sous-agent',
       delegatingMany: 'Attend {count} sous-agents',
+      subagentsOne: '1 sous-agent',
+      subagentsMany: '{count} sous-agents',
       monitoring: 'Surveille',
       monitoringFor: 'Surveille depuis {elapsed}',
       background: 'En arrière-plan',
@@ -723,7 +727,8 @@ export const fr: Translation = {
     stopMonitors: 'Arrêter les moniteurs',
     stopWork: "L'arrêter",
     keep: 'Les garder',
-    dropHere: 'Déplacer la conversation vers {project}'
+    dropHere: 'Déplacer la conversation vers {project}',
+    dragHint: 'Déposer sur un autre projet'
   },
 
   palette: {
@@ -1031,6 +1036,9 @@ export const fr: Translation = {
     moveExplained: "Déplacement expliqué à l'agent",
     moveShow: "Voir ce qui a été dit à l'agent",
     moveHide: "Masquer ce qui a été dit à l'agent",
+    movePending: "Déplacé vers {project} · l'agent sera prévenu à votre prochain message",
+    movePendingShow: "Voir ce qui sera dit à l'agent",
+    movePendingHide: "Masquer ce qui sera dit à l'agent",
     movedByAgent: "Déplacé par l'agent vers {project}",
     startedByAgent: "Lancé par l'agent de {title} dans {project}",
     promptFromAgent: "Envoyé par l'agent de",

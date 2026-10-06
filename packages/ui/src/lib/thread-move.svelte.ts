@@ -3,6 +3,7 @@ import { confirm } from './confirm.svelte';
 import { contextMenu } from './context-menu.svelte';
 import { projectName } from './format';
 import type { MenuItem } from './menu';
+import { startPointerDrag, type DragGrip } from './pointer-drag';
 import { fill, strings } from './strings';
 import type { Store } from './store.svelte';
 import { workingThread } from './thread-rows';
@@ -14,18 +15,80 @@ export interface ThreadDrag {
   projectId: ProjectId | null;
 }
 
-/** The drag's data type, so a file or text dragged over the sidebar is never taken for a thread. */
-export const THREAD_DRAG_TYPE = 'application/x-boite-thread';
+/** The card that follows the mouse: the row's look, its width, and where the mouse took it. */
+export interface DragGhost extends DragGrip {
+  title: string;
+  providerId: string;
+}
 
 /**
- * The row being dragged. `dragover` cannot read a drag's data, only its types,
- * so the target project reads this to decide whether it takes the drop.
+ * The row being dragged, and the project section it would drop on, keyed as
+ * `dropKey` gives it: the section draws its outline from it. The ghost, the
+ * mouse and the target's name draw the card that follows the mouse.
  */
-export const threadDrag = $state<{ current: ThreadDrag | null }>({ current: null });
+export const threadDrag = $state<{
+  current: ThreadDrag | null;
+  over: string | null;
+  target: string | null;
+  ghost: DragGhost | null;
+  x: number;
+  y: number;
+}>({ current: null, over: null, target: null, ghost: null, x: 0, y: 0 });
+
+/** A project section's key while a row hovers it. */
+export function dropKey(machineId: string, projectId: ProjectId): string {
+  return `${machineId}:${projectId}`;
+}
 
 /** Whether a drop of the dragged row on this project would move it. */
 export function takesDrop(drag: ThreadDrag | null, machineId: string, projectId: ProjectId): boolean {
   return drag !== null && drag.machineId === machineId && drag.projectId !== projectId;
+}
+
+/** A project section a row can land on: its machine, its id, and the name the card shows. */
+interface DropTarget {
+  machineId: string;
+  projectId: ProjectId;
+  name: string;
+}
+
+/** The project section under a point, from the section's own data. */
+function sectionAt(x: number, y: number): DropTarget | null {
+  const section = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-testid="project"][data-project-id][data-machine-id]');
+  const projectId = section?.dataset['projectId'], machineId = section?.dataset['machineId'];
+  return projectId && machineId !== undefined ? { machineId, projectId: projectId as ProjectId, name: section?.dataset['projectName'] ?? '' } : null;
+}
+
+/**
+ * Drags a thread row with the mouse onto another project's section, from the
+ * row's `pointerdown` (`pointer-drag.ts` says why pointer events). A press
+ * that does not travel stays a click; Escape cancels. `look` is what the card
+ * that follows the mouse shows of the row.
+ */
+export function startThreadDrag(event: PointerEvent, store: Store, drag: ThreadDrag, look: { title: string; providerId: string }): void {
+  startPointerDrag(event, {
+    rootClass: 'thread-dragging',
+    begin: (grip) => {
+      threadDrag.ghost = { ...look, ...grip };
+      threadDrag.current = drag;
+    },
+    aim: (x, y) => {
+      threadDrag.x = x;
+      threadDrag.y = y;
+      const at = sectionAt(x, y);
+      const lands = at !== null && takesDrop(drag, at.machineId, at.projectId);
+      threadDrag.over = lands ? dropKey(at.machineId, at.projectId) : null;
+      threadDrag.target = lands ? at.name : null;
+    },
+    end: (drop) => {
+      threadDrag.current = null;
+      threadDrag.over = null;
+      threadDrag.target = null;
+      threadDrag.ghost = null;
+      const target = drop && sectionAt(drop.x, drop.y);
+      if (target && takesDrop(drag, target.machineId, target.projectId)) void moveThread(store, drag.threadId, target.projectId);
+    },
+  });
 }
 
 function find(store: Store, threadId: ThreadId): ThreadSummary | null {

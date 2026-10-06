@@ -7,8 +7,12 @@
   import { threadState } from '../lib/thread-state';
   import type { WorkingChildren } from '../lib/thread-rows';
 
-  /** `subagents`: the thread's delegated agents still at work, from its store. */
-  let { thread, now, subagents = null }: { thread: Pick<ThreadSummary, 'status' | 'unread' | 'runningSince' | 'backgroundWork' | 'lastUserMessageAt' | 'createdAt'>; now: number; subagents?: WorkingChildren | null } = $props();
+  /**
+   * `subagents`: the thread's delegated agents still at work, from its store.
+   * `countSubagents`: the row says how many beside the radar, where no hover
+   * shows the title (a phone).
+   */
+  let { thread, now, subagents = null, countSubagents = false }: { thread: Pick<ThreadSummary, 'status' | 'unread' | 'runningSince' | 'backgroundWork' | 'lastUserMessageAt' | 'createdAt'>; now: number; subagents?: WorkingChildren | null; countSubagents?: boolean } = $props();
 
   let kind = $derived(threadState(thread, subagents?.count ?? 0));
   /** The states that count time: the turn, its sub-agents, or the work it left running. */
@@ -37,6 +41,13 @@
     }
     return strings.sidebar.state[kind];
   });
+  /** What the delegating row shows beside its radar: the time, and the count where asked. */
+  let delegatingText = $derived.by(() => {
+    if (!countSubagents) return spent ?? strings.sidebar.state.delegating;
+    const count = subagents?.count ?? 0;
+    const agents = count === 1 ? strings.sidebar.state.subagentsOne : fill(strings.sidebar.state.subagentsMany, { count: String(count) });
+    return spent === null ? agents : `${agents} · ${spent}`;
+  });
 </script>
 
 {#if kind === null}
@@ -44,7 +55,8 @@
 {:else}
   <span class="when state {kind}" data-testid="thread-state" data-state={kind} title={label} aria-label={label}>
     {#if kind === 'working'}<LoaderCircle size={11} class="spinner" aria-hidden="true" /><span class="ui-label">{spent ?? strings.sidebar.state.working}</span>
-    {:else if kind === 'delegating' || kind === 'monitoring'}<Radar size={11} class="pulse" aria-hidden="true" /><span class="ui-label">{spent ?? strings.sidebar.state[kind]}</span>
+    {:else if kind === 'delegating'}<Radar size={11} class="pulse" aria-hidden="true" /><span class="ui-label" data-testid="thread-state-text">{delegatingText}</span>
+    {:else if kind === 'monitoring'}<Radar size={11} class="pulse" aria-hidden="true" /><span class="ui-label">{spent ?? strings.sidebar.state.monitoring}</span>
     {:else if kind === 'background'}<span class="dot pulse" aria-hidden="true"></span><span class="ui-label">{spent ?? strings.sidebar.state.background}</span>
     {:else}<span class="ui-label">{label}</span>{/if}
   </span>

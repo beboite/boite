@@ -84,10 +84,14 @@ authenticated after admission is refused.
 
 The Windows installer run by hand, for an update or a reinstall, still requires
 idle admission: the in-app update has stopped the core before the installer
-starts. Its hooks (`windows/hooks.nsh` and
+starts. Its hooks (`windows/hooks.nsh`, `windows/stop-shell.ps1` and
 `windows/stop-core.ps1`) first close a running shell, with the installer's own
 "Boite is running" question: an open window would start the core again within
-seconds, from the file about to be replaced. They then find the
+seconds, from the file about to be replaced. Only a shell running from that
+install's directory counts, under the build's binary name or the one the
+previous install registered; the template's own check, which matches a file
+name across the session and would close Boite Dev's window from Boite's
+installer, is skipped. They then find the
 `boite-core.exe` processes running that install's exact file, plus a core
 hosted by `bun.exe` when its PID matches `core.json` and its parsed arguments
 name that install's `core/main.js` and data directory. Other Bun processes

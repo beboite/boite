@@ -10,9 +10,12 @@ const { nsis: NSIS, generated: GENERATED, ready } = installerPrerequisites({ roo
 // store its expanded spelling, which the NSIS target comparison expects.
 const scratch = ready ? realpathSync.native(mkdtempSync(join(tmpdir(), 'boite-shortcuts-'))) : '';
 const running = new Set<Bun.Subprocess>();
+// Where the fixture records its MainBinaryName, as the template does under its uninstall key.
+const UNINSTKEY = 'Software\\Boite shortcut test uninstall';
 afterAll(async () => {
   for (const child of running) { child.kill(); await child.exited; }
   if (scratch) rmSync(scratch, { recursive: true, force: true });
+  if (ready) Bun.spawnSync(['reg', 'delete', `HKCU\\${UNINSTKEY}`, '/f'], { stdout: 'ignore', stderr: 'ignore', windowsHide: true });
 });
 
 const template = readFileSync(join(ROOT, 'apps/shell/src-tauri/windows/installer.nsi'), 'utf8').replaceAll('\r\n', '\n');
@@ -47,13 +50,16 @@ describe.skipIf(!ready)('installer shortcuts', () => {
       '!define ARCH "x64"', '!define DISPLAYLANGUAGESELECTOR "false"', '!define STARTMENUFOLDER ""',
       '!define PLACEHOLDER_INSTALL_DIR "unused"',
       '!define MANUPRODUCTKEY "Software\\Boite shortcut test"',
+      `!define UNINSTKEY "${UNINSTKEY}"`,
       'Var PassiveMode', 'Var UpdateMode', 'Var NoShortcutMode', 'Var WixMode',
       'Var OldMainBinaryName', 'Var AppStartMenuFolder',
       nsisFunction('.onInit'), nsisFunction('RestorePreviousInstallLocation'),
       nsisFunction('CreateOrUpdateStartMenuShortcut'), nsisFunction('CreateOrUpdateDesktopShortcut'),
       finishAction === 'CreateOrUpdateDesktopShortcut' ? '' : nsisFunction(finishAction),
       'Section Install',
-      '  StrCpy $OldMainBinaryName "boite-shortcut-test.exe"',
+      // What the template's Install section does with the registered name.
+      '  ReadRegStr $OldMainBinaryName SHCTX "${UNINSTKEY}" "MainBinaryName"',
+      '  WriteRegStr SHCTX "${UNINSTKEY}" "MainBinaryName" "boite-shortcut-test.exe"',
       '  FileOpen $0 "$INSTDIR\\boite-shortcut-test.exe" w', '  FileWrite $0 "new version"', '  FileClose $0',
       '  CreateDirectory "$INSTDIR\\start-menu"', '  CreateDirectory "$INSTDIR\\desktop"',
       '  Call CreateOrUpdateStartMenuShortcut', '  Call CreateOrUpdateDesktopShortcut',
@@ -107,4 +113,31 @@ describe.skipIf(!ready)('installer shortcuts', () => {
       expect(statSync(links[1]!).mtimeMs).toBe(requested);
     }, 30_000);
   }
+
+  // Boite Dev shipped boite-shell.exe, then boite-dev-shell.exe. Its next
+  // installer, downloaded by hand, must update that install in place (not run
+  // its old uninstaller first) and point the existing links at the new file.
+  test('an install made under an earlier binary name is updated and its links follow', async () => {
+    build();
+    const install = join(scratch, 'renamed');
+    const old = join(install, 'boite-old-shortcut-test.exe');
+    const links = ['start-menu', 'desktop'].map(folder => join(install, folder, 'Boite shortcut test.lnk'));
+    for (const folder of ['start-menu', 'desktop']) mkdirSync(join(install, folder), { recursive: true });
+    writeFileSync(old, 'old version');
+    const made = Bun.spawnSync(['powershell', '-NoProfile', '-NonInteractive', '-Command',
+      `$s = New-Object -ComObject WScript.Shell; foreach ($l in @('${links.join("','")}')) { $k = $s.CreateShortcut($l); $k.TargetPath = '${old}'; $k.Save() }`,
+    ], { stdout: 'pipe', stderr: 'pipe', windowsHide: true });
+    expect(made.exitCode).toBe(0);
+    const registered = Bun.spawnSync(['reg', 'add', `HKCU\\${UNINSTKEY}`, '/v', 'MainBinaryName', '/d', 'boite-old-shortcut-test.exe', '/f'], {
+      stdout: 'ignore', stderr: 'pipe', windowsHide: true,
+    });
+    expect(registered.exitCode).toBe(0);
+
+    await run(setup, [`/D=${install}`]);
+    expect(readFileSync(join(install, 'mode.txt'), 'utf8')).toBe('1');
+    const targets = Bun.spawnSync(['powershell', '-NoProfile', '-NonInteractive', '-Command',
+      `$s = New-Object -ComObject WScript.Shell; foreach ($l in @('${links.join("','")}')) { $s.CreateShortcut($l).TargetPath }`,
+    ], { stdout: 'pipe', stderr: 'pipe', windowsHide: true });
+    expect(targets.stdout.toString().trim().split(/\r?\n/)).toEqual([0, 1].map(() => join(install, 'boite-shortcut-test.exe')));
+  }, 30_000);
 });

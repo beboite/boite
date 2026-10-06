@@ -120,7 +120,14 @@ test('projects follow user activity, then keep a dragged custom order after relo
   await page.click(`${id('context-menu')} [data-value=move-down]`);
   await page.waitFor(`!document.querySelector('${id('context-menu')}')`);
   expect(await keys()).toEqual(before);
-  await page.evaluate(`(() => { const rows = document.querySelectorAll('${id('project')}'); const dataTransfer = new DataTransfer(); rows[3].querySelector('${id('project-row')}').dispatchEvent(new DragEvent('dragstart', {bubbles:true, dataTransfer})); rows[0].dispatchEvent(new DragEvent('dragover', {bubbles:true, cancelable:true, dataTransfer})); rows[0].dispatchEvent(new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer})); })()`);
+  // A real mouse drag: the header is taken past the threshold, then dropped on the upper half of the first project.
+  const points = await page.evaluate<{ from: { x: number; y: number }; to: { x: number; y: number } }>(`(() => { const rows = document.querySelectorAll('${id('project')}'); const a = rows[3].querySelector('${id('project-row')}').getBoundingClientRect(); const b = rows[0].getBoundingClientRect(); return { from: { x: a.left + a.width / 2, y: a.top + a.height / 2 }, to: { x: b.left + b.width / 2, y: b.top + Math.min(8, b.height / 4) } }; })()`);
+  await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...points.from, button: 'left', buttons: 1, clickCount: 1 });
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: points.from.x, y: points.from.y - 12, button: 'left', buttons: 1 });
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...points.to, button: 'left', buttons: 1 });
+  await page.waitFor(`document.documentElement.classList.contains('project-dragging')`);
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...points.to, button: 'left', buttons: 0, clickCount: 1 });
+  await page.waitFor(`JSON.stringify(Array.from(document.querySelectorAll('${id('project')}')).map(e => JSON.stringify([e.dataset.machineId, e.dataset.projectId]))) === ${JSON.stringify(JSON.stringify([before[3]!, ...before.slice(0, 3)]))}`);
   expect(await keys()).toEqual([before[3]!, ...before.slice(0, 3)]);
   await page.click(id('project-sort'));
   expect(await keys()).toEqual(activityOrder);
