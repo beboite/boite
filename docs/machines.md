@@ -182,7 +182,9 @@ and Recent, above its grouping switches. Projects is the default. Projects
 appear by recent user activity, using the latest accepted user message among
 their visible threads, or creation time when no message exists. Assistant
 output and title changes leave that order alone. The order button under the
-switch toggles to Custom order; then drag project headers to rearrange them. Their menus also offer Move project up and Move
+switch toggles to Custom order; then drag project headers to rearrange them,
+with the mouse or, on a phone, after holding a header still for a moment; a
+line shows where the project lands and Escape cancels. Their menus also offer Move project up and Move
 project down, including on a phone. Switching back to recent activity keeps
 the saved custom arrangement. The view and custom order belong to this device.
 

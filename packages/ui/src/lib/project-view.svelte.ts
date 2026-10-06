@@ -15,7 +15,6 @@ export function projectKey(entry: ProjectEntry): string {
   return JSON.stringify([machine, entry.project.id]);
 }
 const STORAGE = 'boite.project-view.v1';
-export const PROJECT_DRAG_TYPE = 'application/x-boite-project';
 
 export class ProjectView {
   order = $state<'recent' | 'manual'>('recent');
