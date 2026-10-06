@@ -297,13 +297,13 @@ when the core advertises `chunkedAnswers`.
 - `ChatImage.svelte` draws each picture in a box of its own proportions from
   the first frame: the blur, then the picture fading in over it. A picture that
   came with its bytes reads its size from their header. Nothing around the box
-  moves when the bytes land. An unmeasured prompt counts its thumbnails on top
-  of the 80 px estimate (`estimateSlot`). A height measured above the reader
-  goes back into `scrollTop` inside the `ResizeObserver` callback, before paint.
-  A frame later, the list was painted pushed down by what a picture added, then
-  put back. `tests/e2e/media.test.ts` checks this on a real core with 24
-  screenshots: the fetches on opening, and the reader's text keeping its
-  position to the pixel while the scrolled pictures land.
+  moves when the bytes land: the 180 by 120 place it replaced grew to the
+  thumbnail and pushed what followed. An unmeasured prompt counts its
+  thumbnails on top of the 80 px estimate (`estimateSlot`), so the spacers
+  are closer to what scrolling up mounts. `tests/e2e/media.test.ts` checks
+  this on a real core with 24 screenshots: the fetches on opening, and the
+  reader's text keeping its position to the pixel while the scrolled pictures
+  land.
 
 - While a first page downloads, the chat shows a bar and "192 kB / 1.3 MB",
   the bytes received against the total the core put in each slice. A page

@@ -366,54 +366,46 @@
   const rendered = $derived(timeline.slice(view.start, view.end));
 
   /**
-   * A measured height replaces its estimate; one above the reader goes back into
-   * `scrollTop` so the text does not move. This runs in the observer callback,
-   * before paint: a frame later, the text was painted pushed down by a picture,
-   * then put back. Scrolling resizes no box; the rest waits for `settle`.
+   * A rendered message's real height replaces its estimate. One that sits above
+   * what the user is reading would push the text down as it lands, so the same
+   * delta goes back into `scrollTop` and the viewport does not move.
    */
-  function measure(entries: ResizeObserverEntry[]): boolean {
+  function onMeasured(entries: ResizeObserverEntry[]): void {
     const box = viewport;
+    const lastId = timeline.at(-1)?.id;
     let shift = 0;
     let moved = false;
     for (const entry of entries) {
       const node = entry.target as HTMLElement;
-      if (node === box) continue;
+      if (node === box) {
+        viewHeight = node.clientHeight;
+        continue;
+      }
       const id = node.dataset['mid'];
       if (!id) continue;
       // The observer already measured the box; reading `offsetHeight` again
       // would lay out, mid-scroll, whatever the window just mounted.
       const next = Math.round(entry.borderBoxSize?.[0]?.blockSize ?? node.offsetHeight) + GAP;
-      const at = slots.indexOf(timeline, id);
-      const previous = heights.get(id) ?? (at < 0 ? ESTIMATE : slots.slotAt(timeline, at));
+      const previous = heights.get(id) ?? ESTIMATE;
       if (previous === next) continue;
       heights.set(id, next);
       moved = true;
+      const at = slots.indexOf(timeline, id);
       if (at < 0) continue;
       // Everything from here down is worth a different number now.
       if (at < slots.dirty) slots.dirty = at;
       if (at < view.first) shift += next - previous;
-    }
-    if (box && shift !== 0 && !pinned) {
-      box.scrollTop += shift;
-      if (lifting) liftFrom += shift;
-    }
-    return moved;
-  }
-
-  /** The frame after a measurement: the viewport's height, the pin's tail and the window on real numbers. */
-  function settle(entries: ResizeObserverEntry[], moved: boolean): void {
-    const box = viewport;
-    const lastId = timeline.at(-1)?.id;
-    for (const entry of entries) {
-      const node = entry.target as HTMLElement;
-      if (node === box) viewHeight = node.clientHeight;
-      else if (lastId !== undefined && node.dataset['mid'] === lastId) noteTail(heights.get(lastId) ?? ESTIMATE);
+      if (id === lastId) noteTail(next);
     }
     if (!moved) return;
     measured += 1;
-    // The window moves with the scroll at once: computed on the old position, it mounted a message above
-    // for a frame and dropped it unmeasured, moving the text with no scroll event to read the anchor.
-    if (box && !pinned) scrollTop = box.scrollTop;
+    if (box && shift !== 0 && !pinned) {
+      box.scrollTop += shift;
+      // The window moves with it at once: computed on the old position, it mounted a message above
+      // for a frame and dropped it unmeasured, moving the text with no scroll event to read the anchor.
+      scrollTop = box.scrollTop;
+      if (lifting) liftFrom += shift;
+    }
   }
 
   /** The bottom message's height, at most ten times a second: what the pin follows. */
@@ -485,15 +477,13 @@
     if (typeof ResizeObserver === 'undefined') return;
     let frame = 0;
     const pending = new Map<Element, ResizeObserverEntry>();
-    let moved = false;
     const observer = new ResizeObserver(entries => {
-      if (measure(measurable(entries, id => slots.indexOf(timeline, id) >= 0))) moved = true;
       for (const entry of entries) pending.set(entry.target, entry);
       // Pinned, the list follows what grows at its bottom in this same frame: the observer runs
       // after layout, so the new line is painted already in view (docs/performance.md).
       if (following()) edge.follow(box);
       if (frame) return;
-      // Redrawing the window inside ResizeObserver can resize that same batch.
+      // Applying slot heights inside ResizeObserver can resize that same batch.
       frame = requestAnimationFrame(() => {
         frame = 0;
         const batch = measurable([...pending.values()], id => slots.indexOf(timeline, id) >= 0);
@@ -502,8 +492,7 @@
         // visible message, then align it after Svelte updates the spacers.
         rememberAnchor();
         const anchor = readingAnchor;
-        settle(batch, moved);
-        moved = false;
+        onMeasured(batch);
         void tick().then(() => restoreAnchor(anchor));
       });
     });

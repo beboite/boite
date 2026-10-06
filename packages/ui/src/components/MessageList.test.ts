@@ -538,49 +538,6 @@ test('a long thread renders a window of messages and carries the rest in the spa
   expect(below?.style.height).toBe(`${(500 - 262) * ESTIMATE}px`);
 });
 
-test('a message measured above the reader is paid back in scrollTop inside the observer callback, not a frame later', async () => {
-  const messages = thread(500);
-  stubLayout(messages.length * ESTIMATE);
-  let measure: ResizeObserverCallback | null = null;
-  // The setup's own stubs come back after: unstubbing every global would drop them for the next tests.
-  const saved = { ResizeObserver: globalThis.ResizeObserver, requestAnimationFrame: globalThis.requestAnimationFrame, cancelAnimationFrame: globalThis.cancelAnimationFrame };
-  const frames: FrameRequestCallback[] = [];
-  Object.assign(globalThis, {
-    ResizeObserver: class {
-      constructor(callback: ResizeObserverCallback) { measure = callback; }
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    },
-    // Frames are held: what happens before one runs is what the first paint shows.
-    requestAnimationFrame: (callback: FrameRequestCallback) => frames.push(callback),
-    cancelAnimationFrame: () => undefined
-  });
-  try {
-    running = mount(MessageList, { target: document.body, props: { store, threadId: 't-long', messages } });
-    await settle();
-    const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
-    timeline.scrollTop = 20_000;
-    timeline.dispatchEvent(new Event('scroll'));
-    await settle();
-    // m-246 is the overscan above m-250, the first message on screen.
-    const above = articles()[0]!;
-    expect(above.dataset['mid']).toBe('m-246');
-
-    measure!([{ target: above, borderBoxSize: [{ blockSize: 400, inlineSize: 600 }] } as unknown as ResizeObserverEntry], {} as ResizeObserver);
-    expect(timeline.scrollTop).toBe(20_000 + 400 + 20 - ESTIMATE);
-
-    // The frame redraws the window on the real number and moves nothing twice.
-    for (const frame of frames.splice(0)) frame(0);
-    await settle();
-    expect(timeline.scrollTop).toBe(20_000 + 400 + 20 - ESTIMATE);
-  } finally {
-    if (running) unmount(running, { outro: false });
-    running = null;
-    Object.assign(globalThis, saved);
-  }
-});
-
 test('a prompt not measured yet counts its pictures at their thumbnail height, from the size a light page sent', async () => {
   const messages = thread(500);
   messages[10] = {
