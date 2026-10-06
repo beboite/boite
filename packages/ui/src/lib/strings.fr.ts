@@ -516,6 +516,7 @@ export const fr: Translation = {
     connecting: 'Connexion',
     ready: 'Connecté',
     closed: 'Déconnecté',
+    offline: 'Hors ligne',
     label: 'Connexion'
   },
 
