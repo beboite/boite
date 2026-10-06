@@ -113,6 +113,15 @@
     contextMenu.open(event, desktopItems, titleAction);
   }
 
+  function carrierMenu(anchor: HTMLElement) {
+    const held = carrier, open = store.openThread;
+    if (!held || !open) return;
+    const rect = anchor.getBoundingClientRect();
+    contextMenu.show({ x: rect.left, y: rect.bottom }, [
+      { id: 'open', label: fill(strings.agents.openAgent, { name: held.agent.name }) },
+      ...(store.owner ? [{ id: 'back', label: strings.agents.takeBack }] : [])
+    ], id => { if (id === 'open') store.showAgents(held.agent.id); else void entrust(store, open.id, null); }, anchor);
+  }
   /** The agent this thread was entrusted to, if any. */
   let carrier = $derived(thread ? agentDirectory(store).entrustmentOf(thread.id) : null);
   /** The steward looking after this thread, if its project has one. */
@@ -194,12 +203,12 @@
         </button>
       {/if}
       {#if carrier}
-        <!-- The agent this thread was entrusted to: open it, or take the thread back. -->
-        <Menu items={[{ id: 'open', label: fill(strings.agents.openAgent, { name: carrier.agent.name }) }, ...(store.owner ? [{ id: 'back', label: strings.agents.takeBack }] : [])]}
-          onpick={id => { if (id === 'open') store.showAgents(carrier!.agent.id); else void entrust(store, thread!.id, null); }}
-          label={fill(strings.agents.entrustedTo, { name: carrier.agent.name })} placement="bottom" variant="ghost" testid="thread-entrusted-chip">
-          <span class="entrusted"><AgentAvatar kind="profile" id={carrier.agent.id} name={carrier.agent.name} avatar={carrier.agent.avatar} size={16} /><span class="steward-name ui-label">{fill(strings.agents.entrustedTo, { name: carrier.agent.name })}</span></span>
-        </Menu>
+        <!-- The agent this thread was entrusted to: its menu opens the agent or takes the thread back. -->
+        <button type="button" class="chip entrusted" title={fill(strings.agents.entrustedTo, { name: carrier.agent.name })} data-testid="thread-entrusted-chip"
+          onclick={(event) => carrierMenu(event.currentTarget)}>
+          <AgentAvatar kind="profile" id={carrier.agent.id} name={carrier.agent.name} avatar={carrier.agent.avatar} size={16} />
+          <span class="steward-name ui-label">{fill(strings.agents.entrustedTo, { name: carrier.agent.name })}</span>
+        </button>
       {/if}
       {#if watcher}
         <!-- The steward that looks after this thread's project: what it may do here is its grant's. -->
@@ -306,7 +315,7 @@
   }
 
   .steward { flex: 0 1 auto; min-width: 0; max-width: 220px; gap: 6px; padding-left: 4px; border-color: color-mix(in oklch, var(--color-steward) 45%, transparent); background: var(--color-steward-soft); color: var(--color-steward); cursor: pointer; }
-  .entrusted { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 220px; color: var(--color-accent); font-weight: 500; }
+  .entrusted { flex: 0 1 auto; min-width: 0; max-width: 220px; gap: 6px; padding-left: 4px; border-color: color-mix(in oklch, var(--color-accent) 40%, transparent); background: var(--color-accent-soft); color: var(--color-accent); cursor: pointer; }
   .steward-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .branch-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .branch :global(svg) { flex: none; }
