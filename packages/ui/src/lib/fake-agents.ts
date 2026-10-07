@@ -1,7 +1,7 @@
 import { secureId } from './secure-id';
 import type { AgentDraft, AgentEntities, AgentEntityKind, AgentRecord, AgentSave, AgentWork, AgentsRpcMethods, AgentsSnapshot, RpcParams, RpcResult, AgentProfile, Turn } from '@boite/contracts';
 import { RpcErrorCode, AGENT_HISTORY_PAGE, AGENT_HISTORY_MAX_PAGE } from '@boite/contracts';
-import type { AgentAccountGrant, AgentBrain, AgentRuntimeConfig, AgentSchedule, AgentHistoryCursor, AgentHistoryKind, AgentsHistoryPage, AgentRun, AgentRunSummary, AgentScope } from '@boite/contracts';
+import type { AgentAccountGrant, AgentBrain, AgentRuntimeConfig, AgentSchedule, AgentHistoryCursor, AgentHistoryKind, AgentsHistoryPage, AgentRun, AgentRunSummary, AgentScope, AgentConversationMessage, AgentEntrustment, ThreadActivity } from '@boite/contracts';
 import { RpcFailure } from './client';
 
 /** The core's `nextOccurrence` in local time, without its timezone and DST search. */
@@ -9,7 +9,9 @@ function nextOccurrence(schedule: AgentSchedule, after: number): number | null {
   if (schedule.kind === 'once') return schedule.at > after ? schedule.at : null;
   if (schedule.kind === 'interval') return after + schedule.everyMinutes * 60000;
   const [h = 0, m = 0] = schedule.time.split(':').map(Number), next = new Date(after); next.setHours(h, m, 0, 0);
-  return next.getTime() > after ? next.getTime() : next.getTime() + 86400000;
+  if (next.getTime() <= after) next.setDate(next.getDate() + 1);
+  for (let i = 0; i < 7 && schedule.days?.length && !schedule.days.includes(next.getDay()); i++) next.setDate(next.getDate() + 1);
+  return next.getTime();
 }
 
 const OPEN_WORK: AgentWork['status'][] = ['pending', 'running', 'waiting', 'paused', 'interrupted', 'error'];
@@ -17,6 +19,8 @@ const newestFirst = (a: AgentRecord, b: AgentRecord) => b.updatedAt - a.updatedA
 const byCreation = (a: AgentRecord, b: AgentRecord) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 const summary = ({ context: { instructions: _instructions, ...context }, ...run }: AgentRun): AgentRunSummary => ({ ...run, context });
 const HISTORY_KIND = { message: 'message', work: 'work', memory: 'memory' } as const;
+const DEFAULT_OBJECTIVE = 'Take over this work where it stands and carry it to a verified result.';
+type EntrustedThread = { title: string; archived: boolean; parentThreadId?: string | null; agentSessionId?: string | null; projectId: string | null; activity?: ThreadActivity };
 
 type AgentHandlers = {
   [M in keyof AgentsRpcMethods]: (params: RpcParams<M>) => RpcResult<M>;
@@ -37,12 +41,16 @@ export class FakeAgents {
   private receipts = new Map<string, { fingerprint: string; result: unknown }>();
   private revision = 0;
   private sequence = 0;
+  private entrusted: AgentEntrustment[] = [];
   private limits: AgentsSnapshot['limits'] = { backgroundConcurrency: 2, paused: false, kebaccExperiment: false };
   constructor(private readonly changed: (revision: number) => void, private readonly runner?: {
     create: (agent: AgentProfile, sessionId: string, work: AgentWork) => string;
     start: (threadId: string, prompt: string, agent: AgentProfile) => Turn;
     stop: (threadId: string) => void;
     protocol: (providerId: string) => string | undefined;
+    thread?: (threadId: string) => EntrustedThread | undefined;
+    /** Starts the thread's goal, or removes it with `null`. */
+    goal?: (threadId: string, objective: string | null) => void;
   }) {}
   /** The core's reason to keep a project: a mission, team, resource or memory of an agent names it. */
   referencesProject(projectId: string): boolean {
@@ -133,6 +141,43 @@ export class FakeAgents {
       this.save('delivery', { value: { messageId: message.id, agentId, status: permitted ? 'pending' : 'limited', workId: work?.id ?? null } });
     }
   }
+  /** The core's entrust module: the goal ends in one message from the agent, and a met goal ends the entrustment. */
+  goalEnded(turn: Turn, was: string | undefined, answer: () => string): void {
+    const entry = this.entrusted.find(e => e.threadId === turn.threadId);
+    const goal = this.runner?.thread?.(turn.threadId)?.activity?.goal;
+    if (!entry || was !== 'active' || !goal || goal.status === 'active') return;
+    const event = goal.status === 'complete' ? 'done' : goal.blocked ? 'blocked' : 'stopped';
+    if (event === 'done') this.entrusted = this.entrusted.filter(e => e !== entry);
+    const text = event === 'stopped' ? turn.error ?? 'Turn stopped. Resume to continue.' : answer().replace(/^\s*\[BOITE_GOAL_(?:COMPLETE|BLOCKED)\]\s*$/gm, '').trim();
+    this.postAbout(entry, event, text.slice(0, 8000));
+  }
+  private postAbout(entry: AgentEntrustment, event: NonNullable<AgentConversationMessage['thread']>['event'], text: string): void {
+    const title = this.runner?.thread?.(entry.threadId)?.title ?? '';
+    this.save('message', { value: { scope: { kind: 'agent', id: entry.agentId }, senderId: entry.agentId, text, recipientIds: [], replyTo: null, episodeId: secureId(), sourceRunId: null, thread: { id: entry.threadId, title, event } } });
+  }
+  private entrust(p: RpcParams<'agents.entrust'>): RpcResult<'agents.entrust'> {
+    const thread = this.runner?.thread?.(p.threadId);
+    if (p.agentId === null) {
+      if (!this.entrusted.some(e => e.threadId === p.threadId)) return null;
+      this.entrusted = this.entrusted.filter(e => e.threadId !== p.threadId);
+      if (thread?.activity?.goal) this.runner?.goal?.(p.threadId, null);
+      this.changed(++this.revision);
+      return null;
+    }
+    if (!thread || thread.archived) this.refuse('threadId: expected an existing, unarchived thread');
+    if (thread.parentThreadId) this.refuse('threadId: expected a top-level thread, not a delegated child');
+    if (thread.agentSessionId) this.refuse('threadId: expected an ordinary thread, not a persistent agent session');
+    if (thread.projectId === null) this.refuse('threadId: expected a thread that belongs to a project');
+    const agent = this.rows.get(`profile:${p.agentId}`) as AgentProfile | undefined;
+    if (agent?.status !== 'active') this.refuse('agentId: expected an active agent');
+    if (p.objective !== undefined && (typeof p.objective !== 'string' || p.objective.length > 4000)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'objective: expected 0 to 4000 characters' });
+    const objective = p.objective?.trim() || DEFAULT_OBJECTIVE;
+    this.runner?.goal?.(p.threadId, objective);
+    const entry: AgentEntrustment = { threadId: p.threadId, agentId: agent.id, objective, at: Date.now() };
+    this.entrusted = [...this.entrusted.filter(e => e.threadId !== p.threadId), entry];
+    this.postAbout(entry, 'entrusted', `I am taking over "${thread.title}".`);
+    return { ...entry };
+  }
   private refuse(message: string): never { throw new RpcFailure({ code: RpcErrorCode.Refused, message }); }
   private all<K extends AgentEntityKind>(kind: K): AgentEntities[K][] { return [...this.rows.entries()].filter(([key]) => key.startsWith(`${kind}:`)).map(([, row]) => structuredClone(row) as AgentEntities[K]); }
   private get<K extends AgentEntityKind>(kind: K, id: string): AgentEntities[K] {
@@ -186,7 +231,9 @@ export class FakeAgents {
     const ids = new Set(recent.items.map(w => w.id));
     const work = [...this.all('work').filter(w => OPEN_WORK.includes(w.status) && !ids.has(w.id)), ...recent.items].sort(byCreation);
     const memories = this.newest('memory', undefined, undefined, null, AGENT_HISTORY_PAGE);
-    return { revision: this.revision, routines: this.all('routine'), accountGrants: structuredClone(this.grants), limits: { ...this.limits }, profiles: this.all('profile'), groups: this.all('group'), teams: this.all('team'), missions: this.all('mission'), tasks: this.all('task'), sessions: this.all('session'), messages: messages.items, work, memories: memories.items, ...this.related(messages.items, work), resources: this.all('resource'), artifacts: this.all('artifact'), more: { message: messages.more, work: recent.more, memory: memories.more } };
+    return { revision: this.revision, routines: this.all('routine'), accountGrants: structuredClone(this.grants), limits: { ...this.limits }, profiles: this.all('profile'), groups: this.all('group'), teams: this.all('team'), missions: this.all('mission'), tasks: this.all('task'), sessions: this.all('session'), messages: messages.items, work, memories: memories.items, ...this.related(messages.items, work), resources: this.all('resource'), artifacts: this.all('artifact'), more: { message: messages.more, work: recent.more, memory: memories.more },
+      // The core drops an entrustment when its thread is archived or removed.
+      entrusted: this.entrusted.filter(e => { const thread = this.runner?.thread?.(e.threadId); return thread && !thread.archived; }).map(e => ({ ...e })) };
   }
   private history(p: RpcParams<'agents.history'>): AgentsHistoryPage {
     const kind = HISTORY_KIND[p.kind];
@@ -229,6 +276,7 @@ export class FakeAgents {
     'agents.decision.answer': p => this.answerDecision(p),
     'agents.decision.request': p => this.requestDecision(p),
     'agents.artifact.add': p => this.addArtifact(p),
+    'agents.entrust': p => this.entrust(p),
   };
 
   private dispatch(method: keyof AgentsRpcMethods, raw: unknown): unknown {

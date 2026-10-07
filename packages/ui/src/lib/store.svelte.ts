@@ -279,6 +279,8 @@ export class Store {
   set settingsTab(value) { this.#ctx.layout.settingsTab = value; }
   get settingsSection() { return this.#ctx.layout.settingsSection; }
   set settingsSection(value) { this.#ctx.layout.settingsSection = value; }
+  get agentsTarget() { return this.#ctx.layout.agentsTarget; }
+  set agentsTarget(value) { this.#ctx.layout.agentsTarget = value; }
   get sidebarOpen() { return this.#ctx.layout.sidebarOpen; }
   set sidebarOpen(value) { this.#ctx.layout.sidebarOpen = value; }
   get sidebarCollapsed() { return this.#ctx.layout.sidebarCollapsed; }
@@ -414,6 +416,9 @@ export class Store {
   gatewayOf(...args: Parameters<Accounts['gatewayOf']>) { return this.#ctx.accounts.gatewayOf(...args); }
   shownAccounts() { return this.#ctx.accounts.shownAccounts(); }
   providerOf(...args: Parameters<Accounts['providerOf']>) { return this.#ctx.accounts.providerOf(...args); }
+  get offeredProviders() { return this.#ctx.accounts.offeredProviders; }
+  providerOn(...args: Parameters<Accounts['providerOn']>) { return this.#ctx.accounts.providerOn(...args); }
+  setProviderEnabled(...args: Parameters<Accounts['setProviderEnabled']>) { return this.#ctx.accounts.setProviderEnabled(...args); }
   installOf(...args: Parameters<Accounts['installOf']>) { return this.#ctx.accounts.installOf(...args); }
   accountOf(...args: Parameters<Accounts['accountOf']>) { return this.#ctx.accounts.accountOf(...args); }
   openConnect(...args: Parameters<Accounts['openConnect']>) { return this.#ctx.accounts.openConnect(...args); }

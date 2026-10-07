@@ -66,8 +66,8 @@
   // A step that replaces the pressed button hands the keyboard to its own first control, not to the page behind.
   $effect(() => { void [step, login?.url]; if (overlay.open) void focusFirst(true); });
 
-  let featured = $derived(store.providers.filter((p) => FEATURED.includes(p.id)).sort((a, b) => FEATURED.indexOf(a.id) - FEATURED.indexOf(b.id)));
-  let others = $derived(store.providers.filter((p) => !FEATURED.includes(p.id)));
+  let featured = $derived(store.offeredProviders.filter((p) => FEATURED.includes(p.id)).sort((a, b) => FEATURED.indexOf(a.id) - FEATURED.indexOf(b.id)));
+  let others = $derived(store.offeredProviders.filter((p) => !FEATURED.includes(p.id)));
   let provider = $derived(providerId ? store.providerOf(providerId) : null);
   let accounts = $derived(provider ? store.accountsOf(provider.id) : []);
   const loggingIn = (id: string): boolean => store.logins[id]?.state === 'running' || store.loginTerminals.includes(id);

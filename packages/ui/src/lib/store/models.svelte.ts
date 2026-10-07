@@ -231,12 +231,14 @@ export class Models {
    */
   defaultChoice(): Choice | null {
     const s = this.ctx.store;
-    if (s.draft && this.draftChoice) return this.#offered(this.draftChoice);
-    const remembered = this.prefs.providerId ? s.providerOf(this.prefs.providerId) : null;
+    // A provider turned off since the draft or the last send is never what a new prompt opens on.
+    if (s.draft && this.draftChoice && s.providerOn(this.draftChoice.providerId)) return this.#offered(this.draftChoice);
+    const remembered = this.prefs.providerId && s.providerOn(this.prefs.providerId) ? s.providerOf(this.prefs.providerId) : null;
+    const offered = s.offeredProviders;
     const provider =
       (remembered?.available ? remembered : null) ??
-      s.providers.find((p) => p.available && s.accountsOf(p.id).length > 0) ??
-      s.providers.find((p) => s.accountsOf(p.id).length > 0) ??
+      offered.find((p) => p.available && s.accountsOf(p.id).length > 0) ??
+      offered.find((p) => s.accountsOf(p.id).length > 0) ??
       null;
     if (!provider) return null;
     const accounts = s.accountsOf(provider.id);
@@ -267,7 +269,7 @@ export class Models {
     const provider = s.providerOf(providerId);
     const signedIn = s.accountsOf(providerId).filter((a) => a.status === 'ok');
     const account = signedIn.find((a) => a.id === accountId) ?? signedIn[0];
-    if (!provider || !provider.available || !account) return false;
+    if (!provider || !provider.available || !s.providerOn(providerId) || !account) return false;
     const model = s.defaultModelOf(provider, account.id);
     s.remember({
       providerId,

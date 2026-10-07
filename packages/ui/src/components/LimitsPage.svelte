@@ -8,7 +8,7 @@
   import AccountRename from './AccountRename.svelte';
   import QuotaMachineScope from './QuotaMachineScope.svelte';
   import { openExternal } from '../lib/links';
-  import { gatewayReader, namedQuotas, quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
+  import { gatewayReader, namedQuotas, quotaProviderOff, quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
   import SubscriptionProxyDashboard from './SubscriptionProxyDashboard.svelte';
@@ -36,7 +36,7 @@
   const dashboard = $derived(proxyEnabled && !gatewayNative && !native);
   const gatewayError = $derived(gatewayNative && gateway.state?.status === 'unavailable' ? gateway.state.error : null);
 
-  let shown = $derived(reader.rows === null ? null : shownQuotas(reader.rows, store.accounts));
+  let shown = $derived(reader.rows === null ? null : shownQuotas(reader.rows, store.accounts, store.providers));
   /** The card above says why the gateway's bars are old; each bar only dims. */
   let gatewayRows = $derived(gatewayNative ? (shown ?? []).filter((row) => row.gateway).map((row) => gatewayError ? { ...row, error: null } : row) : []);
   let rows = $derived(shown === null ? null : shown.filter((row) => !row.gateway));
@@ -48,7 +48,7 @@
     return groups;
   }, []));
   /** Every signed-in account with limits to read, switched on or not. The gateway's entries are always read. */
-  let tracked = $derived(namedQuotas(reader.rows ?? [], store.accounts).filter((row) => !row.gateway && row.status !== 'unsupported'
+  let tracked = $derived(namedQuotas(reader.rows ?? [], store.accounts).filter((row) => !row.gateway && row.status !== 'unsupported' && !quotaProviderOff(row, store.providers)
     && store.accounts?.find((account) => account.id === row.accountId)?.status !== 'unauthenticated'));
 
   $effect(() => {

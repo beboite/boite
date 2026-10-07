@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
@@ -67,6 +68,8 @@ afterEach(async () => {
   harness = null;
   delete process.env['ACP_FAKE_LOG'];
   delete process.env['ACP_FAKE_NO_MODES'];
+  delete process.env['ACP_FAKE_MODE_OPTION'];
+  delete process.env['ACP_FAKE_LATE_MODEL'];
   delete process.env['ACP_FAKE_NO_IMAGES'];
   delete process.env['ACP_FAKE_HANG_INIT'];
   delete process.env['ACP_FAKE_EXIT_AT_START'];
@@ -1230,6 +1233,103 @@ describe('acp driver', () => {
     await runTurn(client, threadId, 'second');
     expect(setModeCount('default')).toBe(1);
     expect(logs.some((line) => line.includes('the agent switched to the session mode yolo'))).toBe(true);
+  });
+
+  test('a model of a provider the core injected is asked for though the agent lists none, and again while it loads', async () => {
+    const client = await startCore();
+    const { projectId, accountId, dataDir } = await acpAccount(client);
+    // What the subscription proxy does for OpenCode 2: the account's environment names the
+    // prefix of the injected models, and the provider list carries one of them.
+    const file = join(dataDir, 'providers', 'acp-fake.json');
+    const descriptor = JSON.parse(readFileSync(file, 'utf8')) as { profiles: Record<string, { env?: Record<string, string> }>; models: unknown[] };
+    for (const profile of Object.values(descriptor.profiles)) profile.env = { BOITE_SUBSCRIPTION_PROXY_PREFIX: 'gateway/' };
+    descriptor.models.push({ id: 'gateway/kimi', name: 'Kimi' }, { id: 'elsewhere/kimi', name: 'Kimi elsewhere' });
+    writeFileSync(file, JSON.stringify(descriptor));
+    expect((await client.call('providers.reload', {})).rejected).toEqual([]);
+    process.env['ACP_FAKE_LATE_MODEL'] = '2';
+    const logs = collectLogs(client);
+
+    const thread = await client.call('threads.create', { projectId, providerId: 'acp-fake', accountId, title: 'gateway', model: 'gateway/kimi' });
+    await client.call('threads.subscribe', { threadId: thread.id });
+    await runTurn(client, thread.id, 'first');
+    // Refused twice while the agent loads the provider, taken the third time, and nothing is warned about.
+    expect(configCount('model gateway/kimi')).toBe(3);
+    expect(logs.filter((line) => line.includes('gateway/kimi'))).toEqual([]);
+
+    // A model outside the injected prefix that the agent does not list is still never sent.
+    await client.call('threads.update', { threadId: thread.id, model: 'elsewhere/kimi' });
+    await runTurn(client, thread.id, 'second');
+    expect(configCount('model elsewhere/kimi')).toBe(0);
+    await waitFor(() => logs.some((line) => line === 'warn acp: the agent offers no model option with the value elsewhere/kimi'));
+  });
+
+  test('an agent that lists its modes as a config option is moved through that option', async () => {
+    const client = await startCore({ warmProcessMinutes: 5 });
+    process.env['ACP_FAKE_MODE_OPTION'] = '1';
+    const threadId = await acpThread(client);
+    const logs = collectLogs(client);
+
+    // `default` is the agent's `build`, which it is already in: nothing goes out.
+    await runTurn(client, threadId, 'first');
+    expect(configCount('mode build')).toBe(0);
+
+    await client.call('threads.update', { threadId, permissionMode: 'plan' });
+    await runTurn(client, threadId, 'second');
+    await waitFor(() => configCount('mode plan') === 1);
+
+    // Still in plan: the option's own current value says so, and nothing is sent again.
+    await runTurn(client, threadId, 'third');
+    expect(configCount('mode plan')).toBe(1);
+
+    // It has no mode of that name: the thread leaves plan for the agent's plain mode, never stays in plan.
+    await client.call('threads.update', { threadId, permissionMode: 'acceptEdits' });
+    await runTurn(client, threadId, 'fourth');
+    await waitFor(() => configCount('mode build') === 1);
+    expect(logs.filter((line) => line.includes('no session mode matches'))).toEqual([]);
+    expect(fakeLog()).not.toContain('set_mode');
+  });
+
+  test('an agent that leaves plan through its mode option is put back on the next turn', async () => {
+    const client = await startCore({ warmProcessMinutes: 5 });
+    process.env['ACP_FAKE_MODE_OPTION'] = '1';
+    const threadId = await acpThread(client, undefined, 'plan');
+
+    await runTurn(client, threadId, 'first');
+    await waitFor(() => configCount('mode plan') === 1);
+
+    // The agent goes back to build by itself and says so with its options.
+    await runTurn(client, threadId, '[mode-switch build]drifting');
+    expect(configCount('mode plan')).toBe(1);
+
+    // The thread still says plan: the mode is sent again instead of trusting the value kept from before.
+    await runTurn(client, threadId, 'still planning');
+    await waitFor(() => configCount('mode plan') === 2);
+  });
+
+  test('an option update for another session of the same connection does not touch the mode kept for this one', async () => {
+    const client = await startCore({ warmProcessMinutes: 5 });
+    process.env['ACP_FAKE_MODE_OPTION'] = '1';
+    const seam = await sdkWithUpdateSeam();
+    restoreDriver = setDriver('acp', createAcpDriver({ loadSdk: () => Promise.resolve(seam.sdk) }));
+    const threadId = await acpThread(client, undefined, 'plan');
+    await runTurn(client, threadId, 'first');
+    await waitFor(() => configCount('mode plan') === 1);
+    const sessionId = (await client.call('threads.get', { threadId })).sessionId ?? '';
+    expect(sessionId).not.toBe('');
+    const options = (mode: string): SessionNotification['update'] => ({
+      sessionUpdate: 'config_option_update',
+      configOptions: [{ type: 'select', id: 'mode', category: 'mode', name: 'Mode', currentValue: mode, options: [{ value: 'build', name: 'Build' }, { value: 'plan', name: 'Plan' }] }],
+    });
+
+    // The session the options were discovered on says build, late: it is not this thread's.
+    seam.send({ sessionId: `${sessionId}-discovery`, update: options('build') });
+    await runTurn(client, threadId, 'second');
+    expect(configCount('mode plan')).toBe(1);
+
+    // This thread's own session says build: the next turn puts plan back.
+    seam.send({ sessionId, update: options('build') });
+    await runTurn(client, threadId, 'third');
+    await waitFor(() => configCount('mode plan') === 2);
   });
 
   test('an agent with no modes at all is one warning, and the turn still runs', async () => {

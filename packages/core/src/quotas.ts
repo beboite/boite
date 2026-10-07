@@ -1,3 +1,4 @@
+import { isOpenCode, OPENCODE_V2 } from './providers/opencode.ts';
 import { readFile } from 'node:fs/promises';
 import { mkdtempSync } from 'node:fs';
 import { removeDir } from './fs-retry.ts';
@@ -217,9 +218,10 @@ export class QuotaStore {
     const preferences = object(this.core.journal.getSetting('quota-accounts'));
     const provider = this.core.providers.get(account.providerId);
     const proxied = provider && activeSubscriptionProxy(this.core, provider);
-    const supported = !proxied && (this.isMuse(account) || ['claude', 'codex', 'grok', 'opencode'].includes(account.providerId) || account.id === ANTIGRAVITY_QUOTA_ID);
+    // A provider turned off is never read: its accounts stand as they would with no reader.
+    const supported = !proxied && this.core.providers.summary(account.providerId)?.enabled !== false && (this.isMuse(account) || ['claude', 'codex', 'grok', 'opencode', OPENCODE_V2].includes(account.providerId) || account.id === ANTIGRAVITY_QUOTA_ID);
     const enabled = account.id === ANTIGRAVITY_QUOTA_ID ? preferences[account.id] === true : preferences[account.id] !== false;
-    return { accountId: account.id, providerId: account.providerId, providerName: account.providerId === 'opencode' ? 'OpenCode Go' : this.core.providers.get(account.providerId)?.name ?? account.providerId,
+    return { accountId: account.id, providerId: account.providerId, providerName: isOpenCode(account.providerId) ? 'OpenCode Go' : this.core.providers.get(account.providerId)?.name ?? account.providerId,
       label: account.label, enabled, status: !supported ? 'unsupported' : !enabled ? 'disabled' : 'unavailable', windows: [], checkedAt: null, error: null };
   }
   private isMuse(account: Account): boolean { return this.core.providers.get(account.providerId)?.protocol === 'muse'; }

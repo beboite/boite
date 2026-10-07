@@ -34,7 +34,8 @@ not. Updates create no pinned chat notice.
 
 `Automatic updates` under each machine's agents makes that core update by
 itself. It is off by default. `Check for updates` reads its versions again.
-Providers keeps installed versions, sign-ins and installation controls.
+Providers keeps sign-ins and installation controls and names no version: an
+agent's version is on its machine's card and nowhere else.
 
 ## Two routes
 

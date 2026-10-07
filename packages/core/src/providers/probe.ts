@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import type { Core } from '../core.ts';
 import { forgetProbes, probeModels, rememberExternalModels } from '../drivers/index.ts';
 import { mergeProxyModels, readSubscriptionProxyModels } from '../subscription-proxy.ts';
-import { invalidParams, refused } from '../errors.ts';
+import { invalidParams, refused, unavailable } from '../errors.ts';
 import { logMessageOf } from '../log-errors.ts';
 
 /** After owned processes stop, a missing pipe-close event must not hold the account's probe lane. */
@@ -36,6 +36,13 @@ async function probeProvider(
       accountId,
       accountProviderId: account.providerId,
       providerId: provider.id,
+    });
+  }
+  // The probe starts the agent: a provider turned off lists nothing.
+  if (!core.providers.enabled(provider.id)) {
+    throw unavailable(`${provider.name} is turned off on this machine. Turn it on in Settings > Providers to use it`, {
+      providerId: provider.id,
+      disabled: true,
     });
   }
 

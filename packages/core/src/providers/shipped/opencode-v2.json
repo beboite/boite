@@ -1,0 +1,75 @@
+{
+  "id": "opencode-v2",
+  "schemaVersion": 1,
+  "name": "OpenCode 2",
+  "shortName": "OpenCode 2",
+  "protocol": "acp",
+  "experimental": true,
+  "roots": ["{home}/.local/share/opencode", "{home}/.config/opencode", "{home}/.local/state/opencode", "{isolationDir}"],
+  "profiles": {
+    "windows": {
+      "detect": {},
+      "update": { "args": ["upgrade"], "latestNpm": "@opencode/cli" },
+      "executable": [
+        { "kind": "file", "value": "{npmRoot}/@opencode/cli/bin/opencode.exe" },
+        { "kind": "path", "value": "opencode2" },
+        { "kind": "path", "value": "opencode", "major": 2 },
+        { "kind": "file", "value": "{home}/.opencode/bin/opencode.exe", "major": 2 }
+      ],
+      "launch": { "args": ["acp"] },
+      "env": { "OPENCODE_CONFIG_CONTENT": "{\"permissions\":[{\"action\":\"subagent\",\"resource\":\"*\",\"effect\":\"deny\"}]}" },
+      "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}", "XDG_STATE_HOME": "{isolationDir}/state" },
+      "close": { "processes": ["opencode.exe"] }
+    },
+    "linux": {
+      "detect": {},
+      "update": { "args": ["upgrade"], "latestNpm": "@opencode/cli" },
+      "executable": [
+        { "kind": "path", "value": "opencode2" },
+        { "kind": "file", "value": "{home}/.opencode/bin/opencode2" },
+        { "kind": "file", "value": "{npmRoot}/@opencode/cli/bin/opencode.exe" },
+        { "kind": "path", "value": "opencode", "major": 2 },
+        { "kind": "file", "value": "{home}/.opencode/bin/opencode", "major": 2 }
+      ],
+      "launch": { "args": ["acp"] },
+      "env": { "OPENCODE_CONFIG_CONTENT": "{\"permissions\":[{\"action\":\"subagent\",\"resource\":\"*\",\"effect\":\"deny\"}]}" },
+      "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}", "XDG_STATE_HOME": "{isolationDir}/state" },
+      "close": { "processes": ["opencode"] }
+    },
+    "macos": {
+      "detect": {},
+      "update": { "args": ["upgrade"], "latestNpm": "@opencode/cli" },
+      "executable": [
+        { "kind": "path", "value": "opencode2" },
+        { "kind": "file", "value": "{home}/.opencode/bin/opencode2" },
+        { "kind": "file", "value": "{npmRoot}/@opencode/cli/bin/opencode.exe" },
+        { "kind": "path", "value": "opencode", "major": 2 },
+        { "kind": "file", "value": "{home}/.opencode/bin/opencode", "major": 2 }
+      ],
+      "launch": { "args": ["acp"] },
+      "env": { "OPENCODE_CONFIG_CONTENT": "{\"permissions\":[{\"action\":\"subagent\",\"resource\":\"*\",\"effect\":\"deny\"}]}" },
+      "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}", "XDG_STATE_HOME": "{isolationDir}/state" },
+      "close": { "processes": ["opencode"] }
+    }
+  },
+  "auth": { "kind": "oauth-cli", "sqlite": { "file": "opencode/opencode.db", "tables": ["credential", "account", "control_account"] } },
+  "login": { "command": ["opencode2", "auth", "login", "--standalone"], "terminal": true },
+  "shared": [
+    {
+      "variable": "XDG_CONFIG_HOME",
+      "paths": ["opencode/opencode.json", "opencode/opencode.jsonc", "opencode/cli.json", "opencode/AGENTS.md", "opencode/package.json", "opencode/plugins", "opencode/plugin", "opencode/agents", "opencode/agent", "opencode/commands", "opencode/command", "opencode/skills", "opencode/node_modules"]
+    }
+  ],
+  "hookSources": [
+    { "variable": "XDG_CONFIG_HOME", "path": "opencode/plugins", "format": "modules" }
+  ],
+  "models": [{ "id": "default", "name": "OpenCode default", "default": true }],
+  "capabilities": {
+    "approvals": true,
+    "hooks": true,
+    "checkpoint": false,
+    "images": false,
+    "planMode": true,
+    "resume": true
+  }
+}

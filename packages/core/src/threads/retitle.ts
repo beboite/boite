@@ -217,7 +217,8 @@ export class ThreadTitles {
 
   /** A provider with a title hook that is installed here, the check a turn passes too. */
   private canWrite(provider: ProviderDescriptor): boolean {
-    return writesTitles(provider.protocol) && this.core.providers.summary(provider.id)?.available === true;
+    const summary = this.core.providers.summary(provider.id);
+    return writesTitles(provider.protocol) && summary?.available === true && summary.enabled !== false;
   }
 
   /**

@@ -1,4 +1,4 @@
-import type { Account, ProviderSummary } from '@boite/contracts';
+import { providerEnabled, type Account, type ProviderSummary } from '@boite/contracts';
 import { connected } from './provider-setup';
 
 /**
@@ -42,15 +42,17 @@ export function providerRows(providers: readonly ProviderSummary[]): ProviderRow
 }
 
 /**
- * The Providers page's two lists: rows something can run on now, then the
- * ones still to install or sign into, each in the core's order. One signed-in
- * member is enough for its family to count as connected.
+ * The Providers page's three lists: rows something can run on now, the ones
+ * still to install or sign into, then the ones turned off, each in the core's
+ * order. One signed-in member is enough for its family to count as connected,
+ * and a family is off only when every member is.
  */
 export function providerGroups(
   providers: readonly ProviderSummary[],
   accounts: Account[]
-): { connected: ProviderRow[]; rest: ProviderRow[] } {
+): { connected: ProviderRow[]; rest: ProviderRow[]; off: ProviderRow[] } {
   const rows = providerRows(providers);
   const on = (row: ProviderRow) => row.members.some((member) => connected(member, accounts));
-  return { connected: rows.filter(on), rest: rows.filter((row) => !on(row)) };
+  const off = (row: ProviderRow) => row.members.every((member) => !providerEnabled(member));
+  return { connected: rows.filter(on), rest: rows.filter((row) => !on(row) && !off(row)), off: rows.filter(off) };
 }

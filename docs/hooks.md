@@ -16,6 +16,7 @@ accounts, and the Claude and Codex drivers for the reports.
 | Grok | `hooks/*.json` under `GROK_HOME`, and Claude's `~/.claude/settings.json` | events | no |
 | pi | extensions under `PI_CODING_AGENT_DIR/extensions` | modules | no |
 | OpenCode | plugins under `XDG_CONFIG_HOME/opencode/plugins` | modules | no |
+| OpenCode 2 | the same folder, read with another plugin API | modules | no |
 
 The descriptor's `hookSources` names these places
 ([providers.md](providers.md#hooks-and-shared-configuration)), and Settings reads

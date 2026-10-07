@@ -1,21 +1,23 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { forgetWhich } from './which.ts';
-import type {
-  ProviderDescriptor,
-  ProviderId,
-  ProviderInstall,
-  ProviderLogin,
-  ProviderRejected,
-  ProviderSummary,
-  RpcResult,
+import {
+  threadActive,
+  type ProviderDescriptor,
+  type ProviderId,
+  type ProviderInstall,
+  type ProviderLogin,
+  type ProviderRejected,
+  type ProviderSummary,
+  type RpcResult,
 } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { writesTitles } from '../drivers/index.ts';
 import { InstallManager } from './install.ts';
 import { detectResolves, HOST_CANDIDATES, hostAgentsEnabled, launcherScriptOnly, profileFor, resolveCommand } from './resolve.ts';
 import { Rejection, validateDescriptor } from './validate.ts';
-import { notFound, refused } from '../errors.ts';
+import { attachVersions, loadVersions, versionsSettled } from './versions.ts';
+import { invalidParams, notFound, refused } from '../errors.ts';
 import antigravityShipped from './shipped/antigravity.json';
 import antigravityCliShipped from './shipped/antigravity-cli.json';
 import claudeShipped from './shipped/claude.json';
@@ -23,6 +25,7 @@ import codexShipped from './shipped/codex.json';
 import grokShipped from './shipped/grok.json';
 import museShipped from './shipped/muse.json';
 import opencodeShipped from './shipped/opencode.json';
+import opencodeV2Shipped from './shipped/opencode-v2.json';
 import piShipped from './shipped/pi.json';
 import echoShipped from './shipped/echo.json';
 
@@ -44,6 +47,7 @@ const SHIPPED_SOURCES: { file: string; raw: unknown; when?: () => boolean }[] = 
   { file: 'shipped/grok.json', raw: grokShipped },
   { file: 'shipped/muse.json', raw: museShipped },
   { file: 'shipped/opencode.json', raw: opencodeShipped },
+  { file: 'shipped/opencode-v2.json', raw: opencodeV2Shipped },
   { file: 'shipped/pi.json', raw: piShipped },
   { file: 'shipped/echo.json', raw: echoShipped, when: echoEnabled },
 ];
@@ -73,9 +77,10 @@ function loginSummary(login: ProviderLogin | undefined, protocol?: ProviderDescr
  * `available: false`: that is what lets the picker offer the download instead
  * of a dead row.
  */
-export function summarize(entry: LoadedProvider, installs: InstallManager, dataDir: string): ProviderSummary {
+export function summarize(entry: LoadedProvider, installs: InstallManager, dataDir: string, enabled = true): ProviderSummary {
   const profile = profileFor(entry.descriptor);
-  const executable = profile === undefined ? null : (resolveCommand(profile)?.shown ?? null);
+  // A provider that is turned off is listed from what is already known: asking its program its version would start it.
+  const executable = profile === undefined ? null : (resolveCommand(profile, enabled)?.shown ?? null);
   const available =
     profile !== undefined &&
     detectResolves(profile, installs.currentDir(entry.descriptor.id), dataDir) &&
@@ -94,17 +99,79 @@ export function summarize(entry: LoadedProvider, installs: InstallManager, dataD
     capabilities: entry.descriptor.capabilities,
     install: installs.stateOf(entry.descriptor.id, profile?.install),
     titles: writesTitles(entry.descriptor.protocol),
+    enabled,
+    ...(entry.descriptor.experimental === true ? { experimental: true } : {}),
   };
 }
+
+/** The versions read from the programs a candidate names with a `major`, kept across restarts. */
+const VERSIONS_FILE = 'executable-versions.json';
+/** A program that has not printed its version by then is not one of ours. */
+const VERSION_TIMEOUT_MS = 20_000;
+/** How long `providers.list` and `providers.reload` wait for version reads in flight. OpenCode 1 answers in about one second. */
+const LIST_WAIT_MS = 5_000;
+/** How long a version read whose program was killed may still wait for its pipes. */
+const VERSION_PIPE_GRACE_MS = 2_000;
+let versionRuns = 0;
+
+/** One short run of a program to read its version, traced like every agent process. */
+async function programOutput(core: Core, program: string, args: string[]): Promise<string> {
+  // An id of its own: the timeout ends this run's tree and no other read's.
+  const threadId = `version:${(versionRuns += 1)}`;
+  const spawned = core.procs.spawnPiped(threadId, program, args, { cwd: core.dataDir });
+  spawned.proc.stdin.end();
+  let grace: ReturnType<typeof setTimeout> | undefined;
+  // A launcher's child can inherit the pipes and outlive the kill, where only
+  // direct children are tracked: the read then ends on its own, a moment after
+  // the kill, instead of waiting on pipes that never close.
+  const timeoutMs = core.providers.versionTimeoutMs;
+  const late = new Promise<never>((_resolve, reject) => {
+    grace = setTimeout(() => reject(new Error(`${program} did not print its version in ${timeoutMs / 1000} s`)), timeoutMs + VERSION_PIPE_GRACE_MS);
+  });
+  let killed = false;
+  const timer = setTimeout(() => {
+    killed = true;
+    core.procs.killTree(threadId);
+  }, timeoutMs);
+  const readers = [spawned.proc.stdout, spawned.proc.stderr] as const;
+  try {
+    const [stdout, stderr] = await Promise.race([
+      Promise.all([new Response(readers[0]).text(), new Response(readers[1]).text(), spawned.exited]),
+      late,
+    ]);
+    // Killed at its deadline, whatever it had printed is no answer: kept as one,
+    // "no version" would pass the program over until the core restarts.
+    if (killed) throw new Error(`${program} did not print its version in ${timeoutMs / 1000} s`);
+    return `${stdout}\n${stderr}`;
+  } finally {
+    clearTimeout(timer);
+    clearTimeout(grace);
+  }
+}
+
+/** The journal setting that holds the user's own choices, `{ "<provider id>": true | false }`. */
+export const PROVIDER_SWITCHES = 'provider-switches';
 
 export class ProviderRegistry {
   private entries = new Map<ProviderId, LoadedProvider>();
   private rejected: ProviderRejected[] = [];
+  /**
+   * The providers the user turned on or off themselves. One they never touched
+   * is absent and follows its descriptor: on, or off for an experimental one.
+   */
+  private switches = new Map<ProviderId, boolean>();
   /** Managed installs: the state of each, the leases held on them, and the download itself. */
   readonly installs: InstallManager;
 
+  /** Leaves the version readings this core joined, set once it can run a program. */
+  private leaveVersions: () => void = () => undefined;
+  /** How long a program gets to print its version before it is stopped. A test shortens it. */
+  versionTimeoutMs = VERSION_TIMEOUT_MS;
+
   constructor(private readonly dataDir: string) {
     this.installs = new InstallManager(dataDir);
+    // Before the first resolution: a candidate that names a major resolves at once from what the last run read.
+    loadVersions(join(dataDir, VERSIONS_FILE));
     this.load();
     // Nothing of an agent runs yet at start: releases an update left behind, and
     // downloads of a version no longer pinned, go now.
@@ -175,9 +242,59 @@ export class ProviderRegistry {
 
   list(): ProviderLoadResult {
     return {
-      loaded: [...this.entries.values()].map((entry) => summarize(entry, this.installs, this.dataDir)),
+      loaded: [...this.entries.values()].map((entry) => summarize(entry, this.installs, this.dataDir, this.enabledEntry(entry))),
       rejected: [...this.rejected],
     };
+  }
+
+  /** The core can run programs now: candidates waiting on a version get theirs, and `changed` hears each one. */
+  attachVersions(run: (program: string, args: string[]) => Promise<string>, changed: () => void): void {
+    this.leaveVersions();
+    this.leaveVersions = attachVersions({ file: join(this.dataDir, VERSIONS_FILE), run, changed });
+  }
+
+  close(): void {
+    this.leaveVersions();
+    this.leaveVersions = () => undefined;
+  }
+
+  /**
+   * Resolves once every program a candidate asks its version has answered, or
+   * `waitMs` later: listing starts those reads, and whoever needs to know what
+   * is installed right now (a client's first list, a turn handed over by a
+   * restart) would otherwise miss a provider for the second its program takes.
+   * A program that hangs must not hold them: past the wait they go on without
+   * it, and `providers.updated` follows the reading.
+   */
+  async settle(waitMs: number = LIST_WAIT_MS): Promise<void> {
+    this.list();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const waited = new Promise<void>((resolve) => { timer = setTimeout(resolve, waitMs); });
+    try { await Promise.race([versionsSettled(), waited]); }
+    finally { clearTimeout(timer); }
+  }
+
+  /** What the journal kept of the user's choices. Anything that is not a boolean is dropped. */
+  loadSwitches(stored: unknown): void {
+    this.switches.clear();
+    if (typeof stored !== 'object' || stored === null || Array.isArray(stored)) return;
+    for (const [id, value] of Object.entries(stored)) if (typeof value === 'boolean') this.switches.set(id, value);
+  }
+
+  /** Records the user's choice and returns every choice, as the journal stores them. */
+  setSwitch(id: ProviderId, enabled: boolean): Record<string, boolean> {
+    this.switches.set(id, enabled);
+    return Object.fromEntries(this.switches);
+  }
+
+  /** Turned on: the user's choice when they made one, else on unless the descriptor is experimental. False for an unknown id. */
+  enabled(id: ProviderId): boolean {
+    const entry = this.entries.get(id);
+    return entry !== undefined && this.enabledEntry(entry);
+  }
+
+  private enabledEntry(entry: LoadedProvider): boolean {
+    return this.switches.get(entry.descriptor.id) ?? entry.descriptor.experimental !== true;
   }
 
   get(id: ProviderId): ProviderDescriptor | undefined {
@@ -192,7 +309,7 @@ export class ProviderRegistry {
 
   summary(id: ProviderId): ProviderSummary | undefined {
     const entry = this.entries.get(id);
-    return entry === undefined ? undefined : summarize(entry, this.installs, this.dataDir);
+    return entry === undefined ? undefined : summarize(entry, this.installs, this.dataDir, this.enabledEntry(entry));
   }
 
   /** The launcher script on PATH that stands where this provider's program should be, if that is why it is missing. */
@@ -202,8 +319,9 @@ export class ProviderRegistry {
     return profile === undefined ? null : launcherScriptOnly(profile);
   }
 
+  /** The providers Boite may start something of: installed here and turned on. */
   available(): ProviderSummary[] {
-    return this.list().loaded.filter((provider) => provider.available);
+    return this.list().loaded.filter((provider) => provider.available && provider.enabled !== false);
   }
 
   /**
@@ -287,14 +405,39 @@ export function registerProviderMethods(core: Core): void {
     },
   });
 
-  core.router.register('providers.list', () => core.providers.list());
+  // A client is answered once every program a candidate asks its version has
+  // answered: listing starts those reads, and without the wait the first list
+  // after an install would miss a provider for the second its program takes.
+  const settledList = async (): Promise<ProviderLoadResult> => {
+    await core.providers.settle();
+    return core.providers.list();
+  };
+  core.router.register('providers.list', settledList);
   // The loaded descriptors in full, what each resolves to and the rejections:
   // a reload that changes none of it leaves every client and cached model list alone.
   const fingerprint = (result: ProviderLoadResult): string =>
     JSON.stringify([result, result.loaded.map((summary) => core.providers.get(summary.id))]);
-  core.router.register('providers.reload', () => {
+  // A program that just reported its version may be what a provider was
+  // waiting for: it is listed as installed from now on, and a login it already
+  // has is adopted before the clients hear of it.
+  let listed = fingerprint(core.providers.list());
+  core.providers.attachVersions(
+    (program, args) => programOutput(core, program, args),
+    () => {
+      if (core.stopping || core.journal.isClosed()) return;
+      const result = core.providers.list();
+      const now = fingerprint(result);
+      if (now === listed) return;
+      listed = now;
+      try { core.accounts.ensureDefaults(); }
+      catch (error) { core.log('error', `default accounts after a version read: ${error instanceof Error ? error.message : String(error)}`); }
+      core.bus.emit('providers.updated', core.providers.list());
+    },
+  );
+  core.router.register('providers.reload', async () => {
     const before = fingerprint(core.providers.list());
-    const result = core.providers.load();
+    core.providers.load();
+    const result = await settledList();
     core.accounts.ensureDefaults();
     if (fingerprint(result) !== before) core.bus.emit('providers.updated', result);
     return result;
@@ -316,4 +459,28 @@ export function registerProviderMethods(core: Core): void {
     return core.providers.installs.uninstall(provider.id, core.providers.installBlock(provider.id));
   });
   core.router.register('providers.dryRun', (params) => core.providers.dryRun(params.file));
+  core.router.register('providers.setEnabled', async (params) => {
+    const provider = core.providers.require(params.providerId);
+    if (typeof params.enabled !== 'boolean') {
+      throw invalidParams('enabled must be true or false', { field: 'enabled', expected: 'a boolean' });
+    }
+    if (core.providers.enabled(provider.id) === params.enabled) return core.providers.list();
+    core.journal.setSetting(PROVIDER_SWITCHES, core.providers.setSwitch(provider.id, params.enabled));
+    if (params.enabled) {
+      // Off, its program was never asked its version: it is now, before the
+      // answer says whether it is installed. A login the user already has is
+      // adopted then, as it is when a provider is installed.
+      await core.providers.settle();
+      core.accounts.ensureDefaults();
+    } else {
+      // A warm process is something of this provider still running. A turn in
+      // flight, queued or running, is left to end by itself: the switch refuses the next one.
+      for (const thread of core.journal.listThreads()) {
+        if (thread.providerId === provider.id && !threadActive(thread.status)) core.threads.releaseAgent(thread.id);
+      }
+    }
+    const result = core.providers.list();
+    core.bus.emit('providers.updated', result);
+    return result;
+  });
 }

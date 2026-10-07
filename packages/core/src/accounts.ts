@@ -4,11 +4,12 @@ import { dirname, join, resolve } from 'node:path';
 import type { Account, AccountId, ProviderDescriptor, ProviderId, RpcEvents, TerminalState } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
-import { invalidParams, messageOf, notFound, refused } from './errors.ts';
+import { invalidParams, messageOf, notFound, refused, unavailable } from './errors.ts';
 import { runAcpLogin, type AcpLoginRun } from './drivers/acp/login.ts';
 import { probeThreadId } from './providers/probe.ts';
 import { activeSubscriptionProxy, subscriptionProxyEnv } from './subscription-proxy.ts';
 import { agentEnv, hostAgentsEnabled, launchPrefix, profileFor, resolveExecutable } from './providers/resolve.ts';
+import { sqliteHasRows } from './providers/sqlite-login.ts';
 import { browserNoopPath, browserNoopScript, currentOs, homePath } from './paths.ts';
 import { ISOLATION_DEFAULTS, shareKeys, shareProfile, unshareProfile, type ShareProblem } from './profile-share.ts';
 import type { SpawnedPipedProcess } from './procs.ts';
@@ -245,6 +246,8 @@ export class AccountStore {
     const account = this.require(accountId);
     const provider = this.core.providers.require(account.providerId);
     if (activeSubscriptionProxy(this.core, provider)) return this.check(accountId);
+    // The check starts the agent: for a provider turned off, the files answer alone.
+    if (!this.core.providers.enabled(provider.id)) return this.check(accountId);
     if (provider.protocol !== 'codex-appserver' && provider.protocol !== 'claude-sdk') return this.check(accountId);
     const profile = profileFor(provider);
     const executable = profile ? resolveExecutable(profile) : null;
@@ -358,6 +361,16 @@ export class AccountStore {
     if (currentOs() !== 'windows') chmodSync(file, 0o755);
   }
 
+  /** A sign-in starts the provider's program, which a provider turned off never does. */
+  private assertOn(provider: ProviderDescriptor, accountId: AccountId): void {
+    if (this.core.providers.enabled(provider.id)) return;
+    throw unavailable(`${provider.name} is turned off on this machine. Turn it on in Settings > Providers to use it`, {
+      accountId,
+      providerId: provider.id,
+      disabled: true,
+    });
+  }
+
   /** Adopt existing CLI logins; guided sign-in creates its own isolated account. */
   ensureDefaults(): void {
     const known = new Set(this.list().map((account) => account.providerId));
@@ -378,6 +391,7 @@ export class AccountStore {
   login(accountId: AccountId): { ok: true } {
     const account = this.require(accountId);
     const provider = this.core.providers.require(account.providerId);
+    this.assertOn(provider, accountId);
     if (provider.login === undefined) {
       throw refused(`${provider.name} has no login command Boite can run`, {
         accountId,
@@ -442,6 +456,7 @@ export class AccountStore {
   loginTerminal(accountId: AccountId, cols: number, rows: number): TerminalState {
     const account = this.require(accountId);
     const provider = this.core.providers.require(account.providerId);
+    this.assertOn(provider, accountId);
     const argv = provider.login?.command;
     if (provider.login?.terminal !== true || argv === undefined) {
       throw refused(`${provider.name} does not sign in from a terminal`, {
@@ -751,9 +766,15 @@ export class AccountStore {
     // and its absence proves nothing.
     const own = profileFor(provider)?.session;
     const session = own !== undefined && own.length > 0 ? own : provider.auth.session ?? [];
-    if (session.length === 0) return 'unknown';
+    const sqlite = provider.auth.sqlite;
+    if (session.length === 0 && sqlite === undefined) return 'unknown';
     const base = account.isolationDir ?? this.defaultLocation(provider);
     if (base === null) return 'unknown';
+    if (sqlite !== undefined) {
+      // A database the agent keeps its sign-ins in: one row is a login, a file that will not open says nothing.
+      const rows = sqliteHasRows(join(base, sqlite.file), sqlite.tables);
+      if (rows !== false || session.length === 0) return rows === null ? 'unknown' : rows ? 'ok' : 'unauthenticated';
+    }
     if (session.every((file) => existsSync(join(base, file)))) return 'ok';
     return own?.length === 0 ? 'unknown' : 'unauthenticated';
   }

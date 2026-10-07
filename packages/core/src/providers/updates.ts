@@ -9,7 +9,10 @@ import { notFound, refused } from '../errors.ts';
 import type { InstallOutcome } from './install.ts';
 import { npmInstallOf, unwritableDir } from './npm.ts';
 import { profileFor, resolveCommand } from './resolve.ts';
+import { readVersion, recheckVersions } from './versions.ts';
 import { forgetWhich } from './which.ts';
+
+export { readVersion };
 
 /**
  * The earliest automatic check after the core is up, so nothing spawns or
@@ -32,7 +35,6 @@ const UPDATE_TIMEOUT_MS = 15 * 60 * 1000;
 const SKIPS_FILE = 'harness-updates.json';
 /** The last check's readings, so a restart shows them without spawning anything. */
 const READINGS_FILE = 'harness-versions.json';
-const VERSION_PATTERN = /\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?/;
 
 /** The synthetic thread an update's processes are traced under. */
 export function updateThreadId(providerId: ProviderId): string {
@@ -61,10 +63,6 @@ export function compareVersions(a: string, b: string): number {
 export function inside(dir: string, path: string): boolean {
   const fold = (value: string): string => (process.platform === 'linux' ? value : value.toLowerCase());
   return fold(path).startsWith(fold(dir.endsWith(sep) ? dir : dir + sep));
-}
-
-export function readVersion(output: string): string | null {
-  return VERSION_PATTERN.exec(output)?.[0] ?? null;
 }
 
 interface Entry {
@@ -397,7 +395,8 @@ export class HarnessUpdates {
   private targetOf(providerId: ProviderId): Target | null {
     const descriptor = this.core.providers.get(providerId);
     const summary = this.core.providers.summary(providerId);
-    if (descriptor === undefined || summary === undefined || !summary.available) return null;
+    // A provider turned off is never asked its version and never updated.
+    if (descriptor === undefined || summary === undefined || !summary.available || summary.enabled === false) return null;
     if (this.only !== null && !this.only.has(providerId)) return null;
     const profile = profileFor(descriptor);
     if (profile === undefined) return null;
@@ -498,6 +497,9 @@ export class HarnessUpdates {
   /** One short run of the agent's own program, traced like every process of an agent. */
   private async run(target: Target, args: string[], timeoutMs: number): Promise<string> {
     this.assertOpen();
+    // An updater just rewrote the program, or it was never asked its version: a
+    // candidate that names a major resolves once the program has answered.
+    if (resolveCommand(target.profile) === null) await this.core.providers.settle(this.versionTimeoutMs);
     const command = resolveCommand(target.profile);
     if (command === null) throw new Error(`${target.descriptor.name} is not on this machine any more`);
     const spawned = this.core.procs.spawnPiped(updateThreadId(target.descriptor.id), command.executable, [...command.prefix, ...args], {
@@ -547,6 +549,7 @@ export class HarnessUpdates {
       }
       // An updater may have moved the program on PATH.
       forgetWhich();
+      recheckVersions();
       const read = await this.read(target);
       if (this.closed || this.core.stopping) return;
       const stuck = target.route === 'self' && before.current !== null && read.current === before.current && this.newer({ ...before, ...read });
@@ -566,6 +569,10 @@ export class HarnessUpdates {
       // A new release may list other models, and the path may have moved.
       forgetProbes({ providerId: id });
       forgetWhich();
+      recheckVersions();
+      // The list that goes out names the program as it stands after the update.
+      await this.core.providers.settle(this.versionTimeoutMs);
+      if (this.closed || this.core.stopping) return;
       this.core.bus.emit('providers.updated', this.core.providers.list());
     } catch (error) {
       this.entries.set(id, { ...before, state: 'failed', message: error instanceof Error ? error.message : String(error), checkedAt: Date.now(), program: target.program });

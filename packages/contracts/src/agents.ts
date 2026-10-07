@@ -14,7 +14,11 @@ export interface AgentBrain {
   memory: string;
   revision: string;
 }
-export type AgentSchedule = { kind: 'once'; at: number } | { kind: 'interval'; everyMinutes: number } | { kind: 'daily'; time: string; timezone: string };
+/**
+ * A daily schedule with `days` runs only on those weekdays, numbered 0 (Sunday) to 6 in
+ * its timezone. Absent means every day; the core drops a list of all seven.
+ */
+export type AgentSchedule = { kind: 'once'; at: number } | { kind: 'interval'; everyMinutes: number } | { kind: 'daily'; time: string; timezone: string; days?: number[] };
 export interface AgentRoutine extends AgentRecord {
   agentId: string;
   name: string;
@@ -106,6 +110,27 @@ export interface AgentConversationMessage extends AgentRecord {
   replyTo: string | null;
   episodeId: string;
   sourceRunId: string | null;
+  /**
+   * A message the agent posts about a thread entrusted to it: when it takes
+   * the thread over, and when the work there ends. `text` carries the
+   * thread's last answer (`done`, `blocked`) or why it stopped; clients
+   * write the sentence around it in their own language from `event`.
+   */
+  thread?: { id: string; title: string; event: 'entrusted' | 'done' | 'blocked' | 'stopped' };
+}
+/**
+ * An ordinary thread the owner handed to a persistent agent. The thread keeps
+ * its own model and session; the agent's name and instructions join its turns
+ * and a goal keeps it working until the objective is met or it needs the
+ * user. The agent tells its own conversation when it takes over and when the
+ * work ends. One agent per thread; entrusting again replaces it.
+ */
+export interface AgentEntrustment {
+  threadId: string;
+  agentId: string;
+  /** The goal the thread works toward. */
+  objective: string;
+  at: number;
 }
 export interface AgentDelivery extends AgentRecord {
   messageId: string;
@@ -241,6 +266,8 @@ export interface AgentsSnapshot {
   /** Per kind, true when older records exist beyond this snapshot. */
   more: Record<AgentHistoryKind, boolean>;
   limits: { backgroundConcurrency: number; paused: boolean; kebaccExperiment: boolean };
+  /** Threads entrusted to agents on this core. Missing on older cores. */
+  entrusted?: AgentEntrustment[];
 }
 export interface AgentsRpcMethods {
   'agents.runtime.get': { params: { agentId: string }; result: AgentRuntimeConfig };
@@ -278,6 +305,12 @@ export interface AgentsRpcMethods {
   'agents.decision.answer': { params: { decisionId: string; expectedRevision: number; answer: string }; result: AgentDecision };
   'agents.work.control': { params: { workId: string; expectedRevision: number; action: 'pause' | 'resume' | 'cancel' | 'reconcile'; note?: string }; result: AgentWork };
   'agents.limits.set': { params: AgentsSnapshot['limits']; result: AgentsSnapshot['limits'] };
+  /**
+   * Hands an ordinary thread to an agent, or takes it back with `agentId: null`.
+   * `objective` defaults to carrying the thread's work to a verified result.
+   * Owner only.
+   */
+  'agents.entrust': { params: { threadId: string; agentId: string | null; objective?: string }; result: AgentEntrustment | null };
 }
 export interface AgentsRpcEvents {
   /** Invalidation only: clients fetch an authorized snapshot, never another agent's private data. */

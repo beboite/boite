@@ -6,6 +6,8 @@ import { checkAttachmentArray, checkAttachments } from './threads/inputs.ts';
 
 const empty = (): ThreadActivity => ({ goal: null, loop: null, tasks: [] });
 type PendingAttachments = Partial<Record<'goal' | 'loop', Attachment[]>>;
+/** How a goal stopped working: met, waiting on the user, or paused by a failed or stopped turn. */
+export interface GoalOutcome { threadId: string; outcome: 'complete' | 'blocked' | 'stopped'; text: string }
 
 /** Activity survives reconnects; a restarted core requires an explicit resume. */
 export class ActivityStore {
@@ -13,6 +15,7 @@ export class ActivityStore {
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly ownTurns = new Map<string, { kind: 'goal' | 'loop'; generation: number; iteration: number }>();
   private readonly generations = new Map<string, number>();
+  private readonly goalListeners = new Set<(event: GoalOutcome) => void>();
   private closed = false;
 
   constructor(private readonly core: Core) {
@@ -48,6 +51,25 @@ export class ActivityStore {
         core.journal.deleteSetting(`activity-input:${threadId}`);
       }
     });
+  }
+
+  /** Called after the goal's new state is saved. Returns the unsubscribe. */
+  onGoal(listener: (event: GoalOutcome) => void): () => void {
+    this.goalListeners.add(listener);
+    return () => { this.goalListeners.delete(listener); };
+  }
+
+  private goalEnded(event: GoalOutcome): void {
+    for (const listener of this.goalListeners) {
+      try { listener(event); } catch (error) { this.core.log('warn', `goal outcome listener: ${error instanceof Error ? error.message : String(error)}`); }
+    }
+  }
+
+  /** Pause after a failed or stopped turn, and tell observers when that stopped an active goal. */
+  private stop(threadId: string, error: string): void {
+    const active = this.states.get(threadId)?.goal?.status === 'active';
+    this.pauseAll(threadId, error);
+    if (active) this.goalEnded({ threadId, outcome: 'stopped', text: error });
   }
 
   get(threadId: string): ThreadActivity { return structuredClone(this.states.get(threadId) ?? empty()); }
@@ -182,22 +204,28 @@ export class ActivityStore {
       if (run) {
         run.status = turn.status === 'done' ? 'done' : turn.status === 'stopped' ? 'stopped' : 'error';
         run.finishedAt = turn.finishedAt ?? Date.now();
-        run.summary = activityResult(Array.from(this.core.journal.walkTurnMessages(turn.threadId, turn.id)).filter(message => message.role === 'assistant').flatMap(message => message.parts.filter(part => part.type === 'text').map(part => part.text)).join('\n')).slice(0, 4000) || turn.error || '';
+        run.summary = this.answer(turn).slice(0, 4000) || turn.error || '';
       }
       if (turn.status === 'done' && state.loop.maxIterations && state.loop.iterations >= state.loop.maxIterations) { state.loop.status = 'complete'; state.loop.nextRunAt = null; }
       else if (state.loop.status === 'active') state.loop.nextRunAt = Date.now() + state.loop.intervalMs;
       this.save(turn.threadId);
     }
-    if (turn.status !== 'done' && (!owned || current)) { this.pauseAll(turn.threadId, turn.error ?? 'Turn stopped. Resume to continue.'); return; }
+    if (turn.status !== 'done' && (!owned || current)) { this.stop(turn.threadId, turn.error ?? 'Turn stopped. Resume to continue.'); return; }
     if (!state) return;
     if (owned?.kind === 'goal' && current && state.goal?.status === 'active') {
       const signal = this.goalResult(turn);
       // Clients that know `blocked` show their own words; the error serves older ones.
       if (signal === 'blocked') { state.goal.status = 'paused'; state.goal.blocked = true; state.goal.error = 'The agent reported a blocker. Reply to resume.'; this.save(turn.threadId); }
       else if (signal === 'complete') { state.goal.status = 'complete'; this.save(turn.threadId); }
+      if (signal && this.goalListeners.size) this.goalEnded({ threadId: turn.threadId, outcome: signal, text: this.answer(turn) });
     }
     // Let the scheduler release its running slot and clients submit queued user input first.
     this.schedule(turn.threadId, 250);
+  }
+
+  /** The turn's assistant text without goal markers. */
+  private answer(turn: Turn): string {
+    return activityResult(Array.from(this.core.journal.walkTurnMessages(turn.threadId, turn.id)).filter(message => message.role === 'assistant').flatMap(message => message.parts.filter(part => part.type === 'text').map(part => part.text)).join('\n'));
   }
 
   private goalResult(turn: Turn): 'complete' | 'blocked' | null {
@@ -241,7 +269,7 @@ export class ActivityStore {
         current.loop!.history = [...(current.loop!.history ?? []), { iteration, turnId: turn.id, status: 'running' as const, summary: '', startedAt: Date.now(), finishedAt: null }].slice(-50);
       }
       this.save(threadId);
-    } catch (error) { this.pauseAll(threadId, error instanceof Error ? error.message : String(error)); }
+    } catch (error) { this.stop(threadId, error instanceof Error ? error.message : String(error)); }
   }
 
   private schedule(threadId: string, delay: number): void {

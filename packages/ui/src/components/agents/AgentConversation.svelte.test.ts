@@ -18,8 +18,9 @@ const message = (id: string, senderId: string | null) => ({ id, scope, senderId,
 
 test('an agent message follows a reader at the bottom and leaves one reading older messages alone', async () => {
   const view = $state({
-    seen: { messages: [message('m1', 'a-ada')], deliveries: [] },
-    snapshot: { profiles: [{ id: 'a-ada', name: 'Ada' }], groups: [] },
+    seen: { messages: [message('m1', 'a-ada')], deliveries: [], decisions: [] },
+    snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '' }], groups: [], work: [], sessions: [] },
+    store: { owner: true },
     pending: false,
     loadingOlder: null,
     fill() {},
@@ -28,9 +29,12 @@ test('an agent message follows a reader at the bottom and leaves one reading old
     loadOlder: async () => {},
     call: async () => null,
   });
-  // The transcript's scroll box, with the geometry a browser would give it.
-  const box = document.createElement('div');
-  document.body.append(box);
+  const target = document.createElement('div');
+  document.body.append(target);
+  mounted = mount(AgentConversation, { target, props: { view: view as unknown as AgentsView, scope } });
+  // The transcript's own scroll box, given the geometry a browser would give it
+  // before the first effects run (mount leaves them to the next flush).
+  const box = target.querySelector<HTMLElement>('.agent-chat-scroll')!;
   let top = 0;
   // Each message drawn is 200 px: the height a pre-effect reads is the one before the new message.
   const height = () => 800 + box.querySelectorAll('article').length * 200;
@@ -39,7 +43,6 @@ test('an agent message follows a reader at the bottom and leaves one reading old
   // A browser clamps scrollTop to the scrollable range.
   Object.defineProperty(box, 'scrollTop', { get: () => top, set: (value: number) => { top = Math.max(0, Math.min(value, box.scrollHeight - box.clientHeight)); } });
 
-  mounted = mount(AgentConversation, { target: box, props: { view: view as unknown as AgentsView, scope } });
   await settle();
   expect(top).toBe(600);
 
@@ -66,8 +69,8 @@ test('HTTP agent sending keeps its secure request id for an uncertain retry', as
   vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) });
   const call = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 'm-sent' });
   const view = {
-    seen: { messages: [], deliveries: [] }, snapshot: { profiles: [{ id: 'a-ada', name: 'Ada' }], groups: [] },
-    pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call,
+    seen: { messages: [], deliveries: [], decisions: [] }, snapshot: { profiles: [{ id: 'a-ada', name: 'Ada', avatar: '' }], groups: [], work: [], sessions: [] },
+    store: { owner: true }, pending: false, loadingOlder: null, fill() {}, markRead() {}, hasOlder: () => false, loadOlder: async () => {}, call,
   };
   mounted = mount(AgentConversation, { target: document.body, props: { view: view as unknown as AgentsView, scope } });
   await settle();

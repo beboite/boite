@@ -18,6 +18,10 @@
   import MachineIcon from './MachineIcon.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import ThreadState from './ThreadState.svelte';
+  import AgentAvatar from './agents/AgentAvatar.svelte';
+  import { agentDirectory } from '../lib/agent-directory.svelte';
+  import { stewardChip } from '../lib/steward';
+  import { pickEntrustItem } from '../lib/thread-entrust';
   let {
     machine,
     project,
@@ -52,6 +56,11 @@
   let meta = $derived(showProject || pullRequest !== null);
   /** The logo tells the rows apart; its tooltip names the provider and the model. */
   let agent = $derived(agentLabel(owner, thread));
+  /** A persistent agent's thread wears that agent's picture where the provider's logo goes. */
+  /** An entrusted thread wears its agent's picture too. */
+  let runner = $derived(thread.agentSessionId || thread.parentThreadId ? agentDirectory(owner).ownerOf(thread) : agentDirectory(owner).entrustmentOf(thread.id)?.agent ?? null);
+  /** A steward's own thread wears the robot its id draws, the picture its projects show. */
+  let steward = $derived(owner.stewards?.find(grant => grant.threadId === thread.id) ?? null);
   // A move asked for while the turn runs, until the turn ends and applies it.
   let pending = $derived(pendingLine(thread));
   let doneAllowed = $derived(canMarkDone(owner, thread));
@@ -146,6 +155,7 @@
         if (action === 'pr') void refreshPr(true);
         if (action === 'copy') void owner.copy(thread.cwd);
         pickMoveItem(owner, thread, action);
+        pickEntrustItem(owner, thread, action);
         if (action === 'done') void markDone(owner, thread);
         if (action === 'archive') void archiveThread(owner, thread.id);
         if (action === 'delete') void deleteThread(owner, thread);
@@ -201,9 +211,19 @@
             <MachineIcon icon={machine.icon} os={owner.core?.os} />
           </span>
         {/if}
-        <span class="provider" data-testid="thread-provider" title={agent} aria-label={agent}>
-          <ProviderLogo providerId={thread.providerId} size={12} />
-        </span>
+        {#if steward}
+          <span class="provider" data-testid="thread-steward" title={`${stewardChip(steward)} · ${agent}`} aria-label={stewardChip(steward)}>
+            <AgentAvatar kind="profile" id={thread.id} name={thread.title} size={16} />
+          </span>
+        {:else if runner}
+          <span class="provider" data-testid="thread-agent" title={`${runner.name} · ${agent}`} aria-label={runner.name}>
+            <AgentAvatar kind="profile" id={runner.id} name={runner.name} avatar={runner.avatar} size={16} />
+          </span>
+        {:else}
+          <span class="provider" data-testid="thread-provider" title={agent} aria-label={agent}>
+            <ProviderLogo providerId={thread.providerId} size={12} />
+          </span>
+        {/if}
         <span class="title ui-label">{thread.title}</span>
         {#if draft}<span class="draft" data-testid="thread-draft" title={strings.sidebar.unsentDraft} aria-label={strings.sidebar.unsentDraft}><PencilLine size={12} /></span>{/if}
         {#if thread.pinned}<Pin size={12} />{/if}

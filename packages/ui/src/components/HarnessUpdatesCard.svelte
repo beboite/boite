@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { RefreshCw } from '@lucide/svelte';
+  import { providerEnabled } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
   import ProviderVersion from './ProviderVersion.svelte';
@@ -12,7 +13,9 @@
   let checking = $state(false);
   const connected = $derived(store.owner && store.connection === 'ready');
   const busy = $derived(checking || store.harnessUpdates.some(update => update.state === 'checking'));
+  // A provider turned off is never asked its version and never updated.
   const providers = $derived(store.providers.filter(provider => {
+    if (!providerEnabled(provider)) return false;
     const install = store.installOf(provider.id);
     return store.harnessUpdates.some(update => update.providerId === provider.id && (update.current !== null || update.state !== 'idle'))
       || (provider.available && install?.state === 'installed')

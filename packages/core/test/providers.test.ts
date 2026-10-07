@@ -280,7 +280,10 @@ describe('providers', () => {
     const { loaded, rejected } = await client.call('providers.list', {});
     expect(rejected).toEqual([]);
     const ids = loaded.map((provider) => provider.id).sort();
-    expect(ids).toEqual(['antigravity', 'antigravity-cli', 'claude', 'codex', 'echo', 'grok', 'muse', 'opencode', 'pi']);
+    expect(ids).toEqual(['antigravity', 'antigravity-cli', 'claude', 'codex', 'echo', 'grok', 'muse', 'opencode', 'opencode-v2', 'pi']);
+    // OpenCode 2 is the one experimental descriptor: listed, and off until it is turned on.
+    expect(loaded.filter((provider) => provider.experimental === true).map((provider) => provider.id)).toEqual(['opencode-v2']);
+    expect(loaded.filter((provider) => provider.enabled === false).map((provider) => provider.id)).toEqual(['opencode-v2']);
 
     const echo = loaded.find((provider) => provider.id === 'echo');
     expect(echo?.source).toBe('shipped');
@@ -342,6 +345,26 @@ describe('providers', () => {
       return;
     }
     expect(opencode.executable?.toLowerCase()).toEndWith(process.platform === 'win32' ? 'opencode.exe' : 'opencode');
+  });
+
+  test('the opencode-v2 profile launches acp bare, isolates the state home and signs in without the background service', () => {
+    const descriptor = harness.core.providers.require('opencode-v2');
+    expect(descriptor.experimental).toBe(true);
+    expect(descriptor.auth).toEqual({ kind: 'oauth-cli', sqlite: { file: 'opencode/opencode.db', tables: ['credential', 'account', 'control_account'] } });
+    expect(descriptor.login).toEqual({ command: ['opencode2', 'auth', 'login', '--standalone'], terminal: true });
+    for (const os of ['windows', 'linux', 'macos'] as const) {
+      const profile = descriptor.profiles[os];
+      // Version 2 refuses `--port`, which version 1's line carries.
+      expect(profile?.launch?.args).toEqual(['acp']);
+      expect(profile?.isolation).toEqual({ XDG_DATA_HOME: '{isolationDir}', XDG_CONFIG_HOME: '{isolationDir}', XDG_STATE_HOME: '{isolationDir}/state' });
+      expect(profile?.update).toEqual({ args: ['upgrade'], latestNpm: '@opencode/cli' });
+      // Delegation goes through Boite: OpenCode 2's own subagent tool is denied, in its own permission syntax.
+      expect(JSON.parse(profile?.env?.['OPENCODE_CONFIG_CONTENT'] ?? '{}')).toEqual({ permissions: [{ action: 'subagent', resource: '*', effect: 'deny' }] });
+      // The name both versions install under counts only at major 2 here, and only at major 1 for OpenCode 1.
+      expect(profile?.executable.filter((candidate) => candidate.kind === 'path' && candidate.value === 'opencode').map((candidate) => candidate.major)).toEqual([2]);
+      const first = harness.core.providers.require('opencode').profiles[os];
+      expect(first?.executable.filter((candidate) => candidate.kind === 'path' && candidate.value === 'opencode').map((candidate) => candidate.major)).toEqual([1]);
+    }
   });
 
   test('the opencode profile carries the acp launch arguments and the xdg isolation', async () => {

@@ -16,7 +16,7 @@ export function delegationConfig(ctx: FakeContext, rootId: ThreadId): Delegation
 
 /** What the real core's catalog reads: every available provider's models on its first account, the parent's own first. */
 function modelChoices(ctx: FakeContext, parent: Thread): DelegationModelChoice[] {
-  return ctx.providers.filter(provider => provider.available).flatMap(provider => {
+  return ctx.providers.filter(provider => provider.available && provider.enabled !== false).flatMap(provider => {
     const account = ctx.accounts.find(entry => entry.id === parent.accountId && entry.providerId === provider.id) ?? ctx.accounts.find(entry => entry.providerId === provider.id);
     if (!account) return [];
     return provider.models.filter(model => !model.legacy).map(model => ({
