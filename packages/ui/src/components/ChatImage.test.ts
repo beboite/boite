@@ -32,12 +32,15 @@ function observeBy(): (visible: boolean) => void {
   };
 }
 
-test('a deferred picture has its size and its blur before a byte arrives, asks for the bytes only near the screen, and keeps its box when they land', async () => {
+const COPY = 'data:image/webp;base64,UklGRgAAAABXRUJQ';
+
+test('a deferred picture has its size and its blur before a byte arrives, asks for its light copy only near the screen, and keeps its box when it lands', async () => {
   const show = observeBy();
   const image = reactive<ImagePart>({ type: 'image', mimeType: 'image/png', data: '', alt: 'shot', dataDeferred: true, bytes: 70, width: 1280, height: 720, preview: 'data:image/png;base64,PREVIEW' });
-  // As the store does: the bytes go into the part it holds.
-  const loadMessageAttachment = vi.fn(async () => { image.data = PIXEL; delete image.dataDeferred; return PIXEL; });
-  const store = { loadMessageAttachment, reportError: vi.fn() } as unknown as Store;
+  // The copy leaves the part alone: its original stays on the core until the viewer asks.
+  const loadDisplayImage = vi.fn(async () => COPY);
+  const loadMessageAttachment = vi.fn();
+  const store = { loadDisplayImage, loadMessageAttachment, reportError: vi.fn() } as unknown as Store;
   running = mount(ChatImage, { target: document.body, props: { store, threadId: 't', messageId: 'm', partIndex: 1, image, maxHeight: 240 } });
   flushSync();
 
@@ -49,11 +52,13 @@ test('a deferred picture has its size and its blur before a byte arrives, asks f
   expect(document.querySelector('[data-testid=image-preview]')?.getAttribute('src')).toBe('data:image/png;base64,PREVIEW');
   expect(document.querySelector('[data-testid=image-part]')).toBeNull();
   // Far from the screen, nothing is fetched.
-  expect(loadMessageAttachment).not.toHaveBeenCalled();
+  expect(loadDisplayImage).not.toHaveBeenCalled();
 
   show(true);
-  expect(loadMessageAttachment).toHaveBeenCalledWith('t', 'm', 1);
-  await vi.waitFor(() => expect(document.querySelector('[data-testid=image-part]')?.getAttribute('src')).toBe(`data:image/png;base64,${PIXEL}`));
+  expect(loadDisplayImage).toHaveBeenCalledWith('t', 'm', 1, 'image/png');
+  await vi.waitFor(() => expect(document.querySelector('[data-testid=image-part]')?.getAttribute('src')).toBe(COPY));
+  expect(image.dataDeferred).toBe(true);
+  expect(loadMessageAttachment).not.toHaveBeenCalled();
   // The blur stays under the picture until it decoded, then goes, and the box never changed.
   expect(box.dataset['state']).toBe('loading');
   document.querySelector('[data-testid=image-part]')!.dispatchEvent(new Event('load'));
@@ -62,21 +67,25 @@ test('a deferred picture has its size and its blur before a byte arrives, asks f
   expect(document.querySelector('[data-testid=image-preview]')).toBeNull();
   expect(box.style.width).toBe(width);
   show(true);
-  expect(loadMessageAttachment).toHaveBeenCalledTimes(1);
+  expect(loadDisplayImage).toHaveBeenCalledTimes(1);
+  // The original, once fetched for the viewer, takes the copy's place in the same box.
+  image.data = PIXEL;
+  delete image.dataDeferred;
+  flushSync();
+  expect(document.querySelector('[data-testid=image-part]')?.getAttribute('src')).toBe(`data:image/png;base64,${PIXEL}`);
+  expect(box.style.width).toBe(width);
 });
 
 test('a picture whose fetch failed asks again when it comes back near the screen, and loses the failure once it loads', async () => {
   const show = observeBy();
   const image = reactive<ImagePart>({ type: 'image', mimeType: 'image/png', data: '', alt: null, dataDeferred: true, bytes: 70, width: 1, height: 1 });
   let attempts = 0;
-  const loadMessageAttachment = vi.fn(async () => {
+  const loadDisplayImage = vi.fn(async () => {
     attempts += 1;
     if (attempts === 1) throw new Error('the connection dropped');
-    image.data = PIXEL;
-    delete image.dataDeferred;
-    return PIXEL;
+    return COPY;
   });
-  const store = { loadMessageAttachment, reportError: vi.fn() } as unknown as Store;
+  const store = { loadDisplayImage, reportError: vi.fn() } as unknown as Store;
   running = mount(ChatImage, { target: document.body, props: { store, threadId: 't', messageId: 'm', partIndex: 1, image } });
   flushSync();
   const box = document.querySelector<HTMLElement>('[data-testid=image-box]')!;
@@ -88,7 +97,7 @@ test('a picture whose fetch failed asks again when it comes back near the screen
   show(false);
   show(true);
   await vi.waitFor(() => expect(document.querySelector('[data-testid=image-part]')).not.toBeNull());
-  expect(loadMessageAttachment).toHaveBeenCalledTimes(2);
+  expect(loadDisplayImage).toHaveBeenCalledTimes(2);
   await vi.waitFor(() => expect(box.title).toBe(''));
 });
 

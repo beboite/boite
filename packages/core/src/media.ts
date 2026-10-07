@@ -1,7 +1,7 @@
-import { IMAGE_INLINE_CHARS, MESSAGE_PAGE, MESSAGE_PAGE_MAX, type ImagePreviews, type MessageId, type ThreadId } from '@boite/contracts';
+import { DISPLAY_IMAGE_MAX, IMAGE_INLINE_CHARS, MESSAGE_PAGE, MESSAGE_PAGE_MAX, type ImagePreviews, type MessageId, type ThreadId } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { messageOf } from './errors.ts';
-import { mediaPreviews, messageIdsNear, putMediaPreview, unscannedMedia } from './journal/media-previews.ts';
+import { mediaDisplay, mediaPreviews, messageIdsNear, putMediaDisplay, putMediaPreview, unscannedMedia } from './journal/media-previews.ts';
 
 /** Past this many pixels a picture gets no blur: decoding it costs more memory than the blur is worth. */
 const PREVIEW_MAX_PIXELS = 7680 * 4320;
@@ -11,6 +11,29 @@ const PREVIEW_CONCURRENCY = 3;
 const PREVIEW_QUEUE_CHARS = 64 * 1024 * 1024;
 /** How long a page read waits for the blurs of pictures no client was sent before. */
 const WARM_BUDGET_MS = 1500;
+
+/** WebP copies made at once. Each decodes one picture on Bun's image worker, about 130 ms for a 1920 by 1080 screenshot. */
+const DISPLAY_CONCURRENCY = 2;
+/** What `messages.attachment` with `display` converts. A GIF keeps its frames by staying as it is. */
+const DISPLAY_TYPES = /^image\/(png|jpeg|webp)$/;
+
+/**
+ * The copy of a picture the timeline draws: WebP at quality 80, its longer
+ * side at most `DISPLAY_IMAGE_MAX`. Measured on 2026-10-07, 1.5 to 2.5 MB PNG
+ * screenshots became 50 to 130 KB. Null when Bun cannot decode it or refuses
+ * its size; AVIF would be smaller still, but Bun's Linux build cannot encode it.
+ */
+export async function makeDisplay(data: string): Promise<Uint8Array | null> {
+  if (typeof Bun.Image !== 'function') return null;
+  try {
+    return await new Bun.Image(Buffer.from(data, 'base64'), { maxPixels: PREVIEW_MAX_PIXELS })
+      .resize(DISPLAY_IMAGE_MAX, DISPLAY_IMAGE_MAX, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 80 })
+      .bytes();
+  } catch {
+    return null;
+  }
+}
 
 interface Job {
   threadId: string;
@@ -43,6 +66,10 @@ export class MediaPreviews {
   private readonly waiting = new Map<string, Job>();
   private readonly running = new Map<string, Job>();
   private queuedChars = 0;
+  /** WebP copies being made, one promise per picture however many clients ask. */
+  private readonly displays = new Map<string, Promise<Uint8Array>>();
+  private displaying = 0;
+  private readonly displayTurns: (() => void)[] = [];
 
   constructor(private readonly core: Core) {}
 
@@ -113,6 +140,54 @@ export class MediaPreviews {
       new Promise<void>(resolve => { timer = setTimeout(resolve, WARM_BUDGET_MS); }),
     ]);
     clearTimeout(timer);
+  }
+
+  /**
+   * The WebP copy of a picture for `messages.attachment` with `display`, made
+   * once and kept in `media_displays`; null when the original is what to send:
+   * a GIF or another type, a picture Bun cannot convert, or one whose copy
+   * would not be lighter.
+   */
+  async display(threadId: string, messageId: string, partIndex: number, mimeType: string, data: string): Promise<{ data: string; mimeType: string } | null> {
+    if (!DISPLAY_TYPES.test(mimeType)) return null;
+    const db = this.core.journal.db;
+    let held: Uint8Array | null = null;
+    try {
+      held = mediaDisplay(db, messageId, partIndex);
+    } catch (error) {
+      this.core.log('warn', `display copy of message ${messageId} part ${partIndex} could not be read: ${messageOf(error)}`);
+    }
+    if (held === null) {
+      const key = `${messageId}\0${partIndex}`;
+      let made = this.displays.get(key);
+      if (made === undefined) {
+        made = this.displayTurn(() => makeDisplay(data)).then(copy => {
+          // The original wins when it is already as light: a small PNG icon, a WebP sent as one.
+          const kept = copy !== null && copy.length < data.length * 3 / 4 ? copy : new Uint8Array(0);
+          try {
+            if (!this.core.journal.isClosed()) putMediaDisplay(db, threadId, messageId, partIndex, kept);
+          } catch (error) {
+            this.core.log('warn', `display copy of message ${messageId} part ${partIndex} was not kept: ${messageOf(error)}`);
+          }
+          return kept;
+        }).finally(() => this.displays.delete(key));
+        this.displays.set(key, made);
+      }
+      held = await made;
+    }
+    return held.length === 0 ? null : { data: Buffer.from(held).toString('base64'), mimeType: 'image/webp' };
+  }
+
+  /** Runs `work` once fewer than `DISPLAY_CONCURRENCY` copies are being made. */
+  private async displayTurn<T>(work: () => Promise<T>): Promise<T> {
+    if (this.displaying >= DISPLAY_CONCURRENCY) await new Promise<void>(resolve => this.displayTurns.push(resolve));
+    this.displaying += 1;
+    try {
+      return await work();
+    } finally {
+      this.displaying -= 1;
+      this.displayTurns.shift()?.();
+    }
   }
 
   /** The promise of that blur being written, or null when the queue is full. */

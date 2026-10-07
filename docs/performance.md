@@ -295,6 +295,15 @@ when the core advertises `chunkedAnswers`.
   makes, about 1.2 KB. The core makes three at a time on Bun's image worker,
   refuses pictures above 8K UHD, and keeps them in `media_previews`
   (`packages/core/src/media.ts`).
+- A deferred picture on screen is drawn from a light copy:
+  `messages.attachment` with `display` answers a WebP at quality 80, at most
+  1,280 px on its longer side, made once on Bun's image worker and kept in
+  `media_displays`. Six 1,541 to 2,467 KB PNG screenshots measured 51 to
+  130 KB this way on 2026-10-07, about 130 ms each to make. AVIF would be
+  smaller, but Bun's Linux build cannot encode it. A GIF, a copy that would not
+  be lighter and any other file come as they are. A click opens the original
+  in the viewer, and a download or an edit also fetches the original
+  (`store/display-images.ts`).
 - A light read first makes the blurs of the messages around its page that no
   read looked at before, waiting 1.5 s at most. It does this before the page is
   read, never between the read and the answer, so the answer still holds every

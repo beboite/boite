@@ -33,19 +33,25 @@
 
   let shown = $state(false);
   let failed = $state(false);
+  /** The light copy the core made for the timeline (`loadDisplayImage`). */
+  let copy = $state<string | null>(null);
 
-  const src = $derived(image.dataDeferred || image.data.length === 0 ? null : `data:${image.mimeType};base64,${image.data}`);
+  /** The original, once the part holds it: sent inline, or fetched for the viewer or an edit. */
+  const original = $derived(image.dataDeferred || image.data.length === 0 ? null : `data:${image.mimeType};base64,${image.data}`);
+  const src = $derived(original ?? copy);
   const size = $derived(image.width && image.height ? { width: image.width, height: image.height } : image.data.length > 0 ? imageSize(image.data) : null);
   /** The box's width: the picture's own, shrunk to `maxHeight` keeping its proportions. The column still caps it. */
   const width = $derived(size === null ? null : maxHeight === null ? size.width : Math.min(size.width, (maxHeight * size.width) / size.height));
 
-  // A picture asks for its bytes once while a request runs or after one
-  // succeeded; a failed one asks again the next time it nears the screen.
+  // Near the screen a deferred picture asks for its light copy, once while a
+  // request runs or after one succeeded; a failed one asks again the next
+  // time it nears the screen. The original comes only when opened.
   let asked = false;
   function load(): void {
-    if (asked || !image.dataDeferred) return;
+    if (asked || original !== null) return;
     asked = true;
-    store.loadMessageAttachment(threadId, messageId, partIndex).then(() => {
+    store.loadDisplayImage(threadId, messageId, partIndex, image.mimeType).then((url) => {
+      copy = url;
       failed = false;
     }, (error: unknown) => {
       failed = true;
@@ -53,12 +59,6 @@
       store.reportError(error, 'minor');
     });
   }
-
-  // New bytes (the deferred ones landing) fade in again.
-  $effect(() => {
-    void src;
-    shown = false;
-  });
 </script>
 
 <span

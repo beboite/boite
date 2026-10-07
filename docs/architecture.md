@@ -87,7 +87,8 @@ nothing reads those events back. The types that are read back (`question.asked`,
 indexes, so startup and a thread open no longer scan the events table.
 
 The blur a deferred picture is drawn with before its bytes arrive is a
-`media_previews` row, keyed by message and part, with no event: it is made
+`media_previews` row, keyed by message and part, and the light WebP copy the
+timeline draws is a `media_displays` row, both with no event: they are made
 again from the message when missing ([performance](performance.md)).
 
 A tool output, tool input text, file or image of 32 KiB or more is stored in

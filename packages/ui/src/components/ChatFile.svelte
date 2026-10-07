@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { Check, Download, FileText, Image, Film, Music2, Maximize2, RefreshCw, X } from '@lucide/svelte';
   import { ATTACHMENT_MAX_BYTES, FILE_TICKET_TTL_MS, imageSize, type MessagePart } from '@boite/contracts';
   import { onView } from '../lib/on-view';
@@ -69,9 +69,27 @@
   const waiting = $derived(file?.type === 'file' && !!file.dataDeferred && box !== null && !url && !error);
   const boxWidth = $derived(box === null ? undefined : `min(${box.width}px, calc(min(480px, 65vh) * ${box.width} / ${box.height}))`);
   const boxRatio = $derived(box === null ? undefined : `${box.width} / ${box.height}`);
-  /** Near the screen, a deferred picture fetches itself, unless it is too large to fetch unasked. */
+  /** The light copy the core made for the timeline (`loadDisplayImage`), drawn until the original is asked for. */
+  let copy = $state('');
+  let copyShown = $state(false);
+  let copyAsked = false;
+  /** Near the screen, a deferred picture fetches its light copy; the original waits for a click. */
   function near(): void {
-    if (waiting && !loading && !deferredImage) void load();
+    if (!waiting || copy || copyAsked) return;
+    if (!store || !threadId || !messageId || partIndex === undefined || file?.type !== 'file') { if (!loading && !deferredImage) void load(); return; }
+    copyAsked = true;
+    store.loadDisplayImage(threadId, messageId, partIndex, file.mimeType).then((value) => { if (!disposed) copy = value; }, (reason: unknown) => {
+      copyAsked = false;
+      if (!disposed) error = reason instanceof Error ? reason.message : strings.artifacts.failed;
+    });
+  }
+
+  /** The viewer shows the original: a picture drawn from its copy fetches it first, then opens in the same box. */
+  async function openOriginal(): Promise<void> {
+    if (!url) await load();
+    if (!url || disposed) return;
+    await tick();
+    view(shot);
   }
 
   async function open(): Promise<void> {
@@ -226,9 +244,12 @@
 <section class="chat-file" class:inline-media={inlineMedia} data-testid="chat-file" aria-busy={loading || saving}>
   {#if waiting}
     <div class="preview" data-testid="artifact-waiting">
-      <span class="shot boxed" style:width={boxWidth} style:aspect-ratio={boxRatio} use:onView={near}>
-        {#if file?.type === 'file' && file.preview}<img class="blur" src={file.preview} alt="" aria-hidden="true" data-testid="artifact-blur" />{/if}
-      </span>
+      <button type="button" class="shot boxed" style:width={boxWidth} style:aspect-ratio={boxRatio} use:onView={near} onclick={() => void openOriginal()} disabled={loading}
+        title={strings.artifacts.enlarge} aria-label={strings.artifacts.enlarge} aria-busy={loading} data-testid="artifact-open-original">
+        {#if file?.type === 'file' && file.preview && !copyShown}<img class="blur" src={file.preview} alt="" aria-hidden="true" data-testid="artifact-blur" />{/if}
+        {#if copy}<img src={copy} alt={name} decoding="async" onload={() => copyShown = true} data-testid="artifact-copy" />{/if}
+        <span class="enlarge"><Maximize2 size={16} /></span>
+      </button>
     </div>
   {:else if showPreview && url}
     <div class="preview" data-testid="artifact-content">
@@ -257,7 +278,7 @@
     <button type="button" class="identity" onclick={launch} disabled={opening || saving || loading || (!url && !directory && !(file?.type === 'file' && file.dataDeferred))} title={saved || name}
       aria-label={fill(strings.chat.openFile, { name })} data-testid="artifact-launch">
       {#if image}<Image size={18} />{:else if video}<Film size={18} />{:else if audio}<Music2 size={18} />{:else}<FileText size={20} />{/if}
-      <span class="label"><span class="filename">{name}</span><small>{loading ? strings.artifacts.loading : saving ? strings.artifacts.saving : saved ? strings.artifacts.saved : [bytes(size), dimensions, duration ? millis(duration * 1000) : ''].filter(Boolean).join(' · ')}</small></span>
+      <span class="label"><span class="filename">{name}</span><small>{loading ? strings.artifacts.loading : saving ? strings.artifacts.saving : saved ? strings.artifacts.saved : [bytes(size), dimensions || (box ? `${box.width} × ${box.height}` : ''), duration ? millis(duration * 1000) : ''].filter(Boolean).join(' · ')}</small></span>
     </button>
     {#if directory}<button class="ghost small" type="button" onclick={open} disabled={opening} data-testid="artifact-open"><span class="ui-label">{strings.artifacts.open}</span></button>{/if}
     {#if url || (file?.type === 'file' && file.dataDeferred)}
@@ -288,7 +309,7 @@
   .shot.boxed { max-width: 100%; margin: auto; overflow: hidden; background: var(--color-surface-2); }
   .shot.boxed img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; min-height: 0; max-height: none; object-fit: cover; }
   .enlarge { position: absolute; right: 10px; top: 10px; display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--radius-sm); background: var(--color-surface); box-shadow: var(--shadow-e1); opacity: 0; transition: opacity var(--dur-1); }
-  .shot:hover .enlarge, .shot:focus-visible .enlarge, .clip:hover .enlarge, .clip .enlarge:focus-visible { opacity: 1; }
+  .shot:hover .enlarge, .shot:focus-visible .enlarge, .shot.boxed:hover .enlarge, .clip:hover .enlarge, .clip .enlarge:focus-visible { opacity: 1; }
   .clip { position: relative; }
   .clip .enlarge { padding: 0; border: 0; color: inherit; }
   small, .line { color: var(--color-muted-foreground); font-size: var(--text-xs); }

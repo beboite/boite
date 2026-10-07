@@ -67,8 +67,9 @@
     if (host) host.open(gallery); else viewing = gallery;
   }
 
-  /** The picture as the viewer shows it, under a name a saved copy can keep. */
-  function viewed(image: ImagePart, at: number): MediaItem {
+  /** The picture as the viewer shows it, under a name a saved copy can keep; none while its original is on the core. */
+  function viewed(image: ImagePart, at: number): MediaItem | null {
+    if (image.dataDeferred) return null;
     const extension = image.mimeType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'png';
     const name = image.alt || `image-${at + 1}.${extension}`;
     const src = `data:${image.mimeType};base64,${image.data}`;
@@ -79,6 +80,28 @@
         saveAttachment(name, decodeBase64(image.data), false).catch((error: unknown) => { store.reportError(error, 'minor'); });
       }
     };
+  }
+  /** The picture whose original is on its way to the viewer. */
+  let opening = $state<number | null>(null);
+  /**
+   * The viewer shows the original. A deferred picture is drawn from its light
+   * copy, so its original is fetched first, once, and then opens.
+   */
+  async function open(from: HTMLElement, image: ImagePart, index: number, at: number): Promise<void> {
+    if (image.dataDeferred) {
+      if (opening !== null) return;
+      opening = index;
+      try {
+        await store.loadMessageAttachment(message.threadId, message.id, index);
+      } catch (error) {
+        store.reportError(error, 'minor');
+        return;
+      } finally {
+        opening = null;
+      }
+    }
+    const item = viewed(image, at);
+    if (item) show(galleryFrom(from, item));
   }
   const copyText = $derived(message.parts.flatMap((part) => part.type === 'text' ? [promptText(part)] : []).join('\n\n'));
   /** The move this prompt told the agent about, first thing the core put before its words. */
@@ -124,23 +147,18 @@
   {#if images.length > 0}
     <div class="images">
       {#each images as { image, index }, at (at)}
-        <!-- One box from the blur to the picture: the button arrives with the bytes and changes no size. -->
-        {#if image.dataDeferred}
-          <span class="shot" title={image.alt ?? strings.chat.imagePart}>
-            <ChatImage {store} threadId={message.threadId} messageId={message.id} partIndex={index} {image} maxHeight={THUMB_HEIGHT} />
-          </span>
-        {:else}
+        <!-- One box from the blur to the light copy to the original: nothing changes size. -->
         <button
           type="button"
           class="shot"
           title={image.alt ?? strings.chat.imagePart}
+          aria-busy={opening === index}
           use:media={() => viewed(image, at)}
-          onclick={(event) => show(galleryFrom(event.currentTarget, viewed(image, at)))}
+          onclick={(event) => void open(event.currentTarget, image, index, at)}
           data-testid="image-open"
         >
           <ChatImage {store} threadId={message.threadId} messageId={message.id} partIndex={index} {image} maxHeight={THUMB_HEIGHT} />
         </button>
-        {/if}
       {/each}
     </div>
   {/if}
@@ -229,10 +247,8 @@
     border-color: var(--color-edge);
   }
 
-  /* Its bytes still on the core: a box to wait in, nothing to open yet. */
-  span.shot {
-    display: block;
-    cursor: default;
+  .shot[aria-busy='true'] {
+    cursor: progress;
   }
 
 </style>

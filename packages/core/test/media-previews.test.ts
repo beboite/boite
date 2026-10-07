@@ -43,7 +43,43 @@ function png(width: number, height: number): string {
   ]).toString('base64');
 }
 
+/** A screenshot-like PNG: a gradient with grain, which compresses badly as PNG and well as WebP. */
+function grainy(width: number, height: number): string {
+  const chunk = (type: string, data: Buffer) => {
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const sum = Buffer.alloc(4);
+    sum.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, sum]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 2;
+  const rows = Buffer.alloc((width * 3 + 1) * height);
+  let seed = 7;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = y * (width * 3 + 1) + 1 + x * 3;
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      const grain = (seed >> 16) % 32;
+      rows[at] = Math.min(255, Math.round((x / width) * 220) + grain);
+      rows[at + 1] = Math.min(255, 90 + grain);
+      rows[at + 2] = Math.min(255, Math.round((y / height) * 220) + grain);
+    }
+  }
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(rows)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]).toString('base64');
+}
+
 const SHOT = png(320, 180);
+const SCREEN = grainy(1600, 900);
 const TALL = png(90, 160);
 
 function seed(threadId: string): void {
@@ -98,6 +134,31 @@ describe('deferred pictures', () => {
     expect(picture?.type === 'file' && picture.preview?.startsWith('data:image/png;base64,')).toBe(true);
     expect(clip).toEqual({ type: 'file', mimeType: 'video/mp4', data: video, name: 'drive.mp4' });
     expect((await client.call('messages.attachment', { threadId, messageId: 'msg_attached', partIndex: 0 })).data).toBe(SHOT);
+  });
+
+  test('messages.attachment with display hands back a lighter WebP made once, and the original without it', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    seed(threadId);
+    const gif = Buffer.from('GIF89a\x01\x00\x01\x00\x00\x00\x00;', 'binary').toString('base64');
+    harness.core.journal.putMessage({ id: 'msg_gif', threadId, turnId: 'trn_seed', role: 'user', state: 'complete', createdAt: 3_000, parts: [{ type: 'image', mimeType: 'image/gif', data: gif, alt: null }] });
+    harness.core.journal.putMessage({ id: 'msg_screen', threadId, turnId: 'trn_seed', role: 'assistant', state: 'complete', createdAt: 3_001, parts: [{ type: 'file', mimeType: 'image/png', data: SCREEN, name: 'screen.png' }] });
+
+    const copy = await client.call('messages.attachment', { threadId, messageId: 'msg_screen', partIndex: 0, display: true });
+    expect(copy.mimeType).toBe('image/webp');
+    const bytes = Buffer.from(copy.data, 'base64');
+    expect(bytes.subarray(8, 12).toString()).toBe('WEBP');
+    expect(bytes.length * 5).toBeLessThan(Buffer.from(SCREEN, 'base64').length);
+    // At most 1280 px on its longer side, at the picture's proportions.
+    expect(await new Bun.Image(bytes).metadata()).toMatchObject({ width: 1280, height: 720, format: 'webp' });
+    // Kept: the second read is the same copy, from the journal.
+    const kept = harness.core.journal.db.query('SELECT length(data) AS n FROM media_displays WHERE message_id = ?').get('msg_screen') as { n: number };
+    expect(kept.n).toBe(bytes.length);
+    expect((await client.call('messages.attachment', { threadId, messageId: 'msg_screen', partIndex: 0, display: true })).data).toBe(copy.data);
+    // The original is still what a plain read gives; a copy heavier than its PNG is not sent; a GIF stays a GIF.
+    expect(await client.call('messages.attachment', { threadId, messageId: 'msg_screen', partIndex: 0 })).toEqual({ data: SCREEN });
+    expect(await client.call('messages.attachment', { threadId, messageId: 'msg_shot', partIndex: 1, display: true })).toEqual({ data: SHOT });
+    expect(await client.call('messages.attachment', { threadId, messageId: 'msg_gif', partIndex: 0, display: true })).toEqual({ data: gif });
   });
 
   test('a light page still opens, sized and without blurs, when the blurs cannot be read', async () => {

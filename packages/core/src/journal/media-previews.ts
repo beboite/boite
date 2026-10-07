@@ -37,3 +37,15 @@ export function putMediaPreview(db: Database, threadId: string, messageId: strin
   db.query('INSERT OR REPLACE INTO media_previews (message_id, part_index, thread_id, preview) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM messages WHERE id = ? AND thread_id = ?)')
     .run(messageId, partIndex, threadId, preview, messageId, threadId);
 }
+
+/** The WebP copy the timeline draws: its bytes, empty when the original is lighter, or null when not made yet. */
+export function mediaDisplay(db: Database, messageId: string, partIndex: number): Uint8Array | null {
+  const row = db.query('SELECT data FROM media_displays WHERE message_id = ? AND part_index = ?').get(messageId, partIndex) as { data: Uint8Array } | null;
+  return row === null ? null : row.data;
+}
+
+/** Nothing is written for a message that left its thread meanwhile. */
+export function putMediaDisplay(db: Database, threadId: string, messageId: string, partIndex: number, data: Uint8Array): void {
+  db.query('INSERT OR REPLACE INTO media_displays (message_id, part_index, thread_id, data) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM messages WHERE id = ? AND thread_id = ?)')
+    .run(messageId, partIndex, threadId, data, messageId, threadId);
+}

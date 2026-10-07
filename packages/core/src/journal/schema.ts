@@ -395,12 +395,18 @@ export function migrate(db: Database, file: string): void {
   }
   // The blur each deferred picture is drawn with before its bytes arrive, by
   // message and part; part -1 says every picture of that message was looked
-  // at. Derived from the messages and made again when missing: no event.
+  // at. `media_displays` holds the WebP copy the timeline draws, empty when
+  // the original is lighter. Derived from the messages and made again when
+  // missing: no event.
   if (version < 32) {
     db.exec(`CREATE TABLE IF NOT EXISTS media_previews (
         message_id TEXT NOT NULL, part_index INTEGER NOT NULL, thread_id TEXT NOT NULL, preview TEXT,
         PRIMARY KEY (message_id, part_index)) WITHOUT ROWID;
-      CREATE INDEX IF NOT EXISTS media_previews_thread ON media_previews (thread_id);`);
+      CREATE INDEX IF NOT EXISTS media_previews_thread ON media_previews (thread_id);
+      CREATE TABLE IF NOT EXISTS media_displays (
+        message_id TEXT NOT NULL, part_index INTEGER NOT NULL, thread_id TEXT NOT NULL, data BLOB NOT NULL,
+        PRIMARY KEY (message_id, part_index)) WITHOUT ROWID;
+      CREATE INDEX IF NOT EXISTS media_displays_thread ON media_displays (thread_id);`);
     version = 32;
   }
   version = Math.max(version, SCHEMA_VERSION);

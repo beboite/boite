@@ -238,4 +238,19 @@ test("an agent's attached screenshots open on a light page and load near the scr
   await settled();
   expect(await page.evaluate<number>(top)).toBe(before);
   await page.screenshot(join(artifacts, 'media-agent-loaded.png'));
+
+  // What the timeline drew is the light WebP copy; the original is one click away.
+  const scene = light.messages.find((message) => message.parts.some((part) => part.type === 'file'))!;
+  const index = scene.parts.findIndex((part) => part.type === 'file');
+  const copy = await client.call('messages.attachment', { threadId: agentThreadId, messageId: scene.id, partIndex: index, display: true });
+  const original = await client.call('messages.attachment', { threadId: agentThreadId, messageId: scene.id, partIndex: index });
+  console.log(`agent picture: original ${original.data.length} base64 characters, copy ${copy.data.length} as ${copy.mimeType}`);
+  expect(copy.mimeType).toBe('image/webp');
+  expect(copy.data.length * 5).toBeLessThan(original.data.length);
+  await page.evaluate(`(${shown}).at(-1).click()`);
+  await page.waitFor(`document.querySelector('[data-testid=image-viewer] img')?.complete && document.querySelector('[data-testid=image-viewer] img').naturalWidth === ${WIDTH}`);
+  expect(await page.evaluate<string>(`document.querySelector('[data-testid=image-viewer] img').getAttribute('src').slice(0, 5)`)).toBe('blob:');
+  await settled();
+  await page.screenshot(join(artifacts, 'media-agent-original.png'));
+  await page.evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
 }, 60_000);
