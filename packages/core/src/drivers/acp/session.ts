@@ -591,11 +591,13 @@ export class AcpSession {
       this.ctx?.log('info', `acp: the agent switched to the session mode ${update.currentModeId}`);
       return;
     }
-    // The same announcement from an agent whose modes are a config option. Not
-    // while a `session/load` replays: those are the options of turns long past,
-    // and the session id is only set once the load has answered.
+    // The same announcement from an agent whose modes are a config option. Only
+    // for this thread's session once it is open: a `session/load` replays the
+    // options of turns long past before the session id is set, and the same
+    // connection carries the throwaway session the options were discovered on,
+    // whose late update would otherwise overwrite the mode kept for this one.
     if (update.sessionUpdate === 'config_option_update') {
-      if (this.sessionId !== null) this.controls.noteOptionUpdate(update.configOptions);
+      if (this.sessionId !== null && params.sessionId === this.sessionId) this.controls.noteOptionUpdate(update.configOptions);
       return;
     }
     // A running total outside a turn is still what the next one is measured

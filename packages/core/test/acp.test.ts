@@ -1306,6 +1306,32 @@ describe('acp driver', () => {
     await waitFor(() => configCount('mode plan') === 2);
   });
 
+  test('an option update for another session of the same connection does not touch the mode kept for this one', async () => {
+    const client = await startCore({ warmProcessMinutes: 5 });
+    process.env['ACP_FAKE_MODE_OPTION'] = '1';
+    const seam = await sdkWithUpdateSeam();
+    restoreDriver = setDriver('acp', createAcpDriver({ loadSdk: () => Promise.resolve(seam.sdk) }));
+    const threadId = await acpThread(client, undefined, 'plan');
+    await runTurn(client, threadId, 'first');
+    await waitFor(() => configCount('mode plan') === 1);
+    const sessionId = (await client.call('threads.get', { threadId })).sessionId ?? '';
+    expect(sessionId).not.toBe('');
+    const options = (mode: string): SessionNotification['update'] => ({
+      sessionUpdate: 'config_option_update',
+      configOptions: [{ type: 'select', id: 'mode', category: 'mode', name: 'Mode', currentValue: mode, options: [{ value: 'build', name: 'Build' }, { value: 'plan', name: 'Plan' }] }],
+    });
+
+    // The session the options were discovered on says build, late: it is not this thread's.
+    seam.send({ sessionId: `${sessionId}-discovery`, update: options('build') });
+    await runTurn(client, threadId, 'second');
+    expect(configCount('mode plan')).toBe(1);
+
+    // This thread's own session says build: the next turn puts plan back.
+    seam.send({ sessionId, update: options('build') });
+    await runTurn(client, threadId, 'third');
+    await waitFor(() => configCount('mode plan') === 2);
+  });
+
   test('an agent with no modes at all is one warning, and the turn still runs', async () => {
     const client = await startCore();
     process.env['ACP_FAKE_NO_MODES'] = '1';
