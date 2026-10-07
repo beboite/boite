@@ -149,8 +149,14 @@ Sizes and blurs for deferred pictures measured 3,587,361 emitted core bytes
 on Windows CI on 2026-10-06, 7,361 bytes above the previous 3,580,000 limit:
 the image header parser and the preview queue.
 
-The agents' chat, entrusted threads and robots, merged with `main` at
-`d32a4a95`, measured 4,336,325 UI bytes and 3,602,928 emitted core JavaScript
+On 2026-10-07 on Linux, `main` at `d32a4a95` measured 4,250,457 UI bytes, 457
+above the 4,250,000 limit after the Machines and updates page and the
+mid-turn effort changes, and 3,597,242 emitted core JavaScript bytes. The UI
+limit rises to 4,270,000 and the core JavaScript limit to 3,615,000, leaving
+about 19 KB and 18 KB of headroom.
+
+The agents' chat, entrusted threads and robots, on the same `main`,
+measured 4,336,325 UI bytes and 3,602,928 emitted core JavaScript
 bytes on Linux on 2026-10-07. The UI limit rises to 4,355,000, leaving about
 19 KB of headroom; the core JavaScript limit of 3,615,000 leaves about 12 KB.
 
