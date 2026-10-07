@@ -3241,8 +3241,10 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * (`boite view`). Local files it names are embedded, a remote resource or a
    * script error refuses it with the reason, and `checked` says whether a
    * headless browser loaded it on this machine before it was accepted.
+   * `advice` is what would make the page look more like the app (a fixed
+   * color, a font of its own): it never refuses a publish.
    */
-  'artifacts.view': { params: { threadId: ThreadId; path: string; title?: string }; result: { message: Message; checked: boolean } };
+  'artifacts.view': { params: { threadId: ThreadId; path: string; title?: string }; result: { message: Message; checked: boolean; advice: string[] } };
   'artifacts.preview': { params: { threadId: ThreadId; path: string }; result: { url: string; shown: boolean } };
   'artifacts.previewClose': { params: { threadId: ThreadId; path: string }; result: { ok: true } };
   /** The agent's task list, whole, as the tasks surface shows it. */

@@ -157,6 +157,42 @@ export function buildView(source: string, directory: string, cwd: string): Built
   return { html: html + source.slice(from), problems };
 }
 
+const NAMED_COLORS = 'black|white|red|green|blue|yellow|orange|purple|pink|gray|grey|brown|cyan|magenta|navy|teal|lime|gold|silver|maroon|olive';
+
+/**
+ * What would make a page look more like the app, said to the agent and never
+ * held against the publish: a color written as a value does not follow the
+ * user's theme or accent, and a font of its own is not the app's face. A mock
+ * of somebody else's screen has reasons for both, which is why this advises.
+ */
+export function viewAdvice(source: string): string[] {
+  // Embedded files and comments say nothing about the page's own look.
+  const text = source.replace(/<!--[\s\S]*?(?:-->|$)|\/\*[\s\S]*?\*\//g, ' ').replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+[;,][^"')\s]*/gi, 'data:');
+  const colors = new Set<string>();
+  // A hash that names an element (href="#id", url(#id), a CSS id selector) is not a color.
+  for (const found of text.matchAll(/(?<![\w&/])#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3,4})\b(?![\w-])/gi)) {
+    const before = text.slice(Math.max(0, found.index - 24), found.index);
+    if (/(?:href|for|id|list|aria-[\w-]+|data-[\w-]+)\s*=\s*["']?$/i.test(before) || /url\(\s*["']?$/i.test(before) || /(?:^|[{};,>+~\s])$/.test(before) && /^\s*[^;{}]*\{/.test(text.slice(found.index + found[0].length, found.index + found[0].length + 80))) continue;
+    colors.add(found[0].toLowerCase());
+  }
+  for (const found of text.matchAll(/\b(?:rgb|hsl)a?\(\s*\d[^)]*\)/gi)) colors.add(found[0].replace(/\s+/g, ''));
+  for (const found of text.matchAll(new RegExp(`(?:fill|stroke|color|stop-color|background(?:-color)?|border(?:-color)?)\\s*[:=]\\s*["']?\\s*(${NAMED_COLORS})\\b`, 'gi'))) colors.add(found[1]!.toLowerCase());
+  const advice: string[] = [];
+  if (colors.size) {
+    const shown = [...colors].slice(0, 4).join(', ');
+    advice.push(`${colors.size} fixed color${colors.size === 1 ? '' : 's'} (${shown}${colors.size > 4 ? ', and more' : ''}) will not follow the user's theme or accent: use the variables (var(--color-foreground), var(--color-accent), var(--series-1)) or the classes of boite view help.`);
+  }
+  const fonts = new Set<string>();
+  for (const found of text.matchAll(/font(?:-family)?\s*[:=]\s*["']?([^;}"<>]+)/gi)) {
+    const value = found[1]!.trim();
+    // The shorthand without a family (bold 12px) and the app's own faces are fine.
+    if (/var\(--font-|inherit|^\d|^(?:bold|normal|italic|[1-9]00)\b[^,]*$/i.test(value) && !/,/.test(value.replace(/var\([^)]*\)/g, ''))) continue;
+    if (/[a-z]/i.test(value) && /,|serif|mono|system-ui|arial|helvetica|inter|roboto/i.test(value)) fonts.add(value.slice(0, 60));
+  }
+  if (fonts.size) advice.push(`a font of its own (${[...fonts][0]}) replaces the app's face: use var(--font-sans) or var(--font-mono), which the page already has.`);
+  return advice;
+}
+
 function titleOf(asked: string | undefined, source: string, file: string): string {
   const title = (asked?.replace(/\s+/g, ' ').trim() || viewTitleOf(source) || basename(file).replace(/\.html?$/i, '')).slice(0, VIEW_TITLE_MAX);
   return title || 'View';
@@ -216,7 +252,7 @@ export async function publishView(core: Core, params: RpcParams<'artifacts.view'
     committed = true;
     core.bus.emit('message.started', message);
     core.bus.emit('message.completed', { threadId: thread.id, messageId: message.id, state: 'complete' });
-    return { message, checked: probe !== null };
+    return { message, checked: probe !== null, advice: viewAdvice(source) };
   } finally {
     if (!committed) await unlink(destination).catch(() => {});
   }

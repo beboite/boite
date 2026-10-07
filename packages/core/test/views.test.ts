@@ -6,7 +6,8 @@ import { agentGuide } from '../src/agent-guide.ts';
 import { findChromium } from '../src/browser/chromium.ts';
 import { connect, type CoreClient } from '../src/client.ts';
 import { runCli } from '../src/cli.ts';
-import { buildView } from '../src/views.ts';
+import { buildView, viewAdvice } from '../src/views.ts';
+import { VIEW_EXAMPLE } from '../src/view-example.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 /** The checks that load a page need a Chromium-based browser; the rest runs with none, as a machine without one would. */
@@ -57,6 +58,24 @@ test('the session guide names the command and what calls for it, and view help c
   expect(help.code).toBe(0);
   expect(help.output).toContain(VIEW_HELP);
   for (const told of ['--color-foreground', '--series-1', 'Nothing remote loads', 'one file each', 'data-reduced-motion', 'do not announce it']) expect(VIEW_HELP).toContain(told);
+  // The app's look is explained, the kit is listed, and a full page is one command away.
+  for (const told of ['The look', 'One accent', 'input[type=range]', '.segmented', '.stat', '.series-1', 'Never write a fixed color', 'boite view example', 'advice']) expect(VIEW_HELP).toContain(told);
+  const example = await cli('view', 'example');
+  expect(example.code).toBe(0);
+  expect(example.output).toContain(VIEW_EXAMPLE);
+});
+
+test('advice names what will not look like the app, and the example needs none', () => {
+  expect(viewAdvice(VIEW_EXAMPLE)).toEqual([]);
+  // The example is the kit used as intended: no color and no font of its own.
+  for (const used of ['class="controls"', 'class="field"', 'class="segmented"', 'class="stat"', 'class="stroke accent soft"', 'data-reduced-motion']) expect(VIEW_EXAMPLE).toContain(used);
+  expect(viewAdvice(page('<p style="color: var(--color-accent); font: 600 12px var(--font-mono)">fine</p><a href="#fab">in page</a><use href="#add"/><rect style="fill:url(#bad)"/>&#123;', '<style>#stage { color: currentColor } .a { font-family: var(--font-sans) }</style>'))).toEqual([]);
+  const advice = viewAdvice(page('<rect fill="red"/><p style="background: rgb(10, 20, 30)">x</p><img src="data:image/png;base64,AAAA#fff">', '<style>.a { color: #FF0000; border-color: #abc } .b { font-family: Arial, sans-serif }</style>'));
+  expect(advice).toHaveLength(2);
+  expect(advice[0]).toMatch(/^4 fixed colors \(#ff0000, #abc, rgb\(10,20,30\), red\) will not follow the user's theme/);
+  expect(advice[1]).toMatch(/^a font of its own \(Arial, sans-serif\)/);
+  const many = viewAdvice('<style>a{color:#111}b{color:#222}c{color:#333}d{color:#444}e{color:#555}</style>');
+  expect(many[0]).toMatch(/^5 fixed colors \(#111, #222, #333, #444, and more\)/);
 });
 
 test('the stored page starts its head with the policy, the theme and the bootstrap, on the line the head opens on', () => {
@@ -64,6 +83,10 @@ test('the stored page starts its head with the policy, the theme and the bootstr
   const head = stored.split('\n')[2]!;
   expect(head.startsWith(`<head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${VIEW_CONTENT_POLICY}">`)).toBe(true);
   expect(head).toContain('<style id="boite-view-theme">');
+  // The kit is in the page once, apart from the theme the bootstrap rewrites.
+  expect(head).toContain('<style id="boite-view-kit">');
+  expect(stored.split(':where(.card)').length).toBe(2);
+  expect(stored).toContain('input[type=range]');
   expect(head.indexOf('<script>')).toBeLessThan(head.indexOf('<title>Orbit</title>'));
   // Nothing the page wrote moved to another line: a script error still names the agent's own line.
   expect(stored.split('\n').length).toBe(page('').split('\n').length);
@@ -139,8 +162,9 @@ test('boite view publishes a page as an artifact that opens only on the view rou
   write('.boite/views/orbit.html', page('<svg viewBox="0 0 100 40"><circle cx="20" cy="20" r="8" fill="currentColor"/></svg>', '<title>Orbit of the Moon</title>'));
   const sent = await cli('view', '.boite/views/orbit.html', '--json');
   expect(sent.error).toBe(''); expect(sent.code).toBe(0);
-  const result = JSON.parse(sent.output) as { message: { id: string; turnId: string; parts: MessagePart[] }; checked: boolean };
+  const result = JSON.parse(sent.output) as { message: { id: string; turnId: string; parts: MessagePart[] }; checked: boolean; advice: string[] };
   expect(result.checked).toBe(false);
+  expect(result.advice).toEqual([]);
   const part = viewOf(result.message.parts)!;
   expect(part).toMatchObject({ type: 'artifact', name: 'orbit.html', mimeType: 'text/html', view: { title: 'Orbit of the Moon', height: 320, source: '.boite/views/orbit.html' } });
   const stored = readFileSync(join(harness.dataDir, 'artifacts', part.id), 'utf8');
@@ -207,6 +231,16 @@ real('a page is loaded in a headless browser before it is shown: its height is m
   // At a phone's width the two blocks no longer sit side by side.
   expect(view.narrowHeight!).toBeGreaterThan(view.height);
 
+  // The example an agent starts from loads cleanly and asks for no advice; a page with colors of its own is shown, and told.
+  write('views/pendulum.html', VIEW_EXAMPLE);
+  const example = await agent.call('artifacts.view', { threadId, path: 'views/pendulum.html' });
+  expect(example).toMatchObject({ checked: true, advice: [] });
+  expect(viewOf(example.message.parts)!.view!.height).toBeGreaterThan(300);
+  write('views/loud.html', page('<p style="color:#ff0000">loud</p>'));
+  const loud = await cli('view', 'views/loud.html');
+  expect(loud.code).toBe(0);
+  expect(loud.output).toContain("advice: 1 fixed color (#ff0000) will not follow the user's theme");
+
   // Without a doctype a root is as tall as the window it is loaded in: the stored page has one, so its own height is what is measured.
   write('views/bare.html', '<html><head></head><body><div style="height:120px"></div></body></html>');
   const bare = viewOf((await agent.call('artifacts.view', { threadId, path: 'views/bare.html' })).message.parts)!.view!;
@@ -227,7 +261,7 @@ real('a page is loaded in a headless browser before it is shown: its height is m
   write('views/stores.html', page('<script>localStorage.setItem("seen", "1");</script>'));
   const stored = await agent.call('artifacts.view', { threadId, path: 'views/stores.html' }).then(() => null, (error: Error) => error.message);
   expect(stored).toMatch(/SecurityError/);
-  expect(readdirSync(join(harness.dataDir, 'artifacts')).length).toBe(2);
+  expect(readdirSync(join(harness.dataDir, 'artifacts')).length).toBe(4);
 }, 90_000);
 
 /** The gated test runs with the machine's browser: the core started without one is replaced. */

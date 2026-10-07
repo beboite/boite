@@ -12,6 +12,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { AGENT_ENV, VIEW_HELP } from '@boite/contracts';
+import { VIEW_EXAMPLE } from './view-example.ts';
 import type { AgentTask, GitChange, PanelSurface, Todo } from '@boite/contracts';
 import { connect } from './client.ts';
 import type { CoreClient } from './client.ts';
@@ -59,6 +60,7 @@ ${CONTROL_HELP}
   pr link|unlink <url>           attach or remove a PR link; does not change GitHub
   view <file.html>               draw an HTML page at the end of your answer
                                  (--title <text>); view help has the rules
+                                 and the app's look, view example a full page
   preview <file.html>             open a local HTML artifact with its assets
   preview-close <file.html>       stop serving a local HTML preview
   open trace|tasks|changes|files|workflow [dir|run-id]
@@ -439,6 +441,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
     },
     view: async () => {
       if (rest[0] === 'help' || rest[0] === undefined) { print([VIEW_HELP], { help: VIEW_HELP }); return; }
+      if (rest[0] === 'example') { print([VIEW_EXAMPLE], { example: VIEW_EXAMPLE }); return; }
       const result = await client.call('artifacts.view', { threadId, path: absolute(io.cwd, want(0, 'an HTML file')), ...(parsed.title === undefined ? {} : { title: parsed.title }) });
       const view = result.message.parts[0]?.type === 'artifact' ? result.message.parts[0].view : undefined;
       print([
@@ -447,6 +450,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
           ? `checked: loaded without an error, ${view?.height}px tall on a desktop${view?.narrowHeight ? `, ${view.narrowHeight}px on a phone` : ''}`
           : 'checked: no, this machine has no browser to load it in; read the page once more before you answer',
         'shown: under your final text when this turn ends. Do not announce it or repeat what it shows.',
+        ...result.advice.map(advice => `advice: ${advice}`),
       ], result);
     },
     preview: async () => {

@@ -176,7 +176,7 @@ export function workdirMethods(ctx: FakeContext) {
       thread.messages.push(message);
       ctx.emitToThread(thread.id, 'message.started', structuredClone(message));
       ctx.emitToThread(thread.id, 'message.completed', { threadId: thread.id, messageId: message.id, state: 'complete' });
-      return { message: structuredClone(message), checked: false };
+      return { message: structuredClone(message), checked: false, advice: [] };
     },
     'artifacts.publish': async (params) => {
       const thread = ctx.thread(params.threadId);

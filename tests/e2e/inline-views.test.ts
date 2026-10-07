@@ -1,7 +1,8 @@
-import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'bun:test';
 import { connect } from '../../packages/core/src/client.ts';
+import { VIEW_EXAMPLE } from '../../packages/core/src/view-example.ts';
 import { BrowserPage } from './lib/cdp.ts';
 import { mintPairing, pairingUrlOf, startCore } from './lib/core.ts';
 import { mobileAction } from './lib/mobile.ts';
@@ -24,7 +25,8 @@ test('a view published during a turn is drawn at the end of the finished answer,
     const project = await client.call('projects.add', { path: core.dataDir, name: 'Physics notes' });
     const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
     mkdirSync(join(core.dataDir, '.boite', 'views'), { recursive: true });
-    copyFileSync(join(import.meta.dir, 'fixtures', 'views', 'pendulum.html'), join(core.dataDir, '.boite', 'views', 'pendulum.html'));
+    // The page `boite view example` prints: what an agent starts from is what is drawn and captured here.
+    writeFileSync(join(core.dataDir, '.boite', 'views', 'pendulum.html'), VIEW_EXAMPLE);
     for (const mobile of [false, true]) {
       const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, permissionMode: 'default', title: 'How a pendulum swings' });
       page = await BrowserPage.launch({ url: mobile ? await mintPairing(core) : pairingUrlOf(core), windowSize: { width: 1280, height: 900 }, args: [mobile ? PHONE_POINTER : DESKTOP_POINTER] });
@@ -39,6 +41,8 @@ test('a view published during a turn is drawn at the end of the finished answer,
       const published = await client.call('artifacts.view', { threadId: thread.id, path: '.boite/views/pendulum.html' });
       const part = published.message.parts[0]!;
       expect(part).toMatchObject({ type: 'artifact', view: { title: 'Pendulum', source: '.boite/views/pendulum.html' } });
+      // The example is the kit used as intended: nothing to advise.
+      expect(published.advice).toEqual([]);
       // While the answer is still being written the thread ends on it, not on the page.
       await page.waitFor('document.querySelector("[data-testid=permission-card]")');
       expect(await page.evaluate('document.querySelector("[data-testid=inline-view]") === null && document.querySelector("[data-testid=chat-file]") === null')).toBe(true);
@@ -124,7 +128,7 @@ test('a view from another machine loads under the shell content security policy'
     const project = await client.call('projects.add', { path: core.dataDir, name: 'Remote views' });
     const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
     const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title: 'A view from a remote machine' });
-    copyFileSync(join(import.meta.dir, 'fixtures', 'views', 'pendulum.html'), join(core.dataDir, 'pendulum.html'));
+    writeFileSync(join(core.dataDir, 'pendulum.html'), VIEW_EXAMPLE);
     await client.call('threads.subscribe', { threadId: thread.id });
     const done = client.next('turn.finished');
     await client.call('turns.start', { threadId: thread.id, prompt: 'Here is the pendulum.' });
