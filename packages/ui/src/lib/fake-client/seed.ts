@@ -3,6 +3,7 @@ import type { PermissionRequest, QuestionRequest } from '@boite/contracts';
 import { seedAccounts } from './accounts-seed';
 import { QUESTION_OPTIONS, QUESTION_TEXT } from './conversation';
 import { T0 } from './shared';
+import { heavyThread } from './heavy-thread';
 import { longThread, seedThreads } from './threads-seed';
 import { settlePermission, settleQuestion } from './requests';
 import { seedArchivedThread, seedWorktrees } from './worktrees';
@@ -72,6 +73,10 @@ export function seed(ctx: FakeContext): void {
   if (ctx.long) {
     const long = longThread();
     ctx.threads.set(long.id, long);
+  }
+  if (ctx.heavy) {
+    const heavy = heavyThread();
+    ctx.threads.set(heavy.id, heavy);
   }
 
   const seededRequest: PermissionRequest = {

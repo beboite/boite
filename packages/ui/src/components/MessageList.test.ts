@@ -1023,3 +1023,161 @@ test('the timeline watches the wheel passively, so a notch never waits for the m
     listen.mockRestore();
   }
 });
+
+/** Every row on the page: a message, or one of the rows a long message is cut in. */
+function rowsDrawn(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>('[data-testid=message], [data-testid=message-rest]'));
+}
+
+test('a turn of a thousand calls is drawn as a window of rows, and only its first row names the model', async ({ ready }) => {
+  window.localStorage.clear();
+  const { store: live } = await ready({ delayMs: 0, heavy: true });
+  await live.open('t-heavy');
+  const messages = live.openThread?.messages ?? [];
+  // The whole 11.5 MiB conversation fits one page: nothing is left to load above it.
+  expect(messages).toHaveLength(40);
+  expect(live.messagesBefore).toBeNull();
+  const giant = messages.reduce((a, b) => (b.parts.length > a.parts.length ? b : a));
+  expect(giant.parts.length).toBeGreaterThan(1000);
+
+  stubLayout(60_000);
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-heavy', messages } });
+  await settle();
+
+  // Pinned to the bottom: the last rows, not the thread, and none of the giant message above them.
+  expect(rowsDrawn().length).toBeGreaterThan(0);
+  expect(rowsDrawn().length).toBeLessThan(24);
+  expect(rowsDrawn().at(-1)!.dataset['mid']).toBe(messages.at(-1)!.id);
+  expect(spacer('timeline-above')).not.toBeNull();
+  expect(document.querySelector(`[data-mid="${giant.id}"]`)).toBeNull();
+
+  // Walk the thread to its top: the giant message is only ever on the page a few rows at a time.
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  const seen = new Set<string>();
+  let most = 0;
+  let labels = 0;
+  const top = Number.parseFloat(spacer('timeline-above')!.style.height);
+  for (let at = top; at >= 0; at -= 400) {
+    timeline.scrollTop = at;
+    timeline.dispatchEvent(new Event('scroll'));
+    await settle();
+    const mine = rowsDrawn().filter(node => node.dataset['mid'] === giant.id || node.dataset['mid']!.startsWith(`${giant.id}#`));
+    for (const node of mine) seen.add(node.dataset['mid']!);
+    most = Math.max(most, mine.length);
+    labels = Math.max(labels, mine.filter(node => node.querySelector('[data-testid=message-model]')).length);
+    expect(document.querySelectorAll('[data-testid=tool-group], [data-testid=tool-card]').length).toBeLessThan(120);
+    // The rest of a message is the same message going on: no second label.
+    for (const node of mine) {
+      if (node.dataset['testid'] === 'message-rest') expect(node.querySelector('[data-testid=message-model]')).toBeNull();
+    }
+  }
+  expect(seen.size).toBeGreaterThan(20);
+  expect(most).toBeGreaterThan(1);
+  expect(most).toBeLessThan(14);
+  expect(labels).toBeLessThanOrEqual(1);
+});
+
+test('a scroll inside the rows already drawn redraws nothing and reads no tool call again', async ({ ready }) => {
+  window.localStorage.clear();
+  const { store: live } = await ready({ delayMs: 0, heavy: true });
+  await live.open('t-heavy');
+  const messages = live.openThread?.messages ?? [];
+  stubLayout(60_000);
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-heavy', messages } });
+  await settle();
+
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  const top = Number.parseFloat(spacer('timeline-above')!.style.height);
+  // Into the last finished turn, whose files card is on the page and was read from its calls.
+  timeline.scrollTop = top + 40;
+  timeline.dispatchEvent(new Event('scroll'));
+  await settle();
+  const drawn = rowsDrawn();
+  const before = { ...windowStats };
+
+  // Sixty wheel notches that never leave the first row on screen.
+  for (let notch = 1; notch <= 60; notch += 1) {
+    timeline.scrollTop = top + 40 + notch;
+    timeline.dispatchEvent(new Event('scroll'));
+    await settle();
+  }
+  expect(windowStats.turnFiles).toBe(before.turnFiles);
+  const after = rowsDrawn();
+  expect(after).toHaveLength(drawn.length);
+  after.forEach((node, index) => expect(node).toBe(drawn[index]));
+});
+
+test('Ctrl+F opens the row of a long message that holds the match, not its first row', async ({ ready }) => {
+  window.localStorage.clear();
+  Range.prototype.getBoundingClientRect ??= () => new DOMRect(0, 0, 0, 0);
+  const { store: live } = await ready({ delayMs: 0, heavy: true });
+  await live.open('t-heavy');
+  const messages = live.openThread?.messages ?? [];
+  const giant = messages.reduce((a, b) => (b.parts.length > a.parts.length ? b : a));
+  // A word no other part holds, in a paragraph deep inside the giant message.
+  const at = giant.parts.findIndex((part, index) => index > giant.parts.length / 2 && part.type === 'text');
+  const paragraph = giant.parts[at];
+  if (paragraph?.type !== 'text') throw new Error('the giant message holds paragraphs');
+  paragraph.text = `${paragraph.text} xylophone`;
+  expect(findHits(messages, 'xylophone')).toEqual([{ messageId: giant.id, nth: 0, part: at }]);
+
+  stubLayout(60_000);
+  live.findOpen = true;
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-heavy', messages } });
+  const input = await vi.waitFor(() => {
+    const found = document.querySelector<HTMLInputElement>('[data-testid=find-input]');
+    if (!found) throw new Error('the find bar is not drawn yet');
+    return found;
+  }, { timeout: 8_000 });
+  await settle();
+  expect(document.body.textContent).not.toContain('xylophone');
+
+  input.value = 'xylophone';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await vi.waitFor(() => {
+    const row = rowsDrawn().find(node => node.textContent?.includes('xylophone'));
+    if (!row) throw new Error('the row holding the match is not drawn yet');
+    expect(row.dataset['testid']).toBe('message-rest');
+    expect(row.dataset['mid']!.startsWith(`${giant.id}#`)).toBe(true);
+  }, { timeout: 4_000 });
+  expect(document.querySelector('[data-testid=find-count]')!.textContent?.trim()).toBe('1 of 1');
+});
+
+test('a place read inside a long message is saved by message with its row, and opened again on that row', async ({ ready }) => {
+  window.localStorage.clear();
+  const { store: live } = await ready({ delayMs: 0, heavy: true });
+  await live.open('t-heavy');
+  const messages = live.openThread?.messages ?? [];
+  const giant = messages.reduce((a, b) => (b.parts.length > a.parts.length ? b : a));
+  stubLayout(60_000);
+  // jsdom lays nothing out: every row reports a box that reaches the viewport, so the first one drawn is the anchor.
+  const measured = Element.prototype.getBoundingClientRect;
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    return this instanceof HTMLElement && this.dataset['mid'] ? new DOMRect(0, -30, 800, 400) : new DOMRect(0, 0, 800, VIEW_HEIGHT);
+  };
+  onTestFinished(() => { Element.prototype.getBoundingClientRect = measured; });
+
+  // Opened on a row deep in the giant message: the page draws it, at the place its offset says.
+  const row = `${giant.id}#6`;
+  live.readingPositions.set('t-heavy', { top: 0, pinned: false, heights: new Map(), anchor: { id: giant.id, offset: -30, row }, height: VIEW_HEIGHT });
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-heavy', messages } });
+  await settle();
+  expect(document.querySelector(`[data-mid="${CSS.escape(row)}"]`)).not.toBeNull();
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  expect(timeline.scrollTop).toBeGreaterThan(1000);
+
+  // Left as it was opened, the place saved is the one restored.
+  await unmount(running!); running = null;
+  expect(live.readingPositions.get('t-heavy')?.anchor).toEqual({ id: giant.id, offset: -30, row });
+
+  // A press takes the list back from the restore; from then on the anchor is read from the rows on the page.
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-heavy', messages } });
+  await settle();
+  for (let press = 0; press < 2; press += 1) document.querySelector<HTMLElement>('[data-testid=timeline]')!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  const first = rowsDrawn()[0]!.dataset['mid']!;
+  expect(first).not.toBe(row);
+  expect(first.startsWith(`${giant.id}#`)).toBe(true);
+  await unmount(running!); running = null;
+  // The store asks the core for the page around a message: the anchor names it, never a row.
+  expect(live.readingPositions.get('t-heavy')?.anchor).toEqual({ id: giant.id, offset: -30, row: first });
+});

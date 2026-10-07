@@ -14,9 +14,9 @@ test('every occurrence counts, without case, oldest message first, and tool card
     ])
   ];
   expect(findHits(messages, 'parser')).toEqual([
-    { messageId: 'm-1', nth: 0 },
-    { messageId: 'm-2', nth: 0 },
-    { messageId: 'm-2', nth: 1 }
+    { messageId: 'm-1', nth: 0, part: 0 },
+    { messageId: 'm-2', nth: 0, part: 0 },
+    { messageId: 'm-2', nth: 1, part: 0 }
   ]);
   expect(findHits(messages, '  ')).toEqual([]);
   expect(findHits(messages, 'lexer')).toEqual([]);
@@ -30,6 +30,8 @@ test('a plan card is searched, since the page draws it whole', () => {
     ])
   ];
   expect(findHits(messages, 'parser').map((hit) => hit.nth)).toEqual([0, 1, 2]);
+  // Each hit names the part that holds it: what opens the right row of a message cut in several.
+  expect(findHits(messages, 'parser').map((hit) => hit.part)).toEqual([0, 1, 1]);
 });
 
 test('a hidden goal marker is not a match', () => {

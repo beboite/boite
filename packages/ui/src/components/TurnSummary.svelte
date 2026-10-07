@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { page } from '../lib/page-hidden.svelte';
   import { Check, LoaderCircle, Square, CircleAlert } from '@lucide/svelte';
   import type { BackgroundTask, ThreadProgress, Turn } from '@boite/contracts';
   import { clockTime, elapsed } from '../lib/format';
@@ -25,7 +26,7 @@
     /** The turn's own buttons (copy, retry, fork), at the end of the line. */
     actions?: Snippet;
   } = $props();
-  let hidden = $state(document.hidden);
+  const hidden = $derived(page.hidden);
   let now = $state(Date.now());
   const running = $derived(turn.status === 'running');
   const compactOperation = $derived(turn.execution?.operation === 'compact');
@@ -62,7 +63,6 @@
   });
 </script>
 
-<svelte:document onvisibilitychange={() => hidden = document.hidden} />
 {#snippet metric(id: string, text: string | null, title?: string, quiet = false)}
   <span class="dot ui-label" aria-hidden="true">·</span>
   <span class="ui-label" class:quiet data-testid={id} {title}>{text}</span>

@@ -90,6 +90,8 @@ export interface FakeClientOptions {
   chunkSize?: number;
   /** Seeds one thread of 400 messages, what `?fake=1&long=1` opens the list on. */
   long?: boolean;
+  /** Seeds one thread of forty messages and 11.5 MiB of tool calls, what `?fake=1&heavy=1` opens the list on. */
+  heavy?: boolean;
   /** A fresh machine with no agents, accounts or projects, for the setup flow. */
   uninstalled?: boolean;
   /** Adds a deterministic active team for visual checks on `?fake=1&team=1`. */
@@ -232,6 +234,7 @@ export class FakeContext {
   readonly delayMs: number;
   readonly chunkSize: number | undefined;
   readonly long: boolean;
+  readonly heavy: boolean;
   readonly quotaExtras: boolean;
   /**
    * Two agents behind their newest release, one by each route, so the notices
@@ -272,6 +275,7 @@ export class FakeContext {
     this.delayMs = options.delayMs ?? 18;
     this.chunkSize = options.chunkSize ?? tokenStream();
     this.long = options.long ?? false;
+    this.heavy = options.heavy ?? false;
     const coreId = options.coreId ?? `fake-core-${secureId()}`;
     this.identity = {
       coreId,
