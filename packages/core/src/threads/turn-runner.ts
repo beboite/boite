@@ -1,4 +1,4 @@
-import type { PermissionMode, ThreadId, Turn, TurnId } from '@boite/contracts';
+import type { PermissionMode, ThreadId, ThreadSummary, Turn, TurnId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { getDriver, releaseThread } from '../drivers/index.ts';
 import type { TurnResult } from '../drivers/types.ts';
@@ -39,6 +39,12 @@ export class TurnRunner {
 
   changePermissionMode(threadId: ThreadId, mode: PermissionMode): void {
     this.attempts.changePermissionMode(threadId, mode);
+  }
+
+  /** What a saved selection means for the turn that is running: its mode, its effort and its speed. */
+  selectionChanged(before: ThreadSummary, next: ThreadSummary): void {
+    if (next.permissionMode !== before.permissionMode) this.attempts.changePermissionMode(next.id, next.permissionMode);
+    if (next.effort !== before.effort || next.speed !== before.speed) this.attempts.changeSettings(next.id, next);
   }
 
   async runTurn(turnId: TurnId, threadId: ThreadId): Promise<void> {

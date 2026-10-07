@@ -5,6 +5,7 @@ import type { Driver, TurnHandle, TurnResult } from '../drivers/types.ts';
 import type { ThreadStore } from '../threads.ts';
 import { totalTokens } from '../usage.ts';
 import { LivePermissions } from './live-permissions.ts';
+import { LiveSettings } from './live-settings.ts';
 import { saveThread, setThreadStatus } from './records.ts';
 import type { CarriedInput } from './turn-context.ts';
 
@@ -42,6 +43,7 @@ interface StopDeadline {
 export class TurnAttempts {
   readonly handles = new Map<ThreadId, TurnHandle>();
   private readonly livePermissions = new Map<ThreadId, LivePermissions>();
+  private readonly liveSettings = new Map<ThreadId, { state: TurnAttemptState; settings: LiveSettings }>();
   /** Per running turn: what settles it when its driver never answers a stop. */
   private readonly stopDeadlines = new Map<ThreadId, StopDeadline>();
   /** Threads whose running turn the user stopped: a lost session is not retried for them. */
@@ -64,7 +66,25 @@ export class TurnAttempts {
       this.threads.cards.applyPermissionMode(threadId, mode);
     });
     this.livePermissions.set(threadId, permissions);
+    const settings = new LiveSettings(() => ({ effort: state.thread.effort, speed: state.thread.speed ?? null }), taken => {
+      state.thread = { ...state.thread, ...taken };
+      if (state.running.execution) state.running.execution = { ...state.running.execution, ...taken };
+      this.core.journal.putTurn(state.running);
+    });
+    this.liveSettings.set(threadId, { state, settings });
     return permissions;
+  }
+
+  /**
+   * The thread's effort or speed moved while its turn runs. They only mean
+   * something on the model the turn started on: a selection that also changed
+   * the model or the account waits for the next turn whole.
+   */
+  changeSettings(threadId: ThreadId, selection: Pick<ThreadSummary, 'accountId' | 'model' | 'effort' | 'speed'>): void {
+    const live = this.liveSettings.get(threadId);
+    if (live === undefined) return;
+    if (selection.accountId !== live.state.thread.accountId || selection.model !== live.state.thread.model) return;
+    live.settings.change({ effort: selection.effort, speed: selection.speed ?? null });
   }
 
   changePermissionMode(threadId: ThreadId, mode: PermissionMode): void {
@@ -102,12 +122,16 @@ export class TurnAttempts {
       const handle = driver.startTurn(context);
       this.handles.set(threadId, handle);
       permissions.attach(handle);
+      const settings = this.liveSettings.get(threadId)?.settings;
+      settings?.attach(handle);
       const forced = Promise.withResolvers<TurnResult>();
       this.stopDeadlines.set(threadId, { handle, forced, timer: null });
       if (!resumed && !retriedLostSession && !queued.execution?.operation) this.threads.titles.autoTitle(threadId, turnId);
       result = await Promise.race([handle.done, forced.promise]);
       permissions.detach();
+      settings?.detach();
       await permissions.settled();
+      await settings?.settled();
       const deadline = this.stopDeadlines.get(threadId);
       if (deadline?.timer) clearTimeout(deadline.timer);
       const fresh = !retriedLostSession && result.sessionLost === true ? this.dropLostSession(state.thread, result) : null;
@@ -141,6 +165,8 @@ export class TurnAttempts {
   close(threadId: ThreadId): void {
     this.livePermissions.get(threadId)?.detach();
     this.livePermissions.delete(threadId);
+    this.liveSettings.get(threadId)?.settings.detach();
+    this.liveSettings.delete(threadId);
     this.handles.delete(threadId);
     const deadline = this.stopDeadlines.get(threadId);
     if (deadline?.timer) clearTimeout(deadline.timer);
