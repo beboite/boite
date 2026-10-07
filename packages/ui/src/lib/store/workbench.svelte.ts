@@ -174,11 +174,12 @@ export class Workbench {
     }
   }
 
-  async readArtifact(threadId: ThreadId, messageId: string, artifactId: string, renew?: string): Promise<FileAnswer<ArtifactContent>> {
+  /** `view` asks for the address a published view opens as a page at, which a frame loads; without it the address downloads. */
+  async readArtifact(threadId: ThreadId, messageId: string, artifactId: string, renew?: string, view = false): Promise<FileAnswer<ArtifactContent>> {
     const client = this.ctx.client;
     if (!client) return { ok: false, error: strings.artifacts.failed };
     try {
-      const value = await client.call('artifacts.read', { threadId, messageId, artifactId, ...(renew ? { renew } : {}) });
+      const value = await client.call('artifacts.read', { threadId, messageId, artifactId, ...(renew ? { renew } : {}), ...(view ? { view: true as const } : {}) });
       const endpoint = this.ctx.store.endpointUrl;
       return { ok: true, value: { ...value, url: value.url.startsWith('/') && endpoint ? new URL(value.url, endpoint).href : value.url } };
     } catch (error) { return { ok: false, error: this.ctx.reason(error) }; }

@@ -1,4 +1,4 @@
-import type { AccountId, SchedulerState, ThreadId, Timestamp, Turn, TurnId } from '@boite/contracts';
+import type { AccountId, ProviderId, SchedulerState, ThreadId, Timestamp, Turn, TurnId } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { logMessageOf } from './log-errors.ts';
 
@@ -6,6 +6,8 @@ interface Entry {
   turnId: TurnId;
   threadId: ThreadId;
   accountId: AccountId;
+  /** The provider the accepted turn runs on, whatever the thread selects since. */
+  providerId: ProviderId | undefined;
   queuedAt: Timestamp;
   reportedQueued: boolean;
   queueHold?: Turn['queueHold'];
@@ -37,7 +39,7 @@ export class Scheduler {
 
   enqueue(turn: Turn, accountId: AccountId): void {
     if (this.running.get(turn.threadId)?.turnId === turn.id) return;
-    const entry = { turnId: turn.id, threadId: turn.threadId, accountId, queuedAt: turn.queuedAt, reportedQueued: false, queueHold: turn.queueHold };
+    const entry = { turnId: turn.id, threadId: turn.threadId, accountId, providerId: turn.execution?.providerId, queuedAt: turn.queuedAt, reportedQueued: false, queueHold: turn.queueHold };
     this.queue.set(turn.id, entry);
     this.pump([entry]);
     this.emitUpdated();
@@ -63,6 +65,11 @@ export class Scheduler {
   onSettingsChanged(): void {
     this.pump();
     this.emitUpdated();
+  }
+
+  /** Something that held queued turns let go of them: an agent update finished. */
+  retry(): void {
+    this.pump();
   }
 
   stop(threadId: ThreadId): boolean {
@@ -92,6 +99,8 @@ export class Scheduler {
     for (const entry of entries) {
       if (entry.queueHold || !this.core.delegation.canRun(entry.threadId)
         || this.core.plugins.blocksAccount(entry.accountId)
+        // A program being replaced cannot start a turn; it starts once the updater is done.
+        || this.core.updates.holds(entry.providerId)
         || this.running.has(entry.threadId)) continue;
       this.queue.delete(entry.turnId);
       this.start(entry);

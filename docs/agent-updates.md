@@ -22,7 +22,9 @@ available on its row before the details are opened; a skipped release does
 not. Updates create no pinned chat notice.
 
 - Update releases the provider's warm processes and runs the update in the
-  background. The row shows progress; the next turn starts the new version.
+  background. The row shows progress, or how many running threads of that
+  agent the update still waits for to pause ([Turns in flight](#turns-in-flight));
+  the next turn starts the new version.
 - Skip stops offering that version. A later version is offered again.
   The same row in Machines and updates offers a skipped version again.
 - A failed update keeps the updater's error and Try
@@ -33,7 +35,7 @@ not. Updates create no pinned chat notice.
   is not what runs, and the version shown is the one the update reads.
 
 `Automatic updates` under each machine's agents makes that core update by
-itself. It is off by default. `Check for updates` reads its versions again.
+itself, pausing running turns the same way. It is off by default. `Check for updates` reads its versions again.
 Providers keeps sign-ins and installation controls and names no version: an
 agent's version is on its machine's card and nowhere else.
 
@@ -113,15 +115,62 @@ failing. A download cancelled from the install card fails the update with
 `the download was cancelled`, and a release the install card lands clears the
 offer at once, without waiting for the next check.
 
+## Turns in flight
+
+An update asked for while turns of that agent run does not refuse them and
+does not cut them. Each running turn goes on until its tool calls end: at the
+first moment no tool of the turn runs and no permission card or blocking
+question waits for the user, the core stops the agent's run. The turn itself
+stays open, and the thread shows `Paused while <agent> updates`. A turn that
+starts meanwhile pauses at its own first tool boundary; a turn that ends
+without one simply finishes. The updater starts once no turn of the agent runs
+unpaused, and the provider's warm processes, the paused turns' included, are
+released first.
+
+When the updater is done, each paused turn goes on in the same turn and the
+same native session: the core sends the agent a note that it was paused
+between two tool calls for the update, and the thread shows
+`Resumed after the <agent> <version> update`, `Resumed after the <agent>
+update` when the version did not move, or `Resumed: the <agent> update failed`
+when it failed. `Resumed: the <agent> update no longer waits` is the guard for
+an update that ended before the pause registered; a pause asked for by an
+update that is gone is dropped before it stops the agent. An agent with no session to resume gets the thread's
+history, this turn's work included. The turn finishes once, so a delegated
+agent reports to its parent, a workflow step completes and a notification goes
+out only for the real end. Prompts sent while the updater runs are accepted and
+wait in the queue; they start on the new version.
+
+The first pause starts a 15 minute limit for the agent's other turns to reach
+their own pause. Before any turn has paused, the update waits for the current
+tool calls with no deadline. Past the limit, the paused turns go on with
+`Resumed: the <agent> update waits for other turns`, no turn is paused again,
+and the update runs at the first moment no turn of the agent runs. This covers a turn whose tool call
+waits on another turn of the same agent, such as `boite agents send --wait`,
+which would otherwise never let the update start.
+
+Stop during a pause ends the turn as stopped and the update goes on. A core
+that restarts during a pause hands the turn over ([Restarts](#restarts)). Work
+the agent left running in the background, such as a background shell, ends
+with its process when the update releases it.
+
+## Restarts
+
+This is the same rule a Boite restart follows: the [restart handoff](restart-handoff.md)
+also stops a turn between two tool calls and resumes it afterwards. The
+handoff gives a running tool call 30 seconds, since the core must exit; an
+agent update has no such deadline and waits for the tool call to end. A Boite
+restart during a pause stops the paused turn, which the handoff then resumes
+on the next core like any turn it cut.
+
 ## Rules
 
-- An update is refused while a turn of that provider is queued, running or
-  waiting. The automatic update waits and looks again ten minutes later.
-  The accepted turn's provider still counts after the picker selects another
-  account. Closing the core cancels update processes and prevents an updater
-  waiting on a version check from starting later.
-- A turn is refused while its provider is updating, and an update asked for
-  during a version check starts once that check has landed.
+- An update asked for while a turn of that provider runs pauses that turn as
+  described above. The accepted turn's provider counts after the picker selects
+  another account. Closing the core cancels update processes, stops the paused
+  turns and prevents an updater waiting on a version check from
+  starting later.
+- A turn sent while its provider's updater runs waits in the queue, and an
+  update asked for during a version check starts once that check has landed.
 - Versions compare by their numbers; a pre-release is older than its release.
   The self route offers only a newer version. The managed route offers whatever
   the descriptor pins, since a Boite release may pin an older, working one.
@@ -142,7 +191,8 @@ the owning core ([machines](machines.md)). Each agent row stays under its own
 machine's card, including when provider IDs match on different machines.
 
 With `autoUpdateHarnesses` enabled, a headless core checks ten minutes after
-startup and every six hours, postponing checks while work is active. Enable it
+startup and every six hours, postponing checks while work is active, and
+updates an agent by pausing its turns in flight between two tool calls. Enable it
 under that machine's agents in Settings, Machines and updates. Providers
 without a managed release use the self route as the core user. An unwritable
 npm prefix fails before the
@@ -177,12 +227,16 @@ The client treats that machine as having no updates and shows no error.
   with no reading yet the list is empty; Settings, Machines and updates asks
   for a refresh
   when it opens on an empty list.
-- `providers.update { providerId }`: start one update.
+- `providers.update { providerId }`: start one update. While turns of the
+  agent still run a tool call, its entry is `updating` with `waitingFor` set
+  to their number.
 - `providers.updateSkip { providerId, version }`: skip a version, `null`
   forgets the skip.
 - `providers.updatesChanged`: the whole list, after each check, update or skip.
 
 Tests: `packages/core/test/updates.test.ts` runs a fixture agent with a real
-updater; `tests/e2e/harness-updates.test.ts` checks machine ownership and captures
+updater, and turns on the echo driver for pauses (`[tool:<ms>]` is a tool call
+that runs that long); `tests/e2e/agent-update-pause.test.ts` captures a paused
+and a resumed turn on a real core; `tests/e2e/harness-updates.test.ts` checks machine ownership and captures
 the update controls at desktop and phone widths on the fake client
 (`?fake=1&updates=1`).

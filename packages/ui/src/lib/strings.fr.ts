@@ -14,7 +14,7 @@ import type { Translation } from './i18n.svelte';
 export const fr: Translation = {
   subscriptionProxy: {
     heading: 'Proxy d\'abonnements', enable: 'Utiliser un proxy d\'abonnements',
-    hint: 'Claude et Codex utilisent la passerelle de cette machine, et OpenCode 2 ajoute ses autres modèles aux siens. Limites ouvre son tableau de bord dans Boite. Les autres agents gardent leur configuration.',
+    hint: 'Claude et Codex utilisent la passerelle de cette machine, Grok aussi derrière Douane, et OpenCode 2 ajoute ses autres modèles aux siens. Limites ouvre son tableau de bord dans Boite. Les autres agents gardent leur configuration.',
     baseUrl: 'URL de l\'API', dashboardUrl: 'URL du tableau de bord des limites', key: 'Clé API (facultative)',
     keyHint: 'Laissez vide pour garder la clé enregistrée. Utilisez la clé API du proxy, pas sa clé de gestion du tableau de bord.',
     clearKey: 'Retirer la clé enregistrée', save: 'Enregistrer le proxy', saved: 'Proxy enregistré',
@@ -23,7 +23,7 @@ export const fr: Translation = {
     openDashboard: 'Ouvrir le tableau de bord',
     signInHint: 'Connectez-vous avec Ouvrir le tableau de bord, puis rechargez ici. Si la page reste vide, ce tableau peut refuser les vues intégrées.',
     mixedContent: "Cette page utilise HTTPS. Configurez une URL de tableau HTTPS pour l'afficher ici, ou ouvrez le tableau HTTP séparément.",
-    enabledHint: 'Activé, les comptes connectés sur cette machine ne sont plus utilisés pour Claude et Codex.',
+    enabledHint: 'Activé, les comptes connectés sur cette machine ne sont plus utilisés pour Claude et Codex, ni pour Grok derrière Douane.',
     account: 'Les requêtes passent par {name} ({origin}). Les connexions de ce PC ne sont pas utilisées.',
     via: 'via {name}',
     quotasFailed: 'Impossible de lire les limites de {name} : {error}',
@@ -184,7 +184,7 @@ export const fr: Translation = {
   activityUnsupported: 'Les références ne sont pas disponibles avec /goal ou /loop. Envoyez un message ordinaire ou retirez les références.',
   stashUnsupported: 'Ce brouillon contient des références et ne peut pas être mis de côté. Envoyez-le ou retirez les références.'
 },
-  artifacts: { loadImage: 'Charger', retry: 'Réessayer', mediaFailed: 'Impossible d’afficher ce média. Réessayez ou téléchargez le fichier pour l’ouvrir.', videoFailed: 'Cet appareil ne lit pas cette vidéo. Téléchargez-la pour la regarder dans une autre app.', saving: 'Enregistrement', zoomIn: 'Agrandir', zoomOut: 'Réduire', fitImage: 'Ajuster l’image', open: 'Ouvrir', openLocal: 'Ouvrez ce fichier dans son application par défaut.', preview: 'Aperçu', download: 'Télécharger', close: 'Fermer l’aperçu', closeImage: 'Fermer l’image', enlarge: 'Voir en grand', saved: 'Enregistré dans Téléchargements', loading: 'Chargement du fichier', unavailable: 'Ce fichier ne peut pas être affiché ici. Téléchargez-le pour l’ouvrir.', failed: 'Impossible d’ouvrir ce fichier', ownerOnly: 'Les liens vers les fichiers locaux nécessitent une connexion propriétaire. Demandez à l’agent de joindre le fichier pour le partager avec cet appareil.' },
+  artifacts: { viewReplay: 'Rejouer', viewExpand: 'Afficher en grand', viewCollapse: 'Fermer la vue agrandie', loadImage: 'Charger', retry: 'Réessayer', mediaFailed: 'Impossible d’afficher ce média. Réessayez ou téléchargez le fichier pour l’ouvrir.', videoFailed: 'Cet appareil ne lit pas cette vidéo. Téléchargez-la pour la regarder dans une autre app.', saving: 'Enregistrement', zoomIn: 'Agrandir', zoomOut: 'Réduire', fitImage: 'Ajuster l’image', open: 'Ouvrir', openLocal: 'Ouvrez ce fichier dans son application par défaut.', preview: 'Aperçu', download: 'Télécharger', close: 'Fermer l’aperçu', closeImage: 'Fermer l’image', enlarge: 'Voir en grand', saved: 'Enregistré dans Téléchargements', loading: 'Chargement du fichier', unavailable: 'Ce fichier ne peut pas être affiché ici. Téléchargez-le pour l’ouvrir.', failed: 'Impossible d’ouvrir ce fichier', ownerOnly: 'Les liens vers les fichiers locaux nécessitent une connexion propriétaire. Demandez à l’agent de joindre le fichier pour le partager avec cet appareil.' },
 
   brain: {
     heading: 'Brain', description: 'Les mêmes instructions et skills pour tous vos agents.',
@@ -195,7 +195,7 @@ export const fr: Translation = {
     autoPull: 'Pull automatique', onStartup: 'Au démarrage', periodic: 'À intervalle régulier', minutes: 'min',
     globalInstructions: 'AGENTS.md global', globalDetails: 'Harness reliés',
     globalHint: 'Ce brain s\'applique à tous les projets, même hors de Boite. Les fichiers existants sont sauvegardés puis restaurés à la désactivation.',
-    boiteGuide: 'Guide Boite', boiteGuideHint: 'Une note après AGENTS.md au début d\'une session d\'agent : la commande boite et le panneau. Environ 250 tokens.',
+    boiteGuide: 'Guide Boite', boiteGuideHint: 'Une note après AGENTS.md au début d\'une session d\'agent : la commande boite et le panneau. Environ 300 tokens.',
     linked: 'Relié', existing: 'Déjà relié', blocked: 'À vérifier',
     interval: 'Intervalle du pull en minutes', intervalHint: 'Un nombre entier entre 1 et 1440 minutes.',
     detected: 'Contenu', instructions: 'Instructions', skill: 'Skills', plugin: 'Plugins',
@@ -2168,7 +2168,7 @@ export const fr: Translation = {
     heading: 'Mises à jour des agents',
     intro: 'Chaque machine vérifie ses agents toutes les six heures.',
     auto: 'Mettre les agents à jour automatiquement',
-    autoHint: 'Un agent se met à jour dès qu\'aucune de ses conversations ne tourne et que personne n\'est connecté',
+    autoHint: "Un agent se met à jour sans que personne ne soit connecté : une conversation en cours se met en pause après son appel d'outil et reprend une fois la mise à jour faite",
     checking: 'Vérification',
     available: (name: string, version: string) => `${name} ${version} est disponible`,
     availableShort: 'Mise à jour disponible',
@@ -2176,6 +2176,7 @@ export const fr: Translation = {
     on: (machine: string) => `Sur ${machine}`,
     update: 'Mettre à jour', skip: 'Ignorer', retry: 'Réessayer',
     updating: (name: string) => `Mise à jour de ${name}`,
+    waiting: (count: number) => count === 1 ? "Attend la pause d'une conversation" : `Attend la pause de ${count} conversations`,
     failed: (name: string) => `La mise à jour de ${name} a échoué`,
     upToDate: 'À jour', unknown: 'Vérifie lui-même', runUpdater: 'Lancer sa mise à jour',
     skipped: (version: string) => `${version} ignorée`,

@@ -3,7 +3,7 @@
 ## Subscription proxy
 
 Settings, Providers offers an optional subscription proxy for Claude, Codex and
-OpenCode 2.
+OpenCode 2, and for Grok when the gateway is Douane.
 Choose Douane or CLIProxyAPI, enter the gateway's API URL and its limits dashboard
 URL, enable the switch and save. The API URL accepts an origin or a path ending
 in `/v1`. Model discovery runs on the machine hosting the core. The agent's own
@@ -20,7 +20,8 @@ that needs a native login (`CLAUDE_CODE_SKIP_FAST_MODE_ORG_CHECK`). Codex alread
 sends its service tier and prompt cache key to a custom provider.
 
 While the proxy is enabled, Claude, Codex and OpenCode 2 show one account named
-after the gateway, Douane or CLIProxyAPI, with the API URL's origin. It has no rename,
+after the gateway, Douane or CLIProxyAPI, with the API URL's origin, and so
+does Grok behind Douane. It has no rename,
 check, remove or add actions, and the provider row reads Ready · via Douane.
 The composer, delegation profiles, the default model and Limits show the same
 account. This account is a view in the UI, not a stored account. Threads,
@@ -37,7 +38,8 @@ Douane's default dashboard path is `/admin/#quotas`; CLIProxyAPI uses
 `/management.html#/quota`. A gateway may translate any model to any API, but a
 proprietary model stays in its own harness: Claude lists Claude models and
 Codex lists OpenAI models, whatever routing prefix the gateway gives them, while
-Grok and Muse models are listed by neither. Gemini models are offered to both,
+Grok and Muse models are listed by neither. Grok's models are listed by Grok
+alone, behind Douane. Gemini models are offered to both,
 because Antigravity, their own harness, cannot run through a gateway. Open
 models (`gpt-oss`, Kimi, Qwen, Llama, DeepSeek, Mistral, GLM) are offered to
 each harness whose API the gateway advertises for them, under any routing
@@ -59,8 +61,30 @@ that keep their own configuration; Show proxy dashboard returns to the gateway.
 
 Which agents the proxy serves is decided per provider, not per protocol
 (`subscriptionProxyServes` in the contract): the Claude and Codex protocols
-whole, and OpenCode 2 by its id, because ACP is also what Grok, Antigravity
-and OpenCode 1 speak, and those keep their own configuration.
+whole, and OpenCode 2 by its id, because ACP is also what Antigravity and
+OpenCode 1 speak, and those keep their own configuration. Grok is served by
+its id too, and by Douane alone (`SUBSCRIPTION_PROXY_KIND_PROVIDERS`): behind
+CLIProxyAPI it keeps its own sign-in.
+
+Grok moves to the gateway by its environment and stays the same agent. Its CLI
+lists the gateway's Grok models itself, from
+`GET /v1/models?provider=xai&ids=upstream`: xAI's ids, without the gateway's
+prefix, in xAI's order, each row carrying the context window and the efforts
+the CLI reads (`context_window`, `reasoning_efforts`). A thread therefore keeps
+its model when the proxy is turned on or off, and a session opens on xAI's
+default, since the CLI starts on the first model of an endpoint's list. The
+core reads no catalog of its own for Grok and adds no model to that list. A
+Douane older than these fields lists prefixed ids in alphabetical order, with
+no effort and a 256,000 token window for every model. `XAI_API_KEY` carries
+the proxy key, `GROK_MODELS_BASE_URL`, `GROK_XAI_API_BASE_URL` and
+`GROK_CLI_CHAT_PROXY_BASE_URL` the gateway, so the key reaches no other host.
+Turns carry `x-douane-provider: xai` (through `GROK_CONFIG`, the CLI's inline
+configuration): the gateway spends the Grok subscription, never another one
+that routes a model of the same name. The CLI prefers a stored sign-in to a
+key and would send that token to the gateway, so `GROK_AUTH_PATH` points it at
+`<dataDir>/subscription-proxy/grok-auth.json`, which nothing writes: the CLI
+finds no sign-in, and the account's own stays for when the proxy is off. This
+was measured on Grok CLI 1.0.46, where `GROK_AUTH_PATH` is not documented.
 
 OpenCode 2 does not move to the gateway, it gains it: the core adds one
 provider to OpenCode's inline configuration, named after the gateway's kind

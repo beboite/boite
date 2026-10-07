@@ -1,10 +1,13 @@
 import { afterEach, expect, test } from 'bun:test';
+import { existsSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { SubscriptionProxy } from '@boite/contracts';
 import { checkSettingsPatch } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { probedModelsOf } from '../src/drivers/index.ts';
 import { childEnv } from '../src/drivers/claude/query.ts';
-import { mergeProxyModels, subscriptionProxyCodexArgs, subscriptionProxyEnv } from '../src/subscription-proxy.ts';
+import { agentEnv } from '../src/providers/resolve.ts';
+import { mergeProxyModels, readSubscriptionProxyModels, subscriptionProxyCodexArgs, subscriptionProxyEnv } from '../src/subscription-proxy.ts';
 import { startTestCore, type TestCore } from './harness.ts';
 
 let harness: TestCore | undefined;
@@ -215,10 +218,68 @@ test('OpenCode 2 takes the gateway as one more provider: every model but those w
   expect(harness.core.accounts.accountEnv(harness.core.accounts.require(account.id), provider)['OPENCODE_CONFIG_CONTENT'])
     .toBe('{"permissions":[{"action":"subagent","resource":"*","effect":"deny"}]}');
   expect((await owner.call('accounts.check', { accountId: account.id })).status).toBe('unauthenticated');
-  // Grok and OpenCode 1 speak ACP too and are not served: the proxy is decided per provider.
+  // OpenCode 1 speaks ACP too and is not served: the proxy is decided per provider.
   await owner.call('settings.set', { subscriptionProxy: config(url) });
-  expect(subscriptionProxyEnv(harness.core, harness.core.providers.require('grok'))).toEqual({});
   expect(subscriptionProxyEnv(harness.core, harness.core.providers.require('opencode'))).toEqual({});
+});
+
+test('Grok runs through Douane by its environment alone, and keeps its own sign-in behind CLIProxyAPI', async () => {
+  let listed = 0;
+  gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+    if (new URL(request.url).pathname.endsWith('/models')) listed += 1;
+    return Response.json({ data: [{ id: 'xai/grok-5' }] });
+  } });
+  const url = `http://127.0.0.1:${gateway.port}/v1`;
+  harness = await startTestCore({ settings: { subscriptionProxy: config(url) } });
+  const owner = await harness.connect();
+  await owner.call('subscriptionProxy.key', { key: 'gateway-key' });
+  const provider = harness.core.providers.require('grok');
+  // The gateway is the login: no sign-in of Grok's own is asked for.
+  const account = await owner.call('accounts.add', { providerId: 'grok', label: 'Gateway Grok' });
+  expect(account.status).toBe('ok');
+
+  const env = subscriptionProxyEnv(harness.core, provider);
+  expect(env).toEqual({
+    XAI_API_KEY: 'gateway-key',
+    GROK_MODELS_BASE_URL: url,
+    // The gateway's Grok models alone, under xAI's ids and in xAI's order.
+    GROK_MODELS_LIST_URL: `${url}/models?provider=xai&ids=upstream`,
+    // The key check and the chat proxy follow, so the key reaches no other host.
+    GROK_XAI_API_BASE_URL: url,
+    GROK_CLI_CHAT_PROXY_BASE_URL: url,
+    GROK_AUTH_PATH: join(harness.core.dataDir, 'subscription-proxy', 'grok-auth.json'),
+    GROK_CONFIG: '{"models":{"extra_headers":{"x-douane-provider":"xai"}}}',
+  });
+  // A stored sign-in outranks a key: the CLI is pointed at a file that does not exist.
+  expect(existsSync(env['GROK_AUTH_PATH']!)).toBe(false);
+  // The descriptor unsets what the core inherited under these names; the account's own values come after.
+  const spawned = agentEnv(provider, harness.core.accounts.accountEnv(harness.core.accounts.require(account.id), provider),
+    { XAI_API_KEY: 'inherited-key', GROK_MODELS_BASE_URL: 'https://inherited.test/v1' });
+  expect(spawned['XAI_API_KEY']).toBe('gateway-key');
+  expect(spawned['GROK_MODELS_BASE_URL']).toBe(url);
+  // The CLI lists the gateway's models itself: the core reads no catalog to merge into its answer.
+  expect(await readSubscriptionProxyModels(harness.core, provider)).toBeNull();
+  expect(listed).toBe(0);
+
+  // CLIProxyAPI does not write the list Grok's CLI reads: there the account answers for itself.
+  await owner.call('settings.set', { subscriptionProxy: config(url, 'cliproxyapi') });
+  expect(subscriptionProxyEnv(harness.core, provider)).toEqual({});
+  expect((await owner.call('accounts.check', { accountId: account.id })).status).toBe('unauthenticated');
+  expect(subscriptionProxyEnv(harness.core, harness.core.providers.require('claude'))['ANTHROPIC_AUTH_TOKEN']).toBe('gateway-key');
+
+  // A sign-in of Grok's own that xAI refused stays refused whatever a proxy that
+  // does not serve Grok is told: its session file must not read as a login again.
+  writeFileSync(join(account.isolationDir!, 'auth.json'), '{}');
+  expect((await owner.call('accounts.check', { accountId: account.id })).status).toBe('ok');
+  harness.core.accounts.authenticationFailed(account.id);
+  await owner.call('settings.set', { subscriptionProxy: { ...config(url, 'cliproxyapi'), enabled: false } });
+  await owner.call('settings.set', { subscriptionProxy: config(url, 'cliproxyapi') });
+  expect(harness.core.accounts.require(account.id).status).toBe('unauthenticated');
+  // Douane answers for the account from then on, and leaving it gives the sign-in a fresh reading.
+  await owner.call('settings.set', { subscriptionProxy: config(url) });
+  expect(harness.core.accounts.require(account.id).status).toBe('ok');
+  await owner.call('settings.set', { subscriptionProxy: config(url, 'cliproxyapi') });
+  expect(harness.core.accounts.require(account.id).status).toBe('ok');
 });
 
 test('legacy CLIProxy catalogs select native families and malformed gateway errors cannot echo the key', async () => {

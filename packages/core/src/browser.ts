@@ -43,6 +43,7 @@ import type { Connection } from './router.ts';
 import { refused } from './errors.ts';
 import { Cdp } from './browser/cdp.ts';
 import { chromiumArgs, clearActivePort, findChromium, pipesDevTools, readSavedCookies, waitForEndpoint, writeSavedCookies } from './browser/chromium.ts';
+import { PageProbes, PROBE_TIMEOUT_MS, type PageProbe } from './browser/probe.ts';
 import { TabRecorder } from './browser/recorder.ts';
 import { EDITABLE_SCRIPT, KEY_CODES, PAGE_INFO_SCRIPT, selectionScript, SETTLED_VIEWPORT_SCRIPT } from './browser/scripts.ts';
 import { automate, awaitDocument, documentToken, PAGE_ACTIONS, press, type AgentPage } from './browser/automation.ts';
@@ -56,6 +57,7 @@ const SCOPE = BROWSER_SCOPE;
  * 2026-10-05, where the next start took two.
  */
 const START_TIMEOUT_MS = 60_000;
+
 const TABS_PER_THREAD = 8;
 const TABS_MAX = 24;
 /** A browser process with no tab left is closed after this long: the next `open` starts it again. */
@@ -134,6 +136,8 @@ export class AgentBrowser {
   #queues = new Map<ThreadId, Promise<unknown>>();
   #announce = new Map<ThreadId, ReturnType<typeof setTimeout>>();
   #closed = false;
+  /** Browsers started to check a page (`probe`): no conversation lists them, so they are closed by name. */
+  readonly #probes = new PageProbes<Engine>(() => this.#launch(PRIVATE_BROWSER_PROFILE), engine => this.#lost(engine), message => this.#core.log('warn', message));
   #off: Array<() => void> = [];
   #watching = false;
 
@@ -675,7 +679,7 @@ export class AgentBrowser {
       for (const name of names) {
         const dir = join(root, name);
         const throwaway = /^private-[0-9a-f-]{36}$/.test(name);
-        if (throwaway ? dir === privateDir : kept.has(name) || browserProfileIdError(name) !== null) continue;
+        if (throwaway ? dir === privateDir || this.#probes.holds(dir) : kept.has(name) || browserProfileIdError(name) !== null) continue;
         this.#removeDir(dir);
       }
     } catch (error) {
@@ -832,6 +836,17 @@ export class AgentBrowser {
     return { text: text.slice(0, REMOTE_SELECTION_MAX), truncated: text.length > REMOTE_SELECTION_MAX };
   }
 
+  /**
+   * Loads `url` in a browser of its own that no conversation lists, and says
+   * what the page threw or was refused and how tall it stands at each width.
+   * `boite view` asks before it publishes a page, so a broken one goes back to
+   * the agent and never in front of the user. Null when this machine has no
+   * browser or it did not answer in time: the page is then published unchecked.
+   */
+  probe(url: string, widths: readonly number[], timeoutMs = PROBE_TIMEOUT_MS): Promise<PageProbe | null> {
+    return this.#closed || this.findBrowser().path === null ? Promise.resolve(null) : this.#probes.check(url, widths, timeoutMs);
+  }
+
   // ---------- lifetime ----------
 
   /** The conversation was archived or removed: its tabs close, its recordings with them. */
@@ -853,6 +868,7 @@ export class AgentBrowser {
     this.#closed = true;
     for (const off of this.#off) off();
     for (const timer of this.#announce.values()) clearTimeout(timer);
+    this.#probes.close();
     const engines = await Promise.all([...this.#engines.values()].map(pending => pending.catch(() => null)));
     await Promise.all(engines.map(engine => engine ? this.#shut(engine) : undefined));
   }

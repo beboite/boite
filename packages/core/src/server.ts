@@ -1,5 +1,5 @@
 import type { RpcEventName, RpcEvents, ThreadId } from '@boite/contracts';
-import { FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode } from '@boite/contracts';
+import { FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode, VIEW_CONTENT_POLICY, VIEW_ROUTE, VIEW_SANDBOX } from '@boite/contracts';
 import { timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
@@ -267,6 +267,30 @@ async function ticketedFile(core: Core, ticket: string, range: string | null): P
 }
 
 /**
+ * A published view, opened as a page: the one address of the core where an
+ * agent's HTML runs. Only a ticket minted for a view opens here, so a file
+ * ticket still only downloads. The sandbox puts the page on an opaque origin,
+ * whether a client frames it or someone opens the address: it has no storage,
+ * no cookie and no way to the core's socket, and the policy lets it load and
+ * call nothing. The snapshot never changes, but its ticket does not outlive
+ * ten minutes, so nothing is cached.
+ */
+async function viewPage(core: Core, ticket: string): Promise<Response> {
+  const opened = await core.fileTickets.open(ticket);
+  if (opened === null || !opened.view) {
+    void opened?.handle.close();
+    return new Response('unknown or expired ticket', { status: 404 });
+  }
+  return fdResponse(opened.handle, opened.size, null, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'no-referrer',
+    'content-security-policy': `sandbox ${VIEW_SANDBOX}; ${VIEW_CONTENT_POLICY}`,
+  });
+}
+
+/**
  * `core.shutdown` for a caller with no WebSocket: the desktop shell before it
  * hands its files to the installer, the installer itself, and a shell that
  * found an older core than itself. Only the core token opens it, only through
@@ -387,6 +411,11 @@ export function startServer(options: ServerOptions): RunningServer {
       if (url.pathname.startsWith(`${FILE_ROUTE}/`)) {
         if (request.method !== 'GET') return new Response('method not allowed', { status: 405 });
         return ticketedFile(core, url.pathname.slice(FILE_ROUTE.length + 1), request.headers.get('range'));
+      }
+
+      if (url.pathname.startsWith(`${VIEW_ROUTE}/`)) {
+        if (request.method !== 'GET') return new Response('method not allowed', { status: 405 });
+        return viewPage(core, url.pathname.slice(VIEW_ROUTE.length + 1));
       }
 
       if (url.pathname === RPC_PATH) {

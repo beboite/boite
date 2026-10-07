@@ -153,20 +153,60 @@ export function activeLocale(): Locale {
 }
 
 /**
- * The tag `Intl` formats dates and numbers with. When the machine speaks the
- * language the app is set to, its own tag is used, so a French machine keeps
- * its day order and its 24 hour clock; otherwise the bare language answers,
- * because an app speaking English should read like one.
+ * The tag `Intl` formats dates and numbers with: the language the app speaks,
+ * in the machine's region, so an English app on a Swiss machine shows `19:40`
+ * and `7 Oct` the way the rest of that machine does.
+ *
+ * The region comes from the desktop shell first (`window.__BOITE_REGION__`,
+ * `apps/shell/src-tauri/src/platform/region.rs`), which reads the operating
+ * system's regional format; the webview itself only reports languages. A
+ * shell tag without a region means none; a missing or unparsable one falls
+ * back to the webview, where it is the region of a machine language matching
+ * the app's, then of the first one carrying any. A clock the shell names
+ * explicitly (12 or 24 hours) overrides the region's.
+ * The last answer is kept and checked by reference, since every formatted row
+ * asks with the same inputs: the browser hands back the same
+ * `navigator.languages` array until the languages change.
  */
+let last: { inputs: readonly unknown[]; tag: string } = { inputs: [], tag: '' };
+
 export function formatLocale(): string {
-  const active = activeLocale();
-  if (typeof navigator === 'undefined') return active;
-  for (const raw of [...(navigator.languages ?? []), navigator.language]) {
-    if (typeof raw !== 'string') continue;
-    const tag = raw.trim();
-    if (tag.toLowerCase().split('-')[0] === active) return tag;
+  const shell = typeof window === 'undefined' ? undefined : window.__BOITE_REGION__;
+  const languages = typeof navigator === 'undefined' ? undefined : navigator.languages;
+  const language = typeof navigator === 'undefined' ? undefined : navigator.language;
+  const inputs = [activeLocale(), shell?.locale, shell?.hour12, languages, language];
+  if (last.tag === '' || inputs.some((input, at) => input !== last.inputs[at])) {
+    last = { inputs, tag: formatTag(activeLocale(), shell, [...(languages ?? []), language]) };
   }
-  return active;
+  return last.tag;
+}
+
+function formatTag(active: Locale, shell: Window['__BOITE_REGION__'], machine: unknown[]): string {
+  const shellTag = parse(shell?.locale);
+  let region: string | undefined;
+  if (shellTag) {
+    // A shell tag without a region means none, not the webview's.
+    region = shellTag.region;
+  } else {
+    const parsed = machine.map(parse);
+    region = parsed.find((locale) => locale?.language === active && locale.region)?.region
+      ?? parsed.find((locale) => locale?.region)?.region;
+  }
+  const clock = typeof shell?.hour12 === 'boolean' ? `-u-hc-${shell.hour12 ? 'h12' : 'h23'}` : '';
+  try {
+    return Intl.getCanonicalLocales(`${active}${region ? `-${region}` : ''}${clock}`)[0] ?? active;
+  } catch {
+    return active;
+  }
+}
+
+function parse(raw: unknown): Intl.Locale | undefined {
+  if (typeof raw !== 'string' || raw.trim() === '') return undefined;
+  try {
+    return new Intl.Locale(raw.trim());
+  } catch {
+    return undefined;
+  }
 }
 
 /** Stamps `<html lang>`, so the browser hyphenates and reads the page in the right language. */

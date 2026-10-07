@@ -133,9 +133,9 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 588,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,375,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,405,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,640,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,690,000 |
 
 The total JavaScript measure excludes native binaries and source maps. On
 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
@@ -164,7 +164,20 @@ Later the same day `main` at `9356e7b6` measured 4,355,057 UI bytes on Windows
 CI, 57 above that limit, after the panel's keyboard, mouse and clipboard
 input. The mouse's back and forward buttons add 2,301 bytes, measured on Linux
 with and without them: 4,357,517 against 4,355,216. The UI limit rises to
-4,375,000, leaving about 17 KB of headroom.
+4,375,000, leaving about 17 KB of headroom. Formatting clocks in the
+machine's region adds 434 UI bytes, measured on Linux at `9356e7b6` with and
+without it: 4,355,491 against 4,355,057 UI bytes.
+
+Inline views, on `main` at `7d1f126c`, measured 4,385,281 UI bytes and
+3,672,277 emitted core JavaScript bytes on Linux on 2026-10-07, 27,764 UI
+bytes above the 4,357,517 measured just above and 46,642 core bytes above the
+3,625,635 that `main` measured when built the same way. The core gains
+publishing a page, the headless check, the kit stylesheet stored with each
+page, and the texts `boite view help` and `boite view example` print. The UI
+gains the frame, the order of views in the timeline, and the kit and
+bootstrap, which the client chunk keeps because the fake client stores pages
+with them. The UI limit rises to 4,405,000 and the core JavaScript limit to
+3,690,000, leaving about 20 KB and 18 KB.
 
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured

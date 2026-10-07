@@ -3,7 +3,7 @@ export const strings = {
   subscriptionProxy: {
     heading: 'Subscription proxy',
     enable: 'Use a subscription proxy',
-    hint: 'Claude and Codex use this machine\'s gateway, and OpenCode 2 adds its other models to its own. Limits opens its dashboard inside Boite. Other agents keep their own configuration.',
+    hint: 'Claude and Codex use this machine\'s gateway, Grok does too behind Douane, and OpenCode 2 adds its other models to its own. Limits opens its dashboard inside Boite. Other agents keep their own configuration.',
     baseUrl: 'API URL', dashboardUrl: 'Limits dashboard URL', key: 'API key (optional)',
     keyHint: 'Leave empty to keep the saved key. This is the proxy\'s API key, not its dashboard management key.',
     clearKey: 'Remove saved key', save: 'Save proxy', saved: 'Proxy saved',
@@ -12,7 +12,7 @@ export const strings = {
     openDashboard: 'Open dashboard',
     signInHint: 'Sign in with Open dashboard, then reload here. If the page stays blank, this dashboard may block embedded views.',
     mixedContent: 'This page uses HTTPS. Set an HTTPS dashboard URL to view it here, or open the HTTP dashboard separately.',
-    enabledHint: 'When on, the accounts signed in on this machine are no longer used for Claude and Codex.',
+    enabledHint: 'When on, the accounts signed in on this machine are no longer used for Claude and Codex, nor for Grok behind Douane.',
     /** The single account a proxied provider shows. */
     account: 'Requests go through {name} at {origin}. This machine\'s own sign-ins are not used.',
     via: 'via {name}',
@@ -177,7 +177,7 @@ export const strings = {
   activityUnsupported: 'Element references cannot be used with /goal or /loop. Send a regular message or remove the references.',
   stashUnsupported: 'This draft contains element references and cannot be stashed. Send it or remove the references first.'
 },
-  artifacts: { loadImage: 'Load image', retry: 'Try again', mediaFailed: 'This media could not be previewed. Try again or download the file to open it.', videoFailed: 'This device cannot play this video. Download it to watch it in another app.', saving: 'Saving', zoomIn: 'Zoom in', zoomOut: 'Zoom out', fitImage: 'Fit image', open: 'Open', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', closeImage: 'Close image', enlarge: 'View full size', saved: 'Saved in Downloads', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
+  artifacts: { viewReplay: 'Play again', viewExpand: 'View full size', viewCollapse: 'Close full size', loadImage: 'Load image', retry: 'Try again', mediaFailed: 'This media could not be previewed. Try again or download the file to open it.', videoFailed: 'This device cannot play this video. Download it to watch it in another app.', saving: 'Saving', zoomIn: 'Zoom in', zoomOut: 'Zoom out', fitImage: 'Fit image', open: 'Open', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', closeImage: 'Close image', enlarge: 'View full size', saved: 'Saved in Downloads', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
 
   brain: {
     heading: 'Brain', description: 'Your agents share the same instructions and skills.',
@@ -188,7 +188,7 @@ export const strings = {
     autoPull: 'Pull automatically', onStartup: 'At startup', periodic: 'Periodically', minutes: 'min',
     globalInstructions: 'Global AGENTS.md', globalDetails: 'Connected harnesses',
     globalHint: 'Uses this brain in every project, including outside Boite. Existing files are backed up and restored when disabled.',
-    boiteGuide: 'Boite guide', boiteGuideHint: 'A note after AGENTS.md when an agent session starts: the boite command and the panel. About 250 tokens.',
+    boiteGuide: 'Boite guide', boiteGuideHint: 'A note after AGENTS.md when an agent session starts: the boite command and the panel. About 300 tokens.',
     linked: 'Linked', existing: 'Already linked', blocked: 'Needs attention',
     interval: 'Pull interval in minutes', intervalHint: 'Choose a whole number from 1 to 1440 minutes.',
     detected: 'Contents', instructions: 'Instructions', skill: 'Skills', plugin: 'Plugins',
@@ -2270,7 +2270,7 @@ export const strings = {
     heading: 'Agent updates',
     intro: 'Each machine checks its own agents every six hours.',
     auto: 'Update agents automatically',
-    autoHint: 'An agent updates once none of its threads is running and nobody is connected',
+    autoHint: 'An agent updates with nobody connected: a running thread pauses after its tool call and goes on once the update is done',
     checking: 'Checking',
     available: (name: string, version: string) => `${name} ${version} is available`,
     availableShort: 'Update available',
@@ -2278,6 +2278,7 @@ export const strings = {
     on: (machine: string) => `On ${machine}`,
     update: 'Update', skip: 'Skip', retry: 'Try again',
     updating: (name: string) => `Updating ${name}`,
+    waiting: (count: number) => count === 1 ? 'Waits for a thread to pause' : `Waits for ${count} threads to pause`,
     failed: (name: string) => `${name} did not update`,
     upToDate: 'Up to date', unknown: 'Checks by itself', runUpdater: 'Run its updater',
     skipped: (version: string) => `${version} skipped`,

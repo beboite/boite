@@ -63,7 +63,7 @@
       <span class="version ui-label" title={controls ? versionTitle(update) : strings.harnessUpdates.route[update.route]}>{controls && offered(update) ? `${update.current} → ${update.latest}` : update.current}</span>
     {/if}
     {#if update.state === 'updating' || update.state === 'checking'}
-      <span class="note-inline live ui-label" role="status">{update.state === 'updating' ? strings.providerSettings.updating : strings.harnessUpdates.checking}</span>
+      <span class="note-inline live ui-label" role="status" data-testid="harness-update-progress">{update.state === 'checking' ? strings.harnessUpdates.checking : (update.waitingFor ?? 0) > 0 ? strings.harnessUpdates.waiting(update.waitingFor!) : strings.providerSettings.updating}</span>
     {:else if controls && skippedNow(update) && update.latest !== null}
       <span class="note-inline ui-label">{strings.harnessUpdates.skipped(update.latest)}</span>
     {:else if answered}

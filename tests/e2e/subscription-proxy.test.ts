@@ -30,6 +30,7 @@ async function capture(name: string) {
 const saved = 'document.querySelector("[data-testid=subscription-proxy-result]")?.textContent.includes("saved")';
 const gatewayRow = 'document.querySelector("[data-testid=account-gateway][data-provider=claude]")';
 const showGatewayRow = `${gatewayRow} || document.querySelector("[data-testid=provider-settings][data-provider-id=claude] [data-testid=provider-details-toggle]").click()`;
+const grokRow = 'document.querySelector("[data-testid=provider-settings][data-provider-id=grok]")';
 
 test('disabled mode retains the native glance; Douane brings its quota bars and one gateway account', async () => {
   await page.waitFor('document.querySelector("[data-testid=nav-limits]")');
@@ -55,6 +56,11 @@ test('disabled mode retains the native glance; Douane brings its quota bars and 
   expect(await page.evaluate('document.querySelector("[data-testid=provider-settings][data-provider-id=claude]").querySelectorAll("[data-testid=account-row], [data-testid=account-add], [data-testid=account-gateway] button").length')).toBe(0);
   await page.evaluate(`${gatewayRow}.scrollIntoView({ block: 'center' })`);
   await capture('boite-proxy-gateway-account-desktop.png');
+
+  // Douane serves Grok too, by its id: its row reads ready through the gateway.
+  await page.waitFor(`${grokRow}?.textContent.includes("Ready · via Douane")`);
+  await page.evaluate(`${grokRow}.scrollIntoView({ block: 'center' })`);
+  await capture('boite-proxy-grok-desktop.png');
 
   // Limits shows Douane's own entries, grouped by provider, instead of its dashboard.
   await page.click('[data-testid="settings-tab-limits"]');
@@ -86,6 +92,9 @@ test('disabled mode retains the native glance; Douane brings its quota bars and 
   expect(await page.evaluate('document.querySelector("[data-testid=subscription-proxy-dashboard]").value')).toBe(`${dashboard}/management.html#/quota`);
   await page.click('[data-testid="subscription-proxy-save"]');
   await page.waitFor(saved);
+  // CLIProxyAPI does not serve Grok: its row is back on its own sign-in while Claude stays on the gateway.
+  await page.waitFor('document.querySelector("[data-testid=provider-settings][data-provider-id=claude]")?.textContent.includes("via CLIProxyAPI")');
+  expect(await page.evaluate(`${grokRow}.textContent.includes("via CLIProxyAPI")`)).toBe(false);
   await page.click('[data-testid="settings-back"]');
   await page.click('[data-testid="nav-limits"]');
   await page.waitFor('document.querySelector("[data-testid=subscription-proxy-dashboard-page]")');

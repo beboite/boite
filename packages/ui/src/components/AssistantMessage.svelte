@@ -14,6 +14,7 @@
   import QuestionCard from './QuestionCard.svelte';
   import Prose from './Prose.svelte';
   import ChatFile from './ChatFile.svelte';
+  import InlineView from './InlineView.svelte';
   import ToolGroup from './ToolGroup.svelte';
   import { activityShown, runKey, type ActivityPart } from '../lib/tool-groups';
   import { memoryPartRuns } from '../lib/memory-timeline';
@@ -104,6 +105,8 @@
           typing={!compacting && latestInTurn && message.role === 'assistant' && store.connection === 'ready' && store.openThread?.status === 'running' && index === message.parts.length - 1 && index === caretAt && part.complete !== true} {store} {threadId} />
         {#if part.omitted}<p class="omitted" data-testid="text-omitted">{fill(strings.chat.textOmitted, { count: count(part.omitted) })}</p>{/if}
 
+      {:else if part.type === 'artifact' && part.view}
+        <InlineView {part} {store} {threadId} messageId={message.id} partIndex={index} />
       {:else if part.type === 'file' || part.type === 'artifact'}
         <ChatFile file={part} {store} {threadId} messageId={message.id} partIndex={index} />
       {:else if part.type === 'tool' && planOf(part.name, part.input) !== null}

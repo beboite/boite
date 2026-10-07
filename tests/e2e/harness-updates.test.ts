@@ -107,3 +107,35 @@ test('unknown releases run their own updater and Providers keeps only installed 
     expect(await page.evaluate(`document.querySelector('${id('accounts-page')} ${id(name)}') === null`)).toBe(true);
   }
 }, 30_000);
+
+test('an update asked for while a turn of that agent runs says how many threads it waits for', async () => {
+  // The open thread moves to Claude, then a permission card holds its tool call, the way a long command would.
+  await page.waitFor(`document.querySelector('${id('composer-picker')}')`);
+  await page.click(id('composer-picker'));
+  const tile = `${id('composer-picker-menu')} [data-provider="claude"]`;
+  await page.waitFor(`document.querySelector('${tile}') && !document.querySelector('${tile}').disabled`);
+  await page.click(tile);
+  const model = `${id('composer-picker-menu')} [data-model]:not([disabled])`;
+  await page.waitFor(`document.querySelector('${model}') !== null`);
+  await page.click(model);
+  await page.waitFor(`document.querySelector('${id('composer-picker-menu')}') === null`);
+  await page.type(id('composer-input'), 'Run the build [permission]');
+  await page.waitFor(`!document.querySelector('${id('composer-send')}').disabled`);
+  await page.click(id('composer-send'));
+  await page.waitFor(`document.querySelector('${id('permission-card')}') !== null`);
+  await machines();
+  await unfold();
+  const claude = row(local, 'claude');
+  await page.waitFor(`document.querySelector('${claude} ${id('harness-update-row-run')}') !== null`);
+  await page.click(`${claude} ${id('harness-update-row-run')}`);
+  const waiting = `document.querySelector('${claude} ${id('harness-update-progress')}')?.textContent === 'Waits for a thread to pause'`;
+  await page.waitFor(waiting);
+  await page.evaluate(`document.querySelector('${claude}').scrollIntoView({ block: 'center' })`);
+  await capture('harness-update-waiting-desktop');
+  await size(390);
+  await page.waitFor(`document.querySelector('${id('machines-page')}')`);
+  await unfold();
+  await page.waitFor(waiting);
+  await page.evaluate(`document.querySelector('${claude}').scrollIntoView({ block: 'center' })`);
+  await capture('harness-update-waiting-phone');
+}, 30_000);

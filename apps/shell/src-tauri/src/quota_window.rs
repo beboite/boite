@@ -175,6 +175,7 @@ fn build_popup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>
         .decorations(false).skip_taskbar(true).always_on_top(true)
         .visible(false).focused(false).focusable(false)
         .background_color(ground(dark))
+        .initialization_script(crate::platform::region::script())
         .on_navigation(|url| matches!(url.scheme(), "tauri" | "http" | "https") && matches!(url.host_str(), Some("tauri.localhost") | Some("localhost")));
     #[cfg(windows)]
     if !native_frame { builder = builder.shadow(false); }

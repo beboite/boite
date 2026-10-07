@@ -155,6 +155,12 @@ export interface HarnessUpdate {
   /** Why the last check or update failed, null otherwise. */
   message: string | null;
   checkedAt: Timestamp | null;
+  /**
+   * While `updating`: the running turns of this agent that have not paused
+   * between two tool calls yet. The updater starts once none is left
+   * unpaused, and they resume once it is done. Absent or zero once the updater runs.
+   */
+  waitingFor?: number;
 }
 
 export interface OsProfile {
@@ -1296,8 +1302,13 @@ export type MessagePart =
   | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null; dataDeferred?: true; bytes?: number; width?: number; height?: number; preview?: string }
   /** A deferred picture file (`previewFileData`) carries `width`, `height` and `preview` as a deferred image does. */
   | { type: 'file'; mimeType: string; data: string; name: string | null; dataDeferred?: true; bytes?: number; width?: number; height?: number; preview?: string }
-  /** An immutable published file; resolve its bytes with artifacts.read, never as a disk path. */
-  | { type: 'artifact'; id: string; mimeType: string; bytes: number; name: string }
+  /**
+   * An immutable published file; resolve its bytes with artifacts.read, never as a disk path.
+   * With `view` it is a page the agent published with `boite view`: a client draws it at the
+   * end of its turn instead of a file card, and one that does not know the field still offers
+   * the download.
+   */
+  | { type: 'artifact'; id: string; mimeType: string; bytes: number; name: string; view?: InlineView }
   /** The model's reasoning as the provider streams it, folded in the UI. */
   | { type: 'thinking'; text: string; startedAt?: Timestamp; finishedAt?: Timestamp | null; omitted?: number }
   | {
@@ -1841,20 +1852,34 @@ export const SUBSCRIPTION_PROXY_PROTOCOLS: readonly Protocol[] = ['claude-sdk', 
  * provider, and by agents that keep their own configuration.
  */
 export const SUBSCRIPTION_PROXY_PROVIDERS: readonly ProviderId[] = ['opencode-v2'];
+/**
+ * The providers only one kind of gateway serves. Grok's CLI takes its models
+ * from the gateway's own list, and Douane writes that list the way the CLI
+ * reads it: xAI's ids in xAI's order, each with its window and efforts.
+ */
+export const SUBSCRIPTION_PROXY_KIND_PROVIDERS: Readonly<Record<SubscriptionProxy['kind'], readonly ProviderId[]>> = {
+  douane: ['grok'],
+  cliproxyapi: [],
+};
 
 /** What tells whether a proxy serves a provider: its id and its protocol, as a descriptor and a summary both carry them. */
 export type SubscriptionProxyTarget = { id: ProviderId; protocol: Protocol };
 
-/** Whether an enabled subscription proxy serves this provider. Core and clients decide alike. */
-export function subscriptionProxyServes(provider: SubscriptionProxyTarget | null | undefined): boolean {
-  return provider !== null && provider !== undefined
-    && (SUBSCRIPTION_PROXY_PROTOCOLS.includes(provider.protocol) || SUBSCRIPTION_PROXY_PROVIDERS.includes(provider.id));
+/**
+ * Whether a subscription proxy serves this provider: one of that kind, or one
+ * of either kind when none is named. Core and clients decide alike.
+ */
+export function subscriptionProxyServes(provider: SubscriptionProxyTarget | null | undefined, kind?: SubscriptionProxy['kind']): boolean {
+  if (provider === null || provider === undefined) return false;
+  if (SUBSCRIPTION_PROXY_PROTOCOLS.includes(provider.protocol) || SUBSCRIPTION_PROXY_PROVIDERS.includes(provider.id)) return true;
+  const kinds = kind === undefined ? Object.values(SUBSCRIPTION_PROXY_KIND_PROVIDERS) : [SUBSCRIPTION_PROXY_KIND_PROVIDERS[kind]];
+  return kinds.some((ids) => ids.includes(provider.id));
 }
 
 /** The enabled proxy that serves this provider, or null. */
 export function subscriptionProxyOf(settings: Pick<Settings, 'subscriptionProxy'> | null | undefined, provider: SubscriptionProxyTarget | null | undefined): SubscriptionProxy | null {
   const proxy = settings?.subscriptionProxy;
-  return proxy?.enabled && subscriptionProxyServes(provider) ? proxy : null;
+  return proxy?.enabled && subscriptionProxyServes(provider, proxy.kind) ? proxy : null;
 }
 
 export function subscriptionProxyName(kind: SubscriptionProxy['kind']): string {
@@ -3326,7 +3351,21 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'panel.open': { params: { threadId: ThreadId; surface: PanelSurface }; result: { shown: boolean } };
   /** Explicitly publish a bounded file snapshot from this thread's working directory. */
   'artifacts.publish': { params: { threadId: ThreadId; path: string }; result: Message };
-  'artifacts.read': { params: { threadId: ThreadId; messageId: MessageId; artifactId: string; renew?: string }; result: ArtifactContent };
+  /**
+   * `view: true` asks for the address a published view opens as a page at
+   * (`VIEW_ROUTE`), which only an artifact carrying `view` has; without it the
+   * address downloads.
+   */
+  'artifacts.read': { params: { threadId: ThreadId; messageId: MessageId; artifactId: string; renew?: string; view?: true }; result: ArtifactContent };
+  /**
+   * Publish an HTML page of this thread's working directory as an inline view
+   * (`boite view`). Local files it names are embedded, a remote resource or a
+   * script error refuses it with the reason, and `checked` says whether a
+   * headless browser loaded it on this machine before it was accepted.
+   * `advice` is what would make the page look more like the app (a fixed
+   * color, a font of its own): it never refuses a publish.
+   */
+  'artifacts.view': { params: { threadId: ThreadId; path: string; title?: string }; result: { message: Message; checked: boolean; advice: string[] } };
   'artifacts.preview': { params: { threadId: ThreadId; path: string }; result: { url: string; shown: boolean } };
   'artifacts.previewClose': { params: { threadId: ThreadId; path: string }; result: { ok: true } };
   /** The agent's task list, whole, as the tasks surface shows it. */
@@ -3491,10 +3530,12 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    */
   'providers.updates': { params: { refresh?: boolean }; result: HarnessUpdate[] };
   /**
-   * Bring one agent to its newest release. Refused while a turn of that
-   * provider is queued, running or waiting, and when nothing newer is known.
-   * The warm processes of the provider are released first, since a running
-   * program cannot be replaced. Progress arrives as `providers.updatesChanged`.
+   * Bring one agent to its newest release. Refused when nothing newer is
+   * known. A running turn of that provider is paused once its tool calls are
+   * done, and resumes in the same turn after the update; turns queued while
+   * the updater runs start after it. The warm processes of the provider are
+   * released first, since a running program cannot be replaced. Progress
+   * arrives as `providers.updatesChanged`.
    */
   'providers.update': { params: { providerId: ProviderId }; result: HarnessUpdate };
   /** Stop offering this version. A later one is offered again. `version: null` forgets the skip. */
@@ -4198,3 +4239,10 @@ export { IMAGE_INLINE_CHARS, previewFileData, previewImageData, type ImagePrevie
 /** The longer side, in pixels, of the copy `messages.attachment` sends with `display`. */
 export const DISPLAY_IMAGE_MAX = 1280;
 export { imageSize } from './image-size.ts';
+export {
+  VIEW_ROUTE, VIEW_MAX_BYTES, VIEW_WIDTH, VIEW_NARROW_WIDTH, VIEW_NARROW_BELOW, VIEW_MIN_HEIGHT, VIEW_MAX_HEIGHT, VIEW_DEFAULT_HEIGHT, VIEW_TITLE_MAX,
+  VIEW_CONTENT_POLICY, VIEW_SANDBOX, VIEW_TOKENS, VIEW_HEIGHT_EXPRESSION, VIEW_GUIDE_LINE, VIEW_HELP,
+  clampViewHeight, viewFrameHeight, viewThemeFragment, readViewMessage, viewDocument, viewTitleOf,
+  type InlineView, type ViewTheme, type ViewHostMessage, type ViewPageMessage,
+} from './view.ts';
+import type { InlineView } from './view.ts';
