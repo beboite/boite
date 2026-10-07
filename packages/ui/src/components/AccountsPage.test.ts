@@ -104,6 +104,14 @@ test('a proxied provider shows only the gateway account, without actions, and it
   mounted = mount(AccountsPage, { target: document.body, props: { store } });
   flushSync();
   expect(row('claude')?.textContent).toContain('Ready · via Douane');
+  // Grok is served by Douane alone: behind CLIProxyAPI it keeps its own accounts.
+  expect(row('grok')?.textContent).toContain('Ready · via Douane');
+  store.settings = await client.call('subscriptionProxy.configure', { subscriptionProxy: { ...douane, kind: 'cliproxyapi' } });
+  flushSync();
+  expect(row('claude')?.textContent).toContain('Ready · via CLIProxyAPI');
+  expect(row('grok')?.textContent).not.toContain('via CLIProxyAPI');
+  store.settings = await client.call('subscriptionProxy.configure', { subscriptionProxy: douane });
+  flushSync();
   (row('claude')?.querySelector('[data-testid="provider-details-toggle"]') as HTMLButtonElement).click();
   flushSync();
   const gateway = row('claude')!.querySelector('[data-testid="account-gateway"]')!;

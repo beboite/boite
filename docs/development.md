@@ -543,6 +543,7 @@ Real-provider tests use CLI logins and spend tokens. Run selected cases from
 | `BOITE_E2E_OPENCODE2=1` | `test/opencode2.live.test.ts`: OpenCode 2 turned on, ACP turn, cold resume and plan mode; `BOITE_E2E_OPENCODE2_MODEL` names the model |
 | `BOITE_E2E_GROK=1` | `test/grok.live.test.ts`: default login, model/effort and cold resume; empty isolated homes can open sign-in |
 | `BOITE_E2E_GROK_QUOTA=1` | `test/grok-quota.live.test.ts`: quota for the existing default login |
+| `BOITE_E2E_GROK_PROXY=1` | `test/grok-proxy.live.test.ts`: Grok behind a Douane gateway, on an isolated account that never signed in; `BOITE_E2E_GROK_PROXY_URL` is the gateway's API URL, `BOITE_E2E_GROK_PROXY_KEY` its key |
 | `BOITE_E2E_CODEX=1` | `test/codex.live.test.ts`: app-server turn and resume |
 | `BOITE_E2E_PI=1` | `test/pi.live.test.ts`: turn and resume |
 | `BOITE_E2E_AGY=1` | `test/agy.live.test.ts`: model discovery and one cold default-account turn |

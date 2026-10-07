@@ -3,7 +3,7 @@ export const strings = {
   subscriptionProxy: {
     heading: 'Subscription proxy',
     enable: 'Use a subscription proxy',
-    hint: 'Claude and Codex use this machine\'s gateway, and OpenCode 2 adds its other models to its own. Limits opens its dashboard inside Boite. Other agents keep their own configuration.',
+    hint: 'Claude and Codex use this machine\'s gateway, Grok does too behind Douane, and OpenCode 2 adds its other models to its own. Limits opens its dashboard inside Boite. Other agents keep their own configuration.',
     baseUrl: 'API URL', dashboardUrl: 'Limits dashboard URL', key: 'API key (optional)',
     keyHint: 'Leave empty to keep the saved key. This is the proxy\'s API key, not its dashboard management key.',
     clearKey: 'Remove saved key', save: 'Save proxy', saved: 'Proxy saved',
@@ -12,7 +12,7 @@ export const strings = {
     openDashboard: 'Open dashboard',
     signInHint: 'Sign in with Open dashboard, then reload here. If the page stays blank, this dashboard may block embedded views.',
     mixedContent: 'This page uses HTTPS. Set an HTTPS dashboard URL to view it here, or open the HTTP dashboard separately.',
-    enabledHint: 'When on, the accounts signed in on this machine are no longer used for Claude and Codex.',
+    enabledHint: 'When on, the accounts signed in on this machine are no longer used for Claude and Codex, nor for Grok behind Douane.',
     /** The single account a proxied provider shows. */
     account: 'Requests go through {name} at {origin}. This machine\'s own sign-ins are not used.',
     via: 'via {name}',
