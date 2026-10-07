@@ -16,6 +16,26 @@ export const OVERSCAN = 4;
 export const ESTIMATE = 80;
 /** The column's --chat-message-gap in app.css, included in each measured slot. */
 export const GAP = 20;
+/** A prompt's picture before it is opened: `UserMessage`'s thumbnail height. */
+export const THUMB_HEIGHT = 240;
+/** What a picture adds besides itself: the row's margin and the frame. */
+const THUMB_ROW = 10;
+
+/**
+ * What a message is worth before it is measured. A prompt's pictures count
+ * their thumbnails on top of `ESTIMATE`, at the height their size gives when a
+ * light page sent one: a screenshot taken for 80 px became 330 once on
+ * screen, and everything below the reader moved by the difference.
+ */
+export function estimateSlot(message: Message): number {
+  if (message.role !== 'user') return ESTIMATE;
+  let pictures = 0;
+  for (const part of message.parts) {
+    if (part.type !== 'image') continue;
+    pictures += (part.width && part.height ? Math.min(THUMB_HEIGHT, part.height) : THUMB_HEIGHT) + THUMB_ROW;
+  }
+  return ESTIMATE + pictures;
+}
 
 // -- the running totals ------------------------------------------------------
 // `sums[i]` is the height of everything above message `i`. A spacer is then
@@ -34,14 +54,14 @@ export class SlotTotals {
   /** Where each message sits, so a measurement finds its index without scanning. */
   readonly positions = new Map<string, number>();
 
-  /** `heights` holds the measured slot heights by message id. What is not in it is worth ESTIMATE. */
+  /** `heights` holds the measured slot heights by message id. What is not in it is worth `estimateSlot`. */
   constructor(private readonly heights: Map<string, number>) {}
 
   slotAt(list: Message[], index: number): number {
     windowStats.slots += 1;
     const message = list[index];
     if (!message) return ESTIMATE;
-    return this.heights.get(message.id) ?? ESTIMATE;
+    return this.heights.get(message.id) ?? estimateSlot(message);
   }
 
   rebuild(list: Message[], timelineOrder: string): void {

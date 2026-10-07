@@ -11,6 +11,7 @@ import { AgentStore } from './agents/store.ts';
 import { AgentRuntime } from './agents/runtime.ts';
 import { AgentTokens } from './agent.ts';
 import { FileTickets } from './workdir.ts';
+import { MediaPreviews } from './media.ts';
 import { Bus } from './bus.ts';
 import { shutdownDrivers } from './drivers/index.ts';
 import { ImportStore } from './imports.ts';
@@ -144,6 +145,8 @@ export class Core {
   readonly agents = new AgentTokens();
   /** The one-shot urls `files.read` hands out for what it cannot send inline. */
   readonly fileTickets = new FileTickets();
+  /** The blurs deferred pictures are drawn with before their bytes arrive. */
+  readonly media = new MediaPreviews(this);
   /** Where the `boite` shim is, prepended to the PATH of every process a thread launches. */
   readonly cliDir: string | null = resolveCliDir();
   readonly speech: SpeechStore;

@@ -1,5 +1,5 @@
 import type { Message, MessagePart } from './index';
-import { previewFileData, previewImageData } from './file-preview.ts';
+import { previewFileData, previewImageData, type ImagePreviews } from './file-preview.ts';
 import { longerThan, previewToolPart } from './message-preview.ts';
 
 /** What a client asks a page, and its live events, to leave on the core until it is looked at. */
@@ -43,11 +43,11 @@ function toolParts(message: Message, options: { inputs: boolean; strict: boolean
   return changed ? { ...message, parts } : message;
 }
 
-function project(message: Message, options: TransportOptions, strict: boolean): Message {
+function project(message: Message, options: TransportOptions, strict: boolean, previews?: ImagePreviews): Message {
   const tools = options.compactTools || options.compactToolParts
     ? toolParts(message, { inputs: !!options.compactToolParts, strict }) : message;
-  const files = options.compactFiles ? previewFileData([tools])[0]! : tools;
-  return options.compactImages ? previewImageData([files], strict ? 0 : undefined)[0]! : files;
+  const files = options.compactFiles ? previewFileData([tools], previews)[0]! : tools;
+  return options.compactImages ? previewImageData([files], strict ? 0 : undefined, previews)[0]! : files;
 }
 
 /** UTF-8 bytes of `text`, counted without encoding it. A lone surrogate counts as the three bytes of U+FFFD. */
@@ -117,19 +117,19 @@ function cutTexts(message: Message, bytes: number, max: number): Message {
  * every finished call and image it holds, then cuts its longest texts. Each
  * shape is measured once.
  */
-export function projectMessage(message: Message, options: TransportOptions): Message {
-  const light = project(message, options, false);
+export function projectMessage(message: Message, options: TransportOptions, previews?: ImagePreviews): Message {
+  const light = project(message, options, false, previews);
   if (!options.compactToolParts) return light;
   const max = MESSAGE_SENT_MAX_BYTES;
   const lightBytes = heavyBytes(light, max);
   if (lightBytes < max) return light;
-  const strict = project(message, options, true);
+  const strict = project(message, options, true, previews);
   const strictBytes = strict === light ? lightBytes : heavyBytes(strict, max);
   return strictBytes < max ? strict : cutTexts(strict, strictBytes, max);
 }
 
-/** The messages a client receives for these options. */
-export function forTransport(messages: Message[], options: TransportOptions): Message[] {
+/** The messages a client receives for these options; `previews` gives a deferred picture its blur. */
+export function forTransport(messages: Message[], options: TransportOptions, previews?: ImagePreviews): Message[] {
   if (!compacts(options)) return messages;
-  return messages.map(message => projectMessage(message, options));
+  return messages.map(message => projectMessage(message, options, previews));
 }

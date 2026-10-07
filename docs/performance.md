@@ -273,15 +273,53 @@ when the core advertises `chunkedAnswers`.
   prefixes cannot prove that the omitted text stayed unchanged.
 - File links arrive with their name, MIME type and decoded byte count. Their
   base64 data loads through `messages.attachment` when opened or downloaded.
-  Assistant media previews retain their bytes on first read.
+  An assistant's video, audio or PDF keeps its bytes, since it previews on
+  mount. An assistant's picture above 8 KiB is deferred like a prompt's, with
+  its size and blur, and `ChatFile` loads it within 400 px of the screen in a
+  box of its proportions. Nine screenshots an agent attached made a 40-message
+  page of one thread weigh 12,020,008 bytes, 7,472,667 deflated (measured on
+  2026-10-07). The same page projected this way weighs 50,961 bytes, 13,679
+  deflated.
   Older cores return full files, and a cached deferred file can fall back to
   their history methods after a downgrade.
 - On a core advertising `readingPages`, pages ask for `compactImages`: a
-  picture above 8 KiB of base64 arrives as its decoded size, holds a
-  thumbnail-sized place, and loads through `messages.attachment` once within
-  400 px of what the timeline shows: the observer is rooted at the scrolling
-  timeline, whose clipping would otherwise hide the margin. Edit fetches a prompt's deferred files and pictures
-  before it fills the composer.
+  picture above 8 KiB of base64 arrives as its decoded size, and loads through
+  `messages.attachment` once within 400 px of what the timeline shows. The
+  observer is rooted at the scrolling timeline, whose clipping would otherwise
+  hide the margin. Edit fetches a prompt's deferred files and pictures before
+  it fills the composer.
+- A deferred picture also carries its `width` and `height`, read from its
+  header (`packages/contracts/src/image-size.ts`): PNG, GIF, WebP and JPEG, with
+  JPEG's EXIF orientation applied as a browser applies it. It also carries
+  `preview`, a ThumbHash blur of at most 32 px that `Bun.Image.placeholder()`
+  makes, about 1.2 KB. The core makes three at a time on Bun's image worker,
+  refuses pictures above 8K UHD, and keeps them in `media_previews`
+  (`packages/core/src/media.ts`).
+- A deferred picture on screen is drawn from a light copy:
+  `messages.attachment` with `display` answers a WebP at quality 80, at most
+  1,280 px on its longer side, made once on Bun's image worker and kept in
+  `media_displays`. Six 1,541 to 2,467 KB PNG screenshots measured 51 to
+  130 KB this way on 2026-10-07, about 130 ms each to make. AVIF would be
+  smaller, but Bun's Linux build cannot encode it. A GIF, a copy that would not
+  be lighter and any other file come as they are. A click opens the original
+  in the viewer, and a download or an edit also fetches the original
+  (`store/display-images.ts`).
+- A light read first makes the blurs of the messages around its page that no
+  read looked at before, waiting 1.5 s at most. It does this before the page is
+  read, never between the read and the answer, so the answer still holds every
+  event sent before it. A picture without a blur yet is sent without one and
+  queued.
+- `ChatImage.svelte` draws each picture in a box of its own proportions from
+  the first frame: the blur, then the picture fading in over it. A picture that
+  came with its bytes reads its size from their header. Nothing around the box
+  moves when the bytes land: the 180 by 120 place it replaced grew to the
+  thumbnail and pushed what followed. An unmeasured prompt counts its
+  thumbnails on top of the 80 px estimate (`estimateSlot`), so the spacers
+  are closer to what scrolling up mounts. `tests/e2e/thread-loading.test.ts` checks
+  this on a real core with 24 screenshots: the fetches on opening, and the
+  reader's text keeping its position to the pixel while the scrolled pictures
+  land.
+
 - While a first page downloads, the chat shows a bar and "192 kB / 1.3 MB",
   the bytes received against the total the core put in each slice. A page
   under 64 KiB comes whole and the bar runs without numbers; it shows after

@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { Check, Download, FileText, Image, Film, Music2, Maximize2, RefreshCw, X } from '@lucide/svelte';
-  import { ATTACHMENT_MAX_BYTES, FILE_TICKET_TTL_MS, type MessagePart } from '@boite/contracts';
+  import { ATTACHMENT_MAX_BYTES, FILE_TICKET_TTL_MS, imageSize, type MessagePart } from '@boite/contracts';
+  import { onView } from '../lib/on-view';
   import type { Store } from '../lib/store.svelte';
   import { featureOn } from '../lib/features.svelte';
   import { fill, strings } from '../lib/strings';
@@ -54,6 +55,42 @@
   const inlineMedia = $derived(!!file && ((image && !deferredImage) || video || audio));
   const showPreview = $derived(inlineMedia || (expanded && rich));
   const previewable = $derived(text !== null || image || (pdf && !!file) || audio || video);
+  /**
+   * A picture's own size, from the core for one it deferred or from the header
+   * of the bytes it sent: the preview is drawn at it from the first frame, so
+   * nothing below moves when the picture decodes.
+   */
+  const box = $derived.by(() => {
+    if (file?.type !== 'file' || !/^image\//.test(file.mimeType)) return null;
+    if (file.width && file.height) return { width: file.width, height: file.height };
+    return file.data ? imageSize(file.data) : null;
+  });
+  /** A deferred picture not fetched yet: its box and blur wait for it to near the screen. */
+  const waiting = $derived(file?.type === 'file' && !!file.dataDeferred && box !== null && !url && !error);
+  const boxWidth = $derived(box === null ? undefined : `min(${box.width}px, calc(min(480px, 65vh) * ${box.width} / ${box.height}))`);
+  const boxRatio = $derived(box === null ? undefined : `${box.width} / ${box.height}`);
+  /** The light copy the core made for the timeline (`loadDisplayImage`), drawn until the original is asked for. */
+  let copy = $state('');
+  let copyShown = $state(false);
+  let copyAsked = false;
+  /** Near the screen, a deferred picture fetches its light copy; the original waits for a click. */
+  function near(): void {
+    if (!waiting || copy || copyAsked) return;
+    if (!store || !threadId || !messageId || partIndex === undefined || file?.type !== 'file') { if (!loading && !deferredImage) void load(); return; }
+    copyAsked = true;
+    store.loadDisplayImage(threadId, messageId, partIndex, file.mimeType).then((value) => { if (!disposed) copy = value; }, (reason: unknown) => {
+      copyAsked = false;
+      if (!disposed) error = reason instanceof Error ? reason.message : strings.artifacts.failed;
+    });
+  }
+
+  /** The viewer shows the original: a picture drawn from its copy fetches it first, then opens in the same box. */
+  async function openOriginal(): Promise<void> {
+    if (!url) await load();
+    if (!url || disposed) return;
+    await tick();
+    view(shot);
+  }
 
   async function open(): Promise<void> {
     if (!directory || !path || opening) return;
@@ -205,7 +242,16 @@
 </script>
 
 <section class="chat-file" class:inline-media={inlineMedia} data-testid="chat-file" aria-busy={loading || saving}>
-  {#if showPreview && url}
+  {#if waiting}
+    <div class="preview" data-testid="artifact-waiting">
+      <button type="button" class="shot boxed" style:width={boxWidth} style:aspect-ratio={boxRatio} use:onView={near} onclick={() => void openOriginal()} disabled={loading}
+        title={strings.artifacts.enlarge} aria-label={strings.artifacts.enlarge} aria-busy={loading} data-testid="artifact-open-original">
+        {#if file?.type === 'file' && file.preview && !copyShown}<img class="blur" src={file.preview} alt="" aria-hidden="true" data-testid="artifact-blur" />{/if}
+        {#if copy}<img src={copy} alt={name} decoding="async" onload={() => copyShown = true} data-testid="artifact-copy" />{/if}
+        <span class="enlarge"><Maximize2 size={16} /></span>
+      </button>
+    </div>
+  {:else if showPreview && url}
     <div class="preview" data-testid="artifact-content">
       {#if previewError || unplayable}
         <div class="media-fallback" role="status" data-testid="media-fallback">{#if video}<Film size={28} />{:else}<FileText size={28} />{/if}<p>{video ? strings.artifacts.videoFailed : strings.artifacts.mediaFailed}</p>
@@ -217,7 +263,7 @@
       {:else}
         {#key attempt}
           {#if text !== null}<pre>{#if line}<span class="line">{`${path}:${line}\n`}</span>{/if}{text}</pre>
-          {:else if image}<button type="button" class="shot" bind:this={shot} use:media={mediaItem} onclick={() => view(shot)} title={strings.artifacts.enlarge} aria-label={strings.artifacts.enlarge} data-testid="artifact-enlarge"><img src={url} alt={name} loading="lazy" decoding="async" onload={imageLoaded} onerror={() => previewError = true} /><span class="enlarge"><Maximize2 size={16} /></span></button>
+          {:else if image}<button type="button" class="shot" class:boxed={box !== null} style:width={boxWidth} style:aspect-ratio={boxRatio} bind:this={shot} use:media={mediaItem} onclick={() => view(shot)} title={strings.artifacts.enlarge} aria-label={strings.artifacts.enlarge} data-testid="artifact-enlarge">{#if box !== null && !dimensions && file?.type === 'file' && file.preview}<img class="blur" src={file.preview} alt="" aria-hidden="true" />{/if}<img src={url} alt={name} loading="lazy" decoding="async" onload={imageLoaded} onerror={() => previewError = true} /><span class="enlarge"><Maximize2 size={16} /></span></button>
           {:else if pdf && file}
             <!-- Only signature-checked PDF content reaches the built-in viewer. -->
             <iframe title={name} src={url} referrerpolicy="no-referrer"></iframe>
@@ -232,11 +278,11 @@
     <button type="button" class="identity" onclick={launch} disabled={opening || saving || loading || (!url && !directory && !(file?.type === 'file' && file.dataDeferred))} title={saved || name}
       aria-label={fill(strings.chat.openFile, { name })} data-testid="artifact-launch">
       {#if image}<Image size={18} />{:else if video}<Film size={18} />{:else if audio}<Music2 size={18} />{:else}<FileText size={20} />{/if}
-      <span class="label"><span class="filename">{name}</span><small>{loading ? strings.artifacts.loading : saving ? strings.artifacts.saving : saved ? strings.artifacts.saved : [bytes(size), dimensions, duration ? millis(duration * 1000) : ''].filter(Boolean).join(' · ')}</small></span>
+      <span class="label"><span class="filename">{name}</span><small>{loading ? strings.artifacts.loading : saving ? strings.artifacts.saving : saved ? strings.artifacts.saved : [bytes(size), dimensions || (box ? `${box.width} × ${box.height}` : ''), duration ? millis(duration * 1000) : ''].filter(Boolean).join(' · ')}</small></span>
     </button>
     {#if directory}<button class="ghost small" type="button" onclick={open} disabled={opening} data-testid="artifact-open"><span class="ui-label">{strings.artifacts.open}</span></button>{/if}
     {#if url || (file?.type === 'file' && file.dataDeferred)}
-      {#if deferredImage}<button class="ghost small" type="button" onclick={() => imageRequested = true} data-testid="artifact-load-image"><span class="ui-label">{strings.artifacts.loadImage}</span></button>
+      {#if deferredImage}<button class="ghost small" type="button" onclick={() => { imageRequested = true; if (waiting) void load(); }} data-testid="artifact-load-image"><span class="ui-label">{strings.artifacts.loadImage}</span></button>
       {:else if rich && previewable && !inlineMedia}<button class="ghost small" type="button" onclick={() => expanded = !expanded} aria-expanded={expanded} data-testid="artifact-preview"><span class="ui-label">{strings.artifacts.preview}</span></button>{/if}
       <a class="ghost small download" href={url || '#'} download={name} onclick={download} data-testid="artifact-download" aria-label={strings.artifacts.download} aria-disabled={saving || loading} title={strings.artifacts.download}>{#if saved}<Check size={16} />{:else}<Download size={16} />{/if}</a>
     {/if}
@@ -259,8 +305,11 @@
   .filename { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .shot { position: relative; display: block; width: 100%; height: auto; padding: 0; border: 0; border-radius: 0; background: none; cursor: zoom-in; }
   .shot:hover:not(:disabled) { background: none; }
+  /* Sized from the picture, the box keeps its height while the bytes load and decode. */
+  .shot.boxed { max-width: 100%; margin: auto; overflow: hidden; background: var(--color-surface-2); }
+  .shot.boxed img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; min-height: 0; max-height: none; object-fit: cover; }
   .enlarge { position: absolute; right: 10px; top: 10px; display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--radius-sm); background: var(--color-surface); box-shadow: var(--shadow-e1); opacity: 0; transition: opacity var(--dur-1); }
-  .shot:hover .enlarge, .shot:focus-visible .enlarge, .clip:hover .enlarge, .clip .enlarge:focus-visible { opacity: 1; }
+  .shot:hover .enlarge, .shot:focus-visible .enlarge, .shot.boxed:hover .enlarge, .clip:hover .enlarge, .clip .enlarge:focus-visible { opacity: 1; }
   .clip { position: relative; }
   .clip .enlarge { padding: 0; border: 0; color: inherit; }
   small, .line { color: var(--color-muted-foreground); font-size: var(--text-xs); }

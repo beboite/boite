@@ -93,6 +93,49 @@ test('a deferred file shows its size and fetches the owning conversation only wh
   expect(new TextDecoder().decode((invoke.mock.lastCall as unknown as [string, Uint8Array])[1])).toBe('zip bytes');
 });
 
+test("an agent's deferred picture shows its blur, then its light copy near the screen, and its original only when clicked, in one box", async () => {
+  const callbacks: IntersectionObserverCallback[] = [];
+  const native = globalThis.IntersectionObserver;
+  globalThis.IntersectionObserver = class {
+    constructor(callback: IntersectionObserverCallback) { callbacks.push(callback); }
+    observe() {}
+    disconnect() {}
+  } as unknown as typeof IntersectionObserver;
+  try {
+    const loadDisplayImage = vi.fn(async () => 'data:image/webp;base64,COPY');
+    const loadMessageAttachment = vi.fn(async () => photo.data);
+    running = mount(ChatFile, { target: document.body, props: {
+      file: { ...photo, data: '', dataDeferred: true, bytes: 1_400_000, width: 1280, height: 720, preview: 'data:image/png;base64,BLUR' },
+      store: { loadDisplayImage, loadMessageAttachment } as unknown as Store, threadId: 'thread', messageId: 'message', partIndex: 0
+    } });
+    flushSync();
+    const waiting = query<HTMLElement>('[data-testid=artifact-open-original]');
+    // As wide as the picture, or as its height capped at min(480px, 65vh) allows.
+    const width = waiting.style.width;
+    expect(width).toMatch(/^min\(1280px, calc\(min\(480px, 65vh\) ?\* ?1280 ?\/ ?720\)\)$/);
+    expect(waiting.style.aspectRatio).toBe('1280 / 720');
+    expect(query('[data-testid=artifact-blur]').getAttribute('src')).toBe('data:image/png;base64,BLUR');
+    expect(query('[data-testid=artifact-launch]').textContent).toContain('1280 × 720');
+    // Far from the screen, nothing is fetched.
+    expect(loadDisplayImage).not.toHaveBeenCalled();
+
+    for (const callback of callbacks) callback([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+    await vi.waitFor(() => expect(document.querySelector('[data-testid=artifact-copy]')?.getAttribute('src')).toBe('data:image/webp;base64,COPY'));
+    expect(loadDisplayImage).toHaveBeenCalledWith('thread', 'message', 0, 'image/png');
+    expect(loadMessageAttachment).not.toHaveBeenCalled();
+
+    // A click fetches the original, which takes the copy's place in a box of the same size.
+    waiting.click();
+    await vi.waitFor(() => expect(document.querySelector('[data-testid=artifact-enlarge] img:not(.blur)')?.getAttribute('src')).toBe('blob:attachment'));
+    expect(loadMessageAttachment).toHaveBeenCalledWith('thread', 'message', 0);
+    const shown = query<HTMLElement>('[data-testid=artifact-enlarge]');
+    expect(shown.style.width).toBe(width);
+    expect(shown.style.aspectRatio).toBe('1280 / 720');
+  } finally {
+    globalThis.IntersectionObserver = native;
+  }
+});
+
 test('a failed attachment refresh does not save bytes from the previous successful read', async () => {
   const invoke = vi.fn(async () => ({ path: 'C:/Downloads/build.zip', opened: true }));
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;

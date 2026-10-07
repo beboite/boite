@@ -1,3 +1,4 @@
+import { DisplayImages } from './display-images';
 import { RpcFailure, type Client } from '../client';
 import type { Store } from '../store.svelte';
 import { Accounts } from './accounts.svelte';
@@ -50,6 +51,7 @@ export class StoreContext {
   readonly accounts: Accounts;
   readonly projects: Projects;
   readonly threads: Threads;
+  readonly displayImages: DisplayImages;
   readonly imports: Imports;
   readonly composer: Composer;
   readonly drafts: Drafts;
@@ -69,6 +71,7 @@ export class StoreContext {
     this.accounts = new Accounts(this);
     this.projects = new Projects(this);
     this.threads = new Threads(this);
+    this.displayImages = new DisplayImages(this);
     this.imports = new Imports(this);
     this.composer = new Composer(this);
     this.drafts = new Drafts(this);
