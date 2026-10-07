@@ -1168,7 +1168,6 @@ export const strings = {
     all: 'All', sent: 'Sent', received: 'Received', empty: 'No messages here yet.',
     forwardedOne: 'Forwarded 1 message', forwardedMany: 'Forwarded {count} messages',
     receivedOne: 'Received 1 message', receivedMany: 'Received {count} messages',
-    issueOne: '1 message needs attention', issueMany: '{count} messages need attention',
     /** Incoming letters the steward of this thread's project sent. */
     stewardOne: '1 message from the steward', stewardMany: '{count} messages from the steward',
     /** What the core told this steward about the threads it looks after. */

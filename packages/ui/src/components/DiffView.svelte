@@ -4,6 +4,7 @@
   import { diffPrefs, setDiffPref } from '../lib/diff-prefs.svelte';
   import { fill, strings } from '../lib/strings';
   import { codeLanguage, highlightCode } from '../lib/code-highlight';
+  import { boxWidth } from '../lib/box-width';
 
   let {
     path,
@@ -62,7 +63,7 @@
   }
 </script>
 
-<div class="diff code-syntax" class:grow data-testid="diff-view" data-path={path} data-language={language ?? 'text'} data-layout={split ? 'split' : 'unified'} bind:clientWidth={width}>
+<div class="diff code-syntax" class:grow data-testid="diff-view" data-path={path} data-language={language ?? 'text'} data-layout={split ? 'split' : 'unified'} use:boxWidth={(value) => (width = value)}>
   {#if !headless}
     <div class="head">
       <span class="path mono ui-label" title={path}>{path}</span>

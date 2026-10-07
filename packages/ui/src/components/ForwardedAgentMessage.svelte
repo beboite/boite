@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { page } from '../lib/page-hidden.svelte';
   import { BellRing, CheckCheck, CornerDownLeft, Forward, UserCog } from '@lucide/svelte';
   import type { AgentAddress, AgentLetter } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
@@ -25,7 +26,7 @@
       ? outgoing ? strings.coordination.userSentTo : strings.coordination.userMessageVia
       : outgoing ? strings.coordination.sentTo : strings.coordination.receivedFrom);
   let now = $state(Date.now());
-  let hidden = $state(document.hidden);
+  const hidden = $derived(page.hidden);
   $effect(() => {
     if (hidden) return;
     now = Date.now();
@@ -34,7 +35,6 @@
   });
 </script>
 
-<svelte:document onvisibilitychange={() => hidden = document.hidden} />
 {#if notice}
   <!-- What the core told a steward about one of its threads: an event line, not a message anyone wrote. -->
   <div class="notice" class:compact data-testid="agent-notice" data-letter-id={letter.id} data-direction={outgoing ? 'outgoing' : 'incoming'} title={technical}>

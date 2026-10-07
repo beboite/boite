@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { page } from '../lib/page-hidden.svelte';
   import { Brain, ChevronRight } from '@lucide/svelte';
   import { renderMarkdown } from '../lib/markdown';
   import { ParagraphScan } from '../lib/message-display';
@@ -8,7 +9,7 @@
   let { text, live = false, startedAt = null, finishedAt = null }: { text: string; live?: boolean; startedAt?: number | null; finishedAt?: number | null } = $props();
 
   let now = $state(Date.now());
-  let hidden = $state(document.hidden);
+  const hidden = $derived(page.hidden);
   $effect(() => {
     if (!live || startedAt === null || hidden) return;
     now = Date.now();
@@ -38,7 +39,6 @@
   });
 </script>
 
-<svelte:document onvisibilitychange={() => hidden = document.hidden} />
 
 <div class="thinking" data-testid="thinking-part">
   <button

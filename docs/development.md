@@ -58,6 +58,7 @@ client. Development fixtures spend no provider tokens:
 | --- | --- |
 | `?fake=1` | In-memory core; no service worker |
 | `?fake=1&long=1` | Four-hundred-message conversation |
+| `?fake=1&heavy=1` | Forty messages and 11.5 MiB of tool calls, the last turn 1,300 of them |
 | `?fake=1&stream=tokens` | Sixteen-character streaming deltas |
 | `?fake=1&open=recent` | Opens the latest thread instead of a new draft |
 | `?fake=1&uninstalled=1` | No connected provider |

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { page } from '../lib/page-hidden.svelte';
   import { Bot, Brain, ChevronRight, FilePen, FileText, Globe, Search, SquareTerminal, TriangleAlert, Wrench } from '@lucide/svelte';
   import { fill, strings } from '../lib/strings';
   import { elapsed } from '../lib/format';
@@ -46,7 +47,7 @@
 
   // The run's clock: it ticks while a step runs and stops on the last finish.
   let now = $state(Date.now());
-  let hidden = $state(document.hidden);
+  const hidden = $derived(page.hidden);
   $effect(() => {
     if (!live || hidden || steps.length < 2) return;
     now = Date.now();
@@ -67,7 +68,6 @@
   });
 </script>
 
-<svelte:document onvisibilitychange={() => hidden = document.hidden} />
 
 {#snippet step(part: ActivityPart, index: number, nested = false)}
   {#if part.type === 'thinking'}
