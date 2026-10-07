@@ -254,7 +254,8 @@ boite stewards [set <thread> <project ...> [--all] [--can <a,b>] [--quiet] | rev
 boite steward                    this thread's steward grant
 boite attach <file>               publish a file snapshot in chat, at most 512 MB
 boite view <file.html>            draw the page at the end of the answer (--title <text>)
-boite view help                   the rules of a page: layout, theme, motion, checks
+boite view help                   the rules of a page: layout, the app's look, theme, motion, checks
+boite view example                a complete page in the app's look, to start from
 boite preview <file.html>          open a local HTML artifact and its neighbouring assets
 boite preview-close <file.html>    stop serving that preview
 boite show <file>[:line]         open the file in the panel, at that line

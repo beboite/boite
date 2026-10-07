@@ -61,13 +61,49 @@ No setting turns it on, and the switch above does not turn it off.
 
 Captures: [a view on desktop](images/inline-view-desktop.png) · [the same on a phone](images/inline-view-phone.png)
 
+### The app's look
+
+A page looks like the app without the agent styling it. The bootstrap stored
+with each page carries a kit (`baseCss` in `packages/contracts/src/view.ts`)
+drawn from the app's own stylesheet:
+
+- Bare elements are the app's: text at the answer's size and face, `button`
+  with its `primary`, `ghost` and `small` variants, text fields, the slider
+  (`input[type=range]`, filled with the accent up to a round thumb), the switch
+  (`input[type=checkbox][role=switch]`), `progress`, tables with small caps
+  headers, `code`, `pre` and `kbd`.
+- A few classes give the pieces a visual is made of: `.row`, `.stack`, `.grid`
+  and `.card` for layout, `.controls` and `.field` for a row of controls under
+  a drawing, `.segmented`, `.stat`, `.chip`, `.legend` with `.key`, `.bar`,
+  and in SVG `.stroke`, `.fill`, `.node`, `.gridline`, `.baseline` and
+  `.guide`, which draw in the color set by `.accent`, `.muted` or `.series-1`
+  to `.series-8`.
+- The client hands the page the tokens of `VIEW_TOKENS` as this device
+  computes them: colors, the accent the reader picked, the series palette,
+  radii, text sizes, control heights, shadows, durations and the easing. A
+  theme, an accent or a motion setting changed in the app reaches a page
+  already on screen.
+
+Every rule of the kit is under `:where()`, so it weighs nothing: whatever a
+page says about the same element wins. The kit is a start and never a limit;
+a mock of somebody else's screen can ignore all of it.
+
+Three things push an agent toward it. `boite view help` explains the look in
+a few rules (quiet and flat, one accent, calm type, steps of 4, 2 px strokes)
+and lists the kit. `boite view example` prints a complete page that uses
+nothing else (`packages/core/src/view-example.ts`, the page in the captures
+above, published by the end-to-end test). And a publish answers with advice,
+which never refuses it: a color written as a value, which will not follow the
+reader's theme or accent, and a font of the page's own (`viewAdvice` in
+`packages/core/src/views.ts`).
+
 ### What the agent is told
 
 The guide every session starts with (`packages/core/src/agent-guide.ts`) has
 one line: the command, and that a request for a visual or a schema calls for
 it. `boite view help` prints the rest, read only by an agent about to write a
-page: the layout rules, the theme variables, how to animate and what the
-publish checks. Both texts are `VIEW_GUIDE_LINE` and `VIEW_HELP` in
+page: the layout rules, the app's look and its kit, the theme variables, how
+to animate and what the publish checks. Both texts are `VIEW_GUIDE_LINE` and `VIEW_HELP` in
 `packages/contracts/src/view.ts`, beside the code they describe.
 
 One file is one visual. Several visuals are several files, each published
@@ -92,8 +128,7 @@ an `.html` file inside the thread's working directory, and then:
    is missing, and an `<iframe>`. A link in an `<a>` is left alone.
 3. Puts a bootstrap at the start of the head, on the line the head opens on,
    so a script error still names the line of the agent's own file. It carries
-   the content policy, the app's look for bare elements and the bridge to the
-   client. A file with no doctype is given one: in quirks mode the root is as
+   the content policy, the kit above and the bridge to the client. A file with no doctype is given one: in quirks mode the root is as
    tall as its frame and the page could not report its own height.
 4. Stores the result as an artifact snapshot, as `boite attach` does, and
    loads it once in a headless browser of this machine
@@ -107,9 +142,9 @@ is stored or shown: the agent fixes the file and runs the command again. A
 page reaches the user only once it loaded cleanly. On a machine with no
 Chromium-based browser, or when it does not answer within 20 seconds, the
 page is published unchecked and the command says so; the browser started for
-the check is closed when that wait runs out. A checked publish of
-`tests/e2e/fixtures/views/pendulum.html` took 1.06 to 1.14 s over five calls
-of `artifacts.view` in a `bun test` loop, on Linux with Chrome, on 2026-10-07.
+the check is closed when that wait runs out. A checked publish of the
+page `boite view example` prints took 1.5 to 2.2 s over five calls of
+`artifacts.view` in a `bun test` loop, on Linux with Chrome, on 2026-10-07.
 
 The message is an `artifact` part with a `view` field: the title, the two
 heights and the file it came from. A client that does not know the field
