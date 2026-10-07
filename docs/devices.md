@@ -42,7 +42,7 @@ boite device screenshot --output home.png
 boite device tap 540 1200
 boite device swipe 540 2000 540 400 300
 boite device type hello
-boite device key back
+boite device key back                   # also home, recents, enter, backspace, tab, delete, up, down, left, right, power, rotate
 boite device close --shutdown
 ```
 
@@ -78,6 +78,15 @@ backspace, and a field that types printable ASCII. Rotate reaches emulators
 only (`adb emu rotate`). iOS Simulators are
 view-only: `simctl` has no input command, and the agent drives them itself.
 
+A computer (any screen that is not `pointer: coarse`) has no text field: a
+click on the screen gives it the keyboard. Printable ASCII characters are
+typed, Enter, Backspace, Delete, Tab and the arrows are their Android keys,
+and Escape is back. Characters typed while `adb` is busy leave as one text.
+Paste types the computer's clipboard on one line, line breaks turned into
+spaces, and refuses text `adb` cannot type. Wheel notches become one swipe
+from under the pointer. Copying from the device is not available: `adb` has no
+command that reads an Android clipboard.
+
 When a device opens in the conversation on screen, by the agent or by another
 client, the panel opens on the Device tab (`lib/device-watch.ts`).
 
@@ -104,8 +113,9 @@ reaches every method but `devices.frame`, and only for its own conversation;
 - One host, the core's own machine. A device plugged into another machine is
   not listed.
 - iOS is view-only in the panel and needs macOS with Xcode.
-- `type` sends printable ASCII through `adb shell input text`, which reads
-  `%s` as a space.
+- `type`, the keyboard and a paste send printable ASCII through
+  `adb shell input text`, which reads `%s` as a space. Accented letters and
+  emoji do not reach a device, and nothing is copied back from one.
 - Frames are screenshots, not a video stream: a few frames per second.
 - Tests use fake `adb`, `emulator` and `xcrun` scripts
   (`packages/core/test/fixtures/fake-sdk.ts`) and the fake client
