@@ -18,7 +18,7 @@ import { countLogLines, countProcesses, readScriptedLog, writeScriptedProvider }
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
 /** The fixture's environment switches a test may set; every one is cleared after it. */
-const FAKE_SWITCHES = ['CODEX_FAKE_FORK_ERROR', 'CODEX_FAKE_FORK_SAME', 'CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR'];
+const FAKE_SWITCHES = ['CODEX_FAKE_NO_LIVE_SETTINGS', 'CODEX_FAKE_FORK_ERROR', 'CODEX_FAKE_FORK_SAME', 'CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR'];
 
 test('native collaboration is journalled and appears in Team without using Boite delegation', async () => {
   const client = await startCore();
@@ -1235,6 +1235,47 @@ describe('codex driver', () => {
     expect(counted.started).toHaveLength(1);
     expect(counted.exited).toHaveLength(0);
     expect(fakeLog()).not.toContain('thread/resume');
+  });
+
+  test.each([false, true])('an effort and a speed changed during a turn reach that turn (server without the request: %s)', async (old) => {
+    if (old) process.env['CODEX_FAKE_NO_LIVE_SETTINGS'] = '1';
+    const client = await startCore({ warmProcessMinutes: 5 });
+    const { projectId, accountId } = await codexAccount(client);
+    await client.call('providers.probe', { providerId: 'codex-fake', accountId });
+    const thread = await client.call('threads.create', { projectId, providerId: 'codex-fake', accountId, title: 'codex live', model: 'fake-smart', effort: 'low' });
+    await keepTitle(client, thread.id);
+    await client.call('threads.subscribe', { threadId: thread.id });
+    const counted = countProcesses(client, thread.id);
+    const turn = await client.call('turns.start', { threadId: thread.id, prompt: '[slow] Deploy' });
+    await waitFor(() => fakeLog().includes('waiting for interrupt'));
+
+    await client.call('threads.update', { threadId: thread.id, effort: 'high' });
+    await client.call('threads.update', { threadId: thread.id, speed: 'fast' });
+    await client.call('threads.update', { threadId: thread.id, speed: null });
+    await client.call('threads.update', { threadId: thread.id, effort: 'medium' });
+    if (old) {
+      // One refusal tells this app-server has no such request; nothing else is sent to it.
+      await waitFor(() => harness!.core.threads.runner.handles.has(thread.id));
+      await client.call('turns.stop', { threadId: thread.id });
+      await waitFor(() => harness!.core.journal.getTurn(turn.id)?.status === 'stopped');
+      expect(fakeLog()).not.toContain('turn/settings/update');
+      expect(harness!.core.journal.getTurn(turn.id)?.execution).toMatchObject({ effort: 'low', speed: null });
+    } else {
+      await waitFor(() => harness!.core.journal.getTurn(turn.id)?.execution?.effort === 'medium');
+      expect(fakeLog().split('\n').filter(line => line.startsWith('turn/settings/update'))).toEqual([
+        'turn/settings/update codex-fake-turn-1 effort=high serviceTier=-',
+        'turn/settings/update codex-fake-turn-1 effort=- serviceTier=fast',
+        'turn/settings/update codex-fake-turn-1 effort=- serviceTier=null',
+        'turn/settings/update codex-fake-turn-1 effort=medium serviceTier=-',
+      ]);
+      expect(harness!.core.journal.getTurn(turn.id)?.execution).toMatchObject({ effort: 'medium', speed: null });
+      await client.call('turns.stop', { threadId: thread.id });
+      await waitFor(() => harness!.core.journal.getTurn(turn.id)?.status === 'stopped');
+    }
+    // Never a restart, and never a turn/interrupt before the user's own stop.
+    expect(counted.started).toHaveLength(1);
+    expect(countLines('turn/start model=fake-smart effort=low')).toBe(1);
+    expect(harness!.core.threads.require(thread.id)).toMatchObject({ effort: 'medium', speed: null });
   });
 
   test('a dropped session is resumed on the codex thread id the first turn minted', async () => {

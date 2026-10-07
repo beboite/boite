@@ -16,7 +16,7 @@ import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../../pro
 import { grokLaunchArgs } from '../grok.ts';
 import { stderrLines } from '../lines.ts';
 import { exitWithin } from '../exit.ts';
-import type { TurnContext } from '../types.ts';
+import type { LiveTurnSettings, TurnContext } from '../types.ts';
 import { SessionControls } from './controls.ts';
 import { loadRefusal, LoadRefused, rpcReason, rpcRefusal } from './load.ts';
 import { AGENT_OWN_MODEL } from './models.ts';
@@ -218,6 +218,24 @@ export class AcpSession {
     const applied = await this.controls.applyMode({ ...turn.ctx, thread: { ...turn.ctx.thread, permissionMode: mode } });
     if (applied) turn.ctx.thread.permissionMode = mode;
     return applied;
+  }
+
+  /**
+   * The reasoning effort of a prompt that is still running, as the same
+   * `session/set_config_option` a turn starts with. OpenCode 1.18.35 answered
+   * it during a tool call with the new current value and finished the prompt
+   * normally (probed on 2026-10-07); whether the requests left in that prompt
+   * use it is the agent's own business. ACP has no speed. Grok takes its
+   * effort inside `session/set_model`, untested while it prompts, so it waits
+   * for the next turn.
+   */
+  async applySettings(turn: AcpTurn, change: LiveTurnSettings): Promise<LiveTurnSettings> {
+    if (this.current !== turn || turn.isStopped || this.closing || this.ended) return {};
+    const effort = change.effort;
+    if (typeof effort !== 'string' || effort.length === 0) return {};
+    if (!(await this.controls.applyEffort(turn.ctx, effort))) return {};
+    turn.ctx.thread.effort = effort;
+    return { effort };
   }
 
   private async runTurn(turn: AcpTurn): Promise<void> {

@@ -76,6 +76,11 @@ export class FakeQuery {
   readonly setters: string[] = [];
   /** The name of the one setter this CLI refuses, the way an older one would. */
   refuse: string | null = null;
+  /**
+   * A running CLI that accepts `fastMode: true` and keeps answering at standard
+   * speed, as CLI 2.1.291 does on an account without extra usage.
+   */
+  fastStaysOff = false;
   /** What `supportedCommands()` answers, scripted before the query is used. */
   commandsAnswer: SlashCommand[] = [];
   modelsAnswer: Awaited<ReturnType<Query["supportedModels"]>> = [];
@@ -116,7 +121,12 @@ export class FakeQuery {
   }
 
   applyFlagSettings(settings: { effortLevel?: string | null; disableAllHooks?: boolean | null; fastMode?: boolean }): Promise<void> {
-    if ('fastMode' in settings) return this.setter('fastMode', String(settings.fastMode));
+    if ('fastMode' in settings) {
+      const set = this.setter('fastMode', String(settings.fastMode));
+      // The real CLI re-emits `init` after a flag change; its fast mode state is the only truth.
+      if (this.refuse !== 'fastMode') this.emit(sdk({ type: 'system', subtype: 'init', model: 'claude-opus-5', tools: [], fast_mode_state: settings.fastMode && !this.fastStaysOff ? 'on' : 'off' }));
+      return set;
+    }
     if ('disableAllHooks' in settings) return this.setter('disableAllHooks', settings.disableAllHooks === null ? 'the default' : String(settings.disableAllHooks));
     return this.setter('effortLevel', settings.effortLevel ?? 'the default');
   }

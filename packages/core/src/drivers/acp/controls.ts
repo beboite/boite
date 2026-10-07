@@ -239,6 +239,15 @@ export class SessionControls {
     }
   }
 
+  /** One effort level on the session as it runs. False when the agent has no such option or refused it. */
+  async applyEffort(ctx: TurnContext, effort: string): Promise<boolean> {
+    if (isGrok(ctx.provider) || this.configOptions.length === 0) return false;
+    if (effort === this.appliedEffort) return true;
+    if (!(await this.setOption(ctx, 'thought_level', effort))) return false;
+    this.appliedEffort = effort;
+    return true;
+  }
+
   /** True once that value is what the agent is on, whether it was sent or never needed. */
   private async setOption(
     ctx: TurnContext,

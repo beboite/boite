@@ -7,7 +7,7 @@ import { openAiCacheLife } from '../../prompt-cache.ts';
 import type { SpawnedChild } from '../../procs.ts';
 import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import { subscriptionProxyCodexArgs } from '../../subscription-proxy.ts';
-import type { QuestionAsk, SessionContext, TurnContext } from '../types.ts';
+import type { LiveTurnSettings, QuestionAsk, SessionContext, TurnContext } from '../types.ts';
 import { exitWithin } from '../exit.ts';
 import {
   addCounts,
@@ -30,11 +30,13 @@ import {
   EXIT_GRACE_MS,
   FILE_CHANGE_TOOL_NAME,
   MODE_POLICY,
+  LIVE_TURN_SETTINGS,
   NO_NATIVE_SUBAGENTS,
   PERMISSIONS_TOOL_NAME,
   STDERR_MAX,
 } from './protocol.ts';
 import { CodexRpc } from './rpc.ts';
+import { updateTurnSettings } from './live-settings.ts';
 import { CodexTurn } from './turn.ts';
 import { SessionRetention } from '../session-retention.ts';
 
@@ -102,6 +104,8 @@ export class CodexSession {
   private readonly asyncItems = new Set<string>();
   private closing = false;
   private ended = false;
+  /** This app-server has no `turn/settings/update`: an older codex, or the feature refused. */
+  private liveSettingsRefused = false;
   private initializing = false;
   private sqliteInitFailed = false;
   private startupStderr = '';
@@ -195,6 +199,20 @@ export class CodexSession {
     if (this.current !== turn || turn.settled || turn.isStopped || !this.rpc || !this.threadId || !turn.turnId) return false;
     await this.rpc.request('turn/steer', { threadId: this.threadId, expectedTurnId: turn.turnId, input: [{ type: 'text', text, text_elements: [] }, ...imageInputsOf(attachments)] });
     return true;
+  }
+
+  /** Effort and service tier for the requests the running turn has not sent yet; see `updateTurnSettings`. */
+  async applySettings(turn: CodexTurn, change: LiveTurnSettings): Promise<LiveTurnSettings> {
+    if (this.current !== turn || turn.settled || turn.isStopped || !this.rpc || !this.threadId || !turn.turnId || this.liveSettingsRefused) return {};
+    try {
+      const taken = await updateTurnSettings(this.rpc, this.threadId, turn.turnId, change);
+      Object.assign(turn.ctx.thread, taken);
+      return taken;
+    } catch (error) {
+      this.liveSettingsRefused = true;
+      turn.ctx.log('info', `codex: no effort or speed change on a running turn (${messageOf(error)}); it applies to the next turn`);
+      return {};
+    }
   }
 
   /** Archive, shutdown, an idle window, a changed setup: the process goes. */
@@ -354,7 +372,8 @@ export class CodexSession {
         try {
           await rpc.request('initialize', {
             clientInfo: { name: CLIENT_NAME, title: null, version: pkg.version },
-            capabilities: null,
+            // Opens `turn/settings/update` and nothing else this session calls.
+            capabilities: { experimentalApi: true },
           });
           return rpc;
         } catch (error) {
@@ -382,7 +401,7 @@ export class CodexSession {
   private spawn(ctx: SessionContext, executable: string, args: string[]): CodexRpc {
     args = subscriptionProxyCodexArgs(args, ctx.accountEnv);
     if (ctx.thread.permissionMode === 'yolo') args = [...args, '--config', 'features.hooks=false'];
-    args = [...args, ...NO_NATIVE_SUBAGENTS];
+    args = [...args, ...NO_NATIVE_SUBAGENTS, ...LIVE_TURN_SETTINGS];
     const child = ctx.spawnChild(executable, args, {
       startup: true,
       cwd: ctx.thread.cwd,

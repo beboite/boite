@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { messageOf, unavailable } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
 import { launchPrefix, profileFor, resolveExecutable } from '../../providers/resolve.ts';
-import type { TurnContext } from '../types.ts';
+import type { LiveTurnSettings, TurnContext } from '../types.ts';
 import { exitWithin } from '../exit.ts';
 import {
   agentEnv,
@@ -183,6 +183,25 @@ export class PiSession {
     this.steered = true;
     await this.peer.command('steer', { message, ...(attachments.length ? { images: imagesOf(attachments) } : {}) });
     return true;
+  }
+
+  /**
+   * The thinking level for the model calls the running turn has not made yet.
+   * pi answers `set_thinking_level` at any time and its loop reads the level
+   * again before each following call (`prepareNextTurn` in pi-agent-core
+   * 1.0.4, read on 2026-10-07; no live run on a pi account). pi has no speed,
+   * and no level to send for a thread without effort.
+   */
+  async applySettings(turn: PiTurn, change: LiveTurnSettings): Promise<LiveTurnSettings> {
+    if (this.current !== turn || turn.settled || turn.isStopped || !this.peer) return {};
+    const effort = change.effort;
+    if (typeof effort !== 'string' || effort.length === 0) return {};
+    if (effort !== this.effort) {
+      await this.peer.command('set_thinking_level', { level: effort });
+      this.effort = effort;
+    }
+    turn.ctx.thread.effort = effort;
+    return { effort };
   }
 
   /** Archive, shutdown, an idle window, a changed setup: the process goes. */
