@@ -3,7 +3,7 @@
   import { ConnectionGroup } from '../lib/connection-group.svelte';
   import { GroupLinks } from '../lib/group-links.svelte';
   import InfoTip from './InfoTip.svelte';
-  import { ArrowUpRight, Download, Monitor, RefreshCw, Settings2, Trash2, ScanLine } from '@lucide/svelte';
+  import { ArrowUpRight, ChevronDown, RefreshCw, Settings2, Trash2, ScanLine } from '@lucide/svelte';
   import { workspace, machineIcons, type Machine } from '../lib/workspace.svelte';
   import { store as primary } from '../lib/store.svelte';
   import { confirm } from '../lib/confirm.svelte';
@@ -16,10 +16,12 @@
   import ServerUpdateCard from './ServerUpdateCard.svelte';
   import HarnessUpdatesCard from './HarnessUpdatesCard.svelte';
   import AppUpdateContent from './AppUpdateContent.svelte';
-  import { showAppUpdateUi } from '../lib/app-update.svelte';
+  import { appUpdater, showAppUpdateUi } from '../lib/app-update.svelte';
+  import { machineUpdateState, type MachineUpdateState } from '../lib/machine-updates';
   import PairMachine from './PairMachine.svelte';
   import type { Store } from '../lib/store.svelte';
   let { mobile = false }: { mobile?: boolean } = $props();
+  const uid = $props.id();
   const migration = new ConnectionGroup(workspace);
   onDestroy(() => migration.stop());
   const groupStore = $derived((migration.source && workspace.machines.includes(migration.source) ? migration.source.store : null) ?? workspace.machines.find(machine => machine.store.group)?.store ?? workspace.active);
@@ -51,6 +53,44 @@
   let pairingForm = $state<{ startAdding: () => void }>();
   const settingsMachine = $derived(workspace.machines.find(machine => machine.id === settingsId && machine.store.owner));
   const sync = workspace.settingsSync;
+  /** The rows the user folded or unfolded by hand. A machine alone on its list shows its details without a click. */
+  let unfolded = $state<Record<string, boolean>>({});
+  const detailed = (machine: Machine): boolean => unfolded[machine.id] ?? workspace.machines.length === 1;
+  let checking = $state(false);
+
+  /** Boite on that machine and its agents, as the one word its row shows. */
+  function updates(machine: Machine): MachineUpdateState | null {
+    const store = machine.store;
+    if (store.connection !== 'ready') return null;
+    return machineUpdateState({
+      server: store.localCore ? null : store.serverUpdater.busy ? { phase: 'checking' } : store.serverUpdater.snapshot,
+      app: store.localCore && showAppUpdateUi() ? appUpdater.snapshot : null,
+      agents: store.owner ? store.harnessUpdates : []
+    });
+  }
+  const updateLabels: Record<MachineUpdateState, string> = {
+    failed: strings.machines.updateFailed,
+    updating: strings.providerSettings.updating,
+    available: strings.harnessUpdates.availableShort,
+    checking: strings.harnessUpdates.checking,
+    current: strings.serverUpdate.current
+  };
+
+  /** One button for everything that updates: the desktop app, Boite on each machine and the agents there. */
+  async function checkAll() {
+    if (checking) return;
+    checking = true;
+    try {
+      if (showAppUpdateUi()) appUpdater.check();
+      await Promise.all(workspace.machines.filter(machine => machine.store.connection === 'ready' && machine.store.owner).flatMap(machine => [
+        machine.store.loadHarnessUpdates(true),
+        ...(machine.store.localCore ? [] : [machine.store.serverUpdater.load(true)])
+      ]));
+    } finally {
+      checking = false;
+    }
+  }
+
   $effect(() => {
     const section = workspace.active.settingsSection;
     if (workspace.active.settingsTab === 'machines' && section) {
@@ -99,47 +139,31 @@
   {/key}
 {:else}
 <div class="page machines-page" data-testid="machines-page">
+  <!-- The title and its button belong to the section: a link to the machines lands on them, not under them. -->
+  <section class="connections-section" id="settings-machines" aria-label={strings.machines.heading}>
   <header class="head">
-    <div>
-      <h1 class="ui-label-box"><span class="ui-label">{strings.settings.tabs.machines}</span><InfoTip topic={strings.settings.tabs.machines} text={strings.machines.intro} /></h1>
-    </div>
-
+    <h1 class="ui-label-box"><span class="ui-label">{strings.settings.tabs.machines}</span><InfoTip topic={strings.settings.tabs.machines} text={strings.machines.intro} /></h1>
+    <button type="button" class="ghost small" data-testid="updates-check-all" disabled={checking || !workspace.machines.some(machine => machine.store.connection === 'ready')} aria-busy={checking} onclick={() => void checkAll()}>
+      <RefreshCw size={13} class={checking ? 'spinning' : undefined} /><span class="ui-label">{checking ? strings.appUpdate.checkingAction : strings.appUpdate.check}</span>
+    </button>
   </header>
 
-  <section class="updates-section" id="settings-updates" aria-labelledby="updates-heading">
-    <h2 class="section-heading ui-label-box" id="updates-heading"><Download size={16} /><span class="ui-label">{strings.serverUpdate.updates}</span></h2>
-    <p class="section-hint">{strings.machines.updatesHint}</p>
-    {#if showAppUpdateUi()}
-      <section class="card app-update-card" data-testid="app-update-card">
-        <h3 class="ui-label-box"><span class="ui-label">{strings.appUpdate.heading}</span><span class="local ui-label">{strings.machines.local}</span></h3>
-        <AppUpdateContent beforeInstall={() => undefined} />
-      </section>
-    {/if}
-    <div class="update-machines">
-      {#each workspace.machines as machine (machine.id)}
-        {#if machine.store.owner || !machine.store.localCore}
-          <section class="card update-machine" data-testid="machine-updates-card" data-machine-id={machine.id}>
-            <header class="update-machine-heading">
-              <MachineIcon icon={machine.icon} os={machine.store.core?.os} size={18} />
-              <h3 class="ui-label-box"><span class="ui-label">{machine.label}</span></h3>
-              <span class="status ui-label" class:ready={machine.store.connection === 'ready'}>{machine.store.pairingRequired ? strings.mobile.pairingRequired : strings.connection[machine.store.connection]}</span>
-            </header>
-            {#if !machine.store.localCore}<ServerUpdateCard store={machine.store} label={machine.label} />{/if}
-            {#if machine.store.owner}<HarnessUpdatesCard store={machine.store} />{/if}
-          </section>
-        {/if}
-      {/each}
-    </div>
-  </section>
+  <!-- The desktop app updates the computer it runs on, whichever machine the window shows. -->
+  {#if showAppUpdateUi()}
+    <section class="card app-update-card" data-testid="app-update-card" aria-labelledby="{uid}-app-update">
+      <h2 class="ui-label-box" id="{uid}-app-update"><span class="ui-label">{strings.appUpdate.heading}</span><span class="local ui-label">{strings.machines.local}</span></h2>
+      <AppUpdateContent beforeInstall={() => undefined} />
+    </section>
+  {/if}
 
-  <section class="connections-section" id="settings-machines" aria-labelledby="connections-heading">
-    <h2 class="section-heading ui-label-box" id="connections-heading"><Monitor size={16} /><span class="ui-label">{strings.machines.connections}</span></h2>
     {#if !groupStore.owner}<PairMachine {mobile} bind:this={pairingForm} />{/if}
     {#each groupStores as owner (owner.group?.id ?? 'ungrouped')}
     <GroupCard store={owner} {mobile} migration={owner === groupStores[0] ? migration : undefined}>
     <div class="machines">
       {#each machinesOf(owner) as machine (machine.id)}
         {@const coreId = GroupLinks.coreOf(machine)}
+        {@const state = updates(machine)}
+        {@const open = detailed(machine)}
         <section data-core-id={coreId} class="machine-card" data-testid="machine-card" data-group-member={coreId && owner.group?.cores.some(core => core.coreId === coreId) ? "true" : undefined} data-machine-id={machine.id}>
           <div class="main">
             <button
@@ -155,7 +179,7 @@
               <span class="meta">
                 <span class="dot" class:ready={machine.store.connection === 'ready'} aria-hidden="true"></span>
                 <span class="status ui-label" class:ready={machine.store.connection === 'ready'}>{machine.store.pairingRequired ? strings.mobile.pairingRequired : strings.connection[machine.store.connection]}</span>
-                <span class="address ui-label">{machine.store.localCore ? strings.machines.local : machine.id}</span>
+                {#if state}<span class="updates ui-label" data-testid="machine-updates-state" data-state={state}>{updateLabels[state]}</span>{/if}
               </span>
             </div>
             <div class="actions">
@@ -164,9 +188,6 @@
               {:else if machine.store.connection === 'closed'}
                 <button class="ghost icon-only" aria-label={strings.common.refresh} title={strings.common.refresh} onclick={() => void machine.store.connect()}><RefreshCw size={15} /></button>
               {/if}
-              {#if machine.store !== primary}
-                <button class="ghost icon-only" data-testid="machine-remove" aria-label={strings.machines.remove} title={strings.machines.remove} onclick={() => void removeMachine(machine, owner)}><Trash2 size={15} /></button>
-              {/if}
               <!-- The machine already open has nowhere to go. -->
               {#if machine.store !== workspace.active}
                 <button class="ghost small" data-testid="machine-open" onclick={() => void workspace.select(machine.store)}
@@ -174,6 +195,8 @@
                 >
               {/if}
             </div>
+            <button class="ghost icon-only fold" class:open data-testid="machine-details-toggle" aria-label={strings.machines.details} title={strings.machines.details}
+              aria-expanded={open} aria-controls="{uid}-details-{machine.id}" onclick={() => (unfolded[machine.id] = !open)}><ChevronDown size={16} /></button>
           </div>
           <div class="reveal" class:open={customizing === machine.id} inert={customizing !== machine.id}>
             <div>
@@ -184,11 +207,26 @@
               </div>
             </div>
           </div>
-          {#if machine.store.owner && machine.store.core}
-            <button class="ghost small machine-settings-button" data-testid="machine-settings-open" disabled={machine.store.connection !== 'ready' || !machine.store.settings} onclick={() => settingsId = machine.id}>
-              <Settings2 size={14} /><span class="ui-label">{strings.machines.settings}</span>
-            </button>
-          {/if}
+          <!-- Versions, agents and the machine's own settings: one click away, and still in the page for whoever looks for them. -->
+          <div class="reveal" class:open inert={!open} id="{uid}-details-{machine.id}">
+            <div>
+              <div class="details" data-testid="machine-updates-card" data-machine-id={machine.id}>
+                <p class="address"><span class="ui-label">{strings.machines.address}</span><span class="value">{machine.store.localCore ? strings.machines.local : machine.id}</span></p>
+                {#if !machine.store.localCore}<ServerUpdateCard store={machine.store} label={machine.label} />{/if}
+                {#if machine.store.owner}<HarnessUpdatesCard store={machine.store} />{/if}
+                <div class="detail-actions">
+                  {#if machine.store.owner && machine.store.core}
+                    <button class="ghost small" data-testid="machine-settings-open" disabled={machine.store.connection !== 'ready' || !machine.store.settings} onclick={() => settingsId = machine.id}>
+                      <Settings2 size={14} /><span class="ui-label">{strings.machines.settings}</span>
+                    </button>
+                  {/if}
+                  {#if machine.store !== primary}
+                    <button class="ghost small remove" data-testid="machine-remove" onclick={() => void removeMachine(machine, owner)}><Trash2 size={14} /><span class="ui-label">{strings.machines.remove}</span></button>
+                  {/if}
+                </div>
+              </div>
+            </div>
+          </div>
           {#if sync.reports[machine.id]}
             {@const done = sync.reports[machine.id]!}
             {#if done.report.keybindings === null || done.report.brain === 'absent' || done.report.providers.length > 0}
@@ -229,28 +267,20 @@
   }
   .machines-page > :global(*) { max-width: var(--settings-width); }
   .machines { margin: 0; }
-  .updates-section { margin: 20px 0 28px; scroll-margin-top: 84px; }
   .connections-section { scroll-margin-top: 24px; }
-  .section-heading { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: var(--text-base); }
-  .section-heading :global(svg) { color: var(--color-muted-foreground); flex: none; }
-  .section-hint { margin: -4px 0 16px; color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.5; }
-  .update-machines { display: grid; gap: 12px; }
-  .update-machine { padding: 14px; }
-  .update-machine-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-  .update-machine-heading h3 { flex: 1; min-width: 0; margin: 0; font-size: var(--text-sm); overflow-wrap: anywhere; }
-  .update-machine-heading .status { font-size: var(--text-xs); }
-  .app-update-card { padding: 0; margin-bottom: 12px; }
-  .app-update-card h3 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 0; padding: 14px 14px 0; font-size: var(--text-sm); }
-  .app-update-card h3 .local { font-size: var(--text-xs); font-weight: 400; color: var(--color-muted-foreground); }
+  .app-update-card { padding: 0; margin-bottom: 20px; }
+  .app-update-card h2 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 0; padding: 14px 14px 0; font-size: var(--text-sm); }
+  .app-update-card h2 .local { font-size: var(--text-xs); font-weight: 400; color: var(--color-muted-foreground); }
   .head {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 16px;
+    margin-bottom: 16px;
   }
   h1 {
     font-size: var(--text-lg);
-    margin: 0 0 8px;
+    margin: 0;
   }
 
   /* Folds on its row height, so a close animates as much as an open. */
@@ -349,21 +379,29 @@
   .status.ready {
     color: var(--color-success);
   }
-  .address {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .address::before {
-    content: '·';
-    margin-right: 6px;
-  }
+  /* What the machine has to say about its updates, after its connection. */
+  .updates { color: var(--color-muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .updates::before { content: '·'; margin-right: 6px; color: var(--color-subtle); }
+  .updates[data-state='available'] { color: var(--color-accent); }
+  .updates[data-state='failed'] { color: var(--color-danger); }
+  .fold :global(svg) { transition: transform var(--dur-2) var(--ease-out-quint); }
+  .head :global(.spinning) { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  :global(html[data-motion='reduced']) .head :global(.spinning) { animation: none; }
+  .fold.open :global(svg) { transform: rotate(180deg); }
+  .details { padding: 12px 0 4px 52px; }
+  .address { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); }
+  .address .value { color: var(--color-subtle); overflow-wrap: anywhere; }
+  .detail-actions { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 12px 0 0 -8px; }
+  .detail-actions:empty { display: none; }
+  .remove { color: var(--color-danger); }
   .actions {
     display: flex;
     align-items: center;
     gap: 2px;
     flex: none;
   }
+  .fold { flex: none; }
   .icon-only {
     width: var(--control);
     padding: 0;
@@ -385,7 +423,6 @@
     width: 100%;
   }
   /* What the copy did, under the card it wrote to, and what is left to do there. */
-  .machine-settings-button { align-self: flex-start; margin: 8px 0 2px 52px; }
   .sync-report {
     display: grid;
     justify-items: start;
@@ -403,34 +440,44 @@
   }
   .pair-hint { color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.6; margin: 12px 0 0; }
   @media (prefers-reduced-motion: reduce) {
-    .reveal {
+    .reveal,
+    .fold :global(svg) {
       transition: none;
     }
+    .head :global(.spinning) { animation: none; }
   }
   @media (max-width: 720px) {
     .machines-page {
       padding: 16px;
     }
-    .head {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 12px;
-    }
+    .head { flex-wrap: wrap; gap: 8px 12px; }
+    .head button { min-height: var(--touch-target); }
+    /* The name and the fold keep the first line; what else the row offers goes under them. */
     .main {
       flex-wrap: wrap;
     }
-    .identity {
-      flex-basis: calc(100% - 52px);
+    .fold {
+      order: 2;
+      min-width: var(--touch-target);
+      min-height: var(--touch-target);
     }
     .actions {
+      order: 3;
       width: 100%;
       justify-content: flex-end;
     }
+    .actions:empty {
+      display: none;
+    }
+    .actions button {
+      min-height: var(--touch-target);
+    }
     .icon-choices,
+    .details,
     .sync-report {
       padding-left: 0;
       margin-left: 0;
     }
-    .machine-settings-button { margin-left: 0; min-height: var(--touch-target); }
+    .detail-actions button { min-height: var(--touch-target); }
   }
 </style>

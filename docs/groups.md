@@ -5,8 +5,9 @@ it connects to every other machine of it, in both directions, with no pairing
 link each. A phone paired with one machine reaches all of them. Agents on one
 machine find the agents of the others.
 
-Settings shows one group card containing the machine connections and their
-settings. Opening Machines converts existing full-control connections into one
+Settings shows one group card containing the machine connections, one row
+each, with their updates and settings folded under the row
+([machines](machines.md#the-machines-page)). Opening Machines converts existing full-control connections into one
 group automatically, reusing an existing group when there is one. Offline
 machines join when they reconnect while the page is open. Device-only
 connections retain their role and are never made group members.

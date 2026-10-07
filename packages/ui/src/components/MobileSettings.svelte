@@ -207,7 +207,7 @@
   .detail :global(.page), .detail :global(.machines-page) { padding: 16px; }
   /* The bar above already names the page, so its own title steps aside. */
   .detail :global(.page:not(.machines-page):not(.limits-page) > header),
-  .detail :global(.machines-page > .head h1),
+  .detail :global(.machines-page .head h1),
   .detail :global(.limits-page > header h1) { display: none; }
   /* Its refresh joins the bar, at the right end: alone on a row it pushed the cards down. */
   .detail :global(.limits-page > header) { position: absolute; top: 8px; right: 12px; margin: 0; }

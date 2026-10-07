@@ -61,9 +61,13 @@ test('text and icons share a vertical centre across reading fonts, menus and pho
     }
     await page.evaluate(`__boiteTest.workspace.active.showSettings('machines')`);
     await page.waitFor(`document.querySelector('[data-testid="harness-updates-card"] h4 .info-tip')`);
+    // The agents sit under each machine's row: measured once the row is open.
+    await page.evaluate(`document.querySelectorAll('[data-testid="machine-details-toggle"][aria-expanded="false"]').forEach((toggle) => toggle.click())`);
+    await page.waitFor(`document.querySelector('[data-testid="machine-details-toggle"][aria-expanded="false"]') === null`);
     for (const result of await labelOffsets(page, [
-      ['#updates-heading svg', '#updates-heading .ui-label'],
-      ['#connections-heading svg', '#connections-heading .ui-label'],
+      ['[data-testid="machines-page"] h1 .info-tip', '[data-testid="machines-page"] h1 .ui-label'],
+      ['[data-testid="updates-check-all"] svg', '[data-testid="updates-check-all"] .ui-label'],
+      ['[data-testid="machine-settings-open"] svg', '[data-testid="machine-settings-open"] .ui-label'],
       ['[data-testid="harness-updates-card"] h4 .info-tip', '[data-testid="harness-updates-card"] h4 .ui-label'],
       ['[data-testid="harness-updates-check"]', '[data-testid="harness-updates-check"] .ui-label'],
     ])) expect(Math.abs(result.offset), `${font}: machine updates`).toBeLessThanOrEqual(0.8);
