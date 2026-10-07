@@ -15,9 +15,11 @@ agents without a readable latest version.
 
 ## What the user sees
 
-Settings, Machines and updates lists each machine's agents in the Updates
-section, with their installed and available versions, Update and Skip.
-Updates create no pinned chat notice.
+Settings, Machines and updates lists each machine's agents under that
+machine's details, with their installed and available versions, Update and
+Skip. A machine with a release waiting for one of its agents says Update
+available on its row before the details are opened; a skipped release does
+not. Updates create no pinned chat notice.
 
 - Update releases the provider's warm processes and runs the update in the
   background. The row shows progress; the next turn starts the new version.

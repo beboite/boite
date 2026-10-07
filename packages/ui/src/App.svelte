@@ -48,6 +48,8 @@
   import ThreadPreparation from './components/ThreadPreparation.svelte';
 
   let store = $derived(workspace.active);
+  // The machine the window opened on may still give way to one that answers: until then nothing of it is drawn.
+  const booted = $derived(store.booted && !(workspace.waiting && store === workspace.primary));
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   // A page the agent opens brings its browser forward in the panel, on every client (lib/agent-browser-watch.ts).
   $effect(() => {
@@ -276,7 +278,9 @@
     // Keep other errors (including a failed pairing attempt) visible.
     const pairingNotice = !inShell && (narrow.current || wideRecovery) && store.pairingRequired
       && (error === strings.errors.unpaired || error === strings.errors.revoked);
-    if (!error || pairingNotice) {
+    // A machine that may still give way to one that answers has nothing to report yet.
+    const held = workspace.waiting && owner === workspace.primary;
+    if (!error || pairingNotice || held) {
       toast.hide();
       return;
     }
@@ -574,12 +578,12 @@
   <ThreadPreparation {store} visible={documentVisible && (inShell || mobileScreen === 'chat')} />
 {/if}
 
-<div class="app" class:shell={inShell} class:ready={store.booted} class:phone-chat={!inShell && !mobileRecovery && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting style:--typing-state={documentVisible ? 'running' : 'paused'} bind:this={appRoot}>
-  {#if !inShell && store.booted}<MobileNavigation {store} recover={mobileRecovery} bind:screen={mobileScreen} />{/if}
+<div class="app" class:shell={inShell} class:ready={booted} class:phone-chat={!inShell && !mobileRecovery && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting style:--typing-state={documentVisible ? 'running' : 'paused'} bind:this={appRoot}>
+  {#if !inShell && booted}<MobileNavigation {store} recover={mobileRecovery} bind:screen={mobileScreen} />{/if}
   <TitleBar {store} />
 
   <div class="body" class:mobile-covered={!inShell && store.page === 'chat' && (mobileScreen !== 'chat' || mobileRecovery)} class:panel-maximized={rightPanel.maximized && !rightPanel.floating && store.panelOpen} class:sidebar-folded={sidebarFolded}>
-    {#if !store.booted}
+    {#if !booted}
       <p class="empty boot">{strings.app.loading}</p>
     {:else if wideRecovery}
       <div class="wide-recovery" data-testid="wide-recovery"><MobileConnect {store} onpaired={() => {}} /></div>

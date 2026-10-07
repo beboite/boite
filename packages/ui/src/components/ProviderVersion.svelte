@@ -1,6 +1,7 @@
 <script module lang="ts">
   import type { HarnessUpdate, ProviderSummary } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
+  import { harnessOffered, harnessSkipped } from '../lib/machine-updates';
 
   /** Boite's own copy of the agent has a newer download waiting. */
   export function updatable(store: Store, provider: ProviderSummary): boolean {
@@ -11,13 +12,9 @@
     return install?.state === 'installed' && install.available !== install.version;
   }
 
-  function newer(update: HarnessUpdate): boolean {
-    return update.latest !== null && update.current !== null && update.latest !== update.current && (update.pending || update.skipped === update.latest || update.state === 'failed');
-  }
-
-  const skippedNow = (update: HarnessUpdate): boolean => update.skipped !== null && update.skipped === update.latest;
-  /** The release a row offers: the arrow and the Update button go together. */
-  const offered = (update: HarnessUpdate): boolean => !skippedNow(update) && (update.pending || (update.state === 'failed' && newer(update)));
+  // The release a row offers: the arrow and the Update button go together, and the machine list reads the same test.
+  const skippedNow = harnessSkipped;
+  const offered = harnessOffered;
 </script>
 
 <script lang="ts">
