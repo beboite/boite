@@ -273,7 +273,13 @@ when the core advertises `chunkedAnswers`.
   prefixes cannot prove that the omitted text stayed unchanged.
 - File links arrive with their name, MIME type and decoded byte count. Their
   base64 data loads through `messages.attachment` when opened or downloaded.
-  Assistant media previews retain their bytes on first read.
+  An assistant's video, audio or PDF keeps its bytes, since it previews on
+  mount. An assistant's picture above 8 KiB is deferred like a prompt's, with
+  its size and blur, and `ChatFile` loads it within 400 px of the screen in a
+  box of its proportions. Nine screenshots an agent attached made a 40-message
+  page of one thread weigh 12,020,008 bytes, 7,472,667 deflated (measured on
+  2026-10-07). The same page projected this way weighs 50,961 bytes, 13,679
+  deflated.
   Older cores return full files, and a cached deferred file can fall back to
   their history methods after a downgrade.
 - On a core advertising `readingPages`, pages ask for `compactImages`: a

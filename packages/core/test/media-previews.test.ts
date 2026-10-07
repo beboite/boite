@@ -81,6 +81,25 @@ describe('deferred pictures', () => {
     expect(full).toEqual({ type: 'image', mimeType: 'image/png', data: SHOT, alt: 'msg_shot.png' });
   });
 
+  test("an agent's attached picture is deferred with its size and blur, while its video keeps its bytes", async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const video = Buffer.from('a short clip').toString('base64');
+    harness.core.journal.putMessage({
+      id: 'msg_attached', threadId, turnId: 'trn_seed', role: 'assistant', state: 'complete', createdAt: 2_000,
+      parts: [
+        { type: 'file', mimeType: 'image/png', data: SHOT, name: 'street.png' },
+        { type: 'file', mimeType: 'video/mp4', data: video, name: 'drive.mp4' },
+      ],
+    });
+    const light = await client.call('threads.get', { threadId, compactFiles: true, compactImages: true });
+    const [picture, clip] = light.messages.find((message) => message.id === 'msg_attached')!.parts;
+    expect(picture).toMatchObject({ type: 'file', name: 'street.png', data: '', dataDeferred: true, width: 320, height: 180, bytes: Buffer.from(SHOT, 'base64').length });
+    expect(picture?.type === 'file' && picture.preview?.startsWith('data:image/png;base64,')).toBe(true);
+    expect(clip).toEqual({ type: 'file', mimeType: 'video/mp4', data: video, name: 'drive.mp4' });
+    expect((await client.call('messages.attachment', { threadId, messageId: 'msg_attached', partIndex: 0 })).data).toBe(SHOT);
+  });
+
   test('a light page still opens, sized and without blurs, when the blurs cannot be read', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);

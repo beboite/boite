@@ -1208,7 +1208,8 @@ export type MessagePart =
    * made one. Never persisted.
    */
   | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null; dataDeferred?: true; bytes?: number; width?: number; height?: number; preview?: string }
-  | { type: 'file'; mimeType: string; data: string; name: string | null; dataDeferred?: true; bytes?: number }
+  /** A deferred picture file (`previewFileData`) carries `width`, `height` and `preview` as a deferred image does. */
+  | { type: 'file'; mimeType: string; data: string; name: string | null; dataDeferred?: true; bytes?: number; width?: number; height?: number; preview?: string }
   /** An immutable published file; resolve its bytes with artifacts.read, never as a disk path. */
   | { type: 'artifact'; id: string; mimeType: string; bytes: number; name: string }
   /** The model's reasoning as the provider streams it, folded in the UI. */

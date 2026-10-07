@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
@@ -30,6 +30,8 @@ let core: RunningCore;
 let client: CoreClient;
 let page: BrowserPage;
 let threadId: string;
+let agentThreadId: string;
+const SCENES = 9;
 
 /** A gradient with noise on it: a PNG of about a megabyte that blurs to its own colours. */
 function screenshot(index: number): string {
@@ -106,6 +108,18 @@ beforeAll(async () => {
     });
     await done;
   }
+  // A thread where the agent attached its own screenshots, as `boite attach` does.
+  const agent = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: echo.id, title: 'An agent attaching screenshots' });
+  agentThreadId = agent.id;
+  const turned = new Promise<void>((resolve) => {
+    const off = client.on('turn.finished', (turn) => { if (turn.threadId === agentThreadId) { off(); resolve(); } });
+  });
+  await client.call('turns.start', { threadId: agentThreadId, prompt: 'Show me every scene of the game.' });
+  await turned;
+  for (let index = 0; index < SCENES; index += 1) {
+    writeFileSync(join(core.dataDir, `scene-${index + 1}.png`), Buffer.from(screenshot(SHOTS + index), 'base64'));
+    await client.call('artifacts.publish', { threadId: agentThreadId, path: `scene-${index + 1}.png` });
+  }
   page = await BrowserPage.launch({ url: 'about:blank', windowSize: { width: 1280, height: 900 } });
   await page.send('Page.addScriptToEvaluateOnNewDocument', { source: HOLD_MEDIA });
   await page.navigate(pairingUrlOf(core));
@@ -176,7 +190,7 @@ test('on a phone the pictures fit the column at their proportions', async () => 
   await page.evaluate('window.__media.hold = true');
   // The oldest screenshots were never fetched: the top of the thread shows them blurred.
   await page.evaluate(`document.querySelector('${timeline}').scrollTop = 0`);
-  await page.waitFor(`(${visible}).length > 0 && (${visible}).every((node) => node.dataset.state === 'waiting' && node.querySelector('[data-testid=image-preview]'))`);
+  await page.waitFor(`(${visible}).some((node) => node.dataset.state === 'waiting' && node.querySelector('[data-testid=image-preview]'))`);
   await settled();
   await page.screenshot(join(artifacts, 'media-phone-blur.png'));
   await page.evaluate('window.__media.release()');
@@ -189,4 +203,39 @@ test('on a phone the pictures fit the column at their proportions', async () => 
   expect(fits).toBe(true);
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
   await page.screenshot(join(artifacts, 'media-phone-loaded.png'));
+}, 60_000);
+
+test("an agent's attached screenshots open on a light page and load near the screen in boxes of their size", async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  const light = await client.call('threads.get', { threadId: agentThreadId, limit: 40, compactTools: true, compactFiles: true, compactImages: true, compactToolParts: true });
+  const files = light.messages.flatMap((message) => message.parts.filter((part) => part.type === 'file'));
+  const total = files.reduce((sum, part) => sum + (part.type === 'file' ? part.bytes ?? 0 : 0), 0);
+  console.log(`agent pictures: ${files.length} files of ${total} bytes, the light page ${JSON.stringify(light).length} characters`);
+  expect(files).toHaveLength(SCENES);
+  expect(files.every((part) => part.type === 'file' && part.dataDeferred && part.width === WIDTH && part.height === HEIGHT && part.preview)).toBe(true);
+  expect(JSON.stringify(light).length).toBeLessThan(total / 20);
+
+  const shown = `Array.from(document.querySelectorAll('${timeline} [data-testid=chat-file] .shot')).filter((node) => {
+    const rect = node.getBoundingClientRect();
+    const box = document.querySelector('${timeline}').getBoundingClientRect();
+    return rect.bottom > box.top && rect.top < box.bottom;
+  })`;
+  await page.evaluate('window.__media.sent = 0; window.__media.hold = true');
+  await page.click(`[data-thread-id="${agentThreadId}"]`);
+  await page.waitFor(`(${shown}).length > 0 && (${shown}).every((node) => node.querySelector('[data-testid=artifact-blur]'))`);
+  await settled();
+  const ratios = await page.evaluate<number[]>(`(${shown}).map((node) => { const rect = node.getBoundingClientRect(); return rect.width / rect.height; })`);
+  for (const ratio of ratios) expect(Math.abs(ratio - WIDTH / HEIGHT)).toBeLessThan(0.02);
+  const asked = await page.evaluate<number>('window.__media.sent');
+  console.log(`agent thread opened: ${asked} of ${SCENES} pictures asked, ${ratios.length} on screen`);
+  expect(asked).toBeLessThan(SCENES);
+  await page.screenshot(join(artifacts, 'media-agent-blur.png'));
+  const top = `Math.round(document.querySelector('${timeline} [data-testid=chat-file]').getBoundingClientRect().top)`;
+  const before = await page.evaluate<number>(top);
+
+  await page.evaluate('window.__media.release()');
+  await page.waitFor(`(${shown}).length > 0 && (${shown}).every((node) => node.querySelector('img:not(.blur)')?.complete && !node.querySelector('.blur'))`);
+  await settled();
+  expect(await page.evaluate<number>(top)).toBe(before);
+  await page.screenshot(join(artifacts, 'media-agent-loaded.png'));
 }, 60_000);

@@ -46,7 +46,7 @@ function toolParts(message: Message, options: { inputs: boolean; strict: boolean
 function project(message: Message, options: TransportOptions, strict: boolean, previews?: ImagePreviews): Message {
   const tools = options.compactTools || options.compactToolParts
     ? toolParts(message, { inputs: !!options.compactToolParts, strict }) : message;
-  const files = options.compactFiles ? previewFileData([tools])[0]! : tools;
+  const files = options.compactFiles ? previewFileData([tools], previews)[0]! : tools;
   return options.compactImages ? previewImageData([files], strict ? 0 : undefined, previews)[0]! : files;
 }
 

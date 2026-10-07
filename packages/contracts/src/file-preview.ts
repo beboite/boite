@@ -12,14 +12,30 @@ function base64Bytes(data: string): number {
   return Math.floor(data.length * 3 / 4) - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
 }
 
-/** File links need names and sizes. Preserve bytes for assistant media that previews on mount. */
-export function previewFileData(messages: Message[]): Message[] {
+/** A picture a client draws in its box, and so can wait for, deferred with its size and blur. */
+const DRAWN_IMAGE = /^image\/(png|jpeg|gif|webp)$/;
+
+/**
+ * File links need names and sizes. An assistant's video, audio or PDF keeps
+ * its bytes: it previews on mount. An assistant's picture above
+ * `IMAGE_INLINE_CHARS` is deferred like a prompt's, with the size its header
+ * gives and its blur, and is read once it nears the screen: nine screenshots
+ * an agent attached made a 40-message page weigh 12 MB.
+ */
+export function previewFileData(messages: Message[], previews?: ImagePreviews): Message[] {
   return messages.map(message => {
     let changed = false;
-    const parts = message.parts.map(part => {
-      if (part.type !== 'file' || part.dataDeferred || (message.role !== 'user' && (/^(image|video|audio)\//.test(part.mimeType) || part.mimeType === 'application/pdf'))) return part;
+    const parts = message.parts.map((part, index) => {
+      if (part.type !== 'file' || part.dataDeferred) return part;
+      const picture = DRAWN_IMAGE.test(part.mimeType);
+      if (message.role !== 'user' && (picture ? part.data.length <= IMAGE_INLINE_CHARS : /^(image|video|audio)\//.test(part.mimeType) || part.mimeType === 'application/pdf')) return part;
       changed = true;
-      return { ...part, data: '', bytes: base64Bytes(part.data), dataDeferred: true as const };
+      const size = picture ? imageSize(part.data) : null;
+      const preview = picture ? previews?.(message.id, index, part.data) ?? null : null;
+      return {
+        ...part, data: '', bytes: base64Bytes(part.data), dataDeferred: true as const,
+        ...(size === null ? {} : size), ...(preview === null ? {} : { preview }),
+      };
     });
     return changed ? { ...message, parts } : message;
   });

@@ -93,6 +93,41 @@ test('a deferred file shows its size and fetches the owning conversation only wh
   expect(new TextDecoder().decode((invoke.mock.lastCall as unknown as [string, Uint8Array])[1])).toBe('zip bytes');
 });
 
+test("an agent's deferred picture keeps its box and blur until it nears the screen, then loads in the same box", async () => {
+  const callbacks: IntersectionObserverCallback[] = [];
+  const native = globalThis.IntersectionObserver;
+  globalThis.IntersectionObserver = class {
+    constructor(callback: IntersectionObserverCallback) { callbacks.push(callback); }
+    observe() {}
+    disconnect() {}
+  } as unknown as typeof IntersectionObserver;
+  try {
+    const loadMessageAttachment = vi.fn(async () => photo.data);
+    running = mount(ChatFile, { target: document.body, props: {
+      file: { ...photo, data: '', dataDeferred: true, bytes: 1_400_000, width: 1280, height: 720, preview: 'data:image/png;base64,BLUR' },
+      store: { loadMessageAttachment } as unknown as Store, threadId: 'thread', messageId: 'message', partIndex: 0
+    } });
+    flushSync();
+    const waiting = query<HTMLElement>('[data-testid=artifact-waiting] .shot');
+    // As wide as the picture, or as its height capped at min(480px, 65vh) allows.
+    const width = waiting.style.width;
+    expect(width).toMatch(/^min\(1280px, calc\(min\(480px, 65vh\) ?\* ?1280 ?\/ ?720\)\)$/);
+    expect(waiting.style.aspectRatio).toBe('1280 / 720');
+    expect(query('[data-testid=artifact-blur]').getAttribute('src')).toBe('data:image/png;base64,BLUR');
+    // Far from the screen, the picture is not fetched.
+    expect(loadMessageAttachment).not.toHaveBeenCalled();
+
+    for (const callback of callbacks) callback([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+    await vi.waitFor(() => expect(document.querySelector('[data-testid=artifact-enlarge] img:not(.blur)')?.getAttribute('src')).toBe('blob:attachment'));
+    expect(loadMessageAttachment).toHaveBeenCalledWith('thread', 'message', 0);
+    const shown = query<HTMLElement>('[data-testid=artifact-enlarge]');
+    expect(shown.style.width).toBe(width);
+    expect(shown.style.aspectRatio).toBe('1280 / 720');
+  } finally {
+    globalThis.IntersectionObserver = native;
+  }
+});
+
 test('a failed attachment refresh does not save bytes from the previous successful read', async () => {
   const invoke = vi.fn(async () => ({ path: 'C:/Downloads/build.zip', opened: true }));
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;

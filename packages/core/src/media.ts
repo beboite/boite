@@ -98,7 +98,8 @@ export class MediaPreviews {
       const known = mediaPreviews(journal.db, messageId);
       let complete = message.state !== 'streaming';
       message.parts.forEach((part, index) => {
-        if (part.type !== 'image' || part.data.length <= IMAGE_INLINE_CHARS || known.has(index)) return;
+        const picture = part.type === 'image' || (part.type === 'file' && /^image\/(png|jpeg|gif|webp)$/.test(part.mimeType));
+        if (!picture || part.data.length <= IMAGE_INLINE_CHARS || known.has(index)) return;
         const done = this.enqueue(threadId, messageId, index, part.data);
         if (done === null) complete = false;
         else waits.push(done);
