@@ -19,6 +19,7 @@ import type { Projects } from './store/projects.svelte';
 import type { Requests } from './store/requests.svelte';
 import type { CoreSettings } from './store/settings.svelte';
 import type { Terminals } from './store/terminals.svelte';
+import type { DisplayImages } from './store/display-images';
 import type { Threads } from './store/threads.svelte';
 import type { Workbench } from './store/workbench.svelte';
 import type { Workflows } from './store/workflows.svelte';
@@ -503,6 +504,8 @@ export class Store {
   open(...args: Parameters<Threads['open']>) { return this.#ctx.threads.open(...args); }
   loadToolOutput(...args: Parameters<Threads['loadToolOutput']>) { return this.#ctx.threads.loadToolOutput(...args); }
   loadMessageAttachment(...args: Parameters<Threads['loadMessageAttachment']>) { return this.#ctx.threads.loadMessageAttachment(...args); }
+  /** The light copy of a deferred picture the timeline draws (`store/display-images.ts`); the original stays with `loadMessageAttachment`. */
+  loadDisplayImage(...args: Parameters<DisplayImages['load']>) { return this.#ctx.displayImages.load(...args); }
   get loadingThreadId() { return this.#ctx.threads.loadingThreadId; }
   /** How much of the loading thread arrived, against the core's total; null until the first slice. */
   get loadingBytes() { return this.#ctx.threads.loadingBytes; }

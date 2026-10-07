@@ -1202,9 +1202,14 @@ export type MessagePart =
    * An image the user sent with the prompt, journalled with the message. A page
    * asked with `compactImages` leaves a large one's `data` empty, with
    * `dataDeferred` and its decoded `bytes`: `messages.attachment` reads it.
+   * Such a page also gives it `width` and `height`, the size it is drawn at,
+   * read from its header with JPEG's EXIF orientation applied, and `preview`,
+   * a ThumbHash blur of at most 32 px as a `data:image/png` URL, once the core
+   * made one. Never persisted.
    */
-  | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null; dataDeferred?: true; bytes?: number }
-  | { type: 'file'; mimeType: string; data: string; name: string | null; dataDeferred?: true; bytes?: number }
+  | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null; dataDeferred?: true; bytes?: number; width?: number; height?: number; preview?: string }
+  /** A deferred picture file (`previewFileData`) carries `width`, `height` and `preview` as a deferred image does. */
+  | { type: 'file'; mimeType: string; data: string; name: string | null; dataDeferred?: true; bytes?: number; width?: number; height?: number; preview?: string }
   /** An immutable published file; resolve its bytes with artifacts.read, never as a disk path. */
   | { type: 'artifact'; id: string; mimeType: string; bytes: number; name: string }
   /** The model's reasoning as the provider streams it, folded in the UI. */
@@ -3556,10 +3561,20 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
     params: { threadId: ThreadId; messageId: MessageId; toolId: string };
     result: { part: Extract<MessagePart, { type: 'tool' }> };
   };
-  /** Read one journalled attachment on demand. No filesystem path or executable is accepted. */
+  /**
+   * Read one journalled attachment on demand. No filesystem path or executable
+   * is accepted. With `display`, a PNG, JPEG or WebP picture comes as the copy
+   * the timeline draws: WebP at quality 80, at most `DISPLAY_IMAGE_MAX` pixels
+   * on its longer side, made once and kept by the core, with `mimeType`
+   * `image/webp`. A screenshot of 1.5 MB becomes about 100 KB. A plain read
+   * still returns the original, which the viewer and a download ask for. A GIF,
+   * a picture the core cannot convert or one its copy would not shrink, and any
+   * other file, come as they are, without `mimeType`. An older core ignores
+   * `display` the same way.
+   */
   'messages.attachment': {
-    params: { threadId: ThreadId; messageId: MessageId; partIndex: number };
-    result: { data: string };
+    params: { threadId: ThreadId; messageId: MessageId; partIndex: number; display?: boolean };
+    result: { data: string; mimeType?: string };
   };
   'threads.update': {
     params: {
@@ -4066,4 +4081,7 @@ export function supportsSideQuestions(protocol: Protocol): boolean {
 export { sideQuestionSnapshot } from './side-question-snapshot.ts';
 export { deriveThreadCapabilities, protocolSupportsSteering, type ThreadCapabilitySnapshot } from './thread-capabilities.ts';
 export { resumeAnchor, snapshotOptionsProblem } from './thread-sync.ts';
-export { previewFileData, previewImageData } from './file-preview.ts';
+export { IMAGE_INLINE_CHARS, previewFileData, previewImageData, type ImagePreviews } from './file-preview.ts';
+/** The longer side, in pixels, of the copy `messages.attachment` sends with `display`. */
+export const DISPLAY_IMAGE_MAX = 1280;
+export { imageSize } from './image-size.ts';

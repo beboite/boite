@@ -538,6 +538,31 @@ test('a long thread renders a window of messages and carries the rest in the spa
   expect(below?.style.height).toBe(`${(500 - 262) * ESTIMATE}px`);
 });
 
+test('a prompt not measured yet counts its pictures at their thumbnail height, from the size a light page sent', async () => {
+  const messages = thread(500);
+  messages[10] = {
+    ...messages[10]!,
+    role: 'user',
+    parts: [
+      { type: 'text', text: 'two screenshots' },
+      { type: 'image', mimeType: 'image/png', data: '', alt: null, dataDeferred: true, bytes: 1, width: 1280, height: 720 },
+      { type: 'image', mimeType: 'image/png', data: '', alt: null, dataDeferred: true, bytes: 1, width: 300, height: 100 }
+    ]
+  };
+  stubLayout(messages.length * ESTIMATE);
+  running = mount(MessageList, { target: document.body, props: { store, threadId: 't-long', messages } });
+  await settle();
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  timeline.scrollTop = 20_000;
+  timeline.dispatchEvent(new Event('scroll'));
+  await settle();
+
+  // A 240 px thumbnail for the tall one, its own 100 px for the short one, and
+  // a row's frame each: 360 px more above, so 20000 px is message 245, not 250.
+  expect(articles()[0]?.dataset['mid']).toBe('m-241');
+  expect(spacer('timeline-above')?.style.height).toBe(`${241 * ESTIMATE + 250 + 110}px`);
+});
+
 test('a viewer opened from a row stays open, its files readable, once the rows leave the window', async () => {
   const create = URL.createObjectURL, revoke = URL.revokeObjectURL;
   onTestFinished(() => { URL.createObjectURL = create; URL.revokeObjectURL = revoke; });

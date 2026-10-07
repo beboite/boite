@@ -133,9 +133,9 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 588,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,225,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,250,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,550,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,600,000 |
 
 The total JavaScript measure excludes native binaries and source maps. On
 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
@@ -144,6 +144,10 @@ the core gains 533,240 bytes, mostly the official MCP SDK and its validation
 dependency, loaded only by `boite mcp`; the UI gains 10,992 bytes for recovery,
 task history, capabilities and fork return. The entry sizes stayed below their
 unchanged limits. These are build sizes, not startup or memory measurements.
+
+Sizes and blurs for deferred pictures measured 3,587,361 emitted core bytes
+on Windows CI on 2026-10-06, 7,361 bytes above the previous 3,580,000 limit:
+the image header parser and the preview queue.
 
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured

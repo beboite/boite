@@ -1,3 +1,4 @@
+import { reactive } from '../test/reactive.svelte';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { Message } from '@boite/contracts';
@@ -220,4 +221,27 @@ test('a picture sent with a prompt opens in the viewer among the others', () => 
   expect(query<HTMLImageElement>('[data-testid=image-viewer] img').alt).toBe('IMG_0001.jpg');
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); flushSync();
   expect(document.querySelector('[data-testid=image-viewer]')).toBeNull();
+});
+
+test('a deferred picture drawn from its light copy opens its original in the viewer, fetched on the click', async () => {
+  const thread = document.createElement('div');
+  thread.dataset.mediaGallery = '';
+  document.body.append(thread);
+  const message = reactive({
+    id: 'm2', threadId: 't1', turnId: 'u1', role: 'user', createdAt: 1_790_000_000_000, state: 'complete',
+    parts: [{ type: 'image', mimeType: 'image/png', data: '', alt: 'screen.png', dataDeferred: true, bytes: 2_400_000, width: 1920, height: 1080 }]
+  } as unknown as Message);
+  const part = message.parts[0] as Extract<Message['parts'][number], { type: 'image' }>;
+  // As the store does: the original goes into the part it holds.
+  const loadMessageAttachment = vi.fn(async () => { part.data = btoa('original'); delete part.dataDeferred; return part.data; });
+  const loadDisplayImage = vi.fn(async () => 'data:image/webp;base64,COPY');
+  const store = { providerOf: () => undefined, openThread: null, loadMessageAttachment, loadDisplayImage, reportError: vi.fn() } as unknown as Store;
+  const progress = { responded: () => false } as unknown as TurnProgress;
+  mounted.push(mount(UserMessage, { target: thread, props: { store, message, turn: undefined, progress } }));
+  flushSync();
+
+  query<HTMLButtonElement>('[data-testid=image-open]').click();
+  await vi.waitFor(() => expect(document.querySelector('[data-testid=image-viewer] img')?.getAttribute('src')).toBe(`data:image/png;base64,${btoa('original')}`));
+  expect(loadMessageAttachment).toHaveBeenCalledWith('t1', 'm2', 0);
+  expect(query<HTMLImageElement>('[data-testid=image-viewer] img').alt).toBe('screen.png');
 });

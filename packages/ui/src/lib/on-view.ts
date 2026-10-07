@@ -12,10 +12,11 @@ function scroller(node: Element): Element | null {
 }
 
 /**
- * Calls `seen` once, the first time `node` comes within `margin` of what its
- * scrolling container shows: what a picture a light page left on the core
- * waits for before it is fetched. Without `IntersectionObserver` it is called
- * at once.
+ * Calls `seen` each time `node` comes within `margin` of what its scrolling
+ * container shows: what a picture a light page left on the core waits for
+ * before it is fetched, and again on the way back to one whose fetch failed.
+ * The caller ignores the calls it no longer needs. Without
+ * `IntersectionObserver` it is called once, at once.
  */
 export function onView(node: Element, seen: () => void, margin = '400px'): { destroy(): void } {
   if (typeof IntersectionObserver === 'undefined') {
@@ -24,7 +25,6 @@ export function onView(node: Element, seen: () => void, margin = '400px'): { des
   }
   const observer = new IntersectionObserver((entries) => {
     if (!entries.some((entry) => entry.isIntersecting)) return;
-    observer.disconnect();
     seen();
   }, { root: scroller(node), rootMargin: margin });
   observer.observe(node);
