@@ -41,15 +41,19 @@ function updateHarness(ctx: FakeContext, providerId: string): RpcResult<'provide
   }
   update.state = 'updating';
   update.pending = false;
+  // The real core pauses each running turn of the agent after its tool call first; the fake shows them as waited for.
+  const running = [...ctx.threads.values()].filter((thread) => thread.providerId === providerId && ['running', 'waiting'].includes(thread.status)).length;
+  update.waitingFor = running;
   ctx.emit('providers.updatesChanged', structuredClone(ctx.harnessUpdates));
   setTimeout(() => {
+    delete update.waitingFor;
     update.state = 'idle';
     update.current = update.latest ?? update.current;
     // An updater that checks by itself names its newest release by running: the one it reports now.
     if (update.route === 'self') update.latest = update.current;
     update.checkedAt = Date.now();
     ctx.emit('providers.updatesChanged', structuredClone(ctx.harnessUpdates));
-  }, 1200);
+  }, running > 0 ? 8000 : 1200);
   return structuredClone(update);
 }
 

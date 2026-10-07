@@ -1,4 +1,4 @@
-import type { PermissionMode, ThreadId, ThreadSummary, Turn, TurnId } from '@boite/contracts';
+import type { PermissionMode, ProviderId, ThreadId, ThreadSummary, Turn, TurnId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { getDriver, releaseThread } from '../drivers/index.ts';
 import type { TurnResult } from '../drivers/types.ts';
@@ -35,6 +35,21 @@ export class TurnRunner {
   noteMail(threadId: ThreadId, at: number): void {
     const turn = this.core.journal.listTurns(threadId).findLast(turn => turn.status === 'running');
     if (turn) this.answerAfter.set(turn.id, Math.max(at, this.answerAfter.get(turn.id) ?? 0));
+  }
+
+  /** Asks a running turn to pause at its next tool boundary for an agent update. False when the thread runs no turn. */
+  requestPause(threadId: ThreadId, providerId: ProviderId): boolean {
+    return this.attempts.requestPause(threadId, providerId);
+  }
+
+  /** Withdraws a pause not yet taken. */
+  cancelPause(threadId: ThreadId): void {
+    this.attempts.cancelPause(threadId);
+  }
+
+  /** True while the thread's turn waits for its agent's update. */
+  isPaused(threadId: ThreadId): boolean {
+    return this.attempts.isPaused(threadId);
   }
 
   changePermissionMode(threadId: ThreadId, mode: PermissionMode): void {
