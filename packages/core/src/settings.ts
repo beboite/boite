@@ -1,4 +1,4 @@
-import { checkSettingsPatch, DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, subscriptionProxyServes, type Settings } from '@boite/contracts';
+import { checkSettingsPatch, DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, subscriptionProxyOf, type Settings } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { writesTitles } from './drivers/index.ts';
 import { invalidParams } from './errors.ts';
@@ -54,7 +54,8 @@ export class SettingsStore {
         });
       }
     }
-    const next: Settings = { ...this.get(), ...checked.patch };
+    const previous = this.get();
+    const next: Settings = { ...previous, ...checked.patch };
     this.core.journal.append({ type: 'settings.changed', threadId: null, version: 1, payload: next }, () => {
       // Private credentials share the transaction, never its public event payload.
       persistPrivate?.();
@@ -66,7 +67,10 @@ export class SettingsStore {
     if (checked.patch.subscriptionProxy !== undefined) {
       for (const account of this.core.accounts.list()) {
         const provider = this.core.providers.get(account.providerId);
-        if (subscriptionProxyServes(provider)) {
+        // Only an account the gateway answered for before or answers for now: a
+        // refusal kept on any other one came from its own sign-in, and a proxy
+        // that never served it has nothing to say about it.
+        if (subscriptionProxyOf(previous, provider) !== null || subscriptionProxyOf(next, provider) !== null) {
           this.core.journal.deleteSetting(`account-auth-rejected:${account.id}`);
           this.core.accounts.check(account.id, true);
         }

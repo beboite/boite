@@ -14,7 +14,7 @@ import type { Translation } from './i18n.svelte';
 export const fr: Translation = {
   subscriptionProxy: {
     heading: 'Proxy d\'abonnements', enable: 'Utiliser un proxy d\'abonnements',
-    hint: 'Claude et Codex utilisent la passerelle de cette machine, et OpenCode 2 ajoute ses autres modèles aux siens. Limites ouvre son tableau de bord dans Boite. Les autres agents gardent leur configuration.',
+    hint: 'Claude et Codex utilisent la passerelle de cette machine, Grok aussi derrière Douane, et OpenCode 2 ajoute ses autres modèles aux siens. Limites ouvre son tableau de bord dans Boite. Les autres agents gardent leur configuration.',
     baseUrl: 'URL de l\'API', dashboardUrl: 'URL du tableau de bord des limites', key: 'Clé API (facultative)',
     keyHint: 'Laissez vide pour garder la clé enregistrée. Utilisez la clé API du proxy, pas sa clé de gestion du tableau de bord.',
     clearKey: 'Retirer la clé enregistrée', save: 'Enregistrer le proxy', saved: 'Proxy enregistré',
@@ -23,7 +23,7 @@ export const fr: Translation = {
     openDashboard: 'Ouvrir le tableau de bord',
     signInHint: 'Connectez-vous avec Ouvrir le tableau de bord, puis rechargez ici. Si la page reste vide, ce tableau peut refuser les vues intégrées.',
     mixedContent: "Cette page utilise HTTPS. Configurez une URL de tableau HTTPS pour l'afficher ici, ou ouvrez le tableau HTTP séparément.",
-    enabledHint: 'Activé, les comptes connectés sur cette machine ne sont plus utilisés pour Claude et Codex.',
+    enabledHint: 'Activé, les comptes connectés sur cette machine ne sont plus utilisés pour Claude et Codex, ni pour Grok derrière Douane.',
     account: 'Les requêtes passent par {name} ({origin}). Les connexions de ce PC ne sont pas utilisées.',
     via: 'via {name}',
     quotasFailed: 'Impossible de lire les limites de {name} : {error}',

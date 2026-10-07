@@ -1,4 +1,5 @@
-import { subscriptionProxyName, subscriptionProxyOf, type ModelInfo, type ProviderDescriptor, type SubscriptionProxy } from '@boite/contracts';
+import { join } from 'node:path';
+import { subscriptionProxyName, subscriptionProxyOf, type ModelInfo, type ProviderDescriptor, type ProviderId, type SubscriptionProxy } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, unavailable, RpcFailure } from './errors.ts';
 import { OPENCODE_V2 } from './providers/opencode.ts';
@@ -17,6 +18,7 @@ export const PROXY_KEY_ENV = 'BOITE_SUBSCRIPTION_PROXY_KEY';
 export const PROXY_PREFIX_ENV = 'BOITE_SUBSCRIPTION_PROXY_PREFIX';
 /** OpenCode 2's runtime for a gateway that speaks Chat Completions, which both gateways do for every model. */
 const OPENCODE_GATEWAY_PACKAGE = '@opencode/ai/providers/openai-compatible';
+const GROK: ProviderId = 'grok';
 
 export function activeSubscriptionProxy(core: Core, provider: ProviderDescriptor): SubscriptionProxy | null {
   return subscriptionProxyOf(core.settings.get(), provider);
@@ -60,6 +62,34 @@ function openCodeGatewayEnv(core: Core, provider: ProviderDescriptor, proxy: Sub
   return { OPENCODE_CONFIG_CONTENT: JSON.stringify(content), [PROXY_KEY_ENV]: key, [PROXY_PREFIX_ENV]: `${proxy.kind}/` };
 }
 
+/**
+ * Grok's CLI is sent to the gateway by its environment alone, and stays the
+ * same agent. It lists the gateway's Grok models itself (`provider=xai`) under
+ * xAI's ids and in xAI's order (`ids=upstream`): a thread keeps its model
+ * whether the proxy is on or off, and a session opens on xAI's default, the
+ * first of a list. Each row carries the window and the efforts the CLI reads.
+ * Turns name the pool they spend, since another subscription of the gateway
+ * can route a model of the same name.
+ *
+ * The CLI prefers a stored sign-in to a key and would send that token to the
+ * gateway. `GROK_AUTH_PATH` points it at a file nothing writes, so it finds no
+ * sign-in and the account's own stays as it was for when the proxy is off. Its
+ * key check and its chat proxy move to the gateway with the rest: the key
+ * never reaches xAI.
+ */
+function grokGatewayEnv(core: Core, proxy: SubscriptionProxy, key: string): Record<string, string> {
+  const api = proxyApiUrl(proxy);
+  return {
+    XAI_API_KEY: key,
+    GROK_MODELS_BASE_URL: api,
+    GROK_MODELS_LIST_URL: `${api}/models?provider=xai&ids=upstream`,
+    GROK_XAI_API_BASE_URL: api,
+    GROK_CLI_CHAT_PROXY_BASE_URL: api,
+    GROK_AUTH_PATH: join(core.dataDir, 'subscription-proxy', 'grok-auth.json'),
+    GROK_CONFIG: JSON.stringify({ models: { extra_headers: { 'x-douane-provider': 'xai' } } }),
+  };
+}
+
 export function proxyApiUrl(proxy: SubscriptionProxy): string {
   return `${proxy.baseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, '')}/v1`;
 }
@@ -75,6 +105,7 @@ export function subscriptionProxyEnv(core: Core, provider: ProviderDescriptor): 
   if (!proxy) return {};
   const key = proxyKey(core);
   if (provider.id === OPENCODE_V2) return openCodeGatewayEnv(core, provider, proxy, key);
+  if (provider.id === GROK) return grokGatewayEnv(core, proxy, key);
   if (provider.protocol === 'claude-sdk') return {
     ANTHROPIC_BASE_URL: proxyApiUrl(proxy).replace(/\/v1$/, ''),
     ANTHROPIC_AUTH_TOKEN: key, ANTHROPIC_API_KEY: '',
@@ -167,6 +198,8 @@ export function proprietaryFamily(id: string): ModelFamily | null {
 export async function readSubscriptionProxyModels(core: Core, provider: ProviderDescriptor): Promise<ModelInfo[] | null> {
   const proxy = activeSubscriptionProxy(core, provider);
   if (!proxy) return null;
+  // Grok's CLI reads the gateway's list itself and takes no model outside it: its discovery is the whole catalog.
+  if (provider.id === GROK) return null;
   let response: Response;
   try {
     response = await fetch(`${proxyApiUrl(proxy)}/models`, {

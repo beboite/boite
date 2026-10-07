@@ -1797,20 +1797,34 @@ export const SUBSCRIPTION_PROXY_PROTOCOLS: readonly Protocol[] = ['claude-sdk', 
  * provider, and by agents that keep their own configuration.
  */
 export const SUBSCRIPTION_PROXY_PROVIDERS: readonly ProviderId[] = ['opencode-v2'];
+/**
+ * The providers only one kind of gateway serves. Grok's CLI takes its models
+ * from the gateway's own list, and Douane writes that list the way the CLI
+ * reads it: xAI's ids in xAI's order, each with its window and efforts.
+ */
+export const SUBSCRIPTION_PROXY_KIND_PROVIDERS: Readonly<Record<SubscriptionProxy['kind'], readonly ProviderId[]>> = {
+  douane: ['grok'],
+  cliproxyapi: [],
+};
 
 /** What tells whether a proxy serves a provider: its id and its protocol, as a descriptor and a summary both carry them. */
 export type SubscriptionProxyTarget = { id: ProviderId; protocol: Protocol };
 
-/** Whether an enabled subscription proxy serves this provider. Core and clients decide alike. */
-export function subscriptionProxyServes(provider: SubscriptionProxyTarget | null | undefined): boolean {
-  return provider !== null && provider !== undefined
-    && (SUBSCRIPTION_PROXY_PROTOCOLS.includes(provider.protocol) || SUBSCRIPTION_PROXY_PROVIDERS.includes(provider.id));
+/**
+ * Whether a subscription proxy serves this provider: one of that kind, or one
+ * of either kind when none is named. Core and clients decide alike.
+ */
+export function subscriptionProxyServes(provider: SubscriptionProxyTarget | null | undefined, kind?: SubscriptionProxy['kind']): boolean {
+  if (provider === null || provider === undefined) return false;
+  if (SUBSCRIPTION_PROXY_PROTOCOLS.includes(provider.protocol) || SUBSCRIPTION_PROXY_PROVIDERS.includes(provider.id)) return true;
+  const kinds = kind === undefined ? Object.values(SUBSCRIPTION_PROXY_KIND_PROVIDERS) : [SUBSCRIPTION_PROXY_KIND_PROVIDERS[kind]];
+  return kinds.some((ids) => ids.includes(provider.id));
 }
 
 /** The enabled proxy that serves this provider, or null. */
 export function subscriptionProxyOf(settings: Pick<Settings, 'subscriptionProxy'> | null | undefined, provider: SubscriptionProxyTarget | null | undefined): SubscriptionProxy | null {
   const proxy = settings?.subscriptionProxy;
-  return proxy?.enabled && subscriptionProxyServes(provider) ? proxy : null;
+  return proxy?.enabled && subscriptionProxyServes(provider, proxy.kind) ? proxy : null;
 }
 
 export function subscriptionProxyName(kind: SubscriptionProxy['kind']): string {
