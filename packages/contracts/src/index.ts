@@ -1384,6 +1384,7 @@ export const MESSAGE_PAGE = 120;
 export const INITIAL_MESSAGE_PAGE = 40;
 export { previewToolOutputs, previewToolPart, inputPreview, longerThan, TOOL_OUTPUT_INLINE_CHARS, TOOL_OUTPUT_PREVIEW_CHARS, TOOL_INPUT_INLINE_CHARS, TOOL_INPUT_PREVIEW_CHARS, TOOL_DOCUMENTS_INLINE_CHARS } from './message-preview';
 export { forTransport, projectMessage, MESSAGE_SENT_MAX_BYTES, type TransportOptions } from './transport.ts';
+export { boundedMessageWindow } from './message-window.ts';
 export { lastAgentText, notificationExcerpt, requestExcerpt, NOTIFICATION_TEXT_CHARS } from './notification-text';
 /**
  * The core's generic notification body, named so a phone can show it in the
@@ -1405,7 +1406,8 @@ export interface PushPayload {
 export const MESSAGE_PAGE_MAX = 200;
 /**
  * Serialized UTF-8 bytes of a page's message array, including its brackets and
- * commas. One complete message may exceed this budget to advance pagination,
+ * commas, shared by both halves of a page around a saved reading position.
+ * One complete message may exceed this budget to advance pagination,
  * provided the full RPC response still fits `RPC_MAX_FRAME_BYTES`. A reconnect
  * tail must fit this budget in full; otherwise `threads.get` returns a page.
  */

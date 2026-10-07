@@ -312,6 +312,11 @@ describe('opening where the reader was', () => {
     expect(thread.messagesBefore).toBe(ids(thread.messages)[0]!);
     expect(thread.messagesAfter).toBe(ids(thread.messages).at(-1)!);
 
+    const single = await client.call('threads.get', { threadId, around: 'msg_0100', limit: 1 });
+    expect(ids(single.messages)).toEqual(['msg_0100']);
+    expect(single.messagesBefore).toBe('msg_0100');
+    expect(single.messagesAfter).toBe('msg_0100');
+
     const walked = [...ids(thread.messages)];
     let cursor = thread.messagesAfter ?? null;
     while (cursor !== null) {
