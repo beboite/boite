@@ -163,24 +163,34 @@ export function activeLocale(): Locale {
  * means none. Without a shell tag it is the region of a
  * machine language matching the app's, then of the first one carrying any. A
  * clock the shell names explicitly (12 or 24 hours) overrides the region's.
- * The last answer is kept, since every formatted row asks with the same input.
+ * The last answer is kept and checked by reference, since every formatted row
+ * asks with the same inputs: the browser hands back the same
+ * `navigator.languages` array until the languages change.
  */
-let lastFormat = { key: '', tag: '' };
+let last: { inputs: readonly unknown[]; tag: string } = { inputs: [], tag: '' };
 
 export function formatLocale(): string {
-  const active = activeLocale();
   const shell = typeof window === 'undefined' ? undefined : window.__BOITE_REGION__;
-  const machine = typeof navigator === 'undefined' ? [] : [...(navigator.languages ?? []), navigator.language];
-  const key = `${active}|${shell?.locale}|${shell?.hour12}|${machine.join(',')}`;
-  if (lastFormat.key !== key) lastFormat = { key, tag: formatTag(active, shell, machine) };
-  return lastFormat.tag;
+  const languages = typeof navigator === 'undefined' ? undefined : navigator.languages;
+  const language = typeof navigator === 'undefined' ? undefined : navigator.language;
+  const inputs = [activeLocale(), shell?.locale, shell?.hour12, languages, language];
+  if (last.tag === '' || inputs.some((input, at) => input !== last.inputs[at])) {
+    last = { inputs, tag: formatTag(activeLocale(), shell, [...(languages ?? []), language]) };
+  }
+  return last.tag;
 }
 
 function formatTag(active: Locale, shell: Window['__BOITE_REGION__'], machine: unknown[]): string {
-  const parsed = machine.map(parse);
   const own = parse(shell?.locale);
-  const region = own ? own.region : parsed.find((locale) => locale?.language === active && locale.region)?.region
-    ?? parsed.find((locale) => locale?.region)?.region;
+  let region: string | undefined;
+  if (own) {
+    // A shell tag without a region means none, not the webview's.
+    region = own.region;
+  } else {
+    const parsed = machine.map(parse);
+    region = parsed.find((locale) => locale?.language === active && locale.region)?.region
+      ?? parsed.find((locale) => locale?.region)?.region;
+  }
   const clock = typeof shell?.hour12 === 'boolean' ? `-u-hc-${shell.hour12 ? 'h12' : 'h23'}` : '';
   try {
     return Intl.getCanonicalLocales(`${active}${region ? `-${region}` : ''}${clock}`)[0] ?? active;

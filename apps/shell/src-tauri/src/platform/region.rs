@@ -14,9 +14,11 @@ pub(crate) struct Region {
 
 /// `window.__BOITE_REGION__`, run first by the main window (`window.rs`) and
 /// the quota popup (`quota_window.rs`). A new window drawing the app UI adds
-/// it to its builder; browser tabs and sign-in popups show other sites.
+/// it to its builder; browser tabs and sign-in popups show other sites. Read
+/// once, so every window formats alike until the app restarts.
 pub(crate) fn script() -> String {
-    script_for(&read())
+    static SCRIPT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SCRIPT.get_or_init(|| script_for(&read())).clone()
 }
 
 fn script_for(region: &Region) -> String {
@@ -34,12 +36,16 @@ fn posix_tag(value: &str) -> Option<String> {
 
 /// A name shaped like a BCP 47 tag, letters, digits and `-`; anything else says nothing.
 fn tag(name: &str) -> Option<String> {
-    (!name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).then(|| name.to_owned())
+    let shaped = name.chars().any(|c| c.is_ascii_alphanumeric()) && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    shaped.then(|| name.to_owned())
 }
 
+/// macOS reads the same variables, which a Finder launch usually leaves unset:
+/// the UI then falls back to the webview's languages. A native `CFLocale` read
+/// would cover it.
 #[cfg(not(windows))]
 fn read() -> Region {
-    // The first variable set wins, the way libc resolves LC_TIME.
+    // The first variable set and non-empty wins, the way libc resolves LC_TIME.
     let locale = ["LC_ALL", "LC_TIME", "LANG"].iter()
         .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()))
         .and_then(|value| posix_tag(&value));
@@ -55,6 +61,7 @@ fn read() -> Region {
     // SAFETY: the buffer and its length match; the call writes a NUL-terminated name.
     let written = unsafe { GetUserDefaultLocaleName(name.as_mut_ptr(), name.len() as i32) };
     let locale = (written > 1).then(|| String::from_utf16_lossy(&name[..written as usize - 1])).as_deref().and_then(tag);
+    // 80 is the documented maximum for LOCALE_SSHORTTIME, its NUL included.
     let mut pattern = [0u16; 80];
     // SAFETY: a null name is LOCALE_NAME_USER_DEFAULT; the buffer and its length match.
     let written = unsafe { GetLocaleInfoEx(std::ptr::null(), LOCALE_SSHORTTIME, pattern.as_mut_ptr(), pattern.len() as i32) };
@@ -90,6 +97,7 @@ mod tests {
         assert_eq!(posix_tag("x\"y"), None);
         assert_eq!(tag("fr-CH").as_deref(), Some("fr-CH"));
         assert_eq!(tag(""), None);
+        assert_eq!(tag("---"), None);
     }
 
     #[test]

@@ -157,8 +157,14 @@ test('the desktop shell region and clock win over the webview languages', () => 
   window.__BOITE_REGION__ = { locale: 'en', hour12: null };
   expect(formatLocale()).toBe('en');
 
+  // No tag, or one that does not parse, leaves the webview's region, and an
+  // explicit clock still applies.
   window.__BOITE_REGION__ = { locale: 'not a tag!', hour12: null };
   expect(formatLocale()).toBe('en-US');
+  window.__BOITE_REGION__ = { locale: null, hour12: null };
+  expect(formatLocale()).toBe('en-US');
+  window.__BOITE_REGION__ = { locale: null, hour12: false };
+  expect(formatLocale()).toBe('en-US-u-hc-h23');
 });
 
 test('a translation only carries sentences English has, with the same kind and the same slots', () => {

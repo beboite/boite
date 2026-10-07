@@ -29,10 +29,13 @@ app on a US machine `07:40 PM` and `Oct 7`, and French on a French machine
 operating system's regional format
 (`apps/shell/src-tauri/src/platform/region.rs`: Windows' Region settings and
 their short time pattern; elsewhere the first of `LC_ALL`, `LC_TIME` and
-`LANG` that is set) and sets
+`LANG` that is set and non-empty) and sets
 `window.__BOITE_REGION__` before the page runs, because the webview reports
 only languages: WebView2 on an English Windows set to Switzerland says `en-US`.
-A 12 or 24 hour clock picked in Windows overrides the region's. In a browser
+A 12 or 24 hour clock picked in Windows overrides the region's. A shell tag
+without a region (`LANG=en`) means none; a missing or unparsable one falls
+back to the webview, as in a browser. A Mac app opened from Finder usually has
+none of those variables, so macOS takes the webview's languages for now. In a browser
 or on a phone, the region is that of a machine language matching the app's,
 then of the first language carrying one. Every date, count, duration, size and
 dollar amount goes through `formatLocale()` (`lib/format.ts`, `lib/usage.ts`),
