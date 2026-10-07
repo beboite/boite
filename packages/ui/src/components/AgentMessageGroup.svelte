@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { BellRing, ChevronRight, CornerDownLeft, Forward, CircleAlert, UserCog } from '@lucide/svelte';
+  import { BellRing, ChevronRight, CornerDownLeft, Forward, UserCog } from '@lucide/svelte';
   import type { AgentMail, AgentMailGroup } from '../lib/agent-mail';
-  import { mailNeedsAttention } from '../lib/agent-mail';
   import { count } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -22,12 +21,17 @@
       : one ? strings.agentMessages.receivedOne : strings.agentMessages.receivedMany;
     return fill(text, { count: count(size) });
   }
+  /** The threads on the other end of a row, each named once in the order they wrote. */
+  function names(entries: AgentMail[]): string {
+    const titles = entries.map(entry => (entry.direction === 'outgoing' ? entry.letter.toTitle : entry.letter.from.title).trim());
+    return [...new Set(titles.filter(Boolean))].join(', ');
+  }
 </script>
 
 <div class="exchanges" data-testid="agent-message-group" data-group-id={group.id}>
   {#each kinds as kind}
     {@const entries = group.entries.filter(entry => kindOf(entry) === kind)}
-    {@const issues = entries.filter(mailNeedsAttention).length}
+    {@const who = kind === 'outgoing' || kind === 'incoming' ? names(entries) : ''}
     {@const direction = kind === 'outgoing' ? 'outgoing' : 'incoming'}
     {#if entries.length}
       <button type="button" class="summary" class:received={kind === 'incoming'} class:steward={kind === 'steward'} class:notice={kind === 'notice'}
@@ -41,8 +45,8 @@
           {:else}<CornerDownLeft size={16} strokeWidth={1.75} />{/if}
         </span>
         <span class="content">
-          <span>{label(kind, entries.length)}</span>
-          {#if issues}<span class="issues" data-testid="agent-message-issues"><CircleAlert size={12} /><span class="ui-label">{fill(issues === 1 ? strings.agentMessages.issueOne : strings.agentMessages.issueMany, { count: count(issues) })}</span></span>{/if}
+          <span data-testid="agent-message-label">{label(kind, entries.length)}</span>
+          {#if who}<span class="who" data-testid="agent-message-who">{who}</span>{/if}
         </span>
         <ChevronRight size={14} strokeWidth={1.75} aria-hidden="true" />
       </button>
@@ -62,6 +66,6 @@
   .notice .content { color: var(--color-muted-foreground); }
   .arrow { display: flex; flex: none; }
   .content { display: flex; flex-direction: column; gap: 4px; color: var(--color-foreground); overflow-wrap: anywhere; }
-  .issues { display: flex; align-items: center; gap: 4px; font-size: var(--text-xs); color: var(--color-danger); }
+  .who { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; font-size: var(--text-xs); color: var(--color-muted-foreground); }
   @media (max-width: 720px) { .summary { min-height: var(--touch-target); } }
 </style>

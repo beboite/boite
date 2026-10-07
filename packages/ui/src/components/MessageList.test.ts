@@ -294,6 +294,7 @@ test('a completed mail-only turn keeps its footer below received and forwarded m
   const group = groups[0]!;
   expect(group.textContent).toContain('Received 2 messages');
   expect(group.textContent).toContain('Forwarded 1 message');
+  expect([...group.querySelectorAll('[data-testid=agent-message-who]')].map(node => node.textContent)).toEqual([thread.title, 'Peer']);
   expect(group.compareDocumentPosition(footers[1]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(groups[1]!.compareDocumentPosition(footers[2]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(document.body.textContent).not.toContain('Boite agent coordination');
@@ -393,7 +394,8 @@ test('a burst of 33 agent messages stays in two counters as new mail arrives, an
   const group = document.querySelector('[data-testid=agent-message-group]')!;
   expect(group.textContent).toContain('Forwarded 13 messages');
   expect(group.textContent).toContain('Received 20 messages');
-  expect(group.textContent).toContain('1 message needs attention');
+  expect([...group.querySelectorAll('[data-testid=agent-message-who]')].map(node => node.textContent)).toEqual(['Agent', 'Agent']);
+  expect(group.textContent).not.toContain('attention');
   expect(document.body.textContent).not.toContain('Private exchange');
   expect(document.querySelectorAll('[data-testid=agent-message-group]')).toHaveLength(1);
   expect(articles()).toHaveLength(3);
@@ -439,8 +441,9 @@ test('a steward\'s thread and the thread its agent started keep their mail and p
   thread = owner.openThread!;
   running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
   flushSync();
-  expect([...document.querySelectorAll<HTMLElement>('[data-testid=agent-message-summary]')].map(node => [node.dataset.kind, node.textContent?.trim()]))
-    .toEqual([['outgoing', 'Forwarded 1 message'], ['notice', '1 thread notice']]);
+  expect([...document.querySelectorAll<HTMLElement>('[data-testid=agent-message-summary]')].map(node => [node.dataset.kind,
+    node.querySelector('[data-testid=agent-message-label]')?.textContent, node.querySelector('[data-testid=agent-message-who]')?.textContent]))
+    .toEqual([['outgoing', 'Forwarded 1 message', steer.toTitle], ['notice', '1 thread notice', undefined]]);
 });
 
 /** A store whose thread still has older messages behind the window. */
