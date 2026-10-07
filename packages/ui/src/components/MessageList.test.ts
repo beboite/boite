@@ -1057,7 +1057,8 @@ test('a turn of a thousand calls is drawn as a window of rows, and only its firs
   let most = 0;
   let labels = 0;
   const top = Number.parseFloat(spacer('timeline-above')!.style.height);
-  for (let at = top; at >= 0; at -= 400) {
+  // One screen per step: every part of the thread passes through the view once.
+  for (let at = top; at >= 0; at -= VIEW_HEIGHT) {
     timeline.scrollTop = at;
     timeline.dispatchEvent(new Event('scroll'));
     await settle();
@@ -1075,7 +1076,8 @@ test('a turn of a thousand calls is drawn as a window of rows, and only its firs
   expect(most).toBeGreaterThan(1);
   expect(most).toBeLessThan(14);
   expect(labels).toBeLessThanOrEqual(1);
-});
+  // About 90 redraws of an 11.5 MiB thread: 4 s alone, over 15 s beside the other suites on a CI runner.
+}, 60_000);
 
 test('a scroll inside the rows already drawn redraws nothing and reads no tool call again', async ({ ready }) => {
   window.localStorage.clear();
