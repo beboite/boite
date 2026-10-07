@@ -133,7 +133,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 588,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,355,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,375,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,640,000 |
 
@@ -173,6 +173,14 @@ candidate's `major`, the SQLite login, the switch and the subscription proxy's
 provider block for OpenCode 2. The core JavaScript limit rises to 3,640,000.
 With the agents' chat merged, the build measured 4,342,122 UI bytes and
 3,622,067 core bytes, 12,878 and 17,933 under their limits.
+
+Later on 2026-10-07 on Linux, `main` at `9356e7b6` measured 4,355,057 UI
+bytes, 57 above the 4,355,000 limit, after keyboard, mouse and clipboard input
+for the agent browser and devices. Grok behind Douane adds 229 bytes, the two
+proxy hints in each language and the map of providers a proxy kind serves, for
+4,355,286 UI bytes and 3,626,459 emitted core JavaScript bytes. The UI limit
+rises to 4,375,000, leaving about 19 KB of headroom; the core JavaScript limit
+of 3,640,000 leaves about 13 KB.
 
 On 2026-10-05 on Linux, `origin/main` at `290220a9` measured about 4,183,200 UI
 bytes and 3,446,800 emitted core JavaScript bytes. Stewards and the owner's
