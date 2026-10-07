@@ -178,7 +178,10 @@
 
 <style>
   /* On the same 4 px rest as the parts it names. */
-  .model-attribution { color: var(--color-muted-foreground); font-size: var(--text-xs); margin-bottom: 8px; padding-left: var(--activity-padding); }
+  .model-attribution { color: var(--color-muted-foreground); font-size: var(--text-xs); margin-bottom: 8px; padding-left: var(--activity-padding); opacity: 0; transition: opacity var(--dur-2); }
+  /* Read on demand, as a message's time and buttons are. */
+  :global(.message:hover) .model-attribution { opacity: 1; }
+  @media (hover: none) { .model-attribution { opacity: 1; } }
   .system-attribution { width: fit-content; margin-bottom: 6px; padding: 2px 7px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); color: var(--color-muted-foreground); background: var(--color-surface-2); font-size: var(--text-xs); font-weight: 600; }
 
   /* A 4 px rest on the left so an answer does not kiss the column's edge. */

@@ -5,8 +5,8 @@
   import { fill, strings } from '../lib/strings';
 
   /**
-   * The small buttons a message shows under itself while the pointer is on it,
-   * or always under a finger: copy what it says, and for a turn the ways back
+   * The small buttons and send time a message shows under itself while the
+   * pointer is on it, or always under a finger: copy what it says, and for a turn the ways back
    * into it. Each action is offered only when its caller hands it over.
    */
   let {
@@ -80,16 +80,19 @@
     gap: 2px;
   }
 
-  .act { opacity: 0; transition: opacity var(--dur-2); }
+  /* The send time is read when wanted, like the buttons. */
+  .act, .stamp { opacity: 0; transition: opacity var(--dur-2); }
 
   :global(.message:hover) .act,
-  .message-actions:focus-within .act {
+  :global(.message:hover) .stamp,
+  .message-actions:focus-within .act,
+  .message-actions:focus-within .stamp {
     opacity: 1;
   }
 
-  /* A finger has no hover: the buttons stay. */
+  /* A finger has no hover: the buttons and the time stay. */
   @media (hover: none) {
-    .act { opacity: 1; }
+    .act, .stamp { opacity: 1; }
   }
 
   .stamp {

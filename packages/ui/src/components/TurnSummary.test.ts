@@ -72,6 +72,18 @@ test('a compaction keeps its own duration whatever request it follows', () => {
   expect(document.querySelector('[data-testid=turn-elapsed]')?.getAttribute('title')).toBeNull();
 });
 
+test.each([
+  ['a finished turn', {}, [], true],
+  ['a stopped turn', { status: 'stopped' }, [], true],
+  ['a failed turn', { status: 'error' }, [], false],
+  ['a running turn', { status: 'running', finishedAt: null, usage: null }, [], false],
+  ['a finished turn with work left running', {}, [{ id: 'bash-1', kind: 'shell', description: 'bun run dev', toolId: 'tool-1', startedAt: STARTED }], false],
+] as const)('%s waits for the pointer only when nothing in it needs attention', (_name, overrides, background, settled) => {
+  running = mount(TurnSummary, { target: document.body, props: { turn: turn(overrides as Partial<Turn>), background: [...background] as BackgroundTask[] } });
+  flushSync();
+  expect(document.querySelector('[data-testid=turn-summary]')?.classList.contains('settled')).toBe(settled);
+});
+
 test('work left in the background is counted by kind and can be stopped', () => {
   const tasks: BackgroundTask[] = [
     { id: 'bash-1', kind: 'shell', description: 'bun run dev:ui', toolId: 'tool-1', startedAt: STARTED },

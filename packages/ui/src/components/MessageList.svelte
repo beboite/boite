@@ -26,7 +26,7 @@
   import { retryTurn } from '../lib/composer-edit';
   import { TurnProgress } from '../lib/turn-progress.svelte';
   import { BLOCK_GAP, GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, estimateSlot, measurable, reaches, sameView, windowStats, type WindowView } from '../lib/message-window';
-  import { TimelineRows, rowEstimate, rowIndexOf, type TimelineRow } from '../lib/timeline-rows';
+  import { TimelineRows, rowEstimate, rowIndexOf, seam, type TimelineRow } from '../lib/timeline-rows';
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
   import { glides } from '../lib/motion';
@@ -756,7 +756,7 @@
       {#if view.above > 0}
         <div class="spacer" data-testid="timeline-above" style="height: {view.above}px"></div>
       {/if}
-      {#each rendered as row (row.id)}
+      {#each rendered as row, index (row.id)}
         {@const message = row.message}
         {@const group = grouped.groups.get(message.id)}
         {@const turn = store.openThread?.turns.find(turn => turn.id === message.turnId)}
@@ -766,6 +766,7 @@
           use:track={row}
           class="message {message.role}"
           class:rest={!row.first}
+          data-seam={seam(rows[view.start + index - 1], row)}
           data-testid={row.first ? 'message' : 'message-rest'}
           data-role={group ? 'agent-mail' : message.role}
         >
@@ -879,6 +880,8 @@
     margin-top: calc(var(--chat-block-gap) - var(--chat-message-gap));
     animation: none;
   }
+  .message[data-seam='part'] { margin-top: calc(var(--chat-part-gap) - var(--chat-message-gap)); }
+  .message[data-seam='block'] { margin-top: calc(var(--chat-block-gap) - var(--chat-message-gap)); }
 
   .jump {
     position: absolute;

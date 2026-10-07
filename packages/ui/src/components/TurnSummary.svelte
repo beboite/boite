@@ -61,6 +61,8 @@
     fill(strings.chat.cacheTokens, { read: formatTokens(usage.cacheReadTokens), write: formatTokens(usage.cacheWriteTokens) }),
   ].join('\n'));
   const still = $derived(backgroundLabel(background.map((task) => task.kind)));
+  /** A turn over with nothing left running: its time and tokens wait for the pointer. */
+  const settled = $derived((turn.status === 'done' || turn.status === 'stopped') && !still && !compacting);
   const quiet = $derived(observed ? Math.max(0, now - observed.at) : 0);
   const activityLabel = $derived(observed ? strings.chat.progress[observed.phase] : null);
   const providerAge = $derived(observed?.providerAt == null ? null : Math.max(0, now - observed.providerAt));
@@ -82,7 +84,7 @@
   <div class="reply-pending"><TypingIndicator /></div>
 {/if}
 {#if turn.status !== 'queued' && !(running && activeTool && !waiting && background.length === 0 && !observed && !compacting)}
-  <div class="summary" class:compacting class:preparing class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
+  <div class="summary" class:compacting class:preparing class:settled class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
     {#if compacting}
       <LoaderCircle size={18} class="spinner compaction-icon" aria-hidden="true" />
       <div class="compaction-copy">
@@ -136,6 +138,10 @@
 <style>
   .summary { display: flex; flex-wrap: wrap; align-self: stretch; align-items: center; gap: 4px 6px; margin: 12px 0 0 4px; font-size: var(--text-xs); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; }
   .summary[data-status='running'] { color: var(--color-accent); }
+  /* Read on demand: the message under the pointer or the keyboard shows it, a finger always does. */
+  .summary.settled { opacity: 0; transition: opacity var(--dur-2); }
+  :global(.message:hover) .summary.settled, .summary.settled:focus-within { opacity: 1; }
+  @media (hover: none) { .summary.settled { opacity: 1; } }
   .reply-pending { display: flex; align-items: center; align-self: flex-start; margin: var(--chat-block-gap) 0 0 var(--activity-padding); }
   .reply-pending :global(.typing) { min-height: 40px; padding: 10px 14px; }
   .summary.preparing { margin-top: 6px; color: var(--color-muted-foreground); }

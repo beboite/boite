@@ -3,7 +3,7 @@ import type { MemoryEvent, Message, MessagePart } from '@boite/contracts';
 import { heavyThread } from './fake-client/heavy-thread';
 import { memoryPartRuns } from './memory-timeline';
 import { partRuns } from './tool-groups';
-import { CUT_FROM, ROW_PARTS, TimelineRows, rowCuts, rowEstimate, rowIndexOf } from './timeline-rows';
+import { CUT_FROM, ROW_PARTS, TimelineRows, rowCuts, rowEstimate, rowIndexOf, seam, type TimelineRow } from './timeline-rows';
 
 const tool = (id: string): MessagePart => ({ type: 'tool', toolId: id, name: 'Bash', input: { command: `echo ${id}` }, output: 'ok', status: 'done' });
 const text = (value: string): MessagePart => ({ type: 'text', text: value });
@@ -130,4 +130,21 @@ test('the heavy thread is the 11.5 MiB conversation it stands for, the same at e
   expect(bytes).toBeLessThan(12);
   expect(Math.max(...thread.messages.map(message => message.parts.length))).toBeGreaterThan(1000);
   expect(JSON.stringify(heavyThread().messages.at(-2))).toBe(JSON.stringify(thread.messages.at(-2)));
+});
+
+test('an assistant message that carries on the turn above joins it at the gap of one message', () => {
+  const whole = (value: Message): TimelineRow => ({ id: value.id, message: value, from: 0, to: value.parts.length, first: true, last: true });
+  const inTurn = (value: Message, turnId: string): Message => ({ ...value, turnId });
+  const tools = whole(inTurn(message('a', [text('Checking.'), tool('1'), tool('2'), text('')]), 'turn'));
+  const running = whole(inTurn(message('b', [text(' '), tool('3')]), 'turn'));
+  // Two runs of work meet: the space between two parts of one message.
+  expect(seam(tools, running)).toBe('part');
+  // Text on either side keeps a paragraph's space.
+  expect(seam(running, whole(inTurn(message('c', [text('Done.')]), 'turn')))).toBe('block');
+  expect(seam(whole(inTurn(message('d', [tool('4'), text('Found it.')]), 'turn')), running)).toBe('block');
+  // Another turn, a prompt, a cut row and the first row keep the gap between messages.
+  expect(seam(whole(inTurn(message('e', [tool('5')]), 'other')), running)).toBeNull();
+  expect(seam(whole(inTurn(message('f', [text('Go on')], 'user'), 'turn')), running)).toBeNull();
+  expect(seam(tools, { ...running, first: false })).toBeNull();
+  expect(seam(undefined, running)).toBeNull();
 });
