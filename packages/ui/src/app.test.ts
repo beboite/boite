@@ -2728,3 +2728,69 @@ test('the title counts the threads that wait on the user or finished unread', as
   const waiting = document.querySelectorAll('[data-testid=sidebar] [data-state=waiting]').length;
   expect(Number(/^\((\d+)\)/.exec(document.title)?.[1])).toBeGreaterThanOrEqual(Math.max(1, waiting));
 });
+
+test("a mouse's back and forward buttons walk the threads, settings tabs and machines shown", async () => {
+  await mountOnFake('/?fake=1&machines=1');
+  await waitFor(() => workspace.machines.length === 2);
+  const remote = workspace.machines.find(machine => machine.store !== store)!.store;
+  const remoteThread = remote.threads.find(thread => !thread.archived && !thread.parentThreadId)!.id;
+  /** The release of a side button, and whether the page kept the browser from navigating. */
+  const side = async (button: 3 | 4, shows: () => boolean): Promise<void> => {
+    const event = new MouseEvent('mouseup', { button, bubbles: true, cancelable: true });
+    document.body.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    await waitFor(shows);
+  };
+  const first = store.openThread!.id;
+  // Each view is on screen for a frame, as it is under a hand.
+  await store.open('t-scheduler');
+  flushSync();
+  store.showSettings();
+  flushSync();
+  store.showSettings('appearance');
+  flushSync();
+  await workspace.select(remote, remoteThread);
+  flushSync();
+
+  await side(3, () => workspace.active === store && store.page === 'settings' && store.settingsTab === 'appearance');
+  await side(3, () => store.page === 'settings' && store.settingsTab === 'home');
+  await side(3, () => store.page === 'chat' && store.openThread?.id === 't-scheduler');
+  await side(3, () => store.openThread?.id === first);
+  // The first view has nothing behind it: the button is still the page's, and nothing moves.
+  const spent = new MouseEvent('mouseup', { button: 3, bubbles: true, cancelable: true });
+  document.body.dispatchEvent(spent);
+  expect(spent.defaultPrevented).toBe(true);
+  await side(4, () => store.openThread?.id === 't-scheduler');
+  await side(4, () => store.page === 'settings' && store.settingsTab === 'home');
+  await side(4, () => store.settingsTab === 'appearance');
+  await side(4, () => workspace.active === remote && remote.page === 'chat' && remote.openThread?.id === remoteThread);
+
+  // A thread opened after going back replaces what was ahead.
+  await side(3, () => workspace.active === store && store.settingsTab === 'appearance');
+  await store.open(first);
+  flushSync();
+  const ahead = new MouseEvent('mouseup', { button: 4, bubbles: true, cancelable: true });
+  document.body.dispatchEvent(ahead);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(workspace.active).toBe(store);
+  expect(store.openThread?.id).toBe(first);
+  await side(3, () => store.page === 'settings' && store.settingsTab === 'appearance');
+  await workspace.select(store, first);
+});
+
+test("on a phone a mouse's back button stays the browser's, which closes the open sheet", async () => {
+  const original = window.matchMedia;
+  window.matchMedia = ((media: string) => ({ ...original(media), media, matches: media.includes('max-width: 720px') })) as typeof window.matchMedia;
+  try {
+    await mountOnFake();
+    const opened = store.openThread!.id;
+    await store.open('t-scheduler');
+    flushSync();
+    const event = new MouseEvent('mouseup', { button: 3, bubbles: true, cancelable: true });
+    document.body.dispatchEvent(event);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(event.defaultPrevented).toBe(false);
+    expect(store.openThread?.id).toBe('t-scheduler');
+    expect(opened).not.toBe('t-scheduler');
+  } finally { window.matchMedia = original; }
+});
