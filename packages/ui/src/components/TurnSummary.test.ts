@@ -55,7 +55,14 @@ test('a turn that carries on after monitoring counts from the user request, its 
   flushSync();
   const shown = document.querySelector('[data-testid=turn-elapsed]');
   expect(shown?.textContent).toBe('Worked for 34m 41s');
-  expect(shown?.getAttribute('title')).toBe('Since your message. This reply: 4m 41s');
+  expect(shown?.getAttribute('title')).toBe('This reply alone: 4m 41s');
+});
+
+test('a request start after the turn began, from a clock skew, falls back to the turn', () => {
+  running = mount(TurnSummary, { target: document.body, props: { turn: turn(), requestStartedAt: STARTED + 60_000 } });
+  flushSync();
+  expect(text('turn-elapsed')).toBe('Worked for 4m 41s');
+  expect(document.querySelector('[data-testid=turn-elapsed]')?.getAttribute('title')).toBeNull();
 });
 
 test('a compaction keeps its own duration whatever request it follows', () => {
