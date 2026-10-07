@@ -35,10 +35,10 @@ fn posix_tag(value: &str) -> Option<String> {
 }
 
 /// A name shaped like a BCP 47 tag: a letter first, then letters and digits in
-/// non-empty parts joined by `-`. Anything else says nothing.
+/// parts of 1 to 8 joined by `-`. Anything else says nothing.
 fn tag(name: &str) -> Option<String> {
     let shaped = name.bytes().next().is_some_and(|b| b.is_ascii_alphabetic())
-        && name.split('-').all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_alphanumeric()));
+        && name.split('-').all(|part| !part.is_empty() && part.len() <= 8 && part.bytes().all(|b| b.is_ascii_alphanumeric()));
     shaped.then(|| name.to_owned())
 }
 
@@ -50,11 +50,11 @@ fn read() -> Region {
     Region { locale: posix_locale(|name| std::env::var(name).ok()), hour12: None }
 }
 
-/// The first variable set and non-empty wins, the way libc resolves LC_TIME.
+/// The first variable set and not blank wins, the way libc resolves LC_TIME.
 #[cfg_attr(windows, allow(dead_code))]
 fn posix_locale(var: impl Fn(&str) -> Option<String>) -> Option<String> {
     ["LC_ALL", "LC_TIME", "LANG"].iter()
-        .find_map(|name| var(name).filter(|value| !value.is_empty()))
+        .find_map(|name| var(name).filter(|value| !value.trim().is_empty()))
         .and_then(|value| posix_tag(&value))
 }
 
@@ -113,7 +113,7 @@ mod tests {
         assert_eq!(tag("fr-CH").as_deref(), Some("fr-CH"));
         assert_eq!(tag(""), None);
         assert_eq!(tag("---"), None);
-        for malformed in ["-en", "en-", "en--US", "123"] { assert_eq!(tag(malformed), None, "{malformed}"); }
+        for malformed in ["-en", "en-", "en--US", "123", "en-abcdefghi"] { assert_eq!(tag(malformed), None, "{malformed}"); }
         assert_eq!(tag("zh-Hant-TW").as_deref(), Some("zh-Hant-TW"));
     }
 
@@ -124,7 +124,7 @@ mod tests {
         };
         assert_eq!(posix_locale(env(&[("LC_ALL", "fr_CH.UTF-8"), ("LC_TIME", "en_US.UTF-8"), ("LANG", "de_DE")])).as_deref(), Some("fr-CH"));
         assert_eq!(posix_locale(env(&[("LC_ALL", ""), ("LC_TIME", "en_GB.UTF-8"), ("LANG", "de_DE")])).as_deref(), Some("en-GB"));
-        assert_eq!(posix_locale(env(&[("LANG", "de_DE.UTF-8")])).as_deref(), Some("de-DE"));
+        assert_eq!(posix_locale(env(&[("LC_ALL", "  "), ("LANG", "de_DE.UTF-8")])).as_deref(), Some("de-DE"));
         // `C` decides too: it names no region, so LANG behind it is not read.
         assert_eq!(posix_locale(env(&[("LC_ALL", "C"), ("LANG", "fr_CH.UTF-8")])), None);
         assert_eq!(posix_locale(env(&[])), None);

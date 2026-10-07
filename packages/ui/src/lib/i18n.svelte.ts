@@ -158,11 +158,12 @@ export function activeLocale(): Locale {
  * and `7 Oct` the way the rest of that machine does.
  *
  * The region comes from the desktop shell first (`window.__BOITE_REGION__`,
- * `apps/shell/src-tauri/src/platform/region.rs`), which reads the operating system's regional format;
- * the webview itself only reports languages. A shell tag without a region
- * means none. Without a shell tag it is the region of a
- * machine language matching the app's, then of the first one carrying any. A
- * clock the shell names explicitly (12 or 24 hours) overrides the region's.
+ * `apps/shell/src-tauri/src/platform/region.rs`), which reads the operating
+ * system's regional format; the webview itself only reports languages. A
+ * shell tag without a region means none; a missing or unparsable one falls
+ * back to the webview, where it is the region of a machine language matching
+ * the app's, then of the first one carrying any. A clock the shell names
+ * explicitly (12 or 24 hours) overrides the region's.
  * The last answer is kept and checked by reference, since every formatted row
  * asks with the same inputs: the browser hands back the same
  * `navigator.languages` array until the languages change.

@@ -29,7 +29,7 @@ app on a US machine `07:40 PM` and `Oct 7`, and French on a French machine
 operating system's regional format
 (`apps/shell/src-tauri/src/platform/region.rs`: Windows' Region settings and
 their short time pattern; elsewhere the first of `LC_ALL`, `LC_TIME` and
-`LANG` that is set and non-empty) and sets
+`LANG` that is set and not blank) and sets
 `window.__BOITE_REGION__` before the page runs, because the webview reports
 only languages: WebView2 on an English Windows set to Switzerland says `en-US`.
 A 12 or 24 hour clock picked in Windows overrides the region's, whichever
