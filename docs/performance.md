@@ -327,7 +327,9 @@ when the core advertises `chunkedAnswers`.
 - A first visit with a saved reading position (an anchor message, not pinned
   to the bottom, no cached visit) asks `threads.get` for the page `around`
   that message on a `readingPages` core: 20 messages before it and 20 from
-  it, when more than 40 follow it. `messagesAfter` is the cursor below that
+  it, when more than 40 follow it. Both halves share the 12 MiB page budget;
+  larger windows drop their farthest messages while retaining the anchor
+  and cursors in both directions. `messagesAfter` is the cursor below that
   window; `messages.list` with `after` pages down as the reader nears the
   bottom, and "Jump to latest" replaces the window with the last page. Live
   messages wait for the pages below, except a prompt, which brings the last

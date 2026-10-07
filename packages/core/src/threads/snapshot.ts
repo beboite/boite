@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { MESSAGE_PAGE, MESSAGE_PAGE_MAX, resumeAnchor, snapshotOptionsProblem } from '@boite/contracts';
+import { MESSAGE_PAGE, MESSAGE_PAGE_MAX, MESSAGE_PAGE_MAX_BYTES, boundedMessageWindow, resumeAnchor, snapshotOptionsProblem } from '@boite/contracts';
 import type { Message, RpcParams, Thread, ThreadSummary, Turn } from '@boite/contracts';
 import type { Core } from '../core';
 import { invalidParams, refused } from '../errors';
@@ -77,7 +77,13 @@ function pageAround(core: Core, threadId: string, around: string | undefined, li
   const half = Math.max(1, Math.floor(limit / 2));
   const older = journal.listMessagePage(threadId, { beforeRowid: rowid, limit: half, project, toolPreviews });
   const newer = journal.listMessagesForward(threadId, rowid, Math.max(1, limit - half), project, toolPreviews);
-  return { messages: [...older.messages, ...newer.messages], sent: [...older.sent, ...newer.sent], before: older.before, after: newer.after };
+  const messages = [...older.messages, ...newer.messages], sent = [...older.sent, ...newer.sent];
+  const { start, end } = boundedMessageWindow(sent, older.messages.length, MESSAGE_PAGE_MAX_BYTES);
+  return {
+    messages: messages.slice(start, end), sent: sent.slice(start, end),
+    before: start > 0 ? messages[start]!.id : older.before,
+    after: end < messages.length ? messages[end - 1]!.id : newer.after,
+  };
 }
 
 /** A page of `messages.list`, with the turns its messages belong to. */

@@ -15,7 +15,7 @@ import { modelsOf, checkSpeed, discoverSelection } from './provider-catalog';
 import { delegationConfig, stopDelegation } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
 import { registerFakeWorktree, requireFakeCwd } from './worktrees';
-import { forTransport, projectMessage, resumeAnchor, snapshotOptionsProblem, type TransportOptions } from '@boite/contracts';
+import { boundedMessageWindow, forTransport, projectMessage, resumeAnchor, snapshotOptionsProblem, type TransportOptions } from '@boite/contracts';
 import { dropWaitingMove, fakeMoveNote } from './thread-move';
 import { cancelFamilySideQuestions, cancelSide, sideQuestionMethods } from './side-questions';
 
@@ -97,9 +97,12 @@ function pageOf(
 }
 
 /** The core's page from `from` on, at most `limit`, and the cursor below it while more follow. */
-function forwardOf(messages: Message[], from: number, limit: number): { messages: Message[]; after: string | null } {
-  const page = messages.slice(from, from + limit);
-  return { messages: page, after: from + limit < messages.length ? (page.at(-1)?.id ?? null) : null };
+function forwardOf(messages: Message[], from: number, limit: number, project: Projection): { messages: Message[]; after: string | null } {
+  // Reuse the backward page's byte and single-message rules, iterating from
+  // the first newer message instead of from the last older one.
+  const candidates = messages.slice(from, from + limit).reverse();
+  const page = pageOf(candidates, candidates.length, limit, project).messages.reverse();
+  return { messages: page, after: from + page.length < messages.length ? (page.at(-1)?.id ?? null) : null };
 }
 
 /** The core's page around a reading position: half a page above `at`, half from it on, once more than a page follows it. */
@@ -108,8 +111,14 @@ function aroundOf(messages: Message[], around: string | undefined, limit: number
   if (at < 0 || messages.length - at <= limit) return null;
   const half = Math.max(1, Math.floor(limit / 2));
   const older = pageOf(messages, at, half, project);
-  const newer = forwardOf(messages, at, Math.max(1, limit - half));
-  return { messages: [...older.messages, ...newer.messages], before: older.before, after: newer.after };
+  const newer = forwardOf(messages, at, Math.max(1, limit - half), project);
+  const candidates = [...older.messages, ...newer.messages];
+  const { start, end } = boundedMessageWindow(candidates.map(project), older.messages.length, MESSAGE_PAGE_MAX_BYTES);
+  return {
+    messages: candidates.slice(start, end),
+    before: start > 0 ? candidates[start]!.id : older.before,
+    after: end < candidates.length ? candidates[end - 1]!.id : newer.after,
+  };
 }
 
 type Projection = (message: Message) => Message;
@@ -382,7 +391,8 @@ export function threadMethods(ctx: FakeContext) {
       }
       const asked = params.limit ?? MESSAGE_PAGE;
       const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
-      const page = params.before === undefined ? { ...forwardOf(thread.messages, at + 1, limit), before: null } : pageOf(thread.messages, at, limit, projection(params));
+      const project = projection(params);
+      const page = params.before === undefined ? { ...forwardOf(thread.messages, at + 1, limit, project), before: null } : pageOf(thread.messages, at, limit, project);
       page.messages = forTransport(page.messages, params);
       const turns = new Set(page.messages.map((message) => message.turnId));
       return pagingReply({ ...page, turns: thread.turns.filter((turn) => turns.has(turn.id)) });

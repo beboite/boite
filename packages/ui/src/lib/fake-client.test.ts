@@ -117,6 +117,20 @@ test('fake byte-bounded pages walk complete escaped UTF-8 messages and fall back
   }
   expect(walked).toEqual(expected);
   expect(pages).toBeGreaterThan(1);
+
+  // A saved position combines two independently bounded halves. The result
+  // must share their budget, and loading its newer cursor must do the same.
+  const around = await client.call('threads.get', { threadId: thread.id, around: expected[3], limit: 4 });
+  expect(around.messages.map(message => message.id)).toContain(expected[3]);
+  expect(new TextEncoder().encode(JSON.stringify(around.messages)).byteLength).toBeLessThanOrEqual(MESSAGE_PAGE_MAX_BYTES);
+  const suffix = around.messages.map(message => message.id);
+  for (let after = around.messagesAfter; after;) {
+    const page = await client.call('messages.list', { threadId: thread.id, after, limit: 4 });
+    expect(new TextEncoder().encode(JSON.stringify(page.messages)).byteLength).toBeLessThanOrEqual(MESSAGE_PAGE_MAX_BYTES);
+    suffix.push(...page.messages.map(message => message.id));
+    after = page.after ?? undefined;
+  }
+  expect(suffix).toEqual(expected.slice(expected.indexOf(suffix[0]!)));
 });
 
 test('fake pages keep a complete legal attachment bundle above the byte budget and refuse an oversized message', async ({ createClient }) => {

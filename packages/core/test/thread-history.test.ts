@@ -1,6 +1,55 @@
 import { expect, test } from 'bun:test';
-import { INITIAL_MESSAGE_PAGE, MESSAGE_SENT_MAX_BYTES, RPC_MAX_FRAME_BYTES, TOOL_OUTPUT_PREVIEW_CHARS, type Message } from '@boite/contracts';
+import { INITIAL_MESSAGE_PAGE, MESSAGE_PAGE_MAX_BYTES, MESSAGE_SENT_MAX_BYTES, RPC_MAX_FRAME_BYTES, TOOL_OUTPUT_PREVIEW_CHARS, type Message } from '@boite/contracts';
 import { echoThread, startTestCore } from './harness';
+
+test('a saved reading position shares one byte budget across both halves and keeps every history cursor', async () => {
+  const harness = await startTestCore();
+  try {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const text = '\n'.repeat(2 * 1024 * 1024);
+    const ids = Array.from({ length: 12 }, (_, index) => `heavy-${index}`);
+    harness.core.journal.append({ type: 'message.started', threadId, version: 1, payload: {} }, () => {
+      for (const [index, id] of ids.entries()) harness.core.journal.putMessage({
+        id, threadId, turnId: 'history-turn', role: 'assistant', state: 'complete', createdAt: index,
+        parts: [{ type: 'text', text }],
+      });
+    });
+    const options = { compactToolParts: true, limit: 6 };
+    const opened = await client.call('threads.get', { threadId, around: 'heavy-5', ...options, open: {} });
+    expect(opened.messages.some(message => message.id === 'heavy-5')).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(opened.messages))).toBeLessThanOrEqual(MESSAGE_PAGE_MAX_BYTES);
+    const walked = opened.messages.map(message => message.id);
+    for (let before = opened.messagesBefore; before;) {
+      const page = await client.call('messages.list', { threadId, before, ...options });
+      expect(page.messages.length).toBeGreaterThan(0);
+      walked.unshift(...page.messages.map(message => message.id));
+      before = page.before;
+    }
+    for (let after = opened.messagesAfter; after;) {
+      const page = await client.call('messages.list', { threadId, after, ...options });
+      expect(page.messages.length).toBeGreaterThan(0);
+      walked.push(...page.messages.map(message => message.id));
+      after = page.after ?? undefined;
+    }
+    expect(walked).toEqual(ids);
+    expect(harness.core.journal.getMessage('heavy-5')!.parts[0]).toEqual({ type: 'text', text });
+
+    // Ordinary pages allow one legal message above 12 MiB. A centred page
+    // must keep that anchor alone rather than dropping it or adding a neighbour.
+    const anchor = harness.core.journal.getMessage('heavy-5')!;
+    harness.core.journal.append({ type: 'message.part', threadId, version: 1, payload: {} }, () => {
+      harness.core.journal.putMessage({ ...anchor, parts: [{ type: 'text', text: 'x'.repeat(13 * 1024 * 1024) }] });
+      for (let index = 0; index < 7; index++) harness.core.journal.putMessage({
+        ...anchor, id: `after-anchor-${index}`, parts: [{ type: 'text', text: 'newer' }],
+      });
+    });
+    const single = await client.call('threads.get', { threadId, around: anchor.id, limit: 6 });
+    expect(single.messages.map(message => message.id)).toEqual([anchor.id]);
+    expect(single.messagesBefore).toBe(anchor.id);
+    expect(single.messagesAfter).toBe(anchor.id);
+  } finally { await harness.stop(); }
+});
 
 test('a compact first page keeps complete history and retrieves tool output on demand over RPC', async () => {
   const harness = await startTestCore();
