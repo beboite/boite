@@ -1,4 +1,4 @@
-import type { RemoteBrowserFrame, RemoteBrowserInput, RemoteFrameOptions } from './browser-remote';
+import type { RemoteBrowserFrame, RemoteBrowserInput, RemoteBrowserSelection, RemoteFrameOptions } from './browser-remote';
 /**
  * The agent's browser runs on the machine that runs its conversation: the core
  * starts a headless Chromium there and drives it over the DevTools protocol.
@@ -57,6 +57,8 @@ export const BROWSER_WAIT_MAX_MS = 15000;
 /** Key names a press accepts, beside single characters and F1 to F12, after optional modifiers. */
 export const BROWSER_KEYS = ['Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', 'Space', 'Insert'] as const;
 const KEY_PATTERN = new RegExp(`^(?:(?:Control|Ctrl|Alt|Shift|Meta|Cmd)\\+)*(?:${BROWSER_KEYS.join('|')}|F(?:[1-9]|1[0-2])|[^\\s+]|\\+)$`);
+/** Whether `key` is a key or a combination a press accepts. */
+export const browserKeyValid = (key: unknown): key is string => typeof key === 'string' && KEY_PATTERN.test(key);
 /** What a command that acts on the page reports: where it ended and what the page asked. */
 export interface BrowserActionResult { ok: true; url?: string; title?: string; navigated?: boolean; loading?: boolean; note?: string; dialogs?: BrowserDialog[]; value?: unknown }
 export interface BrowserDialog { type: 'alert' | 'confirm' | 'prompt'; message: string; accepted: boolean; value?: string | null }
@@ -137,6 +139,11 @@ export interface BrowserRpcMethods {
   'browser.remoteStatus': { params: { threadId: string }; result: AgentBrowserStatus };
   /** Input on the tab a frame showed, from a viewer: never a script. */
   'browser.remoteInput': { params: { threadId: string; frameId: string; input: RemoteBrowserInput }; result: { ok: true } };
+  /**
+   * The text selected in the tab a frame showed, for a viewer's copy: what a
+   * person at that page would copy, so never a password field's.
+   */
+  'browser.remoteSelection': { params: { threadId: string; frameId: string }; result: RemoteBrowserSelection };
   'browser.command': { params: { threadId: string; tabId?: string; action: BrowserAction }; result: BrowserReply };
   /**
    * Owner only: copies the sign-ins of one of the desktop's browser profiles

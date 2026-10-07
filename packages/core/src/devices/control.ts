@@ -44,7 +44,7 @@ const COMMAND_TIMEOUT_MS = 15_000;
 /** A capture is shared by every viewer that asks within this long, so a phone and a desktop cost one screencap. */
 const CAPTURE_REUSE_MS = 200;
 const SESSIONS_MAX = 4;
-const KEYCODES = { back: 4, home: 3, recents: 187, enter: 66, backspace: 67, power: 26 } as const;
+const KEYCODES = { back: 4, home: 3, recents: 187, enter: 66, backspace: 67, power: 26, tab: 61, delete: 112, up: 19, down: 20, left: 21, right: 22 } as const;
 
 interface Run {
   code: number | null;

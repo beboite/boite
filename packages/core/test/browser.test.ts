@@ -19,6 +19,7 @@ const PAGE = `<!doctype html><title>Fixture</title>
 <button id="go" onclick="document.title='clicked'">Go</button>
 <input id="name" style="position:absolute;left:100px;top:220px">
 <a id="pop" href="#" style="position:absolute;left:100px;top:300px" onclick="window.open('/popup','x','width=400,height=300');return false">Popup</a>
+<p id="words" style="position:absolute;left:100px;top:360px;margin:0;width:400px">Select these words</p>
 <script>console.error('boom'); fetch('/missing?token=secret');</script>`;
 
 // agent-browser's commands: refs, a form that navigates, dialogs, a covered element.
@@ -137,6 +138,37 @@ real('a viewer on another device watches and drives the tab, and hears it come a
     // The button spans 100..300 × 100..180 CSS pixels.
     await phone.call('browser.remoteInput', { threadId, frameId: small.id, input: { kind: 'tap', x: 200 / small.width, y: 140 / small.height, width: small.width, height: small.height } });
     expect(await evaluate('document.title')).toBe('clicked');
+    // A computer's keyboard, mouse and clipboard: keys as key events, a paste, a selection read back.
+    await Bun.sleep(150);
+    const live = await phone.call('browser.remoteFrame', { threadId, tabId });
+    const act = (input: Parameters<typeof phone.call<'browser.remoteInput'>>[1]['input']) => phone.call('browser.remoteInput', { threadId, frameId: live.id, input });
+    const at = (x: number, y: number) => ({ x: x / live.width, y: y / live.height, width: live.width, height: live.height });
+    await evaluate('window.keys = []; addEventListener("keydown", e => keys.push(e.key))');
+    await act({ kind: 'tap', ...at(150, 230) });
+    await act({ kind: 'press', keys: ['h', 'i', 'Space', 'A', 'x', 'Backspace'] });
+    expect(await evaluate('document.querySelector("#name").value')).toBe('hi A');
+    expect(await evaluate('keys.join(",")')).toBe('h,i, ,A,x,Backspace');
+    await act({ kind: 'text', text: ' é\u{1F600} pasted' });
+    expect(await evaluate('document.querySelector("#name").value')).toBe('hi A é\u{1F600} pasted');
+    expect(await phone.call('browser.remoteSelection', { threadId, frameId: live.id })).toEqual({ text: '', truncated: false });
+    await act({ kind: 'select-all' });
+    expect(await phone.call('browser.remoteSelection', { threadId, frameId: live.id })).toEqual({ text: 'hi A é\u{1F600} pasted', truncated: false });
+    // A double click selects the word under it, and a key replaces the selection.
+    await act({ kind: 'tap', ...at(104, 230) });
+    await act({ kind: 'tap', ...at(104, 230), count: 2 });
+    expect((await phone.call('browser.remoteSelection', { threadId, frameId: live.id })).text.trim()).toBe('hi');
+    await act({ kind: 'press', keys: ['Delete'] });
+    expect(String(await evaluate('document.querySelector("#name").value')).trim()).toBe('A é\u{1F600} pasted');
+    // A drag selects page text; a password field's selection is never read.
+    await act({ kind: 'drag', from: { x: 100 / live.width, y: 369 / live.height }, to: { x: 480 / live.width, y: 369 / live.height }, width: live.width, height: live.height });
+    expect((await phone.call('browser.remoteSelection', { threadId, frameId: live.id })).text).toBe('Select these words');
+    await evaluate('document.querySelector("#name").type = "password"');
+    await act({ kind: 'tap', ...at(150, 230) });
+    await act({ kind: 'select-all' });
+    expect(await evaluate('document.querySelector("#name").selectionEnd > 0')).toBe(true);
+    expect(await phone.call('browser.remoteSelection', { threadId, frameId: live.id })).toEqual({ text: '', truncated: false });
+    await expect(act({ kind: 'press', keys: ['Hyper+a'] })).rejects.toThrow('remote press');
+    await expect(phone.call('browser.remoteSelection', { threadId, frameId: 'unknown' })).rejects.toThrow('refresh');
     await expect(phone.call('browser.remoteInput', { threadId, frameId: small.id, input: { kind: 'navigate', url: 'javascript:alert(1)' } })).rejects.toThrow('HTTP');
     // A viewer never gets the agent's own command, which can run scripts.
     await expect(phone.call('browser.command', { threadId, action: { kind: 'evaluate', expression: '1' } })).rejects.toThrow();
