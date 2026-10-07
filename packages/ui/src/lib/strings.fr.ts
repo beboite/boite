@@ -1099,7 +1099,6 @@ export const fr: Translation = {
     all: 'Tous', sent: 'Envoyés', received: 'Reçus', empty: 'Aucun message ici pour le moment.',
     forwardedOne: '1 message transmis', forwardedMany: '{count} messages transmis',
     receivedOne: '1 message reçu', receivedMany: '{count} messages reçus',
-    issueOne: '1 message à vérifier', issueMany: '{count} messages à vérifier',
     stewardOne: '1 message du gardien', stewardMany: '{count} messages du gardien',
     noticeOne: '1 avis de conversation', noticeMany: '{count} avis de conversation'
   },

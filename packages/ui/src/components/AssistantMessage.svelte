@@ -7,7 +7,6 @@
   import type { Store } from '../lib/store.svelte';
   import { formatTokens } from '../lib/tokens';
   import { count } from '../lib/format';
-  import { promptText, visibleAnswer } from '../lib/message-display';
   import { isNamedModel } from '../lib/model-order';
   import { planOf } from '../lib/plan';
   import PermissionCard from './PermissionCard.svelte';
@@ -19,18 +18,22 @@
   import ToolGroup from './ToolGroup.svelte';
   import { activityShown, runKey, type ActivityPart } from '../lib/tool-groups';
   import { memoryPartRuns } from '../lib/memory-timeline';
+  import { shownText as shownTextOf } from '../lib/timeline-rows';
   import MemoryRow from './MemoryRow.svelte';
 
   /**
    * An assistant or system message in the timeline: the model that wrote it,
    * then every part it carries, its calls and reasoning folded into activity runs.
    * `signedOut` is the thread's account when it is signed out, so an error can
-   * carry the way back in.
+   * carry the way back in. `from` and `to` name the parts to draw when the
+   * timeline cut a long message in several rows (lib/timeline-rows.ts).
    */
   let {
     store,
     threadId,
     message,
+    from = 0,
+    to,
     signedOut,
     showModel,
     latestInTurn = true,
@@ -39,6 +42,8 @@
     store: Store;
     threadId: string;
     message: Message;
+    from?: number;
+    to?: number;
     signedOut: Account | null;
     showModel: boolean;
     latestInTurn?: boolean;
@@ -53,12 +58,14 @@
   const compacting = $derived(execution?.operation === 'compact' ||
     store.openThread?.progress?.turnId === message.turnId && store.openThread.progress.phase === 'compacting');
   const caretAt = $derived(message.state === 'streaming' ? lastTextIndex(message) : -1);
-  const runs = $derived(memoryPartRuns(message.parts, memoryEvents));
+  const end = $derived(to ?? message.parts.length);
+  const runs = $derived(memoryPartRuns(message.parts, memoryEvents, from, end));
   const isBackground = (toolId: string) => store.openThread?.background?.some((task) => task.toolId === toolId) ?? false;
   // A proposed plan is read from its call's input: a page that cut it is completed at once.
   $effect(() => {
-    for (const part of message.parts) {
-      if (part.type === 'tool' && part.inputDeferred && part.name === 'ExitPlanMode') void store.loadToolOutput(threadId, message.id, part.toolId).catch(() => {});
+    for (let at = from; at < end; at += 1) {
+      const part = message.parts[at];
+      if (part?.type === 'tool' && part.inputDeferred && part.name === 'ExitPlanMode') void store.loadToolOutput(threadId, message.id, part.toolId).catch(() => {});
     }
   });
 </script>
@@ -69,7 +76,7 @@
     {execution.model && isNamedModel(model ?? { id: execution.model, name: execution.model }) ? model?.name ?? execution.model : store.providerOf(execution.providerId)?.name}
   </div>
 {/if}
-{#if message.role === 'system'}
+{#if message.role === 'system' && from === 0}
   <div class="system-attribution" data-testid="message-system">{strings.chat.system}</div>
 {/if}
 <div class="parts">
@@ -90,7 +97,7 @@
     {:else if message.parts[run.index]}
     {@const index = run.index}
     {@const part = message.parts[run.index]!}
-    {@const shownText = part.type === 'text' ? message.role === 'system' ? promptText(part) : visibleAnswer(part.text) : ''}
+    {@const shownText = part.type === 'text' ? shownTextOf(message, part) : ''}
     {#if part.type !== 'text' || shownText.length > 0 || index === caretAt}
     <div class="part" data-kind={part.type}>
       {#if part.type === 'text'}

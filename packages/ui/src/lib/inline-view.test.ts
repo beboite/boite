@@ -8,7 +8,8 @@ const text = (id: string, turnId: string, role: Message['role'] = 'assistant'): 
 const view = (id: string, turnId: string, source: string): Message =>
   ({ id, threadId: 't', turnId, role: 'assistant', state: 'complete', createdAt: ++at, parts: [{ type: 'artifact', id: `a-${id}`, name: source.split('/').at(-1)!, mimeType: 'text/html', bytes: 10, view: { title: id, height: 300, source } }] });
 const ids = (messages: Message[]) => messages.map((message) => message.id);
-const idle = () => false;
+const idle: { id: string; status: 'done' }[] = [];
+const live = (id: string) => [{ id, status: 'running' as const }, { id: 'another', status: 'done' as const }];
 
 afterEach(() => { document.documentElement.removeAttribute('style'); delete document.documentElement.dataset['motion']; });
 
@@ -29,7 +30,7 @@ test('views are drawn after everything else their turn wrote, in the order they 
 
 test('a turn still running shows none of its views: they arrive with the finished answer', () => {
   const timeline = [text('u1', 'one', 'user'), text('a1', 'one'), view('v1', 'one', 'orbit.html'), text('u2', 'two', 'user'), view('v2', 'two', 'bars.html'), text('b1', 'two')];
-  expect(ids(placeViews(timeline, (turn) => turn === 'two'))).toEqual(['u1', 'a1', 'v1', 'u2', 'b1']);
+  expect(ids(placeViews(timeline, live('two')))).toEqual(['u1', 'a1', 'v1', 'u2', 'b1']);
   expect(ids(placeViews(timeline, idle))).toEqual(['u1', 'a1', 'v1', 'u2', 'b1', 'v2']);
 });
 
@@ -44,7 +45,7 @@ test('the same file published again in a turn takes the place of the earlier vie
 test('a view whose turn has nothing else loaded keeps its own place', () => {
   const timeline = [view('v0', 'older', 'old.html'), view('v1', 'older', 'old.html'), text('u1', 'one', 'user'), text('a1', 'one')];
   expect(ids(placeViews(timeline, idle))).toEqual(['v1', 'u1', 'a1']);
-  expect(ids(placeViews(timeline, (turn) => turn === 'older'))).toEqual(['u1', 'a1']);
+  expect(ids(placeViews(timeline, live('older')))).toEqual(['u1', 'a1']);
 });
 
 test('a page is handed the tokens this device computes, and the reader\'s motion setting', () => {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { page } from '../lib/page-hidden.svelte';
   import { Bot, ChevronRight, FilePen, FileText, Globe, Search, SquareTerminal, Wrench, X } from '@lucide/svelte';
   import type { ToolDocument, ToolStatus } from '@boite/contracts';
   import { elapsed, json } from '../lib/format';
@@ -58,7 +59,7 @@
   } = $props();
 
   let now = $state(Date.now());
-  let hidden = $state(document.hidden);
+  const hidden = $derived(page.hidden);
   // A running call ticks once a second while the page is on screen.
   $effect(() => {
     if (status !== 'running' || startedAt === null || hidden) return;
@@ -163,7 +164,6 @@
   });
 </script>
 
-<svelte:document onvisibilitychange={() => hidden = document.hidden} />
 <div class="tool" data-testid="tool-card" data-status={status} data-streaming={streaming} data-family={family}>
   <button
     type="button"

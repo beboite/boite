@@ -2,10 +2,15 @@ import type { Message } from '@boite/contracts';
 import { visibleAnswer, visibleUserText } from './message-display';
 import { planOf } from './plan';
 
-/** One occurrence of the query: in which message, and which one there, counting from 0. */
+/**
+ * One occurrence of the query: in which message, which one there counting from
+ * 0, and in which of its parts, so a long message the timeline cut in several
+ * rows is opened on the row that draws it.
+ */
 export interface FindHit {
   messageId: string;
   nth: number;
+  part: number;
 }
 
 function occurrences(text: string, needle: string): number {
@@ -17,21 +22,19 @@ function occurrences(text: string, needle: string): number {
 }
 
 /**
- * What a message shows as text, in the order the page draws it: the prompt, or
- * the answer without its hidden markers, and a plan card's plan. Other tool
- * cards are folded to one line and left out.
+ * What each part of a message shows as text, in the order the page draws it:
+ * the prompt, or the answer without its hidden markers, and a plan card's
+ * plan. Other tool cards are folded to one line and left out.
  */
-function readable(message: Message): string {
-  return message.parts
-    .flatMap((part) => {
-      if (part.type === 'text') return [message.role === 'user' ? visibleUserText(part.text) : visibleAnswer(part.text)];
-      if (part.type === 'tool') {
-        const plan = planOf(part.name, part.input);
-        return plan === null ? [] : [plan];
-      }
-      return [];
-    })
-    .join('\n');
+function readable(message: Message): { part: number; text: string }[] {
+  return message.parts.flatMap((part, index) => {
+    if (part.type === 'text') return [{ part: index, text: message.role === 'user' ? visibleUserText(part.text) : visibleAnswer(part.text) }];
+    if (part.type === 'tool') {
+      const plan = planOf(part.name, part.input);
+      return plan === null ? [] : [{ part: index, text: plan }];
+    }
+    return [];
+  });
 }
 
 /**
@@ -42,9 +45,12 @@ function readable(message: Message): string {
 export function findHits(messages: readonly Message[], query: string): FindHit[] {
   const needle = query.trim().toLowerCase();
   if (!needle) return [];
-  return messages.flatMap((message) =>
-    Array.from({ length: occurrences(readable(message), needle) }, (_, nth) => ({ messageId: message.id, nth }))
-  );
+  // A query is one line, so no occurrence spans two parts: counted part by part, they are the message's.
+  return messages.flatMap((message) => {
+    let nth = 0;
+    return readable(message).flatMap(({ part, text }) =>
+      Array.from({ length: occurrences(text, needle) }, () => ({ messageId: message.id, nth: nth++, part })));
+  });
 }
 
 /** The ranges of `query` in the text drawn under `root`, without case, in reading order. */

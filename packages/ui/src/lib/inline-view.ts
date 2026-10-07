@@ -4,7 +4,7 @@
  * like the answer around it (theme tokens, the reader's motion setting, the
  * app's own font faces). docs/chat-files.md has the whole feature.
  */
-import { VIEW_TOKENS, type InlineView, type Message, type MessagePart, type ViewHostMessage, type ViewTheme } from '@boite/contracts';
+import { VIEW_TOKENS, type InlineView, type Message, type MessagePart, type Turn, type ViewHostMessage, type ViewTheme } from '@boite/contracts';
 import { glides } from './motion';
 
 export type ViewPart = Extract<MessagePart, { type: 'artifact' }> & { view: InlineView };
@@ -20,14 +20,16 @@ const sourceOf = (part: ViewPart) => part.view.source ?? part.name;
 /**
  * Views drawn where they belong: after everything else their turn wrote, in
  * the order they were published. One published again from the same file in
- * the same turn takes the place of the earlier one. A turn still running
- * shows none of them, so the answer being written stays the last thing in
+ * the same turn takes the place of the earlier one. A turn of `turns` still
+ * running or queued shows none of them, so the answer being written stays the last thing in
  * the thread and the page arrives with the finished answer. A view whose
  * turn has nothing else in `timeline` (the rest is on a page not loaded yet)
  * stays where it is. The same array comes back when there is no view.
  */
-export function placeViews(timeline: Message[], running: (turnId: string) => boolean): Message[] {
+export function placeViews(timeline: Message[], turns: readonly Pick<Turn, 'id' | 'status'>[]): Message[] {
   if (!timeline.some((message) => viewPart(message))) return timeline;
+  const live = new Set(turns.filter((turn) => turn.status === 'running' || turn.status === 'queued').map((turn) => turn.id));
+  const running = (turnId: string) => live.has(turnId);
   const views = new Map<string, Message[]>();
   const lastOther = new Map<string, number>();
   timeline.forEach((message, index) => {
