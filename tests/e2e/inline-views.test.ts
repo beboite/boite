@@ -9,7 +9,9 @@ import { ensureProductionUi } from './lib/prod-ui.ts';
 
 const SHOTS = join(import.meta.dir, '.artifacts');
 const READY = 'document.querySelector("[data-testid=inline-view]")?.dataset.ready === "true"';
+// A headless browser reports the pointer of the machine it runs on, a mouse on one runner and none on another: each run is told which it has.
 const DESKTOP_POINTER = '--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4';
+const PHONE_POINTER = '--blink-settings=primaryHoverType=1,availableHoverTypes=1,primaryPointerType=2,availablePointerTypes=2';
 const SETTLED = 'Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])';
 
 test('a view published during a turn is drawn at the end of the finished answer, on desktop and paired phone', async () => {
@@ -25,8 +27,7 @@ test('a view published during a turn is drawn at the end of the finished answer,
     copyFileSync(join(import.meta.dir, 'fixtures', 'views', 'pendulum.html'), join(core.dataDir, '.boite', 'views', 'pendulum.html'));
     for (const mobile of [false, true]) {
       const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, permissionMode: 'default', title: 'How a pendulum swings' });
-      // A headless browser has no pointer, which reads as a phone's: the desktop run is given a mouse.
-      page = await BrowserPage.launch({ url: mobile ? await mintPairing(core) : pairingUrlOf(core), windowSize: { width: 1280, height: 900 }, args: mobile ? [] : [DESKTOP_POINTER] });
+      page = await BrowserPage.launch({ url: mobile ? await mintPairing(core) : pairingUrlOf(core), windowSize: { width: 1280, height: 900 }, args: [mobile ? PHONE_POINTER : DESKTOP_POINTER] });
       if (mobile) await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
       await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
       if (mobile) await mobileAction(page, 'mobile-conversations');

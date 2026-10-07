@@ -133,9 +133,9 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 588,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,250,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,290,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,600,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,640,000 |
 
 The total JavaScript measure excludes native binaries and source maps. On
 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
@@ -144,6 +144,15 @@ the core gains 533,240 bytes, mostly the official MCP SDK and its validation
 dependency, loaded only by `boite mcp`; the UI gains 10,992 bytes for recovery,
 task history, capabilities and fork return. The entry sizes stayed below their
 unchanged limits. These are build sizes, not startup or memory measurements.
+
+Inline views measured 4,267,528 UI bytes and 3,617,293 emitted core JavaScript
+bytes on Linux on 2026-10-07, against 4,250,457 and 3,590,819 for `origin/main`
+at `ecf0fe68` built the same way, which was already 457 UI bytes above the
+previous 4,250,000 limit. The core gains 26,474 bytes: publishing a page, the
+headless check, and the text an agent reads with `boite view help`. The UI
+gains 17,071 bytes: the frame, the order of views in the timeline, and the
+page bootstrap, which the client chunk keeps because the fake client stores
+pages with it.
 
 Sizes and blurs for deferred pictures measured 3,587,361 emitted core bytes
 on Windows CI on 2026-10-06, 7,361 bytes above the previous 3,580,000 limit:
