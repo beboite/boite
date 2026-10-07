@@ -22,6 +22,27 @@ export const ESTIMATE = 80;
 export const GAP = 20;
 /** --chat-block-gap in app.css: what a row that continues a cut message keeps above it instead. */
 export const BLOCK_GAP = 12;
+/** --chat-part-gap in app.css: what a message that carries on its turn keeps above it between runs of work. */
+export const PART_GAP = 4;
+
+/**
+ * The gap a measured row keeps above it, part of its slot: the column's, a cut
+ * message's paragraph, or the seam of a message carrying on its turn (`seam`
+ * in timeline-rows).
+ */
+export function slotGap(seam: string | null | undefined, rest: boolean): number {
+  return seam === 'part' ? PART_GAP : seam === 'block' || rest ? BLOCK_GAP : GAP;
+}
+
+/**
+ * Whether a row's slot was measured with another gap than it now keeps. A
+ * seam can change with nothing resizing, when an older page lands above the
+ * row: the row must be measured again.
+ */
+export function gapChanged(node: HTMLElement, seam: string | null, rest: boolean): boolean {
+  const measured = node.dataset['gap'];
+  return measured !== undefined && Number(measured) !== slotGap(seam, rest);
+}
 /** A prompt's picture before it is opened: `UserMessage`'s thumbnail height. */
 export const THUMB_HEIGHT = 240;
 /** What a picture adds besides itself: the row's margin and the frame. */

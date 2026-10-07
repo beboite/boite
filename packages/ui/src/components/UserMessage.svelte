@@ -164,7 +164,7 @@
   {/if}
 </div>
 {#if viewing}<ImageViewer items={viewing.items} index={viewing.index} onclose={() => viewing = null} />{/if}
-<div class="receipts" class:agent={!!startedBy} data-testid="message-receipts">
+<div class="receipts" class:agent={!!startedBy} class:settled={!!turn && progress.responded(message.turnId)} data-testid="message-receipts">
   <MessageActions text={copyText} at={message.createdAt} {edit} />
   <span class="tick" data-testid="receipt-accepted" class:received={!!turn} title={strings.chat.accepted} aria-label={strings.chat.accepted}><Check size={12} /></span>
   <span class="tick" data-testid="receipt-responded" class:received={progress.responded(message.turnId)} title={strings.chat.responseStarted} aria-label={strings.chat.responseStarted}><Check size={12} /></span>
@@ -176,6 +176,10 @@
   .receipts { display: flex; align-items: center; gap: 1px; margin: 4px 2px 0; color: var(--color-muted-foreground); }
   .receipts .tick { display: flex; opacity: .45; }
   .receipts .received { color: var(--color-accent); opacity: 1; }
+  /* Delivered and answered: the ticks wait for the pointer like the time beside them. A pending one stays. */
+  .receipts.settled .tick { opacity: 0; transition: opacity var(--dur-2); }
+  :global(.message:hover) .receipts.settled .tick, .receipts.settled:focus-within .tick, .receipts.settled:not(:has(button)) .tick { opacity: 1; }
+  @media (hover: none) { .receipts.settled .tick { opacity: 1; } }
   .command { color: var(--color-accent); font-weight: 600; }
 
   .bubble {

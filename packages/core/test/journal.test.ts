@@ -87,7 +87,7 @@ describe('journal', () => {
 
   test.each([0, 25])('index failure rolls back schema %i and a later open retries the entire migration', (version) => {
     const target = join(dir, 'index-failure.db');
-    const indexes = ['thread_deletions_by_date', 'processes_by_started', 'turns_by_status', 'messages_by_turn', 'turns_by_finished'];
+    const indexes = ['thread_deletions_by_date', 'processes_by_started', 'turns_by_status', 'messages_by_turn', 'turns_by_finished', 'turns_by_thread_queue'];
     if (version === 25) {
       const previous = new Journal(target);
       try {
@@ -101,7 +101,8 @@ describe('journal', () => {
     const failure = new Error('maintenance index failed');
     const original = Database.prototype.exec;
     const mock = spyOn(Database.prototype, 'exec').mockImplementation(function (this: Database, sql: string) {
-      if (sql.includes('CREATE INDEX IF NOT EXISTS messages_by_turn')) throw failure;
+      // The newest index fails: every one created before it in the transaction rolls back too.
+      if (sql.includes('CREATE INDEX IF NOT EXISTS turns_by_thread_queue')) throw failure;
       return original.call(this, sql);
     });
     try {

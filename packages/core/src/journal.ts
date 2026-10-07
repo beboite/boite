@@ -21,6 +21,7 @@ import { toAccount, toMessage, toProcess, toProject, toThread, toTurn, parseJson
 import type { AccountRow, MessageRow, ProcessRow, ProjectIconRow, ProjectRow, ThreadRow, TurnRow } from './journal/rows.ts';
 import type { DetectedIcon as StoredProjectIcon } from './project-icons.ts';
 import { messageOfError, StreamBuffer } from './journal/stream-buffer.ts';
+import { requestSince } from './journal/request-since.ts';
 import { usageByBucket, usageByThread, type UsageSumRow, type UsageThreadRow } from './journal/usage-sums.ts';
 import { sent, type Projection } from './journal/sent.ts';
 
@@ -484,6 +485,11 @@ export class Journal {
       .query("SELECT MIN(started_at) AS since FROM turns WHERE thread_id = ? AND status = 'running'")
       .get(threadId) as { since: number | null } | null;
     return row?.since ?? null;
+  }
+
+  /** When the user's current request started (`journal/request-since.ts`). */
+  requestSince(threadId: string): number | null {
+    return requestSince(this.db, threadId);
   }
 
   /**

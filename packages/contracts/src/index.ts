@@ -948,6 +948,14 @@ export interface ThreadSummary {
    * missing on older cores.
    */
   runningSince?: Timestamp | null;
+  /**
+   * When the user's current request started: the start of the last turn the
+   * user opened, kept through the turns Boite opened after it to carry on
+   * (`continuesRequest`). What a row counts from while the agent works or
+   * monitors, so a pause to watch CI does not reset it. Null when no turn runs
+   * and nothing runs in the background; missing on older cores.
+   */
+  requestSince?: Timestamp | null;
   /** In memory only, cleared at turn end/restart. Missing on older cores. */
   progress?: ThreadProgress | null;
   /**
@@ -1095,6 +1103,47 @@ export interface Turn {
    * finished before it was recorded.
    */
   checkpoint?: { sessionId: string; entry: string } | null;
+}
+
+/**
+ * Whether Boite opened this turn itself to carry on the user's last request:
+ * background work it left finished, a delegated agent or another agent wrote
+ * back, the core resumed after a restart, or the context was compacted on its
+ * own. The user's message, not this turn, is where the request started.
+ */
+export function continuesRequest(turn: Pick<Turn, 'execution'>): boolean {
+  const execution = turn.execution;
+  if (!execution) return false;
+  const operation = execution.operation;
+  return operation === 'background' || operation === 'delegation' || operation === 'coordination' || operation === 'resume' || execution.automatic === true;
+}
+
+/** Queue order: `queuedAt`, then id, so every client and the core agree on a tie. */
+export function queueOrder(a: Pick<Turn, 'id' | 'queuedAt'>, b: Pick<Turn, 'id' | 'queuedAt'>): number {
+  return a.queuedAt - b.queuedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+/**
+ * When the request each turn belongs to started: the start of the last turn
+ * the user opened, carried through the turns Boite opened after it
+ * (`continuesRequest`). Turns are ordered by `queuedAt`, then by id for the
+ * same millisecond, whatever order the list holds them in. A turn that never started maps to null and moves
+ * nothing: a prompt still queued, or cancelled before it ran, has no start to
+ * count from. When the user's turn is not in the list, a page not loaded yet,
+ * the earliest start of the loaded continuation stands in.
+ */
+export function requestStarts(turns: readonly Pick<Turn, 'id' | 'queuedAt' | 'startedAt' | 'execution'>[]): Map<TurnId, Timestamp | null> {
+  const starts = new Map<TurnId, Timestamp | null>();
+  let since: Timestamp | null = null;
+  for (const turn of [...turns].sort(queueOrder)) {
+    if (turn.startedAt === null) {
+      starts.set(turn.id, null);
+      continue;
+    }
+    if (!continuesRequest(turn) || since === null) since = turn.startedAt;
+    starts.set(turn.id, since);
+  }
+  return starts;
 }
 
 /** A thread status that means one of its turns is still under way. */

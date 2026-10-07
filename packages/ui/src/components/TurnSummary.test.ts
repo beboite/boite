@@ -48,6 +48,42 @@ test('a finished turn reads how long it worked, when it was done and what it spe
   expect(document.querySelector('[data-testid=turn-background]')).toBeNull();
 });
 
+test('a turn that carries on after monitoring counts from the user request, its own share on hover', () => {
+  // The user's turn began 30 minutes before Boite woke the agent for this one.
+  const request = STARTED - 1_800_000;
+  running = mount(TurnSummary, { target: document.body, props: { turn: turn(), requestStartedAt: request } });
+  flushSync();
+  const shown = document.querySelector('[data-testid=turn-elapsed]');
+  expect(shown?.textContent).toBe('Worked for 34m 41s');
+  expect(shown?.getAttribute('title')).toBe('This reply alone: 4m 41s');
+});
+
+test('a request start after the turn began, from a clock skew, falls back to the turn', () => {
+  running = mount(TurnSummary, { target: document.body, props: { turn: turn(), requestStartedAt: STARTED + 60_000 } });
+  flushSync();
+  expect(text('turn-elapsed')).toBe('Worked for 4m 41s');
+  expect(document.querySelector('[data-testid=turn-elapsed]')?.getAttribute('title')).toBeNull();
+});
+
+test('a compaction keeps its own duration whatever request it follows', () => {
+  running = mount(TurnSummary, { target: document.body, props: { turn: turn({ execution: compactExecution }), requestStartedAt: STARTED - 1_800_000 } });
+  flushSync();
+  expect(text('turn-elapsed')).toBe('Compacted in 4m 41s');
+  expect(document.querySelector('[data-testid=turn-elapsed]')?.getAttribute('title')).toBeNull();
+});
+
+test.each([
+  ['a finished turn', {}, [], true],
+  ['a stopped turn', { status: 'stopped' }, [], true],
+  ['a failed turn', { status: 'error' }, [], false],
+  ['a running turn', { status: 'running', finishedAt: null, usage: null }, [], false],
+  ['a finished turn with work left running', {}, [{ id: 'bash-1', kind: 'shell', description: 'bun run dev', toolId: 'tool-1', startedAt: STARTED }], false],
+] as const)('%s waits for the pointer only when nothing in it needs attention', (_name, overrides, background, settled) => {
+  running = mount(TurnSummary, { target: document.body, props: { turn: turn(overrides as Partial<Turn>), background: [...background] as BackgroundTask[] } });
+  flushSync();
+  expect(document.querySelector('[data-testid=turn-summary]')?.classList.contains('settled')).toBe(settled);
+});
+
 test('work left in the background is counted by kind and can be stopped', () => {
   const tasks: BackgroundTask[] = [
     { id: 'bash-1', kind: 'shell', description: 'bun run dev:ui', toolId: 'tool-1', startedAt: STARTED },

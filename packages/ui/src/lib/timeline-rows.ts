@@ -139,3 +139,19 @@ export function rowIndexOf(rows: readonly TimelineRow[], messageId: string, part
   while (rows[at + 1]?.message === rows[at]!.message && rows[at + 1]!.from <= part) at += 1;
   return at;
 }
+
+/**
+ * How an assistant message that carries on the turn of the row above joins it.
+ * A provider can open a new message in the middle of a turn, and the gap
+ * between messages then cut one run of work in two. Joined, the seam takes the
+ * gap the parts of one message take: `block` where text meets it, the space a
+ * paragraph keeps, `part` between two runs of activity. Null for any other row.
+ */
+export function seam(previous: TimelineRow | undefined, row: TimelineRow): 'part' | 'block' | null {
+  if (!previous || !row.first || row.message.role !== 'assistant' || previous.message.role !== 'assistant') return null;
+  if (previous.message.turnId !== row.message.turnId || previous.message.id === row.message.id) return null;
+  const shown = (part: MessagePart) => !(part.type === 'text' && part.text.trim() === '');
+  const lead = row.message.parts.find(shown);
+  const tail = previous.message.parts.slice(previous.from, previous.to).findLast(shown);
+  return lead?.type === 'text' || tail?.type === 'text' ? 'block' : 'part';
+}

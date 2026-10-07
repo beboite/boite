@@ -999,6 +999,7 @@ export const strings = {
     workedFor: 'Worked for {time}',
     compacting: 'Compacting conversation',
     compactionElapsed: 'Elapsed: {time}',
+    turnOwnTime: 'This reply alone: {time}',
     compactedFor: 'Compacted in {time}',
     compactionFailed: 'Compaction failed',
     compactionStopped: 'Compaction stopped',

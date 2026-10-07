@@ -25,8 +25,8 @@
   import { isSending } from '../lib/composer-queue';
   import { retryTurn } from '../lib/composer-edit';
   import { TurnProgress } from '../lib/turn-progress.svelte';
-  import { BLOCK_GAP, GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, estimateSlot, measurable, reaches, sameView, windowStats, type WindowView } from '../lib/message-window';
-  import { TimelineRows, rowEstimate, rowIndexOf, type TimelineRow } from '../lib/timeline-rows';
+  import { GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, estimateSlot, gapChanged, measurable, reaches, sameView, slotGap, windowStats, type WindowView } from '../lib/message-window';
+  import { TimelineRows, rowEstimate, rowIndexOf, seam, type TimelineRow } from '../lib/timeline-rows';
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
   import { glides } from '../lib/motion';
@@ -78,6 +78,8 @@
   const teamRowId = $derived(`delegation:${threadId}`);
   /** The runs this thread started, each a card where it began. */
   const workflowRows = $derived(new Map(store.workflowsOf(threadId).filter(run => run.rootThreadId === threadId).map(run => [`workflow:${run.id}`, run])));
+  /** The turns of the thread this list shows, open or delegated. */
+  const shownTurns = $derived(store.openThread?.id === threadId ? store.openThread.turns : store.delegationThread?.id === threadId ? store.delegationThread.turns : []);
   const grouped = $derived.by(() => {
     if (mail.length === 0 && team.length === 0 && workflowRows.size === 0 && memoryRows.size === 0) return { timeline: messages, groups: new Map() };
     const activity: Message[] = team.length ? [{
@@ -86,9 +88,8 @@
     }] : [];
     const runs: Message[] = [...workflowRows].map(([id, run]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: run.createdAt }));
     const memory: Message[] = [...memoryRows].map(([id, event]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: event.at }));
-    const turns = store.openThread?.id === threadId ? store.openThread.turns : store.delegationThread?.id === threadId ? store.delegationThread.turns : [];
     // Output that already existed in this millisecond precedes its exchange.
-    const rows = [...withAgentMail(messages, mail, threadId, turns), ...activity, ...runs, ...memory].sort((a, b) =>
+    const rows = [...withAgentMail(messages, mail, threadId, shownTurns), ...activity, ...runs, ...memory].sort((a, b) =>
       a.createdAt - b.createdAt || Number(a.id.startsWith('coordination:')) - Number(b.id.startsWith('coordination:')) || a.id.localeCompare(b.id));
     return groupAgentMail(rows, mail);
   });
@@ -391,7 +392,9 @@
       if (!id) continue;
       // The observer already measured the box; reading `offsetHeight` again would lay out, mid-scroll,
       // whatever the window just mounted. A row that continues a message sits a paragraph's gap under it.
-      const next = Math.round(entry.borderBoxSize?.[0]?.blockSize ?? node.offsetHeight) + (node.dataset['rest'] === undefined ? GAP : BLOCK_GAP);
+      const gap = slotGap(node.dataset['seam'], node.dataset['rest'] !== undefined);
+      node.dataset['gap'] = String(gap);
+      const next = Math.round(entry.borderBoxSize?.[0]?.blockSize ?? node.offsetHeight) + gap;
       const at = slots.indexOf(rows, id);
       const previous = heights.get(id) ?? slots.estimateOf(rows[at]);
       if (previous === next) continue;
@@ -444,7 +447,7 @@
    * rise plays once per message: a second element for the same id, minted when
    * the window scrolled back over it, opens with the animation off.
    */
-  function track(node: HTMLElement, row: TimelineRow): { destroy(): void } {
+  function track(node: HTMLElement, { row }: { row: TimelineRow; joined: string | null }): { update(next: { row: TimelineRow; joined: string | null }): void; destroy(): void } {
     const id = row.id;
     node.dataset['mid'] = id;
     if (!row.first) { node.dataset['rest'] = ''; node.dataset['message'] = row.message.id; }
@@ -465,6 +468,7 @@
     anchors.nodes.set(id, node);
     boxes?.observe(node);
     return {
+      update: ({ row: next, joined }) => { if (gapChanged(node, joined, !next.first)) { boxes?.unobserve(node); boxes?.observe(node); } },
       destroy() {
         boxes?.unobserve(node);
         // A second element for the same row may already have taken its place.
@@ -756,16 +760,19 @@
       {#if view.above > 0}
         <div class="spacer" data-testid="timeline-above" style="height: {view.above}px"></div>
       {/if}
-      {#each rendered as row (row.id)}
+      {#each rendered as row, index (row.id)}
         {@const message = row.message}
         {@const group = grouped.groups.get(message.id)}
         {@const turn = store.openThread?.turns.find(turn => turn.id === message.turnId)}
         {@const source = group || viewPart(message) ? messages.findLast(current => current.turnId === message.turnId) : message}
         {@const closes = row.last && turn !== undefined && lastInTurn.get(turn.id) === message.id}
+        {@const joined = seam(rows[view.start + index - 1], row)}
         <article
-          use:track={row}
+          use:track={{ row, joined }}
           class="message {message.role}"
           class:rest={!row.first}
+          data-seam={joined}
+          style:margin-top={joined && `calc(var(--chat-${joined}-gap) - var(--chat-message-gap))`}
           data-testid={row.first ? 'message' : 'message-rest'}
           data-role={group ? 'agent-mail' : message.role}
         >
@@ -791,7 +798,7 @@
             <TurnFiles {store} {...filesByTurn.get(turn.id)!} />
           {/if}
           {#if turn && closes}
-            <MessageTurnSummary {store} {threadId} {turn} message={source ?? message} {messages}>
+            <MessageTurnSummary {store} {threadId} {turn} turns={shownTurns} message={source ?? message} {messages}>
               {#snippet actions()}
                 <MessageActions
                   text={() => answerOf(turn.id)}
@@ -857,12 +864,7 @@
   }
 
   /* paging: one muted line at the top while the page above is being read. */
-  .loading-older {
-    flex: 0 0 auto;
-    text-align: center;
-    color: var(--color-muted-foreground);
-    font-size: var(--text-sm);
-  }
+  .loading-older { flex: 0 0 auto; text-align: center; color: var(--color-muted-foreground); font-size: var(--text-sm); }
 
   .message {
     display: flex;
