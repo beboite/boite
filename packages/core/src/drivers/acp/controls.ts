@@ -117,6 +117,22 @@ export class SessionControls {
     return this.configOptions.length > 0;
   }
 
+  /**
+   * `config_option_update`: the options as the agent says they now stand.
+   * Only the mode is taken from it, for an agent whose modes are a config
+   * option and that left one on its own: without it the kept value would still
+   * say `plan`, nothing would be sent, and the next turn would run in the
+   * agent's mode instead of the thread's. The model and the effort keep what
+   * Boite's own calls were answered.
+   */
+  noteOptionUpdate(options: SessionConfigOption[]): void {
+    const mode = categoryOption(options, 'mode');
+    // Only an option the session already listed is refreshed: one that appears
+    // here first would make a session with no options look as if it had some.
+    if (mode === null || !this.configOptions.some((entry) => entry.id === mode.id)) return;
+    this.configOptions = this.configOptions.map((entry) => (entry.id === mode.id ? mode : entry));
+  }
+
   /** `current_mode_update`: a mode change the agent announced on its own. */
   noteMode(modeId: string): void {
     this.currentModeId = modeId;

@@ -142,11 +142,13 @@ export class Connection {
         this.paired = false;
         const { FakeClient } = await import('../fake-client');
         // `&long=1` adds the four-hundred-message thread the windowed list is
-        // looked at on, `&principal=session` answers as a paired phone, so the
-        // screens a device is refused can be walked without pairing one.
+        // looked at on, `&heavy=1` the forty messages and 11.5 MiB of tool calls
+        // a long agent session leaves, `&principal=session` answers as a paired
+        // phone, so the screens a device is refused can be walked without pairing one.
         s.attach(
           new FakeClient({
             long: params.get('long') === '1',
+            heavy: params.get('heavy') === '1',
             delegationDemo: params.get('team') === '1',
             stewardDemo: params.get('steward') === '1',
             uninstalled: params.get('uninstalled') === '1',

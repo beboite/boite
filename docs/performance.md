@@ -496,6 +496,41 @@ limits expensive work while streaming, typing and scrolling:
   writes wait for a typing pause. Bottom following runs after layout and before
   paint through `ResizeObserver`.
 
+### A long turn is many rows
+
+A long agent session leaves a thread whose weight is tool calls: four real
+ones of 15 to 23 MB read on 2026-10-07 held 4,000 to 6,200 calls, and one
+assistant message carried a whole turn, up to 3,106 parts. The window counted
+messages, so such a message was mounted whole whenever any of it was near the
+viewport, and every scroll event read each call of the turns on screen again
+for the files card. `?fake=1&heavy=1` seeds that shape: forty messages,
+11.5 MiB, a last turn of 1,300 calls in runs of about ten.
+
+- `lib/timeline-rows.ts` cuts a message of more than 64 parts into rows of at
+  least 40, each starting on a paragraph the page draws. An activity run never
+  spans a cut, so the rows draw what the whole message drew, and a continuing
+  row keeps the 12 px a paragraph takes inside a message. The window measures,
+  anchors and estimates rows; the first row keeps the message's id.
+- A part arriving on a streaming message changes its last row only: the rows
+  above stay the same objects and draw nothing again.
+- The window hands back the same object while it covers the same rows, and
+  the files card reads tool calls only for a finished turn whose last row is
+  drawn: a scroll inside the rows on the page runs neither.
+- A reading position saves the message and the row of it on top; a find hit
+  names its part, and opens the row that draws it.
+- An anchor is read from the rows by id instead of searching every node, a
+  wheel notch away from the bottom reads no layout, a diff's width comes from
+  its `ResizeObserver` entry, page visibility has one listener for every call
+  clock, and a call's description is kept by its input object.
+
+Medians of five runs on 2026-10-07, 1280 x 890, software compositing, the base
+being `89556311`: a wheel up the long turn went from 1,895 to 784 ms of
+main-thread CPU per three seconds, with 3,271 nodes under the scroller down to
+849; six jumps across the thread from 825 to 56 ms of long tasks; a flick from
+435 ms of long tasks to none, covering 47,000 px of its gesture instead of
+26,000. The ordinary 400-message thread measured 878 then 870 ms.
+[Heavy-thread report](../bench/results/2026-10-07-heavy-thread.md).
+
 `packages/ui/src/render-cost.test.ts` rejects unbounded blur, forbidden endless
 animation properties, outer-container `:has()` and outline width transitions.
 The [frame report](../bench/results/2026-09-30-ui-frames.md) and
@@ -673,6 +708,8 @@ bun run bench/startup.ts --exe <boite-shell.exe> --runs 7
 bun bench/ui-frames.ts --noblur                # fps and main thread per UI scenario, software compositing
 bun bench/ui-frames.ts --ui <other checkout>/packages/ui --cpu 4 --size 1920x1080@1.5
 bun bench/ui-frames.ts --trace --only "typing,long thread scroll"   # layouts per window, and how many a script forced
+bun bench/ui-frames.ts --runs 5 --only "heavy thread scroll,heavy thread flick,heavy thread jumps,heavy scroll while streaming"
+bun bench/ui-frames.ts --gpu --only "heavy thread scroll"          # composited on the machine's GPU, never a software renderer
 bun bench/rpc-actions.ts --journal <journal.db> --runs 6   # latency, core CPU, bytes and RSS per RPC (Linux)
 ```
 
@@ -689,9 +726,14 @@ WebView2 profile, and reads the page's own timings over the debugging port.
 and plays each scenario in headless Chrome without a GPU: frames drawn, long
 tasks and main-thread time, per 1,000 px for the scroll scenarios, and each
 key's latency for the typing ones. `--noblur` repeats each one with backdrop
-filters off, `--ui` measures another checkout. `--trace` counts the layouts of
-each window and those a script forced, numbers that hold on a busy machine;
-`--profile <dir>` writes a CPU profile per scenario.
+filters off, `--css "<rules>"` with the rules it is given, `--ui` measures
+another checkout. `--trace` counts the layouts of each window, those a script
+forced and the paints, and the last two columns give the main thread's own
+CPU time and the nodes under the scroller: numbers that hold on a busy
+machine. `--profile <dir>` writes a CPU profile per scenario. `--gpu`
+composites on the machine's GPU, as an accelerated WebView2 does, and stops
+when Chrome only finds a software renderer. The heavy scenarios play the
+11.5 MiB thread of `?fake=1&heavy=1`.
 
 `bench/rpc-actions.ts` starts a core as a child process and times the boot
 calls, the reads of a thread and the common writes, with the core's CPU and
@@ -708,7 +750,8 @@ Results: [bench/results/2026-10-05-rpc-actions.md](../bench/results/2026-10-05-r
 [bench/results/2026-10-03-remote-browser-frames.md](../bench/results/2026-10-03-remote-browser-frames.md),
 [bench/results/2026-09-19-wire-and-startup.md](../bench/results/2026-09-19-wire-and-startup.md),
 [bench/results/2026-09-30-ui-frames.md](../bench/results/2026-09-30-ui-frames.md),
-[bench/results/2026-09-30-typing-and-scroll.md](../bench/results/2026-09-30-typing-and-scroll.md).
+[bench/results/2026-09-30-typing-and-scroll.md](../bench/results/2026-09-30-typing-and-scroll.md),
+[bench/results/2026-10-07-heavy-thread.md](../bench/results/2026-10-07-heavy-thread.md).
 
 ## The Windows sidecar is the signed runtime
 

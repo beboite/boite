@@ -60,6 +60,8 @@ export class QuotaResetStore {
     if (confirmed !== true) throw invalidParams('quotas.reset confirmed must be true after user confirmation', { field: 'confirmed', expected: true });
     const account = this.core.accounts.require(accountId);
     if (!['claude', 'codex'].includes(account.providerId)) throw refused(`Banked resets are not supported for ${account.providerId}.`);
+    // Using a reset starts the agent, which a provider turned off never does.
+    if (!this.core.providers.enabled(account.providerId)) throw refused('Turn this provider on in Settings > Providers before using a reset.');
     if (account.status === 'unauthenticated') throw refused('Sign in to this account before using a reset.');
     if (object(this.core.journal.getSetting('quota-accounts'))[account.id] === false) throw refused('Enable quota monitoring for this account before using a reset.');
     const key = attemptKey(this.core, account);

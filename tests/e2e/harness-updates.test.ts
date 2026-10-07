@@ -7,7 +7,8 @@ let server: { close(): Promise<void> };
 let page: BrowserPage;
 let url: string;
 const id = (name: string) => `[data-testid="${name}"]`;
-const local = `${id('machine-updates-card')}:first-child`;
+// Each machine is one row of the list, its versions and agents folded under it.
+const local = `${id('machine-card')}:first-child ${id('machine-updates-card')}`;
 const remote = `${id('machine-updates-card')}[data-machine-id="http://builder.test"]`;
 const row = (card: string, provider: string) => `${card} ${id('machine-agent-update')}[data-provider-id="${provider}"]`;
 async function capture(name: string) {
@@ -23,6 +24,8 @@ async function machines() {
   await page.click(id('settings-tab-machines'));
   await page.waitFor(`document.querySelectorAll('${id('harness-updates-card')}').length === 2`);
 }
+/** Opens every row's details, which a capture needs: a click through the DOM reaches them folded. */
+const unfold = () => page.evaluate(`document.querySelectorAll('${id('machine-details-toggle')}[aria-expanded="false"]').forEach((toggle) => toggle.click())`);
 
 beforeAll(async () => {
   const port = await freePort(); url = `http://127.0.0.1:${port}/?fake=1&updates=1&machines=1&open=recent`;
@@ -38,14 +41,21 @@ test('agent updates stay in Machines and Update and Skip target their own machin
   await capture('harness-updates-chat');
   await machines();
   expect((await page.text(id('settings-tab-machines'))).trim()).toBe('Machines and updates');
-  expect(await page.evaluate(`document.querySelectorAll('#settings-updates ${id('harness-updates-card')}').length`)).toBe(2);
-  expect(await page.evaluate(`document.querySelector('#settings-machines ${id('harness-updates-card')}') === null`)).toBe(true);
+  // One row per machine: its agents are under it, folded, and the row says a release is waiting.
+  expect(await page.evaluate(`document.querySelectorAll('#settings-machines ${id('machine-card')} ${id('harness-updates-card')}').length`)).toBe(2);
+  expect(await page.evaluate(`document.querySelectorAll('${id('machine-updates-card')}').length`)).toBe(2);
+  expect(await page.evaluate(`document.querySelectorAll('${id('machine-details-toggle')}[aria-expanded="false"]').length`)).toBe(2);
+  await page.waitFor(`document.querySelectorAll('${id('machine-updates-state')}[data-state="available"]').length === 2`);
+  expect(await page.evaluate(`document.querySelector('[data-settings-section="updates"]') === null`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('${id('app-update-popover')}') === null`)).toBe(true);
+  await capture('harness-updates-folded');
+  await unfold();
   await capture('harness-updates-desktop');
+  // The page ends before the phones card can reach the top: it is brought into view, and the list scrolls away.
+  await page.click('[data-settings-section="devices"]');
+  await page.waitFor(`document.getElementById('settings-devices').getBoundingClientRect().top < innerHeight - 200 && document.getElementById('settings-machines').getBoundingClientRect().top < 0`);
   await page.click('[data-settings-section="machines"]');
-  await page.waitFor(`document.getElementById('settings-machines').getBoundingClientRect().top < 150`);
-  await page.click('[data-settings-section="updates"]');
-  await page.waitFor(`document.getElementById('settings-updates').getBoundingClientRect().top > 0 && document.getElementById('settings-updates').getBoundingClientRect().top < 150`);
+  await page.waitFor(`document.getElementById('settings-machines').getBoundingClientRect().top > 0 && document.getElementById('settings-machines').getBoundingClientRect().top < 250`);
 
   await page.click(`${row(local, 'claude')} ${id('harness-update-skip')}`);
   await page.waitFor(`document.querySelector('${row(local, 'claude')} ${id('harness-update-unskip')}')`);
@@ -58,7 +68,7 @@ test('agent updates stay in Machines and Update and Skip target their own machin
   expect(await page.evaluate(`document.querySelector('${local} ${id('setting-auto-update-harnesses')}').checked`)).toBe(false);
 
   const active = await page.evaluate('window.__boiteTest.workspace.active.machineId');
-  for (const navigation of [id('settings-tab-machines'), '[data-settings-section="updates"]']) {
+  for (const navigation of [id('settings-tab-machines'), '[data-settings-section="devices"]']) {
     await page.click('[data-settings-section="machines"]');
     await page.click(`${id('machine-card')}[data-machine-id="http://builder.test"] ${id('machine-settings-open')}`);
     await page.waitFor(`document.querySelector('${id('machine-settings')}')`);
@@ -71,7 +81,8 @@ test('agent updates stay in Machines and Update and Skip target their own machin
   await size(390);
   await page.waitFor(`document.querySelector('${id('machines-page')}')`);
   expect((await page.text('.mobile-settings > header h1')).trim()).toBe('Machines and updates');
-  await page.evaluate(`document.querySelector('${local}').scrollIntoView({block:'start'})`);
+  await unfold();
+  await page.evaluate(`document.querySelector('${id('machine-card')}').scrollIntoView({block:'start'})`);
   await capture('harness-updates-phone');
   await page.click(`${row(local, 'claude')} ${id('harness-update-unskip')}`);
   await page.waitFor(`document.querySelector('${row(local, 'claude')} ${id('harness-update-row-run')}')`);

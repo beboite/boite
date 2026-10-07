@@ -394,6 +394,67 @@ export function removeBrought(url: string, machine: { coreId: string; groupId?: 
   return readEnvironments();
 }
 
+export const MAIN_STORAGE_KEY = 'boite.main';
+
+/**
+ * The machine the owner chose to open on at every start. `local` is the app's
+ * own core: the one the shell starts, whose port changes at every start, or
+ * in a browser the one that serves the page. Any other is a machine this
+ * device holds a key for, named by its address and, when the group brought
+ * it, by what it is in that group: its address may change, the machine stays
+ * the one chosen.
+ */
+export type MainMachine = { local: true } | { url: string; coreId?: string; groupId?: string };
+
+export function readMainMachine(): MainMachine | null {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(MAIN_STORAGE_KEY) ?? 'null');
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const shape = parsed as Record<string, unknown>;
+    if (shape['local'] === true) return { local: true };
+    if (typeof shape['url'] !== 'string') return null;
+    const member = typeof shape['coreId'] === 'string' && typeof shape['groupId'] === 'string' ? { coreId: shape['coreId'], groupId: shape['groupId'] } : {};
+    return { url: normalise(shape['url']), ...member };
+  } catch {
+    return null;
+  }
+}
+
+/** With null, a start opens again on the machine shown last. */
+export function storeMainMachine(main: MainMachine | null): void {
+  try {
+    if (main === null) window.localStorage.removeItem(MAIN_STORAGE_KEY);
+    else window.localStorage.setItem(MAIN_STORAGE_KEY, JSON.stringify(main));
+  } catch {
+    /* a browser that refuses storage still runs for this session */
+  }
+}
+
+/** The key this device holds for the chosen machine: at its address, or wherever the group has brought that machine since. */
+function mainEnvironment(main: MainMachine): StoredEnvironment | undefined {
+  if ('local' in main) return undefined;
+  const keyed = readEnvironments().filter((env) => env.token !== '');
+  return keyed.find((env) => env.url === main.url)
+    ?? (main.coreId === undefined ? undefined : keyed.find((env) => env.coreId === main.coreId && env.groupId === main.groupId));
+}
+
+/**
+ * Makes the machine the owner chose the one this start opens on, whichever
+ * machine was shown last. A choice this device holds no key for any more, a
+ * machine removed or dropped by its group, changes nothing: the start opens
+ * where the last one ended, and the choice counts again once that machine is
+ * back.
+ */
+export function openOnMainMachine(): void {
+  const main = readMainMachine();
+  if (main === null) return;
+  // With no stored core, a start falls back on the app's own: the shell's, or the origin of the page.
+  // In a browser that machine may need the key held for it, a phone's page being served by the machine it paired with.
+  const env = 'local' in main ? readEnvironments().find((entry) => entry.token !== '' && servesThisPage(entry.url)) : mainEnvironment(main);
+  if (env) storeEndpoint(env);
+  else if ('local' in main) clearStoredEndpoint();
+}
+
 function rawStoredUrl(): string | null {
   try {
     const parsed: unknown = JSON.parse(window.localStorage.getItem(ENDPOINT_STORAGE_KEY) ?? 'null');
@@ -453,6 +514,12 @@ function takeFromQuery(): Endpoint | null {
   window.history.replaceState(null, '', stripped);
 
   return endpoint;
+}
+
+/** Whether the address bar still carries a link to a core: a pairing link, a token or a `?core=`. Read before the link is taken. */
+export function opensFromLink(): boolean {
+  const params = new URLSearchParams(window.location.search);
+  return [CORE_QUERY_PARAM, PAIR_QUERY_PARAM, GRANT_QUERY_PARAM].some((name) => params.get(name));
 }
 
 /** The core a `?core=` link names, with or without a key of its own, read before the link is taken. */

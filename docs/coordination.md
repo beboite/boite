@@ -39,8 +39,9 @@ Consecutive agent exchanges appear in the conversation as compact counts:
 activity markers separate bursts. A count opens the Messages tab in the right
 panel, filtered to that direction and scrolled to the selected burst. The tab
 also opens from the panel launcher and offers All, Sent and Received filters.
-It updates with new mail and keeps its filter across reloads. Unconfirmed,
-expired and rejected messages add an attention count to the summary.
+It updates with new mail and keeps its filter across reloads. Under its count,
+a summary names the threads on the other end, each once. A message that is
+unconfirmed, expired or rejected shows that status in the Messages tab.
 
 The tab retains each message's bubble, text, age and delivery status. The arrow,
 thread title, project and machine identify the other conversation. Received

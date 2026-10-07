@@ -497,6 +497,9 @@ export class HarnessUpdates {
   /** One short run of the agent's own program, traced like every process of an agent. */
   private async run(target: Target, args: string[], timeoutMs: number): Promise<string> {
     this.assertOpen();
+    // An updater just rewrote the program, or it was never asked its version: a
+    // candidate that names a major resolves once the program has answered.
+    if (resolveCommand(target.profile) === null) await this.core.providers.settle(this.versionTimeoutMs);
     const command = resolveCommand(target.profile);
     if (command === null) throw new Error(`${target.descriptor.name} is not on this machine any more`);
     const spawned = this.core.procs.spawnPiped(updateThreadId(target.descriptor.id), command.executable, [...command.prefix, ...args], {
@@ -567,6 +570,9 @@ export class HarnessUpdates {
       forgetProbes({ providerId: id });
       forgetWhich();
       recheckVersions();
+      // The list that goes out names the program as it stands after the update.
+      await this.core.providers.settle(this.versionTimeoutMs);
+      if (this.closed || this.core.stopping) return;
       this.core.bus.emit('providers.updated', this.core.providers.list());
     } catch (error) {
       this.entries.set(id, { ...before, state: 'failed', message: error instanceof Error ? error.message : String(error), checkedAt: Date.now(), program: target.program });

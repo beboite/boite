@@ -77,7 +77,3 @@ export function groupAgentMail(timeline: Message[], mail: AgentMail[]): { timeli
   }
   return { timeline: rows, groups };
 }
-
-export function mailNeedsAttention(entry: AgentMail): boolean {
-  return ['uncertain', 'expired', 'rejected'].includes(entry.letter.status);
-}

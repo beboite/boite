@@ -11,7 +11,13 @@ export interface ReadingPosition {
   top: number;
   pinned: boolean;
   heights: Map<string, number>;
-  anchor?: { id: string; offset: number };
+  /**
+   * The message at the top of the reader's view, what the core is asked the
+   * page around, and how far its top is from the list's. `row` names the row
+   * the offset is measured from when the timeline cut a long message in
+   * several (`lib/timeline-rows.ts`); without it, the message's first row.
+   */
+  anchor?: { id: string; offset: number; row?: string };
   height?: number;
   reservePrompt?: string | null;
   followPrompt?: string | null;

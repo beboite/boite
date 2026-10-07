@@ -134,12 +134,13 @@ no real provider call and uses no existing login directory.
 
 ## Updating from the app
 
-Open Settings, Machines and updates. In Updates, each remote server shows its
-installed version and a Check for updates action. When a signed server release
-is available, Update appears on that machine's card. The desktop app's own
-manual check and channel choices appear in the same Updates section.
-Cards show the installed and offered versions together. Details expands the
-idle wait, backup and recovery behavior without adding it to the confirmation.
+Open Settings, Machines and updates. A remote server whose row says Update
+available has a signed release waiting: open its details, where the server
+shows its installed version, a Check for updates action and Update. The
+desktop app's own manual check and channel choices sit in the card above the
+list. Cards show the installed and offered versions together. The card's own
+Details expands the idle wait, backup and recovery behavior without adding it
+to the confirmation.
 
 Server updates require an owner connection, including on a phone. Ordinary
 paired devices cannot stop or update the server. The action always goes to the
