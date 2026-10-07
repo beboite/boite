@@ -108,7 +108,7 @@ test('unknown releases run their own updater and Providers keeps only installed 
   }
 }, 30_000);
 
-test('an update asked for while a turn of that agent runs says how many tool calls it waits for', async () => {
+test('an update asked for while a turn of that agent runs says how many threads it waits for', async () => {
   // The open thread moves to Claude, then a permission card holds its tool call, the way a long command would.
   await page.waitFor(`document.querySelector('${id('composer-picker')}')`);
   await page.click(id('composer-picker'));
@@ -128,7 +128,7 @@ test('an update asked for while a turn of that agent runs says how many tool cal
   const claude = row(local, 'claude');
   await page.waitFor(`document.querySelector('${claude} ${id('harness-update-row-run')}') !== null`);
   await page.click(`${claude} ${id('harness-update-row-run')}`);
-  const waiting = `document.querySelector('${claude} ${id('harness-update-progress')}')?.textContent === 'Waits for a tool call to finish'`;
+  const waiting = `document.querySelector('${claude} ${id('harness-update-progress')}')?.textContent === 'Waits for a thread to pause'`;
   await page.waitFor(waiting);
   await page.evaluate(`document.querySelector('${claude}').scrollIntoView({ block: 'center' })`);
   await capture('harness-update-waiting-desktop');

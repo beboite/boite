@@ -17,10 +17,12 @@ export function resumeAfterUpdate(name: string, from: string | null, to: string 
       label: `Resumed: the ${name} update failed`,
     };
   }
-  const moved = from !== null && to !== null && from !== to ? ` from ${from} to ${to}` : to === null ? '' : ` to ${to}`;
+  // An updater that found nothing newer leaves the version where it was: no move to announce.
+  const unchanged = to !== null && from === to;
+  const moved = to === null || unchanged ? '' : from === null ? ` to ${to}` : ` from ${from} to ${to}`;
   return {
-    prompt: `Boite paused this turn between two tool calls to update ${name}${moved}. Your session and the results of your tool calls are kept. ${GO_ON}`,
-    label: to === null ? `Resumed after the ${name} update` : `Resumed after the ${name} ${to} update`,
+    prompt: `Boite paused this turn between two tool calls to update ${name}${moved}.${unchanged ? ` ${name} stays on ${to}.` : ''} Your session and the results of your tool calls are kept. ${GO_ON}`,
+    label: to === null || unchanged ? `Resumed after the ${name} update` : `Resumed after the ${name} ${to} update`,
   };
 }
 

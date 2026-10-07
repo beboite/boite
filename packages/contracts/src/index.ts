@@ -156,9 +156,9 @@ export interface HarnessUpdate {
   message: string | null;
   checkedAt: Timestamp | null;
   /**
-   * While `updating`: the turns of this agent still inside a tool call. The
-   * updater starts once each of them has paused between two tool calls, and
-   * they resume once it is done. Absent or zero once the updater runs.
+   * While `updating`: the running turns of this agent that have not paused
+   * between two tool calls yet. The updater starts once none is left
+   * unpaused, and they resume once it is done. Absent or zero once the updater runs.
    */
   waitingFor?: number;
 }

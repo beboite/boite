@@ -22,8 +22,8 @@ available on its row before the details are opened; a skipped release does
 not. Updates create no pinned chat notice.
 
 - Update releases the provider's warm processes and runs the update in the
-  background. The row shows progress, or how many tool calls the update still
-  waits for while turns of that agent run ([Turns in flight](#turns-in-flight));
+  background. The row shows progress, or how many running threads of that
+  agent the update still waits for to pause ([Turns in flight](#turns-in-flight));
   the next turn starts the new version.
 - Skip stops offering that version. A later version is offered again.
   The same row in Machines and updates offers a skipped version again.
@@ -130,17 +130,21 @@ released first.
 When the updater is done, each paused turn goes on in the same turn and the
 same native session: the core sends the agent a note that it was paused
 between two tool calls for the update, and the thread shows
-`Resumed after the <agent> <version> update`, or `Resumed: the <agent> update
-failed` when it failed. An agent with no session to resume gets the thread's
+`Resumed after the <agent> <version> update`, `Resumed after the <agent>
+update` when the version did not move, or `Resumed: the <agent> update failed`
+when it failed. `Resumed: the <agent> update no longer waits` is the guard for
+an update that ended before the pause registered; a pause asked for by an
+update that is gone is dropped before it stops the agent. An agent with no session to resume gets the thread's
 history, this turn's work included. The turn finishes once, so a delegated
 agent reports to its parent, a workflow step completes and a notification goes
 out only for the real end. Prompts sent while the updater runs are accepted and
 wait in the queue; they start on the new version.
 
-A paused turn waits at most 15 minutes for the agent's other turns to reach
-their own pause. Past that, the paused turns go on with `Resumed: the <agent>
-update waits for other turns`, no turn is paused again, and the update runs at
-the first moment no turn of the agent runs. This covers a turn whose tool call
+The first pause starts a 15 minute limit for the agent's other turns to reach
+their own pause. Before any turn has paused, the update waits for the current
+tool calls with no deadline. Past the limit, the paused turns go on with
+`Resumed: the <agent> update waits for other turns`, no turn is paused again,
+and the update runs at the first moment no turn of the agent runs. This covers a turn whose tool call
 waits on another turn of the same agent, such as `boite agents send --wait`,
 which would otherwise never let the update start.
 

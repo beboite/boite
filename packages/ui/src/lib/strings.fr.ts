@@ -2175,7 +2175,7 @@ export const fr: Translation = {
     on: (machine: string) => `Sur ${machine}`,
     update: 'Mettre à jour', skip: 'Ignorer', retry: 'Réessayer',
     updating: (name: string) => `Mise à jour de ${name}`,
-    waiting: (count: number) => count === 1 ? "Attend la fin d'un appel d'outil" : `Attend la fin de ${count} appels d'outil`,
+    waiting: (count: number) => count === 1 ? "Attend la pause d'une conversation" : `Attend la pause de ${count} conversations`,
     failed: (name: string) => `La mise à jour de ${name} a échoué`,
     upToDate: 'À jour', unknown: 'Vérifie lui-même', runUpdater: 'Lancer sa mise à jour',
     skipped: (version: string) => `${version} ignorée`,

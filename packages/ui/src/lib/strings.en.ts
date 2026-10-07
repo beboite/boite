@@ -2277,7 +2277,7 @@ export const strings = {
     on: (machine: string) => `On ${machine}`,
     update: 'Update', skip: 'Skip', retry: 'Try again',
     updating: (name: string) => `Updating ${name}`,
-    waiting: (count: number) => count === 1 ? 'Waits for a tool call to finish' : `Waits for ${count} tool calls to finish`,
+    waiting: (count: number) => count === 1 ? 'Waits for a thread to pause' : `Waits for ${count} threads to pause`,
     failed: (name: string) => `${name} did not update`,
     upToDate: 'Up to date', unknown: 'Checks by itself', runUpdater: 'Run its updater',
     skipped: (version: string) => `${version} skipped`,

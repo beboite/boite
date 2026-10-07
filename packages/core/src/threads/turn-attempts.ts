@@ -248,7 +248,13 @@ export class TurnAttempts {
    * outside the driver's own callback.
    */
   private toolBoundary(threadId: ThreadId): void {
-    if (!this.pauseWanted.has(threadId) || this.threads.handoff.toolsRunning(threadId) > 0) return;
+    const providerId = this.pauseWanted.get(threadId);
+    if (providerId === undefined || this.threads.handoff.toolsRunning(threadId) > 0) return;
+    // The update may have run or stopped pausing since it asked: nothing to pause for any more.
+    if (!this.core.updates.wantsPause(providerId)) {
+      this.pauseWanted.delete(threadId);
+      return;
+    }
     const handle = this.handles.get(threadId);
     if (handle === undefined) return;
     setTimeout(() => {
