@@ -2,13 +2,14 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
-import type { HarnessUpdate, OsProfile, ProviderDescriptor, ProviderId, ProviderSelfUpdate } from '@boite/contracts';
+import type { HarnessUpdate, OsProfile, ProviderDescriptor, ProviderId, ProviderSelfUpdate, ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { forgetProbes } from '../drivers/index.ts';
 import { notFound, refused } from '../errors.ts';
 import type { InstallOutcome } from './install.ts';
 import { npmInstallOf, unwritableDir } from './npm.ts';
 import { profileFor, resolveCommand } from './resolve.ts';
+import { resumeAfterUpdate, resumePostponed, resumeUnwaited, type Resume } from './update-resume.ts';
 import { readVersion, recheckVersions } from './versions.ts';
 import { forgetWhich } from './which.ts';
 
@@ -21,8 +22,15 @@ export { readVersion };
  */
 const FIRST_CHECK_MS = 10 * 60 * 1000;
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
-/** An automatic check or update that found a turn in flight looks again this often. */
+/** An automatic check that found a turn in flight looks again this often. */
 const BUSY_RETRY_MS = 10 * 60 * 1000;
+/**
+ * How long a paused turn waits for the other turns of its agent to pause. Past
+ * it the paused turns go on, on the version they started with, and the update
+ * waits for a moment when none of the agent's turns runs: a turn that waits on
+ * another one through a tool call would otherwise never let it go.
+ */
+const PAUSE_LIMIT_MS = 15 * 60 * 1000;
 const VERSION_TIMEOUT_MS = 20_000;
 /** How long a timed-out run's pipes may stay open once its tree was killed, for a descendant killTree cannot reach. */
 const PIPE_GRACE_MS = 2_000;
@@ -74,6 +82,21 @@ interface Entry {
   checkedAt: number | null;
   /** The program this reading came from. Null in a reading kept by an older build. */
   program: string | null;
+}
+
+/**
+ * An update asked for while turns of its agent run. `pause`: each running turn
+ * pauses at its next tool boundary. `idle`: the pause limit passed, the paused
+ * turns went on, and the update waits for none to run. `run`: the updater runs,
+ * and the scheduler holds the agent's queued turns until it is done.
+ */
+interface Drain {
+  target: Target;
+  before: Entry;
+  phase: 'pause' | 'idle' | 'run';
+  limit: ReturnType<typeof setTimeout> | null;
+  resume: ReturnType<typeof Promise.withResolvers<Resume | null>>;
+  waitingFor: number;
 }
 
 interface Target {
@@ -185,17 +208,23 @@ export class HarnessUpdates {
   private checking: Promise<HarnessUpdate[]> | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
+  private readonly drains = new Map<ProviderId, Drain>();
   /** When the last whole check finished, kept across restarts. */
   private lastCheckAt: number | null = null;
-  /** Test seams: the registry read, the only providers a check may touch, and how long a version read may take. */
+  /** Test seams: the registry read, the only providers a check may touch, how long a version read and a pause may take. */
   npmLatest: (name: string) => Promise<string> = npmLatest;
   only: ReadonlySet<ProviderId> | null = null;
   versionTimeoutMs = VERSION_TIMEOUT_MS;
+  pauseLimitMs = PAUSE_LIMIT_MS;
 
   constructor(private readonly core: Core) {
     this.skips = this.readSkips();
     this.readReadings();
     core.providers.installs.onSettled((outcome) => this.installSettled(outcome));
+    // A turn that ends may be the last one an update waits for.
+    core.bus.onAny((name) => {
+      if (name === 'turn.finished' && this.drains.size > 0) setTimeout(() => this.advanceAll(), 0);
+    });
   }
 
   /**
@@ -262,6 +291,11 @@ export class HarnessUpdates {
     if (this.timer !== null) clearTimeout(this.timer);
     this.timer = null;
     for (const id of this.entries.keys()) this.core.procs.killTree(updateThreadId(id));
+    for (const drain of this.drains.values()) {
+      if (drain.limit !== null) clearTimeout(drain.limit);
+      drain.resume.resolve(null);
+    }
+    this.drains.clear();
   }
 
   /**
@@ -308,21 +342,14 @@ export class HarnessUpdates {
         latest: entry.latest,
       });
     }
-    const busy = this.busyThreads(providerId);
-    if (busy > 0) {
-      throw refused(`${target.descriptor.name} has ${busy} turn${busy === 1 ? '' : 's'} in flight; update it once they finish`, {
-        providerId,
-        busy,
-      });
-    }
-    // A running program cannot be replaced, and a warm session is one.
-    for (const thread of this.core.journal.listThreads()) {
-      if (thread.providerId === providerId) this.core.threads.releaseAgent(thread.id);
-    }
-    this.put(providerId, { ...entry, state: 'updating', message: null });
-    void this.runUpdate(target, entry).catch((error: unknown) => {
-      this.core.log('error', `updating ${providerId}: ${error instanceof Error ? error.message : String(error)}`);
-    });
+    // Turns of this agent in flight pause between two tool calls rather than refuse the update.
+    const drain: Drain = { target, before: entry, phase: 'pause', limit: null, resume: Promise.withResolvers(), waitingFor: 0 };
+    this.drains.set(providerId, drain);
+    this.entries.set(providerId, { ...entry, state: 'updating', message: null });
+    for (const threadId of this.runningThreads(providerId)) this.core.threads.runner.requestPause(threadId, providerId);
+    drain.waitingFor = this.waitingFor(providerId);
+    this.emit();
+    this.advance(providerId);
     return this.describe(providerId)!;
   }
 
@@ -331,9 +358,37 @@ export class HarnessUpdates {
     return this.entries.get(providerId)?.current ?? null;
   }
 
-  /** True while this provider's program is being replaced: a turn started now would run on half of it. */
+  /** True while this provider's update is asked for and not done. */
   updating(providerId: ProviderId): boolean {
     return this.entries.get(providerId)?.state === 'updating';
+  }
+
+  /** True while this provider's turns should pause at their next tool boundary. */
+  wantsPause(providerId: ProviderId): boolean {
+    return this.drains.get(providerId)?.phase === 'pause';
+  }
+
+  /** True while the updater runs: the scheduler starts none of this provider's turns. */
+  holds(providerId: ProviderId | undefined): boolean {
+    return providerId !== undefined && this.drains.get(providerId)?.phase === 'run';
+  }
+
+  /** What a turn that paused for this provider's update waits on. */
+  resumeOf(providerId: ProviderId): Promise<Resume | null> {
+    const drain = this.drains.get(providerId);
+    if (drain !== undefined) return drain.resume.promise;
+    return Promise.resolve(resumeUnwaited(this.core.providers.get(providerId)?.name ?? providerId));
+  }
+
+  /** A turn paused: the update may start, and the pause limit runs from the first one. */
+  turnPaused(providerId: ProviderId): void {
+    const drain = this.drains.get(providerId);
+    if (drain === undefined) return;
+    if (drain.limit === null && drain.phase === 'pause') {
+      drain.limit = setTimeout(() => this.postpone(providerId), this.pauseLimitMs);
+      drain.limit.unref?.();
+    }
+    this.advance(providerId);
   }
 
   skip(providerId: ProviderId, version: string | null): HarnessUpdate {
@@ -359,7 +414,6 @@ export class HarnessUpdates {
   }
 
   private async tick(): Promise<void> {
-    let deferred = false;
     try {
       // A check started by hand since the timer was armed already counts.
       const recent = this.lastCheckAt !== null && Date.now() - this.lastCheckAt < CHECK_EVERY_MS - BUSY_RETRY_MS;
@@ -375,10 +429,7 @@ export class HarnessUpdates {
       if (this.core.settings.get().autoUpdateHarnesses) {
         for (const update of this.snapshot()) {
           if (!update.pending) continue;
-          if (this.busyThreads(update.providerId) > 0) {
-            deferred = true;
-            continue;
-          }
+          // A turn in flight pauses at its next tool boundary for it, and goes on after.
           await this.update(update.providerId).catch((error: unknown) => {
             this.core.log('warn', `automatic update of ${update.providerId}: ${error instanceof Error ? error.message : String(error)}`);
           });
@@ -388,7 +439,7 @@ export class HarnessUpdates {
       if (this.closed || this.core.stopping) return;
       this.core.log('warn', `checking agent updates: ${error instanceof Error ? error.message : String(error)}`);
     }
-    this.schedule(deferred ? BUSY_RETRY_MS : CHECK_EVERY_MS);
+    this.schedule(CHECK_EVERY_MS);
   }
 
   /** The route this provider updates by on this machine, null when there is none. */
@@ -635,22 +686,84 @@ export class HarnessUpdates {
     });
   }
 
+  /** The threads whose turn of this provider is running, a paused one included. */
+  private runningThreads(providerId: ProviderId): ThreadId[] {
+    const threads = new Set<ThreadId>();
+    for (const turn of this.core.journal.unfinishedTurns()) {
+      if (turn.status !== 'running') continue;
+      const owner = turn.execution?.providerId ?? this.core.journal.getThread(turn.threadId)?.providerId;
+      if (owner === providerId) threads.add(turn.threadId);
+    }
+    return [...threads];
+  }
+
+  /** The running turns of this provider that have not paused: what the updater waits for. */
+  private waitingFor(providerId: ProviderId): number {
+    return this.runningThreads(providerId).filter((threadId) => !this.core.threads.runner.isPaused(threadId)).length;
+  }
+
+  private advanceAll(): void {
+    for (const id of [...this.drains.keys()]) this.advance(id);
+  }
+
+  /** Starts the updater once no turn of the provider runs unpaused, or says how many it still waits for. */
+  private advance(providerId: ProviderId): void {
+    const drain = this.drains.get(providerId);
+    if (drain === undefined || drain.phase === 'run' || this.closed) return;
+    const waiting = this.waitingFor(providerId);
+    if (waiting > 0) {
+      if (waiting !== drain.waitingFor) {
+        drain.waitingFor = waiting;
+        this.emit();
+      }
+      return;
+    }
+    drain.phase = 'run';
+    drain.waitingFor = 0;
+    if (drain.limit !== null) clearTimeout(drain.limit);
+    drain.limit = null;
+    // A running program cannot be replaced, and a warm session is one: a paused turn's included.
+    for (const thread of this.core.journal.listThreads()) {
+      if (thread.providerId === providerId) this.core.threads.releaseAgent(thread.id);
+    }
+    this.emit();
+    void this.runUpdate(drain.target, drain.before)
+      .catch((error: unknown) => {
+        this.core.log('error', `updating ${providerId}: ${error instanceof Error ? error.message : String(error)}`);
+      })
+      .finally(() => {
+        if (this.drains.get(providerId) !== drain) return;
+        this.drains.delete(providerId);
+        const entry = this.entries.get(providerId);
+        drain.resume.resolve(this.closed || this.core.stopping ? null
+          : resumeAfterUpdate(drain.target.descriptor.name, drain.before.current, entry?.current ?? null, entry?.state === 'failed'));
+        // The turns queued while the updater ran start now, on the new version.
+        if (!this.closed && !this.core.stopping) this.core.scheduler.retry();
+      });
+  }
+
+  /**
+   * The pause limit passed with turns still inside a tool call: the paused
+   * ones go on, and the update waits for none of the agent's turns to run.
+   */
+  private postpone(providerId: ProviderId): void {
+    const drain = this.drains.get(providerId);
+    if (drain === undefined || drain.phase !== 'pause') return;
+    drain.limit = null;
+    drain.phase = 'idle';
+    for (const threadId of this.runningThreads(providerId)) this.core.threads.runner.cancelPause(threadId);
+    const name = drain.target.descriptor.name;
+    const waiting = drain.resume;
+    drain.resume = Promise.withResolvers();
+    this.core.log('info', `${name}: turns still in a tool call after ${Math.round(this.pauseLimitMs / 60000)} min; the paused ones go on and the update waits for an idle moment`);
+    waiting.resolve(resumePostponed(name));
+    this.advance(providerId);
+  }
+
   /** True while any turn of any agent is queued, running or waiting. */
   private anyBusy(): boolean {
     return this.core.journal.unfinishedTurns().length > 0 ||
       this.core.journal.listThreads().some((thread) => ['queued', 'running', 'waiting'].includes(thread.status));
-  }
-
-  private busyThreads(providerId: ProviderId): number {
-    const busy = new Set(this.core.journal
-      .listThreads()
-      .filter((thread) => thread.providerId === providerId && ['queued', 'running', 'waiting'].includes(thread.status))
-      .map(thread => thread.id));
-    // The picker changes the next turn, not the execution target already accepted.
-    for (const turn of this.core.journal.unfinishedTurns()) {
-      if (turn.execution?.providerId === providerId) busy.add(turn.threadId);
-    }
-    return busy.size;
   }
 
   private newer(entry: Pick<Entry, 'route' | 'current' | 'latest'>): boolean {
@@ -680,6 +793,7 @@ export class HarnessUpdates {
       state: entry.state,
       message: entry.message,
       checkedAt: entry.checkedAt,
+      ...(entry.state === 'updating' ? { waitingFor: this.drains.get(providerId)?.waitingFor ?? 0 } : {}),
     };
   }
 

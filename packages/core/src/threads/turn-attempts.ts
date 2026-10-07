@@ -1,7 +1,8 @@
-import type { Account, PermissionMode, ProviderDescriptor, ThreadId, ThreadSummary, Turn, TurnId, Usage } from '@boite/contracts';
+import type { Account, PermissionMode, ProviderDescriptor, ProviderId, RpcEvents, ThreadId, ThreadSummary, Turn, TurnId, Usage } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { releaseThread } from '../drivers/index.ts';
 import type { Driver, TurnHandle, TurnResult } from '../drivers/types.ts';
+import type { Resume } from '../providers/update-resume.ts';
 import type { ThreadStore } from '../threads.ts';
 import { totalTokens } from '../usage.ts';
 import { LivePermissions } from './live-permissions.ts';
@@ -49,8 +50,18 @@ export class TurnAttempts {
   /** Threads whose running turn the user stopped: a lost session is not retried for them. */
   private readonly stopRequested = new Set<ThreadId>();
   private readonly preparing = new Set<ThreadId>();
+  /** Turns an agent update asked to pause at their next tool boundary. */
+  private readonly pauseWanted = new Map<ThreadId, ProviderId>();
+  /** Turns whose driver was stopped to pause them, not by the user. */
+  private readonly pausing = new Set<ThreadId>();
+  /** Paused turns, with what ends their pause early: a stop or the core closing. */
+  private readonly paused = new Map<ThreadId, () => void>();
 
-  constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
+  constructor(private readonly core: Core, private readonly threads: ThreadStore) {
+    core.bus.onAny((name, payload) => {
+      if (name === 'turn.toolCompleted') this.toolBoundary((payload as RpcEvents['turn.toolCompleted']).threadId);
+    });
+  }
 
   open(state: TurnAttemptState): LivePermissions {
     const { threadId } = state;
@@ -107,10 +118,22 @@ export class TurnAttempts {
     let resumed = false;
     let usage: Usage | null = null;
     let result: TurnResult;
+    /** What the agent is told when its turn goes on after an agent update. */
+    let afterUpdate: Resume | null = null;
     for (;;) {
       state.thread.permissionMode = permissions.mode;
-      const context = this.threads.contexts.makeContext(state.thread, provider, account, state.running, carried);
-      if (resumed && state.thread.sessionId !== null) {
+      const note = afterUpdate;
+      afterUpdate = null;
+      // The resumed session already holds what the first attempt took from the thread.
+      const context = this.threads.contexts.makeContext(state.thread, provider, account, state.running, note ? { memory: '', deferred: '', letters: '' } : carried, note?.prompt);
+      if (note) {
+        // Shown once the context is built, so a fresh session's history does not carry it twice.
+        this.threads.noteSystem(threadId, turnId, note.prompt, note.label, 'turn.resumedAfterUpdate');
+        if (usage) context.sessionBefore = {
+          costUsd: (context.sessionBefore?.costUsd ?? 0) + (usage.costUsdEquivalent ?? 0),
+          tokens: (context.sessionBefore?.tokens ?? 0) + totalTokens(usage),
+        };
+      } else if (resumed && state.thread.sessionId !== null) {
         context.prompt = `Continue the current task from where it stopped. The user changed the permission mode to ${permissions.mode}. Do not repeat completed work. Retain subsequent instructions already in the conversation.\n\nRequest for reference:\n${context.prompt}`;
         if (usage) context.sessionBefore = {
           costUsd: (context.sessionBefore?.costUsd ?? 0) + (usage.costUsdEquivalent ?? 0),
@@ -126,6 +149,8 @@ export class TurnAttempts {
       settings?.attach(handle);
       const forced = Promise.withResolvers<TurnResult>();
       this.stopDeadlines.set(threadId, { handle, forced, timer: null });
+      // A turn that starts while its agent waits to update pauses at its first tool boundary too.
+      if (this.core.updates.wantsPause(provider.id)) this.pauseWanted.set(threadId, provider.id);
       if (!resumed && !retriedLostSession && !queued.execution?.operation) this.threads.titles.autoTitle(threadId, turnId);
       result = await Promise.race([handle.done, forced.promise]);
       permissions.detach();
@@ -145,13 +170,23 @@ export class TurnAttempts {
         state.running = { ...state.running, ...(state.running.execution ? { execution: { ...state.running.execution, sessionId: null, sessionGeneration: fresh.sessionGeneration ?? 0 } } : {}) };
         continue;
       }
+      // Stopped between two tool calls for an agent update: the same turn
+      // waits for it, then goes on in the same session.
+      if (this.pausing.delete(threadId) && result.status === 'stopped') {
+        usage = sumUsage(usage, result.usage);
+        this.keepSession(state, result);
+        const resume = await this.pause(threadId, turnId, provider);
+        if (resume === null) {
+          result = { status: 'stopped', sessionId: state.thread.sessionId, usage: null };
+          break;
+        }
+        afterUpdate = resume;
+        resumed = true;
+        continue;
+      }
       if (!permissions.restarting || result.status === 'done') break;
       usage = sumUsage(usage, result.usage);
-      state.thread = { ...state.thread, sessionId: result.sessionId ?? state.thread.sessionId, sessionResumeAt: null };
-      const current = this.core.journal.getThread(threadId);
-      if (current && (current.sessionGeneration ?? 0) === (state.thread.sessionGeneration ?? 0)) {
-        saveThread(this.core, { ...current, sessionId: state.thread.sessionId, sessionResumeAt: null }, 'thread.updated');
-      }
+      this.keepSession(state, result);
       this.threads.cards.clearPermissionsOf(threadId);
       this.threads.cards.clearQuestionsOf(threadId);
       setThreadStatus(this.core, threadId, 'running');
@@ -173,6 +208,78 @@ export class TurnAttempts {
     this.stopDeadlines.delete(threadId);
     this.stopRequested.delete(threadId);
     this.preparing.delete(threadId);
+    this.pauseWanted.delete(threadId);
+    this.pausing.delete(threadId);
+    this.paused.delete(threadId);
+  }
+
+  /** The session a stopped attempt leaves goes on the thread, so a later stop keeps it too. */
+  private keepSession(state: TurnAttemptState, result: TurnResult): void {
+    state.thread = { ...state.thread, sessionId: result.sessionId ?? state.thread.sessionId, sessionResumeAt: null };
+    if (state.running.execution) state.running = { ...state.running, execution: { ...state.running.execution, sessionId: state.thread.sessionId, sessionResumeAt: null } };
+    const current = this.core.journal.getThread(state.threadId);
+    if (current && (current.sessionGeneration ?? 0) === (state.thread.sessionGeneration ?? 0)) {
+      saveThread(this.core, { ...current, sessionId: state.thread.sessionId, sessionResumeAt: null }, 'thread.updated');
+    }
+  }
+
+  /** Asks a running turn of this provider to pause at its next tool boundary. False when the thread runs no turn. */
+  requestPause(threadId: ThreadId, providerId: ProviderId): boolean {
+    if (this.paused.has(threadId) || this.pausing.has(threadId)) return true;
+    if (!this.handles.has(threadId)) return false;
+    this.pauseWanted.set(threadId, providerId);
+    this.toolBoundary(threadId);
+    return true;
+  }
+
+  /** Withdraws a pause not yet taken. A turn already paused waits for its resume. */
+  cancelPause(threadId: ThreadId): void {
+    this.pauseWanted.delete(threadId);
+  }
+
+  isPaused(threadId: ThreadId): boolean {
+    return this.paused.has(threadId);
+  }
+
+  /**
+   * A turn an agent update waits for pauses once no tool call of it runs and
+   * no card waits for the user: when its last tool call ends, or at once when
+   * it is asked between two of them. The stop goes out on the next tick,
+   * outside the driver's own callback.
+   */
+  private toolBoundary(threadId: ThreadId): void {
+    if (!this.pauseWanted.has(threadId) || this.threads.handoff.toolsRunning(threadId) > 0) return;
+    const handle = this.handles.get(threadId);
+    if (handle === undefined) return;
+    setTimeout(() => {
+      if (this.handles.get(threadId) !== handle || !this.pauseWanted.has(threadId) || this.threads.handoff.toolsRunning(threadId) > 0) return;
+      if (this.threads.cards.listPermissions(threadId).length > 0 || this.threads.cards.listQuestions(threadId).some((question) => !question.async)) return;
+      this.pauseWanted.delete(threadId);
+      this.pausing.add(threadId);
+      handle.stop();
+      this.armStopDeadline(threadId, handle);
+    }, 0);
+  }
+
+  /**
+   * Holds a paused turn until its agent's update settles. Returns what to tell
+   * the agent when it goes on, or null when the turn was stopped meanwhile.
+   */
+  private async pause(threadId: ThreadId, turnId: TurnId, provider: ProviderDescriptor): Promise<Resume | null> {
+    this.handles.delete(threadId);
+    this.threads.handoff.forgetTools(threadId);
+    const left = Promise.withResolvers<null>();
+    this.paused.set(threadId, () => left.resolve(null));
+    this.threads.noteSystem(threadId, turnId, `Paused between two tool calls while ${provider.name} updates.`, `Paused while ${provider.name} updates`, 'turn.pausedForUpdate');
+    try {
+      // Taken before the update can learn of this pause: it may settle in the same tick.
+      const settled = this.core.updates.resumeOf(provider.id);
+      this.core.updates.turnPaused(provider.id);
+      const resume = await Promise.race([settled, left.promise]);
+      return resume === null || this.stopRequested.has(threadId) || this.core.stopping || this.core.journal.isClosed() ? null : resume;
+    } finally {
+      this.paused.delete(threadId);
+    }
   }
 
   /**
@@ -196,6 +303,13 @@ export class TurnAttempts {
   }
 
   stopRunning(threadId: ThreadId): boolean {
+    const paused = this.paused.get(threadId);
+    if (paused !== undefined) {
+      this.stopRequested.add(threadId);
+      paused();
+      return true;
+    }
+    this.pauseWanted.delete(threadId);
     const handle = this.handles.get(threadId);
     if (handle === undefined) {
       if (!this.preparing.has(threadId)) return false;

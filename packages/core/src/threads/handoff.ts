@@ -67,6 +67,16 @@ export class RestartHandoff {
 
   get active(): boolean { return this.entries !== null; }
 
+  /** The tool calls of this thread's turn still running. An agent update pauses a turn at zero too. */
+  toolsRunning(threadId: ThreadId): number {
+    return this.tools.get(threadId)?.size ?? 0;
+  }
+
+  /** A turn paused in place starts its next attempt with no tool call open, whatever the stopped one left. */
+  forgetTools(threadId: ThreadId): void {
+    this.tools.delete(threadId);
+  }
+
   /** A queued turn this handoff carries to the next core stays queued through shutdown. */
   keepsQueued(turnId: TurnId): boolean {
     return this.entries?.get(turnId)?.was === 'queued' || this.inheritedTurns().get(turnId) === 'queued';

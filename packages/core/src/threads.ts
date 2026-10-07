@@ -689,9 +689,6 @@ export class ThreadStore {
       throw refused('this thread already has an in-flight turn', data);
     }
     const provider = this.core.providers.require(thread.providerId);
-    if (this.core.updates.updating(thread.providerId)) {
-      throw refused(`${provider.name} is updating; send this again once it is done`, { threadId, providerId: thread.providerId });
-    }
     if (this.core.journal.getAccount(thread.accountId) === null) throw accountRemoved(thread);
     assertDriverRunnable(
       provider.protocol,
@@ -829,9 +826,12 @@ export class ThreadStore {
     }
   }
 
-  noteCoordination(threadId: string, turnId: string, text: string): void {
-    const message: Message = { id: newId('msg_'), threadId, turnId, role: 'system', parts: [{ type: 'text', text, displayText: 'Agent coordination' }], state: 'complete', createdAt: Date.now() };
-    this.core.journal.append({ type: 'coordination.context', threadId, version: 1, payload: message }, () => this.core.journal.putMessage(message));
+  noteCoordination(threadId: string, turnId: string, text: string): void { this.noteSystem(threadId, turnId, text, 'Agent coordination', 'coordination.context'); }
+
+  /** A line of Boite's own inside a running turn: what the agent was told, under a short label. */
+  noteSystem(threadId: string, turnId: string, text: string, displayText: string, eventType: string): void {
+    const message: Message = { id: newId('msg_'), threadId, turnId, role: 'system', parts: [{ type: 'text', text, displayText }], state: 'complete', createdAt: Date.now() };
+    this.core.journal.append({ type: eventType, threadId, version: 1, payload: message }, () => this.core.journal.putMessage(message));
     this.runner.noteMail(threadId, message.createdAt);
     this.core.bus.emit('message.started', message);
     this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });

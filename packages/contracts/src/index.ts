@@ -155,6 +155,12 @@ export interface HarnessUpdate {
   /** Why the last check or update failed, null otherwise. */
   message: string | null;
   checkedAt: Timestamp | null;
+  /**
+   * While `updating`: the turns of this agent still inside a tool call. The
+   * updater starts once each of them has paused between two tool calls, and
+   * they resume once it is done. Absent or zero once the updater runs.
+   */
+  waitingFor?: number;
 }
 
 export interface OsProfile {
@@ -3442,10 +3448,12 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    */
   'providers.updates': { params: { refresh?: boolean }; result: HarnessUpdate[] };
   /**
-   * Bring one agent to its newest release. Refused while a turn of that
-   * provider is queued, running or waiting, and when nothing newer is known.
-   * The warm processes of the provider are released first, since a running
-   * program cannot be replaced. Progress arrives as `providers.updatesChanged`.
+   * Bring one agent to its newest release. Refused when nothing newer is
+   * known. A running turn of that provider is paused once its tool calls are
+   * done, and resumes in the same turn after the update; turns queued while
+   * the updater runs start after it. The warm processes of the provider are
+   * released first, since a running program cannot be replaced. Progress
+   * arrives as `providers.updatesChanged`.
    */
   'providers.update': { params: { providerId: ProviderId }; result: HarnessUpdate };
   /** Stop offering this version. A later one is offered again. `version: null` forgets the skip. */

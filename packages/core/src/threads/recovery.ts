@@ -91,7 +91,7 @@ export class ThreadRecovery {
     const provider = this.core.providers.require(target.providerId);
     const account = this.core.accounts.require(target.accountId);
     if (account.providerId !== provider.id) throw refused('the saved account belongs to another provider', { accountId: account.id, providerId: provider.id });
-    if (this.core.updates.updating(provider.id)) throw refused('the saved provider is updating; resume the prompt after the update');
+    // A provider updating holds the resumed prompt in the queue until its updater is done.
     assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), account, () => this.core.providers.launcherScriptOnly(provider.id));
     checkStoredEffort(provider, account.id, target.model, target.effort);
     checkStoredSpeed(provider, account.id, target.model, target.speed ?? null);

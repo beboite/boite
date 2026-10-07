@@ -50,12 +50,13 @@ function writeDescriptor(
       schemaVersion: 1,
       name: 'Fake updating agent',
       shortName: 'UpFake',
-      protocol: 'acp',
+      // Turns run on the deterministic echo driver; the updater is the fixture's own.
+      protocol: 'echo',
       roots: ['{isolationDir}'],
       profiles: { windows: profile, linux: profile, macos: profile },
       auth: { kind: 'none' },
       models: [{ id: 'default', name: 'Agent default', default: true }],
-      capabilities: { approvals: true, hooks: false, checkpoint: false, images: false, planMode: false, resume: false },
+      capabilities: { approvals: true, hooks: false, checkpoint: false, images: false, planMode: false, resume: true },
     }),
     'utf8',
   );
@@ -103,6 +104,18 @@ async function start(
   const loaded = await client.call('providers.reload', {});
   expect(loaded.rejected).toEqual([]);
   return { client, state };
+}
+
+/** Resolves when a tool card of that thread starts running, whether or not a client watches the thread. */
+function toolRunning(threadId: string): Promise<void> {
+  return new Promise((resolve) => {
+    const off = harness!.core.bus.onAny((name, payload) => {
+      const event = payload as { threadId?: string; part?: { type: string; status?: string } };
+      if (name !== 'message.part' || event.threadId !== threadId || event.part?.type !== 'tool' || event.part.status !== 'running') return;
+      off();
+      resolve();
+    });
+  });
 }
 
 function only(list: HarnessUpdate[]): HarnessUpdate {
@@ -315,16 +328,122 @@ describe('harness updates', () => {
     await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
   });
 
-  test('a provider with a turn in flight is not updated under it', async () => {
-    const { client } = await start('command');
+  test('a turn in flight pauses once its tool call ends, the agent updates, and the same turn goes on in its session', async () => {
+    const { client, state } = await start('command', 'update-gated');
+    const core = harness!.core;
     await client.call('providers.updates', { refresh: true });
     const project = await client.call('projects.add', { path: harness!.dataDir, name: 'updates' });
     const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
     const thread = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'busy' });
-    harness!.core.journal.putThread({ ...harness!.core.journal.getThread(thread.id)!, status: 'running' });
+    const other = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'later' });
+    const running = toolRunning(thread.id);
+    const turn = await client.call('turns.start', { threadId: thread.id, prompt: '[tool:1500][sleep:30000]never written' });
+    await running;
 
-    await expect(client.call('providers.update', { providerId: 'update-fake' })).rejects.toThrow(/1 turn in flight/);
-  });
+    const asked = await client.call('providers.update', { providerId: 'update-fake' });
+    expect(asked.state).toBe('updating');
+    expect(asked.waitingFor).toBe(1);
+    // The tool call runs to its end before anything is replaced.
+    await new Promise((done) => setTimeout(done, 300));
+    expect(existsSync(`${state}.running`)).toBe(false);
+    await waitFor(() => existsSync(`${state}.running`), 20000);
+    expect(core.journal.getTurn(turn.id)?.status).toBe('running');
+    const tool = [...core.journal.walkTurnMessages(thread.id, turn.id)].flatMap((message) => message.parts).find((part) => part.type === 'tool');
+    expect(tool?.type === 'tool' && tool.status).toBe('done');
+
+    // A prompt sent while the updater runs waits in the queue instead of being refused.
+    const queued = await client.call('turns.start', { threadId: other.id, prompt: 'after the update' });
+    await new Promise((done) => setTimeout(done, 200));
+    expect(core.journal.getTurn(queued.id)?.status).toBe('queued');
+
+    writeFileSync(`${state}.go`, '');
+    await client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
+    await waitFor(() => core.journal.getTurn(turn.id)?.status === 'done' && core.journal.getTurn(queued.id)?.status === 'done', 20000);
+
+    expect(core.journal.listTurns(thread.id).map((entry) => entry.id)).toEqual([turn.id]);
+    const messages = [...core.journal.walkTurnMessages(thread.id, turn.id)];
+    const labels = messages.filter((message) => message.role === 'system').map((message) => message.parts[0]?.type === 'text' ? message.parts[0].displayText : null);
+    expect(labels).toEqual(['Paused while Fake updating agent updates', 'Resumed after the Fake updating agent 1.2.0 update']);
+    const answer = messages.filter((message) => message.role === 'assistant').at(-1)!.parts.map((part) => part.type === 'text' ? part.text : '').join('');
+    expect(answer).toContain('from 1.0.0 to 1.2.0');
+    expect(answer).not.toContain('never written');
+    // The resumed run goes on in the session the paused one had.
+    expect(core.threads.require(thread.id).sessionId).toBe(`echo-${thread.id}`);
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
+  }, 30000);
+
+  test('turns that cannot pause in time let the paused ones go on, and the update waits for them to end', async () => {
+    const { client } = await start('command');
+    const core = harness!.core;
+    core.updates.pauseLimitMs = 400;
+    await client.call('providers.updates', { refresh: true });
+    const project = await client.call('projects.add', { path: harness!.dataDir, name: 'updates' });
+    const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
+    const quick = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'quick' });
+    const asking = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'asking' });
+    // A permission card holds its tool call open until the user answers.
+    await client.call('turns.start', { threadId: asking.id, prompt: '[permission]' });
+    await waitFor(() => core.threads.require(asking.id).status === 'waiting', 20000);
+    const quickRunning = toolRunning(quick.id);
+    const turn = await client.call('turns.start', { threadId: quick.id, prompt: '[tool:300][sleep:30000]never written' });
+    await quickRunning;
+
+    expect((await client.call('providers.update', { providerId: 'update-fake' })).waitingFor).toBe(2);
+    await waitFor(() => core.journal.getTurn(turn.id)?.status === 'done', 20000);
+    const labels = [...core.journal.walkTurnMessages(quick.id, turn.id)].filter((message) => message.role === 'system').map((message) => message.parts[0]?.type === 'text' ? message.parts[0].displayText : null);
+    expect(labels).toEqual(['Paused while Fake updating agent updates', 'Resumed: the Fake updating agent update waits for other turns']);
+    const waiting = only(await client.call('providers.updates', {}));
+    expect(waiting.state).toBe('updating');
+    expect(waiting.current).toBe('1.0.0');
+    expect(waiting.waitingFor).toBe(1);
+
+    // Stopping the last turn in flight lets the updater run.
+    const updated = client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
+    await client.call('turns.stop', { threadId: asking.id });
+    await updated;
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
+  }, 30000);
+
+  test('a turn asked between two tool calls pauses at once, and a stop during the pause ends it as stopped while the update still lands', async () => {
+    const { client, state } = await start('command', 'update-gated');
+    const core = harness!.core;
+    await client.call('providers.updates', { refresh: true });
+    const project = await client.call('projects.add', { path: harness!.dataDir, name: 'updates' });
+    const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'stopped' });
+    // No tool call runs: the turn is between two of them, as a model writing its answer is.
+    const turn = await client.call('turns.start', { threadId: thread.id, prompt: '[sleep:30000]never written' });
+    await waitFor(() => core.threads.runner.handles.has(thread.id), 20000);
+    await client.call('providers.update', { providerId: 'update-fake' });
+    await waitFor(() => existsSync(`${state}.running`), 20000);
+    expect(core.threads.runner.isPaused(thread.id)).toBe(true);
+
+    expect(await client.call('turns.stop', { threadId: thread.id })).toEqual({ stopped: true });
+    await waitFor(() => core.journal.getTurn(turn.id)?.status === 'stopped', 20000);
+    expect(core.threads.require(thread.id).status).toBe('idle');
+    writeFileSync(`${state}.go`, '');
+    await client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
+  }, 30000);
+
+  test('a Boite restart during the pause hands the paused turn to the next core', async () => {
+    const { client, state } = await start('command', 'update-gated');
+    const core = harness!.core;
+    await client.call('providers.updates', { refresh: true });
+    const project = await client.call('projects.add', { path: harness!.dataDir, name: 'updates' });
+    const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'update-fake', accountId: account.id, title: 'restarting' });
+    const turn = await client.call('turns.start', { threadId: thread.id, prompt: '[sleep:30000]never written' });
+    await waitFor(() => core.threads.runner.handles.has(thread.id), 20000);
+    await client.call('providers.update', { providerId: 'update-fake' });
+    await waitFor(() => core.threads.runner.isPaused(thread.id), 20000);
+
+    await core.threads.handoff.begin();
+    expect(core.journal.getTurn(turn.id)?.status).toBe('stopped');
+    expect((core.journal.getSetting('restart-handoff') as { turns: { turnId: string; was: string }[] }).turns).toEqual([expect.objectContaining({ turnId: turn.id, was: 'running' })]);
+    writeFileSync(`${state}.go`, '');
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0, 20000);
+  }, 30000);
 
   test("an update releases the provider's idle threads and sweeps what their agents left", async () => {
     const { client } = await start('command');
@@ -344,22 +463,26 @@ describe('harness updates', () => {
     await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
   });
 
-  test('an accepted turn still protects its provider after the picker changes', async () => {
-    const { client, state } = await start('command');
+  test('an accepted turn waits for its provider\'s updater after the picker changes', async () => {
+    const { client, state } = await start('command', 'update-gated');
     const core = harness!.core;
     await client.call('providers.updates', { refresh: true });
     const blocker = await echoThread(harness!, client);
-    await client.call('turns.start', { threadId: blocker.threadId, prompt: '[sleep:60000]' });
     const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
-    holdAccountTurns(harness!, account.id);
+    const release = holdAccountTurns(harness!, account.id);
     const thread = await client.call('threads.create', { projectId: core.threads.require(blocker.threadId).projectId!, providerId: 'update-fake', accountId: account.id });
-    await client.call('turns.start', { threadId: thread.id, prompt: 'queued on the old provider' });
+    const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'queued on the old provider' });
     await client.call('threads.update', { threadId: thread.id, accountId: blocker.accountId });
     expect(core.threads.require(thread.id).providerId).toBe('echo');
-    try {
-      await expect(client.call('providers.update', { providerId: 'update-fake' })).rejects.toThrow(/1 turn in flight/);
-      expect(readFileSync(state, 'utf8')).toBe('1.0.0');
-    } finally { await client.call('turns.stop', { threadId: thread.id }); }
+
+    await client.call('providers.update', { providerId: 'update-fake' });
+    await waitFor(() => existsSync(`${state}.running`), 20000);
+    release();
+    await new Promise((done) => setTimeout(done, 200));
+    expect(core.journal.getTurn(turn.id)?.status).toBe('queued');
+    writeFileSync(`${state}.go`, '');
+    await waitFor(() => core.journal.getTurn(turn.id)?.status === 'done', 20000);
+    expect(readFileSync(state, 'utf8')).toBe('1.2.0');
   });
 
   test('an update asked for during a check waits for it, and a second one is refused while the first runs', async () => {
@@ -386,12 +509,14 @@ describe('harness updates', () => {
     release();
 
     expect((await started).state).toBe('updating');
-    // A turn started now would run on a program half replaced.
+    // A turn started now would run on a program half replaced: it waits for the updater.
     expect(harness!.core.updates.updating('update-fake')).toBe(true);
-    await expect(client.call('turns.start', { threadId: thread.id, prompt: 'hello' })).rejects.toThrow(/is updating/);
+    const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
     await checked;
     await expect(client.call('providers.update', { providerId: 'update-fake' })).rejects.toThrow(/already updating/);
-    await changed;
+    const updated = only(await changed);
+    await waitFor(() => harness?.core.journal.getTurn(turn.id)?.status === 'done', 20000);
+    expect(harness!.core.journal.getTurn(turn.id)!.startedAt!).toBeGreaterThanOrEqual(updated.checkedAt!);
     await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
   });
 
