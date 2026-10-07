@@ -6,7 +6,8 @@ import { utf8Bytes } from './transport.ts';
  * A contiguous slice around the anchor, measured as the client receives it.
  * Drop the farthest edge until the two halves share one page budget. Keep a
  * single complete anchor even when it alone exceeds the page budget, just as
- * ordinary pages do. Callers preserve cursors for either edge that was cut.
+ * ordinary pages do. Callers provide the index of an existing anchor and
+ * preserve cursors for either edge that was cut.
  */
 export function boundedMessageWindow(messages: Message[], anchorIndex: number, maxBytes: number): { start: number; end: number } {
   let start = 0, end = messages.length;

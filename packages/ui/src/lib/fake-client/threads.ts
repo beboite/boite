@@ -83,12 +83,12 @@ function pageOf(
     const message = messages[start - 1]!;
     const size = sentBytes(message, project);
     const next = bytes + size + (start < end ? 1 : 0);
-    if (start < end && next > MESSAGE_PAGE_MAX_BYTES) break;
     if (size >= RPC_MAX_FRAME_BYTES) {
       throw new RpcFailure({ code: RpcErrorCode.Refused,
         message: `message ${message.id} is ${size} serialized UTF-8 bytes; expected a complete message below ${RPC_MAX_FRAME_BYTES} bytes`,
         data: { threadId: message.threadId, messageId: message.id, field: 'messages', bytes: size, max: RPC_MAX_FRAME_BYTES, expected: `a complete message below ${RPC_MAX_FRAME_BYTES} serialized UTF-8 bytes` } });
     }
+    if (start < end && next > MESSAGE_PAGE_MAX_BYTES) break;
     bytes = next;
     start -= 1;
   }
@@ -125,7 +125,14 @@ type Projection = (message: Message) => Message;
 
 /** The core's rule: page budgets measure a message as the client receives it. */
 function projection(options: TransportOptions): Projection {
-  return message => projectMessage(message, options);
+  const cache = new WeakMap<Message, Message>();
+  return message => {
+    const held = cache.get(message);
+    if (held) return held;
+    const sent = projectMessage(message, options);
+    cache.set(message, sent);
+    return sent;
+  };
 }
 
 /** As the core counts it: a read with no projection is internal and never measured. */
@@ -362,7 +369,7 @@ export function threadMethods(ctx: FakeContext) {
       const proof = anchor === null ? undefined : { from: anchor, hash: snapshotHash(page.messages.slice(page.messages.findIndex(message => message.id === anchor)), params) };
       const known = params.sync && params.sync !== true ? params.sync : undefined;
       const unchanged = tail !== null && params.after !== undefined && known?.from === params.after && known.hash === (proof?.from === params.after ? proof.hash : snapshotHash(tail, params));
-      const snapshot = { ...thread, turns, messages: unchanged ? [] : forTransport(page.messages, params), messagesBefore: page.before,
+      const snapshot = { ...thread, turns, messages: unchanged ? [] : page.messages.map(project), messagesBefore: page.before,
         ...(page.after === null ? {} : { messagesAfter: page.after }),
         ...(tail !== null ? { messagesFrom: params.after } : {}), ...(proof ? { messagesSync: proof } : {}), ...(unchanged ? { messagesUnchanged: true as const } : {}) };
       if (!params.open) return pagingReply(snapshot);

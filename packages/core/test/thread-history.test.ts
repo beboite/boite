@@ -19,16 +19,29 @@ test('a saved reading position shares one byte budget across both halves and kee
     const opened = await client.call('threads.get', { threadId, around: 'heavy-5', ...options, open: {} });
     expect(opened.messages.some(message => message.id === 'heavy-5')).toBe(true);
     expect(Buffer.byteLength(JSON.stringify(opened.messages))).toBeLessThanOrEqual(MESSAGE_PAGE_MAX_BYTES);
+    expect(opened.messagesBefore).not.toBeNull();
+    expect(opened.messagesAfter).toBeDefined();
+    const complete = (messages: Message[]) => {
+      for (const message of messages) expect(message.parts[0]).toEqual({ type: 'text', text });
+    };
+    complete(opened.messages);
     const walked = opened.messages.map(message => message.id);
+    let pages = 0;
     for (let before = opened.messagesBefore; before;) {
       const page = await client.call('messages.list', { threadId, before, ...options });
       expect(page.messages.length).toBeGreaterThan(0);
+      complete(page.messages);
+      expect(page.before).not.toBe(before);
+      expect(++pages).toBeLessThan(ids.length);
       walked.unshift(...page.messages.map(message => message.id));
       before = page.before;
     }
     for (let after = opened.messagesAfter; after;) {
       const page = await client.call('messages.list', { threadId, after, ...options });
       expect(page.messages.length).toBeGreaterThan(0);
+      complete(page.messages);
+      expect(page.after).not.toBe(after);
+      expect(++pages).toBeLessThan(ids.length);
       walked.push(...page.messages.map(message => message.id));
       after = page.after ?? undefined;
     }
@@ -37,17 +50,22 @@ test('a saved reading position shares one byte budget across both halves and kee
 
     // Ordinary pages allow one legal message above 12 MiB. A centred page
     // must keep that anchor alone rather than dropping it or adding a neighbour.
-    const anchor = harness.core.journal.getMessage('heavy-5')!;
-    harness.core.journal.append({ type: 'message.part', threadId, version: 1, payload: {} }, () => {
-      harness.core.journal.putMessage({ ...anchor, parts: [{ type: 'text', text: 'x'.repeat(13 * 1024 * 1024) }] });
-      for (let index = 0; index < 7; index++) harness.core.journal.putMessage({
-        ...anchor, id: `after-anchor-${index}`, parts: [{ type: 'text', text: 'newer' }],
+    const singleThread = await echoThread(harness, client);
+    const largeText = 'x'.repeat(13 * 1024 * 1024);
+    harness.core.journal.append({ type: 'message.started', threadId: singleThread.threadId, version: 1, payload: {} }, () => {
+      for (let index = 0; index < 12; index++) harness.core.journal.putMessage({
+        id: `single-${index}`, threadId: singleThread.threadId, turnId: 'single-turn', role: 'assistant', state: 'complete', createdAt: index,
+        parts: [{ type: 'text', text: index === 5 ? largeText : 'neighbour' }],
       });
     });
-    const single = await client.call('threads.get', { threadId, around: anchor.id, limit: 6 });
-    expect(single.messages.map(message => message.id)).toEqual([anchor.id]);
-    expect(single.messagesBefore).toBe(anchor.id);
-    expect(single.messagesAfter).toBe(anchor.id);
+    const single = await client.call('threads.get', { threadId: singleThread.threadId, around: 'single-5', limit: 6 });
+    expect(single.messages.map(message => message.id)).toEqual(['single-5']);
+    expect(single.messagesBefore).toBe('single-5');
+    expect(single.messagesAfter).toBe('single-5');
+    expect(single.messages[0]!.parts[0]).toEqual({ type: 'text', text: largeText });
+    const bytes = Buffer.byteLength(JSON.stringify(single.messages));
+    expect(bytes).toBeGreaterThan(MESSAGE_PAGE_MAX_BYTES);
+    expect(bytes).toBeLessThan(RPC_MAX_FRAME_BYTES);
   } finally { await harness.stop(); }
 });
 

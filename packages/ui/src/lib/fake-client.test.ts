@@ -4,6 +4,8 @@ import type { FakeClient } from './fake-client';
 import { ATTACHMENT_MAX_BYTES, DEFAULT_DELEGATION_CONFIG, MESSAGE_PAGE_MAX_BYTES, MESSAGE_SENT_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, SPEECH_DEFAULT_MODEL, TODO_TEXT_MAX, type RpcEvents, type RpcMethodName, type Turn } from '@boite/contracts';
 import { FAKE_AUTO_COMPACT_SETTLE_MS } from './fake-client/turns';
 import { FakeContext } from './fake-client/context';
+import { seed } from './fake-client/seed';
+import { threadMethods } from './fake-client/threads';
 
 test('done expiry mirrors the core while manual archives and restored history remain recoverable', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
@@ -120,22 +122,58 @@ test('fake byte-bounded pages walk complete escaped UTF-8 messages and fall back
 
   // A saved position combines two independently bounded halves. The result
   // must share their budget, and loading its newer cursor must do the same.
+  expect(expected).toHaveLength(8);
   const around = await client.call('threads.get', { threadId: thread.id, around: expected[3], limit: 4 });
   expect(around.messages.map(message => message.id)).toContain(expected[3]);
   expect(new TextEncoder().encode(JSON.stringify(around.messages)).byteLength).toBeLessThanOrEqual(MESSAGE_PAGE_MAX_BYTES);
-  const suffix = around.messages.map(message => message.id);
+  const window = around.messages.map(message => message.id);
+  pages = 0;
+  for (let before = around.messagesBefore; before;) {
+    const page = await client.call('messages.list', { threadId: thread.id, before, limit: 4 });
+    expect(page.messages.length).toBeGreaterThan(0);
+    expect(new TextEncoder().encode(JSON.stringify(page.messages)).byteLength).toBeLessThanOrEqual(MESSAGE_PAGE_MAX_BYTES);
+    expect(page.before).not.toBe(before);
+    expect(++pages).toBeLessThan(10);
+    window.unshift(...page.messages.map(message => message.id));
+    before = page.before;
+  }
   for (let after = around.messagesAfter; after;) {
     const page = await client.call('messages.list', { threadId: thread.id, after, limit: 4 });
+    expect(page.messages.length).toBeGreaterThan(0);
     expect(new TextEncoder().encode(JSON.stringify(page.messages)).byteLength).toBeLessThanOrEqual(MESSAGE_PAGE_MAX_BYTES);
-    suffix.push(...page.messages.map(message => message.id));
+    expect(page.after).not.toBe(after);
+    expect(++pages).toBeLessThan(10);
+    window.push(...page.messages.map(message => message.id));
     after = page.after ?? undefined;
   }
-  expect(suffix).toEqual(expected.slice(expected.indexOf(suffix[0]!)));
+  expect(window).toEqual(expected);
+});
+
+test('fake history refuses an oversized next message before the page byte boundary, like the core', async () => {
+  const ctx = new FakeContext({ delayMs: 0 });
+  seed(ctx);
+  const thread = ctx.thread('t-parser');
+  const base = thread.messages[0]!;
+  thread.turns = [];
+  const part = (id: string, text: string) => ({ ...base, id, parts: [{ type: 'text' as const, text }] });
+  const cursor = part('cursor', 'cursor');
+  const small = part('small', 'x'.repeat(7 * 1024 * 1024));
+  const oversized = part('oversized', 'x'.repeat(RPC_MAX_FRAME_BYTES));
+  const methods = threadMethods(ctx);
+  thread.messages = [cursor, small, oversized];
+  await expect(methods['messages.list']({ threadId: thread.id, after: cursor.id, limit: 2 }).then(() => null, error => error))
+    .resolves.toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'messages', messageId: oversized.id } });
+  thread.messages = [oversized, small, cursor];
+  await expect(methods['messages.list']({ threadId: thread.id, before: cursor.id, limit: 2 }).then(() => null, error => error))
+    .resolves.toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'messages', messageId: oversized.id } });
 });
 
 test('fake pages keep a complete legal attachment bundle above the byte budget and refuse an oversized message', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo', title: 'Single message' });
+  await client.call('turns.start', { threadId: thread.id, prompt: 'Before the bundle' });
+  await client.settled();
+  const prefix = await client.call('threads.get', { threadId: thread.id });
   const data = 'A'.repeat(Math.ceil(5 * 1024 * 1024 / 3) * 4 - 1) + '=';
   await client.call('turns.start', { threadId: thread.id, prompt: 'Review the bundle', attachments: ['first.bin', 'second.bin'].map(name => ({ kind: 'file', name, mimeType: 'application/octet-stream', data })) });
   await client.settled();
@@ -146,8 +184,21 @@ test('fake pages keep a complete legal attachment bundle above the byte budget a
   const bytes = new TextEncoder().encode(JSON.stringify(page.messages)).byteLength;
   expect(bytes).toBeGreaterThan(MESSAGE_PAGE_MAX_BYTES);
   expect(bytes).toBeLessThan(RPC_MAX_FRAME_BYTES);
-  expect(page.before).toBeNull();
+  expect(page.before).toBe(page.messages[0]!.id);
+  const older = await client.call('messages.list', { threadId: thread.id, before: page.before! });
+  expect(older.messages.map(message => message.id)).toEqual(prefix.messages.map(message => message.id));
+  expect(older.before).toBeNull();
   expect(page.messages[0]?.parts.filter(part => part.type === 'file').every(part => part.data === data)).toBe(true);
+  for (let index = 0; index < 4; index++) {
+    await client.call('turns.start', { threadId: thread.id, prompt: `After the bundle ${index}` });
+    await client.settled();
+  }
+  const anchor = page.messages[0]!.id;
+  const centred = await client.call('threads.get', { threadId: thread.id, around: anchor, limit: 4 });
+  expect(centred.messages.map(message => message.id)).toEqual([anchor]);
+  expect(centred.messages[0]!.parts).toEqual(page.messages[0]!.parts);
+  expect(centred.messagesBefore).toBe(anchor);
+  expect(centred.messagesAfter).toBe(anchor);
   await client.call('turns.start', { threadId: thread.id, prompt: 'x'.repeat(RPC_MAX_FRAME_BYTES) });
   await client.settled();
   await expect(client.call('threads.get', { threadId: thread.id })).rejects.toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'messages', expected: `a complete message below ${RPC_MAX_FRAME_BYTES} serialized UTF-8 bytes` } });
