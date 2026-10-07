@@ -133,9 +133,9 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 588,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,250,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,270,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,600,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,615,000 |
 
 The total JavaScript measure excludes native binaries and source maps. On
 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
@@ -148,6 +148,12 @@ unchanged limits. These are build sizes, not startup or memory measurements.
 Sizes and blurs for deferred pictures measured 3,587,361 emitted core bytes
 on Windows CI on 2026-10-06, 7,361 bytes above the previous 3,580,000 limit:
 the image header parser and the preview queue.
+
+On 2026-10-07 on Linux, `main` at `d32a4a95` measured 4,250,457 UI bytes, 457
+above the 4,250,000 limit after the Machines and updates page and the
+mid-turn effort changes, and 3,597,242 emitted core JavaScript bytes. The UI
+limit rises to 4,270,000 and the core JavaScript limit to 3,615,000, leaving
+about 19 KB and 18 KB of headroom.
 
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured
