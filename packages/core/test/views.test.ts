@@ -68,6 +68,9 @@ test('the stored page starts its head with the policy, the theme and the bootstr
   // Nothing the page wrote moved to another line: a script error still names the agent's own line.
   expect(stored.split('\n').length).toBe(page('').split('\n').length);
   expect(viewDocument('<svg></svg>').startsWith('<!doctype html><head>')).toBe(true);
+  // A page written without a doctype is given one, on its first line.
+  expect(viewDocument('<html><head></head>\n<body></body></html>')).toMatch(/^<!doctype html><html><head><meta charset="utf-8">.*\n<body><\/body><\/html>$/s);
+  expect(viewDocument('<html>\n<body></body></html>').startsWith('<!doctype html><html><head><meta')).toBe(true);
   expect(viewDocument('<!-- <head> --><script>var s = "<head>";</script><p>x</p>')).toMatch(/^<!doctype html><head>.*<\/head><!-- <head> -->/s);
   expect(viewTitleOf('<script>var t = "<title>no</title>";</script><title> Orbit \n of the Moon </title>')).toBe('Orbit of the Moon');
   expect(viewTitleOf('<p>none</p>')).toBeNull();
@@ -89,22 +92,27 @@ test('local files are embedded, and a remote address or a missing file is a prob
   write('views/dot.png', PNG);
   write('views/lib.js', 'window.lib = "</script>";');
   write('views/look.css', '.stage { height: 200px }');
+  // A stylesheet in another folder names its own files from there.
+  write('views/theme/skin.css', '.skin { background: url(tile.png) } .mark { background: url("#mark") }');
+  write('views/theme/tile.png', PNG);
   const built = buildView(page([
     '<img src="dot.png" alt="">',
     '<div style="background: url(dot.png)"></div>',
     '<script src="lib.js"></script>',
     '<a href="https://example.com/docs">docs</a>',
     '<script>var tag = "<img src=\\"https://example.com/in-a-string.png\\">";</script>',
-  ].join('\n'), '<link rel="stylesheet" href="look.css">'), join(harness.dataDir, 'views'), harness.dataDir);
+  ].join('\n'), '<link rel="stylesheet" href="look.css"><link rel="stylesheet" href="theme/skin.css">'), join(harness.dataDir, 'views'), harness.dataDir);
   expect(built.problems).toEqual([]);
   const data = `data:image/png;base64,${PNG.toString('base64')}`;
   expect(built.html).toContain(`<img src="${data}" alt="">`);
   expect(built.html).toContain(`url("${data}")`);
   expect(built.html).toContain('<script>window.lib = "<\\/script>";</script>');
   expect(built.html).toContain('<style>.stage { height: 200px }</style>');
+  expect(built.html).toContain(`<style>.skin { background: url("data:image/png;base64,${PNG.toString('base64')}") } .mark { background: url("#mark") }</style>`);
   expect(built.html).toContain('<a href="https://example.com/docs">');
   expect(built.html).toContain('in-a-string.png');
 
+  write('views/theme/broken.css', '@import "more.css"; .a { background: url(gone.png) } .b { background: url(https://example.com/b.png) }');
   const refused = buildView(page([
     '<script src="https://cdn.example.com/chart.js"></script>',
     '<img src="missing.png">',
@@ -112,6 +120,7 @@ test('local files are embedded, and a remote address or a missing file is a prob
     '<style>@import url("https://fonts.example.com/inter.css"); .a { background: url(//example.com/a.png) }</style>',
     '<iframe src="other.html"></iframe>',
     '<img src="notes.txt">',
+    '<link rel="stylesheet" href="theme/broken.css">',
   ].join('\n')), join(harness.dataDir, 'views'), harness.dataDir).problems;
   expect(refused.find(line => line.includes('chart.js'))).toMatch(/^line 5: https:\/\/cdn\.example\.com\/chart\.js is remote/);
   expect(refused.find(line => line.includes('missing.png'))).toMatch(/^line 6: missing\.png: .*does not exist/);
@@ -120,6 +129,9 @@ test('local files are embedded, and a remote address or a missing file is a prob
   expect(refused.some(line => /url\(\/\/example\.com\/a\.png\) is remote/.test(line))).toBe(true);
   expect(refused.some(line => /<iframe> cannot load other\.html/.test(line))).toBe(true);
   expect(refused.some(line => /notes\.txt is not a file a view can embed/.test(line))).toBe(true);
+  expect(refused.some(line => /^line 11: the stylesheet uses @import/.test(line))).toBe(true);
+  expect(refused.some(line => /^line 11: gone\.png: .*does not exist/.test(line))).toBe(true);
+  expect(refused.some(line => /^line 11: url\(https:\/\/example\.com\/b\.png\) in the stylesheet is remote/.test(line))).toBe(true);
 });
 
 test('boite view publishes a page as an artifact that opens only on the view route, under its sandbox', async () => {
@@ -195,6 +207,12 @@ real('a page is loaded in a headless browser before it is shown: its height is m
   // At a phone's width the two blocks no longer sit side by side.
   expect(view.narrowHeight!).toBeGreaterThan(view.height);
 
+  // Without a doctype a root is as tall as the window it is loaded in: the stored page has one, so its own height is what is measured.
+  write('views/bare.html', '<html><head></head><body><div style="height:120px"></div></body></html>');
+  const bare = viewOf((await agent.call('artifacts.view', { threadId, path: 'views/bare.html' })).message.parts)!.view!;
+  expect(bare.height).toBeGreaterThanOrEqual(120);
+  expect(bare.height).toBeLessThan(200);
+
   write('views/throws.html', page('<p>before</p>\n<script>\n  const stage = document.querySelector("#stage");\n  stage.getContext("2d");\n</script>'));
   const thrown = await agent.call('artifacts.view', { threadId, path: 'views/throws.html' }).then(() => null, (error: Error) => error.message);
   expect(thrown).toContain('not ready to show');
@@ -209,7 +227,7 @@ real('a page is loaded in a headless browser before it is shown: its height is m
   write('views/stores.html', page('<script>localStorage.setItem("seen", "1");</script>'));
   const stored = await agent.call('artifacts.view', { threadId, path: 'views/stores.html' }).then(() => null, (error: Error) => error.message);
   expect(stored).toMatch(/SecurityError/);
-  expect(readdirSync(join(harness.dataDir, 'artifacts')).length).toBe(1);
+  expect(readdirSync(join(harness.dataDir, 'artifacts')).length).toBe(2);
 }, 90_000);
 
 /** The gated test runs with the machine's browser: the core started without one is replaced. */

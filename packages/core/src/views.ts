@@ -6,8 +6,8 @@
  * with it goes back to the agent as the refusal's sentence, so the user is
  * only ever shown a page that loaded cleanly. docs/chat-files.md has the rest.
  */
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { mkdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
@@ -16,7 +16,7 @@ import {
   type InlineView, type Message, type RpcParams, type RpcResult,
 } from '@boite/contracts';
 import type { Core } from './core.ts';
-import { existingInside } from './workdir.ts';
+import { existingInside, openChecked } from './workdir.ts';
 import { messageOf, refused } from './errors.ts';
 import { newId } from './ids.ts';
 
@@ -55,8 +55,10 @@ export function buildView(source: string, directory: string, cwd: string): Built
   const lineOf = (offset: number) => source.slice(0, offset).split('\n').length;
   const problem = (offset: number, text: string) => { if (problems.length < 12) problems.push(`line ${lineOf(offset)}: ${text}`); };
   const cache = new Map<string, { mime: string; data: Buffer } | string>();
-  const load = (address: string): { mime: string; data: Buffer } | string => {
-    const cached = cache.get(address);
+  /** A file named from `folder`: the page's own, or the folder of the stylesheet that names it. */
+  const load = (address: string, folder = directory): { mime: string; data: Buffer } | string => {
+    const key = `${folder}\0${address}`;
+    const cached = cache.get(key);
     if (cached !== undefined) return cached;
     let path = address.split(/[?#]/, 1)[0] ?? '';
     try { path = decodeURIComponent(path); } catch { /* a stray percent sign: the name as written */ }
@@ -65,14 +67,36 @@ export function buildView(source: string, directory: string, cwd: string): Built
     if (!mime) loaded = `${address} is not a file a view can embed (images, fonts, audio, video, .css, .js)`;
     else {
       try {
-        const found = existingInside(cwd, isAbsolute(path) ? path : resolve(directory, path), 'file', 'local file');
-        loaded = found.stats.size > VIEW_MAX_BYTES ? `${address} is over 4 MB` : { mime, data: readFileSync(found.real) };
+        const found = existingInside(cwd, isAbsolute(path) ? path : resolve(folder, path), 'file', 'local file');
+        // Read through the descriptor of the file that was checked: a link swapped in since is not followed.
+        const fd = openSync(found.real, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+        try {
+          const stats = fstatSync(fd);
+          if (!stats.isFile() || stats.dev !== found.stats.dev || stats.ino !== found.stats.ino) loaded = `${address} changed while it was opened`;
+          else loaded = stats.size > VIEW_MAX_BYTES ? `${address} is over 4 MB` : { mime, data: readFileSync(fd) };
+        } finally { closeSync(fd); }
       } catch (error) { loaded = `${address}: ${messageOf(error)}`; }
     }
-    cache.set(address, loaded);
+    cache.set(key, loaded);
     return loaded;
   };
   const dataUrl = (file: { mime: string; data: Buffer }) => `data:${file.mime};base64,${file.data.toString('base64')}`;
+
+  /**
+   * A stylesheet file as the text of a `<style>`: what its rules name is found
+   * from its own folder, and embedded here, since nothing of it is in `source`.
+   */
+  const stylesheet = (css: string, folder: string, at: number): string => {
+    if (/@import\b/i.test(css.replace(/\/\*[\s\S]*?\*\//g, ''))) problem(at, 'the stylesheet uses @import, which is not followed: link each stylesheet from the page.');
+    return css.replace(CSS_URL, (rule: string, double?: string, single?: string, bare?: string) => {
+      const address = (double ?? single ?? bare ?? '').trim();
+      if (kept(address)) return rule;
+      if (remote(address)) { problem(at, `url(${address}) in the stylesheet is remote, and a view loads nothing remote. Embed the file from disk.`); return rule; }
+      const file = load(address, folder);
+      if (typeof file === 'string') { problem(at, file); return rule; }
+      return `url("${dataUrl(file)}")`;
+    }).replace(/<\/style/gi, '<\\/style');
+  };
 
   // Comments and element bodies blanked to the same length: a tag written in a string is not the page's.
   const blank = (tags: string) => source.replace(new RegExp(`<!--[\\s\\S]*?(?:-->|$)|(<(${tags})\\b[^>]*>)([\\s\\S]*?)(?=<\\/\\2\\s*>|$)`, 'gi'),
@@ -97,7 +121,8 @@ export function buildView(source: string, directory: string, cwd: string): Built
         // The file becomes the element's own text; a closing tag inside it would end the element early.
         edits.push({ start: at, end: at + tag[0].length + closing.index + closing[0].length, text: `<script>${file.data.toString('utf8').replace(/<\/script/gi, '<\\/script')}</script>` });
       } else if (name === 'link' && /\srel\s*=\s*["']?stylesheet/i.test(tag[0])) {
-        edits.push({ start: at, end: at + tag[0].length, text: `<style>${file.data.toString('utf8').replace(/<\/style/gi, '<\\/style')}</style>` });
+        const sheet = address.split(/[?#]/, 1)[0] ?? '';
+        edits.push({ start: at, end: at + tag[0].length, text: `<style>${stylesheet(file.data.toString('utf8'), dirname(isAbsolute(sheet) ? sheet : resolve(directory, sheet)), offset)}</style>` });
       } else {
         const value = attribute[0].slice(attribute[0].indexOf('=') + 1).trim();
         const start = offset + attribute[0].lastIndexOf(value);
@@ -152,7 +177,10 @@ export async function publishView(core: Core, params: RpcParams<'artifacts.view'
   const found = existingInside(thread.cwd, params.path, 'file', 'artifacts.view path');
   if (!/\.html?$/i.test(found.relative)) throw refused('artifacts.view path must be an HTML file', { path: params.path });
   if (found.stats.size > VIEW_MAX_BYTES) throw refused('artifacts.view page must be at most 4 MB', { path: params.path });
-  const source = await readFile(found.real, 'utf8');
+  // Read through the handle of the file that was checked: a link swapped in since is refused.
+  const handle = await openChecked(found.real, constants.O_RDONLY, found.stats.dev, found.stats.ino, 'artifacts.view path', params.path);
+  let source: string;
+  try { source = await handle.readFile('utf8'); } finally { await handle.close(); }
   if (!source.trim()) throw refused('artifacts.view page is empty', { path: params.path });
   const built = buildView(source, dirname(found.absolute), thread.cwd);
   if (built.problems.length) throw notReady(built.problems);

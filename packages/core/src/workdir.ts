@@ -194,7 +194,7 @@ export async function createExclusiveFile(dir: FileHandle, name: string, fallbac
 }
 
 /** Open the real file checked a moment ago, and refuse a symlink swapped in since. */
-async function openChecked(real: string, flags: number, dev: number, ino: number, what: string, path: string): Promise<FileHandle> {
+export async function openChecked(real: string, flags: number, dev: number, ino: number, what: string, path: string): Promise<FileHandle> {
   let handle: FileHandle;
   try {
     handle = await open(real, flags | NOFOLLOW);

@@ -185,11 +185,13 @@ export function viewDocument(html: string): string {
     `<style id="boite-view-theme">${DEFAULT_CSS}</style>`,
     `<script>${BOOTSTRAP}</script>`,
   ].join('');
-  const opened = /<head(?:\s[^>]*)?>/i.exec(scan);
-  if (opened) return html.slice(0, opened.index + opened[0].length) + head + html.slice(opened.index + opened[0].length);
-  const root = /<html(?:\s[^>]*)?>/i.exec(scan);
-  if (root) return `${html.slice(0, root.index + root[0].length)}<head>${head}</head>${html.slice(root.index + root[0].length)}`;
+  // Standards mode whatever the file says: in quirks mode the root is as tall as its frame, and the page could never say its own height.
   const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
+  const lead = doctype ? '' : '<!doctype html>';
+  const opened = /<head(?:\s[^>]*)?>/i.exec(scan);
+  if (opened) return lead + html.slice(0, opened.index + opened[0].length) + head + html.slice(opened.index + opened[0].length);
+  const root = /<html(?:\s[^>]*)?>/i.exec(scan);
+  if (root) return `${lead}${html.slice(0, root.index + root[0].length)}<head>${head}</head>${html.slice(root.index + root[0].length)}`;
   if (doctype) return `${doctype[0]}<head>${head}</head>${html.slice(doctype[0].length)}`;
   return `<!doctype html><head>${head}</head>${html}`;
 }

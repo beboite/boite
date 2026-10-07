@@ -826,16 +826,25 @@ export class AgentBrowser {
   async #probe(url: string, widths: readonly number[], timeoutMs: number): Promise<PageProbe | null> {
     if (this.#closed || this.findBrowser().path === null) return null;
     let engine: Engine | null = null;
+    let over = false;
+    // Once, whoever asks first: the page answered, the wait ran out, or the browser came up too late.
+    const end = () => {
+      over = true;
+      if (!engine) return;
+      this.#probes.delete(engine); this.#lost(engine);
+      engine = null;
+    };
     const work = (async (): Promise<PageProbe> => {
       const started = engine = await this.#launch(PRIVATE_BROWSER_PROFILE);
+      if (over) throw new Error('the browser started after the wait for it ran out');
       this.#probes.add(started);
       return probePage(started.cdp, url, widths);
     })();
-    // A browser that starts after the wait is still closed, by this same line.
-    const settled = work.finally(() => { if (engine) { this.#probes.delete(engine); this.#lost(engine); } });
+    const settled = work.finally(end);
     return Promise.race([
       settled.catch(error => { this.#core.log('warn', `a page could not be checked before it was shown: ${error instanceof Error ? error.message : String(error)}`); return null; }),
-      Bun.sleep(timeoutMs).then(() => null),
+      // The browser is closed with the wait, not when a command it no longer answers gives up.
+      Bun.sleep(timeoutMs).then(() => { end(); return null; }),
     ]);
   }
 

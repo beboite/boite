@@ -83,15 +83,18 @@ an `.html` file inside the thread's working directory, and then:
 
 1. Embeds every local file the page names by a relative path: pictures,
    fonts, audio and video become `data:` addresses, a script and a stylesheet
-   become the element's own text. They must stay inside the working
-   directory. The page with its files is at most 4 MB.
+   become the element's own text, and what a linked stylesheet names in a
+   `url()` is embedded from that stylesheet's folder. They must stay inside
+   the working directory, and each is read through the descriptor of the file
+   that was checked. The page with its files is at most 4 MB.
 2. Refuses a remote address in anything the page would load (`<script src>`,
    `<link href>`, `<img src>`, a CSS `url()`, an `@import`), a local file that
    is missing, and an `<iframe>`. A link in an `<a>` is left alone.
 3. Puts a bootstrap at the start of the head, on the line the head opens on,
    so a script error still names the line of the agent's own file. It carries
    the content policy, the app's look for bare elements and the bridge to the
-   client.
+   client. A file with no doctype is given one: in quirks mode the root is as
+   tall as its frame and the page could not report its own height.
 4. Stores the result as an artifact snapshot, as `boite attach` does, and
    loads it once in a headless browser of this machine
    ([the agent's browser](browser.md), in a process of its own that no
@@ -103,7 +106,8 @@ A refusal is the command's error, with each problem and its line, and nothing
 is stored or shown: the agent fixes the file and runs the command again. A
 page reaches the user only once it loaded cleanly. On a machine with no
 Chromium-based browser, or when it does not answer within 20 seconds, the
-page is published unchecked and the command says so. A checked publish of
+page is published unchecked and the command says so; the browser started for
+the check is closed when that wait runs out. A checked publish of
 `tests/e2e/fixtures/views/pendulum.html` took 1.06 to 1.14 s over five calls
 of `artifacts.view` in a `bun test` loop, on Linux with Chrome, on 2026-10-07.
 
