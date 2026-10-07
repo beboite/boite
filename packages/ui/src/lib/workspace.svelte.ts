@@ -5,6 +5,8 @@ import {
   forgetGroupOf,
   removeBrought,
   linkedCore,
+  openOnMainMachine,
+  opensFromLink,
   parsePairingLink,
   readEnvironments,
   removeEnvironment,
@@ -12,8 +14,11 @@ import {
   storeEndpoint,
   upsertEnvironment,
   readStoredEndpoint,
+  readMainMachine,
+  storeMainMachine,
   fromTauri,
   type Endpoint,
+  type MainMachine,
   type StoredEnvironment
 } from './endpoint';
 import { strings } from './strings';
@@ -56,6 +61,15 @@ export function machineHealth(machine: Machine, primary: Store): MachineHealth {
   const needed = s.pairingRequired || s === primary || isThisPC(machine) || s.threads.some(t => threadActive(t.status));
   return needed ? 'lost' : 'offline';
 }
+
+/**
+ * How long the machine the window opens on is given to say hello before the
+ * other remembered machines are connected without it. The service worker
+ * gives the page itself about as long (`SHELL_PATIENCE_MS` in `public/sw.js`).
+ */
+export const PRIMARY_PATIENCE_MS = 2000;
+/** How long the window keeps its loading screen while another machine may still answer in place of the one it opened on. */
+export const STAND_IN_WAIT_MS = 6000;
 
 export const machineIcons = ['desktop', 'laptop', 'server', 'rack', 'cloud', 'cpu'] as const;
 export type MachineIconName = typeof machineIcons[number];
@@ -101,6 +115,18 @@ export class Workspace {
    * to it would make a second key for a machine this device already holds one for.
    */
   settled = $state(false);
+  /**
+   * The machine the window opened on has not answered and another one may
+   * still be shown in its place: the window keeps its loading screen instead
+   * of drawing a dead machine and its error for the moment that takes.
+   */
+  waiting = $state(false);
+  /**
+   * The machine the owner chose to open on at every start; null while a start
+   * opens on the machine shown last. Kept on this device: a phone and a
+   * computer each have their own.
+   */
+  main = $state<MainMachine | null>(readMainMachine());
   #generation = 0;
   #lifecycle = 0;
 
@@ -208,11 +234,78 @@ export class Workspace {
    */
   async boot(thread: string | null = null): Promise<void> {
     this.settled = false;
+    const lifecycle = this.#lifecycle + 1;
+    // A link in the address bar is the owner asking for that machine: its answer is waited for, whatever it is.
+    this.waiting = !opensFromLink();
+    const hold = setTimeout(() => { if (this.#current(lifecycle)) this.waiting = false; }, STAND_IN_WAIT_MS);
     try {
       await this.#boot(thread);
     } finally {
+      clearTimeout(hold);
       this.settled = true;
+      this.waiting = false;
     }
+  }
+
+  /**
+   * Another machine may be shown in place of the one the window opened on,
+   * which has not answered. Never in place of the shell's own core, which the
+   * shell brings back itself, and not before an address is known: the shell is
+   * still starting its core, or the owner is being asked about a link.
+   */
+  #mayStandIn(): boolean {
+    return store.endpointUrl !== null && !store.localCore && store.connection !== 'ready'
+      && (window.__TAURI_INTERNALS__ !== undefined || readEnvironments().some((e) => e.token !== '' && e.url !== store.endpointUrl));
+  }
+
+  /** Whether the machine the window opens on has still not said hello after `PRIMARY_PATIENCE_MS`, with another machine to show instead. */
+  async #silent(booting: Promise<void>): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = await Promise.race([
+      booting.then(() => false),
+      new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(true), PRIMARY_PATIENCE_MS); })
+    ]);
+    clearTimeout(timer);
+    return late && this.#mayStandIn();
+  }
+
+  /**
+   * The machine the window opened on does not answer and another one does: the
+   * window opens on that one, on the draft a start lands on, and starts there
+   * next time unless the owner chose the machine a start opens on. A phone
+   * paired with a laptop keeps working on the rest of the group while the
+   * laptop is off. Nothing moves once the user went somewhere.
+   */
+  #standIn(lifecycle: number, generation: number): void {
+    if (!this.#current(lifecycle)) return;
+    const live = generation === this.#generation && this.active === store && store.page === 'chat' && this.#mayStandIn()
+      ? this.machines.find((m) => m.store !== store && m.store.connection === 'ready')
+      : undefined;
+    if (live) {
+      this.#moveTo(live.store);
+      live.store.showChat();
+      live.store.visible = true;
+      void live.store.openLanding();
+    }
+    if (this.active !== store || !this.#mayStandIn()) this.waiting = false;
+  }
+
+  /** The machine the window opened on has ended its first attempt, after the others were connected without it. */
+  #primaryAnswered(lifecycle: number, generation: number): void {
+    if (!this.#current(lifecycle)) return;
+    const machine = this.machines.find((m) => m.store === store);
+    if (machine && store.connection === 'ready') {
+      // It was listed under its address until it said who it is.
+      if (machine.label === hostOf(store.endpointUrl) && store.core?.hostname) {
+        machine.label = store.core.hostname;
+        this.restoreProfile(machine);
+        this.#distinct(machine);
+        this.machines = [...this.machines];
+      }
+      // Another remembered address of this same core connected first: it goes, as it would have had it come second.
+      for (const other of this.machines.filter((m) => m.store !== store && m.store !== this.active)) this.#discardAlias(other);
+    }
+    this.#standIn(lifecycle, generation);
   }
 
   async #boot(thread: string | null): Promise<void> {
@@ -220,6 +313,9 @@ export class Workspace {
     const generation = this.#generation;
     store.visible = true;
     this.active = store;
+    // The machine the owner chose becomes the stored core before anything below reads it.
+    this.main = readMainMachine();
+    openOnMainMachine();
     try {
       this.view = localStorage.getItem('boite.thread-view') === 'recent' ? 'recent' : 'projects';
     } catch {
@@ -242,11 +338,19 @@ export class Workspace {
       if (stored !== undefined && gated.includes(stored) && !cleared.some((e) => e.url === stored)) this.#openElsewhere();
     }
     const selected = readStoredEndpoint();
-    await (thread === null ? store.boot() : store.boot(false, thread));
+    const booting = thread === null ? store.boot() : store.boot(false, thread);
+    // Awaited below on every path: a failure in between is not left unhandled.
+    booting.catch(() => undefined);
+    // A machine that stays silent, a laptop switched off, does not keep the others waiting: they are
+    // connected without it, and the first that answers is shown in its place. A link is always waited on.
+    const ahead = this.waiting && await this.#silent(booting);
+    if (!ahead) await booting;
     if (!this.#current(lifecycle)) return;
     this.active = store;
     // Read after the boot: a pairing link it opened on has just made this machine one paired by hand.
     this.machines = [this.#primaryMachine(selected, readEnvironments(), saved)];
+    // Ends the wait at once when the machine answered, or when no other could be shown.
+    this.#standIn(lifecycle, generation);
     if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('fake') === '1') {
       if (new URLSearchParams(window.location.search).get('machines') === '1') {
         await this.#addFakeMachine(lifecycle);
@@ -256,6 +360,11 @@ export class Workspace {
     const primaryEndpoint = readStoredEndpoint();
     await this.#connectShellLocal(lifecycle);
     if (!this.#current(lifecycle)) return;
+    this.#standIn(lifecycle, generation);
+    const shown = (connected: boolean): boolean => {
+      if (connected) this.#standIn(lifecycle, generation);
+      return connected;
+    };
     if (!store.localCore && primaryEndpoint?.url === store.endpointUrl && primaryEndpoint.token) {
       // An entry that went during the boot comes back as what it was: a machine the group brought is not made
       // the owner's by being written again. One still there says what it is itself, a pairing by hand included.
@@ -268,11 +377,12 @@ export class Workspace {
     }
     const others = readEnvironments().filter((e) => e.url !== store.endpointUrl);
     await Promise.all([
-      ...others.filter((e) => !holdsBack(e)).map((e) => this.add(e, e.label)),
+      ...others.filter((e) => !holdsBack(e)).map((e) => this.add(e, e.label).then(shown)),
       // A key held back is sent once the machines paired by hand had their say, and only where it still stands.
       vetting.then((cleared) => Promise.all(others
         .filter((e) => holdsBack(e) && cleared.some((kept) => kept.url === e.url) && this.#current(lifecycle))
-        .map((e) => this.add(e, e.label))))
+        .map((e) => this.add(e, e.label).then(shown)))),
+      ...(ahead ? [booting.then(() => this.#primaryAnswered(lifecycle, generation))] : [])
     ]);
     if (!this.#current(lifecycle)) return;
     await this.#adoptPopulatedJournal(lifecycle);
@@ -331,6 +441,37 @@ export class Workspace {
     if (saved) upsertEnvironment({ ...saved, coreId: core.coreId, groupId, epoch: core.epoch });
     if (machine.store === this.primary && saved) storeEndpoint({ ...saved, coreId: core.coreId, groupId, epoch: core.epoch });
     this.machines = [...this.machines];
+  }
+
+  /**
+   * What choosing this machine to open on is saved as. The app's own core, the
+   * one the shell starts or in a browser the one that serves the page, is
+   * named as such: the shell's takes another port at every start. The fake
+   * core has no address and stands for the page's own.
+   */
+  #mainOf(machine: Machine): MainMachine {
+    const s = machine.store;
+    if (s.localCore || servesThisPage(machine.id) || (s === store && s.endpointUrl === null)) return { local: true };
+    return { url: machine.id, ...(machine.coreId === undefined || machine.groupId === undefined ? {} : { coreId: machine.coreId, groupId: machine.groupId }) };
+  }
+
+  /** Whether this is the machine the owner chose to open on. One the group brought is the same machine at whatever address it gives now. */
+  isMain(machine: Machine): boolean {
+    const main = this.main;
+    if (main === null) return false;
+    const mine = this.#mainOf(machine);
+    if ('local' in main || 'local' in mine) return 'local' in main && 'local' in mine;
+    return main.url === mine.url || (main.coreId !== undefined && main.coreId === mine.coreId && main.groupId === mine.groupId);
+  }
+
+  /**
+   * The owner chooses the machine every start opens on, or with null goes back
+   * to the machine shown last. Nothing moves now: the window stays where it is,
+   * and a start on a machine that does not answer still opens on another.
+   */
+  setMain(machine: Machine | null): void {
+    this.main = machine === null ? null : this.#mainOf(machine);
+    storeMainMachine(this.main);
   }
 
   setView(view: 'projects' | 'recent'): void {
@@ -465,20 +606,27 @@ export class Workspace {
     return this.add({ ...parsed, token: '' }, label);
   }
 
-  async select(target: Store, threadId?: string, projectId?: string): Promise<void> {
-    const generation = ++this.#generation;
+  /**
+   * The window moves to `target`, which takes over the sidebar, the search and
+   * the notifications as they were. It is where the next start opens, unless
+   * the owner chose a machine for that (`main`).
+   */
+  #moveTo(target: Store): void {
     const previous = this.active;
-    if (previous !== target) {
-      void previous.suspend();
-      if (generation !== this.#generation) return;
-      target.sidebarWidth = previous.sidebarWidth;
-      target.sidebarCollapsed = previous.sidebarCollapsed;
-      target.search = previous.search;
-      target.notifications = previous.notifications;
-      this.active = target;
-      const saved = readEnvironments().find(e => e.url === target.endpointUrl);
-      if (saved) storeEndpoint(saved);
-    }
+    if (previous === target) return;
+    void previous.suspend();
+    target.sidebarWidth = previous.sidebarWidth;
+    target.sidebarCollapsed = previous.sidebarCollapsed;
+    target.search = previous.search;
+    target.notifications = previous.notifications;
+    this.active = target;
+    const saved = readEnvironments().find(e => e.url === target.endpointUrl);
+    if (saved) storeEndpoint(saved);
+  }
+
+  async select(target: Store, threadId?: string, projectId?: string): Promise<void> {
+    ++this.#generation;
+    this.#moveTo(target);
     target.showChat();
     target.visible = true;
     if (threadId) await target.open(threadId);

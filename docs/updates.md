@@ -1,17 +1,20 @@
 # Desktop updates
 
-Settings, Machines and updates groups desktop, server and agent updates in its
-Updates section. Connections, pairing and synchronization follow below. The
-desktop card belongs to this computer, even while another machine's
-conversation is open.
+Settings, Machines and updates lists every machine once. Each row says in one
+word where its updates stand (Up to date, Update available, Updating, Update
+failed), and one Check for updates button at the top of the page reads the
+desktop app, every server and every agent again
+([machines](machines.md#the-machines-page)). The desktop card sits above the
+list and belongs to this computer, even while another machine's conversation is
+open.
 It names the release and its age, links to the changelog on GitHub and offers
 installation with a restart confirmation. Channel options show the installed
 version and let you switch channels.
 
 Manual checks and channel controls remain in Machines and updates when
-everything is current. Each remote machine has its own
+everything is current. Each remote machine keeps its own
 [server update card](server.md#updating-from-the-app) and owner-only
-[agent update controls](agent-updates.md).
+[agent update controls](agent-updates.md) under its row's details.
 
 ## Boite and Boite Nightly
 

@@ -41,6 +41,11 @@
     };
   });
 
+  /** The app a device paired from, in plain words: `pwa` and `shell` are what the two clients call themselves. */
+  function clientName(name: string): string {
+    return name === 'pwa' ? strings.settings.pairing.clients.pwa : name === 'shell' ? strings.settings.pairing.clients.shell : name;
+  }
+
   /** A switch saves when it flips, as every other switch in Settings does; a refusal puts it back. */
   async function toggleLan(input: HTMLInputElement) {
     const ok = await store.saveSettings({ listenOnLan: input.checked });
@@ -78,23 +83,10 @@
 <section class="card" id="settings-devices" data-testid="pairing-card">
   <h2 class="ui-label-box"><span class="ui-label">{strings.settings.pairing.heading}</span><InfoTip topic={strings.settings.pairing.heading} text={strings.settings.pairing.intro} /></h2>
   {#if store.principal === 'owner'}
-    <label for="{uid}-listen-on-lan" class="switch-row">
-      <span class="text ui-label-box">
-        <span class="ui-label" id="{uid}-listen-on-lan-name">{strings.settings.listenOnLan}</span><InfoTip topic={strings.settings.listenOnLan} text={strings.settings.listenOnLanHint} />
-      </span>
-      <input id="{uid}-listen-on-lan" aria-labelledby="{uid}-listen-on-lan-name" type="checkbox" role="switch" data-testid="setting-listen-on-lan"
-        checked={store.settings?.listenOnLan ?? false} disabled={!store.settings}
-        onchange={(event) => void toggleLan(event.currentTarget)} />
-    </label>
-    <label for="{uid}-pairing-owner" class="switch-row">
-      <span class="text ui-label-box">
-        <span class="ui-label" id="{uid}-pairing-owner-name">{strings.settings.pairing.owner}</span><InfoTip topic={strings.settings.pairing.owner} text={strings.settings.pairing.ownerHint} />
-      </span>
-      <input id="{uid}-pairing-owner" aria-labelledby="{uid}-pairing-owner-name" type="checkbox" role="switch" data-testid="pairing-owner" bind:checked={ownerLink} />
-    </label>
     <div class="actions">
+      <!-- The button says what its link is for: a phone, unless the switch under More options asks for another computer. -->
       <button type="button" class="primary" data-testid="pairing-mint" onclick={() => void store.mintPairing(ownerLink ? 'owner' : 'device')}>
-        <span class="ui-label">{strings.settings.pairing.mint}</span>
+        <span class="ui-label">{ownerLink ? strings.settings.pairing.mintOwner : strings.settings.pairing.mint}</span>
       </button>
       {#if store.pairing}
         <button type="button" onclick={() => void store.copy(store.pairing?.url ?? '')}><span class="ui-label">{strings.settings.pairing.copy}</span></button>
@@ -140,7 +132,7 @@
       {#each store.sessions as session (session.id)}
         <li data-session-id={session.id}>
           <span class="name">
-            {session.client.name} {session.client.version}
+            {clientName(session.client.name)} <span class="subtle version">{session.client.version}</span>
             {#if session.role === 'owner'}<span class="subtle">({strings.settings.pairing.ownerTag})</span>{/if}
             {#if session.current}<span class="subtle">({strings.settings.pairing.thisDevice})</span>{/if}
           </span>
@@ -152,10 +144,32 @@
       {/each}
     </ul>
   {/if}
+  {#if store.principal === 'owner'}
+    <!-- What a phone on the same tailnet never needs: kept a click away, and open while one of them is on. -->
+    <details class="disclosure options" data-testid="pairing-options" open={ownerLink || undefined}>
+      <summary>{strings.settings.pairing.options}</summary>
+      <label for="{uid}-listen-on-lan" class="switch-row">
+        <span class="text ui-label-box">
+          <span class="ui-label" id="{uid}-listen-on-lan-name">{strings.settings.listenOnLan}</span><InfoTip topic={strings.settings.listenOnLan} text={strings.settings.listenOnLanHint} />
+        </span>
+        <input id="{uid}-listen-on-lan" aria-labelledby="{uid}-listen-on-lan-name" type="checkbox" role="switch" data-testid="setting-listen-on-lan"
+          checked={store.settings?.listenOnLan ?? false} disabled={!store.settings}
+          onchange={(event) => void toggleLan(event.currentTarget)} />
+      </label>
+      <label for="{uid}-pairing-owner" class="switch-row">
+        <span class="text ui-label-box">
+          <span class="ui-label" id="{uid}-pairing-owner-name">{strings.settings.pairing.owner}</span><InfoTip topic={strings.settings.pairing.owner} text={strings.settings.pairing.ownerHint} />
+        </span>
+        <input id="{uid}-pairing-owner" aria-labelledby="{uid}-pairing-owner-name" type="checkbox" role="switch" data-testid="pairing-owner" bind:checked={ownerLink} />
+      </label>
+    </details>
+  {/if}
 </section>
 
 <style>
   .actions { margin-top: 4px; }
+  .options { margin-top: 16px; }
+  .version { font-size: var(--text-xs); }
   .minted { display: flex; align-items: flex-start; gap: 14px; margin-top: 14px; }
   .minted-text { flex: 1; min-width: 0; display: grid; gap: 6px; }
   .qr {

@@ -60,8 +60,15 @@ function input(selector: string, value: string) {
 test('sync stays on the list and the settings button edits the owning machine without changing the active conversation', async () => {
   const { source, target } = await setup();
   expect(query('[data-testid="machines-page"] h1').textContent).toContain(strings.settings.tabs.machines);
-  expect(document.querySelectorAll('#settings-updates [data-testid="machine-updates-card"]')).toHaveLength(2);
-  expect(document.querySelector('#settings-machines [data-testid="harness-updates-card"]')).toBeNull();
+  // Each machine is listed once, with its versions and agents folded under its own row.
+  expect(document.querySelectorAll('#settings-machines [data-testid="machine-card"] [data-testid="machine-updates-card"]')).toHaveLength(2);
+  expect(document.querySelectorAll('[data-testid="machine-updates-card"]')).toHaveLength(2);
+  const fold = query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-details-toggle"]');
+  const details = document.getElementById(fold.getAttribute('aria-controls')!)!;
+  expect([fold.getAttribute('aria-expanded'), details.inert]).toEqual(['false', true]);
+  fold.click();
+  flushSync();
+  expect([fold.getAttribute('aria-expanded'), details.inert]).toEqual(['true', false]);
   await source.store.open('t-trace');
   const thread = source.store.openThread;
   await source.store.client!.call('settings.set', { asyncQuestions: false, warmProcessMinutes: 9, agentMemoryBudgetPercent: 70 });
@@ -105,11 +112,33 @@ test('sync stays on the list and the settings button edits the owning machine wi
   expect(workspace.active).toBe(source.store);
   query<HTMLButtonElement>('[data-machine-id="target"] [data-testid="machine-settings-open"]').click();
   flushSync();
-  source.store.showSettings('machines', 'updates');
+  source.store.showSettings('machines', 'machines');
   flushSync();
   expect(document.querySelector('[data-testid="machine-settings"]')).toBeNull();
-  expect(document.querySelector('#settings-updates')).not.toBeNull();
+  expect(document.querySelector('#settings-machines')).not.toBeNull();
   expect(source.store.openThread).toBe(thread);
+});
+
+test('each row says where its updates stand, one button checks every machine, and a machine alone shows its details', async () => {
+  const { source, target } = await setup();
+  await vi.waitFor(() => { flushSync(); expect(document.querySelectorAll('[data-testid="machine-updates-state"]')).toHaveLength(2); });
+  const settled = (machine: Machine) => machine.store.harnessUpdates.map(update => ({ ...update, latest: update.current, pending: false, skipped: null, state: 'idle' as const, checkedAt: 1 }));
+  source.store.harnessUpdates = settled(source);
+  target.store.harnessUpdates = settled(target).map((update, index) => index === 0 ? { ...update, current: '1.0.0', latest: '99.0.0', pending: true } : update);
+  flushSync();
+  const said = (id: string) => query(`[data-machine-id="${id}"] [data-testid="machine-updates-state"]`);
+  expect([said('target').dataset.state, said('target').textContent]).toEqual(['available', strings.harnessUpdates.availableShort]);
+  expect([said('source').dataset.state, said('source').textContent]).toEqual(['current', strings.serverUpdate.current]);
+
+  const checks = [source, target].map(machine => vi.spyOn(machine.store, 'loadHarnessUpdates').mockResolvedValue());
+  const server = vi.spyOn(target.store.serverUpdater, 'load').mockResolvedValue();
+  query<HTMLButtonElement>('[data-testid="updates-check-all"]').click();
+  await vi.waitFor(() => expect(checks.map(check => check.mock.calls)).toEqual([[[true]], [[true]]]));
+  expect(server).toHaveBeenCalledWith(true);
+
+  workspace.machines = workspace.machines.filter(machine => machine.id !== target.id);
+  flushSync();
+  expect(query('[data-machine-id="source"] [data-testid="machine-details-toggle"]').getAttribute('aria-expanded')).toBe('true');
 });
 
 test('offline and paired machines cannot be edited and a removed target never falls back to the active machine', async () => {
