@@ -102,6 +102,32 @@ test.skipIf(process.platform === 'win32')('a program replaced in place is asked 
   expect(resolveCommand(silent)).toBeNull();
 });
 
+test.skipIf(process.platform === 'win32')('a program that cannot be run is passed over for the candidate behind it', async () => {
+  const broken = program('broken', 'agent 2.0.0');
+  const plain = program('plain', 'agent 9.9.9');
+  let changes = 0;
+  const asked: string[] = [];
+  leave = attachVersions({
+    file: join(dir, 'executable-versions.json'),
+    changed: () => { changes += 1; },
+    run: async (path) => {
+      asked.push(path);
+      throw new Error('the program did not start');
+    },
+  });
+  const gated = profile({ kind: 'file', value: broken, major: 2 }, { kind: 'file', value: plain });
+
+  // Asked and not answered yet: nothing resolves, the candidate may still be the right one.
+  expect(resolveCommand(gated)).toBeNull();
+  await versionsSettled();
+  // It could not say: the candidate behind it is taken, and whoever listens was told to look again.
+  expect(resolveCommand(gated)?.executable).toBe(plain);
+  expect(changes).toBe(1);
+  // Not asked again at every resolution.
+  expect(resolveCommand(gated)?.executable).toBe(plain);
+  expect(asked).toEqual([broken]);
+});
+
 function descriptor(patch: Record<string, unknown>): Record<string, unknown> {
   const os = { detect: {}, executable: [{ kind: 'path', value: 'lab' }], isolation: { LAB_HOME: '{isolationDir}' } };
   return {

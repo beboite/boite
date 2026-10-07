@@ -91,8 +91,6 @@ function start(program: string, args: string[]): void {
     waiting.set(program, args);
     return;
   }
-  const failedAt = failures.get(program);
-  if (failedAt !== undefined && Date.now() - failedAt < RETRY_MS) return;
   let stat: { mtimeMs: number; size: number };
   try { stat = statSync(program); } catch { return; }
   fresh.add(program);
@@ -109,6 +107,8 @@ function start(program: string, args: string[]): void {
     () => {
       pending.delete(program);
       failures.set(program, Date.now());
+      // From unknown to "cannot say": the candidate is passed over now, and a later one may resolve.
+      for (const each of hosts) each.changed();
     },
   );
   pending.set(program, read);
@@ -127,9 +127,12 @@ function recheckLater(program: string, args: string[]): void {
 
 /**
  * The major version of the program at this path: a number once it is known,
- * null when the program answered with no version or cannot be reached, and
- * undefined while it has not been asked yet, in which case the question is on
- * its way. `args` is what makes the program print its version.
+ * null when the program answered with no version, cannot be reached or could
+ * not be run a moment ago, and undefined while it has not been asked yet, in
+ * which case the question is on its way. A program that could not be run is
+ * asked again once `RETRY_MS` has passed; until then it is no candidate, so
+ * the ones behind it get their turn. `args` is what makes the program print
+ * its version.
  */
 export function majorAt(program: string, args: readonly string[]): number | null | undefined {
   let stat: { mtimeMs: number; size: number };
@@ -145,6 +148,8 @@ export function majorAt(program: string, args: readonly string[]): number | null
     const major = Number.parseInt(reading.version, 10);
     return Number.isNaN(major) ? null : major;
   }
+  const failedAt = failures.get(program);
+  if (failedAt !== undefined && Date.now() - failedAt < RETRY_MS) return null;
   start(program, [...args]);
   return undefined;
 }
