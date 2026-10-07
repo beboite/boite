@@ -44,6 +44,7 @@
   import { WsClient } from './lib/client';
   import { listenForInstall } from './lib/pwa';
   import { mobileOverlay } from './lib/mobile-history';
+  import { startViewHistory } from './lib/view-history.svelte';
   import { agentAutoLink } from './lib/agent-links.svelte';
   import ThreadPreparation from './components/ThreadPreparation.svelte';
 
@@ -378,8 +379,11 @@
     startGlass();
     // A click on a toast opens the thread it was about.
     const stopToasts = onNotificationOpen((threadId) => void workspace.openNotification(threadId));
+    // A mouse's back and forward buttons walk the threads, drafts and settings tabs shown.
+    const stopViewHistory = startViewHistory();
     if (!inShell) {
       return () => {
+        stopViewHistory();
         stopTheme();
         stopToasts();
         stopSettingsSync();
@@ -424,6 +428,7 @@
       disposed = true;
       unlisten?.();
       stopTray?.();
+      stopViewHistory();
       stopTheme();
       stopToasts();
       quitHold?.dispose();

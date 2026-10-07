@@ -104,6 +104,8 @@ export class Workspace {
   active = $state(store);
   view = $state<'projects' | 'recent'>('projects');
   error = $state<string | null>(null);
+  /** Selections still landing: until they have, the screen is on its way somewhere (`view-history.svelte.ts`). */
+  selecting = $state(0);
   readonly settingsSync = new AutoSettingsSync(() => this.machines, profileKey);
   /** Connects the other machines of a group and drops the ones that left it. */
   readonly groups = new GroupLinks(this);
@@ -625,6 +627,15 @@ export class Workspace {
   }
 
   async select(target: Store, threadId?: string, projectId?: string): Promise<void> {
+    this.selecting += 1;
+    try {
+      await this.#select(target, threadId, projectId);
+    } finally {
+      this.selecting -= 1;
+    }
+  }
+
+  async #select(target: Store, threadId?: string, projectId?: string): Promise<void> {
     ++this.#generation;
     this.#moveTo(target);
     target.showChat();
