@@ -41,6 +41,7 @@ import type { Connection } from './router.ts';
 import { refused } from './errors.ts';
 import { Cdp } from './browser/cdp.ts';
 import { chromiumArgs, clearActivePort, findChromium, pipesDevTools, readSavedCookies, waitForEndpoint, writeSavedCookies } from './browser/chromium.ts';
+import { PROBE_TIMEOUT_MS, probePage, type PageProbe } from './browser/probe.ts';
 import { TabRecorder } from './browser/recorder.ts';
 import { EDITABLE_SCRIPT, KEY_CODES, PAGE_INFO_SCRIPT, SETTLED_VIEWPORT_SCRIPT } from './browser/scripts.ts';
 import { automate, awaitDocument, documentToken, PAGE_ACTIONS, type AgentPage } from './browser/automation.ts';
@@ -54,6 +55,7 @@ const SCOPE = BROWSER_SCOPE;
  * 2026-10-05, where the next start took two.
  */
 const START_TIMEOUT_MS = 60_000;
+
 const TABS_PER_THREAD = 8;
 const TABS_MAX = 24;
 /** A browser process with no tab left is closed after this long: the next `open` starts it again. */
@@ -132,6 +134,9 @@ export class AgentBrowser {
   #queues = new Map<ThreadId, Promise<unknown>>();
   #announce = new Map<ThreadId, ReturnType<typeof setTimeout>>();
   #closed = false;
+  /** Browsers started to check a page (`probe`): no conversation lists them, so they are closed by name. */
+  #probes = new Set<Engine>();
+  #probeQueue: Promise<void> = Promise.resolve();
   #off: Array<() => void> = [];
   #watching = false;
 
@@ -661,7 +666,7 @@ export class AgentBrowser {
       for (const name of names) {
         const dir = join(root, name);
         const throwaway = /^private-[0-9a-f-]{36}$/.test(name);
-        if (throwaway ? dir === privateDir : kept.has(name) || browserProfileIdError(name) !== null) continue;
+        if (throwaway ? dir === privateDir || [...this.#probes].some(engine => engine.dir === dir) : kept.has(name) || browserProfileIdError(name) !== null) continue;
         this.#removeDir(dir);
       }
     } catch (error) {
@@ -802,6 +807,38 @@ export class AgentBrowser {
     return { ok: true };
   }
 
+  // ---------- the check of a page before it is shown ----------
+
+  /**
+   * Loads `url` in a browser of its own that no conversation lists, and says
+   * what the page threw or was refused and how tall it stands at each width.
+   * `boite view` asks before it publishes a page, so a broken one goes back to
+   * the agent and never in front of the user. Null when this machine has no
+   * browser or it did not answer in time: the page is then published unchecked.
+   * One check at a time: each starts a process.
+   */
+  probe(url: string, widths: readonly number[], timeoutMs = PROBE_TIMEOUT_MS): Promise<PageProbe | null> {
+    const run = this.#probeQueue.then(() => this.#probe(url, widths, timeoutMs));
+    this.#probeQueue = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  async #probe(url: string, widths: readonly number[], timeoutMs: number): Promise<PageProbe | null> {
+    if (this.#closed || this.findBrowser().path === null) return null;
+    let engine: Engine | null = null;
+    const work = (async (): Promise<PageProbe> => {
+      const started = engine = await this.#launch(PRIVATE_BROWSER_PROFILE);
+      this.#probes.add(started);
+      return probePage(started.cdp, url, widths);
+    })();
+    // A browser that starts after the wait is still closed, by this same line.
+    const settled = work.finally(() => { if (engine) { this.#probes.delete(engine); this.#lost(engine); } });
+    return Promise.race([
+      settled.catch(error => { this.#core.log('warn', `a page could not be checked before it was shown: ${error instanceof Error ? error.message : String(error)}`); return null; }),
+      Bun.sleep(timeoutMs).then(() => null),
+    ]);
+  }
+
   // ---------- lifetime ----------
 
   /** The conversation was archived or removed: its tabs close, its recordings with them. */
@@ -823,6 +860,7 @@ export class AgentBrowser {
     this.#closed = true;
     for (const off of this.#off) off();
     for (const timer of this.#announce.values()) clearTimeout(timer);
+    for (const engine of [...this.#probes]) { this.#probes.delete(engine); this.#lost(engine); }
     const engines = await Promise.all([...this.#engines.values()].map(pending => pending.catch(() => null)));
     await Promise.all(engines.map(engine => engine ? this.#shut(engine) : undefined));
   }

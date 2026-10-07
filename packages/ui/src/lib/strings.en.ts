@@ -147,7 +147,7 @@ export const strings = {
   activityUnsupported: 'Element references cannot be used with /goal or /loop. Send a regular message or remove the references.',
   stashUnsupported: 'This draft contains element references and cannot be stashed. Send it or remove the references first.'
 },
-  artifacts: { loadImage: 'Load image', retry: 'Try again', mediaFailed: 'This media could not be previewed. Try again or download the file to open it.', videoFailed: 'This device cannot play this video. Download it to watch it in another app.', saving: 'Saving', zoomIn: 'Zoom in', zoomOut: 'Zoom out', fitImage: 'Fit image', open: 'Open', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', closeImage: 'Close image', enlarge: 'View full size', saved: 'Saved in Downloads', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
+  artifacts: { viewReplay: 'Play again', viewExpand: 'View full size', viewCollapse: 'Close full size', loadImage: 'Load image', retry: 'Try again', mediaFailed: 'This media could not be previewed. Try again or download the file to open it.', videoFailed: 'This device cannot play this video. Download it to watch it in another app.', saving: 'Saving', zoomIn: 'Zoom in', zoomOut: 'Zoom out', fitImage: 'Fit image', open: 'Open', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', closeImage: 'Close image', enlarge: 'View full size', saved: 'Saved in Downloads', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
 
   brain: {
     heading: 'Brain', description: 'Your agents share the same instructions and skills.',
@@ -158,7 +158,7 @@ export const strings = {
     autoPull: 'Pull automatically', onStartup: 'At startup', periodic: 'Periodically', minutes: 'min',
     globalInstructions: 'Global AGENTS.md', globalDetails: 'Connected harnesses',
     globalHint: 'Uses this brain in every project, including outside Boite. Existing files are backed up and restored when disabled.',
-    boiteGuide: 'Boite guide', boiteGuideHint: 'A note after AGENTS.md when an agent session starts: the boite command and the panel. About 250 tokens.',
+    boiteGuide: 'Boite guide', boiteGuideHint: 'A note after AGENTS.md when an agent session starts: the boite command and the panel. About 300 tokens.',
     linked: 'Linked', existing: 'Already linked', blocked: 'Needs attention',
     interval: 'Pull interval in minutes', intervalHint: 'Choose a whole number from 1 to 1440 minutes.',
     detected: 'Contents', instructions: 'Instructions', skill: 'Skills', plugin: 'Plugins',

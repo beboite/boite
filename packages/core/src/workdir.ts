@@ -465,6 +465,8 @@ export interface FileTicketTarget {
   path: string;
   mime: string;
   name?: string;
+  /** A published view: the one kind of ticket `VIEW_ROUTE` opens as a page. Any other only downloads. */
+  view?: true;
 }
 
 function fileIdentity(path: string): string | null {
@@ -485,13 +487,14 @@ function fileIdentity(path: string): string | null {
 export class FileTickets {
   private readonly held = new Map<string, FileTicketTarget & { expiresAt: number; identity: string | null }>();
 
-  mint(path: string, mime: string, now = Date.now(), name?: string, identity?: string): string {
+  mint(path: string, mime: string, now = Date.now(), name?: string, identity?: string, view = false): string {
     this.sweep(now);
     const ticket = newToken();
     this.held.set(ticket, {
       path,
       mime,
       ...(name ? { name } : {}),
+      ...(view ? { view: true as const } : {}),
       expiresAt: now + FILE_TICKET_TTL_MS,
       identity: identity ?? fileIdentity(path),
     });
@@ -514,7 +517,7 @@ export class FileTickets {
       this.held.delete(ticket);
       return null;
     }
-    return { path: entry.path, mime: entry.mime, ...(entry.name ? { name: entry.name } : {}) };
+    return { path: entry.path, mime: entry.mime, ...(entry.name ? { name: entry.name } : {}), ...(entry.view ? { view: true as const } : {}) };
   }
 
   /** Drop every ticket. A revoked session must not keep a bearer URL alive. */
@@ -534,7 +537,7 @@ export class FileTickets {
    * Open the ticket's file without following a symlink swapped in after the
    * mint. The handle is the caller's to close. A mismatch drops the ticket.
    */
-  async open(ticket: string, now = Date.now()): Promise<{ handle: FileHandle; mime: string; name?: string; size: number } | null> {
+  async open(ticket: string, now = Date.now()): Promise<{ handle: FileHandle; mime: string; name?: string; size: number; view?: true } | null> {
     this.sweep(now);
     const entry = this.held.get(ticket);
     if (entry === undefined || entry.identity === null) {
@@ -558,7 +561,7 @@ export class FileTickets {
         await handle.close();
         return null;
       }
-      return { handle, mime: entry.mime, ...(entry.name ? { name: entry.name } : {}), size: Number(stats.size) };
+      return { handle, mime: entry.mime, ...(entry.name ? { name: entry.name } : {}), size: Number(stats.size), ...(entry.view ? { view: true as const } : {}) };
     } catch (error) {
       await handle.close();
       throw error;

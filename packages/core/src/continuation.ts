@@ -19,7 +19,8 @@ function textPart(part: MessagePart): string {
     case 'tool': return `Tool ${part.name}: ${part.status}\n${JSON.stringify(part.output ?? '')}`;
     case 'error': return `Error: ${part.message}`;
     case 'image': return `[Image: ${part.alt ?? 'attachment'}]`;
-    case 'artifact': return `[Published file: ${part.name}, ${part.bytes} bytes]`;
+    // A view names the file it came from, so the next model can open it again and change it.
+    case 'artifact': return part.view ? `[Inline view shown to the user: ${part.view.title}, from ${part.view.source ?? part.name}]` : `[Published file: ${part.name}, ${part.bytes} bytes]`;
     // Reasoning, old permission grants and compaction internals are not portable context.
     default: return '';
   }

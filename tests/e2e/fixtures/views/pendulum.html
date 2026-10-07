@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Pendulum</title>
+<style>
+  .stage { display: block; width: 100%; aspect-ratio: 60 / 23; }
+  .axis { stroke: var(--color-border); stroke-dasharray: 3 4; }
+  .sweep { fill: none; stroke: var(--color-accent-soft); stroke-width: 3; stroke-linecap: round; }
+  .rod { stroke: var(--color-edge); stroke-width: 2; }
+  .pivot { fill: var(--color-muted-foreground); }
+  .bob { fill: var(--color-accent); }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; margin-top: 12px; }
+  .controls label { display: flex; align-items: center; gap: 8px; }
+  .controls input { width: 120px; }
+  output, .readout b { font-family: var(--font-mono); color: var(--color-foreground); }
+  output { min-width: 5ch; }
+  .readout { display: flex; gap: 24px; margin-top: 10px; font-size: var(--text-sm); color: var(--color-muted-foreground); }
+  .readout b { font-weight: 600; }
+</style>
+</head>
+<body>
+<svg class="stage" viewBox="0 0 600 230" role="img" aria-label="A pendulum swinging from a fixed point">
+  <line class="axis" x1="300" y1="20" x2="300" y2="222"/>
+  <path class="sweep" id="sweep"/>
+  <line class="rod" id="rod" x1="300" y1="20" x2="300" y2="156"/>
+  <circle class="pivot" cx="300" cy="20" r="4"/>
+  <circle class="bob" id="bob" cx="300" cy="156" r="14"/>
+</svg>
+<div class="controls">
+  <button id="toggle" type="button">Pause</button>
+  <label>Length <input id="length" type="range" min="0.5" max="3" step="0.1" value="2"><output id="lengthOut">2.0 m</output></label>
+  <label>Start angle <input id="angle" type="range" min="5" max="60" step="1" value="35"><output id="angleOut">35°</output></label>
+</div>
+<div class="readout"><span>Period <b id="period"></b></span><span>Angle <b id="now"></b></span></div>
+<script>
+  const G = 9.81, PIVOT = { x: 300, y: 20 }, SCALE = 68;
+  const $ = (id) => document.getElementById(id);
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches || document.documentElement.hasAttribute('data-reduced-motion');
+  let length = 2, start = 35 * Math.PI / 180, theta = start, speed = 0, playing = !still, last = 0;
+
+  function point(angle) {
+    return { x: PIVOT.x + Math.sin(angle) * length * SCALE, y: PIVOT.y + Math.cos(angle) * length * SCALE };
+  }
+  function draw() {
+    const bob = point(theta), from = point(-start), to = point(start), radius = length * SCALE;
+    $('rod').setAttribute('x2', bob.x); $('rod').setAttribute('y2', bob.y);
+    $('bob').setAttribute('cx', bob.x); $('bob').setAttribute('cy', bob.y);
+    $('sweep').setAttribute('d', `M ${from.x} ${from.y} A ${radius} ${radius} 0 0 0 ${to.x} ${to.y}`);
+    $('now').textContent = `${(theta * 180 / Math.PI).toFixed(0)}°`;
+    $('period').textContent = `${(2 * Math.PI * Math.sqrt(length / G)).toFixed(2)} s`;
+  }
+  function reset() { theta = start; speed = 0; draw(); }
+  function frame(now) {
+    const dt = Math.min(0.032, (now - last) / 1000 || 0);
+    last = now;
+    if (playing) {
+      // Semi-implicit Euler keeps the swing from gaining energy over time.
+      speed += -(G / length) * Math.sin(theta) * dt;
+      theta += speed * dt;
+      draw();
+    }
+    requestAnimationFrame(frame);
+  }
+  $('toggle').textContent = playing ? 'Pause' : 'Play';
+  $('toggle').addEventListener('click', () => { playing = !playing; $('toggle').textContent = playing ? 'Pause' : 'Play'; });
+  $('length').addEventListener('input', (event) => { length = Number(event.target.value); $('lengthOut').textContent = `${length.toFixed(1)} m`; reset(); });
+  $('angle').addEventListener('input', (event) => { start = Number(event.target.value) * Math.PI / 180; $('angleOut').textContent = `${event.target.value}°`; reset(); });
+  draw();
+  requestAnimationFrame(frame);
+</script>
+</body>
+</html>
