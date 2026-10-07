@@ -95,6 +95,9 @@ export interface BrowserOptions {
   args?: string[];
 }
 
+/** How a browser that never got as far as its page fails: the only failures `launch` tries again. */
+const STARTUP_STALLS = ['the browser never exposed a page', 'the devtools socket', 'Page.navigate timed out', 'the requested navigation never committed'];
+
 /** Every page `launch` opened and nobody closed yet, for `closeAllBrowsers`. */
 const open = new Set<BrowserPage>();
 
@@ -163,7 +166,25 @@ export class BrowserPage {
     });
   }
 
+  /**
+   * A browser on `options.url`. A start that never reached the page is tried
+   * once more with a fresh process: on a loaded Windows runner the first
+   * Chrome of a shard has taken over 30 s to open its debugging port, and one
+   * in the middle of a run over 20 s to commit its first navigation, on `main`
+   * as on branches (2026-10-07). What the page does once it is up is never retried.
+   */
   static async launch(options: BrowserOptions): Promise<BrowserPage> {
+    try {
+      return await BrowserPage.#start(options);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      if (!STARTUP_STALLS.some((stall) => reason.startsWith(stall))) throw error;
+      console.warn(`[e2e] the browser did not start, launching it once more: ${reason.split('\n', 1)[0]}`);
+      return BrowserPage.#start(options);
+    }
+  }
+
+  static async #start(options: BrowserOptions): Promise<BrowserPage> {
     const executable = options.executable ?? findBrowser();
     const ownsUserDataDir = options.userDataDir === undefined;
     const userDataDir = options.userDataDir ?? mkdtempSync(join(tmpdir(), `${E2E_DIR_PREFIX}browser-`));
