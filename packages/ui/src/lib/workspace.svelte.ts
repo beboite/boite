@@ -335,6 +335,8 @@ export class Workspace {
     this.active = store;
     // Read after the boot: a pairing link it opened on has just made this machine one paired by hand.
     this.machines = [this.#primaryMachine(selected, readEnvironments(), saved)];
+    // Ends the wait at once when the machine answered, or when no other could be shown.
+    this.#standIn(lifecycle, generation);
     if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('fake') === '1') {
       if (new URLSearchParams(window.location.search).get('machines') === '1') {
         await this.#addFakeMachine(lifecycle);
@@ -342,8 +344,6 @@ export class Workspace {
       return;
     }
     const primaryEndpoint = readStoredEndpoint();
-    // Ends the wait at once when the machine answered, or when no other could be shown.
-    this.#standIn(lifecycle, generation);
     await this.#connectShellLocal(lifecycle);
     if (!this.#current(lifecycle)) return;
     this.#standIn(lifecycle, generation);
