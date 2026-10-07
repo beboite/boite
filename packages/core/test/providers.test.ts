@@ -347,6 +347,24 @@ describe('providers', () => {
     expect(opencode.executable?.toLowerCase()).toEndWith(process.platform === 'win32' ? 'opencode.exe' : 'opencode');
   });
 
+  test('the opencode-v2 profile launches acp bare, isolates the state home and signs in without the background service', () => {
+    const descriptor = harness.core.providers.require('opencode-v2');
+    expect(descriptor.experimental).toBe(true);
+    expect(descriptor.auth).toEqual({ kind: 'oauth-cli', sqlite: { file: 'opencode/opencode.db', tables: ['credential', 'account', 'control_account'] } });
+    expect(descriptor.login).toEqual({ command: ['opencode2', 'auth', 'login', '--standalone'], terminal: true });
+    for (const os of ['windows', 'linux', 'macos'] as const) {
+      const profile = descriptor.profiles[os];
+      // Version 2 refuses `--port`, which version 1's line carries.
+      expect(profile?.launch?.args).toEqual(['acp']);
+      expect(profile?.isolation).toEqual({ XDG_DATA_HOME: '{isolationDir}', XDG_CONFIG_HOME: '{isolationDir}', XDG_STATE_HOME: '{isolationDir}/state' });
+      expect(profile?.update).toEqual({ args: ['upgrade'], latestNpm: '@opencode/cli' });
+      // The name both versions install under counts only at major 2 here, and only at major 1 for OpenCode 1.
+      expect(profile?.executable.filter((candidate) => candidate.kind === 'path' && candidate.value === 'opencode').map((candidate) => candidate.major)).toEqual([2]);
+      const first = harness.core.providers.require('opencode').profiles[os];
+      expect(first?.executable.filter((candidate) => candidate.kind === 'path' && candidate.value === 'opencode').map((candidate) => candidate.major)).toEqual([1]);
+    }
+  });
+
   test('the opencode profile carries the acp launch arguments and the xdg isolation', async () => {
     const descriptor = harness.core.providers.require('opencode');
     const profile = descriptor.profiles[currentOs()];

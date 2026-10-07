@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import type { RpcEvents } from '@boite/contracts';
@@ -98,4 +98,31 @@ test('an account whose agent keeps its login in a database reads signed in once 
   db.run("INSERT INTO credential VALUES ('cred_1', '{}')");
   db.close();
   expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('ok');
+});
+
+test.skipIf(process.platform === 'win32')('a list waits for the program a candidate asks its version, and answers with the provider it found', async () => {
+  // A program that says which major it is, and a descriptor that takes it only at that major.
+  const program = join(harness.dataDir, 'gated-agent');
+  writeFileSync(program, '#!/bin/sh\necho "gated-agent v2.3.1"\n');
+  chmodSync(program, 0o755);
+  const profile = (major: number) => ({ detect: {}, executable: [{ kind: 'file', value: program, major }], isolation: { GATED_HOME: '{isolationDir}' } });
+  const descriptor = (id: string, major: number) => ({
+    id, schemaVersion: 1, name: id, shortName: id, protocol: 'acp', roots: ['{isolationDir}'],
+    profiles: { linux: profile(major), macos: profile(major) }, auth: { kind: 'none' },
+    models: [{ id: 'default', name: 'Default', default: true }],
+    capabilities: { approvals: true, hooks: false, checkpoint: false, images: false, planMode: false, resume: true },
+  });
+  mkdirSync(join(harness.dataDir, 'providers'), { recursive: true });
+  writeFileSync(join(harness.dataDir, 'providers', 'gated-one.json'), JSON.stringify(descriptor('gated-one', 1)));
+  writeFileSync(join(harness.dataDir, 'providers', 'gated-two.json'), JSON.stringify(descriptor('gated-two', 2)));
+
+  const client = await harness.connect();
+  // The very first answer already knows: the reload ran the program before it answered.
+  const { loaded, rejected } = await client.call('providers.reload', {});
+  expect(rejected).toEqual([]);
+  expect(loaded.find((provider) => provider.id === 'gated-two')).toMatchObject({ available: true, executable: program });
+  expect(loaded.find((provider) => provider.id === 'gated-one')).toMatchObject({ available: false, executable: null });
+  // The reading is kept beside the data, for the next start.
+  const kept = JSON.parse(await Bun.file(join(harness.dataDir, 'executable-versions.json')).text()) as Record<string, { version: string }>;
+  expect(kept[program]?.version).toBe('2.3.1');
 });

@@ -107,6 +107,8 @@ export function summarize(entry: LoadedProvider, installs: InstallManager, dataD
 const VERSIONS_FILE = 'executable-versions.json';
 /** A program that has not printed its version by then is not one of ours. */
 const VERSION_TIMEOUT_MS = 20_000;
+/** How long `providers.list` and `providers.reload` wait for version reads in flight. OpenCode 1 answers in about one second. */
+const LIST_WAIT_MS = 5_000;
 let versionRuns = 0;
 
 /** One short run of a program to read its version, traced like every agent process. */
@@ -371,7 +373,12 @@ export function registerProviderMethods(core: Core): void {
   // after an install would miss a provider for the second its program takes.
   const settledList = async (): Promise<ProviderLoadResult> => {
     core.providers.list();
-    await versionsSettled();
+    // A program that hangs on its version must not hold the list: past the wait
+    // the answer goes out without it, and `providers.updated` follows the reading.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const waited = new Promise<void>((resolve) => { timer = setTimeout(resolve, LIST_WAIT_MS); });
+    try { await Promise.race([versionsSettled(), waited]); }
+    finally { clearTimeout(timer); }
     return core.providers.list();
   };
   core.router.register('providers.list', settledList);
