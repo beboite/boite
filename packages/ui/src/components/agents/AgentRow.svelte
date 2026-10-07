@@ -33,6 +33,7 @@
     status: waiting ? ('waiting' as const) : (live?.status ?? ('idle' as const)),
     unread: false,
     runningSince: live?.runningSince ?? null,
+    requestSince: live?.requestSince ?? null,
     backgroundWork: null,
     lastUserMessageAt: at,
     createdAt: at

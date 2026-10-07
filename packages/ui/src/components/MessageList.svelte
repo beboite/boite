@@ -691,7 +691,7 @@
     return result;
   });
   /** Where each turn's request started, so a reply after monitoring keeps counting from the user's message. */
-  const turnRequestStarts = $derived(requestStarts(store.openThread?.turns ?? []));
+  const turnRequestStarts = $derived(requestStarts(store.openThread?.id === threadId ? store.openThread.turns : store.delegationThread?.id === threadId ? store.delegationThread.turns : []));
   const lastInTurn = $derived.by(() => {
     const result = new Map<string, string>();
     for (const message of timeline) result.set(message.turnId, message.id);
