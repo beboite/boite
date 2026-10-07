@@ -58,7 +58,7 @@
   function detail(chat: AgentChat): string {
     const last = chat.last;
     if (last) {
-      const text = last.thread ? fill(labels.threadEvent[last.thread.event], { title: last.thread.title }) : previewOf(last.text);
+      const text = last.thread ? fill(labels.threadEvent[last.thread.event], { name: profiles.get(last.senderId ?? '')?.name ?? '', title: last.thread.title }) : previewOf(last.text);
       const sender = last.senderId === null ? labels.user : chat.kind === 'profile' ? '' : profiles.get(last.senderId)?.name ?? '';
       return sender ? fill(labels.previewFrom, { name: sender, text }) : text;
     }

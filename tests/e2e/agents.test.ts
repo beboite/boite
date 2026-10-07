@@ -228,7 +228,7 @@ test('a thread entrusted from its menu carries on, and its agent reports in its 
   await page.evaluate(`window.__boiteTest.workspace.active.showAgents(window.__agentsFixture.first.id)`);
   await page.waitFor(`document.querySelectorAll('[data-testid="agent-thread-event"]').length === 2`);
   expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="agent-thread-event"]')).map(e => e.dataset.event)`)).toEqual(['entrusted', 'done']);
-  expect(await page.evaluate(`document.querySelector('[data-testid="agent-thread-event"][data-event="entrusted"]').textContent`)).toContain('I am taking over "Finish the trace tab".');
+  expect(await page.evaluate(`document.querySelector('[data-testid="agent-thread-event"][data-event="entrusted"]').textContent`)).toContain('took over "Finish the trace tab"');
   await page.evaluate(`document.querySelector('[data-testid="agent-thread-event"][data-event="done"]').scrollIntoView({ block: 'center' })`);
   await capture('agents-entrusted-desktop.png');
   await page.click('[data-testid="agent-thread-event"][data-event="done"] [data-testid="agent-thread-event-open"]');

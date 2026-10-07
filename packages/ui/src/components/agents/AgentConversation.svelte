@@ -119,32 +119,38 @@
               </footer>
             {/if}
           </article>
+        {:else if message.thread?.event === 'entrusted'}
+          <!-- Taking a thread over is a moment of the conversation, marked across it the way a started thread is. -->
+          {@const event = message.thread}
+          {@const present = view.store.threads.some(t => t.id === event.id)}
+          <div class="agent-marker" data-testid="agent-thread-event" data-event="entrusted">
+            <span class="rule"></span>
+            {#if present}
+              <button type="button" class="ghost small label" title={labels.openThread} onclick={() => void view.store.open(event.id)} data-testid="agent-thread-event-open"><Handshake size={13} strokeWidth={1.75} /><span class="ui-label">{fill(labels.threadEvent.entrusted, { name: nameOf(message.senderId!), title: event.title })}</span></button>
+            {:else}
+              <span class="label"><Handshake size={13} strokeWidth={1.75} /><span class="ui-label">{fill(labels.threadEvent.entrusted, { name: nameOf(message.senderId!), title: event.title })}</span></span>
+            {/if}
+            <span class="rule"></span>
+          </div>
         {:else}
           {@const sender = profileOf(message.senderId!)}
           {@const planned = plannedOf(message)}
-          <article class="agent-message from-agent" class:first data-event={message.thread?.event}>
+          {@const event = message.thread}
+          <article class="agent-message from-agent" class:first data-event={event?.event} data-testid={event ? 'agent-thread-event' : undefined}>
             {#if group && first}
               <header>
                 <AgentAvatar kind="profile" id={message.senderId!} name={sender?.name ?? ''} avatar={sender?.avatar} size={20} />
                 <strong>{nameOf(message.senderId!)}</strong>
               </header>
             {:else}<span class="agent-sr-only">{nameOf(message.senderId!)}</span>{/if}
-            {#if message.thread}
-              {@const event = message.thread}
-              <div class="thread-event" data-event={event.event} data-testid="agent-thread-event">
-                <p class="thread-event-line">
-                  {#if event.event === 'done'}<CircleCheck size={15} strokeWidth={1.75} />{:else if event.event === 'blocked'}<CircleQuestionMark size={15} strokeWidth={1.75} />{:else if event.event === 'stopped'}<CircleStop size={15} strokeWidth={1.75} />{:else}<Handshake size={15} strokeWidth={1.75} />{/if}
-                  <span>{fill(labels.threadEvent[event.event], { title: event.title })}</span>
-                </p>
-                {#if event.event !== 'entrusted' && message.text.trim()}<div class="thread-event-text"><Prose text={message.text} store={view.store} /></div>{/if}
-                {#if view.store.threads.some(t => t.id === event.id)}
-                  <button type="button" class="ghost small" onclick={() => void view.store.open(event.id)} data-testid="agent-thread-event-open"><SquareArrowOutUpRight size={13} strokeWidth={1.75} /><span class="ui-label">{labels.openThread}</span></button>
-                {/if}
-              </div>
-            {:else}
-              {#if planned !== null}<p class="planned-label" data-testid="agent-planned-result"><CalendarClock size={13} strokeWidth={1.75} /><span>{planned || labels.plannedResult}</span></p>{/if}
-              <div class="answer"><Prose text={message.text} store={view.store} bubble /></div>
-            {/if}
+            {#if event}
+              <!-- How an entrusted thread ended: a label over the agent's bubble, like a planned task's, that opens the thread. -->
+              <button type="button" class="ghost small event-label" data-event={event.event} title={labels.openThread} disabled={!view.store.threads.some(t => t.id === event.id)} onclick={() => void view.store.open(event.id)} data-testid="agent-thread-event-open">
+                {#if event.event === 'done'}<CircleCheck size={13} strokeWidth={1.75} />{:else if event.event === 'blocked'}<CircleQuestionMark size={13} strokeWidth={1.75} />{:else}<CircleStop size={13} strokeWidth={1.75} />{/if}
+                <span class="ui-label">{fill(labels.threadEvent[event.event], { name: nameOf(message.senderId!), title: event.title })}</span>
+              </button>
+            {:else if planned !== null}<p class="planned-label" data-testid="agent-planned-result"><CalendarClock size={13} strokeWidth={1.75} /><span>{planned || labels.plannedResult}</span></p>{/if}
+            {#if message.text.trim()}<div class="answer"><Prose text={message.text} store={view.store} bubble /></div>{/if}
             {#if lastOfRun}<footer><time datetime={new Date(message.createdAt).toISOString()}>{time(message.createdAt)}</time></footer>{/if}
           </article>
         {/if}
