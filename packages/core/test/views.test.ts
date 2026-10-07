@@ -87,6 +87,10 @@ test('the stored page starts its head with the policy, the theme and the bootstr
   expect(head).toContain('<style id="boite-view-kit">');
   expect(stored.split(':where(.card)').length).toBe(2);
   expect(stored).toContain('input[type=range]');
+  // Every rule of the kit weighs nothing, and none overrides what a drawing says in its own attributes.
+  const kit = /<style id="boite-view-kit">([\s\S]*?)<\/style>/.exec(stored)![1]!;
+  expect(kit).toContain(':where(svg text:not([fill]))');
+  for (const rule of kit.split('}').map(part => part.split('{')[0]!.trim()).filter(selector => selector && !selector.startsWith('@') && !selector.startsWith('html'))) expect(rule).toMatch(/^:where\(/);
   expect(head.indexOf('<script>')).toBeLessThan(head.indexOf('<title>Orbit</title>'));
   // Nothing the page wrote moved to another line: a script error still names the agent's own line.
   expect(stored.split('\n').length).toBe(page('').split('\n').length);

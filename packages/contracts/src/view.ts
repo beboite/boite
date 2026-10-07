@@ -185,7 +185,8 @@ const baseCss = (): string => [
   ':where(.bar){height:6px;border-radius:999px;background:linear-gradient(to right,currentColor var(--value,0%),var(--color-edge) var(--value,0%));color:var(--color-accent)}',
   ':where(.stage){display:block;width:100%}',
   // Drawings: a color is set once and the strokes and fills take it.
-  ':where(svg){max-width:100%;overflow:visible}:where(svg text){color:var(--color-muted-foreground);fill:currentColor;font-family:inherit;font-size:var(--text-xs);font-variant-numeric:tabular-nums}',
+  // A rule of a stylesheet beats an attribute, even at no weight: text that says its own fill or size in the markup keeps it.
+  ':where(svg){max-width:100%;overflow:visible}:where(svg text){font-variant-numeric:tabular-nums}:where(svg text:not([font-family])){font-family:inherit}:where(svg text:not([font-size])){font-size:var(--text-xs)}:where(svg text:not([fill])){color:var(--color-muted-foreground);fill:currentColor}',
   ':where(.node){fill:var(--color-surface-2);stroke:var(--color-edge);stroke-width:1}',
   ':where(.stroke){fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}:where(.fill){fill:currentColor;stroke:none}:where(.soft){opacity:.2}',
   ':where(.gridline){fill:none;stroke:var(--color-border);stroke-width:1}:where(.baseline){fill:none;stroke:var(--color-edge);stroke-width:1}:where(.guide){fill:none;stroke:var(--color-edge);stroke-width:1;stroke-dasharray:3 4}',
