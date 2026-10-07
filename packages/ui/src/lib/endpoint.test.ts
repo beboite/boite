@@ -431,10 +431,15 @@ test('the machine the owner chose is the one a start opens on, wherever the grou
   expect(readStoredEndpoint()?.url).toBe('https://laptop.test');
   expect(readMainMachine()).toEqual({ url: 'http://10.0.0.5:3773', coreId: 'server', groupId: 'home' });
 
-  // The app's own core has no key to store: the stored core goes, and the start falls back on that one.
+  // The app's own core: the stored core goes, and the start falls back on the shell's or on the page's origin.
   storeMainMachine({ local: true });
   openOnMainMachine();
   expect(readStoredEndpoint()).toBeNull();
+  // A phone's page is served by the machine it paired with, which opens with the key held for it.
+  storeEndpoint(laptop);
+  upsertEnvironment({ url: window.location.origin, token: 'own-key', paired: true });
+  openOnMainMachine();
+  expect(readStoredEndpoint()).toMatchObject({ url: window.location.origin, token: 'own-key' });
 
   storeMainMachine(null);
   expect(readMainMachine()).toBeNull();

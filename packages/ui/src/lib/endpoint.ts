@@ -397,11 +397,12 @@ export function removeBrought(url: string, machine: { coreId: string; groupId?: 
 export const MAIN_STORAGE_KEY = 'boite.main';
 
 /**
- * The machine the owner chose to open on at every start. `local` is the core
- * this app reaches with no key of its own: the shell's, or in a browser the
- * one that serves the page. Any other is a machine this device holds a key
- * for, named by its address and, when the group brought it, by what it is in
- * that group: its address may change, the machine stays the one chosen.
+ * The machine the owner chose to open on at every start. `local` is the app's
+ * own core: the one the shell starts, whose port changes at every start, or
+ * in a browser the one that serves the page. Any other is a machine this
+ * device holds a key for, named by its address and, when the group brought
+ * it, by what it is in that group: its address may change, the machine stays
+ * the one chosen.
  */
 export type MainMachine = { local: true } | { url: string; coreId?: string; groupId?: string };
 
@@ -447,12 +448,11 @@ function mainEnvironment(main: MainMachine): StoredEnvironment | undefined {
 export function openOnMainMachine(): void {
   const main = readMainMachine();
   if (main === null) return;
-  if ('local' in main) {
-    clearStoredEndpoint();
-    return;
-  }
-  const env = mainEnvironment(main);
+  // With no stored core, a start falls back on the app's own: the shell's, or the origin of the page.
+  // In a browser that machine may need the key held for it, a phone's page being served by the machine it paired with.
+  const env = 'local' in main ? readEnvironments().find((entry) => entry.token !== '' && servesThisPage(entry.url)) : mainEnvironment(main);
   if (env) storeEndpoint(env);
+  else if ('local' in main) clearStoredEndpoint();
 }
 
 function rawStoredUrl(): string | null {

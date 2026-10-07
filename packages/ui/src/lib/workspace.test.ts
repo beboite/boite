@@ -560,7 +560,7 @@ test('the machine the owner chose is where every start opens, whichever was show
   expect(opened).toEqual(['https://laptop.test', 'https://laptop.test']);
 });
 
-test('the choice names the shell\'s own core without its address, and a machine the group brought whatever address it has now', async () => {
+test('the choice names the app\'s own core without its address, and a machine the group brought whatever address it has now', async () => {
   const { w, a, b } = await phoneOfTwo();
   a.localCore = true;
   a.endpointUrl = 'http://127.0.0.1:41000';
@@ -569,6 +569,8 @@ test('the choice names the shell\'s own core without its address, and a machine 
   expect(endpoints.readMainMachine()).toEqual({ local: true });
   // The shell's core takes another port at every start.
   expect(w.isMain({ ...local, id: 'http://127.0.0.1:41001' })).toBe(true);
+  // In a browser the app's own core is the one that serves the page, whatever store reaches it.
+  expect(w.isMain({ id: window.location.origin, label: 'Laptop', store: b })).toBe(true);
 
   const brought = { id: 'https://server.test', label: 'Server', store: b, coreId: 'server', groupId: 'home' };
   w.setMain(brought);

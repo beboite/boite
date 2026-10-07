@@ -444,15 +444,14 @@ export class Workspace {
   }
 
   /**
-   * What choosing this machine to open on is saved as. The core this app
-   * reaches with no key of its own, the shell's or in a browser the one that
-   * serves the page, has no address to name it by: the shell's changes port at
-   * every start.
+   * What choosing this machine to open on is saved as. The app's own core, the
+   * one the shell starts or in a browser the one that serves the page, is
+   * named as such: the shell's takes another port at every start. The fake
+   * core has no address and stands for the page's own.
    */
   #mainOf(machine: Machine): MainMachine {
     const s = machine.store;
-    const keyed = readEnvironments().some((e) => e.url === machine.id && e.token !== '');
-    if (s.localCore || (s === store && !keyed && (s.endpointUrl === null || servesThisPage(machine.id)))) return { local: true };
+    if (s.localCore || servesThisPage(machine.id) || (s === store && s.endpointUrl === null)) return { local: true };
     return { url: machine.id, ...(machine.coreId === undefined || machine.groupId === undefined ? {} : { coreId: machine.coreId, groupId: machine.groupId }) };
   }
 
