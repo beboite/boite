@@ -15,7 +15,7 @@ import { modelsOf, checkSpeed, discoverSelection } from './provider-catalog';
 import { delegationConfig, stopDelegation } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
 import { registerFakeWorktree, requireFakeCwd } from './worktrees';
-import { boundedMessageWindow, forTransport, projectMessage, resumeAnchor, snapshotOptionsProblem, type TransportOptions } from '@boite/contracts';
+import { boundedMessageWindow, projectMessage, resumeAnchor, snapshotOptionsProblem, type TransportOptions } from '@boite/contracts';
 import { dropWaitingMove, fakeMoveNote } from './thread-move';
 import { cancelFamilySideQuestions, cancelSide, sideQuestionMethods } from './side-questions';
 
@@ -96,7 +96,10 @@ function pageOf(
   return { messages: page, before: start > 0 ? (page[0]?.id ?? null) : null };
 }
 
-/** The core's page from `from` on, at most `limit`, and the cursor below it while more follow. */
+/**
+ * The core's forward page: at most `limit` within the byte budget, except for
+ * one complete legal message. The cursor names its retained edge while more follow.
+ */
 function forwardOf(messages: Message[], from: number, limit: number, project: Projection): { messages: Message[]; after: string | null } {
   // Reuse the backward page's byte and single-message rules, iterating from
   // the first newer message instead of from the last older one.
@@ -105,7 +108,11 @@ function forwardOf(messages: Message[], from: number, limit: number, project: Pr
   return { messages: page, after: from + page.length < messages.length ? (page.at(-1)?.id ?? null) : null };
 }
 
-/** The core's page around a reading position: half a page above `at`, half from it on, once more than a page follows it. */
+/**
+ * Half a page on either side of the anchor when more than a page follows it.
+ * Both halves share the byte and count budgets, retaining a complete single
+ * anchor when needed; cuts rewrite cursors to the retained edges.
+ */
 function aroundOf(messages: Message[], around: string | undefined, limit: number, project: Projection): { messages: Message[]; before: string | null; after: string | null } | null {
   const at = around === undefined ? -1 : messages.findIndex(message => message.id === around);
   if (at < 0 || messages.length - at <= limit) return null;
@@ -128,7 +135,7 @@ function projection(options: TransportOptions): Projection {
   const cache = new WeakMap<Message, Message>();
   return message => {
     const held = cache.get(message);
-    if (held) return held;
+    if (held !== undefined) return held;
     const sent = projectMessage(message, options);
     cache.set(message, sent);
     return sent;
@@ -400,7 +407,7 @@ export function threadMethods(ctx: FakeContext) {
       const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
       const project = projection(params);
       const page = params.before === undefined ? { ...forwardOf(thread.messages, at + 1, limit, project), before: null } : pageOf(thread.messages, at, limit, project);
-      page.messages = forTransport(page.messages, params);
+      page.messages = page.messages.map(project);
       const turns = new Set(page.messages.map((message) => message.turnId));
       return pagingReply({ ...page, turns: thread.turns.filter((turn) => turns.has(turn.id)) });
     },
