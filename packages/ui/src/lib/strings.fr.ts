@@ -141,7 +141,7 @@ export const fr: Translation = {
     asks: '{name} vous demande',
     planned: 'Tâches planifiées', plannedResult: 'Tâche planifiée',
     entrustTo: 'Confier à un agent', entrustToName: 'Confier à {name}', entrustedTo: 'Confié à {name}', takeBack: 'Reprendre la main',
-    threadEvent: { entrusted: 'Je reprends « {title} ».', done: 'Terminé : « {title} »', blocked: '« {title} » a besoin de toi', stopped: '« {title} » s’est arrêté' },
+    threadEvent: { entrusted: '{name} reprend « {title} »', done: 'Terminé · {title}', blocked: 'A besoin de toi · {title}', stopped: 'Arrêté · {title}' },
     openThread: 'Ouvrir le thread', deliveryFailed: '{name} ne l’a pas reçu',
     messageTo: 'Écrire à {name}', sayHello: 'Dites bonjour à {name}, ou planifiez une tâche qu’il fera tout seul.',
     liveWorking: '{name} travaille', liveWaiting: '{name} a besoin de vous', seeThread: 'Ouvrir son thread',
@@ -150,7 +150,7 @@ export const fr: Translation = {
     ownedBy: '{name} gère ce thread', ownedHint: 'Parlez à {name} dans sa discussion. Ce thread montre ce qu’il fait.', openAgent: 'Ouvrir {name}',
     robot: {
       family: 'Style', shape: 'Forme', color: 'Couleur', eyes: 'Yeux', top: 'Accessoire', shuffle: 'Mélanger', customize: 'Personnaliser', done: 'Terminé',
-      option: '{part} {n}', families: { bubble: 'Bulle', capsule: 'Capsule', retro: 'Rétro' },
+      option: '{part} {n}', families: { loco: 'LocoRoco', bubble: 'Bulle', capsule: 'Capsule', retro: 'Rétro' },
     },
     when: {
       who: 'Agent', pickAgent: 'Choisir un agent', what: 'Que doit-il faire ?', whatPlaceholder: 'Par exemple : résume les nouveaux messages et dis-moi lesquels attendent une réponse.',

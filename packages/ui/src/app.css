@@ -306,6 +306,18 @@
   --robot-7: #c294ff;
   --robot-8: #ff92c2;
   --robot-9: #8e98ab;
+  /* LocoRoco's flat colours: yellow, orange, red, pink, purple, blue, teal, green, black. */
+  --loco-1: #f6b51e;
+  --loco-2: #f58a24;
+  --loco-3: #e9453a;
+  --loco-4: #f37fb2;
+  --loco-5: #8c55c9;
+  --loco-6: #2f7fd8;
+  --loco-7: #23b3a8;
+  --loco-8: #5cb43a;
+  --loco-9: #26232a;
+  --loco-ink: #3b2414;
+  --loco-pupil: #2b1a0e;
   --robot-ink: #1d1f24;
   --robot-shine: #ffffff;
   --robot-face: #fff6e9;

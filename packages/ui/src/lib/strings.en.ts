@@ -134,7 +134,7 @@ export const strings = {
     asks: '{name} asks you',
     planned: 'Planned tasks', plannedResult: 'Planned task',
     entrustTo: 'Entrust to an agent', entrustToName: 'Entrust to {name}', entrustedTo: 'Entrusted to {name}', takeBack: 'Take it back',
-    threadEvent: { entrusted: 'I am taking over "{title}".', done: 'Done: "{title}"', blocked: '"{title}" needs you', stopped: '"{title}" stopped' },
+    threadEvent: { entrusted: '{name} took over "{title}"', done: 'Done · {title}', blocked: 'Needs you · {title}', stopped: 'Stopped · {title}' },
     openThread: 'Open the thread', deliveryFailed: '{name} did not get it',
     messageTo: 'Message {name}', sayHello: 'Say hello to {name}, or plan a task it will do on its own.',
     liveWorking: '{name} is working', liveWaiting: '{name} needs you', seeThread: 'Open its thread',
@@ -143,7 +143,7 @@ export const strings = {
     ownedBy: '{name} runs this thread', ownedHint: 'Talk to {name} in its conversation. This thread shows what it does.', openAgent: 'Open {name}',
     robot: {
       family: 'Style', shape: 'Shape', color: 'Color', eyes: 'Eyes', top: 'Accessory', shuffle: 'Shuffle', customize: 'Customize', done: 'Done',
-      option: '{part} {n}', families: { bubble: 'Bubble', capsule: 'Capsule', retro: 'Retro' },
+      option: '{part} {n}', families: { loco: 'LocoRoco', bubble: 'Bubble', capsule: 'Capsule', retro: 'Retro' },
     },
     when: {
       who: 'Agent', pickAgent: 'Choose an agent', what: 'What should it do?', whatPlaceholder: 'For example: sum up the new messages and tell me what needs an answer.',

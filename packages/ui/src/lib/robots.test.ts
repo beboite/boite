@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { encodeRobot, parseRobot, robotOf, ROBOT_COLORS, ROBOT_FAMILIES, ROBOT_PARTS, seededRobot, withPart } from './robots';
+import { encodeRobot, parseRobot, robotColor, robotOf, ROBOT_COLORS, ROBOT_FAMILIES, ROBOT_PARTS, seededRobot, withPart } from './robots';
 
 test('a robot round-trips through the avatar field and fits the core limit', () => {
   for (const family of ROBOT_FAMILIES) {
@@ -14,6 +14,11 @@ test('a robot round-trips through the avatar field and fits the core limit', () 
 
 test('an id draws the same robot on every client, and different ids differ', () => {
   expect(seededRobot('mira')).toEqual(seededRobot('mira'));
+  // A new agent is a LocoRoco, in the games' flat colours; the other styles keep the pastel set.
+  expect(seededRobot('mira').family).toBe('loco');
+  expect(encodeRobot(seededRobot('mira'))).toMatch(/^bot:d\./);
+  expect(robotColor({ family: 'loco', color: 0 })).toBe('var(--loco-1)');
+  expect(robotColor({ family: 'bubble', color: 8 })).toBe('var(--robot-9)');
   const drawn = new Set(Array.from({ length: 40 }, (_, i) => encodeRobot(seededRobot(`id-${i}`))));
   expect(drawn.size).toBeGreaterThan(30);
 });

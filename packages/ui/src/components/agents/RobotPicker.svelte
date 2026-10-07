@@ -1,7 +1,7 @@
 <script lang="ts">
   import { secureId } from '../../lib/secure-id';
   import { Dices } from '@lucide/svelte';
-  import { choices, ROBOT_FAMILIES, seededRobot, withPart, type Robot, type RobotPart } from '../../lib/robots';
+  import { choices, robotColor, ROBOT_FAMILIES, seededRobot, withPart, type Robot, type RobotPart } from '../../lib/robots';
   import { fill, strings } from '../../lib/strings';
   import RobotFace from './RobotFace.svelte';
 
@@ -44,7 +44,7 @@
             {@const option = withPart(robot, part, index)}
             {@const name = fill(labels.option, { part: labels[part], n: String(index + 1) })}
             {#if part === 'color'}
-              <button type="button" class="swatch" class:on={robot.color === index} role="radio" aria-checked={robot.color === index} title={name} aria-label={name} style:--swatch="var(--robot-{index + 1})" onclick={() => onpick(option)}></button>
+              <button type="button" class="swatch" class:on={robot.color === index} role="radio" aria-checked={robot.color === index} title={name} aria-label={name} style:--swatch={robotColor({ family: robot.family, color: index })} onclick={() => onpick(option)}></button>
             {:else}
               <button type="button" class="option" class:on={robot[part] === index} role="radio" aria-checked={robot[part] === index} title={name} aria-label={name} onclick={() => onpick(option)}>
                 <span class="thumb"><RobotFace robot={option} state="still" /></span>

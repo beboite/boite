@@ -32,16 +32,24 @@ come filled in, and role, tools and the rest wait under More options.
 ### Robots
 
 An agent's picture is a small robot drawn in SVG (`RobotFace.svelte`). It has
-a style (Bubble, Capsule or Retro), a shape, one of nine colours, eyes and an
-accessory. The robot is stored in the existing `avatar` field as
-`bot:<style>.<shape>.<colour>.<eyes>.<accessory>`, for example `bot:b.0.4.0.1`,
-so no record changed. An empty avatar draws the robot the agent's id gives, the
-same on every client; one or two characters (an emoji, initials) stay text, and
-a code this build cannot read stays text too. Shuffle draws a new robot in the
-same style; Customize opens one row per part, each choice drawn on the robot.
-The colours are `--robot-1` to `--robot-9` and a few shared tones in `app.css`.
-The face moves with the agent: it blinks at rest, glances from side to side
-while it works and hops while it waits on the user. Reduced motion stills it.
+a style, a shape, one of nine colours, a face and a top. The default style is
+LocoRoco, after the games' art: a flat blob with no outline or shine, two small
+white eyes with brown pupils set off-centre near the top, a thin smile or a
+round singing mouth, and a flick of the body's own colour on top. Its colours
+are the saturated `--loco-1` to `--loco-9` in `app.css`, the ninth black with a
+light mouth. Bubble, Capsule and Retro remain in the picker and share the
+pastel `--robot-1` to `--robot-9`.
+
+The robot is stored in the existing `avatar` field as
+`bot:<style>.<shape>.<colour>.<face>.<top>`, for example `bot:d.0.0.0.0` for a
+yellow LocoRoco, so no record changed. An empty avatar draws the LocoRoco the
+agent's id gives, the same on every client; one or two characters (an emoji,
+initials) stay text, and a code this build cannot read stays text too. Shuffle
+draws a new robot in the same style; Customize opens one row per part, each
+choice drawn on the robot. The face moves with the agent: it blinks at rest,
+a LocoRoco squishes on the spot while it works (the other styles glance from
+side to side), and every style hops while it waits on the user. Reduced motion
+stills it.
 
 ### Threads an agent runs or carries
 
@@ -66,11 +74,12 @@ that is not active, naming the field. The thread keeps its own model and
 session. A goal starts on it (Take over this work where it stands and carry it
 to a verified result, unless another objective is given), the agent's name and
 instructions join each of its turns, and the agent posts in its own
-conversation that it takes the thread over. When the goal is met the agent
-posts the thread's final answer as a Done card and the entrustment ends; when
+conversation that it takes the thread over, drawn as a marker across the
+conversation. When the goal is met the agent posts the thread's final answer
+in its bubble under a Done label and the entrustment ends; when
 the thread needs the user, or a turn fails, it posts that too and the
-entrustment stays, so the user's answer in the thread resumes the goal. Each
-card opens the thread. While entrusted, the thread wears the agent's picture
+entrustment stays, so the user's answer in the thread resumes the goal. The marker
+and each label open the thread. While entrusted, the thread wears the agent's picture
 in the list and an Entrusted to chip in its header, whose menu opens the agent
 or takes the thread back; taking it back removes the goal without a message.
 Archiving or removing the thread ends the entrustment. The snapshot carries
@@ -332,7 +341,7 @@ memory and brain files, plans a routine on chosen weekdays and reads its
 sentence, inspects model limits, accepts a task, finds the agent waiting in the
 thread list's Agents in charge card, opens its thread and its conversation from
 there, answers a decision in the conversation, then entrusts a thread from its
-title menu and finds the take-over and Done cards in the agent's
+title menu and finds the take-over marker and the Done label in the agent's
 conversation. `robots.test.ts`, `schedule.test.ts`, `thread-entrust.test.ts` and
 `agents.test.ts` cover robot codes, schedule sentences, the entrust menu rows,
 the rows an agent at work lights and the thread list's directory;
