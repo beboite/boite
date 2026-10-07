@@ -171,4 +171,43 @@ live('codex app-server driver, live', () => {
     },
     TURN_TIMEOUT_MS * 2,
   );
+
+  test(
+    'an effort changed while a real turn runs a command reaches that turn',
+    async () => {
+      const client = await harness.connect();
+      const project = await client.call('projects.add', { path: projectDir, name: 'live effort' });
+      const account = (await client.call('accounts.list', {})).find(entry => entry.providerId === 'codex' && entry.label === 'Default');
+      if (!account) throw new Error('no default codex account on this machine');
+      const probe = await client.call('providers.probe', { providerId: 'codex', accountId: account.id });
+      const model = probe.models.find(entry => (entry.effort?.levels.length ?? 0) >= 2 && !entry.legacy);
+      if (!model?.effort) throw new Error('no codex model with two effort levels on this account');
+      const [from, to] = [model.effort.levels[0]!.id, model.effort.levels[1]!.id];
+      const thread = await client.call('threads.create', {
+        projectId: project.id, providerId: 'codex', accountId: account.id, cwd: projectDir,
+        title: 'live effort', model: model.id, effort: from, permissionMode: 'bypassPermissions',
+      });
+      await client.call('threads.update', { threadId: thread.id, title: 'live effort' });
+      await client.call('threads.subscribe', { threadId: thread.id });
+      const finished = client.next('turn.finished', turn => turn.threadId === thread.id, TURN_TIMEOUT_MS);
+      const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'Run the shell command `sleep 8; echo one`. When it has finished, answer with the single word done.' });
+      // The command is running: the agent has at least one more model request to make.
+      const deadline = Date.now() + TURN_TIMEOUT_MS;
+      while (!harness.core.journal.listMessages(thread.id).some(message => message.parts.some(part => part.type === 'tool'))) {
+        if (Date.now() > deadline) throw new Error('the agent never started its command');
+        await Bun.sleep(100);
+      }
+      expect(harness.core.journal.getTurn(turn.id)?.status).toBe('running');
+      await client.call('threads.update', { threadId: thread.id, effort: to });
+      while (harness.core.journal.getTurn(turn.id)?.execution?.effort !== to) {
+        if (Date.now() > deadline || harness.core.journal.getTurn(turn.id)?.status !== 'running') throw new Error(`the running turn stayed on ${harness.core.journal.getTurn(turn.id)?.execution?.effort}`);
+        await Bun.sleep(50);
+      }
+      expect((await finished).status).toBe('done');
+      expect(harness.core.journal.getTurn(turn.id)?.execution).toMatchObject({ model: model.id, effort: to });
+      expect(assistantText(harness.core.journal.listMessages(thread.id)).toLowerCase()).toContain('done');
+      expect(harness.core.journal.listTurns(thread.id)).toHaveLength(1);
+    },
+    TURN_TIMEOUT_MS + 30_000,
+  );
 });

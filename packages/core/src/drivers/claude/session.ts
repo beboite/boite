@@ -3,11 +3,11 @@ import type { BackgroundTask, PermissionMode } from '@boite/contracts';
 import { messageOf, unavailable } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
 import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
-import type { SessionContext, TurnContext } from '../types.ts';
+import type { LiveTurnSettings, SessionContext, TurnContext } from '../types.ts';
 import { hookReport } from './hooks.ts';
 import { authenticationFailureOf, backgroundKind, commandsOf, isAuthenticationFailure, restoredCost, subagentOf } from './mapping.ts';
 import { toolGate } from './permissions.ts';
-import { childEnv, liveSetup, PromptQueue, STDERR_MAX } from './query.ts';
+import { childEnv, liveSetup, PROMPT_EFFORT, PromptQueue, STDERR_MAX } from './query.ts';
 import type { ClaudeDeps, LiveSetup } from './query.ts';
 import type { ClaudeTurn } from './turn.ts';
 import { SessionRetention } from '../session-retention.ts';
@@ -18,6 +18,8 @@ export const NATIVE_SUBAGENT_TOOLS = ['Agent', 'Task', 'Workflow'] as const;
 const STOP_GRACE_MS = 3_000;
 /** How long the CLI has to exit on its own once the prompt stream is over. */
 const FINISH_GRACE_MS = 5_000;
+/** The CLI re-emits its `init` frame right after a flag change (under 200 ms, CLI 2.1.291). */
+const FAST_REPORT_MS = 2_000;
 
 /**
  * How long a session with nothing left in the background waits for the CLI to
@@ -98,6 +100,8 @@ export class ClaudeSession {
   private pending: Promise<void> = Promise.resolve();
   /** An unanswered live control makes the query unsafe to retain for another turn. */
   private permissionTurn: ClaudeTurn | null = null;
+  /** Callers waiting for the fast mode state of the next `init` frame. */
+  private fastReports: ((state: string | undefined) => void)[] = [];
   private readonly ready: Promise<void>;
   private markReady: () => void = () => undefined;
   /** The permission callback and the tool hooks, reading the turn the CLI is on. */
@@ -238,6 +242,63 @@ export class ClaudeSession {
     }
   }
 
+  /**
+   * Effort and speed for the requests the running turn has not sent yet. The
+   * CLI reads its flag layer before each model request, so a new level holds
+   * from the next one: probed on CLI 2.1.291, where the tool hooks of the same
+   * turn reported the new effort 1.5 s after the call. `ultrathink` is a word
+   * of the prompt already sent, and fast mode can only be switched off this
+   * way (see `applyLive`): both are left to the next turn.
+   */
+  async applySettings(turn: ClaudeTurn, change: LiveTurnSettings): Promise<LiveTurnSettings> {
+    await this.ready;
+    await this.pending;
+    if (this.head() !== turn || turn.settled || turn.isStopped || !this.query || !this.applied || this.closing || this.ended) return {};
+    const query = this.query;
+    const applied = this.applied;
+    const current = () => this.head() === turn && !turn.settled && !turn.isStopped &&
+      this.query === query && this.applied === applied && !this.closing && !this.ended;
+    const taken: LiveTurnSettings = {};
+    if ('effort' in change && change.effort !== PROMPT_EFFORT) {
+      const effort = change.effort ?? null;
+      const level = liveSetup({ ...turn.ctx.thread, effort }).effortLevel;
+      if (level !== applied.effortLevel) {
+        await query.applyFlagSettings({ effortLevel: level });
+        if (!current()) return taken;
+        applied.effortLevel = level;
+      }
+      turn.ctx.thread.effort = effort;
+      taken.effort = effort;
+    }
+    if ('speed' in change && change.speed !== 'fast') {
+      if (applied.fastMode) {
+        await query.applyFlagSettings({ fastMode: false });
+        if (!current()) return taken;
+        applied.fastMode = false;
+      }
+      turn.ctx.thread.speed = change.speed ?? null;
+      taken.speed = change.speed ?? null;
+    }
+    return taken;
+  }
+
+  /** The fast mode state of the next `init` frame, or undefined when none comes in time. */
+  private nextFastState(): Promise<string | undefined> {
+    return new Promise((resolve) => {
+      const report = (state: string | undefined): void => {
+        clearTimeout(timer);
+        resolve(state);
+      };
+      const timer = setTimeout(() => {
+        const at = this.fastReports.indexOf(report);
+        if (at >= 0) this.fastReports.splice(at, 1);
+        resolve(undefined);
+      }, FAST_REPORT_MS);
+      timer.unref?.();
+      this.fastReports.push(report);
+    });
+  }
+
   /** Apply the next turn's settings before its prompt enters the warm stream. */
   private async follow(turn: ClaudeTurn): Promise<void> {
     if (turn.isStopped || this.closing || this.ended) return;
@@ -275,7 +336,16 @@ export class ClaudeSession {
         live.effortLevel = wanted.effortLevel;
       }
       if (wanted.fastMode !== live.fastMode) {
+        // Switching fast mode on is accepted by the setter and reported back
+        // as `fastMode: true` by `getSettings`, yet a running CLI may keep
+        // answering at standard speed: on a Max account without extra usage
+        // (CLI 2.1.291, probed on 2026-10-07) the re-emitted `init` says
+        // `off` with `extra_usage_disabled`, while the same account gets fast
+        // answers from a process launched with the setting. Only that frame
+        // tells, so anything but `on` moves the turn to a new process.
+        const reported = wanted.fastMode ? this.nextFastState() : null;
         await query.applyFlagSettings({ fastMode: wanted.fastMode });
+        if (reported !== null && (await reported) !== 'on') throw new Error('fast mode stays off on the running process');
         live.fastMode = wanted.fastMode;
       }
       if (wanted.permissionMode !== live.permissionMode) {
@@ -386,6 +456,9 @@ export class ClaudeSession {
     const sessionId = (message as { session_id?: string }).session_id;
     if (typeof sessionId === 'string' && sessionId.length > 0) this.sessionId = sessionId;
     if (message.type === 'system') this.noteTasks(message);
+    if (message.type === 'system' && message.subtype === 'init') {
+      for (const report of this.fastReports.splice(0)) report(message.fast_mode_state);
+    }
     if (this.replayed(message)) return;
     // Counted once here, with or without a turn: an adopted message is handed
     // to the turn that opens for it later.

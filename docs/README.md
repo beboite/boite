@@ -18,7 +18,7 @@
 - [Agent coordination](coordination.md): messages between agents, machine links and limits.
 - [Stewards](stewards.md): an agent assigned to projects that drives their threads while the owner is away.
 - [Groups](groups.md): machines that connect to each other, their phones, Tailscale addresses and trust.
-- [Persistent agents](agents.md): identities, groups, teams, missions, memory and background execution.
+- [Persistent agents](agents.md): the Agents page, robots, planned tasks, threads an agent runs, groups, missions, memory and background execution.
 - [Subagents](delegation.md): child conversations on by default, model profiles, live steering and usage.
 - [Workflows](workflows.md): JSON plans of delegated steps, fan-out, conditions, templates and the graph.
 - [Usage](usage.md): tokens, API cost and limits per day, provider and model.

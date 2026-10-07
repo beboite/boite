@@ -16,6 +16,7 @@
  * rollout does, `CODEX_FAKE_SLOW_START=<ms>` delays the answer to
  * `thread/start` and `thread/resume`, and `CODEX_FAKE_DEAF=1` answers `turn/interrupt` without
  * ending the turn.
+ * `CODEX_FAKE_NO_LIVE_SETTINGS=1` is a server with no `turn/settings/update`.
  *
  * The wire is copied from the real server on purpose: responses and
  * notifications carry no `jsonrpc` member, which is what the driver has to
@@ -635,6 +636,15 @@ function handle(method: string, raw: unknown): unknown {
       const images = Array.isArray(params['input']) ? params['input'].filter((input: Record<string, unknown>) => input['type'] === 'image') : [];
       if (images.length) log(`steer-images ${images.length} ${String(images[0]['url']).slice(0, 22)}`);
       return { turnId: active };
+    }
+    case 'turn/settings/update': {
+      // The real server's two refusals (0.160.1), then its two answers.
+      if (process.env['CODEX_FAKE_NO_LIVE_SETTINGS'] === '1') throw new Error('Method not found: turn/settings/update');
+      if (!experimentalApi) throw new Error('turn/settings/update requires experimentalApi capability');
+      if (!process.argv.includes('features.step_model_switching=true')) throw new Error('turn settings updates require the step_model_switching feature');
+      const turnId = textOf(params['turnId']);
+      log(`turn/settings/update ${turnId} effort=${'effort' in params ? String(params['effort']) : '-'} serviceTier=${'serviceTier' in params ? String(params['serviceTier']) : '-'}`);
+      return { status: waiting.has(turnId) && params['threadId'] === threadId ? 'applied' : 'targetUnavailable' };
     }
     case 'turn/interrupt': {
       const turnId = textOf(params['turnId']);

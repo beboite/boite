@@ -241,6 +241,23 @@ async function piThread(client: CoreClient, model?: string, effort?: string): Pr
   return thread.id;
 }
 
+test('pi takes a thinking level while its turn runs', async () => {
+  const client = await startCore({ warmProcessMinutes: 5 });
+  const { projectId, accountId } = await piAccount(client);
+  await client.call('providers.probe', { providerId: 'pi-fake', accountId });
+  const created = await client.call('threads.create', { projectId, providerId: 'pi-fake', accountId, title: 'live level', model: 'fake-a/smart', effort: 'low' });
+  const threadId = created.id;
+  await client.call('threads.subscribe', { threadId });
+  const turn = await client.call('turns.start', { threadId, prompt: '[slow] Deploy' });
+  await waitFor(() => fakeLog().includes('waiting for abort'));
+  await client.call('threads.update', { threadId, effort: 'high' });
+  await waitFor(() => harness!.core.journal.getTurn(turn.id)?.execution?.effort === 'high');
+  expect(fakeLog().split('\n').filter(line => line === 'level high')).toHaveLength(1);
+  expect(harness!.core.journal.getTurn(turn.id)?.status).toBe('running');
+  await client.call('turns.stop', { threadId });
+  await waitFor(() => harness!.core.journal.getTurn(turn.id)?.status === 'stopped');
+});
+
 test('manual compaction uses the compact RPC response without sending a prompt', async () => {
   const client = await startCore();
   const threadId = await piThread(client);

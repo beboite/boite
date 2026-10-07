@@ -40,6 +40,8 @@ export class Layout {
   /** A folder is being dragged over the window. */
   dropping = $state(false);
   search = $state('');
+  /** The agent an outside link asked the Agents page to open, with a fresh key for repeated asks; the page takes it once. */
+  agentsTarget = $state<{ agentId: string; request: number } | null>(null);
 
   constructor(private readonly ctx: StoreContext) {}
 
@@ -89,9 +91,10 @@ export class Layout {
   }
 
   /** The Agents page is an experiment: with it off, nothing leads there. */
-  showAgents(): void {
+  showAgents(agentId: string | null = null): void {
     if (!experimentOn('resident-agents')) return;
     this.ctx.threads.invalidateNavigation();
+    if (agentId) this.agentsTarget = { agentId, request: (this.agentsTarget?.request ?? 0) + 1 };
     this.page = 'agents';
     this.sidebarOpen = false;
   }

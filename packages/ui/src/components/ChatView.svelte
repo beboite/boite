@@ -12,6 +12,7 @@
   import Composer from './Composer.svelte';
   import FolderGoneNotice from './FolderGoneNotice.svelte';
   import AgentDock from './AgentDock.svelte';
+  import AgentOwnerBar from './AgentOwnerBar.svelte';
   import Menu from './Menu.svelte';
   import MessageList from './MessageList.svelte';
   import ThreadLoading from './ThreadLoading.svelte';
@@ -172,7 +173,9 @@
     {#if thread}<AgentDock {store} threadId={thread.id} />{/if}
     {#if thread?.backgroundHistory?.length}<BackgroundHistory tasks={thread.backgroundHistory} />{/if}
     {#if thread}<ThreadRecovery {store} />{/if}
-    {#if !thread?.agentSessionId}
+    {#if thread?.agentSessionId}
+      <AgentOwnerBar {store} {thread} />
+    {:else}
       {#if store.openProject?.missing === true}<FolderGoneNotice {store} project={store.openProject} />{/if}
       {#if thread?.archived}<DoneThreadNotice {store} threadId={thread.id} />{:else}<Composer {store} centered={!thread && !sending} />{/if}
     {/if}
