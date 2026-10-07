@@ -135,7 +135,7 @@ The tested installer becomes the release artifact.
 | UI entry chunk | 588,000 |
 | UI files, excluding `.br` and `.gz` copies | 4,250,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,600,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,640,000 |
 
 The total JavaScript measure excludes native binaries and source maps. On
 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
@@ -154,12 +154,13 @@ before integrating these orchestration additions. The combined build measured
 3,961,330 UI bytes and 3,239,585 emitted core JavaScript bytes on the same day.
 Reproduce it with `bun run build:ui && bun run build:core && bun scripts/ci/budgets.ts`.
 
-On 2026-10-07, `bun run build:core` with Bun 1.4.2 on Linux measured 3,579,412
-emitted core JavaScript bytes at `896208a7`, 588 under the limit of 3,580,000.
-Provider switches and the OpenCode 2 descriptor measured 3,592,530: 13,118 bytes
-for the second descriptor, the version readings behind a candidate's `major`,
-the SQLite login and the switch. The limit rises to 3,620,000 bytes, which
-leaves 27,470. The other three limits are unchanged.
+On 2026-10-07, `bun run build:core` with Bun 1.4.2 on Linux measured 3,590,819
+emitted core JavaScript bytes at `89556311`, 9,181 under the limit of 3,600,000.
+Provider switches and OpenCode 2 measured 3,607,720: 16,901 bytes for the second
+descriptor, the version readings behind a candidate's `major`, the SQLite
+login, the switch and the subscription proxy's provider block for OpenCode 2.
+The limit rises to 3,640,000 bytes, which leaves 32,280. The other three limits
+are unchanged.
 
 On 2026-10-05 on Linux, `origin/main` at `290220a9` measured about 4,183,200 UI
 bytes and 3,446,800 emitted core JavaScript bytes. Stewards and the owner's

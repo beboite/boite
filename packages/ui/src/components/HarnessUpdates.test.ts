@@ -75,13 +75,15 @@ test('failed updates retain their reason and retry and unknown releases keep the
   expect(blind.querySelector('[data-testid="harness-update-row-blind"]')).toBeNull();
 });
 
-test('Providers retains installed versions without update controls or starting checks', async () => {
+test('Providers shows no version and no update control, and starts no check', async () => {
   const local = await machine('local', 'This PC');
   const load = vi.spyOn(local, 'loadHarnessUpdates');
   mounted = mount(AccountsPage, { target: document.body, props: { store: local } });
   await settle();
-  const version = document.querySelector('[data-update-provider="claude"]')!;
-  expect(version.textContent?.trim()).toBe('2.1.267');
+  // Versions and updates live on Machines and updates, one place per machine.
+  expect(document.querySelector('[data-testid="accounts-page"] [data-testid="provider-settings"]')).not.toBeNull();
+  expect(document.querySelector('[data-update-provider]')).toBeNull();
+  expect(document.querySelector('[data-testid="accounts-page"] .version')).toBeNull();
   expect(document.querySelector('[data-testid="harness-updates-check"]')).toBeNull();
   expect(document.querySelector('[data-testid="setting-auto-update-harnesses"]')).toBeNull();
   expect(document.querySelector('[data-testid="harness-update-row-run"]')).toBeNull();

@@ -1874,10 +1874,10 @@ test('Providers keeps installation details and Machines updates the managed copy
   query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
   await waitFor(() => document.querySelector(behind) !== null);
 
-  // Providers keeps the installed version; update controls belong to Machines.
+  // Providers says whose copy runs, never its version: versions and updates belong to Machines.
   store.harnessUpdates = store.harnessUpdates.filter((update) => update.providerId !== 'opencode');
   await openProviderDetails('opencode');
-  expect(query(`${behind} [data-testid=install-status]`).textContent?.trim()).toBe('Installed by Boite · version 0.4.12');
+  expect(query(`${behind} [data-testid=install-status]`).textContent?.trim()).toBe('Installed by Boite');
   expect(document.querySelector(`${behind} [data-testid=install-remove]`)).not.toBeNull();
   expect(document.querySelector(`${behind} [data-testid=install-update]`)).toBeNull();
 

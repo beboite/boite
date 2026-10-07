@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
@@ -54,6 +55,7 @@ afterEach(async () => {
   delete process.env['ACP_FAKE_LOG'];
   delete process.env['ACP_FAKE_NO_MODES'];
   delete process.env['ACP_FAKE_MODE_OPTION'];
+  delete process.env['ACP_FAKE_LATE_MODEL'];
   delete process.env['ACP_FAKE_NO_IMAGES'];
   delete process.env['ACP_FAKE_HANG_INIT'];
   delete process.env['ACP_FAKE_EXIT_AT_START'];
@@ -1217,6 +1219,34 @@ describe('acp driver', () => {
     await runTurn(client, threadId, 'second');
     expect(setModeCount('default')).toBe(1);
     expect(logs.some((line) => line.includes('the agent switched to the session mode yolo'))).toBe(true);
+  });
+
+  test('a model of a provider the core injected is asked for though the agent lists none, and again while it loads', async () => {
+    const client = await startCore();
+    const { projectId, accountId, dataDir } = await acpAccount(client);
+    // What the subscription proxy does for OpenCode 2: the account's environment names the
+    // prefix of the injected models, and the provider list carries one of them.
+    const file = join(dataDir, 'providers', 'acp-fake.json');
+    const descriptor = JSON.parse(readFileSync(file, 'utf8')) as { profiles: Record<string, { env?: Record<string, string> }>; models: unknown[] };
+    for (const profile of Object.values(descriptor.profiles)) profile.env = { BOITE_SUBSCRIPTION_PROXY_PREFIX: 'gateway/' };
+    descriptor.models.push({ id: 'gateway/kimi', name: 'Kimi' }, { id: 'elsewhere/kimi', name: 'Kimi elsewhere' });
+    writeFileSync(file, JSON.stringify(descriptor));
+    expect((await client.call('providers.reload', {})).rejected).toEqual([]);
+    process.env['ACP_FAKE_LATE_MODEL'] = '2';
+    const logs = collectLogs(client);
+
+    const thread = await client.call('threads.create', { projectId, providerId: 'acp-fake', accountId, title: 'gateway', model: 'gateway/kimi' });
+    await client.call('threads.subscribe', { threadId: thread.id });
+    await runTurn(client, thread.id, 'first');
+    // Refused twice while the agent loads the provider, taken the third time, and nothing is warned about.
+    expect(configCount('model gateway/kimi')).toBe(3);
+    expect(logs.filter((line) => line.includes('gateway/kimi'))).toEqual([]);
+
+    // A model outside the injected prefix that the agent does not list is still never sent.
+    await client.call('threads.update', { threadId: thread.id, model: 'elsewhere/kimi' });
+    await runTurn(client, thread.id, 'second');
+    expect(configCount('model elsewhere/kimi')).toBe(0);
+    await waitFor(() => logs.some((line) => line === 'warn acp: the agent offers no model option with the value elsewhere/kimi'));
   });
 
   test('an agent that lists its modes as a config option is moved through that option', async () => {

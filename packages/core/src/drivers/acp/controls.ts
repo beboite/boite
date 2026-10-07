@@ -11,6 +11,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 import type { PermissionMode } from '@boite/contracts';
 import { messageOf } from '../../errors.ts';
+import { PROXY_PREFIX_ENV } from '../../subscription-proxy.ts';
 import { grokReasoningEffortOf } from '../grok.ts';
 import type { TurnContext } from '../types.ts';
 import { AGENT_OWN_MODEL, agentModelsOf, categoryOption, selectValues, type AgentModels } from './models.ts';
@@ -52,6 +53,9 @@ const MODE_CANDIDATES: Record<PermissionMode, readonly string[]> = {
   plan: ['plan'],
   dontAsk: ['dontAsk', 'dont_ask', 'bypassPermissions', 'bypass_permissions', 'yolo', 'auto', ...PLAIN_MODES],
 };
+
+/** How long to wait before each new try of a model the agent takes without listing it: 3.25 s in all. */
+const INJECTED_MODEL_RETRY_MS: readonly number[] = [250, 500, 1000, 1500];
 
 /** Mode ids are spelled every way there is: match without case, `_` or `-`. */
 function normalizeModeId(id: string): string {
@@ -282,6 +286,18 @@ export class SessionControls {
     }
   }
 
+  /**
+   * The model option for a model the agent takes without listing it: one of a
+   * provider the core injected into its configuration, whose ids all start with
+   * the prefix the account's environment names. OpenCode 2 lists the models of
+   * its own providers alone and still runs `douane/<model>` when asked.
+   */
+  private injectedModelOption(ctx: TurnContext, category: SessionConfigOptionCategory, wanted: string): SessionConfigOption | undefined {
+    const prefix = ctx.accountEnv[PROXY_PREFIX_ENV];
+    if (category !== 'model' || prefix === undefined || prefix.length === 0 || !wanted.startsWith(prefix)) return undefined;
+    return categoryOption(this.configOptions, 'model') ?? undefined;
+  }
+
   /** True once that value is what the agent is on, whether it was sent or never needed. */
   private async setOption(
     ctx: TurnContext,
@@ -293,9 +309,10 @@ export class SessionControls {
     // Nothing to ask for: the agent keeps whatever it is configured with.
     if (wanted === null || wanted.length === 0) return true;
     if (category === 'model' && wanted === AGENT_OWN_MODEL) return true;
-    const option = this.configOptions.find(
+    const listed = this.configOptions.find(
       (entry) => entry.category === category && selectValues(entry).includes(wanted),
     );
+    const option = listed ?? this.injectedModelOption(ctx, category, wanted);
     if (option === undefined) {
       if (!this.configWarned) {
         this.configWarned = true;
@@ -303,19 +320,32 @@ export class SessionControls {
       }
       return false;
     }
-    try {
-      const answer = await agent.request('session/set_config_option', {
-        sessionId,
-        configId: option.id,
-        value: wanted,
-      });
-      // The answer carries the options as they now stand, current values included.
-      const listed = (answer as { configOptions?: SessionConfigOption[] | null }).configOptions ?? null;
-      if (listed !== null && listed.length > 0) this.configOptions = listed;
-      return true;
-    } catch (error) {
-      ctx.log('warn', `acp: the agent refused the ${category} ${wanted}: ${messageOf(error)}`);
-      return false;
+    // OpenCode 2 answers `session/new` a moment before it has loaded a provider
+    // injected into its configuration: asked at once, it does not know the
+    // model yet, and half a second later it does. Only a model it never listed
+    // is asked again; a refusal of one it lists is its answer.
+    const waits = listed === undefined ? INJECTED_MODEL_RETRY_MS : [];
+    for (let attempt = 0; ; attempt += 1) {
+      const live = this.target();
+      if (live.agent === null || live.sessionId === null) return false;
+      try {
+        const answer = await live.agent.request('session/set_config_option', {
+          sessionId: live.sessionId,
+          configId: option.id,
+          value: wanted,
+        });
+        // The answer carries the options as they now stand, current values included.
+        const options = (answer as { configOptions?: SessionConfigOption[] | null }).configOptions ?? null;
+        if (options !== null && options.length > 0) this.configOptions = options;
+        return true;
+      } catch (error) {
+        const wait = waits[attempt];
+        if (wait === undefined) {
+          ctx.log('warn', `acp: the agent refused the ${category} ${wanted}: ${messageOf(error)}`);
+          return false;
+        }
+        await new Promise<void>((resolve) => { setTimeout(resolve, wait); });
+      }
     }
   }
 }

@@ -11,6 +11,9 @@
  *
  * `ACP_FAKE_MODE_OPTION=1` makes it list its modes the way OpenCode does: no
  * `modes`, and a `mode` config option whose values are `build` and `plan`.
+ * `ACP_FAKE_LATE_MODEL=<n>` makes it refuse a `gateway/` model n times before
+ * taking it: the model of a provider injected into its configuration, which it
+ * never lists.
  * `ACP_FAKE_NO_MODES=1` makes it answer no `modes` at all, which is the agent
  * the mode mapping has to survive without sending anything.
  *
@@ -163,6 +166,10 @@ if (modeOption) {
   });
 }
 
+/** How many times a `gateway/` model is refused before it is taken, like an agent still loading an injected provider. */
+const lateModelRefusals = Number(process.env['ACP_FAKE_LATE_MODEL'] ?? '0');
+let lateModelCalls = 0;
+
 /** An agent with no modes at all, so the driver's warning path has a subject. */
 const noModes = process.env['ACP_FAKE_NO_MODES'] === '1' || modeOption;
 /** An agent that never learned to read an image, so a driver has to refuse first. */
@@ -279,6 +286,14 @@ const app = agent({ name: 'acp-fake' })
   })
   .onRequest('session/set_config_option', ({ params }) => {
     log(`set_config_option ${params.configId} ${String(params.value)}`);
+    // A model of a provider the client injected: not listed, unknown for the first calls, then taken.
+    if (params.configId === 'model' && String(params.value).startsWith('gateway/')) {
+      lateModelCalls += 1;
+      if (lateModelCalls <= lateModelRefusals) {
+        throw RequestError.invalidParams({ modelId: params.value }, `model not found: ${String(params.value)}`);
+      }
+      return { configOptions };
+    }
     if (params.configId === 'mode') {
       const option = configOptions.find((entry) => entry.id === 'mode');
       if (option?.type === 'select') option.currentValue = String(params.value);

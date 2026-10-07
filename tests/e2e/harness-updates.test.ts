@@ -89,8 +89,9 @@ test('unknown releases run their own updater and Providers keeps only installed 
   expect(await page.evaluate(`document.querySelector('${cli} ${id('harness-update-row-blind')}') === null`)).toBe(true);
   await capture('harness-update-blind-current');
   await page.click(id('settings-tab-accounts'));
-  await page.waitFor(`document.querySelectorAll('${id('provider-update')}').length === 4`);
-  expect(await page.evaluate(`document.querySelector('[data-update-provider="claude"] .version').textContent`)).toBe('2.1.267');
+  // Providers names no version: they are on Machines and updates, the page just left.
+  await page.waitFor(`document.querySelector('${id('accounts-page')} ${id('provider-settings')}') !== null`);
+  expect(await page.evaluate(`document.querySelectorAll('${id('accounts-page')} ${id('provider-update')}, ${id('accounts-page')} .version').length`)).toBe(0);
   for (const name of ['harness-updates-check', 'setting-auto-update-harnesses', 'harness-update-row-run', 'harness-update-row-blind', 'install-update']) {
     expect(await page.evaluate(`document.querySelector('${id('accounts-page')} ${id(name)}') === null`)).toBe(true);
   }

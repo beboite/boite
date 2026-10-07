@@ -60,7 +60,7 @@ function quotas(ctx: FakeContext): AccountQuota[] {
 
 function accountQuotas(ctx: FakeContext): AccountQuota[] {
   const accounts = [...ctx.accounts, { id: 'quota:antigravity-cli', providerId: 'antigravity', label: 'Antigravity CLI' }];
-  const proxied = (providerId: string) => subscriptionProxyOf(ctx.settings, ctx.providers.find(provider => provider.id === providerId)?.protocol) !== null;
+  const proxied = (providerId: string) => subscriptionProxyOf(ctx.settings, ctx.providers.find(provider => provider.id === providerId)) !== null;
   return accounts.map((account, index) => ({
     ...(ctx.quotaExtras && ctx.quotaEnabled[account.id] !== false && ['claude', 'codex'].includes(account.providerId) ? {
       resetCredits: { availableCount: Math.max(0, (account.providerId === 'claude' ? 1 : 2) - (ctx.quotaResetsUsed[account.id] ?? 0)), nextExpiresAt: Date.now() + 7 * 86400_000 },

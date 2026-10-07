@@ -5,7 +5,6 @@
   import { slide } from 'svelte/transition';
   import { ChevronRight, Plus, RefreshCw, Terminal } from '@lucide/svelte';
   import { providerEnabled, type Account, type ProviderSummary } from '@boite/contracts';
-  import ProviderVersion from './ProviderVersion.svelte';
   import ProviderIcon from './ProviderLogo.svelte';
   import ModelPicker from './ModelPicker.svelte';
   import EffortSlider from './EffortSlider.svelte';
@@ -18,7 +17,8 @@
 
   /**
    * One row per provider, one next step per row: install what is missing, sign
-   * in when nothing is signed in, otherwise its installed version.
+   * in when nothing is signed in, nothing once it is ready. Versions and updates
+   * are on Machines and updates, one list per machine, and are not repeated here.
    * Connected providers come first; the rest wait below as the ways to
    * add one, and the ones turned off close the page, dimmed, with only their
    * switch to act on. Accounts, the default model and the uninstall sit behind
@@ -530,9 +530,9 @@
     <dl class="facts">
       {#if install?.state === 'installed'}
         <div class="fact">
-          <dt>{strings.providerSettings.version}</dt>
+          <dt>{strings.providerSettings.managedCopy}</dt>
           <dd class="managed">
-            <span class="ui-label" data-testid="install-status">{strings.install.upToDate.replace('{version}', install.version)}</span>
+            <span class="ui-label" data-testid="install-status">{strings.install.installed}</span>
             <button class="quiet small" data-testid="install-remove" onclick={() => void uninstall(provider)}><span class="ui-label">{strings.install.remove}</span></button>
           </dd>
         </div>
@@ -601,10 +601,9 @@
         </div>
       {/if}
       <div class="act">
-        <!-- A provider still to add shows its one way in; its version waits until it is connected. -->
-        <!-- Off, nothing of it is offered: no version, no install, no sign-in, only the way back on. -->
+        <!-- A provider still to add shows its one way in. Versions and updates are on Machines and updates, not here. -->
+        <!-- Off, nothing of it is offered: no install, no sign-in, only the way back on. -->
         {#if !off}
-          {#if !secondary}<ProviderVersion {store} provider={lead} main={main && step === 'ready'} installing={step === 'installing'} oninstall={() => void startInstall(lead, false)} />{/if}
           {@render stepAction(lead, step, main)}
         {/if}
         <!-- A family's switches are its members', inside the opened row. -->
@@ -633,7 +632,6 @@
                 </span>
                 <div class="act">
                   {#if member.id !== lead.id && !memberOff}
-                    <ProviderVersion {store} provider={member} installing={memberStep === 'installing'} oninstall={() => void startInstall(member, false)} />
                     {@render stepAction(member, memberStep, false)}
                   {/if}
                   {@render enabledSwitch(member)}
@@ -820,7 +818,6 @@
      the row about 480 px, where the action drops under the name. */
   @media (max-width: 900px) {
     .line, .account-line, .member-line { flex-wrap: wrap; }
-    /* A version alone stays beside the name; a version and its button take the next line, at the right. */
     .line .summary { flex: 1 1 260px; }
     .line .act { margin-left: auto; }
     .account-line .act, .member-line .act { order: 3; flex-basis: 100%; justify-content: flex-start; }

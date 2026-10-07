@@ -1784,13 +1784,28 @@ export interface SubscriptionProxy {
   dashboardUrl: string;
 }
 
-/** The agents a subscription proxy serves; every other protocol keeps its own configuration. */
+/** The protocols whose every agent a subscription proxy serves. */
 export const SUBSCRIPTION_PROXY_PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver'];
+/**
+ * The providers a subscription proxy serves by id, where the protocol cannot
+ * say: ACP is shared by OpenCode 2, which takes the gateway as one more model
+ * provider, and by agents that keep their own configuration.
+ */
+export const SUBSCRIPTION_PROXY_PROVIDERS: readonly ProviderId[] = ['opencode-v2'];
 
-/** The enabled proxy that serves this protocol, or null. Core and clients decide alike. */
-export function subscriptionProxyOf(settings: Pick<Settings, 'subscriptionProxy'> | null | undefined, protocol: Protocol | null | undefined): SubscriptionProxy | null {
+/** What tells whether a proxy serves a provider: its id and its protocol, as a descriptor and a summary both carry them. */
+export type SubscriptionProxyTarget = { id: ProviderId; protocol: Protocol };
+
+/** Whether an enabled subscription proxy serves this provider. Core and clients decide alike. */
+export function subscriptionProxyServes(provider: SubscriptionProxyTarget | null | undefined): boolean {
+  return provider !== null && provider !== undefined
+    && (SUBSCRIPTION_PROXY_PROTOCOLS.includes(provider.protocol) || SUBSCRIPTION_PROXY_PROVIDERS.includes(provider.id));
+}
+
+/** The enabled proxy that serves this provider, or null. */
+export function subscriptionProxyOf(settings: Pick<Settings, 'subscriptionProxy'> | null | undefined, provider: SubscriptionProxyTarget | null | undefined): SubscriptionProxy | null {
   const proxy = settings?.subscriptionProxy;
-  return proxy?.enabled && protocol && SUBSCRIPTION_PROXY_PROTOCOLS.includes(protocol) ? proxy : null;
+  return proxy?.enabled && subscriptionProxyServes(provider) ? proxy : null;
 }
 
 export function subscriptionProxyName(kind: SubscriptionProxy['kind']): string {

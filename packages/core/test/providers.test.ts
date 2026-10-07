@@ -358,6 +358,8 @@ describe('providers', () => {
       expect(profile?.launch?.args).toEqual(['acp']);
       expect(profile?.isolation).toEqual({ XDG_DATA_HOME: '{isolationDir}', XDG_CONFIG_HOME: '{isolationDir}', XDG_STATE_HOME: '{isolationDir}/state' });
       expect(profile?.update).toEqual({ args: ['upgrade'], latestNpm: '@opencode/cli' });
+      // Delegation goes through Boite: OpenCode 2's own subagent tool is denied, in its own permission syntax.
+      expect(JSON.parse(profile?.env?.['OPENCODE_CONFIG_CONTENT'] ?? '{}')).toEqual({ permissions: [{ action: 'subagent', resource: '*', effect: 'deny' }] });
       // The name both versions install under counts only at major 2 here, and only at major 1 for OpenCode 1.
       expect(profile?.executable.filter((candidate) => candidate.kind === 'path' && candidate.value === 'opencode').map((candidate) => candidate.major)).toEqual([2]);
       const first = harness.core.providers.require('opencode').profiles[os];

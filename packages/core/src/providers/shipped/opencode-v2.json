@@ -17,6 +17,7 @@
         { "kind": "file", "value": "{home}/.opencode/bin/opencode.exe", "major": 2 }
       ],
       "launch": { "args": ["acp"] },
+      "env": { "OPENCODE_CONFIG_CONTENT": "{\"permissions\":[{\"action\":\"subagent\",\"resource\":\"*\",\"effect\":\"deny\"}]}" },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}", "XDG_STATE_HOME": "{isolationDir}/state" },
       "close": { "processes": ["opencode.exe"] }
     },
@@ -31,6 +32,7 @@
         { "kind": "file", "value": "{home}/.opencode/bin/opencode", "major": 2 }
       ],
       "launch": { "args": ["acp"] },
+      "env": { "OPENCODE_CONFIG_CONTENT": "{\"permissions\":[{\"action\":\"subagent\",\"resource\":\"*\",\"effect\":\"deny\"}]}" },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}", "XDG_STATE_HOME": "{isolationDir}/state" },
       "close": { "processes": ["opencode"] }
     },
@@ -45,6 +47,7 @@
         { "kind": "file", "value": "{home}/.opencode/bin/opencode", "major": 2 }
       ],
       "launch": { "args": ["acp"] },
+      "env": { "OPENCODE_CONFIG_CONTENT": "{\"permissions\":[{\"action\":\"subagent\",\"resource\":\"*\",\"effect\":\"deny\"}]}" },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}", "XDG_STATE_HOME": "{isolationDir}/state" },
       "close": { "processes": ["opencode"] }
     }

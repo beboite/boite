@@ -153,6 +153,74 @@ test('a gateway that translates every model keeps proprietary models in their ow
     'codex/qwen3-coder', 'meta/llama-4-maverick']);
 });
 
+test('OpenCode 2 takes the gateway as one more provider: every model but those with a harness of their own', async () => {
+  const anyApi = ['anthropic', 'openai', 'openai-response'];
+  const sent: { key: string | null } = { key: null };
+  gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+    sent.key = request.headers.get('authorization');
+    return Response.json({ data: [
+      ...['claude/claude-opus-5-5', 'codex/gpt-6-sol', 'antigravity/claude-sonnet-5-5-high', 'antigravity/gemini-3-flash',
+        'antigravity/gpt-oss-120b-medium', 'xai/grok-5', 'opencode_go/grok-code-fast', 'muse/muse-code', 'opencode_go/kimi-k3',
+        'codex/o5', 'claude/default', 'codex/qwen3-coder'].map(id => ({ id, name: `Name of ${id}`, supported_endpoint_types: anyApi })),
+      // A model the gateway only answers over Messages has no Chat Completions route for OpenCode to call.
+      { id: 'kimi/messages-only', supported_endpoint_types: ['anthropic'] },
+      // An id that could not be a key of OpenCode's configuration is left out rather than written into it.
+      { id: 'bad id"}', supported_endpoint_types: anyApi },
+    ] });
+  } });
+  const url = `http://127.0.0.1:${gateway.port}/v1`;
+  harness = await startTestCore({ settings: { subscriptionProxy: config(url) } });
+  const owner = await harness.connect();
+  await owner.call('subscriptionProxy.key', { key: 'gateway-key' });
+  await owner.call('providers.setEnabled', { providerId: 'opencode-v2', enabled: true });
+  // The gateway is the login: no sign-in of OpenCode's own is asked for.
+  const account = await owner.call('accounts.add', { providerId: 'opencode-v2', label: 'Gateway OpenCode' });
+  expect(account.status).toBe('ok');
+
+  // No OpenCode on a test machine: its own list is missing, the gateway's stands alone.
+  const { models } = await owner.call('providers.probe', { providerId: 'opencode-v2', accountId: account.id });
+  expect(sent.key).toBe('Bearer gateway-key');
+  // Claude, GPT and Grok stay in Claude Code, Codex and Grok, whatever route the gateway gives them.
+  expect(models.map(model => model.id)).toEqual(['douane/antigravity/gemini-3-flash', 'douane/antigravity/gpt-oss-120b-medium',
+    'douane/muse/muse-code', 'douane/opencode_go/kimi-k3', 'douane/codex/qwen3-coder']);
+  expect(models[0]).toEqual({ id: 'douane/antigravity/gemini-3-flash', name: 'Name of antigravity/gemini-3-flash' });
+
+  const provider = harness.core.providers.require('opencode-v2');
+  const env = subscriptionProxyEnv(harness.core, provider);
+  expect(Object.keys(env).sort()).toEqual(['BOITE_SUBSCRIPTION_PROXY_KEY', 'BOITE_SUBSCRIPTION_PROXY_PREFIX', 'OPENCODE_CONFIG_CONTENT']);
+  expect(env['BOITE_SUBSCRIPTION_PROXY_KEY']).toBe('gateway-key');
+  expect(env['BOITE_SUBSCRIPTION_PROXY_PREFIX']).toBe('douane/');
+  // The key is named, never written: OpenCode reads it from its environment.
+  expect(env['OPENCODE_CONFIG_CONTENT']).not.toContain('gateway-key');
+  expect(JSON.parse(env['OPENCODE_CONFIG_CONTENT']!)).toEqual({
+    // What the descriptor already sends stays: OpenCode's own subagents are denied.
+    permissions: [{ action: 'subagent', resource: '*', effect: 'deny' }],
+    providers: { douane: {
+      package: '@opencode/ai/providers/openai-compatible', name: 'Douane', settings: { baseURL: url }, env: ['BOITE_SUBSCRIPTION_PROXY_KEY'],
+      models: {
+        'antigravity/gemini-3-flash': { name: 'Name of antigravity/gemini-3-flash' },
+        'antigravity/gpt-oss-120b-medium': { name: 'Name of antigravity/gpt-oss-120b-medium' },
+        'muse/muse-code': { name: 'Name of muse/muse-code' },
+        'opencode_go/kimi-k3': { name: 'Name of opencode_go/kimi-k3' },
+        'codex/qwen3-coder': { name: 'Name of codex/qwen3-coder' },
+      },
+    } },
+  });
+  // The account's whole environment carries it, over the descriptor's own inline configuration.
+  expect(harness.core.accounts.accountEnv(harness.core.accounts.require(account.id), provider)['OPENCODE_CONFIG_CONTENT']).toBe(env['OPENCODE_CONFIG_CONTENT']);
+
+  // Off, the descriptor's configuration is all that is left, and the account answers for itself again.
+  await owner.call('settings.set', { subscriptionProxy: { ...config(url), enabled: false } });
+  expect(subscriptionProxyEnv(harness.core, provider)).toEqual({});
+  expect(harness.core.accounts.accountEnv(harness.core.accounts.require(account.id), provider)['OPENCODE_CONFIG_CONTENT'])
+    .toBe('{"permissions":[{"action":"subagent","resource":"*","effect":"deny"}]}');
+  expect((await owner.call('accounts.check', { accountId: account.id })).status).toBe('unauthenticated');
+  // Grok and OpenCode 1 speak ACP too and are not served: the proxy is decided per provider.
+  await owner.call('settings.set', { subscriptionProxy: config(url) });
+  expect(subscriptionProxyEnv(harness.core, harness.core.providers.require('grok'))).toEqual({});
+  expect(subscriptionProxyEnv(harness.core, harness.core.providers.require('opencode'))).toEqual({});
+});
+
 test('legacy CLIProxy catalogs select native families and malformed gateway errors cannot echo the key', async () => {
   let fail = false;
   gateway = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {

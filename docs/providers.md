@@ -2,7 +2,8 @@
 
 ## Subscription proxy
 
-Settings, Providers offers an optional subscription proxy for Claude and Codex.
+Settings, Providers offers an optional subscription proxy for Claude, Codex and
+OpenCode 2.
 Choose Douane or CLIProxyAPI, enter the gateway's API URL and its limits dashboard
 URL, enable the switch and save. The API URL accepts an origin or a path ending
 in `/v1`. Model discovery runs on the machine hosting the core. The agent's own
@@ -18,8 +19,8 @@ and the one-hour prompt cache stay on (`_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL
 that needs a native login (`CLAUDE_CODE_SKIP_FAST_MODE_ORG_CHECK`). Codex already
 sends its service tier and prompt cache key to a custom provider.
 
-While the proxy is enabled, Claude and Codex show one account named after the
-gateway, Douane or CLIProxyAPI, with the API URL's origin. It has no rename,
+While the proxy is enabled, Claude, Codex and OpenCode 2 show one account named
+after the gateway, Douane or CLIProxyAPI, with the API URL's origin. It has no rename,
 check, remove or add actions, and the provider row reads Ready · via Douane.
 The composer, delegation profiles, the default model and Limits show the same
 account. This account is a view in the UI, not a stored account. Threads,
@@ -55,6 +56,30 @@ then Reload retries the embedded view. Some gateways refuse framing or restrict
 cross-site cookies; those dashboards remain available through Open dashboard.
 Show account limits opens the native limits and monitoring switches for agents
 that keep their own configuration; Show proxy dashboard returns to the gateway.
+
+Which agents the proxy serves is decided per provider, not per protocol
+(`subscriptionProxyServes` in the contract): the Claude and Codex protocols
+whole, and OpenCode 2 by its id, because ACP is also what Grok, Antigravity
+and OpenCode 1 speak, and those keep their own configuration.
+
+OpenCode 2 does not move to the gateway, it gains it: the core adds one
+provider to OpenCode's inline configuration, named after the gateway's kind
+(`douane` or `cliproxyapi`), which calls the gateway's Chat Completions route
+(`@opencode/ai/providers/openai-compatible`, `settings.baseURL`, the key read
+from `BOITE_SUBSCRIPTION_PROXY_KEY`). OpenCode's own providers stay beside it.
+The picker lists OpenCode's own models first, then the gateway's as
+`douane/<gateway id>`: every model but those with a harness of their own, so
+no Claude, GPT or Grok model, and Gemini, Muse and the open families. A custom
+provider only knows the models its configuration names, so the core keeps the
+last catalog it read (the journal setting `subscription-proxy-opencode-models`)
+and writes it into that block at every spawn; a restart starts a turn on a
+gateway model without probing first. While the proxy is on, the gateway is the
+login: an OpenCode 2 account reads `ok` with no sign-in of its own. OpenCode 2
+lists none of an injected provider's models in its ACP model option and still
+takes them, and for about half a second after `session/new` it refuses one it
+has not loaded yet: the driver sends a model under the injected prefix
+(`BOITE_SUBSCRIPTION_PROXY_PREFIX`) though it is not listed, and asks again
+after 250, 500, 1,000 and 1,500 ms before it warns.
 
 An optional API key stays on the core and is supplied through the agent's
 environment, never a URL or process argument. Leave the key field empty to keep
@@ -523,6 +548,9 @@ descriptor accounts for, each point read off OpenCode 2.0.24 on Linux:
   at major 2. `opencode` takes it only at major 1, and falls back to the
   `opencode-ai` package's own binary when the name on PATH went to version 2.
 - `opencode acp` takes no `--port`: version 2 refuses the flag and exits.
+- Its own subagent tool is denied, as version 1's `task` is, since delegation
+  goes through Boite. The profile's `env` sends it in version 2's syntax, a
+  `permissions` rule on the `subagent` action, as `OPENCODE_CONFIG_CONTENT`.
 - A sign-in is a row of `opencode/opencode.db`, in its `credential`, `account`
   or `control_account` table, which `auth.sqlite` names. Version 2 never reads
   version 1's `auth.json`: each is signed in on its own, even on the default
@@ -547,8 +575,12 @@ descriptor accounts for, each point read off OpenCode 2.0.24 on Linux:
 
 `test/opencode2.live.test.ts`, opt-in behind `BOITE_E2E_OPENCODE2=1`, turns the
 provider on, runs a turn, resumes it on a new process and moves the session to
-`plan`. Not verified: Windows and macOS, an OAuth sign-in, and image
-attachments, which is why `capabilities.images` is false.
+`plan`. Behind a [subscription proxy](#subscription-proxy) it was run against a
+local stand-in for the gateway, which received the turn on its Chat
+Completions route with the key and the gateway's own model id; no turn went
+through a real Douane or CLIProxyAPI. Not verified either: Windows and macOS,
+an OAuth sign-in, and image attachments, which is why `capabilities.images` is
+false.
 
 ## Turning a provider off
 

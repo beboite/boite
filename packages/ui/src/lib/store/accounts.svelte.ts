@@ -67,7 +67,7 @@ export class Accounts {
    * settings and protocols, so a phone shows the same account as the PC.
    */
   gatewayOf(providerId: ProviderId): AccountGateway | null {
-    const proxy = subscriptionProxyOf(this.ctx.store.settings, this.providerOf(providerId)?.protocol);
+    const proxy = subscriptionProxyOf(this.ctx.store.settings, this.providerOf(providerId));
     return proxy ? { kind: proxy.kind, name: subscriptionProxyName(proxy.kind), origin: subscriptionProxyOrigin(proxy) } : null;
   }
 
