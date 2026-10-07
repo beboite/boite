@@ -164,7 +164,9 @@ Later the same day `main` at `9356e7b6` measured 4,355,057 UI bytes on Windows
 CI, 57 above that limit, after the panel's keyboard, mouse and clipboard
 input. The mouse's back and forward buttons add 2,301 bytes, measured on Linux
 with and without them: 4,357,517 against 4,355,216. The UI limit rises to
-4,375,000, leaving about 17 KB of headroom.
+4,375,000, leaving about 17 KB of headroom. Formatting clocks in the
+machine's region adds 434 UI bytes, measured on Linux at `9356e7b6` with and
+without it: 4,355,491 against 4,355,057 UI bytes.
 
 Inline views, on `main` at `7d1f126c`, measured 4,385,281 UI bytes and
 3,672,277 emitted core JavaScript bytes on Linux on 2026-10-07, 27,764 UI
