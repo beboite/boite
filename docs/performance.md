@@ -315,7 +315,7 @@ when the core advertises `chunkedAnswers`.
   moves when the bytes land: the 180 by 120 place it replaced grew to the
   thumbnail and pushed what followed. An unmeasured prompt counts its
   thumbnails on top of the 80 px estimate (`estimateSlot`), so the spacers
-  are closer to what scrolling up mounts. `tests/e2e/media.test.ts` checks
+  are closer to what scrolling up mounts. `tests/e2e/thread-loading.test.ts` checks
   this on a real core with 24 screenshots: the fetches on opening, and the
   reader's text keeping its position to the pixel while the scrolled pictures
   land.
