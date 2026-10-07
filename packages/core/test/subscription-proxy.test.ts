@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SubscriptionProxy } from '@boite/contracts';
 import { checkSettingsPatch } from '@boite/contracts';
@@ -266,6 +266,20 @@ test('Grok runs through Douane by its environment alone, and keeps its own sign-
   expect(subscriptionProxyEnv(harness.core, provider)).toEqual({});
   expect((await owner.call('accounts.check', { accountId: account.id })).status).toBe('unauthenticated');
   expect(subscriptionProxyEnv(harness.core, harness.core.providers.require('claude'))['ANTHROPIC_AUTH_TOKEN']).toBe('gateway-key');
+
+  // A sign-in of Grok's own that xAI refused stays refused whatever a proxy that
+  // does not serve Grok is told: its session file must not read as a login again.
+  writeFileSync(join(account.isolationDir!, 'auth.json'), '{}');
+  expect((await owner.call('accounts.check', { accountId: account.id })).status).toBe('ok');
+  harness.core.accounts.authenticationFailed(account.id);
+  await owner.call('settings.set', { subscriptionProxy: { ...config(url, 'cliproxyapi'), enabled: false } });
+  await owner.call('settings.set', { subscriptionProxy: config(url, 'cliproxyapi') });
+  expect(harness.core.accounts.require(account.id).status).toBe('unauthenticated');
+  // Douane answers for the account from then on, and leaving it gives the sign-in a fresh reading.
+  await owner.call('settings.set', { subscriptionProxy: config(url) });
+  expect(harness.core.accounts.require(account.id).status).toBe('ok');
+  await owner.call('settings.set', { subscriptionProxy: config(url, 'cliproxyapi') });
+  expect(harness.core.accounts.require(account.id).status).toBe('ok');
 });
 
 test('legacy CLIProxy catalogs select native families and malformed gateway errors cannot echo the key', async () => {
