@@ -34,11 +34,13 @@ const own = [...navigator.languages];
 beforeAll(() => loadLocale('fr'));
 
 beforeEach(() => {
+  delete window.__BOITE_REGION__;
   window.localStorage.clear();
   setLocaleSetting('system');
 });
 
 afterEach(() => {
+  delete window.__BOITE_REGION__;
   speaks(...own);
   window.localStorage.clear();
   setLocaleSetting('system');
@@ -138,20 +140,25 @@ test('the desktop shell region and clock win over the webview languages', () => 
   speaks('en-US');
   setLocaleSetting('en');
   window.__BOITE_REGION__ = { locale: 'fr-CH', hour12: null };
-  try {
-    expect(formatLocale()).toBe('en-CH');
-    const evening = new Date(2026, 9, 7, 19, 40);
-    expect(new Intl.DateTimeFormat(formatLocale(), { hour: '2-digit', minute: '2-digit' }).format(evening)).toBe('19:40');
+  expect(formatLocale()).toBe('en-CH');
+  const evening = new Date(2026, 9, 7, 19, 40);
+  const clock = () => new Intl.DateTimeFormat(formatLocale(), { hour: '2-digit', minute: '2-digit' }).format(evening);
+  expect(clock()).toBe('19:40');
 
-    window.__BOITE_REGION__ = { locale: 'en-US', hour12: false };
-    expect(formatLocale()).toBe('en-US-u-hc-h23');
-    expect(new Intl.DateTimeFormat(formatLocale(), { hour: '2-digit', minute: '2-digit' }).format(evening)).toBe('19:40');
+  window.__BOITE_REGION__ = { locale: 'en-US', hour12: false };
+  expect(formatLocale()).toBe('en-US-u-hc-h23');
+  expect(clock()).toBe('19:40');
 
-    window.__BOITE_REGION__ = { locale: 'not a tag!', hour12: null };
-    expect(formatLocale()).toBe('en-US');
-  } finally {
-    delete window.__BOITE_REGION__;
-  }
+  window.__BOITE_REGION__ = { locale: 'en-GB', hour12: true };
+  expect(formatLocale()).toBe('en-GB-u-hc-h12');
+  expect(clock()).toMatch(/^07:40\s?pm$/i);
+
+  // A shell tag with no region means none, rather than the webview's.
+  window.__BOITE_REGION__ = { locale: 'en', hour12: null };
+  expect(formatLocale()).toBe('en');
+
+  window.__BOITE_REGION__ = { locale: 'not a tag!', hour12: null };
+  expect(formatLocale()).toBe('en-US');
 });
 
 test('a translation only carries sentences English has, with the same kind and the same slots', () => {

@@ -12,7 +12,9 @@ pub(crate) struct Region {
     pub(crate) hour12: Option<bool>,
 }
 
-/// The script every app window runs first: `window.__BOITE_REGION__`.
+/// `window.__BOITE_REGION__`, run first by the main window (`window.rs`) and
+/// the quota popup (`quota_window.rs`). A new window drawing the app UI adds
+/// it to its builder; browser tabs and sign-in popups show other sites.
 pub(crate) fn script() -> String {
     script_for(&read())
 }
@@ -26,9 +28,13 @@ fn script_for(region: &Region) -> String {
 #[cfg_attr(windows, allow(dead_code))]
 fn posix_tag(value: &str) -> Option<String> {
     let name = value.split(['.', '@']).next()?.trim();
-    if name.is_empty() || name == "C" || name == "POSIX" { return None; }
-    let tag = name.replace('_', "-");
-    tag.chars().all(|c| c.is_ascii_alphanumeric() || c == '-').then_some(tag)
+    if name == "C" || name == "POSIX" { return None; }
+    tag(&name.replace('_', "-"))
+}
+
+/// A name shaped like a BCP 47 tag, letters, digits and `-`; anything else says nothing.
+fn tag(name: &str) -> Option<String> {
+    (!name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).then(|| name.to_owned())
 }
 
 #[cfg(not(windows))]
@@ -48,7 +54,7 @@ fn read() -> Region {
     let mut name = [0u16; 85];
     // SAFETY: the buffer and its length match; the call writes a NUL-terminated name.
     let written = unsafe { GetUserDefaultLocaleName(name.as_mut_ptr(), name.len() as i32) };
-    let locale = (written > 1).then(|| String::from_utf16_lossy(&name[..written as usize - 1]));
+    let locale = (written > 1).then(|| String::from_utf16_lossy(&name[..written as usize - 1])).as_deref().and_then(tag);
     let mut pattern = [0u16; 80];
     // SAFETY: a null name is LOCALE_NAME_USER_DEFAULT; the buffer and its length match.
     let written = unsafe { GetLocaleInfoEx(std::ptr::null(), LOCALE_SSHORTTIME, pattern.as_mut_ptr(), pattern.len() as i32) };
@@ -82,6 +88,8 @@ mod tests {
         assert_eq!(posix_tag("C.UTF-8"), None);
         assert_eq!(posix_tag("POSIX"), None);
         assert_eq!(posix_tag("x\"y"), None);
+        assert_eq!(tag("fr-CH").as_deref(), Some("fr-CH"));
+        assert_eq!(tag(""), None);
     }
 
     #[test]

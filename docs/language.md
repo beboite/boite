@@ -26,8 +26,10 @@ Dates and numbers follow the language the app speaks, in the machine's
 region. An English app on a Swiss machine reads `19:40` and `7 Oct`, the same
 app on a US machine `07:40 PM` and `Oct 7`, and French on a French machine
 `jeu. 21:48` and `31 000`. The desktop shell reads the region from the
-operating system's regional format (`platform/region.rs`: Windows' Region
-settings and their short time pattern, `LC_TIME` or `LANG` elsewhere) and sets
+operating system's regional format
+(`apps/shell/src-tauri/src/platform/region.rs`: Windows' Region settings and
+their short time pattern; elsewhere the first of `LC_ALL`, `LC_TIME` and
+`LANG` that is set) and sets
 `window.__BOITE_REGION__` before the page runs, because the webview reports
 only languages: WebView2 on an English Windows set to Switzerland says `en-US`.
 A 12 or 24 hour clock picked in Windows overrides the region's. In a browser

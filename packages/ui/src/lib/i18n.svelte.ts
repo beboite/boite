@@ -158,31 +158,28 @@ export function activeLocale(): Locale {
  * and `7 Oct` the way the rest of that machine does.
  *
  * The region comes from the desktop shell first (`window.__BOITE_REGION__`,
- * `platform/region.rs`), which reads the operating system's regional format;
- * the webview itself only reports languages. Elsewhere it is the region of a
+ * `apps/shell/src-tauri/src/platform/region.rs`), which reads the operating system's regional format;
+ * the webview itself only reports languages. A shell tag without a region
+ * means none. Without a shell tag it is the region of a
  * machine language matching the app's, then of the first one carrying any. A
  * clock the shell names explicitly (12 or 24 hours) overrides the region's.
- * The work is kept per input, since every formatted row asks.
+ * The last answer is kept, since every formatted row asks with the same input.
  */
+let lastFormat = { key: '', tag: '' };
+
 export function formatLocale(): string {
   const active = activeLocale();
   const shell = typeof window === 'undefined' ? undefined : window.__BOITE_REGION__;
   const machine = typeof navigator === 'undefined' ? [] : [...(navigator.languages ?? []), navigator.language];
   const key = `${active}|${shell?.locale}|${shell?.hour12}|${machine.join(',')}`;
-  let tag = formatTags.get(key);
-  if (tag === undefined) {
-    tag = formatTag(active, shell, machine);
-    formatTags.set(key, tag);
-  }
-  return tag;
+  if (lastFormat.key !== key) lastFormat = { key, tag: formatTag(active, shell, machine) };
+  return lastFormat.tag;
 }
-
-const formatTags = new Map<string, string>();
 
 function formatTag(active: Locale, shell: Window['__BOITE_REGION__'], machine: unknown[]): string {
   const parsed = machine.map(parse);
-  const region = parse(shell?.locale)?.region
-    ?? parsed.find((locale) => locale?.language === active && locale.region)?.region
+  const own = parse(shell?.locale);
+  const region = own ? own.region : parsed.find((locale) => locale?.language === active && locale.region)?.region
     ?? parsed.find((locale) => locale?.region)?.region;
   const clock = typeof shell?.hour12 === 'boolean' ? `-u-hc-${shell.hour12 ? 'h12' : 'h23'}` : '';
   try {
