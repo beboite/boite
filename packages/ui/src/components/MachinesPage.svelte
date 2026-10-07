@@ -13,6 +13,7 @@
   import PairingCard from './PairingCard.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
   import MachineSettings from './MachineSettings.svelte';
+  import MainMachine from './MainMachine.svelte';
   import ServerUpdateCard from './ServerUpdateCard.svelte';
   import HarnessUpdatesCard from './HarnessUpdatesCard.svelte';
   import AppUpdateContent from './AppUpdateContent.svelte';
@@ -213,7 +214,8 @@
     {#if memberRepair}<PairMachine {mobile} bind:this={pairingForm} onpaired={() => memberRepair = false} />{/if}
   </section>
 
-
+  <!-- Chosen on the device itself, a phone included: it says where that device opens. -->
+  <MainMachine />
 
   {#if !mobile}
     <!-- A phone pairs from the computer, never from itself: both cards are the desktop's. -->

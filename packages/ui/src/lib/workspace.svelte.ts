@@ -5,6 +5,7 @@ import {
   forgetGroupOf,
   removeBrought,
   linkedCore,
+  openOnMainMachine,
   opensFromLink,
   parsePairingLink,
   readEnvironments,
@@ -13,8 +14,11 @@ import {
   storeEndpoint,
   upsertEnvironment,
   readStoredEndpoint,
+  readMainMachine,
+  storeMainMachine,
   fromTauri,
   type Endpoint,
+  type MainMachine,
   type StoredEnvironment
 } from './endpoint';
 import { strings } from './strings';
@@ -117,6 +121,12 @@ export class Workspace {
    * of drawing a dead machine and its error for the moment that takes.
    */
   waiting = $state(false);
+  /**
+   * The machine the owner chose to open on at every start; null while a start
+   * opens on the machine shown last. Kept on this device: a phone and a
+   * computer each have their own.
+   */
+  main = $state<MainMachine | null>(readMainMachine());
   #generation = 0;
   #lifecycle = 0;
 
@@ -262,8 +272,9 @@ export class Workspace {
   /**
    * The machine the window opened on does not answer and another one does: the
    * window opens on that one, on the draft a start lands on, and starts there
-   * next time. A phone paired with a laptop keeps working on the rest of the
-   * group while the laptop is off. Nothing moves once the user went somewhere.
+   * next time unless the owner chose the machine a start opens on. A phone
+   * paired with a laptop keeps working on the rest of the group while the
+   * laptop is off. Nothing moves once the user went somewhere.
    */
   #standIn(lifecycle: number, generation: number): void {
     if (!this.#current(lifecycle)) return;
@@ -302,6 +313,9 @@ export class Workspace {
     const generation = this.#generation;
     store.visible = true;
     this.active = store;
+    // The machine the owner chose becomes the stored core before anything below reads it.
+    this.main = readMainMachine();
+    openOnMainMachine();
     try {
       this.view = localStorage.getItem('boite.thread-view') === 'recent' ? 'recent' : 'projects';
     } catch {
@@ -427,6 +441,38 @@ export class Workspace {
     if (saved) upsertEnvironment({ ...saved, coreId: core.coreId, groupId, epoch: core.epoch });
     if (machine.store === this.primary && saved) storeEndpoint({ ...saved, coreId: core.coreId, groupId, epoch: core.epoch });
     this.machines = [...this.machines];
+  }
+
+  /**
+   * What choosing this machine to open on is saved as. The core this app
+   * reaches with no key of its own, the shell's or in a browser the one that
+   * serves the page, has no address to name it by: the shell's changes port at
+   * every start.
+   */
+  #mainOf(machine: Machine): MainMachine {
+    const s = machine.store;
+    const keyed = readEnvironments().some((e) => e.url === machine.id && e.token !== '');
+    if (s.localCore || (s === store && !keyed && (s.endpointUrl === null || servesThisPage(machine.id)))) return { local: true };
+    return { url: machine.id, ...(machine.coreId === undefined || machine.groupId === undefined ? {} : { coreId: machine.coreId, groupId: machine.groupId }) };
+  }
+
+  /** Whether this is the machine the owner chose to open on. One the group brought is the same machine at whatever address it gives now. */
+  isMain(machine: Machine): boolean {
+    const main = this.main;
+    if (main === null) return false;
+    const mine = this.#mainOf(machine);
+    if ('local' in main || 'local' in mine) return 'local' in main && 'local' in mine;
+    return main.url === mine.url || (main.coreId !== undefined && main.coreId === mine.coreId && main.groupId === mine.groupId);
+  }
+
+  /**
+   * The owner chooses the machine every start opens on, or with null goes back
+   * to the machine shown last. Nothing moves now: the window stays where it is,
+   * and a start on a machine that does not answer still opens on another.
+   */
+  setMain(machine: Machine | null): void {
+    this.main = machine === null ? null : this.#mainOf(machine);
+    storeMainMachine(this.main);
   }
 
   setView(view: 'projects' | 'recent'): void {
@@ -561,7 +607,11 @@ export class Workspace {
     return this.add({ ...parsed, token: '' }, label);
   }
 
-  /** The window moves to `target`, which takes over the sidebar, the search and the notifications as they were, and is where the next start opens. */
+  /**
+   * The window moves to `target`, which takes over the sidebar, the search and
+   * the notifications as they were. It is where the next start opens, unless
+   * the owner chose a machine for that (`main`).
+   */
   #moveTo(target: Store): void {
     const previous = this.active;
     if (previous === target) return;

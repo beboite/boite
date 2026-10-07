@@ -55,7 +55,8 @@ The two machines list each other and connect. A third machine joins with an
 invitation from either. A phone needs nothing more than its usual pairing
 link, from any member ([phone](phone.md)): once paired, it connects to the
 others at the same role, and keeps reaching them when the machine it paired
-with is off. The app then opens on one of the others by itself
+with is off. The app then opens on one of the others by itself, and the
+phone can name any machine it reaches as the one it opens on
 ([machines](machines.md#connecting-a-machine)).
 
 **Leave the group** takes this machine out and tells the others first.

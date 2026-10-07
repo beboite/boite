@@ -37,6 +37,21 @@ asked for; the shell's own core, which the shell restarts itself; and a window
 where the user already opened something. The machine that was off is retried
 in the background and comes back as one more machine of the list.
 
+A start opens on the machine shown last. A device can name its main machine
+instead, under Machines and updates in Settings, once it reaches more than one:
+every start then opens on that machine, whichever one was shown since. The
+choice is made on the device and kept there (`boite.main` in its storage), so a
+phone and a computer each have their own. It gives the machine nothing: its
+key, its role and what a [group](groups.md) may do with it stay as they were. A
+main machine that is off gives way like any other, after the same two seconds
+at every start, and is asked first again at the next one. A machine the group
+brought stays the one chosen when its address changes. A machine this device
+holds no key for any more, removed here or dropped by its group, no longer
+counts: starts open on the machine shown last until it is connected again. The
+desktop app can name its own core. It never opens on a machine connected by URL
+and token, chosen or not, since that stored key could be its own core's from an
+earlier start.
+
 Machine names and icons can be changed in Settings. These preferences are saved on this client and follow the core across address changes. Connections to the same host, data directory and channel appear once.
 
 The shell discovers its local core on startup instead of remembering its temporary
@@ -306,8 +321,9 @@ the machine identity. Only the visible host subscribes to an open conversation;
 all hosts continue receiving summaries. Driver protocols remain unchanged.
 
 `tests/e2e/machines.test.ts` covers two real temporary cores, pairing, routing,
-restart, reload, automatic settings copies, a real remote terminal, and a phone
-reloaded while the machine it paired with answers nothing. Its fake fixture deliberately reuses thread and
+restart, reload, automatic settings copies, a real remote terminal, a phone
+reloaded while the machine it paired with answers nothing, and that phone
+naming its main machine. Its fake fixture deliberately reuses thread and
 project IDs on two hosts and produces desktop and phone captures. Core tests
 cover user-message timestamps, origin validation and PR metadata parsing.
 `tests/e2e/project-views.test.ts` checks project filtering, draft routing,

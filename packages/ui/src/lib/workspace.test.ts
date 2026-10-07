@@ -532,6 +532,54 @@ test('a link in the address bar is waited on however long its machine takes, and
   expect(w.active).toBe(a);
 });
 
+test('the machine the owner chose is where every start opens, whichever was shown last, and stays chosen while another stands in for it', async () => {
+  vi.useFakeTimers();
+  const { w, a, b, server } = await phoneOfTwo();
+  w.setMain({ id: 'https://laptop.test', label: 'Laptop', store: a });
+  expect(endpoints.readMainMachine()).toEqual({ url: 'https://laptop.test' });
+  // The server was shown last: with no choice made, that is where the next start would open.
+  endpoints.storeEndpoint({ url: 'https://server.test', token: 'server-key', paired: true });
+  a.connection = 'connecting';
+  a.booted = false;
+  // What a start opens on is the core stored when the first machine boots.
+  const opened: (string | undefined)[] = [];
+  vi.spyOn(a, 'boot').mockImplementation(() => {
+    opened.push(endpoints.readStoredEndpoint()?.url);
+    return new Promise<void>(() => {});
+  });
+  void w.boot();
+  await vi.advanceTimersByTimeAsync(PRIMARY_PATIENCE_MS);
+  server();
+  await vi.advanceTimersByTimeAsync(0);
+  // The laptop is off: the server stands in for it, and is the machine shown last once more.
+  expect(w.active).toBe(b);
+  expect(endpoints.readStoredEndpoint()?.url).toBe('https://server.test');
+  expect(w.machines.map((machine) => w.isMain(machine))).toEqual([true, false]);
+  void w.boot();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(opened).toEqual(['https://laptop.test', 'https://laptop.test']);
+});
+
+test('the choice names the shell\'s own core without its address, and a machine the group brought whatever address it has now', async () => {
+  const { w, a, b } = await phoneOfTwo();
+  a.localCore = true;
+  a.endpointUrl = 'http://127.0.0.1:41000';
+  const local = { id: 'http://127.0.0.1:41000', label: 'This PC', store: a };
+  w.setMain(local);
+  expect(endpoints.readMainMachine()).toEqual({ local: true });
+  // The shell's core takes another port at every start.
+  expect(w.isMain({ ...local, id: 'http://127.0.0.1:41001' })).toBe(true);
+
+  const brought = { id: 'https://server.test', label: 'Server', store: b, coreId: 'server', groupId: 'home' };
+  w.setMain(brought);
+  expect(endpoints.readMainMachine()).toEqual({ url: 'https://server.test', coreId: 'server', groupId: 'home' });
+  expect(w.isMain({ ...brought, id: 'https://server.example' })).toBe(true);
+  expect(w.isMain({ ...brought, id: 'https://server.example', coreId: 'other' })).toBe(false);
+  expect(w.isMain(local)).toBe(false);
+  w.setMain(null);
+  expect(w.machines.some((machine) => w.isMain(machine))).toBe(false);
+});
+
 test('a remote machine switched off is offline, and lost only while the user depends on it', async () => {
   const { a, b } = await setup();
   const remote = { id: 'http://laptop.test', label: 'Laptop', store: b };

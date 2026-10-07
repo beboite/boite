@@ -368,6 +368,22 @@ test('one invitation groups two real cores: the page connects the second by itse
     await page.waitFor(machines(2), 40_000);
     expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.endpointUrl`)).toBe(second.url);
 
+    // From the phone, the owner names the machine it paired with as its main one. The window is on the other
+    // machine, where a start opened again until now: from this choice on, a start opens on the main one.
+    await mobileAction(page, 'mobile-settings');
+    await page.waitFor(`document.querySelector('${id('settings-tab-machines')}')`);
+    await page.click(id('settings-tab-machines'));
+    await page.waitFor(`document.querySelector('${id('main-machine-pick')}')`);
+    await page.click(id('main-machine-pick'));
+    await page.waitFor(`document.querySelector('${id('main-machine-pick-menu')}')`);
+    await page.click(`${id('main-machine-pick-menu')} [data-value=${JSON.stringify(awake.url)}]`);
+    await page.waitFor(`JSON.parse(localStorage.getItem('boite.main') ?? 'null')?.url === ${JSON.stringify(awake.url)}`);
+    await page.evaluate(`document.querySelector('${id('main-machine')}').scrollIntoView({ block: 'center' })`);
+    await capture('main-machine-phone.png');
+    expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    await page.evaluate('location.reload()');
+    await page.waitFor(`${machines(2)} && globalThis.__boiteTest.workspace.active.endpointUrl === ${JSON.stringify(awake.url)}`, 20_000);
+
     // Removed from the group: the second machine leaves, drops the phone's key, and the page lets it go.
     await a.call('group.remove', { coreId: joined.self });
     await page.waitFor(`globalThis.__boiteTest.workspace.machines.length === 1`, 20_000);
