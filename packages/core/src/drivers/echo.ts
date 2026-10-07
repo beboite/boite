@@ -194,6 +194,12 @@ export const echoDriver: Driver = {
         ctx.thread.permissionMode = mode;
         return true;
       },
+      async applySettings(change) {
+        if (state.stopped || state.ended) return {};
+        if ('effort' in change) ctx.thread.effort = change.effort ?? null;
+        if ('speed' in change) ctx.thread.speed = change.speed ?? null;
+        return change;
+      },
       async steer(text, attachments = []) {
         if (state.stopped || state.ended) return false;
         state.input.push({ text, attachments });

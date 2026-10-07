@@ -86,12 +86,16 @@
   <h2>{strings.phone.heading}</h2>
   {#if store.owner && showServerSettings}
     <div class="block"><TailscaleAccess {store} /></div>
-    <div class="block">
+    <!-- A reverse proxy of one's own: what the Tailscale switch above does without typing anything. -->
+    <div class="block"><details class="disclosure" data-testid="phone-own-address">
+      <summary>{strings.phone.ownAddress}</summary>
+      <div class="fields">
       <label for="{uid}-public-url"><span class="ui-label-box"><span class="ui-label" id="{uid}-public-url-name">{strings.phone.publicUrl}</span><InfoTip topic={strings.phone.publicUrl} text={strings.phone.publicUrlHint} /></span><input id="{uid}-public-url" aria-labelledby="{uid}-public-url-name" type="url" bind:value={publicUrl} placeholder={strings.phone.urlPlaceholder} data-testid="phone-public-url" /></label>
       <div class="actions">
         <button disabled={store.connection !== 'ready'} onclick={() => void store.saveSettings({ publicUrl: publicUrl.trim() || null })}><span class="ui-label">{strings.settings.save}</span></button>
       </div>
-    </div>
+      </div>
+    </details></div>
   {/if}
   {#if !inShell}
     <div class="block">
@@ -129,6 +133,7 @@
      field or the sentence first, its buttons under it. */
   .block { display: flex; flex-direction: column; gap: 10px; }
   .block + .block { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--color-border); }
+  .fields { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; }
   label { display: flex; flex-direction: column; gap: 6px; }
   label > span { margin: 0; }
   input { width: 100%; }

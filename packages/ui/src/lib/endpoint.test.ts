@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, test } from 'vitest';
 import {
   linkedCore,
+  openOnMainMachine,
   parsePairingLink,
+  readMainMachine,
+  storeMainMachine,
   readEnvironments,
   readStoredEndpoint,
   droppedSince,
@@ -396,4 +399,48 @@ describe('parsePairingLink', () => {
     expect(parsePairingLink('ftp://192.168.1.20/?grant=abc')).toBeNull();
     expect(parsePairingLink('abc')).toBeNull();
   });
+});
+
+test('the machine the owner chose is the one a start opens on, wherever the group has brought it since', () => {
+  localStorage.clear();
+  const laptop = { url: 'https://laptop.test', token: 'laptop-key', paired: true };
+  upsertEnvironment(laptop);
+  upsertEnvironment({ url: 'http://10.0.0.5:3773', token: 'server-key', paired: true, coreId: 'server', groupId: 'home', epoch: 1 });
+  storeEndpoint(laptop);
+
+  // No choice: the start opens where the last one ended.
+  openOnMainMachine();
+  expect(readStoredEndpoint()?.url).toBe('https://laptop.test');
+
+  // Its key and the group's marks travel with it: it stays a machine the group may drop.
+  storeMainMachine({ url: 'http://10.0.0.5:3773', coreId: 'server', groupId: 'home' });
+  openOnMainMachine();
+  expect(readStoredEndpoint()).toEqual({ url: 'http://10.0.0.5:3773', token: 'server-key', paired: true, coreId: 'server', groupId: 'home', epoch: 1 });
+
+  // The group reaches that machine at another address now: it is still the one chosen.
+  storeEndpoint(laptop);
+  removeEnvironment('http://10.0.0.5:3773');
+  upsertEnvironment({ url: 'https://server.test', token: 'new-key', paired: true, coreId: 'server', groupId: 'home', epoch: 2 });
+  openOnMainMachine();
+  expect(readStoredEndpoint()).toMatchObject({ url: 'https://server.test', token: 'new-key' });
+
+  // No key left for it: the start opens where the last one ended, and the choice waits for the machine to be back.
+  storeEndpoint(laptop);
+  removeEnvironment('https://server.test');
+  openOnMainMachine();
+  expect(readStoredEndpoint()?.url).toBe('https://laptop.test');
+  expect(readMainMachine()).toEqual({ url: 'http://10.0.0.5:3773', coreId: 'server', groupId: 'home' });
+
+  // The app's own core: the stored core goes, and the start falls back on the shell's or on the page's origin.
+  storeMainMachine({ local: true });
+  openOnMainMachine();
+  expect(readStoredEndpoint()).toBeNull();
+  // A phone's page is served by the machine it paired with, which opens with the key held for it.
+  storeEndpoint(laptop);
+  upsertEnvironment({ url: window.location.origin, token: 'own-key', paired: true });
+  openOnMainMachine();
+  expect(readStoredEndpoint()).toMatchObject({ url: window.location.origin, token: 'own-key' });
+
+  storeMainMachine(null);
+  expect(readMainMachine()).toBeNull();
 });

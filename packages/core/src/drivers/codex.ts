@@ -61,6 +61,7 @@ export function createCodexDriver(): Driver {
       return {
         done: turn.done,
         steer: (text, attachments) => running.steer(turn, text, attachments),
+        applySettings: change => running.applySettings(turn, change),
         stop: (): void => {
           running.stopTurn(turn);
         },
