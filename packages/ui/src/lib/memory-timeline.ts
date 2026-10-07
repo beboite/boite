@@ -26,18 +26,25 @@ export function placeMemoryEvents(messages: Message[], events: MemoryEvent[]) {
 
 type MemoryRun = { kind: 'memory'; key: string; events: MemoryEvent[] };
 
-/** Break folded activity runs at notice boundaries so later calls cannot cover them. */
-export function memoryPartRuns(parts: MessagePart[], events: MemoryEvent[]): (PartRun | MemoryRun)[] {
-  if (!events.length) return partRuns(parts);
+/**
+ * Break folded activity runs at notice boundaries so later calls cannot cover them.
+ * `from` and `to` name the parts one row of a cut message draws (`timeline-rows.ts`):
+ * its runs keep the indices they have in the whole message, and a notice shows in
+ * the row that holds its part, the last row for one anchored at the message's end.
+ */
+export function memoryPartRuns(parts: MessagePart[], events: MemoryEvent[], from = 0, to = parts.length): (PartRun | MemoryRun)[] {
+  if (!events.length) return partRuns(parts, from, to);
   const boundaries = new Map<number, MemoryEvent[]>();
   for (const event of events) {
     const index = Math.max(0, Math.min(event.anchor?.partIndex ?? parts.length, parts.length));
+    if (index < from || (index >= to && to < parts.length)) continue;
     boundaries.set(index, [...(boundaries.get(index) ?? []), event]);
   }
+  if (boundaries.size === 0) return partRuns(parts, from, to);
   const runs: (PartRun | MemoryRun)[] = [];
-  let start = 0;
+  let start = from;
   for (const [end, notices] of [...boundaries].sort((a, b) => a[0] - b[0])) {
-    runs.push(...shiftedRuns(parts, start, end));
+    runs.push(...partRuns(parts, start, end));
     // Group consecutive stops only when their reason and threshold match.
     for (const [index, event] of notices.entries()) {
       const previous = runs.at(-1);
@@ -48,12 +55,7 @@ export function memoryPartRuns(parts: MessagePart[], events: MemoryEvent[]): (Pa
     }
     start = end;
   }
-  runs.push(...shiftedRuns(parts, start, parts.length));
+  runs.push(...partRuns(parts, start, to));
   return runs;
 }
 
-function shiftedRuns(parts: MessagePart[], start: number, end: number): PartRun[] {
-  return partRuns(parts.slice(start, end)).map(run => run.kind === 'part'
-    ? { kind: 'part', index: run.index + start }
-    : { kind: 'activity', indices: run.indices.map(index => index + start) });
-}

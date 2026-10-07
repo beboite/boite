@@ -85,7 +85,24 @@ function commandOf(value: unknown): string {
   return text(value);
 }
 
+/**
+ * What was read from an input, by the input itself. A call is described for
+ * its run's sentence, its glyph, its own line and its turn's files, each time
+ * the window draws it: the store replaces an input, it never edits one in
+ * place, so the same object under the same name reads the same.
+ */
+const described = new WeakMap<object, { name: string; description: ToolDescription }>();
+
 export function describeTool(name: string, input: unknown): ToolDescription {
+  if (typeof input !== 'object' || input === null) return describe(name, input);
+  const known = described.get(input);
+  if (known?.name === name) return known.description;
+  const description = describe(name, input);
+  described.set(input, { name, description });
+  return description;
+}
+
+function describe(name: string, input: unknown): ToolDescription {
   const fields = record(input) ?? {};
   const key = name.toLowerCase().replace(/[\s_-]/g, '');
   const family = BY_NAME[key] ?? familyOfShape(fields);

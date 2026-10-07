@@ -50,31 +50,32 @@ export function activityShown(parts: readonly ActivityPart[], thinkingLive: bool
  * Splits the parts into runs. Calls and reasoning with nothing written between
  * them are one run, drawn as one line that opens on its steps; blank text does
  * not break it. Answer text, a call that made something and a proposed plan
- * each keep their own place in the timeline.
+ * each keep their own place in the timeline. `from` and `to` read a stretch of
+ * the message only, its runs indexed as in the whole message: what one row of
+ * a long message draws, and what a memory notice cuts a message into.
  */
-export function partRuns(parts: readonly MessagePart[]): PartRun[] {
+export function partRuns(parts: readonly MessagePart[], from = 0, to = parts.length): PartRun[] {
   const runs: PartRun[] = [];
   let open: { kind: 'activity'; indices: number[] } | null = null;
-  parts.forEach((part, index) => {
-    if (part.type === 'text' && part.text.trim() === '' && index < parts.length - 1) return;
+  for (let index = from; index < to; index += 1) {
+    const part = parts[index];
+    if (!part) continue;
+    // Blank text is skipped unless it ends the message itself: that one carries the caret.
+    if (part.type === 'text' && part.text.trim() === '' && index < parts.length - 1) continue;
     const folds = part.type === 'thinking' || (part.type === 'tool' && planOf(part.name, part.input) === null);
     if (!folds) {
       open = null;
       runs.push({ kind: 'part', index });
-      return;
-    }
-    if (part.type === 'tool' && standsAlone(part)) {
+    } else if (part.type === 'tool' && standsAlone(part)) {
       open = null;
       runs.push({ kind: 'activity', indices: [index] });
-      return;
-    }
-    if (open) {
+    } else if (open) {
       open.indices.push(index);
-      return;
+    } else {
+      open = { kind: 'activity', indices: [index] };
+      runs.push(open);
     }
-    open = { kind: 'activity', indices: [index] };
-    runs.push(open);
-  });
+  }
   return runs;
 }
 
