@@ -29,7 +29,9 @@ export const strings = {
     display: 'Display', resolution: 'Page resolution', fitPhone: 'Fit this screen', phone: 'Phone', tablet: 'Tablet', rotate: 'Rotate', width: 'Width', height: 'Height', apply: 'Apply', sharedSize: 'Resolution also changes the page the agent sees.', restoreSize: 'Restore the default size', previewZoom: 'Preview zoom (this device only)', fit: 'Fit', panHint: 'Drag to pan the preview. Use the arrows to scroll the page.',
     address: 'Address', go: 'Go', back: 'Back', forward: 'Forward', reload: 'Reload', badAddress: 'Enter a web address (http or https).',
     title: 'Agent’s browser', waiting: 'Waiting for the page', live: 'Live', paused: 'Paused', reconnecting: 'Reconnecting', pause: 'Pause', resume: 'Resume',
-    interact: 'Tap or swipe the shared page', image: 'Live view of the agent’s browser', scrollUp: 'Scroll up', scrollDown: 'Scroll down',
+    interact: 'Tap or swipe the shared page', interactDesk: 'The shared page: click it, then type',
+    deskHint: 'Click the page, then type in it. Drag to select, double-click a word, scroll with the wheel. Copy, cut and paste use the keyboard.',
+    copy: 'Copy the selected text', copied: 'Copied.', nothingSelected: 'Nothing is selected in the page. Double-tap a word first.', copyCut: 'The selection was too long: its start was copied.', image: 'Live view of the agent’s browser', scrollUp: 'Scroll up', scrollDown: 'Scroll down',
     text: 'Tap a page field, then type here', send: 'Send text to the page', gesture: 'Tap to click. Drag to scroll. Return sends the text and Enter; ⌫ on an empty field erases in the page.'
   },
   /** The browser the conversation's agent drives on the machine that runs it, watched from any client. */
@@ -52,7 +54,8 @@ export const strings = {
     back: 'Back', home: 'Home', recents: 'Recent apps', rotate: 'Rotate', power: 'Power button', enter: 'Enter', backspace: 'Delete the previous character',
     text: 'Type into the focused field', send: 'Send the text', ascii: 'Only printable ASCII characters reach the device.',
     screenshot: 'Save a screenshot', close: 'Close {name}', shutdown: 'Power off',
-    interact: 'Tap or swipe the device screen', image: 'Live view of {name}', gesture: 'Tap to touch. Drag to swipe.'
+    interact: 'Tap or swipe the device screen', interactDesk: 'The device screen: click it, then type',
+    deskHint: 'Click the screen, then type. Drag to swipe, scroll with the wheel, Esc goes back. Paste types the clipboard; copying from the device is not available.', image: 'Live view of {name}', gesture: 'Tap to touch. Drag to swipe.'
   },
   agents: {
     runtime: "Models and limits",

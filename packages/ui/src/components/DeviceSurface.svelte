@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
   import { Camera, Circle, CornerDownLeft, Delete, EyeOff, Pause, Play, Plus, Power, RefreshCw, RotateCw, Send, Smartphone, Square, Triangle, X } from '@lucide/svelte';
-  import type { MobileDevice, MobileDeviceFrame, MobileDeviceInput, MobileDeviceList, MobileDeviceSession } from '@boite/contracts';
+  import { MOBILE_TEXT_MAX, type MobileDevice, type MobileDeviceFrame, type MobileDeviceInput, type MobileDeviceList, type MobileDeviceSession } from '@boite/contracts';
+  import { deviceKey, devicePaste, hasKeyboard, liveInput } from '../lib/live-input';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
   import { FRAME_INTERVAL, frameMaxWidth, framePoint, frameQuality, nextPollDelay } from '../lib/remote-browser-view';
@@ -21,6 +22,12 @@
   let alive = true, generation = 0, timer: ReturnType<typeof setTimeout> | undefined, pending = false, requestedAt = 0;
   let roundTrip = 0, unchanged = 0, failures = 0;
   let pointer: { x: number; y: number; at: number; frame: MobileDeviceFrame } | undefined;
+  // A computer types, pastes and scrolls on the screen itself; the text field below is the phone's.
+  const desk = hasKeyboard();
+  let viewer = $state<HTMLElement>(), screen = $state<HTMLButtonElement>();
+  // Keyboard and wheel input, sent one at a time in order: each is an adb process on the agent's machine.
+  let typed: MobileDeviceInput[] = [], typing: Promise<void> | null = null;
+  let wheelY = 0, wheelAt: { x: number; y: number } | null = null, wheelTimer: ReturnType<typeof setTimeout> | undefined;
   const session = $derived(sessions.find(one => one.deviceId === selected) ?? sessions[0] ?? null);
   const key = $derived(store.threadKey(threadId));
   const revealed = $derived(liveViews.shown('device', key));
@@ -101,6 +108,50 @@
     if (!client || !target || !usable) return false;
     return (await act(() => client.call('devices.input', { threadId, deviceId: target.deviceId, input: value }))) !== undefined;
   }
+  /** Characters typed while adb is busy leave together in the next text. */
+  function direct(value: MobileDeviceInput) {
+    const last = typed.at(-1);
+    if (value.kind === 'text' && last?.kind === 'text' && last.text.length + value.text.length <= MOBILE_TEXT_MAX) typed[typed.length - 1] = { kind: 'text', text: last.text + value.text };
+    else typed.push(value);
+    typing ??= drain().finally(() => { typing = null; });
+  }
+  async function drain(): Promise<void> {
+    while (typed.length) {
+      const value = typed.shift()!, client = store.client, target = showing;
+      if (!alive || !client || !target?.input || paused || store.connection !== 'ready') { typed = []; return; }
+      try { await client.call('devices.input', { threadId, deviceId: target.deviceId, input: value }); error = ''; }
+      catch (cause) { typed = []; if (alive) error = message(cause); return; }
+      finally { if (alive) kick(); }
+    }
+  }
+  function pasted(value: string) {
+    const line = devicePaste(value);
+    if (line === null) { error = strings.devicePanel.ascii; return; }
+    for (let at = 0; at < line.length; at += MOBILE_TEXT_MAX) direct({ kind: 'text', text: line.slice(at, at + MOBILE_TEXT_MAX) });
+  }
+  /** Wheel notches become one swipe from under the pointer, the way a finger would scroll that far. */
+  function wheel(event: WheelEvent) {
+    if (event.ctrlKey || !usable || !frame || !showing?.input) return;
+    event.preventDefault();
+    const at = pixel(event, frame);
+    if (!at || !picture) return;
+    const unit = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? 400 : 1, current = frame;
+    wheelAt ??= at;
+    wheelY += event.deltaY * unit * current.width / Math.max(1, picture.getBoundingClientRect().width);
+    clearTimeout(wheelTimer);
+    wheelTimer = setTimeout(() => {
+      const from = wheelAt, reach = Math.round(current.height * .6), by = Math.max(-reach, Math.min(reach, Math.round(wheelY)));
+      wheelAt = null; wheelY = 0;
+      if (!from || !by) return;
+      direct({ kind: 'swipe', from, to: { x: from.x, y: Math.max(0, Math.min(current.height - 1, from.y - by)) }, durationMs: 150 });
+    }, 80);
+  }
+  $effect(() => {
+    const node = screen;
+    if (!node) return;
+    node.addEventListener('wheel', wheel, { passive: false });
+    return () => node.removeEventListener('wheel', wheel);
+  });
   async function screenshot(): Promise<void> {
     const client = store.client, target = showing;
     if (!client || !target) return;
@@ -127,12 +178,22 @@
       sessions = result.sessions;
       if (result.sessions.length === 0) void refresh();
     }, cause => { error = message(cause); });
+    const live = liveInput(() => viewer, {
+      key(event) {
+        if (!showing?.input || !frame || paused) return false;
+        const sent = deviceKey(event);
+        if (!sent) return false;
+        direct('key' in sent ? { kind: 'key', key: sent.key } : { kind: 'text', text: sent.text });
+        return true;
+      },
+      paste(value) { if (showing?.input) pasted(value); },
+    });
     const visibility = () => { if (document.hidden) stop(); else resume(); };
     const back = () => { if (!document.hidden && !pending) resume(); };
     document.addEventListener('visibilitychange', visibility);
     for (const name of ['pageshow', 'online', 'focus'] as const) window.addEventListener(name, back);
     return () => {
-      alive = false; stop(); off?.();
+      alive = false; stop(); off?.(); live.destroy(); clearTimeout(wheelTimer);
       document.removeEventListener('visibilitychange', visibility);
       for (const name of ['pageshow', 'online', 'focus'] as const) window.removeEventListener(name, back);
     };
@@ -150,7 +211,7 @@
   });
 
   /** Where a touch lands, in the device's own screen pixels: what `devices.input` and the agent use. */
-  function pixel(event: PointerEvent, current: MobileDeviceFrame): { x: number; y: number } | null {
+  function pixel(event: MouseEvent, current: MobileDeviceFrame): { x: number; y: number } | null {
     const at = picture ? framePoint(picture.getBoundingClientRect(), current, event.clientX, event.clientY) : null;
     return at ? { x: Math.round(at.x * (current.width - 1)), y: Math.round(at.y * (current.height - 1)) } : null;
   }
@@ -231,7 +292,7 @@
       {/if}
     </div>
   {:else if session}
-    <div class="viewer" bind:clientWidth={areaWidth}>
+    <div class="viewer" bind:this={viewer} bind:clientWidth={areaWidth}>
       {#if session.state === 'booting'}
         <p class="muted center" data-testid="device-starting">{fill(strings.devicePanel.starting, { name: session.name })}</p>
       {:else if !revealed && session.state === 'ready'}
@@ -247,7 +308,7 @@
       {:else if session.state === 'failed'}
         <div class="center"><p class="error">{fill(strings.devicePanel.failed, { name: session.name })}</p>{#if session.error}<p class="muted detail">{session.error}</p>{/if}</div>
       {:else if frame && frame.deviceId === session.deviceId}
-        <button type="button" class="screen" class:stale={paused || !!error} class:view-only={!session.input} aria-label={strings.devicePanel.interact} disabled={!usable || !session.input}
+        <button bind:this={screen} type="button" class="screen" class:stale={paused || !!error} class:view-only={!session.input} aria-label={desk && session.input ? strings.devicePanel.interactDesk : strings.devicePanel.interact} disabled={!usable || !session.input}
           onpointerdown={down} onpointerup={up} onpointercancel={() => { pointer = undefined; }} oncontextmenu={e => e.preventDefault()}>
           <img bind:this={picture} src={`data:image/jpeg;base64,${frame.base64}`} alt={fill(strings.devicePanel.image, { name: session.name })} draggable="false" data-testid="device-frame" />
         </button>
@@ -262,14 +323,18 @@
             <button type="button" class="chip" disabled={!usable} aria-label={strings.devicePanel.recents} title={strings.devicePanel.recents} onclick={() => void input({ kind: 'key', key: 'recents' })}><Square size={14} /></button>
             <button type="button" class="chip" disabled={!usable} aria-label={strings.devicePanel.rotate} title={strings.devicePanel.rotate} onclick={() => void input({ kind: 'key', key: 'rotate' })}><RotateCw size={15} /></button>
             <button type="button" class="chip" disabled={!usable} aria-label={strings.devicePanel.power} title={strings.devicePanel.power} onclick={() => void input({ kind: 'key', key: 'power' })}><Power size={15} /></button>
+            {#if !desk}
             <button type="button" class="chip" disabled={!usable} aria-label={strings.devicePanel.enter} title={strings.devicePanel.enter} onclick={() => void input({ kind: 'key', key: 'enter' })}><CornerDownLeft size={15} /></button>
             <button type="button" class="chip" disabled={!usable} aria-label={strings.devicePanel.backspace} title={strings.devicePanel.backspace} onclick={() => void input({ kind: 'key', key: 'backspace' })}><Delete size={15} /></button>
+            {/if}
           </div>
+          {#if desk}<small data-testid="device-desk-hint">{strings.devicePanel.deskHint}</small>{:else}
           <form onsubmit={e => { e.preventDefault(); void sendText(false); }}>
             <input bind:value={text} data-testid="device-text" maxlength="500" enterkeyhint="send" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label={strings.devicePanel.text} placeholder={strings.devicePanel.text} onkeydown={textKey} />
             <button type="submit" class="chip" disabled={!usable || !text} aria-label={strings.devicePanel.send}><Send size={16} /></button>
           </form>
           <small>{strings.devicePanel.gesture}</small>
+          {/if}
         {:else}<small data-testid="device-view-only">{strings.devicePanel.viewOnly}</small>{/if}
       </footer>
     {/if}
