@@ -1275,6 +1275,23 @@ describe('acp driver', () => {
     expect(fakeLog()).not.toContain('set_mode');
   });
 
+  test('an agent that leaves plan through its mode option is put back on the next turn', async () => {
+    const client = await startCore({ warmProcessMinutes: 5 });
+    process.env['ACP_FAKE_MODE_OPTION'] = '1';
+    const threadId = await acpThread(client, undefined, 'plan');
+
+    await runTurn(client, threadId, 'first');
+    await waitFor(() => configCount('mode plan') === 1);
+
+    // The agent goes back to build by itself and says so with its options.
+    await runTurn(client, threadId, '[mode-switch build]drifting');
+    expect(configCount('mode plan')).toBe(1);
+
+    // The thread still says plan: the mode is sent again instead of trusting the value kept from before.
+    await runTurn(client, threadId, 'still planning');
+    await waitFor(() => configCount('mode plan') === 2);
+  });
+
   test('an agent with no modes at all is one warning, and the turn still runs', async () => {
     const client = await startCore();
     process.env['ACP_FAKE_NO_MODES'] = '1';

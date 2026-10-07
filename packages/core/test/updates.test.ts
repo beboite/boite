@@ -174,6 +174,36 @@ describe('harness updates', () => {
     expect(only(await client.call('providers.updates', { refresh: true }))).toMatchObject({ current: '1.2.0', latest: null });
   });
 
+  test.skipIf(process.platform === 'win32')('an updater that rewrites a program told apart by its major is read again, not reported gone', async () => {
+    harness = await startTestCore();
+    harness.core.updates.only = new Set(['gated-fake']);
+    // A program that names its version and whose updater replaces its own file, as `opencode upgrade` does.
+    const program = join(harness.dataDir, 'gated-agent');
+    const script = (version: string): string => `#!/bin/sh\n# ${version} padded so the file changes size: ${'x'.repeat(version.length * 7)}\ncase "$1" in\n  --version) echo "gated-agent ${version}";;\n  update) cp "$0.next" "$0.tmp" && mv "$0.tmp" "$0"; echo "updated";;\nesac\n`;
+    writeFileSync(program, script('1.0.0'));
+    writeFileSync(`${program}.next`, script('1.12.0'));
+    chmodSync(program, 0o755);
+    chmodSync(`${program}.next`, 0o755);
+    const profile = { detect: {}, executable: [{ kind: 'file', value: program, major: 1 }], update: { args: ['update'] }, isolation: {} };
+    mkdirSync(join(harness.dataDir, 'providers'), { recursive: true });
+    writeFileSync(join(harness.dataDir, 'providers', 'gated-fake.json'), JSON.stringify({
+      id: 'gated-fake', schemaVersion: 1, name: 'Gated agent', shortName: 'Gated', protocol: 'acp', roots: ['{isolationDir}'],
+      profiles: { linux: profile, macos: profile }, auth: { kind: 'none' },
+      models: [{ id: 'default', name: 'Agent default', default: true }],
+      capabilities: { approvals: true, hooks: false, checkpoint: false, images: false, planMode: false, resume: false },
+    }));
+    const client = await harness.connect();
+    expect((await client.call('providers.reload', {})).loaded.find((provider) => provider.id === 'gated-fake')).toMatchObject({ available: true, executable: program });
+    expect((await client.call('providers.updates', { refresh: true }))[0]).toMatchObject({ providerId: 'gated-fake', current: '1.0.0', state: 'idle' });
+
+    // The file changed under the kept reading: the read that follows the updater waits for the new one.
+    const changed = client.next('providers.updatesChanged', (list) => list[0]?.state !== 'updating' && list[0]?.state !== 'checking' && list[0]?.current !== '1.0.0', 20000);
+    expect((await client.call('providers.update', { providerId: 'gated-fake' })).state).toBe('updating');
+    expect((await changed)[0]).toMatchObject({ current: '1.12.0', state: 'idle', message: null });
+    expect(harness.core.providers.summary('gated-fake')).toMatchObject({ available: true, executable: program });
+    await waitFor(() => harness?.core.procs.liveCount('update:gated-fake') === 0);
+  });
+
   test('an updater that finds nothing newer leaves the agent reading as current, not failed', async () => {
     const { client } = await start('none', 'update-current');
 

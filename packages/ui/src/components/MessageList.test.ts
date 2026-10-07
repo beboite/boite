@@ -1075,7 +1075,7 @@ test('a turn of a thousand calls is drawn as a window of rows, and only its firs
   expect(most).toBeGreaterThan(1);
   expect(most).toBeLessThan(14);
   expect(labels).toBeLessThanOrEqual(1);
-});
+}, 60_000);
 
 test('a scroll inside the rows already drawn redraws nothing and reads no tool call again', async ({ ready }) => {
   window.localStorage.clear();

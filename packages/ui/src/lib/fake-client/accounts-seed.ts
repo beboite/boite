@@ -191,15 +191,15 @@ export function seedAccounts() {
       source: 'shipped',
       available: true,
       executable: 'C:\\Users\\you\\AppData\\Roaming\\npm\\opencode.exe',
-      models: [{ id: 'default', name: 'OpenCode 2 default', default: true }],
+      models: [{ id: 'default', name: 'OpenCode default', default: true }],
       install: null,
       experimental: true,
       capabilities: {
         approvals: true,
-        hooks: false,
+        hooks: true,
         checkpoint: false,
         images: false,
-        planMode: false,
+        planMode: true,
         resume: true
       }
     },

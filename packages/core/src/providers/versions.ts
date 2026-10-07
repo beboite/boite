@@ -94,21 +94,28 @@ function start(program: string, args: string[]): void {
   let stat: { mtimeMs: number; size: number };
   try { stat = statSync(program); } catch { return; }
   fresh.add(program);
-  const read = host.run(program, args).then(
+  // What a resolution answers while this read runs: the kept reading when it
+  // still fits the file (a recheck), nothing otherwise. Only the second kind
+  // leaves someone waiting for the answer, whatever version comes back.
+  const kept = readings.get(program);
+  const believed = kept !== undefined && kept.mtimeMs === stat.mtimeMs && kept.size === stat.size;
+  const failedBefore = failures.has(program);
+  // Behind a promise from the first step: a host that throws instead of rejecting must not break a provider list.
+  const read = Promise.resolve().then(() => host.run(program, args)).then(
     (output) => {
       failures.delete(program);
-      const before = readings.get(program)?.version;
       const version = readVersion(output);
       readings.set(program, { mtimeMs: stat.mtimeMs, size: stat.size, version });
       pending.delete(program);
       persist();
-      if (before !== version) for (const each of hosts) each.changed();
+      if (!believed || kept.version !== version) for (const each of hosts) each.changed();
     },
     () => {
       pending.delete(program);
       failures.set(program, Date.now());
-      // From unknown to "cannot say": the candidate is passed over now, and a later one may resolve.
-      for (const each of hosts) each.changed();
+      // From unknown to "cannot say": the candidate is passed over now, and a
+      // later one may resolve. A retry that fails again changes nothing.
+      if (!failedBefore) for (const each of hosts) each.changed();
     },
   );
   pending.set(program, read);
@@ -128,13 +135,14 @@ function recheckLater(program: string, args: string[]): void {
 /**
  * The major version of the program at this path: a number once it is known,
  * null when the program answered with no version, cannot be reached or could
- * not be run a moment ago, and undefined while it has not been asked yet, in
- * which case the question is on its way. A program that could not be run is
- * asked again once `RETRY_MS` has passed; until then it is no candidate, so
- * the ones behind it get their turn. `args` is what makes the program print
- * its version.
+ * not be run, and undefined while it has not been asked yet, in which case the
+ * question is on its way. A program that could not be run stays no candidate,
+ * so the ones behind it get their turn, and is asked again in the background
+ * once `RETRY_MS` has passed. `args` is what makes the program print its
+ * version. With `ask` false nothing is ever started: the answer is what is
+ * already known, for a provider that is turned off and must start nothing.
  */
-export function majorAt(program: string, args: readonly string[]): number | null | undefined {
+export function majorAt(program: string, args: readonly string[], ask = true): number | null | undefined {
   let stat: { mtimeMs: number; size: number };
   try {
     stat = statSync(program);
@@ -143,14 +151,18 @@ export function majorAt(program: string, args: readonly string[]): number | null
   }
   const reading = readings.get(program);
   if (reading !== undefined && reading.mtimeMs === stat.mtimeMs && reading.size === stat.size) {
-    recheckLater(program, [...args]);
+    if (ask) recheckLater(program, [...args]);
     if (reading.version === null) return null;
     const major = Number.parseInt(reading.version, 10);
     return Number.isNaN(major) ? null : major;
   }
   const failedAt = failures.get(program);
-  if (failedAt !== undefined && Date.now() - failedAt < RETRY_MS) return null;
-  start(program, [...args]);
+  if (failedAt !== undefined) {
+    // Asked before and it could not say: passed over, while a new try runs behind.
+    if (ask && Date.now() - failedAt >= RETRY_MS) start(program, [...args]);
+    return null;
+  }
+  if (ask) start(program, [...args]);
   return undefined;
 }
 

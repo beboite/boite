@@ -3453,7 +3453,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   /**
    * Turn one provider on or off on this core's machine. Off, nothing of that
    * provider starts and no picker offers it; its accounts, its threads and its
-   * install stay as they are, and a turn already running ends by itself. On
+   * install stay as they are, and a turn already queued or running ends by itself. On
    * again, its default account is adopted if an existing login is found. The
    * answer and `providers.updated` carry every summary with its `enabled`.
    * Owner only: it decides what the machine runs.

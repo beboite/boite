@@ -24,6 +24,8 @@ function writeExperimental(dataDir: string): void {
 test('a provider turned off starts nothing, says why, and runs again once it is back on', async () => {
   const client = await harness.connect();
   const { threadId, accountId } = await echoThread(harness, client);
+  // A second seat with a directory of its own, the kind a sign-in is run for.
+  const seat = await client.call('accounts.add', { providerId: 'echo', label: 'Another seat' });
   const updates: RpcEvents['providers.updated'][] = [];
   client.on('providers.updated', (payload) => { updates.push(payload); });
 
@@ -42,6 +44,9 @@ test('a provider turned off starts nothing, says why, and runs again once it is 
   expect(capabilities.images.reason).toBe('provider-disabled');
   // The account and the thread are kept: off is not removed.
   expect((await client.call('accounts.list', {})).some((account) => account.id === accountId)).toBe(true);
+  // Its sign-in starts the provider's program too, in a pipe or in a terminal: both are refused.
+  await expect(client.call('accounts.login', { accountId: seat.id })).rejects.toThrow(/Echo is turned off on this machine/);
+  await expect(client.call('accounts.loginTerminal', { accountId: seat.id, cols: 80, rows: 24 })).rejects.toThrow(/Echo is turned off on this machine/);
 
   const on = await client.call('providers.setEnabled', { providerId: 'echo', enabled: true });
   expect(on.loaded.find((provider) => provider.id === 'echo')?.enabled).toBe(true);
@@ -125,4 +130,31 @@ test.skipIf(process.platform === 'win32')('a list waits for the program a candid
   // The reading is kept beside the data, for the next start.
   const kept = JSON.parse(await Bun.file(join(harness.dataDir, 'executable-versions.json')).text()) as Record<string, { version: string }>;
   expect(kept[program]?.version).toBe('2.3.1');
+});
+
+test.skipIf(process.platform === 'win32')('a provider that is off is listed without running its program, which is asked the moment it is turned on', async () => {
+  // The program leaves a mark each time it runs.
+  const program = join(harness.dataDir, 'quiet-agent');
+  const mark = join(harness.dataDir, 'quiet-agent.ran');
+  writeFileSync(program, `#!/bin/sh\necho ran >> "${mark}"\necho "quiet-agent 2.0.0"\n`);
+  chmodSync(program, 0o755);
+  const profile = { detect: {}, executable: [{ kind: 'file', value: program, major: 2 }], isolation: { QUIET_HOME: '{isolationDir}' } };
+  mkdirSync(join(harness.dataDir, 'providers'), { recursive: true });
+  writeFileSync(join(harness.dataDir, 'providers', 'quiet.json'), JSON.stringify({
+    id: 'quiet', schemaVersion: 1, name: 'Quiet', shortName: 'Quiet', protocol: 'acp', experimental: true, roots: ['{isolationDir}'],
+    profiles: { linux: profile, macos: profile }, auth: { kind: 'none' },
+    models: [{ id: 'default', name: 'Default', default: true }],
+    capabilities: { approvals: true, hooks: false, checkpoint: false, images: false, planMode: false, resume: true },
+  }));
+  const client = await harness.connect();
+  const listed = await client.call('providers.reload', {});
+  // Experimental, so off: whether it is installed is not known, and nothing was started to find out.
+  expect(listed.loaded.find((provider) => provider.id === 'quiet')).toMatchObject({ enabled: false, available: false, executable: null });
+  await client.call('providers.list', {});
+  expect(await Bun.file(mark).exists()).toBe(false);
+
+  // Turned on, the answer already says it is there.
+  const on = await client.call('providers.setEnabled', { providerId: 'quiet', enabled: true });
+  expect(on.loaded.find((provider) => provider.id === 'quiet')).toMatchObject({ enabled: true, available: true, executable: program });
+  expect((await Bun.file(mark).text()).trim()).toBe('ran');
 });

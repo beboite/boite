@@ -349,7 +349,14 @@ const app = agent({ name: 'acp-fake' })
     const switched = modeSwitchIn(text);
     if (switched !== null) {
       currentModeId = switched;
-      await send({ sessionUpdate: 'current_mode_update', currentModeId: switched });
+      const option = configOptions.find((entry) => entry.id === 'mode');
+      if (modeOption && option?.type === 'select') {
+        // An agent whose modes are a config option announces the change as its options.
+        option.currentValue = switched;
+        await send({ sessionUpdate: 'config_option_update', configOptions });
+      } else {
+        await send({ sessionUpdate: 'current_mode_update', currentModeId: switched });
+      }
     }
 
     const directives = directivesOf(text);

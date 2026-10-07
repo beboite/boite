@@ -2,7 +2,7 @@ import { Database } from 'bun:sqlite';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import type { OsProfile } from '@boite/contracts';
 import { openCode2Key } from '../src/providers/opencode.ts';
 import { resolveCommand } from '../src/providers/resolve.ts';
@@ -88,12 +88,27 @@ test.skipIf(process.platform === 'win32')('a program replaced in place is asked 
   await versionsSettled();
   expect(resolveCommand(gated)?.executable).toBe(file);
 
+  // Rewritten at the same version, as a reinstall does: nothing resolves while it is asked again,
+  // so whoever listed meanwhile is told once the answer is in, though the version did not move.
+  writeFileSync(file, '#!/bin/sh\necho "agent 2.4.0"\n# reinstalled\n');
+  const before = state.changes;
+  expect(resolveCommand(gated)).toBeNull();
+  await versionsSettled();
+  expect(resolveCommand(gated)?.executable).toBe(file);
+  expect(state.changes).toBe(before + 1);
+
   // The same path now holds another major: its size changed, so the reading is not believed.
   writeFileSync(file, '#!/bin/sh\necho "agent version 3.0.0 (rewritten)"\n');
   expect(resolveCommand(gated)).toBeNull();
   await versionsSettled();
   expect(resolveCommand(gated)).toBeNull();
-  expect(state.runs.length).toBe(2);
+  expect(state.runs.length).toBe(3);
+
+  // A provider that is turned off is resolved without asking: a program never asked stays unknown and is not run.
+  const unasked = program('unasked', 'agent 2.0.0');
+  expect(resolveCommand(profile({ kind: 'file', value: unasked, major: 2 }), false)).toBeNull();
+  await versionsSettled();
+  expect(state.runs).not.toContain(unasked);
 
   const mute = program('mute', 'no version here');
   const silent = profile({ kind: 'file', value: mute, major: 2 });
@@ -126,6 +141,19 @@ test.skipIf(process.platform === 'win32')('a program that cannot be run is passe
   // Not asked again at every resolution.
   expect(resolveCommand(gated)?.executable).toBe(plain);
   expect(asked).toEqual([broken]);
+
+  // A minute later it is asked again behind the scenes, and stays passed over meanwhile:
+  // the candidate behind it keeps resolving, and a second failure tells nobody anything new.
+  const now = spyOn(Date, 'now').mockReturnValue(Date.now() + 61_000);
+  try {
+    expect(resolveCommand(gated)?.executable).toBe(plain);
+    await versionsSettled();
+    expect(asked).toEqual([broken, broken]);
+    expect(changes).toBe(1);
+    expect(resolveCommand(gated)?.executable).toBe(plain);
+  } finally {
+    now.mockRestore();
+  }
 });
 
 function descriptor(patch: Record<string, unknown>): Record<string, unknown> {
@@ -193,9 +221,12 @@ test('a SQLite login reads as signed in once a listed table holds a row', () => 
   expect(sqliteHasRows(file, ['account', 'credential'])).toBe(true);
   db.close();
 
+  // A file that is not a database says nothing about a login: unknown, never signed out.
   const broken = join(dir, 'broken.db');
   writeFileSync(broken, 'this is not a database, and it is long enough to be read as one');
-  expect(sqliteHasRows(broken, ['credential'])).not.toBe(true);
+  expect(sqliteHasRows(broken, ['credential'])).toBeNull();
+  // A table this version of the agent does not have is only an empty answer.
+  expect(sqliteHasRows(file, ['no_such_table'])).toBe(false);
 });
 
 test('the OpenCode 2 key of an integration is the active credential stored for it', () => {

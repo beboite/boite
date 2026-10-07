@@ -246,7 +246,13 @@ session protocol either.
   so asking costs one run of the program per install and none at a restart.
   Until a program has answered, the profile resolves to nothing rather than
   to a later candidate; the answer lists the providers again and
-  `providers.updated` follows when something changed. A launcher script that
+  `providers.updated` follows. Whoever must know what is installed right now
+  waits for it, five seconds at most: `providers.list`, `providers.reload`,
+  the turns a restart hands over, and the version read after an update, whose
+  updater has just rewritten the program. A program that could not be run is
+  passed over for the candidate behind it and asked again a minute later. A
+  provider that is turned off is listed from what is already known and its
+  program is never asked; turning it on asks it. A launcher script that
   stays the same while the program behind it changes is covered by one check
   per run of the core, thirty seconds after the reading is first used, and by
   another after an agent update. An `npm` candidate takes no `major`: it
@@ -593,10 +599,13 @@ descriptor: on, or off when it is `experimental`.
 Off, nothing of that provider starts. A turn, a model probe and
 `threads.capabilities` go through the same gate as a missing agent
 (`assertDriverRunnable`) and answer with a sentence saying where to turn it
-back on, and the capability reason `provider-disabled`. The update check skips
-it, its usage is not read, no title is written on it, a delegated agent cannot
-be routed to it and no default account is adopted for it. Its warm processes
-are released at once; a turn already running ends by itself.
+back on, and the capability reason `provider-disabled`. A sign-in and a banked
+reset are refused the same way, and a connection check reads the login files
+without starting the agent. The update check skips it, its program is not
+even asked its version, its usage is not read, no title is written on it, a
+delegated agent cannot be routed to it and no default account is adopted for
+it. Its warm processes
+are released at once; a turn already queued or running ends by itself.
 
 Nothing is removed. Accounts, threads, the managed install and the user's own
 install stay as they are, and turning the provider back on adopts an existing
@@ -746,7 +755,9 @@ answers; YOLO does not invent form values or complete a device sign-in.
   category `mode` instead, with no `availableModes` at all, which is what
   OpenCode does with `build` and `plan`: the same candidates are matched
   against that option's values and the mode goes out as a
-  `session/set_config_option`. Every Boite mode but `plan` ends its candidate
+  `session/set_config_option`. A change the agent makes on its own reaches
+  Boite as a `config_option_update`, which refreshes the kept value so the
+  next turn puts the thread's mode back. Every Boite mode but `plan` ends its candidate
   list on the agent's plain mode (`default`, `build`, `normal`), so a thread
   that leaves `plan` for a mode the agent does not list goes back to the plain
   one instead of staying in `plan`.

@@ -508,7 +508,14 @@ export function startServer(options: ServerOptions): RunningServer {
   // What a restart handed over starts once agents can reach this core. After
   // the caller's own setup: `main` writes `core.json` right behind this call.
   setTimeout(() => {
-    if (!stopping) core.threads.handoff.resume();
+    if (stopping) return;
+    // A provider told from another by its program's version is not installed,
+    // as far as a turn is concerned, until that program has answered: on the
+    // first start after an update there is no kept reading, and a turn resumed
+    // before it would be refused for good.
+    void core.providers.settle().finally(() => {
+      if (!stopping) core.threads.handoff.resume();
+    });
   }, 0);
   core.subscribers = {
     hasSubscribers(threadId: ThreadId): boolean {

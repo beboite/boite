@@ -68,7 +68,7 @@ function accountQuotas(ctx: FakeContext): AccountQuota[] {
         ? { kind: 'budget' as const, enabled: true, remaining: 75, limit: 100, unlimited: false }
         : { kind: 'balance' as const, enabled: null, remaining: 42, limit: null, unlimited: false },
     } : {}),
-    accountId: account.id, providerId: account.providerId, providerName: account.providerId === 'opencode' ? 'OpenCode Go' : ctx.providers.find((p) => p.id === account.providerId)?.name ?? account.providerId,
+    accountId: account.id, providerId: account.providerId, providerName: account.providerId === 'opencode' || account.providerId === 'opencode-v2' ? 'OpenCode Go' : ctx.providers.find((p) => p.id === account.providerId)?.name ?? account.providerId,
     label: account.label, enabled: account.id === 'quota:antigravity-cli' ? ctx.quotaEnabled[account.id] === true : ctx.quotaEnabled[account.id] !== false,
     // The CLI's own account reports nothing: its limits come from the `quota:antigravity-cli` source.
     status: proxied(account.providerId) || ctx.providers.find(provider => provider.id === account.providerId)?.enabled === false || account.providerId === 'echo' || account.providerId === 'pi' || account.providerId === 'antigravity-cli' || account.id === 'a-antigravity' ? 'unsupported' : ctx.quotaEnabled[account.id] === false || account.id === 'quota:antigravity-cli' && ctx.quotaEnabled[account.id] !== true ? 'disabled' : 'ready',
