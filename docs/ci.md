@@ -133,7 +133,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 588,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,250,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,265,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,600,000 |
 
@@ -148,6 +148,12 @@ unchanged limits. These are build sizes, not startup or memory measurements.
 Sizes and blurs for deferred pictures measured 3,587,361 emitted core bytes
 on Windows CI on 2026-10-06, 7,361 bytes above the previous 3,580,000 limit:
 the image header parser and the preview queue.
+
+Opening on another machine with a device's main machine (#366) and the folded
+machine rows (#367) measured 4,250,457 UI bytes together on 2026-10-07, 457
+bytes above the previous 4,250,000 limit. Fresh builds measured 4,243,226 bytes
+before them, 4,247,667 after the first and 4,250,457 after the second, so each
+stayed under the limit on its own pull request and the two crossed it on main.
 
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured
