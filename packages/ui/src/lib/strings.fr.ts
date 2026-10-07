@@ -14,7 +14,7 @@ import type { Translation } from './i18n.svelte';
 export const fr: Translation = {
   subscriptionProxy: {
     heading: 'Proxy d\'abonnements', enable: 'Utiliser un proxy d\'abonnements',
-    hint: 'Claude et Codex utilisent la passerelle de cette machine. Limites ouvre son tableau de bord dans Boite. Les autres agents gardent leur configuration.',
+    hint: 'Claude et Codex utilisent la passerelle de cette machine, et OpenCode 2 ajoute ses autres modèles aux siens. Limites ouvre son tableau de bord dans Boite. Les autres agents gardent leur configuration.',
     baseUrl: 'URL de l\'API', dashboardUrl: 'URL du tableau de bord des limites', key: 'Clé API (facultative)',
     keyHint: 'Laissez vide pour garder la clé enregistrée. Utilisez la clé API du proxy, pas sa clé de gestion du tableau de bord.',
     clearKey: 'Retirer la clé enregistrée', save: 'Enregistrer le proxy', saved: 'Proxy enregistré',
@@ -38,7 +38,9 @@ export const fr: Translation = {
     display: 'Affichage', resolution: 'Résolution de la page', fitPhone: 'Adapter à cet écran', phone: 'Téléphone', tablet: 'Tablette', rotate: 'Pivoter', width: 'Largeur', height: 'Hauteur', apply: 'Appliquer', sharedSize: 'La résolution change aussi la page que voit l’agent.', restoreSize: 'Revenir à la taille par défaut', previewZoom: 'Zoom de l’aperçu (cet appareil seulement)', fit: 'Ajuster', panHint: 'Glissez pour déplacer l’aperçu. Utilisez les flèches pour défiler dans la page.',
     address: 'Adresse', go: 'Aller', back: 'Précédent', forward: 'Suivant', reload: 'Recharger', badAddress: 'Saisissez une adresse web (http ou https).',
     title: 'Navigateur de l’agent', waiting: 'En attente de la page', live: 'En direct', paused: 'En pause', reconnecting: 'Reconnexion', pause: 'Pause', resume: 'Reprendre',
-    interact: 'Toucher ou faire défiler la page partagée', image: 'Vue en direct du navigateur de l’agent', scrollUp: 'Défiler vers le haut', scrollDown: 'Défiler vers le bas',
+    interact: 'Toucher ou faire défiler la page partagée', interactDesk: 'La page partagée : cliquez dessus, puis écrivez',
+    deskHint: 'Cliquez dans la page, puis écrivez. Glissez pour sélectionner, double-cliquez un mot, défilez à la molette. Copier, couper et coller passent par le clavier.',
+    copy: 'Copier le texte sélectionné', copied: 'Copié.', nothingSelected: 'Rien n’est sélectionné dans la page. Touchez deux fois un mot d’abord.', copyCut: 'La sélection était trop longue : son début a été copié.', image: 'Vue en direct du navigateur de l’agent', scrollUp: 'Défiler vers le haut', scrollDown: 'Défiler vers le bas',
     text: 'Touchez un champ de la page, puis écrivez ici', send: 'Envoyer le texte à la page', gesture: 'Touchez pour cliquer. Glissez pour défiler. Retour envoie le texte puis Entrée ; ⌫ sur un champ vide efface dans la page.'
   },
   agentBrowser: {
@@ -59,7 +61,8 @@ export const fr: Translation = {
     back: 'Retour', home: 'Accueil', recents: 'Applications récentes', rotate: 'Pivoter', power: "Bouton d'alimentation", enter: 'Entrée', backspace: 'Effacer le caractère précédent',
     text: 'Écrire dans le champ actif', send: 'Envoyer le texte', ascii: "Seuls les caractères ASCII imprimables atteignent l'appareil.",
     screenshot: "Enregistrer une capture d'écran", close: 'Fermer {name}', shutdown: 'Éteindre',
-    interact: "Touchez ou glissez sur l'écran de l'appareil", image: 'Vue en direct de {name}', gesture: 'Touchez pour appuyer. Glissez pour balayer.'
+    interact: "Touchez ou glissez sur l'écran de l'appareil", interactDesk: "L'écran de l'appareil : cliquez dessus, puis écrivez",
+    deskHint: "Cliquez sur l'écran, puis écrivez. Glissez pour balayer, défilez à la molette, Échap revient en arrière. Coller écrit le presse-papiers ; copier depuis l'appareil n'est pas disponible.", image: 'Vue en direct de {name}', gesture: 'Touchez pour appuyer. Glissez pour balayer.'
   },
   agents: {
     runtime: "Modèles et limites",
@@ -1635,7 +1638,7 @@ export const fr: Translation = {
     downloading: 'Téléchargement, {percent}',
     verifying: "Vérification de l'archive",
     extracting: 'Décompression',
-    upToDate: 'Installé par Boite, version {version}',
+    installed: 'Installé par Boite',
     updateAvailable: 'Version {installed}, {available} disponible',
     progress: 'Progression du téléchargement'
   },
@@ -2214,8 +2217,16 @@ export const fr: Translation = {
     executable: 'Lancé depuis',
     accounts: 'Comptes',
     installation: 'Installation',
-    version: 'Version',
+    managedCopy: 'Copie de Boite',
     addHeading: 'Ajouter un fournisseur',
+    offHeading: 'Désactivés',
+    off: 'Désactivé',
+    experimental: 'Expérimental',
+    /** The switch's accessible name: `{provider}` is the provider's own name. */
+    enable: 'Utiliser {provider}',
+    enableHint: "Désactivé, Boite ne lance rien de ce fournisseur et aucune liste ne le propose. Ses comptes et ses conversations sont conservés.",
+    /** A thread whose provider is off: the composer's chip and the sentence behind it. */
+    threadOff: '{provider} est désactivé. Activez-le dans Réglages > Fournisseurs pour continuer cette conversation.',
     defaultModel: 'Modèle par défaut',
     autoUpdate: 'Mises à jour automatiques',
     checkUpdates: 'Rechercher les mises à jour',

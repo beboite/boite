@@ -514,7 +514,10 @@ The view shows the chosen tab under an address bar with back, forward and
 reload. Tap to click and drag to scroll, as on the phone itself. Tap a page
 field and type in the input below the preview: Return sends the text and then
 Enter, and Backspace in the empty input erases on the page. Navigation keys
-and scroll buttons remain available without a hardware keyboard.
+and scroll buttons remain available without a hardware keyboard. A double tap
+selects a word and **Copy** puts the page's selection on the phone's
+clipboard. A computer has none of these controls: it types, scrolls, selects,
+copies and pastes on the page itself ([the agent's browser](browser.md#watching-it)).
 
 The phone requests JPEG frames while the view is shown and the app visible,
 one at a time: the next as soon as the last has arrived, at most four a second

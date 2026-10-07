@@ -12,7 +12,7 @@
       "executable": [
         { "kind": "file", "value": "{agentsDir}/opencode.exe" },
         { "kind": "file", "value": "{npmRoot}/opencode-ai/bin/opencode.exe" },
-        { "kind": "path", "value": "opencode" }
+        { "kind": "path", "value": "opencode", "major": 1 }
       ],
       "install": {
         "arch": "x64",
@@ -31,8 +31,9 @@
       "detect": {},
       "update": { "args": ["upgrade"], "latestNpm": "opencode-ai" },
       "executable": [
-        { "kind": "path", "value": "opencode" },
-        { "kind": "file", "value": "{home}/.opencode/bin/opencode" }
+        { "kind": "path", "value": "opencode", "major": 1 },
+        { "kind": "file", "value": "{npmRoot}/opencode-ai/bin/opencode.exe" },
+        { "kind": "file", "value": "{home}/.opencode/bin/opencode", "major": 1 }
       ],
       "launch": { "args": ["acp", "--port", "0"] },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}" },
@@ -43,8 +44,9 @@
       "detect": {},
       "update": { "args": ["upgrade"], "latestNpm": "opencode-ai" },
       "executable": [
-        { "kind": "path", "value": "opencode" },
-        { "kind": "file", "value": "{home}/.opencode/bin/opencode" }
+        { "kind": "path", "value": "opencode", "major": 1 },
+        { "kind": "file", "value": "{npmRoot}/opencode-ai/bin/opencode.exe" },
+        { "kind": "file", "value": "{home}/.opencode/bin/opencode", "major": 1 }
       ],
       "launch": { "args": ["acp", "--port", "0"] },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}" },

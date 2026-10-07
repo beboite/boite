@@ -406,7 +406,7 @@ export function buildBatch(
   const isModeB = mode === "B";
   return events.filter(ev => ALLOWED_EVENTS.has(ev.name)).map((ev) => {
     const distinctId = ev.name === "ping" ? ids.pingIdentifier : ids.eventIdentifier;
-    const providers = ["claude", "codex", "opencode", "pi", "grok", "antigravity", "antigravity-cli", "muse"];
+    const providers = ["claude", "codex", "opencode", "opencode-v2", "pi", "grok", "antigravity", "antigravity-cli", "muse"];
     const properties: Record<string, unknown> = {
       distinct_id: distinctId, $process_person_profile: isModeB,
       ...privacyProperties(), telemetry_mode: mode,

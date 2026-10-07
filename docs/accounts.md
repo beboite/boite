@@ -124,6 +124,9 @@ same change, or passive checks can report a signed-in account as unauthenticated
 `accounts.check` reads the files `auth.session` names. A passive check answers
 `ok` when the files exist, `unauthenticated` when they are absent, `unknown`
 when the provider can store its login elsewhere, or `error` when the check fails.
+A provider that names `auth.sqlite` is read the same way from its database:
+`ok` once a listed table holds a row
+([providers.md](providers.md#opencode-2)).
 
 The Check connection button requests a fresh login check, without listing
 models or sending a prompt. Codex reads its account through the app-server with

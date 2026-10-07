@@ -138,6 +138,31 @@ phone watching one tab cost one. Input names the frame it was aimed at; a tap
 on a frame of another page or another viewport size is refused, and the
 address bar accepts only http and https.
 
+A computer drives the page itself, with nothing under it but one line of
+help. A click on the page gives it the keyboard until a click or a focus lands
+elsewhere: characters, Enter, Tab, Escape, the arrows, Home, End, Page Up and
+Down, Delete and Backspace leave as native key events (`press`), and the keys
+typed while a request is in flight leave together in the next one, in order.
+The wheel scrolls under the pointer. A drag with the mouse is a drag in the
+page, so it selects text; a second click selects the word, a third the
+paragraph, and Shift with a click extends the selection. Control or Command
+with A selects all, with Z or Y undoes and redoes.
+
+The clipboard is the viewer's own. Paste inserts this computer's text in the
+focused field of the page. Copy and cut ask the core for the page's selection
+(`browser.remoteSelection`) and write it to this computer's clipboard; cut then
+erases it in the page. The selection is read in the focused field, else in the
+document, through open shadow roots and same-origin frames, at most 100,000
+characters. A password field answers nothing, and a selection inside a
+cross-origin frame is not read. The other Control and Command chords and the
+function keys stay with the app.
+
+A touch screen (`pointer: coarse`) keeps the scroll buttons, the keys and the
+text field under the page, with a **Copy** button for the selection: a double
+tap selects a word first. Pasting there goes through the text field.
+`lib/live-input.ts` holds the keyboard and clipboard rules for this view and
+the Device panel.
+
 These are frames, not a video stream: a few a second while the page moves.
 A video stream (the screencast encoded as H.264 and decoded by WebCodecs in the
 client) would be smoother on a fast link; it is not built.
@@ -147,8 +172,9 @@ client) would be smoother on a fast link; it is not built.
 `browser.command` is the owner's and the conversation's own agent's, never
 another conversation's: its token names one thread. A paired phone has
 `browser.remoteStatus`, `browser.remoteFrame` and `browser.remoteInput` for a
-conversation it has subscribed to, and never `browser.command`, so it cannot
-run a script in the page. It can act in the page as a person would, signed-in
+conversation it has subscribed to, with `browser.remoteSelection` for the text
+selected there, and never `browser.command`, so it cannot run a script in the
+page. It can act in the page as a person would, signed-in
 sites included: pair only devices you would give that. `browser.remoteChanged`
 goes to the clients subscribed to the conversation.
 

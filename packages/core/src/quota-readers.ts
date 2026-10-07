@@ -1,3 +1,4 @@
+import { OPENCODE_V2, openCode2Key } from './providers/opencode.ts';
 import { readFile, mkdtemp } from 'node:fs/promises';
 import { removeDir } from './fs-retry.ts';
 import { existsSync } from 'node:fs';
@@ -95,7 +96,10 @@ export async function readExtraQuota(core: Core, account: Account): Promise<Quot
   const root = env['XDG_DATA_HOME'] ?? process.env['XDG_DATA_HOME'] ?? join(homePath(), '.local', 'share');
   // Isolated accounts never borrow an API key from the host environment.
   let token = account.isolationDir === null ? process.env['OPENCODE_API_KEY'] : undefined;
-  if (!token) {
+  if (!token && account.providerId === OPENCODE_V2) {
+    // OpenCode 2 keeps its sign-ins in its database, never in auth.json.
+    token = openCode2Key(root, 'opencode-go') ?? undefined;
+  } else if (!token) {
     const auth = await credentials(join(root, 'opencode', 'auth.json'), 'OpenCode Go');
     const login = obj(auth['opencode-go']);
     if (login['type'] === 'api' && typeof login['key'] === 'string') token = login['key'];

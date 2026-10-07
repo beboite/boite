@@ -1,8 +1,9 @@
 /*
  * The check of a page before it is shown: `boite view` loads the page it is
  * about to publish in a browser of its own and asks what it threw, what the
- * content policy refused and how tall it stands. `AgentBrowser.probe` starts
- * and ends the browser; this is what happens in it.
+ * content policy refused and how tall it stands. `PageProbes` starts and ends
+ * the browser of each check, with what `AgentBrowser` gives it to do so;
+ * `probePage` is what happens in that browser.
  */
 import { VIEW_HEIGHT_EXPRESSION } from '@boite/contracts';
 import type { Cdp } from './cdp.ts';
@@ -62,4 +63,56 @@ export async function probePage(cdp: Cdp, url: string, widths: readonly number[]
     }
     return { errors, heights };
   } finally { for (const stop of off) stop(); }
+}
+
+/**
+ * The browsers started to check a page, one check at a time since each starts
+ * a process. No conversation lists them, so they are closed here: when the
+ * page answered, when the wait ran out, or on arrival for one that came up
+ * after it.
+ */
+export class PageProbes<E extends { cdp: Cdp; dir: string }> {
+  readonly #running = new Set<E>();
+  #queue: Promise<void> = Promise.resolve();
+
+  constructor(private readonly launch: () => Promise<E>, private readonly lost: (engine: E) => void, private readonly warn: (message: string) => void) {}
+
+  /** Null when the browser did not answer in time or could not be started. */
+  check(url: string, widths: readonly number[], timeoutMs: number): Promise<PageProbe | null> {
+    const run = this.#queue.then(() => this.#check(url, widths, timeoutMs));
+    this.#queue = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  /** Whether `dir` is the profile folder of a check still running: it is not a leftover to remove. */
+  holds(dir: string): boolean {
+    return [...this.#running].some(engine => engine.dir === dir);
+  }
+
+  close(): void {
+    for (const engine of [...this.#running]) { this.#running.delete(engine); this.lost(engine); }
+  }
+
+  #check(url: string, widths: readonly number[], timeoutMs: number): Promise<PageProbe | null> {
+    let engine: E | null = null;
+    let over = false;
+    // Once, whoever asks first: the page answered, the wait ran out, or the browser came up too late.
+    const end = () => {
+      over = true;
+      if (!engine) return;
+      this.#running.delete(engine); this.lost(engine);
+      engine = null;
+    };
+    const work = (async (): Promise<PageProbe> => {
+      const started = engine = await this.launch();
+      if (over) throw new Error('the browser started after the wait for it ran out');
+      this.#running.add(started);
+      return probePage(started.cdp, url, widths);
+    })();
+    return Promise.race([
+      work.finally(end).catch(error => { this.warn(`a page could not be checked before it was shown: ${error instanceof Error ? error.message : String(error)}`); return null; }),
+      // The browser is closed with the wait, not when a command it no longer answers gives up.
+      Bun.sleep(timeoutMs).then(() => { end(); return null; }),
+    ]);
+  }
 }

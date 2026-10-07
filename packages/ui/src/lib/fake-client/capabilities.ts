@@ -1,4 +1,4 @@
-import { deriveThreadCapabilities, protocolSupportsSteering, threadActive } from '@boite/contracts';
+import { deriveThreadCapabilities, protocolSupportsSteering, providerEnabled, threadActive } from '@boite/contracts';
 import type { FakeContext, FakeMethods } from './context';
 
 /** The fixture reports its implemented controls through the same pure mapping as the core. */
@@ -22,7 +22,7 @@ export function capabilityMethods(ctx: FakeContext): Pick<FakeMethods, 'threads.
       return deriveThreadCapabilities({
         threadId, providerId: thread.providerId, protocol, selectionVersion: thread.selectionVersion ?? 0,
         providerCapabilities: provider?.capabilities ?? null,
-        runtimeReason: !provider?.available ? 'provider-unavailable' : !account || account.providerId !== thread.providerId || account.status === 'unauthenticated' ? 'account-unavailable' : null,
+        runtimeReason: !provider ? 'provider-unavailable' : !providerEnabled(provider) ? 'provider-disabled' : !provider.available ? 'provider-unavailable' : !account || account.providerId !== thread.providerId || account.status === 'unauthenticated' ? 'account-unavailable' : null,
         conversationReason: thread.agentSessionId || thread.projectId === null ? 'agent-session' : thread.archived ? 'archived' : null,
         busy: threadActive(thread.status) || Boolean(running), steeringSupported, steeringReason,
         compactionReason: !thread.sessionId ? 'no-session' : protocol === 'acp' && !thread.commands.some(command => command.name === 'compact') ? 'no-command' : protocol === 'agy' ? 'unsupported' : null,

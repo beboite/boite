@@ -263,3 +263,48 @@ test('a signed-in Claude seat is probed before its model and account are applied
     gate.resolve();
   }
 });
+
+test('a provider turned off leaves the picker, its favorites and the draft that was on it', async () => {
+  await mountAt('landing');
+  const tiles = () => [...document.querySelectorAll('[data-testid=composer-picker-menu] .tile[data-provider]')]
+    .map((tile) => tile.getAttribute('data-provider'))
+    .filter((id) => id !== 'favorites' && id !== 'more');
+  const trigger = () => document.querySelector<HTMLButtonElement>('[data-testid=composer-picker]')!;
+  trigger().click();
+  await waitFor(() => tiles().length > 1);
+  const chosen = store.defaultChoice()!.providerId;
+  const other = tiles().find((id) => id !== chosen)!;
+  expect(tiles()).toContain(chosen);
+  // An experimental provider nobody turned on was never offered.
+  expect(tiles()).not.toContain('opencode-v2');
+
+  expect(await store.setProviderEnabled(other, false)).toBe(true);
+  await waitFor(() => !tiles().includes(other));
+  expect(tiles()).toContain(chosen);
+
+  // The provider the draft sits on: the composer moves to one that is still on.
+  expect(await store.setProviderEnabled(chosen, false)).toBe(true);
+  await waitFor(() => !tiles().includes(chosen));
+  expect(store.defaultChoice()?.providerId).not.toBe(chosen);
+  expect(store.offeredProviders.map((provider) => provider.id)).not.toContain(chosen);
+
+  expect(await store.setProviderEnabled(other, true)).toBe(true);
+  await waitFor(() => tiles().includes(other));
+});
+
+test('a thread whose provider is turned off says so beside the picker, and the chip leads to Providers', async () => {
+  await mountAt('recent');
+  await waitFor(() => store.openThread !== null);
+  const chip = () => document.querySelector<HTMLButtonElement>('[data-testid=composer-provider-off]');
+  expect(chip()).toBeNull();
+  const provider = store.providerOf(store.openThread!.providerId)!;
+  expect(await store.setProviderEnabled(provider.id, false)).toBe(true);
+  await waitFor(() => chip() !== null);
+  expect(chip()!.textContent).toBe('Turned off');
+  expect(chip()!.title).toBe(`${provider.name} is turned off. Turn it on in Settings > Providers to continue this conversation.`);
+  chip()!.click();
+  await waitFor(() => store.page === 'settings' && store.settingsTab === 'accounts');
+  store.showChat();
+  expect(await store.setProviderEnabled(provider.id, true)).toBe(true);
+  await waitFor(() => chip() === null);
+});

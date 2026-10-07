@@ -25,7 +25,7 @@ import { lanAddress } from './server/lan.ts';
 import { ProcRegistry } from './procs.ts';
 import { withLoad } from './threads/records.ts';
 import { ProjectStore } from './projects.ts';
-import { ProviderRegistry } from './providers/loader.ts';
+import { PROVIDER_SWITCHES, ProviderRegistry } from './providers/loader.ts';
 import { Router } from './router.ts';
 import { Scheduler } from './scheduler.ts';
 import { SessionStore } from './sessions.ts';
@@ -265,6 +265,7 @@ export class Core {
     this.router = new Router();
     this.settings = new SettingsStore(this);
     this.providers = new ProviderRegistry(this.dataDir);
+    this.providers.loadSwitches(this.journal.getSetting(PROVIDER_SWITCHES));
     this.accounts = new AccountStore(this);
     this.projects = new ProjectStore(this);
     this.procs = new ProcRegistry(this.journal, this.bus, undefined, { summarize: (thread) => withLoad(this, thread) });
@@ -414,6 +415,7 @@ export class Core {
     await this.#stopDoneRetention();
     await this.brain.close();
     this.updates.close();
+    this.providers.close();
     this.serverUpdates.close();
     await this.drain();
     await this.delegation.close();

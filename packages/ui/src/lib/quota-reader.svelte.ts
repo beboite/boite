@@ -1,4 +1,4 @@
-import { RpcErrorCode, type Account, type AccountQuota, type SubscriptionProxyQuotas } from '@boite/contracts';
+import { RpcErrorCode, providerEnabled, type Account, type AccountQuota, type ProviderSummary, type SubscriptionProxyQuotas } from '@boite/contracts';
 import { RpcFailure, type Client } from './client';
 import { fill, strings } from './strings';
 
@@ -34,11 +34,17 @@ function remember(key: string, rows: AccountQuota[]): void {
  * connected has nothing to say, and the Antigravity CLI source shows once
  * someone turned it on.
  */
-export function shownQuotas(rows: AccountQuota[], accounts?: Account[]): AccountQuota[] {
+export function shownQuotas(rows: AccountQuota[], accounts?: Account[], providers?: readonly Pick<ProviderSummary, 'id' | 'enabled'>[]): AccountQuota[] {
   return namedQuotas(rows, accounts).filter((row) => {
     if (row.status === 'unsupported' || row.status === 'disabled' || !row.enabled) return false;
+    if (quotaProviderOff(row, providers)) return false;
     return accounts?.find((account) => account.id === row.accountId)?.status !== 'unauthenticated';
   });
+}
+
+/** A provider turned off is not read any more: a row kept from before says nothing current. */
+export function quotaProviderOff(row: AccountQuota, providers?: readonly Pick<ProviderSummary, 'id' | 'enabled'>[]): boolean {
+  return providers?.some((provider) => provider.id === row.providerId && !providerEnabled(provider)) === true;
 }
 
 /** Account labels are current metadata, independent of the cached usage reading. */

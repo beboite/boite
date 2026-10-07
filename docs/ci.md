@@ -133,9 +133,9 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 588,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,385,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,405,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,665,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,690,000 |
 
 The total JavaScript measure excludes native binaries and source maps. On
 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
@@ -160,20 +160,30 @@ measured 4,336,325 UI bytes and 3,602,928 emitted core JavaScript
 bytes on Linux on 2026-10-07. The UI limit rises to 4,355,000, leaving about
 19 KB of headroom; the core JavaScript limit of 3,615,000 leaves about 12 KB.
 
-Inline views, on `main` at `9d736a78`, measured 4,364,095 UI bytes and
-3,649,224 emitted core JavaScript bytes on Linux on 2026-10-07, 27,770 and
-46,296 bytes above that `main`. The core gains publishing a page, the headless
-check, the kit stylesheet stored with each page, and the texts
-`boite view help` and `boite view example` print. The UI gains the frame, the
-order of views in the timeline, and the kit and bootstrap, which the client
-chunk keeps because the fake client stores pages with them. The UI limit rises
-to 4,385,000 and the core JavaScript limit to 3,665,000, leaving about 21 KB
-and 16 KB.
-
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured
 3,961,330 UI bytes and 3,239,585 emitted core JavaScript bytes on the same day.
 Reproduce it with `bun run build:ui && bun run build:core && bun scripts/ci/budgets.ts`.
+
+Provider switches and OpenCode 2 measured 4,256,207 UI bytes and 3,616,381
+emitted core JavaScript bytes on the same day, on `main` at `6bf59cd7`: 5,750 UI
+bytes for the switches, the Turned off group and the composer chip, and 19,139
+core bytes for the second descriptor, the version readings behind a
+candidate's `major`, the SQLite login, the switch and the subscription proxy's
+provider block for OpenCode 2. The core JavaScript limit rises to 3,640,000.
+With the agents' chat merged, the build measured 4,342,122 UI bytes and
+3,622,067 core bytes, 12,878 and 17,933 under their limits.
+
+Inline views, on `main` at `9356e7b6`, measured 4,382,821 UI bytes and
+3,672,277 emitted core JavaScript bytes on Linux on 2026-10-07. That `main`,
+built the same way, measured 4,355,057 and 3,625,635: 57 UI bytes above its
+4,355,000 limit before this change. Views add 27,764 UI bytes and 46,642 core
+bytes. The core gains publishing a page, the headless check, the kit
+stylesheet stored with each page, and the texts `boite view help` and
+`boite view example` print. The UI gains the frame, the order of views in the
+timeline, and the kit and bootstrap, which the client chunk keeps because the
+fake client stores pages with them. The UI limit rises to 4,405,000 and the
+core JavaScript limit to 3,690,000, leaving about 22 KB and 18 KB.
 
 On 2026-10-05 on Linux, `origin/main` at `290220a9` measured about 4,183,200 UI
 bytes and 3,446,800 emitted core JavaScript bytes. Stewards and the owner's

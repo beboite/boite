@@ -125,3 +125,42 @@ test('a paired device hears only the device events, as access.ts mayReceiveEvent
   expect(phoneLog.map((line) => line.split(' ')[0])).toEqual(['thread.updated']);
 });
 
+
+test('a provider turned off refuses a turn and reports provider-disabled, as drivers/index.ts and threads/capabilities.ts', async () => {
+  const client = await fake();
+  const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
+  const events = heard(client, ['providers.updated']);
+  const { loaded } = await client.call('providers.setEnabled', { providerId: 'echo', enabled: false });
+  expect(loaded.find(provider => provider.id === 'echo')?.enabled).toBe(false);
+  expect(loaded.every(provider => typeof provider.enabled === 'boolean')).toBe(true);
+  expect(events).toHaveLength(1);
+  // Asking for what already stands tells nobody.
+  await client.call('providers.setEnabled', { providerId: 'echo', enabled: false });
+  expect(events).toHaveLength(1);
+
+  const refusal = await client.call('turns.start', { threadId: thread.id, prompt: 'hello' }).catch(error => error as { code: number; message: string; data: unknown });
+  expect(refusal).toMatchObject({
+    code: RpcErrorCode.Unavailable,
+    message: 'Echo is turned off on this machine. Turn it on in Settings > Providers to use it',
+    data: { providerId: 'echo', disabled: true },
+  });
+  expect(await code(client.call('providers.probe', { providerId: 'echo', accountId: 'a-echo' }))).toBe(RpcErrorCode.Unavailable);
+  expect((await client.call('threads.capabilities', { threadId: thread.id })).compaction.reason).toBe('provider-disabled');
+
+  await client.call('providers.setEnabled', { providerId: 'echo', enabled: true });
+  expect(events).toHaveLength(2);
+  expect(await code(client.call('turns.start', { threadId: thread.id, prompt: 'hello' }))).toBe('answered');
+  await client.call('turns.stop', { threadId: thread.id });
+});
+
+test('an experimental provider is off until its owner turns it on, and a paired device may not, as providers/loader.ts and access.ts', async () => {
+  const client = await fake();
+  const listed = (await client.call('providers.list', {})).loaded.find(provider => provider.id === 'opencode-v2');
+  expect(listed).toMatchObject({ name: 'OpenCode 2', protocol: 'acp', experimental: true, enabled: false, available: true });
+  expect(await code(client.call('providers.setEnabled', { providerId: 'nope', enabled: true }))).toBe(RpcErrorCode.NotFound);
+  expect(await code(client.call('providers.setEnabled', { providerId: 'opencode-v2', enabled: 'yes' as unknown as boolean }))).toBe(RpcErrorCode.InvalidParams);
+  const phone = await fake({ principal: 'session' });
+  expect(await code(phone.call('providers.setEnabled', { providerId: 'opencode-v2', enabled: true }))).toBe(RpcErrorCode.Refused);
+  const { loaded } = await client.call('providers.setEnabled', { providerId: 'opencode-v2', enabled: true });
+  expect(loaded.find(provider => provider.id === 'opencode-v2')?.enabled).toBe(true);
+});

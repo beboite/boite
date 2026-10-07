@@ -119,7 +119,7 @@ quota views update the label immediately while retaining their cached windows.
 | Codex | `account/rateLimits/read`, without opening a conversation |
 | Muse Code | Last `usage/changed` observation from an existing host supporting that event; no host or prompt starts to refresh limits |
 | Grok | Credit percentage or legacy credit amounts from the selected CLI login's billing endpoint |
-| OpenCode Go | Rolling, weekly and monthly limits from its Go usage API, using its own saved API login or the default account's `OPENCODE_API_KEY` |
+| OpenCode Go | Rolling, weekly and monthly limits from its Go usage API, using its own saved API login or the default account's `OPENCODE_API_KEY`. OpenCode 2 accounts read the key from their own database |
 | Antigravity CLI | Opt-in `agy -p /usage --output-format json` in a temporary directory, with version, output and timeout checks; no model prompt |
 
 Quota readers live in `packages/core/src/quotas.ts` and `quota-readers.ts`, with

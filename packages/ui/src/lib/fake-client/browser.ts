@@ -3,9 +3,10 @@ import { refusal } from './shared';
 import { fakeBrowserScreen, type FakePage } from './browser-screen';
 import type { FakeContext, FakeMethods } from './context';
 
-type Methods = 'browser.command' | 'browser.importCookies' | 'browser.remoteFrame' | 'browser.remoteInput' | 'browser.remoteStatus';
+type Methods = 'browser.command' | 'browser.importCookies' | 'browser.remoteFrame' | 'browser.remoteInput' | 'browser.remoteSelection' | 'browser.remoteStatus';
 
-interface Tab extends FakePage { tabId: string; profile: string; history: string[]; historyIndex: number; at: number }
+/** `selected`: the typed text is selected, by a double click or select-all, until the next click or key. */
+interface Tab extends FakePage { tabId: string; profile: string; history: string[]; historyIndex: number; at: number; selected?: boolean }
 interface Browser { tabs: Tab[]; active: string | null; frames: (RemoteBrowserFrame & { taken: number })[]; requestedAt: number }
 
 const VIEWPORT = { width: 1280, height: 800 };
@@ -169,10 +170,20 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
       const frame = browser?.frames.find(one => one.id === frameId && Date.now() - one.taken < 5000);
       const tab = frame && browser?.tabs.find(one => one.tabId === frame.tabId);
       if (!browser || !frame || !tab) throw refusal('the page changed; refresh the live browser before interacting');
-      if (input.kind === 'tap' && (input.width !== frame.width || input.height !== frame.height)) throw refusal('the browser viewport changed; refresh before tapping');
+      if ((input.kind === 'tap' || input.kind === 'drag') && (input.width !== frame.width || input.height !== frame.height)) throw refusal('the browser viewport changed; refresh before tapping');
+      const type = (text: string) => { tab.text = (tab.selected ? '' : tab.text) + text; tab.selected = false; };
       switch (input.kind) {
-        case 'tap': tab.taps++; break;
-        case 'text': tab.text += input.text; break;
+        case 'tap': tab.taps++; tab.selected = (input.count ?? 1) > 1 || input.shift === true; break;
+        case 'drag': tab.selected = true; break;
+        case 'select-all': tab.selected = true; break;
+        case 'text': type(input.text); break;
+        case 'press':
+          for (const key of input.keys) {
+            if (key === 'Backspace' || key === 'Delete') { tab.text = tab.selected ? '' : tab.text.slice(0, -1); tab.selected = false; }
+            else if (key === 'Space') type(' ');
+            else if ([...key].length === 1) type(key);
+          }
+          break;
         case 'key': if (input.key === 'Backspace') tab.text = tab.text.slice(0, -1); break;
         case 'scroll': tab.scrollY = Math.max(0, tab.scrollY + input.y); break;
         case 'viewport': tab.width = input.width; tab.height = input.height; moved(browser, tab); break;
@@ -187,6 +198,14 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, Methods> {
         case 'reload': moved(browser, tab); break;
       }
       return { ok: true };
+    },
+    'browser.remoteSelection': async ({ threadId, frameId }) => {
+      watching(threadId);
+      const browser = browsers.get(threadId);
+      const frame = browser?.frames.find(one => one.id === frameId && Date.now() - one.taken < 5000);
+      const tab = frame && browser?.tabs.find(one => one.tabId === frame.tabId);
+      if (!frame || !tab) throw refusal('refresh the live browser before copying');
+      return { text: tab.selected ? tab.text : '', truncated: false };
     },
   };
 }

@@ -57,6 +57,12 @@ export function assertDriverRunnable(
   launcherScript: () => string | null = () => null,
 ): void {
   if (!RUNNABLE.has(protocol)) throw unavailable(`no driver for protocol ${protocol}`, { protocol });
+  if (provider !== undefined && provider.enabled === false) {
+    throw unavailable(`${provider.name} is turned off on this machine. Turn it on in Settings > Providers to use it`, {
+      providerId: account.providerId,
+      disabled: true,
+    });
+  }
   if (provider === undefined || !provider.available) {
     const script = provider === undefined ? null : launcherScript();
     throw unavailable(
