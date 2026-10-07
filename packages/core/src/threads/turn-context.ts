@@ -267,7 +267,7 @@ export class TurnContexts {
       // Boite's own text, so the guide switch turns it off with the rest.
       const said = origin && inject && guideEnabled && (sessionId === null || !sameOrigin(origin, this.sentFromBefore(threadId, origin.messageId)))
         ? sentFromNote(origin.from) : '';
-      const coordinationGuide = inject && operation !== 'compact' && guideEnabled ? this.core.coordination.instructions(threadId) + this.core.stewards.instructions(threadId) : '';
+      const coordinationGuide = inject && operation !== 'compact' && guideEnabled ? this.core.coordination.instructions(threadId) + this.core.stewards.instructions(threadId) + this.core.workforce.entrusted.instructions(threadId) : '';
       const guide = inject && sessionId === null && guideEnabled
         ? agentGuide(provider.protocol !== 'echo' && this.core.settings.get().asyncQuestions !== false) : '';
       const prefix = (inject ? this.core.brain.instructions(provider.id) : '') + guide;

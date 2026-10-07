@@ -59,7 +59,7 @@ import {
 import { RpcFailure } from '../client';
 import { FakeAgents } from '../fake-agents';
 import type { FakeFinishedTurn } from '../fake-usage';
-import { finishActivityTurn } from './activity';
+import { activityMethods, finishActivityTurn } from './activity';
 import { FakeBus } from './bus';
 import { FAKE_TREE } from './files';
 import { seedHooks } from './hooks';
@@ -250,6 +250,11 @@ export class FakeContext {
       start: (threadId, prompt, agent) => { Object.assign(this.thread(threadId), agent.selection); return this.startTurn(threadId, prompt); },
       stop: threadId => { void this.stopTurn(threadId); },
       protocol: providerId => this.providers.find(p => p.id === providerId)?.protocol,
+      thread: threadId => this.threads.get(threadId),
+      goal: (threadId, objective) => {
+        const methods = activityMethods(this);
+        void (objective === null ? methods['threads.activity.control']({ threadId, kind: 'goal', action: 'remove' }) : methods['threads.activity.set']({ threadId, goal: { objective } })).catch(() => {});
+      },
     });
     this.plugins = new FakePlugins({
       emit: (event, payload) => this.emit(event, payload),
@@ -363,8 +368,11 @@ export class FakeContext {
     if (event === 'turn.finished') {
       const turn = payload as Turn;
       const agentThread = this.threads.get(turn.threadId);
-      if (agentThread?.agentSessionId) this.agents.finished(turn, agentThread.messages.filter(m => m.turnId === turn.id && m.role === 'assistant').flatMap(m => m.parts.flatMap(p => p.type === 'text' ? [p.text] : [])).join('\n'));
+      const answer = () => agentThread?.messages.filter(m => m.turnId === turn.id && m.role === 'assistant').flatMap(m => m.parts.flatMap(p => p.type === 'text' ? [p.text] : [])).join('\n') ?? '';
+      if (agentThread?.agentSessionId) this.agents.finished(turn, answer());
+      const goal = agentThread?.activity?.goal?.status;
       finishActivityTurn(this, turn);
+      this.agents.goalEnded(turn, goal, answer);
     }
     this.bus.deliver(event, payload);
     if (event === 'process.started' || event === 'process.exited') {

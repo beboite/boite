@@ -4,7 +4,7 @@ import type { AgentProfile, AgentRuntimeConfig } from '@boite/contracts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 import { Core } from '../src/core.ts';
 import { SCHEMA_VERSION } from '../src/journal/schema.ts';
-import { nextOccurrence } from '../src/agents/routines.ts';
+import { checkSchedule, nextOccurrence } from '../src/agents/routines.ts';
 import { Database } from 'bun:sqlite';
 import { join } from 'node:path';
 import { connect } from '../src/client.ts';
@@ -225,6 +225,23 @@ test('restart preserves the brain and catches up one due routine without duplica
 test('daily routines run once per local date across the autumn clock change', () => {
  const next=nextOccurrence({kind:'daily',time:'02:30',timezone:'Europe/Paris'},Date.parse('2026-10-25T00:30:00Z'));
  expect(new Date(next!).toISOString()).toBe('2026-10-26T01:30:00.000Z');
+ // 02:30 does not exist on 28 March 2027 in Paris: the next listed date runs instead.
+ const skipped=(days?:number[])=>new Date(nextOccurrence({kind:'daily',time:'02:30',timezone:'Europe/Paris',...(days?{days}:{})},Date.parse('2027-03-28T00:00:00Z'))!).toISOString();
+ expect(skipped()).toBe('2027-03-29T00:30:00.000Z');
+ expect(skipped([0])).toBe('2027-04-04T00:30:00.000Z');
+});
+
+test('weekday routines run only on listed local weekdays', () => {
+ const mwf=checkSchedule({kind:'daily',time:'09:00',timezone:'Europe/Paris',days:[5,1,3]});
+ expect(mwf).toEqual({kind:'daily',time:'09:00',timezone:'Europe/Paris',days:[1,3,5]});
+ const next=(after:string)=>new Date(nextOccurrence(mwf,Date.parse(after))!).toISOString();
+ expect(next('2026-10-07T06:00:00Z')).toBe('2026-10-07T07:00:00.000Z'); // Wednesday, before 09:00
+ expect(next('2026-10-07T07:00:00Z')).toBe('2026-10-09T07:00:00.000Z'); // Wednesday at 09:00: Friday
+ expect(next('2026-10-23T08:00:00Z')).toBe('2026-10-26T08:00:00.000Z'); // Friday past, Monday after the clock change
+ // Local weekday, not UTC: Monday 00:30 in Tokyo is Sunday in UTC.
+ expect(new Date(nextOccurrence({kind:'daily',time:'00:30',timezone:'Asia/Tokyo',days:[1]},Date.parse('2026-10-07T00:00:00Z'))!).toISOString()).toBe('2026-10-11T15:30:00.000Z');
+ expect(checkSchedule({kind:'daily',time:'09:00',timezone:'UTC',days:[6,5,4,3,2,1,0]})).toEqual({kind:'daily',time:'09:00',timezone:'UTC'});
+ for(const days of [[],[8],[1,1],[1.5],['1'] as unknown as number[],[0,1,2,3,4,5,6,0]])expect(()=>checkSchedule({kind:'daily',time:'09:00',timezone:'UTC',days})).toThrow('schedule.days: expected 1 to 7 different weekday numbers');
 });
 
 test('schema 14 from the earlier persistent branch upgrades without losing projectless sessions', async () => {

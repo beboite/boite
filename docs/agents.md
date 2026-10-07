@@ -6,6 +6,90 @@ and scoped memory when its provider, account or model changes. Pausing or
 archiving an identity stops its current execution and prevents new work; the
 stopped work item says the agent was paused or archived.
 
+## The page
+
+The page is a chat. Its list stands where the thread list does, under the
+Threads and Agents switch: one card with every conversation, agents and groups
+together, newest first. A row reads like a thread row: the agent's picture
+where the provider logo goes, its name, the same state a thread shows on the
+right (Working with its time, Needs you while it waits on the user, or when it
+last moved) and the last thing said under it. The foot holds the engine
+settings and Settings.
+
+A conversation is the whole page, drawn with the thread's bubbles and
+composer: the user asks, the agent answers in its bubble, works (three dots in
+a bubble, with a button into the thread it works in) and comes back with the
+result. A planned task's result is labelled with the task's name. A question
+the agent asks stands in the conversation with its answers to pick and a free
+answer. A group names who speaks and shows only deliveries that failed. The
+header keeps the picture, the name and how the agent stands; its planned tasks
+have a button with their count, and memory, settings, activity and missions
+wait in its menu.
+
+A new agent needs a name and what it does; its robot, model and permissions
+come filled in, and role, tools and the rest wait under More options.
+
+### Robots
+
+An agent's picture is a small robot drawn in SVG (`RobotFace.svelte`). It has
+a style, a shape, one of nine colours, a face and a top. The default style is
+Jelly: a blob on two small feet with a shine and rosy cheeks, in one of six
+shapes (round, drop, puddle, two bumps, pear, cloud), eight faces (black or
+white eyes, smiling, sleepy, surprised, singing, winking) and eight tops
+(nothing, a curl, a flower, antennae, a loop, a sprout, three hairs, a bow).
+Its colours are `--jelly-1` to `--jelly-9` in `app.css`, livelier than the
+pastel `--robot-1` to `--robot-9` that Bubble, Capsule and Retro share.
+
+The robot is stored in the existing `avatar` field as
+`bot:<style>.<shape>.<colour>.<face>.<top>`, for example `bot:d.0.0.0.0` for a
+round yellow jelly, so no record changed. An empty avatar draws the jelly the
+agent's id gives, the same on every client; one or two characters (an emoji,
+initials) stay text, and a code this build cannot read stays text too. Shuffle
+draws a new robot in the same style; Customize opens one row per part, each
+choice drawn on the robot. The face moves with the agent: it blinks at rest,
+a jelly squishes on the spot while it works (the other styles glance from
+side to side), and every style hops while it waits on the user. Reduced motion
+stills it.
+
+### Threads an agent runs or carries
+
+An agent works in threads of its own (`agentSessionId`). The thread list shows
+it: an Agents in charge card above the projects lists the [stewards](stewards.md)
+of that machine, every entrusted thread with its agent, and every agent whose
+own thread runs, is queued or waits on the user, with the same state words as a
+thread row. A row opens the thread, or the agent's conversation when it waits
+on an answer given there. A project thread an agent runs, a mission task in a
+worktree for example, wears the agent's picture in place of the provider logo,
+and so does a delegated child of such a thread. Opening an agent's thread
+shows, where the composer would be, whose thread it is and the way to the
+agent's conversation, where the user talks to it.
+
+### Entrusting a thread
+
+Any kept thread of a project can be handed to an agent from its menus (row,
+title, phone sheet): Entrust to an agent, then the agent. `agents.entrust`
+(owner only, `packages/core/src/agents/entrust.ts`) refuses a delegated child,
+an agent session, an archived thread, a thread outside a project and an agent
+that is not active, naming the field. The thread keeps its own model and
+session. A goal starts on it (Take over this work where it stands and carry it
+to a verified result, unless another objective is given), the agent's name and
+instructions join each of its turns, and the agent posts in its own
+conversation that it takes the thread over, drawn as a marker across the
+conversation. When the goal is met the agent posts the thread's final answer
+in its bubble under a Done label and the entrustment ends; when
+the thread needs the user, or a turn fails, it posts that too and the
+entrustment stays, so the user's answer in the thread resumes the goal. The marker
+and each label open the thread. While entrusted, the thread wears the agent's picture
+in the list and an Entrusted to chip in its header, whose menu opens the agent
+or takes the thread back; taking it back removes the goal without a message.
+Archiving or removing the thread ends the entrustment. The snapshot carries
+the list as `entrusted`, and a message about a thread carries `thread` with
+its id, title and event; clients write the sentence from the event.
+
+The thread list reads all this from the agents snapshot
+(`lib/agent-directory.svelte.ts`), loaded only with the Agents experiment on
+and refreshed on `agents.changed` at most every 1.5 seconds.
+
 ## Conversations and teams
 
 A group is a shared conversation without a required project. Each agent/group
@@ -53,7 +137,8 @@ A retry with the same request id returns the original artifact after completion.
 The interface exposes results and the execution without requiring process logs.
 
 An agent calls `boite agent decide` to release its slot and request a durable
-human decision. Needs attention shows the prompt and choices. An answer creates
+human decision. The prompt and its choices stand in the conversation where the
+work was asked, and the agent's row reads Needs you. An answer creates
 one continuation in the same context. Native tool approvals still use the
 existing permission cards and provider process.
 
@@ -158,11 +243,27 @@ date, an interval in minutes, or a daily local time with an IANA timezone. The
 core wakes them without an idle model loop. One unfinished occurrence blocks
 the next. After downtime, at most one overdue occurrence enters the durable
 queue; missed intervals are not replayed. Daily routines run once per local
-date, even when clocks move back. A skipped local time runs the following day.
+date, even when clocks move back. A skipped local time runs on the next
+scheduled day. A daily routine can be limited to chosen weekdays, for example
+Monday, Wednesday and Friday at 09:00; the weekday is read in its timezone.
 Pausing the identity or the engine also holds its routines. A single-date
 routine is done once it ran, on schedule or through Run now: the card reads
 Done and offers no Resume, and only a new date schedules it again, even one
 saved while the routine is paused.
+
+Planning a task asks two things: what to do, and when, picked from Once (with
+In an hour, This evening and Tomorrow morning), Every day, Some days (a toggle
+per weekday) and Repeatedly (15 minutes to a day, or any number of minutes). A
+sentence under the choices says what will happen and when it runs next before
+anything is saved, for example "Every Monday and Friday at 6:00 PM". The time
+zone is the device's and is never asked; a routine saved elsewhere names its
+zone in that sentence and keeps it until its time changes. The name is
+optional: it defaults to the first words of the task. Plan, beside a direct
+conversation's composer, turns what is written there into a task for that
+agent; the header's planned tasks button lists them. A routine's result comes
+back in the agent's conversation labelled with the routine's name. Each
+routine shows its next run and how its last run went, with Run
+now, Pause or Resume, Edit and the way into that run's thread.
 
 Models and limits separates the required default route, allowed main routes,
 and allowed subagent profiles. A route names a provider, account and model.
@@ -185,11 +286,11 @@ the brain and policy, converse and handle decisions on the selected host.
 
 ## Interface and storage
 
-The directory opens conversations, activity, scoped memory, routines, the
-individual brain and model limits. The machine picker selects the owning core;
-closing this client does not stop that core. Disconnection marks the last state
-as stale. The interface exposes the supported conversations and policy pages; retained
-scene sources have no navigation entry.
+The page opens conversations, activity, scoped memory, routines, the
+individual brain and model limits. With several machines, the menu at the top
+of the list selects the owning core; closing this client does not stop that
+core. Disconnection marks the last state as stale. Retained scene sources have
+no navigation entry.
 
 Contracts live in `packages/contracts/src/agents.ts`. The journal stores domain records,
 receipts and projectless managed threads
@@ -236,7 +337,15 @@ serialization, CLI tools, interrupted runs and workspace preparation recovery.
 same-millisecond cursors, session paging, the query plan of each targeted read
 and the migration from schema 15.
 The UI journey creates and converses with an agent, leaves the page, edits
-memory and brain files, creates a routine, inspects model limits, accepts a task
-and answers a decision. Captures are under
+memory and brain files, plans a routine on chosen weekdays and reads its
+sentence, inspects model limits, accepts a task, finds the agent waiting in the
+thread list's Agents in charge card, opens its thread and its conversation from
+there, answers a decision in the conversation, then entrusts a thread from its
+title menu and finds the take-over marker and the Done label in the agent's
+conversation. `robots.test.ts`, `schedule.test.ts`, `thread-entrust.test.ts` and
+`agents.test.ts` cover robot codes, schedule sentences, the entrust menu rows,
+the rows an agent at work lights and the thread list's directory;
+`agents-entrust.test.ts` covers the core's refusals, goal, persona, outcome
+messages and clean-up. Captures are under
 `tests/e2e/.artifacts`. The shell journey finishes work after shell exit,
 adopts the same PID and stops it explicitly. Real-provider inference is opt-in.
