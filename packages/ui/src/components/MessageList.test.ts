@@ -1075,7 +1075,9 @@ test('a turn of a thousand calls is drawn as a window of rows, and only its firs
   expect(most).toBeGreaterThan(1);
   expect(most).toBeLessThan(14);
   expect(labels).toBeLessThanOrEqual(1);
-});
+  // The walk settles the page at every step: about six seconds alone on a workstation, and past the
+  // default fifteen on every CI run since it landed, where it shares the runner with seven other workers.
+}, 60_000);
 
 test('a scroll inside the rows already drawn redraws nothing and reads no tool call again', async ({ ready }) => {
   window.localStorage.clear();
