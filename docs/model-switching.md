@@ -3,7 +3,41 @@
 The composer picker can select another provider or account in an existing
 thread. The conversation, draft, working directory and worktree stay in place.
 The selection applies to the next prompt accepted by the core. An already
-running or queued turn keeps its account, model, effort and speed.
+running or queued turn keeps its account and model.
+
+Effort and speed also reach the turn that is running, where the agent has a
+way to take them: they hold for the model requests that turn has not sent yet,
+and the turn's recorded settings follow. A change the agent cannot take stays
+on the thread for the next turn. It never interrupts or restarts a turn, and a
+selection that also changes the model or the account waits for the next turn
+whole. A queued turn keeps what it was accepted with.
+
+| Agent | Effort during a turn | Speed during a turn |
+| --- | --- | --- |
+| Claude | `applyFlagSettings`, from the next request | off at once; on with the next turn |
+| Codex | `turn/settings/update`, from the next request | same request, as the service tier |
+| ACP agents | `session/set_config_option`, as the agent applies it | none in the protocol |
+| pi | `set_thinking_level`, from the next model call | none |
+| Grok, Muse, Antigravity | next turn | next turn |
+
+Checked on 2026-10-07. Claude CLI 2.1.291: the tool hooks of the same turn
+reported the new effort, and answers went from `fast` to `standard` after the
+switch off. Codex 0.160.1, against an endpoint that records requests: the
+second request of the turn carried the new `reasoning.effort` and
+`service_tier`. Codex needs the `step_model_switching` feature at launch and
+the `experimentalApi` capability, which Boite sets; a Codex without them
+refuses once and keeps the next-turn behaviour. OpenCode 1.18.35 answered the
+option change during a tool call and finished its prompt. pi was read in
+source (`pi-agent-core` 1.0.4), not run. Grok takes its effort inside
+`session/set_model`, untested during a prompt; Muse and Antigravity have no
+call for it.
+
+Claude cannot be trusted to switch fast mode on in a running process. The
+setter is accepted and `getSettings` reports `fastMode: true`, yet on a Max
+account without extra usage the CLI kept answering at standard speed, while a
+process launched with the setting answered fast. The `init` frame the CLI
+re-emits after the change is the only report: unless it says `on`, the next
+turn resumes the session on a new process launched with fast mode.
 
 Permission modes apply as soon as the user selects them, including during a
 running turn. Claude and compatible ACP agents receive a native live setter.
@@ -119,8 +153,9 @@ The lightning button beside the effort chip cycles through the model's advertise
 back to standard. Codex uses its per-model `serviceTiers` list, including Fast or
 Ultrafast only when listed, and sends the selected id as `turn/start.serviceTier`.
 Claude uses `supportsFastMode` and session-scoped `settings.fastMode`; a warm
-CLI applies changes through `applyFlagSettings` before the next prompt. If an
-older CLI refuses the setting, that turn resumes on a new process. Older Codex catalogs use
+CLI applies changes through `applyFlagSettings` before the next prompt. If the
+CLI refuses the setting or keeps fast mode off, that turn resumes on a new
+process. Older Codex catalogs use
 `additionalSpeedTiers` when `serviceTiers` is absent.
 Native tiers cycle Fast before Ultrafast regardless of catalog order. When no
 native tier is advertised, a listed model and its `-fast`, `_fast` or `:fast`
@@ -213,6 +248,9 @@ composer are not accepted turns; they use the selected model when submitted.
 
 ## Verification
 
+`packages/core/test/live-settings.test.ts` covers effort and speed changes during
+a turn, and each driver's own test covers its setter. The opt-in live Claude and
+Codex tests change the effort while a real command runs.
 `packages/core/test/model-switch.test.ts` covers account changes and return,
 queued execution ownership, stale selections, long history, images and schema
 migration. The UI test preserves the thread and draft across picker changes.

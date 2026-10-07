@@ -444,7 +444,7 @@ export class ThreadStore {
       this.core.bus.emit('thread.commands', { threadId: thread.id, commands: [] });
     }
     const saved = this.save(next, 'thread.updated');
-    if (next.permissionMode !== thread.permissionMode) this.runner.changePermissionMode(thread.id, next.permissionMode);
+    this.runner.selectionChanged(thread, next);
     return saved;
   }
 

@@ -3,6 +3,14 @@ import type { NativeAgentUpdate, PermissionMode, ToolStatus } from '@boite/contr
 /** What the agent sees as `clientInfo.name`. */
 export const CLIENT_NAME = 'boite';
 /** Subagents in Boite are Boite conversations; Codex's own `spawn_agent` family stays off. */
+/**
+ * `turn/settings/update` changes the effort and the service tier of a running
+ * turn, and the app-server refuses it without this feature at launch and the
+ * `experimentalApi` capability at `initialize` (codex 0.160.1, where the
+ * feature is listed "under development" and cannot be enabled at runtime). An
+ * older codex ignores the unknown feature with one `configWarning`.
+ */
+export const LIVE_TURN_SETTINGS = ['--config', 'features.step_model_switching=true'] as const;
 export const NO_NATIVE_SUBAGENTS = ['--config', 'features.multi_agent=false', '--config', 'features.multi_agent_v2=false'] as const;
 
 export const STDERR_MAX = 400;
