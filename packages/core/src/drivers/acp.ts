@@ -3,7 +3,7 @@ import { AcpSession, sessionKey, type AcpMemory } from './acp/session.ts';
 import { readModels, withModelEffort, type ProbeEntry } from './acp/probe.ts';
 import { isGrok, MINUTE_MS, type AcpDeps } from './acp/protocol.ts';
 import { AcpTurn } from './acp/turn.ts';
-import type { Driver, ProbeContext, ProbeFilter, ProbeResult, TurnContext, TurnHandle } from './types.ts';
+import type { Driver, LiveTurnSettings, ProbeContext, ProbeFilter, ProbeResult, TurnContext, TurnHandle } from './types.ts';
 
 /** One ACP agent process per thread, kept between turns the way the Claude one is. */
 export function createAcpDriver(deps: AcpDeps): Driver {
@@ -137,6 +137,7 @@ export function createAcpDriver(deps: AcpDeps): Driver {
       return {
         done: turn.done,
         ...(isGrok(ctx.provider) ? {} : { setPermissionMode: (mode: TurnContext['thread']['permissionMode']) => running.setPermissionMode(turn, mode) }),
+        ...(isGrok(ctx.provider) ? {} : { applySettings: (change: LiveTurnSettings) => running.applySettings(turn, change) }),
         stop: (): void => {
           running.stopTurn(turn);
         },

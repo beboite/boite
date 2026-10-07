@@ -30,6 +30,20 @@ test('ACP named task calls reach the native team without exposing the side conve
   ]);
 });
 
+test('ACP takes an effort change while its prompt runs, as the same config option', async () => {
+  const client = await startCore({ warmProcessMinutes: 5 });
+  const threadId = await acpThread(client, 'fake-fast');
+  const turn = await client.call('turns.start', { threadId, prompt: '[slow]' });
+  await waitFor(() => fakeLog().includes('waiting for cancel'));
+  await client.call('threads.update', { threadId, effort: 'high' });
+  await waitFor(() => harness!.core.journal.getTurn(turn.id)?.execution?.effort === 'high');
+  expect(countLogLines(fakeLog(), 'set_config_option thought_level high')).toBe(1);
+  expect((await client.call('threads.get', { threadId })).turns[0]).toMatchObject({ id: turn.id, status: 'running' });
+  expect(fakeLog().split('session/prompt').length - 1).toBe(1);
+  await client.call('turns.stop', { threadId });
+  await waitFor(() => harness!.core.journal.getTurn(turn.id)?.status === 'stopped');
+});
+
 let harness: TestCore | null = null;
 let logFile = '';
 let restoreDriver: (() => void) | null = null;
