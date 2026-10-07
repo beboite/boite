@@ -119,3 +119,60 @@ test('a proxied provider shows only the gateway account, without actions, and it
   expect([...row('claude')!.querySelectorAll('[data-testid="account-row"]')].map(entry => entry.getAttribute('data-account-id'))).toEqual(['a-claude-main', 'a-claude-side']);
   expect(row('claude')!.querySelector('[data-testid="account-add"]')).not.toBeNull();
 });
+const toggle = (id: string) => document.querySelector<HTMLInputElement>(`[data-testid="provider-enabled"][data-provider-id="${id}"]`)!;
+const group = (id: string) => row(id)?.parentElement?.getAttribute('data-testid');
+
+test('the switch turns a provider off through providers.setEnabled and its row moves to Turned off', async ({ ready }) => {
+  const { store, client } = await ready();
+  const call = vi.spyOn(client, 'call');
+  mounted = mount(AccountsPage, { target: document.body, props: { store } });
+  flushSync();
+  expect(group('claude')).toBe('providers-connected');
+  expect(toggle('claude').checked).toBe(true);
+  expect(toggle('claude').getAttribute('role')).toBe('switch');
+
+  toggle('claude').click();
+  await vi.waitFor(() => expect(group('claude')).toBe('providers-off'));
+  expect(call).toHaveBeenCalledWith('providers.setEnabled', { providerId: 'claude', enabled: false });
+  expect(row('claude')?.getAttribute('data-enabled')).toBe('false');
+  expect(row('claude')?.querySelector('[data-testid="provider-state"]')?.textContent).toContain('Turned off');
+  // Off, the row offers no way in: only the switch that brings it back.
+  expect(row('claude')?.querySelector('[data-testid="provider-sign-in"], [data-testid="install-start"], [data-testid="provider-setup"]')).toBeNull();
+
+  toggle('claude').click();
+  await vi.waitFor(() => expect(group('claude')).toBe('providers-connected'));
+  expect(call).toHaveBeenLastCalledWith('providers.setEnabled', { providerId: 'claude', enabled: true });
+});
+
+test('an experimental provider is off until turned on and says so in both places', async ({ ready }) => {
+  const { store } = await ready();
+  mounted = mount(AccountsPage, { target: document.body, props: { store } });
+  flushSync();
+  expect(group('opencode-v2')).toBe('providers-off');
+  expect(row('opencode-v2')?.querySelector('[data-testid="provider-experimental"]')?.textContent).toBe('Experimental');
+  expect(row('claude')?.querySelector('[data-testid="provider-experimental"]')).toBeNull();
+  // A row of its own with OpenCode's guide, never a member of OpenCode's row.
+  expect(row('opencode')?.querySelector('[data-testid="provider-member"]')).toBeNull();
+
+  toggle('opencode-v2').click();
+  await vi.waitFor(() => expect(group('opencode-v2')).not.toBe('providers-off'));
+  expect(row('opencode-v2')?.querySelector('[data-testid="provider-experimental"]')).not.toBeNull();
+});
+
+test('a family has one switch per member inside the opened row, none for the family', async ({ ready }) => {
+  const { store } = await ready();
+  mounted = mount(AccountsPage, { target: document.body, props: { store } });
+  flushSync();
+  expect(row('antigravity')?.querySelector('[data-testid="provider-enabled"]')).toBeNull();
+  row('antigravity')!.querySelector<HTMLButtonElement>('[data-testid="provider-details-toggle"]')!.click();
+  flushSync();
+  expect([...row('antigravity')!.querySelectorAll('[data-testid="provider-enabled"]')].map((input) => input.getAttribute('data-provider-id')).sort())
+    .toEqual(['antigravity', 'antigravity-cli']);
+
+  // One member off leaves the family where it was; both off move it.
+  toggle('antigravity-cli').click();
+  await vi.waitFor(() => expect(store.providerOn('antigravity-cli')).toBe(false));
+  expect(group('antigravity')).not.toBe('providers-off');
+  toggle('antigravity').click();
+  await vi.waitFor(() => expect(group('antigravity')).toBe('providers-off'));
+});

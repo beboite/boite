@@ -2182,6 +2182,14 @@ export const fr: Translation = {
     installation: 'Installation',
     version: 'Version',
     addHeading: 'Ajouter un fournisseur',
+    offHeading: 'Désactivés',
+    off: 'Désactivé',
+    experimental: 'Expérimental',
+    /** The switch's accessible name: `{provider}` is the provider's own name. */
+    enable: 'Utiliser {provider}',
+    enableHint: "Désactivé, Boite ne lance rien de ce fournisseur et aucune liste ne le propose. Ses comptes et ses conversations sont conservés.",
+    /** A thread whose provider is off: the composer's chip and the sentence behind it. */
+    threadOff: '{provider} est désactivé. Activez-le dans Réglages > Fournisseurs pour continuer cette conversation.',
     defaultModel: 'Modèle par défaut',
     autoUpdate: 'Mises à jour automatiques',
     checkUpdates: 'Rechercher les mises à jour',

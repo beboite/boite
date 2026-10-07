@@ -4,7 +4,7 @@
   import { onMount } from 'svelte';
   import { slide } from 'svelte/transition';
   import { ChevronRight, Plus, RefreshCw, Terminal } from '@lucide/svelte';
-  import type { Account, ProviderSummary } from '@boite/contracts';
+  import { providerEnabled, type Account, type ProviderSummary } from '@boite/contracts';
   import ProviderVersion from './ProviderVersion.svelte';
   import ProviderIcon from './ProviderLogo.svelte';
   import ModelPicker from './ModelPicker.svelte';
@@ -20,9 +20,10 @@
    * One row per provider, one next step per row: install what is missing, sign
    * in when nothing is signed in, otherwise its installed version.
    * Connected providers come first; the rest wait below as the ways to
-   * add one. Accounts, the default model and the uninstall sit behind
+   * add one, and the ones turned off close the page, dimmed, with only their
+   * switch to act on. Accounts, the default model and the uninstall sit behind
    * the row's chevron. A family (Antigravity and its CLI) is one row, each way
-   * in its own block inside it.
+   * in its own block inside it with its own switch.
    */
   let { store }: { store: Store } = $props();
   const uid = $props.id();
@@ -40,6 +41,8 @@
   let revealed = $state<Record<string, boolean>>({});
   let checking = $state<string | null>(null);
   let detecting = $state(false);
+  /** The provider whose switch is waiting for the core's answer. */
+  let switching = $state<string | null>(null);
   let lastDetect = 0;
 
   let groups = $derived(providerGroups(store.providers, store.shownAccounts()));
@@ -51,6 +54,7 @@
     claude: 'https://code.claude.com/docs/en/setup',
     codex: 'https://developers.openai.com/codex/cli',
     opencode: 'https://opencode.ai/docs/',
+    'opencode-v2': 'https://opencode.ai/v2/docs/',
     grok: 'https://grok.com/build',
     muse: 'https://developer.meta.com/ai/products/muse-code/',
     pi: 'https://github.com/earendil-works/pi'
@@ -79,11 +83,28 @@
     return setupStep(provider, store.installOf(provider.id), store.accountsOf(provider.id), loggingIn);
   }
 
-  /** The member a row speaks for: one signed in, else one with a step Boite can take, else the head. */
+  /** The member a row speaks for: one signed in, else one turned on with a step Boite can take, else the first turned on, else the head. */
   function leadOf(row: ProviderRow): ProviderSummary {
+    const on = row.members.filter((member) => providerEnabled(member));
     return row.members.find((member) => connected(member, store.accountsOf(member.id)))
-      ?? row.members.find((member) => stepOf(member) !== 'manual')
+      ?? on.find((member) => stepOf(member) !== 'manual')
+      ?? on[0]
       ?? row.members[0]!;
+  }
+
+  /**
+   * The switch saves when it flips, as every other switch in Settings does. A
+   * refusal puts it back where the core still has it.
+   */
+  async function setEnabled(provider: ProviderSummary, input: HTMLInputElement) {
+    if (switching !== null) { input.checked = providerEnabled(provider); return; }
+    switching = provider.id;
+    try {
+      if (!providerEnabled(provider) === input.checked) await store.setProviderEnabled(provider.id, input.checked);
+    } finally {
+      switching = null;
+      input.checked = store.providerOn(provider.id);
+    }
   }
 
   /** Whether the chevron has anything to open: a row with nothing behind it draws none. */
@@ -98,6 +119,7 @@
 
   /** What the row says under the name: state, never advice. */
   function stateText(provider: ProviderSummary, step: SetupStep): string {
+    if (!providerEnabled(provider)) return strings.providerSettings.off;
     const install = store.installOf(provider.id);
     if (step === 'installing' && install) {
       if (install.state === 'downloading') {
@@ -255,11 +277,12 @@
     // so nobody has to find a button for it.
     const onFocus = () => {
       if (Date.now() - lastDetect < 5000) return;
-      const steps = store.providers.map((provider) => stepOf(provider));
+      // A provider turned off is never looked for: nothing of it is started.
+      const steps = store.offeredProviders.map((provider) => stepOf(provider));
       if (steps.includes('manual')) void detect();
       else if (steps.includes('external')) {
         lastDetect = Date.now();
-        for (const provider of store.providers) {
+        for (const provider of store.offeredProviders) {
           if (stepOf(provider) !== 'external') continue;
           for (const account of store.accountsOf(provider.id)) void store.checkAccount(account.id);
         }
@@ -269,6 +292,28 @@
     return () => { offProviders?.(); offInstall?.(); window.removeEventListener('focus', onFocus); chained = {}; };
   });
 </script>
+
+<!-- On or off. Owner only in the core, and only the owner reaches this page. -->
+{#snippet enabledSwitch(provider: ProviderSummary)}
+  <input
+    type="checkbox"
+    role="switch"
+    class="enabled-switch"
+    aria-label={fill(strings.providerSettings.enable, { provider: provider.name })}
+    title={fill(strings.providerSettings.enable, { provider: provider.name })}
+    data-testid="provider-enabled"
+    data-provider-id={provider.id}
+    checked={providerEnabled(provider)}
+    disabled={!store.owner || switching !== null}
+    onchange={(event) => void setEnabled(provider, event.currentTarget)}
+  />
+{/snippet}
+
+{#snippet experimentalBadge(provider: ProviderSummary)}
+  {#if provider.experimental}
+    <span class="badge ui-label-box" data-testid="provider-experimental"><span class="ui-label">{strings.providerSettings.experimental}</span></span>
+  {/if}
+{/snippet}
 
 <!-- The one next step: install, repair, cancel, the installer's guide or the sign-in. -->
 {#snippet stepAction(provider: ProviderSummary, step: SetupStep, main: boolean)}
@@ -389,6 +434,7 @@
   {@const gateway = store.gatewayOf(provider.id)}
   {@const install = store.installOf(provider.id)}
   {@const account = modelAccount(provider)}
+  {@const on = providerEnabled(provider)}
   {#if accounts.length > 0 || gateway}
     <div class="section-head">
       <span class="section-label"><span class="ui-label">{strings.providerSettings.accounts}</span></span>
@@ -425,13 +471,13 @@
           </p>
         </div>
         <div class="act">
-          {#if provider.available && provider.login && (entry.isolationDir !== null || inTerminal(provider)) && !loggingIn(entry.id)}
+          {#if on && provider.available && provider.login && (entry.isolationDir !== null || inTerminal(provider)) && !loggingIn(entry.id)}
             <button class="quiet small" data-testid="account-login" data-account-id={entry.id} onclick={() => void startLogin(provider, entry)}>
               <span class="ui-label">{entry.status === 'ok' ? strings.providerSettings.reconnect : strings.accounts.login}</span>
             </button>
           {/if}
           <button class="quiet small" data-testid="account-rename" onclick={() => { editing = entry.id; label = entry.label; }}><span class="ui-label">{strings.providerSettings.rename}</span></button>
-          <button class="quiet small" disabled={checking !== null || loggingIn(entry.id)} data-testid="account-verify" onclick={() => void verify(entry)}><span class="ui-label">{checking === entry.id ? strings.providerSettings.checking : strings.providerSettings.check}</span></button>
+          <button class="quiet small" disabled={!on || checking !== null || loggingIn(entry.id)} data-testid="account-verify" onclick={() => void verify(entry)}><span class="ui-label">{checking === entry.id ? strings.providerSettings.checking : strings.providerSettings.check}</span></button>
           <button class="quiet small" data-testid="account-remove" data-account-id={entry.id} onclick={() => void remove(entry)}><span class="ui-label">{strings.accounts.remove}</span></button>
         </div>
       </div>
@@ -439,7 +485,7 @@
     </div>
   {/each}
 
-  {#if !gateway && provider.available && (provider.login || (!provider.alwaysIsolated && !accounts.some((entry) => entry.isolationDir === null)))}
+  {#if on && !gateway && provider.available && (provider.login || (!provider.alwaysIsolated && !accounts.some((entry) => entry.isolationDir === null)))}
     <div class="more">
       {#if provider.login}
         <button class="quiet small" data-testid="account-add" disabled={busy !== null} onclick={() => void signIn(provider, true)}><Plus size={14} /><span class="ui-label">{strings.providerSettings.addAccount}</span></button>
@@ -507,9 +553,13 @@
   {@const install = store.installOf(lead.id)}
   {@const main = !secondary || firstRun}
   {@const foldable = hasDetails(row)}
+  {@const off = !providerEnabled(lead)}
+  {@const alone = row.members.length === 1}
   <section
     class="provider"
     class:secondary
+    class:off
+    data-enabled={off ? 'false' : 'true'}
     id="settings-provider-{row.id}"
     data-testid="provider-settings"
     data-provider-id={row.id}
@@ -530,9 +580,9 @@
           <span class="chevron"><ChevronRight size={16} strokeWidth={2.25} /></span>
           <ProviderIcon providerId={row.id} size={secondary ? 18 : 22} />
           <span class="who">
-            <span class="name">{row.name}</span>
-            <span class="state" class:bad={install?.state === 'failed' && step === 'install'} data-testid="provider-state">
-              <span class="dot" class:ok={step === 'ready'} class:live={step === 'installing' || step === 'signing-in'}></span>
+            <span class="name">{row.name}{#if alone}{@render experimentalBadge(lead)}{/if}</span>
+            <span class="state" class:bad={!off && install?.state === 'failed' && step === 'install'} data-testid="provider-state">
+              <span class="dot" class:ok={!off && step === 'ready'} class:live={!off && (step === 'installing' || step === 'signing-in')}></span>
               <span class="ui-label">{stateText(lead, step)}</span>
             </span>
           </span>
@@ -542,9 +592,9 @@
           <span class="chevron blank"></span>
           <ProviderIcon providerId={row.id} size={secondary ? 18 : 22} />
           <span class="who">
-            <span class="name">{row.name}</span>
-            <span class="state" class:bad={install?.state === 'failed' && step === 'install'} data-testid="provider-state">
-              <span class="dot" class:ok={step === 'ready'} class:live={step === 'installing' || step === 'signing-in'}></span>
+            <span class="name">{row.name}{#if alone}{@render experimentalBadge(lead)}{/if}</span>
+            <span class="state" class:bad={!off && install?.state === 'failed' && step === 'install'} data-testid="provider-state">
+              <span class="dot" class:ok={!off && step === 'ready'} class:live={!off && (step === 'installing' || step === 'signing-in')}></span>
               <span class="ui-label">{stateText(lead, step)}</span>
             </span>
           </span>
@@ -552,11 +602,16 @@
       {/if}
       <div class="act">
         <!-- A provider still to add shows its one way in; its version waits until it is connected. -->
-        {#if !secondary}<ProviderVersion {store} provider={lead} main={main && step === 'ready'} installing={step === 'installing'} oninstall={() => void startInstall(lead, false)} />{/if}
-        {@render stepAction(lead, step, main)}
+        <!-- Off, nothing of it is offered: no version, no install, no sign-in, only the way back on. -->
+        {#if !off}
+          {#if !secondary}<ProviderVersion {store} provider={lead} main={main && step === 'ready'} installing={step === 'installing'} oninstall={() => void startInstall(lead, false)} />{/if}
+          {@render stepAction(lead, step, main)}
+        {/if}
+        <!-- A family's switches are its members', inside the opened row. -->
+        {#if alone}{@render enabledSwitch(lead)}{/if}
       </div>
     </div>
-    {@render progress(lead, step)}
+    {#if !off}{@render progress(lead, step)}{/if}
     {#each row.members as member (member.id)}{@render logins(member)}{/each}
 
     {#if open[row.id] && foldable}
@@ -565,24 +620,26 @@
           <!-- The way in that works first, then the others. -->
           {#each [lead, ...row.members.filter((entry) => entry.id !== lead.id)] as member (member.id)}
             {@const memberStep = stepOf(member)}
-            <div class="member" data-testid="provider-member" data-provider-id={member.id} data-step={memberStep}>
+            {@const memberOff = !providerEnabled(member)}
+            <div class="member" class:off={memberOff} data-testid="provider-member" data-provider-id={member.id} data-step={memberStep} data-enabled={memberOff ? 'false' : 'true'}>
               <div class="member-line">
                 <ProviderIcon providerId={member.id} size={16} />
                 <span class="who">
-                  <span class="member-name">{member.name}</span>
+                  <span class="member-name">{member.name}{@render experimentalBadge(member)}</span>
                   <span class="state" data-testid="provider-state">
-                    <span class="dot" class:ok={memberStep === 'ready'} class:live={memberStep === 'installing' || memberStep === 'signing-in'}></span>
+                    <span class="dot" class:ok={!memberOff && memberStep === 'ready'} class:live={!memberOff && (memberStep === 'installing' || memberStep === 'signing-in')}></span>
                     <span class="ui-label">{stateText(member, memberStep)}</span>
                   </span>
                 </span>
-                {#if member.id !== lead.id}
-                  <div class="act">
+                <div class="act">
+                  {#if member.id !== lead.id && !memberOff}
                     <ProviderVersion {store} provider={member} installing={memberStep === 'installing'} oninstall={() => void startInstall(member, false)} />
                     {@render stepAction(member, memberStep, false)}
-                  </div>
-                {/if}
+                  {/if}
+                  {@render enabledSwitch(member)}
+                </div>
               </div>
-              {#if member.id !== lead.id}
+              {#if member.id !== lead.id && !memberOff}
                 {@render progress(member, memberStep)}
               {/if}
               {@render memberBody(member)}
@@ -617,6 +674,15 @@
       {#each groups.rest as row (row.id)}{@render providerRow(row, groups.connected.length > 0)}{/each}
     </div>
   {/if}
+
+  {#if groups.off.length > 0}
+    <div class="group-heading">
+      <h2 class="ui-label-box"><span class="ui-label">{strings.providerSettings.offHeading}</span><InfoTip topic={strings.providerSettings.offHeading} text={strings.providerSettings.enableHint} /></h2>
+    </div>
+    <div class="card flush list secondary-list" data-testid="providers-off">
+      {#each groups.off as row (row.id)}{@render providerRow(row, true)}{/each}
+    </div>
+  {/if}
   {#if store.owner}<SubscriptionProxySettings {store} />{/if}
 </div>
 
@@ -636,6 +702,11 @@
   .secondary .name { font-size: var(--text-sm); font-weight: 500; color: var(--color-muted-foreground); }
   .secondary .summary:hover .name { color: var(--color-foreground); }
   .secondary-list { background: transparent; }
+
+  /* Turned off: still listed, read as set aside. The switch keeps its full weight, it is the way back. */
+  .provider.off .summary, .member.off .member-line > :not(.act), .member.off .account { opacity: 0.55; }
+  .name, .member-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+  .badge { padding: 1px 7px; border-radius: var(--radius-sm); background: var(--color-surface-3); color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 600; white-space: nowrap; }
 
   .line, .account-line, .member-line { display: flex; align-items: center; gap: 12px; min-width: 0; }
   .who { flex: 1; min-width: 0; display: grid; gap: 2px; text-align: left; }

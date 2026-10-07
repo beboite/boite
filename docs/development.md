@@ -540,6 +540,7 @@ Real-provider tests use CLI logins and spend tokens. Run selected cases from
 | --- | --- |
 | `BOITE_E2E_CLAUDE=1` | `test/claude.live.test.ts`: turn, resume, native import and warm process |
 | `BOITE_E2E_OPENCODE=1` | `test/opencode.live.test.ts`: ACP turn and cold resume |
+| `BOITE_E2E_OPENCODE2=1` | `test/opencode2.live.test.ts`: OpenCode 2 turned on, ACP turn, cold resume and plan mode; `BOITE_E2E_OPENCODE2_MODEL` names the model |
 | `BOITE_E2E_GROK=1` | `test/grok.live.test.ts`: default login, model/effort and cold resume; empty isolated homes can open sign-in |
 | `BOITE_E2E_GROK_QUOTA=1` | `test/grok-quota.live.test.ts`: quota for the existing default login |
 | `BOITE_E2E_CODEX=1` | `test/codex.live.test.ts`: app-server turn and resume |

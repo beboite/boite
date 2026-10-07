@@ -53,6 +53,7 @@ afterEach(async () => {
   harness = null;
   delete process.env['ACP_FAKE_LOG'];
   delete process.env['ACP_FAKE_NO_MODES'];
+  delete process.env['ACP_FAKE_MODE_OPTION'];
   delete process.env['ACP_FAKE_NO_IMAGES'];
   delete process.env['ACP_FAKE_HANG_INIT'];
   delete process.env['ACP_FAKE_EXIT_AT_START'];
@@ -1216,6 +1217,32 @@ describe('acp driver', () => {
     await runTurn(client, threadId, 'second');
     expect(setModeCount('default')).toBe(1);
     expect(logs.some((line) => line.includes('the agent switched to the session mode yolo'))).toBe(true);
+  });
+
+  test('an agent that lists its modes as a config option is moved through that option', async () => {
+    const client = await startCore({ warmProcessMinutes: 5 });
+    process.env['ACP_FAKE_MODE_OPTION'] = '1';
+    const threadId = await acpThread(client);
+    const logs = collectLogs(client);
+
+    // `default` is the agent's `build`, which it is already in: nothing goes out.
+    await runTurn(client, threadId, 'first');
+    expect(configCount('mode build')).toBe(0);
+
+    await client.call('threads.update', { threadId, permissionMode: 'plan' });
+    await runTurn(client, threadId, 'second');
+    await waitFor(() => configCount('mode plan') === 1);
+
+    // Still in plan: the option's own current value says so, and nothing is sent again.
+    await runTurn(client, threadId, 'third');
+    expect(configCount('mode plan')).toBe(1);
+
+    // It has no mode of that name: the thread leaves plan for the agent's plain mode, never stays in plan.
+    await client.call('threads.update', { threadId, permissionMode: 'acceptEdits' });
+    await runTurn(client, threadId, 'fourth');
+    await waitFor(() => configCount('mode build') === 1);
+    expect(logs.filter((line) => line.includes('no session mode matches'))).toEqual([]);
+    expect(fakeLog()).not.toContain('set_mode');
   });
 
   test('an agent with no modes at all is one warning, and the turn still runs', async () => {

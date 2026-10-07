@@ -1,4 +1,4 @@
-import type { Account, ProviderInstallState, ProviderSummary } from '@boite/contracts';
+import { providerEnabled, type Account, type ProviderInstallState, type ProviderSummary } from '@boite/contracts';
 
 /**
  * Where one provider stands for a user who only wants it to work. The Providers
@@ -44,9 +44,9 @@ export function setupStep(
   return provider.login ? 'sign-in' : 'external';
 }
 
-/** A provider something can run on right now: its agent is there and an account is signed in. */
+/** A provider something can run on right now: it is turned on, its agent is there and an account is signed in. */
 export function connected(provider: ProviderSummary, accounts: Account[]): boolean {
-  return provider.available && accounts.some((account) => account.providerId === provider.id && account.status === 'ok');
+  return providerEnabled(provider) && provider.available && accounts.some((account) => account.providerId === provider.id && account.status === 'ok');
 }
 
 /** The account a sign-in from the row lands on: one Boite already made and nobody is logged into. */

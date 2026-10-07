@@ -9,6 +9,8 @@
  * process, so a test can count the agent processes a probe cache did or did not
  * save.
  *
+ * `ACP_FAKE_MODE_OPTION=1` makes it list its modes the way OpenCode does: no
+ * `modes`, and a `mode` config option whose values are `build` and `plan`.
  * `ACP_FAKE_NO_MODES=1` makes it answer no `modes` at all, which is the agent
  * the mode mapping has to survive without sending anything.
  *
@@ -145,8 +147,24 @@ const MODES: SessionMode[] = [
   { id: 'plan', name: 'Plan' },
 ];
 
+/** An agent whose modes are the values of a config option, with no `modes` in any answer. */
+const modeOption = process.env['ACP_FAKE_MODE_OPTION'] === '1';
+if (modeOption) {
+  configOptions.push({
+    type: 'select',
+    id: 'mode',
+    category: 'mode',
+    name: 'Mode',
+    currentValue: 'build',
+    options: [
+      { value: 'build', name: 'Build' },
+      { value: 'plan', name: 'Plan' },
+    ],
+  });
+}
+
 /** An agent with no modes at all, so the driver's warning path has a subject. */
-const noModes = process.env['ACP_FAKE_NO_MODES'] === '1';
+const noModes = process.env['ACP_FAKE_NO_MODES'] === '1' || modeOption;
 /** An agent that never learned to read an image, so a driver has to refuse first. */
 const noImages = process.env['ACP_FAKE_NO_IMAGES'] === '1';
 let currentModeId = 'default';
@@ -261,6 +279,11 @@ const app = agent({ name: 'acp-fake' })
   })
   .onRequest('session/set_config_option', ({ params }) => {
     log(`set_config_option ${params.configId} ${String(params.value)}`);
+    if (params.configId === 'mode') {
+      const option = configOptions.find((entry) => entry.id === 'mode');
+      if (option?.type === 'select') option.currentValue = String(params.value);
+      return { configOptions };
+    }
     // Like OpenCode, the smart model names its own scale once a session is on it.
     if (params.configId === 'model' && params.value === 'fake-smart') {
       return {

@@ -2283,6 +2283,14 @@ export const strings = {
     installation: 'Installation',
     version: 'Version',
     addHeading: 'Add a provider',
+    offHeading: 'Turned off',
+    off: 'Turned off',
+    experimental: 'Experimental',
+    /** The switch's accessible name: `{provider}` is the provider's own name. */
+    enable: 'Use {provider}',
+    enableHint: 'Off, Boite starts nothing of this provider and no list offers it. Its accounts and conversations are kept.',
+    /** A thread whose provider is off: the composer's chip and the sentence behind it. */
+    threadOff: '{provider} is turned off. Turn it on in Settings > Providers to continue this conversation.',
     defaultModel: 'Default model',
     autoUpdate: 'Automatic updates',
     checkUpdates: 'Check for updates',

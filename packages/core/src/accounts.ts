@@ -9,6 +9,7 @@ import { runAcpLogin, type AcpLoginRun } from './drivers/acp/login.ts';
 import { probeThreadId } from './providers/probe.ts';
 import { activeSubscriptionProxy, subscriptionProxyEnv } from './subscription-proxy.ts';
 import { agentEnv, hostAgentsEnabled, launchPrefix, profileFor, resolveExecutable } from './providers/resolve.ts';
+import { sqliteHasRows } from './providers/sqlite-login.ts';
 import { browserNoopPath, browserNoopScript, currentOs, homePath } from './paths.ts';
 import { ISOLATION_DEFAULTS, shareKeys, shareProfile, unshareProfile, type ShareProblem } from './profile-share.ts';
 import type { SpawnedPipedProcess } from './procs.ts';
@@ -751,9 +752,15 @@ export class AccountStore {
     // and its absence proves nothing.
     const own = profileFor(provider)?.session;
     const session = own !== undefined && own.length > 0 ? own : provider.auth.session ?? [];
-    if (session.length === 0) return 'unknown';
+    const sqlite = provider.auth.sqlite;
+    if (session.length === 0 && sqlite === undefined) return 'unknown';
     const base = account.isolationDir ?? this.defaultLocation(provider);
     if (base === null) return 'unknown';
+    if (sqlite !== undefined) {
+      // A database the agent keeps its sign-ins in: one row is a login, a file that will not open says nothing.
+      const rows = sqliteHasRows(join(base, sqlite.file), sqlite.tables);
+      if (rows !== false || session.length === 0) return rows === null ? 'unknown' : rows ? 'ok' : 'unauthenticated';
+    }
     if (session.every((file) => existsSync(join(base, file)))) return 'ok';
     return own?.length === 0 ? 'unknown' : 'unauthenticated';
   }

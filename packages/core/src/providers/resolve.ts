@@ -4,6 +4,7 @@ import type { ExecutableCandidate, Os, OsProfile, ProviderDescriptor } from '@bo
 import { currentOs } from '../paths.ts';
 import { substituteHome } from './expand.ts';
 import { globalRoots, resolveNpm } from './npm.ts';
+import { majorAt } from './versions.ts';
 import { which } from './which.ts';
 
 /**
@@ -103,10 +104,17 @@ export function resolveCommand(profile: OsProfile): ResolvedCommand | null {
     const updateEnv = candidate.updateEnv ?? {};
     if (candidate.kind === 'path') {
       const found = whichProgram(candidate.value, scripts);
-      if (found !== null) return { executable: found, prefix: [], shown: found, updateEnv };
+      if (found === null) continue;
+      const fits = atMajor(candidate, found, profile);
+      // Not known yet: a later candidate must not stand in for the one that may well be right.
+      if (fits === undefined) return null;
+      if (fits) return { executable: found, prefix: [], shown: found, updateEnv };
     } else if (candidate.kind === 'file') {
       for (const path of filePaths(candidate.value, profile)) {
-        if (runnableFile(path)) return { executable: path, prefix: [], shown: path, updateEnv };
+        if (!runnableFile(path)) continue;
+        const fits = atMajor(candidate, path, profile);
+        if (fits === undefined) return null;
+        if (fits) return { executable: path, prefix: [], shown: path, updateEnv };
       }
     } else if (candidate.kind === 'npm') {
       const found = resolveNpm(candidate.value);
@@ -114,6 +122,18 @@ export function resolveCommand(profile: OsProfile): ResolvedCommand | null {
     }
   }
   return null;
+}
+
+/**
+ * A candidate that names a major only counts when the program found there
+ * reports it. Undefined while the program has not answered yet: the read is on
+ * its way, the profile resolves to nothing meanwhile, and whoever listens to
+ * the version readings resolves again once it is in.
+ */
+function atMajor(candidate: ExecutableCandidate, path: string, profile: OsProfile): boolean | undefined {
+  if (candidate.major === undefined) return true;
+  const major = majorAt(path, profile.update?.versionArgs ?? ['--version']);
+  return major === undefined ? undefined : major === candidate.major;
 }
 
 function runnableFile(path: string): boolean {

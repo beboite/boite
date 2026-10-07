@@ -105,7 +105,7 @@ OpenCode's descriptor, with the `linux` and `macos` profiles, `shared` and
       "executable": [
         { "kind": "file", "value": "{agentsDir}/opencode.exe" },
         { "kind": "file", "value": "{npmRoot}/opencode-ai/bin/opencode.exe" },
-        { "kind": "path", "value": "opencode" }
+        { "kind": "path", "value": "opencode", "major": 1 }
       ],
       "launch": { "args": ["acp", "--port", "0"] },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}" },
@@ -131,7 +131,12 @@ OpenCode's descriptor, with the `linux` and `macos` profiles, `shared` and
   `macos`. A provider with no profile for the running OS is not offered.
 - `auth.kind` is `oauth-cli`, `api-key` or `none`, and `auth.session` names the
   files inside the isolation directory that carry the login, which is what the
-  core reads to tell `ok` from `unauthenticated`. `auth.identity` says where the
+  core reads to tell `ok` from `unauthenticated`. `auth.sqlite` is the same
+  question for an agent that keeps its sign-ins in a database: a `file` inside
+  the isolation directory and the `tables` that hold them. The account reads
+  `ok` once one of those tables has a row, `unauthenticated` while none does or
+  the file is not there yet, and `unknown` when the file will not open. The
+  core opens it read-only and never writes it. `auth.identity` says where the
   account name comes from.
 - `login` is either `command`, the argv of the provider's own login command plus
   an optional `env`, or `acp: { methodId }`, the `authenticate` method of an ACP
@@ -145,6 +150,9 @@ OpenCode's descriptor, with the `linux` and `macos` profiles, `shared` and
   block of named levels with a default. A native agent may declare an empty list
   and let the probe supply its catalog. The unnamed `default` alias remains
   accepted for existing descriptors. Echo requires at least one static model.
+- `experimental: true` marks an agent Boite drives without long use behind it.
+  It stays off until the user turns it on ([below](#turning-a-provider-off)),
+  and its row on the Providers page carries an Experimental badge.
 - `capabilities` is six booleans: `approvals`, `hooks`, `checkpoint`, `images`,
   `planMode`, `resume`. `approvals: false` means the thread's permission mode
   never reaches that agent, and the UI stops promising a gate that does not exist.
@@ -203,6 +211,21 @@ session protocol either.
   the summary shows the script as the executable. Only the `pi` and `acp`
   protocols take an `npm` candidate: the SDK and app-server drivers spawn the
   program with no leading argument.
+- A `path` or `file` candidate may name a `major`. It then counts only when
+  the program found there reports that major version, read with the profile's
+  `update.versionArgs`, `--version` by default. Two majors of one agent can
+  install under one name: `opencode` on PATH is OpenCode 1 or OpenCode 2, and
+  each has a descriptor of its own. A program at another major is passed over
+  for the next candidate. The reading is kept per program path, with the size
+  and modification time of its file, in `<dataDir>/executable-versions.json`,
+  so asking costs one run of the program per install and none at a restart.
+  Until a program has answered, the profile resolves to nothing rather than
+  to a later candidate; the answer lists the providers again and
+  `providers.updated` follows when something changed. A launcher script that
+  stays the same while the program behind it changes is covered by one check
+  per run of the core, thirty seconds after the reading is first used, and by
+  another after an agent update. An `npm` candidate takes no `major`: it
+  already names its package (`packages/core/src/providers/versions.ts`).
 - A `file` candidate that starts with `{npmRoot}` is looked for under each
   global npm `node_modules` directory, the same list an `npm` candidate walks,
   with the profile's `path` names as the bin hints. That is how Codex and
@@ -380,7 +403,7 @@ left for the next of those moments.
 
 ## What ships
 
-Nine descriptors ship, and only the first eight are ever visible to a user: `echo`
+Ten descriptors ship, and only the first nine are ever visible to a user: `echo`
 is the deterministic fake the tests and the bench run on, loaded only under
 `BOITE_ECHO=1`.
 
@@ -388,6 +411,7 @@ is the deterministic fake the tests and the bench run on, loaded only under
 | --- | --- | --- |
 | Claude | `claude-sdk` | SDK-driven CLI |
 | OpenCode | `acp` | `opencode acp --port 0` |
+| OpenCode 2 | `acp` | `opencode2 acp`, experimental and off until turned on |
 | Antigravity | `acp` | Managed `agy_acp_server` for the host OS |
 | Antigravity CLI | `agy` | `agy --input-format stream-json --output-format stream-json -p=` |
 | Grok | `acp` | `grok [permission flags] agent [approval flag] stdio` |
@@ -484,6 +508,73 @@ fails with its exit code and the last line it wrote to stderr. Stderr is read in
 whole lines, a line cut at 64 KB. A tool's text output and a markdown document
 are cut at 64K characters with a note saying where, and a diff whose two sides
 pass that size is drawn as a sentence giving its size.
+
+## OpenCode 2
+
+OpenCode 2 is another program than OpenCode 1, published as `@opencode/cli`
+beside `opencode-ai`, and its descriptor `opencode-v2` ships beside `opencode`
+as an experimental provider. Both speak ACP to the same driver. What the
+descriptor accounts for, each point read off OpenCode 2.0.24 on Linux:
+
+- The two install under one name. The npm package and the installer both put
+  a program called `opencode` on the machine, where OpenCode 1 already is, and
+  add `opencode2` beside it. So `opencode-v2` looks for `opencode2` first, then
+  for the npm package's own binary, and takes a program called `opencode` only
+  at major 2. `opencode` takes it only at major 1, and falls back to the
+  `opencode-ai` package's own binary when the name on PATH went to version 2.
+- `opencode acp` takes no `--port`: version 2 refuses the flag and exits.
+- A sign-in is a row of `opencode/opencode.db`, in its `credential`, `account`
+  or `control_account` table, which `auth.sqlite` names. Version 2 never reads
+  version 1's `auth.json`: each is signed in on its own, even on the default
+  account, whose folder the two share. The same database holds the sessions of
+  both. Version 2 loads a session version 1 created; version 1 answers -32603
+  to one version 2 created, so a thread moved to version 2 stays there.
+- Every command but `acp` talks to a background service that outlives it and
+  listens on one fixed port, so a second account could never start its own.
+  Boite never starts it: turns and probes run over `acp`, which serves itself,
+  and the login command is `opencode2 auth login --standalone`.
+  `XDG_STATE_HOME` is isolated under `{isolationDir}/state`, beside the XDG
+  pair OpenCode 1 isolates, so a command typed by hand in the login terminal
+  registers its service in the account's folder and not in the user's.
+- OpenCode Go usage is read with the key version 2 stored for `opencode-go`
+  in the `credential` table (`packages/core/src/providers/opencode.ts`).
+- The plugin API changed: a plugin written for version 1 does not load in
+  version 2. The descriptor shares the same `opencode/plugins` folder with an
+  isolated account and Settings counts what is in it, whatever it was written
+  for.
+- It has no managed install: version 2 is published as npm tarballs, a
+  format the installer does not unpack, so its row links to the install guide.
+
+`test/opencode2.live.test.ts`, opt-in behind `BOITE_E2E_OPENCODE2=1`, turns the
+provider on, runs a turn, resumes it on a new process and moves the session to
+`plan`. Not verified: Windows and macOS, an OAuth sign-in, and image
+attachments, which is why `capabilities.images` is false.
+
+## Turning a provider off
+
+Every provider has a switch on the Providers page, for a machine that has
+more agents installed than its user wants offered. `providers.setEnabled`
+stores the choice per core, in the journal setting `provider-switches`, and
+each summary carries it as `enabled`. A provider nobody touched follows its
+descriptor: on, or off when it is `experimental`.
+
+Off, nothing of that provider starts. A turn, a model probe and
+`threads.capabilities` go through the same gate as a missing agent
+(`assertDriverRunnable`) and answer with a sentence saying where to turn it
+back on, and the capability reason `provider-disabled`. The update check skips
+it, its usage is not read, no title is written on it, a delegated agent cannot
+be routed to it and no default account is adopted for it. Its warm processes
+are released at once; a turn already running ends by itself.
+
+Nothing is removed. Accounts, threads, the managed install and the user's own
+install stay as they are, and turning the provider back on adopts an existing
+login the way a fresh install does. The page lists the off providers last,
+dimmed, under Turned off, with no install or sign-in step; a row that holds
+two providers, Antigravity and its CLI, has one switch per provider inside
+it. The clients hide an off provider from every list that offers one, the
+model picker included, and a thread that was on it shows a Turned off chip in
+its composer. The method is the owner's: a paired device reads `enabled` and
+cannot change it.
 
 ## The Antigravity CLI
 
@@ -619,7 +710,14 @@ answers; YOLO does not invent form values or complete a device sign-in.
   deliberately not part of the session key, so a warm session follows a change
   instead of being dropped. An agent that lists no modes or refuses the call is one
   warning in the log while the turn runs anyway: a mode is a preference, never a
-  reason to refuse a turn.
+  reason to refuse a turn. An agent may list its modes as a config option of
+  category `mode` instead, with no `availableModes` at all, which is what
+  OpenCode does with `build` and `plan`: the same candidates are matched
+  against that option's values and the mode goes out as a
+  `session/set_config_option`. Every Boite mode but `plan` ends its candidate
+  list on the agent's plain mode (`default`, `build`, `normal`), so a thread
+  that leaves `plan` for a mode the agent does not list goes back to the plain
+  one instead of staying in `plan`.
 - Codex takes a pair when the thread opens, an approval policy and a sandbox:
   `default` and `acceptEdits` are on-request plus workspace-write, `plan` never
   plus read-only, `bypassPermissions` and `dontAsk` never plus danger-full-access.
