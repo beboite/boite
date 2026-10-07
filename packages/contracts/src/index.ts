@@ -1112,11 +1112,16 @@ export function continuesRequest(turn: Pick<Turn, 'execution'>): boolean {
   return operation === 'background' || operation === 'delegation' || operation === 'coordination' || operation === 'resume' || execution.automatic === true;
 }
 
+/** Queue order: `queuedAt`, then id, so every client and the core agree on a tie. */
+export function queueOrder(a: Pick<Turn, 'id' | 'queuedAt'>, b: Pick<Turn, 'id' | 'queuedAt'>): number {
+  return a.queuedAt - b.queuedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
 /**
  * When the request each turn belongs to started: the start of the last turn
  * the user opened, carried through the turns Boite opened after it
- * (`continuesRequest`). Turns are ordered by `queuedAt`, whatever order the
- * list holds them in. A turn that never started maps to null and moves
+ * (`continuesRequest`). Turns are ordered by `queuedAt`, then by id for the
+ * same millisecond, whatever order the list holds them in. A turn that never started maps to null and moves
  * nothing: a prompt still queued, or cancelled before it ran, has no start to
  * count from. When the user's turn is not in the list, a page not loaded yet,
  * the earliest start of the loaded continuation stands in.
@@ -1124,7 +1129,7 @@ export function continuesRequest(turn: Pick<Turn, 'execution'>): boolean {
 export function requestStarts(turns: readonly Pick<Turn, 'id' | 'queuedAt' | 'startedAt' | 'execution'>[]): Map<TurnId, Timestamp | null> {
   const starts = new Map<TurnId, Timestamp | null>();
   let since: Timestamp | null = null;
-  for (const turn of [...turns].sort((a, b) => a.queuedAt - b.queuedAt)) {
+  for (const turn of [...turns].sort(queueOrder)) {
     if (turn.startedAt === null) {
       starts.set(turn.id, null);
       continue;

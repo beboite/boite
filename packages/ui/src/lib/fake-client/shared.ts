@@ -3,6 +3,7 @@ import {
   BRANCH_NAME_MAX,
   RpcErrorCode,
   TODO_TEXT_MAX,
+  queueOrder,
   requestStarts,
   type AgentCommand,
   type Thread,
@@ -84,7 +85,7 @@ export function fakeWorktree(projectPath: string, _title: string, branch?: strin
 function currentRequestSince(turns: Turn[]): number | null {
   const started = turns.filter(turn => turn.startedAt !== null);
   if (started.length === 0) return null;
-  const latest = started.reduce((last, turn) => turn.queuedAt >= last.queuedAt ? turn : last);
+  const latest = started.reduce((last, turn) => queueOrder(turn, last) > 0 ? turn : last);
   return requestStarts(turns).get(latest.id) ?? null;
 }
 

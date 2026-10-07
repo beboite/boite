@@ -453,7 +453,7 @@ export function ensureIndexes(db: Database): void {
   db.exec('CREATE INDEX IF NOT EXISTS messages_by_turn ON messages (thread_id, turn_id)');
   db.exec('CREATE INDEX IF NOT EXISTS turns_by_finished ON turns (finished_at)');
   // `requestSince` walks a busy thread's turns back from the newest on every summary.
-  db.exec('CREATE INDEX IF NOT EXISTS turns_by_thread_queue ON turns (thread_id, queued_at) WHERE started_at IS NOT NULL');
+  db.exec('CREATE INDEX IF NOT EXISTS turns_by_thread_queue ON turns (thread_id, queued_at, id) WHERE started_at IS NOT NULL');
   // The few event types read back. Without them, restoring asynchronous questions
   // at startup read the whole events table, and every thread open walked all of
   // its thread's events for memory notices.
