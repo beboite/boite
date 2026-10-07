@@ -32,7 +32,7 @@ afterEach(() => {
   workspace.view = 'projects';
   projectView.order = 'recent';
   projectView.keys = [];
-  projectThreadView.otherOpen = false;
+  projectThreadView.shelf = { idle: false, archived: false };
 });
 
 async function waitFor(check: () => boolean, attempts = 2000): Promise<void> {
@@ -175,36 +175,22 @@ test('in the manual order a header dragged with the mouse moves its project; a s
   expect(next.defaultPrevented).toBe(false);
 });
 
-test('a header drags only among the projects of its own fold', async () => {
+test('an idle project waits as a row in its fold, outside the headers that reorder', async () => {
   await mountOnFake();
   projectView.order = 'manual';
   const [first, second] = order() as [string, string];
-  // A project without conversations goes to the open Other fold, under the active ones.
+  // A project without conversations goes to the Idle projects fold, as a row with no header to drag.
   const template = store.projects.find((project) => project.id === first)!;
   store.projects = [...store.projects, { ...template, id: 'quiet-project', name: 'Quiet', createdAt: 0 }];
-  projectThreadView.otherOpen = true;
-  await waitFor(() => order().length === 3);
-  expect(order()).toEqual([first, second, 'quiet-project']);
+  projectThreadView.shelf.idle = true;
+  await waitFor(() => document.querySelector('[data-testid=idle-project][data-project-id="quiet-project"]') !== null);
+  expect(order()).toEqual([first, second]);
+  expect(document.querySelector('[data-testid=idle-project] [data-testid=project-row]')).toBeNull();
   place(section(first), 0);
   place(section(second), 110);
-  place(section('quiet-project'), 220);
-  let target: Element | null = null;
-  under(() => target);
+  under(() => section(first));
 
-  // Over an active project the quiet one shows no line, and its release changes nothing, saved or drawn.
-  header('quiet-project').dispatchEvent(pointer('pointerdown', 10, 250));
-  target = section(first);
-  window.dispatchEvent(pointer('pointermove', 10, 80));
-  await waitFor(dragging);
-  window.dispatchEvent(pointer('pointermove', 10, 20));
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  expect(document.querySelector('.insert-before, .insert-after')).toBeNull();
-  window.dispatchEvent(pointer('pointerup', 10, 20));
-  expect(dragging()).toBe(false);
-  expect(projectView.keys).toEqual([]);
-  expect(order()).toEqual([first, second, 'quiet-project']);
-
-  // Within its fold a project still moves.
+  // The listed projects still move among themselves, and the idle one stays out of the saved order.
   header(second).dispatchEvent(pointer('pointerdown', 10, 150));
   window.dispatchEvent(pointer('pointermove', 10, 80));
   await waitFor(dragging);
@@ -212,7 +198,8 @@ test('a header drags only among the projects of its own fold', async () => {
   await waitFor(() => section(first).classList.contains('insert-before'));
   window.dispatchEvent(pointer('pointerup', 10, 20));
   await waitFor(() => order()[0] === second);
-  expect(order()).toEqual([second, first, 'quiet-project']);
+  expect(order()).toEqual([second, first]);
+  expect(projectView.keys.some((key) => key.includes('quiet-project'))).toBe(false);
 });
 
 test('only the pointer that started a drag ends it, and leaving the window cancels it', async () => {

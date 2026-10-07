@@ -1,0 +1,188 @@
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { crc32, deflateSync } from 'node:zlib';
+import type { Message } from '@boite/contracts';
+import { echoThread, startTestCore } from './harness.ts';
+import type { TestCore } from './harness.ts';
+
+let harness: TestCore;
+
+beforeEach(async () => {
+  harness = await startTestCore();
+});
+
+afterEach(async () => {
+  await harness.stop();
+});
+
+/** A real PNG with noise in it, base64: past the inline limit, and Bun can decode and blur it. */
+function png(width: number, height: number): string {
+  const chunk = (type: string, data: Buffer) => {
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const sum = Buffer.alloc(4);
+    sum.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, sum]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 2;
+  const rows = Buffer.alloc((width * 3 + 1) * height);
+  let seed = width * 31 + height;
+  for (let at = 0; at < rows.length; at += 1) {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    rows[at] = at % (width * 3 + 1) === 0 ? 0 : seed >> 23;
+  }
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(rows)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]).toString('base64');
+}
+
+/** A screenshot-like PNG: a gradient with grain, which compresses badly as PNG and well as WebP. */
+function grainy(width: number, height: number): string {
+  const chunk = (type: string, data: Buffer) => {
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const sum = Buffer.alloc(4);
+    sum.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, sum]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 2;
+  const rows = Buffer.alloc((width * 3 + 1) * height);
+  let seed = 7;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = y * (width * 3 + 1) + 1 + x * 3;
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      const grain = (seed >> 16) % 32;
+      rows[at] = Math.min(255, Math.round((x / width) * 220) + grain);
+      rows[at + 1] = Math.min(255, 90 + grain);
+      rows[at + 2] = Math.min(255, Math.round((y / height) * 220) + grain);
+    }
+  }
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(rows)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]).toString('base64');
+}
+
+const SHOT = png(320, 180);
+const SCREEN = grainy(1600, 900);
+const TALL = png(90, 160);
+
+function seed(threadId: string): void {
+  const message = (id: string, data: string, at: number): Message => ({
+    id, threadId, turnId: 'trn_seed', role: 'user', state: 'complete', createdAt: at,
+    parts: [{ type: 'text', text: 'look' }, { type: 'image', mimeType: 'image/png', data, alt: `${id}.png` }],
+  });
+  harness.core.journal.putMessage(message('msg_shot', SHOT, 1_000));
+  harness.core.journal.putMessage(message('msg_tall', TALL, 1_001));
+}
+
+const previews = (threadId: string) =>
+  (harness.core.journal.db.query('SELECT COUNT(*) AS n FROM media_previews WHERE thread_id = ?').get(threadId) as { n: number }).n;
+
+describe('deferred pictures', () => {
+  test('a light page gives each deferred picture its size and, from the first opening, its blur', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    seed(threadId);
+    expect(SHOT.length).toBeGreaterThan(8 * 1024);
+
+    const light = await client.call('threads.get', { threadId, compactImages: true });
+    const shot = light.messages.find((message) => message.id === 'msg_shot')!.parts[1];
+    expect(shot).toMatchObject({ type: 'image', data: '', dataDeferred: true, width: 320, height: 180, bytes: Buffer.from(SHOT, 'base64').length });
+    expect(shot?.type === 'image' && shot.preview?.startsWith('data:image/png;base64,')).toBe(true);
+    const tall = light.messages.find((message) => message.id === 'msg_tall')!.parts[1];
+    expect(tall).toMatchObject({ width: 90, height: 160 });
+    expect((await client.call('messages.attachment', { threadId, messageId: 'msg_shot', partIndex: 1 })).data).toBe(SHOT);
+
+    // An older page of the same thread carries them too.
+    const older = await client.call('messages.list', { threadId, before: 'msg_tall', compactImages: true });
+    expect(older.messages[0]!.parts[1]).toMatchObject({ width: 320, height: 180, preview: (shot as { preview: string }).preview });
+    // Without the flag nothing changes: the bytes, and no size or blur.
+    const full = (await client.call('threads.get', { threadId })).messages.find((message) => message.id === 'msg_shot')!.parts[1];
+    expect(full).toEqual({ type: 'image', mimeType: 'image/png', data: SHOT, alt: 'msg_shot.png' });
+  });
+
+  test("an agent's attached picture is deferred with its size and blur, while its video keeps its bytes", async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const video = Buffer.from('a short clip').toString('base64');
+    harness.core.journal.putMessage({
+      id: 'msg_attached', threadId, turnId: 'trn_seed', role: 'assistant', state: 'complete', createdAt: 2_000,
+      parts: [
+        { type: 'file', mimeType: 'image/png', data: SHOT, name: 'street.png' },
+        { type: 'file', mimeType: 'video/mp4', data: video, name: 'drive.mp4' },
+      ],
+    });
+    const light = await client.call('threads.get', { threadId, compactFiles: true, compactImages: true });
+    const [picture, clip] = light.messages.find((message) => message.id === 'msg_attached')!.parts;
+    expect(picture).toMatchObject({ type: 'file', name: 'street.png', data: '', dataDeferred: true, width: 320, height: 180, bytes: Buffer.from(SHOT, 'base64').length });
+    expect(picture?.type === 'file' && picture.preview?.startsWith('data:image/png;base64,')).toBe(true);
+    expect(clip).toEqual({ type: 'file', mimeType: 'video/mp4', data: video, name: 'drive.mp4' });
+    expect((await client.call('messages.attachment', { threadId, messageId: 'msg_attached', partIndex: 0 })).data).toBe(SHOT);
+  });
+
+  test('messages.attachment with display hands back a lighter WebP made once, and the original without it', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    seed(threadId);
+    const gif = Buffer.from('GIF89a\x01\x00\x01\x00\x00\x00\x00;', 'binary').toString('base64');
+    harness.core.journal.putMessage({ id: 'msg_gif', threadId, turnId: 'trn_seed', role: 'user', state: 'complete', createdAt: 3_000, parts: [{ type: 'image', mimeType: 'image/gif', data: gif, alt: null }] });
+    harness.core.journal.putMessage({ id: 'msg_screen', threadId, turnId: 'trn_seed', role: 'assistant', state: 'complete', createdAt: 3_001, parts: [{ type: 'file', mimeType: 'image/png', data: SCREEN, name: 'screen.png' }] });
+
+    const copy = await client.call('messages.attachment', { threadId, messageId: 'msg_screen', partIndex: 0, display: true });
+    expect(copy.mimeType).toBe('image/webp');
+    const bytes = Buffer.from(copy.data, 'base64');
+    expect(bytes.subarray(8, 12).toString()).toBe('WEBP');
+    expect(bytes.length * 5).toBeLessThan(Buffer.from(SCREEN, 'base64').length);
+    // At most 1280 px on its longer side, at the picture's proportions.
+    expect(await new Bun.Image(bytes).metadata()).toMatchObject({ width: 1280, height: 720, format: 'webp' });
+    // Kept: the second read is the same copy, from the journal.
+    const kept = harness.core.journal.db.query('SELECT length(data) AS n FROM media_displays WHERE message_id = ?').get('msg_screen') as { n: number };
+    expect(kept.n).toBe(bytes.length);
+    expect((await client.call('messages.attachment', { threadId, messageId: 'msg_screen', partIndex: 0, display: true })).data).toBe(copy.data);
+    // The original is still what a plain read gives; a copy heavier than its PNG is not sent; a GIF stays a GIF.
+    expect(await client.call('messages.attachment', { threadId, messageId: 'msg_screen', partIndex: 0 })).toEqual({ data: SCREEN });
+    expect(await client.call('messages.attachment', { threadId, messageId: 'msg_shot', partIndex: 1, display: true })).toEqual({ data: SHOT });
+    expect(await client.call('messages.attachment', { threadId, messageId: 'msg_gif', partIndex: 0, display: true })).toEqual({ data: gif });
+  });
+
+  test('a light page still opens, sized and without blurs, when the blurs cannot be read', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    seed(threadId);
+    harness.core.journal.db.exec('DROP TABLE media_previews');
+    const light = await client.call('threads.get', { threadId, compactImages: true });
+    const shot = light.messages.find((message) => message.id === 'msg_shot')!.parts[1];
+    expect(shot).toMatchObject({ dataDeferred: true, width: 320, height: 180 });
+    expect(shot).not.toHaveProperty('preview');
+    expect((await client.call('messages.list', { threadId, before: 'msg_tall', compactImages: true })).messages).toHaveLength(1);
+  });
+
+  test('the blurs of a rewound message and of a deleted thread leave the journal with them', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    seed(threadId);
+    await client.call('threads.get', { threadId, compactImages: true });
+    // A blur per picture, and the mark that each message was looked at.
+    expect(previews(threadId)).toBe(4);
+    harness.core.journal.db.transaction(() => harness.core.journal.truncateMessages(threadId, harness.core.journal.messageRowid(threadId, 'msg_tall')!))();
+    expect(previews(threadId)).toBe(2);
+    harness.core.journal.deleteThreads([threadId]);
+    expect(previews(threadId)).toBe(0);
+  });
+});

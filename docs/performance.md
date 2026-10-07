@@ -273,15 +273,53 @@ when the core advertises `chunkedAnswers`.
   prefixes cannot prove that the omitted text stayed unchanged.
 - File links arrive with their name, MIME type and decoded byte count. Their
   base64 data loads through `messages.attachment` when opened or downloaded.
-  Assistant media previews retain their bytes on first read.
+  An assistant's video, audio or PDF keeps its bytes, since it previews on
+  mount. An assistant's picture above 8 KiB is deferred like a prompt's, with
+  its size and blur, and `ChatFile` loads it within 400 px of the screen in a
+  box of its proportions. Nine screenshots an agent attached made a 40-message
+  page of one thread weigh 12,020,008 bytes, 7,472,667 deflated (measured on
+  2026-10-07). The same page projected this way weighs 50,961 bytes, 13,679
+  deflated.
   Older cores return full files, and a cached deferred file can fall back to
   their history methods after a downgrade.
 - On a core advertising `readingPages`, pages ask for `compactImages`: a
-  picture above 8 KiB of base64 arrives as its decoded size, holds a
-  thumbnail-sized place, and loads through `messages.attachment` once within
-  400 px of what the timeline shows: the observer is rooted at the scrolling
-  timeline, whose clipping would otherwise hide the margin. Edit fetches a prompt's deferred files and pictures
-  before it fills the composer.
+  picture above 8 KiB of base64 arrives as its decoded size, and loads through
+  `messages.attachment` once within 400 px of what the timeline shows. The
+  observer is rooted at the scrolling timeline, whose clipping would otherwise
+  hide the margin. Edit fetches a prompt's deferred files and pictures before
+  it fills the composer.
+- A deferred picture also carries its `width` and `height`, read from its
+  header (`packages/contracts/src/image-size.ts`): PNG, GIF, WebP and JPEG, with
+  JPEG's EXIF orientation applied as a browser applies it. It also carries
+  `preview`, a ThumbHash blur of at most 32 px that `Bun.Image.placeholder()`
+  makes, about 1.2 KB. The core makes three at a time on Bun's image worker,
+  refuses pictures above 8K UHD, and keeps them in `media_previews`
+  (`packages/core/src/media.ts`).
+- A deferred picture on screen is drawn from a light copy:
+  `messages.attachment` with `display` answers a WebP at quality 80, at most
+  1,280 px on its longer side, made once on Bun's image worker and kept in
+  `media_displays`. Six 1,541 to 2,467 KB PNG screenshots measured 51 to
+  130 KB this way on 2026-10-07, about 130 ms each to make. AVIF would be
+  smaller, but Bun's Linux build cannot encode it. A GIF, a copy that would not
+  be lighter and any other file come as they are. A click opens the original
+  in the viewer, and a download or an edit also fetches the original
+  (`store/display-images.ts`).
+- A light read first makes the blurs of the messages around its page that no
+  read looked at before, waiting 1.5 s at most. It does this before the page is
+  read, never between the read and the answer, so the answer still holds every
+  event sent before it. A picture without a blur yet is sent without one and
+  queued.
+- `ChatImage.svelte` draws each picture in a box of its own proportions from
+  the first frame: the blur, then the picture fading in over it. A picture that
+  came with its bytes reads its size from their header. Nothing around the box
+  moves when the bytes land: the 180 by 120 place it replaced grew to the
+  thumbnail and pushed what followed. An unmeasured prompt counts its
+  thumbnails on top of the 80 px estimate (`estimateSlot`), so the spacers
+  are closer to what scrolling up mounts. `tests/e2e/thread-loading.test.ts` checks
+  this on a real core with 24 screenshots: the fetches on opening, and the
+  reader's text keeping its position to the pixel while the scrolled pictures
+  land.
+
 - While a first page downloads, the chat shows a bar and "192 kB / 1.3 MB",
   the bytes received against the total the core put in each slice. A page
   under 64 KiB comes whole and the bar runs without numbers; it shows after
@@ -457,6 +495,41 @@ limits expensive work while streaming, typing and scrolling:
 - The composer uses `field-sizing: content` where supported; IndexedDB draft
   writes wait for a typing pause. Bottom following runs after layout and before
   paint through `ResizeObserver`.
+
+### A long turn is many rows
+
+A long agent session leaves a thread whose weight is tool calls: four real
+ones of 15 to 23 MB read on 2026-10-07 held 4,000 to 6,200 calls, and one
+assistant message carried a whole turn, up to 3,106 parts. The window counted
+messages, so such a message was mounted whole whenever any of it was near the
+viewport, and every scroll event read each call of the turns on screen again
+for the files card. `?fake=1&heavy=1` seeds that shape: forty messages,
+11.5 MiB, a last turn of 1,300 calls in runs of about ten.
+
+- `lib/timeline-rows.ts` cuts a message of more than 64 parts into rows of at
+  least 40, each starting on a paragraph the page draws. An activity run never
+  spans a cut, so the rows draw what the whole message drew, and a continuing
+  row keeps the 12 px a paragraph takes inside a message. The window measures,
+  anchors and estimates rows; the first row keeps the message's id.
+- A part arriving on a streaming message changes its last row only: the rows
+  above stay the same objects and draw nothing again.
+- The window hands back the same object while it covers the same rows, and
+  the files card reads tool calls only for a finished turn whose last row is
+  drawn: a scroll inside the rows on the page runs neither.
+- A reading position saves the message and the row of it on top; a find hit
+  names its part, and opens the row that draws it.
+- An anchor is read from the rows by id instead of searching every node, a
+  wheel notch away from the bottom reads no layout, a diff's width comes from
+  its `ResizeObserver` entry, page visibility has one listener for every call
+  clock, and a call's description is kept by its input object.
+
+Medians of five runs on 2026-10-07, 1280 x 890, software compositing, the base
+being `89556311`: a wheel up the long turn went from 1,895 to 784 ms of
+main-thread CPU per three seconds, with 3,271 nodes under the scroller down to
+849; six jumps across the thread from 825 to 56 ms of long tasks; a flick from
+435 ms of long tasks to none, covering 47,000 px of its gesture instead of
+26,000. The ordinary 400-message thread measured 878 then 870 ms.
+[Heavy-thread report](../bench/results/2026-10-07-heavy-thread.md).
 
 `packages/ui/src/render-cost.test.ts` rejects unbounded blur, forbidden endless
 animation properties, outer-container `:has()` and outline width transitions.
@@ -635,6 +708,8 @@ bun run bench/startup.ts --exe <boite-shell.exe> --runs 7
 bun bench/ui-frames.ts --noblur                # fps and main thread per UI scenario, software compositing
 bun bench/ui-frames.ts --ui <other checkout>/packages/ui --cpu 4 --size 1920x1080@1.5
 bun bench/ui-frames.ts --trace --only "typing,long thread scroll"   # layouts per window, and how many a script forced
+bun bench/ui-frames.ts --runs 5 --only "heavy thread scroll,heavy thread flick,heavy thread jumps,heavy scroll while streaming"
+bun bench/ui-frames.ts --gpu --only "heavy thread scroll"          # composited on the machine's GPU, never a software renderer
 bun bench/rpc-actions.ts --journal <journal.db> --runs 6   # latency, core CPU, bytes and RSS per RPC (Linux)
 ```
 
@@ -651,9 +726,14 @@ WebView2 profile, and reads the page's own timings over the debugging port.
 and plays each scenario in headless Chrome without a GPU: frames drawn, long
 tasks and main-thread time, per 1,000 px for the scroll scenarios, and each
 key's latency for the typing ones. `--noblur` repeats each one with backdrop
-filters off, `--ui` measures another checkout. `--trace` counts the layouts of
-each window and those a script forced, numbers that hold on a busy machine;
-`--profile <dir>` writes a CPU profile per scenario.
+filters off, `--css "<rules>"` with the rules it is given, `--ui` measures
+another checkout. `--trace` counts the layouts of each window, those a script
+forced and the paints, and the last two columns give the main thread's own
+CPU time and the nodes under the scroller: numbers that hold on a busy
+machine. `--profile <dir>` writes a CPU profile per scenario. `--gpu`
+composites on the machine's GPU, as an accelerated WebView2 does, and stops
+when Chrome only finds a software renderer. The heavy scenarios play the
+11.5 MiB thread of `?fake=1&heavy=1`.
 
 `bench/rpc-actions.ts` starts a core as a child process and times the boot
 calls, the reads of a thread and the common writes, with the core's CPU and
@@ -670,7 +750,8 @@ Results: [bench/results/2026-10-05-rpc-actions.md](../bench/results/2026-10-05-r
 [bench/results/2026-10-03-remote-browser-frames.md](../bench/results/2026-10-03-remote-browser-frames.md),
 [bench/results/2026-09-19-wire-and-startup.md](../bench/results/2026-09-19-wire-and-startup.md),
 [bench/results/2026-09-30-ui-frames.md](../bench/results/2026-09-30-ui-frames.md),
-[bench/results/2026-09-30-typing-and-scroll.md](../bench/results/2026-09-30-typing-and-scroll.md).
+[bench/results/2026-09-30-typing-and-scroll.md](../bench/results/2026-09-30-typing-and-scroll.md),
+[bench/results/2026-10-07-heavy-thread.md](../bench/results/2026-10-07-heavy-thread.md).
 
 ## The Windows sidecar is the signed runtime
 

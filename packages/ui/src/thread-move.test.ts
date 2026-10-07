@@ -7,6 +7,7 @@ import { writeExperiments } from './lib/experiments';
 import { closeTour } from './lib/onboarding.svelte';
 import { work } from './lib/work-prefs.svelte';
 import { moveThread } from './lib/thread-move.svelte';
+import { projectThreadView } from './lib/project-threads.svelte';
 
 /*
  * Moving a thread to another project from the whole app over the in-memory
@@ -28,6 +29,7 @@ afterEach(() => {
   window.localStorage.clear();
   work.load();
   workspace.view = 'projects';
+  projectThreadView.shelf = { idle: false, archived: false };
 });
 
 async function waitFor(check: () => boolean, attempts = 2000): Promise<void> {
@@ -142,6 +144,25 @@ test('a row dragged with the mouse onto another project moves there; a short pre
   expect(boite.classList.contains('drop')).toBe(false);
   expect(document.documentElement.classList.contains('thread-dragging')).toBe(false);
   expect(document.querySelector('[data-testid=thread-drag-ghost]')).toBeNull();
+});
+test('a row dropped on an idle project in its fold moves there', async () => {
+  await mountOnFake();
+  await waitFor(() => inProject('t-descriptors', 'p-notes'));
+  const quiet = await store.client!.call('projects.add', { path: 'C:\\src\\quiet', name: 'quiet' });
+  await waitFor(() => document.querySelector('[data-testid=idle-projects-toggle]') !== null);
+  query<HTMLButtonElement>('[data-testid=idle-projects-toggle]').click();
+  await waitFor(() => document.querySelector(`[data-testid=idle-project][data-project-id="${quiet.id}"]`) !== null);
+  const row = query(`[data-testid=idle-project][data-project-id="${quiet.id}"]`);
+  const move = vi.spyOn(store, 'move');
+  under(() => row.querySelector('[data-testid=idle-project-open]'));
+
+  card('t-descriptors').dispatchEvent(pointer('pointerdown', 10, 10));
+  window.dispatchEvent(pointer('pointermove', 10, 80));
+  await waitFor(() => row.classList.contains('drop'));
+  expect(query('[data-testid=thread-drag-hint]').textContent?.trim()).toBe('quiet');
+  window.dispatchEvent(pointer('pointerup', 10, 80));
+  await waitFor(() => inProject('t-descriptors', quiet.id));
+  expect(move).toHaveBeenCalledWith('t-descriptors', quiet.id, undefined);
 });
 test('a running thread stays draggable; its move asks first, waits for the turn, and Cancel move drops it', async () => {
   await mountOnFake();

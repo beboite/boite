@@ -191,6 +191,19 @@ export const SCENARIOS: Record<string, Scenario> = {
     const journal = await env.call('threads.get', { threadId: created.id });
     check(journal.messages.some(message => message.parts.some(part => part.type === 'file' && part.data === data && !part.dataDeferred)), 'snapshot compaction changed the journal');
   },
+  'a deferred picture of a light page keeps the size its header gives': async env => {
+    const setup = await echo(env), created = await thread(env, setup);
+    // A PNG header for 640 by 360, padded past the 8 KiB a light page keeps inline: the size comes from the header alone.
+    const header = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 2, 0x80, 0, 0, 1, 0x68, 8, 2, 0, 0, 0];
+    const data = btoa(String.fromCharCode(...header, ...new Array(9000).fill(0)));
+    await env.call('turns.start', { threadId: created.id, prompt: 'see', attachments: [{ kind: 'image', name: 'shot.png', mimeType: 'image/png', data }] });
+    await until('the picture turn to finish', async () => (await summary(env, created.id)).status === 'idle');
+    const light = await env.call('threads.get', { threadId: created.id, compactImages: true });
+    const message = light.messages.find(message => message.parts.some(part => part.type === 'image'));
+    const part = message?.parts.find(part => part.type === 'image');
+    check(part?.type === 'image', 'the picture disappeared');
+    same({ data: part.data, deferred: part.dataDeferred, width: part.width, height: part.height }, { data: '', deferred: true, width: 640, height: 360 }, 'the deferred picture');
+  },
   'activity uploads are validated before mutation and accompany only the first iteration': async env => {
     const setup = await echo(env);
     const { id: threadId } = await thread(env, setup);

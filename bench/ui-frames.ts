@@ -5,15 +5,21 @@
  * GPU hides shows. docs/performance.md, "What a frame costs".
  *
  * Run: bun bench/ui-frames.ts [--cpu 4] [--size 1920x1080@1.5] [--runs 2]
- *        [--only "palette over stream,long thread scroll"] [--noblur]
+ *        [--only "palette over stream,long thread scroll"] [--noblur] [--css "<rules>"]
  *        [--ui <other checkout>/packages/ui] [--bundle <dir>] [--browser <chrome>]
- *        [--trace] [--profile <dir>]
+ *        [--trace] [--profile <dir>] [--gpu]
  *
  * Without --bundle it builds the UI once, in a child process and into a
  * temporary directory (`--build <dir>` alone builds and exits), from this
  * checkout or from the `packages/ui` that --ui names, to compare two. `--noblur`
  * also measures every scenario with backdrop filters switched off, which is
- * how a blur's own share of a frame is told apart.
+ * how a blur's own share of a frame is told apart, and `--css` with the rules
+ * it is given. `--gpu` composites on the machine's GPU instead, the usual case
+ * of an accelerated WebView2, and stops if Chrome only finds a software renderer.
+ *
+ * The last two columns hold whatever else the machine runs: the main thread's
+ * own CPU time over the measured window, and the nodes under the scroller and
+ * the listeners of the page at its end. The frame figures before them are wall-clock.
  *
  * The typing scenarios press a key every 40 ms in the composer and report each
  * key's latency, from its keydown to the task after the next frame. `--trace`
@@ -35,6 +41,8 @@ const option = (name: string): string | undefined => {
   return at < 0 ? undefined : argv[at + 1];
 };
 const CPU = Number(option('cpu') ?? 1);
+/** `--gpu` composites on the machine's GPU instead: what an accelerated WebView2 does. It refuses a software renderer. */
+const GPU = argv.includes('--gpu');
 const RUNS = Number(option('runs') ?? 1);
 /** `--profile <dir>` writes a CPU profile of each measured window there, one per scenario. */
 const PROFILE = option('profile');
@@ -45,9 +53,12 @@ const ONLY = option('only')?.split(',').map((name) => name.trim());
 const size = /^(\d+)x(\d+)(?:@([\d.]+))?$/.exec(option('size') ?? '1280x890@1');
 if (!size) throw new Error('--size must read <width>x<height>[@<device pixel ratio>]');
 const W = Number(size[1]), H = Number(size[2]), DPR = Number(size[3] ?? 1);
-const VARIANTS: Record<string, string> = argv.includes('--noblur')
-  ? { base: '', noblur: '*, *::before, *::after { backdrop-filter: none !important; }' }
-  : { base: '' };
+const VARIANTS: Record<string, string> = {
+  base: '',
+  ...(argv.includes('--noblur') ? { noblur: '*, *::before, *::after { backdrop-filter: none !important; }' } : {}),
+  // `--css "<rules>"` measures every scenario again with these rules added: what one declaration costs or saves.
+  ...(option('css') === undefined ? {} : { css: option('css')! }),
+};
 
 const UI = resolve(option('ui') ?? join(import.meta.dir, '../packages/ui'));
 
@@ -72,7 +83,7 @@ interface TraceEvent {
   name: string; ph: string; ts: number; dur?: number; tid: number; pid: number;
   args?: { name?: string; beginData?: { stackTrace?: { functionName: string }[] }; data?: { reason?: string; nodeName?: string } };
 }
-interface Measure { fps: number; p95: number; worst: number; longTasks: number; longMs: number; mainMs: number; scriptMs: number; layoutMs: number; styleMs: number; scrolled: number; keys: number[] }
+interface Measure { fps: number; p95: number; worst: number; longTasks: number; longMs: number; mainMs: number; scriptMs: number; layoutMs: number; styleMs: number; cpuMs: number; nodes: number; listeners: number; scrolled: number; keys: number[] }
 
 class Page {
   #id = 0;
@@ -172,7 +183,7 @@ async function main(): Promise<void> {
   const debugPort = await freePort();
   const profile = mkdtempSync(join(tmpdir(), 'boite-ui-frames-profile-'));
   const chrome = Bun.spawn({
-    cmd: [option('browser') ?? findBrowser(), '--headless=new', '--disable-gpu', '--disable-software-rasterizer', '--disable-3d-apis', '--mute-audio',
+    cmd: [option('browser') ?? findBrowser(), '--headless=new', ...(GPU ? ['--enable-gpu', '--use-gl=angle', '--use-angle=gl-egl', '--disable-software-rasterizer'] : ['--disable-gpu', '--disable-software-rasterizer', '--disable-3d-apis']), '--mute-audio',
       '--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--lang=en-US',
       '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1', '--remote-allow-origins=*',
       `--window-size=${W},${H}`, `--user-data-dir=${profile}`, `--remote-debugging-port=${debugPort}`, 'about:blank'],
@@ -216,8 +227,14 @@ async function main(): Promise<void> {
       await page.waitFor(`document.querySelectorAll('.prose.live .paragraph').length >= 2`);
     };
     // A wheel up the conversation through the compositor at 2400 px/s, not awaited.
-    const wheel = (width = W, height = H): void => {
-      void page.send('Input.synthesizeScrollGesture', { x: Math.round(width * 0.55), y: Math.round(height * 0.4), yDistance: 9000, speed: 2400, gestureSourceType: 'mouse' }).catch(() => {});
+    const wheel = (width = W, height = H, distance = 9000, speed = 2400): void => {
+      void page.send('Input.synthesizeScrollGesture', { x: Math.round(width * 0.55), y: Math.round(height * 0.4), yDistance: distance, speed, gestureSourceType: 'mouse' }).catch(() => {});
+    };
+    // The 11.5 MiB thread: forty messages, one of them a turn of 1,300 tool calls.
+    const openHeavy = async (width = W, height = H, mobile = false): Promise<void> => {
+      await open('open=recent&heavy=1', width, height, mobile);
+      await page.waitFor(`globalThis.__bench.store.openThread?.id === 't-heavy' && document.querySelector('[data-testid=message]')`);
+      await Bun.sleep(1200);
     };
     // Typing into the composer at 25 keys a second, a fast typist, not awaited:
     // each key goes through the renderer as a real keydown, keypress and input.
@@ -264,6 +281,22 @@ async function main(): Promise<void> {
       'activity panel over stream': async () => { await open('open=recent&stream=tokens'); await stream(); await openActivity(); },
       'long thread scroll': async () => { await open('open=recent&long=1'); wheel(); },
       'scroll while streaming': async () => { await open('open=recent&stream=tokens&long=1'); await stream(); wheel(); },
+      'heavy thread scroll': async () => { await openHeavy(); wheel(); },
+      // A flick: 20,000 px a second, which crosses a whole turn of work in the measured window.
+      'heavy thread flick': async () => { await openHeavy(); wheel(W, H, 70_000, 20_000); },
+      // The scrollbar thumb dropped at six places across the thread, one every 450 ms: each lands on rows never drawn.
+      'heavy thread jumps': async () => {
+        await openHeavy();
+        await page.evaluate(`(() => { const el = ${SCROLLER}; const at = [0.1, 0.8, 0.3, 0.95, 0.5, 0]; let jump = 0; const timer = setInterval(() => { el.scrollTop = el.scrollHeight * at[jump++]; if (jump >= at.length) clearInterval(timer); }, 450); })()`);
+      },
+      // An answer streams at the bottom while the wheel goes up the long turn above it.
+      'heavy scroll while streaming': async () => {
+        await open('open=recent&stream=tokens&heavy=1');
+        await page.waitFor(`globalThis.__bench.store.openThread?.id === 't-heavy' && document.querySelector('[data-testid=message]')`);
+        await Bun.sleep(1200);
+        await stream();
+        wheel();
+      },
       'scroll under activity': async () => { await open('open=recent&stream=tokens&long=1'); await stream(); await openActivity(); wheel(); },
       'onboarding tour': async () => {
         await page.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: DPR, mobile: false });
@@ -274,6 +307,7 @@ async function main(): Promise<void> {
       },
       'phone streaming': async () => { await open('open=recent&stream=tokens', 390, 844, true); await stream(); },
       'phone long scroll': async () => { await open('open=recent&long=1', 390, 844, true); wheel(390, 844); },
+      'phone heavy scroll': async () => { await openHeavy(390, 844, true); wheel(390, 844); },
       'typing': async () => { await open('open=recent'); await focusComposer(); type(); },
       'typing in a long draft': async () => { await open('open=recent'); await focusComposer(PROMPT.repeat(2)); type(); },
       'typing with an image': async () => { await open('open=recent'); await focusComposer(); await attachImage(); type(); },
@@ -336,7 +370,8 @@ async function main(): Promise<void> {
           for (const event of forcedLayouts) { const name = (event.args?.beginData?.stackTrace ?? []).slice(0, 3).map((frame) => frame.functionName || '(anon)').join(' < '); const [n, ms] = by.get(name) ?? [0, 0]; by.set(name, [n + 1, ms + (event.dur ?? 0) / 1000]); }
           for (const [name, [n, ms]] of [...by].sort((a, b) => b[1][1] - a[1][1]).slice(0, 8)) console.log(`    forced ${n}x ${ms.toFixed(0)} ms: ${name}`);
         }
-        console.log(`  trace ${current}: layouts ${layouts.length}, forced by script ${forced}, keys ${keys.length}; ${top}`);
+        const paints = traced.filter((event) => onMain(event) && event.name === 'Paint').length;
+        console.log(`  trace ${current}: layouts ${layouts.length}, forced by script ${forced}, paints ${paints}, keys ${keys.length}; ${top}`);
       }
       if (PROFILE) { const { profile } = await page.send('Profiler.stop') as { profile: unknown }; await Bun.write(join(PROFILE, `${current.replaceAll(' ', '-')}.cpuprofile`), JSON.stringify(profile)); }
       // The typist stops with the measured window.
@@ -353,13 +388,25 @@ async function main(): Promise<void> {
         scriptMs: ((after['ScriptDuration']! - before['ScriptDuration']!) * 1000) / seconds,
         layoutMs: ((after['LayoutDuration']! - before['LayoutDuration']!) * 1000) / seconds,
         styleMs: ((after['RecalcStyleDuration']! - before['RecalcStyleDuration']!) * 1000) / seconds,
+        // The main thread's own CPU clock: what it ran, whatever else the machine was doing meanwhile.
+        cpuMs: (after['ThreadTime']! - before['ThreadTime']!) * 1000,
+        nodes: await page.evaluate<number>(`window.__sc ? window.__sc.querySelectorAll('*').length : document.querySelectorAll('*').length`),
+        listeners: after['JSEventListeners']!,
         scrolled,
         keys: keys.sort((a, b) => a - b),
       };
     };
 
-    console.log(`# ${W}x${H}@${DPR}, CPU x${CPU}, ${new Date().toISOString().slice(0, 10)}, software compositing`);
-    console.log('scenario | variant | fps | p95 ms | worst ms | long tasks | main ms/s (script, layout, style) | main ms per 1000 px | keys: count, median, p95, worst ms');
+    let compositing = 'software compositing';
+    if (GPU) {
+      await page.send('Page.navigate', { url: `http://127.0.0.1:${uiPort}/?fake=1` });
+      await Bun.sleep(500);
+      const renderer = await page.evaluate<string | null>(`(() => { const gl = document.createElement('canvas').getContext('webgl2'); const debug = gl?.getExtension('WEBGL_debug_renderer_info'); return debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : null; })()`);
+      if (!renderer || /swiftshader|llvmpipe|softpipe/i.test(renderer)) throw new Error(`--gpu found no hardware renderer: ${renderer}`);
+      compositing = renderer;
+    }
+    console.log(`# ${W}x${H}@${DPR}, CPU x${CPU}, ${new Date().toISOString().slice(0, 10)}, ${compositing}`);
+    console.log('scenario | variant | fps | p95 ms | worst ms | long tasks | main ms/s (script, layout, style) | main ms per 1000 px | keys: count, median, p95, worst ms | main CPU ms, per 1000 px | scroller nodes, listeners');
     for (const [name, setup] of Object.entries(scenarios)) {
       if (ONLY && !ONLY.includes(name)) continue;
       for (let run = 0; run < RUNS; run++) {
@@ -370,10 +417,11 @@ async function main(): Promise<void> {
             await page.call(`function (css) { let s = document.getElementById('bench-variant'); if (!s) { s = document.createElement('style'); s.id = 'bench-variant'; document.head.append(s); } s.textContent = css; }`, css);
             const m = await measure();
             // Only a wheel's distance: a list following its answer, or a draft scrolling to its caret, is no scroll cost.
-            const perPixel = name.includes('scroll') && m.scrolled > 0 ? ((m.mainMs * 3) / m.scrolled * 1000).toFixed(0) : '-';
+            const perPixel = (name.includes('scroll') || name.includes('flick')) && m.scrolled > 0 ? ((m.mainMs * 3) / m.scrolled * 1000).toFixed(0) : '-';
             const at = (share: number) => (m.keys[Math.min(m.keys.length - 1, Math.floor(m.keys.length * share))] ?? 0).toFixed(1);
             const keys = m.keys.length ? `${m.keys.length}, ${at(0.5)}, ${at(0.95)}, ${at(1)}` : '-';
-            console.log(`${name} | ${variant} | ${m.fps.toFixed(1)} | ${m.p95.toFixed(0)} | ${m.worst.toFixed(0)} | ${m.longTasks} (${m.longMs.toFixed(0)} ms) | ${m.mainMs.toFixed(0)} (${m.scriptMs.toFixed(0)}, ${m.layoutMs.toFixed(0)}, ${m.styleMs.toFixed(0)}) | ${perPixel} | ${keys}`);
+            const cpuPerPixel = (name.includes('scroll') || name.includes('flick')) && m.scrolled > 0 ? (m.cpuMs / m.scrolled * 1000).toFixed(0) : '-';
+            console.log(`${name} | ${variant} | ${m.fps.toFixed(1)} | ${m.p95.toFixed(0)} | ${m.worst.toFixed(0)} | ${m.longTasks} (${m.longMs.toFixed(0)} ms) | ${m.mainMs.toFixed(0)} (${m.scriptMs.toFixed(0)}, ${m.layoutMs.toFixed(0)}, ${m.styleMs.toFixed(0)}) | ${perPixel} | ${keys} | ${m.cpuMs.toFixed(0)}, ${cpuPerPixel} | ${m.nodes}, ${m.listeners}`);
           } catch (error) {
             console.log(`${name} | ${variant} | failed: ${error instanceof Error ? error.message : String(error)}`);
           }

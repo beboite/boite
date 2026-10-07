@@ -4,6 +4,8 @@ import { groupWorkingThread, recentPreferences, workingThread } from './recent.s
 import { compareThreads } from './thread-order';
 
 export type ProjectThreadKind = 'working' | 'done' | 'archived';
+/** The two folds under the project list: projects with no open conversation, and projects put out of the list. */
+export type ProjectShelfKind = 'idle' | 'archived';
 /** Archived conversations split in two: done ones (marked done, PR merged) leave after a delay, the others wait to be picked up again. */
 export type ArchiveKind = 'done' | 'archived';
 
@@ -23,7 +25,8 @@ export class ProjectThreadView {
   working = $state<string[]>([]);
   done = $state<string[]>([]);
   archived = $state<string[]>([]);
-  otherOpen = $state(false);
+  /** Both folds start closed and stay as left, across desktop and phone, for this session. */
+  shelf = $state<Record<ProjectShelfKind, boolean>>({ idle: false, archived: false });
 
   isOpen(entry: ProjectEntry, kind: ProjectThreadKind): boolean {
     if (kind === 'working' && !recentPreferences.groupWorking) return false;

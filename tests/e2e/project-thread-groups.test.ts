@@ -58,7 +58,7 @@ for (const width of [1280, 390]) {
       await showThreadView(page, 'projects', prefix);
       await revealProject('t-scheduler');
       await option('other');
-      await page.waitFor(`!document.querySelector('${root} ${id('other-projects-toggle')}') && document.querySelector('${root} [data-project-id="${empty}"]')`);
+      await page.waitFor(`!document.querySelector('${root} ${id('idle-projects-toggle')}') && document.querySelector('${root} [data-project-id="${empty}"]')`);
       await option('merged');
       await revealProject(merged);
       expect(await page.evaluate(`globalThis.__boiteTest.workspace.machines[0].store.client.call('threads.get', {threadId:'t-parser'}).then(t=>t.archived)`)).toBe(true);
@@ -120,7 +120,7 @@ for (const width of [1280, 390]) {
       expect(await page.evaluate(`!!document.querySelector(${JSON.stringify(project(main, busy))})`)).toBe(true);
       await page.waitFor(`document.querySelectorAll('${root} ${id(width < 720 ? 'mobile-project-group' : 'project')}').length === 4`);
       expect(await page.evaluate(`document.querySelector(${JSON.stringify(project(main, 'p-notes'))}) === null && document.querySelector(${JSON.stringify(project(main, empty))}) === null`)).toBe(true);
-      expect(await page.evaluate(`document.querySelector('${root} ${id('other-projects-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
+      expect(await page.evaluate(`document.querySelector('${root} ${id('idle-projects-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
       expect(await page.evaluate(`document.querySelector('${first} ${id('project-working-toggle')}').dataset.count`)).toBe('1');
       // t-parser was archived by hand: it waits under Archived, not Done.
       expect(await page.evaluate(`document.querySelector('${first} ${id('project-done-toggle')}').dataset.count`)).toBe('0');
@@ -186,7 +186,7 @@ for (const width of [1280, 390]) {
         await page.waitFor(`document.querySelector('${row(first, 't-scheduler')}')`);
         expect(await page.evaluate(`document.querySelector('${row(first, 't-bench')}') === null`)).toBe(true);
         await page.type(id('mobile-search'), '');
-        await page.waitFor(`document.querySelector('${root} ${id('other-projects-toggle')}')`);
+        await page.waitFor(`document.querySelector('${root} ${id('idle-projects-toggle')}')`);
       } else {
         // Opening a previously expanded counter also unfolds its collapsed project.
         await click(`${first} ${id('project-row')}`);
@@ -196,13 +196,16 @@ for (const width of [1280, 390]) {
         expect(await page.evaluate(`document.querySelector('${first} ${id('project-done-toggle')}').getAttribute('aria-expanded')`)).toBe('true');
       }
 
-      await click(`${root} ${id('other-projects-toggle')}`);
-      expect(await page.evaluate(`!!document.querySelector('${building}:not(.inactive)') && !document.querySelector('${root} ${id('other-projects')} ${id(width < 720 ? 'mobile-project-group' : 'project')}[data-project-id="${busy}"]')`)).toBe(true);
+      await click(`${root} ${id('idle-projects-toggle')}`);
+      // The fold lists idle projects as compact rows, never as project sections.
+      const idleRow = (projectId: string) => `${root} ${id('idle-projects')} ${id('idle-project')}[data-machine-id="${main}"][data-project-id="${projectId}"]`;
+      expect(await page.evaluate(`!!document.querySelector('${building}:not(.inactive)') && !document.querySelector('${idleRow(busy)}') && !!document.querySelector('${idleRow(empty)}')`)).toBe(true);
+      expect(await page.evaluate(`!document.querySelector('${root} ${id('idle-projects')} ${id(width < 720 ? 'mobile-project-group' : 'project')}')`)).toBe(true);
       expect(await page.evaluate(`document.querySelector('${building} ${id('project-working-toggle')}').dataset.count`)).toBe('1');
       await click(`${building} ${id('project-working-toggle')}`);
       await page.waitFor(`document.querySelector('${row(building, 't-building')}')`);
       expect(await page.evaluate(`document.querySelector('${building} ${id('project-done-toggle')}').disabled`)).toBe(true);
-      // Queued and background work also keep the project outside Other projects.
+      // Queued and background work also keep the project outside Idle projects.
       for (const [index, renderedState] of ['queued', 'monitoring', 'background', 'working'].entries()) {
         await page.evaluate(`(() => {
           const states = [
@@ -215,9 +218,10 @@ for (const width of [1280, 390]) {
           store.threads = store.threads.map(t => t.id === 't-building' ? {...t, ...states[${index}]} : t);
         })()`);
         await page.waitFor(`document.querySelector('${row(building, 't-building')} ${id('thread-state')}[data-state="${renderedState}"]')`);
-        expect(await page.evaluate(`!document.querySelector('${root} ${id('other-projects')} [data-project-id="${busy}"]')`)).toBe(true);
+        expect(await page.evaluate(`!document.querySelector('${idleRow(busy)}')`)).toBe(true);
       }
-      const finished = project(main, 'p-notes');
+      // An idle project keeps its done history one click away, under its row.
+      const finished = idleRow('p-notes');
       await page.waitFor(`document.querySelector('${finished}')`);
       await click(`${finished} ${id('project-done-toggle')}`);
       const done = `${root} ${id('done-thread')}[data-machine-id="${main}"][data-thread-id="t-descriptors"]`;
@@ -235,13 +239,15 @@ for (const width of [1280, 390]) {
         await revealDone();
       }
       await click(`${done} ${id('done-thread-restore')}`);
-      await page.waitFor(`document.querySelector('${finished}:not(.inactive)')`);
+      await page.waitFor(`document.querySelector('${project(main, 'p-notes')}:not(.inactive)') && !document.querySelector('${finished}')`);
       expect(await page.evaluate(`globalThis.__boiteTest.workspace.machines[0].store.client.call('threads.get', {threadId:'t-descriptors'}).then(t=>t.archived)`)).toBe(false);
       expect(await page.evaluate(`globalThis.__boiteTest.workspace.machines[1].store.client.call('threads.get', {threadId:'t-descriptors'}).then(t=>t.archived)`)).toBe(false);
 
-      // A draft makes an otherwise empty project available immediately.
-      await page.evaluate(`globalThis.__boiteTest.workspace.machines[0].store.startDraft(${JSON.stringify(empty)})`);
-      await page.waitFor(`document.querySelector('${project(main, empty)}:not(.inactive)')`);
+      // Choosing an idle project starts a draft there, which returns it to the list immediately.
+      await click(`${idleRow(empty)} ${id('idle-project-open')}`);
+      await page.waitFor(`globalThis.__boiteTest.workspace.machines[0].store.draft?.projectId === ${JSON.stringify(empty)}`);
+      if (width < 720) await page.click(id('mobile-back'));
+      await page.waitFor(`document.querySelector('${project(main, empty)}:not(.inactive)') && !document.querySelector('${idleRow(empty)}')`);
       expect(await page.evaluate(`document.querySelector('${project(main, empty)} ${id('project-done-toggle')}').disabled && document.querySelector('${project(main, empty)} ${id('project-working-toggle')}').disabled`)).toBe(true);
       if (width < 720) await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 1, mobile: true });
       else await page.evaluate('globalThis.__boiteTest.workspace.active.setSidebarWidth(208)');
