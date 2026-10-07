@@ -22,13 +22,20 @@ right language. The tray icon's menu is native: the UI sends its two labels
 through `tray_labels` at start and on every change. App update errors come from
 the shell and stay in English.
 
-Dates and numbers follow, and keep the machine's region when it speaks the
-language the app is set to. A French machine on French reads `jeu. 21:48` and
-`31 000`, and so does an English machine on French, in French's default
-region. An app set to English on a French machine reads as English, not as a French machine
-writing English. Every date, count, duration, size and dollar amount goes
-through `formatLocale()` (`lib/format.ts`, `lib/usage.ts`), never the system's
-default: French reads `38,0 s`, `1 594 tours` and `113,23 $US`.
+Dates and numbers follow the language the app speaks, in the machine's
+region. An English app on a Swiss machine reads `19:40` and `7 Oct`, the same
+app on a US machine `07:40 PM` and `Oct 7`, and French on a French machine
+`jeu. 21:48` and `31 000`. The desktop shell reads the region from the
+operating system's regional format (`platform/region.rs`: Windows' Region
+settings and their short time pattern, `LC_TIME` or `LANG` elsewhere) and sets
+`window.__BOITE_REGION__` before the page runs, because the webview reports
+only languages: WebView2 on an English Windows set to Switzerland says `en-US`.
+A 12 or 24 hour clock picked in Windows overrides the region's. In a browser
+or on a phone, the region is that of a machine language matching the app's,
+then of the first language carrying one. Every date, count, duration, size and
+dollar amount goes through `formatLocale()` (`lib/format.ts`, `lib/usage.ts`),
+never the system's default: French reads `38,0 s`, `1 594 tours` and
+`113,23 $US`.
 
 The core names effort levels and quota windows in English. The UI shows its
 own word instead: an effort or speed level by its id (`high`, `xhigh`, `fast`,

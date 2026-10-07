@@ -167,6 +167,7 @@ pub(crate) fn build_main_window<R: Runtime>(
             .visible(false)
             .focused(!hidden())
             .skip_taskbar(hidden())
+            .initialization_script(crate::platform::region::script())
             // The browser surfaces belong to the page that asked for them: a
             // reload of the UI takes every child webview with it.
             .on_page_load(|window, payload| {

@@ -116,18 +116,42 @@ test('formatted update messages use the current language and preserve arguments'
   expect(strings.harnessUpdates.on('Desktop')).toBe('Sur Desktop');
 });
 
-test('dates and numbers keep the machine region when it speaks the same language', () => {
+test('dates and numbers follow the machine region in the language the app speaks', () => {
   speaks('fr-CA', 'en-US');
   setLocaleSetting('fr');
   expect(formatLocale()).toBe('fr-CA');
-
-  // An English app on a French machine reads as English, not as fr-CA.
   setLocaleSetting('en');
   expect(formatLocale()).toBe('en-US');
 
+  // A region from another language still counts: French on a German machine.
   speaks('de-DE');
   setLocaleSetting('fr');
-  expect(formatLocale()).toBe('fr');
+  expect(formatLocale()).toBe('fr-DE');
+
+  speaks('en');
+  setLocaleSetting('en');
+  expect(formatLocale()).toBe('en');
+});
+
+test('the desktop shell region and clock win over the webview languages', () => {
+  // WebView2 on an English Windows set to Switzerland reports only en-US.
+  speaks('en-US');
+  setLocaleSetting('en');
+  window.__BOITE_REGION__ = { locale: 'fr-CH', hour12: null };
+  try {
+    expect(formatLocale()).toBe('en-CH');
+    const evening = new Date(2026, 9, 7, 19, 40);
+    expect(new Intl.DateTimeFormat(formatLocale(), { hour: '2-digit', minute: '2-digit' }).format(evening)).toBe('19:40');
+
+    window.__BOITE_REGION__ = { locale: 'en-US', hour12: false };
+    expect(formatLocale()).toBe('en-US-u-hc-h23');
+    expect(new Intl.DateTimeFormat(formatLocale(), { hour: '2-digit', minute: '2-digit' }).format(evening)).toBe('19:40');
+
+    window.__BOITE_REGION__ = { locale: 'not a tag!', hour12: null };
+    expect(formatLocale()).toBe('en-US');
+  } finally {
+    delete window.__BOITE_REGION__;
+  }
 });
 
 test('a translation only carries sentences English has, with the same kind and the same slots', () => {

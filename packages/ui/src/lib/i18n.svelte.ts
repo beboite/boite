@@ -153,20 +153,52 @@ export function activeLocale(): Locale {
 }
 
 /**
- * The tag `Intl` formats dates and numbers with. When the machine speaks the
- * language the app is set to, its own tag is used, so a French machine keeps
- * its day order and its 24 hour clock; otherwise the bare language answers,
- * because an app speaking English should read like one.
+ * The tag `Intl` formats dates and numbers with: the language the app speaks,
+ * in the machine's region, so an English app on a Swiss machine shows `19:40`
+ * and `7 Oct` the way the rest of that machine does.
+ *
+ * The region comes from the desktop shell first (`window.__BOITE_REGION__`,
+ * `platform/region.rs`), which reads the operating system's regional format;
+ * the webview itself only reports languages. Elsewhere it is the region of a
+ * machine language matching the app's, then of the first one carrying any. A
+ * clock the shell names explicitly (12 or 24 hours) overrides the region's.
+ * The work is kept per input, since every formatted row asks.
  */
 export function formatLocale(): string {
   const active = activeLocale();
-  if (typeof navigator === 'undefined') return active;
-  for (const raw of [...(navigator.languages ?? []), navigator.language]) {
-    if (typeof raw !== 'string') continue;
-    const tag = raw.trim();
-    if (tag.toLowerCase().split('-')[0] === active) return tag;
+  const shell = typeof window === 'undefined' ? undefined : window.__BOITE_REGION__;
+  const machine = typeof navigator === 'undefined' ? [] : [...(navigator.languages ?? []), navigator.language];
+  const key = `${active}|${shell?.locale}|${shell?.hour12}|${machine.join(',')}`;
+  let tag = formatTags.get(key);
+  if (tag === undefined) {
+    tag = formatTag(active, shell, machine);
+    formatTags.set(key, tag);
   }
-  return active;
+  return tag;
+}
+
+const formatTags = new Map<string, string>();
+
+function formatTag(active: Locale, shell: Window['__BOITE_REGION__'], machine: unknown[]): string {
+  const parsed = machine.map(parse);
+  const region = parse(shell?.locale)?.region
+    ?? parsed.find((locale) => locale?.language === active && locale.region)?.region
+    ?? parsed.find((locale) => locale?.region)?.region;
+  const clock = typeof shell?.hour12 === 'boolean' ? `-u-hc-${shell.hour12 ? 'h12' : 'h23'}` : '';
+  try {
+    return Intl.getCanonicalLocales(`${active}${region ? `-${region}` : ''}${clock}`)[0] ?? active;
+  } catch {
+    return active;
+  }
+}
+
+function parse(raw: unknown): Intl.Locale | undefined {
+  if (typeof raw !== 'string' || raw.trim() === '') return undefined;
+  try {
+    return new Intl.Locale(raw.trim());
+  } catch {
+    return undefined;
+  }
 }
 
 /** Stamps `<html lang>`, so the browser hyphenates and reads the page in the right language. */
