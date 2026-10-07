@@ -32,7 +32,8 @@ their short time pattern; elsewhere the first of `LC_ALL`, `LC_TIME` and
 `LANG` that is set and non-empty) and sets
 `window.__BOITE_REGION__` before the page runs, because the webview reports
 only languages: WebView2 on an English Windows set to Switzerland says `en-US`.
-A 12 or 24 hour clock picked in Windows overrides the region's. A shell tag
+A 12 or 24 hour clock picked in Windows overrides the region's, whichever
+region applies. A shell tag
 without a region (`LANG=en`) means none; a missing or unparsable one falls
 back to the webview, as in a browser. A Mac app opened from Finder usually has
 none of those variables, so macOS takes the webview's languages for now. In a browser

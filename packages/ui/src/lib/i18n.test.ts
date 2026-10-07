@@ -125,6 +125,11 @@ test('dates and numbers follow the machine region in the language the app speaks
   setLocaleSetting('en');
   expect(formatLocale()).toBe('en-US');
 
+  // A language the browser cannot parse is skipped, not taken as no region.
+  speaks('not a tag!', 'fr-CA');
+  setLocaleSetting('fr');
+  expect(formatLocale()).toBe('fr-CA');
+
   // A region from another language still counts: French on a German machine.
   speaks('de-DE');
   setLocaleSetting('fr');
@@ -156,6 +161,8 @@ test('the desktop shell region and clock win over the webview languages', () => 
   // A shell tag with no region means none, rather than the webview's.
   window.__BOITE_REGION__ = { locale: 'en', hour12: null };
   expect(formatLocale()).toBe('en');
+  window.__BOITE_REGION__ = { locale: 'en', hour12: false };
+  expect(formatLocale()).toBe('en-u-hc-h23');
 
   // No tag, or one that does not parse, leaves the webview's region, and an
   // explicit clock still applies.
