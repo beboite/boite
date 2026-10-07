@@ -133,7 +133,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 588,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,355,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,375,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,640,000 |
 
@@ -159,6 +159,12 @@ The agents' chat, entrusted threads and robots, on the same `main`,
 measured 4,336,325 UI bytes and 3,602,928 emitted core JavaScript
 bytes on Linux on 2026-10-07. The UI limit rises to 4,355,000, leaving about
 19 KB of headroom; the core JavaScript limit of 3,615,000 leaves about 12 KB.
+
+Later the same day `main` at `9356e7b6` measured 4,355,057 UI bytes on Windows
+CI, 57 above that limit, after the panel's keyboard, mouse and clipboard
+input. The mouse's back and forward buttons add 2,301 bytes, measured on Linux
+with and without them: 4,357,517 against 4,355,216. The UI limit rises to
+4,375,000, leaving about 17 KB of headroom.
 
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured
@@ -254,6 +260,16 @@ fixture plugin used by `startDevUi`. It consumes the optimized dependency body
 before closing Vite. Tests importing or blocking `/src/` URLs still use a dev
 server, warming reachable modules within its 60-second hook. Job deadlines stay
 35 minutes. Failure captures are attempted on cancellation too.
+
+The first Chrome of a hosted Windows runner can take over 30 seconds to open
+its debugging port, which failed the first browser test of a shard on `main`
+and on branches on 2026-10-07. `warm.ts` therefore opens the fake-client bundle
+in a browser once before the tests, where nothing has a deadline, and only
+warns when that browser does not come up. `BrowserPage.launch` starts a fresh
+browser once more when the first never reached its page: no debugging port,
+no devtools socket, or a first navigation that did not commit in 20 seconds.
+It logs `[e2e] the browser did not start` when it does. Nothing the page does
+after it has loaded is retried.
 
 CI Chromium uses CPU compositing with software GL disabled. Browser launch
 failures retain bounded stderr; exited browsers fail promptly. Navigation waits
