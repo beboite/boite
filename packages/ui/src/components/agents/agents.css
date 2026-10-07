@@ -275,7 +275,7 @@ html[data-motion='reduced'] .typing-bubble .dots i { animation: none; opacity: 0
   .agents-page.empty:not(.detail-open) .agents-main { display: flex; flex: 1; }
   .agents-views { margin: 0 12px; }
   .agents-views .tools .menu .trigger.ghost, .agents-views .tools button.icon { width: var(--control-touch); height: var(--control-touch); }
-    .agents-detail-head .menu .trigger.ghost, .agents-detail-head > button.icon { width: var(--control-touch); height: var(--control-touch); }
+  .agents-detail-head .menu .trigger.ghost, .agents-detail-head > button.icon { width: var(--control-touch); height: var(--control-touch); }
   .agents-foot { display: none; }
   .agents-detail-head { gap: 2px; min-height: 56px; padding: 6px 8px 6px 4px; }
   .agents-detail-head > button.small:not(.icon) { font-size: 0; gap: 0; width: var(--control-touch); height: var(--control-touch); padding: 0; }

@@ -224,7 +224,8 @@
           </span>
         </button>
         <nav class="agents-actions" aria-label={title}>
-          {#if current !== panes[0]}
+          {#if current !== panes[0] && !narrow.current}
+            <!-- On a phone the back arrow already returns to the conversation. -->
             <button type="button" class="ghost small back-chat" onclick={() => { pane = null; }} data-testid="agent-back-chat"><MessageSquare size={14} strokeWidth={1.75} /><span class="ui-label">{paneLabel(panes[0]!)}</span></button>
           {/if}
           {#if profile}
