@@ -304,6 +304,22 @@ Their cards omit the PR link. A manual refresh explains that the hosting
 machine needs an update; other RPC errors still appear in a notification.
 Reconnecting clears the capability check so an updated core is detected.
 
+## Back and forward
+
+On a desktop, a mouse's back and forward buttons walk the views this window
+showed, in order: a thread, a draft, a settings tab or the Agents page, on
+whichever machine each one was. Back from a thread on another machine returns
+to that machine as well as to the view. A view opened after going back replaces
+what was ahead of it, as in a browser.
+
+The trail lives in memory (`lib/view-history.svelte.ts`), holds the last 100
+views and starts empty with each window. A thread or project deleted since, or a
+machine removed, is stepped over. A thread still loading is not a view yet, and a
+machine switch counts once. The browser's own history is left alone: on a
+desktop the app cancels the navigation those buttons would start, so Back at
+the first view stays in Boite. Under 720 px the buttons keep the browser's
+meaning, which closes the open sheet ([phone](phone.md)).
+
 ## Merged PR conversations
 
 Git projects default to Archive merged PR conversations. An owner can change

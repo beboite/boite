@@ -160,6 +160,23 @@ measured 4,336,325 UI bytes and 3,602,928 emitted core JavaScript
 bytes on Linux on 2026-10-07. The UI limit rises to 4,355,000, leaving about
 19 KB of headroom; the core JavaScript limit of 3,615,000 leaves about 12 KB.
 
+Later the same day `main` at `9356e7b6` measured 4,355,057 UI bytes on Windows
+CI, 57 above that limit, after the panel's keyboard, mouse and clipboard
+input. The mouse's back and forward buttons add 2,301 bytes, measured on Linux
+with and without them: 4,357,517 against 4,355,216. The UI limit rises to
+4,375,000, leaving about 17 KB of headroom.
+
+Inline views, on `main` at `7d1f126c`, measured 4,385,281 UI bytes and
+3,672,277 emitted core JavaScript bytes on Linux on 2026-10-07, 27,764 UI
+bytes above the 4,357,517 measured just above and 46,642 core bytes above the
+3,625,635 that `main` measured when built the same way. The core gains
+publishing a page, the headless check, the kit stylesheet stored with each
+page, and the texts `boite view help` and `boite view example` print. The UI
+gains the frame, the order of views in the timeline, and the kit and
+bootstrap, which the client chunk keeps because the fake client stores pages
+with them. The UI limit rises to 4,405,000 and the core JavaScript limit to
+3,690,000, leaving about 20 KB and 18 KB.
+
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured
 3,961,330 UI bytes and 3,239,585 emitted core JavaScript bytes on the same day.
@@ -173,17 +190,6 @@ candidate's `major`, the SQLite login, the switch and the subscription proxy's
 provider block for OpenCode 2. The core JavaScript limit rises to 3,640,000.
 With the agents' chat merged, the build measured 4,342,122 UI bytes and
 3,622,067 core bytes, 12,878 and 17,933 under their limits.
-
-Inline views, on `main` at `9356e7b6`, measured 4,382,821 UI bytes and
-3,672,277 emitted core JavaScript bytes on Linux on 2026-10-07. That `main`,
-built the same way, measured 4,355,057 and 3,625,635: 57 UI bytes above its
-4,355,000 limit before this change. Views add 27,764 UI bytes and 46,642 core
-bytes. The core gains publishing a page, the headless check, the kit
-stylesheet stored with each page, and the texts `boite view help` and
-`boite view example` print. The UI gains the frame, the order of views in the
-timeline, and the kit and bootstrap, which the client chunk keeps because the
-fake client stores pages with them. The UI limit rises to 4,405,000 and the
-core JavaScript limit to 3,690,000, leaving about 22 KB and 18 KB.
 
 On 2026-10-05 on Linux, `origin/main` at `290220a9` measured about 4,183,200 UI
 bytes and 3,446,800 emitted core JavaScript bytes. Stewards and the owner's
@@ -265,6 +271,16 @@ fixture plugin used by `startDevUi`. It consumes the optimized dependency body
 before closing Vite. Tests importing or blocking `/src/` URLs still use a dev
 server, warming reachable modules within its 60-second hook. Job deadlines stay
 35 minutes. Failure captures are attempted on cancellation too.
+
+The first Chrome of a hosted Windows runner can take over 30 seconds to open
+its debugging port, which failed the first browser test of a shard on `main`
+and on branches on 2026-10-07. `warm.ts` therefore opens the fake-client bundle
+in a browser once before the tests, where nothing has a deadline, and only
+warns when that browser does not come up. `BrowserPage.launch` starts a fresh
+browser once more when the first never reached its page: no debugging port,
+no devtools socket, or a first navigation that did not commit in 20 seconds.
+It logs `[e2e] the browser did not start` when it does. Nothing the page does
+after it has loaded is retried.
 
 CI Chromium uses CPU compositing with software GL disabled. Browser launch
 failures retain bounded stderr; exited browsers fail promptly. Navigation waits
