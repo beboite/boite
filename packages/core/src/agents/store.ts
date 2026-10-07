@@ -13,6 +13,7 @@ import { newId } from '../ids.ts';
 import { existingInside } from '../workdir.ts';
 import { checkModel, checkEffort } from '../threads/selection.ts';
 import { AgentsRepository, OPEN_WORK, type RecentFilter } from './repository.ts';
+import { AgentEntrustments } from './entrust.ts';
 import { ResidentAgents } from './resident.ts';
 import { AgentRoutines } from './routines.ts';
 import { boolean, ids, integer, object, oneOf, sameScope, scope, text } from './validation.ts';
@@ -32,7 +33,8 @@ export class AgentStore {
   readonly resident: ResidentAgents;
   readonly routines: AgentRoutines;
   readonly records: AgentsRepository;
-  constructor(readonly core: Core) { this.records = new AgentsRepository(core.journal); this.resident = new ResidentAgents(core); this.routines = new AgentRoutines(core); }
+  readonly entrusted: AgentEntrustments;
+  constructor(readonly core: Core) { this.records = new AgentsRepository(core.journal); this.resident = new ResidentAgents(core); this.routines = new AgentRoutines(core); this.entrusted = new AgentEntrustments(core, this); }
 
   changed(): void { this.core.bus.emit('agents.changed', { revision: this.records.revision() }); }
   /** Read on every scheduler pass; `setLimits` is its only writer, so it is read from disk once. */
@@ -486,6 +488,7 @@ export class AgentStore {
       resources: r.list('resource').filter(resource => allowed(resource.scope)),
       artifacts: r.list('artifact').filter(a => missions.some(m => m.id === a.missionId)),
       more: { message: messages.more, work: recentWork.more, memory: memories.more },
+      entrusted: this.entrusted.list().filter(e => !session || e.agentId === session.agentId),
     };
   }
 
@@ -544,4 +547,5 @@ export function registerPersistentAgents(core: Core): void {
   core.router.register('agents.decision.request', p => store.requestDecision(p));
   core.router.register('agents.decision.answer', p => store.answerDecision(p));
   core.router.register('agents.work.control', p => store.control(p));
+  core.router.register('agents.entrust', p => store.entrusted.entrust(p));
 }

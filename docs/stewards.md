@@ -42,6 +42,17 @@ deleting it removes the grant. Revoking rejects its letters and notices that
 were not delivered yet. Paired phones read the grants; only the owner sets or
 revokes them.
 
+## Seeing who looks after what
+
+The thread list shows every steward without opening anything. Its thread
+heads the Agents in charge card above the projects, with the projects it
+covers and its state; the header of each project it covers carries its robot,
+which opens its thread; its own row wears that robot in place of the provider
+logo. A thread it covers names it in the header ("Steward: Night watch"), and
+that chip opens the steward. The thread list loads the grants once per
+connection and reads them again on `stewards.changed`
+(`lib/steward-view.ts`, `components/AgentsAtWork.svelte`).
+
 ## What the steward does
 
 Its prompt names its projects and capabilities, and the CLI:
