@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ArrowUp, GitBranch, Paperclip, Square } from '@lucide/svelte';
   import { tick } from 'svelte';
+  import { MediaQuery } from 'svelte/reactivity';
   import type { PermissionMode, ProviderSummary } from '@boite/contracts';
   import { tokens as formatTokens } from '../lib/format';
   import { confirm } from '../lib/confirm.svelte';
@@ -77,6 +78,18 @@
     const account = choice ? store.accountOf(choice.accountId) : null;
     return account?.status === 'unauthenticated' ? account : null;
   });
+  /** The open thread's provider was turned off in Providers: the core refuses its next turn. */
+  let providerOff = $derived.by(() => {
+    const entry = store.openThread ? store.providerOf(store.openThread.providerId) : null;
+    return entry && !store.providerOn(entry.id) ? entry : null;
+  });
+  /**
+   * Providers is a desktop settings page and the owner's alone. Anywhere else
+   * (a phone-width window, a paired device) the chip is a label: it leads
+   * nowhere, and the sentence behind it is the one a send would answer with.
+   */
+  const phoneWidth = new MediaQuery('(max-width: 720px)');
+  let providersReachable = $derived(store.owner && (!phoneWidth.current || window.__TAURI_INTERNALS__ !== undefined));
   /** The thread names an account that was removed: it sends again once another one is picked. */
   let accountRemoved = $derived(store.openThread !== null && store.accounts.length > 0 && store.accountOf(store.openThread.accountId) === null);
   let modeItems = $derived(
@@ -207,6 +220,14 @@
     <ModelPicker {store} {choice} disabled={picking} onpick={pick} />
     {#if signedOut && store.owner}
       <button type="button" class="chip signed-out" data-testid="composer-reconnect" title={fill(strings.connect.signedOut, { provider: provider?.name ?? '' })} onclick={() => store.openConnect(signedOut.providerId, signedOut.id)}><span class="ui-label">{strings.connect.reconnect}</span></button>
+    {/if}
+    {#if providerOff}
+      {@const sentence = fill(strings.providerSettings.threadOff, { provider: providerOff.name })}
+      {#if providersReachable}
+        <button type="button" class="chip signed-out" data-testid="composer-provider-off" title={sentence} aria-label={sentence} onclick={() => store.showSettings('accounts')}><span class="ui-label">{strings.providerSettings.off}</span></button>
+      {:else}
+        <span class="chip signed-out" data-testid="composer-provider-off" title={sentence} aria-label={sentence}><span class="ui-label">{strings.providerSettings.off}</span></span>
+      {/if}
     {/if}
     {#if accountRemoved}
       <button type="button" class="chip signed-out" data-testid="composer-account-removed" title={strings.accounts.removedHint} onclick={() => void openChip('composer-picker')}><span class="ui-label">{strings.accounts.removed}</span></button>

@@ -1,8 +1,9 @@
 /** The provider list, its reload and dry run, and the model catalog a probe reads. */
-import { RpcErrorCode, type Account, type ModelInfo, type RpcResult } from '@boite/contracts';
+import { RpcErrorCode, providerEnabled, type Account, type ModelInfo, type RpcResult } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { CLAUDE_MODELS } from './accounts-seed';
 import { MUSE_EFFORT, PROBE_MS, PROBED_MODELS, UPDATABLE_ID } from './providers';
+import { turnedOff } from './checks';
 import { DATA_DIR } from './shared';
 import type { FakeContext, FakeMethods } from './context';
 
@@ -50,6 +51,8 @@ async function probe(ctx: FakeContext, providerId: string, accountId: string): P
   if (account.providerId !== providerId) {
     throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the account belongs to another provider' });
   }
+  // The probe starts the agent: a provider turned off lists nothing.
+  if (!providerEnabled(provider)) throw turnedOff(provider);
   const dynamic = ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'].includes(provider.protocol);
   if (dynamic && !provider.available) {
     throw new RpcFailure({ code: RpcErrorCode.Unavailable, message: `${provider.name} is not available on this machine` });
@@ -68,8 +71,41 @@ async function probe(ctx: FakeContext, providerId: string, accountId: string): P
   return { models, probedAt };
 }
 
+/** The core's `accounts.ensureDefaults`: a provider that is here, turned on and has no account gets its default one. */
+function ensureDefaults(ctx: FakeContext): void {
+  for (const provider of ctx.providers) {
+    if (!provider.available || !providerEnabled(provider) || ctx.removedDefaultProviders.has(provider.id) || ctx.accounts.some(account => account.providerId === provider.id)) continue;
+    // With no seeded CLI login, a piped sign-in creates only its isolated account.
+    if (!provider.alwaysIsolated && provider.login && provider.login.kind !== 'terminal') continue;
+    const id = `a-${++ctx.seq}`;
+    const account: Account = {
+      id, providerId: provider.id, label: 'Default',
+      isolationDir: provider.alwaysIsolated ? `${DATA_DIR}/accounts/${id}` : null,
+      status: provider.alwaysIsolated ? 'unauthenticated' : 'ok', identity: null, createdAt: ctx.now(),
+    };
+    ctx.accounts.push(account);
+    ctx.emit('accounts.updated', structuredClone(account));
+  }
+}
+
 export function providerCatalogMethods(ctx: FakeContext) {
   return {
+    // The core's `providers.setEnabled`: the same answer and the same event, and
+    // nothing at all when the switch already stands where it is asked to go.
+    'providers.setEnabled': async (params) => {
+      const provider = ctx.providers.find(entry => entry.id === params.providerId);
+      if (!provider) throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `unknown provider ${params.providerId}`, data: { providerId: params.providerId } });
+      if (typeof params.enabled !== 'boolean') {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'enabled must be true or false', data: { field: 'enabled', expected: 'a boolean' } });
+      }
+      if (providerEnabled(provider) === params.enabled) return { loaded: structuredClone(ctx.providers), rejected: [] };
+      provider.enabled = params.enabled;
+      // A login the user already has is adopted now, as it is when a provider is installed.
+      if (params.enabled) ensureDefaults(ctx);
+      const result = { loaded: structuredClone(ctx.providers), rejected: [] };
+      ctx.emit('providers.updated', structuredClone(result));
+      return result;
+    },
     'providers.list': async (params) => {
       return { loaded: structuredClone(ctx.providers), rejected: [] };
     },
@@ -77,19 +113,7 @@ export function providerCatalogMethods(ctx: FakeContext) {
       // As the core: a reload that changes no provider tells nobody, so a page
       // that reloads on focus keeps every model list it already read.
       const before = JSON.stringify(ctx.providers);
-      for (const provider of ctx.providers) {
-        if (!provider.available || ctx.removedDefaultProviders.has(provider.id) || ctx.accounts.some(account => account.providerId === provider.id)) continue;
-        // With no seeded CLI login, a piped sign-in creates only its isolated account.
-        if (!provider.alwaysIsolated && provider.login && provider.login.kind !== 'terminal') continue;
-        const id = `a-${++ctx.seq}`;
-        const account: Account = {
-          id, providerId: provider.id, label: 'Default',
-          isolationDir: provider.alwaysIsolated ? `${DATA_DIR}/accounts/${id}` : null,
-          status: provider.alwaysIsolated ? 'unauthenticated' : 'ok', identity: null, createdAt: ctx.now(),
-        };
-        ctx.accounts.push(account);
-        ctx.emit('accounts.updated', structuredClone(account));
-      }
+      ensureDefaults(ctx);
       const result = { loaded: structuredClone(ctx.providers), rejected: [] };
       if (JSON.stringify(ctx.providers) !== before) ctx.emit('providers.updated', structuredClone(result));
       return result;

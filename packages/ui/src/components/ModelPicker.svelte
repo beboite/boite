@@ -59,7 +59,7 @@
   let shownProviderId = $state<string | null>(null);
   let favoritesOpen = $state(false);
   let pickPending = $state(false);
-  const favorites = $derived(store.favorites.filter((f) => store.accountOf(f.accountId)?.providerId === f.providerId));
+  const favorites = $derived(store.favorites.filter((f) => store.accountOf(f.accountId)?.providerId === f.providerId && store.providerOn(f.providerId)));
   const favoriteSet = $derived.by(() => favoriteIds(store.favorites, shown?.id, shownAccountId));
   function favorite(model: ModelInfo): boolean {
     return favoriteSet.has(model.id);
@@ -99,9 +99,9 @@
 
   let provider = $derived(choice ? store.providerOf(choice.providerId) : null);
   let account = $derived(choice ? store.accountOf(choice.accountId) : null);
-  let shown = $derived(
-    (shownProviderId ? store.providerOf(shownProviderId) : null) ?? provider ?? store.providers[0] ?? null
-  );
+  /** A provider turned off has no column: the rail's first one shows instead. */
+  const offered = (id: string | null | undefined) => (id && store.providerOn(id) ? store.providerOf(id) : null);
+  let shown = $derived(offered(shownProviderId) ?? offered(provider?.id) ?? store.offeredProviders[0] ?? null);
   /** The account the right column belongs to: an agent lists its models per login. */
   let shownAccountId = $derived.by((): string | null => {
     if (!shown) return null;
@@ -266,7 +266,7 @@
 
   function firstInstanceOf(providerId: string): { providerId: string; accountId: string } | null {
     const entry = store.providerOf(providerId);
-    if (!entry || !entry.available) return null;
+    if (!entry || !entry.available || !store.providerOn(providerId)) return null;
     const seat = store.accountsOf(providerId)[0];
     return seat ? { providerId, accountId: seat.id } : null;
   }

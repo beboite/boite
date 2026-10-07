@@ -1,4 +1,4 @@
-import { checkSettingsPatch, DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type Settings } from '@boite/contracts';
+import { checkSettingsPatch, DEFAULT_THREAD_DONE_RETENTION_DAYS, DEFAULT_THREAD_DELETION_RETENTION_DAYS, subscriptionProxyServes, type Settings } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { writesTitles } from './drivers/index.ts';
 import { invalidParams } from './errors.ts';
@@ -66,7 +66,7 @@ export class SettingsStore {
     if (checked.patch.subscriptionProxy !== undefined) {
       for (const account of this.core.accounts.list()) {
         const provider = this.core.providers.get(account.providerId);
-        if (provider && ['claude-sdk', 'codex-appserver'].includes(provider.protocol)) {
+        if (subscriptionProxyServes(provider)) {
           this.core.journal.deleteSetting(`account-auth-rejected:${account.id}`);
           this.core.accounts.check(account.id, true);
         }

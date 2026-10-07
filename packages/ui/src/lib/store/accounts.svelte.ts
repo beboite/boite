@@ -1,4 +1,4 @@
-import { RpcErrorCode, subscriptionProxyName, subscriptionProxyOf, subscriptionProxyOrigin } from '@boite/contracts';
+import { RpcErrorCode, providerEnabled, subscriptionProxyName, subscriptionProxyOf, subscriptionProxyOrigin } from '@boite/contracts';
 import type {
   Account,
   HarnessUpdate,
@@ -67,7 +67,7 @@ export class Accounts {
    * settings and protocols, so a phone shows the same account as the PC.
    */
   gatewayOf(providerId: ProviderId): AccountGateway | null {
-    const proxy = subscriptionProxyOf(this.ctx.store.settings, this.providerOf(providerId)?.protocol);
+    const proxy = subscriptionProxyOf(this.ctx.store.settings, this.providerOf(providerId));
     return proxy ? { kind: proxy.kind, name: subscriptionProxyName(proxy.kind), origin: subscriptionProxyOrigin(proxy) } : null;
   }
 
@@ -90,6 +90,19 @@ export class Accounts {
 
   providerOf(id: ProviderId): ProviderSummary | null {
     return this.providers.find((p) => p.id === id) ?? null;
+  }
+
+  /**
+   * The providers a picker may offer: the ones turned on, in the core's order.
+   * The Providers page alone reads the whole list, to show the ones that are off.
+   */
+  get offeredProviders(): ProviderSummary[] {
+    return this.providers.filter((provider) => providerEnabled(provider));
+  }
+
+  /** Whether this provider is known here and turned on. */
+  providerOn(id: ProviderId): boolean {
+    return providerEnabled(this.providerOf(id));
   }
 
   /** Null when this provider ships no release for Boite to install. */
@@ -320,6 +333,26 @@ export class Accounts {
     this.harnessUpdates = this.harnessUpdates.some((entry) => entry.providerId === update.providerId)
       ? this.harnessUpdates.map((entry) => (entry.providerId === update.providerId ? update : entry))
       : [...this.harnessUpdates, update];
+  }
+
+  /**
+   * Turn a provider on or off on this store's machine. The answer is the whole
+   * list, the same one `providers.updated` carries to every other client.
+   */
+  async setProviderEnabled(providerId: ProviderId, enabled: boolean): Promise<boolean> {
+    const client = this.ctx.client;
+    if (!client || !this.ctx.store.owner) return false;
+    const generation = this.ctx.clientGeneration;
+    try {
+      const { loaded, rejected } = await client.call('providers.setEnabled', { providerId, enabled });
+      if (!this.ctx.currentClient(client, generation)) return false;
+      this.providers = loaded;
+      this.rejectedProviders = rejected;
+      return true;
+    } catch (error) {
+      if (this.ctx.currentClient(client, generation)) this.ctx.fail(error);
+      return false;
+    }
   }
 
   /** Start the download. The rest arrives as `providers.installProgress`. */

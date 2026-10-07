@@ -124,8 +124,18 @@ export function missingFolder(path: string): boolean {
   return /(^|[\\/])missing([\\/]|$)/i.test(path);
 }
 
+/** The core's refusal for a provider turned off: a turn and a probe answer the same sentence. */
+export function turnedOff(provider: ProviderSummary): RpcFailure {
+  return new RpcFailure({
+    code: RpcErrorCode.Unavailable,
+    message: `${provider.name} is turned off on this machine. Turn it on in Settings > Providers to use it`,
+    data: { providerId: provider.id, disabled: true },
+  });
+}
+
 /** The core's `assertDriverRunnable`, for the fake's providers and accounts. */
 export function checkRunnable(provider: ProviderSummary | undefined, account: Account): void {
+  if (provider !== undefined && provider.enabled === false) throw turnedOff(provider);
   if (provider === undefined || !provider.available) {
     throw new RpcFailure({
       code: RpcErrorCode.Unavailable,

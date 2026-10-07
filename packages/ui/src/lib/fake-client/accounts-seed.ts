@@ -179,6 +179,30 @@ export function seedAccounts() {
         resume: true
       }
     },
+    // The next major of the same agent, driven without long use behind it: off
+    // until the user turns it on, and its row says Experimental.
+    {
+      id: 'opencode-v2',
+      name: 'OpenCode 2',
+      shortName: 'OpenCode 2',
+      protocol: 'acp',
+      login: { kind: 'terminal' },
+      alwaysIsolated: false,
+      source: 'shipped',
+      available: true,
+      executable: 'C:\\Users\\you\\AppData\\Roaming\\npm\\opencode.exe',
+      models: [{ id: 'default', name: 'OpenCode default', default: true }],
+      install: null,
+      experimental: true,
+      capabilities: {
+        approvals: true,
+        hooks: true,
+        checkpoint: false,
+        images: false,
+        planMode: true,
+        resume: true
+      }
+    },
     {
       id: MANAGED_ID,
       name: 'Antigravity',
@@ -239,6 +263,9 @@ export function seedAccounts() {
   });
   // The core's drivers that write titles (`ProviderSummary.titles`).
   for (const provider of providers) provider.titles = ['claude-sdk', 'codex-appserver', 'echo'].includes(provider.protocol);
+  // The core's `summarize`: every summary says whether it is on, and an
+  // experimental one is off until the user turns it on.
+  for (const provider of providers) provider.enabled = provider.experimental !== true;
   const accounts: Account[] = [
     {
       id: 'a-echo',

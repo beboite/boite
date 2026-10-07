@@ -416,6 +416,9 @@ export class Store {
   gatewayOf(...args: Parameters<Accounts['gatewayOf']>) { return this.#ctx.accounts.gatewayOf(...args); }
   shownAccounts() { return this.#ctx.accounts.shownAccounts(); }
   providerOf(...args: Parameters<Accounts['providerOf']>) { return this.#ctx.accounts.providerOf(...args); }
+  get offeredProviders() { return this.#ctx.accounts.offeredProviders; }
+  providerOn(...args: Parameters<Accounts['providerOn']>) { return this.#ctx.accounts.providerOn(...args); }
+  setProviderEnabled(...args: Parameters<Accounts['setProviderEnabled']>) { return this.#ctx.accounts.setProviderEnabled(...args); }
   installOf(...args: Parameters<Accounts['installOf']>) { return this.#ctx.accounts.installOf(...args); }
   accountOf(...args: Parameters<Accounts['accountOf']>) { return this.#ctx.accounts.accountOf(...args); }
   openConnect(...args: Parameters<Accounts['openConnect']>) { return this.#ctx.accounts.openConnect(...args); }

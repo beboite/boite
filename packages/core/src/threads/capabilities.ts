@@ -11,6 +11,7 @@ export function threadCapabilities(core: Core, threadId: string): ThreadCapabili
   const protocol = provider?.protocol ?? null;
   let runtimeReason: ThreadCapabilityReason | null = null;
   if (!provider) runtimeReason = 'provider-unavailable';
+  else if (!core.providers.enabled(provider.id)) runtimeReason = 'provider-disabled';
   else if (!account || account.providerId !== thread.providerId) runtimeReason = 'account-unavailable';
   else {
     try { assertDriverRunnable(provider.protocol, core.providers.summary(provider.id), account); }

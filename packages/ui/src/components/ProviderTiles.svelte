@@ -47,8 +47,10 @@
    * every provider shows, so the rail is never empty.
    */
   let listed = $derived.by((): ProviderSummary[] => {
-    const usable = store.providers.filter((entry) => connected(entry, store.accountsOf(entry.id)) || entry.id === choice?.providerId);
-    return usable.some((entry) => connected(entry, store.accountsOf(entry.id))) ? usable : store.providers;
+    // A provider turned off is offered nowhere, the one an open thread sits on included.
+    const offered = store.offeredProviders;
+    const usable = offered.filter((entry) => connected(entry, store.accountsOf(entry.id)) || entry.id === choice?.providerId);
+    return usable.some((entry) => connected(entry, store.accountsOf(entry.id))) ? usable : offered;
   });
   let tiles = $derived.by((): Tile[] => {
     return listed.map((entry) => {

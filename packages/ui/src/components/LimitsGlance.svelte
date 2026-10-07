@@ -24,7 +24,7 @@
   let gateway = $derived(gatewayReader(store.endpointUrl ?? 'here'));
   /** How long a press waits for the gateway's first answer before opening the glance anyway. */
   const KNOWN_WAIT_MS = 300;
-  let rows = $derived(reader.rows === null ? null : shownQuotas(reader.rows, store.accounts));
+  let rows = $derived(reader.rows === null ? null : shownQuotas(reader.rows, store.accounts, store.providers));
   /** The last read's failure, cleared by the next read that lands. */
   let failed = $state('');
 

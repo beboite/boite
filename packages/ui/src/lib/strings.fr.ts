@@ -14,7 +14,7 @@ import type { Translation } from './i18n.svelte';
 export const fr: Translation = {
   subscriptionProxy: {
     heading: 'Proxy d\'abonnements', enable: 'Utiliser un proxy d\'abonnements',
-    hint: 'Claude et Codex utilisent la passerelle de cette machine. Limites ouvre son tableau de bord dans Boite. Les autres agents gardent leur configuration.',
+    hint: 'Claude et Codex utilisent la passerelle de cette machine, et OpenCode 2 ajoute ses autres modèles aux siens. Limites ouvre son tableau de bord dans Boite. Les autres agents gardent leur configuration.',
     baseUrl: 'URL de l\'API', dashboardUrl: 'URL du tableau de bord des limites', key: 'Clé API (facultative)',
     keyHint: 'Laissez vide pour garder la clé enregistrée. Utilisez la clé API du proxy, pas sa clé de gestion du tableau de bord.',
     clearKey: 'Retirer la clé enregistrée', save: 'Enregistrer le proxy', saved: 'Proxy enregistré',
@@ -1635,7 +1635,7 @@ export const fr: Translation = {
     downloading: 'Téléchargement, {percent}',
     verifying: "Vérification de l'archive",
     extracting: 'Décompression',
-    upToDate: 'Installé par Boite, version {version}',
+    installed: 'Installé par Boite',
     updateAvailable: 'Version {installed}, {available} disponible',
     progress: 'Progression du téléchargement'
   },
@@ -2214,8 +2214,16 @@ export const fr: Translation = {
     executable: 'Lancé depuis',
     accounts: 'Comptes',
     installation: 'Installation',
-    version: 'Version',
+    managedCopy: 'Copie de Boite',
     addHeading: 'Ajouter un fournisseur',
+    offHeading: 'Désactivés',
+    off: 'Désactivé',
+    experimental: 'Expérimental',
+    /** The switch's accessible name: `{provider}` is the provider's own name. */
+    enable: 'Utiliser {provider}',
+    enableHint: "Désactivé, Boite ne lance rien de ce fournisseur et aucune liste ne le propose. Ses comptes et ses conversations sont conservés.",
+    /** A thread whose provider is off: the composer's chip and the sentence behind it. */
+    threadOff: '{provider} est désactivé. Activez-le dans Réglages > Fournisseurs pour continuer cette conversation.',
     defaultModel: 'Modèle par défaut',
     autoUpdate: 'Mises à jour automatiques',
     checkUpdates: 'Rechercher les mises à jour',

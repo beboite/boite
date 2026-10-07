@@ -4,6 +4,7 @@ import type { ExecutableCandidate, Os, OsProfile, ProviderDescriptor } from '@bo
 import { currentOs } from '../paths.ts';
 import { substituteHome } from './expand.ts';
 import { globalRoots, resolveNpm } from './npm.ts';
+import { majorAt } from './versions.ts';
 import { which } from './which.ts';
 
 /**
@@ -96,17 +97,29 @@ function takesScripts(profile: OsProfile): boolean {
   return profile.executable.some((candidate) => candidate.kind === 'file' && isLauncherScript(candidate.value));
 }
 
-export function resolveCommand(profile: OsProfile): ResolvedCommand | null {
+/**
+ * `ask` false resolves from what is already known and starts no program: a
+ * candidate that names a major and has no reading yet stays unresolved. It is
+ * how a provider that is turned off is listed.
+ */
+export function resolveCommand(profile: OsProfile, ask = true): ResolvedCommand | null {
   if (HOST_CANDIDATES.has(profile.executable)) return null;
   const scripts = takesScripts(profile);
   for (const candidate of profile.executable) {
     const updateEnv = candidate.updateEnv ?? {};
     if (candidate.kind === 'path') {
       const found = whichProgram(candidate.value, scripts);
-      if (found !== null) return { executable: found, prefix: [], shown: found, updateEnv };
+      if (found === null) continue;
+      const fits = atMajor(candidate, found, profile, ask);
+      // Not known yet: a later candidate must not stand in for the one that may well be right.
+      if (fits === undefined) return null;
+      if (fits) return { executable: found, prefix: [], shown: found, updateEnv };
     } else if (candidate.kind === 'file') {
       for (const path of filePaths(candidate.value, profile)) {
-        if (runnableFile(path)) return { executable: path, prefix: [], shown: path, updateEnv };
+        if (!runnableFile(path)) continue;
+        const fits = atMajor(candidate, path, profile, ask);
+        if (fits === undefined) return null;
+        if (fits) return { executable: path, prefix: [], shown: path, updateEnv };
       }
     } else if (candidate.kind === 'npm') {
       const found = resolveNpm(candidate.value);
@@ -114,6 +127,18 @@ export function resolveCommand(profile: OsProfile): ResolvedCommand | null {
     }
   }
   return null;
+}
+
+/**
+ * A candidate that names a major only counts when the program found there
+ * reports it. Undefined while the program has not answered yet: the read is on
+ * its way, the profile resolves to nothing meanwhile, and whoever listens to
+ * the version readings resolves again once it is in.
+ */
+function atMajor(candidate: ExecutableCandidate, path: string, profile: OsProfile, ask: boolean): boolean | undefined {
+  if (candidate.major === undefined) return true;
+  const major = majorAt(path, profile.update?.versionArgs ?? ['--version'], ask);
+  return major === undefined ? undefined : major === candidate.major;
 }
 
 function runnableFile(path: string): boolean {

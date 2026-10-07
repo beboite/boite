@@ -20,6 +20,7 @@ import type {
   Usage,
 } from '@boite/contracts';
 import { ANTHROPIC_DEFAULT, openAiCacheLife } from '../../prompt-cache.ts';
+import { isOpenCode } from '../../providers/opencode.ts';
 import { normalizeAntigravityTool } from '../antigravity.ts';
 import { imageDocument } from '../documents.ts';
 import type { PromptCacheLife, TurnContext, TurnResult } from '../types.ts';
@@ -32,7 +33,7 @@ import type { PromptCacheLife, TurnContext, TurnResult } from '../types.ts';
  * own gateway publish no lifetime, so their threads show no timer.
  */
 export function acpCacheLife(providerId: string, model: string | null): PromptCacheLife | null {
-  if (providerId !== 'opencode' || model === null) return null;
+  if (!isOpenCode(providerId) || model === null) return null;
   if (model.startsWith('anthropic/')) return ANTHROPIC_DEFAULT;
   if (model.startsWith('openai/')) return openAiCacheLife(model);
   return null;

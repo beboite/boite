@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ChevronDown } from '@lucide/svelte';
-  import { defaultTitleModel, type ModelInfo, type TitleModel } from '@boite/contracts';
+  import { defaultTitleModel, providerEnabled, type ModelInfo, type TitleModel } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
   import Menu from './Menu.svelte';
   import { separator, type MenuItem } from '../lib/menu';
@@ -20,9 +20,9 @@
   const idOf = (choice: TitleModel): string => JSON.stringify([choice.providerId, choice.model]);
 
   let chosen = $derived(store.settings?.titleModel ?? null);
-  /** A provider that writes titles, is here and has an account signed in. */
+  /** A provider that writes titles, is turned on, is here and has an account signed in. */
   let writers = $derived(
-    store.providers.flatMap((provider) => {
+    store.providers.filter((provider) => providerEnabled(provider)).flatMap((provider) => {
       const account = store.accountsOf(provider.id).find((entry) => entry.status === 'ok');
       return provider.titles === true && provider.available && account ? [{ provider, account }] : [];
     })

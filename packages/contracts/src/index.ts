@@ -68,6 +68,15 @@ export interface ExecutableCandidate {
    * without it cannot tell how it was installed.
    */
   updateEnv?: Record<string, string>;
+  /**
+   * Taken only when the program found there reports this major version. Two
+   * majors of one agent can install under one name (`opencode` is OpenCode 1
+   * or OpenCode 2), and each has its own descriptor: without this the first
+   * descriptor would start the other one's program. The version is read once
+   * per program file with the profile's `update.versionArgs`, default
+   * `--version`, and until that reading is in the candidate does not resolve.
+   */
+  major?: number;
 }
 
 /**
@@ -191,6 +200,14 @@ export interface ProviderAuth {
   kind: 'oauth-cli' | 'api-key' | 'none';
   /** Files inside the isolation directory that carry the login. */
   session?: string[];
+  /**
+   * A SQLite database inside the isolation directory that carries the login,
+   * for an agent that keeps its credentials in one: the account reads `ok`
+   * once any of these tables holds a row, and `unauthenticated` while none
+   * does or the file is not there yet. Read without a lock, never written.
+   * OpenCode 2 stores every sign-in in the `credential` table of `opencode.db`.
+   */
+  sqlite?: { file: string; tables: string[] };
   /** Where the account identity is read from, and the shape it must have. */
   identity?: { source: { file: string; field: string } | { command: string[] }; format: string };
 }
@@ -324,7 +341,7 @@ export interface ProviderCapabilities {
 }
 
 /** Stable reasons for an unavailable thread control; clients localize these codes. */
-export type ThreadCapabilityReason = 'unsupported' | 'provider-unavailable' | 'account-unavailable' | 'archived' | 'agent-session' | 'busy' | 'not-running' | 'no-session' | 'no-command' | 'no-checkpoint' | 'selection-changed' | 'awaiting-input' | 'no-request' | 'no-history' | 'stopping' | 'updating' | 'plugins-blocked';
+export type ThreadCapabilityReason = 'unsupported' | 'provider-unavailable' | 'provider-disabled' | 'account-unavailable' | 'archived' | 'agent-session' | 'busy' | 'not-running' | 'no-session' | 'no-command' | 'no-checkpoint' | 'selection-changed' | 'awaiting-input' | 'no-request' | 'no-history' | 'stopping' | 'updating' | 'plugins-blocked';
 export interface ThreadCapability {
   supported: boolean;
   available: boolean;
@@ -378,6 +395,11 @@ export interface ProviderDescriptor {
   hookSources?: ProviderHookSource[];
   /** Dialect fixes the driver of this protocol applies for this agent only. */
   quirks?: ProviderQuirk[];
+  /**
+   * An agent Boite drives without long use behind it. It stays off until the
+   * user turns it on in Providers, and its row says so.
+   */
+  experimental?: boolean;
   /** Native protocols may leave this empty; providers.probe supplies the account's catalog. */
   models: ModelInfo[];
   capabilities: ProviderCapabilities;
@@ -402,6 +424,21 @@ export interface ProviderSummary {
   install: ProviderInstallState | null;
   /** True when this provider's agent writes thread titles: what Settings offers for `titleModel`. Missing on older cores. */
   titles?: boolean;
+  /**
+   * False when the provider is turned off: the user's own choice
+   * (`providers.setEnabled`), or an experimental provider nobody turned on yet.
+   * An off provider starts nothing: no turn, probe, version check or usage
+   * read, and no picker offers it. Its accounts and threads are kept. Missing
+   * on older cores, which read as on; read it through `providerEnabled`.
+   */
+  enabled?: boolean;
+  /** The descriptor's `experimental`. Missing reads as false. */
+  experimental?: boolean;
+}
+
+/** Whether a provider is turned on. A summary from a core older than the switch has no field and is on. */
+export function providerEnabled(summary: Pick<ProviderSummary, 'enabled'> | null | undefined): boolean {
+  return summary !== null && summary !== undefined && summary.enabled !== false;
 }
 
 /** A descriptor that did not load. Always shown, never silent. */
@@ -1747,13 +1784,28 @@ export interface SubscriptionProxy {
   dashboardUrl: string;
 }
 
-/** The agents a subscription proxy serves; every other protocol keeps its own configuration. */
+/** The protocols whose every agent a subscription proxy serves. */
 export const SUBSCRIPTION_PROXY_PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver'];
+/**
+ * The providers a subscription proxy serves by id, where the protocol cannot
+ * say: ACP is shared by OpenCode 2, which takes the gateway as one more model
+ * provider, and by agents that keep their own configuration.
+ */
+export const SUBSCRIPTION_PROXY_PROVIDERS: readonly ProviderId[] = ['opencode-v2'];
 
-/** The enabled proxy that serves this protocol, or null. Core and clients decide alike. */
-export function subscriptionProxyOf(settings: Pick<Settings, 'subscriptionProxy'> | null | undefined, protocol: Protocol | null | undefined): SubscriptionProxy | null {
+/** What tells whether a proxy serves a provider: its id and its protocol, as a descriptor and a summary both carry them. */
+export type SubscriptionProxyTarget = { id: ProviderId; protocol: Protocol };
+
+/** Whether an enabled subscription proxy serves this provider. Core and clients decide alike. */
+export function subscriptionProxyServes(provider: SubscriptionProxyTarget | null | undefined): boolean {
+  return provider !== null && provider !== undefined
+    && (SUBSCRIPTION_PROXY_PROTOCOLS.includes(provider.protocol) || SUBSCRIPTION_PROXY_PROVIDERS.includes(provider.id));
+}
+
+/** The enabled proxy that serves this provider, or null. */
+export function subscriptionProxyOf(settings: Pick<Settings, 'subscriptionProxy'> | null | undefined, provider: SubscriptionProxyTarget | null | undefined): SubscriptionProxy | null {
   const proxy = settings?.subscriptionProxy;
-  return proxy?.enabled && protocol && SUBSCRIPTION_PROXY_PROTOCOLS.includes(protocol) ? proxy : null;
+  return proxy?.enabled && subscriptionProxyServes(provider) ? proxy : null;
 }
 
 export function subscriptionProxyName(kind: SubscriptionProxy['kind']): string {
@@ -3398,6 +3450,18 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'providers.update': { params: { providerId: ProviderId }; result: HarnessUpdate };
   /** Stop offering this version. A later one is offered again. `version: null` forgets the skip. */
   'providers.updateSkip': { params: { providerId: ProviderId; version: string | null }; result: HarnessUpdate };
+  /**
+   * Turn one provider on or off on this core's machine. Off, nothing of that
+   * provider starts and no picker offers it; its accounts, its threads and its
+   * install stay as they are, and a turn already queued or running ends by itself. On
+   * again, its default account is adopted if an existing login is found. The
+   * answer and `providers.updated` carry every summary with its `enabled`.
+   * Owner only: it decides what the machine runs.
+   */
+  'providers.setEnabled': {
+    params: { providerId: ProviderId; enabled: boolean };
+    result: { loaded: ProviderSummary[]; rejected: ProviderRejected[] };
+  };
   /** Validate a user descriptor and show what it would do. Writes nothing. */
   'providers.dryRun': {
     params: { file: string };

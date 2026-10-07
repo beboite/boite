@@ -3,7 +3,7 @@ export const strings = {
   subscriptionProxy: {
     heading: 'Subscription proxy',
     enable: 'Use a subscription proxy',
-    hint: 'Claude and Codex use this machine\'s gateway. Limits opens its dashboard inside Boite. Other agents keep their own configuration.',
+    hint: 'Claude and Codex use this machine\'s gateway, and OpenCode 2 adds its other models to its own. Limits opens its dashboard inside Boite. Other agents keep their own configuration.',
     baseUrl: 'API URL', dashboardUrl: 'Limits dashboard URL', key: 'API key (optional)',
     keyHint: 'Leave empty to keep the saved key. This is the proxy\'s API key, not its dashboard management key.',
     clearKey: 'Remove saved key', save: 'Save proxy', saved: 'Proxy saved',
@@ -1726,7 +1726,7 @@ export const strings = {
     downloading: 'Downloading · {percent}',
     verifying: 'Checking the download',
     extracting: 'Unpacking',
-    upToDate: 'Installed by Boite · version {version}',
+    installed: 'Installed by Boite',
     updateAvailable: 'Version {installed} · {available} is available',
     progress: 'Download progress'
   },
@@ -2316,8 +2316,16 @@ export const strings = {
     executable: 'Runs from',
     accounts: 'Accounts',
     installation: 'Installation',
-    version: 'Version',
+    managedCopy: "Boite's copy",
     addHeading: 'Add a provider',
+    offHeading: 'Turned off',
+    off: 'Turned off',
+    experimental: 'Experimental',
+    /** The switch's accessible name: `{provider}` is the provider's own name. */
+    enable: 'Use {provider}',
+    enableHint: 'Off, Boite starts nothing of this provider and no list offers it. Its accounts and conversations are kept.',
+    /** A thread whose provider is off: the composer's chip and the sentence behind it. */
+    threadOff: '{provider} is turned off. Turn it on in Settings > Providers to continue this conversation.',
     defaultModel: 'Default model',
     autoUpdate: 'Automatic updates',
     checkUpdates: 'Check for updates',

@@ -7,7 +7,7 @@ import { enhancedDetails, type EnhancedDetails } from '../../contracts/src/telem
 
 const EVENTS = ['ping', 'first_run', 'app_launched', 'session_ended', 'project_added', 'thread_spawned', 'turn_finished'] as const;
 type EventName = typeof EVENTS[number];
-const PROVIDERS = ['claude', 'codex', 'opencode', 'pi', 'grok', 'antigravity', 'antigravity-cli', 'muse'];
+const PROVIDERS = ['claude', 'codex', 'opencode', 'opencode-v2', 'pi', 'grok', 'antigravity', 'antigravity-cli', 'muse'];
 const MODES = ['off', 'basic', 'enhanced'] as const;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const INTERVAL = 300_000;

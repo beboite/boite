@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { afterEach, expect, test, spyOn } from 'bun:test';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -45,6 +46,30 @@ test('Antigravity print mode is gated on a stable supported version', () => {
   for (const version of ['1.1.11', 'agy 1.2.2', '2.0.0']) expect(supportsAntigravityUsage(version)).toBe(true);
   for (const version of ['1.1.10', '1.0.99', '1.2.2-preview', '1.2.2.3', 'running']) expect(supportsAntigravityUsage(version)).toBe(false);
 });
+test('OpenCode 2 reads the Go key from its database, never from auth.json', async () => {
+  directory = await mkdtemp(join(tmpdir(), 'boite-quota-test-'));
+  process.env.BOITE_DATA_DIR = directory;
+  await mkdir(join(directory, 'opencode'));
+  // A version 1 login in the same folder is not version 2's: it signs in on its own.
+  await writeFile(join(directory, 'opencode', 'auth.json'), JSON.stringify({ 'opencode-go': { type: 'api', key: 'fixture-v1-key' } }));
+  const core = { accounts: { accountEnv: () => ({ XDG_DATA_HOME: directory }) }, providers: { require: () => ({}) } } as unknown as Core;
+  const fakeFetch: typeof fetch = Object.assign(async (url: string | URL | Request, options?: RequestInit) => {
+    expect(url).toBe('https://opencode.ai/zen/go/v1/usage');
+    expect(options?.headers).toMatchObject({ Authorization: 'Bearer fixture-v2-key' });
+    return Response.json({ usage: { weekly: { percent: 40 } } });
+  }, { preconnect: fetch.preconnect });
+  const fetcher = spyOn(globalThis, 'fetch').mockImplementation(fakeFetch);
+  restore = () => fetcher.mockRestore();
+  const account = { providerId: 'opencode-v2', isolationDir: directory } as Account;
+  await expect(readExtraQuota(core, account)).rejects.toThrow('Connect OpenCode Go');
+  const db = new Database(join(directory, 'opencode', 'opencode.db'));
+  db.run('CREATE TABLE credential (id TEXT PRIMARY KEY, integration_id TEXT, label TEXT, value TEXT, connector_id TEXT, method_id TEXT, active INTEGER, time_created INTEGER, time_updated INTEGER)');
+  db.run("INSERT INTO credential VALUES ('cred_go', 'opencode-go', 'OpenCode Go', ?, NULL, NULL, 1, 1, 1)", [JSON.stringify({ type: 'key', key: 'fixture-v2-key' })]);
+  db.close();
+  expect((await readExtraQuota(core, account))[0]?.usedPercent).toBe(40);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
 test('OpenCode reads the isolated Go key and sends it only to its fixed usage endpoint', async () => {
   directory = await mkdtemp(join(tmpdir(), 'boite-quota-test-'));
   process.env.BOITE_DATA_DIR = directory;

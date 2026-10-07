@@ -51,6 +51,7 @@ const DESCRIPTOR_KEYS = [
   'sharedKeys',
   'hookSources',
   'quirks',
+  'experimental',
   'models',
   'capabilities',
 ] as const;
@@ -123,7 +124,7 @@ function checkRoots(value: unknown, file: string): string[] {
 
 function checkCandidate(value: unknown, file: string, field: string): ExecutableCandidate {
   const obj = asObject(value, file, field);
-  checkKeys(obj, ['kind', 'value', 'updateEnv'], file, field);
+  checkKeys(obj, ['kind', 'value', 'updateEnv', 'major'], file, field);
   const kind = asString(obj['kind'], file, `${field}.kind`);
   if (!CANDIDATE_KINDS.includes(kind as ExecutableCandidate['kind'])) {
     reject(file, `${field}.kind`, `one of: ${CANDIDATE_KINDS.join(', ')}`, `unknown candidate kind ${kind}`);
@@ -137,6 +138,11 @@ function checkCandidate(value: unknown, file: string, field: string): Executable
   }
   const candidate: ExecutableCandidate = { kind: kind as ExecutableCandidate['kind'], value: candidateValue };
   if (obj['updateEnv'] !== undefined) candidate.updateEnv = checkStringMap(obj['updateEnv'], file, `${field}.updateEnv`);
+  if (obj['major'] !== undefined) {
+    // An npm candidate is already one package, and its program is `node`: there is no version to ask it.
+    if (kind === 'npm') reject(file, `${field}.major`, 'a path or file candidate', 'an npm candidate names its package and takes no major');
+    candidate.major = asPositiveInteger(obj['major'], file, `${field}.major`);
+  }
   return candidate;
 }
 
@@ -292,7 +298,7 @@ function checkProfile(value: unknown, file: string, field: string): OsProfile {
 
 function checkAuth(value: unknown, file: string): ProviderAuth {
   const obj = asObject(value, file, 'auth');
-  checkKeys(obj, ['kind', 'session', 'identity'], file, 'auth');
+  checkKeys(obj, ['kind', 'session', 'sqlite', 'identity'], file, 'auth');
   const kind = asString(obj['kind'], file, 'auth.kind');
   if (!AUTH_KINDS.includes(kind as ProviderAuth['kind'])) {
     reject(file, 'auth.kind', `one of: ${AUTH_KINDS.join(', ')}`, `unknown auth kind ${kind}`);
@@ -302,6 +308,20 @@ function checkAuth(value: unknown, file: string): ProviderAuth {
     auth.session = asArray(obj['session'], file, 'auth.session').map((entry, index) =>
       asString(entry, file, `auth.session[${index}]`),
     );
+  }
+  if (obj['sqlite'] !== undefined) {
+    const sqlite = asObject(obj['sqlite'], file, 'auth.sqlite');
+    checkKeys(sqlite, ['file', 'tables'], file, 'auth.sqlite');
+    const tables = asArray(sqlite['tables'], file, 'auth.sqlite.tables').map((entry, index) => {
+      const table = asString(entry, file, `auth.sqlite.tables[${index}]`);
+      // The name goes into the query as an identifier, so it can be nothing else.
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(table)) {
+        reject(file, `auth.sqlite.tables[${index}]`, 'a table name of letters, digits and _', `${table} is not a table name`);
+      }
+      return table;
+    });
+    if (tables.length === 0) reject(file, 'auth.sqlite.tables', 'at least one table name', 'auth.sqlite.tables is empty');
+    auth.sqlite = { file: checkRelative(sqlite['file'], file, 'auth.sqlite.file', 'the isolation directory'), tables };
   }
   if (obj['identity'] !== undefined) {
     const identity = asObject(obj['identity'], file, 'auth.identity');
@@ -713,6 +733,7 @@ export function validateDescriptor(
   // What each account keeps to itself, relative to its isolation directory.
   const guarded = [
     ...(auth.session ?? []),
+    ...(auth.sqlite === undefined ? [] : [auth.sqlite.file]),
     ...Object.values(profiles).flatMap((profile) => profile?.session ?? []),
     ...Object.keys(seedFiles ?? {}),
   ].map((path) => path.split('\\').join('/'));
@@ -734,6 +755,7 @@ export function validateDescriptor(
       ...(obj['sharedKeys'] === undefined ? {} : { sharedKeys: checkSharedKeys(obj['sharedKeys'], file, profiles, guarded) }),
       ...(obj['hookSources'] === undefined ? {} : { hookSources: checkHookSources(obj['hookSources'], file, profiles, capabilities.hooks) }),
       ...(obj['quirks'] === undefined ? {} : { quirks: checkQuirks(obj['quirks'], file) }),
+      ...(obj['experimental'] === undefined ? {} : { experimental: asBoolean(obj['experimental'], file, 'experimental') }),
       models: checkModels(obj['models'], file, protocol as Protocol),
       capabilities,
     },
