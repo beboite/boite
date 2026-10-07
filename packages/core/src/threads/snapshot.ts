@@ -69,6 +69,8 @@ export function threadSnapshot(core: Core, thread: ThreadSummary, after: string 
  * The last page, unless `around` names a message with more than `limit`
  * written after it: then half a page before it and half from it on. A count
  * on the index decides, so the far case reads no row it does not send.
+ * Both halves share MESSAGE_PAGE_MAX_BYTES and the requested count; cuts
+ * retain the anchor and rewrite cursors to the retained edges.
  */
 function pageAround(core: Core, threadId: string, around: string | undefined, limit: number, project: Projection, toolPreviews: boolean): { messages: Message[]; sent: Message[]; before: string | null; after: string | null } {
   const journal = core.journal;
@@ -78,7 +80,7 @@ function pageAround(core: Core, threadId: string, around: string | undefined, li
   const older = journal.listMessagePage(threadId, { beforeRowid: rowid, limit: half, project, toolPreviews });
   const newer = journal.listMessagesForward(threadId, rowid, Math.max(1, limit - half), project, toolPreviews);
   const messages = [...older.messages, ...newer.messages], sent = [...older.sent, ...newer.sent];
-  const { start, end } = boundedMessageWindow(sent, older.messages.length, MESSAGE_PAGE_MAX_BYTES);
+  const { start, end } = boundedMessageWindow(sent, older.messages.length, MESSAGE_PAGE_MAX_BYTES, limit);
   return {
     messages: messages.slice(start, end), sent: sent.slice(start, end),
     before: start > 0 ? messages[start]!.id : older.before,

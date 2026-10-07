@@ -113,7 +113,7 @@ function aroundOf(messages: Message[], around: string | undefined, limit: number
   const older = pageOf(messages, at, half, project);
   const newer = forwardOf(messages, at, Math.max(1, limit - half), project);
   const candidates = [...older.messages, ...newer.messages];
-  const { start, end } = boundedMessageWindow(candidates.map(project), older.messages.length, MESSAGE_PAGE_MAX_BYTES);
+  const { start, end } = boundedMessageWindow(candidates.map(project), older.messages.length, MESSAGE_PAGE_MAX_BYTES, limit);
   return {
     messages: candidates.slice(start, end),
     before: start > 0 ? candidates[start]!.id : older.before,

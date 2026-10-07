@@ -329,7 +329,10 @@ when the core advertises `chunkedAnswers`.
   that message on a `readingPages` core: 20 messages before it and 20 from
   it, when more than 40 follow it. Both halves share the 12 MiB page budget;
   larger windows drop their farthest messages while retaining the anchor
-  and cursors in both directions. `messagesAfter` is the cursor below that
+  and cursors in both directions. Each cut cursor names the retained edge;
+  a single complete anchor may exceed the byte budget. The requested message
+  count also applies to the combined window, including a limit of one.
+  `messagesAfter` is the cursor below that
   window; `messages.list` with `after` pages down as the reader nears the
   bottom, and "Jump to latest" replaces the window with the last page. Live
   messages wait for the pages below, except a prompt, which brings the last

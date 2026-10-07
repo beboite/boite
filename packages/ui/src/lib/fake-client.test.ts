@@ -147,6 +147,10 @@ test('fake byte-bounded pages walk complete escaped UTF-8 messages and fall back
     after = page.after ?? undefined;
   }
   expect(window).toEqual(expected);
+  const single = await client.call('threads.get', { threadId: thread.id, around: expected[3], limit: 1 });
+  expect(single.messages.map(message => message.id)).toEqual([expected[3]]);
+  expect(single.messagesBefore).toBe(expected[3]);
+  expect(single.messagesAfter).toBe(expected[3]);
 });
 
 test('fake history refuses an oversized next message before the page byte boundary, like the core', async () => {
