@@ -5,6 +5,7 @@ import { separator, type MenuItem } from './menu';
 import { canMarkDone } from './recent.svelte';
 import { canDeleteThread } from './thread-removal';
 import { moveItems } from './thread-move.svelte';
+import { entrustItems } from './thread-entrust';
 import { strings } from './strings';
 
 interface ThreadMenuOptions {
@@ -34,6 +35,7 @@ export function threadMenuItems(store: Store, thread: ThreadSummary, options: Th
     { id: 'rename', label: strings.sidebar.rename, glyph: PencilLine },
     { id: 'retitle', label: retitling ? strings.sidebar.retitling : strings.sidebar.retitle, glyph: Sparkles, disabled: retitling },
     ...(thread.parentThreadId || thread.projectId === null || !kept ? [] : moveItems(store, thread).map(item => ({ ...item, glyph: item.id === 'move-cancel' ? X : FolderInput }))),
+    ...entrustItems(store, thread),
     separator('sep-tools'),
     { id: 'copy', label: strings.sidebar.copyPath, glyph: Copy, title: thread.cwd },
     ...(options.prLoading === undefined || !thread.branch || thread.branch === 'HEAD' ? [] : [{ id: 'pr', label: strings.machines.refreshPr, glyph: GitPullRequest, disabled: options.prLoading }]),

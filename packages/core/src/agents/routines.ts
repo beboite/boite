@@ -11,18 +11,43 @@ export function checkSchedule(value:AgentSchedule):AgentSchedule {
     if(typeof value.time!=='string'||!/^([01]\d|2[0-3]):[0-5]\d$/.test(value.time))throw refused('schedule.time: expected HH:mm');
     text(value.timezone,'schedule.timezone',100);
     try{new Intl.DateTimeFormat('en',{timeZone:value.timezone}).format();}catch{throw refused('schedule.timezone: expected an IANA timezone');}
-    return{kind:'daily',time:value.time,timezone:value.timezone};
+    const days=value.days===undefined?undefined:weekdays(value.days);
+    return{kind:'daily',time:value.time,timezone:value.timezone,...(days&&days.length<7?{days}:{})};
   }
   throw refused('schedule.kind: expected once, interval or daily');
+}
+function weekdays(value:unknown):number[] {
+  const bad=()=>refused('schedule.days: expected 1 to 7 different weekday numbers, 0 (Sunday) to 6');
+  if(!Array.isArray(value)||value.length<1||value.length>7)throw bad();
+  if(value.some(d=>!Number.isInteger(d)||d<0||d>6)||new Set(value).size!==value.length)throw bad();
+  return[...value as number[]].sort((a,b)=>a-b);
+}
+/** Local wall clock of an instant in a timezone, as the UTC milliseconds of the same wall reading. */
+function wall(parts:Intl.DateTimeFormat,at:number):number {
+  const p:Record<string,number>={};for(const part of parts.formatToParts(at))if(part.type!=='literal')p[part.type]=Number(part.value);
+  return Date.UTC(p['year']!,p['month']!-1,p['day']!,p['hour']!,p['minute']!,p['second']!);
 }
 export function nextOccurrence(schedule:AgentSchedule,after:number):number|null {
   if(schedule.kind==='once')return schedule.at>after?schedule.at:null;
   if(schedule.kind==='interval')return after+schedule.everyMinutes*60000;
-  const format=new Intl.DateTimeFormat('en-GB',{timeZone:schedule.timezone,hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
-  const date=new Intl.DateTimeFormat('en-CA',{timeZone:schedule.timezone,year:'numeric',month:'2-digit',day:'2-digit'});
-  const afterDate=date.format(after), afterTime=format.format(after);
-  // Two days cover a nonexistent local time at the DST transition. No model call.
-  for(let minute=Math.floor(after/60000)*60000+60000;minute<=after+49*3600000;minute+=60000)if(format.format(minute)===schedule.time && (date.format(minute)!==afterDate || afterTime<schedule.time))return minute;
+  const parts=new Intl.DateTimeFormat('en-GB',{timeZone:schedule.timezone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
+  const [h=0,m=0]=schedule.time.split(':').map(Number),minutes=h*60+m;
+  const afterWall=wall(parts,after),afterDay=Math.floor(afterWall/86400000),afterMinutes=Math.floor(afterWall%86400000/60000);
+  // One local date at a time, no minute scan and no model call. Fifteen dates cover a
+  // weekday list whose next date falls on a nonexistent local time at a DST change.
+  for(let day=afterDay;day<=afterDay+14;day++){
+    if(day===afterDay&&afterMinutes>=minutes)continue;
+    if(schedule.days&&!schedule.days.includes(new Date(day*86400000).getUTCDay()))continue;
+    const target=day*86400000+minutes*60000;
+    // The offsets a day before and after include both sides of any clock change that day.
+    // An ambiguous time keeps its earliest instant after `after`; a skipped one has none.
+    let found:number|null=null;
+    for(const probe of[target-86400000,target+86400000]){
+      const at=target-(wall(parts,probe)-probe);
+      if(at>after&&wall(parts,at)===target&&(found===null||at<found))found=at;
+    }
+    if(found!==null)return found;
+  }
   throw refused('schedule: could not find the next local occurrence');
 }
 export class AgentRoutines {

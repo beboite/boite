@@ -30,6 +30,9 @@
   import LimitsGlance from './LimitsGlance.svelte';
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
+  import AgentsAtWork from './AgentsAtWork.svelte';
+  import AgentAvatar from './agents/AgentAvatar.svelte';
+  import { stewardsOf } from '../lib/steward-view';
   import DraftRow from './DraftRow.svelte';
   import MachineIcon from './MachineIcon.svelte';
   import ProjectTile from './ProjectTile.svelte';
@@ -172,6 +175,7 @@
   <div class="views"><ProjectViews entries={groups} {store} /></div>
   <div class="scroll" class:recent={workspace.view === 'recent'} data-project-list bind:this={scrollRoot} onscroll={() => { if (showRows && scrollRoot) savedScroll = scrollRoot.scrollTop; }}>
     {#if showRows}
+    {#each visible as machine (machine.id)}<AgentsAtWork {machine} {now} showMachine={multi} />{/each}
     {#if groups.length === 0}<p class="empty">{strings.sidebar.noProjects}</p>{/if}
     {#if workspace.view === 'recent'}
       {#each visible as machine (machine.id)}
@@ -253,6 +257,13 @@
                 >{/if}{#if multi}<span class="host" data-testid="project-host" class:offline={owner.connection !== 'ready'}
                   title={`${machine.label} · ${strings.connection[owner.connection]}`} aria-label={machine.label}><MachineIcon icon={machine.icon} os={owner.core?.os} /></span>{/if}
             </button>
+            {#each stewardsOf(owner, project.id).slice(0, 2) as steward (steward.thread.id)}
+              <!-- The steward that looks after this project: its picture, and the way to its thread. -->
+              <button type="button" class="ghost icon small steward-mark" title={fill(strings.steward.lookedAfterBy, { name: steward.thread.title })} aria-label={fill(strings.steward.lookedAfterBy, { name: steward.thread.title })}
+                onclick={() => void workspace.select(owner, steward.thread.id)} data-testid="project-steward" data-thread-id={steward.thread.id}>
+                <AgentAvatar kind="profile" id={steward.thread.id} name={steward.thread.title} status={steward.thread.status === 'running' ? 'running' : 'idle'} size={18} />
+              </button>
+            {/each}
             <ProjectThreadCounters {entry} working={lists.working.length} {controls} {collapsed} />
             <button
               class="ghost small icon project-actions"
@@ -479,6 +490,7 @@
   .host.offline {
     color: var(--color-danger);
   }
+  .steward-mark { flex: none; width: var(--control-sm); height: var(--control-sm); padding: 0; }
   .project-actions {
     opacity: 0;
   }

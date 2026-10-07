@@ -133,9 +133,9 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 588,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,300,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,385,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,660,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,665,000 |
 
 The total JavaScript measure excludes native binaries and source maps. On
 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
@@ -155,14 +155,20 @@ mid-turn effort changes, and 3,597,242 emitted core JavaScript bytes. The UI
 limit rises to 4,270,000 and the core JavaScript limit to 3,615,000, leaving
 about 19 KB and 18 KB of headroom.
 
-Inline views measured 4,278,133 UI bytes and 3,643,439 emitted core JavaScript
-bytes on Linux on 2026-10-07 with that `main` merged, 27,676 and 46,197 bytes
-above it. The core gains publishing a page, the headless check, the kit
-stylesheet stored with each page, and the texts `boite view help` and
-`boite view example` print. The UI gains the frame, the order of views in the
-timeline, and the kit and bootstrap, which the client chunk keeps because the
-fake client stores pages with them. The UI limit rises to 4,300,000 and the
-core JavaScript limit to 3,660,000, leaving about 22 KB and 17 KB.
+The agents' chat, entrusted threads and robots, on the same `main`,
+measured 4,336,325 UI bytes and 3,602,928 emitted core JavaScript
+bytes on Linux on 2026-10-07. The UI limit rises to 4,355,000, leaving about
+19 KB of headroom; the core JavaScript limit of 3,615,000 leaves about 12 KB.
+
+Inline views, on `main` at `9d736a78`, measured 4,364,095 UI bytes and
+3,649,224 emitted core JavaScript bytes on Linux on 2026-10-07, 27,770 and
+46,296 bytes above that `main`. The core gains publishing a page, the headless
+check, the kit stylesheet stored with each page, and the texts
+`boite view help` and `boite view example` print. The UI gains the frame, the
+order of views in the timeline, and the kit and bootstrap, which the client
+chunk keeps because the fake client stores pages with them. The UI limit rises
+to 4,385,000 and the core JavaScript limit to 3,665,000, leaving about 21 KB
+and 16 KB.
 
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured
