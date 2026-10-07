@@ -589,7 +589,6 @@ export const strings = {
     projectArchivedThreads: '{project}: {count} archived',
     /** The fold under the list for projects with no open conversation, and what choosing one does. */
     idleProjects: 'Idle projects',
-    idleProjectsHint: 'Choose one to start a thread.',
     groupingOptions: 'Display options',
     /** The sidebar's top switch between the thread list and the Agents page. */
     surface: 'Threads or agents',
@@ -642,7 +641,6 @@ export const strings = {
     refreshIcon: 'Refresh icon',
     projectArchivedToast: 'Archived {project}',
     archivedProjects: 'Archived projects',
-    archivedProjectsHint: 'Choose one to bring it back.',
     restoreProject: 'Restore',
     restoreAndStart: 'Restore {project} and start a thread',
     /** The drawer under a project's rows: its archived threads, opened for this session only. */

@@ -114,7 +114,6 @@
       controls={uid} testid="{kind}-projects-toggle" onclick={() => (projectThreadView.shelf[kind] = !open)} />
     <div id={uid} class="motion-fold" class:expanded={open} inert={!open}><div>
       {#if visited}
-        <p class="hint">{kind === 'idle' ? strings.sidebar.idleProjectsHint : strings.sidebar.archivedProjectsHint}</p>
         {#each groups as { machine, projects } (machine.id)}
           {#if multi}
             <div class="machine" data-testid="{kind}-projects-machine" title={machine.label}>
@@ -226,13 +225,6 @@
 <style>
   .shelf {
     border-top: 1px solid var(--color-border);
-  }
-  .hint {
-    margin: 0;
-    padding: 0 var(--fold-inset) 6px var(--fold-indent);
-    color: var(--color-subtle);
-    font-size: var(--text-xs);
-    line-height: 1.4;
   }
   .machine {
     display: flex;

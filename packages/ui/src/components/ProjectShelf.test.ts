@@ -43,7 +43,6 @@ test('the archived fold restores a project alone from its button, or restores it
   expect(document.querySelector('[data-testid=archived-project-restore]')).toBeNull();
   toggle.click();
   flushSync();
-  expect(document.querySelector('[data-testid=archived-projects] .hint')?.textContent).toBe('Choose one to bring it back.');
   // One machine: no machine header, and a paired device gets no remove button.
   expect(document.querySelector('[data-testid=archived-projects-machine]')).toBeNull();
   expect(document.querySelector('[data-testid=archived-project-remove]')).toBeNull();
