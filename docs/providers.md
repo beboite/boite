@@ -254,8 +254,10 @@ session protocol either.
   provider that is turned off is listed from what is already known and its
   program is never asked; turning it on asks it. A launcher script that
   stays the same while the program behind it changes is covered by one check
-  per run of the core, thirty seconds after the reading is first used, and by
-  another after an agent update. An `npm` candidate takes no `major`: it
+  per run of the core, at the first resolution half a minute or more after the
+  reading is first used, and by another after an agent update. A program
+  stopped at its 20 second deadline has given no answer: it is passed over and
+  asked again, never recorded as having no version. An `npm` candidate takes no `major`: it
   already names its package (`packages/core/src/providers/versions.ts`).
 - A `file` candidate that starts with `{npmRoot}` is looked for under each
   global npm `node_modules` directory, the same list an `npm` candidate walks,

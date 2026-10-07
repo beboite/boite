@@ -13,8 +13,10 @@
  * A program replaced in place changes its file and is asked again by itself.
  * A launcher script that stays the same while the program behind it changes
  * does not, so every reading taken from the file is also checked once per run
- * of the core, a little after its first use, and again after an agent update
- * (`recheckVersions`).
+ * of the core, at the first resolution that comes half a minute or more after
+ * its first use, and again after an agent update (`recheckVersions`). Nothing
+ * here runs on a timer: a program is only ever started by a resolution that
+ * asks, which a provider turned off never does.
  */
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -22,7 +24,7 @@ import { dirname } from 'node:path';
 const VERSION_PATTERN = /\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?/;
 /** A program that could not be asked is asked again after this long, not at every resolution. */
 const RETRY_MS = 60_000;
-/** How long after its first use a kept reading is checked against the program, so nothing extra runs while the core starts. */
+/** How long after its first use a kept reading is due for a check against the program, so nothing extra runs while the core starts. */
 const RECHECK_AFTER_MS = 30_000;
 
 /** The first `x.y.z` in what a program printed, null when there is none. */
@@ -50,10 +52,13 @@ const readings = new Map<string, Reading>();
 const pending = new Map<string, Promise<void>>();
 /** Programs asked for before any core could run them, with the arguments to ask them with. */
 const waiting = new Map<string, string[]>();
-const failures = new Map<string, number>();
+/** Programs that could not be run, with when and the file they were then: a file that changed since is asked at once. */
+const failures = new Map<string, { at: number; mtimeMs: number; size: number }>();
 const hosts = new Set<VersionHost>();
 /** Paths whose reading this run already took from the program itself, or is about to. */
 const fresh = new Set<string>();
+/** From when a reading kept from an earlier run is due for its check against the program. */
+const due = new Map<string, number>();
 
 function isReading(value: unknown): value is Reading {
   if (typeof value !== 'object' || value === null) return false;
@@ -112,7 +117,7 @@ function start(program: string, args: string[]): void {
     },
     () => {
       pending.delete(program);
-      failures.set(program, Date.now());
+      failures.set(program, { at: Date.now(), mtimeMs: stat.mtimeMs, size: stat.size });
       // From unknown to "cannot say": the candidate is passed over now, and a
       // later one may resolve. A retry that fails again changes nothing.
       if (!failedBefore) for (const each of hosts) each.changed();
@@ -121,15 +126,16 @@ function start(program: string, args: string[]): void {
   pending.set(program, read);
 }
 
-/** A reading kept from an earlier run is believed now and checked against the program once, shortly. */
-function recheckLater(program: string, args: string[]): void {
+/**
+ * A reading kept from an earlier run is believed, and checked against the
+ * program once: at the first resolution that asks `RECHECK_AFTER_MS` or more
+ * after the first one. The answer of that resolution is still the kept reading.
+ */
+function recheckWhenDue(program: string, args: string[]): void {
   if (fresh.has(program)) return;
-  fresh.add(program);
-  const timer = setTimeout(() => {
-    fresh.delete(program);
-    start(program, args);
-  }, RECHECK_AFTER_MS);
-  timer.unref?.();
+  const at = due.get(program);
+  if (at === undefined) due.set(program, Date.now() + RECHECK_AFTER_MS);
+  else if (Date.now() >= at) start(program, args);
 }
 
 /**
@@ -151,17 +157,19 @@ export function majorAt(program: string, args: readonly string[], ask = true): n
   }
   const reading = readings.get(program);
   if (reading !== undefined && reading.mtimeMs === stat.mtimeMs && reading.size === stat.size) {
-    if (ask) recheckLater(program, [...args]);
+    if (ask) recheckWhenDue(program, [...args]);
     if (reading.version === null) return null;
     const major = Number.parseInt(reading.version, 10);
     return Number.isNaN(major) ? null : major;
   }
-  const failedAt = failures.get(program);
-  if (failedAt !== undefined) {
+  const failed = failures.get(program);
+  if (failed !== undefined && failed.mtimeMs === stat.mtimeMs && failed.size === stat.size) {
     // Asked before and it could not say: passed over, while a new try runs behind.
-    if (ask && Date.now() - failedAt >= RETRY_MS) start(program, [...args]);
+    if (ask && Date.now() - failed.at >= RETRY_MS) start(program, [...args]);
     return null;
   }
+  // Another file than the one that failed: a new question, asked at once.
+  if (failed !== undefined) failures.delete(program);
   if (ask) start(program, [...args]);
   return undefined;
 }
@@ -169,6 +177,7 @@ export function majorAt(program: string, args: readonly string[], ask = true): n
 /** Every reading is checked against its program at its next use: an agent was just updated. */
 export function recheckVersions(): void {
   fresh.clear();
+  for (const program of readings.keys()) due.set(program, 0);
 }
 
 /** A core that can run programs joins in. What was asked for before it came starts now. Returns the way out. */
@@ -195,4 +204,5 @@ export function forgetVersions(): void {
   waiting.clear();
   failures.clear();
   fresh.clear();
+  due.clear();
 }

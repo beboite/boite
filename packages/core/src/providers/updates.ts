@@ -572,6 +572,7 @@ export class HarnessUpdates {
       recheckVersions();
       // The list that goes out names the program as it stands after the update.
       await this.core.providers.settle(this.versionTimeoutMs);
+      if (this.closed || this.core.stopping) return;
       this.core.bus.emit('providers.updated', this.core.providers.list());
     } catch (error) {
       this.entries.set(id, { ...before, state: 'failed', message: error instanceof Error ? error.message : String(error), checkedAt: Date.now(), program: target.program });

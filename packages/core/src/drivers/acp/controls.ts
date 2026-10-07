@@ -127,10 +127,10 @@ export class SessionControls {
    */
   noteOptionUpdate(options: SessionConfigOption[]): void {
     const mode = categoryOption(options, 'mode');
-    if (mode === null) return;
-    this.configOptions = this.configOptions.some((entry) => entry.id === mode.id)
-      ? this.configOptions.map((entry) => (entry.id === mode.id ? mode : entry))
-      : [...this.configOptions, mode];
+    // Only an option the session already listed is refreshed: one that appears
+    // here first would make a session with no options look as if it had some.
+    if (mode === null || !this.configOptions.some((entry) => entry.id === mode.id)) return;
+    this.configOptions = this.configOptions.map((entry) => (entry.id === mode.id ? mode : entry));
   }
 
   /** `current_mode_update`: a mode change the agent announced on its own. */

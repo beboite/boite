@@ -158,3 +158,31 @@ test.skipIf(process.platform === 'win32')('a provider that is off is listed with
   expect(on.loaded.find((provider) => provider.id === 'quiet')).toMatchObject({ enabled: true, available: true, executable: program });
   expect((await Bun.file(mark).text()).trim()).toBe('ran');
 });
+
+test.skipIf(process.platform === 'win32')('a program stopped at its version deadline is passed over and asked again, never kept as having no version', async () => {
+  // It hangs where it should print its version.
+  const program = join(harness.dataDir, 'slow-agent');
+  writeFileSync(program, '#!/bin/sh\nexec sleep 30\n');
+  chmodSync(program, 0o755);
+  const profile = { detect: {}, executable: [{ kind: 'file', value: program, major: 2 }], isolation: { SLOW_HOME: '{isolationDir}' } };
+  mkdirSync(join(harness.dataDir, 'providers'), { recursive: true });
+  writeFileSync(join(harness.dataDir, 'providers', 'slow.json'), JSON.stringify({
+    id: 'slow', schemaVersion: 1, name: 'Slow', shortName: 'Slow', protocol: 'acp', roots: ['{isolationDir}'],
+    profiles: { linux: profile, macos: profile }, auth: { kind: 'none' },
+    models: [{ id: 'default', name: 'Default', default: true }],
+    capabilities: { approvals: true, hooks: false, checkpoint: false, images: false, planMode: false, resume: true },
+  }));
+  harness.core.providers.versionTimeoutMs = 300;
+  const client = await harness.connect();
+  const stuck = await client.call('providers.reload', {});
+  expect(stuck.loaded.find((provider) => provider.id === 'slow')).toMatchObject({ available: false, executable: null });
+  // Nothing was written down for it: "no version" would hide the program until the core restarts.
+  const kept = join(harness.dataDir, 'executable-versions.json');
+  const readings = (await Bun.file(kept).exists()) ? JSON.parse(await Bun.file(kept).text()) as Record<string, unknown> : {};
+  expect(readings[program]).toBeUndefined();
+
+  // Repaired, it is another file: asked at once, not a minute later.
+  writeFileSync(program, '#!/bin/sh\necho "slow-agent 2.1.0"\n');
+  const fixed = await client.call('providers.reload', {});
+  expect(fixed.loaded.find((provider) => provider.id === 'slow')).toMatchObject({ available: true, executable: program });
+});

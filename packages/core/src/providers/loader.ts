@@ -124,16 +124,24 @@ async function programOutput(core: Core, program: string, args: string[]): Promi
   // A launcher's child can inherit the pipes and outlive the kill, where only
   // direct children are tracked: the read then ends on its own, a moment after
   // the kill, instead of waiting on pipes that never close.
+  const timeoutMs = core.providers.versionTimeoutMs;
   const late = new Promise<never>((_resolve, reject) => {
-    grace = setTimeout(() => reject(new Error(`${program} did not print its version in ${VERSION_TIMEOUT_MS / 1000} s`)), VERSION_TIMEOUT_MS + VERSION_PIPE_GRACE_MS);
+    grace = setTimeout(() => reject(new Error(`${program} did not print its version in ${timeoutMs / 1000} s`)), timeoutMs + VERSION_PIPE_GRACE_MS);
   });
-  const timer = setTimeout(() => core.procs.killTree(threadId), VERSION_TIMEOUT_MS);
+  let killed = false;
+  const timer = setTimeout(() => {
+    killed = true;
+    core.procs.killTree(threadId);
+  }, timeoutMs);
   const readers = [spawned.proc.stdout, spawned.proc.stderr] as const;
   try {
     const [stdout, stderr] = await Promise.race([
       Promise.all([new Response(readers[0]).text(), new Response(readers[1]).text(), spawned.exited]),
       late,
     ]);
+    // Killed at its deadline, whatever it had printed is no answer: kept as one,
+    // "no version" would pass the program over until the core restarts.
+    if (killed) throw new Error(`${program} did not print its version in ${timeoutMs / 1000} s`);
     return `${stdout}\n${stderr}`;
   } finally {
     clearTimeout(timer);
@@ -157,6 +165,8 @@ export class ProviderRegistry {
 
   /** Leaves the version readings this core joined, set once it can run a program. */
   private leaveVersions: () => void = () => undefined;
+  /** How long a program gets to print its version before it is stopped. A test shortens it. */
+  versionTimeoutMs = VERSION_TIMEOUT_MS;
 
   constructor(private readonly dataDir: string) {
     this.installs = new InstallManager(dataDir);

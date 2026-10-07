@@ -78,6 +78,26 @@ test.skipIf(process.platform === 'win32')('a candidate that names a major takes 
   expect(resolveCommand(second)?.executable).toBe(two);
   expect(state.runs.length).toBe(2);
   expect(Object.keys(JSON.parse(readFileSync(state.file, 'utf8')) as object).sort()).toEqual([one, two].sort());
+
+  // Half a minute on, a kept reading is checked against its program once, by a resolution that asks.
+  // One that does not ask (a provider turned off) starts nothing, however long ago the reading was kept.
+  const later = spyOn(Date, 'now').mockReturnValue(Date.now() + 31_000);
+  try {
+    expect(resolveCommand(second, false)?.executable).toBe(two);
+    await versionsSettled();
+    expect(state.runs.length).toBe(2);
+    // The answer is still the kept reading while both programs are asked again behind it.
+    expect(resolveCommand(second)?.executable).toBe(two);
+    await versionsSettled();
+    expect(state.runs.length).toBe(4);
+    expect(state.changes).toBe(2);
+    // Once per run: nothing more is asked.
+    expect(resolveCommand(second)?.executable).toBe(two);
+    await versionsSettled();
+    expect(state.runs.length).toBe(4);
+  } finally {
+    later.mockRestore();
+  }
 });
 
 test.skipIf(process.platform === 'win32')('a program replaced in place is asked again, and one that names no version never fits', async () => {

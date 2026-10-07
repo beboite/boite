@@ -156,10 +156,10 @@ Reproduce it with `bun run build:ui && bun run build:core && bun scripts/ci/budg
 
 On 2026-10-07, `bun run build:core` with Bun 1.4.2 on Linux measured 3,590,819
 emitted core JavaScript bytes at `89556311`, 9,181 under the limit of 3,600,000.
-Provider switches and OpenCode 2 measured 3,609,556: 18,737 bytes for the second
+Provider switches and OpenCode 2 measured 3,609,958: 19,139 bytes for the second
 descriptor, the version readings behind a candidate's `major`, the SQLite
 login, the switch and the subscription proxy's provider block for OpenCode 2.
-The limit rises to 3,640,000 bytes, which leaves 30,444. The same day
+The limit rises to 3,640,000 bytes, which leaves 30,042. The same day
 `bun run build:ui` measured 4,247,667 UI bytes at `046ef609`, 2,333 under the
 limit of 4,250,000, and 4,256,207 with the provider switches, the Turned off
 group and the composer chip: 8,540 bytes. The UI limit rises to 4,290,000,
