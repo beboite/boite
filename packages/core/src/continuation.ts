@@ -25,11 +25,15 @@ function textPart(part: MessagePart): string {
   }
 }
 
-/** Fresh native session, same visible conversation. Historical output is never executed. */
+/**
+ * Fresh native session, same visible conversation. Historical output is never
+ * executed. The history stops before `upTo`, the turn being sent; `null` keeps
+ * every message, the work of a turn that goes on after a pause included.
+ */
 export function continuationInput(
   journal: Journal,
   threadId: string,
-  turnId: string,
+  upTo: string | null,
   input: { prompt: string; attachments: Attachment[]; moved?: true },
   provider: ProviderDescriptor,
   fileReference: (file: Extract<MessagePart, { type: 'file' }>) => string = file => `[File: ${file.name ?? 'attachment'}]`,
@@ -43,7 +47,7 @@ export function continuationInput(
   let imageCount = 0;
   let moved = input.moved === true;
   for (const message of journal.walkMessages(threadId)) {
-    if (message.turnId === turnId) break;
+    if (upTo !== null && message.turnId === upTo) break;
     if (message.parts.some((part) => part.type === 'text' && part.moved !== undefined)) moved = true;
     for (const part of message.parts) {
       if (part.type !== 'image') continue;

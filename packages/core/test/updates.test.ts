@@ -445,6 +445,25 @@ describe('harness updates', () => {
     await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0, 20000);
   }, 30000);
 
+  test('a turn resumed on a fresh session reads its own work, and its resume note once', async () => {
+    harness = await startTestCore();
+    const client = await harness.connect();
+    const core = harness.core;
+    const { threadId } = await echoThread(harness, client);
+    const turn = await client.call('turns.start', { threadId, prompt: 'build the release [tool]' });
+    await waitFor(() => core.journal.getTurn(turn.id)?.status === 'done', 20000);
+    // An agent with no session to resume: the history is the whole context.
+    const thread = { ...core.threads.require(threadId), sessionId: null };
+    const note = 'Boite paused this turn between two tool calls (test note).';
+    const context = core.threads.contexts.makeContext(thread, core.providers.require(thread.providerId), core.accounts.require(thread.accountId), core.journal.getTurn(turn.id)!, { memory: '', deferred: '', letters: '' }, note);
+    core.threads.noteSystem(threadId, turn.id, note, 'Resumed', 'turn.resumedAfterUpdate');
+    const times = (text: string): number => text.split(note).length - 1;
+    expect(context.prompt).toContain('build the release');
+    expect(times(context.prompt)).toBe(1);
+    // A driver that starts another fresh session later gets the same history, not the note again.
+    expect(times(context.continuation!().prompt)).toBe(1);
+  });
+
   test("an update releases the provider's idle threads and sweeps what their agents left", async () => {
     const { client } = await start('command');
     await client.call('providers.updates', {});

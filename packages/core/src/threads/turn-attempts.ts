@@ -52,10 +52,10 @@ export class TurnAttempts {
   private readonly preparing = new Set<ThreadId>();
   /** Turns an agent update asked to pause at their next tool boundary. */
   private readonly pauseWanted = new Map<ThreadId, ProviderId>();
-  /** Turns whose driver was stopped to pause them, not by the user. */
-  private readonly pausing = new Set<ThreadId>();
-  /** Paused turns, with what ends their pause early: a stop or the core closing. */
-  private readonly paused = new Map<ThreadId, () => void>();
+  /** Turns whose driver was stopped to pause them, not by the user, by the provider they pause for. */
+  private readonly pausing = new Map<ThreadId, ProviderId>();
+  /** Paused turns: the provider they wait for, and what ends their pause early, a stop or the core closing. */
+  private readonly paused = new Map<ThreadId, { providerId: ProviderId; leave: () => void }>();
 
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {
     core.bus.onAny((name, payload) => {
@@ -225,7 +225,9 @@ export class TurnAttempts {
 
   /** Asks a running turn of this provider to pause at its next tool boundary. False when the thread runs no turn. */
   requestPause(threadId: ThreadId, providerId: ProviderId): boolean {
-    if (this.paused.has(threadId) || this.pausing.has(threadId)) return true;
+    // A pause already taken counts only for the provider it was taken for.
+    const taken = this.pausing.get(threadId) ?? this.paused.get(threadId)?.providerId;
+    if (taken !== undefined) return taken === providerId;
     if (!this.handles.has(threadId)) return false;
     this.pauseWanted.set(threadId, providerId);
     this.toolBoundary(threadId);
@@ -261,7 +263,7 @@ export class TurnAttempts {
       if (this.handles.get(threadId) !== handle || !this.pauseWanted.has(threadId) || this.threads.handoff.toolsRunning(threadId) > 0) return;
       if (this.threads.cards.listPermissions(threadId).length > 0 || this.threads.cards.listQuestions(threadId).some((question) => !question.async)) return;
       this.pauseWanted.delete(threadId);
-      this.pausing.add(threadId);
+      this.pausing.set(threadId, providerId);
       handle.stop();
       this.armStopDeadline(threadId, handle);
     }, 0);
@@ -275,7 +277,7 @@ export class TurnAttempts {
     this.handles.delete(threadId);
     this.threads.handoff.forgetTools(threadId);
     const left = Promise.withResolvers<null>();
-    this.paused.set(threadId, () => left.resolve(null));
+    this.paused.set(threadId, { providerId: provider.id, leave: () => left.resolve(null) });
     this.threads.noteSystem(threadId, turnId, `Paused between two tool calls while ${provider.name} updates.`, `Paused while ${provider.name} updates`, 'turn.pausedForUpdate');
     try {
       // Taken before the update can learn of this pause: it may settle in the same tick.
@@ -312,7 +314,7 @@ export class TurnAttempts {
     const paused = this.paused.get(threadId);
     if (paused !== undefined) {
       this.stopRequested.add(threadId);
-      paused();
+      paused.leave();
       return true;
     }
     this.pauseWanted.delete(threadId);

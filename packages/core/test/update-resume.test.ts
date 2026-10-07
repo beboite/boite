@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { resumeAfterUpdate } from '../src/providers/update-resume.ts';
+import { resumeAfterUpdate, resumePostponed, resumeUnwaited } from '../src/providers/update-resume.ts';
 
 describe('the note a turn paused for an agent update resumes with', () => {
   test('names a move only when the version moved, and never claims one that did not happen', () => {
@@ -23,5 +23,16 @@ describe('the note a turn paused for an agent update resumes with', () => {
       label: 'Resumed: the Codex update failed',
     });
     expect(resumeAfterUpdate('Codex', '1.0.0', null, true).prompt).toContain('the update failed. Continue');
+  });
+
+  test('a postponed or vanished update says so, and still asks the agent to go on', () => {
+    expect(resumePostponed('Codex')).toEqual({
+      prompt: 'Boite paused this turn between two tool calls to update Codex, but other turns are still working, so the update waits for them. Continue the task where you stopped.',
+      label: 'Resumed: the Codex update waits for other turns',
+    });
+    expect(resumeUnwaited('Codex')).toEqual({
+      prompt: 'Boite paused this turn between two tool calls for an update of Codex that no longer waits. Continue the task where you stopped.',
+      label: 'Resumed: the Codex update no longer waits',
+    });
   });
 });

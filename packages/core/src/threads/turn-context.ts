@@ -246,8 +246,11 @@ export class TurnContexts {
     // A turn resumed after an agent update goes on from its own messages: the
     // prompt is the resume note, and a fresh session reads this turn's work too.
     const input = resumePrompt !== undefined ? { prompt: resumePrompt, attachments: [] } : this.lastUserInput(threadId, turn.id);
-    const carry = (): { prompt: string; attachments: Attachment[] } =>
-      continuationInput(this.core.journal, threadId, resumePrompt !== undefined ? '' : turn.id, input, provider, part => fileReference(this.core.dataDir, part));
+    const history = (): { prompt: string; attachments: Attachment[] } =>
+      continuationInput(this.core.journal, threadId, resumePrompt !== undefined ? null : turn.id, input, provider, part => fileReference(this.core.dataDir, part));
+    // Read once for a resume, before its note lands: a later fresh start would otherwise carry the note twice.
+    const resumedHistory = resumePrompt !== undefined ? history() : null;
+    const carry = (): { prompt: string; attachments: Attachment[] } => resumedHistory ?? history();
     const fresh = !thread.agentSessionId && thread.sessionId === null && ((thread.sessionGeneration ?? 0) > 0 || resumePrompt !== undefined);
     const continued = fresh ? carry() : input;
     const prepared = prepareAttachments(this.core.dataDir, continued);

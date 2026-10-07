@@ -11,10 +11,11 @@
  * to `<state file>.prefix`, where `npm install -g` would have written, and
  * `update-stuck` fails and still exits with zero, as `opencode upgrade` does
  * whatever went wrong, and `update-gated` writes `<state file>.running`, then
- * installs 1.2.0 once `<state file>.go` exists, so a test can look while it runs. With
+ * installs 1.2.0 once `<state file>.go` exists, so a test can look while it
+ * runs; a gate still shut after 30 s fails it. With
  * `FAKE_HANG=1`, `--version` answers and then hangs with a child on its pipes.
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 
 const [stateFile = '', command = ''] = process.argv.slice(2);
 const installed = existsSync(stateFile) ? readFileSync(stateFile, 'utf8').trim() : '1.0.0';
@@ -33,6 +34,12 @@ else if (command === 'check') {
 } else if (command === 'update-gated') {
   writeFileSync(`${stateFile}.running`, 'yes');
   for (let waited = 0; !existsSync(`${stateFile}.go`) && waited < 30_000; waited += 20) await Bun.sleep(20);
+  rmSync(`${stateFile}.running`, { force: true });
+  // A gate nobody opened is a stuck test, not an installed release.
+  if (!existsSync(`${stateFile}.go`)) {
+    console.error('error: the gate never opened');
+    process.exit(4);
+  }
   writeFileSync(stateFile, '1.2.0');
   console.log('updated to 1.2.0');
 } else if (command === 'update-current') {
