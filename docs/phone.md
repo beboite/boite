@@ -47,7 +47,8 @@ binds `0.0.0.0` instead, and `--host` takes a specific address:
 bun packages/core/src/main.ts --lan
 ```
 
-Settings, Machines and updates, Listen on LAN saves `listenOnLan`. The core
+Settings, Machines and updates, Phones and other devices, More options,
+Reachable on the local network saves `listenOnLan`. The core
 reads it at startup; enabling it binds `0.0.0.0`. Explicit `--host` or `--lan`
 flags take precedence. A running core never rebinds, so changing the switch
 requires a restart. The startup log names the address and its source.
@@ -73,8 +74,10 @@ other devices", drawn beside a QR code the phone's camera opens:
 http://192.168.1.20:53421/?grant=<32 random bytes, hex>
 ```
 
-Close hides the link and QR code, and New pairing link creates another one.
-Closing leaves an already issued link valid until it is used or expires.
+Add a phone mints the link. Close hides the link and QR code, and the button
+creates another one. Closing leaves an already issued link valid until it is
+used or expires. The paired devices are listed under it by what they are, a
+phone or browser or the desktop app, with the version they run.
 
 The owner must request a link. Startup logs contain no grant or session key.
 
@@ -98,8 +101,8 @@ A link carries a role. `device` is the default and the only one the QR code is
 drawn for: a phone, whose key says hello as `session` and reaches the list below.
 `owner` is for another computer of the owner's that drives a core running
 elsewhere, a server say: its key says hello as `owner` and reaches every method,
-minting links and revoking included. The "Full control" switch of the pairing
-card mints one, `boite-core pair --owner` mints one on a machine with no window
+minting links and revoking included. The "Full control" switch under More
+options turns the card's button into Link for another computer, which mints one, `boite-core pair --owner` mints one on a machine with no window
 ([server.md](server.md)), and the Connection card of the other computer takes it
 pasted. A role anything but those two is refused by name.
 
@@ -318,7 +321,8 @@ access to the ports required for its certificate challenge and public HTTPS.
 Keep the core bound to loopback when the proxy is local. A private VPN still
 needs a certificate the phone trusts for PWA features.
 
-Set the matching origin in General, Phone app, Public HTTPS address. A headless
+Set the matching origin in Machines and updates, Phone app, Use another HTTPS
+address. A headless
 core accepts `--public-url https://boite.example.com` or `BOITE_PUBLIC_URL`.
 This saves `settings.publicUrl`, uses it in new pairing links, and permits that
 exact browser origin at the WebSocket gate. An address copied from the browser

@@ -88,8 +88,7 @@ import { workspace } from '../lib/workspace.svelte';
       { id: 'tasks', label: strings.protection.tasks }
     ],
     machines: [
-      { id: 'updates', label: strings.serverUpdate.updates },
-      { id: 'machines', label: strings.machines.connections },
+      { id: 'machines', label: strings.machines.heading },
       { id: 'devices', label: strings.settings.pairing.heading },
       { id: 'phone', label: strings.phone.heading }
     ],
@@ -144,10 +143,10 @@ import { workspace } from '../lib/workspace.svelte';
     ['appearance', 'buttons', strings.terminal.title],
     ['appearance', 'buttons', strings.rightPanel.trace],
     ['accounts', null, strings.settings.modelDefaults],
-    ['machines', 'updates', strings.appUpdate.heading],
-    ['machines', 'updates', strings.harnessUpdates.auto],
-    ['machines', 'updates', strings.harnessUpdates.heading],
-    ['machines', 'updates', strings.serverUpdate.updates],
+    ['machines', 'machines', strings.appUpdate.heading],
+    ['machines', 'machines', strings.harnessUpdates.auto],
+    ['machines', 'machines', strings.harnessUpdates.heading],
+    ['machines', 'machines', strings.serverUpdate.updates],
     ['resources', 'quiet', strings.settings.focusGuard],
     ['resources', 'quiet', strings.settings.muteAgents],
     ['resources', 'limits', strings.settings.memoryProtection],
@@ -263,7 +262,7 @@ import { workspace } from '../lib/workspace.svelte';
         data-testid="settings-tab-{entry.id}"
         aria-current={tab === entry.id ? 'page' : undefined}
         aria-expanded={toc[entry.id] ? tab === entry.id : undefined}
-        onclick={() => { selectedSection = ''; store.showSettings(entry.id, entry.id === 'machines' ? 'updates' : undefined); }}
+        onclick={() => { selectedSection = ''; store.showSettings(entry.id, entry.id === 'machines' ? 'machines' : undefined); }}
       >
         <Icon size={15} strokeWidth={1.75} />
         <span class="ui-label">{entry.label}</span>

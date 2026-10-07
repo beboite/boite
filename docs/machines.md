@@ -127,6 +127,27 @@ that address, if any. A name already used by another machine gets the
 newcomer's host beside it, as in `Studio (build.example)`, when pairing and
 when renaming.
 
+## The machines page
+
+Settings, Machines and updates shows each machine on one row: its icon, its
+name, whether it is connected and one word about its updates. The row's chevron
+opens its details: its address, Boite's version on that machine with its
+update, its agents with theirs and the automatic update switch, Settings for
+this machine and Remove machine. A machine alone on its list shows its details
+without a click. Before this, a machine appeared twice, once as an updates
+card listing every agent version and once as a connection.
+
+One Check for updates button at the top reads everything again: the desktop
+app, Boite on every machine connected with full control, and the agents there.
+The row's word is the most pressing of what it finds: a failed update, then
+one in progress, then one available, then a check in progress, then Up to
+date. A row says nothing until something has answered.
+
+Phones and other devices has one button, Add a phone, which draws the QR code.
+Reachable on the local network and Full control sit under More options. Phone
+app keeps the Tailscale HTTPS switch in view and folds the address of a
+reverse proxy of one's own under Use another HTTPS address.
+
 ## Agent links
 
 Group members establish agent trust and browser origins through the shared
@@ -169,8 +190,7 @@ sign-ins stay on their own machine. Each owner machine card has a Settings for
 this machine button beside its synchronization control. It opens resource and
 execution settings for that core without changing the active conversation.
 Agent update checks, versions and the automatic update switch sit under that
-machine in the Updates section of Machines and updates. Desktop and server
-updates share this section, above connections, pairing and synchronization.
+machine's details ([the machines page](#the-machines-page)).
 Checking synchronization leaves the machine list open. The button is available
 on desktop and phone; offline machines cannot be edited. The report names
 providers that still need signing in on the target
