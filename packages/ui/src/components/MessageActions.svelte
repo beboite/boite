@@ -86,7 +86,9 @@
   :global(.message:hover) .act,
   :global(.message:hover) .stamp,
   .message-actions:focus-within .act,
-  .message-actions:focus-within .stamp {
+  .message-actions:focus-within .stamp,
+  /* With no button to reach, a keyboard could never show the time: it stays. */
+  .message-actions:not(:has(.act)) .stamp {
     opacity: 1;
   }
 

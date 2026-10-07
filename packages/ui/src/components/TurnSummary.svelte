@@ -140,7 +140,7 @@
   .summary[data-status='running'] { color: var(--color-accent); }
   /* Read on demand: the message under the pointer or the keyboard shows it, a finger always does. */
   .summary.settled { opacity: 0; transition: opacity var(--dur-2); }
-  :global(.message:hover) .summary.settled, .summary.settled:focus-within { opacity: 1; }
+  :global(.message:hover) .summary.settled, .summary.settled:focus-within, .summary.settled:not(:has(button)) { opacity: 1; }
   @media (hover: none) { .summary.settled { opacity: 1; } }
   .reply-pending { display: flex; align-items: center; align-self: flex-start; margin: var(--chat-block-gap) 0 0 var(--activity-padding); }
   .reply-pending :global(.typing) { min-height: 40px; padding: 10px 14px; }

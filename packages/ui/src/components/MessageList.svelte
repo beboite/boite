@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { ArrowDown } from '@lucide/svelte';
-  import { requestStarts, type Message } from '@boite/contracts';
+  import type { Message } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import MessageTurnSummary from './MessageTurnSummary.svelte';
@@ -25,7 +25,7 @@
   import { isSending } from '../lib/composer-queue';
   import { retryTurn } from '../lib/composer-edit';
   import { TurnProgress } from '../lib/turn-progress.svelte';
-  import { BLOCK_GAP, GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, estimateSlot, measurable, reaches, sameView, windowStats, type WindowView } from '../lib/message-window';
+  import { GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, estimateSlot, gapChanged, measurable, reaches, sameView, slotGap, windowStats, type WindowView } from '../lib/message-window';
   import { TimelineRows, rowEstimate, rowIndexOf, seam, type TimelineRow } from '../lib/timeline-rows';
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
@@ -392,7 +392,9 @@
       if (!id) continue;
       // The observer already measured the box; reading `offsetHeight` again would lay out, mid-scroll,
       // whatever the window just mounted. A row that continues a message sits a paragraph's gap under it.
-      const next = Math.round(entry.borderBoxSize?.[0]?.blockSize ?? node.offsetHeight) + (node.dataset['rest'] === undefined ? GAP : BLOCK_GAP);
+      const gap = slotGap(node.dataset['seam'], node.dataset['rest'] !== undefined);
+      node.dataset['gap'] = String(gap);
+      const next = Math.round(entry.borderBoxSize?.[0]?.blockSize ?? node.offsetHeight) + gap;
       const at = slots.indexOf(rows, id);
       const previous = heights.get(id) ?? slots.estimateOf(rows[at]);
       if (previous === next) continue;
@@ -445,7 +447,7 @@
    * rise plays once per message: a second element for the same id, minted when
    * the window scrolled back over it, opens with the animation off.
    */
-  function track(node: HTMLElement, row: TimelineRow): { destroy(): void } {
+  function track(node: HTMLElement, { row }: { row: TimelineRow; joined: string | null }): { update(next: { row: TimelineRow; joined: string | null }): void; destroy(): void } {
     const id = row.id;
     node.dataset['mid'] = id;
     if (!row.first) { node.dataset['rest'] = ''; node.dataset['message'] = row.message.id; }
@@ -466,6 +468,7 @@
     anchors.nodes.set(id, node);
     boxes?.observe(node);
     return {
+      update: ({ row: next, joined }) => { if (gapChanged(node, joined, !next.first)) { boxes?.unobserve(node); boxes?.observe(node); } },
       destroy() {
         boxes?.unobserve(node);
         // A second element for the same row may already have taken its place.
@@ -694,8 +697,6 @@
     }
     return result;
   });
-  /** Where each turn's request started, so a reply after monitoring keeps counting from the user's message. */
-  const turnRequestStarts = $derived(requestStarts(shownTurns));
   const lastInTurn = $derived.by(() => {
     const result = new Map<string, string>();
     for (const message of timeline) result.set(message.turnId, message.id);
@@ -765,11 +766,13 @@
         {@const turn = store.openThread?.turns.find(turn => turn.id === message.turnId)}
         {@const source = group || viewPart(message) ? messages.findLast(current => current.turnId === message.turnId) : message}
         {@const closes = row.last && turn !== undefined && lastInTurn.get(turn.id) === message.id}
+        {@const joined = seam(rows[view.start + index - 1], row)}
         <article
-          use:track={row}
+          use:track={{ row, joined }}
           class="message {message.role}"
           class:rest={!row.first}
-          data-seam={seam(rows[view.start + index - 1], row)}
+          data-seam={joined}
+          style:margin-top={joined && `calc(var(--chat-${joined}-gap) - var(--chat-message-gap))`}
           data-testid={row.first ? 'message' : 'message-rest'}
           data-role={group ? 'agent-mail' : message.role}
         >
@@ -795,7 +798,7 @@
             <TurnFiles {store} {...filesByTurn.get(turn.id)!} />
           {/if}
           {#if turn && closes}
-            <MessageTurnSummary {store} {threadId} {turn} requestStartedAt={turnRequestStarts.get(turn.id) ?? null} message={source ?? message} {messages}>
+            <MessageTurnSummary {store} {threadId} {turn} turns={shownTurns} message={source ?? message} {messages}>
               {#snippet actions()}
                 <MessageActions
                   text={() => answerOf(turn.id)}
@@ -861,12 +864,7 @@
   }
 
   /* paging: one muted line at the top while the page above is being read. */
-  .loading-older {
-    flex: 0 0 auto;
-    text-align: center;
-    color: var(--color-muted-foreground);
-    font-size: var(--text-sm);
-  }
+  .loading-older { flex: 0 0 auto; text-align: center; color: var(--color-muted-foreground); font-size: var(--text-sm); }
 
   .message {
     display: flex;
@@ -883,8 +881,6 @@
     margin-top: calc(var(--chat-block-gap) - var(--chat-message-gap));
     animation: none;
   }
-  .message[data-seam='part'] { margin-top: calc(var(--chat-part-gap) - var(--chat-message-gap)); }
-  .message[data-seam='block'] { margin-top: calc(var(--chat-block-gap) - var(--chat-message-gap)); }
 
   .jump {
     position: absolute;

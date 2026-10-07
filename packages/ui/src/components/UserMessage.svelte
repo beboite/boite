@@ -178,7 +178,7 @@
   .receipts .received { color: var(--color-accent); opacity: 1; }
   /* Delivered and answered: the ticks wait for the pointer like the time beside them. A pending one stays. */
   .receipts.settled .tick { opacity: 0; transition: opacity var(--dur-2); }
-  :global(.message:hover) .receipts.settled .tick, .receipts.settled:focus-within .tick { opacity: 1; }
+  :global(.message:hover) .receipts.settled .tick, .receipts.settled:focus-within .tick, .receipts.settled:not(:has(button)) .tick { opacity: 1; }
   @media (hover: none) { .receipts.settled .tick { opacity: 1; } }
   .command { color: var(--color-accent); font-weight: 600; }
 
