@@ -133,7 +133,7 @@ The tested installer becomes the release artifact.
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
 | UI entry chunk | 588,000 |
-| UI files, excluding `.br` and `.gz` copies | 4,345,000 |
+| UI files, excluding `.br` and `.gz` copies | 4,355,000 |
 | Core `dist/main.js` | 995,000 |
 | All emitted core JavaScript, including lazy chunks and workers | 3,615,000 |
 
@@ -150,9 +150,9 @@ on Windows CI on 2026-10-06, 7,361 bytes above the previous 3,580,000 limit:
 the image header parser and the preview queue.
 
 The agents' chat, entrusted threads and robots, merged with `main` at
-`bdd28f7b`, measured 4,329,091 UI bytes and 3,596,505 emitted core JavaScript
-bytes on Linux on 2026-10-07. The UI limit rises to 4,345,000 and the core
-JavaScript limit to 3,615,000, leaving about 16 KB and 18 KB of headroom.
+`d32a4a95`, measured 4,336,325 UI bytes and 3,602,928 emitted core JavaScript
+bytes on Linux on 2026-10-07. The UI limit rises to 4,355,000, leaving about
+19 KB of headroom; the core JavaScript limit of 3,615,000 leaves about 12 KB.
 
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured
