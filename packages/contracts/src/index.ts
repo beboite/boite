@@ -1247,8 +1247,13 @@ export type MessagePart =
   | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null; dataDeferred?: true; bytes?: number; width?: number; height?: number; preview?: string }
   /** A deferred picture file (`previewFileData`) carries `width`, `height` and `preview` as a deferred image does. */
   | { type: 'file'; mimeType: string; data: string; name: string | null; dataDeferred?: true; bytes?: number; width?: number; height?: number; preview?: string }
-  /** An immutable published file; resolve its bytes with artifacts.read, never as a disk path. */
-  | { type: 'artifact'; id: string; mimeType: string; bytes: number; name: string }
+  /**
+   * An immutable published file; resolve its bytes with artifacts.read, never as a disk path.
+   * With `view` it is a page the agent published with `boite view`: a client draws it at the
+   * end of its turn instead of a file card, and one that does not know the field still offers
+   * the download.
+   */
+  | { type: 'artifact'; id: string; mimeType: string; bytes: number; name: string; view?: InlineView }
   /** The model's reasoning as the provider streams it, folded in the UI. */
   | { type: 'thinking'; text: string; startedAt?: Timestamp; finishedAt?: Timestamp | null; omitted?: number }
   | {
@@ -3277,7 +3282,21 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'panel.open': { params: { threadId: ThreadId; surface: PanelSurface }; result: { shown: boolean } };
   /** Explicitly publish a bounded file snapshot from this thread's working directory. */
   'artifacts.publish': { params: { threadId: ThreadId; path: string }; result: Message };
-  'artifacts.read': { params: { threadId: ThreadId; messageId: MessageId; artifactId: string; renew?: string }; result: ArtifactContent };
+  /**
+   * `view: true` asks for the address a published view opens as a page at
+   * (`VIEW_ROUTE`), which only an artifact carrying `view` has; without it the
+   * address downloads.
+   */
+  'artifacts.read': { params: { threadId: ThreadId; messageId: MessageId; artifactId: string; renew?: string; view?: true }; result: ArtifactContent };
+  /**
+   * Publish an HTML page of this thread's working directory as an inline view
+   * (`boite view`). Local files it names are embedded, a remote resource or a
+   * script error refuses it with the reason, and `checked` says whether a
+   * headless browser loaded it on this machine before it was accepted.
+   * `advice` is what would make the page look more like the app (a fixed
+   * color, a font of its own): it never refuses a publish.
+   */
+  'artifacts.view': { params: { threadId: ThreadId; path: string; title?: string }; result: { message: Message; checked: boolean; advice: string[] } };
   'artifacts.preview': { params: { threadId: ThreadId; path: string }; result: { url: string; shown: boolean } };
   'artifacts.previewClose': { params: { threadId: ThreadId; path: string }; result: { ok: true } };
   /** The agent's task list, whole, as the tasks surface shows it. */
@@ -4149,3 +4168,10 @@ export { IMAGE_INLINE_CHARS, previewFileData, previewImageData, type ImagePrevie
 /** The longer side, in pixels, of the copy `messages.attachment` sends with `display`. */
 export const DISPLAY_IMAGE_MAX = 1280;
 export { imageSize } from './image-size.ts';
+export {
+  VIEW_ROUTE, VIEW_MAX_BYTES, VIEW_WIDTH, VIEW_NARROW_WIDTH, VIEW_NARROW_BELOW, VIEW_MIN_HEIGHT, VIEW_MAX_HEIGHT, VIEW_DEFAULT_HEIGHT, VIEW_TITLE_MAX,
+  VIEW_CONTENT_POLICY, VIEW_SANDBOX, VIEW_TOKENS, VIEW_HEIGHT_EXPRESSION, VIEW_GUIDE_LINE, VIEW_HELP,
+  clampViewHeight, viewFrameHeight, viewThemeFragment, readViewMessage, viewDocument, viewTitleOf,
+  type InlineView, type ViewTheme, type ViewHostMessage, type ViewPageMessage,
+} from './view.ts';
+import type { InlineView } from './view.ts';

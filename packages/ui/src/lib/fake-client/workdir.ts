@@ -1,5 +1,5 @@
 /** A thread's working directory: files, git, the panel and published artifacts. */
-import { ARTIFACT_MAX_BYTES, ATTACHMENT_MAX_BYTES, PANEL_SURFACE_KINDS, RpcErrorCode, type ArtifactContent, type FileContent, type FileEntry, type GitDiff, type GitStatus, type Message, type PanelSurface } from '@boite/contracts';
+import { ARTIFACT_MAX_BYTES, ATTACHMENT_MAX_BYTES, PANEL_SURFACE_KINDS, RpcErrorCode, VIEW_DEFAULT_HEIGHT, VIEW_TITLE_MAX, viewDocument, viewTitleOf, type ArtifactContent, type FileContent, type FileEntry, type GitDiff, type GitStatus, type Message, type PanelSurface } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { FAKE_CHANGES, FAKE_DIFFS, FAKE_MEDIA, FAKE_MEDIA_PATHS, fakeBytes, fakeLanguage } from './files';
 import { refusal, T0 } from './shared';
@@ -142,11 +142,41 @@ export function workdirMethods(ctx: FakeContext) {
       inside(ctx, thread.cwd, path, 'artifacts.previewClose path');
       return { ok: true as const };
     },
-    'artifacts.read': async ({ threadId, messageId, artifactId }) => {
+    'artifacts.read': async ({ threadId, messageId, artifactId, view }) => {
       const message = ctx.thread(threadId).messages.find(m => m.id === messageId);
       const value = snapshots.get(artifactId);
-      if (!value || !message?.parts.some(p => p.type === 'artifact' && p.id === artifactId)) throw refusal('artifacts.read needs an artifact from this message and thread');
+      const part = message?.parts.find(p => p.type === 'artifact' && p.id === artifactId);
+      if (!value || part?.type !== 'artifact') throw refusal('artifacts.read needs an artifact from this message and thread');
+      if (view && !part.view) throw refusal('artifacts.read view needs an artifact published with boite view');
       return { ...value };
+    },
+    // The real core embeds local files and loads the page in a headless browser; here the page is stored as written.
+    'artifacts.view': async (params) => {
+      const thread = ctx.thread(params.threadId);
+      if (thread.archived) throw refusal('artifacts.view needs an active thread');
+      const turn = thread.turns.at(-1);
+      if (!turn) throw refusal('artifacts.view needs a thread with a turn');
+      const path = inside(ctx, thread.cwd, params.path, 'artifacts.view path', 'file');
+      if (!/\.html?$/i.test(path)) throw refusal('artifacts.view path must be an HTML file');
+      const source = ctx.files.get(path) ?? '';
+      if (!source.trim()) throw refusal('artifacts.view page is empty');
+      const remote = /<(?:script|link|img|iframe)\b[^>]*\s(?:src|href)\s*=\s*["']?((?:https?:)?\/\/[^"'\s>]+)/i.exec(source);
+      if (remote) throw refusal(`artifacts.view page is not ready to show. Fix the file and run the command again:\n- ${remote[1]} is remote, and a view loads nothing remote.`);
+      const body = new TextEncoder().encode(viewDocument(source));
+      const id = `artifact-${++ctx.seq}`;
+      const name = path.split('/').at(-1) ?? path;
+      const url = URL.createObjectURL(new Blob([body], { type: 'text/html' }));
+      ctx.artifactUrls.add(url);
+      snapshots.set(id, { name, mimeType: 'text/html', url, bytes: body.length });
+      const title = (params.title?.replace(/\s+/g, ' ').trim() || viewTitleOf(source) || name.replace(/\.html?$/i, '')).slice(0, VIEW_TITLE_MAX);
+      const message: Message = {
+        id: `m-${++ctx.seq}`, threadId: thread.id, turnId: turn.id, role: 'assistant', state: 'complete', createdAt: ctx.now(),
+        parts: [{ type: 'artifact', id, name, mimeType: 'text/html', bytes: body.length, view: { title, height: VIEW_DEFAULT_HEIGHT, source: path } }],
+      };
+      thread.messages.push(message);
+      ctx.emitToThread(thread.id, 'message.started', structuredClone(message));
+      ctx.emitToThread(thread.id, 'message.completed', { threadId: thread.id, messageId: message.id, state: 'complete' });
+      return { message: structuredClone(message), checked: false, advice: [] };
     },
     'artifacts.publish': async (params) => {
       const thread = ctx.thread(params.threadId);

@@ -35,6 +35,7 @@
   import { editWhole, pullNewer, pullOlder } from '../lib/reading-window';
   import { ReadingAnchor, type RowAnchor } from '../lib/reading-anchor';
   import { MediaQuery } from 'svelte/reactivity';
+  import { placeViews, viewPart } from '../lib/inline-view';
 
   /** A phone has no room left of the bubbles for the outline rail: it is not drawn there. */
   const narrow = new MediaQuery('(max-width: 720px)');
@@ -91,7 +92,8 @@
       a.createdAt - b.createdAt || Number(a.id.startsWith('coordination:')) - Number(b.id.startsWith('coordination:')) || a.id.localeCompare(b.id));
     return groupAgentMail(rows, mail);
   });
-  const timeline = $derived(grouped.timeline);
+  /** A turn's views go after its answer, and wait for a turn still running to end (`placeViews`). */
+  const timeline = $derived(placeViews(grouped.timeline, store.openThread?.id === threadId ? store.openThread.turns : store.delegationThread?.id === threadId ? store.delegationThread.turns : []));
   const memoryPlacement = $derived(placeMemoryEvents(messages, store.openThread?.id === threadId ? store.openThread.memoryEvents ?? [] : store.delegationThread?.id === threadId ? store.delegationThread.memoryEvents ?? [] : []));
   const memoryRows = $derived(new Map(memoryPlacement.standalone.map((event, index) => [`memory:${event.at}:${event.kind}:${index}`, event])));
   /** What the window lists and measures: a row per message, several for the message of a long turn (lib/timeline-rows.ts). */
@@ -686,7 +688,8 @@
   const firstAssistantInTurn = $derived.by(() => {
     const result = new Map<string, string>();
     for (const message of messages) {
-      if (message.role === 'assistant' && !result.has(message.turnId)) result.set(message.turnId, message.id);
+      // A view is drawn after the answer, wherever it was published: the answer's first message carries the model.
+      if (message.role === 'assistant' && !result.has(message.turnId) && !viewPart(message)) result.set(message.turnId, message.id);
     }
     return result;
   });
@@ -757,7 +760,7 @@
         {@const message = row.message}
         {@const group = grouped.groups.get(message.id)}
         {@const turn = store.openThread?.turns.find(turn => turn.id === message.turnId)}
-        {@const source = group ? messages.findLast(current => current.turnId === message.turnId) : message}
+        {@const source = group || viewPart(message) ? messages.findLast(current => current.turnId === message.turnId) : message}
         {@const closes = row.last && turn !== undefined && lastInTurn.get(turn.id) === message.id}
         <article
           use:track={row}

@@ -2,7 +2,7 @@ import { open, mkdir, rename, unlink, readFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { basename, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { ARTIFACT_MAX_BYTES, ATTACHMENT_MAX_BYTES, FILE_ROUTE, type ArtifactContent, type Message, type MessagePart, type RpcParams } from '@boite/contracts';
+import { ARTIFACT_MAX_BYTES, ATTACHMENT_MAX_BYTES, FILE_ROUTE, VIEW_ROUTE, type ArtifactContent, type Message, type MessagePart, type RpcParams } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { existingInside, mediaOf } from './workdir.ts';
 import { refused } from './errors.ts';
@@ -98,6 +98,12 @@ export function readArtifact(core: Core, params: RpcParams<'artifacts.read'>): A
     ? message.parts.find((p) => p.type === 'artifact' && p.id === params.artifactId) : null;
   if (part?.type !== 'artifact' || !/^[a-f0-9-]{36}$/.test(part.id)) throw refused('artifacts.read needs an artifact from this message and thread');
   const found = existingInside(join(core.dataDir, 'artifacts'), part.id, 'file', 'artifacts.read snapshot');
+  if (params.view) {
+    if (!part.view) throw refused('artifacts.read view needs an artifact published with boite view');
+    // A page keeps the address it was loaded from: each frame takes a ticket of its own.
+    const ticket = core.fileTickets.mint(found.absolute, part.mimeType, Date.now(), part.name, undefined, true);
+    return { url: `${VIEW_ROUTE}/${ticket}`, name: part.name, bytes: part.bytes, mimeType: part.mimeType };
+  }
   const ticket = typeof params.renew === 'string' && core.fileTickets.renew(params.renew, found.absolute)
     ? params.renew : core.fileTickets.mint(found.absolute, part.mimeType, Date.now(), part.name);
   return { url: `${FILE_ROUTE}/${ticket}`, name: part.name, bytes: part.bytes, mimeType: part.mimeType };

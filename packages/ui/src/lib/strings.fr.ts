@@ -184,7 +184,7 @@ export const fr: Translation = {
   activityUnsupported: 'Les références ne sont pas disponibles avec /goal ou /loop. Envoyez un message ordinaire ou retirez les références.',
   stashUnsupported: 'Ce brouillon contient des références et ne peut pas être mis de côté. Envoyez-le ou retirez les références.'
 },
-  artifacts: { loadImage: 'Charger', retry: 'Réessayer', mediaFailed: 'Impossible d’afficher ce média. Réessayez ou téléchargez le fichier pour l’ouvrir.', videoFailed: 'Cet appareil ne lit pas cette vidéo. Téléchargez-la pour la regarder dans une autre app.', saving: 'Enregistrement', zoomIn: 'Agrandir', zoomOut: 'Réduire', fitImage: 'Ajuster l’image', open: 'Ouvrir', openLocal: 'Ouvrez ce fichier dans son application par défaut.', preview: 'Aperçu', download: 'Télécharger', close: 'Fermer l’aperçu', closeImage: 'Fermer l’image', enlarge: 'Voir en grand', saved: 'Enregistré dans Téléchargements', loading: 'Chargement du fichier', unavailable: 'Ce fichier ne peut pas être affiché ici. Téléchargez-le pour l’ouvrir.', failed: 'Impossible d’ouvrir ce fichier', ownerOnly: 'Les liens vers les fichiers locaux nécessitent une connexion propriétaire. Demandez à l’agent de joindre le fichier pour le partager avec cet appareil.' },
+  artifacts: { viewReplay: 'Rejouer', viewExpand: 'Afficher en grand', viewCollapse: 'Fermer la vue agrandie', loadImage: 'Charger', retry: 'Réessayer', mediaFailed: 'Impossible d’afficher ce média. Réessayez ou téléchargez le fichier pour l’ouvrir.', videoFailed: 'Cet appareil ne lit pas cette vidéo. Téléchargez-la pour la regarder dans une autre app.', saving: 'Enregistrement', zoomIn: 'Agrandir', zoomOut: 'Réduire', fitImage: 'Ajuster l’image', open: 'Ouvrir', openLocal: 'Ouvrez ce fichier dans son application par défaut.', preview: 'Aperçu', download: 'Télécharger', close: 'Fermer l’aperçu', closeImage: 'Fermer l’image', enlarge: 'Voir en grand', saved: 'Enregistré dans Téléchargements', loading: 'Chargement du fichier', unavailable: 'Ce fichier ne peut pas être affiché ici. Téléchargez-le pour l’ouvrir.', failed: 'Impossible d’ouvrir ce fichier', ownerOnly: 'Les liens vers les fichiers locaux nécessitent une connexion propriétaire. Demandez à l’agent de joindre le fichier pour le partager avec cet appareil.' },
 
   brain: {
     heading: 'Brain', description: 'Les mêmes instructions et skills pour tous vos agents.',
@@ -195,7 +195,7 @@ export const fr: Translation = {
     autoPull: 'Pull automatique', onStartup: 'Au démarrage', periodic: 'À intervalle régulier', minutes: 'min',
     globalInstructions: 'AGENTS.md global', globalDetails: 'Harness reliés',
     globalHint: 'Ce brain s\'applique à tous les projets, même hors de Boite. Les fichiers existants sont sauvegardés puis restaurés à la désactivation.',
-    boiteGuide: 'Guide Boite', boiteGuideHint: 'Une note après AGENTS.md au début d\'une session d\'agent : la commande boite et le panneau. Environ 250 tokens.',
+    boiteGuide: 'Guide Boite', boiteGuideHint: 'Une note après AGENTS.md au début d\'une session d\'agent : la commande boite et le panneau. Environ 300 tokens.',
     linked: 'Relié', existing: 'Déjà relié', blocked: 'À vérifier',
     interval: 'Intervalle du pull en minutes', intervalHint: 'Un nombre entier entre 1 et 1440 minutes.',
     detected: 'Contenu', instructions: 'Instructions', skill: 'Skills', plugin: 'Plugins',

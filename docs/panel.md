@@ -171,6 +171,9 @@ cannot read the core UI's storage or connect to its authenticated WebSocket.
 Paths outside the artifact directory, dotfiles, non-web file types and escaping
 symlinks are refused. Files are read live, so reload reflects edits.
 
+A single page meant to be read in the conversation is an
+[inline view](chat-files.md#inline-views) instead, published with `boite view`.
+
 `boite preview-close reports/index.html` stops its server. Archiving or removing
 the thread and shutting down the core also close previews. Up to 16 can be open
 at once. Opening another evicts the least recently used preview; reopening a

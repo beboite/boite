@@ -253,6 +253,9 @@ boite allow|deny <id> <request-id>
 boite stewards [set <thread> <project ...> [--all] [--can <a,b>] [--quiet] | revoke <thread>]
 boite steward                    this thread's steward grant
 boite attach <file>               publish a file snapshot in chat, at most 512 MB
+boite view <file.html>            draw the page at the end of the answer (--title <text>)
+boite view help                   the rules of a page: layout, the app's look, theme, motion, checks
+boite view example                a complete page in the app's look, to start from
 boite preview <file.html>          open a local HTML artifact and its neighbouring assets
 boite preview-close <file.html>    stop serving that preview
 boite show <file>[:line]         open the file in the panel, at that line
@@ -368,6 +371,11 @@ they do for `thread new` elsewhere: Off, Pause and a thread restricted to its
 own project refuse it. There is no hourly limit. A thread an agent started
 adds none until the user has written in it, and delegated children, workflow steps and persistent agent
 sessions are refused.
+
+`view` publishes one HTML page as an [inline view](chat-files.md#inline-views):
+its local files are embedded, a remote resource or a script error refuses it
+with the line to fix, and it is drawn under the answer when the turn ends.
+`preview` is for a site of several files the user browses in the panel.
 
 `attach` saves a snapshot referenced by an assistant message, so it remains downloadable from
 desktop and paired phones after the original changes or disappears. The thread

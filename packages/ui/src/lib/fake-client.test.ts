@@ -359,6 +359,43 @@ test('fake streamed artifacts keep immutable message-scoped snapshots and releas
   }
 });
 
+test('fake inline views store the page with its bootstrap and open only for a view read', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const OriginalURL = URL;
+  const createObjectURL = vi.fn((_object: Blob | MediaSource) => 'blob:fake-view');
+  vi.stubGlobal('URL', class extends OriginalURL {
+    static createObjectURL = createObjectURL;
+    static revokeObjectURL = () => {};
+  });
+  try {
+    await client.call('files.write', { threadId: 't-trace', path: 'orbit.html', text: '<title>Orbit</title><svg viewBox="0 0 10 10"></svg>' });
+    const { message, checked } = await client.call('artifacts.view', { threadId: 't-trace', path: 'orbit.html' });
+    expect(checked).toBe(false);
+    const part = message.parts[0]!;
+    if (part.type !== 'artifact') throw new Error('expected an artifact part');
+    expect(part).toMatchObject({ name: 'orbit.html', mimeType: 'text/html', view: { title: 'Orbit', height: 320, source: 'orbit.html' } });
+    const stored = await (createObjectURL.mock.calls[0]![0] as Blob).text();
+    expect(stored).toContain('boite-view-theme');
+    expect(stored).toContain('<svg viewBox="0 0 10 10">');
+    const ids = { threadId: 't-trace', messageId: message.id, artifactId: part.id };
+    expect(await client.call('artifacts.read', { ...ids, view: true })).toMatchObject({ url: 'blob:fake-view', name: 'orbit.html' });
+
+    await client.call('files.write', { threadId: 't-trace', path: 'remote.html', text: '<script src="https://cdn.example.com/chart.js"></script>' });
+    await expect(client.call('artifacts.view', { threadId: 't-trace', path: 'remote.html' })).rejects.toMatchObject({ code: RpcErrorCode.Refused, message: expect.stringContaining('https://cdn.example.com/chart.js is remote') });
+    await client.call('files.write', { threadId: 't-trace', path: 'notes.md', text: '# no' });
+    await expect(client.call('artifacts.view', { threadId: 't-trace', path: 'notes.md' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    const path = 'large-plain.txt';
+    await client.call('files.write', { threadId: 't-trace', path, text: 'x'.repeat(ATTACHMENT_MAX_BYTES + 1) });
+    const file = await client.call('artifacts.publish', { threadId: 't-trace', path });
+    const plain = file.parts[0]!;
+    if (plain.type !== 'artifact') throw new Error('expected a streamed artifact');
+    await expect(client.call('artifacts.read', { threadId: 't-trace', messageId: file.id, artifactId: plain.id, view: true })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+  } finally {
+    client.close();
+    vi.stubGlobal('URL', OriginalURL);
+  }
+});
+
 test('fake delegation enforces family access and keeps request IDs idempotent', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   const config = {
