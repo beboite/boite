@@ -455,6 +455,12 @@ function takeFromQuery(): Endpoint | null {
   return endpoint;
 }
 
+/** Whether the address bar still carries a link to a core: a pairing link, a token or a `?core=`. Read before the link is taken. */
+export function opensFromLink(): boolean {
+  const params = new URLSearchParams(window.location.search);
+  return [CORE_QUERY_PARAM, PAIR_QUERY_PARAM, GRANT_QUERY_PARAM].some((name) => params.get(name));
+}
+
 /** The core a `?core=` link names, with or without a key of its own, read before the link is taken. */
 export function linkedCore(): string | null {
   const core = new URLSearchParams(window.location.search).get(CORE_QUERY_PARAM);

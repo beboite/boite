@@ -55,7 +55,8 @@ The two machines list each other and connect. A third machine joins with an
 invitation from either. A phone needs nothing more than its usual pairing
 link, from any member ([phone](phone.md)): once paired, it connects to the
 others at the same role, and keeps reaching them when the machine it paired
-with is off.
+with is off. The app then opens on one of the others by itself
+([machines](machines.md#connecting-a-machine)).
 
 **Leave the group** takes this machine out and tells the others first.
 **Remove from the group** takes another machine out; that machine is told and
@@ -377,6 +378,14 @@ address, where it is worth nothing once the member has given that address up.
 - A window trusts the machine that serves its page. A machine removed from
   the group that still serves the page a client opens decides what that page
   does, with every key saved under its address.
+- The page itself still comes from one machine. With that machine off, an
+  installed app opens from the copy its service worker kept, which needs an
+  HTTPS address ([phone](phone.md#https-and-installation)); a page opened over
+  plain HTTP does not load at all, and another member's address is another
+  origin, which holds none of this device's keys.
+- While the only machine a phone was paired with by hand is off, the keys it
+  already holds keep working, but a machine that joined the group since cannot
+  be reached: only a machine paired by hand vouches for a ticket.
 - A member that has not heard a removal stays exposed to the removed machine,
   which may use it to act on the group. The only answer is to have every
   member on when a compromised machine is removed.
@@ -410,4 +419,5 @@ and `workspace.test.ts` hold the client rules: which addresses get a key, who
 says who is in a group, and what is asked before a held key is sent. The shared contract scenario in
 `tests/contract/scenarios.ts` holds the refusals on the core and on the
 in-memory client. `tests/e2e/machines.test.ts` joins two real cores from the
-page and writes desktop and phone captures.
+page, reloads a paired phone while its own machine answers nothing, and writes
+desktop and phone captures.

@@ -543,7 +543,10 @@ devices you intend to give that control.
 
 - What a phone gets with the core asleep is the app shell painting from disk, an
   empty chat, and "Connecting" in the sidebar footer until the socket comes
-  back on its own. No offline history: the journal is on the core. Prompts
+  back on its own. A phone that holds keys for other machines, those of a
+  [group](groups.md), opens on one of them instead
+  ([machines](machines.md#connecting-a-machine)). No offline history: the
+  journal is on the core. Prompts
   written in a thread that was open before the connection went wait in the
   device's outbox (`docs/machines.md`), and go out once it is back, even after
   the PWA was closed in between; a new thread still needs the core.

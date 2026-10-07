@@ -232,8 +232,8 @@ test('one invitation groups two real cores: the page connects the second by itse
   const first = await startCore(),
     second = await startCore();
   cores.push(first, second);
-  const a = await connect(first.url, first.token),
-    b = await connect(second.url, second.token);
+  let a = await connect(first.url, first.token);
+  const b = await connect(second.url, second.token);
   try {
     // The page is served by the UI server of this test, not by a core: both cores allow its origin.
     await Promise.all([
@@ -343,6 +343,30 @@ test('one invitation groups two real cores: the page connects the second by itse
     await page.waitFor(`document.querySelectorAll('[data-testid="mobile-list"] .thread').length === 2`);
     await capture('group-phone-both-machines.png');
     expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+
+    // The machine the phone paired with goes off: its address takes a socket and answers nothing, as a laptop
+    // put to sleep does. A reload opens on the other machine of the group, with nothing to pair and no error.
+    a.close();
+    await first.stop({ keepDataDir: true });
+    const asleep = Bun.listen({ hostname: '127.0.0.1', port: first.port, socket: { data() {}, open() {}, close() {}, error() {} } });
+    try {
+      await page.evaluate('location.reload()');
+      await page.waitFor(`globalThis.__boiteTest?.workspace.active.endpointUrl === ${JSON.stringify(second.url)} && !!document.querySelector('${id('composer-input')}')`, 20_000);
+      expect(await page.evaluate(`document.querySelector('${id('error-toast')}') === null`)).toBe(true);
+      await page.type(id('composer-input'), 'Still reachable');
+      await page.click(id('composer-send'));
+      await page.waitFor(`document.querySelector('${id('chat')}')?.textContent.includes('Still reachable')`);
+      await capture('group-phone-paired-machine-off.png');
+      expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    } finally {
+      asleep.stop(true);
+    }
+    // Back on, it is one machine of the list again: the phone reaches it by itself and stays where it was.
+    const awake = await startCore({ dataDir: first.dataDir, port: first.port });
+    cores[cores.indexOf(first)] = awake;
+    a = await connect(awake.url, awake.token);
+    await page.waitFor(machines(2), 40_000);
+    expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.endpointUrl`)).toBe(second.url);
 
     // Removed from the group: the second machine leaves, drops the phone's key, and the page lets it go.
     await a.call('group.remove', { coreId: joined.self });
