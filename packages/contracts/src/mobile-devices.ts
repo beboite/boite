@@ -66,7 +66,7 @@ export interface MobileDeviceFrame {
   at: number;
 }
 
-export const MOBILE_DEVICE_KEYS = ['back', 'home', 'recents', 'enter', 'backspace', 'power', 'rotate'] as const;
+export const MOBILE_DEVICE_KEYS = ['back', 'home', 'recents', 'enter', 'backspace', 'power', 'rotate', 'tab', 'delete', 'up', 'down', 'left', 'right'] as const;
 export type MobileDeviceKey = (typeof MOBILE_DEVICE_KEYS)[number];
 
 /** Coordinates are screen pixels, as in a full-size screenshot. */

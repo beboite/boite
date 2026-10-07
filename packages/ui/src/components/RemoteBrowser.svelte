@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { Pause, Play, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, RotateCw, Send } from '@lucide/svelte';
-  import type { RemoteBrowserFrame, RemoteBrowserInput } from '@boite/contracts';
+  import { Pause, Play, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Copy, RotateCw, Send } from '@lucide/svelte';
+  import { REMOTE_PRESS_MAX, REMOTE_TEXT_MAX, type RemoteBrowserFrame, type RemoteBrowserInput } from '@boite/contracts';
+  import { browserKey, hasKeyboard, liveInput, writeClipboardLater } from '../lib/live-input';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
   import { normalizeUrl } from '../lib/browser-bridge';
@@ -21,7 +22,14 @@
   let pending = false, requestedAt = 0;
   // What the next request asks for and when: see remote-browser-view.ts.
   let roundTrip = 0, unchanged = 0, failures = 0;
-  let pointer: { x: number; y: number; lastX: number; lastY: number; moved: boolean; frame: RemoteBrowserFrame; client: Store['client'] } | undefined;
+  let pointer: { x: number; y: number; lastX: number; lastY: number; moved: boolean; mouse: boolean; shift: boolean; from: { x: number; y: number } | null; frame: RemoteBrowserFrame; client: Store['client'] } | undefined;
+  // A computer drives the page itself: keys, wheel, mouse selection and the clipboard, with no keys or text field below.
+  const desk = hasKeyboard();
+  let area = $state<HTMLElement>(), screen = $state<HTMLButtonElement>(), note = $state(''), noteTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastTap = { at: 0, x: 0, y: 0, count: 0 };
+  // Mouse and keyboard input, sent one at a time in the order it was made, without freezing the view between two.
+  type Direct = Extract<RemoteBrowserInput, { kind: 'tap' | 'drag' | 'press' | 'text' | 'select-all' }>;
+  let queue: { value: Direct; target?: RemoteBrowserFrame }[] = [], draining: Promise<void> | null = null;
   // Pixels dragged but not yet sent, and where the finger started on the page.
   let scrollX = 0, scrollY = 0, scrolling = false, scrollAt: { x: number; y: number } | null = null;
   let frameClient = $state.raw<Store['client']>(null);
@@ -121,20 +129,90 @@
       else if (alive) kick();
     }
   }
+  const old = (target: RemoteBrowserFrame) => performance.now() - (receivedAt.get(target) ?? -Infinity) > 5000;
+  /** Keys typed while a request is in flight leave together in the next one. */
+  function direct(value: Direct, target?: RemoteBrowserFrame) {
+    const last = queue.at(-1)?.value;
+    if (value.kind === 'press' && last?.kind === 'press' && last.keys.length + value.keys.length <= REMOTE_PRESS_MAX) last.keys.push(...value.keys);
+    else queue.push({ value: value.kind === 'press' ? { kind: 'press', keys: [...value.keys] } : value, ...(target ? { target } : {}) });
+    draining ??= drain().finally(() => { draining = null; });
+  }
+  async function drain(): Promise<void> {
+    while (queue.length) {
+      const { value, target = frame } = queue.shift()!, client = store.client;
+      // What cannot land on the page the user saw is dropped, never replayed on another.
+      if (!alive || !client || frameClient !== client || !target || paused || store.connection !== 'ready' || old(target)) { queue = []; return; }
+      try { await client.call('browser.remoteInput', { threadId, frameId: target.id, input: value }); }
+      catch (cause) { queue = []; if (alive && client === store.client) error = message(cause); return; }
+      finally { if (alive) kick(); }
+    }
+  }
+  /** The page's selected text, once what was typed before the copy has reached it. */
+  async function selection(): Promise<string> {
+    await draining;
+    const client = store.client, target = frame;
+    if (!client || frameClient !== client || !target) return '';
+    const { text, truncated } = await client.call('browser.remoteSelection', { threadId, frameId: target.id });
+    if (truncated) say(strings.remoteBrowser.copyCut);
+    return text;
+  }
+  function say(text: string) { note = text; clearTimeout(noteTimer); noteTimer = setTimeout(() => { note = ''; }, 3000); }
+  /** The Copy button, for a screen with no Control+C. */
+  async function copySelection() {
+    try { say(await writeClipboardLater(selection()) ? strings.remoteBrowser.copied : strings.remoteBrowser.nothingSelected); }
+    catch (cause) { say(message(cause)); }
+  }
+  onMount(() => {
+    const live = liveInput(() => area, {
+      key(event) {
+        if (!frame || paused) return false;
+        const sent = browserKey(event);
+        if (!sent) return false;
+        direct(sent === 'select-all' ? { kind: 'select-all' } : 'press' in sent ? { kind: 'press', keys: [sent.press] } : { kind: 'text', text: sent.text });
+        return true;
+      },
+      paste(pasted) { for (let at = 0; at < pasted.length; at += REMOTE_TEXT_MAX) direct({ kind: 'text', text: pasted.slice(at, at + REMOTE_TEXT_MAX) }); },
+      copy: selection,
+      cut() { direct({ kind: 'press', keys: ['Backspace'] }); },
+      failed(reason) { say(reason); },
+    });
+    return () => { live.destroy(); clearTimeout(noteTimer); };
+  });
+  // The wheel scrolls the page, not the panel: the listener must be able to cancel it.
+  $effect(() => {
+    const node = screen;
+    if (!node) return;
+    node.addEventListener('wheel', wheel, { passive: false });
+    return () => node.removeEventListener('wheel', wheel);
+  });
+  function wheel(event: WheelEvent) {
+    if (zoom || event.ctrlKey || !usable || !frame) return;
+    event.preventDefault();
+    const unit = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? frame.height : 1;
+    scrollAt = point(event, frame);
+    scrollX -= event.deltaX * unit; scrollY -= event.deltaY * unit;
+    flushScroll();
+  }
   function resize(width: number, height: number) {
     viewportWidth = Math.max(240, Math.min(3840, Math.round(width)));
     viewportHeight = Math.max(240, Math.min(3840, Math.round(height)));
     zoom = 0;
     void input({ kind: 'viewport', width: viewportWidth, height: viewportHeight });
   }
-  function point(event: PointerEvent, current: RemoteBrowserFrame) {
+  function point(event: MouseEvent, current: RemoteBrowserFrame) {
     return picture ? framePoint(picture.getBoundingClientRect(), current, event.clientX, event.clientY) : null;
+  }
+  /** As `point`, for a drag released outside the picture: it ends on the nearest edge. */
+  function edgePoint(event: MouseEvent, current: RemoteBrowserFrame) {
+    if (!picture) return null;
+    const box = picture.getBoundingClientRect(), within = (n: number, low: number, size: number) => Math.max(low, Math.min(low + size, n));
+    return framePoint(box, current, within(event.clientX, box.left, box.width), within(event.clientY, box.top, box.height));
   }
   function down(event: PointerEvent) {
     if (!usable || !frame || event.button !== 0) return;
-    pointer = { x: event.clientX, y: event.clientY, lastX: event.clientX, lastY: event.clientY, moved: false, frame, client: frameClient };
+    pointer = { x: event.clientX, y: event.clientY, lastX: event.clientX, lastY: event.clientY, moved: false, mouse: event.pointerType === 'mouse', shift: event.shiftKey, from: point(event, frame), frame, client: frameClient };
     scrollX = 0; scrollY = 0; scrollAt = point(event, frame);
-    event.currentTarget instanceof Element && event.currentTarget.setPointerCapture(event.pointerId);
+    event.currentTarget instanceof Element && event.currentTarget.setPointerCapture?.(event.pointerId);
   }
   /** The page follows the finger while it moves: one wheel in flight, the rest added to the next. */
   function flushScroll() {
@@ -153,6 +231,7 @@
     if (!start || zoom) return;
     if (!start.moved && Math.hypot(event.clientX - start.x, event.clientY - start.y) <= 8) return;
     start.moved = true;
+    if (start.mouse) return; // A mouse drag selects on release; its wheel scrolls.
     scrollX += event.clientX - start.lastX; scrollY += event.clientY - start.lastY;
     start.lastX = event.clientX; start.lastY = event.clientY;
     flushScroll();
@@ -160,11 +239,26 @@
   function up(event: PointerEvent) {
     const start = pointer; pointer = undefined;
     if (!start || start.client !== store.client) return;
+    const size = { width: start.frame.width, height: start.frame.height };
+    if (start.mouse && (start.moved || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8)) {
+      const to = edgePoint(event, start.frame);
+      if (start.from && to) direct({ kind: 'drag', from: start.from, to, ...size }, start.frame);
+      return;
+    }
     if (start.moved || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) {
       if (zoom) return; // Enlarged previews pan locally; arrow buttons scroll the shared page.
       scrollX += event.clientX - start.lastX; scrollY += event.clientY - start.lastY;
       flushScroll();
-    } else { const p = point(event, start.frame); if (p) void input({ kind: 'tap', ...p, width: start.frame.width, height: start.frame.height }, start.frame); }
+    } else {
+      const p = point(event, start.frame);
+      if (!p) return;
+      // A second and a third click at the same place select the word, then the paragraph.
+      const again = performance.now() - lastTap.at < 450 && Math.hypot(event.clientX - lastTap.x, event.clientY - lastTap.y) <= 6;
+      const count = (again ? Math.min(3, lastTap.count + 1) : 1) as 1 | 2 | 3;
+      lastTap = { at: performance.now(), x: event.clientX, y: event.clientY, count };
+      const tap = { kind: 'tap' as const, ...p, ...size, ...(count > 1 ? { count } : {}), ...(start.shift ? { shift: true } : {}) };
+      if (start.mouse) direct(tap, start.frame); else void input(tap, start.frame);
+    }
   }
   function go(event: SubmitEvent) {
     event.preventDefault();
@@ -224,21 +318,27 @@
       </div>
     </section>
   {/if}
-  <div class="screen-area" class:zoomed={zoom > 0} bind:clientWidth={areaWidth} bind:clientHeight={areaHeight}>
+  <div class="screen-area" class:zoomed={zoom > 0} bind:this={area} bind:clientWidth={areaWidth} bind:clientHeight={areaHeight}>
     {#if frame}
-      <button type="button" class="screen" style:width={`${frame.width * previewScale}px`} style:height={`${frame.height * previewScale}px`} class:stale={paused || error || !fresh} aria-label={strings.remoteBrowser.interact} disabled={!usable} onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={() => { pointer = undefined; }} oncontextmenu={e => e.preventDefault()}>
+      <button bind:this={screen} type="button" class="screen" style:width={`${frame.width * previewScale}px`} style:height={`${frame.height * previewScale}px`} class:stale={paused || error || !fresh} class:desk aria-label={desk ? strings.remoteBrowser.interactDesk : strings.remoteBrowser.interact} disabled={!usable} onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={() => { pointer = undefined; }} oncontextmenu={e => e.preventDefault()}>
         <img bind:this={picture} src={`data:image/jpeg;base64,${frame.base64}`} alt={strings.remoteBrowser.image} draggable="false" data-testid="remote-browser-frame" />
       </button>
     {:else}<p class="empty">{strings.remoteBrowser.waiting}</p>{/if}
   </div>
   </div>
+  {#if desk}
+  <footer class="desk"><small class="note" role="status" data-testid="remote-browser-note">{note || (zoom ? strings.remoteBrowser.panHint : strings.remoteBrowser.deskHint)}</small></footer>
+  {:else}
   <footer>
     <div class="keys"><button type="button" class="chip" disabled={!usable} onclick={() => void input({ kind: 'scroll', x: 0, y: -500 })} aria-label={strings.remoteBrowser.scrollUp}><ArrowUp size={17} /></button><button type="button" class="chip" disabled={!usable} onclick={() => void input({ kind: 'scroll', x: 0, y: 500 })} aria-label={strings.remoteBrowser.scrollDown}><ArrowDown size={17} /></button>
       {#each (['Tab', 'Enter', 'Escape', 'Backspace'] as const) as key}<button type="button" class="chip" disabled={!usable} onclick={() => void input({ kind: 'key', key })}><span class="ui-label">{key === 'Backspace' ? '⌫' : key === 'Escape' ? 'Esc' : key}</span></button>{/each}
+      <button type="button" class="chip" data-testid="remote-browser-copy" disabled={!usable} aria-label={strings.remoteBrowser.copy} title={strings.remoteBrowser.copy} onclick={() => void copySelection()}><Copy size={16} /></button>
     </div>
     <form onsubmit={e => { e.preventDefault(); void sendText(false); }}><input bind:value={text} data-testid="remote-browser-text" maxlength="2000" enterkeyhint="send" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label={strings.remoteBrowser.text} placeholder={strings.remoteBrowser.text} onkeydown={textKey} /><button type="submit" class="chip" disabled={!usable || !text} aria-label={strings.remoteBrowser.send}><Send size={17} /></button></form>
+    {#if note}<small class="note" role="status" data-testid="remote-browser-note">{note}</small>{/if}
     <small>{zoom ? strings.remoteBrowser.panHint : strings.remoteBrowser.gesture}</small>
   </footer>
+  {/if}
 </section>
 
 <style>
@@ -256,5 +356,6 @@
   .screen { width: 100%; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; touch-action: none; cursor: crosshair; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; } .screen:disabled { opacity: 1; } .screen.stale { opacity: .55; } img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; -webkit-user-select: none; user-select: none; }
   footer { padding: 10px 16px max(12px, env(safe-area-inset-bottom)); display: grid; gap: 8px; } .keys { display: flex; gap: 6px; flex-wrap: wrap; } .chip { min-height: 44px; min-width: 44px; justify-content: center; } form { display: flex; gap: 8px; } input { min-width: 0; flex: 1; font-size: 16px; min-height: 44px; }
   .error { display: flex; align-items: center; gap: 8px; padding: 0 16px 8px; } .error p { flex: 1; margin: 0; font-size: var(--text-sm); color: var(--color-danger); max-height: 90px; overflow: auto; overflow-wrap: anywhere; } .empty { margin: auto; padding: 24px; }
-  @media (max-width: 720px) { footer small { display: none; } .nav, .toolbar, footer { padding-inline: 12px; } .nav { gap: 4px; } }
+  .screen.desk { cursor: default; } footer.desk { padding-block: 6px max(8px, env(safe-area-inset-bottom)); }
+  @media (max-width: 720px) { footer small { display: none; } footer small.note { display: block; } .nav, .toolbar, footer { padding-inline: 12px; } .nav { gap: 4px; } }
 </style>

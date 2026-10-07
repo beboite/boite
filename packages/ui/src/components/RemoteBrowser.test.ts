@@ -235,3 +235,88 @@ test('a still page is polled slowly, and a phone back from the background resume
   await vi.advanceTimersByTimeAsync(1); await settle();
   expect(requests).toHaveLength(idle + 1);
 });
+
+test('a computer drives the page itself: keys in order, the wheel, a paste and a copy, with no text field below', async () => {
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.startsWith('not all'), addEventListener() {}, removeEventListener() {} }));
+  const writeText = vi.fn(async () => {});
+  vi.stubGlobal('navigator', Object.assign(Object.create(navigator), { clipboard: { writeText } }));
+  client = new FakeClient({ delayMs: 0 }); store = new Store(); store.attach(client); await store.connect();
+  const original = client.call.bind(client), inputs: unknown[] = [];
+  let release: (() => void) | undefined;
+  vi.spyOn(client, 'call').mockImplementation(((method: string, params: { input?: unknown }) => {
+    if (method === 'browser.remoteFrame') return Promise.resolve({ id: 'frame', tabId: 'tab', title: 'Desktop', width: 760, height: 900, at: Date.now(), base64: 'AAAA' });
+    if (method === 'browser.remoteSelection') return Promise.resolve({ text: 'picked words', truncated: false });
+    if (method !== 'browser.remoteInput') return original(method as never, params as never);
+    inputs.push(structuredClone(params.input));
+    // The first request stays in flight while the next keys are typed.
+    return inputs.length === 1 ? new Promise<unknown>(resolve => { release = () => resolve({ ok: true }); }) : Promise.resolve({ ok: true });
+  }) as typeof client.call);
+  try {
+    app = mount(RemoteBrowser, { target: document.body, props: { store, threadId: 't-trace' } }); await settle();
+    await new Promise(resolve => setTimeout(resolve, 20)); await settle();
+    expect(document.querySelector('[data-testid=remote-browser-text]')).toBeNull();
+    expect(document.querySelector('[data-testid=remote-browser-note]')!.textContent).toContain('Click the page');
+    const key = (name: string, more: KeyboardEventInit = {}) => { const event = new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true, ...more }); document.body.dispatchEvent(event); return event.defaultPrevented; };
+    // Until the page is clicked the keyboard is the app's.
+    expect(key('h')).toBe(false);
+    const screen = document.querySelector<HTMLElement>('[data-testid=remote-browser-frame]')!.parentElement!;
+    screen.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
+    expect(key('h')).toBe(true);
+    for (const name of ['i', ' ', 'Enter']) expect(key(name)).toBe(true);
+    expect(key('ArrowLeft', { shiftKey: true })).toBe(true);
+    expect(key('a', { ctrlKey: true })).toBe(true);
+    // Copy, paste and the app's own chords are not keys of the page.
+    expect(key('c', { ctrlKey: true })).toBe(false);
+    expect(key('k', { ctrlKey: true })).toBe(false);
+    expect(key('F5')).toBe(false);
+    await settle();
+    expect(inputs).toEqual([{ kind: 'press', keys: ['h'] }]);
+    release!(); await settle();
+    expect(inputs.slice(1)).toEqual([{ kind: 'press', keys: ['i', 'Space', 'Enter', 'Shift+ArrowLeft'] }, { kind: 'select-all' }]);
+
+    const clip = (type: string) => { const event = new Event(type, { bubbles: true, cancelable: true }); Object.assign(event, { clipboardData: { getData: () => 'from the PC' } }); document.body.dispatchEvent(event); return event.defaultPrevented; };
+    expect(clip('paste')).toBe(true); await settle();
+    expect(inputs.at(-1)).toEqual({ kind: 'text', text: 'from the PC' });
+    expect(clip('copy')).toBe(true); await settle();
+    expect(writeText).toHaveBeenCalledWith('picked words');
+    expect(clip('cut')).toBe(true); await settle();
+    expect(inputs.at(-1)).toEqual({ kind: 'press', keys: ['Backspace'] });
+
+    const wheel = new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true });
+    screen.dispatchEvent(wheel); await settle();
+    expect(wheel.defaultPrevented).toBe(true);
+    expect(inputs.at(-1)).toEqual({ kind: 'scroll', x: 0, y: 120 });
+
+    // The address bar takes the keyboard and the clipboard back.
+    const address = document.querySelector<HTMLInputElement>('[data-testid=remote-browser-address]')!, sent = inputs.length;
+    address.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
+    expect(key('h')).toBe(false);
+    expect(clip('paste')).toBe(false);
+    expect(inputs).toHaveLength(sent);
+  } finally { vi.unstubAllGlobals(); }
+});
+
+test('a phone keeps the text field and gets a copy button for the page selection', async () => {
+  const writeText = vi.fn(async () => {});
+  vi.stubGlobal('navigator', Object.assign(Object.create(navigator), { clipboard: { writeText } }));
+  client = new FakeClient({ delayMs: 0 }); store = new Store(); store.attach(client); await store.connect();
+  const original = client.call.bind(client);
+  let picked = '';
+  vi.spyOn(client, 'call').mockImplementation(((method: string, params: unknown) => {
+    if (method === 'browser.remoteFrame') return Promise.resolve({ id: 'frame', tabId: 'tab', title: 'Phone', width: 393, height: 700, at: Date.now(), base64: 'AAAA' });
+    if (method === 'browser.remoteSelection') return Promise.resolve({ text: picked, truncated: false });
+    return original(method as never, params as never);
+  }) as typeof client.call);
+  try {
+    app = mount(RemoteBrowser, { target: document.body, props: { store, threadId: 't-trace' } }); await settle();
+    await new Promise(resolve => setTimeout(resolve, 20)); await settle();
+    expect(document.querySelector('[data-testid=remote-browser-text]')).not.toBeNull();
+    const copy = document.querySelector<HTMLButtonElement>('[data-testid=remote-browser-copy]')!;
+    copy.click(); await settle();
+    expect(writeText).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid=remote-browser-note]')!.textContent).toContain('Nothing is selected');
+    picked = 'a word'; copy.click(); await settle();
+    expect(writeText).toHaveBeenCalledWith('a word');
+    expect(document.querySelector('[data-testid=remote-browser-note]')!.textContent).toContain('Copied');
+  } finally { vi.unstubAllGlobals(); }
+});

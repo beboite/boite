@@ -290,9 +290,10 @@ describe('the Device panel over RPC', () => {
     expect((await run('screenshot', '--output', 'screen.png')).code).not.toBe(0);
     expect((await run('tap', '12', '34')).out).toContain('ok: tap on Pixel_8');
     expect((await run('key', 'home')).code).toBe(0);
+    expect((await run('key', 'left')).code).toBe(0);
     expect((await run('type', 'hello')).code).toBe(0);
     expect((await run('key', 'menu')).error).toContain('device key must be one of');
-    expect(sdk.calls()).toEqual(expect.arrayContaining(['adb -s emulator-5554 shell input tap 12 34', 'adb -s emulator-5554 shell input keyevent 3', "adb -s emulator-5554 shell input text 'hello'"]));
+    expect(sdk.calls()).toEqual(expect.arrayContaining(['adb -s emulator-5554 shell input tap 12 34', 'adb -s emulator-5554 shell input keyevent 3', 'adb -s emulator-5554 shell input keyevent 21', "adb -s emulator-5554 shell input text 'hello'"]));
     expect((await run('close', '--shutdown')).out).toContain('closed: Pixel_8 (powered off)');
     expect((await run('help')).out).toContain('view-only');
   });});

@@ -105,3 +105,48 @@ test('the fake core keeps devices to subscribed, active conversations and powers
   expect(events.slice(-2).sort()).toEqual(['t-bench:', `${thread}:`]);
   off();
 });
+
+test('a computer types, pastes and scrolls on the device screen, with no text field below', async () => {
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.startsWith('not all'), addEventListener() {}, removeEventListener() {} }));
+  vi.useFakeTimers();
+  try {
+    const calls = vi.spyOn(client, 'call');
+    const inputs = () => calls.mock.calls.filter(([method]) => method === 'devices.input').map(([, params]) => (params as { input: unknown }).input);
+    app = mount(DeviceSurface, { target: document.body, props: { store, threadId: thread } }); await settle();
+    document.querySelector<HTMLButtonElement>('[data-testid=device-open]')!.click(); await settle();
+    await vi.advanceTimersByTimeAsync(FAKE_BOOT_MS + 300); await settle();
+    document.querySelector<HTMLButtonElement>('[data-testid=device-show]')!.click(); await settle();
+    await vi.advanceTimersByTimeAsync(300); await settle();
+    expect(document.querySelector('[data-testid=device-text]')).toBeNull();
+    expect(document.querySelector('[data-testid=device-desk-hint]')!.textContent).toContain('Click the screen');
+    const image = document.querySelector<HTMLImageElement>('[data-testid=device-frame]')!;
+    vi.spyOn(image, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 270, height: 600, right: 270, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
+    const screen = image.parentElement!;
+    const key = (name: string, more: KeyboardEventInit = {}) => { const event = new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true, ...more }); document.body.dispatchEvent(event); return event.defaultPrevented; };
+    expect(key('a')).toBe(false);
+    screen.dispatchEvent(new PointerEvent('pointerdown', { clientX: 135, clientY: 300, button: 0, bubbles: true }));
+    screen.dispatchEvent(new PointerEvent('pointerup', { clientX: 135, clientY: 300, button: 0, bubbles: true }));
+    await settle();
+    const before = inputs().length;
+    for (const name of ['h', 'i', '!', 'Enter', 'Escape']) expect(key(name)).toBe(true);
+    expect(key('é')).toBe(false);
+    expect(key('v', { ctrlKey: true })).toBe(false);
+    await vi.advanceTimersByTimeAsync(50); await settle();
+    // Characters typed while the first is on its way leave as one text; keys keep their place.
+    expect(inputs().slice(before)).toEqual([{ kind: 'text', text: 'h' }, { kind: 'text', text: 'i!' }, { kind: 'key', key: 'enter' }, { kind: 'key', key: 'back' }]);
+
+    const paste = (text: string) => { const event = new Event('paste', { bubbles: true, cancelable: true }); Object.assign(event, { clipboardData: { getData: () => text } }); document.body.dispatchEvent(event); };
+    paste('two\r\n  lines '); await vi.advanceTimersByTimeAsync(50); await settle();
+    expect(inputs().at(-1)).toEqual({ kind: 'text', text: 'two lines' });
+    const sent = inputs().length;
+    paste('héllo'); await settle();
+    expect(inputs()).toHaveLength(sent);
+    expect(document.querySelector('[data-testid=device-error]')!.textContent).toContain('ASCII');
+
+    // Three wheel notches down: one swipe up from under the pointer, in screen pixels.
+    await vi.advanceTimersByTimeAsync(400); await settle();
+    for (let i = 0; i < 3; i++) screen.dispatchEvent(new WheelEvent('wheel', { deltaY: 50, clientX: 135, clientY: 300, bubbles: true, cancelable: true }));
+    await vi.advanceTimersByTimeAsync(200); await settle();
+    expect(inputs().at(-1)).toEqual({ kind: 'swipe', from: { x: 540, y: 1200 }, to: { x: 540, y: 600 }, durationMs: 150 });
+  } finally { vi.unstubAllGlobals(); }
+});

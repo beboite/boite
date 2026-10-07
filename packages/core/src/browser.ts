@@ -21,6 +21,7 @@ import {
   PRIVATE_BROWSER_PROFILE,
   remoteBrowserInputError,
   remoteFrameOptionsError,
+  REMOTE_SELECTION_MAX,
   REMOTE_URL_MAX,
   type AgentBrowserStatus,
   type AgentBrowserTab,
@@ -31,6 +32,7 @@ import {
   type BrowserPreset,
   type BrowserReply,
   type RemoteBrowserFrame,
+  type RemoteBrowserSelection,
   type RpcParams,
   type Settings,
   type ThreadId,
@@ -42,8 +44,8 @@ import { refused } from './errors.ts';
 import { Cdp } from './browser/cdp.ts';
 import { chromiumArgs, clearActivePort, findChromium, pipesDevTools, readSavedCookies, waitForEndpoint, writeSavedCookies } from './browser/chromium.ts';
 import { TabRecorder } from './browser/recorder.ts';
-import { EDITABLE_SCRIPT, KEY_CODES, PAGE_INFO_SCRIPT, SETTLED_VIEWPORT_SCRIPT } from './browser/scripts.ts';
-import { automate, awaitDocument, documentToken, PAGE_ACTIONS, type AgentPage } from './browser/automation.ts';
+import { EDITABLE_SCRIPT, KEY_CODES, PAGE_INFO_SCRIPT, selectionScript, SETTLED_VIEWPORT_SCRIPT } from './browser/scripts.ts';
+import { automate, awaitDocument, documentToken, PAGE_ACTIONS, press, type AgentPage } from './browser/automation.ts';
 
 /** The process scope of the agent browser's own processes, in the trace and the registry. */
 export const BROWSER_SCOPE = 'system:browser';
@@ -545,10 +547,22 @@ export class AgentBrowser {
     await this.#send(tab, 'Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: keyCode });
   }
 
-  async #click(tab: Tab, point: { x: number; y: number }): Promise<void> {
-    await this.#send(tab, 'Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
-    await this.#send(tab, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
-    await this.#send(tab, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
+  /** `count` is the click's rank in a double or triple click; Shift extends the selection to the point. */
+  async #click(tab: Tab, point: { x: number; y: number }, count = 1, shift = false): Promise<void> {
+    const modifiers = shift ? 8 : 0;
+    await this.#send(tab, 'Input.dispatchMouseEvent', { type: 'mouseMoved', ...point, modifiers });
+    await this.#send(tab, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: count, modifiers });
+    await this.#send(tab, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: count, modifiers });
+  }
+
+  /** The button held from one point to the other, through a few steps so the page sees a drag and not a jump. */
+  async #drag(tab: Tab, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
+    await this.#send(tab, 'Input.dispatchMouseEvent', { type: 'mouseMoved', ...from });
+    await this.#send(tab, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...from, button: 'left', buttons: 1, clickCount: 1 });
+    for (let step = 1; step <= 4; step++) {
+      await this.#send(tab, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: from.x + (to.x - from.x) * step / 4, y: from.y + (to.y - from.y) * step / 4, button: 'left', buttons: 1 });
+    }
+    await this.#send(tab, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...to, button: 'left', clickCount: 1 });
   }
 
   /** Waits for the page's viewport to hold its size; a page that cannot answer is left as it is. */
@@ -783,10 +797,17 @@ export class AgentBrowser {
     const page = await this.#evaluate(tab, PAGE_INFO_SCRIPT, 5000) as PageInfo;
     const same = page.width === saved.page.width && page.height === saved.page.height && page.href === saved.page.href && page.origin === saved.page.origin;
     if (!same) throw changed();
-    if (input.kind === 'tap' && (input.width !== saved.frame.width || input.height !== saved.frame.height)) throw refused('the browser viewport changed; refresh before tapping');
+    if ((input.kind === 'tap' || input.kind === 'drag') && (input.width !== saved.frame.width || input.height !== saved.frame.height)) throw refused('the browser viewport changed; refresh before tapping');
     const at = (x: number, y: number) => ({ x: Math.min(page.width - 1, x * page.width), y: Math.min(page.height - 1, y * page.height) });
     switch (input.kind) {
-      case 'tap': await this.#click(tab, at(input.x, input.y)); break;
+      case 'tap': await this.#click(tab, at(input.x, input.y), input.count ?? 1, input.shift === true); break;
+      case 'drag': await this.#drag(tab, at(input.from.x, input.from.y), at(input.to.x, input.to.y)); break;
+      case 'press': for (const key of input.keys) await press(tab.page, key); break;
+      case 'select-all':
+        // The editing command is named: headless, no browser menu turns Control+A into it.
+        await this.#send(tab, 'Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, modifiers: 2, commands: ['selectAll'] });
+        await this.#send(tab, 'Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, modifiers: 2 });
+        break;
       case 'text':
         if (!await this.#evaluate(tab, EDITABLE_SCRIPT, 5000)) throw refused('tap a text field in the page first');
         await this.#send(tab, 'Input.insertText', { text: input.text }); break;
@@ -800,6 +821,15 @@ export class AgentBrowser {
     }
     tab.frame = null;
     return { ok: true };
+  }
+
+  /** What a viewer's copy takes: the selection of the tab its frame showed. */
+  async remoteSelection({ threadId, frameId }: RpcParams<'browser.remoteSelection'>, connection: Connection): Promise<RemoteBrowserSelection> {
+    this.#viewer(threadId, connection);
+    const saved = this.#viewers.get(`${connection.id}:${threadId}`)?.frames.find(entry => entry.frame.id === frameId && Date.now() - entry.frame.at < FRAME_LIFE_MS);
+    if (!saved) throw refused('refresh the live browser before copying');
+    const text = String(await this.#evaluate(this.#tabOf(threadId, saved.frame.tabId), selectionScript(REMOTE_SELECTION_MAX), 5000) ?? '');
+    return { text: text.slice(0, REMOTE_SELECTION_MAX), truncated: text.length > REMOTE_SELECTION_MAX };
   }
 
   // ---------- lifetime ----------
