@@ -110,9 +110,11 @@ export function readViewMessage(data: unknown): ViewPageMessage | null {
 /**
  * The app's look for a bare page: the answer's own text size and face, and
  * controls, tables and code drawn as the app draws them. Every rule is under
- * `:where()`, so anything the page says about the same element wins.
+ * `:where()`, so anything the page says about the same element wins. It is
+ * built when a page is stored, like the bootstrap below: a client's bundle,
+ * which stores none, then carries neither.
  */
-const BASE_CSS = [
+const baseCss = (): string => [
   'html{background:transparent;color:var(--color-foreground);font-family:var(--font-sans);font-size:var(--text-reading);line-height:var(--leading-reading);-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;scrollbar-width:none}',
   'html::-webkit-scrollbar{display:none}',
   ':where(body){margin:0}',
@@ -141,7 +143,7 @@ const REDUCED_CSS = '*,*::before,*::after{animation-duration:.001ms!important;an
 const DARK = '--color-background:#101013;--color-surface:#151518;--color-surface-2:#1b1b1f;--color-surface-3:#232327;--color-border:rgba(255,255,255,.07);--color-edge:rgba(255,255,255,.14);--color-foreground:#ececf1;--color-muted-foreground:#a2a2ad;--color-subtle:#8c8c96;--color-accent:oklch(68% .19 260);--color-accent-soft:oklch(68% .19 260/.18);--color-accent-ink:#101013;--color-success:#4ade80;--color-live:#eab308;--color-danger:#f0716f;--series-1:#d95926;--series-2:#3987e5;--series-3:#199e70;--series-4:#9085e9;--series-5:#c98500;--series-6:#d55181;--series-7:#008300;--series-8:#e66767;';
 const LIGHT = '--color-background:#f3f3f6;--color-surface:#fafafb;--color-surface-2:#fff;--color-surface-3:#ebebef;--color-border:rgba(0,0,0,.08);--color-edge:rgba(0,0,0,.16);--color-foreground:#1c1c21;--color-muted-foreground:#50505a;--color-subtle:#67676f;--color-accent-ink:#fff;--color-success:#16a34a;--color-live:#ca8a04;--color-danger:#dc2626;--series-1:#eb6834;--series-2:#2a78d6;--series-3:#18a070;--series-4:#4a3aa7;--series-5:#bf8200;--series-6:#e26092;--series-7:#008300;--series-8:#e34948;';
 const SHAPE = "--radius-sm:6px;--radius-md:8px;--radius-lg:12px;--font-sans:ui-sans-serif,system-ui,'Segoe UI',sans-serif;--font-mono:ui-monospace,'Cascadia Mono',Consolas,monospace;--text-xs:12px;--text-sm:13px;--text-reading:15px;--leading-reading:1.6;";
-const DEFAULT_CSS = `:root{color-scheme:dark;${DARK}${SHAPE}}@media (prefers-color-scheme:light){:root{color-scheme:light;${LIGHT}}}${BASE_CSS}`;
+const defaultCss = (): string => `:root{color-scheme:dark;${DARK}${SHAPE}}@media (prefers-color-scheme:light){:root{color-scheme:light;${LIGHT}}}${baseCss()}`;
 
 /*
  * Runs in the head before the page's own styles and scripts. It writes the
@@ -150,7 +152,7 @@ const DEFAULT_CSS = `:root{color-scheme:dark;${DARK}${SHAPE}}@media (prefers-col
  * height the way the core measures it; and hands a clicked link to the client
  * instead of letting it replace the page inside the conversation.
  */
-const BOOTSTRAP = `(function(){var s=document.getElementById("boite-view-theme"),r=document.documentElement,b=${JSON.stringify(BASE_CSS)},q=${JSON.stringify(REDUCED_CSS)},last=0;` +
+const bootstrap = (): string => `(function(){var s=document.getElementById("boite-view-theme"),r=document.documentElement,b=${JSON.stringify(baseCss())},q=${JSON.stringify(REDUCED_CSS)},last=0;` +
   'function post(t,d){if(window.parent===window)return;d.boiteView=1;d.type=t;window.parent.postMessage(d,"*");}' +
   'function apply(t){if(!s||!t||typeof t!=="object"||!t.vars||typeof t.vars!=="object")return;var c=":root{color-scheme:"+(t.scheme==="light"?"light":"dark")+";",k;for(k in t.vars){if(/^--[a-z0-9-]+$/.test(k))c+=k+":"+String(t.vars[k]).replace(/[;{}<>]/g,"")+";";}s.textContent=c+"}"+b+(t.reduced?q:"");if(t.reduced)r.setAttribute("data-reduced-motion","");else r.removeAttribute("data-reduced-motion");}' +
   `try{var m=/[#&]${THEME_KEY}=([^&]*)/.exec(location.hash);if(m){apply(JSON.parse(decodeURIComponent(m[1])));history.replaceState(history.state,"",location.pathname+location.search);}}catch(e){}` +
@@ -182,8 +184,8 @@ export function viewDocument(html: string): string {
     /<meta\s[^>]*charset/i.test(scan.slice(0, 4096)) ? '' : '<meta charset="utf-8">',
     `<meta http-equiv="Content-Security-Policy" content="${VIEW_CONTENT_POLICY}">`,
     /<meta\s[^>]*name\s*=\s*["']?viewport/i.test(scan) ? '' : '<meta name="viewport" content="width=device-width, initial-scale=1">',
-    `<style id="boite-view-theme">${DEFAULT_CSS}</style>`,
-    `<script>${BOOTSTRAP}</script>`,
+    `<style id="boite-view-theme">${defaultCss()}</style>`,
+    `<script>${bootstrap()}</script>`,
   ].join('');
   // Standards mode whatever the file says: in quirks mode the root is as tall as its frame, and the page could never say its own height.
   const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
