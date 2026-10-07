@@ -829,7 +829,7 @@ export class ThreadStore {
   noteCoordination(threadId: string, turnId: string, text: string): void { this.noteSystem(threadId, turnId, text, 'Agent coordination', 'coordination.context'); }
 
   /** A line of Boite's own inside a running turn: what the agent was told, under a short label. */
-  noteSystem(threadId: string, turnId: string, text: string, displayText: string, eventType: string): void {
+  noteSystem(threadId: string, turnId: string, text: string, displayText: string, eventType: 'coordination.context' | 'turn.pausedForUpdate' | 'turn.resumedAfterUpdate'): void {
     const message: Message = { id: newId('msg_'), threadId, turnId, role: 'system', parts: [{ type: 'text', text, displayText }], state: 'complete', createdAt: Date.now() };
     this.core.journal.append({ type: eventType, threadId, version: 1, payload: message }, () => this.core.journal.putMessage(message));
     this.runner.noteMail(threadId, message.createdAt);
