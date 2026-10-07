@@ -22,6 +22,36 @@ The client saves the exchanged session key and discards the grant
 connects remembered machines. A fresh local core without threads yields to a
 remembered core on the same computer that already has them.
 
+A machine that is off does not hold the others back. When the machine the
+window opens on has not said hello after two seconds, the other remembered
+machines are connected without it, and the window opens on the first that
+answers: on the draft a start lands on, and there again at the next start. A
+machine that refuses at once gives way the same way. The loading screen stays
+for up to six seconds while another machine may still answer, so a laptop that
+is off shows neither an empty page nor its connection error first; with nobody
+else answering, that machine is shown as it is. Until this, a phone paired with
+a laptop that was then switched off stayed blank for ten seconds and landed on
+the laptop's error, the rest of its group connected behind it. Three cases
+wait as before: a link in the address bar, which names the machine the owner
+asked for; the shell's own core, which the shell restarts itself; and a window
+where the user already opened something. The machine that was off is retried
+in the background and comes back as one more machine of the list.
+
+A start opens on the machine shown last. A device can name its main machine
+instead, under Machines and updates in Settings, once it reaches more than one:
+every start then opens on that machine, whichever one was shown since. The
+choice is made on the device and kept there (`boite.main` in its storage), so a
+phone and a computer each have their own. It gives the machine nothing: its
+key, its role and what a [group](groups.md) may do with it stay as they were. A
+main machine that is off gives way like any other, after the same two seconds
+at every start, and is asked first again at the next one. A machine the group
+brought stays the one chosen when its address changes. A machine this device
+holds no key for any more, removed here or dropped by its group, no longer
+counts: starts open on the machine shown last until it is connected again. The
+desktop app can name its own core. It never opens on a machine connected by URL
+and token, chosen or not, since that stored key could be its own core's from an
+earlier start.
+
 Machine names and icons can be changed in Settings. These preferences are saved on this client and follow the core across address changes. Connections to the same host, data directory and channel appear once.
 
 The shell discovers its local core on startup instead of remembering its temporary
@@ -291,7 +321,9 @@ the machine identity. Only the visible host subscribes to an open conversation;
 all hosts continue receiving summaries. Driver protocols remain unchanged.
 
 `tests/e2e/machines.test.ts` covers two real temporary cores, pairing, routing,
-restart, reload, automatic settings copies and a real remote terminal. Its fake fixture deliberately reuses thread and
+restart, reload, automatic settings copies, a real remote terminal, a phone
+reloaded while the machine it paired with answers nothing, and that phone
+naming its main machine. Its fake fixture deliberately reuses thread and
 project IDs on two hosts and produces desktop and phone captures. Core tests
 cover user-message timestamps, origin validation and PR metadata parsing.
 `tests/e2e/project-views.test.ts` checks project filtering, draft routing,

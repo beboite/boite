@@ -155,6 +155,7 @@ import { workspace } from '../lib/workspace.svelte';
     ['machines', 'devices', strings.settings.listenOnLan],
     ['machines', 'devices', strings.settings.pairing.mint],
     ['machines', 'phone', strings.phone.publicUrl],
+    ['machines', 'machines', strings.machines.main],
     ['advanced', 'execution', strings.settings.warmProcessMinutes]
   ]);
 

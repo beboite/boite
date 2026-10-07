@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { machineHealth, Workspace } from './workspace.svelte';
+import { machineHealth, PRIMARY_PATIENCE_MS, Workspace } from './workspace.svelte';
 import { Store, store as primary } from './store.svelte';
 import { FakeClient } from './fake-client';
 import { upsertEnvironment } from './endpoint';
@@ -8,6 +8,8 @@ import * as endpoints from './endpoint';
 let workspace: Workspace | undefined;
 afterEach(() => {
   delete window.__TAURI_INTERNALS__;
+  vi.useRealTimers();
+  window.history.replaceState(null, '', '/');
   vi.restoreAllMocks();
   workspace?.close();
   localStorage.clear();
@@ -391,6 +393,193 @@ test('a notification link from another remembered machine opens there once it co
   await w.boot(id);
   expect(w.active).toBe(b);
   expect(b.openThread?.id).toBe(id);
+});
+
+/** A phone paired with a laptop, which also holds a key for a server of the same group. */
+async function phoneOfTwo() {
+  const { w, a, b } = await setup();
+  a.localCore = false;
+  a.endpointUrl = 'https://laptop.test';
+  b.endpointUrl = 'https://server.test';
+  upsertEnvironment({ url: 'https://laptop.test', token: 'laptop-key', paired: true, label: 'Laptop' });
+  upsertEnvironment({ url: 'https://server.test', token: 'server-key', paired: true, label: 'Server' });
+  endpoints.storeEndpoint({ url: 'https://laptop.test', token: 'laptop-key', paired: true });
+  let answer!: (connected: boolean) => void;
+  const add = vi.spyOn(w, 'add').mockImplementation(() => new Promise<boolean>((resolve) => {
+    answer = (connected) => {
+      if (connected) w.machines = [...w.machines, { id: 'https://server.test', label: 'Server', store: b }];
+      resolve(connected);
+    };
+  }));
+  return { w, a, b, add, server: (connected = true) => answer(connected) };
+}
+
+test('a laptop switched off does not keep the phone waiting: the server is connected without it and the window opens there', async () => {
+  vi.useFakeTimers();
+  const { w, a, b, add, server } = await phoneOfTwo();
+  // No answer and no refusal either, as a machine that is off leaves a socket.
+  a.connection = 'connecting';
+  a.booted = false;
+  vi.spyOn(a, 'boot').mockReturnValue(new Promise<void>(() => {}));
+  void w.boot();
+  await vi.advanceTimersByTimeAsync(PRIMARY_PATIENCE_MS - 1);
+  expect(add).not.toHaveBeenCalled();
+  expect(w.waiting).toBe(true);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(add).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://server.test' }), 'Server');
+  expect(w.active).toBe(a);
+  server();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(w.active).toBe(b);
+  expect(w.waiting).toBe(false);
+  // On the draft a start lands on, and where the next start opens.
+  expect(b.visible && b.draft !== null && a.visible === false).toBe(true);
+  expect(endpoints.readStoredEndpoint()?.url).toBe('https://server.test');
+  expect(w.machines.map((machine) => machine.label)).toEqual(['Laptop', 'Server']);
+});
+
+test('a machine that refuses at once gives way too, and nothing of it is drawn while the other may answer', async () => {
+  const { w, a, b, add, server } = await phoneOfTwo();
+  a.connection = 'connecting';
+  a.error = 'socket error';
+  vi.spyOn(a, 'boot').mockResolvedValue();
+  const booting = w.boot();
+  await waitFor(() => add.mock.calls.length === 1);
+  expect(w.waiting).toBe(true);
+  expect(w.active).toBe(a);
+  server();
+  await booting;
+  expect(w.active).toBe(b);
+  expect(w.waiting).toBe(false);
+});
+
+test('the window stays where it is when its machine answers, when the user went somewhere, on the shell\'s own core and when nothing else answers', async () => {
+  // Answered in time: the others come second, as they always did.
+  let phone = await phoneOfTwo();
+  vi.spyOn(phone.a, 'boot').mockResolvedValue();
+  let booting = phone.w.boot();
+  await waitFor(() => phone.add.mock.calls.length === 1);
+  expect(phone.w.waiting).toBe(false);
+  phone.server();
+  await booting;
+  expect(phone.w.active).toBe(phone.a);
+
+  // The user opened something while the server was still connecting.
+  phone.w.close();
+  phone = await phoneOfTwo();
+  phone.a.connection = 'connecting';
+  vi.spyOn(phone.a, 'boot').mockResolvedValue();
+  booting = phone.w.boot();
+  await waitFor(() => phone.add.mock.calls.length === 1);
+  await phone.w.select(phone.a);
+  phone.server();
+  await booting;
+  expect(phone.w.active).toBe(phone.a);
+
+  // The shell brings its own core back itself.
+  phone.w.close();
+  phone = await phoneOfTwo();
+  phone.a.connection = 'connecting';
+  phone.a.localCore = true;
+  vi.spyOn(phone.a, 'boot').mockResolvedValue();
+  booting = phone.w.boot();
+  await waitFor(() => phone.add.mock.calls.length === 1);
+  expect(phone.w.waiting).toBe(false);
+  phone.server();
+  await booting;
+  expect(phone.w.active).toBe(phone.a);
+
+  // Nobody else answers: the machine is shown as it is, with its error.
+  phone.w.close();
+  phone = await phoneOfTwo();
+  phone.a.connection = 'connecting';
+  vi.spyOn(phone.a, 'boot').mockResolvedValue();
+  booting = phone.w.boot();
+  await waitFor(() => phone.add.mock.calls.length === 1);
+  phone.server(false);
+  await booting;
+  expect(phone.w.active).toBe(phone.a);
+  expect(phone.w.waiting).toBe(false);
+});
+
+test('a link in the address bar is waited on however long its machine takes, and a machine that answers late keeps the window', async () => {
+  vi.useFakeTimers();
+  let phone = await phoneOfTwo();
+  phone.a.connection = 'connecting';
+  window.history.replaceState(null, '', '/?grant=one-time');
+  vi.spyOn(phone.a, 'boot').mockReturnValue(new Promise<void>(() => {}));
+  void phone.w.boot();
+  await vi.advanceTimersByTimeAsync(PRIMARY_PATIENCE_MS * 10);
+  expect(phone.add).not.toHaveBeenCalled();
+  expect(phone.w.waiting).toBe(false);
+
+  phone.w.close();
+  window.history.replaceState(null, '', '/');
+  phone = await phoneOfTwo();
+  const { w, a, add, server } = phone;
+  a.connection = 'connecting';
+  let hello!: () => void;
+  vi.spyOn(a, 'boot').mockReturnValue(new Promise<void>((resolve) => { hello = resolve; }));
+  const booting = w.boot();
+  await vi.advanceTimersByTimeAsync(PRIMARY_PATIENCE_MS);
+  expect(add).toHaveBeenCalledTimes(1);
+  a.connection = 'ready';
+  hello();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(w.waiting).toBe(false);
+  server();
+  await booting;
+  expect(w.active).toBe(a);
+});
+
+test('the machine the owner chose is where every start opens, whichever was shown last, and stays chosen while another stands in for it', async () => {
+  vi.useFakeTimers();
+  const { w, a, b, server } = await phoneOfTwo();
+  w.setMain({ id: 'https://laptop.test', label: 'Laptop', store: a });
+  expect(endpoints.readMainMachine()).toEqual({ url: 'https://laptop.test' });
+  // The server was shown last: with no choice made, that is where the next start would open.
+  endpoints.storeEndpoint({ url: 'https://server.test', token: 'server-key', paired: true });
+  a.connection = 'connecting';
+  a.booted = false;
+  // What a start opens on is the core stored when the first machine boots.
+  const opened: (string | undefined)[] = [];
+  vi.spyOn(a, 'boot').mockImplementation(() => {
+    opened.push(endpoints.readStoredEndpoint()?.url);
+    return new Promise<void>(() => {});
+  });
+  void w.boot();
+  await vi.advanceTimersByTimeAsync(PRIMARY_PATIENCE_MS);
+  server();
+  await vi.advanceTimersByTimeAsync(0);
+  // The laptop is off: the server stands in for it, and is the machine shown last once more.
+  expect(w.active).toBe(b);
+  expect(endpoints.readStoredEndpoint()?.url).toBe('https://server.test');
+  expect(w.machines.map((machine) => w.isMain(machine))).toEqual([true, false]);
+  void w.boot();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(opened).toEqual(['https://laptop.test', 'https://laptop.test']);
+});
+
+test('the choice names the app\'s own core without its address, and a machine the group brought whatever address it has now', async () => {
+  const { w, a, b } = await phoneOfTwo();
+  a.localCore = true;
+  a.endpointUrl = 'http://127.0.0.1:41000';
+  const local = { id: 'http://127.0.0.1:41000', label: 'This PC', store: a };
+  w.setMain(local);
+  expect(endpoints.readMainMachine()).toEqual({ local: true });
+  // The shell's core takes another port at every start.
+  expect(w.isMain({ ...local, id: 'http://127.0.0.1:41001' })).toBe(true);
+  // In a browser the app's own core is the one that serves the page, whatever store reaches it.
+  expect(w.isMain({ id: window.location.origin, label: 'Laptop', store: b })).toBe(true);
+
+  const brought = { id: 'https://server.test', label: 'Server', store: b, coreId: 'server', groupId: 'home' };
+  w.setMain(brought);
+  expect(endpoints.readMainMachine()).toEqual({ url: 'https://server.test', coreId: 'server', groupId: 'home' });
+  expect(w.isMain({ ...brought, id: 'https://server.example' })).toBe(true);
+  expect(w.isMain({ ...brought, id: 'https://server.example', coreId: 'other' })).toBe(false);
+  expect(w.isMain(local)).toBe(false);
+  w.setMain(null);
+  expect(w.machines.some((machine) => w.isMain(machine))).toBe(false);
 });
 
 test('a remote machine switched off is offline, and lost only while the user depends on it', async () => {
