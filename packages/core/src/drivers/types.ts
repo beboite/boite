@@ -215,9 +215,22 @@ export interface TurnResult {
 
 export type PromptCacheLife = Pick<import('@boite/contracts').PromptCache, 'ttlSeconds' | 'maxSeconds' | 'source'>;
 
+/** The execution settings a driver may change on a turn that is already running. */
+export interface LiveTurnSettings {
+  effort?: string | null;
+  speed?: string | null;
+}
+
 export interface TurnHandle {
   done: Promise<TurnResult>;
   stop(): void;
+  /**
+   * Change the effort or the speed of the active native turn, for the model
+   * requests it has not sent yet. Only the named fields changed. The answer
+   * names the fields the agent took; an absent field stays as the turn started
+   * and reaches the agent with the next turn. Never restarts the turn.
+   */
+  applySettings?(change: LiveTurnSettings): Promise<LiveTurnSettings>;
   /** Apply permissions to the active native turn. False requests a resume with a new process. */
   setPermissionMode?(mode: ThreadSummary['permissionMode']): Promise<boolean>;
   /**

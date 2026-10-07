@@ -89,6 +89,62 @@ describe('claude driver', () => {
     queries[0]!.emit(success('sess-live-mode'));
     await waitFor(() => harness.core.journal.getTurn(turn.id)?.status === 'done');
   });
+  test('effort and fast mode off reach a running query; fast mode on waits for the next turn', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('settings.set', { warmProcessMinutes: 5 });
+    harness.core.providers.require('claude').models.find(model => model.id === 'claude-opus-5')!.speeds = [{ id: 'fast', label: 'Fast' }];
+    await client.call('threads.update', { threadId, model: 'claude-opus-5', effort: 'low', speed: 'fast' });
+    scripted(fake => fake.emit(init('sess-live-effort')), (fake, _prompt, index) => { if (index > 0) fake.emit(success('sess-live-effort')); });
+    const turn = await client.call('turns.start', { threadId, prompt: 'Keep working' });
+    await waitFor(() => calls[0]?.prompts.length === 1);
+    expect(calls[0]!.options).toMatchObject({ effort: 'low', settings: { fastMode: true } });
+
+    await client.call('threads.update', { threadId, effort: 'high' });
+    await waitFor(() => queries[0]!.setters.includes('effortLevel high'));
+    await client.call('threads.update', { threadId, speed: null });
+    await waitFor(() => harness.core.journal.getTurn(turn.id)?.execution?.speed === null);
+    expect(harness.core.journal.getTurn(turn.id)?.execution).toMatchObject({ effort: 'high', speed: null });
+    // A running CLI cannot be trusted to switch fast mode on: nothing is sent,
+    // and the effort change queued behind it shows the speed one was handled.
+    await client.call('threads.update', { threadId, speed: 'fast' });
+    await client.call('threads.update', { threadId, effort: 'xhigh' });
+    await waitFor(() => queries[0]!.setters.includes('effortLevel xhigh'));
+    expect(queries[0]!.setters).toEqual(['effortLevel high', 'fastMode false', 'effortLevel xhigh']);
+    expect(queries[0]!.interrupts).toBe(0);
+    expect(calls[0]!.prompts).toEqual(['Keep working']);
+    queries[0]!.emit(success('sess-live-effort'));
+    await waitFor(() => harness.core.journal.getTurn(turn.id)?.status === 'done');
+    expect(harness.core.journal.getTurn(turn.id)?.execution).toMatchObject({ effort: 'xhigh', speed: null });
+
+    // The next turn carries the speed, on the same process when the CLI reports it on.
+    expect(await runTurn(client, threadId, 'second')).toBe('done');
+    expect(queries).toHaveLength(1);
+    expect(queries[0]!.setters).toEqual(['effortLevel high', 'fastMode false', 'effortLevel xhigh', 'fastMode true']);
+  });
+
+  test('a running CLI that keeps fast mode off moves the turn to a process launched with it', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('settings.set', { warmProcessMinutes: 5 });
+    harness.core.providers.require('claude').models.find(model => model.id === 'claude-opus-5')!.speeds = [{ id: 'fast', label: 'Fast' }];
+    await client.call('threads.update', { threadId, model: 'claude-opus-5' });
+    scripted((fake) => { fake.fastStaysOff = true; }, answerEach('sess-fast-off'));
+    expect(await runTurn(client, threadId, 'first')).toBe('done');
+    await client.call('threads.update', { threadId, speed: 'fast' });
+    expect(await runTurn(client, threadId, 'second')).toBe('done');
+    // The setter was accepted and the frame that followed still said `off`.
+    expect(queries[0]!.setters).toEqual(['fastMode true']);
+    expect(queries).toHaveLength(2);
+    expect(calls[1]!.options).toMatchObject({ resume: 'sess-fast-off', settings: { fastMode: true } });
+    expect(calls.map(call => call.prompts)).toEqual([['first'], ['second']]);
+    // Switching it off again needs no new process.
+    await client.call('threads.update', { threadId, speed: null });
+    expect(await runTurn(client, threadId, 'third')).toBe('done');
+    expect(queries).toHaveLength(2);
+    expect(queries[1]!.setters).toEqual(['fastMode false']);
+  });
+
   test('viewing initializes a prompt-free query and retains it across real turns at zero minutes', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);
