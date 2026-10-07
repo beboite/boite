@@ -39,9 +39,8 @@ back to the webview, as in a browser. A Mac app opened from Finder usually has
 none of those variables, so macOS takes the webview's languages for now. In a browser
 or on a phone, the region is that of a machine language matching the app's,
 then of the first language carrying one. Every date, count, duration, size and
-dollar amount goes through `formatLocale()` (`lib/format.ts`, `lib/usage.ts`),
-never the system's default: French reads `38,0 s`, `1 594 tours` and
-`113,23 $US`.
+dollar amount goes through `formatLocale()`, never the system's default:
+French reads `38,0 s`, `1 594 tours` and `113,23 $US`.
 
 The core names effort levels and quota windows in English. The UI shows its
 own word instead: an effort or speed level by its id (`high`, `xhigh`, `fast`,

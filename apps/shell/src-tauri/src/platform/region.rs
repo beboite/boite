@@ -34,9 +34,11 @@ fn posix_tag(value: &str) -> Option<String> {
     tag(&name.replace('_', "-"))
 }
 
-/// A name shaped like a BCP 47 tag, letters, digits and `-`; anything else says nothing.
+/// A name shaped like a BCP 47 tag: a letter first, then letters and digits in
+/// non-empty parts joined by `-`. Anything else says nothing.
 fn tag(name: &str) -> Option<String> {
-    let shaped = name.chars().any(|c| c.is_ascii_alphanumeric()) && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    let shaped = name.bytes().next().is_some_and(|b| b.is_ascii_alphabetic())
+        && name.split('-').all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_alphanumeric()));
     shaped.then(|| name.to_owned())
 }
 
@@ -64,13 +66,22 @@ fn read() -> Region {
     let mut name = [0u16; 85];
     // SAFETY: the buffer and its length match; the call writes a NUL-terminated name.
     let written = unsafe { GetUserDefaultLocaleName(name.as_mut_ptr(), name.len() as i32) };
-    let locale = (written > 1).then(|| String::from_utf16_lossy(&name[..written as usize - 1])).as_deref().and_then(tag);
+    // `de-DE_phoneb` names a sort order after the `_`, which is not part of the region.
+    let locale = utf16(&name, written).and_then(|name| name.split('_').next().and_then(tag));
     // 80 is the documented maximum for LOCALE_SSHORTTIME, its NUL included.
     let mut pattern = [0u16; 80];
     // SAFETY: a null name is LOCALE_NAME_USER_DEFAULT; the buffer and its length match.
     let written = unsafe { GetLocaleInfoEx(std::ptr::null(), LOCALE_SSHORTTIME, pattern.as_mut_ptr(), pattern.len() as i32) };
-    let pattern = (written > 1).then(|| String::from_utf16_lossy(&pattern[..written as usize - 1]));
+    let pattern = utf16(&pattern, written);
     Region { locale, hour12: pattern.as_deref().and_then(hour12) }
+}
+
+/// What a Win32 call wrote into `buffer`, its count including the NUL; nothing
+/// when it failed or claims more than the buffer holds.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn utf16(buffer: &[u16], written: i32) -> Option<String> {
+    let length = usize::try_from(written).ok().filter(|&n| n > 1 && n <= buffer.len())?;
+    Some(String::from_utf16_lossy(&buffer[..length - 1]))
 }
 
 /// `HH:mm` is a 24 hour clock, `h:mm tt` a 12 hour one; quoted text is skipped.
@@ -102,6 +113,8 @@ mod tests {
         assert_eq!(tag("fr-CH").as_deref(), Some("fr-CH"));
         assert_eq!(tag(""), None);
         assert_eq!(tag("---"), None);
+        for malformed in ["-en", "en-", "en--US", "123"] { assert_eq!(tag(malformed), None, "{malformed}"); }
+        assert_eq!(tag("zh-Hant-TW").as_deref(), Some("zh-Hant-TW"));
     }
 
     #[test]
@@ -115,6 +128,15 @@ mod tests {
         // `C` decides too: it names no region, so LANG behind it is not read.
         assert_eq!(posix_locale(env(&[("LC_ALL", "C"), ("LANG", "fr_CH.UTF-8")])), None);
         assert_eq!(posix_locale(env(&[])), None);
+    }
+
+    #[test]
+    fn a_win32_count_past_its_buffer_reads_as_nothing() {
+        let buffer: Vec<u16> = "HH:mm\0".encode_utf16().collect();
+        assert_eq!(utf16(&buffer, 6).as_deref(), Some("HH:mm"));
+        assert_eq!(utf16(&buffer, 7), None);
+        assert_eq!(utf16(&buffer, 0), None);
+        assert_eq!(utf16(&buffer, -1), None);
     }
 
     #[test]

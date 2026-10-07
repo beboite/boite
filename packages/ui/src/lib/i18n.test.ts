@@ -148,11 +148,14 @@ test('the desktop shell region and clock win over the webview languages', () => 
   expect(formatLocale()).toBe('en-CH');
   const evening = new Date(2026, 9, 7, 19, 40);
   const clock = () => new Intl.DateTimeFormat(formatLocale(), { hour: '2-digit', minute: '2-digit' }).format(evening);
+  const day = () => new Intl.DateTimeFormat(formatLocale(), { day: 'numeric', month: 'short' }).format(evening);
   expect(clock()).toBe('19:40');
+  expect(day()).toBe('7 Oct');
 
   window.__BOITE_REGION__ = { locale: 'en-US', hour12: false };
   expect(formatLocale()).toBe('en-US-u-hc-h23');
   expect(clock()).toBe('19:40');
+  expect(day()).toBe('Oct 7');
 
   window.__BOITE_REGION__ = { locale: 'en-GB', hour12: true };
   expect(formatLocale()).toBe('en-GB-u-hc-h12');

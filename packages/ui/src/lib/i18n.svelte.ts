@@ -181,11 +181,11 @@ export function formatLocale(): string {
 }
 
 function formatTag(active: Locale, shell: Window['__BOITE_REGION__'], machine: unknown[]): string {
-  const own = parse(shell?.locale);
+  const shellTag = parse(shell?.locale);
   let region: string | undefined;
-  if (own) {
+  if (shellTag) {
     // A shell tag without a region means none, not the webview's.
-    region = own.region;
+    region = shellTag.region;
   } else {
     const parsed = machine.map(parse);
     region = parsed.find((locale) => locale?.language === active && locale.region)?.region

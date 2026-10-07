@@ -165,8 +165,8 @@ CI, 57 above that limit, after the panel's keyboard, mouse and clipboard
 input. The mouse's back and forward buttons add 2,301 bytes, measured on Linux
 with and without them: 4,357,517 against 4,355,216. The UI limit rises to
 4,375,000, leaving about 17 KB of headroom. Formatting clocks in the
-machine's region adds 434 bytes, measured on Linux at `9356e7b6` with and
-without it: 4,355,491 against 4,355,057.
+machine's region adds 434 UI bytes, measured on Linux at `9356e7b6` with and
+without it: 4,355,491 against 4,355,057 UI bytes.
 
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured
