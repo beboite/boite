@@ -27,7 +27,7 @@
   import RecentGroup from './RecentGroup.svelte';
   import RecentDone from './RecentDone.svelte';
   import ProjectThreadCounters from './ProjectThreadCounters.svelte';
-  import OtherProjects from './OtherProjects.svelte';
+  import ProjectShelf from './ProjectShelf.svelte';
   import DraftRow from './DraftRow.svelte';
   import ProjectTile from './ProjectTile.svelte';
   import { projectKey, projectView, type ProjectEntry } from '../lib/project-view.svelte';
@@ -64,7 +64,8 @@
   let groups = $derived(projectView.sorted(machines.flatMap(machine => machine.store.projects.filter(project => !project.archived).map(project => ({ machine, project })))));
   let activeGroups = $derived(recentPreferences.groupOtherProjects ? groups.filter(activeProject) : groups);
   let otherGroups = $derived(recentPreferences.groupOtherProjects ? groups.filter(entry => !activeProject(entry)) : []);
-  let shownGroups = $derived(query ? groups : [...activeGroups, ...(projectThreadView.otherOpen ? otherGroups : [])]);
+  let shownGroups = $derived(query ? groups : activeGroups);
+  let shelved = $derived(machines.flatMap(machine => machine.store.projects.filter(project => project.archived === true).map(project => ({ machine, project }))));
   let selected = $derived(projectView.selected(groups));
   let draftOwner = $derived(screen === 'threads' && workspace.view === 'recent' && selected ? selected.machine.store : store);
   let entries = $derived(machines.flatMap(machine => {
@@ -270,7 +271,8 @@
       {@render projectRows(query ? groups : activeGroups)}
       {#if !query}
         {#if groups.length > 0 && activeGroups.length === 0}<p class="empty">{strings.sidebar.noActiveProjects}</p>{/if}
-        <OtherProjects count={otherGroups.length}>{@render projectRows(otherGroups)}</OtherProjects>
+        <ProjectShelf kind="idle" entries={otherGroups} multi={several} {now} {scrollRoot} onopen={() => show('chat')} />
+        <ProjectShelf kind="archived" entries={shelved} multi={several} {now} {scrollRoot} onopen={() => show('chat')} />
       {/if}
       <WindowList items={rows.filter(row => row.thread.projectId === null)} keyOf={row => JSON.stringify([row.machine.id, row.thread.id])} {scrollRoot} estimate={77} measurements={measurements('unassigned')}>
         {#snippet row(entry)}{@render threadRow(entry)}{/snippet}

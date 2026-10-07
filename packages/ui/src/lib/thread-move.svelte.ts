@@ -52,9 +52,9 @@ interface DropTarget {
   name: string;
 }
 
-/** The project section under a point, from the section's own data. */
+/** The project section or idle project row under a point, from its own data: each marks itself with `data-thread-drop`. */
 function sectionAt(x: number, y: number): DropTarget | null {
-  const section = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-testid="project"][data-project-id][data-machine-id]');
+  const section = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-thread-drop][data-project-id][data-machine-id]');
   const projectId = section?.dataset['projectId'], machineId = section?.dataset['machineId'];
   return projectId && machineId !== undefined ? { machineId, projectId: projectId as ProjectId, name: section?.dataset['projectName'] ?? '' } : null;
 }

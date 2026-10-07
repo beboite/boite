@@ -587,7 +587,8 @@ export const strings = {
     projectWorkingThreads: '{project}: {count} working',
     projectDoneThreads: '{project}: {count} done',
     projectArchivedThreads: '{project}: {count} archived',
-    otherProjects: 'Other projects',
+    /** The fold under the list for projects with no open conversation, and what choosing one does. */
+    idleProjects: 'Idle projects',
     groupingOptions: 'Display options',
     /** The sidebar's top switch between the thread list and the Agents page. */
     surface: 'Threads or agents',
@@ -641,6 +642,7 @@ export const strings = {
     projectArchivedToast: 'Archived {project}',
     archivedProjects: 'Archived projects',
     restoreProject: 'Restore',
+    restoreAndStart: 'Restore {project} and start a thread',
     /** The drawer under a project's rows: its archived threads, opened for this session only. */
     archivedThreads: 'Archived conversations',
     restoreThread: 'Restore',
@@ -1841,8 +1843,8 @@ export const strings = {
     conversations: 'Conversations',
     groupWorkingThreads: 'Group working threads',
     groupWorkingThreadsHint: 'Fold working and background threads in Projects and Recent. Pins, drafts, errors and threads that need you stay visible. This device only.',
-    groupOtherProjects: 'Group other projects',
-    groupOtherProjectsHint: 'Fold projects without a visible conversation or draft into Other projects in the Projects view. Turn off to keep all projects in the list. This device only.',
+    groupOtherProjects: 'Group idle projects',
+    groupOtherProjectsHint: 'Fold projects without a visible conversation or draft into Idle projects in the Projects view. Turn off to keep all projects in the list. This device only.',
     app: 'App',
     tourReplay: 'Replay the tour',
     execution: 'Agent execution',

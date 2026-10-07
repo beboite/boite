@@ -13,6 +13,8 @@ import { closeTour } from './lib/onboarding.svelte';
 import { work } from './lib/work-prefs.svelte';
 import { rightPanel } from './lib/right-panel.svelte';
 import { count } from './lib/format';
+import { projectThreadView } from './lib/project-threads.svelte';
+import { sidebarRows } from './lib/sidebar-rows.svelte';
 
 // The opener plugin is the shell's system browser; nothing real may run here.
 const { openUrl } = vi.hoisted(() => ({ openUrl: vi.fn(async (_url: string) => {}) }));
@@ -153,6 +155,24 @@ test('the app mounts against the fake core, lists the seeded threads and opens t
   expect(document.querySelectorAll('[data-testid=thread-row]').length).toBe(4);
   // The most recent thread opens on its own; nothing to click first.
   expect(store.openThread?.id).toBe('t-descriptors');
+});
+
+test('Alt+digit reaches the history unfolded under an idle project, after the listed projects', async ({ app: _app }) => {
+  try {
+    await store.open('t-trace');
+    await store.archive('t-descriptors', true);
+    projectThreadView.shelf.idle = true;
+    const row = '[data-testid=idle-project][data-project-id="p-notes"]';
+    await waitFor(() => document.querySelector(`${row} [data-testid$=-toggle]`) !== null);
+    query<HTMLButtonElement>(`${row} [data-testid$=-toggle]`).click();
+    await waitFor(() => document.querySelector(`${row} [data-testid=done-thread]`) !== null);
+    await waitFor(() => sidebarRows.list.at(-1)?.threadId === 't-descriptors');
+    expect(sidebarRows.list.map(entry => entry.threadId)).toEqual([...store.threadsOf('p-boite').map(() => expect.any(String)), 't-descriptors']);
+  } finally {
+    projectThreadView.shelf = { idle: false, archived: false };
+    projectThreadView.done = [];
+    projectThreadView.archived = [];
+  }
 });
 
 test('the page leaves the service worker its notification words on boot', async () => {

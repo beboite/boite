@@ -2,7 +2,6 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import type { Project, ThreadSummary } from '@boite/contracts';
 import ArchivedDrawer from './ArchivedDrawer.svelte';
-import ArchivedProjects from './ArchivedProjects.svelte';
 import ArchivedThreads from './ArchivedThreads.svelte';
 import ContextMenu from './ContextMenu.svelte';
 import { FakeClient } from '../lib/fake-client';
@@ -181,7 +180,6 @@ async function settle() {
 }
 
 const project = (extra: Partial<Project> = {}): Project => ({ id: 'p-1', name: 'boite', path: '/w/boite', createdAt: 0, ...extra });
-const iconless = { projectIconUrl: () => null, loadProjectIcon: async () => {} };
 const archived = (id: string, title: string) => ({ id, title, projectId: 'p-1', archived: true, updatedAt: 0 }) as ThreadSummary;
 
 test('a project with no archived thread has no drawer', () => {
@@ -215,75 +213,4 @@ test('the drawer reads the project\'s archived threads on opening, and a restore
   expect(call).toHaveBeenCalledWith('threads.archive', { threadId: 't-1', archived: false });
   expect(store.threads.map((t) => t.id)).toEqual(['t-1']);
   expect(document.querySelector('[data-thread-id=t-1]')).toBeNull();
-});
-
-test('the archived projects fold lists them and restores one in one click', () => {
-  const archiveProject = vi.fn(async () => true);
-  const machine = { id: 'local', label: 'This machine', store: { ...iconless, archiveProject } };
-  running = mount(ArchivedProjects, {
-    target: document.body,
-    props: { entries: [{ machine: machine as never, project: project({ archived: true }) }], multi: false }
-  });
-  flushSync();
-  const toggle = document.querySelector<HTMLButtonElement>('[data-testid=archived-projects-toggle]')!;
-  expect(toggle.querySelector('.label')?.textContent).toBe('Archived projects');
-  expect(toggle.querySelector('.fold-count')?.textContent).toBe('1');
-  expect(document.querySelector('[data-testid=archived-project-restore]')).toBeNull();
-  toggle.click();
-  flushSync();
-  // One machine: no machine header, and a paired device gets no remove button.
-  expect(document.querySelector('[data-testid=archived-projects-machine]')).toBeNull();
-  expect(document.querySelector('[data-testid=archived-project-remove]')).toBeNull();
-  document.querySelector<HTMLButtonElement>('[data-testid=archived-project-restore]')!.click();
-  expect(archiveProject).toHaveBeenCalledWith('p-1', false);
-});
-
-test('archived projects with matching ids show their machines and restore on the owning machine', () => {
-  const localRestore = vi.fn(async () => true);
-  const remoteRestore = vi.fn(async () => true);
-  running = mount(ArchivedProjects, {
-    target: document.body,
-    props: {
-      entries: [
-        { machine: { id: 'local', label: 'Workstation', store: { ...iconless, archiveProject: localRestore } } as never, project: project({ archived: true }) },
-        { machine: { id: 'remote', label: 'Build server', store: { ...iconless, archiveProject: remoteRestore } } as never, project: project({ archived: true }) }
-      ],
-      multi: true
-    }
-  });
-  flushSync();
-  document.querySelector<HTMLButtonElement>('[data-testid=archived-projects-toggle]')!.click();
-  flushSync();
-  const rows = document.querySelectorAll('[data-testid=archived-projects] li');
-  expect(rows).toHaveLength(2);
-  expect([...document.querySelectorAll('[data-testid=archived-projects-machine]')].map(h => h.textContent?.trim())).toEqual(['Workstation', 'Build server']);
-  expect([...rows].map(r => r.getAttribute('data-machine-id'))).toEqual(['local', 'remote']);
-  rows[1]!.querySelector<HTMLButtonElement>('button')!.click();
-  expect(remoteRestore).toHaveBeenCalledWith('p-1', false);
-  expect(localRestore).not.toHaveBeenCalled();
-});
-
-test('the owner removes an archived project only after confirming, on the owning machine', async () => {
-  const { confirm } = await import('../lib/confirm.svelte');
-  const removeProject = vi.fn(async () => {});
-  const machine = { id: 'local', label: 'Workstation', store: { ...iconless, owner: true, archiveProject: vi.fn(), removeProject } };
-  running = mount(ArchivedProjects, {
-    target: document.body,
-    props: { entries: [{ machine: machine as never, project: project({ archived: true }) }], multi: false }
-  });
-  flushSync();
-  document.querySelector<HTMLButtonElement>('[data-testid=archived-projects-toggle]')!.click();
-  flushSync();
-  const remove = document.querySelector<HTMLButtonElement>('[data-testid=archived-project-remove]')!;
-
-  const refuse = vi.spyOn(confirm, 'ask').mockResolvedValueOnce(false);
-  remove.click();
-  await settle();
-  expect(refuse).toHaveBeenCalledWith(expect.objectContaining({ title: 'Remove boite from Boite?', danger: true }));
-  expect(removeProject).not.toHaveBeenCalled();
-
-  vi.spyOn(confirm, 'ask').mockResolvedValueOnce(true);
-  remove.click();
-  await settle();
-  expect(removeProject).toHaveBeenCalledWith('p-1');
 });

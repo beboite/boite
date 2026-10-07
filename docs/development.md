@@ -226,10 +226,16 @@ includes running, queued and background work. Pins and unsent
 drafts stay visible while Working is folded and appear once when expanded;
 questions and failures stay in the main list. Done and Archived read only that project's
 archived summaries when expanded, with the same reading and restore actions as
-Recent. Other projects holds empty projects and projects whose conversations
-are all archived, in a closed section below the main list. Creating or restoring
-a conversation or starting a draft returns its project to the main list.
-Group other projects, in settings and the Projects grouping menu, can be disabled
+Recent. Idle projects holds empty projects and projects whose conversations
+are all archived, as compact rows in a closed fold below the main list. Archived
+projects sits under it with the same rows, on desktop and phone. Choosing an idle
+row starts a draft there; choosing an archived row restores the project, then
+starts a draft. Each row also archives (idle) or restores and removes (archived)
+without opening anything, and an idle row takes a dragged thread. An idle project
+with done or archived conversations shows those counts on its row; each unfolds
+that history under it. Creating or restoring a conversation or starting a draft
+returns its project to the main list.
+Group idle projects, in settings and the Projects grouping menu, can be disabled
 to keep every project in its normal order. Both grouping preferences persist on
 the device. Expansion follows the owning project between desktop and phone for
 the current session. Phone search exposes matching
