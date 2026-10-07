@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { LOCO_DARK, robotColor, type Robot } from '../../lib/robots';
+  import { robotColor, type Robot } from '../../lib/robots';
 
   /**
    * One robot, drawn in a 64 unit square that its holder crops to a disc. The
@@ -25,59 +25,95 @@
   const rx = $derived(32 + screen.w / 4.2);
 
   /*
-   * LocoRoco, after the games' art: one flat blob with no outline or shine,
-   * two small white eyes with brown pupils set off-centre near the top, a thin
-   * smile or a round singing mouth, and a flick of the body's own colour.
+   * Jelly: a blob that fills the disc on two small feet, with a shine, rosy
+   * cheeks and a face near its top. Shapes, faces and tops vary a lot so two
+   * agents rarely look alike.
    */
-  const locoBody = [
-    'M32 15 C46 15 55 25 55 38 C55 52 45 61 32 61 C18 61 9 52 9 38 C9 24 19 15 32 15Z',
-    'M32 21 C48 21 58 29 58 40 C58 52 47 59 32 59 C17 59 6 52 6 40 C6 29 16 21 32 21Z',
-    'M32 12 C44 12 52 25 52 39 C52 52 43 61 32 61 C21 61 12 52 12 39 C12 25 20 12 32 12Z',
-    'M10 40 C9 26 19 17 31 17 C45 17 56 25 55 39 C55 53 46 60 32 60 C18 60 11 52 10 40Z',
+  const jellyBody = [
+    'M7 46 C6 29 18 15 32 15 C47 15 58 29 57 46 C56 58 45 62 32 62 C19 62 8 58 7 46Z',
+    'M32 8 C38 16 56 28 56 46 C56 58 45 63 32 63 C19 63 8 58 8 46 C8 28 26 16 32 8Z',
+    'M3 50 C3 36 16 25 32 25 C48 25 61 36 61 50 C61 59 49 63 32 63 C15 63 3 59 3 50Z',
+    'M7 48 C6 34 10 17 21 17 C27 17 29 22 32 22 C35 22 37 17 43 17 C54 17 58 34 57 48 C56 59 45 63 32 63 C19 63 8 59 7 48Z',
+    'M32 10 C43 10 50 24 51 38 C52 53 44 62 32 62 C20 62 12 53 13 38 C14 24 21 10 32 10Z',
+    'M6 47 C5 37 10 30 17 29 C17 21 24 16 32 16 C40 16 47 21 47 29 C54 30 59 37 58 47 C57 58 46 62 32 62 C18 62 7 58 6 47Z',
   ];
-  const locoTop = $derived([15, 21, 12, 17][robot.shape] ?? 15);
-  /** The face sits right of centre, the way the games turn them. */
-  const fx = 36;
-  const fy = $derived(locoTop + 13);
-  /** Where each expression's pupils look. */
-  const look = $derived([{ x: 1.2, y: -1.2 }, { x: 0.2, y: -1.8 }, { x: 0, y: 0 }, { x: 0, y: 0 }, { x: -1.7, y: 0.3 }][robot.eyes] ?? { x: 0, y: 0 });
-  const dark = $derived(robot.family === 'loco' && robot.color === LOCO_DARK);
+  /** Per shape: the top of the head the face hangs from, where a top grows, and the shine. */
+  const jelly = $derived([
+    { head: 16, crown: 15, shine: [20, 26] },
+    { head: 12, crown: 9, shine: [25, 25] },
+    { head: 25, crown: 25, shine: [16, 35] },
+    { head: 16, crown: 22, shine: [18, 27] },
+    { head: 12, crown: 10, shine: [22, 22] },
+    { head: 17, crown: 16, shine: [22, 24] },
+  ][robot.shape] ?? { head: 16, crown: 15, shine: [20, 26] });
+  const ey = $derived(jelly.head + 15);
+  const c = $derived(jelly.crown);
+  /** A tall head nears the disc's edge: what grows straight up starts lower so it is not cropped. */
+  const up = $derived(Math.max(jelly.crown, 15));
+  const tip = $derived(Math.max(jelly.crown - 8, 6));
+  const petals = [0, 72, 144, 216, 288].map(a => ({ x: 4.2 * Math.cos(a * Math.PI / 180), y: 4.2 * Math.sin(a * Math.PI / 180) }));
 </script>
 
-<svg viewBox="0 0 64 64" class="robot" class:dark data-family={robot.family} data-state={state} style:--rb={robotColor(robot)} aria-hidden="true">
+<svg viewBox="0 0 64 64" class="robot" data-family={robot.family} data-state={state} style:--rb={robotColor(robot)} aria-hidden="true">
   <rect class={robot.family === 'capsule' ? 'base' : 'soft'} width="64" height="64" />
   <g class="whole">
     <g transform={tilt}>
-      {#if robot.family === 'loco'}
-        <!-- Behind the body: the flick, of the body's own colour. -->
-        {#if robot.top === 0}
-          <path d="M33 {locoTop + 3} C33 {locoTop - 3} 37 {locoTop - 6} 41 {locoTop - 6}" fill="none" class="stroke-base" stroke-width="3.2" stroke-linecap="round" />
-          <ellipse cx="43" cy={locoTop - 7} rx="4.2" ry="2.8" class="base" transform="rotate(-25 43 {locoTop - 7})" />
-        {:else if robot.top === 1}
-          <path d="M27 {locoTop + 3} C26 {locoTop - 3} 22 {locoTop - 6} 18 {locoTop - 5} M39 {locoTop + 3} C40 {locoTop - 3} 44 {locoTop - 6} 48 {locoTop - 5}" fill="none" class="stroke-base" stroke-width="3" stroke-linecap="round" />
-          <circle cx="17" cy={locoTop - 5} r="3" class="base" /><circle cx="49" cy={locoTop - 5} r="3" class="base" />
+      {#if robot.family === 'jelly'}
+        <!-- Behind the body: what grows out of its top. -->
+        {#if robot.top === 1}
+          <path d="M32 {c + 1} C30 {c - 6} 26 {c - 8} 23 {c - 6}" fill="none" class="stroke-deep" stroke-width="2.4" stroke-linecap="round" />
         {:else if robot.top === 2}
-          <path d="M32 {locoTop + 3} C30 {locoTop - 5} 39 {locoTop - 9} 40 {locoTop - 3} C40.6 {locoTop + 1} 35 {locoTop + 1} 36 {locoTop - 3}" fill="none" class="stroke-base" stroke-width="3" stroke-linecap="round" />
+          <path d="M32 {up + 1} L32 {up - 5}" class="stroke-leaf" stroke-width="2" />
+          {#each petals as petal, i (i)}<circle cx={32 + petal.x} cy={up - 8 + petal.y} r="2.6" class="petal" />{/each}
+          <circle cx="32" cy={up - 8} r="2.2" class="halo" />
         {:else if robot.top === 3}
-          <path d="M33 {locoTop + 3} L33 {locoTop - 4}" class="stroke-leaf" stroke-width="2.2" stroke-linecap="round" />
-          <path d="M33 {locoTop - 3} C28 {locoTop - 10} 22 {locoTop - 7} 23 {locoTop - 3} C26 {locoTop - 1} 30 {locoTop - 1} 33 {locoTop - 3}Z" class="leaf" />
-          <path d="M33 {locoTop - 5} C37 {locoTop - 12} 44 {locoTop - 10} 43 {locoTop - 6} C40 {locoTop - 3} 36 {locoTop - 3} 33 {locoTop - 5}Z" class="leaf light" />
+          <path d="M26 {c + 2} C24 {c - 4} 21 {tip + 1} 18 {tip} M38 {c + 2} C40 {c - 4} 43 {tip + 1} 46 {tip}" fill="none" class="stroke-deep" stroke-width="2.2" stroke-linecap="round" />
+          <circle cx="18" cy={tip} r="2.6" class="deep" /><circle cx="46" cy={tip} r="2.6" class="deep" />
+        {:else if robot.top === 4}
+          <path d="M31 {up + 1} C29 {up - 7} 37 {up - 9} 37 {up - 4} C37 {up - 1} 33 {up - 1} 33 {up - 4}" fill="none" class="stroke-deep" stroke-width="2.2" stroke-linecap="round" />
+        {:else if robot.top === 5}
+          <path d="M32 {up + 2} L32 {up - 5}" class="stroke-leaf" stroke-width="2.2" stroke-linecap="round" />
+          <path d="M32 {up - 4} C27 {up - 11} 21 {up - 8} 22 {up - 4} C25 {up - 2} 29 {up - 2} 32 {up - 4}Z" class="leaf" />
+          <path d="M32 {up - 6} C36 {up - 13} 43 {up - 11} 42 {up - 7} C39 {up - 4} 35 {up - 4} 32 {up - 6}Z" class="leaf light" />
+        {:else if robot.top === 6}
+          <path d="M27 {c + 3} L25 {c - 4} M32 {c + 2} L32 {c - 6} M37 {c + 3} L39 {c - 4}" fill="none" class="stroke-deep" stroke-width="2.2" stroke-linecap="round" />
         {/if}
-        <path d={locoBody[robot.shape] ?? locoBody[0]} class="base" />
+        <ellipse cx="22" cy="62" rx="6" ry="3" class="deep" /><ellipse cx="42" cy="62" rx="6" ry="3" class="deep" />
+        <path d={jellyBody[robot.shape] ?? jellyBody[0]} class="base" />
+        <ellipse cx={jelly.shine[0]} cy={jelly.shine[1]} rx="6" ry="3.5" class="gloss" transform="rotate(-25 {jelly.shine[0]} {jelly.shine[1]})" />
+        <ellipse class="blush" cx="15" cy={ey + 9} rx="3.6" ry="2.2" /><ellipse class="blush" cx="49" cy={ey + 9} rx="3.6" ry="2.2" />
         <g class="eyes">
-          {#if robot.eyes === 3}
-            <path d="M{fx - 9.5} {fy + 1} q3.5 -4.5 7 0 M{fx + 1.5} {fy} q3.5 -4.5 7 0" fill="none" class="loco-ink" stroke-width="2.3" stroke-linecap="round" />
+          {#if robot.eyes === 0 || robot.eyes === 1}
+            <ellipse cx="26" cy={ey} rx="4.2" ry="6.2" fill={INK} /><ellipse cx="38" cy={ey} rx="4.2" ry="6.2" fill={INK} />
+            {#if robot.eyes === 0}<ellipse cx="27.4" cy={ey - 2.6} rx="1.5" ry="2" class="white" /><ellipse cx="39.4" cy={ey - 2.6} rx="1.5" ry="2" class="white" />
+            {:else}<circle cx="27" cy={ey - 4} r="1.6" class="white" /><circle cx="39" cy={ey - 4} r="1.6" class="white" />{/if}
+          {:else if robot.eyes === 2}
+            <circle cx="25" cy={ey} r="6" class="white" /><circle cx="39" cy={ey} r="6" class="white" />
+            <circle cx="25" cy={ey + 1} r="2.6" fill={INK} /><circle cx="39" cy={ey + 1} r="2.6" fill={INK} />
+          {:else if robot.eyes === 3}
+            <path d="M21 {ey + 1} q5 -7 10 0 M33 {ey + 1} q5 -7 10 0" fill="none" class="stroke-ink" stroke-width="2.8" stroke-linecap="round" />
+          {:else if robot.eyes === 4}
+            <path d="M21 {ey} q5 4 10 0 M33 {ey} q5 4 10 0" fill="none" class="stroke-ink" stroke-width="2.4" stroke-linecap="round" />
+          {:else if robot.eyes === 5 || robot.eyes === 6}
+            <!-- White eyes, the right one a little bigger, looking up and away. -->
+            <circle cx="28" cy={ey} r="4.6" class="white" /><circle cx="40" cy={ey - 1} r="5.4" class="white" />
+            <circle cx={robot.eyes === 5 ? 29.6 : 28.4} cy={ey - 1.4} r="2.3" fill={INK} /><circle cx={robot.eyes === 5 ? 41.8 : 40.4} cy={ey - 2.6} r="2.6" fill={INK} />
           {:else}
-            {@const big = robot.eyes === 2 ? 1.15 : 1}
-            <circle cx={fx - 6} cy={fy} r={4 * big} class="white" /><circle cx={fx + 5} cy={fy - 1} r={4.5 * big} class="white" />
-            <circle cx={fx - 6 + look.x} cy={fy + look.y} r={robot.eyes === 2 ? 1.6 : 2.1} class="pupil" /><circle cx={fx + 5 + look.x} cy={fy - 1 + look.y} r={robot.eyes === 2 ? 1.7 : 2.3} class="pupil" />
+            <ellipse cx="26" cy={ey} rx="4.2" ry="6.2" fill={INK} /><ellipse cx="27.4" cy={ey - 2.6} rx="1.5" ry="2" class="white" />
+            <path d="M33 {ey + 1} q5 -6 10 0" fill="none" class="stroke-ink" stroke-width="2.8" stroke-linecap="round" />
           {/if}
         </g>
-        {#if robot.eyes === 0}<path d="M{fx - 8} {fy + 8} Q{fx - 1} {fy + 14} {fx + 6} {fy + 7}" fill="none" class="mouth" stroke-width="1.9" stroke-linecap="round" />
-        {:else if robot.eyes === 1}<ellipse cx={fx - 1} cy={fy + 11} rx="3.6" ry="4.4" class="mouth-fill" /><ellipse cx={fx - 1} cy={fy + 12.4} rx="2.1" ry="2.2" class="tongue" />
-        {:else if robot.eyes === 2}<circle cx={fx - 1} cy={fy + 10} r="2.2" class="mouth-fill" />
-        {:else if robot.eyes === 3}<path d="M{fx - 9} {fy + 6} Q{fx - 1} {fy + 18} {fx + 7} {fy + 6} Z" class="mouth-fill" /><path d="M{fx - 5} {fy + 11.5} Q{fx - 1} {fy + 15} {fx + 3} {fy + 11.5} Z" class="tongue" />
-        {:else}<path d="M{fx - 6} {fy + 9} Q{fx - 1} {fy + 11} {fx + 4} {fy + 7}" fill="none" class="mouth" stroke-width="1.9" stroke-linecap="round" />{/if}
+        {#if robot.eyes === 0}<path d="M22 {ey + 9} Q32 {ey + 19} 42 {ey + 9}" fill="none" class="stroke-ink" stroke-width="2.4" stroke-linecap="round" />
+        {:else if robot.eyes === 1 || robot.eyes === 4}<path d="M28 {ey + 11} q4 3 8 0" fill="none" class="stroke-ink" stroke-width="2.2" stroke-linecap="round" />
+        {:else if robot.eyes === 2}<ellipse cx="32" cy={ey + 13} rx="3.4" ry="4" fill={INK} />
+        {:else if robot.eyes === 3}<path d="M21 {ey + 8} Q32 {ey + 21} 43 {ey + 8} Z" fill={INK} /><path d="M27 {ey + 13} Q32 {ey + 17} 37 {ey + 13} Z" class="tongue" />
+        {:else if robot.eyes === 5}<path d="M27 {ey + 10} Q34 {ey + 15} 41 {ey + 8}" fill="none" class="stroke-ink" stroke-width="2.2" stroke-linecap="round" />
+        {:else if robot.eyes === 6}<ellipse cx="34" cy={ey + 12} rx="3.8" ry="4.6" fill={INK} /><ellipse cx="34" cy={ey + 13.6} rx="2.2" ry="2.3" class="tongue" />
+        {:else}<path d="M24 {ey + 9} Q32 {ey + 17} 40 {ey + 9}" fill="none" class="stroke-ink" stroke-width="2.4" stroke-linecap="round" /><ellipse cx="35" cy={ey + 13.5} rx="2.6" ry="2.2" class="tongue" />{/if}
+        <!-- Over the body: a bow on its top. -->
+        {#if robot.top === 7}
+          <path d="M32 {c - 1} L26 {c - 4.6} Q24 {c - 1} 26 {c + 2.6} Z M32 {c - 1} L38 {c - 4.6} Q40 {c - 1} 38 {c + 2.6} Z" class="bow" /><circle cx="32" cy={c - 1} r="2.2" class="bow knot" />
+        {/if}
 
       {:else if robot.family === 'bubble'}
         <!-- Behind the body: what grows out of its top. -->
@@ -206,15 +242,9 @@
   .screen { fill: var(--robot-screen); }
   .lit { fill: var(--robot-led); }
   .heart { fill: var(--robot-blush); }
-  [data-family='loco'] .soft { fill: color-mix(in srgb, var(--rb) 22%, var(--robot-shine)); }
-  .stroke-base { stroke: var(--rb); }
-  .pupil { fill: var(--loco-pupil); }
-  .loco-ink { stroke: var(--loco-ink); }
-  .mouth { stroke: var(--loco-ink); }
-  .mouth-fill { fill: var(--loco-ink); }
+  .gloss { fill: var(--robot-shine); opacity: 0.45; }
+  .petal { fill: var(--robot-blush); }
   .tongue { fill: var(--robot-blush); }
-  .dark .mouth, .dark .loco-ink { stroke: var(--robot-face); }
-  .dark .mouth-fill { fill: var(--robot-face); }
 
   /* A blink at rest, a glance while working, a hop while it waits on the user. */
   .eyes { transform-box: fill-box; transform-origin: center; }
@@ -222,8 +252,8 @@
   [data-state='working'] .eyes { animation: robot-glance 2.4s ease-in-out infinite; }
   [data-state='working'] .led { animation: robot-pulse 1.2s ease-in-out infinite; }
   [data-state='waiting'] .whole { animation: robot-hop 1.8s ease-in-out infinite; }
-  /* A LocoRoco at work squishes on the spot, the way they wobble in the games. */
-  [data-family='loco'][data-state='working'] .whole { transform-origin: 32px 62px; animation: robot-squish 0.9s ease-in-out infinite; }
+  /* A jelly at work squishes on the spot. */
+  [data-family='jelly'][data-state='working'] .whole { transform-origin: 32px 62px; animation: robot-squish 0.9s ease-in-out infinite; }
   @keyframes robot-squish { 0%, 100% { transform: scale(1, 1); } 40% { transform: scale(1.07, 0.93); } 70% { transform: scale(0.96, 1.04); } }
   @keyframes robot-blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.12); } }
   @keyframes robot-glance { 0%, 20% { transform: translateX(0); } 30%, 50% { transform: translateX(-2.2px); } 60%, 80% { transform: translateX(2.2px); } 90%, 100% { transform: translateX(0); } }

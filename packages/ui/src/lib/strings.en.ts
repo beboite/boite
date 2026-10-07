@@ -143,7 +143,7 @@ export const strings = {
     ownedBy: '{name} runs this thread', ownedHint: 'Talk to {name} in its conversation. This thread shows what it does.', openAgent: 'Open {name}',
     robot: {
       family: 'Style', shape: 'Shape', color: 'Color', eyes: 'Eyes', top: 'Accessory', shuffle: 'Shuffle', customize: 'Customize', done: 'Done',
-      option: '{part} {n}', families: { loco: 'LocoRoco', bubble: 'Bubble', capsule: 'Capsule', retro: 'Retro' },
+      option: '{part} {n}', families: { jelly: 'Jelly', bubble: 'Bubble', capsule: 'Capsule', retro: 'Retro' },
     },
     when: {
       who: 'Agent', pickAgent: 'Choose an agent', what: 'What should it do?', whatPlaceholder: 'For example: sum up the new messages and tell me what needs an answer.',

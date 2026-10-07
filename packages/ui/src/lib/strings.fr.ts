@@ -150,7 +150,7 @@ export const fr: Translation = {
     ownedBy: '{name} gère ce thread', ownedHint: 'Parlez à {name} dans sa discussion. Ce thread montre ce qu’il fait.', openAgent: 'Ouvrir {name}',
     robot: {
       family: 'Style', shape: 'Forme', color: 'Couleur', eyes: 'Yeux', top: 'Accessoire', shuffle: 'Mélanger', customize: 'Personnaliser', done: 'Terminé',
-      option: '{part} {n}', families: { loco: 'LocoRoco', bubble: 'Bulle', capsule: 'Capsule', retro: 'Rétro' },
+      option: '{part} {n}', families: { jelly: 'Gelée', bubble: 'Bulle', capsule: 'Capsule', retro: 'Rétro' },
     },
     when: {
       who: 'Agent', pickAgent: 'Choisir un agent', what: 'Que doit-il faire ?', whatPlaceholder: 'Par exemple : résume les nouveaux messages et dis-moi lesquels attendent une réponse.',

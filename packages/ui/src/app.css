@@ -306,18 +306,16 @@
   --robot-7: #c294ff;
   --robot-8: #ff92c2;
   --robot-9: #8e98ab;
-  /* LocoRoco's flat colours: yellow, orange, red, pink, purple, blue, teal, green, black. */
-  --loco-1: #f6b51e;
-  --loco-2: #f58a24;
-  --loco-3: #e9453a;
-  --loco-4: #f37fb2;
-  --loco-5: #8c55c9;
-  --loco-6: #2f7fd8;
-  --loco-7: #23b3a8;
-  --loco-8: #5cb43a;
-  --loco-9: #26232a;
-  --loco-ink: #3b2414;
-  --loco-pupil: #2b1a0e;
+  /* The jelly family's livelier set: sun, orange, coral, pink, purple, blue, teal, green, slate. */
+  --jelly-1: #fbc53a;
+  --jelly-2: #fa9d45;
+  --jelly-3: #f56d5f;
+  --jelly-4: #f98bbd;
+  --jelly-5: #a979e6;
+  --jelly-6: #509ef0;
+  --jelly-7: #3cc5b2;
+  --jelly-8: #7cc95c;
+  --jelly-9: #7f889b;
   --robot-ink: #1d1f24;
   --robot-shine: #ffffff;
   --robot-face: #fff6e9;

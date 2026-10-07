@@ -7,7 +7,7 @@
  * `RobotFace.svelte` draws them.
  */
 
-export type RobotFamily = 'loco' | 'bubble' | 'capsule' | 'retro';
+export type RobotFamily = 'jelly' | 'bubble' | 'capsule' | 'retro';
 
 export interface Robot {
   family: RobotFamily;
@@ -20,28 +20,25 @@ export interface Robot {
 /** The part a picker row changes. */
 export type RobotPart = 'family' | 'shape' | 'color' | 'eyes' | 'top';
 
-/** How many choices each family offers per part. Every family has nine colours. */
+/** How many choices each family offers per part. Every family has nine colors. */
 export const ROBOT_PARTS: Record<RobotFamily, Record<'shape' | 'eyes' | 'top', number>> = {
-  loco: { shape: 4, eyes: 5, top: 5 },
+  jelly: { shape: 6, eyes: 8, top: 8 },
   bubble: { shape: 4, eyes: 5, top: 7 },
   capsule: { shape: 4, eyes: 5, top: 6 },
   retro: { shape: 4, eyes: 5, top: 4 },
 };
-export const ROBOT_FAMILIES: RobotFamily[] = ['loco', 'bubble', 'capsule', 'retro'];
-/** `--robot-1` to `--robot-9` in app.css; the LocoRoco family reads its own `--loco-1` to `--loco-9`. */
+export const ROBOT_FAMILIES: RobotFamily[] = ['jelly', 'bubble', 'capsule', 'retro'];
+/** `--robot-1` to `--robot-9` in app.css; the jelly family reads its own, livelier `--jelly-1` to `--jelly-9`. */
 export const ROBOT_COLORS = 9;
-/** The family a robot drawn from an id belongs to: the jelly blobs of LocoRoco. */
-export const DEFAULT_FAMILY: RobotFamily = 'loco';
+/** The family a robot drawn from an id belongs to: the jelly blobs. */
+export const DEFAULT_FAMILY: RobotFamily = 'jelly';
 
-/** The colour variable a robot wears: LocoRoco's flat, saturated set, or the pastel one the others share. */
+/** The color variable a robot wears: the jelly set, or the pastel one the other families share. */
 export function robotColor(robot: Pick<Robot, 'family' | 'color'>): string {
-  return `var(--${robot.family === 'loco' ? 'loco' : 'robot'}-${robot.color + 1})`;
+  return `var(--${robot.family === 'jelly' ? 'jelly' : 'robot'}-${robot.color + 1})`;
 }
 
-/** The ninth LocoRoco colour is black: its mouth and lids are drawn light. */
-export const LOCO_DARK = 8;
-
-const LETTER: Record<RobotFamily, string> = { bubble: 'a', capsule: 'b', retro: 'c', loco: 'd' };
+const LETTER: Record<RobotFamily, string> = { bubble: 'a', capsule: 'b', retro: 'c', jelly: 'd' };
 const PREFIX = 'bot:';
 
 export function isRobotCode(avatar: string): boolean {

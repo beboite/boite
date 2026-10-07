@@ -33,21 +33,21 @@ come filled in, and role, tools and the rest wait under More options.
 
 An agent's picture is a small robot drawn in SVG (`RobotFace.svelte`). It has
 a style, a shape, one of nine colours, a face and a top. The default style is
-LocoRoco, after the games' art: a flat blob with no outline or shine, two small
-white eyes with brown pupils set off-centre near the top, a thin smile or a
-round singing mouth, and a flick of the body's own colour on top. Its colours
-are the saturated `--loco-1` to `--loco-9` in `app.css`, the ninth black with a
-light mouth. Bubble, Capsule and Retro remain in the picker and share the
-pastel `--robot-1` to `--robot-9`.
+Jelly: a blob on two small feet with a shine and rosy cheeks, in one of six
+shapes (round, drop, puddle, two bumps, pear, cloud), eight faces (black or
+white eyes, smiling, sleepy, surprised, singing, winking) and eight tops
+(nothing, a curl, a flower, antennae, a loop, a sprout, three hairs, a bow).
+Its colours are `--jelly-1` to `--jelly-9` in `app.css`, livelier than the
+pastel `--robot-1` to `--robot-9` that Bubble, Capsule and Retro share.
 
 The robot is stored in the existing `avatar` field as
 `bot:<style>.<shape>.<colour>.<face>.<top>`, for example `bot:d.0.0.0.0` for a
-yellow LocoRoco, so no record changed. An empty avatar draws the LocoRoco the
+round yellow jelly, so no record changed. An empty avatar draws the jelly the
 agent's id gives, the same on every client; one or two characters (an emoji,
 initials) stay text, and a code this build cannot read stays text too. Shuffle
 draws a new robot in the same style; Customize opens one row per part, each
 choice drawn on the robot. The face moves with the agent: it blinks at rest,
-a LocoRoco squishes on the spot while it works (the other styles glance from
+a jelly squishes on the spot while it works (the other styles glance from
 side to side), and every style hops while it waits on the user. Reduced motion
 stills it.
 
