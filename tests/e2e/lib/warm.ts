@@ -3,7 +3,7 @@
 // `packages/ui/node_modules/.vite`, and workers starting together empty it under
 // each other's servers. One optimization here leaves every later server a
 // consistent cache. With an output directory argument it also builds the
-// fake-client bundle once, for `BOITE_E2E_FAKE_UI`.
+// fake-client bundle once, for `BOITE_E2E_FAKE_UI`, and opens it in a browser.
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { freePort } from './cdp.ts';
@@ -59,6 +59,25 @@ async function prepare(): Promise<void> {
   if (outDir) {
     await preparationStep('build fake UI', async () => {
       await build({ root, plugins: [fixtureBridge], define: { 'import.meta.env.DEV': 'true' }, build: { outDir: resolve(outDir), emptyOutDir: true }, logLevel: 'warn' });
+    });
+    // The first Chrome of a hosted runner is the slow one. It starts here, where
+    // nothing has a deadline, and not inside the first test of the run. A
+    // browser that will not start is the tests' to report, so this never fails.
+    await preparationStep('first browser', async () => {
+      process.env.BOITE_E2E_FAKE_UI = resolve(outDir);
+      const { BrowserPage } = await import('./cdp.ts');
+      const { startUi } = await import('./ui.ts');
+      const port = await freePort();
+      const ui = await startUi(port);
+      try {
+        const page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent` });
+        try { await page.waitFor(`document.querySelector('[data-testid="composer-input"]')`, 60_000); }
+        finally { await page.close(); }
+      } catch (error) {
+        console.warn('e2e preparation: the first browser did not come up', error);
+      } finally {
+        await ui.close();
+      }
     });
   }
 }

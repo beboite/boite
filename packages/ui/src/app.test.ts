@@ -2775,6 +2775,12 @@ test("a mouse's back and forward buttons walk the threads, settings tabs and mac
   expect(workspace.active).toBe(store);
   expect(store.openThread?.id).toBe(first);
   await side(3, () => store.page === 'settings' && store.settingsTab === 'appearance');
+  // Views shown after a button's move are still recorded, one by one.
+  await store.open('t-scheduler');
+  flushSync();
+  await store.open(first);
+  flushSync();
+  await side(3, () => store.page === 'chat' && store.openThread?.id === 't-scheduler');
   await workspace.select(store, first);
 });
 

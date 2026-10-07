@@ -115,9 +115,12 @@ let moving = false;
 let moves: Promise<void> = Promise.resolve();
 
 function record(): void {
-  // A machine being switched to shows what it had open until what was asked for lands.
-  if (moving || workspace.selecting > 0 || !workspace.active.booted) return;
+  // Read first, whatever comes of it: an effect that returned before reading
+  // any state would depend on none, and never run again.
   const view = currentView();
+  // A machine being switched to shows what it had open until what was asked for lands.
+  const settled = workspace.selecting === 0 && workspace.active.booted;
+  if (moving || !settled) return;
   if (view) trail.visit(view);
 }
 
