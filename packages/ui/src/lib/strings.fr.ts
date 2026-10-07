@@ -963,6 +963,7 @@ export const fr: Translation = {
     workedFor: 'A travaillé {time}',
     compacting: 'Compaction en cours',
     compactionElapsed: 'Temps écoulé : {time}',
+    turnOwnTime: 'Depuis votre message. Cette réponse : {time}',
     compactedFor: 'Contexte compacté en {time}',
     compactionFailed: 'Échec de la compaction',
     compactionStopped: 'Compaction arrêtée',

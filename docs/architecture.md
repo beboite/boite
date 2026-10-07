@@ -238,6 +238,13 @@ splits the assistant message at its arrival; earlier running tools finish in
 the earlier message. Claude background work can keep a session alive after its
 foreground turn and later open a background-completion turn.
 
+A turn Boite opens by itself (background completion, delegation or
+coordination mail, restart resume, automatic compaction) carries on the user's
+last request (`continuesRequest`). Elapsed time counts from that request's
+first turn: `requestStarts` for a chat summary, `ThreadSummary.requestSince`
+for a sidebar row while the agent works or monitors. A shell left running keeps
+its own start, and a compaction its own duration.
+
 Native task observations persist with the provider, session generation and
 originating turn. The UI shows the latest 100 observations separately from
 Boite's delegated conversations. A missing live task is marked ended, not

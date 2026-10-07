@@ -4,10 +4,12 @@
   import type { Store } from '../lib/store.svelte';
   import TurnSummary from './TurnSummary.svelte';
 
-  let { store, threadId, turn, message, messages, actions }: {
+  let { store, threadId, turn, requestStartedAt = null, message, messages, actions }: {
     store: Store;
     threadId: string;
     turn: Turn;
+    /** When the user's request this turn carries on started (`requestStarts`). */
+    requestStartedAt?: number | null;
     message: Message;
     messages: Message[];
     actions?: Snippet;
@@ -25,6 +27,7 @@
 
 <TurnSummary
   {turn}
+  {requestStartedAt}
   progress={store.openThread?.id === threadId ? store.openThread.progress : undefined}
   activeTool={active.some(current => current.parts.some(part => part.type === 'tool' && part.status === 'running'))}
   {activeContent}

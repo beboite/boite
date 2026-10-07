@@ -3,9 +3,11 @@ import {
   BRANCH_NAME_MAX,
   RpcErrorCode,
   TODO_TEXT_MAX,
+  requestStarts,
   type AgentCommand,
   type Thread,
   type ThreadSummary,
+  type Turn,
   type Usage,
   type WorktreeStorage,
 } from '@boite/contracts';
@@ -78,6 +80,14 @@ export function fakeWorktree(projectPath: string, _title: string, branch?: strin
   };
 }
 
+/** When the request of the latest turn that started began, as the core's `journal.requestSince` reads it. */
+function currentRequestSince(turns: Turn[]): number | null {
+  const started = turns.filter(turn => turn.startedAt !== null);
+  if (started.length === 0) return null;
+  const latest = started.reduce((last, turn) => turn.queuedAt >= last.queuedAt ? turn : last);
+  return requestStarts(turns).get(latest.id) ?? null;
+}
+
 export function toSummary(thread: Thread): ThreadSummary {
   const { memoryEvents: _memoryEvents, messages: _messages, turns: _turns, commands: _commands, background: _background, backgroundHistory: _history, activity: _activity, messagesBefore: _before, messagesFrom: _from, messagesSync: _sync, messagesUnchanged: _unchanged, ...rest } = thread;
   const busy = thread.status === 'running' || thread.status === 'waiting';
@@ -87,6 +97,7 @@ export function toSummary(thread: Thread): ThreadSummary {
     ...rest,
     lastUserMessageAt: thread.messages.filter(m => m.role === 'user').at(-1)?.createdAt ?? null,
     runningSince: busy && started.length > 0 ? Math.min(...started) : null,
+    requestSince: busy || tasks.length > 0 ? currentRequestSince(thread.turns) : null,
     backgroundWork: tasks.length === 0 ? null : { kinds: tasks.map(task => task.kind), since: Math.min(...tasks.map(task => task.startedAt)) }
   };
 }

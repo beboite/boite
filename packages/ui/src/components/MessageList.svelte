@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { ArrowDown } from '@lucide/svelte';
-  import type { Message } from '@boite/contracts';
+  import { requestStarts, type Message } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import MessageTurnSummary from './MessageTurnSummary.svelte';
@@ -690,6 +690,8 @@
     }
     return result;
   });
+  /** Where each turn's request started, so a reply after monitoring keeps counting from the user's message. */
+  const turnRequestStarts = $derived(requestStarts(store.openThread?.turns ?? []));
   const lastInTurn = $derived.by(() => {
     const result = new Map<string, string>();
     for (const message of timeline) result.set(message.turnId, message.id);
@@ -788,7 +790,7 @@
             <TurnFiles {store} {...filesByTurn.get(turn.id)!} />
           {/if}
           {#if turn && closes}
-            <MessageTurnSummary {store} {threadId} {turn} message={source ?? message} {messages}>
+            <MessageTurnSummary {store} {threadId} {turn} requestStartedAt={turnRequestStarts.get(turn.id) ?? null} message={source ?? message} {messages}>
               {#snippet actions()}
                 <MessageActions
                   text={() => answerOf(turn.id)}

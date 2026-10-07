@@ -59,6 +59,7 @@ export function withLoad(core: Core, thread: ThreadSummary): ThreadSummary {
     archiveReason: thread.archived ? archiveState(core.journal, thread.id).reason : undefined,
     load: core.procs.loadOf(thread.id),
     runningSince: busy ? core.journal.runningSince(thread.id) : null,
+    requestSince: busy || tasks.length > 0 ? core.journal.requestSince(thread.id) : null,
     progress: busy ? core.threads?.progress?.get(thread.id) ?? null : null,
     backgroundWork: tasks.length === 0 ? null : { kinds: tasks.map(task => task.kind), since: Math.min(...tasks.map(task => task.startedAt)) },
     pendingMove: core.threads?.moves?.pendingOf(thread.id) ?? null,

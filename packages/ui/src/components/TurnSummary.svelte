@@ -9,8 +9,14 @@
   import { backgroundLabel } from '../lib/background';
   import type { Snippet } from 'svelte';
   import TypingIndicator from './TypingIndicator.svelte';
-  let { turn, progress, waiting = false, activeTool = false, activeContent = false, typing = false, background = [], stop, actions }: {
+  let { turn, requestStartedAt = null, progress, waiting = false, activeTool = false, activeContent = false, typing = false, background = [], stop, actions }: {
     turn: Turn;
+    /**
+     * When the user's request this turn belongs to started, earlier than the
+     * turn's own start when Boite opened it to carry on after background work.
+     * The elapsed time counts from there.
+     */
+    requestStartedAt?: number | null;
     progress?: ThreadProgress | null;
     waiting?: boolean;
     /** The message already shows the running tool's activity row. */
@@ -40,7 +46,12 @@
     if (turn.status === 'stopped') return compactOperation ? strings.chat.compactionStopped : strings.chat.stopped;
     return waiting ? strings.notify.needsYou : strings.chat.working;
   });
-  const spent = $derived(turn.startedAt === null ? null : Math.max(0, (turn.finishedAt ?? now) - turn.startedAt));
+  const own = $derived(turn.startedAt === null ? null : Math.max(0, (turn.finishedAt ?? now) - turn.startedAt));
+  // A compaction reports its own duration; work counts from the user's request.
+  const since = $derived(compactOperation || turn.startedAt === null ? turn.startedAt : Math.min(requestStartedAt ?? turn.startedAt, turn.startedAt));
+  const spent = $derived(since === null ? null : Math.max(0, (turn.finishedAt ?? now) - since));
+  /** This turn's own share, shown on hover when the request spans several turns. */
+  const ownLabel = $derived(own !== null && spent !== null && spent - own >= 1000 ? fill(strings.chat.turnOwnTime, { time: elapsed(own) }) : undefined);
   const elapsedLabel = $derived(compactOperation ? turn.status === 'done' ? strings.chat.compactedFor : strings.chat.compactionElapsed : running ? strings.chat.workingFor : strings.chat.workedFor);
   const usage = $derived(turn.usage);
   const total = $derived(usage === null ? 0 : usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens);
@@ -84,7 +95,7 @@
     {:else}
     {#if turn.status === 'done'}<Check size={14} />{:else if turn.status === 'error'}<CircleAlert size={14} />{:else if turn.status === 'stopped'}<Square size={12} />{:else if !preparing && !activeContent}<LoaderCircle size={16} class="spinner" />{/if}
     {#if spent !== null}
-      <span class="ui-label" data-testid="turn-elapsed">{fill(elapsedLabel, { time: elapsed(spent) })}</span>
+      <span class="ui-label" data-testid="turn-elapsed" title={ownLabel}>{fill(elapsedLabel, { time: elapsed(spent) })}</span>
     {/if}
     {#if compactOperation && (turn.status === 'error' || turn.status === 'stopped')}
       {@render metric('compaction-result', label)}

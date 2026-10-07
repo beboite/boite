@@ -48,6 +48,23 @@ test('a finished turn reads how long it worked, when it was done and what it spe
   expect(document.querySelector('[data-testid=turn-background]')).toBeNull();
 });
 
+test('a turn that carries on after monitoring counts from the user request, its own share on hover', () => {
+  // The user's turn began 30 minutes before Boite woke the agent for this one.
+  const request = STARTED - 1_800_000;
+  running = mount(TurnSummary, { target: document.body, props: { turn: turn(), requestStartedAt: request } });
+  flushSync();
+  const shown = document.querySelector('[data-testid=turn-elapsed]');
+  expect(shown?.textContent).toBe('Worked for 34m 41s');
+  expect(shown?.getAttribute('title')).toBe('Since your message. This reply: 4m 41s');
+});
+
+test('a compaction keeps its own duration whatever request it follows', () => {
+  running = mount(TurnSummary, { target: document.body, props: { turn: turn({ execution: compactExecution }), requestStartedAt: STARTED - 1_800_000 } });
+  flushSync();
+  expect(text('turn-elapsed')).toBe('Compacted in 4m 41s');
+  expect(document.querySelector('[data-testid=turn-elapsed]')?.getAttribute('title')).toBeNull();
+});
+
 test('work left in the background is counted by kind and can be stopped', () => {
   const tasks: BackgroundTask[] = [
     { id: 'bash-1', kind: 'shell', description: 'bun run dev:ui', toolId: 'tool-1', startedAt: STARTED },
