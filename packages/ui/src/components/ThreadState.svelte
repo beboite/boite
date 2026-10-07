@@ -14,16 +14,20 @@
    */
   let { thread, now, subagents = null, countSubagents = false }: { thread: Pick<ThreadSummary, 'status' | 'unread' | 'runningSince' | 'requestSince' | 'backgroundWork' | 'lastUserMessageAt' | 'createdAt'>; now: number; subagents?: WorkingChildren | null; countSubagents?: boolean } = $props();
 
+  function earliest(a: number | null | undefined, b: number | null | undefined): number | null {
+    return a == null ? b ?? null : b == null ? a : Math.min(a, b);
+  }
   let kind = $derived(threadState(thread, subagents?.count ?? 0));
   /** The states that count time: the turn, its sub-agents, or the work it left running. */
   let live = $derived(kind === 'working' || kind === 'delegating' || kind === 'monitoring' || kind === 'background');
   /**
    * Working and monitoring count from the user's request, so a pause to watch
    * CI and the turn that resumes after it do not reset the clock. A shell left
-   * running counts from its own start: it may outlive many requests.
+   * running counts from its own start: it may outlive many requests. A request
+   * never starts after the turn that carries it on.
    */
   let since = $derived(
-    kind === 'working' ? thread.requestSince ?? thread.runningSince ?? null
+    kind === 'working' ? earliest(thread.requestSince, thread.runningSince)
     : kind === 'monitoring' ? thread.requestSince ?? thread.backgroundWork?.since ?? null
     : kind === 'delegating' ? subagents?.since ?? null
     : live ? thread.backgroundWork?.since ?? null : null);

@@ -88,9 +88,16 @@ test('monitoring and the turn that resumes after it keep counting from the user 
   expect(watching.textContent?.trim()).toBe('30m 00s');
   expect(watching.getAttribute('title')).toBe('Monitoring for 30m 00s\n1 monitor still running');
   unmount(running!, { outro: false });
+  running = null;
   const resumed = draw({ status: 'running', runningSince: NOW - 5_000, requestSince: request });
   expect(resumed.textContent?.trim()).toBe('30m 00s');
   unmount(running!, { outro: false });
+  running = null;
+  // A request start later than the running turn's, from a clock skew, falls back to the turn's.
+  const skewed = draw({ status: 'running', runningSince: NOW - 5_000, requestSince: NOW - 1_000 });
+  expect(skewed.textContent?.trim()).toBe('5s');
+  unmount(running!, { outro: false });
+  running = null;
   // A shell left running may predate the request: it keeps its own start.
   const shell = draw({ status: 'idle', requestSince: request, backgroundWork: { kinds: ['shell'], since: NOW - 5_000 } });
   expect(shell.textContent?.trim()).toBe('5s');

@@ -1116,13 +1116,19 @@ export function continuesRequest(turn: Pick<Turn, 'execution'>): boolean {
  * When the request each turn belongs to started: the start of the last turn
  * the user opened, carried through the turns Boite opened after it
  * (`continuesRequest`). Turns are ordered by `queuedAt`, whatever order the
- * list holds them in. When the user's turn is not in the list, a page not
- * loaded yet, the earliest start of the loaded continuation stands in.
+ * list holds them in. A turn that never started maps to null and moves
+ * nothing: a prompt still queued, or cancelled before it ran, has no start to
+ * count from. When the user's turn is not in the list, a page not loaded yet,
+ * the earliest start of the loaded continuation stands in.
  */
 export function requestStarts(turns: readonly Pick<Turn, 'id' | 'queuedAt' | 'startedAt' | 'execution'>[]): Map<TurnId, Timestamp | null> {
   const starts = new Map<TurnId, Timestamp | null>();
   let since: Timestamp | null = null;
   for (const turn of [...turns].sort((a, b) => a.queuedAt - b.queuedAt)) {
+    if (turn.startedAt === null) {
+      starts.set(turn.id, null);
+      continue;
+    }
     if (!continuesRequest(turn) || since === null) since = turn.startedAt;
     starts.set(turn.id, since);
   }

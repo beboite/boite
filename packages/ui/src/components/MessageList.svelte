@@ -77,6 +77,8 @@
   const teamRowId = $derived(`delegation:${threadId}`);
   /** The runs this thread started, each a card where it began. */
   const workflowRows = $derived(new Map(store.workflowsOf(threadId).filter(run => run.rootThreadId === threadId).map(run => [`workflow:${run.id}`, run])));
+  /** The turns of the thread this list shows, open or delegated. */
+  const shownTurns = $derived(store.openThread?.id === threadId ? store.openThread.turns : store.delegationThread?.id === threadId ? store.delegationThread.turns : []);
   const grouped = $derived.by(() => {
     if (mail.length === 0 && team.length === 0 && workflowRows.size === 0 && memoryRows.size === 0) return { timeline: messages, groups: new Map() };
     const activity: Message[] = team.length ? [{
@@ -85,9 +87,8 @@
     }] : [];
     const runs: Message[] = [...workflowRows].map(([id, run]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: run.createdAt }));
     const memory: Message[] = [...memoryRows].map(([id, event]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: event.at }));
-    const turns = store.openThread?.id === threadId ? store.openThread.turns : store.delegationThread?.id === threadId ? store.delegationThread.turns : [];
     // Output that already existed in this millisecond precedes its exchange.
-    const rows = [...withAgentMail(messages, mail, threadId, turns), ...activity, ...runs, ...memory].sort((a, b) =>
+    const rows = [...withAgentMail(messages, mail, threadId, shownTurns), ...activity, ...runs, ...memory].sort((a, b) =>
       a.createdAt - b.createdAt || Number(a.id.startsWith('coordination:')) - Number(b.id.startsWith('coordination:')) || a.id.localeCompare(b.id));
     return groupAgentMail(rows, mail);
   });
@@ -691,7 +692,7 @@
     return result;
   });
   /** Where each turn's request started, so a reply after monitoring keeps counting from the user's message. */
-  const turnRequestStarts = $derived(requestStarts(store.openThread?.id === threadId ? store.openThread.turns : store.delegationThread?.id === threadId ? store.delegationThread.turns : []));
+  const turnRequestStarts = $derived(requestStarts(shownTurns));
   const lastInTurn = $derived.by(() => {
     const result = new Map<string, string>();
     for (const message of timeline) result.set(message.turnId, message.id);
