@@ -21,18 +21,25 @@
   let deleting = $state(false);
 
   async function restore(): Promise<void> {
+    if (restoring || deleting) return;
     const owner = entry.machine.store;
     restoring = true;
     try { await restoreThread(owner, entry.thread.id); }
     catch (error) { owner.error = error instanceof Error ? error.message : String(error); }
     finally { restoring = false; }
   }
-  /** The row stays until the core answers: a second pick would be refused and raise an error banner. */
+  /**
+   * The row stays until the list reloads: a second pick would be refused and
+   * raise an error banner, so a deleted row never comes back to life.
+   */
   async function remove(): Promise<void> {
-    if (deleting) return;
+    if (deleting || restoring) return;
+    const owner = entry.machine.store;
     deleting = true;
-    try { await deleteThread(entry.machine.store, entry.thread); }
-    finally { deleting = false; }
+    let removed = false;
+    try { removed = await deleteThread(owner, entry.thread); }
+    catch (error) { owner.error = error instanceof Error ? error.message : String(error); }
+    finally { if (!removed) deleting = false; }
   }
   function open(): void {
     onopen?.();
