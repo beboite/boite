@@ -102,3 +102,45 @@ test('done and archived threads are separate lists with their own counts', async
   click('[data-testid=recent-done-toggle]'); await settle();
   expect([...document.querySelectorAll('[data-testid=done-thread]')].map(row => (row as HTMLElement).dataset.threadId)).toEqual(['t-trace']);
 });
+
+test('a done thread is deleted from its own menu, opened by right click or by its button', async () => {
+  const source = await ready('first');
+  const props = $state({ entries: entries(), now: Date.now(), header: false, open: true });
+  mounted = mount(RecentDone, { target: document.body, props });
+  await settle();
+  const { contextMenu } = await import('../lib/context-menu.svelte');
+  const row = document.querySelector('[data-testid=done-thread][data-thread-id=t-trace]') as HTMLElement;
+  const rightClick = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 12, clientY: 12 });
+  row.dispatchEvent(rightClick);
+  // The browser's own menu, the one a link would get, stays shut.
+  expect(rightClick.defaultPrevented).toBe(true);
+  expect(contextMenu.current?.items.filter(item => !item.separator).map(item => item.id)).toEqual(['open', 'restore', 'copy', 'delete']);
+  contextMenu.close();
+  click('[data-thread-id=t-trace] [data-testid=done-thread-menu]');
+  const removals = vi.spyOn(source.client, 'call');
+  // Picked twice before the core answers: one request, no refusal banner.
+  const pick = contextMenu.current!.onpick;
+  // Refused by the core: the banner says so and the row can be tried again.
+  removals.mockRejectedValueOnce(new Error('refused'));
+  pick('delete'); await settle();
+  expect(source.store.error).toBe('refused');
+  expect((document.querySelector('[data-thread-id=t-trace] [data-testid=done-thread-open]') as HTMLButtonElement).disabled).toBe(false);
+  source.store.error = null; removals.mockClear();
+  pick('delete'); pick('delete'); contextMenu.close(); flushSync();
+  expect((document.querySelector('[data-thread-id=t-trace] [data-testid=done-thread-open]') as HTMLButtonElement).disabled).toBe(true);
+  // Reopened while the core has not answered, and after it has: the row offers nothing more.
+  const locked = () => {
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 12, clientY: 12 }));
+    const items = contextMenu.current!.items.filter(item => ['open', 'restore', 'delete'].includes(item.id)).map(item => item.disabled);
+    contextMenu.close();
+    return items;
+  };
+  expect(locked()).toEqual([true, true, true]);
+  await settle();
+  expect(locked()).toEqual([true, true, true]);
+  expect(removals.mock.calls.filter(([method]) => method === 'threads.remove')).toHaveLength(1);
+  expect(source.store.error).toBeNull();
+  await expect(source.client.call('threads.get', { threadId: 't-trace' })).rejects.toThrow();
+  props.entries = entries(); await settle();
+  expect(document.querySelector('[data-testid=done-thread]')).toBeNull();
+});
