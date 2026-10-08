@@ -281,15 +281,15 @@ memory stop, then at most one every five minutes while the stall continues;
 its event also carries the group's current charge. Thirty seconds without a
 stalled sample end the streak. A root process found in another cgroup path, or
 any counter lower than the last one, starts over as a new group: five new
-stalled samples are needed before it is told. Two samples more than five
-seconds apart only restart the measure: no stall share is computed over an
-idle gap.
-cgroup v1, a group without `memory.high`, a kernel without `memory.pressure`,
-a path outside the core's cgroup namespace, an unreadable `/proc/<pid>/cgroup`
-and a missing, unreadable or malformed `memory.events`, `memory.pressure`,
-`memory.high` or `memory.current` give no reading and no notice. `memory.max`
-is read when present and never required. The notice follows `memoryProtection`
-and stops nothing.
+stalled samples are needed before the thread gets another notice. Two samples
+more than five seconds apart only restart the measure: no stall share is
+computed over an idle gap.
+A reading needs `/proc/<pid>/cgroup`, `memory.events`, `memory.pressure`,
+`memory.high` and `memory.current`: when any of them is missing, unreadable or
+malformed there is no reading and no notice. That covers cgroup v1, a group
+without `memory.high`, a kernel without `memory.pressure` and a path outside
+the core's cgroup namespace. `memory.max` is read when present and never
+required. The notice follows `memoryProtection` and stops nothing.
 
 Registered POSIX children start detached in their own process group.
 `resources.killTree` sends group SIGTERM, probes every 100 ms and sends SIGKILL

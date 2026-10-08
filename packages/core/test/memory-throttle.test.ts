@@ -66,9 +66,9 @@ describe('throttle policy', () => {
   test('a gap of more than five seconds restarts the measure without counting or losing the streak', () => {
     const before = run(stalled(5)).policy;
     expect(before).toMatchObject({ streak: 4, at: 4000, noticedAt: null });
-    // Six seconds later the group waited 5 s in all: a share over the bar, and still no stalled sample.
-    const gap = decideThrottle(before, { path: PATH, highEvents: 9, stallMicros: 7_000_000 }, before.at + THROTTLE_GAP_MS + 1000);
-    expect(gap).toEqual({ policy: { ...before, highEvents: 9, stallMicros: 7_000_000, at: before.at + THROTTLE_GAP_MS + 1000 }, notify: false });
+    // One millisecond past the gap, with a share over the bar: still no stalled sample.
+    const gap = decideThrottle(before, { path: PATH, highEvents: 9, stallMicros: 7_000_000 }, before.at + THROTTLE_GAP_MS + 1);
+    expect(gap).toEqual({ policy: { ...before, highEvents: 9, stallMicros: 7_000_000, at: before.at + THROTTLE_GAP_MS + 1 }, notify: false });
     // The next ordinary sample is measured from the gap's counters, and completes the streak.
     expect(decideThrottle(gap.policy, { path: PATH, highEvents: 10, stallMicros: 7_500_000 }, gap.policy.at + 1000)).toMatchObject({ notify: true, policy: { streak: 5, noticedAt: gap.policy.at + 1000 } });
     // Exactly five seconds is still a sample.
