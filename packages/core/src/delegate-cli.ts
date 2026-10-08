@@ -3,7 +3,7 @@
  * few lines a model reads back cheaply: one row per child or run, its state,
  * its model and reasoning, its time, then the one next step that makes sense.
  */
-import { CONVERSATION_PROFILE_ID } from '@boite/contracts';
+import { CONVERSATION_PROFILE_ID, speedName } from '@boite/contracts';
 import type { DelegatedAgent, DelegationModelChoice, DelegationView, WorkflowRun } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
 import { requiredText, Usage } from './cli-args.ts';
@@ -16,6 +16,7 @@ export interface DelegateOptions {
   title?: string;
   model?: string;
   effort?: string;
+  speed?: string;
   profile?: string;
 }
 
@@ -43,10 +44,16 @@ function stateOf(agent: DelegatedAgent): string {
   return turn === 'error' ? 'failed' : turn ?? agent.thread.status;
 }
 
+/** `codex/gpt-5.5 effort=high speed=priority`: what a child runs on, the speed as its stored tier id. */
+export function routeOf(agent: DelegatedAgent): string {
+  const { providerId, model, effort, speed } = agent.thread;
+  return `${providerId}/${model ?? 'default'}${effort ? ` effort=${effort}` : ''}${speed ? ` speed=${speed}` : ''}`;
+}
+
 function agentRow(agent: DelegatedAgent, now: number): string[] {
   const state = stateOf(agent);
   const end = ACTIVE.has(agent.thread.status) ? now : agent.lastTurn?.finishedAt ?? now;
-  const route = `${agent.thread.providerId}/${agent.thread.model ?? 'default'}${agent.thread.effort ? ` effort=${agent.thread.effort}` : ''}`;
+  const route = routeOf(agent);
   const head = `${agent.thread.id} ${state} ${elapsed(end - agent.thread.createdAt)} ${route} ${JSON.stringify(agent.thread.title)}`;
   if (ACTIVE.has(agent.thread.status) || !agent.result) return [head];
   return [head, `  result: ${oneLine(agent.result, 300)}${agent.result.length > 300 && agent.resultRef ? ` (full: boite delegate result ${agent.resultRef.agentId} ${agent.resultRef.turnId})` : ''}`];
@@ -70,7 +77,10 @@ function teamLine(view: DelegationView, runs: WorkflowRun[]): string {
 
 export function choiceRow(choice: DelegationModelChoice): string {
   const efforts = choice.efforts.length ? ` effort=${choice.efforts.join('|')}${choice.defaultEffort ? ` (default ${choice.defaultEffort})` : ''}` : ' (no reasoning levels)';
-  return `${choice.providerId}/${choice.model} ${JSON.stringify(choice.name)}${efforts}${choice.current ? ' [this conversation]' : ''}`;
+  // The id is what `--speed` stores and `delegate list` shows; a label that says something else stands in front of it.
+  const tiers = choice.speeds ?? [];
+  const speeds = tiers.length ? ` speed=${tiers.map(speedName).join('|')}` : '';
+  return `${choice.providerId}/${choice.model} ${JSON.stringify(choice.name)}${efforts}${speeds}${choice.current ? ' [this conversation]' : ''}`;
 }
 
 export async function delegateCommand(client: CoreClient, threadId: string, rest: string[], options: DelegateOptions, print: Print): Promise<void> {
@@ -85,7 +95,7 @@ export async function delegateCommand(client: CoreClient, threadId: string, rest
     case 'models': {
       const models = await client.call('delegation.models', { threadId });
       print([
-        `models a child can run on: boite delegate spawn "<brief>" --model <provider/model> [--effort <level>]`,
+        `models a child can run on: boite delegate spawn "<brief>" --model <provider/model> [--effort <level>] [--speed <tier>]`,
         ...models.choices.map(choiceRow),
         ...models.unavailable.map(u => `unavailable: ${u.providerId} (${u.reason})`),
         ...(models.anyModel ? [] : ['The owner allows only this conversation\'s model and the profiles (boite delegate profiles); --model must name one of them.']),
@@ -127,17 +137,20 @@ export async function delegateCommand(client: CoreClient, threadId: string, rest
         const view = await client.call('delegation.get', { threadId });
         if (rest[1] === CONVERSATION_PROFILE_ID || view.config.profiles.some(p => p.id === rest[1])) { profileId = rest[1]; start = 2; }
       }
-      const task = requiredText(rest, start, 'delegate spawn needs a brief: boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>]', false);
+      const speed = options.speed?.trim();
+      if (speed !== undefined && (!speed || speed.length > 64)) throw new Usage('--speed needs a tier of 1 to 64 characters; boite delegate models lists them');
+      const task = requiredText(rest, start, 'delegate spawn needs a brief: boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>] [--speed <tier>]', false);
       const agent = await client.call('delegation.spawn', {
         threadId, task, requestId,
         ...(profileId === undefined ? {} : { profileId }),
         ...(options.model === undefined ? {} : { model: options.model }),
         ...(options.effort === undefined ? {} : { effort: options.effort }),
+        ...(speed === undefined ? {} : { speed }),
         ...(options.title === undefined ? {} : { title: options.title }),
       });
       print([
         `agent: ${agent.thread.id}`,
-        `model: ${agent.thread.providerId}/${agent.thread.model ?? 'default'}${agent.thread.effort ? ` effort=${agent.thread.effort}` : ''}`,
+        `model: ${routeOf(agent)}`,
         `status: ${agent.thread.status}`,
         'Its result comes back to you as a message. Keep working or end your turn; do not poll.',
       ], agent);

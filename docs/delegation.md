@@ -6,7 +6,8 @@ it names a model and a reasoning level, from any installed provider: a Claude
 conversation can start a Codex reviewer. `boite delegate models` lists the
 choices. Without `--model` the child runs on the built-in profile
 `conversation`, the conversation's own harness, account, model and effort. A
-child never runs on a fast service tier.
+child runs on one of a model's speed tiers, such as its fast mode, only when
+the spawn names one with `--speed`; it never inherits the parent's.
 
 The gear in the Subagents tab opens Settings with two switches and a list.
 "Let this conversation start subagents" turns delegation off for that
@@ -116,7 +117,8 @@ existing child to reuse its session.
 ## Controls and usage
 
 Delegation starts enabled, with free model choice. The first turn of a new
-provider session carries a short guide: the commands, `--model` and `--effort`,
+provider session carries a short guide: the commands, `--model`, `--effort` and
+`--speed`, that a child runs at standard speed (no tier) without `--speed`,
 and the rule that results come back as messages. Later turns carry it again
 when the request is about handing work out (delegation, subagents, parallel
 work, a workflow) or the team is paused. A child receives one line naming its
@@ -161,6 +163,7 @@ structured output, commands and recovery.
 boite delegate models
 boite delegate spawn "List the parser's entry points. Do not edit files."
 boite delegate spawn "Review the parser changes. Do not edit files." --model codex/gpt-5.5 --effort high
+boite delegate spawn "Play the build and report what breaks." --model codex/gpt-6-luna --effort max --speed fast
 boite delegate spawn "Review the parser changes." --profile reviewer
 boite delegate list
 boite delegate send <child-thread-id> "Focus on malformed inputs."
@@ -173,12 +176,28 @@ boite delegate stop
 tie) or a unique part of an id or name, such as `opus`. An ambiguous or
 unknown name is refused with the candidates. `--effort` must be one of the
 model's levels; without it the child keeps the parent's level on the same
-model, else the model's default. The older `delegate spawn <profile> "<brief>"`
-form still works.
+model, else the model's default. `--speed` names one of the model's speed tiers
+by id or by label, in any case: `fast` selects Claude's `fast` and the Codex
+tier whose id is `priority` and label "Fast". It applies to the model the child
+runs on, so it also works with `--profile` and with no `--model`, unless that
+route runs on the provider's default model: then the spawn is refused and
+`--model` has to name a model. A tier the model lacks is refused with the model
+and the tiers it offers, or that it offers none. Tiers come from
+`boite delegate models`, which reads any agent-owned list not read yet. A spawn
+never probes for tiers, so a spawn naming a speed on a model or profile whose
+tiers are not read yet is refused and says to list the delegation models and spawn again; a spawn without a speed is not
+affected. `delegate models` prints the tiers of each model that has some, joined
+by `|`, each as its id, with the label in front when the label says something
+else: `speed=fast` for Claude, `speed=Fast (priority)` for that Codex tier.
+`--speed` takes any one of those entries as it is.
+`delegate list` and a spawn show the id the child stores, here
+`speed=priority`. The older `delegate spawn <profile> "<brief>"` form still
+works.
 
 Every answer is a few plain lines. `delegate list` starts with one summary
 line (`subagents: on; 1 running, 2 done, 0 failed, 0 stopped`), then one row per
-child with its id, state, elapsed time, `provider/model effort=` and title, and
+child with its id, state, elapsed time, `provider/model effort=`, `speed=` when
+it has one, and title, and
 the first 300 characters of a finished result. Workflow runs follow as
 `<run-id> workflow <status> <elapsed> steps=<done>/<total>`. A spawn prints the
 child id, its route and a reminder that the result arrives as a message.

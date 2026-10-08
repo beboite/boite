@@ -1,7 +1,7 @@
 import { expect, vi } from 'vitest';
 import { test } from '../test/fake-client';
 import type { FakeClient } from './fake-client';
-import { ATTACHMENT_MAX_BYTES, DEFAULT_DELEGATION_CONFIG, MESSAGE_PAGE_MAX_BYTES, MESSAGE_SENT_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, SPEECH_DEFAULT_MODEL, TODO_TEXT_MAX, type RpcEvents, type RpcMethodName, type Turn } from '@boite/contracts';
+import { ATTACHMENT_MAX_BYTES, DEFAULT_DELEGATION_CONFIG, matchSpeed, speedName, speedRefusal, MESSAGE_PAGE_MAX_BYTES, MESSAGE_SENT_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, SPEECH_DEFAULT_MODEL, TODO_TEXT_MAX, type RpcEvents, type RpcMethodName, type Turn } from '@boite/contracts';
 import { FAKE_AUTO_COMPACT_SETTLE_MS } from './fake-client/turns';
 import { FakeContext } from './fake-client/context';
 import { seed } from './fake-client/seed';
@@ -491,6 +491,83 @@ test('fake delegation enforces family access and keeps request IDs idempotent', 
   expect(childView.agents.map(agent => agent.thread.id)).toEqual([first.thread.id]);
   expect(childView.messages.every(letter => letter.from.threadId === first.thread.id || letter.to.threadId === first.thread.id)).toBe(true);
   await expect(client.call('delegation.spawn', { ...params, threadId: first.thread.id, requestId: 'nested' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+});
+
+test('fake delegation gives a child a speed only when asked, by id or label, with the core\'s refusals', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  // The parent runs fast on a model the agent listed; reading it is what fills the catalog.
+  const parent = await client.call('threads.create', { projectId: 'p-boite', providerId: 'codex', accountId: 'a-codex', model: 'codex-demo', effort: 'high', speed: 'fast' });
+  expect(parent.speed).toBe('fast');
+  const threadId = parent.id;
+  const models = await client.call('delegation.models', { threadId });
+  expect(models.choices.find(choice => choice.model === 'codex-demo')?.speeds).toEqual([{ id: 'fast', label: 'Fast' }, { id: 'ultrafast', label: 'Ultrafast' }]);
+  expect(models.choices.find(choice => choice.providerId === 'echo')?.speeds).toEqual([]);
+  const speedOf = async (params: { model?: string; speed?: string }, requestId: string) =>
+    (await client.call('delegation.spawn', { threadId, task: `Play ${requestId}`, requestId, ...params })).thread.speed ?? null;
+  expect(await speedOf({ model: 'codex/codex-demo', speed: 'ULTRAFAST' }, 'label')).toBe('ultrafast');
+  expect(await speedOf({ model: 'codex/codex-demo', speed: 'fast' }, 'id')).toBe('fast');
+  expect(await speedOf({ speed: 'Fast' }, 'own')).toBe('fast');
+  expect(await speedOf({}, 'own-none')).toBeNull();
+  expect(await speedOf({ model: 'codex/codex-demo' }, 'none')).toBeNull();
+  const echo = models.choices.find(choice => choice.providerId === 'echo')!;
+  await expect(client.call('delegation.spawn', { threadId, model: `echo/${echo.model}`, speed: 'fast', task: 'No tier', requestId: 'no-tier' }))
+    .rejects.toMatchObject({ code: RpcErrorCode.Refused, message: `speed: echo/${echo.model} offers no speed tier; leave speed out` });
+  await expect(client.call('delegation.spawn', { threadId, model: 'codex/codex-demo', speed: ' turbo ', task: 'Bad tier', requestId: 'bad-tier' }))
+    .rejects.toMatchObject({ code: RpcErrorCode.Refused, message: 'speed: codex/codex-demo has no "turbo" tier; expected fast, ultrafast' });
+  // The core bounds a speed before it reads any model: the same code and words here.
+  for (const [speed, requestId] of [['', 'empty'], [' ', 'blank'], ['f'.repeat(65), 'long']] as const) {
+    await expect(client.call('delegation.spawn', { threadId, model: 'codex/codex-demo', speed, task: 'Bad text', requestId }))
+      .rejects.toMatchObject({ code: RpcErrorCode.InvalidParams, message: 'speed: expected 1 to 64 characters' });
+  }
+  // 64 characters pass the bound and fail as a tier nobody offers.
+  await expect(client.call('delegation.spawn', { threadId, model: 'codex/codex-demo', speed: 'f'.repeat(64), task: 'Bad text', requestId: 'edge' }))
+    .rejects.toMatchObject({ code: RpcErrorCode.Refused, message: `speed: codex/codex-demo has no "${'f'.repeat(64)}" tier; expected fast, ultrafast` });
+  await expect(client.call('delegation.spawn', { threadId, model: 'codex/codex-demo', task: 'Play id', requestId: 'id' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+});
+
+test('fake delegation reads no agent in a spawn: unread tiers are refused naming the delegation models, read-but-empty ones as none', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const config = { ...DEFAULT_DELEGATION_CONFIG, profiles: [{ id: 'sol', name: 'Sol', providerId: 'codex', accountId: 'a-codex', model: 'gpt-6.1-sol', effort: null }] };
+  await client.call('delegation.configure', { threadId: 't-trace', config });
+  const spawn = (params: { model?: string; profileId?: string }, requestId: string) => client.call('delegation.spawn', { threadId: 't-trace', speed: 'fast', task: `Play ${requestId}`, requestId, ...params });
+  // Nothing read Codex's own list yet.
+  const unread = 'speed: the tiers of codex/gpt-6.1-sol are not read yet; list the delegation models and spawn again';
+  await expect(spawn({ profileId: 'sol' }, 'early')).rejects.toMatchObject({ code: RpcErrorCode.Refused, message: unread });
+  // That spawn read nothing: the same one is refused the same way.
+  await expect(spawn({ profileId: 'sol' }, 'early-again')).rejects.toMatchObject({ code: RpcErrorCode.Refused, message: unread });
+  // What the refusal says to do reads the list: the agent's own model is there with its tiers.
+  const models = await client.call('delegation.models', { threadId: 't-trace' });
+  expect(models.choices.find(choice => choice.providerId === 'codex' && choice.model === 'codex-demo')?.speeds?.map(speed => speed.id)).toEqual(['fast', 'ultrafast']);
+  // Read: the model the agent listed without a tier offers none, the one it listed with tiers takes one.
+  await expect(spawn({ profileId: 'sol' }, 'read')).rejects.toMatchObject({ code: RpcErrorCode.Refused, message: 'speed: codex/gpt-6.1-sol offers no speed tier; leave speed out' });
+  expect((await spawn({ model: 'codex/codex-demo' }, 'demo')).thread).toMatchObject({ providerId: 'codex', model: 'codex-demo', speed: 'fast' });
+});
+
+test('a speed is matched by id or label in any case, and a refusal names what the model offers', () => {
+  const codex = [{ id: 'priority', label: 'Fast' }];
+  expect(matchSpeed(codex, 'fast')).toBe('priority');
+  expect(matchSpeed(codex, ' Priority ')).toBe('priority');
+  expect(matchSpeed([{ id: 'fast', label: 'Fast' }], 'FAST')).toBe('fast');
+  // An id wins over another tier's label.
+  expect(matchSpeed([{ id: 'priority', label: 'Fast' }, { id: 'fast', label: 'Faster' }], 'fast')).toBe('fast');
+  expect(matchSpeed(codex, 'turbo')).toBeNull();
+  // The listed form goes back in, and padding around an id or a label is not part of it.
+  expect(matchSpeed(codex, 'fast (PRIORITY)')).toBe('priority');
+  expect(matchSpeed([{ id: 'priority', label: ' Fast ' }], 'fast')).toBe('priority');
+  // A non-string speed and missing tiers are no match, not a throw.
+  for (const wanted of ['', '   ', 123, null, undefined, { id: 'priority' }]) expect(matchSpeed(codex, wanted)).toBeNull();
+  for (const speeds of [undefined, null, []]) expect(matchSpeed(speeds, 'fast')).toBeNull();
+  expect(speedName({ id: 'priority', label: 'Fast' })).toBe('Fast (priority)');
+  expect(speedName({ id: 'fast', label: 'Fast' })).toBe('fast');
+  expect(speedName({ id: 'priority', label: ' Fast ' })).toBe('Fast (priority)');
+  expect(speedName({ id: 'priority', label: ' ' })).toBe('priority');
+  // A padded id is shown without its padding.
+  expect(speedName({ id: ' priority ', label: 'Fast' })).toBe('Fast (priority)');
+  expect(speedName({ id: ' ', label: 'Fast' })).toBe('Fast');
+  expect(speedRefusal('codex/gpt-6-luna', codex, ' turbo ')).toBe('speed: codex/gpt-6-luna has no "turbo" tier; expected Fast (priority)');
+  expect(speedRefusal('claude/haiku', [], 'fast')).toBe('speed: claude/haiku offers no speed tier; leave speed out');
+  // No list at all is tiers nobody read yet, not a model without tiers.
+  for (const speeds of [undefined, null]) expect(speedRefusal('claude/haiku', speeds, 'fast')).toBe('speed: the tiers of claude/haiku are not read yet; list the delegation models and spawn again');
 });
 
 test('fake agent.spawn starts a real thread marked at both ends and keeps retries idempotent', async ({ createClient }) => {

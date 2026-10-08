@@ -285,7 +285,7 @@ boite agent remember <json>
 boite agent routines
 boite agent schedule <json>
 boite delegate models|profiles|list
-boite delegate spawn <brief> [--model <provider/model>] [--effort <level>] [--profile <id>] [--title <t>]
+boite delegate spawn <brief> [--model <provider/model>] [--effort <level>] [--speed <tier>] [--profile <id>] [--title <t>]
 boite delegate send <thread-id> <text>
 boite delegate wait [thread-id] [--timeout <s>]
 boite delegate result <thread-id> <turn-id> [offset]
@@ -444,8 +444,12 @@ and `options`; it yields execution until the user answers. A memory contains
 `title` and `text`, with `id` and `expectedRevision` for an edit. The core adds
 the source context. Use `--json` to preserve the structured result.
 [Delegation](delegation.md) runs each child on the model and reasoning level
-the agent names (`delegate models` lists them), else on the conversation's own
-route or an owner-added profile, and records team usage. Children share the parent's checkout, retain their own sessions,
+the agent names (`boite delegate models` lists them), else on the conversation's own
+route or an owner-added profile, and records team usage. `--speed <tier>` puts
+the child on one of its model's speed tiers, such as `fast`; without it a
+child has none, whatever the parent runs on. Tiers come from `boite delegate models`:
+a spawn naming a speed on a model or profile on an agent-owned list not read yet is
+refused and says to list the delegation models and spawn again. Children share the parent's checkout, retain their own sessions,
 and return bounded results automatically. `delegate stop` pauses the whole team;
 only the owner can change profiles or resume a paused team.
 [Workflows](workflows.md) run a JSON plan of such children: `workflow help`

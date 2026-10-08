@@ -25,10 +25,13 @@ export function checkSpeed(ctx: FakeContext, providerId: string, accountId: stri
   if (!models.find(m => m.id === model)?.speeds?.some(option => option.id === speed)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model does not offer this speed' });
 }
 
+/** The protocols whose models and speed tiers come from the agent, as in the core. */
+export const PROBED_PROTOCOLS = ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'];
+
 /** Match the core's automatic discovery before a new model, effort or speed is checked. */
 export async function discoverSelection(ctx: FakeContext, providerId: string, accountId: string, model: string | null, effort: string | null, speed: string | null): Promise<void> {
   const provider = ctx.providers.find(p => p.id === providerId);
-  if (model === null || !provider || !['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'].includes(provider.protocol)) return;
+  if (model === null || !provider || !PROBED_PROTOCOLS.includes(provider.protocol)) return;
   const listed = modelsOf(ctx, providerId, accountId).find(entry => entry.id === model);
   const missingEffort = effort !== null && listed?.effort === undefined;
   if ((provider.protocol === 'acp' && missingEffort) || (!ctx.modelCatalogs.has(providerId + '::' + accountId) &&
@@ -41,7 +44,7 @@ export async function discoverSelection(ctx: FakeContext, providerId: string, ac
  * ACP, Codex and pi probe their own catalogs. Demo models are explicitly
  * named as such; only OpenCode uses the large catalog fixture.
  */
-async function probe(ctx: FakeContext, providerId: string, accountId: string): Promise<RpcResult<'providers.probe'>> {
+export async function probe(ctx: FakeContext, providerId: string, accountId: string): Promise<RpcResult<'providers.probe'>> {
   const provider = ctx.providers.find((p) => p.id === providerId);
   if (!provider) {
     throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `unknown provider ${providerId}` });
@@ -53,7 +56,7 @@ async function probe(ctx: FakeContext, providerId: string, accountId: string): P
   }
   // The probe starts the agent: a provider turned off lists nothing.
   if (!providerEnabled(provider)) throw turnedOff(provider);
-  const dynamic = ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'].includes(provider.protocol);
+  const dynamic = PROBED_PROTOCOLS.includes(provider.protocol);
   if (dynamic && !provider.available) {
     throw new RpcFailure({ code: RpcErrorCode.Unavailable, message: `${provider.name} is not available on this machine` });
   }

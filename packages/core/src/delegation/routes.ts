@@ -2,9 +2,10 @@
  * Which harness, account, model and reasoning level a delegated child runs on.
  * An agent names a model (`codex/gpt-5.5`, `gpt-5.5`, `opus`) and a level;
  * Boite picks the account: the parent's for its own provider, else that
- * provider's usable login. A child never gets a fast service tier.
+ * provider's usable login. A child runs on a speed tier only when the request
+ * names one: it never inherits the parent's.
  */
-import { CONVERSATION_PROFILE_ID } from '@boite/contracts';
+import { CONVERSATION_PROFILE_ID, matchSpeed, SPEED_NEEDS_MODEL, speedRefusal } from '@boite/contracts';
 import type { Account, DelegationConfig, DelegationModelChoice, DelegationModels, DelegationProfile, ProviderId, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { invalidParams, messageOf, refused } from '../errors.ts';
@@ -13,12 +14,14 @@ import { checkEffort, modelsFor, PROBED_PROTOCOLS } from '../threads/selection.t
 import type { ProviderProbe } from '../providers/probe.ts';
 
 /** A profile, or a conversation's own route, whose model may be the provider's default. */
-export type ChildRoute = Omit<DelegationProfile, 'model'> & { model: string | null };
+export type ChildRoute = Omit<DelegationProfile, 'model'> & { model: string | null; speed?: string | null };
 
 export interface RouteRequest {
   profileId?: string | null;
   model?: string;
   effort?: string;
+  /** A speed tier of the route's model, by id or label. */
+  speed?: string;
 }
 
 const PROBE_TIMEOUT_MS = 30_000;
@@ -52,6 +55,7 @@ export function catalog(core: Core, parent: ThreadSummary, withLegacy = false): 
       const choice: DelegationModelChoice = {
         providerId: summary.id, providerName: summary.name, accountId: account.id, model: model.id, name: model.name,
         efforts: model.effort?.levels.map(level => level.id) ?? [], defaultEffort: model.effort?.default ?? null,
+        speeds: model.speeds?.map(speed => ({ ...speed })) ?? [],
         current: parent.providerId === summary.id && parent.model === model.id,
       };
       (model.legacy ? legacy : choices).push(choice);
@@ -139,5 +143,14 @@ export function resolveRoute(core: Core, parent: ThreadSummary, config: Delegati
     if (route.model === null) throw invalidParams('effort: this route runs on the provider\'s default model; name a model with --model to choose its reasoning');
     route = { ...route, effort: checkEffort(provider, route.accountId, route.model, request.effort) };
   }
-  return route;
+  if (request.speed === undefined) return { ...route, speed: null };
+  if (route.model === null) throw invalidParams(SPEED_NEEDS_MODEL);
+  const provider = core.providers.require(route.providerId);
+  const listed = modelsFor(provider, route.accountId).find(entry => entry.id === route.model)?.speeds;
+  const speed = matchSpeed(listed, request.speed);
+  if (speed !== null) return { ...route, speed };
+  // A spawn reads no agent. Tiers are unread only while an agent that owns its list has given none; anything else without tiers offers none.
+  const unread = listed === undefined && PROBED_PROTOCOLS.includes(provider.protocol) && probedModelsOf(provider.protocol, provider.id, route.accountId) === null;
+  // Unread tiers are unknown, not empty: no `expected` list then.
+  throw refused(speedRefusal(`${route.providerId}/${route.model}`, unread ? null : listed ?? [], request.speed), unread ? { field: 'speed' } : { field: 'speed', expected: (listed ?? []).map(option => option.id) });
 }
