@@ -116,3 +116,52 @@ test('a single stopped process fits both themes and narrow screens, including lo
   })()`)).toBe(true);
   expect(page.errors()).toEqual([]);
 }, 30000);
+
+test('a throttling notice shows its whole sentence beside the stalled tool on desktop and phone', async () => {
+  const limit = 5120 * 1048576;
+  await page.evaluate("__boiteTest.setTheme('dark')");
+  await page.evaluate('__boiteTest.workspace.active.showChat()');
+  for (const locale of ['en', 'fr']) {
+    await page.evaluate(`(async () => {
+      const { setLocaleSetting } = await import('/src/lib/i18n.svelte.ts');
+      await setLocaleSetting('${locale}');
+      const thread = __boiteTest.workspace.active.openThread;
+      thread.memoryEvents = [{
+        threadId: thread.id, kind: 'throttled', limitBytes: ${limit}, bytes: ${limit} + 4096, state: 'ok', at: Date.now(),
+        anchor: { messageId: thread.messages.at(-1).id, partIndex: 3 },
+      }];
+    })()`);
+    await page.waitFor(`document.querySelector('${id('memory-row')}')?.dataset.kind === 'throttled'`);
+    const sentence = await page.evaluate<string>(`(async () => {
+      const { strings } = await import('/src/lib/strings.ts');
+      const { bytes } = await import('/src/lib/format.ts');
+      return strings.resources.throttled(bytes(${limit}));
+    })()`);
+    expect(sentence).toContain(locale === 'fr' ? '5,0 Go' : '5.0 GB');
+    await page.waitFor(`document.querySelector('${id('memory-row')} p')?.textContent === ${JSON.stringify(sentence)}`);
+    expect(await page.evaluate(`document.querySelectorAll('${id('memory-row')}').length`)).toBe(1);
+    expect(await page.evaluate(`document.querySelector('${id('memory-row')} .title, ${id('memory-row')} .process')`)).toBeNull();
+    expect(await page.evaluate(`(() => { const t = document.querySelector('${id('timeline')}').textContent; const at = t.indexOf(${JSON.stringify(sentence)}); return t.indexOf('cargo build') < at && at < t.indexOf('Retrying'); })()`)).toBe(true);
+    for (const [width, height] of [[1280, 900], [390, 844]] as const) {
+      await page.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 720 });
+      await page.evaluate(`document.querySelector('${id('memory-row')}').scrollIntoView({ block: 'center' })`);
+      // French is the longer sentence, so it is the one kept as the capture.
+      if (locale === 'fr') await capture(width < 720 ? 'throttled-phone' : 'throttled-desktop');
+      // Every line of the sentence lies inside the row and the row inside the screen: nothing is clipped.
+      expect(await page.evaluate(`(() => {
+        const row = document.querySelector('${id('memory-row')}');
+        const text = row.querySelector('p');
+        const r = row.getBoundingClientRect();
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        const lines = [...range.getClientRects()];
+        const button = row.querySelector('.configure').getBoundingClientRect();
+        return lines.length > 0 && lines.every(line => line.left >= r.left && line.right <= r.right && line.top >= r.top && line.bottom <= r.bottom)
+          && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight
+          && row.scrollWidth <= row.clientWidth && text.scrollWidth <= text.clientWidth && text.scrollHeight <= text.clientHeight
+          && button.right <= r.right && button.bottom <= r.bottom;
+      })()`)).toBe(true);
+    }
+  }
+  expect(page.errors()).toEqual([]);
+}, 30000);

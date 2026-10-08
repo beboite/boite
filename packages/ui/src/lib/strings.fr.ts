@@ -1616,6 +1616,7 @@ export const fr: Translation = {
     },
     threadCap: 'Cette conversation a atteint sa limite de mémoire. Boite a refusé de lui en accorder davantage.',
     budget: "Les agents ont atteint leur budget mémoire commun. Boite a refusé de leur en accorder davantage.",
+    throttled: (limit: string) => `Les processus de cette conversation sont ralentis par leur limite mémoire de ${limit}. Ils se figent au lieu d'échouer.`,
     empty: 'Rien ne tourne en ce moment.',
     processes: 'processus',
     killTree: "Tuer l'arborescence",

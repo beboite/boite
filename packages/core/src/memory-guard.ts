@@ -3,6 +3,8 @@ import { totalmem } from 'node:os';
 import type { Bus } from './bus.ts';
 import { decideMemory, initialMemoryPolicy, type MemoryProcess } from './memory-guard-logic.ts';
 import { resolveMemoryLimits } from './memory-limits.ts';
+import { decideThrottle, type ThrottlePolicy } from './memory-throttle-logic.ts';
+import type { CgroupMemory } from './platform/linux-cgroup.ts';
 import type { ProcessPlatform } from './platform/types.ts';
 
 /** Runs on the registry's load sample; owns no timer or native process handle. */
@@ -11,6 +13,7 @@ export class MemoryGuard {
   private agentBytes = 0;
   private enabled = true;
   private limits: ReturnType<typeof resolveMemoryLimits> | null = null;
+  private readonly throttles = new Map<string, ThrottlePolicy>();
 
   constructor(private readonly bus: Bus, private readonly platform: ProcessPlatform) {}
 
@@ -25,6 +28,7 @@ export class MemoryGuard {
     this.enabled = settings.memoryProtection !== false;
     this.limits = resolveMemoryLimits(settings, this.platform.machineMemory()?.totalBytes ?? totalmem());
     if (!this.enabled) {
+      this.throttles.clear();
       const changed = this.state !== 'ok';
       this.policy = initialMemoryPolicy();
       if (changed) this.bus.emit('resources.memory', { threadId: null, kind: 'pressure', state: 'ok', at: Date.now() });
@@ -61,6 +65,30 @@ export class MemoryGuard {
     if (!this.enabled) return;
     this.bus.emit('resources.memory', { threadId, kind, state: this.state, at: Date.now() });
   }
+
+  /** The agent's own process names the cgroup its whole session was started in. */
+  sampleThrottle(threadId: string, processes: Iterable<{ root: boolean; record: { pid: number } }>): void {
+    if (!this.enabled || this.platform.cgroupMemory === undefined) return;
+    for (const process of processes) {
+      if (!process.root) continue;
+      this.throttle(threadId, this.platform.cgroupMemory(process.record.pid));
+      return;
+    }
+  }
+
+  /** One reading of a thread's cgroup per load sample; a null reading keeps what is known. */
+  throttle(threadId: string, reading: CgroupMemory | null, at = Date.now()): void {
+    if (!this.enabled || reading === null) return;
+    const result = decideThrottle(this.throttles.get(threadId), reading, at);
+    this.throttles.set(threadId, result.policy);
+    if (result.notify) this.bus.emit('resources.memory', {
+      threadId, kind: 'throttled', limitBytes: reading.highBytes, bytes: reading.currentBytes, state: this.state, at,
+    });
+  }
+
+  forgetThrottle(threadId: string): void {
+    this.throttles.delete(threadId);
+  }
 }
 
 /** Stable prefix shared by live delivery and the next turn's system note. */
@@ -71,6 +99,8 @@ export function memoryNotice(event: MemoryEvent): string {
       ? 'An allocation was refused because this thread reached its memory cap.'
       : event.kind === 'budget'
         ? 'An allocation was refused because the agents reached their shared memory budget.'
-        : `Machine memory pressure is ${event.state}.`;
+        : event.kind === 'throttled'
+          ? `This conversation's processes are being slowed by their memory limit (${Math.round(event.limitBytes / 1048576)} MB): they stall instead of failing.`
+          : `Machine memory pressure is ${event.state}.`;
   return `[Boite memory guard] ${fact} Do not rerun it unchanged; lower parallelism, for example \`cargo build -j 2\`; close editors or servers you started; run one heavy job at a time.`;
 }

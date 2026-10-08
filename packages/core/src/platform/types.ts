@@ -1,5 +1,6 @@
 import type { ResourceByteUsage, Settings, TraceCapability } from '@boite/contracts';
 import type { ServerUpdatePlatform } from '../server-update/types.ts';
+import type { CgroupMemory } from './linux-cgroup.ts';
 
 export interface NativeProcessInfo {
   exe: string;
@@ -97,6 +98,11 @@ export interface ProcessPlatform {
   finishResources?(): void;
   /** Null `availableBytes` when the OS gives no honest reading; the reserve check then sits out. */
   machineMemory(): { totalBytes: number; availableBytes: number | null } | null;
+  /**
+   * The memory readings of the cgroup holding `pid`, or null when the OS has no
+   * such group, it has no throttling limit or its files cannot be read. Linux only.
+   */
+  cgroupMemory?(pid: number): CgroupMemory | null;
   pidAdded(threadId: string, pid: number): void;
   pidRemoved(threadId: string, pid: number): void;
   /** A turn is starting: have the process drain and the protections ready before its first process. */
