@@ -62,6 +62,8 @@ const TABS_PER_THREAD = 8;
 const TABS_MAX = 24;
 /** A browser process with no tab left is closed after this long: the next `open` starts it again. */
 const IDLE_CLOSE_MS = 60_000;
+/** A page that moved has its cookies on disk this long after; one that stays put, at this interval. */
+const COOKIE_SAVE_DELAY_MS = 1000, COOKIE_SAVE_EVERY_MS = 30_000;
 /**
  * How long `open` and `navigate` wait for the next page's DOM before answering
  * that it still loads. The load event can wait on an image or a script that
@@ -88,6 +90,11 @@ interface Engine {
   exited: Promise<unknown>;
   tabs: Set<string>;
   idle?: ReturnType<typeof setTimeout>;
+  /** The save a navigation asked for, and the one that repeats while tabs are open. */
+  saveSoon?: ReturnType<typeof setTimeout>;
+  saveEvery?: ReturnType<typeof setInterval>;
+  /** What `boite-cookies.json` holds, so an unchanged set is not written again. */
+  saved?: string;
   /** Removed when the process ends: private tabs keep nothing. */
   throwaway: boolean;
 }
@@ -263,6 +270,7 @@ export class AgentBrowser {
       cdp.on('Target.targetCreated', params => void this.#adopt(engine, params.targetInfo as { targetId: string; type: string; openerId?: string; url: string }));
       cdp.on('Target.targetDestroyed', params => this.#gone(engine, String(params.targetId)));
       cdp.on('Target.targetInfoChanged', params => this.#info(engine, params.targetInfo as { targetId: string; url: string; title: string }));
+      if (!engine.throwaway) engine.saveEvery = setInterval(() => { if (engine.tabs.size) void this.#saveCookies(engine); }, COOKIE_SAVE_EVERY_MS);
       return engine;
     } catch (error) {
       kill();
@@ -275,7 +283,7 @@ export class AgentBrowser {
   #lost(engine: Engine): void {
     const current = this.#engines.get(engine.profile);
     void current?.then(value => { if (value === engine) this.#engines.delete(engine.profile); }, () => {});
-    clearTimeout(engine.idle);
+    this.#stopTimers(engine);
     for (const id of [...engine.tabs]) this.#drop(id);
     engine.cdp.close(); engine.kill();
     if (engine.throwaway) void engine.exited.then(() => this.#removeDir(engine.dir));
@@ -286,7 +294,7 @@ export class AgentBrowser {
       const current = await this.#engines.get(engine.profile)!.catch(() => null);
       if (current === engine) this.#engines.delete(engine.profile);
     }
-    clearTimeout(engine.idle);
+    this.#stopTimers(engine);
     await this.#saveCookies(engine);
     // A clean close lets the browser write its own files; the kill is for one that does not end.
     await engine.cdp.send('Browser.close', {}, undefined, 3000).catch(() => {});
@@ -298,16 +306,31 @@ export class AgentBrowser {
    * The core keeps each profile's cookies itself. A browser writes its own
    * late and, on Windows and macOS, lost them when it closed a minute after
    * its last tab; one without an expiry date is never written by it at all.
-   * Saved when a tab closes and before the process ends, restored at start.
+   * Saved a second after a page moves (a sign-in ends on one), every 30
+   * seconds while a tab is open, when a tab closes and before the process
+   * ends; restored at start. A core killed outright loses at most that.
    */
   async #saveCookies(engine: Engine): Promise<void> {
     if (engine.throwaway || !engine.cdp.open) return;
     try {
       const { cookies } = await engine.cdp.send<{ cookies: Record<string, unknown>[] }>('Storage.getCookies', {}, undefined, 5000);
+      const held = JSON.stringify(cookies);
+      if (held === engine.saved) return;
       writeSavedCookies(engine.dir, cookies);
+      engine.saved = held;
     } catch (error) {
       this.#core.log('warn', `the cookies of browser profile ${engine.profile} could not be saved: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  #saveCookiesSoon(engine: Engine): void {
+    if (engine.throwaway) return;
+    clearTimeout(engine.saveSoon);
+    engine.saveSoon = setTimeout(() => void this.#saveCookies(engine), COOKIE_SAVE_DELAY_MS);
+  }
+
+  #stopTimers(engine: Engine): void {
+    clearTimeout(engine.idle); clearTimeout(engine.saveSoon); clearInterval(engine.saveEvery);
   }
 
   #idle(engine: Engine): void {
@@ -337,7 +360,7 @@ export class AgentBrowser {
     };
     on('Page.frameNavigated', params => {
       const frame = params.frame as { parentId?: string; url: string };
-      if (!frame.parentId) { tab.url = frame.url; tab.frame = null; this.#changed(threadId); }
+      if (!frame.parentId) { tab.url = frame.url; tab.frame = null; this.#changed(threadId); this.#saveCookiesSoon(engine); }
     });
     on('Page.javascriptDialogOpening', params => {
       // Nobody can answer a dialog in a headless page. One an agent command raised follows
