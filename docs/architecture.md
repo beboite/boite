@@ -246,7 +246,7 @@ for a sidebar row while the agent works or monitors. A shell left running keeps
 its own start, and a compaction its own duration.
 
 Native task observations persist with the provider, session generation and
-originating turn. The core keeps the latest 100 per thread; the chat lists
+originating turn. A thread snapshot carries the newest 100; the chat lists
 none of them and names only the tasks still running in the turn summary. A missing live task is marked ended, not
 successful; explicit provider outcomes can complete it later. Session release
 and core restart record cancellation without trying to adopt or restart native
