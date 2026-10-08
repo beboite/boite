@@ -16,7 +16,10 @@ export const THROTTLE_REPEAT_MS = 5 * 60_000;
 export const THROTTLE_QUIET_MS = 30_000;
 /** A longer wait between two samples is an idle gap: no share of it is measured. */
 export const THROTTLE_GAP_MS = 5000;
-/** The group must have spent one part in this many of the time since the last sample waiting: 200 ms per second. Whole numbers, so an exact share is not lost to rounding. */
+/**
+ * One part in this many of the time since the last sample must be stall: 200 ms
+ * per second. Whole numbers, so an exact fifth is not lost to rounding.
+ */
 export const THROTTLE_STALL_ONE_IN = 5;
 
 export interface ThrottleReading {

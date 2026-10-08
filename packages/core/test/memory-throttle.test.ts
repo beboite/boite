@@ -67,12 +67,12 @@ describe('throttle policy', () => {
     const before = run(stalled(5)).policy;
     expect(before).toMatchObject({ streak: 4, at: 4000, noticedAt: null });
     // Six seconds later the group waited 5 s in all: a share over the bar, and still no stalled sample.
-    const gap = decideThrottle(before, { path: PATH, highEvents: 9, stallMicros: 7_000_000 }, 4000 + THROTTLE_GAP_MS + 1000);
-    expect(gap).toEqual({ policy: { ...before, highEvents: 9, stallMicros: 7_000_000, at: 4000 + THROTTLE_GAP_MS + 1000 }, notify: false });
+    const gap = decideThrottle(before, { path: PATH, highEvents: 9, stallMicros: 7_000_000 }, before.at + THROTTLE_GAP_MS + 1000);
+    expect(gap).toEqual({ policy: { ...before, highEvents: 9, stallMicros: 7_000_000, at: before.at + THROTTLE_GAP_MS + 1000 }, notify: false });
     // The next ordinary sample is measured from the gap's counters, and completes the streak.
-    expect(decideThrottle(gap.policy, { path: PATH, highEvents: 10, stallMicros: 7_500_000 }, 5000 + THROTTLE_GAP_MS + 1000)).toMatchObject({ notify: true, policy: { streak: 5, noticedAt: 5000 + THROTTLE_GAP_MS + 1000 } });
+    expect(decideThrottle(gap.policy, { path: PATH, highEvents: 10, stallMicros: 7_500_000 }, gap.policy.at + 1000)).toMatchObject({ notify: true, policy: { streak: 5, noticedAt: gap.policy.at + 1000 } });
     // Exactly five seconds is still a sample.
-    expect(decideThrottle(before, { path: PATH, highEvents: 9, stallMicros: 7_000_000 }, 4000 + THROTTLE_GAP_MS)).toMatchObject({ notify: true });
+    expect(decideThrottle(before, { path: PATH, highEvents: 9, stallMicros: 7_000_000 }, before.at + THROTTLE_GAP_MS)).toMatchObject({ notify: true });
     // A gap as long as the quiet period ends the streak like any calm stretch, and keeps what was noticed.
     const long = decideThrottle(noticed(), { path: PATH, highEvents: 90, stallMicros: 90_000_000 }, 9000 + THROTTLE_QUIET_MS);
     expect(long.policy).toMatchObject({ streak: 0, noticedAt: 5000, highEvents: 90 });
@@ -201,7 +201,7 @@ describe('throttle notice', () => {
     let readable = new Set([71, 72]);
     const guard = new MemoryGuard(bus, { ...createPosixPlatform('linux', null), cgroupMemory: (pid) => { asked.push(pid); return readable.has(pid) ? reading(count, `/agents.slice/${pid}.scope`) : null; } });
     guard.applySettings(DEFAULT_SETTINGS);
-    const live = [{ root: false, record: { pid: 70 } }, { root: true, record: { pid: 0 } }, { root: true, record: { pid: -1 } }, { root: true, record: { pid: 71 } }, { root: true, record: { pid: 72 } }];
+    const live = [{ root: false, record: { pid: 70 } }, { root: true, record: { pid: 0 } }, { root: true, record: { pid: -1 } }, { root: true, record: { pid: 71.5 } }, { root: true, record: { pid: Number.NaN } }, { root: true, record: { pid: 71 } }, { root: true, record: { pid: 72 } }];
     for (let sample = 0; sample < 3; sample++) { count = sample; guard.sampleThrottle('sampled', live); }
     expect(asked).toEqual([71, 71, 71]);
     // The first root lost its group: the second is read in the same sample.
