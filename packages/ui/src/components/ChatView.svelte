@@ -17,7 +17,6 @@
   import MessageList from './MessageList.svelte';
   import ThreadLoading from './ThreadLoading.svelte';
   import ThreadRecovery from './ThreadRecovery.svelte';
-  import BackgroundHistory from './BackgroundHistory.svelte';
   import ForkReturn from './ForkReturn.svelte';
   import ProjectTile from './ProjectTile.svelte';
   import DoneThreadNotice from './DoneThreadNotice.svelte';
@@ -171,7 +170,6 @@
     {/if}
 
     {#if thread}<AgentDock {store} threadId={thread.id} />{/if}
-    {#if thread?.backgroundHistory?.length}<BackgroundHistory tasks={thread.backgroundHistory} />{/if}
     {#if thread}<ThreadRecovery {store} />{/if}
     {#if thread?.agentSessionId}
       <AgentOwnerBar {store} {thread} />
