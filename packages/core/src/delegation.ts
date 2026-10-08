@@ -3,8 +3,8 @@ import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, nativeAgentsOfTool,
 import type { AgentLetter, DelegatedAgent, DelegationConfig, DelegationModels, DelegationView, RpcParams, ThreadSummary, Turn, Usage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
-import { checkEffort, checkModel, checkStoredSpeed, needsModelDiscovery } from './threads/selection.ts';
-import { anyModel, catalog, conversationRoute, discover, providersNamed, resolveRoute, speedsKnown, type ChildRoute, type RouteRequest } from './delegation/routes.ts';
+import { checkEffort, checkModel, checkSpeed, needsModelDiscovery } from './threads/selection.ts';
+import { anyModel, catalog, conversationRoute, discover, providersNamed, resolveRoute, type ChildRoute, type RouteRequest } from './delegation/routes.ts';
 import type { ProviderProbe } from './providers/probe.ts';
 import { newId } from './ids.ts';
 import { assertDriverRunnable } from './drivers/index.ts';
@@ -288,32 +288,31 @@ export class Delegation {
     const parent = this.root(parentId);
     return resolveRoute(this.core, parent, this.config(parent.id), request);
   }
-  /**
-   * Read what the synchronous checks need and no probe gave yet: the list of a
-   * provider whose model a spawn or a plan names, and the levels or speed
-   * tiers of a model that is listed without them.
-   */
-  async prepareRoutes(parentId: string, probe: ProviderProbe, requests: RouteRequest[]): Promise<void> {
-    if (!requests.some(request => request.model !== undefined || request.effort !== undefined || request.speed !== undefined)) return;
+  /** Read the model lists a spawn or a plan names before the synchronous checks run. */
+  async prepareRoutes(parentId: string, probe: ProviderProbe, models: (string | undefined)[]): Promise<void> {
+    const named = models.filter((model): model is string => typeof model === 'string' && model.length > 0);
+    if (!named.length) return;
     const parent = this.root(parentId);
     const known = catalog(this.core, parent, true).choices;
-    const config = this.config(parent.id);
-    const only = new Set<string>();
-    let every = false;
-    for (const request of requests) {
-      let route: Pick<ChildRoute, 'providerId' | 'accountId' | 'model'> | undefined;
-      if (request.model !== undefined) {
-        route = known.find(c => `${c.providerId}/${c.model}` === request.model || c.model === request.model);
-        if (!route) {
-          const named = providersNamed(this.core, request.model);
-          if (named) for (const id of named) only.add(id); else every = true;
-          continue;
-        }
-      } else if (request.effort !== undefined || request.speed !== undefined) route = this.route(parent, config, request.profileId ?? null);
-      const provider = route && this.core.providers.get(route.providerId);
-      if (route && provider && needsModelDiscovery(provider, route.accountId, route.model, request.effort ?? null, request.speed ?? null)) only.add(provider.id);
-    }
-    if (every || only.size) await discover(this.core, probe, parent, every ? undefined : [...only]);
+    const missing = named.filter(model => !known.some(c => `${c.providerId}/${c.model}` === model || c.model === model));
+    if (!missing.length) return;
+    const only = missing.map(model => providersNamed(this.core, model));
+    await discover(this.core, probe, parent, only.some(list => list === undefined) ? undefined : [...new Set(only.flat() as string[])]);
+  }
+  /**
+   * A spawn that names a speed needs the tiers of the model it runs on. An
+   * agent that owns its list gives them with it: read it when nobody has yet.
+   * The fields are a spawn's own, unchecked; a failed read is left to the refusal.
+   */
+  async prepareSpeed(parentId: string, probe: ProviderProbe, params: { profileId?: unknown; model?: unknown; speed?: unknown }): Promise<void> {
+    if (typeof params.speed !== 'string') return;
+    const parent = this.root(parentId);
+    const model = typeof params.model === 'string' ? params.model.trim().toLowerCase() : undefined;
+    const route: Pick<ChildRoute, 'providerId' | 'accountId' | 'model'> | undefined = model === undefined
+      ? this.route(parent, this.config(parent.id), typeof params.profileId === 'string' ? params.profileId : null)
+      : catalog(this.core, parent, true).choices.find(c => `${c.providerId}/${c.model}`.toLowerCase() === model || c.model.toLowerCase() === model);
+    const provider = route && this.core.providers.get(route.providerId);
+    if (route && provider && needsModelDiscovery(provider, route.accountId, route.model, null, params.speed)) await discover(this.core, probe, parent, [provider.id]);
   }
   /** What `boite delegate models` prints: every runnable model, read from each agent once. */
   async models(threadId: string, probe: ProviderProbe): Promise<DelegationModels> {
@@ -328,19 +327,13 @@ export class Delegation {
    * An ordinary child thread on a profile, or on the parent's own route for a
    * workflow step that names none, in the parent's checkout and permission
    * mode, on the route's speed tier or none: never the parent's. The tier is
-   * checked here too, whoever built the route; like a thread's stored speed it
-   * stands while the agent's tiers are not read. `record` runs in the same
+   * checked here, whoever built the route. `record` runs in the same
    * transaction.
    */
   createChild(parent: ThreadSummary, profile: ChildRoute, title: string, record: (id: string) => void): string {
     const id = newId('thr_');
     const { speed: asked, ...route } = profile;
-    const speed = asked ?? null;
-    if (speed !== null && route.model === null) throw invalidParams('speed: this route runs on the provider\'s default model; name a model with --model to choose its speed');
-    const provider = this.core.providers.require(route.providerId);
-    checkStoredSpeed(provider, route.accountId, route.model, speed);
-    // threads.create refuses a tier it cannot read; an unread one is written below instead.
-    const listed = speed === null || speedsKnown(provider, route.accountId, route.model);
+    const speed = checkSpeed(this.core.providers.require(route.providerId), route.accountId, route.model, asked ?? null);
     this.core.journal.db.transaction(() => {
       if (parent.projectId === null) {
         const now = Date.now();
@@ -349,12 +342,10 @@ export class Delegation {
           context: null, promptCache: null, load: null, unread: false, pinned: false, createdAt: now, updatedAt: now };
         this.core.journal.append({ type: 'thread.created', threadId: id, version: 1, payload: child }, () => this.core.journal.putThread(child));
         this.core.bus.emit('thread.created', child);
-      } else this.core.threads.create({ projectId: parent.projectId, providerId: route.providerId, accountId: route.accountId, model: route.model ?? undefined, effort: route.effort, speed: listed ? speed : null, title, cwd: parent.cwd, permissionMode: parent.permissionMode }, { id, branch: parent.branch, parentThreadId: parent.id });
+      } else this.core.threads.create({ projectId: parent.projectId, providerId: route.providerId, accountId: route.accountId, model: route.model ?? undefined, effort: route.effort, speed, title, cwd: parent.cwd, permissionMode: parent.permissionMode }, { id, branch: parent.branch, parentThreadId: parent.id });
       record(id);
-      const child = { ...this.core.threads.require(id), titleSource: 'user' as const, speed };
-      this.core.journal.putThread(child);
-      // threads.create announced the child without its unread tier: say what it runs on.
-      if (!listed) this.core.bus.emit('thread.updated', withLoad(this.core, child));
+      const child = this.core.threads.require(id);
+      this.core.journal.putThread({ ...child, titleSource: 'user' });
     })();
     return id;
   }

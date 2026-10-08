@@ -26,7 +26,6 @@ import { registerStewardMethods } from './stewards.ts';
 import { registerGroupMethods } from './group/rpc.ts';
 import { registerTerminalMethods } from './terminals.ts';
 import { registerWorkflowMethods } from './workflows.ts';
-import { routeRequest } from './delegation/routes.ts';
 import { registerWorktreeMethods } from './worktree-sweep.ts';
 
 /** Adding a module is one file plus one line here. `hello` is the server's own. */
@@ -69,7 +68,8 @@ export function registerModules(core: Core): void {
   core.router.register('delegation.configure', params => core.delegation.configure(params.threadId, params.config));
   core.router.register('delegation.models', params => core.delegation.models(params.threadId, probe));
   core.router.register('delegation.spawn', async params => {
-    await core.delegation.prepareRoutes(params.threadId, probe, [routeRequest({ profileId: params.profileId, model: params.model, effort: params.effort, speed: params.speed })]);
+    await core.delegation.prepareRoutes(params.threadId, probe, [typeof params.model === 'string' ? params.model : undefined]);
+    await core.delegation.prepareSpeed(params.threadId, probe, params);
     return core.delegation.spawn(params);
   });
   core.router.register('delegation.send', (params, ctx) => core.delegation.send(params, ctx.connection.identity.principal === 'agent' ? 'agent' : 'user'));

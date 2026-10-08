@@ -512,38 +512,3 @@ test('a step names its model and reasoning level, and a level the model lacks is
   expect(h.core.threads.require(quick!.threadId!).effort).toBe('low');
   expect(plain!.effort).toBe(h.core.threads.require(threadId).effort);
 });
-
-test('a step names a speed tier of its model, by id or label, and an unknown one is refused before anything starts', async () => {
-  const { held } = scripted(ctx => ({ hold: ctx.prompt.includes('Hold the run') }));
-  const { h, owner, threadId } = await setup();
-  const echo = h.core.providers.require('echo').models.find(model => model.id === 'echo');
-  if (!echo) throw new Error(`echo lists ${h.core.providers.require('echo').models.map(model => model.id).join(', ')}`);
-  echo.speeds = [{ id: 'priority', label: 'Fast' }];
-  h.core.journal.putThread({ ...h.core.threads.require(threadId), speed: 'priority' });
-  // What the null speeds below are measured against.
-  expect(h.core.threads.require(threadId).speed).toBe('priority');
-  const bad: WorkflowPlan = { name: 'Bad', steps: [{ id: 'play', model: 'echo/echo', speed: 'turbo', task: 'Play.' }] };
-  await expect(owner.call('workflows.check', { threadId, plan: bad })).rejects.toThrow('steps[0] (play): speed: echo/echo has no "turbo" tier; expected Fast (priority)');
-  await expect(owner.call('workflows.start', { threadId, requestId: 'bad-speed', plan: bad })).rejects.toThrow('has no "turbo" tier');
-  await expect(owner.call('workflows.check', { threadId, plan: { name: 'Typed', steps: [{ id: 'play', speed: 3, task: 'Play.' }] } as unknown as WorkflowPlan })).rejects.toThrow('steps[0].speed');
-  const run = await owner.call('workflows.start', { threadId, requestId: 'speeds', plan: { name: 'Speeds', steps: [
-    { id: 'quick', model: 'echo', speed: ' Fast ', task: 'Play quickly.' },
-    { id: 'own', speed: 'priority', after: ['quick'], task: 'Play on this model.' },
-    { id: 'plain', speed: null, after: ['own'], task: 'Play again.' },
-    { id: 'gate', after: ['plain'], task: 'Hold the run.' },
-    { id: 'late', speed: 'fast', after: ['gate'], task: 'Play after the tiers are gone.' },
-  ] } });
-  // The run stores the tier id, trimmed and resolved, not what the plan spelled.
-  expect(run.plan.steps.map(step => step.speed ?? null)).toEqual(['priority', 'priority', null, null, 'priority']);
-  await waitFor(() => held.size === 1);
-  const extended = await owner.call('workflows.extend', { threadId, runId: run.id, requestId: 'more', steps: [{ id: 'added', speed: 'FAST', after: ['gate'], task: 'Play, added later.' }] });
-  expect(extended.plan.steps.at(-1)!.speed).toBe('priority');
-  // A restart drops what the agent listed: the steps checked before it still launch on their tier.
-  delete echo.speeds;
-  await expect(owner.call('workflows.check', { threadId, plan: { name: 'New', steps: [{ id: 'play', speed: 'priority', task: 'Play.' }] } })).rejects.toThrow('echo/echo offers no speed tier; leave speed out');
-  [...held.values()][0]!('held');
-  const done = await settled(h, threadId, run.id, ['done']);
-  const speeds = Object.fromEntries(done.nodes.map(node => [node.id, node.instances[0]!.speed ?? null]));
-  expect(speeds).toEqual({ quick: 'priority', own: 'priority', plain: null, gate: null, late: 'priority', added: 'priority' });
-  expect(Object.fromEntries(done.nodes.map(node => [node.id, h.core.threads.require(node.instances[0]!.threadId!).speed ?? null]))).toEqual(speeds);
-});

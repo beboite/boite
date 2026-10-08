@@ -118,7 +118,7 @@ existing child to reuse its session.
 
 Delegation starts enabled, with free model choice. The first turn of a new
 provider session carries a short guide: the commands, `--model`, `--effort` and
-`--speed`, that a child runs at standard speed without `--speed`,
+`--speed`, that a child runs at standard speed (no tier) without `--speed`,
 and the rule that results come back as messages. Later turns carry it again
 when the request is about handing work out (delegation, subagents, parallel
 work, a workflow) or the team is paused. A child receives one line naming its
@@ -181,13 +181,13 @@ by id or by label, in any case: `fast` selects Claude's `fast` and the Codex
 tier whose id is `priority` and label "Fast". It applies to the model the child
 runs on, so it also works with `--profile` and with no `--model`, unless that
 route runs on the provider's default model: then the spawn is refused and
-`--model` has to name one. A tier the model lacks is refused with the model and
-the tiers it offers, or that it offers none. Tiers the agent has not listed yet
-are read from the agent first; when that read fails the refusal says so instead
-of "no tier". `delegate models` prints the tiers of each model that has some,
-each as its id, with the label in front when the label says something else:
-`speed=fast` for Claude, `speed=Fast (priority)` for that Codex tier, a form
-`--speed` takes back as it is.
+`--model` has to name a model. A tier the model lacks is refused with the model
+and the tiers it offers, or that it offers none. Tiers the agent has not listed
+yet are read from the agent first; when that read fails the refusal says so
+instead of claiming the model offers none. `delegate models` prints the tiers
+of each model that has some, each as its id, with the label in front when the
+label says something else: `speed=fast` for Claude, `speed=Fast (priority)` for
+that Codex tier. `--speed` takes the value after `speed=` as it is.
 `delegate list` and a spawn show the id the child stores, here
 `speed=priority`. The older `delegate spawn <profile> "<brief>"` form still
 works.

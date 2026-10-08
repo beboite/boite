@@ -63,7 +63,7 @@ import { activityMethods, finishActivityTurn } from './activity';
 import { FakeBus } from './bus';
 import { FAKE_TREE } from './files';
 import { seedHooks } from './hooks';
-import { childRoute, delegationConfig, discoverRoute, workflowAnswer, workflowChild } from './delegation';
+import { delegationConfig, workflowAnswer, workflowChild } from './delegation';
 import { FakePlugins } from './plugins';
 import { initialHarnessUpdates } from './provider-installs';
 import { DATA_DIR, T0, toSummary } from './shared';
@@ -269,8 +269,6 @@ export class FakeContext {
         this.delegationConfigs.set(rootId, { ...delegationConfig(this, rootId), paused: false });
         this.emit('delegation.changed', { threadId: rootId });
       },
-      route: (root, config, ask) => childRoute(this, root, config, ask),
-      discover: (root, config, ask) => discoverRoute(this, root, config, ask),
       child: (root, profile, title, task) => workflowChild(this, root, profile, title, task),
       answer: (threadId, text, ok) => workflowAnswer(this, threadId, text, ok),
       changed: (rootId, runId) => this.emitToThread(rootId, 'workflows.changed', { threadId: rootId, runId }),

@@ -2817,12 +2817,12 @@ export function matchSpeed(speeds: readonly SpeedTier[] | null | undefined, want
   const query = wanted.trim().toLowerCase();
   if (!query || !speeds) return null;
   const by = (name: (speed: SpeedTier) => string) => speeds.find(speed => name(speed).trim().toLowerCase() === query);
-  return (by(speed => speed.id) ?? by(speed => speed.label) ?? by(speedName))?.id ?? null;
+  return (by(speed => speed.id) ?? by(speed => speed.label) ?? by(speedName))?.id.trim() ?? null;
 }
 /** How a tier is written for an agent: its id, with the label in front when the label says something else, as `Fast (priority)`. */
 export function speedName(speed: SpeedTier): string {
-  const label = speed.label.trim();
-  return !label || label.toLowerCase() === speed.id.trim().toLowerCase() ? speed.id : `${label} (${speed.id})`;
+  const label = speed.label.trim(), id = speed.id.trim();
+  return !label || label.toLowerCase() === id.toLowerCase() ? id : `${label} (${id})`;
 }
 /**
  * Why a speed is refused: the model and the tiers it offers, or that it offers
@@ -3152,9 +3152,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   /**
    * `model` is `provider/model` or a model id `delegation.models` lists; it
    * wins over `profileId`. Neither: this conversation's own model. `speed` is
-   * a tier of the model the child runs on, by id or by label,
-   * case-insensitively, and is refused otherwise. Left out: no tier, never
-   * the parent's.
+   * a tier of the model the child runs on, by id, by label or as listed
+   * (`Fast (priority)`), case-insensitively, and is refused otherwise. Left
+   * out: no tier, never the parent's.
    */
   'delegation.spawn': { params: { threadId: ThreadId; profileId?: string; model?: string; effort?: string; speed?: string; task: string; title?: string; requestId: string }; result: DelegatedAgent };
   'delegation.models': { params: { threadId: ThreadId }; result: DelegationModels };

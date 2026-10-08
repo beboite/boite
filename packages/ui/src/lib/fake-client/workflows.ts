@@ -1,4 +1,5 @@
 import {
+  CONVERSATION_PROFILE_ID,
   RpcErrorCode,
   WorkflowPlanError,
   WORKFLOW_LIMITS,
@@ -29,7 +30,7 @@ import {
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { refusal } from './shared';
-import type { ChildRoute, RouteAsk } from './delegation';
+import type { ChildRoute } from './delegation';
 
 type WorkflowMethod = Extract<RpcMethodName, `workflows.${string}`>;
 type Handlers = { [M in WorkflowMethod]: (params: RpcParams<M>) => RpcResult<M> | Promise<RpcResult<M>> };
@@ -40,10 +41,6 @@ export interface WorkflowHost {
   config(rootId: ThreadId): DelegationConfig;
   /** Unpauses the delegation team, what an owner resume does in the core. */
   resumeTeam(rootId: ThreadId): void;
-  /** The route a step names, resolved like a spawn's; undefined for a profile that does not exist. Throws the core's refusals. */
-  route(root: Thread, config: DelegationConfig, ask: RouteAsk): ChildRoute | undefined;
-  /** Reads the agent's speed tiers a step needs before they are checked. */
-  discover(root: Thread, config: DelegationConfig, ask: RouteAsk): Promise<void>;
   /** A child thread of the root on that profile, its task as the first message. */
   child(root: Thread, profile: ChildRoute, title: string, task: string): ThreadId;
   /** The child's answer lands and it goes idle; `ok` false leaves an error instead. */
@@ -135,21 +132,13 @@ export class FakeWorkflows {
       if (!run || run.rootThreadId !== this.#rootOf(threadId).id) throw invalid(`runId: no workflow run ${String(runId)} on this thread`);
       return structuredClone(run);
     },
-    'workflows.check': async ({ threadId, plan }) => {
-      const root = this.#rootOf(threadId);
-      const config = this.#team(root.id);
-      await this.#discover(root, config, plan?.steps);
+    'workflows.check': ({ threadId, plan }) => {
+      const config = this.#team(this.#rootOf(threadId).id);
       const checked = planError(() => checkPlan(plan, { profiles: config.profiles.map(p => p.id) }));
-      this.#checkRoutes(root, config, checked.plan.steps);
       return { levels: workflowLevels(checked.steps.map(s => ({ id: s.id, after: s.deps }))) };
     },
-    'workflows.start': async (params) => {
-      // Like the core: a replayed request, an archived thread or a paused team reads no agent.
-      const { root, prior, config } = this.#admit(params.threadId, params.plan, params.requestId, params.templateId);
-      if (!prior) await this.#discover(root, config, params.plan?.steps);
-      return structuredClone(this.start(params.threadId, params.plan, params.requestId, params.templateId, 'user'));
-    },
-    'workflows.extend': async (params) => {
+    'workflows.start': (params) => structuredClone(this.start(params.threadId, params.plan, params.requestId, params.templateId, 'user')),
+    'workflows.extend': (params) => {
       const run = this.#own(params.threadId, params.runId);
       const key = `${run.id}:${params.requestId}`;
       const fingerprint = JSON.stringify(params.steps);
@@ -160,9 +149,7 @@ export class FakeWorkflows {
       }
       if (run.status !== 'running' && run.status !== 'paused') throw refusal(`the run is ${run.status}; only a running or paused run takes new steps`);
       const config = this.#team(run.rootThreadId);
-      await this.#discover(this.host.thread(run.rootThreadId), config, params.steps);
       const steps = planError(() => checkSteps(params.steps, { profiles: config.profiles.map(p => p.id), existing: run.nodes.map(n => ({ id: n.id, after: n.after })) }));
-      this.#checkRoutes(this.host.thread(run.rootThreadId), config, steps);
       run.plan.steps.push(...steps.map(({ deps: _deps, ...step }) => step));
       run.nodes.push(...steps.map(step => this.#node(step, step.deps)));
       this.#requests.set(key, { fingerprint, runId: run.id });
@@ -215,24 +202,20 @@ export class FakeWorkflows {
     },
   };
 
-  /** What a start checks before it reads the plan: the thread, a replayed request, a paused team. */
-  #admit(threadId: ThreadId, plan: WorkflowPlan, requestId: string, templateId: string | undefined): { root: Thread; key: string; fingerprint: string; prior: WorkflowRun | undefined; config: DelegationConfig } {
+  /** What `workflows.start` does, also the seed's way in. */
+  start(threadId: ThreadId, plan: WorkflowPlan, requestId: string, templateId: string | undefined, by: 'agent' | 'user'): WorkflowRun {
     const root = this.host.thread(threadId);
     if (root.parentThreadId) throw refusal('a workflow step or delegated agent cannot start a workflow; ask its parent');
     if (root.archived) throw refusal('cannot start a workflow on an archived thread');
     const fingerprint = JSON.stringify([plan, templateId ?? null]);
     const key = `${root.id}:${requestId}`;
     const prior = this.#requests.get(key);
-    if (prior && prior.fingerprint !== fingerprint) throw refusal('requestId already used for different content');
-    return { root, key, fingerprint, prior: prior && this.#runs.get(prior.runId), config: prior ? this.host.config(root.id) : this.#team(root.id) };
-  }
-
-  /** What `workflows.start` does, also the seed's way in. */
-  start(threadId: ThreadId, plan: WorkflowPlan, requestId: string, templateId: string | undefined, by: 'agent' | 'user'): WorkflowRun {
-    const { root, key, fingerprint, prior, config } = this.#admit(threadId, plan, requestId, templateId);
-    if (prior) return prior;
+    if (prior) {
+      if (prior.fingerprint !== fingerprint) throw refusal('requestId already used for different content');
+      return this.#runs.get(prior.runId)!;
+    }
+    const config = this.#team(root.id);
     const checked = planError(() => checkPlan(plan, { profiles: config.profiles.map(p => p.id) }));
-    this.#checkRoutes(root, config, checked.plan.steps);
     if (templateId !== undefined && !this.#templates.has(templateId)) throw invalid(`templateId: no template ${templateId}`);
     const active = [...this.#runs.values()].filter(run => run.rootThreadId === root.id && (run.status === 'running' || run.status === 'paused')).length;
     if (active >= ACTIVE_RUNS) throw refusal(`this thread already has ${active} unfinished workflows; stop or finish one first`);
@@ -297,33 +280,6 @@ export class FakeWorkflows {
     const config = this.host.config(rootId);
     if (config.enabled && config.paused) throw refusal('subagents are paused for this thread; the owner resumes them in Subagents > Settings');
     return config;
-  }
-
-  /** What a step says about its route, as the host resolves it. */
-  #ask(step: Pick<WorkflowStepPlan, 'profile' | 'model' | 'effort' | 'speed'>): RouteAsk {
-    return { profileId: step.profile ?? null, ...(step.model === undefined ? {} : { model: step.model }), ...(step.effort === undefined ? {} : { effort: step.effort }), ...(step.speed == null ? {} : { speed: step.speed }) };
-  }
-
-  /** The agent's tiers for every step that names a speed, read before the plan is checked; the steps are not validated yet. */
-  async #discover(root: Thread, config: DelegationConfig, steps: unknown): Promise<void> {
-    if (!Array.isArray(steps)) return;
-    for (const step of steps) {
-      const speed = typeof step === 'object' && step !== null ? (step as WorkflowStepPlan).speed : undefined;
-      if (typeof speed === 'string' && speed.trim()) await this.host.discover(root, config, this.#ask(step as WorkflowStepPlan));
-    }
-  }
-
-  /** The core's route check: a model, a level or a speed a step cannot have is refused with its place, and a speed becomes its tier id. */
-  #checkRoutes(root: Thread, config: DelegationConfig, steps: WorkflowStepPlan[], field = 'steps'): void {
-    steps.forEach((step, i) => {
-      if (step.model === undefined && step.effort === undefined && step.speed == null) return;
-      try {
-        const route = this.host.route(root, config, this.#ask(step));
-        if (route?.speed != null) step.speed = route.speed;
-      } catch (error) {
-        throw invalid(`${field}[${i}] (${step.id}): ${error instanceof Error ? error.message : String(error)}`);
-      }
-    });
   }
 
   #node(step: WorkflowStepPlan, after: string[]): WorkflowNode {
@@ -442,15 +398,8 @@ export class FakeWorkflows {
     const now = this.host.now();
     if (inst.threadId === null) {
       const root = this.host.thread(run.rootThreadId);
-      const step = run.plan.steps.find(s => s.id === node.id);
-      let profile: ChildRoute | undefined;
-      try {
-        // The speed is the tier id the start checked: it stands when the agent's tiers are no longer read, as in the core.
-        profile = this.host.route(root, config, { ...this.#ask({ ...step, profile: node.profileId ?? undefined }), checked: true });
-      } catch (error) {
-        Object.assign(inst, { status: 'failed', error: error instanceof Error ? error.message : String(error), startedAt: now, finishedAt: now });
-        return;
-      }
+      const profile: ChildRoute | undefined = config.profiles.find(p => p.id === node.profileId)
+        ?? (node.profileId === null || node.profileId === CONVERSATION_PROFILE_ID ? { id: CONVERSATION_PROFILE_ID, name: root.model ?? root.providerId, providerId: root.providerId, accountId: root.accountId, model: root.model, effort: root.effort ?? null } : undefined);
       if (!profile) {
         Object.assign(inst, { status: 'failed', error: `profile ${node.profileId} is no longer a profile of this thread`, startedAt: now, finishedAt: now });
         return;
@@ -458,7 +407,7 @@ export class FakeWorkflows {
       const title = `${run.name} · ${node.title}${inst.label ? ` · ${inst.label}` : ''}`.slice(0, 120);
       const threadId = this.host.child(root, profile, title, inst.task ?? '');
       this.#steps.set(threadId, { runId: run.id, key: inst.key });
-      Object.assign(inst, { threadId, providerId: profile.providerId, model: profile.model, effort: profile.effort, speed: profile.speed ?? null });
+      Object.assign(inst, { threadId, providerId: profile.providerId, model: profile.model });
     }
     Object.assign(inst, { status: 'running', attempts: 1, error: null, result: null, output: null, startedAt: now, finishedAt: null });
     if (this.#held) return;

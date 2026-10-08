@@ -56,7 +56,7 @@ async function probe(ctx: FakeContext, providerId: string, accountId: string): P
   }
   // The probe starts the agent: a provider turned off lists nothing.
   if (!providerEnabled(provider)) throw turnedOff(provider);
-  const dynamic = ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'].includes(provider.protocol);
+  const dynamic = PROBED_PROTOCOLS.includes(provider.protocol);
   if (dynamic && !provider.available) {
     throw new RpcFailure({ code: RpcErrorCode.Unavailable, message: `${provider.name} is not available on this machine` });
   }
