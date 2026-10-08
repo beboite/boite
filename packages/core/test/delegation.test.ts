@@ -278,8 +278,9 @@ test('the parent learns dynamic workflows and coordination within a compact prom
   await owner.call('turns.start', { threadId, prompt: 'Review the parser' });
   const prompt = runs.get(threadId)!.ctx.prompt;
   for (const command of ['boite agents list', 'boite agents send', 'boite agents reply', 'boite delegate spawn', 'boite delegate send', 'boite workflow help', 'boite workflow check', 'boite workflow run', 'boite workflow extend', 'forEach', 'when']) expect(prompt).toContain(command);
-  // 2600 before the line that names `boite view`, about 220 bytes.
-  expect(Buffer.byteLength(prompt)).toBeLessThan(2820);
+  expect(prompt).toContain('boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>] [--speed <tier>]:');
+  // 2600 before the line that names `boite view`, about 220 bytes, then 17 for `[--speed <tier>]`.
+  expect(Buffer.byteLength(prompt)).toBeLessThan(2840);
   runs.get(threadId)!.finish();
   await waitFor(() => h.core.threads.require(threadId).status === 'idle');
   await owner.call('turns.start', { threadId, prompt: 'Continue' });
@@ -724,4 +725,79 @@ test('an agent picks any installed model and reasoning level for a child, never 
     expect((await agent.call('delegation.spawn', { threadId, model: 'echo/echo', effort: 'low', task: 'Own model', requestId: 'own' })).thread.effort).toBe('low');
     expect((await agent.call('delegation.models', { threadId })).anyModel).toBe(false);
   } finally { agent.close(); }
+});
+
+test('a child runs on a speed tier only when the spawn names one, by id or by label, and an unknown tier is refused with the model\'s own', async () => {
+  scripted();
+  const { h, owner, threadId } = await setup();
+  const shipped = JSON.parse(readFileSync(join(import.meta.dir, '../src/providers/shipped/echo.json'), 'utf8')) as Record<string, unknown>;
+  mkdirSync(join(h.dataDir, 'providers'), { recursive: true });
+  writeFileSync(join(h.dataDir, 'providers', 'twin.json'), JSON.stringify({ ...shipped, id: 'twin', name: 'Twin', shortName: 'Twin', models: [
+    { id: 'luna', name: 'Luna', effort: { levels: [{ id: 'low', label: 'Low' }, { id: 'max', label: 'Max' }], default: 'low' } },
+    { id: 'plain', name: 'Plain' },
+  ] }));
+  expect((await owner.call('providers.reload', {})).rejected).toEqual([]);
+  h.core.accounts.ensureDefaults();
+  // A descriptor lists no speed: a driver reads them from the agent. Codex names its fast tier `priority`.
+  h.core.providers.require('twin').models.find(model => model.id === 'luna')!.speeds = [{ id: 'priority', label: 'Fast' }];
+  // The parent itself runs fast, on a tier whose id and label agree.
+  h.core.providers.require('echo').models.find(model => model.id === 'echo')!.speeds = [{ id: 'fast', label: 'Fast' }];
+  h.core.journal.putThread({ ...h.core.threads.require(threadId), speed: 'fast' });
+  const agent = await connect(h.url, h.core.agents.tokenFor(threadId));
+  const speedOf = async (params: { model?: string; profileId?: string; effort?: string; speed?: string }, requestId: string) => {
+    const child = await agent.call('delegation.spawn', { threadId, task: `Play ${requestId}`, requestId, ...params });
+    // What the journal holds, not only what the answer says.
+    expect(h.core.threads.require(child.thread.id).speed ?? null).toBe(child.thread.speed ?? null);
+    return child.thread.speed ?? null;
+  };
+  try {
+    const models = await agent.call('delegation.models', { threadId });
+    expect(models.choices.find(c => c.model === 'luna')?.speeds).toEqual([{ id: 'priority', label: 'Fast' }]);
+    expect(models.choices.find(c => c.model === 'plain')?.speeds).toEqual([]);
+
+    expect(await speedOf({ model: 'twin/luna', effort: 'max', speed: 'fast' }, 'label')).toBe('priority');
+    expect(await speedOf({ model: 'twin/luna', speed: 'FAST' }, 'label-case')).toBe('priority');
+    expect(await speedOf({ model: 'twin/luna', speed: 'priority' }, 'id')).toBe('priority');
+    // No speed asked: none, whatever the parent runs on, on another model or on its own.
+    expect(await speedOf({ model: 'twin/luna' }, 'none')).toBeNull();
+    expect(await speedOf({}, 'own-none')).toBeNull();
+    expect(await speedOf({ profileId: 'worker' }, 'profile-none')).toBeNull();
+    // The conversation's own route and a named profile take a speed too, checked against their model.
+    expect(await speedOf({ speed: 'fast' }, 'own')).toBe('fast');
+    expect(await speedOf({ profileId: 'worker', speed: 'Fast' }, 'profile')).toBe('fast');
+
+    await expect(agent.call('delegation.spawn', { threadId, model: 'twin/plain', speed: 'fast', task: 'No tier', requestId: 'no-tier' })).rejects.toThrow('speed: twin/plain offers no speed tier; leave --speed out');
+    await expect(agent.call('delegation.spawn', { threadId, model: 'twin/luna', speed: 'turbo', task: 'Bad tier', requestId: 'bad-tier' })).rejects.toThrow('speed: twin/luna has no "turbo" tier; expected fast (priority)');
+    await expect(agent.call('delegation.spawn', { threadId, speed: 'priority', task: 'Other tier', requestId: 'other-tier' })).rejects.toThrow('speed: echo/echo has no "priority" tier; expected fast');
+    // A retry of the same request is the same child; another speed under that id is different content.
+    expect(await speedOf({ model: 'twin/luna', effort: 'max', speed: 'fast' }, 'label')).toBe('priority');
+    await expect(agent.call('delegation.spawn', { threadId, model: 'twin/luna', effort: 'max', task: 'Play label', requestId: 'label' })).rejects.toThrow('requestId already used');
+  } finally { agent.close(); }
+
+  // A draft's child is written without threads.create: the same speed lands there.
+  const parent = h.core.threads.require(threadId);
+  const route = h.core.delegation.resolve(threadId, { model: 'twin/luna', speed: 'fast' });
+  const draft = h.core.delegation.createChild({ ...parent, projectId: null }, route, 'Draft child', () => {});
+  expect(h.core.threads.require(draft).speed).toBe('priority');
+  const plain = h.core.delegation.createChild({ ...parent, projectId: null }, h.core.delegation.resolve(threadId, {}), 'Draft plain', () => {});
+  expect(h.core.threads.require(plain).speed).toBeNull();
+
+  const call = async (args: string[]) => {
+    let out = '', err = '';
+    const code = await runCli(args, { out: s => { out += s; }, err: s => { err += s; }, env: { BOITE_THREAD_ID: threadId, BOITE_CORE_URL: h.url, BOITE_AGENT_TOKEN: h.core.agents.tokenFor(threadId) }, cwd: h.dataDir });
+    return { out, err, code };
+  };
+  const listed = (await call(['delegate', 'models'])).out;
+  expect(listed.split('\n')[0]).toBe('models a child can run on: boite delegate spawn "<brief>" --model <provider/model> [--effort <level>] [--speed <tier>]');
+  expect(listed).toContain('twin/luna "Luna" effort=low|max (default low) speed=fast\n');
+  expect(listed).toContain('twin/plain "Plain" (no reasoning levels)\n');
+  expect(listed).toContain('echo/echo "Echo" effort=low|high (default high) speed=fast [this conversation]');
+  const spawned = await call(['delegate', 'spawn', 'Play the build', '--model', 'twin/luna', '--effort', 'max', '--speed', 'fast', '--title', 'Playtest']);
+  expect(spawned.out).toMatch(/^agent: thr_\S+\nmodel: twin\/luna effort=max speed=priority\nstatus: \w+\n/);
+  const list = (await call(['delegate', 'list'])).out;
+  expect(list).toMatch(/thr_\S+ \w+ \d+s twin\/luna effort=max speed=priority "Playtest"/);
+  expect(list).toMatch(/thr_\S+ \w+ \d+s twin\/luna effort=low "Play none"/);
+  const refused = await call(['delegate', 'spawn', 'Play the build', '--model', 'twin/plain', '--speed', 'fast']);
+  expect(refused.code).not.toBe(0);
+  expect(refused.err).toContain('twin/plain offers no speed tier');
 });

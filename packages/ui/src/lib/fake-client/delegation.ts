@@ -1,7 +1,8 @@
 /** Delegation: a parent thread's team of child threads, their usage and letters. */
-import { collectNativeAgents, collectProcessAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, RpcErrorCode, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationModelChoice, type DelegationProfile, type DelegationView, type DelegationWaitResult, type RpcParams, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { collectNativeAgents, collectProcessAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, matchSpeed, RpcErrorCode, speedRefusal, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationModelChoice, type DelegationProfile, type DelegationView, type DelegationWaitResult, type RpcParams, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { addUsage, emptyUsage, toSummary } from './shared';
+import { modelsOf } from './provider-catalog';
 import type { FakeContext, FakeMethods } from './context';
 
 function delegationRoot(ctx: FakeContext, threadId: ThreadId): ThreadId {
@@ -19,12 +20,23 @@ function modelChoices(ctx: FakeContext, parent: Thread): DelegationModelChoice[]
   return ctx.providers.filter(provider => provider.available && provider.enabled !== false).flatMap(provider => {
     const account = ctx.accounts.find(entry => entry.id === parent.accountId && entry.providerId === provider.id) ?? ctx.accounts.find(entry => entry.providerId === provider.id);
     if (!account) return [];
-    return provider.models.filter(model => !model.legacy).map(model => ({
+    return modelsOf(ctx, provider.id, account.id).filter(model => !model.legacy).map(model => ({
       providerId: provider.id, providerName: provider.name, accountId: account.id, model: model.id, name: model.name,
       efforts: model.effort?.levels.map(level => level.id) ?? [], defaultEffort: model.effort?.default ?? null,
+      speeds: model.speeds?.map(speed => ({ id: speed.id, label: speed.label })) ?? [],
       current: parent.providerId === provider.id && parent.model === model.id,
     }));
   });
+}
+
+/** The core's speed resolution: by id or label, any case, refused naming the model and what it offers. */
+function pickSpeed(ctx: FakeContext, route: ChildRoute, wanted: string | undefined): string | null {
+  if (wanted === undefined) return null;
+  if (route.model === null) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'speed: this route runs on the provider\'s default model; name a model with --model to choose its speed' });
+  const speeds = modelsOf(ctx, route.providerId, route.accountId).find(model => model.id === route.model)?.speeds ?? [];
+  const speed = matchSpeed(speeds, wanted);
+  if (speed === null) throw new RpcFailure({ code: RpcErrorCode.Refused, message: speedRefusal(`${route.providerId}/${route.model}`, speeds, wanted) });
+  return speed;
 }
 
 /** `provider/model`, a model id (the parent's provider first) or a unique part of an id or name. */
@@ -144,7 +156,7 @@ export function workflowChild(ctx: FakeContext, root: Thread, profile: ChildRout
   const turn: Turn = { id: `turn-${id}`, threadId: id, status: 'running', queuedAt: at, startedAt: at, finishedAt: null, usage: null, error: null };
   const child: Thread = {
     ...root, id, parentThreadId: root.id, title, titleSource: 'user',
-    providerId: profile.providerId, accountId: profile.accountId, model: profile.model, effort: profile.effort,
+    providerId: profile.providerId, accountId: profile.accountId, model: profile.model, effort: profile.effort, speed: null,
     status: 'running', unread: false, archived: false, pinned: false,
     sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, activity: undefined, moveNote: null,
     createdAt: at, updatedAt: at, messagesBefore: null, turns: [turn], commands: [],
@@ -305,7 +317,7 @@ export function delegationMethods(ctx: FakeContext) {
       if (parent.parentThreadId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation supports one level' });
       const task = params.task.trim();
       if (!task || task.length > 12000) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'task must contain 1 to 12000 characters' });
-      const fingerprint = JSON.stringify([params.profileId ?? null, params.model ?? null, params.effort ?? null, task, params.title ?? null]);
+      const fingerprint = JSON.stringify([params.profileId ?? null, params.model ?? null, params.effort ?? null, params.speed ?? null, task, params.title ?? null]);
       const requestKey = `${parent.id}:${params.requestId}`;
       const prior = ctx.delegationRequests.get(requestKey);
       if (prior) {
@@ -322,6 +334,7 @@ export function delegationMethods(ctx: FakeContext) {
       const profile: ChildRoute | undefined = params.model !== undefined ? pickModel(ctx, parent, config, params.model, params.effort) : config.profiles.find(entry => entry.id === profileId)
         ?? (profileId === CONVERSATION_PROFILE_ID ? { id: CONVERSATION_PROFILE_ID, name: parent.model ?? parent.providerId, providerId: parent.providerId, accountId: parent.accountId, model: parent.model, effort: parent.effort ?? null } : undefined);
       if (!profile) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'unknown delegation profile' });
+      const speed = pickSpeed(ctx, profile, params.speed);
       const id = `t-${++ctx.seq}`;
       const at = ctx.now();
       const child: Thread = {
@@ -334,7 +347,7 @@ export function delegationMethods(ctx: FakeContext) {
         accountId: profile.accountId,
         model: profile.model,
         effort: params.model === undefined && params.effort !== undefined ? params.effort : profile.effort,
-        speed: null,
+        speed,
         status: 'idle', unread: false, archived: false, pinned: false,
         sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, moveNote: null,
         createdAt: at, updatedAt: at, messagesBefore: null, messages: [], turns: [], commands: []

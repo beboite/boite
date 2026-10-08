@@ -15,6 +15,7 @@ export interface Parsed {
   name?: string;
   model?: string;
   effort?: string;
+  speed?: string;
   profile?: string;
   wait: boolean;
   timeout?: number;
@@ -90,6 +91,7 @@ export function parse(argv: string[]): Parsed {
     else if (arg === '--shutdown' && parsed.positional[0] === 'device' && parsed.positional[1] === 'close') parsed.positional.push(arg);
     else if (arg === '--model') parsed.model = next();
     else if (arg === '--effort') parsed.effort = next();
+    else if (arg === '--speed') parsed.speed = next();
     else if (arg === '--profile') parsed.profile = next();
     else if (arg.startsWith('--')) throw new Usage(`unknown flag ${arg}`);
     else parsed.positional.push(arg);

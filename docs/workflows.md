@@ -44,14 +44,17 @@ native subagents or plain work when that fits better.
 Every step above runs on the conversation's model. A step that should run on
 another one names it, as `boite delegate spawn --model` does:
 `{ "id": "review", "model": "codex/gpt-5.5", "effort": "high", ... }`, or a
-profile: `{ "id": "review", "profile": "reviewer", ... }`. `boite delegate
-models` lists the choices.
+profile: `{ "id": "review", "profile": "reviewer", ... }`. `"speed": "fast"`
+puts it on a speed tier of its model. `boite delegate models` lists the
+choices. `boite workflow check` refuses a model, a level or a speed the step
+cannot have before anything starts, with the message `delegate spawn` gives.
 
 | Field | Meaning |
 | --- | --- |
 | `id` | Letters, digits, `_` and `-`, starting with a letter |
 | `model` | Optional. `provider/model`, a model id or a unique part of one, matched like `delegate spawn --model`. Refused when the owner turned off "Let the agent choose the model" and it is not a suggested one |
 | `effort` | Optional. One of the model's reasoning levels. Left out: the parent's level on the same model, else the model's default |
+| `speed` | Optional. One of the model's speed tiers, by id or label, such as `fast`. Left out: none, whatever the conversation runs on |
 | `profile` | Optional. A delegation profile id of this thread. Left out with no `model`, the step runs on the conversation's model |
 | `task` | The brief. `{{step}}`, `{{step.field}}`, `{{item}}` and `{{index}}` are filled in when the step starts |
 | `after` | Steps that must end first. A step named in `forEach`, `when` or the task is added automatically |

@@ -512,3 +512,23 @@ test('a step names its model and reasoning level, and a level the model lacks is
   expect(h.core.threads.require(quick!.threadId!).effort).toBe('low');
   expect(plain!.effort).toBe(h.core.threads.require(threadId).effort);
 });
+
+test('a step names a speed tier of its model, by id or label, and an unknown one is refused before anything starts', async () => {
+  scripted(() => 'done');
+  const { h, owner, threadId } = await setup();
+  h.core.providers.require('echo').models.find(model => model.id === 'echo')!.speeds = [{ id: 'priority', label: 'Fast' }];
+  h.core.journal.putThread({ ...h.core.threads.require(threadId), speed: 'priority' });
+  const bad: WorkflowPlan = { name: 'Bad', steps: [{ id: 'play', model: 'echo/echo', speed: 'turbo', task: 'Play.' }] };
+  await expect(owner.call('workflows.check', { threadId, plan: bad })).rejects.toThrow('steps[0] (play): speed: echo/echo has no "turbo" tier; expected fast (priority)');
+  await expect(owner.call('workflows.start', { threadId, requestId: 'bad-speed', plan: bad })).rejects.toThrow('has no "turbo" tier');
+  await expect(owner.call('workflows.check', { threadId, plan: { name: 'Typed', steps: [{ id: 'play', speed: 3, task: 'Play.' }] } as unknown as WorkflowPlan })).rejects.toThrow('steps[0].speed');
+  const run = await owner.call('workflows.start', { threadId, requestId: 'speeds', plan: { name: 'Speeds', steps: [
+    { id: 'quick', model: 'echo', speed: 'fast', task: 'Play quickly.' },
+    { id: 'own', speed: 'priority', after: ['quick'], task: 'Play on this model.' },
+    { id: 'plain', after: ['own'], task: 'Play again.' },
+  ] } });
+  const done = await settled(h, threadId, run.id, ['done']);
+  const [quick, own, plain] = done.nodes.map(node => node.instances[0]!);
+  expect([quick!.speed, own!.speed, plain!.speed ?? null]).toEqual(['priority', 'priority', null]);
+  expect([quick, own, plain].map(inst => h.core.threads.require(inst!.threadId!).speed ?? null)).toEqual(['priority', 'priority', null]);
+});

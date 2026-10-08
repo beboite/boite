@@ -2800,8 +2800,21 @@ export interface DelegationModelChoice {
   /** Reasoning levels this model offers, lowest first. Empty: no reasoning control. */
   efforts: string[];
   defaultEffort: string | null;
+  /** Native service tiers this model offers, such as `fast`. Empty: no speed control. */
+  speeds: { id: string; label: string }[];
   /** The parent conversation's own model. */
   current: boolean;
+}
+/** A speed named by id or by label, any case: `fast` is Claude's `fast` and the Codex tier `priority` labelled "Fast". */
+export function matchSpeed(speeds: readonly { id: string; label: string }[], wanted: string): string | null {
+  const query = wanted.trim().toLowerCase();
+  return (speeds.find(speed => speed.id.toLowerCase() === query) ?? speeds.find(speed => speed.label.toLowerCase() === query))?.id ?? null;
+}
+/** Why a speed is refused: the model and the tiers it offers, or that it offers none. */
+export function speedRefusal(model: string, speeds: readonly { id: string; label: string }[], wanted: string): string {
+  if (!speeds.length) return `speed: ${model} offers no speed tier; leave --speed out`;
+  const names = speeds.map(speed => speed.label.toLowerCase() === speed.id.toLowerCase() ? speed.id : `${speed.label.toLowerCase()} (${speed.id})`);
+  return `speed: ${model} has no "${wanted}" tier; expected ${names.join(', ')}`;
 }
 export interface DelegationModels {
   anyModel: boolean;
@@ -3123,7 +3136,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * wins over `profileId`. Neither: this conversation's own model. A child
    * never runs in a fast service tier.
    */
-  'delegation.spawn': { params: { threadId: ThreadId; profileId?: string; model?: string; effort?: string; task: string; title?: string; requestId: string }; result: DelegatedAgent };
+  'delegation.spawn': { params: { threadId: ThreadId; profileId?: string; model?: string; effort?: string; speed?: string; task: string; title?: string; requestId: string }; result: DelegatedAgent };
   'delegation.models': { params: { threadId: ThreadId }; result: DelegationModels };
   'delegation.send': { params: { threadId: ThreadId; toThreadId: ThreadId; text: string; requestId: string }; result: AgentLetter };
   'delegation.stop': { params: { threadId: ThreadId; agentId?: ThreadId }; result: { stopped: number } };

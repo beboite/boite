@@ -102,10 +102,11 @@ ${CONTROL_HELP}
   agent routines                list this identity's scheduled work
   agent schedule <json>          name, prompt, schedule; optional id, expectedRevision, enabled
   --request-id <id>              reuse to retry agent, agents send|reply or delegate spawn|send
-  delegate models                models and reasoning levels a subagent can use
+  delegate models                models, reasoning levels and speeds a subagent can use
   delegate spawn <brief>         start a subagent on one bounded job; its result
                                  comes back as a message (--model <provider/model>,
-                                 --effort <level>, --title <title>, --profile <id>)
+                                 --effort <level>, --speed <tier>, --title <title>,
+                                 --profile <id>)
   delegate list                  every subagent and workflow: state, model, time
   delegate send <thread-id> <text>
                                  steer or reuse a subagent, or ask the parent
@@ -333,7 +334,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       await delegateCommand(client, threadId, rest, {
         ...(parsed.requestId === undefined ? {} : { requestId: parsed.requestId }), ...(parsed.timeout === undefined ? {} : { timeout: parsed.timeout }),
         ...(parsed.title === undefined ? {} : { title: parsed.title }), ...(parsed.model === undefined ? {} : { model: parsed.model }),
-        ...(parsed.effort === undefined ? {} : { effort: parsed.effort }), ...(parsed.profile === undefined ? {} : { profile: parsed.profile }),
+        ...(parsed.effort === undefined ? {} : { effort: parsed.effort }), ...(parsed.speed === undefined ? {} : { speed: parsed.speed }), ...(parsed.profile === undefined ? {} : { profile: parsed.profile }),
       }, print);
     },
     agents: async () => {

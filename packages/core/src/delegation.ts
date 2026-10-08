@@ -41,7 +41,7 @@ export function subagentGuide(config: DelegationConfig): string {
   if (!config.enabled) return `${head} the owner turned them off for this conversation; work alone and point the user to Subagents > Settings if they asked for some.\n${WORKFLOW_LINE}`;
   return [
     head,
-    `- boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>]: one bounded job each, on this conversation's model by default. ${anyModel(config) ? 'Any model of boite delegate models works, any harness (Claude can run codex/<model>).' : `The owner allows only this model${profiles ? ' and the profiles' : ''}.`}${profiles ? ` --profile: ${profiles}.` : ''}`,
+    `- boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>] [--speed <tier>]: one bounded job each, on this conversation's model by default. ${anyModel(config) ? 'Any model of boite delegate models works, any harness (Claude can run codex/<model>).' : `The owner allows only this model${profiles ? ' and the profiles' : ''}.`}${profiles ? ` --profile: ${profiles}.` : ''}`,
     '- The brief is all a child sees: goal, files it owns, limits, how to verify. Shared checkout: give parallel children distinct files.',
     '- Results return as messages: keep working or end your turn, never poll. Follow: boite delegate list; steer with boite delegate send <id> <text>; boite delegate stop [id].',
     `- ${WORKFLOW_LINE}`,
@@ -239,9 +239,9 @@ export class Delegation {
     const requestId = text(params.requestId, 'requestId', 128);
     const task = text(params.task, 'task', 12000);
     const title = params.title === undefined ? task.split('\n')[0]!.slice(0, 80) : text(params.title, 'title', 120);
-    const request: RouteRequest = { profileId: params.profileId ?? null, ...(params.model === undefined ? {} : { model: text(params.model, 'model', 256) }), ...(params.effort === undefined ? {} : { effort: text(params.effort, 'effort', 32) }) };
+    const request: RouteRequest = { profileId: params.profileId ?? null, ...(params.model === undefined ? {} : { model: text(params.model, 'model', 256) }), ...(params.effort === undefined ? {} : { effort: text(params.effort, 'effort', 32) }), ...(params.speed === undefined ? {} : { speed: text(params.speed, 'speed', 64) }) };
     // A request id from before routes keeps its fingerprint: profile, task and title only.
-    const fingerprint = hash(request.model === undefined && request.effort === undefined ? [params.profileId, task, title] : [request, task, title]);
+    const fingerprint = hash(request.model === undefined && request.effort === undefined && request.speed === undefined ? [params.profileId, task, title] : [request, task, title]);
     const existing = this.core.journal.db.query('SELECT * FROM delegated_agents WHERE root_id = ? AND request_id = ?').get(parent.id, requestId) as AgentRow | null;
     if (existing) {
       if (existing.fingerprint !== fingerprint) throw refused('requestId already used for different content');
@@ -311,19 +311,21 @@ export class Delegation {
   /**
    * An ordinary child thread on a profile, or on the parent's own route for a
    * workflow step that names none, in the parent's checkout and permission
-   * mode. `record` runs in the same transaction.
+   * mode, on the route's speed tier or none: never the parent's. `record` runs
+   * in the same transaction.
    */
   createChild(parent: ThreadSummary, profile: ChildRoute, title: string, record: (id: string) => void): string {
     const id = newId('thr_');
     this.core.journal.db.transaction(() => {
       if (parent.projectId === null) {
         const now = Date.now();
-        const child: ThreadSummary = { ...parent, parentThreadId: parent.id, agentSessionId: undefined, ...profile, speed: null, id,
+        const { speed, ...route } = profile;
+        const child: ThreadSummary = { ...parent, parentThreadId: parent.id, agentSessionId: undefined, ...route, speed: speed ?? null, id,
           title, titleSource: 'user', status: 'idle', sessionId: null, sessionGeneration: 0, selectionVersion: 0,
           context: null, promptCache: null, load: null, unread: false, pinned: false, createdAt: now, updatedAt: now };
         this.core.journal.append({ type: 'thread.created', threadId: id, version: 1, payload: child }, () => this.core.journal.putThread(child));
         this.core.bus.emit('thread.created', child);
-      } else this.core.threads.create({ projectId: parent.projectId, providerId: profile.providerId, accountId: profile.accountId, model: profile.model ?? undefined, effort: profile.effort, title, cwd: parent.cwd, permissionMode: parent.permissionMode }, { id, branch: parent.branch, parentThreadId: parent.id });
+      } else this.core.threads.create({ projectId: parent.projectId, providerId: profile.providerId, accountId: profile.accountId, model: profile.model ?? undefined, effort: profile.effort, speed: profile.speed ?? null, title, cwd: parent.cwd, permissionMode: parent.permissionMode }, { id, branch: parent.branch, parentThreadId: parent.id });
       record(id);
       const child = this.core.threads.require(id);
       this.core.journal.putThread({ ...child, titleSource: 'user' });

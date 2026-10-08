@@ -36,6 +36,7 @@ Fields of a step:
   model     optional: provider/model from boite delegate models, any harness;
             left out, the step runs on this conversation's model
   effort    optional: a reasoning level that model lists
+  speed     optional: a speed tier that model lists, such as fast
   profile   optional: a profile id from boite delegate profiles
   after     step ids that must end first (steps named anywhere else are added)
   forEach   a path to a list: one execution per item, {{item}} is the item
@@ -76,7 +77,7 @@ const MARK: Record<WorkflowNode['status'], string> = { waiting: '[ ]', running: 
 function nodeRow(node: WorkflowNode): string {
   const counts = node.forEach === null ? '' : ` ${node.instances.filter(i => i.status === 'done').length}/${node.instances.length}`;
   const inst = node.instances.find(i => i.model);
-  const model = inst ? `${inst.providerId}/${inst.model}${inst.effort ? ` effort=${inst.effort}` : ''}` : '';
+  const model = inst ? `${inst.providerId}/${inst.model}${inst.effort ? ` effort=${inst.effort}` : ''}${inst.speed ? ` speed=${inst.speed}` : ''}` : '';
   return `${MARK[node.status]} ${node.id}${counts} ${node.status}${model ? ` ${model}` : ''}${node.error ? ` error=${JSON.stringify(node.error)}` : ''}`;
 }
 

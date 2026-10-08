@@ -25,6 +25,8 @@ export interface WorkflowStepPlan {
   model?: string;
   /** A reasoning level the step's model offers. */
   effort?: string;
+  /** A speed tier the step's model offers, by id or label, such as `fast`. Left out: none. */
+  speed?: string;
   /** The brief. `{{step.field}}`, `{{item}}` and `{{index}}` are filled in when the step starts. */
   task: string;
   /** Steps that must end first. Steps named in `forEach`, `when` or the task are added automatically. */
@@ -79,6 +81,8 @@ export interface WorkflowInstance {
   model: string | null;
   /** The reasoning level it runs at; null or missing on older runs: the model's default. */
   effort?: string | null;
+  /** The speed tier it runs on; null or missing: none. */
+  speed?: string | null;
   status: WorkflowStepStatus;
   attempts: number;
   /** A durable output correction awaiting admission, including while paused. */

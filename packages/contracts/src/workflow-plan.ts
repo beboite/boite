@@ -110,6 +110,7 @@ export function checkSteps(value: unknown, options: CheckOptions, field = 'steps
     if (profile !== undefined && profile !== CONVERSATION_PROFILE && !options.profiles.includes(profile)) fail(`${at}.profile: "${profile}" is not a profile of this thread; ${options.profiles.length ? `expected one of ${options.profiles.join(', ')}, or` : 'none is configured:'} leave profile out to run the step on the conversation's model`);
     const model = raw.model === undefined || raw.model === null ? undefined : text(raw.model, `${at}.model`, 256);
     const effort = raw.effort === undefined || raw.effort === null ? undefined : text(raw.effort, `${at}.effort`, 32);
+    const speed = raw.speed === undefined || raw.speed === null ? undefined : text(raw.speed, `${at}.speed`, 64);
     const task = text(raw.task, `${at}.task`, WORKFLOW_LIMITS.taskChars);
     const title = raw.title === undefined ? undefined : text(raw.title, `${at}.title`, 80);
     const deps = new Set<string>();
@@ -137,7 +138,7 @@ export function checkSteps(value: unknown, options: CheckOptions, field = 'steps
     if (when) needStep(when.path.split('.'), `${at}.when.path`, false);
     for (const ref of templateRefs(task, `${at}.task`)) needStep(ref, `${at}.task`, forEach !== undefined);
     const output = raw.output === undefined ? undefined : checkShapeDefinition(raw.output, `${at}.output`);
-    return { id, ...(profile && (profile !== CONVERSATION_PROFILE || options.profiles.includes(profile)) ? { profile } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), task, deps: [...deps], ...(title ? { title } : {}), ...(raw.after ? { after: raw.after.map(String) } : {}), ...(forEach ? { forEach } : {}), ...(when ? { when } : {}), ...(output ? { output } : {}) };
+    return { id, ...(profile && (profile !== CONVERSATION_PROFILE || options.profiles.includes(profile)) ? { profile } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(speed ? { speed } : {}), task, deps: [...deps], ...(title ? { title } : {}), ...(raw.after ? { after: raw.after.map(String) } : {}), ...(forEach ? { forEach } : {}), ...(when ? { when } : {}), ...(output ? { output } : {}) };
   });
   // Existing steps cannot depend on new ones, so a cycle can only run through the new ones.
   const graph = new Map<string, string[]>([...existing.map(s => [s.id, s.after] as const), ...steps.map(s => [s.id, s.deps] as const)]);

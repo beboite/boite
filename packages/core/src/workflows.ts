@@ -144,12 +144,12 @@ export class Workflows {
     if (principal === 'agent' && run.launchedBy !== 'agent') throw refused('the user started this run; an agent changes only the runs it started');
     return run;
   }
-  /** Every step that names a model or a level runs on a route that exists and the owner allows, checked before anything starts. */
+  /** Every step that names a model, a level or a speed runs on a route that exists and the owner allows, checked before anything starts. */
   private checkRoutes(rootId: string, steps: WorkflowStepPlan[], field = 'steps'): void {
     steps.forEach((step, i) => {
-      if (step.model === undefined && step.effort === undefined) return;
+      if (step.model === undefined && step.effort === undefined && step.speed === undefined) return;
       try {
-        this.core.delegation.resolve(rootId, { profileId: step.profile ?? null, ...(step.model === undefined ? {} : { model: step.model }), ...(step.effort === undefined ? {} : { effort: step.effort }) });
+        this.core.delegation.resolve(rootId, { profileId: step.profile ?? null, ...(step.model === undefined ? {} : { model: step.model }), ...(step.effort === undefined ? {} : { effort: step.effort }), ...(step.speed === undefined ? {} : { speed: step.speed }) });
       } catch (error) {
         throw invalidParams(`${field}[${i}] (${step.id}): ${messageOf(error)}`);
       }
@@ -376,7 +376,7 @@ export class Workflows {
         const step = run.plan.steps.find(s => s.id === node.id);
         let profile: ChildRoute;
         try {
-          profile = this.core.delegation.resolve(root.id, { profileId: node.profileId, ...(step?.model === undefined ? {} : { model: step.model }), ...(step?.effort === undefined ? {} : { effort: step.effort }) });
+          profile = this.core.delegation.resolve(root.id, { profileId: node.profileId, ...(step?.model === undefined ? {} : { model: step.model }), ...(step?.effort === undefined ? {} : { effort: step.effort }), ...(step?.speed === undefined ? {} : { speed: step.speed }) });
         } catch (error) {
           return failNow(step?.model === undefined && node.profileId !== null && !config.profiles.some(p => p.id === node.profileId) ? `profile ${node.profileId} is no longer a profile of this thread` : messageOf(error));
         }
@@ -388,7 +388,7 @@ export class Workflows {
           this.core.journal.db.query('INSERT INTO workflow_steps VALUES (?, ?, ?)').run(id, run.id, key);
         });
         this.stepOf.set(threadId, { runId: run.id, key });
-        Object.assign(inst, { threadId, providerId: profile.providerId, model: profile.model, effort: profile.effort });
+        Object.assign(inst, { threadId, providerId: profile.providerId, model: profile.model, effort: profile.effort, speed: profile.speed ?? null });
       } catch (error) {
         return failNow(messageOf(error));
       }
