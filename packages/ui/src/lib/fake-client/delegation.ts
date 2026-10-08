@@ -2,7 +2,7 @@
 import { collectNativeAgents, collectProcessAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, matchSpeed, RpcErrorCode, speedRefusal, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationModelChoice, type DelegationProfile, type DelegationView, type DelegationWaitResult, type RpcParams, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { addUsage, emptyUsage, toSummary } from './shared';
-import { discoverSelection, modelsOf } from './provider-catalog';
+import { discoverSelection, modelsOf, PROBED_PROTOCOLS } from './provider-catalog';
 import type { FakeContext, FakeMethods } from './context';
 
 function delegationRoot(ctx: FakeContext, threadId: ThreadId): ThreadId {
@@ -34,19 +34,25 @@ function checkSpeedText(wanted: unknown): void {
   if (typeof wanted !== 'string' || !wanted.trim() || wanted.length > 64) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'speed: expected 1 to 64 characters' });
 }
 
-/** The core's speed resolution: by id or label, any case, refused naming the model and what it offers. */
-function pickSpeed(ctx: FakeContext, route: ChildRoute, wanted: string | null | undefined): string | null {
+/**
+ * The core's speed resolution: by id or label, any case, refused naming the
+ * model and what it offers. A `checked` tier id stands while the model's tiers
+ * are unread, as a workflow step's does at launch.
+ */
+function pickSpeed(ctx: FakeContext, route: ChildRoute, wanted: string | null | undefined, checked = false): string | null {
   if (wanted === undefined || wanted === null) return null;
   checkSpeedText(wanted);
   if (route.model === null) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'speed: this route runs on the provider\'s default model; name a model with --model to choose its speed' });
-  const speeds = modelsOf(ctx, route.providerId, route.accountId).find(model => model.id === route.model)?.speeds ?? [];
+  const speeds = modelsOf(ctx, route.providerId, route.accountId).find(model => model.id === route.model)?.speeds;
   const speed = matchSpeed(speeds, wanted);
-  if (speed === null) throw new RpcFailure({ code: RpcErrorCode.Refused, message: speedRefusal(`${route.providerId}/${route.model}`, speeds, wanted) });
-  return speed;
+  if (speed !== null) return speed;
+  if (checked && speeds === undefined) return wanted.trim();
+  const unread = speeds === undefined && PROBED_PROTOCOLS.includes(ctx.providers.find(provider => provider.id === route.providerId)?.protocol ?? '');
+  throw new RpcFailure({ code: RpcErrorCode.Refused, message: speedRefusal(`${route.providerId}/${route.model}`, unread ? null : speeds ?? [], wanted) });
 }
 
 /** What a spawn or a workflow step says about the route of its child. */
-export interface RouteAsk { profileId?: string | null; model?: string; effort?: string; speed?: string | null }
+export interface RouteAsk { profileId?: string | null; model?: string; effort?: string; speed?: string | null; checked?: boolean }
 
 /** A named profile, else the conversation's own route under its built-in id. */
 function namedRoute(parent: Thread, config: DelegationConfig, profileId: string | null | undefined): ChildRoute | undefined {
@@ -59,10 +65,10 @@ function namedRoute(parent: Thread, config: DelegationConfig, profileId: string 
 export function childRoute(ctx: FakeContext, parent: Thread, config: DelegationConfig, ask: RouteAsk): ChildRoute | undefined {
   const base = ask.model !== undefined ? pickModel(ctx, parent, config, ask.model, ask.effort) : namedRoute(parent, config, ask.profileId);
   if (!base) return undefined;
-  return { ...base, effort: ask.model === undefined && ask.effort !== undefined ? ask.effort : base.effort, speed: pickSpeed(ctx, base, ask.speed) };
+  return { ...base, effort: ask.model === undefined && ask.effort !== undefined ? ask.effort : base.effort, speed: pickSpeed(ctx, base, ask.speed, ask.checked) };
 }
 
-/** Read the agent's speed tiers before a speed is checked, as choosing one on a thread does. */
+/** Read the agent's speed tiers before a speed is checked, as choosing one on a thread does. A failed read is not the answer: the check that follows refuses, as the core's does. */
 export async function discoverRoute(ctx: FakeContext, parent: Thread, config: DelegationConfig, ask: RouteAsk): Promise<void> {
   if (typeof ask.speed !== 'string') return;
   let route: Pick<ChildRoute, 'providerId' | 'accountId' | 'model'> | undefined;
@@ -71,7 +77,7 @@ export async function discoverRoute(ctx: FakeContext, parent: Thread, config: De
     const account = rest.length ? ctx.accounts.find(entry => entry.id === parent.accountId && entry.providerId === providerId) ?? ctx.accounts.find(entry => entry.providerId === providerId) : undefined;
     route = account ? { providerId: providerId!, accountId: account.id, model: rest.join('/') } : undefined;
   } else route = namedRoute(parent, config, typeof ask.profileId === 'string' ? ask.profileId : null);
-  if (route) await discoverSelection(ctx, route.providerId, route.accountId, route.model, null, ask.speed);
+  if (route) await discoverSelection(ctx, route.providerId, route.accountId, route.model, null, ask.speed).catch(() => {});
 }
 
 /** `provider/model`, a model id (the parent's provider first) or a unique part of an id or name. */

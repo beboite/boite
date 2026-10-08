@@ -10,7 +10,7 @@ import type { Account, AccountId, DelegationConfig, DelegationModelChoice, Deleg
 import type { Core } from '../core.ts';
 import { invalidParams, messageOf, refused } from '../errors.ts';
 import { probedModelsOf } from '../drivers/index.ts';
-import { checkEffort, checkSpeed, modelsFor, PROBED_PROTOCOLS } from '../threads/selection.ts';
+import { checkEffort, modelsFor, PROBED_PROTOCOLS } from '../threads/selection.ts';
 import type { ProviderProbe } from '../providers/probe.ts';
 
 /** A profile, or a conversation's own route, whose model may be the provider's default. */
@@ -36,7 +36,7 @@ export interface RouteRequest {
  */
 export function routeRequest(raw: unknown): RouteRequest {
   const value = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
-  const named = (key: string) => typeof value[key] === 'string' && value[key].trim() ? value[key] : undefined;
+  const named = (key: string) => typeof value[key] === 'string' && value[key].trim() ? value[key].trim() : undefined;
   const [profileId, model, effort, speed] = [named('profileId') ?? named('profile'), named('model'), named('effort'), named('speed')];
   return { ...(profileId === undefined ? {} : { profileId }), ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }), ...(speed === undefined ? {} : { speed }) };
 }
@@ -173,9 +173,9 @@ export function resolveRoute(core: Core, parent: ThreadSummary, config: Delegati
   const provider = core.providers.require(route.providerId);
   const speeds = offered ?? modelsFor(provider, route.accountId).find(entry => entry.id === route.model)?.speeds ?? [];
   const speed = matchSpeed(speeds, request.speed);
-  if (speed === null) {
-    if (request.checked && !speedsKnown(provider, route.accountId, route.model)) return { ...route, speed: request.speed };
-    throw refused(speedRefusal(`${route.providerId}/${route.model}`, speeds, request.speed), { field: 'speed', expected: speeds.map(option => option.id) });
-  }
-  return { ...route, speed: checkSpeed(provider, route.accountId, route.model, speed) };
+  if (speed !== null) return { ...route, speed };
+  const unread = !speedsKnown(provider, route.accountId, route.model);
+  if (request.checked && unread) return { ...route, speed: request.speed.trim() };
+  // Only an agent that owns its list can have tiers nobody read; a descriptor's model without any offers none.
+  throw refused(speedRefusal(`${route.providerId}/${route.model}`, unread && PROBED_PROTOCOLS.includes(provider.protocol) ? null : speeds, request.speed), { field: 'speed', expected: speeds.map(option => option.id) });
 }

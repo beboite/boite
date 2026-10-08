@@ -336,6 +336,7 @@ export class Delegation {
     const id = newId('thr_');
     const { speed: asked, ...route } = profile;
     const speed = asked ?? null;
+    if (speed !== null && route.model === null) throw invalidParams('speed: this route runs on the provider\'s default model; name a model with --model to choose its speed');
     const provider = this.core.providers.require(route.providerId);
     checkStoredSpeed(provider, route.accountId, route.model, speed);
     // threads.create refuses a tier it cannot read; an unread one is written below instead.
@@ -348,10 +349,12 @@ export class Delegation {
           context: null, promptCache: null, load: null, unread: false, pinned: false, createdAt: now, updatedAt: now };
         this.core.journal.append({ type: 'thread.created', threadId: id, version: 1, payload: child }, () => this.core.journal.putThread(child));
         this.core.bus.emit('thread.created', child);
-      } else this.core.threads.create({ projectId: parent.projectId, providerId: profile.providerId, accountId: profile.accountId, model: profile.model ?? undefined, effort: profile.effort, speed: listed ? speed : null, title, cwd: parent.cwd, permissionMode: parent.permissionMode }, { id, branch: parent.branch, parentThreadId: parent.id });
+      } else this.core.threads.create({ projectId: parent.projectId, providerId: route.providerId, accountId: route.accountId, model: route.model ?? undefined, effort: route.effort, speed: listed ? speed : null, title, cwd: parent.cwd, permissionMode: parent.permissionMode }, { id, branch: parent.branch, parentThreadId: parent.id });
       record(id);
-      const child = this.core.threads.require(id);
-      this.core.journal.putThread({ ...child, titleSource: 'user', speed });
+      const child = { ...this.core.threads.require(id), titleSource: 'user' as const, speed };
+      this.core.journal.putThread(child);
+      // threads.create announced the child without its unread tier: say what it runs on.
+      if (!listed) this.core.bus.emit('thread.updated', withLoad(this.core, child));
     })();
     return id;
   }

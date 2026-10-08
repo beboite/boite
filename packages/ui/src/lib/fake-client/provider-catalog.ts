@@ -25,10 +25,13 @@ export function checkSpeed(ctx: FakeContext, providerId: string, accountId: stri
   if (!models.find(m => m.id === model)?.speeds?.some(option => option.id === speed)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model does not offer this speed' });
 }
 
+/** The protocols whose models and speed tiers come from the agent, as in the core. */
+export const PROBED_PROTOCOLS = ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'];
+
 /** Match the core's automatic discovery before a new model, effort or speed is checked. */
 export async function discoverSelection(ctx: FakeContext, providerId: string, accountId: string, model: string | null, effort: string | null, speed: string | null): Promise<void> {
   const provider = ctx.providers.find(p => p.id === providerId);
-  if (model === null || !provider || !['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'].includes(provider.protocol)) return;
+  if (model === null || !provider || !PROBED_PROTOCOLS.includes(provider.protocol)) return;
   const listed = modelsOf(ctx, providerId, accountId).find(entry => entry.id === model);
   const missingEffort = effort !== null && listed?.effort === undefined;
   if ((provider.protocol === 'acp' && missingEffort) || (!ctx.modelCatalogs.has(providerId + '::' + accountId) &&

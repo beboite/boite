@@ -6,6 +6,7 @@ import { FAKE_AUTO_COMPACT_SETTLE_MS } from './fake-client/turns';
 import { FakeContext } from './fake-client/context';
 import { seed } from './fake-client/seed';
 import { threadMethods } from './fake-client/threads';
+import { childRoute } from './fake-client/delegation';
 
 test('done expiry mirrors the core while manual archives and restored history remain recoverable', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
@@ -519,6 +520,9 @@ test('fake delegation gives a child a speed only when asked, by id or label, wit
     await expect(client.call('delegation.spawn', { threadId, model: 'codex/codex-demo', speed, task: 'Bad text', requestId }))
       .rejects.toMatchObject({ code: RpcErrorCode.InvalidParams, message: 'speed: expected 1 to 64 characters' });
   }
+  // 64 characters pass the bound and fail as a tier nobody offers.
+  await expect(client.call('delegation.spawn', { threadId, model: 'codex/codex-demo', speed: 'f'.repeat(64), task: 'Bad text', requestId: 'edge' }))
+    .rejects.toMatchObject({ code: RpcErrorCode.Refused, message: `speed: codex/codex-demo has no "${'f'.repeat(64)}" tier; expected fast, ultrafast` });
   await expect(client.call('delegation.spawn', { threadId, model: 'codex/codex-demo', task: 'Play id', requestId: 'id' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
 });
 
@@ -529,11 +533,14 @@ test('fake delegation reads an agent\'s speed tiers before it checks one, and a 
   expect(before.choices.some(choice => choice.model === 'codex-demo')).toBe(false);
   const child = await client.call('delegation.spawn', { threadId: 't-trace', model: 'codex/codex-demo', speed: 'Ultrafast', task: 'Play unread', requestId: 'unread' });
   expect([child.thread.providerId, child.thread.model, child.thread.speed]).toEqual(['codex', 'codex-demo', 'ultrafast']);
+  // The spawn read the list: the model and its tiers are there now.
+  expect((await client.call('delegation.models', { threadId: 't-trace' })).choices.find(choice => choice.model === 'codex-demo')?.speeds?.map(speed => speed.id)).toEqual(['fast', 'ultrafast']);
 
   const bad = { name: 'Bad', steps: [{ id: 'play', model: 'codex/codex-demo', speed: 'turbo', task: 'Play.' }] };
   await expect(client.call('workflows.check', { threadId: 't-trace', plan: bad }))
     .rejects.toMatchObject({ code: RpcErrorCode.InvalidParams, message: 'steps[0] (play): speed: codex/codex-demo has no "turbo" tier; expected fast, ultrafast' });
-  await expect(client.call('workflows.start', { threadId: 't-trace', requestId: 'bad-speed', plan: bad })).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
+  await expect(client.call('workflows.start', { threadId: 't-trace', requestId: 'bad-speed', plan: bad }))
+    .rejects.toMatchObject({ code: RpcErrorCode.InvalidParams, message: 'steps[0] (play): speed: codex/codex-demo has no "turbo" tier; expected fast, ultrafast' });
   const run = await client.call('workflows.start', { threadId: 't-trace', requestId: 'speeds', plan: { name: 'Speeds', steps: [
     { id: 'quick', model: 'codex/codex-demo', speed: ' Ultrafast ', task: 'Play quickly.' },
     { id: 'plain', task: 'Play again.' },
@@ -554,13 +561,34 @@ test('a speed is matched by id or label in any case, and a refusal names what th
   // An id wins over another tier's label.
   expect(matchSpeed([{ id: 'priority', label: 'Fast' }, { id: 'fast', label: 'Faster' }], 'fast')).toBe('fast');
   expect(matchSpeed(codex, 'turbo')).toBeNull();
-  // Whatever a transport or an older core hands over is no match, never a throw.
+  // The listed form goes back in, and padding around an id or a label is not part of it.
+  expect(matchSpeed(codex, 'fast (PRIORITY)')).toBe('priority');
+  expect(matchSpeed([{ id: 'priority', label: ' Fast ' }], 'fast')).toBe('priority');
+  // A non-string speed and missing tiers are no match, not a throw.
   for (const wanted of ['', '   ', 123, null, undefined, { id: 'priority' }]) expect(matchSpeed(codex, wanted)).toBeNull();
   for (const speeds of [undefined, null, []]) expect(matchSpeed(speeds, 'fast')).toBeNull();
   expect(speedName({ id: 'priority', label: 'Fast' })).toBe('Fast (priority)');
   expect(speedName({ id: 'fast', label: 'Fast' })).toBe('fast');
+  expect(speedName({ id: 'priority', label: ' Fast ' })).toBe('Fast (priority)');
+  expect(speedName({ id: 'priority', label: ' ' })).toBe('priority');
   expect(speedRefusal('codex/gpt-6-luna', codex, ' turbo ')).toBe('speed: codex/gpt-6-luna has no "turbo" tier; expected Fast (priority)');
-  for (const speeds of [[], undefined, null]) expect(speedRefusal('claude/haiku', speeds, 'fast')).toBe('speed: claude/haiku offers no speed tier; leave speed out');
+  expect(speedRefusal('claude/haiku', [], 'fast')).toBe('speed: claude/haiku offers no speed tier; leave speed out');
+  // No list at all is an agent that gave none, not a model without tiers.
+  for (const speeds of [undefined, null]) expect(speedRefusal('claude/haiku', speeds, 'fast')).toBe('speed: the speed tiers of claude/haiku could not be read from its agent; list the models to see why');
+});
+
+test('a fake step\'s checked tier stands while the agent\'s tiers are unread, and an unread list is not an empty one', () => {
+  const ctx = new FakeContext({ delayMs: 0 });
+  seed(ctx);
+  const parent = ctx.thread('t-trace');
+  const config = { ...DEFAULT_DELEGATION_CONFIG, profiles: [{ id: 'moon', name: 'Moon', providerId: 'codex', accountId: 'a-codex', model: 'gpt-6.1-sol', effort: null }] };
+  const ask = { profileId: 'moon', speed: ' priority ' };
+  expect(ctx.modelCatalogs.has('codex::a-codex')).toBe(false);
+  expect(childRoute(ctx, parent, config, { ...ask, checked: true })?.speed).toBe('priority');
+  expect(() => childRoute(ctx, parent, config, ask)).toThrow('speed: the speed tiers of codex/gpt-6.1-sol could not be read from its agent; list the models to see why');
+  // Once the agent listed the model without that tier, a checked id is refused like any other.
+  ctx.modelCatalogs.set('codex::a-codex', [{ id: 'gpt-6.1-sol', name: 'Sol', speeds: [] }]);
+  expect(() => childRoute(ctx, parent, config, { ...ask, checked: true })).toThrow('speed: codex/gpt-6.1-sol offers no speed tier; leave speed out');
 });
 
 test('fake agent.spawn starts a real thread marked at both ends and keeps retries idempotent', async ({ createClient }) => {

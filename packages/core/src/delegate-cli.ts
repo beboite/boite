@@ -137,14 +137,15 @@ export async function delegateCommand(client: CoreClient, threadId: string, rest
         const view = await client.call('delegation.get', { threadId });
         if (rest[1] === CONVERSATION_PROFILE_ID || view.config.profiles.some(p => p.id === rest[1])) { profileId = rest[1]; start = 2; }
       }
-      if (options.speed !== undefined && (!options.speed.trim() || options.speed.length > 64)) throw new Usage('--speed needs a tier of 1 to 64 characters; boite delegate models lists them');
+      const speed = options.speed?.trim();
+      if (speed !== undefined && (!speed || speed.length > 64)) throw new Usage('--speed needs a tier of 1 to 64 characters; boite delegate models lists them');
       const task = requiredText(rest, start, 'delegate spawn needs a brief: boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>] [--speed <tier>]', false);
       const agent = await client.call('delegation.spawn', {
         threadId, task, requestId,
         ...(profileId === undefined ? {} : { profileId }),
         ...(options.model === undefined ? {} : { model: options.model }),
         ...(options.effort === undefined ? {} : { effort: options.effort }),
-        ...(options.speed === undefined ? {} : { speed: options.speed }),
+        ...(speed === undefined ? {} : { speed }),
         ...(options.title === undefined ? {} : { title: options.title }),
       });
       print([

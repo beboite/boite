@@ -25,7 +25,7 @@ export interface WorkflowStepPlan {
   model?: string;
   /** A reasoning level the step's model offers. */
   effort?: string;
-  /** A speed tier the step's model offers, by id or label, such as `fast`. Left out or null: none. A run stores the tier id. */
+  /** A speed tier the step's model offers, by id or label, such as `fast`. Left out or null: none. A plan names it either way; the plan a run stores holds the resolved tier id. */
   speed?: string | null;
   /** The brief. `{{step.field}}`, `{{item}}` and `{{index}}` are filled in when the step starts. */
   task: string;

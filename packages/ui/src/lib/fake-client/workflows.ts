@@ -144,13 +144,12 @@ export class FakeWorkflows {
       return { levels: workflowLevels(checked.steps.map(s => ({ id: s.id, after: s.deps }))) };
     },
     'workflows.start': async (params) => {
-      const root = this.host.thread(params.threadId);
-      await this.#discover(root, this.host.config(root.id), params.plan?.steps);
+      // Like the core: a replayed request, an archived thread or a paused team reads no agent.
+      const { root, prior, config } = this.#admit(params.threadId, params.plan, params.requestId, params.templateId);
+      if (!prior) await this.#discover(root, config, params.plan?.steps);
       return structuredClone(this.start(params.threadId, params.plan, params.requestId, params.templateId, 'user'));
     },
     'workflows.extend': async (params) => {
-      const rootId = this.#own(params.threadId, params.runId).rootThreadId;
-      await this.#discover(this.host.thread(rootId), this.host.config(rootId), params.steps);
       const run = this.#own(params.threadId, params.runId);
       const key = `${run.id}:${params.requestId}`;
       const fingerprint = JSON.stringify(params.steps);
@@ -161,6 +160,7 @@ export class FakeWorkflows {
       }
       if (run.status !== 'running' && run.status !== 'paused') throw refusal(`the run is ${run.status}; only a running or paused run takes new steps`);
       const config = this.#team(run.rootThreadId);
+      await this.#discover(this.host.thread(run.rootThreadId), config, params.steps);
       const steps = planError(() => checkSteps(params.steps, { profiles: config.profiles.map(p => p.id), existing: run.nodes.map(n => ({ id: n.id, after: n.after })) }));
       this.#checkRoutes(this.host.thread(run.rootThreadId), config, steps);
       run.plan.steps.push(...steps.map(({ deps: _deps, ...step }) => step));
@@ -215,19 +215,22 @@ export class FakeWorkflows {
     },
   };
 
-  /** What `workflows.start` does, also the seed's way in. */
-  start(threadId: ThreadId, plan: WorkflowPlan, requestId: string, templateId: string | undefined, by: 'agent' | 'user'): WorkflowRun {
+  /** What a start checks before it reads the plan: the thread, a replayed request, a paused team. */
+  #admit(threadId: ThreadId, plan: WorkflowPlan, requestId: string, templateId: string | undefined): { root: Thread; key: string; fingerprint: string; prior: WorkflowRun | undefined; config: DelegationConfig } {
     const root = this.host.thread(threadId);
     if (root.parentThreadId) throw refusal('a workflow step or delegated agent cannot start a workflow; ask its parent');
     if (root.archived) throw refusal('cannot start a workflow on an archived thread');
     const fingerprint = JSON.stringify([plan, templateId ?? null]);
     const key = `${root.id}:${requestId}`;
     const prior = this.#requests.get(key);
-    if (prior) {
-      if (prior.fingerprint !== fingerprint) throw refusal('requestId already used for different content');
-      return this.#runs.get(prior.runId)!;
-    }
-    const config = this.#team(root.id);
+    if (prior && prior.fingerprint !== fingerprint) throw refusal('requestId already used for different content');
+    return { root, key, fingerprint, prior: prior && this.#runs.get(prior.runId), config: prior ? this.host.config(root.id) : this.#team(root.id) };
+  }
+
+  /** What `workflows.start` does, also the seed's way in. */
+  start(threadId: ThreadId, plan: WorkflowPlan, requestId: string, templateId: string | undefined, by: 'agent' | 'user'): WorkflowRun {
+    const { root, key, fingerprint, prior, config } = this.#admit(threadId, plan, requestId, templateId);
+    if (prior) return prior;
     const checked = planError(() => checkPlan(plan, { profiles: config.profiles.map(p => p.id) }));
     this.#checkRoutes(root, config, checked.plan.steps);
     if (templateId !== undefined && !this.#templates.has(templateId)) throw invalid(`templateId: no template ${templateId}`);
@@ -305,7 +308,8 @@ export class FakeWorkflows {
   async #discover(root: Thread, config: DelegationConfig, steps: unknown): Promise<void> {
     if (!Array.isArray(steps)) return;
     for (const step of steps) {
-      if (typeof step === 'object' && step !== null && typeof (step as WorkflowStepPlan).speed === 'string') await this.host.discover(root, config, this.#ask(step as WorkflowStepPlan));
+      const speed = typeof step === 'object' && step !== null ? (step as WorkflowStepPlan).speed : undefined;
+      if (typeof speed === 'string' && speed.trim()) await this.host.discover(root, config, this.#ask(step as WorkflowStepPlan));
     }
   }
 
@@ -315,7 +319,7 @@ export class FakeWorkflows {
       if (step.model === undefined && step.effort === undefined && step.speed == null) return;
       try {
         const route = this.host.route(root, config, this.#ask(step));
-        if (route?.speed) step.speed = route.speed;
+        if (route?.speed != null) step.speed = route.speed;
       } catch (error) {
         throw invalid(`${field}[${i}] (${step.id}): ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -441,7 +445,8 @@ export class FakeWorkflows {
       const step = run.plan.steps.find(s => s.id === node.id);
       let profile: ChildRoute | undefined;
       try {
-        profile = this.host.route(root, config, this.#ask({ ...step, profile: node.profileId ?? undefined }));
+        // The speed is the tier id the start checked: it stands when the agent's tiers are no longer read, as in the core.
+        profile = this.host.route(root, config, { ...this.#ask({ ...step, profile: node.profileId ?? undefined }), checked: true });
       } catch (error) {
         Object.assign(inst, { status: 'failed', error: error instanceof Error ? error.message : String(error), startedAt: now, finishedAt: now });
         return;

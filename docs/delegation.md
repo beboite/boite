@@ -7,7 +7,7 @@ conversation can start a Codex reviewer. `boite delegate models` lists the
 choices. Without `--model` the child runs on the built-in profile
 `conversation`, the conversation's own harness, account, model and effort. A
 child runs on one of a model's speed tiers, such as its fast mode, only when
-the spawn names it with `--speed`; it never inherits the parent's.
+the spawn names one with `--speed`; it never inherits the parent's.
 
 The gear in the Subagents tab opens Settings with two switches and a list.
 "Let this conversation start subagents" turns delegation off for that
@@ -183,9 +183,11 @@ runs on, so it also works with `--profile` and with no `--model`, unless that
 route runs on the provider's default model: then the spawn is refused and
 `--model` has to name one. A tier the model lacks is refused with the model and
 the tiers it offers, or that it offers none. Tiers the agent has not listed yet
-are read from it first. `delegate models` prints the tiers of each model that
-has some, each as its id, with the label in front when the label says something
-else: `speed=fast` for Claude, `speed=Fast (priority)` for that Codex tier.
+are read from the agent first; when that read fails the refusal says so instead
+of "no tier". `delegate models` prints the tiers of each model that has some,
+each as its id, with the label in front when the label says something else:
+`speed=fast` for Claude, `speed=Fast (priority)` for that Codex tier, a form
+`--speed` takes back as it is.
 `delegate list` and a spawn show the id the child stores, here
 `speed=priority`. The older `delegate spawn <profile> "<brief>"` form still
 works.

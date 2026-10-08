@@ -514,12 +514,14 @@ test('a step names its model and reasoning level, and a level the model lacks is
 });
 
 test('a step names a speed tier of its model, by id or label, and an unknown one is refused before anything starts', async () => {
-  const { held } = scripted(ctx => ({ hold: ctx.thread.title.includes('gate') }));
+  const { held } = scripted(ctx => ({ hold: ctx.prompt.includes('Hold the run') }));
   const { h, owner, threadId } = await setup();
   const echo = h.core.providers.require('echo').models.find(model => model.id === 'echo');
   if (!echo) throw new Error(`echo lists ${h.core.providers.require('echo').models.map(model => model.id).join(', ')}`);
   echo.speeds = [{ id: 'priority', label: 'Fast' }];
   h.core.journal.putThread({ ...h.core.threads.require(threadId), speed: 'priority' });
+  // What the null speeds below are measured against.
+  expect(h.core.threads.require(threadId).speed).toBe('priority');
   const bad: WorkflowPlan = { name: 'Bad', steps: [{ id: 'play', model: 'echo/echo', speed: 'turbo', task: 'Play.' }] };
   await expect(owner.call('workflows.check', { threadId, plan: bad })).rejects.toThrow('steps[0] (play): speed: echo/echo has no "turbo" tier; expected Fast (priority)');
   await expect(owner.call('workflows.start', { threadId, requestId: 'bad-speed', plan: bad })).rejects.toThrow('has no "turbo" tier');

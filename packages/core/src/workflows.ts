@@ -154,7 +154,7 @@ export class Workflows {
       if (step.model === undefined && step.effort === undefined && step.speed == null) return;
       try {
         const route = this.core.delegation.resolve(rootId, { profileId: step.profile ?? null, ...(step.model === undefined ? {} : { model: step.model }), ...(step.effort === undefined ? {} : { effort: step.effort }), ...(step.speed == null ? {} : { speed: step.speed }) });
-        if (route.speed) step.speed = route.speed;
+        if (route.speed != null) step.speed = route.speed;
       } catch (error) {
         throw invalidParams(`${field}[${i}] (${step.id}): ${messageOf(error)}`);
       }

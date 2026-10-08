@@ -47,10 +47,9 @@ another one names it, as `boite delegate spawn --model` does:
 profile: `{ "id": "review", "profile": "reviewer", ... }`. `"speed": "fast"`
 puts it on a speed tier of its model. `boite delegate models` lists the
 choices. `boite workflow check` refuses a model, a level or a speed the step
-cannot have before anything starts, with the step's place, as `steps[0]
-(review): `, before the message `delegate spawn` gives. The run stores a speed
-as its tier id and launches on it, also after a restart that made the core
-forget the agent's tiers.
+cannot have before anything starts, with the step's place as `steps[0] (review): `
+before the message `delegate spawn` gives. The run stores a speed as its tier
+id and launches on it, even after a restart cleared the probed model list.
 
 | Field | Meaning |
 | --- | --- |

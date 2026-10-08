@@ -46,10 +46,10 @@ async function setup(patch: Partial<DelegationConfig> = {}) {
 }
 
 /** A second provider on the echo driver, with its own models and a logged-in default account. */
-async function twinProvider(h: TestCore, owner: CoreClient, models: ModelInfo[]): Promise<void> {
+async function twinProvider(h: TestCore, owner: CoreClient, models: ModelInfo[], protocol?: string): Promise<void> {
   const shipped = JSON.parse(readFileSync(join(import.meta.dir, '../src/providers/shipped/echo.json'), 'utf8')) as Record<string, unknown>;
   mkdirSync(join(h.dataDir, 'providers'), { recursive: true });
-  writeFileSync(join(h.dataDir, 'providers', 'twin.json'), JSON.stringify({ ...shipped, id: 'twin', name: 'Twin', shortName: 'Twin', models }));
+  writeFileSync(join(h.dataDir, 'providers', 'twin.json'), JSON.stringify({ ...shipped, id: 'twin', name: 'Twin', shortName: 'Twin', models, ...(protocol ? { protocol } : {}) }));
   expect((await owner.call('providers.reload', {})).rejected).toEqual([]);
   h.core.accounts.ensureDefaults();
 }
@@ -771,6 +771,8 @@ test('a child runs on a speed tier only when the spawn names one, by id or by la
     expect(await speedOf({ model: 'twin/luna', effort: 'max', speed: 'fast' }, 'label')).toBe('priority');
     expect(await speedOf({ model: 'twin/luna', speed: 'FAST' }, 'label-case')).toBe('priority');
     expect(await speedOf({ model: 'twin/luna', speed: 'priority' }, 'id')).toBe('priority');
+    // The form `delegate models` and a refusal print goes back in as it is.
+    expect(await speedOf({ model: 'twin/luna', speed: 'Fast (priority)' }, 'listed')).toBe('priority');
     // No speed asked: none, whatever the parent runs on, on another model or on its own.
     expect(await speedOf({ model: 'twin/luna' }, 'none')).toBeNull();
     expect(await speedOf({}, 'own-none')).toBeNull();
@@ -804,7 +806,16 @@ test('a child runs on a speed tier only when the spawn names one, by id or by la
     // Tiers the agent has not listed yet, as after a restart: the checked id stands, like a thread's own stored speed.
     expect(h.core.threads.require(h.core.delegation.createChild(from, { ...route, model: 'unread', effort: null, speed: 'priority' }, 'Unread', () => {})).speed).toBe('priority');
   }
+  expect(() => h.core.delegation.createChild(parent, { ...route, model: null, effort: null, speed: 'priority' }, 'Default model', () => {})).toThrow('provider\'s default model');
+  // A project child is announced by threads.create before its unread tier is written: clients are told what it runs on.
+  const announced: (string | null | undefined)[] = [];
+  const off = h.core.bus.onCommitted((name, payload) => { if (name === 'thread.updated' && (payload as { title: string }).title === 'Announced') announced.push((payload as { speed?: string | null }).speed); });
+  h.core.delegation.createChild(parent, { ...route, model: 'unread', effort: null, speed: 'priority' }, 'Announced', () => {});
+  await waitFor(() => announced.length > 0);
+  off();
+  expect(announced).toContain('priority');
   expect(() => h.core.delegation.resolve(threadId, { model: 'twin/unread', speed: 'priority' })).toThrow('twin/unread offers no speed tier');
+  expect(h.core.delegation.resolve(threadId, { model: 'twin/unread', speed: ' priority ', checked: true }).speed).toBe('priority');
   expect(h.core.delegation.resolve(threadId, { model: 'twin/unread', speed: 'priority', checked: true }).speed).toBe('priority');
   expect(() => h.core.delegation.resolve(threadId, { model: 'twin/plain', speed: 'priority', checked: true })).toThrow('twin/plain offers no speed tier');
 
@@ -824,7 +835,7 @@ test('a child runs on a speed tier only when the spawn names one, by id or by la
   expect(listed).toContain('twin/luna "Luna" effort=low|max (default low) speed=Fast (priority)\n');
   expect(listed).toContain('twin/plain "Plain" (no reasoning levels)\n');
   expect(listed).toContain('echo/echo "Echo" effort=low|high (default high) speed=fast [this conversation]');
-  const spawned = await ok(['delegate', 'spawn', 'Play the build', '--model', 'twin/luna', '--effort', 'max', '--speed', 'fast', '--title', 'Playtest']);
+  const spawned = await ok(['delegate', 'spawn', 'Play the build', '--model', 'twin/luna', '--effort', 'max', '--speed', ' fast ', '--title', 'Playtest']);
   expect(spawned).toMatch(/^agent: thr_\S+\nmodel: twin\/luna effort=max speed=priority\nstatus: \w+\n/);
   const list = await ok(['delegate', 'list']);
   expect(list).toMatch(/thr_\S+ running \d+s twin\/luna effort=max speed=priority "Playtest"/);
@@ -852,9 +863,8 @@ test('the models list and a child row name a tier by the id a child stores, with
 test('a speed on a model whose tiers the agent has not listed yet reads them first, for a named model and for a profile', async () => {
   scripted();
   const { h, owner, threadId } = await setup();
-  await twinProvider(h, owner, [{ id: 'luna', name: 'Luna' }]);
   // The agent owns this provider's list, as Claude and Codex do: a descriptor entry carries no tier until a probe ran.
-  (h.core.providers.require('twin') as { protocol: string }).protocol = 'pi';
+  await twinProvider(h, owner, [{ id: 'luna', name: 'Luna' }], 'pi');
   restores.push(() => forgetProbes({ providerId: 'twin' }));
   const account = h.core.accounts.list().find(a => a.providerId === 'twin')!;
   await owner.call('delegation.configure', { threadId, config: { ...h.core.delegation.config(threadId), profiles: [{ id: 'moon', name: 'Moon', providerId: 'twin', accountId: account.id, model: 'luna', effort: null }] } });
@@ -868,7 +878,8 @@ test('a speed on a model whose tiers the agent has not listed yet reads them fir
   for (const request of [{ model: 'twin/luna', speed: 'fast' }, { profileId: 'moon', speed: 'fast' }]) {
     forgetProbes({ providerId: 'twin' });
     probed.length = 0;
-    expect(() => h.core.delegation.resolve(threadId, request)).toThrow('twin/luna offers no speed tier');
+    // Unread is not the same answer as none: nothing says to leave the speed out.
+    expect(() => h.core.delegation.resolve(threadId, request)).toThrow('speed: the speed tiers of twin/luna could not be read from its agent; list the models to see why');
     await h.core.delegation.prepareRoutes(threadId, probe as unknown as Probe, [request]);
     expect(probed).toEqual(['twin']);
     expect(h.core.delegation.resolve(threadId, request).speed).toBe('priority');

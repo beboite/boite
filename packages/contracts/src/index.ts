@@ -2807,20 +2807,31 @@ export interface DelegationModelChoice {
   /** The parent conversation's own model. */
   current: boolean;
 }
-/** A speed named by id or by label, any case: `fast` is Claude's `fast` and the Codex tier `priority` labelled "Fast". Null for anything else. */
+/**
+ * A speed named by id, by label or the way it is listed (`Fast (priority)`), any
+ * case: `fast` is Claude's `fast` and the Codex tier `priority` labelled "Fast".
+ * Null for anything else.
+ */
 export function matchSpeed(speeds: readonly SpeedTier[] | null | undefined, wanted: unknown): string | null {
   if (typeof wanted !== 'string') return null;
   const query = wanted.trim().toLowerCase();
   if (!query || !speeds) return null;
-  return (speeds.find(speed => speed.id.toLowerCase() === query) ?? speeds.find(speed => speed.label.toLowerCase() === query))?.id ?? null;
+  const by = (name: (speed: SpeedTier) => string) => speeds.find(speed => name(speed).trim().toLowerCase() === query);
+  return (by(speed => speed.id) ?? by(speed => speed.label) ?? by(speedName))?.id ?? null;
 }
 /** How a tier is written for an agent: its id, with the label in front when the label says something else, as `Fast (priority)`. */
 export function speedName(speed: SpeedTier): string {
-  return speed.label.trim().toLowerCase() === speed.id.toLowerCase() ? speed.id : `${speed.label} (${speed.id})`;
+  const label = speed.label.trim();
+  return !label || label.toLowerCase() === speed.id.trim().toLowerCase() ? speed.id : `${label} (${speed.id})`;
 }
-/** Why a speed is refused: the model and the tiers it offers, or that it offers none. The same words on every transport. */
+/**
+ * Why a speed is refused: the model and the tiers it offers, or that it offers
+ * none; with no list at all, that its agent has not given one. The same words on
+ * every transport.
+ */
 export function speedRefusal(model: string, speeds: readonly SpeedTier[] | null | undefined, wanted: string): string {
-  if (!speeds?.length) return `speed: ${model} offers no speed tier; leave speed out`;
+  if (!speeds) return `speed: the speed tiers of ${model} could not be read from its agent; list the models to see why`;
+  if (!speeds.length) return `speed: ${model} offers no speed tier; leave speed out`;
   return `speed: ${model} has no "${wanted.trim()}" tier; expected ${speeds.map(speedName).join(', ')}`;
 }
 export interface DelegationModels {
@@ -3141,8 +3152,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   /**
    * `model` is `provider/model` or a model id `delegation.models` lists; it
    * wins over `profileId`. Neither: this conversation's own model. `speed` is
-   * a tier of the model the child runs on, by id or by label in any case, and
-   * is refused otherwise. Left out: no tier, never the parent's.
+   * a tier of the model the child runs on, by id or by label,
+   * case-insensitively, and is refused otherwise. Left out: no tier, never
+   * the parent's.
    */
   'delegation.spawn': { params: { threadId: ThreadId; profileId?: string; model?: string; effort?: string; speed?: string; task: string; title?: string; requestId: string }; result: DelegatedAgent };
   'delegation.models': { params: { threadId: ThreadId }; result: DelegationModels };

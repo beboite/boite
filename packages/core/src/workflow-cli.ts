@@ -37,7 +37,7 @@ Fields of a step:
             left out, the step runs on this conversation's model
   effort    optional: a reasoning level that model lists
   speed     optional: a speed tier that model lists, by id or label, such as
-            fast; left out: none, whatever this conversation runs on
+            fast; left out, standard speed, not this conversation's tier
   profile   optional: a profile id from boite delegate profiles
   after     step ids that must end first (steps named anywhere else are added)
   forEach   a path to a list: one execution per item, {{item}} is the item
