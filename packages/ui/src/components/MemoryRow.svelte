@@ -5,12 +5,12 @@
   import { ChevronDown, Settings2, TriangleAlert } from '@lucide/svelte';
 
   let { event, events = [event], onconfigure }: { event: MemoryEvent; events?: MemoryEvent[]; onconfigure?: () => void } = $props();
-  function describe(event: MemoryEvent): string {
-    if (event.kind === 'killed') return strings.resources.killReason[event.reason](bytes(event.limitBytes));
-    if (event.kind === 'throttled') return strings.resources.throttled(bytes(event.limitBytes));
-    if (event.kind === 'thread-cap') return strings.resources.threadCap;
-    if (event.kind === 'budget') return strings.resources.budget;
-    return strings.resources.states[event.state];
+  function describe(notice: MemoryEvent): string {
+    if (notice.kind === 'killed') return strings.resources.killReason[notice.reason](bytes(notice.limitBytes));
+    if (notice.kind === 'throttled') return strings.resources.throttled(bytes(notice.limitBytes));
+    if (notice.kind === 'thread-cap') return strings.resources.threadCap;
+    if (notice.kind === 'budget') return strings.resources.budget;
+    return strings.resources.states[notice.state];
   }
   const text = $derived(describe(event));
 </script>
