@@ -296,15 +296,16 @@ export function delegationMethods(ctx: FakeContext) {
     },
     'delegation.models': async ({ threadId }) => {
       const parent = ctx.thread(delegationRoot(ctx, threadId));
-      // The core's discover(): every agent-owned list nobody read yet is read first.
-      // The fake reports nothing unavailable: its probe of an available, enabled
-      // provider with an account cannot fail, and it has no login to be missing.
+      // The core's discover(): every agent-owned list nobody read yet is read first,
+      // and a failed read is reported, never thrown. The fake's probe of a filtered
+      // provider cannot fail today, and it skips the core's no-logged-in-account case.
+      const unavailable: { providerId: string; reason: string }[] = [];
       await Promise.all(ctx.providers.filter(provider => provider.available && provider.enabled !== false && PROBED_PROTOCOLS.includes(provider.protocol)).map(async provider => {
         const account = ctx.accounts.find(entry => entry.id === parent.accountId && entry.providerId === provider.id) ?? ctx.accounts.find(entry => entry.providerId === provider.id);
         if (!account || ctx.modelCatalogs.has(provider.id + '::' + account.id)) return;
-        await probe(ctx, provider.id, account.id);
+        await probe(ctx, provider.id, account.id).catch((error: unknown) => { unavailable.push({ providerId: provider.id, reason: error instanceof Error ? error.message : String(error) }); });
       }));
-      return { anyModel: delegationConfig(ctx, parent.id).anyModel !== false, choices: modelChoices(ctx, parent), unavailable: [] };
+      return { anyModel: delegationConfig(ctx, parent.id).anyModel !== false, choices: modelChoices(ctx, parent), unavailable };
     },
     'delegation.get': async ({ threadId }) => {
       return delegationView(ctx, delegationRoot(ctx, threadId), threadId);

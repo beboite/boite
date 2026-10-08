@@ -856,7 +856,7 @@ test('the models list and a child row name a tier by the id a child stores, with
   expect(routeOf(child(null))).toBe('codex/gpt-6-luna effort=max');
 });
 
-test('a spawn reads no agent: a speed on a model whose tiers are not read yet is refused naming the model listing that reads them', async () => {
+test('a spawn reads no agent: a speed on a model whose tiers are not read yet is refused naming the delegation models listing that reads them', async () => {
   scripted();
   const { h, owner, threadId } = await setup();
   // The agent owns this provider's list, as Claude and Codex do: a descriptor entry carries no tier until a probe ran.

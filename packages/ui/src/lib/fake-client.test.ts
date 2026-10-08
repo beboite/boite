@@ -525,15 +525,16 @@ test('fake delegation gives a child a speed only when asked, by id or label, wit
   await expect(client.call('delegation.spawn', { threadId, model: 'codex/codex-demo', task: 'Play id', requestId: 'id' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
 });
 
-test('fake delegation reads no agent in a spawn: unread tiers are refused naming the model listing, read and empty ones as none', async ({ createClient }) => {
+test('fake delegation reads no agent in a spawn: unread tiers are refused naming the delegation models, read and empty ones as none', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   const config = { ...DEFAULT_DELEGATION_CONFIG, profiles: [{ id: 'sol', name: 'Sol', providerId: 'codex', accountId: 'a-codex', model: 'gpt-6.1-sol', effort: null }] };
   await client.call('delegation.configure', { threadId: 't-trace', config });
   const spawn = (params: { model?: string; profileId?: string }, requestId: string) => client.call('delegation.spawn', { threadId: 't-trace', speed: 'fast', task: `Play ${requestId}`, requestId, ...params });
   // Nothing read Codex's own list yet.
-  await expect(spawn({ profileId: 'sol' }, 'early')).rejects.toMatchObject({ code: RpcErrorCode.Refused, message: 'speed: the tiers of codex/gpt-6.1-sol are not read yet; list the delegation models and spawn again' });
+  const unread = 'speed: the tiers of codex/gpt-6.1-sol are not read yet; list the delegation models and spawn again';
+  await expect(spawn({ profileId: 'sol' }, 'early')).rejects.toMatchObject({ code: RpcErrorCode.Refused, message: unread });
   // That spawn read nothing: the same one is refused the same way.
-  await expect(spawn({ profileId: 'sol' }, 'early-again')).rejects.toMatchObject({ code: RpcErrorCode.Refused, message: 'speed: the tiers of codex/gpt-6.1-sol are not read yet; list the delegation models and spawn again' });
+  await expect(spawn({ profileId: 'sol' }, 'early-again')).rejects.toMatchObject({ code: RpcErrorCode.Refused, message: unread });
   // What the refusal says to do reads the list: the agent's own model is there with its tiers.
   const models = await client.call('delegation.models', { threadId: 't-trace' });
   expect(models.choices.find(choice => choice.providerId === 'codex' && choice.model === 'codex-demo')?.speeds?.map(speed => speed.id)).toEqual(['fast', 'ultrafast']);
