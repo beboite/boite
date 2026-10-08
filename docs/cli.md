@@ -448,7 +448,7 @@ the agent names (`boite delegate models` lists them), else on the conversation's
 route or an owner-added profile, and records team usage. `--speed <tier>` puts
 the child on one of its model's speed tiers, such as `fast`; without it a
 child has none, whatever the parent runs on. Tiers come from `boite delegate models`:
-a spawn naming a speed on an agent-owned model whose tiers are not read yet is
+a spawn naming a speed on a model or profile on an agent-owned list not read yet is
 refused and says to list the delegation models and spawn again. Children share the parent's checkout, retain their own sessions,
 and return bounded results automatically. `delegate stop` pauses the whole team;
 only the owner can change profiles or resume a paused team.

@@ -525,7 +525,7 @@ test('fake delegation gives a child a speed only when asked, by id or label, wit
   await expect(client.call('delegation.spawn', { threadId, model: 'codex/codex-demo', task: 'Play id', requestId: 'id' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
 });
 
-test('fake delegation reads no agent in a spawn: unread tiers are refused naming the delegation models, read and empty ones as none', async ({ createClient }) => {
+test('fake delegation reads no agent in a spawn: unread tiers are refused naming the delegation models, read-but-empty ones as none', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   const config = { ...DEFAULT_DELEGATION_CONFIG, profiles: [{ id: 'sol', name: 'Sol', providerId: 'codex', accountId: 'a-codex', model: 'gpt-6.1-sol', effort: null }] };
   await client.call('delegation.configure', { threadId: 't-trace', config });

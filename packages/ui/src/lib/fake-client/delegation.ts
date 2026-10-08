@@ -1,5 +1,5 @@
 /** Delegation: a parent thread's team of child threads, their usage and letters. */
-import { collectNativeAgents, collectProcessAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, matchSpeed, RpcErrorCode, SPEED_NEEDS_MODEL, speedRefusal, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationModelChoice, type DelegationProfile, type DelegationView, type DelegationWaitResult, type RpcParams, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { collectNativeAgents, collectProcessAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, matchSpeed, providerEnabled, RpcErrorCode, SPEED_NEEDS_MODEL, speedRefusal, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationModelChoice, type DelegationProfile, type DelegationView, type DelegationWaitResult, type RpcParams, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { addUsage, emptyUsage, toSummary } from './shared';
 import { modelsOf, PROBED_PROTOCOLS, probe } from './provider-catalog';
@@ -15,10 +15,15 @@ export function delegationConfig(ctx: FakeContext, rootId: ThreadId): Delegation
   return structuredClone({ enabled: saved.enabled, paused: saved.paused, profiles: saved.profiles, anyModel: saved.anyModel !== false });
 }
 
+/** The account a parent's children use on a provider: the parent's own there, else the provider's first. */
+function accountFor(ctx: FakeContext, parent: Thread, providerId: string) {
+  return ctx.accounts.find(entry => entry.id === parent.accountId && entry.providerId === providerId) ?? ctx.accounts.find(entry => entry.providerId === providerId);
+}
+
 /** What the real core's catalog reads: every available provider's models on its first account, the parent's own first. */
 function modelChoices(ctx: FakeContext, parent: Thread): DelegationModelChoice[] {
-  return ctx.providers.filter(provider => provider.available && provider.enabled !== false).flatMap(provider => {
-    const account = ctx.accounts.find(entry => entry.id === parent.accountId && entry.providerId === provider.id) ?? ctx.accounts.find(entry => entry.providerId === provider.id);
+  return ctx.providers.filter(provider => provider.available && providerEnabled(provider)).flatMap(provider => {
+    const account = accountFor(ctx, parent, provider.id);
     if (!account) return [];
     return modelsOf(ctx, provider.id, account.id).filter(model => !model.legacy).map(model => ({
       providerId: provider.id, providerName: provider.name, accountId: account.id, model: model.id, name: model.name,
@@ -297,11 +302,11 @@ export function delegationMethods(ctx: FakeContext) {
     'delegation.models': async ({ threadId }) => {
       const parent = ctx.thread(delegationRoot(ctx, threadId));
       // The core's discover(): every agent-owned list nobody read yet is read first,
-      // and a failed read is reported, never thrown. The fake's probe of a filtered
-      // provider cannot fail today, and it skips the core's no-logged-in-account case.
+      // and a failed read is reported, never thrown. The fake's probe only clones
+      // fixtures, so it cannot fail; this method skips the core's no-logged-in-account case.
       const unavailable: { providerId: string; reason: string }[] = [];
-      await Promise.all(ctx.providers.filter(provider => provider.available && provider.enabled !== false && PROBED_PROTOCOLS.includes(provider.protocol)).map(async provider => {
-        const account = ctx.accounts.find(entry => entry.id === parent.accountId && entry.providerId === provider.id) ?? ctx.accounts.find(entry => entry.providerId === provider.id);
+      await Promise.all(ctx.providers.filter(provider => provider.available && providerEnabled(provider) && PROBED_PROTOCOLS.includes(provider.protocol)).map(async provider => {
+        const account = accountFor(ctx, parent, provider.id);
         if (!account || ctx.modelCatalogs.has(provider.id + '::' + account.id)) return;
         await probe(ctx, provider.id, account.id).catch((error: unknown) => { unavailable.push({ providerId: provider.id, reason: error instanceof Error ? error.message : String(error) }); });
       }));
