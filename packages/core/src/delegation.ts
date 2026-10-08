@@ -3,7 +3,7 @@ import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, nativeAgentsOfTool,
 import type { AgentLetter, DelegatedAgent, DelegationConfig, DelegationModels, DelegationView, RpcParams, ThreadSummary, Turn, Usage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
-import { checkEffort, checkModel, checkSpeed, needsModelDiscovery } from './threads/selection.ts';
+import { checkEffort, checkModel, checkSpeed } from './threads/selection.ts';
 import { anyModel, catalog, conversationRoute, discover, providersNamed, resolveRoute, type ChildRoute, type RouteRequest } from './delegation/routes.ts';
 import type { ProviderProbe } from './providers/probe.ts';
 import { newId } from './ids.ts';
@@ -299,21 +299,6 @@ export class Delegation {
     const only = missing.map(model => providersNamed(this.core, model));
     await discover(this.core, probe, parent, only.some(list => list === undefined) ? undefined : [...new Set(only.flat() as string[])]);
   }
-  /**
-   * A spawn that names a speed needs the tiers of the model it runs on. An
-   * agent that owns its list gives them with it: read it when nobody has yet.
-   * The fields are a spawn's own, unchecked; a failed read is left to the refusal.
-   */
-  async prepareSpeed(parentId: string, probe: ProviderProbe, params: { profileId?: unknown; model?: unknown; speed?: unknown }): Promise<void> {
-    if (typeof params.speed !== 'string') return;
-    const parent = this.root(parentId);
-    const model = typeof params.model === 'string' ? params.model.trim().toLowerCase() : undefined;
-    const route: Pick<ChildRoute, 'providerId' | 'accountId' | 'model'> | undefined = model === undefined
-      ? this.route(parent, this.config(parent.id), typeof params.profileId === 'string' ? params.profileId : null)
-      : catalog(this.core, parent, true).choices.find(c => `${c.providerId}/${c.model}`.toLowerCase() === model || c.model.toLowerCase() === model);
-    const provider = route && this.core.providers.get(route.providerId);
-    if (route && provider && needsModelDiscovery(provider, route.accountId, route.model, null, params.speed)) await discover(this.core, probe, parent, [provider.id]);
-  }
   /** What `boite delegate models` prints: every runnable model, read from each agent once. */
   async models(threadId: string, probe: ProviderProbe): Promise<DelegationModels> {
     const parent = this.root(threadId);
@@ -333,6 +318,7 @@ export class Delegation {
   createChild(parent: ThreadSummary, profile: ChildRoute, title: string, record: (id: string) => void): string {
     const id = newId('thr_');
     const { speed: asked, ...route } = profile;
+    if (asked != null && route.model === null) throw invalidParams('speed: this route runs on the provider\'s default model; name a model with --model to choose its speed');
     const speed = checkSpeed(this.core.providers.require(route.providerId), route.accountId, route.model, asked ?? null);
     this.core.journal.db.transaction(() => {
       if (parent.projectId === null) {

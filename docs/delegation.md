@@ -182,12 +182,13 @@ tier whose id is `priority` and label "Fast". It applies to the model the child
 runs on, so it also works with `--profile` and with no `--model`, unless that
 route runs on the provider's default model: then the spawn is refused and
 `--model` has to name a model. A tier the model lacks is refused with the model
-and the tiers it offers, or that it offers none. Tiers the agent has not listed
-yet are read from the agent first; when that read fails the refusal says so
-instead of claiming the model offers none. `delegate models` prints the tiers
-of each model that has some, each as its id, with the label in front when the
-label says something else: `speed=fast` for Claude, `speed=Fast (priority)` for
-that Codex tier. `--speed` takes the value after `speed=` as it is.
+and the tiers it offers, or that it offers none. Tiers come from
+`boite delegate models`, which reads every agent's list: a spawn reads none, so
+a speed on a model whose tiers are not read yet is refused and names that
+command. `delegate models` prints the tiers of each model that has some, joined
+by `|`, each as its id, with the label in front when the label says something
+else: `speed=fast` for Claude, `speed=Fast (priority)` for that Codex tier.
+`--speed` takes any one of those entries as it is.
 `delegate list` and a spawn show the id the child stores, here
 `speed=priority`. The older `delegate spawn <profile> "<brief>"` form still
 works.

@@ -767,6 +767,8 @@ test('a child runs on a speed tier only when the spawn names one, by id or by la
     const models = await agent.call('delegation.models', { threadId });
     expect(models.choices.find(c => c.providerId === 'twin' && c.model === 'luna')?.speeds).toEqual([{ id: 'priority', label: 'Fast', description: 'Priority processing' }]);
     expect(models.choices.find(c => c.providerId === 'twin' && c.model === 'plain')?.speeds).toEqual([]);
+    // A model listed without tiers is sent an empty list, not a missing one.
+    expect(models.choices.find(c => c.providerId === 'twin' && c.model === 'unread')?.speeds).toEqual([]);
 
     expect(await speedOf({ model: 'twin/luna', effort: 'max', speed: 'fast' }, 'label')).toBe('priority');
     expect(await speedOf({ model: 'twin/luna', speed: 'FAST' }, 'label-case')).toBe('priority');
@@ -805,9 +807,10 @@ test('a child runs on a speed tier only when the spawn names one, by id or by la
   expect(h.core.threads.require(plain).speed).toBeNull();
   // A route somebody else built is checked like any other: a label is not a tier id, a model without tiers takes none, nor does the provider's default model.
   for (const from of [parent, draftParent]) {
-    for (const bad of [{ speed: 'Fast' }, { model: 'plain', effort: null }, { model: 'unread', effort: null }, { model: null, effort: null }]) {
+    for (const bad of [{ speed: 'Fast' }, { model: 'plain', effort: null }, { model: 'unread', effort: null }]) {
       expect(() => h.core.delegation.createChild(from, { ...route, ...bad }, 'Refused', () => {})).toThrow('does not offer this speed');
     }
+    expect(() => h.core.delegation.createChild(from, { ...route, model: null, effort: null }, 'Default model', () => {})).toThrow('name a model with --model to choose its speed');
   }
   expect(() => h.core.delegation.resolve(threadId, { model: 'twin/unread', speed: 'priority' })).toThrow('twin/unread offers no speed tier');
 
@@ -853,40 +856,40 @@ test('the models list and a child row name a tier by the id a child stores, with
   expect(routeOf(child(null))).toBe('codex/gpt-6-luna effort=max');
 });
 
-test('a spawn with a speed on a model whose tiers the agent has not listed yet reads them first, for a named model and for a profile', async () => {
+test('a spawn reads no agent: a speed on a model whose tiers are not read yet is refused naming the command that reads them', async () => {
   scripted();
   const { h, owner, threadId } = await setup();
   // The agent owns this provider's list, as Claude and Codex do: a descriptor entry carries no tier until a probe ran.
-  await twinProvider(h, owner, [{ id: 'luna', name: 'Luna' }], 'pi');
+  await twinProvider(h, owner, [{ id: 'luna', name: 'Luna' }, { id: 'plain', name: 'Plain' }], 'pi');
   restores.push(() => forgetProbes({ providerId: 'twin' }));
   const account = h.core.accounts.list().find(a => a.providerId === 'twin');
   if (!account) throw new Error(`no twin account among ${h.core.accounts.list().map(a => `${a.providerId}/${a.id}`).join(', ')}`);
   await owner.call('delegation.configure', { threadId, config: { ...h.core.delegation.config(threadId), profiles: [{ id: 'moon', name: 'Moon', providerId: 'twin', accountId: account.id, model: 'luna', effort: null }] } });
   const probed: string[] = [];
-  const probe: Parameters<typeof h.core.delegation.prepareSpeed>[1] = async params => {
+  const probe: Parameters<typeof h.core.delegation.models>[1] = async params => {
     probed.push(params.providerId);
-    const models = [{ id: 'luna', name: 'Luna', speeds: [{ id: 'priority', label: 'Fast' }] }];
-    rememberExternalModels('pi', 'twin', params.accountId, models);
-    return { providerId: params.providerId, accountId: params.accountId, models, probedAt: Date.now() };
+    // What the agent answers: one model with a tier, one without any.
+    const models = [{ id: 'luna', name: 'Luna', speeds: [{ id: 'priority', label: 'Fast' }] }, { id: 'plain', name: 'Plain' }];
+    if (params.providerId === 'twin') rememberExternalModels('pi', 'twin', params.accountId, models);
+    return { models, probedAt: Date.now() };
   };
-  for (const request of [{ model: 'twin/luna', speed: 'fast' }, { model: 'LUNA', speed: 'fast' }, { profileId: 'moon', speed: 'fast' }]) {
-    forgetProbes({ providerId: 'twin' });
-    probed.length = 0;
-    // Unread is not the same answer as none: nothing says to leave the speed out.
-    expect(() => h.core.delegation.resolve(threadId, request)).toThrow('speed: the speed tiers of twin/luna could not be read from its agent; list the models to see why');
-    await h.core.delegation.prepareSpeed(threadId, probe, request);
-    expect(probed).toEqual(['twin']);
-    expect(h.core.delegation.resolve(threadId, request).speed).toBe('priority');
-    // Read once: the next request finds the tiers.
-    await h.core.delegation.prepareSpeed(threadId, probe, request);
-    expect(probed).toEqual(['twin']);
-  }
-  // No speed asked, nothing read, and the route resolves without a tier while the list is unread.
-  forgetProbes({ providerId: 'twin' });
-  probed.length = 0;
-  for (const request of [{ profileId: 'moon' }, {}]) {
-    await h.core.delegation.prepareSpeed(threadId, probe, request);
-    expect(h.core.delegation.resolve(threadId, request).speed).toBeNull();
-  }
-  expect(probed).toEqual([]);
+  const unread = 'speed: the tiers of twin/luna are not read yet; list the delegation models (boite delegate models) and spawn again';
+  const agent = await connect(h.url, h.core.agents.tokenFor(threadId));
+  try {
+    for (const route of [{ model: 'twin/luna' }, { profileId: 'moon' }]) {
+      await expect(agent.call('delegation.spawn', { threadId, ...route, speed: 'fast', task: 'Too early', requestId: `early-${JSON.stringify(route)}` })).rejects.toThrow(unread);
+      // Without a speed the same route starts: nothing needs the tiers.
+      expect(h.core.delegation.resolve(threadId, route).speed).toBeNull();
+    }
+    // Nothing was read on the way to those refusals: only `boite delegate models` reads.
+    expect(h.core.delegation.resolve(threadId, { model: 'twin/luna' }).speed).toBeNull();
+    expect(() => h.core.delegation.resolve(threadId, { model: 'twin/luna', speed: 'fast' })).toThrow(unread);
+    const listed = await h.core.delegation.models(threadId, probe);
+    expect(probed).toContain('twin');
+    expect(listed.choices.find(c => c.providerId === 'twin' && c.model === 'luna')?.speeds).toEqual([{ id: 'priority', label: 'Fast' }]);
+    // Resolved, not spawned: this provider has no agent to start a turn on.
+    for (const route of [{ model: 'twin/luna' }, { profileId: 'moon' }]) expect(h.core.delegation.resolve(threadId, { ...route, speed: 'fast' }).speed).toBe('priority');
+    // Read and empty is a model without tiers, not an unread one.
+    await expect(agent.call('delegation.spawn', { threadId, model: 'twin/plain', speed: 'fast', task: 'No tier', requestId: 'read-plain' })).rejects.toThrow('speed: twin/plain offers no speed tier; leave speed out');
+  } finally { agent.close(); }
 });

@@ -149,6 +149,7 @@ export function resolveRoute(core: Core, parent: ThreadSummary, config: Delegati
   const listed = modelsFor(provider, route.accountId).find(entry => entry.id === route.model)?.speeds;
   const speed = matchSpeed(listed, request.speed);
   if (speed !== null) return { ...route, speed };
-  // Only an agent that owns its list can have tiers nobody could read; a descriptor's model without any offers none.
-  throw refused(speedRefusal(`${route.providerId}/${route.model}`, listed === undefined && PROBED_PROTOCOLS.includes(provider.protocol) ? null : listed ?? [], request.speed), { field: 'speed', expected: (listed ?? []).map(option => option.id) });
+  // A spawn reads no agent. Tiers are unread only while an agent that owns its list has given none; anything else without tiers offers none.
+  const unread = listed === undefined && PROBED_PROTOCOLS.includes(provider.protocol) && probedModelsOf(provider.protocol, provider.id, route.accountId) === null;
+  throw refused(speedRefusal(`${route.providerId}/${route.model}`, unread ? null : listed ?? [], request.speed), { field: 'speed', expected: (listed ?? []).map(option => option.id) });
 }

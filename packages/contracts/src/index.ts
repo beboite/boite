@@ -2810,27 +2810,29 @@ export interface DelegationModelChoice {
 /**
  * A speed named by id, by label or the way it is listed (`Fast (priority)`), any
  * case: `fast` is Claude's `fast` and the Codex tier `priority` labelled "Fast".
- * Null for anything else.
+ * Padding is ignored on both sides; the id comes back exactly as the model
+ * advertises it, which is what a thread's speed is checked against. Null for
+ * anything else.
  */
 export function matchSpeed(speeds: readonly SpeedTier[] | null | undefined, wanted: unknown): string | null {
   if (typeof wanted !== 'string') return null;
   const query = wanted.trim().toLowerCase();
   if (!query || !speeds) return null;
   const by = (name: (speed: SpeedTier) => string) => speeds.find(speed => name(speed).trim().toLowerCase() === query);
-  return (by(speed => speed.id) ?? by(speed => speed.label) ?? by(speedName))?.id.trim() ?? null;
+  return (by(speed => speed.id) ?? by(speed => speed.label) ?? by(speedName))?.id ?? null;
 }
 /** How a tier is written for an agent: its id, with the label in front when the label says something else, as `Fast (priority)`. */
 export function speedName(speed: SpeedTier): string {
   const label = speed.label.trim(), id = speed.id.trim();
-  return !label || label.toLowerCase() === id.toLowerCase() ? id : `${label} (${id})`;
+  return !id ? label : !label || label.toLowerCase() === id.toLowerCase() ? id : `${label} (${id})`;
 }
 /**
  * Why a speed is refused: the model and the tiers it offers, or that it offers
- * none; with no list at all, that its agent has not given one. The same words on
- * every transport.
+ * none; with no list at all, that its tiers are not read yet and what reads
+ * them. The same words for the CLI and the MCP tool.
  */
 export function speedRefusal(model: string, speeds: readonly SpeedTier[] | null | undefined, wanted: string): string {
-  if (!speeds) return `speed: the speed tiers of ${model} could not be read from its agent; list the models to see why`;
+  if (!speeds) return `speed: the tiers of ${model} are not read yet; list the delegation models (boite delegate models) and spawn again`;
   if (!speeds.length) return `speed: ${model} offers no speed tier; leave speed out`;
   return `speed: ${model} has no "${wanted.trim()}" tier; expected ${speeds.map(speedName).join(', ')}`;
 }
