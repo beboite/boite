@@ -72,7 +72,7 @@ export class MemoryGuard {
     let reading: CgroupMemory | null = null;
     // A root whose group cannot be read does not hide the next one's.
     for (const process of processes) {
-      if (!process.root || process.record.pid <= 0) continue;
+      if (!process.root || !Number.isInteger(process.record.pid) || process.record.pid <= 0) continue;
       reading = this.platform.cgroupMemory(process.record.pid);
       if (reading !== null) break;
     }

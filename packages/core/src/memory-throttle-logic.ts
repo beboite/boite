@@ -16,8 +16,8 @@ export const THROTTLE_REPEAT_MS = 5 * 60_000;
 export const THROTTLE_QUIET_MS = 30_000;
 /** A longer wait between two samples is an idle gap: no share of it is measured. */
 export const THROTTLE_GAP_MS = 5000;
-/** The share of the time since the last sample the group must have spent waiting: 200 ms per second. */
-export const THROTTLE_STALL_SHARE = 0.2;
+/** The group must have spent one part in this many of the time since the last sample waiting: 200 ms per second. Whole numbers, so an exact share is not lost to rounding. */
+export const THROTTLE_STALL_ONE_IN = 5;
 
 export interface ThrottleReading {
   /** The group the counters belong to. Another path is another limit. */
@@ -59,7 +59,7 @@ export function decideThrottle(policy: ThrottlePolicy | undefined, reading: Thro
   }
   // After an idle gap the counters only restart the measure; a stall spread over it proves nothing.
   const stalled = elapsedMs <= THROTTLE_GAP_MS && highEvents > policy.highEvents
-    && stallMicros - policy.stallMicros >= elapsedMs * 1000 * THROTTLE_STALL_SHARE;
+    && (stallMicros - policy.stallMicros) * THROTTLE_STALL_ONE_IN >= elapsedMs * 1000;
   if (!stalled) return { policy: calmThrottle({ ...policy, ...counters }, at), notify: false };
   const streak = policy.streak + 1;
   const notify = streak >= THROTTLE_STREAK && (policy.noticedAt === null || at - policy.noticedAt >= THROTTLE_REPEAT_MS);
