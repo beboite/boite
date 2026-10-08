@@ -337,7 +337,11 @@ export interface ModelInfo {
   speeds?: SpeedTier[];
 }
 /** One native service tier of a model, such as Claude's `fast` or the Codex tier `priority` labelled "Fast". */
-export interface SpeedTier { id: string; label: string; description?: string }
+export interface SpeedTier {
+  id: string;
+  label: string;
+  description?: string;
+}
 
 export interface ProviderCapabilities {
   approvals: boolean;
@@ -2824,15 +2828,17 @@ export function matchSpeed(speeds: readonly SpeedTier[] | null | undefined, want
 /** How a tier is written for an agent: its id, with the label in front when the label says something else, as `Fast (priority)`. */
 export function speedName(speed: SpeedTier): string {
   const label = speed.label.trim(), id = speed.id.trim();
-  return !id ? label : !label || label.toLowerCase() === id.toLowerCase() ? id : `${label} (${id})`;
+  return !id ? label : (!label || label.toLowerCase() === id.toLowerCase() ? id : `${label} (${id})`);
 }
+/** Why a speed is refused on a route that runs on the provider's default model: no model, no tiers to choose from. */
+export const SPEED_NEEDS_MODEL = 'speed: this route runs on the provider\'s default model; name a model with --model to choose its speed';
 /**
  * Why a speed is refused: the model and the tiers it offers, or that it offers
  * none; with no list at all, that its tiers are not read yet and what reads
  * them. The same words for the CLI and the MCP tool.
  */
 export function speedRefusal(model: string, speeds: readonly SpeedTier[] | null | undefined, wanted: string): string {
-  if (!speeds) return `speed: the tiers of ${model} are not read yet; list the delegation models (boite delegate models) and spawn again`;
+  if (!speeds) return `speed: the tiers of ${model} are not read yet; list the delegation models and spawn again`;
   if (!speeds.length) return `speed: ${model} offers no speed tier; leave speed out`;
   return `speed: ${model} has no "${wanted.trim()}" tier; expected ${speeds.map(speedName).join(', ')}`;
 }

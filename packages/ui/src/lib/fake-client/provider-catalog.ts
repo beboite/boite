@@ -44,7 +44,7 @@ export async function discoverSelection(ctx: FakeContext, providerId: string, ac
  * ACP, Codex and pi probe their own catalogs. Demo models are explicitly
  * named as such; only OpenCode uses the large catalog fixture.
  */
-async function probe(ctx: FakeContext, providerId: string, accountId: string): Promise<RpcResult<'providers.probe'>> {
+export async function probe(ctx: FakeContext, providerId: string, accountId: string): Promise<RpcResult<'providers.probe'>> {
   const provider = ctx.providers.find((p) => p.id === providerId);
   if (!provider) {
     throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `unknown provider ${providerId}` });

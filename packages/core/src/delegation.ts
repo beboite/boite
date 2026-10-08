@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, nativeAgentsOfTool, processAgentCommand, type RpcEvents } from '@boite/contracts';
+import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, nativeAgentsOfTool, processAgentCommand, SPEED_NEEDS_MODEL, type RpcEvents } from '@boite/contracts';
 import type { AgentLetter, DelegatedAgent, DelegationConfig, DelegationModels, DelegationView, RpcParams, ThreadSummary, Turn, Usage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
@@ -318,7 +318,7 @@ export class Delegation {
   createChild(parent: ThreadSummary, profile: ChildRoute, title: string, record: (id: string) => void): string {
     const id = newId('thr_');
     const { speed: asked, ...route } = profile;
-    if (asked != null && route.model === null) throw invalidParams('speed: this route runs on the provider\'s default model; name a model with --model to choose its speed');
+    if (asked != null && route.model === null) throw invalidParams(SPEED_NEEDS_MODEL);
     const speed = checkSpeed(this.core.providers.require(route.providerId), route.accountId, route.model, asked ?? null);
     this.core.journal.db.transaction(() => {
       if (parent.projectId === null) {

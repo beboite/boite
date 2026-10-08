@@ -444,12 +444,12 @@ and `options`; it yields execution until the user answers. A memory contains
 `title` and `text`, with `id` and `expectedRevision` for an edit. The core adds
 the source context. Use `--json` to preserve the structured result.
 [Delegation](delegation.md) runs each child on the model and reasoning level
-the agent names (`delegate models` lists them), else on the conversation's own
+the agent names (`boite delegate models` lists them), else on the conversation's own
 route or an owner-added profile, and records team usage. `--speed <tier>` puts
 the child on one of its model's speed tiers, such as `fast`; without it a
-child has none, whatever the parent runs on. Tiers come from `delegate models`:
-a spawn on a model whose tiers are not read yet is refused and names that
-command. Children share the parent's checkout, retain their own sessions,
+child has none, whatever the parent runs on. Tiers come from `boite delegate models`:
+a spawn naming a speed on a model whose tiers are not read yet is refused and
+says to list the models. Children share the parent's checkout, retain their own sessions,
 and return bounded results automatically. `delegate stop` pauses the whole team;
 only the owner can change profiles or resume a paused team.
 [Workflows](workflows.md) run a JSON plan of such children: `workflow help`

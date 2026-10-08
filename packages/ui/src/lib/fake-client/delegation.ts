@@ -1,8 +1,8 @@
 /** Delegation: a parent thread's team of child threads, their usage and letters. */
-import { collectNativeAgents, collectProcessAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, matchSpeed, RpcErrorCode, speedRefusal, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationModelChoice, type DelegationProfile, type DelegationView, type DelegationWaitResult, type RpcParams, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { collectNativeAgents, collectProcessAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, matchSpeed, RpcErrorCode, SPEED_NEEDS_MODEL, speedRefusal, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationModelChoice, type DelegationProfile, type DelegationView, type DelegationWaitResult, type RpcParams, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { addUsage, emptyUsage, toSummary } from './shared';
-import { modelsOf, PROBED_PROTOCOLS } from './provider-catalog';
+import { modelsOf, PROBED_PROTOCOLS, probe } from './provider-catalog';
 import type { FakeContext, FakeMethods } from './context';
 
 function delegationRoot(ctx: FakeContext, threadId: ThreadId): ThreadId {
@@ -37,7 +37,7 @@ function checkSpeedText(wanted: unknown): void {
 /** The core's speed resolution: by id or label, any case, refused naming the model and what it offers. */
 function pickSpeed(ctx: FakeContext, route: ChildRoute, wanted: string | undefined): string | null {
   if (wanted === undefined) return null;
-  if (route.model === null) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'speed: this route runs on the provider\'s default model; name a model with --model to choose its speed' });
+  if (route.model === null) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: SPEED_NEEDS_MODEL });
   const speeds = modelsOf(ctx, route.providerId, route.accountId).find(model => model.id === route.model)?.speeds;
   const speed = matchSpeed(speeds, wanted);
   if (speed !== null) return speed;
@@ -296,7 +296,14 @@ export function delegationMethods(ctx: FakeContext) {
     },
     'delegation.models': async ({ threadId }) => {
       const parent = ctx.thread(delegationRoot(ctx, threadId));
-      return { anyModel: delegationConfig(ctx, parent.id).anyModel !== false, choices: modelChoices(ctx, parent), unavailable: [] };
+      // The core's discover(): every agent-owned list nobody read yet is read first, and a failed read is reported, not thrown.
+      const unavailable: { providerId: string; reason: string }[] = [];
+      await Promise.all(ctx.providers.filter(provider => provider.available && provider.enabled !== false && PROBED_PROTOCOLS.includes(provider.protocol)).map(async provider => {
+        const account = ctx.accounts.find(entry => entry.id === parent.accountId && entry.providerId === provider.id) ?? ctx.accounts.find(entry => entry.providerId === provider.id);
+        if (!account || ctx.modelCatalogs.has(provider.id + '::' + account.id)) return;
+        await probe(ctx, provider.id, account.id).catch((error: unknown) => { unavailable.push({ providerId: provider.id, reason: error instanceof Error ? error.message : String(error) }); });
+      }));
+      return { anyModel: delegationConfig(ctx, parent.id).anyModel !== false, choices: modelChoices(ctx, parent), unavailable };
     },
     'delegation.get': async ({ threadId }) => {
       return delegationView(ctx, delegationRoot(ctx, threadId), threadId);

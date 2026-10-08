@@ -6,7 +6,7 @@ import type { CoreClient } from '../src/client.ts';
 import type { DelegatedAgent, DelegationConfig, ModelInfo, ProcessRecord, SpeedTier, Turn } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
-import { forgetProbes, rememberExternalModels, setDriver } from '../src/drivers/index.ts';
+import { forgetProbes, probedModelsOf, rememberExternalModels, setDriver } from '../src/drivers/index.ts';
 import { choiceRow, routeOf } from '../src/delegate-cli.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { runCli } from '../src/cli.ts';
@@ -788,9 +788,9 @@ test('a child runs on a speed tier only when the spawn names one, by id or by la
     await expect(agent.call('delegation.spawn', { threadId, model: 'twin/plain', speed: 'fast', task: 'No tier', requestId: 'no-tier' })).rejects.toThrow('speed: twin/plain offers no speed tier; leave speed out');
     await expect(agent.call('delegation.spawn', { threadId, model: 'twin/luna', speed: 'turbo', task: 'Bad tier', requestId: 'bad-tier' })).rejects.toThrow('speed: twin/luna has no "turbo" tier; expected Fast (priority)');
     await expect(agent.call('delegation.spawn', { threadId, model: 'twin/luna', speed: ' ', task: 'Blank tier', requestId: 'blank-tier' })).rejects.toThrow('speed: expected 1 to 64 characters');
-    const long = await agent.call('delegation.spawn', { threadId, model: 'twin/luna', speed: 'f'.repeat(65), task: 'Long tier', requestId: 'long-tier' }).then(() => '', error => (error as Error).message);
-    expect(long).toContain('speed: expected 1 to 64 characters');
-    expect(long).not.toContain('fffff');
+    const rpcLong = await agent.call('delegation.spawn', { threadId, model: 'twin/luna', speed: 'f'.repeat(65), task: 'Long tier', requestId: 'long-tier' }).then(() => '', error => (error as Error).message);
+    expect(rpcLong).toContain('speed: expected 1 to 64 characters');
+    expect(rpcLong).not.toContain('fffff');
     await expect(agent.call('delegation.spawn', { threadId, speed: 'priority', task: 'Other tier', requestId: 'other-tier' })).rejects.toThrow('speed: echo/echo has no "priority" tier; expected fast');
     // A retry of the same request is the same child; another speed under that id is different content.
     expect(await speedOf({ model: 'twin/luna', effort: 'max', speed: 'fast' }, 'label')).toBe('priority');
@@ -839,10 +839,10 @@ test('a child runs on a speed tier only when the spawn names one, by id or by la
   const refused = await call(['delegate', 'spawn', 'Play the build', '--model', 'twin/plain', '--speed', 'fast']);
   expect(refused.code).not.toBe(0);
   expect(refused.err).toContain('twin/plain offers no speed tier; leave speed out');
-  const long = await call(['delegate', 'spawn', 'Play the build', '--speed', 'f'.repeat(65)]);
-  expect(long.code).not.toBe(0);
-  expect(long.err).toContain('--speed needs a tier of 1 to 64 characters');
-  expect(long.err).not.toContain('fffff');
+  const cliLong = await call(['delegate', 'spawn', 'Play the build', '--speed', 'f'.repeat(65)]);
+  expect(cliLong.code).not.toBe(0);
+  expect(cliLong.err).toContain('--speed needs a tier of 1 to 64 characters');
+  expect(cliLong.err).not.toContain('fffff');
 });
 
 test('the models list and a child row name a tier by the id a child stores, with a label that differs in front', () => {
@@ -873,15 +873,21 @@ test('a spawn reads no agent: a speed on a model whose tiers are not read yet is
     if (params.providerId === 'twin') rememberExternalModels('pi', 'twin', params.accountId, models);
     return { models, probedAt: Date.now() };
   };
-  const unread = 'speed: the tiers of twin/luna are not read yet; list the delegation models (boite delegate models) and spawn again';
+  const unread = 'speed: the tiers of twin/luna are not read yet; list the delegation models and spawn again';
   const agent = await connect(h.url, h.core.agents.tokenFor(threadId));
   try {
     for (const route of [{ model: 'twin/luna' }, { profileId: 'moon' }]) {
       await expect(agent.call('delegation.spawn', { threadId, ...route, speed: 'fast', task: 'Too early', requestId: `early-${JSON.stringify(route)}` })).rejects.toThrow(unread);
-      // Without a speed the same route starts: nothing needs the tiers.
+      // Without a speed the same route resolves with a null speed: nothing needs the tiers.
       expect(h.core.delegation.resolve(threadId, route).speed).toBeNull();
     }
     // Nothing was read on the way to those refusals: only `boite delegate models` reads.
+    expect(probedModelsOf('pi', 'twin', account.id)).toBeNull();
+    // Unknown is not empty: the refusal carries no list of expected tiers.
+    let data: unknown = 'not refused';
+    try { h.core.delegation.resolve(threadId, { model: 'twin/luna', speed: 'fast' }); } catch (error) { data = (error as { data?: unknown }).data; }
+    expect(data).toEqual({ field: 'speed' });
+    expect(() => h.core.delegation.resolve(threadId, { model: 'twin/plain', speed: 'fast' })).toThrow('speed: the tiers of twin/plain are not read yet; list the delegation models and spawn again');
     expect(h.core.delegation.resolve(threadId, { model: 'twin/luna' }).speed).toBeNull();
     expect(() => h.core.delegation.resolve(threadId, { model: 'twin/luna', speed: 'fast' })).toThrow(unread);
     const listed = await h.core.delegation.models(threadId, probe);

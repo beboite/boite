@@ -5,7 +5,7 @@
  * provider's usable login. A child runs on a speed tier only when the request
  * names one: it never inherits the parent's.
  */
-import { CONVERSATION_PROFILE_ID, matchSpeed, speedRefusal } from '@boite/contracts';
+import { CONVERSATION_PROFILE_ID, matchSpeed, SPEED_NEEDS_MODEL, speedRefusal } from '@boite/contracts';
 import type { Account, DelegationConfig, DelegationModelChoice, DelegationModels, DelegationProfile, ProviderId, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { invalidParams, messageOf, refused } from '../errors.ts';
@@ -144,12 +144,13 @@ export function resolveRoute(core: Core, parent: ThreadSummary, config: Delegati
     route = { ...route, effort: checkEffort(provider, route.accountId, route.model, request.effort) };
   }
   if (request.speed === undefined) return { ...route, speed: null };
-  if (route.model === null) throw invalidParams('speed: this route runs on the provider\'s default model; name a model with --model to choose its speed');
+  if (route.model === null) throw invalidParams(SPEED_NEEDS_MODEL);
   const provider = core.providers.require(route.providerId);
   const listed = modelsFor(provider, route.accountId).find(entry => entry.id === route.model)?.speeds;
   const speed = matchSpeed(listed, request.speed);
   if (speed !== null) return { ...route, speed };
   // A spawn reads no agent. Tiers are unread only while an agent that owns its list has given none; anything else without tiers offers none.
   const unread = listed === undefined && PROBED_PROTOCOLS.includes(provider.protocol) && probedModelsOf(provider.protocol, provider.id, route.accountId) === null;
-  throw refused(speedRefusal(`${route.providerId}/${route.model}`, unread ? null : listed ?? [], request.speed), { field: 'speed', expected: (listed ?? []).map(option => option.id) });
+  // Unread tiers are unknown, not empty: no `expected` list then.
+  throw refused(speedRefusal(`${route.providerId}/${route.model}`, unread ? null : listed ?? [], request.speed), unread ? { field: 'speed' } : { field: 'speed', expected: (listed ?? []).map(option => option.id) });
 }
