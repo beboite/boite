@@ -57,13 +57,15 @@ browser after a restart. A folder that cannot be removed is logged.
 
 Logins live on the machine that runs the agent, not on the device that shows
 it. The core keeps each profile's cookies itself, in `boite-cookies.json` in
-the profile folder, readable by its own account only: saved when a tab closes
-and before the browser process ends, handed back when it starts. The browser's
+the profile folder, readable by its own account only: saved a second after a
+page changes, every 30 seconds while a tab is open, when a tab closes and
+before the browser process ends, handed back when it starts. The browser's
 own cookie file was not enough: on the Windows and macOS CI runners of
 2026-10-05 a cookie set in a tab was gone after the process closed, and a
 cookie with no expiry date is never written by a browser at all. A private
-tab's cookies are never saved. A core killed outright keeps what was saved at
-the last tab closed.
+tab's cookies are never saved. A core killed outright keeps what was saved
+last, so a sign-in whose tab is still open is at most 30 seconds from the
+disk.
 
 ### Copying a desktop profile's sign-ins
 

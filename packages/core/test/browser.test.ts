@@ -331,6 +331,18 @@ real('each profile keeps its own cookies, across a restart of the browser; a pri
   } finally { await again.close(); }
 }, 150_000);
 
+real('a sign-in is on disk while its tab is still open: a core killed there keeps it', async () => {
+  const { tabId } = await harness.core.browser.command({ threadId, action: { kind: 'open', url: url() } });
+  await harness.core.browser.command({ threadId, tabId, action: { kind: 'evaluate', expression: "document.cookie = 'login=kept; max-age=3600'" } });
+  // A sign-in ends on a page change; nothing closes the tab or the browser here.
+  await harness.core.browser.command({ threadId, tabId, action: { kind: 'navigate', url: url() } });
+  const file = join(harness.core.dataDir, 'browser', 'default', 'boite-cookies.json');
+  const names = () => { try { return (JSON.parse(readFileSync(file, 'utf8')) as { name: string; value: string }[]).map(cookie => `${cookie.name}=${cookie.value}`); } catch { return []; } };
+  for (let i = 0; i < 100 && !names().includes('login=kept'); i++) await Bun.sleep(50);
+  expect(names()).toContain('login=kept');
+  await harness.core.browser.command({ threadId, tabId, action: { kind: 'close' } });
+}, 150_000);
+
 real('the owner copies a desktop profile into the agent browser: the profile is made here, its sign-ins open with it and outlive a restart', async () => {
   const cookies = [
     { name: 'session', value: 'no-expiry', domain: '127.0.0.1', path: '/' },
