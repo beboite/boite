@@ -46,7 +46,7 @@ describe('cgroup memory reader', () => {
     mkdirSync(join(roots.proc, '8'), { recursive: true });
     writeFileSync(join(roots.proc, '8', 'cgroup'), `0::${SCOPE}\n`);
     expect(readCgroupMemory(8, roots)).toBeNull();
-    for (const missing of ['memory.events', 'memory.pressure', 'memory.high', 'memory.max', 'memory.current']) {
+    for (const missing of ['memory.events', 'memory.pressure', 'memory.high', 'memory.current']) {
       group(9, `0::${SCOPE}\n`, scope(1));
       rmSync(join(roots.cgroup, SCOPE, missing));
       expect(readCgroupMemory(9, roots)).toBeNull();
@@ -58,6 +58,35 @@ describe('cgroup memory reader', () => {
     expect(readCgroupMemory(10, roots)).toBeNull();
     group(10, `0::${SCOPE}\n`, scope(1, { 'memory.max': 'max\n' }));
     expect(readCgroupMemory(10, roots)).toMatchObject({ highBytes: 5 * GB, maxBytes: null });
+    // The hard limit is not what the notice reads: without it the reading stands.
+    group(10, `0::${SCOPE}\n`, scope(1, { 'memory.max': 'plenty\n' }));
+    expect(readCgroupMemory(10, roots)).toMatchObject({ highEvents: 1, highBytes: 5 * GB, maxBytes: null });
+    rmSync(join(roots.cgroup, SCOPE, 'memory.max'));
+    expect(readCgroupMemory(10, roots)).toMatchObject({ highEvents: 1, highBytes: 5 * GB, maxBytes: null });
+  });
+
+  test('each malformed reading the notice needs gives null', () => {
+    const malformed: Record<string, string>[] = [
+      { 'memory.high': '5G\n' },
+      { 'memory.events': 'low 0\nhigh many\nmax 0\n' },
+      { 'memory.events': 'low 0\nhigh -3\nmax 0\n' },
+      { 'memory.pressure': 'some avg10=0.00 avg60=0.00 avg300=0.00 total=soon\n' },
+      { 'memory.pressure': 'some avg10=0.00 avg60=0.00 avg300=0.00\n' },
+    ];
+    for (const patch of malformed) {
+      group(14, `0::${SCOPE}\n`, scope(2, patch));
+      expect(readCgroupMemory(14, roots)).toBeNull();
+    }
+    group(14, `0::${SCOPE}\n`, scope(2));
+    expect(readCgroupMemory(14, roots)).not.toBeNull();
+  });
+
+  test('a pid that is no process id is never looked up', () => {
+    // Files exist under these names, so only the pid check can refuse them.
+    for (const pid of [0, -1, 1.5, Number.NaN]) {
+      group(pid, `0::${SCOPE}\n`, scope(1));
+      expect(readCgroupMemory(pid, roots)).toBeNull();
+    }
   });
 
   test('cgroup v1 lines, a path outside the namespace and malformed counts give null', () => {
@@ -77,6 +106,7 @@ describe('cgroup memory reader', () => {
   });
 
   test('only Linux reads a cgroup', () => {
-    expect(createPosixPlatform('macos', null).cgroupMemory?.(process.pid)).toBeNull();
+    expect(createPosixPlatform('macos', null).cgroupMemory).toBeUndefined();
+    expect(createPosixPlatform('linux', null).cgroupMemory).toBeInstanceOf(Function);
   });
 });

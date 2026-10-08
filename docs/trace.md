@@ -276,9 +276,13 @@ build, the kernel drops cache and no process waits. A sample therefore counts
 as stalled only when the `high` count rose and the `some` total of
 `memory.pressure` grew by at least 20% of the time since the previous sample
 (200 ms per second). A thread with five stalled samples gets one `throttled`
-memory notice with the limit and the current charge, delivered to the user and
-the agent like a memory stop, then at most one every five minutes while the
-stall continues. Thirty seconds without a stalled sample end the streak.
+memory notice naming the limit, delivered to the user and the agent like a
+memory stop, then at most one every five minutes while the stall continues;
+its event also carries the group's current charge. Thirty seconds without a
+stalled sample end the streak. A root process found in another cgroup path, or
+counters lower than the last ones, start over as a new group with its own first
+notice. Two samples more than five seconds apart only restart the measure: no
+stall share is computed over an idle gap.
 cgroup v1, a group without `memory.high`, a kernel without `memory.pressure`,
 a path outside the core's cgroup namespace and unreadable files give no
 reading and no notice. The notice follows `memoryProtection` and stops nothing.

@@ -29,7 +29,7 @@ test('unknown process and size are omitted', () => {
 
 test.each(['en', 'fr'] as const)('renders a %s throttling notice with its limit and no stopped process', async (locale) => {
   await setLocaleSetting(locale);
-  mounted = mount(MemoryRow, { target: document.body, props: { event: { threadId: 't', kind: 'throttled', limitBytes: 5120 * 1048576, bytes: 5121 * 1048576, state: 'ok', at: 1 } } });
+  mounted = mount(MemoryRow, { target: document.body, props: { event: { threadId: 't', kind: 'throttled', limitBytes: 5120 * 1048576, bytes: 6144 * 1048576, state: 'ok', at: 1 } } });
   flushSync();
   const row = document.querySelector('[data-testid=memory-row]')!;
   expect(row.getAttribute('data-kind')).toBe('throttled');

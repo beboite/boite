@@ -14,10 +14,14 @@ export const THROTTLE_STREAK = 5;
 export const THROTTLE_REPEAT_MS = 5 * 60_000;
 /** This long without a stalled sample ends the streak. */
 export const THROTTLE_QUIET_MS = 30_000;
+/** A longer wait between two samples is an idle gap: no share of it is measured. */
+export const THROTTLE_GAP_MS = 5000;
 /** The share of the time since the last sample the group must have spent waiting: 200 ms per second. */
 export const THROTTLE_STALL_SHARE = 0.2;
 
 export interface ThrottleReading {
+  /** The group the counters belong to. Another path is another limit. */
+  path: string;
   /** The `high` count of `memory.events`. */
   highEvents: number;
   /** The `some` total of `memory.pressure`, in microseconds. */
@@ -33,21 +37,31 @@ export interface ThrottlePolicy extends ThrottleReading {
   noticedAt: number | null;
 }
 
+/** A streak whose last stalled sample is 30 s old is over, whether or not a reading came. */
+export function calmThrottle(policy: ThrottlePolicy, at: number): ThrottlePolicy {
+  return policy.streak > 0 && at - policy.stalledAt >= THROTTLE_QUIET_MS ? { ...policy, streak: 0 } : policy;
+}
+
 export function decideThrottle(policy: ThrottlePolicy | undefined, reading: ThrottleReading, at: number): { policy: ThrottlePolicy; notify: boolean } {
-  const { highEvents, stallMicros } = reading;
-  // The first reading is only a baseline, and a lower counter is another group.
-  if (policy === undefined || highEvents < policy.highEvents || stallMicros < policy.stallMicros) {
-    return { policy: { highEvents, stallMicros, at, streak: 0, stalledAt: at, noticedAt: policy?.noticedAt ?? null }, notify: false };
+  const { path, highEvents, stallMicros } = reading;
+  const counters = { path, highEvents, stallMicros, at };
+  // The first reading is only a baseline. Another path or a lower counter is a
+  // new group with its own limit, so what was said about the old one is dropped.
+  if (policy === undefined || path !== policy.path || highEvents < policy.highEvents || stallMicros < policy.stallMicros) {
+    return { policy: { ...counters, streak: 0, stalledAt: at, noticedAt: null }, notify: false };
   }
   const elapsedMs = at - policy.at;
   // No time passed, so no share of it can be measured: keep the older reading.
-  if (elapsedMs <= 0) return { policy, notify: false };
-  const stalled = highEvents > policy.highEvents && stallMicros - policy.stallMicros >= elapsedMs * 1000 * THROTTLE_STALL_SHARE;
-  if (!stalled) {
-    const streak = at - policy.stalledAt >= THROTTLE_QUIET_MS ? 0 : policy.streak;
-    return { policy: { ...policy, highEvents, stallMicros, at, streak }, notify: false };
+  if (elapsedMs === 0) return { policy, notify: false };
+  // The clock stepped back: start over from here, without a second notice for the same episode.
+  if (elapsedMs < 0) {
+    return { policy: { ...counters, streak: 0, stalledAt: at, noticedAt: policy.noticedAt === null ? null : Math.min(policy.noticedAt, at) }, notify: false };
   }
+  // After an idle gap the counters only restart the measure; a stall spread over it proves nothing.
+  const stalled = elapsedMs <= THROTTLE_GAP_MS && highEvents > policy.highEvents
+    && stallMicros - policy.stallMicros >= elapsedMs * 1000 * THROTTLE_STALL_SHARE;
+  if (!stalled) return { policy: calmThrottle({ ...policy, ...counters }, at), notify: false };
   const streak = policy.streak + 1;
   const notify = streak >= THROTTLE_STREAK && (policy.noticedAt === null || at - policy.noticedAt >= THROTTLE_REPEAT_MS);
-  return { policy: { highEvents, stallMicros, at, streak, stalledAt: at, noticedAt: notify ? at : policy.noticedAt }, notify };
+  return { policy: { ...counters, streak, stalledAt: at, noticedAt: notify ? at : policy.noticedAt }, notify };
 }

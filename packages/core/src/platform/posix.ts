@@ -30,7 +30,7 @@ export function createPosixPlatform(
     finishResources: () => load?.finishResources?.(),
     // macOS `freemem()` leaves out inactive and purgeable pages, far below what the system can hand out.
     machineMemory: () => os === 'linux' ? linuxMachineMemory() : { totalBytes: totalmem(), availableBytes: null },
-    cgroupMemory: (pid) => (os === 'linux' ? readCgroupMemory(pid) : null),
+    ...(os === 'linux' ? { cgroupMemory: (pid: number) => readCgroupMemory(pid) } : {}),
     pidAdded: (threadId, pid) => {
       load?.add(threadId, pid);
     },

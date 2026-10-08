@@ -119,37 +119,59 @@ test('a single stopped process fits both themes and narrow screens, including lo
 
 test('a throttling notice shows its whole sentence beside the stalled tool on desktop and phone', async () => {
   const limit = 5120 * 1048576;
+  const row = id('memory-row');
   await page.evaluate("__boiteTest.setTheme('dark')");
   await page.evaluate('__boiteTest.workspace.active.showChat()');
   for (const locale of ['en', 'fr']) {
+    const size = locale === 'fr' ? '5,0 Go' : '5.0 GB';
+    // Its own conversation, so the test reads the same alone or after the others.
     await page.evaluate(`(async () => {
       const { setLocaleSetting } = await import('/src/lib/i18n.svelte.ts');
       await setLocaleSetting('${locale}');
       const thread = __boiteTest.workspace.active.openThread;
+      const message = thread.messages.findLast(item => item.role === 'assistant');
+      const at = Date.now();
+      thread.messages = [thread.messages[0], message];
+      message.parts = [
+        { type: 'text', text: 'Building the release binary.' },
+        { type: 'tool', toolId: 'throttle-check', name: 'Bash', input: { command: 'cargo check' }, output: 'Checked', status: 'done', startedAt: at - 10000 },
+        { type: 'tool', toolId: 'throttle-build', name: 'Bash', input: { command: 'cargo build --release' }, output: 'Finished', status: 'done', startedAt: at - 5000 },
+        { type: 'text', text: 'The build went through with two workers.' },
+        { type: 'tool', toolId: 'throttle-test', name: 'Bash', input: { command: 'cargo test -j 2' }, output: 'Passed', status: 'done', startedAt: at + 20000 },
+      ];
       thread.memoryEvents = [{
-        threadId: thread.id, kind: 'throttled', limitBytes: ${limit}, bytes: ${limit} + 4096, state: 'ok', at: Date.now(),
-        anchor: { messageId: thread.messages.at(-1).id, partIndex: 3 },
+        threadId: thread.id, kind: 'throttled', limitBytes: ${limit}, bytes: ${limit} + 1073741824, state: 'ok', at,
+        anchor: { messageId: message.id, partIndex: 3 },
       }];
     })()`);
-    await page.waitFor(`document.querySelector('${id('memory-row')}')?.dataset.kind === 'throttled'`);
-    const sentence = await page.evaluate<string>(`(async () => {
+    await page.waitFor(`document.querySelector('${row}')?.dataset.kind === 'throttled' && document.querySelector('${row} p')?.textContent.includes('${size}')`);
+    // The page's texts come back here and are compared in this process, never spliced into page code.
+    const shown = await page.evaluate<{ expected: string; row: string; timeline: string }>(`(async () => {
       const { strings } = await import('/src/lib/strings.ts');
       const { bytes } = await import('/src/lib/format.ts');
-      return strings.resources.throttled(bytes(${limit}));
+      return {
+        expected: strings.resources.throttled(bytes(${limit})),
+        row: document.querySelector('${row} p').textContent,
+        timeline: document.querySelector('${id('timeline')}').textContent,
+      };
     })()`);
-    expect(sentence).toContain(locale === 'fr' ? '5,0 Go' : '5.0 GB');
-    await page.waitFor(`document.querySelector('${id('memory-row')} p')?.textContent === ${JSON.stringify(sentence)}`);
-    expect(await page.evaluate(`document.querySelectorAll('${id('memory-row')}').length`)).toBe(1);
-    expect(await page.evaluate(`document.querySelector('${id('memory-row')} .title, ${id('memory-row')} .process')`)).toBeNull();
-    expect(await page.evaluate(`(() => { const t = document.querySelector('${id('timeline')}').textContent; const at = t.indexOf(${JSON.stringify(sentence)}); return t.indexOf('cargo build') < at && at < t.indexOf('Retrying'); })()`)).toBe(true);
+    expect(shown.expected).toContain(size);
+    expect(shown.row).toBe(shown.expected);
+    const at = shown.timeline.indexOf(shown.expected);
+    expect(at).toBeGreaterThan(shown.timeline.indexOf('Building the release binary.'));
+    expect(shown.timeline.indexOf('The build went through')).toBeGreaterThan(at);
+    expect(shown.timeline).not.toContain('6.0 GB');
+    expect(shown.timeline).not.toContain('6,0 Go');
+    expect(await page.evaluate(`document.querySelectorAll('${row}').length`)).toBe(1);
+    expect(await page.evaluate(`document.querySelectorAll('${row} .title, ${row} .process, ${row} .details, ${row} .size').length`)).toBe(0);
     for (const [width, height] of [[1280, 900], [390, 844]] as const) {
       await page.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 720 });
-      await page.evaluate(`document.querySelector('${id('memory-row')}').scrollIntoView({ block: 'center' })`);
+      await page.evaluate(`document.querySelector('${row}').scrollIntoView({ block: 'center' })`);
       // French is the longer sentence, so it is the one kept as the capture.
       if (locale === 'fr') await capture(width < 720 ? 'throttled-phone' : 'throttled-desktop');
       // Every line of the sentence lies inside the row and the row inside the screen: nothing is clipped.
       expect(await page.evaluate(`(() => {
-        const row = document.querySelector('${id('memory-row')}');
+        const row = document.querySelector('${row}');
         const text = row.querySelector('p');
         const r = row.getBoundingClientRect();
         const range = document.createRange();

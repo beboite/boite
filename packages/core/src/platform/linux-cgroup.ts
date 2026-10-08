@@ -23,7 +23,7 @@ export interface CgroupMemory {
   /** Microseconds at least one process of the group waited for memory, since it was created. */
   stallMicros: number;
   highBytes: number;
-  /** Null when `memory.max` is `max`: the group is throttled but never refused. */
+  /** Null when `memory.max` is `max`, missing or unreadable: the hard limit is not what the notice is about. */
   maxBytes: number | null;
   currentBytes: number;
 }
@@ -57,11 +57,12 @@ export function cgroupPath(text: string): string | null {
 }
 
 /**
- * Null whenever any reading is missing, the group has no `memory.high`, or the
- * files are unreadable. A kernel without pressure accounting has no
+ * Null for a pid that is no process id, whenever a reading the notice needs is
+ * missing or malformed, or the group has no `memory.high`. A kernel without pressure accounting has no
  * `memory.pressure`, so it gives null too: the count alone is never a reading.
  */
 export function readCgroupMemory(pid: number, roots: CgroupRoots = {}): CgroupMemory | null {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
   const path = cgroupPath(read(join(roots.proc ?? '/proc', String(pid), 'cgroup')) ?? '');
   if (path === null) return null;
   const directory = join(roots.cgroup ?? '/sys/fs/cgroup', path);
@@ -71,9 +72,7 @@ export function readCgroupMemory(pid: number, roots: CgroupRoots = {}): CgroupMe
   const highEvents = count(/^high (\d+)$/m.exec(read(join(directory, 'memory.events')) ?? '')?.[1] ?? null);
   const stallMicros = count(/^some .*\btotal=(\d+)$/m.exec(read(join(directory, 'memory.pressure')) ?? '')?.[1] ?? null);
   const currentBytes = count(read(join(directory, 'memory.current')));
-  const max = read(join(directory, 'memory.max'))?.trim();
-  if (highEvents === null || stallMicros === null || currentBytes === null || max === undefined) return null;
-  const maxBytes = max === 'max' ? null : count(max);
-  if (max !== 'max' && maxBytes === null) return null;
+  if (highEvents === null || stallMicros === null || currentBytes === null) return null;
+  const maxBytes = count(read(join(directory, 'memory.max')));
   return { path, highEvents, stallMicros, highBytes, maxBytes, currentBytes };
 }
