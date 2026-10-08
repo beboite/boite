@@ -18,6 +18,7 @@
     onopen?: () => void;
   } = $props();
   let restoring = $state(false);
+  let deleting = $state(false);
 
   async function restore(): Promise<void> {
     const owner = entry.machine.store;
@@ -25,6 +26,13 @@
     try { await restoreThread(owner, entry.thread.id); }
     catch (error) { owner.error = error instanceof Error ? error.message : String(error); }
     finally { restoring = false; }
+  }
+  /** The row stays until the core answers: a second pick would be refused and raise an error banner. */
+  async function remove(): Promise<void> {
+    if (deleting) return;
+    deleting = true;
+    try { await deleteThread(entry.machine.store, entry.thread); }
+    finally { deleting = false; }
   }
   function open(): void {
     onopen?.();
@@ -39,16 +47,16 @@
       event,
       [
         { id: 'open', label: strings.sidebar.open },
-        { id: 'restore', label: strings.sidebar.reopenThread, disabled: restoring || offline },
+        { id: 'restore', label: strings.sidebar.reopenThread, disabled: restoring || deleting || offline },
         // On hover: a worktree path printed beside the label squeezes it into a column of letters.
         { id: 'copy', label: strings.sidebar.copyPath, title: thread.cwd },
-        ...(canDeleteThread(thread) ? [separator(), { id: 'delete', label: strings.sidebar.delete, danger: true, disabled: restoring || offline }] : [])
+        ...(canDeleteThread(thread) ? [separator(), { id: 'delete', label: strings.sidebar.delete, danger: true, disabled: restoring || deleting || offline }] : [])
       ],
       (action) => {
         if (action === 'open') open();
         if (action === 'restore') void restore();
         if (action === 'copy') void owner.copy(thread.cwd);
-        if (action === 'delete') void deleteThread(owner, thread);
+        if (action === 'delete') void remove();
       }
     );
   }
@@ -65,7 +73,7 @@
   </button>
   <button type="button" class="ghost icon restore" data-testid="done-thread-restore" title={strings.sidebar.reopenThread}
     aria-label={fill(strings.sidebar.reopenNamedThread, { title: entry.thread.title })}
-    disabled={restoring || entry.machine.store.connection !== 'ready'} onclick={() => void restore()}><ArchiveRestore size={14} /></button>
+    disabled={restoring || deleting || entry.machine.store.connection !== 'ready'} onclick={() => void restore()}><ArchiveRestore size={14} /></button>
   <button type="button" class="ghost icon actions" data-testid="done-thread-menu" title={strings.sidebar.threadMenu}
     aria-label={strings.sidebar.threadMenu} onclick={menu}><Ellipsis size={15} /></button>
   {#if entry.thread.archiveReason?.type === 'pr-merged'}
@@ -85,6 +93,8 @@
   /* Like a thread row: the menu button shows with the pointer or the keyboard on the row. */
   .actions { margin-right: 4px; opacity: 0; }
   .done-thread:hover .actions, .done-thread:focus-within .actions { opacity: 1; }
+  /* No hover to reveal it on a touch screen, whatever its width. */
+  @media (hover: none), (pointer: coarse) { .actions { opacity: 1; } }
   .reason { grid-column: 1 / -1; padding: 0 10px 8px; color: var(--color-subtle); font-size: var(--text-xs); text-underline-offset: 2px; }
   @media (max-width: 720px) {
     .read { min-height: 68px; }

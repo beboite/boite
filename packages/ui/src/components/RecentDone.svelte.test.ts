@@ -117,7 +117,11 @@ test('a done thread is deleted from its own menu, opened by right click or by it
   expect(contextMenu.current?.items.filter(item => !item.separator).map(item => item.id)).toEqual(['open', 'restore', 'copy', 'delete']);
   contextMenu.close();
   click('[data-thread-id=t-trace] [data-testid=done-thread-menu]');
-  contextMenu.current!.onpick('delete'); contextMenu.close(); await settle();
+  const removals = vi.spyOn(source.client, 'call');
+  // Picked twice before the core answers: one request, no refusal banner.
+  const pick = contextMenu.current!.onpick; pick('delete'); pick('delete'); contextMenu.close(); await settle();
+  expect(removals.mock.calls.filter(([method]) => method === 'threads.remove')).toHaveLength(1);
+  expect(source.store.error).toBeNull();
   await expect(source.client.call('threads.get', { threadId: 't-trace' })).rejects.toThrow();
   props.entries = entries(); await settle();
   expect(document.querySelector('[data-testid=done-thread]')).toBeNull();
