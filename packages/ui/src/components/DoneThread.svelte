@@ -29,8 +29,8 @@
     finally { restoring = false; }
   }
   /**
-   * The row stays until the list reloads: a second pick would be refused and
-   * raise an error banner, so a deleted row never comes back to life.
+   * The row stays until the list reloads: the lock is kept on success so a
+   * second pick cannot ask the core again and raise an error banner.
    */
   async function remove(): Promise<void> {
     if (deleting || restoring) return;
@@ -42,6 +42,8 @@
     finally { if (!removed) deleting = false; }
   }
   function open(): void {
+    // Being deleted, or gone already: there is no thread left to open.
+    if (deleting) return;
     onopen?.();
     void workspace.select(entry.machine.store, entry.thread.id);
   }
@@ -53,7 +55,7 @@
     contextMenu.open(
       event,
       [
-        { id: 'open', label: strings.sidebar.open },
+        { id: 'open', label: strings.sidebar.open, disabled: deleting },
         { id: 'restore', label: strings.sidebar.reopenThread, disabled: restoring || deleting || offline },
         // On hover: a worktree path printed beside the label squeezes it into a column of letters.
         { id: 'copy', label: strings.sidebar.copyPath, title: thread.cwd },
@@ -71,7 +73,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="done-thread" data-testid="done-thread" data-thread-id={entry.thread.id} data-machine-id={entry.machine.id} oncontextmenu={menu}>
-  <button type="button" class="ghost read" data-testid="done-thread-open" title={entry.thread.title}
+  <button type="button" class="ghost read" data-testid="done-thread-open" title={entry.thread.title} disabled={deleting}
     onclick={open}>
     <span class="title ui-label">{entry.thread.title}</span>
     <span class="detail"><ProjectTile project={entry.project} store={entry.machine.store} size={14} /><span>{projectName(entry.project)}{#if showMachine} · {entry.machine.label}{/if}</span>

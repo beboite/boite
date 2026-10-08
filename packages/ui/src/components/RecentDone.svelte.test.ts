@@ -119,17 +119,25 @@ test('a done thread is deleted from its own menu, opened by right click or by it
   click('[data-thread-id=t-trace] [data-testid=done-thread-menu]');
   const removals = vi.spyOn(source.client, 'call');
   // Picked twice before the core answers: one request, no refusal banner.
-  const pick = contextMenu.current!.onpick; pick('delete'); pick('delete'); contextMenu.close(); flushSync();
-  // Reopened while the core has not answered, and after it has: the row offers neither way out again.
+  const pick = contextMenu.current!.onpick;
+  // Refused by the core: the banner says so and the row can be tried again.
+  removals.mockRejectedValueOnce(new Error('refused'));
+  pick('delete'); await settle();
+  expect(source.store.error).toBe('refused');
+  expect((document.querySelector('[data-thread-id=t-trace] [data-testid=done-thread-open]') as HTMLButtonElement).disabled).toBe(false);
+  source.store.error = null; removals.mockClear();
+  pick('delete'); pick('delete'); contextMenu.close(); flushSync();
+  expect((document.querySelector('[data-thread-id=t-trace] [data-testid=done-thread-open]') as HTMLButtonElement).disabled).toBe(true);
+  // Reopened while the core has not answered, and after it has: the row offers nothing more.
   const locked = () => {
     row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 12, clientY: 12 }));
-    const items = contextMenu.current!.items.filter(item => item.id === 'restore' || item.id === 'delete').map(item => item.disabled);
+    const items = contextMenu.current!.items.filter(item => ['open', 'restore', 'delete'].includes(item.id)).map(item => item.disabled);
     contextMenu.close();
     return items;
   };
-  expect(locked()).toEqual([true, true]);
+  expect(locked()).toEqual([true, true, true]);
   await settle();
-  expect(locked()).toEqual([true, true]);
+  expect(locked()).toEqual([true, true, true]);
   expect(removals.mock.calls.filter(([method]) => method === 'threads.remove')).toHaveLength(1);
   expect(source.store.error).toBeNull();
   await expect(source.client.call('threads.get', { threadId: 't-trace' })).rejects.toThrow();
