@@ -17,16 +17,13 @@ beforeAll(async () => {
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
 for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
-  test(`retained prompts and native history remain usable at ${viewport.width}px`, async () => {
+  test(`retained prompts remain usable at ${viewport.width}px`, async () => {
     await page.send('Emulation.setDeviceMetricsOverride', { ...viewport, deviceScaleFactor: 1, mobile: viewport.width < 720 });
     await page.evaluate(`(async () => {
       const store = globalThis.__boiteTest.workspace.active;
       const thread = await store.client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo', title: 'Recovery checks' });
       store.client.holdAfterRestart(thread.id, 'Review the saved changes after restart');
       await store.open(thread.id);
-      store.openThread.backgroundHistory = [{ id: 'native-review', threadId: thread.id, providerId: 'echo', sessionGeneration: 0,
-        parentTurnId: null, kind: 'agent', description: 'Review the parser', toolId: null, startedAt: Date.now() - 10000,
-        state: 'cancelled', observedAt: Date.now(), finishedAt: Date.now(), reason: 'core-restarted' }];
     })()`);
     await page.waitFor('document.querySelector("[data-testid=thread-recovery]") !== null');
     if (viewport.width === 1280) {
@@ -45,10 +42,8 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
       }
       await page.evaluate(`document.documentElement.dataset.font = 'inter'; document.fonts.ready`);
     }
-    await page.click('[data-testid=background-history] summary');
     await page.evaluate('document.fonts.ready');
     expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
-    expect(await page.evaluate('document.querySelector("[data-testid=background-history]").textContent.includes("Interrupted by a core restart")')).toBe(true);
     await page.screenshot(join(import.meta.dir, '.artifacts', `orchestration-held-${viewport.width}.png`));
     await page.click('[data-testid=thread-recovery] button');
     await page.waitFor('document.querySelector("[data-testid=thread-recovery]") === null');

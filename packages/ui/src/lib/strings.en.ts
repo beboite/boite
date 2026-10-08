@@ -1017,13 +1017,9 @@ export const strings = {
     finishedAt: 'done {time}',
     /** `{what}` is a list of `backgroundOne` and `backgroundMany` joined by `backgroundJoin`. */
     backgroundRunning: '{what} still running',
-    backgroundHistory: 'Native task history',
     forkOrigin: 'Forked from', forkReturn: 'Send conclusions back', forkSummary: 'Conclusions for the original conversation',
     forkReturned: 'Conclusions sent to the original conversation', forkSourceUnavailable: 'Original conversation unavailable',
     forkNative: 'Native context preserved', forkSeeded: 'Visible history copied',
-    backgroundState: { running: 'Running', completed: 'Completed', error: 'Failed', cancelled: 'Interrupted', ended: 'No longer reported' },
-    backgroundRestarted: 'Interrupted by a core restart',
-    backgroundSessionEnded: 'Agent session ended',
     backgroundJoin: ', ',
     backgroundOne: { shell: '{count} shell', agent: '{count} agent', monitor: '{count} monitor', workflow: '{count} workflow', other: '{count} task' },
     backgroundMany: { shell: '{count} shells', agent: '{count} agents', monitor: '{count} monitors', workflow: '{count} workflows', other: '{count} tasks' },
