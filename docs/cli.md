@@ -449,7 +449,7 @@ route or an owner-added profile, and records team usage. `--speed <tier>` puts
 the child on one of its model's speed tiers, such as `fast`; without it a
 child has none, whatever the parent runs on. Tiers come from `boite delegate models`:
 a spawn naming a speed on a model whose tiers are not read yet is refused and
-says to list the models. Children share the parent's checkout, retain their own sessions,
+says to list the delegation models and spawn again. Children share the parent's checkout, retain their own sessions,
 and return bounded results automatically. `delegate stop` pauses the whole team;
 only the owner can change profiles or resume a paused team.
 [Workflows](workflows.md) run a JSON plan of such children: `workflow help`

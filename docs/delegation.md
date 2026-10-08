@@ -184,8 +184,8 @@ route runs on the provider's default model: then the spawn is refused and
 `--model` has to name a model. A tier the model lacks is refused with the model
 and the tiers it offers, or that it offers none. Tiers come from
 `boite delegate models`, which reads any agent-owned list not read yet. A spawn
-probes none for tiers, so a spawn naming a speed on a model whose tiers are not
-read yet is refused and says to list the models; a spawn without a speed is not
+never probes for tiers, so a spawn naming a speed on a model whose tiers are not
+read yet is refused and says to list the delegation models and spawn again; a spawn without a speed is not
 affected. `delegate models` prints the tiers of each model that has some, joined
 by `|`, each as its id, with the label in front when the label says something
 else: `speed=fast` for Claude, `speed=Fast (priority)` for that Codex tier.
