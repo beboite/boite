@@ -82,11 +82,14 @@
   .detail > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   time { flex: none; margin-left: auto; }
   .restore, .actions { flex: none; color: var(--color-muted-foreground); }
-  .actions { margin-right: 4px; }
+  /* Like a thread row: the menu button shows with the pointer or the keyboard on the row. */
+  .actions { margin-right: 4px; opacity: 0; }
+  .done-thread:hover .actions, .done-thread:focus-within .actions { opacity: 1; }
   .reason { grid-column: 1 / -1; padding: 0 10px 8px; color: var(--color-subtle); font-size: var(--text-xs); text-underline-offset: 2px; }
   @media (max-width: 720px) {
     .read { min-height: 68px; }
     .title { white-space: normal; overflow-wrap: anywhere; font-size: var(--text-base); }
     .restore, .actions { min-width: var(--touch-target); min-height: var(--touch-target); }
+    .actions { opacity: 1; }
   }
 </style>
