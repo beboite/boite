@@ -1,4 +1,5 @@
 import { availableParallelism, totalmem } from 'node:os';
+import { readCgroupMemory } from './linux-cgroup.ts';
 import { LinuxLoad, linuxMachineMemory, linuxStartedAt } from './linux-load.ts';
 import type { ProcessPlatform } from './types.ts';
 import { linuxServerUpdates } from './linux-server-update.ts';
@@ -29,6 +30,7 @@ export function createPosixPlatform(
     finishResources: () => load?.finishResources?.(),
     // macOS `freemem()` leaves out inactive and purgeable pages, far below what the system can hand out.
     machineMemory: () => os === 'linux' ? linuxMachineMemory() : { totalBytes: totalmem(), availableBytes: null },
+    ...(os === 'linux' ? { cgroupMemory: (pid: number) => readCgroupMemory(pid) } : {}),
     pidAdded: (threadId, pid) => {
       load?.add(threadId, pid);
     },

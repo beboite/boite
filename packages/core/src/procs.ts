@@ -795,6 +795,7 @@ export class ProcRegistry {
       this.live.delete(threadId);
       this.known.delete(threadId);
       this.lastLoad.delete(threadId);
+      this.memory.forgetThrottle(threadId);
       this.resources.forget(threadId);
       this.lastPushed.delete(threadId);
       // The thread's Job Object too: an id minted per call would otherwise hold
@@ -827,6 +828,7 @@ export class ProcRegistry {
       if (byPid.size === 0) continue;
       const load = this.measure(threadId, byPid.size, processes);
       this.lastLoad.set(threadId, load);
+      this.memory.sampleThrottle(threadId, byPid.values());
       if (!worthPushing(this.lastPushed.get(threadId), load)) continue;
       const thread = this.journal.getThread(threadId);
       if (thread === null) continue;

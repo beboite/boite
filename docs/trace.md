@@ -241,7 +241,7 @@ seconds of zeroed PCM, without audible content.
 
 | Setting | Effect when off |
 | --- | --- |
-| `memoryProtection` | Removes automatic stops and Windows allocation caps |
+| `memoryProtection` | Removes automatic stops, Windows allocation caps and the Linux throttling notice |
 | `focusGuard` | Leaves agent windows' foreground behavior unchanged |
 | `muteAgents` | Restores agent sessions muted by Boite |
 | `reapOrphans` | Retains leftovers until tree termination or core exit |
@@ -264,6 +264,32 @@ overcount a parallel workload. macOS uses `proc_pid_rusage` physical footprint
 for each direct child and reports CPU as zero. The automatic memory guard can
 stop the heaviest child tree when a thread exceeds its share. CPU job caps,
 focus guard and audio mute remain Windows-only.
+
+Linux also reads the cgroup of each thread's root agent process on the same
+one-second sample: the `0::<path>` line of `/proc/<pid>/cgroup`, then
+`memory.events`, `memory.pressure`, `memory.high`, `memory.max` and
+`memory.current` under `/sys/fs/cgroup<path>`. Past `memory.high` the kernel
+fails nothing; every process of the group stalls near 0% CPU while the `high`
+count of `memory.events` climbs. That count alone proves no stall: a group
+whose charge is mostly clean page cache reaches the limit during any large
+build, the kernel drops cache and no process waits. A sample therefore counts
+as stalled only when the `high` count rose and the `some` total of
+`memory.pressure` grew by at least 20% of the time since the previous sample
+(200 ms per second). A thread with five stalled samples gets one `throttled`
+memory notice naming the limit, delivered to the user and the agent like a
+memory stop, then at most one every five minutes while the stall continues;
+its event also carries the group's current charge. Thirty seconds without a
+stalled sample end the streak. A root process found in another cgroup path, or
+any counter lower than the last one, starts over as a new group: five new
+stalled samples are needed before the thread gets another notice. Two samples
+more than five seconds apart only restart the measure: no stall share is
+computed over an idle gap.
+A reading needs `/proc/<pid>/cgroup`, `memory.events`, `memory.pressure`,
+`memory.high` and `memory.current`: when any of them is missing, unreadable or
+malformed there is no reading and no notice. That covers cgroup v1, a group
+without `memory.high`, a kernel without `memory.pressure` and a path outside
+the core's cgroup namespace. `memory.max` is read when present and never
+required. The notice follows `memoryProtection` and stops nothing.
 
 Registered POSIX children start detached in their own process group.
 `resources.killTree` sends group SIGTERM, probes every 100 ms and sends SIGKILL

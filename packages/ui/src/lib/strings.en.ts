@@ -1702,6 +1702,7 @@ export const strings = {
     },
     threadCap: 'This conversation reached its memory limit. Boite refused more memory.',
     budget: 'The agents reached their shared memory budget. Boite refused more memory.',
+    throttled: (limit: string) => `This conversation's processes are slowed by their ${limit} memory limit. They stall instead of failing.`,
     empty: 'Nothing is running right now.',
     processes: 'processes',
     killTree: 'Kill tree',

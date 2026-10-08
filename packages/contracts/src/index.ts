@@ -1730,6 +1730,11 @@ export type MemoryKillReason = 'thread-quota' | 'budget' | 'machine';
 export type MemoryEvent = MemoryEventBase & (
   | { kind: 'killed'; reason: MemoryKillReason; limitBytes: number }
   | { kind: 'thread-cap' | 'budget' | 'pressure' }
+  /**
+   * Linux: the thread's cgroup keeps hitting `memory.high` (`limitBytes`), so its
+   * processes stall instead of failing. `bytes` is the group's current charge.
+   */
+  | { kind: 'throttled'; limitBytes: number }
 );
 
 /** Per-core consent. Installation identifiers never cross RPC. */
