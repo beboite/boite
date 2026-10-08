@@ -3,8 +3,8 @@ import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, nativeAgentsOfTool,
 import type { AgentLetter, DelegatedAgent, DelegationConfig, DelegationModels, DelegationView, RpcParams, ThreadSummary, Turn, Usage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
-import { checkEffort, checkModel } from './threads/selection.ts';
-import { anyModel, catalog, conversationRoute, discover, providersNamed, resolveRoute, type ChildRoute, type RouteRequest } from './delegation/routes.ts';
+import { checkEffort, checkModel, checkStoredSpeed, needsModelDiscovery } from './threads/selection.ts';
+import { anyModel, catalog, conversationRoute, discover, providersNamed, resolveRoute, speedsKnown, type ChildRoute, type RouteRequest } from './delegation/routes.ts';
 import type { ProviderProbe } from './providers/probe.ts';
 import { newId } from './ids.ts';
 import { assertDriverRunnable } from './drivers/index.ts';
@@ -41,7 +41,7 @@ export function subagentGuide(config: DelegationConfig): string {
   if (!config.enabled) return `${head} the owner turned them off for this conversation; work alone and point the user to Subagents > Settings if they asked for some.\n${WORKFLOW_LINE}`;
   return [
     head,
-    `- boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>] [--speed <tier>]: one bounded job each, on this conversation's model by default. ${anyModel(config) ? 'Any model of boite delegate models works, any harness (Claude can run codex/<model>).' : `The owner allows only this model${profiles ? ' and the profiles' : ''}.`}${profiles ? ` --profile: ${profiles}.` : ''}`,
+    `- boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>] [--speed <tier>]: one bounded job each, on this conversation's model by default, standard speed without --speed (tiers: boite delegate models). ${anyModel(config) ? 'Any model of boite delegate models works, any harness (Claude can run codex/<model>).' : `The owner allows only this model${profiles ? ' and the profiles' : ''}.`}${profiles ? ` --profile: ${profiles}.` : ''}`,
     '- The brief is all a child sees: goal, files it owns, limits, how to verify. Shared checkout: give parallel children distinct files.',
     '- Results return as messages: keep working or end your turn, never poll. Follow: boite delegate list; steer with boite delegate send <id> <text>; boite delegate stop [id].',
     `- ${WORKFLOW_LINE}`,
@@ -288,16 +288,32 @@ export class Delegation {
     const parent = this.root(parentId);
     return resolveRoute(this.core, parent, this.config(parent.id), request);
   }
-  /** Read the model lists a spawn or a plan names before the synchronous checks run. */
-  async prepareRoutes(parentId: string, probe: ProviderProbe, models: (string | undefined)[]): Promise<void> {
-    const named = models.filter((model): model is string => typeof model === 'string' && model.length > 0);
-    if (!named.length) return;
+  /**
+   * Read what the synchronous checks need and no probe gave yet: the list of a
+   * provider whose model a spawn or a plan names, and the levels or speed
+   * tiers of a model that is listed without them.
+   */
+  async prepareRoutes(parentId: string, probe: ProviderProbe, requests: RouteRequest[]): Promise<void> {
+    if (!requests.some(request => request.model !== undefined || request.effort !== undefined || request.speed !== undefined)) return;
     const parent = this.root(parentId);
     const known = catalog(this.core, parent, true).choices;
-    const missing = named.filter(model => !known.some(c => `${c.providerId}/${c.model}` === model || c.model === model));
-    if (!missing.length) return;
-    const only = missing.map(model => providersNamed(this.core, model));
-    await discover(this.core, probe, parent, only.some(list => list === undefined) ? undefined : [...new Set(only.flat() as string[])]);
+    const config = this.config(parent.id);
+    const only = new Set<string>();
+    let every = false;
+    for (const request of requests) {
+      let route: Pick<ChildRoute, 'providerId' | 'accountId' | 'model'> | undefined;
+      if (request.model !== undefined) {
+        route = known.find(c => `${c.providerId}/${c.model}` === request.model || c.model === request.model);
+        if (!route) {
+          const named = providersNamed(this.core, request.model);
+          if (named) for (const id of named) only.add(id); else every = true;
+          continue;
+        }
+      } else if (request.effort !== undefined || request.speed !== undefined) route = this.route(parent, config, request.profileId ?? null);
+      const provider = route && this.core.providers.get(route.providerId);
+      if (route && provider && needsModelDiscovery(provider, route.accountId, route.model, request.effort ?? null, request.speed ?? null)) only.add(provider.id);
+    }
+    if (every || only.size) await discover(this.core, probe, parent, every ? undefined : [...only]);
   }
   /** What `boite delegate models` prints: every runnable model, read from each agent once. */
   async models(threadId: string, probe: ProviderProbe): Promise<DelegationModels> {
@@ -311,24 +327,31 @@ export class Delegation {
   /**
    * An ordinary child thread on a profile, or on the parent's own route for a
    * workflow step that names none, in the parent's checkout and permission
-   * mode, on the route's speed tier or none: never the parent's. `record` runs
-   * in the same transaction.
+   * mode, on the route's speed tier or none: never the parent's. The tier is
+   * checked here too, whoever built the route; like a thread's stored speed it
+   * stands while the agent's tiers are not read. `record` runs in the same
+   * transaction.
    */
   createChild(parent: ThreadSummary, profile: ChildRoute, title: string, record: (id: string) => void): string {
     const id = newId('thr_');
+    const { speed: asked, ...route } = profile;
+    const speed = asked ?? null;
+    const provider = this.core.providers.require(route.providerId);
+    checkStoredSpeed(provider, route.accountId, route.model, speed);
+    // threads.create refuses a tier it cannot read; an unread one is written below instead.
+    const listed = speed === null || speedsKnown(provider, route.accountId, route.model);
     this.core.journal.db.transaction(() => {
       if (parent.projectId === null) {
         const now = Date.now();
-        const { speed, ...route } = profile;
-        const child: ThreadSummary = { ...parent, parentThreadId: parent.id, agentSessionId: undefined, ...route, speed: speed ?? null, id,
+        const child: ThreadSummary = { ...parent, parentThreadId: parent.id, agentSessionId: undefined, ...route, speed, id,
           title, titleSource: 'user', status: 'idle', sessionId: null, sessionGeneration: 0, selectionVersion: 0,
           context: null, promptCache: null, load: null, unread: false, pinned: false, createdAt: now, updatedAt: now };
         this.core.journal.append({ type: 'thread.created', threadId: id, version: 1, payload: child }, () => this.core.journal.putThread(child));
         this.core.bus.emit('thread.created', child);
-      } else this.core.threads.create({ projectId: parent.projectId, providerId: profile.providerId, accountId: profile.accountId, model: profile.model ?? undefined, effort: profile.effort, speed: profile.speed ?? null, title, cwd: parent.cwd, permissionMode: parent.permissionMode }, { id, branch: parent.branch, parentThreadId: parent.id });
+      } else this.core.threads.create({ projectId: parent.projectId, providerId: profile.providerId, accountId: profile.accountId, model: profile.model ?? undefined, effort: profile.effort, speed: listed ? speed : null, title, cwd: parent.cwd, permissionMode: parent.permissionMode }, { id, branch: parent.branch, parentThreadId: parent.id });
       record(id);
       const child = this.core.threads.require(id);
-      this.core.journal.putThread({ ...child, titleSource: 'user' });
+      this.core.journal.putThread({ ...child, titleSource: 'user', speed });
     })();
     return id;
   }

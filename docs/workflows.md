@@ -47,14 +47,17 @@ another one names it, as `boite delegate spawn --model` does:
 profile: `{ "id": "review", "profile": "reviewer", ... }`. `"speed": "fast"`
 puts it on a speed tier of its model. `boite delegate models` lists the
 choices. `boite workflow check` refuses a model, a level or a speed the step
-cannot have before anything starts, with the message `delegate spawn` gives.
+cannot have before anything starts, with the step's place, as `steps[0]
+(review): `, before the message `delegate spawn` gives. The run stores a speed
+as its tier id and launches on it, also after a restart that made the core
+forget the agent's tiers.
 
 | Field | Meaning |
 | --- | --- |
 | `id` | Letters, digits, `_` and `-`, starting with a letter |
 | `model` | Optional. `provider/model`, a model id or a unique part of one, matched like `delegate spawn --model`. Refused when the owner turned off "Let the agent choose the model" and it is not a suggested one |
 | `effort` | Optional. One of the model's reasoning levels. Left out: the parent's level on the same model, else the model's default |
-| `speed` | Optional. One of the model's speed tiers, by id or label, such as `fast`. Left out: none, whatever the conversation runs on |
+| `speed` | Optional. One of the model's speed tiers, by id or label in any case, such as `fast`. Left out: none, whatever the conversation runs on |
 | `profile` | Optional. A delegation profile id of this thread. Left out with no `model`, the step runs on the conversation's model |
 | `task` | The brief. `{{step}}`, `{{step.field}}`, `{{item}}` and `{{index}}` are filled in when the step starts |
 | `after` | Steps that must end first. A step named in `forEach`, `when` or the task is added automatically |
@@ -65,7 +68,7 @@ cannot have before anything starts, with the message `delegate spawn` gives.
 A path reads a step's structured output, or its final answer when it has none.
 On a fanned-out step, `review.bugs` collects the bugs of every item into one
 list. The core checks the whole plan before anything starts: a name that is no profile,
-a model that is not installed or not allowed, a level the model lacks, cycles, a path to a step that does not exist and a bad shape are refused with
+a model that is not installed or not allowed, a level or a speed tier the model lacks, cycles, a path to a step that does not exist and a bad shape are refused with
 the field named.
 
 `forEach`, `when` and `extend` make a plan dynamic. `forEach` sizes a step

@@ -6,7 +6,7 @@
  * names one: it never inherits the parent's.
  */
 import { CONVERSATION_PROFILE_ID, matchSpeed, speedRefusal } from '@boite/contracts';
-import type { Account, DelegationConfig, DelegationModelChoice, DelegationModels, DelegationProfile, ProviderId, ThreadSummary } from '@boite/contracts';
+import type { Account, AccountId, DelegationConfig, DelegationModelChoice, DelegationModels, DelegationProfile, ProviderDescriptor, ProviderId, SpeedTier, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { invalidParams, messageOf, refused } from '../errors.ts';
 import { probedModelsOf } from '../drivers/index.ts';
@@ -22,6 +22,28 @@ export interface RouteRequest {
   effort?: string;
   /** A speed tier of the route's model, by id or label. */
   speed?: string;
+  /**
+   * The speed is a tier id this core already checked, as a workflow step's at
+   * launch: when the agent's tiers are not read again since a restart, it stands.
+   */
+  checked?: boolean;
+}
+
+/**
+ * What an unchecked spawn or workflow step says about its route, for the reads
+ * that come before the checks. A field of the wrong type is left out; the
+ * checks refuse it afterwards.
+ */
+export function routeRequest(raw: unknown): RouteRequest {
+  const value = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+  const named = (key: string) => typeof value[key] === 'string' && value[key].trim() ? value[key] : undefined;
+  const [profileId, model, effort, speed] = [named('profileId') ?? named('profile'), named('model'), named('effort'), named('speed')];
+  return { ...(profileId === undefined ? {} : { profileId }), ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }), ...(speed === undefined ? {} : { speed }) };
+}
+
+/** Whether this model's speed tiers are read. A descriptor lists none: they come from the agent's probe. */
+export function speedsKnown(provider: ProviderDescriptor, accountId: AccountId, model: string | null): boolean {
+  return modelsFor(provider, accountId).find(entry => entry.id === model)?.speeds !== undefined;
 }
 
 const PROBE_TIMEOUT_MS = 30_000;
@@ -55,7 +77,7 @@ export function catalog(core: Core, parent: ThreadSummary, withLegacy = false): 
       const choice: DelegationModelChoice = {
         providerId: summary.id, providerName: summary.name, accountId: account.id, model: model.id, name: model.name,
         efforts: model.effort?.levels.map(level => level.id) ?? [], defaultEffort: model.effort?.default ?? null,
-        speeds: model.speeds?.map(speed => ({ id: speed.id, label: speed.label })) ?? [],
+        speeds: model.speeds?.map(speed => ({ ...speed })) ?? [],
         current: parent.providerId === summary.id && parent.model === model.id,
       };
       (model.legacy ? legacy : choices).push(choice);
@@ -121,12 +143,15 @@ export function resolveRoute(core: Core, parent: ThreadSummary, config: Delegati
   const profiles = config.profiles;
   const named = (id: string) => profiles.find(p => p.id === id) ?? (id === CONVERSATION_PROFILE_ID ? conversationRoute(parent) : undefined);
   let route: ChildRoute;
+  // The tiers `boite delegate models` listed for a named model; a profile's are read below.
+  let offered: readonly SpeedTier[] | undefined;
   if (request.model !== undefined) {
     const choice = pick(catalog(core, parent, true).choices, parent, request.model);
     const allowed = [conversationRoute(parent), ...profiles];
     if (!anyModel(config) && !allowed.some(r => r.providerId === choice.providerId && r.model === choice.model)) {
       throw refused(`the owner limited subagents to this conversation's model and the profiles (${allowed.map(r => r.id).join(', ')}); leave --model out or name one of them`);
     }
+    offered = choice.speeds ?? [];
     const sameAsParent = choice.providerId === parent.providerId && choice.model === parent.model;
     route = {
       id: label(choice), name: choice.name, providerId: choice.providerId, accountId: choice.accountId, model: choice.model,
@@ -146,8 +171,11 @@ export function resolveRoute(core: Core, parent: ThreadSummary, config: Delegati
   if (request.speed === undefined) return { ...route, speed: null };
   if (route.model === null) throw invalidParams('speed: this route runs on the provider\'s default model; name a model with --model to choose its speed');
   const provider = core.providers.require(route.providerId);
-  const speeds = modelsFor(provider, route.accountId).find(entry => entry.id === route.model)?.speeds ?? [];
+  const speeds = offered ?? modelsFor(provider, route.accountId).find(entry => entry.id === route.model)?.speeds ?? [];
   const speed = matchSpeed(speeds, request.speed);
-  if (speed === null) throw refused(speedRefusal(`${route.providerId}/${route.model}`, speeds, request.speed), { field: 'speed', expected: speeds.map(option => option.id) });
+  if (speed === null) {
+    if (request.checked && !speedsKnown(provider, route.accountId, route.model)) return { ...route, speed: request.speed };
+    throw refused(speedRefusal(`${route.providerId}/${route.model}`, speeds, request.speed), { field: 'speed', expected: speeds.map(option => option.id) });
+  }
   return { ...route, speed: checkSpeed(provider, route.accountId, route.model, speed) };
 }

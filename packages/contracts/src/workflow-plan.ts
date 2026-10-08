@@ -110,7 +110,7 @@ export function checkSteps(value: unknown, options: CheckOptions, field = 'steps
     if (profile !== undefined && profile !== CONVERSATION_PROFILE && !options.profiles.includes(profile)) fail(`${at}.profile: "${profile}" is not a profile of this thread; ${options.profiles.length ? `expected one of ${options.profiles.join(', ')}, or` : 'none is configured:'} leave profile out to run the step on the conversation's model`);
     const model = raw.model === undefined || raw.model === null ? undefined : text(raw.model, `${at}.model`, 256);
     const effort = raw.effort === undefined || raw.effort === null ? undefined : text(raw.effort, `${at}.effort`, 32);
-    const speed = raw.speed === undefined || raw.speed === null ? undefined : text(raw.speed, `${at}.speed`, 64);
+    const speed = raw.speed === undefined || raw.speed === null ? undefined : text(raw.speed, `${at}.speed`, 64).trim();
     const task = text(raw.task, `${at}.task`, WORKFLOW_LIMITS.taskChars);
     const title = raw.title === undefined ? undefined : text(raw.title, `${at}.title`, 80);
     const deps = new Set<string>();

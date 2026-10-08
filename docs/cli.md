@@ -446,7 +446,7 @@ the source context. Use `--json` to preserve the structured result.
 [Delegation](delegation.md) runs each child on the model and reasoning level
 the agent names (`delegate models` lists them), else on the conversation's own
 route or an owner-added profile, and records team usage. `--speed <tier>` puts
-the child on one of that model's speed tiers, such as `fast`; without it a
+the child on one of its model's speed tiers, such as `fast`; without it a
 child has none, whatever the parent runs on. Children share the parent's checkout, retain their own sessions,
 and return bounded results automatically. `delegate stop` pauses the whole team;
 only the owner can change profiles or resume a paused team.

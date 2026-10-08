@@ -2,7 +2,7 @@
 import { collectNativeAgents, collectProcessAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, matchSpeed, RpcErrorCode, speedRefusal, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationModelChoice, type DelegationProfile, type DelegationView, type DelegationWaitResult, type RpcParams, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { addUsage, emptyUsage, toSummary } from './shared';
-import { modelsOf } from './provider-catalog';
+import { discoverSelection, modelsOf } from './provider-catalog';
 import type { FakeContext, FakeMethods } from './context';
 
 function delegationRoot(ctx: FakeContext, threadId: ThreadId): ThreadId {
@@ -23,20 +23,55 @@ function modelChoices(ctx: FakeContext, parent: Thread): DelegationModelChoice[]
     return modelsOf(ctx, provider.id, account.id).filter(model => !model.legacy).map(model => ({
       providerId: provider.id, providerName: provider.name, accountId: account.id, model: model.id, name: model.name,
       efforts: model.effort?.levels.map(level => level.id) ?? [], defaultEffort: model.effort?.default ?? null,
-      speeds: model.speeds?.map(speed => ({ id: speed.id, label: speed.label })) ?? [],
+      speeds: model.speeds?.map(speed => ({ ...speed })) ?? [],
       current: parent.providerId === provider.id && parent.model === model.id,
     }));
   });
 }
 
+/** The core's bound on a speed before it looks at any model: `text(speed, 'speed', 64)`. */
+function checkSpeedText(wanted: unknown): void {
+  if (typeof wanted !== 'string' || !wanted.trim() || wanted.length > 64) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'speed: expected 1 to 64 characters' });
+}
+
 /** The core's speed resolution: by id or label, any case, refused naming the model and what it offers. */
-function pickSpeed(ctx: FakeContext, route: ChildRoute, wanted: string | undefined): string | null {
-  if (wanted === undefined) return null;
+function pickSpeed(ctx: FakeContext, route: ChildRoute, wanted: string | null | undefined): string | null {
+  if (wanted === undefined || wanted === null) return null;
+  checkSpeedText(wanted);
   if (route.model === null) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'speed: this route runs on the provider\'s default model; name a model with --model to choose its speed' });
   const speeds = modelsOf(ctx, route.providerId, route.accountId).find(model => model.id === route.model)?.speeds ?? [];
   const speed = matchSpeed(speeds, wanted);
   if (speed === null) throw new RpcFailure({ code: RpcErrorCode.Refused, message: speedRefusal(`${route.providerId}/${route.model}`, speeds, wanted) });
   return speed;
+}
+
+/** What a spawn or a workflow step says about the route of its child. */
+export interface RouteAsk { profileId?: string | null; model?: string; effort?: string; speed?: string | null }
+
+/** A named profile, else the conversation's own route under its built-in id. */
+function namedRoute(parent: Thread, config: DelegationConfig, profileId: string | null | undefined): ChildRoute | undefined {
+  const id = profileId ?? CONVERSATION_PROFILE_ID;
+  return config.profiles.find(entry => entry.id === id)
+    ?? (id === CONVERSATION_PROFILE_ID ? { id: CONVERSATION_PROFILE_ID, name: parent.model ?? parent.providerId, providerId: parent.providerId, accountId: parent.accountId, model: parent.model, effort: parent.effort ?? null } : undefined);
+}
+
+/** The route a spawn or a workflow step runs on, resolved like the core's; undefined for a profile that does not exist. */
+export function childRoute(ctx: FakeContext, parent: Thread, config: DelegationConfig, ask: RouteAsk): ChildRoute | undefined {
+  const base = ask.model !== undefined ? pickModel(ctx, parent, config, ask.model, ask.effort) : namedRoute(parent, config, ask.profileId);
+  if (!base) return undefined;
+  return { ...base, effort: ask.model === undefined && ask.effort !== undefined ? ask.effort : base.effort, speed: pickSpeed(ctx, base, ask.speed) };
+}
+
+/** Read the agent's speed tiers before a speed is checked, as choosing one on a thread does. */
+export async function discoverRoute(ctx: FakeContext, parent: Thread, config: DelegationConfig, ask: RouteAsk): Promise<void> {
+  if (typeof ask.speed !== 'string') return;
+  let route: Pick<ChildRoute, 'providerId' | 'accountId' | 'model'> | undefined;
+  if (typeof ask.model === 'string') {
+    const [providerId, ...rest] = ask.model.split('/');
+    const account = rest.length ? ctx.accounts.find(entry => entry.id === parent.accountId && entry.providerId === providerId) ?? ctx.accounts.find(entry => entry.providerId === providerId) : undefined;
+    route = account ? { providerId: providerId!, accountId: account.id, model: rest.join('/') } : undefined;
+  } else route = namedRoute(parent, config, typeof ask.profileId === 'string' ? ask.profileId : null);
+  if (route) await discoverSelection(ctx, route.providerId, route.accountId, route.model, null, ask.speed);
 }
 
 /** `provider/model`, a model id (the parent's provider first) or a unique part of an id or name. */
@@ -148,7 +183,7 @@ export function seedDelegationDemo(ctx: FakeContext): void {
 
 /** A workflow step's thread, the way `delegation.spawn` makes one: the task sent, the turn running. */
 /** A profile, or the conversation's own route, whose model may be the provider's default. */
-export type ChildRoute = Omit<DelegationProfile, 'model'> & { model: string | null };
+export type ChildRoute = Omit<DelegationProfile, 'model'> & { model: string | null; speed?: string | null };
 
 export function workflowChild(ctx: FakeContext, root: Thread, profile: ChildRoute, title: string, task: string): ThreadId {
   const id = `t-${++ctx.seq}`;
@@ -156,7 +191,7 @@ export function workflowChild(ctx: FakeContext, root: Thread, profile: ChildRout
   const turn: Turn = { id: `turn-${id}`, threadId: id, status: 'running', queuedAt: at, startedAt: at, finishedAt: null, usage: null, error: null };
   const child: Thread = {
     ...root, id, parentThreadId: root.id, title, titleSource: 'user',
-    providerId: profile.providerId, accountId: profile.accountId, model: profile.model, effort: profile.effort, speed: null,
+    providerId: profile.providerId, accountId: profile.accountId, model: profile.model, effort: profile.effort, speed: profile.speed ?? null,
     status: 'running', unread: false, archived: false, pinned: false,
     sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, activity: undefined, moveNote: null,
     createdAt: at, updatedAt: at, messagesBefore: null, turns: [turn], commands: [],
@@ -317,6 +352,7 @@ export function delegationMethods(ctx: FakeContext) {
       if (parent.parentThreadId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation supports one level' });
       const task = params.task.trim();
       if (!task || task.length > 12000) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'task must contain 1 to 12000 characters' });
+      if (params.speed !== undefined) checkSpeedText(params.speed);
       const fingerprint = JSON.stringify([params.profileId ?? null, params.model ?? null, params.effort ?? null, params.speed ?? null, task, params.title ?? null]);
       const requestKey = `${parent.id}:${params.requestId}`;
       const prior = ctx.delegationRequests.get(requestKey);
@@ -330,11 +366,10 @@ export function delegationMethods(ctx: FakeContext) {
       if (parent.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start delegation on an archived parent' });
       if (!config.enabled || config.paused) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation is disabled or paused' });
       const rows = ctx.delegationAgents.get(parent.id) ?? [];
-      const profileId = params.profileId ?? CONVERSATION_PROFILE_ID;
-      const profile: ChildRoute | undefined = params.model !== undefined ? pickModel(ctx, parent, config, params.model, params.effort) : config.profiles.find(entry => entry.id === profileId)
-        ?? (profileId === CONVERSATION_PROFILE_ID ? { id: CONVERSATION_PROFILE_ID, name: parent.model ?? parent.providerId, providerId: parent.providerId, accountId: parent.accountId, model: parent.model, effort: parent.effort ?? null } : undefined);
+      const ask: RouteAsk = { profileId: params.profileId, model: params.model, effort: params.effort, speed: params.speed };
+      await discoverRoute(ctx, parent, config, ask);
+      const profile = childRoute(ctx, parent, config, ask);
       if (!profile) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'unknown delegation profile' });
-      const speed = pickSpeed(ctx, profile, params.speed);
       const id = `t-${++ctx.seq}`;
       const at = ctx.now();
       const child: Thread = {
@@ -346,8 +381,8 @@ export function delegationMethods(ctx: FakeContext) {
         providerId: profile.providerId,
         accountId: profile.accountId,
         model: profile.model,
-        effort: params.model === undefined && params.effort !== undefined ? params.effort : profile.effort,
-        speed,
+        effort: profile.effort,
+        speed: profile.speed ?? null,
         status: 'idle', unread: false, archived: false, pinned: false,
         sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, moveNote: null,
         createdAt: at, updatedAt: at, messagesBefore: null, messages: [], turns: [], commands: []

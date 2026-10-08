@@ -3,7 +3,7 @@
  * few lines a model reads back cheaply: one row per child or run, its state,
  * its model and reasoning, its time, then the one next step that makes sense.
  */
-import { CONVERSATION_PROFILE_ID } from '@boite/contracts';
+import { CONVERSATION_PROFILE_ID, speedName } from '@boite/contracts';
 import type { DelegatedAgent, DelegationModelChoice, DelegationView, WorkflowRun } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
 import { requiredText, Usage } from './cli-args.ts';
@@ -44,8 +44,8 @@ function stateOf(agent: DelegatedAgent): string {
   return turn === 'error' ? 'failed' : turn ?? agent.thread.status;
 }
 
-/** `codex/gpt-5.5 effort=high speed=priority`: what a child runs on. */
-function routeOf(agent: DelegatedAgent): string {
+/** `codex/gpt-5.5 effort=high speed=priority`: what a child runs on, the speed as its stored tier id. */
+export function routeOf(agent: DelegatedAgent): string {
   const { providerId, model, effort, speed } = agent.thread;
   return `${providerId}/${model ?? 'default'}${effort ? ` effort=${effort}` : ''}${speed ? ` speed=${speed}` : ''}`;
 }
@@ -77,7 +77,9 @@ function teamLine(view: DelegationView, runs: WorkflowRun[]): string {
 
 export function choiceRow(choice: DelegationModelChoice): string {
   const efforts = choice.efforts.length ? ` effort=${choice.efforts.join('|')}${choice.defaultEffort ? ` (default ${choice.defaultEffort})` : ''}` : ' (no reasoning levels)';
-  const speeds = choice.speeds.length ? ` speed=${choice.speeds.map(speed => speed.label.toLowerCase()).join('|')}` : '';
+  // The id is what `--speed` stores and `delegate list` shows; a label that says something else stands in front of it.
+  const tiers = choice.speeds ?? [];
+  const speeds = tiers.length ? ` speed=${tiers.map(speedName).join('|')}` : '';
   return `${choice.providerId}/${choice.model} ${JSON.stringify(choice.name)}${efforts}${speeds}${choice.current ? ' [this conversation]' : ''}`;
 }
 
@@ -135,6 +137,7 @@ export async function delegateCommand(client: CoreClient, threadId: string, rest
         const view = await client.call('delegation.get', { threadId });
         if (rest[1] === CONVERSATION_PROFILE_ID || view.config.profiles.some(p => p.id === rest[1])) { profileId = rest[1]; start = 2; }
       }
+      if (options.speed !== undefined && (!options.speed.trim() || options.speed.length > 64)) throw new Usage('--speed needs a tier of 1 to 64 characters; boite delegate models lists them');
       const task = requiredText(rest, start, 'delegate spawn needs a brief: boite delegate spawn "<brief>" [--model <provider/model>] [--effort <level>] [--speed <tier>]', false);
       const agent = await client.call('delegation.spawn', {
         threadId, task, requestId,

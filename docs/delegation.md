@@ -6,8 +6,8 @@ it names a model and a reasoning level, from any installed provider: a Claude
 conversation can start a Codex reviewer. `boite delegate models` lists the
 choices. Without `--model` the child runs on the built-in profile
 `conversation`, the conversation's own harness, account, model and effort. A
-child runs on a model's speed tier (its fast mode) only when the spawn names
-one with `--speed`; it never inherits the parent's.
+child runs on one of a model's speed tiers, such as its fast mode, only when
+the spawn names it with `--speed`; it never inherits the parent's.
 
 The gear in the Subagents tab opens Settings with two switches and a list.
 "Let this conversation start subagents" turns delegation off for that
@@ -118,7 +118,7 @@ existing child to reuse its session.
 
 Delegation starts enabled, with free model choice. The first turn of a new
 provider session carries a short guide: the commands, `--model`, `--effort` and
-`--speed`,
+`--speed`, that a child runs at standard speed without `--speed`,
 and the rule that results come back as messages. Later turns carry it again
 when the request is about handing work out (delegation, subagents, parallel
 work, a workflow) or the team is paused. A child receives one line naming its
@@ -179,10 +179,16 @@ model's levels; without it the child keeps the parent's level on the same
 model, else the model's default. `--speed` names one of the model's speed tiers
 by id or by label, in any case: `fast` selects Claude's `fast` and the Codex
 tier whose id is `priority` and label "Fast". It applies to the model the child
-runs on, so it also works with `--profile` and with no `--model`. A tier the
-model lacks is refused with the model and the tiers it offers, or that it
-offers none. `delegate models` prints them as `speed=fast` on the models that
-have some. The older `delegate spawn <profile> "<brief>"` form still works.
+runs on, so it also works with `--profile` and with no `--model`, unless that
+route runs on the provider's default model: then the spawn is refused and
+`--model` has to name one. A tier the model lacks is refused with the model and
+the tiers it offers, or that it offers none. Tiers the agent has not listed yet
+are read from it first. `delegate models` prints the tiers of each model that
+has some, each as its id, with the label in front when the label says something
+else: `speed=fast` for Claude, `speed=Fast (priority)` for that Codex tier.
+`delegate list` and a spawn show the id the child stores, here
+`speed=priority`. The older `delegate spawn <profile> "<brief>"` form still
+works.
 
 Every answer is a few plain lines. `delegate list` starts with one summary
 line (`subagents: on; 1 running, 2 done, 0 failed, 0 stopped`), then one row per

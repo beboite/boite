@@ -334,8 +334,10 @@ export interface ModelInfo {
   /** Reasoning effort this model offers. A model without it has no effort control. */
   effort?: { levels: EffortLevel[]; default: string };
   /** Native service tiers advertised for this model; absent means no speed control. */
-  speeds?: { id: string; label: string; description?: string }[];
+  speeds?: SpeedTier[];
 }
+/** One native service tier of a model, such as Claude's `fast` or the Codex tier `priority` labelled "Fast". */
+export interface SpeedTier { id: string; label: string; description?: string }
 
 export interface ProviderCapabilities {
   approvals: boolean;
@@ -2800,21 +2802,26 @@ export interface DelegationModelChoice {
   /** Reasoning levels this model offers, lowest first. Empty: no reasoning control. */
   efforts: string[];
   defaultEffort: string | null;
-  /** Native service tiers this model offers, such as `fast`. Empty: no speed control. */
-  speeds: { id: string; label: string }[];
+  /** Native service tiers this model offers, such as `fast`. Empty: no speed control. Missing on older cores. */
+  speeds?: SpeedTier[];
   /** The parent conversation's own model. */
   current: boolean;
 }
-/** A speed named by id or by label, any case: `fast` is Claude's `fast` and the Codex tier `priority` labelled "Fast". */
-export function matchSpeed(speeds: readonly { id: string; label: string }[], wanted: string): string | null {
+/** A speed named by id or by label, any case: `fast` is Claude's `fast` and the Codex tier `priority` labelled "Fast". Null for anything else. */
+export function matchSpeed(speeds: readonly SpeedTier[] | null | undefined, wanted: unknown): string | null {
+  if (typeof wanted !== 'string') return null;
   const query = wanted.trim().toLowerCase();
+  if (!query || !speeds) return null;
   return (speeds.find(speed => speed.id.toLowerCase() === query) ?? speeds.find(speed => speed.label.toLowerCase() === query))?.id ?? null;
 }
-/** Why a speed is refused: the model and the tiers it offers, or that it offers none. */
-export function speedRefusal(model: string, speeds: readonly { id: string; label: string }[], wanted: string): string {
-  if (!speeds.length) return `speed: ${model} offers no speed tier; leave --speed out`;
-  const names = speeds.map(speed => speed.label.toLowerCase() === speed.id.toLowerCase() ? speed.id : `${speed.label.toLowerCase()} (${speed.id})`);
-  return `speed: ${model} has no "${wanted}" tier; expected ${names.join(', ')}`;
+/** How a tier is written for an agent: its id, with the label in front when the label says something else, as `Fast (priority)`. */
+export function speedName(speed: SpeedTier): string {
+  return speed.label.trim().toLowerCase() === speed.id.toLowerCase() ? speed.id : `${speed.label} (${speed.id})`;
+}
+/** Why a speed is refused: the model and the tiers it offers, or that it offers none. The same words on every transport. */
+export function speedRefusal(model: string, speeds: readonly SpeedTier[] | null | undefined, wanted: string): string {
+  if (!speeds?.length) return `speed: ${model} offers no speed tier; leave speed out`;
+  return `speed: ${model} has no "${wanted.trim()}" tier; expected ${speeds.map(speedName).join(', ')}`;
 }
 export interface DelegationModels {
   anyModel: boolean;
@@ -3133,8 +3140,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'delegation.configure': { params: { threadId: ThreadId; config: DelegationConfig }; result: DelegationView };
   /**
    * `model` is `provider/model` or a model id `delegation.models` lists; it
-   * wins over `profileId`. Neither: this conversation's own model. A child
-   * never runs in a fast service tier.
+   * wins over `profileId`. Neither: this conversation's own model. `speed` is
+   * a tier of the model the child runs on, by id or by label in any case, and
+   * is refused otherwise. Left out: no tier, never the parent's.
    */
   'delegation.spawn': { params: { threadId: ThreadId; profileId?: string; model?: string; effort?: string; speed?: string; task: string; title?: string; requestId: string }; result: DelegatedAgent };
   'delegation.models': { params: { threadId: ThreadId }; result: DelegationModels };
