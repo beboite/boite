@@ -9,7 +9,38 @@ without either noticing the other. The code is
 `accounts.logins` restores running login cards after reconnect. `accounts.loginCancel`
 stops the login process and waits for it to exit. Removing an account does the
 same before deleting its isolated directory; default CLI directories stay on
-disk. Removal is refused while any thread still references the account.
+disk. A conversation runs on its agent, not on one login: see
+[a conversation follows its agent](#a-conversation-follows-its-agent).
+
+## A conversation follows its agent
+
+A thread records the account its last turn used, yet that account does not
+hold it hostage. The rule lives in `packages/core/src/threads/account-fallback.ts`
+and the in-memory client mirrors it:
+
+- When a turn starts and the thread's account reads `unauthenticated`, the core
+  moves the thread to another account of the same provider: one signed in
+  (`ok`) first, then `unknown`, then `error`. The model, effort and permission
+  mode stay; a speed the new account does not list goes back to standard. The
+  native session belongs to the old login, so the turn starts a fresh one with
+  the journal's context, as a switch from the model picker does, and
+  `thread.updated` tells every client. With no other account able to run, the
+  turn is refused with the account's name, as before.
+- Removing an account moves its conversations, archived ones included, to the
+  provider's best other account, even a signed-out one, which the rule above
+  then hands on at the next turn. Removal is refused while a turn runs on the
+  account, and when it is the provider's only account and conversations still
+  use it: they would have no agent left to run on. Signing in again, or adding
+  another account first, ends that refusal.
+- Titles follow the same choice: the title of a thread whose account signed
+  out is written on the account its next turn would use.
+- A persistent agent keeps the account its profile names.
+
+The composer reflects it. A draft opens on the remembered account while it is
+signed in, else on another of that provider. The picker shows a provider's
+models for its first signed-in account, and a signed-out account chip cannot
+be picked. `Sign in again` appears only when no other account of the agent can
+take the next turn.
 
 ## The isolation directory
 
@@ -182,8 +213,9 @@ keyboard user goes from `Install` to `Cancel`, to the sign-in link, then to
 sheet at the bottom of the screen, and its last button stays above the home
 indicator.
 
-An account that answered `unauthenticated` gets a `Sign in again` chip beside
-the model chip, and an error in its thread carries the same button. Both open
+An account that answered `unauthenticated`, with no other account of its agent
+signed in, gets a `Sign in again` chip beside the model chip, and an error in
+its thread carries the same button. Both open
 the dialog on that account, so the login lands on it instead of creating a
 second one; a default-location account, which Boite never logs in, is told to
 sign in from the agent's own window and check again, unless its login runs in a

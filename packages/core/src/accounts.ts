@@ -10,6 +10,7 @@ import { agentEnv, hostAgentsEnabled, launchPrefix, profileFor, resolveExecutabl
 import { browserNoopPath, browserNoopScript, currentOs, homePath } from './paths.ts';
 import { ISOLATION_DEFAULTS, shareProfile, unshareProfile, type ShareProblem } from './profile-share.ts';
 import type { SpawnedPipedProcess } from './procs.ts';
+import { otherAccounts } from './threads/account-fallback.ts';
 
 /** The thread a login process is traced under. It is a name, never a real thread. */
 export function loginThreadId(accountId: AccountId): string {
@@ -144,9 +145,7 @@ export class AccountStore {
       }
     };
     checkAgentReferences();
-    if (this.core.scheduler.activeAccountIds().includes(accountId) || this.core.journal.listThreads().some((thread) => thread.accountId === accountId)) {
-      throw refused('this account is used by a thread; remove its project before removing the account', { accountId });
-    }
+    this.heirFor(account);
     const directory = account.isolationDir;
     if (directory !== null && (resolve(directory) !== resolve(this.core.dataDir, 'accounts', accountId)
       || (existsSync(directory) && lstatSync(directory).isSymbolicLink()))) {
@@ -155,9 +154,11 @@ export class AccountStore {
     await this.loginCancel(accountId);
     await this.checks.get(accountId)?.catch(() => {});
     checkAgentReferences();
-    // Cancelling yields to RPC work; a new thread may have claimed this account.
-    if (this.core.scheduler.activeAccountIds().includes(accountId) || this.core.journal.listThreads().some((thread) => thread.accountId === accountId)) {
-      throw refused('this account is used by a thread; remove its project before removing the account', { accountId });
+    // Cancelling yields to RPC work: a turn may have started on this account since.
+    const heir = this.heirFor(account);
+    // Its conversations carry on under another login of the same agent.
+    for (const thread of this.core.journal.listThreads()) {
+      if (thread.accountId === accountId && heir !== null) this.core.threads.moveToAccount(thread.id, heir);
     }
     if (directory !== null) {
       unshareProfile(directory);
@@ -173,6 +174,25 @@ export class AccountStore {
       },
     );
     this.core.bus.emit('accounts.removed', { accountId });
+  }
+
+  /**
+   * Where the conversations of an account being removed go: the provider's
+   * best other account, signed in or not, or null when none uses it. Refused
+   * while a turn runs on it, and when it is the provider's only account and
+   * conversations still use it, since they would have no agent left to run on.
+   */
+  private heirFor(account: Account): Account | null {
+    const threads = this.core.journal.listThreads().filter((thread) => thread.accountId === account.id);
+    if (this.core.scheduler.activeAccountIds().includes(account.id) || threads.some((thread) => ['queued', 'running', 'waiting'].includes(thread.status))) {
+      throw refused('a turn is running on this account; stop it before removing the account', { accountId: account.id });
+    }
+    if (threads.length === 0) return null;
+    const heir = otherAccounts(this.core, account.providerId, account.id)[0] ?? null;
+    if (heir === null) {
+      throw refused(`${threads.length} conversation${threads.length === 1 ? ' uses' : 's use'} this account, the only one of its agent: sign in again, or add another account first and they move to it`, { accountId: account.id });
+    }
+    return heir;
   }
 
   /**

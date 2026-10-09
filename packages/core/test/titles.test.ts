@@ -50,12 +50,16 @@ describe('title rules', () => {
     expect(parseAgentTitle('{broken')).toBeNull();
   });
 
-  test('each provider writes titles on its small model, a dated id standing for its name', () => {
+  test('each provider writes titles on the newest model of its small family, a dated id standing for its name', () => {
     const claude = { id: 'claude', protocol: 'claude-sdk' as const };
-    expect(defaultTitleModel(claude, [{ id: 'claude-opus-5' }])).toBe('claude-haiku-4-5');
+    // Nothing of the family listed: the CLI's alias for its newest Haiku.
+    expect(defaultTitleModel(claude, [{ id: 'claude-opus-5' }])).toBe('haiku');
     expect(defaultTitleModel(claude, [{ id: 'claude-haiku-4-5-20251001' }])).toBe('claude-haiku-4-5-20251001');
+    expect(defaultTitleModel(claude, [{ id: 'claude-haiku-4-5-20251001' }, { id: 'claude-haiku-5-5' }, { id: 'claude-opus-5' }])).toBe('claude-haiku-5-5');
     const codex = { id: 'codex', protocol: 'codex-appserver' as const };
     expect(defaultTitleModel(codex, [{ id: 'gpt-5.6-luna' }, { id: 'gpt-5.4-mini' }])).toBe('gpt-5.6-luna');
+    expect(defaultTitleModel(codex, [{ id: 'gpt-5.6-luna' }, { id: 'gpt-6.1-sol' }, { id: 'gpt-6-luna' }])).toBe('gpt-6-luna');
+    expect(defaultTitleModel(codex, [{ id: 'gpt-5.1-codex-mini' }, { id: 'gpt-5.4-mini' }])).toBe('gpt-5.4-mini');
     // A second descriptor on Codex's protocol takes Codex's picks.
     expect(defaultTitleModel({ id: 'codex-work', protocol: 'codex-appserver' }, [])).toBe('gpt-6-luna');
     expect(defaultTitleModel({ id: 'echo', protocol: 'echo' }, [{ id: 'echo' }])).toBeNull();

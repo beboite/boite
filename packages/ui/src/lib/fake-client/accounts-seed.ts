@@ -99,6 +99,7 @@ export function seedAccounts() {
             default: 'high'
           }
         },
+        { id: 'claude-haiku-5-5', name: 'Haiku 5.5' },
         { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5', legacy: true }
       ],
       install: null,

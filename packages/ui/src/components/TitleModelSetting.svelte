@@ -32,7 +32,7 @@
     writers.map(({ provider, account }) => {
       const offered = store.modelsOf(provider.id, account.id).filter((model) => model.id !== 'default');
       const listed = offered.filter((model) => model.legacy !== true);
-      // The small model can be a legacy one (Haiku 4.5), which the core still picks.
+      // The newest small model, even one the picker folds away as legacy.
       const small = defaultTitleModel(provider, offered);
       const named = (id: string): ModelInfo => offered.find((model) => model.id === id) ?? { id, name: DEFAULT_MODEL_NAMES[id] ?? id };
       const ids = [small, chosen?.providerId === provider.id ? chosen.model : null, ...listed.map((model) => model.id)];

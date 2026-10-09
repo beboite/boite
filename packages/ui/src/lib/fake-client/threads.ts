@@ -4,6 +4,7 @@ import { steerUser } from './user-steering';
 import { RpcFailure } from '../client';
 import { checkCwd, checkEffort, checkModel, checkRunnable, defaultModel } from './checks';
 import { writeTitle } from './titles';
+import { moveToAccount, usableAccount } from './account-fallback';
 import { DATA_DIR, fakeWorktree, fakeDraftFolder, refusal, toSummary } from './shared';
 import { closeTerminal } from './terminals';
 import { announceProject, archiveProject } from './project-archive';
@@ -342,6 +343,9 @@ export function threadMethods(ctx: FakeContext) {
       if (!provider) throw ctx.notFound('provider', providerId);
       // As the core, in its order: an archived or busy thread first, then whether the agent can run at all.
       if (!thread.archived && !['queued', 'running', 'waiting'].includes(thread.status) && !ctx.inFlight.has(thread.id)) {
+        // A signed-out account hands the thread to another of its agent before the check.
+        const usable = usableAccount(ctx, providerId, thread.accountId);
+        if (usable && usable.id !== thread.accountId) moveToAccount(ctx, thread, usable);
         const account = ctx.accounts.find((a) => a.id === thread.accountId);
         if (account) checkRunnable(provider, account);
       }

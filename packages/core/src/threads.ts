@@ -46,6 +46,7 @@ import { ThreadRecovery } from './threads/recovery.ts';
 import { ThreadTitles } from './threads/retitle.ts';
 import { readMemoryEvents } from './threads/memory-read.ts';
 import { checkEffort, checkModel, checkSpeed, checkStoredEffort, defaultModel } from './threads/selection.ts';
+import { movedToAccount, usableAccount } from './threads/account-fallback.ts';
 import { TurnContexts } from './threads/turn-context.ts';
 import { TurnRunner } from './threads/turn-runner.ts';
 import { ThreadFocus } from './threads/focus.ts';
@@ -436,6 +437,35 @@ export class ThreadStore {
     return this.save(next, 'thread.updated');
   }
 
+  /**
+   * Puts a thread that is not running on another account of its provider: the
+   * old login's warm process and commands go, and its native session with them
+   * (`threads/account-fallback.ts`).
+   */
+  moveToAccount(threadId: ThreadId, account: Account): ThreadSummary {
+    const thread = this.require(threadId);
+    if (!['queued', 'running', 'waiting'].includes(thread.status)) {
+      this.releaseAgent(thread.id);
+      this.agentState.noteBackground(thread.id, []);
+    }
+    this.agentState.commands.delete(thread.id);
+    this.core.bus.emit('thread.commands', { threadId: thread.id, commands: [] });
+    return this.save(movedToAccount(this.core, thread, account), 'thread.updated');
+  }
+
+  /**
+   * The thread on an account that can run it: its own, or, once that one
+   * signed out or went away, the best other account of its provider. With
+   * nowhere to go it stays put, and the turn's check names its account. A
+   * persistent agent keeps the account its profile names.
+   */
+  private onUsableAccount(thread: ThreadSummary): ThreadSummary {
+    const own = this.core.journal.getAccount(thread.accountId);
+    if (thread.agentSessionId || (own !== null && own.status !== 'unauthenticated')) return thread;
+    const other = usableAccount(this.core, thread.providerId, thread.accountId);
+    return other === null ? thread : this.moveToAccount(thread.id, other);
+  }
+
   private checkSelection(thread: ThreadSummary, expected?: number): void {
     if (expected !== undefined && expected !== (thread.selectionVersion ?? 0)) {
       throw refused('the model selection changed; review the selected model and send again', { threadId: thread.id });
@@ -563,7 +593,7 @@ export class ThreadStore {
 
   startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], agentRunId?: string, startedBy?: ThreadLink): Turn {
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
-    const thread = this.require(threadId);
+    let thread = this.require(threadId);
     this.codeCheckpoints.assertAvailable(thread.cwd);
     if (thread.agentSessionId && operation !== 'compact') {
       const run = agentRunId ? this.core.workforce.records.get('run', agentRunId) : null;
@@ -590,6 +620,7 @@ export class ThreadStore {
       const data: TurnInFlightData = { threadId, reason: 'turn-in-flight', thread: this.withLoad(thread) };
       throw refused('this thread already has an in-flight turn', data);
     }
+    thread = this.onUsableAccount(thread);
     const provider = this.core.providers.require(thread.providerId);
     if (this.core.updates.updating(thread.providerId)) {
       throw refused(`${provider.name} is updating; send this again once it is done`, { threadId, providerId: thread.providerId });

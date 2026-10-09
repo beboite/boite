@@ -1333,8 +1333,8 @@ export const strings = {
     terminalDone: 'Close the terminal',
     remove: 'Remove',
     removeTitle: 'Remove {account}?',
-    removeBody: 'This signs the account out of Boite and deletes its files. Accounts used by a thread cannot be removed.',
-    removeDefaultBody: 'Boite stops using this login. It stays signed in on your computer. Accounts used by a thread cannot be removed.',
+    removeBody: 'This signs the account out of Boite and deletes its files. Its conversations carry on with another account of the same agent.',
+    removeDefaultBody: 'Boite stops using this login. It stays signed in on your computer. Its conversations carry on with another account of the same agent.',
     status: {
       unknown: 'unknown',
       ok: 'ok',

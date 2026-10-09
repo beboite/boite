@@ -1284,11 +1284,23 @@ test('account lifecycle reload preserves the running login snapshot', async () =
   expect(store.logins['a-claude-side']).toEqual(before);
 });
 
-test('account lifecycle refuses removal of an account referenced by an archived thread', async () => {
+test('account lifecycle keeps the only account of an agent while an archived thread uses it', async () => {
   const { client } = await ready();
   await client.call('threads.archive', { threadId: 't-trace', archived: true });
-  await expect(client.call('accounts.remove', { accountId: 'a-echo' })).rejects.toThrow(/thread/i);
+  await expect(client.call('accounts.remove', { accountId: 'a-echo' })).rejects.toThrow(/only one of its agent|a turn is running/);
   expect((await client.call('accounts.list', {})).some((a) => a.id === 'a-echo')).toBe(true);
+});
+
+test('a thread follows its agent: a signed-out account hands it over on send, a removed one on removal', async () => {
+  const { client } = await ready();
+  const thread = await client.call('threads.create', { projectId: 'p-notes', providerId: 'claude', accountId: 'a-claude-side', title: 'Signed out' });
+  const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
+  expect(turn.execution?.accountId).toBe('a-claude-main');
+  expect((await client.call('threads.get', { threadId: thread.id })).accountId).toBe('a-claude-main');
+
+  const parked = await client.call('threads.create', { projectId: 'p-notes', providerId: 'claude', accountId: 'a-claude-side', title: 'Parked' });
+  await client.call('accounts.remove', { accountId: 'a-claude-side' });
+  expect((await client.call('threads.get', { threadId: parked.id })).accountId).toBe('a-claude-main');
 });
 
 test('account lifecycle cancellation removes the login and permits retry', async () => {

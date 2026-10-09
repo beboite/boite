@@ -1271,8 +1271,8 @@ export const fr: Translation = {
     terminalDone: 'Fermer le terminal',
     remove: 'Supprimer',
     removeTitle: 'Supprimer {account} ?',
-    removeBody: "Cela déconnecte le compte de Boite et supprime ses fichiers. Un compte utilisé par une conversation ne peut pas être supprimé.",
-    removeDefaultBody: "Boite cesse d'utiliser ce login. Il reste connecté sur votre ordinateur. Un compte utilisé par une conversation ne peut pas être supprimé.",
+    removeBody: "Cela déconnecte le compte de Boite et supprime ses fichiers. Ses conversations continuent avec un autre compte du même agent.",
+    removeDefaultBody: "Boite cesse d'utiliser ce login. Il reste connecté sur votre ordinateur. Ses conversations continuent avec un autre compte du même agent.",
     status: {
       unknown: 'inconnu',
       ok: 'ok',

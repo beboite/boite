@@ -27,7 +27,7 @@ test('Claude titles the first request with its images while the main SDK query k
     expect(await titled).toMatchObject({ title: 'Inspect scheduler image', status: 'running', titleState: { needsRefinement: false } });
     const titleCall = calls.find(call => call.options.persistSession === false)!;
     await waitFor(() => titleCall.prompts.length > 0);
-    expect(titleCall.options.model).toBe('claude-haiku-4-5-20251001');
+    expect(titleCall.options.model).toBe('claude-haiku-5-5');
     expect(titleCall.options.tools).toEqual([]);
     expect(titleCall.options.settingSources).toEqual([]);
     expect(titleCall.options.maxTurns).toBe(1);

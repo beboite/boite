@@ -40,12 +40,15 @@
     ...(delegation?.messages.filter(letter => letter.from.threadId === threadId || letter.to.threadId === threadId) ?? [])
   ]);
   const delegationLetterIds = $derived(new Set(delegation?.messages.map(letter => letter.id) ?? []));
-  /** The thread's account is signed out: an error then carries the way back in. */
+  /**
+   * The thread's account is signed out and no other account of its agent can
+   * take the next turn: an error then carries the way back in.
+   */
   const signedOut = $derived.by(() => {
     const thread = store.openThread;
     if (!thread || thread.id !== threadId) return null;
     const account = store.accountOf(thread.accountId);
-    return account?.status === 'unauthenticated' ? account : null;
+    return account?.status === 'unauthenticated' && store.usableAccountOf(account.providerId, account.id) === null ? account : null;
   });
   const letterRows = $derived.by(() => new Map(letters.map(letter => [`coordination:${letter.id}`, letter])));
   const team = $derived(delegation?.rootThreadId === threadId ? delegation.agents : []);

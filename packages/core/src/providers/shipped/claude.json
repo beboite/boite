@@ -178,6 +178,20 @@
         "default": "high"
       }
     },
+    {
+      "id": "claude-haiku-5-5",
+      "name": "Haiku 5.5",
+      "effort": {
+        "levels": [
+          { "id": "low", "label": "Low" },
+          { "id": "medium", "label": "Medium" },
+          { "id": "high", "label": "High" },
+          { "id": "xhigh", "label": "Extra high" },
+          { "id": "max", "label": "Max" }
+        ],
+        "default": "high"
+      }
+    },
     { "id": "claude-haiku-4-5-20251001", "name": "Haiku 4.5", "legacy": true }
   ],
   "capabilities": {

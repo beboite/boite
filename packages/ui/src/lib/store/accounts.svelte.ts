@@ -51,6 +51,21 @@ export class Accounts {
     return this.accounts.filter((a) => a.providerId === providerId);
   }
 
+  /**
+   * The account a turn of this provider runs on, as the core picks it
+   * (`threads/account-fallback.ts`): `preferred` unless it signed out, else the
+   * provider's other account signed in, then one nobody could check. Null when
+   * every account of the provider is signed out.
+   */
+  usableAccountOf(providerId: ProviderId, preferred: string | null = null): Account | null {
+    const accounts = this.accountsOf(providerId);
+    const own = accounts.find((a) => a.id === preferred);
+    if (own && own.status !== 'unauthenticated') return own;
+    const rank = { ok: 0, unknown: 1, error: 2, unauthenticated: 3 } as const;
+    return accounts.filter((a) => a.id !== preferred && a.status !== 'unauthenticated')
+      .sort((a, b) => rank[a.status] - rank[b.status])[0] ?? null;
+  }
+
   providerOf(id: ProviderId): ProviderSummary | null {
     return this.providers.find((p) => p.id === id) ?? null;
   }

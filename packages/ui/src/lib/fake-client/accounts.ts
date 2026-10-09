@@ -2,6 +2,7 @@
 import { RpcErrorCode, type Account, type AccountQuota, type RpcEvents } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { sessionStatus } from './checks';
+import { moveToAccount, otherAccounts } from './account-fallback';
 import { DATA_DIR } from './shared';
 import type { FakeContext, FakeMethods } from './context';
 
@@ -143,11 +144,18 @@ export function accountMethods(ctx: FakeContext) {
     },
     'accounts.remove': async (params) => {
       if (!ctx.accounts.some((a) => a.id === params.accountId)) throw ctx.notFound('account', params.accountId);
-      const referenced = [...ctx.threads.values()].find((t) => t.accountId === params.accountId);
-      if (referenced) {
-        throw new RpcFailure({ code: RpcErrorCode.Refused, message: `account ${params.accountId} is used by thread ${referenced.id}` });
+      const account = ctx.accounts.find((a) => a.id === params.accountId)!;
+      const threads = [...ctx.threads.values()].filter((t) => t.accountId === params.accountId);
+      if (threads.some((t) => ['queued', 'running', 'waiting'].includes(t.status) || ctx.inFlight.has(t.id))) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a turn is running on this account; stop it before removing the account', data: { accountId: account.id } });
+      }
+      // As the core: its conversations move to another account of the agent, and the last account stays.
+      const heir = otherAccounts(ctx, account.providerId, account.id)[0];
+      if (threads.length > 0 && !heir) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${threads.length} conversation${threads.length === 1 ? ' uses' : 's use'} this account, the only one of its agent: sign in again, or add another account first and they move to it`, data: { accountId: account.id } });
       }
       cancelLogin(ctx, params.accountId);
+      if (heir) for (const thread of threads) moveToAccount(ctx, thread, heir);
       ctx.accounts = ctx.accounts.filter((a) => a.id !== params.accountId);
       ctx.emit('accounts.removed', { accountId: params.accountId });
       return { ok: true };

@@ -65,10 +65,14 @@
   // Older modes keep their execution policy until the user makes a choice.
   let displayedMode = $derived<PermissionMode>(shownMode(choice?.permissionMode ?? 'default', provider));
   let modes = $derived(modesFor(provider));
-  /** The chosen account answered that it is signed out: the next send would fail on it. */
+  /**
+   * The chosen account answered that it is signed out and no other account of
+   * its agent can take the next send over: the core moves a thread to one
+   * that can, so only the last signed-out login asks to sign in again.
+   */
   let signedOut = $derived.by(() => {
     const account = choice ? store.accountOf(choice.accountId) : null;
-    return account?.status === 'unauthenticated' ? account : null;
+    return account?.status === 'unauthenticated' && store.usableAccountOf(account.providerId, account.id) === null ? account : null;
   });
   let modeItems = $derived(
     modes.map((mode) => ({

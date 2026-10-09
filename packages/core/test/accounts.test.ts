@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
@@ -52,6 +52,14 @@ async function addLoginProvider(harness: TestCore, client: CoreClient): Promise<
   expect(loaded.rejected).toEqual([]);
   expect(loaded.loaded.some((provider) => provider.id === 'echo-auth')).toBe(true);
   return 'echo-auth';
+}
+
+/** An isolated account of `providerId` with a session file, checked signed in. */
+async function signedIn(client: CoreClient, providerId: string, label: string) {
+  const account = await client.call('accounts.add', { providerId, label });
+  writeFileSync(join(account.isolationDir ?? '', '.credentials.json'), '{"fake":true}', 'utf8');
+  expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('ok');
+  return account;
 }
 
 let harness: TestCore;
@@ -275,13 +283,37 @@ describe('accounts', () => {
     expect(existsSync(account.isolationDir ?? '')).toBe(false);
   });
 
-  test('an account used by a thread cannot be removed', async () => {
+  test('removing an account moves its conversations to another account of the agent, and the last one is kept', async () => {
     const client = await harness.connect();
-    const account = await client.call('accounts.add', { providerId: 'echo', label: 'Used' });
+    const providerId = await addLoginProvider(harness, client);
+    const first = await signedIn(client, providerId, 'First');
     const project = await client.call('projects.add', { path: harness.dataDir });
-    await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id });
-    await expect(client.call('accounts.remove', { accountId: account.id })).rejects.toThrow('used by');
-    expect(existsSync(account.isolationDir ?? '')).toBe(true);
+    const thread = await client.call('threads.create', { projectId: project.id, providerId, accountId: first.id });
+    await expect(client.call('accounts.remove', { accountId: first.id })).rejects.toThrow('the only one of its agent');
+    expect(existsSync(first.isolationDir ?? '')).toBe(true);
+
+    const second = await signedIn(client, providerId, 'Second');
+    const moved = client.next('thread.updated', (event) => event.id === thread.id && event.accountId === second.id);
+    await client.call('accounts.remove', { accountId: first.id });
+    await moved;
+    expect((await client.call('threads.get', { threadId: thread.id })).accountId).toBe(second.id);
+    expect(existsSync(first.isolationDir ?? '')).toBe(false);
+  });
+
+  test('a conversation whose account signed out runs its next turn on another signed-in account of its agent', async () => {
+    const client = await harness.connect();
+    const providerId = await addLoginProvider(harness, client);
+    const first = await signedIn(client, providerId, 'First');
+    const second = await signedIn(client, providerId, 'Second');
+    const project = await client.call('projects.add', { path: harness.dataDir });
+    const thread = await client.call('threads.create', { projectId: project.id, providerId, accountId: first.id });
+    rmSync(join(first.isolationDir ?? '', '.credentials.json'));
+    expect((await client.call('accounts.check', { accountId: first.id })).status).toBe('unauthenticated');
+
+    const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
+    expect(turn.execution?.accountId).toBe(second.id);
+    expect((await client.call('threads.get', { threadId: thread.id })).accountId).toBe(second.id);
+    await waitFor(() => harness.core.journal.getTurn(turn.id)?.status === 'done');
   });
 
   test('a running login can be listed and cancelled', async () => {

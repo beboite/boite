@@ -387,7 +387,7 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   expect(tiles()).toEqual(['favorites', 'claude', 'echo', 'opencode', 'codex', 'pi', 'grok', 'muse', 'antigravity-cli', 'more']);
   // Claude is the shown one and has two logins, so they sit beside its name.
   expect(seats()).toEqual(['claude::a-claude-main', 'claude::a-claude-side']);
-  expect(shownModels()).toEqual(['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5']);
+  expect(shownModels()).toEqual(['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-5-5']);
 
   // One account: nothing beside the name.
   query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=echo]').click();
@@ -395,9 +395,16 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   expect(seats()).toEqual([]);
 
   query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=claude]').click();
-  await waitFor(() => shownModels().length === 3);
+  await waitFor(() => shownModels().length === 4);
   query<HTMLButtonElement>('[data-testid=picker-legacy]').click();
-  await waitFor(() => document.querySelectorAll('[data-model]').length === 7);
+  await waitFor(() => document.querySelectorAll('[data-model]').length === 8);
+
+  // A signed-out login cannot be picked: no turn could run on it.
+  expect(query<HTMLButtonElement>('[data-instance="claude::a-claude-side"]').disabled).toBe(true);
+  await store.loginAccount('a-claude-side');
+  await waitFor(() => Boolean(store.logins['a-claude-side']?.url));
+  await store.client!.call('accounts.loginInput', { accountId: 'a-claude-side', text: 'pasted-code' });
+  await waitFor(() => !query<HTMLButtonElement>('[data-instance="claude::a-claude-side"]').disabled);
 
   // The second account of the same provider, then a model: one thread with both.
   query<HTMLButtonElement>('[data-instance="claude::a-claude-side"]').click();
@@ -1936,7 +1943,7 @@ test('account lifecycle cancel button stops login and restores retry', async () 
   expect(document.querySelector('[data-testid=account-login]')).not.toBeNull();
 });
 
-test('a new isolated account is signed out, and a thread on it offers the sign-in', async () => {
+test('a thread on a signed-out account offers the sign-in only once no other account of its agent can run it', async () => {
   await mountOnFake();
   const client = store.client!;
   const account = await client.call('accounts.add', { providerId: 'claude', label: 'Work', useDefaultLocation: false });
@@ -1945,6 +1952,10 @@ test('a new isolated account is signed out, and a thread on it offers the sign-i
   const thread = await client.call('threads.create', { projectId: project!.id, providerId: 'claude', accountId: account.id, title: 'Signed out' });
   await waitFor(() => store.threads.some((entry) => entry.id === thread.id));
   await store.open(thread.id);
+  // The signed-in main account takes the next send over, so nothing asks to sign in.
+  await waitFor(() => document.querySelector('[data-testid=composer-attach]') !== null);
+  expect(document.querySelector('[data-testid=composer-reconnect]')).toBeNull();
+  for (const entry of store.accounts) if (entry.providerId === 'claude') entry.status = 'unauthenticated';
   await waitFor(() => document.querySelector('[data-testid=composer-reconnect]') !== null);
 });
 
