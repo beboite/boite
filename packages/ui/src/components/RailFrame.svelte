@@ -16,7 +16,7 @@
    * head on top, an optional subhead that stays put (the Agents search), the
    * rows in one scroll, and one foot ending on the limits and Settings. Each
    * list fills the head, the rows and the foot's own buttons, and may fill the
-   * subhead.
+   * subhead and the foot's lead (the thread list's machine button).
    *
    * `drawer` is the thread list's phone form, a sheet over the chat; the Agents
    * list is a whole screen on a phone and stays in the flow.
