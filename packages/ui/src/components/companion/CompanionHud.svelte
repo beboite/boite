@@ -23,8 +23,8 @@
   interface Props {
     threads: ThreadSummary[];
     projects: Map<string, string>;
-    /** The companion's own conversation, left out. */
-    own: string | null;
+    /** The threads of the companion's own agents, left out. */
+    own: readonly string[];
     gauges: HudGauge[];
     /** The shell's word that the pointer is on the companion (`senses.hover`). */
     hover: boolean;

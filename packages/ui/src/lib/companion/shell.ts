@@ -90,9 +90,31 @@ export async function focusCompanion(): Promise<void> {
   await invoke('companion_focus');
 }
 
+/**
+ * Keeps a file where an agent can open it (`companion_keep`): a folder of the
+ * system's temporary one, cleared of what is a day old. Its path, or null
+ * outside the shell.
+ */
+export async function keepFile(data: Uint8Array, name: string): Promise<string | null> {
+  if (!inShell()) return null;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('companion_keep', data, { headers: { 'x-name': encodeURIComponent(name) } });
+}
+
+/** An attachment's base64 data, a data URL or bare, as bytes. */
+export function bytesOf(data: string): Uint8Array {
+  const binary = atob(data.slice(data.indexOf(',') + 1));
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
 /** Brings the main window forward, on a thread or on the companion's settings. */
 export async function showMain(threadId: string | null): Promise<void> {
-  await invoke('companion_show_main', { threadId });
+  await invoke('companion_show_main', { threadId, agentId: null });
+}
+
+/** Brings the main window forward on an agent's conversation, in the Agents page. */
+export async function showAgent(agentId: string): Promise<void> {
+  await invoke('companion_show_main', { threadId: null, agentId });
 }
 
 /** Hears one of the shell's `companion://` events. Returns the function that stops. */

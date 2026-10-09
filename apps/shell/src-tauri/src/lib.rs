@@ -180,6 +180,7 @@ pub fn run() {
             companion_window::companion_capture,
             companion_window::companion_cover,
             companion_window::companion_focus,
+            companion_window::companion_keep,
             material::window_material,
             material::window_material_supported,
             tray::tray_labels,

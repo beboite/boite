@@ -1,27 +1,28 @@
 <!--
   What the companion shows under itself besides its panel: the reminders that
-  rang, its reply, the other conversations that finished, and a word when
-  Boite is out of reach. Each block takes clicks (`data-hit`).
+  rang, each agent's reply, named when several stand, the other conversations
+  that finished, and a word when Boite is out of reach. Each block takes
+  clicks (`data-hit`).
 -->
 <script lang="ts">
   import { BellRing, CircleAlert, ExternalLink, Square, X } from '@lucide/svelte';
   import { fill, strings } from '../../lib/strings';
-  import { showMain } from '../../lib/companion/shell';
-  import type { Talk } from '../../lib/companion/talk.svelte';
+  import { showAgent, showMain } from '../../lib/companion/shell';
   import type { Notes } from '../../lib/companion/notes.svelte';
+  import type { CrewMember } from './CompanionCrew.svelte';
 
   interface Props {
-    talk: Talk;
+    members: CrewMember[];
     notes: Notes;
     /** The panel is open: the notices wait behind it. */
     open: boolean;
     reachable: boolean;
-    threadId: string | null;
   }
 
-  let { talk, notes, open, reachable, threadId }: Props = $props();
+  let { members, notes, open, reachable }: Props = $props();
 
   const copy = strings.companion;
+  const several = $derived(members.length > 1);
 
   function openNotice(id: string, thread: string) {
     notes.dismiss(id);
@@ -40,26 +41,31 @@
   </div>
 {/each}
 
-{#if talk.shown && talk.phase !== 'none'}
-  <div class="card bubble" data-hit role="status" aria-live="polite" data-testid="companion-reply">
-    {#if talk.problem}
-      <p class="text problem">{talk.problem}</p>
-    {:else if talk.reply}
-      <p class="text">{talk.reply}</p>
-    {:else}
-      <p class="text waiting">{copy.thinking}</p>
-    {/if}
-    <div class="tools">
-      {#if talk.thinking}
-        <button class="ghost icon" aria-label={copy.stop} title={copy.stop} onclick={() => void talk.stop()}><Square size={13} /></button>
-      {/if}
-      {#if threadId}
-        <button class="ghost icon" aria-label={copy.openThread} title={copy.openThread} onclick={() => void showMain(threadId)}><ExternalLink size={13} /></button>
-      {/if}
-      <button class="ghost icon" aria-label={copy.hideReply} title={copy.hideReply} onclick={() => talk.hide()}><X size={13} /></button>
+{#each members as { id, name, talk } (id)}
+  {#if talk.shown && talk.phase !== 'none'}
+    <div class="card bubble" data-hit role="status" aria-live="polite" data-testid="companion-reply">
+      <div class="said">
+        {#if several && name}<span class="label">{name}</span>{/if}
+        {#if talk.problem}
+          <p class="text problem">{talk.problem}</p>
+        {:else if talk.reply}
+          <p class="text">{talk.reply}</p>
+        {:else}
+          <p class="text waiting">{copy.thinking}</p>
+        {/if}
+      </div>
+      <div class="tools">
+        {#if talk.thinking}
+          <button class="ghost icon" aria-label={copy.stop} title={copy.stop} onclick={() => void talk.stop()}><Square size={13} /></button>
+        {/if}
+        {#if id}
+          <button class="ghost icon" aria-label={copy.openThread} title={copy.openThread} onclick={() => void showAgent(id)}><ExternalLink size={13} /></button>
+        {/if}
+        <button class="ghost icon" aria-label={copy.hideReply} title={copy.hideReply} onclick={() => talk.hide()}><X size={13} /></button>
+      </div>
     </div>
-  </div>
-{/if}
+  {/if}
+{/each}
 
 {#if !open}
   {#each notes.notices as notice (notice.id)}
@@ -96,6 +102,9 @@
     width: max-content;
     padding: 8px 6px 8px 12px;
     border-radius: var(--radius-lg);
+  }
+  .said {
+    min-width: 0;
   }
   .text {
     max-height: 220px;

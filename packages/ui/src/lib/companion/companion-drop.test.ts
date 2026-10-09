@@ -9,10 +9,9 @@ import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES
 import { FakeClient } from '../fake-client';
 import { INITIAL_MODEL_DEFAULTS } from '../model-defaults';
 import { defaultPrefs, PREFS_STORAGE_KEY } from '../prefs';
-import { promptFor } from './brain';
+import { messageFor, roleBlock } from './brain';
 import { parseDirectives, visibleReply } from './directives';
 import { gatherDropped, joinScreen, type Encode } from './drop.svelte';
-import { requestText } from './history';
 import { newThreadChoice, resolveProject } from './tasks';
 import { Tasks, unknownLine } from './tasks.svelte';
 
@@ -76,10 +75,10 @@ test('the screen goes after the dropped files, unless the two together pass a ca
   expect(typeof joinScreen([held(ATTACHMENTS_TOTAL_MAX_BYTES - 1)], shot)).toBe('string');
 });
 
-test('the request names the dropped files, and the history still shows the words alone', () => {
-  const prompt = promptFor('What is in these?', { prime: null, memory: '', now: new Date(2026, 9, 9, 14, 5), seen: null, files: ['plan.pdf', 'odd]name.png'] });
-  expect(prompt).toContain('[The user dropped these files on you; they come with this request: plan.pdf, odd name.png.]');
-  expect(requestText(prompt)).toBe('What is in these?');
+test('the request names where the dropped files are kept, and the history still shows the words alone', () => {
+  const message = messageFor('What is in these?', { now: new Date(2026, 9, 9, 14, 5), seen: null, shots: [], files: ['C:\\kept\\plan.pdf', 'C:\\kept\\odd]name.png'] });
+  expect(message).toContain('files the user dropped on you: C:\\kept\\plan.pdf, C:\\kept\\odd name.png]]');
+  expect(visibleReply(message)).toBe('What is in these?');
 });
 
 // ---------------------------------------------------------------------------
@@ -94,12 +93,10 @@ test('[[task: project | instruction]] is read, the bars after the first kept in 
   expect(parseDirectives(many, new Date()).task).toHaveLength(3);
 });
 
-test('the first request names the projects, and the history leaves them out', () => {
-  const prompt = promptFor('Hello', { prime: 'new', memory: '[Memory: none]', now: new Date(2026, 9, 9, 9, 0), seen: null, projects: ['boite', 'notes'] });
-  expect(prompt).toContain("[Boite's projects: boite, notes.]");
-  expect(prompt).toContain('[[task: PROJECT | INSTRUCTION]]');
-  expect(requestText(prompt)).toBe('Hello');
-  expect(promptFor('Again', { prime: null, memory: '', now: new Date(), seen: null, projects: ['boite'] })).not.toContain("Boite's projects");
+test('the role names the projects and how to hand one a task', () => {
+  const block = roleBlock(['boite', 'notes']);
+  expect(block).toContain("Boite's projects: boite, notes.");
+  expect(block).toContain('[[task: PROJECT | INSTRUCTION]]');
 });
 
 const project = (id: string, name: string, extra: Partial<Project> = {}): Project => ({ id, name, path: `C:\\src\\${id}`, createdAt: 0, ...extra });

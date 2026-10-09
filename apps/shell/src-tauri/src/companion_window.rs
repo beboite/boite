@@ -9,7 +9,8 @@ use crate::platform::desktop;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, Monitor, PhysicalPosition, Runtime, State, Webview, WebviewUrl, WebviewWindow};
 
 pub const LABEL: &str = "companion";
@@ -602,6 +603,70 @@ pub fn companion_focus(app: AppHandle, webview: Webview) -> Result<(), String> {
     window_of(&app)?.set_focus().map_err(|error| error.to_string())
 }
 
+/// The folder, under the system's temporary one, where the files a request
+/// carries wait for the agent to open them.
+const KEPT_DIR: &str = "boite-companion";
+/// Kept files older than this go when the next one is kept.
+const KEPT_FOR: Duration = Duration::from_secs(24 * 60 * 60);
+static KEPT: AtomicU64 = AtomicU64::new(0);
+
+/// Keeps a file a request carries (a capture, a dropped file) where the
+/// companion's agent can open it, and says where: an agent's turn takes paths,
+/// not attachments. The body is the file's bytes; the `x-name` header its
+/// name, percent-encoded.
+#[tauri::command]
+pub async fn companion_keep(webview: Webview, request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    only_companion(&webview)?;
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("the file comes as raw bytes".into());
+    };
+    let name = request.headers().get("x-name").and_then(|value| value.to_str().ok()).map(percent_decoded).unwrap_or_default();
+    let dir = std::env::temp_dir().join(KEPT_DIR);
+    keep_file(&dir, &name, bytes, SystemTime::now()).map(|path| path.to_string_lossy().into_owned()).map_err(|error| error.to_string())
+}
+
+fn keep_file(dir: &Path, name: &str, bytes: &[u8], now: SystemTime) -> std::io::Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    for entry in std::fs::read_dir(dir)?.flatten() {
+        let stale = entry.metadata().and_then(|meta| meta.modified()).is_ok_and(|at| now.duration_since(at).unwrap_or_default() > KEPT_FOR);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    let stamp = now.duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
+    let path = dir.join(format!("{stamp}-{}-{}", KEPT.fetch_add(1, Ordering::Relaxed), safe_name(name)));
+    std::fs::write(&path, bytes)?;
+    Ok(path)
+}
+
+/// A file name that stays inside the folder and that every system accepts.
+fn safe_name(name: &str) -> String {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or_default();
+    let clean: String = base.chars().map(|c| if c.is_alphanumeric() || matches!(c, '.' | '-' | '_' | ' ') { c } else { '_' }).take(80).collect();
+    let clean = clean.trim_matches(['.', ' ']);
+    if clean.is_empty() { "file".into() } else { clean.into() }
+}
+
+fn percent_decoded(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let hex = (bytes[index] == b'%').then(|| text.get(index + 1..index + 3)).flatten().and_then(|pair| u8::from_str_radix(pair, 16).ok());
+        match hex {
+            Some(byte) => {
+                out.push(byte);
+                index += 3;
+            }
+            None => {
+                out.push(bytes[index]);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// The areas that take clicks, whole, each time the page's layout changes.
 #[tauri::command]
 pub fn companion_hit_rects(webview: Webview, state: State<'_, CompanionState>, rects: Vec<HitRect>) -> Result<(), String> {
@@ -623,15 +688,17 @@ pub async fn companion_media_control(webview: Webview, action: String) -> Result
     tauri::async_runtime::spawn_blocking(move || crate::platform::media::media_control(action)).await.map_err(|error| error.to_string())?
 }
 
-/// Brings the main window forward on the companion's settings, or on the
-/// thread `thread_id` (the same event a notification click sends).
+/// Brings the main window forward on the companion's settings, on the agent
+/// `agent_id` in the Agents page, or on the thread `thread_id` (the same event
+/// a notification click sends).
 #[tauri::command]
-pub async fn companion_show_main(app: AppHandle, webview: Webview, thread_id: Option<String>) -> Result<(), String> {
+pub async fn companion_show_main(app: AppHandle, webview: Webview, thread_id: Option<String>, agent_id: Option<String>) -> Result<(), String> {
     only_companion(&webview)?;
     crate::window::show_main(&app);
-    let sent = match thread_id {
-        Some(thread) => app.emit_to(crate::browser::MAIN_LABEL, "notification://open", thread),
-        None => app.emit_to(crate::browser::MAIN_LABEL, "companion://settings", ()),
+    let sent = match (thread_id, agent_id) {
+        (_, Some(agent)) => app.emit_to(crate::browser::MAIN_LABEL, "companion://agent", agent),
+        (Some(thread), None) => app.emit_to(crate::browser::MAIN_LABEL, "notification://open", thread),
+        (None, None) => app.emit_to(crate::browser::MAIN_LABEL, "companion://settings", ()),
     };
     sent.map_err(|error| error.to_string())
 }
@@ -647,6 +714,27 @@ mod tests {
         assert!(inside(&rects, 40.0, 320.0), "on the panel's edge");
         assert!(!inside(&rects, 20.0, 40.0), "beside the character");
         assert!(!inside(&[], 220.0, 40.0), "a page that announced nothing takes no click");
+    }
+
+    #[test]
+    fn kept_files_stay_in_their_folder_under_a_safe_name() {
+        assert_eq!(safe_name("..\\..\\Windows\\win.ini"), "win.ini");
+        assert_eq!(safe_name("../etc/pass:wd"), "pass_wd");
+        assert_eq!(safe_name(".."), "file");
+        assert_eq!(safe_name(""), "file");
+        assert_eq!(percent_decoded("%C3%A9t%C3%A9 1.png"), "été 1.png");
+        assert_eq!(percent_decoded("50%"), "50%");
+        let dir = std::env::temp_dir().join(format!("boite-companion-test-{}", std::process::id()));
+        let now = SystemTime::now();
+        let old = keep_file(&dir, "old.txt", b"old", now - KEPT_FOR - Duration::from_secs(60)).unwrap();
+        let file = std::fs::File::options().write(true).open(&old).unwrap();
+        file.set_modified(now - KEPT_FOR - Duration::from_secs(60)).unwrap();
+        drop(file);
+        let kept = keep_file(&dir, "shot.jpg", b"jpeg", now).unwrap();
+        assert_eq!(kept.parent(), Some(dir.as_path()));
+        assert_eq!(std::fs::read(&kept).unwrap(), b"jpeg");
+        assert!(!old.exists(), "a file older than a day goes");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

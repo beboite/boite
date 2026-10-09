@@ -91,20 +91,23 @@ export function remember(text: string, now = Date.now()): MemoryFact[] {
 }
 
 /**
- * Drops the facts `query` names: one that contains it or is contained in it,
- * or one that holds most of its words, since the agent rarely quotes a fact
- * word for word.
+ * Whether `query` names the fact `text`: it contains it or is contained in it,
+ * or it holds most of its words, since the agent rarely quotes a fact word for
+ * word.
  */
-export function forget(query: string): MemoryFact[] {
+export function namesFact(query: string, text: string): boolean {
   const wanted = normalized(query);
-  if (!wanted) return readMemory();
+  if (!wanted) return false;
+  const fact = normalized(text);
+  if (fact.includes(wanted) || wanted.includes(fact)) return true;
   const words = wanted.split(' ').filter((word) => word.length >= 3);
-  const named = (fact: MemoryFact) => {
-    const text = normalized(fact.text);
-    if (text.includes(wanted) || wanted.includes(text)) return true;
-    return words.length >= 2 && words.filter((word) => text.includes(word)).length / words.length >= 0.6;
-  };
-  const next = readMemory().filter((fact) => !named(fact));
+  return words.length >= 2 && words.filter((word) => fact.includes(word)).length / words.length >= 0.6;
+}
+
+/** Drops the facts `query` names (`namesFact`). */
+export function forget(query: string): MemoryFact[] {
+  if (!normalized(query)) return readMemory();
+  const next = readMemory().filter((fact) => !namesFact(query, fact.text));
   store(MEMORY_KEY, next);
   return next;
 }

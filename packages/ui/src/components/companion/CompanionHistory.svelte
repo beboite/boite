@@ -1,56 +1,33 @@
 <!--
-  The companion's earlier exchanges, read from its thread each time the list
-  opens (`lib/companion/history.ts`): the request as typed, the reply as the
+  An agent's earlier exchanges with the user, as the agents snapshot carries
+  them (`lib/companion/history.ts`): the request as typed, the reply as the
   bubble showed it. A click puts the reply back in the bubble.
 -->
 <script lang="ts">
-  import type { Client } from '../../lib/client';
-  import { readHistory, type Exchange } from '../../lib/companion/history';
+  import type { AgentsSnapshot } from '@boite/contracts';
+  import { exchangesOf, type Exchange } from '../../lib/companion/history';
   import { strings } from '../../lib/strings';
 
   interface Props {
-    /** The page's connection, read when the list opens. */
-    client: () => Client | null;
-    threadId: string | null;
+    /** Null while the snapshot is read. */
+    snapshot: AgentsSnapshot | null;
+    /** The agent the panel talks to; empty when the companion has none. */
+    agentId: string;
     onpick: (exchange: Exchange) => void;
   }
 
-  let { client, threadId, onpick }: Props = $props();
+  let { snapshot, agentId, onpick }: Props = $props();
 
   const copy = strings.companion.history;
 
-  let exchanges = $state.raw<Exchange[] | null>(null);
-  let failed = $state(false);
-
-  $effect(() => {
-    const [source, thread] = [client(), threadId];
-    exchanges = null;
-    failed = false;
-    if (!source || !thread) {
-      exchanges = [];
-      return;
-    }
-    let live = true;
-    readHistory(source, thread)
-      .then((list) => {
-        if (live) exchanges = list;
-      })
-      .catch(() => {
-        if (live) failed = true;
-      });
-    return () => {
-      live = false;
-    };
-  });
+  const exchanges = $derived(snapshot === null && agentId ? null : exchangesOf(snapshot, agentId));
 
   const time = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 </script>
 
 <section class="history" aria-label={copy.title} data-testid="companion-history">
   <h3>{copy.title}</h3>
-  {#if failed}
-    <p class="none problem" role="alert">{copy.failed}</p>
-  {:else if exchanges === null}
+  {#if exchanges === null}
     <p class="none">{copy.loading}</p>
   {:else if exchanges.length === 0}
     <p class="none">{copy.empty}</p>
@@ -143,9 +120,6 @@
     margin: 0 14px 8px;
     font-size: var(--text-xs);
     color: var(--color-muted-foreground);
-  }
-  .problem {
-    color: var(--color-danger);
   }
   @keyframes unfold {
     from {

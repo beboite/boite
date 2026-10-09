@@ -5,8 +5,10 @@ character on a screen in the desktop app. It shows the state of the agents at
 a glance, lets the user answer their permissions and questions without
 opening Boite, and answers requests of its own: the user can ask it
 something, show it the screen, or ask it to act on the computer (open an app
-or a page, play music, launch a game). It keeps a memory of the user, rings
-the reminders it is asked for and says when another conversation finished.
+or a page, play music, launch a game). Those who answer are agents of the
+Agents page, up to four side by side, each with its own look, conversation
+and memory. It rings the reminders they set and says when another thread
+finished.
 
 Only the desktop shell shows it. A browser or a phone with the experiment on
 shows the Settings page, which says that the companion runs in the desktop app.
@@ -20,9 +22,9 @@ shows the Settings page, which says that the companion runs in the desktop app.
 | Media session (Spotify first): read, cover and control | `apps/shell/src-tauri/src/platform/media.rs` |
 | App in front, and whether it is a game | `apps/shell/src-tauri/src/platform/games.rs` |
 | Page, mounted for `index.html?view=companion` | `packages/ui/src/CompanionApp.svelte` |
-| Character, ask bar, panel, notices, music pill, HUD, pomodoro and focus, history, memory card, dropped files, task cards, confetti | `packages/ui/src/components/companion/` |
+| Character and its accessories, agents row, ask bar, panel, notices, music pill, HUD, pomodoro and focus, history, Settings' agents and reminders cards, dropped files, task cards, confetti | `packages/ui/src/components/companion/` |
 | Settings, Companion | `packages/ui/src/components/CompanionSettings.svelte` |
-| Preferences, mood, brain, conversation, senses, notices, HUD, pomodoro, focus, history, reactions, memory, directives, screen, dropped files, tasks, sounds, shell calls | `packages/ui/src/lib/companion/` |
+| Preferences, mood, brain and role, agents (`crew.ts`, `crew.svelte.ts`), each agent's conversation (`talk.svelte.ts`), looks (`skin.ts`), senses, notices, HUD, pomodoro, focus, history, reactions, reminders, directives, screen, dropped files, tasks, sounds, shell calls | `packages/ui/src/lib/companion/` |
 
 The main window opens the companion's window while the experiment is on and
 closes it when it is switched off (`lib/companion/follow.svelte.ts`).
@@ -116,44 +118,61 @@ experiments: screen, position and drop spot, hiding for full-screen apps, the
 shortcut (one of `COMPANION_HOTKEYS`, or none), sounds, agent, account,
 model, effort, control mode, music, quotas and the ones hidden, closing on an
 outside click, the pomodoro's work and break minutes, focus during work, and
-the id of the conversation. Both webviews share the origin, so the companion
-follows a change from Settings through the `storage` event.
+the agents of the row (`agents`, four at most, the leader first). Both
+webviews share the origin, so the companion follows a change from Settings
+through the `storage` event.
 
-Changing the agent, account, model, effort or control mode keeps the
-conversation: before its next request, `talk.svelte.ts` moves the thread over
-with `threads.update` (account, model, effort, permission mode). A move to
-another agent starts a session of its own on the same thread, so the role goes
-again. Only "New conversation", or the thread being deleted, starts another
-thread.
+The provider, account, model, effort and control mode are what a new agent
+of the companion's gets. An agent already in the row keeps its own, changed
+in its page in Agents.
 
-## Brain
+## Agents
 
-The companion talks through an ordinary thread, titled "Companion", in the
-drafts project. It runs like any other thread, on the chosen account, so the
-core's subscription proxy (Douane) and the usual permissions apply. Nothing
-is added to the core or to the RPC.
+The companion talks through agents of the Agents page (`docs/agents.md`):
+their conversations, memories, models and looks are the ones that page shows
+and changes, and opening one from the companion turns the "Resident agents"
+experiment on. They run like any other agent, on their own account, so the
+core's subscription proxy (Douane), its limit on agent work running at once
+and the usual permissions apply. Nothing is added to the core or to the RPC.
 
-- Automatic takes the first agent that is on, present and signed in, on the
-  small model titles are written with when the agent lists it, otherwise on
-  the agent's default. A chosen agent that is off or signed out is reported,
-  not replaced.
-- "Ask before acting" creates the thread in the `default` permission mode:
-  every command waits for Allow or Deny, which the companion's panel shows.
-  "Act without asking" uses `bypassPermissions`.
-- The UI cannot write an instructions file for the agent, so the role
-  (`COMPANION_ROLE` in `brain.ts`) and the memory go in front of the first
-  request of a conversation. `priming.ts` keeps what the thread was last given
-  (hashes of the role and the memory, under `boite.companion.primed`): the
-  role goes again when it changed, when the thread moved to another agent, or
-  for a conversation the record does not know; the memory goes again, alone,
-  whenever it changed or a reply's directives could not be read. The agent so
-  believes the memory the companion keeps, not what the conversation says it
-  noted. The role asks for short plain-text answers in
-  the user's language, gives the Windows recipes (`Start-Process`,
-  `Get-StartApps`, Steam's `steam://rungameid/`, Spotify URIs and the media
-  keys) and the directives below.
-- Every request starts with the local date and time, and says what images
-  come with it. The ask bar sends the screen when the eye is on: by itself
+- The row (`CompanionCrew.svelte`): the agents stand side by side, the leader
+  first. A click on one opens the panel to talk to it; with the panel open, a
+  click on another switches to it. Each keeps its own bubble, request
+  in flight and history. The first time the companion runs without agents it
+  makes one, Bots, in the classic look, and moves the facts it kept on this
+  computer into Bots's memory. Settings, Companion, Agents makes another one
+  (on the provider below), adds an existing agent, draws a new look for one,
+  opens its page, or takes it off the row, except the last one. An agent taken
+  off stays an ordinary agent, and its instructions lose the role.
+- Looks (`skin.ts`, `BoxTop.svelte`): each agent stands as the companion's
+  box in its own robot's colours, with a body colour, lid, eyes and an
+  accessory on the lid (`ROBOT_PARTS.box`); the robot picker in Agents draws
+  the same boxes. A robot of another family becomes a box of its colour. A new
+  agent, or "New look", gets a body colour nobody in the row wears
+  (`freshSkin`) and an accessory; Bots keeps the classic box. The accessory
+  steps aside for the headphones and the headset.
+- The role (`COMPANION_ROLE` in `brain.ts`) sits in the instructions of each
+  agent of the row, between `<!-- boite-companion -->` marks, after what the
+  user wrote, with Boite's projects for `[[task: …]]` (`roleBlock`,
+  `withRole`). The companion writes it again when it or the projects change,
+  and takes it out whole (`withoutRole`) when the agent leaves the row. It
+  asks for short plain-text answers in the user's language, gives the Windows
+  recipes (`Start-Process`, `Get-StartApps`, Steam's `steam://rungameid/`,
+  Spotify URIs and the media keys) and the directives below.
+- For a new agent, Automatic takes the first provider that is on, present and
+  signed in, on the small model titles are written with when it lists it,
+  otherwise on its default. A chosen provider that is off or signed out is
+  reported, not replaced. "Ask before acting" makes the agent in the
+  `default` permission mode: every command waits for Allow or Deny, which the
+  companion's panel shows. "Act without asking" uses `bypassPermissions`.
+- A request goes to the agent's direct conversation (`agents.message.send`)
+  and ends with a `[[context: …]]` line (`contextLine`): the local date and
+  time, then the paths of the images and files that go with it. An agent's
+  turn takes paths, not attachments, so the shell keeps each file in the
+  system's temporary folder, under `boite-companion`, for a day
+  (`companion_keep`), and the agent opens it with its file-reading tool.
+  Outside the shell no image or file goes.
+- The ask bar sends the screen when the eye is on: by itself
   when the request speaks of the screen (`mentionsScreen`), or by a click.
   The row under the bar then picks what goes, a choice kept in the
   preferences: every screen (one image per screen, the primary first), the
@@ -165,12 +184,14 @@ is added to the core or to the RPC.
   (Advanced): at 0 the agent starts again for every request. The companion
   does not change it; its Settings page says so and links there.
 
-The reply bubble streams the text parts of the agent's messages from
-`message.started`, `message.delta` and `message.part` on the subscribed
-thread; reasoning and tool input are left out. The turn ends when the thread
-leaves `queued`, `running` or `waiting`; the page then reads the thread's last
-messages (`threads.get`; `messages.list` needs a cursor) for the final text and
-the directives of every message of the turn.
+The answer streams into the agent's bubble from the thread the agent works
+its conversation in (`message.started`, `message.delta` and `message.part` on
+that subscribed thread; reasoning and tool input are left out). The agent's
+message that replies to the request ends it, and a work that ends without
+one makes the bubble say so. The agents snapshot is read again on
+`agents.changed`, after 150 ms while an answer is awaited and 1.2 s
+otherwise. The conversation shows in Agents as the user typed it: the context
+line and the directives are left out there too (`visibleReply`).
 
 ## Memory, reminders and directives
 
@@ -189,13 +210,18 @@ The agent adds lines of its own to a reply, which the bubble never shows
 - `[[task: project | instruction]]` launches a Boite thread in that project
   (three per reply at most; see "Launching threads").
 
-The memory (80 facts at most, oldest out first) and the reminders live in
-`localStorage` on this computer (`memory.ts`), never in the core except as the
-memory block of a request. Settings, Companion lists both: a fact can be
-added or forgotten, the whole memory cleared after a confirmation, a reminder
-cancelled. A change goes to the agent with the next request, in the same
-conversation. Passwords and other secrets are not to be kept, as the role
-says.
+The facts go to the memory of the agent that answered (`agents.memory.save`;
+a forget expires the memories it names, the way the Agents page deletes one),
+which the core gives the agent with its requests; they are seen and changed
+in its page in Agents. The reminders live in `localStorage` on this computer
+(`memory.ts`); Settings, Companion lists them and cancels one. Passwords and
+other secrets are not to be kept, as the role says.
+
+The companion's window carries out each answer's directives once, the marks
+of the answers already read kept under `boite.companion.marks`. An answer it
+first sees more than two minutes after it was written, because the companion
+was closed, only keeps and forgets facts and sets reminders: a timer, focus
+or a thread launched late would surprise the user.
 
 The companion's window checks the reminders every second. One that is due
 shows a card with OK and "In 10 min", the character looks alert and a chime
@@ -205,7 +231,8 @@ all.
 
 ## Notices
 
-When a thread other than the companion's finishes, a card says so with the
+When a thread other than the ones the row's agents work in finishes, a card
+says so with the
 first sentence of its last answer, without Markdown (`summaryLine`). A click
 opens the thread in the main window. Notices go after 15 seconds, and stay
 while the pointer is on the companion or its panel is open.
@@ -351,14 +378,15 @@ and the user's choice are kept under `boite.companion.focus`.
 
 ## History
 
-The row under the ask bar shows the last 20 exchanges (`CompanionHistory.svelte`,
-`history.ts`). They are read from the companion's thread with `threads.get`
-each time the list opens, with tool calls, files and images compacted. Nothing
-is copied locally.
+The row under the ask bar shows the last 20 exchanges with the agent being
+talked to (`CompanionHistory.svelte`, `history.ts`): each request of the
+user's in its direct conversation, from the agents snapshot, with the
+agent's message that replies to it. Nothing is copied locally; the whole
+conversation is in its page in Agents.
 
-A request reads as the user typed it: the role and memory it carried, the
-date line and every bracketed line are left out. A reply reads as the
-bubble showed it (`visibleReply`). A click puts the reply back in the bubble.
+A request reads as the user typed it, without its context line. A reply reads
+as the bubble showed it (`visibleReply`). A click puts the reply back in the
+bubble.
 The list closes when a new permission or question opens the panel.
 
 ## Dropping files
@@ -378,12 +406,12 @@ composer's contract (`readAttachmentFile`). The core's caps are checked as
 each file comes (`ATTACHMENT_MAX_BYTES`, `ATTACHMENTS_PER_TURN`,
 `ATTACHMENTS_TOTAL_MAX_BYTES`, with the screen's images on sending), and a
 refusal names the file and the cap in the composer's words; the other files
-stay. The request names the files it carries for the agent. A request that
-does not go puts the text and the files back.
+stay. The request's context line says where they were kept for the agent. A
+request that does not go puts the text and the files back.
 
 ## Launching threads
 
-A request that carries the role lists Boite's projects, drafts and
+The role lists Boite's projects, drafts and
 archived ones left out (`taskProjects`). The agent launches a thread with
 `[[task: project | instruction]]` (`tasks.ts`, `tasks.svelte.ts`):
 
@@ -411,16 +439,16 @@ Nothing is added to the core or the RPC.
   spots, full-screen cover, picked area on the screen, shortcut parsing and ACL,
   the cover's size and per-track cache, which apps are games, and when a press
   is a click elsewhere.
-- `packages/ui/src/lib/companion/companion.test.ts`: preferences, mood, brain
-  choice, prompt and wording.
+- `packages/ui/src/lib/companion/companion.test.ts`: preferences and the row,
+  mood, brain choice, the context line, the role's marks, and wording.
 - `packages/ui/src/lib/companion/companion-memory.test.ts`: memory,
   reminders, directives, notices' summary line, layout and screen words.
-- `packages/ui/src/lib/companion/companion-talk.test.ts`, on the fake core: a
-  reply's directives kept, a brain changed in Settings moving the same thread
-  over, a finished thread's first sentence, a reminder ringing again until
-  answered.
-- `packages/ui/src/lib/companion/companion-priming.test.ts`: when the role or
-  the memory goes again, and the record's storage.
+- `packages/ui/src/lib/companion/companion-crew.test.ts`: the look each agent
+  wears and the fresh ones, the row, replies, memory kept and forgotten, the
+  agent the companion makes, and the notes (an agent's own thread left out, a
+  reminder ringing again until answered).
+- `packages/ui/src/lib/companion/skin.test.ts` and `packages/ui/src/lib/robots.test.ts`:
+  the box's colours, lid, eyes and accessories, and boxes in the robot codes.
 - `packages/ui/src/lib/companion/companion-hud.test.ts`: the HUD's threads,
   steps and order, the gauges, their levels and providers, the ones hidden in
   Settings, and following the quotas on the fake core's HUD demo.
@@ -428,14 +456,15 @@ Nothing is added to the core or the RPC.
   focus directives and durations, the pomodoro's phases, the countdown and the
   stopwatch, pause, storage and
   chimes across a reload, what focus sets aside and lets ring, its
-  preferences, and the history's requests and replies, read back from the
-  fake core.
+  preferences, and the history's requests and replies, read from an agents
+  snapshot.
 - `packages/ui/src/lib/companion/companion-reactions.test.ts`: the answers
   that say the tests pass or not, in English and French, the day's first sign
   and the coffee's hours, the confetti's timing, and a finished thread's
   answer handed over by the notes on the fake core.
 - `packages/ui/src/lib/companion/companion-drop.test.ts`: dropped files under
-  the caps and with the screen, the request naming files and projects, the
+  the caps and with the screen, the request naming the kept files, the role
+  naming the projects, the
   task directive, finding a project, the new thread's agent and model, and
   launching in both control modes on the fake core.
 - Captures: `?view=companion&fake=1` on the dev UI at 440 × 600 (`&hud=1`

@@ -32,6 +32,7 @@ commands.allow = [
   "companion_capture",
   "companion_cover",
   "companion_focus",
+  "companion_keep",
   "window_material",
   "window_material_supported",
   "tray_labels",
@@ -73,4 +74,5 @@ commands.allow = [
   "companion_capture",
   "companion_cover",
   "companion_focus",
+  "companion_keep",
 ]

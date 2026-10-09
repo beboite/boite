@@ -6,9 +6,9 @@
  * page receives for writes made by the other pages of its origin. Both
  * webviews of the shell share the origin and the profile, so they share this.
  *
- * `threadId` is the conversation the companion talks in. It is cleared when
- * the brain changes (model, account, effort, control mode), because a thread
- * keeps the agent and permission mode it was made with.
+ * `agents` are the Boite agents that stand as the companion, side by side, the
+ * first one leading (`crew.svelte.ts`). The brain fields are what a companion
+ * agent made from here runs on; each agent then keeps its own.
  */
 
 /** Along the top of the screen, or `free`: where the user dropped the character. */
@@ -55,7 +55,10 @@ export interface CompanionPrefs {
   /** Focus mode during the pomodoro's work phase. */
   focusOnWork: boolean;
   screenScope: CompanionScreenScope;
-  threadId: string | null;
+  /** The agents that stand as the companion, by id, the leader first; `CREW_MAX` at most. */
+  agents: string[];
+  /** The first agent was made for the companion: from then on the row is the user's to change. */
+  crewMade: boolean;
 }
 
 export const COMPANION_STORAGE_KEY = 'boite.companion';
@@ -80,11 +83,12 @@ export const DEFAULT_COMPANION_PREFS: CompanionPrefs = {
   breakMinutes: 5,
   focusOnWork: true,
   screenScope: 'all',
-  threadId: null
+  agents: [],
+  crewMade: false
 };
 
-/** The fields the conversation's thread runs with: `talk.svelte.ts` applies a change to it before the next request. */
-export const BRAIN_KEYS = ['providerId', 'accountId', 'model', 'effort', 'control'] as const;
+/** How many agents stand side by side: the window is 440 px wide. */
+export const CREW_MAX = 4;
 
 const text = (value: unknown): string | null => (typeof value === 'string' && value !== '' ? value : null);
 
@@ -126,7 +130,8 @@ export function parseCompanionPrefs(raw: unknown): CompanionPrefs {
     breakMinutes: minutes(value.breakMinutes, 60, DEFAULT_COMPANION_PREFS.breakMinutes),
     focusOnWork: value.focusOnWork !== false,
     screenScope: value.screenScope === 'here' || value.screenScope === 'zone' ? value.screenScope : 'all',
-    threadId: text(value.threadId)
+    agents: Array.isArray(value.agents) ? [...new Set(value.agents.filter((id): id is string => typeof id === 'string' && id !== ''))].slice(0, CREW_MAX) : [],
+    crewMade: value.crewMade === true
   };
 }
 

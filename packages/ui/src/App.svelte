@@ -29,7 +29,7 @@
   import { strings } from './lib/strings';
   import { experimentOn } from './lib/experiments.svelte';
   import { installWhipEscape } from './lib/whip.svelte';
-  import { followCompanionExperiment } from './lib/companion/follow.svelte';
+  import { followCompanionExperiment, showAgentPage } from './lib/companion/follow.svelte';
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
   import type { Store } from './lib/store.svelte';
@@ -399,17 +399,18 @@
     let unlisten: (() => void) | undefined;
     let disposed = false;
     let stopTray: (() => void) | undefined;
-    const traySettings = async (tab: 'accounts' | 'limits' | 'companion') => {
+    const onLocal = async (open: (local: Store) => void) => {
       const local = workspace.machines.find((machine) => machine.store.localCore)?.store;
       if (!local) return;
       await workspace.select(local);
-      if (workspace.active === local) local.showSettings(tab);
+      if (workspace.active === local) open(local);
     };
     void import('@tauri-apps/api/event').then(async ({ listen }) => {
       const stops = await Promise.all([
-        listen('tray://providers', () => void traySettings('accounts')),
-        listen('tray://limits', () => void traySettings('limits')),
-        listen('companion://settings', () => void traySettings('companion')),
+        listen('tray://providers', () => void onLocal((local) => local.showSettings('accounts'))),
+        listen('tray://limits', () => void onLocal((local) => local.showSettings('limits'))),
+        listen('companion://settings', () => void onLocal((local) => local.showSettings('companion'))),
+        listen<string>('companion://agent', (event) => void onLocal((local) => showAgentPage(local, event.payload))),
       ]);
       const stop = () => stops.forEach((off) => off());
       if (disposed) stop(); else stopTray = stop;

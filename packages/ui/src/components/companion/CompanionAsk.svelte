@@ -7,7 +7,7 @@
 -->
 <script lang="ts">
   import { ArrowUp, ScanEye, Settings, Square } from '@lucide/svelte';
-  import { strings } from '../../lib/strings';
+  import { fill, strings } from '../../lib/strings';
   import { mentionsScreen, type ScreenScope } from '../../lib/companion/screen';
 
   interface Props {
@@ -23,9 +23,11 @@
     onscope: (scope: ScreenScope) => void;
     onstop: () => void;
     onsettings: () => void;
+    /** The agent asked, named when several stand side by side. */
+    to?: string | null;
   }
 
-  let { draft = $bindable(), thinking, canSee, screens, scope, input = $bindable(null), onask, onscope, onstop, onsettings }: Props = $props();
+  let { draft = $bindable(), thinking, canSee, screens, scope, input = $bindable(null), onask, onscope, onstop, onsettings, to = null }: Props = $props();
 
   let choice = $state<boolean | null>(null);
   const screen = $derived(canSee && (choice ?? mentionsScreen(draft)));
@@ -47,7 +49,7 @@
 </script>
 
 <form class="askbar" onsubmit={submit}>
-  <input bind:this={input} bind:value={draft} type="text" placeholder={strings.companion.ask} aria-label={strings.companion.askLabel} autocomplete="off" />
+  <input bind:this={input} bind:value={draft} type="text" placeholder={to ? fill(strings.companion.askTo, { name: to }) : strings.companion.ask} aria-label={to ? fill(strings.companion.askToLabel, { name: to }) : strings.companion.askLabel} autocomplete="off" />
   {#if canSee}
     <button
       type="button"

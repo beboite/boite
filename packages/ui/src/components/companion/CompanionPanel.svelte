@@ -24,8 +24,8 @@
     permissions: PermissionRequest[];
     questions: QuestionRequest[];
     mood: MoodState;
-    /** The companion's own thread: its reply is in the bubble, so it is not listed with the others at work. */
-    own: string | null;
+    /** The threads of the companion's own agents: their replies are in the bubble, so they are not listed with the others at work. */
+    own: readonly string[];
     onact(action: PanelAction): Promise<void>;
   }
 
@@ -35,8 +35,8 @@
   const asks = $derived(permissions);
   const blocking = $derived(questions.filter((question) => !question.async));
   const later = $derived(questions.filter((question) => question.async));
-  const working = $derived(threads.filter((thread) => isWorking(thread.status) && thread.id !== own));
-  const finished = $derived(threads.filter((thread) => mood.justFinished.includes(thread.id) && thread.id !== own));
+  const working = $derived(threads.filter((thread) => isWorking(thread.status) && !own.includes(thread.id)));
+  const finished = $derived(threads.filter((thread) => mood.justFinished.includes(thread.id) && !own.includes(thread.id)));
   const nothing = $derived(asks.length + blocking.length + later.length + working.length + finished.length === 0);
 
   let pending = $state<string[]>([]);

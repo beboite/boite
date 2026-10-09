@@ -1,18 +1,20 @@
 <!--
   The desktop companion's window (`companion_window.rs`): a transparent area
-  on a screen, with the character, its reply, what it has to tell, the music
-  it hears and, once opened, a field to ask it something and the requests
-  agents are waiting on. Only the areas marked `data-hit` take clicks; the
-  rest of the window lets them through to what is under it.
+  on a screen, with the characters, their replies, what they have to tell,
+  the music they hear and, once opened, a field to ask the one clicked
+  something and the requests agents are waiting on. Only the areas marked
+  `data-hit` take clicks; the rest of the window lets them through to what is
+  under it.
 
-  The companion talks through an ordinary thread in the drafts project
-  (`lib/companion/talk.svelte.ts`), so its agent runs the way every thread
-  runs, through the core's account and subscription proxy. The shell tells
-  it what goes on around it (`lib/companion/senses.svelte.ts`).
+  Each character is a Boite agent (`lib/companion/crew.svelte.ts`), talked to
+  in its own conversation of the Agents page (`lib/companion/talk.svelte.ts`),
+  so it runs the way every agent runs, through the core's accounts and
+  subscription proxy, with its own memory. The shell tells the window what
+  goes on around it (`lib/companion/senses.svelte.ts`).
 -->
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
-  import type { ImageAttachment, PermissionRequest, QuestionRequest, ThreadSummary } from '@boite/contracts';
+  import type { PermissionRequest, QuestionRequest, ThreadSummary } from '@boite/contracts';
   import { WsClient, type Client, type ClientState } from './lib/client';
   import { resolveEndpoint } from './lib/endpoint';
   import { startTheme } from './lib/theme';
@@ -25,9 +27,12 @@
   import { playCue, unlockSounds, type Cue } from './lib/companion/sounds';
   import { companionHitRects, companionMonitors, configureCompanion, coverScreen, dragCompanion, focusCompanion, inShell, layoutOf, placeCompanion, showMain, type CompanionLayout, type HitRect } from './lib/companion/shell';
   import { Talk } from './lib/companion/talk.svelte';
+  import { Crew } from './lib/companion/crew.svelte';
+  import { sessionThreadOf, skinOf } from './lib/companion/crew';
+  import { taskProjects } from './lib/companion/tasks';
   import { Notes } from './lib/companion/notes.svelte';
   import { Senses } from './lib/companion/senses.svelte';
-  import CompanionCharacter, { type Gaze } from './components/companion/CompanionCharacter.svelte';
+  import CompanionCrew, { type CrewMember } from './components/companion/CompanionCrew.svelte';
   import CompanionPanel, { type PanelAction } from './components/companion/CompanionPanel.svelte';
   import CompanionAsk from './components/companion/CompanionAsk.svelte';
   import CompanionNotes from './components/companion/CompanionNotes.svelte';
@@ -42,7 +47,6 @@
   import CompanionFocusCards from './components/companion/CompanionFocusCards.svelte';
   import CompanionTools from './components/companion/CompanionTools.svelte';
   import CompanionHistory from './components/companion/CompanionHistory.svelte';
-  import CompanionConfetti from './components/companion/CompanionConfetti.svelte';
   import { Reactions } from './lib/companion/reactions.svelte';
   import { Dropped, joinScreen } from './lib/companion/drop.svelte';
   import { Tasks } from './lib/companion/tasks.svelte';
@@ -53,26 +57,25 @@
   const REFRESH_EVERY = 15_000;
   const MEDIA_EVERY = 2000;
   const HIT_PAD = 6;
-  /** How far the pointer goes on the character before a press becomes a drag. */
+  /** How far the pointer goes on a character before a press becomes a drag. */
   const DRAG_FROM = 4;
-  /** The distance at which the eyes reach the side and the bottom of their sockets. */
-  const GAZE_REACH = { x: 240, y: 180 };
 
   const initial = readCompanionPrefs();
   let prefs = $state<CompanionPrefs>(initial);
   let threads = $state.raw<ThreadSummary[]>([]);
   let projects = $state.raw(new Map<string, string>());
+  /** The projects a task may go to, by name, for the agents' role; null until read. */
+  let projectNames = $state.raw<string[] | null>(null);
   let permissions = $state.raw<PermissionRequest[]>([]);
   let questions = $state.raw<QuestionRequest[]>([]);
   let mood = $state<MoodState>(RESTING);
   let media = $state<MediaState | null>(null);
   let pointerOn = $state(false);
   let open = $state(false);
-  let boing = $state(0);
+  let boings = $state<Record<string, number>>({});
   let draft = $state('');
   let sending = $state(false);
   let input = $state<HTMLInputElement | null>(null);
-  let character = $state<HTMLButtonElement | null>(null);
   let layout = $state<CompanionLayout>(layoutOf(initial.anchor, initial.spot));
   let dragging = $state(false);
   /** The window covers a screen while the user picks what to show. */
@@ -108,24 +111,60 @@
   const focus = new Focus({ auto: () => prefs.focusOnWork && timer.working });
   let history = $state(false);
 
-  const talk = new Talk({
+  // The agents standing as companions, and one conversation each.
+  const crew = new Crew({
     client: () => client,
     prefs: () => prefs,
-    threads: () => threads,
-    hovering: () => hover,
-    created: (thread) => (threads = [...threads, thread]),
-    settled: (outcome, directives) => {
-      cue(outcome === 'done' ? 'done' : 'error');
-      if (directives) obey(directives);
-    }
+    projects: () => projectNames,
+    waiting: () => talks.some((talk) => talk.waiting),
+    answered: (agentId, message, directives, fresh) => {
+      talkCache.get(agentId)?.answered(message);
+      if (!fresh) return;
+      answerer = agentId;
+      obey(directives);
+    },
+    loaded: () => talks.forEach((talk) => talk.follow())
   });
+
+  const talkCache = new Map<string, Talk>();
+  function talkOf(agentId: string | null): Talk {
+    const key = agentId ?? '';
+    let talk = talkCache.get(key);
+    if (!talk) {
+      talk = new Talk(agentId, {
+        client: () => client,
+        snapshot: () => crew.snapshot,
+        hovering: () => hover,
+        missing: () => crew.problem ?? strings.companion.noAgent,
+        settled: (outcome) => cue(outcome === 'done' ? 'done' : 'error')
+      });
+      talkCache.set(key, talk);
+    }
+    return talk;
+  }
+
+  // With no agent yet, a lone character stands, and says so when asked.
+  const members = $derived<CrewMember[]>(
+    crew.members.length > 0
+      ? crew.members.map((agent) => ({ id: agent.id, name: agent.name, skin: skinOf(agent), talk: talkOf(agent.id) }))
+      : [{ id: '', name: null, skin: null, talk: talkOf(null) }]
+  );
+  const talks = $derived(members.map((member) => member.talk));
+  /** The character the panel talks to. */
+  let activeId = $state('');
+  const active = $derived(members.find((member) => member.id === activeId) ?? members[0]!);
+  const thinking = $derived(talks.some((talk) => talk.thinking));
+  /** The agents' own conversations, which the quotas and the notices leave out. */
+  const ownThreads = $derived(crew.members.flatMap((agent) => sessionThreadOf(crew.snapshot, agent.id) ?? []));
+  /** The agent whose fresh reply set a task: what the tasks say goes to its bubble. */
+  let answerer: string | null = null;
 
   const attached = new Dropped();
   const tasks = new Tasks({
     client: () => client,
     control: () => prefs.control,
     created: (thread) => acceptThread(thread),
-    say: (text) => talk.aside(text)
+    say: (text) => (talkCache.get(answerer ?? '') ?? active.talk).aside(text)
   });
 
   /** A work phase starts: an earlier "focus off" gives way to the pomodoro again. */
@@ -149,7 +188,7 @@
   const notes = new Notes({
     client: () => client,
     threads: () => threads,
-    ownThread: () => prefs.threadId,
+    ownThreads: () => ownThreads,
     holding: () => hover || open,
     rang: () => {
       senses.wake();
@@ -169,7 +208,7 @@
   });
 
   const senses = new Senses({
-    hover: () => talk.hold(),
+    hover: () => talks.forEach((talk) => talk.hold()),
     outside: () => {
       if (prefs.closeOutside && open) close();
     },
@@ -180,15 +219,19 @@
   // In the shell the pointer is heard from its watch, since the window stops
   // taking it outside the areas; in a browser the page sees it.
   const hover = $derived(inShell() ? senses.hover : pointerOn);
-  const asleep = $derived(senses.asleep && !open && !talk.thinking && !dragging && mood.mood === 'idle' && notes.alarms.length === 0 && !media?.playing);
+  const asleep = $derived(senses.asleep && !open && !thinking && !dragging && mood.mood === 'idle' && notes.alarms.length === 0 && !media?.playing);
 
-  /** Where the pointer is, seen from the character's eyes. */
-  const gaze = $derived.by((): Gaze | null => {
-    const point = senses.pointer;
-    if (!point || !character || dragging) return null;
-    const box = character.getBoundingClientRect();
-    const clamp = (value: number) => Math.max(-1, Math.min(1, value));
-    return { x: clamp((point.x - box.x - box.width / 2) / GAZE_REACH.x), y: clamp((point.y - box.y - box.height / 2) / GAZE_REACH.y) };
+  // The music pill outlives the pointer a little: crossing the gap between the
+  // character, the quotas and the pill must not take it away.
+  const MEDIA_LINGER = 900;
+  let mediaShown = $state(false);
+  $effect(() => {
+    if (open || hover) {
+      mediaShown = true;
+      return;
+    }
+    const hide = setTimeout(() => (mediaShown = false), MEDIA_LINGER);
+    return () => clearTimeout(hide);
   });
 
   // ---------------------------------------------------------------------
@@ -232,6 +275,7 @@
     if (!client) return;
     const list = await client.call('projects.list', {});
     projects = new Map(list.map((project) => [project.id, project.name]));
+    projectNames = taskProjects(list).map((project) => project.name);
   }
 
   async function refresh() {
@@ -248,7 +292,6 @@
       questions = questionList;
       reachable = true;
       if (threadList.some((thread) => thread.projectId && !projects.has(thread.projectId))) await readProjects();
-      talk.follow();
       followRequests();
     } catch {
       reachable = false;
@@ -265,7 +308,6 @@
   /** A thread that changed: its status counts at once, the requests are read again a moment later. */
   function acceptThread(thread: ThreadSummary) {
     threads = threads.some((entry) => entry.id === thread.id) ? threads.map((entry) => (entry.id === thread.id ? thread : entry)) : [...threads, thread];
-    talk.follow();
     recompute();
     soon();
   }
@@ -276,6 +318,7 @@
 
   async function ask(withScreen: boolean) {
     const request = draft.trim();
+    const talk = active.talk;
     if (!request || sending || talk.thinking) return;
     sending = true;
     try {
@@ -351,17 +394,40 @@
   }
 
   async function toggle() {
-    boing++;
+    bounce();
     open = !open;
     autoOpened = false;
     if (open) await focusInput();
+  }
+
+  /** A character hops: on a click, on files dropped, when summoned. */
+  function bounce(id = active.id) {
+    boings = { ...boings, [id]: (boings[id] ?? 0) + 1 };
+  }
+
+  /**
+   * A click on a character: it opens or closes the panel; with the panel
+   * open, a click on another character turns the panel to it instead.
+   */
+  function pick(id: string) {
+    press = null;
+    if (dropped) return;
+    if (open && id !== active.id) {
+      activeId = id;
+      bounce(id);
+      history = false;
+      void focusInput();
+      return;
+    }
+    activeId = id;
+    void toggle();
   }
 
   /** Files dropped on the character or the panel: the panel opens on them, ready to type the question. */
   function dropFiles(event: DragEvent) {
     const reading = attached.drop(event);
     if (!reading) return;
-    boing++;
+    bounce();
     open = true;
     autoOpened = false;
     history = false;
@@ -371,7 +437,7 @@
 
   /** The shortcut: the companion comes forward, ready to type. */
   async function summon() {
-    boing++;
+    bounce();
     open = true;
     autoOpened = false;
     cue('open');
@@ -408,11 +474,6 @@
     }
   }
 
-  function onclick() {
-    press = null;
-    if (!dropped) void toggle();
-  }
-
   function pressMediaKey(action: MediaAction) {
     void pressMedia(action)
       .then(readMedia)
@@ -435,7 +496,7 @@
   }
 
   $effect(() => {
-    void [open, talk.shown, talk.phase, media, notes.notices, notes.alarms, mood.blocking, layout, picking, hudOpen, timer.phase, focus.recap, focus.active, history, attached.held, attached.over, attached.reading, attached.problem, tasks.pending, tasks.launched];
+    void [open, members.length, talks.map((talk) => [talk.shown, talk.phase]), media, mediaShown, notes.notices, notes.alarms, mood.blocking, layout, picking, hudOpen, timer.phase, focus.recap, focus.active, history, attached.held, attached.over, attached.reading, attached.problem, tasks.pending, tasks.launched];
     void tick().then(() => requestAnimationFrame(sendRects));
   });
 
@@ -488,9 +549,9 @@
     const off: (() => void)[] = [startTheme()];
     off.push(
       subscribeCompanionPrefs((next) => {
-        const brainChanged = next.threadId !== prefs.threadId;
+        const crewChanged = next.agents.join() !== prefs.agents.join();
         prefs = next;
-        if (brainChanged) void talk.subscribe(next.threadId);
+        if (crewChanged) void crew.load();
       })
     );
     const initialize = async () => {
@@ -508,7 +569,7 @@
             reachable = state === 'ready';
             recompute();
             if (state === 'ready') {
-              talk.resubscribe();
+              crew.resubscribe();
               soon(0);
             }
           })
@@ -524,14 +585,14 @@
       off.push(client.on('permission.resolved', () => soon(0)));
       off.push(client.on('question.asked', () => soon(0)));
       off.push(client.on('question.answered', () => soon(0)));
-      off.push(client.on('message.started', (message) => talk.started(message)));
-      off.push(client.on('message.delta', (delta) => talk.delta(delta)));
-      off.push(client.on('message.part', (part) => talk.part(part)));
-      off.push(client.on('message.completed', (done) => talk.completed(done)));
+      off.push(client.on('message.started', (message) => talks.forEach((talk) => talk.started(message))));
+      off.push(client.on('message.delta', (delta) => talks.forEach((talk) => talk.delta(delta))));
+      off.push(client.on('message.part', (part) => talks.forEach((talk) => talk.part(part))));
+      off.push(client.on('agents.changed', () => crew.changed()));
       connected = true;
       await readProjects().catch(() => {});
-      await talk.subscribe(prefs.threadId);
       await refresh();
+      await crew.load();
     };
     void initialize().catch(() => {
       reachable = false;
@@ -545,7 +606,8 @@
       clearInterval(rects);
       clearTimeout(refreshTimer);
       clearTimeout(celebrateTimer);
-      talk.dispose();
+      crew.dispose();
+      talkCache.forEach((talk) => talk.dispose());
       notes.dispose();
       timer.dispose();
       senses.dispose();
@@ -560,7 +622,7 @@
     if (event.key !== 'Escape') return;
     if (picking) pickDone?.(null);
     else if (open) close();
-    else talk.hide();
+    else talks.forEach((talk) => talk.hide());
   }
 </script>
 
@@ -577,67 +639,61 @@
   ondrop={dropFiles}
 >
   <div class="column">
-    <div class="head">
-      <button
-        bind:this={character}
-        class="character"
-        class:dragging
-        data-hit
-        aria-label={open ? strings.companion.close : strings.companion.open}
-        aria-expanded={open}
-        {onclick}
-        onpointerdown={onpress}
-        onpointermove={onmove}
-        onpointerup={() => (press = null)}
-        onpointerenter={() => (pointerOn = true)}
-        onpointerleave={() => {
-          pointerOn = false;
-          if (!inShell()) talk.hold();
-        }}
-      >
-        <CompanionCharacter
-          mood={talk.thinking ? 'working' : mood.mood}
-          music={media?.playing ?? false}
-          busy={mood.busy}
-          hover={hover || dragging}
-          {boing}
-          {gaze}
-          {asleep}
-          typing={senses.typing}
-          alarm={notes.alarms.length > 0}
-          calm={focus.active}
-          rest={timer.phase === 'break'}
-          game={reactions.game}
-          coffee={reactions.coffee}
-          cheer={reactions.cheering}
-          startled={attached.over}
-          size={64}
-        />
-        {#if reactions.cheering}<CompanionConfetti burst={reactions.cheer} />{/if}
-        {#if mood.blocking > 0}<span class="badge" aria-hidden="true">{mood.blocking}</span>{/if}
-      </button>
-      <div class="hud">
-        <CompanionHud
-          {threads}
-          {projects}
-          own={prefs.threadId}
-          {gauges}
-          {hover}
-          {reachable}
-          {layout}
-          bind:expanded={hudOpen}
-          onopen={(threadId) => void showMain(threadId)}
-          onresize={sendRects}
-        />
-        <CompanionTimer {timer} {hover} onresize={sendRects} />
-      </div>
-    </div>
+    <CompanionCrew
+      {members}
+      active={active.id}
+      {open}
+      {layout}
+      look={{
+        music: media?.playing ?? false,
+        hover: hover || dragging,
+        asleep,
+        typing: senses.typing,
+        calm: focus.active,
+        rest: timer.phase === 'break',
+        game: reactions.game,
+        coffee: reactions.coffee,
+        startled: attached.over
+      }}
+      mood={mood.mood}
+      busy={mood.busy}
+      alarm={notes.alarms.length > 0}
+      blocking={mood.blocking}
+      cheering={reactions.cheering}
+      burst={reactions.cheer}
+      {boings}
+      pointer={senses.pointer}
+      {dragging}
+      onpick={pick}
+      {onpress}
+      {onmove}
+      onrelease={() => (press = null)}
+      onenter={() => (pointerOn = true)}
+      onleave={() => {
+        pointerOn = false;
+        if (!inShell()) talks.forEach((talk) => talk.hold());
+      }}
+    >
+      <CompanionHud
+        {threads}
+        {projects}
+        own={ownThreads}
+        {gauges}
+        {hover}
+        {reachable}
+        {layout}
+        bind:expanded={hudOpen}
+        onopen={(threadId) => void showMain(threadId)}
+        onresize={sendRects}
+      />
+      <CompanionTimer {timer} {hover} onresize={sendRects} />
+    </CompanionCrew>
 
-    {#if media && (open || hover)}
+    {#if media && mediaShown}
       <div data-hit><MediaPill {media} oncontrol={pressMediaKey} /></div>
     {/if}
 
-    <CompanionNotes {talk} {notes} {open} {reachable} threadId={prefs.threadId} />
+    <CompanionNotes {members} {notes} {open} {reachable} />
     <CompanionFocusCards {timer} {focus} onopen={(threadId) => void showMain(threadId)} />
     <CompanionTaskCards {tasks} onopen={(threadId) => void showMain(threadId)} />
 
@@ -646,21 +702,22 @@
         <CompanionAsk
           bind:draft
           bind:input
-          thinking={talk.thinking || sending}
+          thinking={active.talk.thinking || sending}
           canSee={inShell()}
           {screens}
           scope={prefs.screenScope}
           onask={(screen) => void ask(screen)}
           onscope={(screenScope) => writeCompanionPrefs({ screenScope })}
-          onstop={() => void talk.stop()}
+          onstop={() => void active.talk.stop()}
           onsettings={() => void showMain(null)}
+          to={members.length > 1 ? active.name : null}
         />
         <CompanionAttachments dropped={attached} />
         <CompanionTools {timer} {focus} workMinutes={prefs.workMinutes} breakMinutes={prefs.breakMinutes} bind:history onstart={() => startTimer()} />
         {#if history}
-          <CompanionHistory client={() => client} threadId={prefs.threadId} onpick={(exchange) => talk.recall(exchange.reply)} />
+          <CompanionHistory snapshot={crew.snapshot} agentId={active.id} onpick={(exchange) => active.talk.recall(exchange.reply)} />
         {/if}
-        <CompanionPanel {threads} {projects} {permissions} {questions} {mood} own={prefs.threadId} onact={act} />
+        <CompanionPanel {threads} {projects} {permissions} {questions} {mood} own={ownThreads} onact={act} />
       </section>
     {/if}
   </div>
@@ -728,112 +785,6 @@
   }
   .stage[data-align='right'] .column {
     align-items: flex-end;
-  }
-
-  /* The character and its HUD: under it in the centre, where the sides leave
-     too little room, beside it towards the middle of the screen otherwise. The
-     character stays first, so its centre does not move. */
-  .head {
-    flex: none;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    max-width: 100%;
-  }
-  .stage[data-edge='bottom'] .head {
-    flex-direction: column-reverse;
-  }
-  .stage[data-align='left'] .head,
-  .stage[data-align='right'] .head {
-    flex-direction: row;
-    align-items: flex-start;
-    gap: 14px;
-  }
-  .stage[data-align='right'] .head {
-    flex-direction: row-reverse;
-  }
-  .stage[data-edge='bottom'][data-align='left'] .head,
-  .stage[data-edge='bottom'][data-align='right'] .head {
-    align-items: flex-end;
-  }
-  /* The HUD: the activity pill and the pomodoro side by side under the
-     character, one over the other beside it. */
-  .hud {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-    max-width: 100%;
-  }
-  .stage[data-align='left'] .hud,
-  .stage[data-align='right'] .hud {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  .stage[data-align='right'] .hud {
-    align-items: flex-end;
-  }
-  .stage[data-edge='bottom'][data-align='left'] .hud,
-  .stage[data-edge='bottom'][data-align='right'] .hud {
-    flex-direction: column-reverse;
-  }
-  /* Some air between the character and its HUD, so the pill does not touch it. */
-  .head > .hud:has(> :global(*)) {
-    margin-top: 10px;
-  }
-  /* At the bottom edge the HUD sits over the character, whose lid needs more. */
-  .stage[data-edge='bottom'][data-align='center'] .head > .hud:has(> :global(*)) {
-    margin-top: 0;
-    margin-bottom: 14px;
-  }
-  /* Beside the character, the pill sits level with its middle. */
-  .stage[data-align='left'] .head > .hud,
-  .stage[data-align='right'] .head > .hud {
-    margin-top: 11px;
-  }
-  .stage[data-edge='bottom'][data-align='left'] .head > .hud,
-  .stage[data-edge='bottom'][data-align='right'] .head > .hud {
-    margin-top: 0;
-    margin-bottom: 11px;
-  }
-
-  .character {
-    position: relative;
-    flex: none;
-    padding: 0;
-    border: none;
-    background: none;
-    cursor: pointer;
-    touch-action: none;
-    /* Air between the character and what it shows, on the side it shows it. */
-    margin-bottom: 10px;
-  }
-  .stage[data-edge='bottom'] .character {
-    margin-top: 10px;
-    margin-bottom: 0;
-  }
-  .character.dragging {
-    cursor: grabbing;
-  }
-  .character:focus-visible {
-    outline: 2px solid var(--color-accent);
-    outline-offset: 2px;
-    border-radius: var(--radius-md);
-  }
-  .badge {
-    position: absolute;
-    top: 0;
-    right: -4px;
-    min-width: 18px;
-    height: 18px;
-    padding: 0 5px;
-    border-radius: var(--radius-full);
-    background: var(--color-danger);
-    color: var(--color-accent-ink);
-    font-size: var(--text-xs);
-    font-weight: 600;
-    line-height: 18px;
-    text-align: center;
   }
 
   .sheet {

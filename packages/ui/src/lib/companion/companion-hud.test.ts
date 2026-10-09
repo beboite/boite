@@ -46,7 +46,7 @@ test('lists the threads at work but its own, the latest request first', () => {
       thread('waiting', { status: 'waiting', runningSince: 3_000 })
     ],
     projects,
-    'own'
+    ['own']
   );
   expect(rows.map((row) => row.id)).toEqual(['new', 'waiting', 'old']);
   expect(rows[0]).toMatchObject({ title: 'Untitled thread', project: '', step: 'Queued', since: 5_000 });
@@ -57,8 +57,8 @@ test('lists the threads at work but its own, the latest request first', () => {
 
 test('words the step from the progress the core reports', () => {
   const progress = (phase: 'tool' | 'thinking', detail: string | null) => ({ turnId: 'turn-1', phase, detail, at: 0 });
-  const [tool] = hudThreads([thread('a', { progress: progress('tool', 'bun run test') })], projects, null);
-  const [thinking] = hudThreads([thread('b', { progress: progress('thinking', null) })], projects, null);
+  const [tool] = hudThreads([thread('a', { progress: progress('tool', 'bun run test') })], projects, []);
+  const [thinking] = hudThreads([thread('b', { progress: progress('thinking', null) })], projects, []);
   expect(tool?.step).toBe('Running tool: bun run test');
   expect(thinking?.step).toBe('Thinking');
 });
@@ -127,7 +127,7 @@ test('shows every gauge but the ones hidden in Settings, each with its provider 
 test('the HUD demo of the fake core has threads at work and a Douane', async () => {
   const client = await connected({ hudDemo: true });
   const now = Date.now();
-  const rows = hudThreads(await client.call('threads.list', {}), new Map([['p-boite', 'boite'], ['p-notes', 'notes']]), null);
+  const rows = hudThreads(await client.call('threads.list', {}), new Map([['p-boite', 'boite'], ['p-notes', 'notes']]), []);
   expect(rows.map((row) => row.id)).toEqual(['t-hud-tests', 't-bench', 't-scheduler']);
   expect(rows[0]).toMatchObject({ project: 'notes', step: 'Running tool: bun run test' });
   expect(now - (rows[0]?.since ?? 0)).toBeLessThan(5 * 60_000);

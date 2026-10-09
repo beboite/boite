@@ -4,13 +4,11 @@
  * lets ring, and the exchanges read back from the companion's thread.
  */
 import { afterEach, expect, test, vi } from 'vitest';
-import type { Message } from '@boite/contracts';
-import { FakeClient } from '../fake-client';
-import { promptFor } from './brain';
+import type { AgentConversationMessage, AgentsSnapshot } from '@boite/contracts';
+import { messageFor } from './brain';
 import { parseDirectives, parseDuration, visibleReply } from './directives';
 import { audible, Focus, FOCUS_STORAGE_KEY, PomodoroTimer } from './focus.svelte';
-import { exchangesOf, readHistory, requestText } from './history';
-import { isWorking } from './mood';
+import { exchangesOf } from './history';
 import { clock, elapsedMs, nextPhase, parsePomodoro, pausePomodoro, POMODORO_STORAGE_KEY, readPomodoro, remainingMs, resumePomodoro, settlePomodoro, startCountdown, startPomodoro, startStopwatch, STOPWATCH_MAX_MS } from './pomodoro';
 import { DEFAULT_COMPANION_PREFS, parseCompanionPrefs } from './prefs';
 
@@ -236,60 +234,42 @@ test('the pomodoro preferences are read field by field, each with its default', 
   expect(parseCompanionPrefs({ workMinutes: 12.5, breakMinutes: '5' })).toMatchObject({ workMinutes: 25, breakMinutes: 5 });
 });
 
-test('a request reads as typed, without the role, the memory, the date or the bracketed lines', () => {
+test('a request reads as typed, without the context line the companion adds', () => {
   const now = new Date(2026, 9, 9, 14, 30);
-  expect(requestText(promptFor('What is on today?', { prime: 'new', memory: 'Facts:\n- Is called Chris', now, seen: null }))).toBe('What is on today?');
-  expect(requestText(promptFor('Look at this', { prime: null, memory: '', now, seen: { kind: 'zone' } }))).toBe('Look at this');
-  for (const prime of ['role', 'memory'] as const) expect(requestText(promptFor('Hi', { prime, memory: 'Facts:\n- Is called Chris', now, seen: null }))).toBe('Hi');
-  expect(requestText('[2026-10-09 14:30]\nTwo lines\nof [text] here')).toBe('Two lines\nof [text] here');
+  expect(visibleReply(messageFor('What is on today?', { now, seen: null, shots: [], files: [] }))).toBe('What is on today?');
+  expect(visibleReply(messageFor('Look at this', { now, seen: { kind: 'zone' }, shots: ['C:\\t\\zone.jpg'], files: ['C:\\t\\a.txt'] }))).toBe('Look at this');
+  expect(visibleReply('Two lines\nof [text] here')).toBe('Two lines\nof [text] here');
 });
 
-const message = (id: string, role: Message['role'], text: string, createdAt = 0): Message => ({
+const record = { revision: 1, updatedAt: 0, episodeId: 'e', sourceRunId: null, recipientIds: [] };
+const said = (id: string, senderId: string | null, text: string, createdAt: number, extra: Partial<AgentConversationMessage> = {}): AgentConversationMessage => ({
+  ...record,
   id,
-  threadId: 't',
-  turnId: `turn-${id}`,
-  role,
-  parts: [{ type: 'text', text }],
-  state: 'complete',
-  createdAt
+  scope: { kind: 'agent', id: 'bots' },
+  senderId,
+  text,
+  replyTo: null,
+  createdAt,
+  ...extra
 });
+const snapshotOf = (messages: AgentConversationMessage[]) => ({ messages }) as unknown as AgentsSnapshot;
 
-test('each request goes with the last words its turn wrote, as the bubble showed them', () => {
+test('each request goes with the answer that replied to it, as the bubble showed them, newest first', () => {
   const messages = [
-    message('u1', 'user', '[now]\nHello', 1),
-    message('a1', 'assistant', 'Working on it.', 2),
-    message('a2', 'assistant', 'Hi Chris.\n[[remember: Is called Chris]]', 3),
-    message('u2', 'user', '[now]\nAre you there?', 4),
-    message('u3', 'user', '[now]\nPomodoro', 5),
-    message('a3', 'assistant', 'Go.\n[[timer: 25m | Focus]]', 6)
+    said('a2', 'bots', 'Hi Chris.\n[[remember: Is called Chris]]', 3, { replyTo: 'u1' }),
+    said('u1', null, 'Hello\n\n[[context: local time Friday 2026-10-09 14:30]]', 1),
+    said('u2', null, 'Are you there?', 4),
+    said('u3', null, 'Pomodoro', 5),
+    said('a3', 'bots', 'Go.\n[[timer: 25m | Focus]]', 6, { replyTo: 'u3' }),
+    // Another agent's conversation, and a message to the group, stay out.
+    said('x1', null, 'Elsewhere', 7, { scope: { kind: 'agent', id: 'other' } }),
+    said('g1', null, 'To the group', 8, { scope: { kind: 'group', id: 'bots' } })
   ];
-  expect(exchangesOf(messages)).toEqual([
-    { id: 'u1', request: 'Hello', reply: 'Hi Chris.', at: 1 },
+  expect(exchangesOf(snapshotOf(messages), 'bots')).toEqual([
+    { id: 'u3', request: 'Pomodoro', reply: 'Go.', at: 5 },
     { id: 'u2', request: 'Are you there?', reply: '', at: 4 },
-    { id: 'u3', request: 'Pomodoro', reply: 'Go.', at: 5 }
+    { id: 'u1', request: 'Hello', reply: 'Hi Chris.', at: 1 }
   ]);
-  expect(exchangesOf(messages, 2).map((exchange) => exchange.id)).toEqual(['u2', 'u3']);
-});
-
-test('the history is read from the thread, newest first', async () => {
-  const client = new FakeClient({ delayMs: 0 });
-  await client.connect();
-  const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
-  expect(await readHistory(client, thread.id)).toEqual([]);
-  // The fake agent echoes the request, directives included.
-  for (const request of ['First\n[[focus: on]]', 'Second']) {
-    await client.call('turns.start', { threadId: thread.id, prompt: `[now]\n${request}` });
-    await vi.waitFor(async () => {
-      const { messages: _messages, ...summary } = await client.call('threads.get', { threadId: thread.id });
-      expect(isWorking(summary.status)).toBe(false);
-      expect((await readHistory(client, thread.id))[0]?.reply).not.toBe('');
-    });
-  }
-  const get = vi.spyOn(client, 'call');
-  const history = await readHistory(client, thread.id);
-  expect(get).toHaveBeenCalledWith('threads.get', expect.objectContaining({ threadId: thread.id, compactTools: true }));
-  expect(history.map((exchange) => exchange.request)).toEqual(['Second', 'First\n[[focus: on]]']);
-  expect(history[0]?.reply).toContain('Second');
-  expect(history[1]?.reply).toContain('First');
-  expect(history[1]?.reply).not.toContain('[[');
+  expect(exchangesOf(snapshotOf(messages), 'bots', 2).map((exchange) => exchange.id)).toEqual(['u3', 'u2']);
+  expect(exchangesOf(null, 'bots')).toEqual([]);
 });

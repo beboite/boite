@@ -15,7 +15,10 @@
 
 <script lang="ts">
   import type { Mood } from '../../lib/companion/mood';
+  import { boxPaint, isBox } from '../../lib/companion/skin';
+  import type { Robot } from '../../lib/robots';
   import { strings } from '../../lib/strings';
+  import BoxTop from './BoxTop.svelte';
 
   interface Props {
     mood: Mood;
@@ -50,9 +53,11 @@
     cheer?: boolean;
     /** Files are dragged over it: it opens its eyes wide. */
     startled?: boolean;
+    /** The agent's robot: a box (`lib/companion/skin.ts`) colours the box and puts its accessory on the lid; anything else draws the classic companion. */
+    skin?: Robot | null;
   }
 
-  let { mood, music = false, busy = false, hover = false, boing = 0, size = 56, lively = true, gaze = null, asleep = false, typing = false, alarm = false, calm = false, rest = false, game = false, coffee = false, cheer = false, startled = false }: Props = $props();
+  let { mood, music = false, busy = false, hover = false, boing = 0, size = 56, lively = true, gaze = null, asleep = false, typing = false, alarm = false, calm = false, rest = false, game = false, coffee = false, cheer = false, startled = false, skin = null }: Props = $props();
 
   type Act = 'look' | 'blink' | 'peek' | 'stretch' | 'yawn';
   const ACT_MS: Record<Act, number> = { look: 2400, blink: 700, peek: 1200, stretch: 1400, yawn: 2400 };
@@ -111,6 +116,9 @@
   const headset = $derived(game && !tea);
   const cup = $derived(coffee && !tea && face !== 'sleep' && !urgent);
   const notes = $derived(music && face !== 'sleep' && face !== 'calling' && face !== 'alarm' && face !== 'worried');
+  // The skin's colours; the accessory steps aside while headphones or the headset go over the top.
+  const paint = $derived(isBox(skin) ? boxPaint(skin) : null);
+  const capped = $derived((music && !tea) || headset);
   const clamp = (value: number) => Math.max(-1, Math.min(1, value));
   const look = $derived(face === 'typing' ? { x: 0, y: 1 } : face === 'sleep' || face === 'yawn' || !gaze ? { x: 0, y: 0 } : { x: clamp(gaze.x), y: clamp(gaze.y) });
 </script>
@@ -122,7 +130,13 @@
   class:busy={busy && mood === 'working'}
   class:hover={hover && face === 'awake'}
   class:boing={bouncing}
+  class:skinned={paint !== null}
+  class:tinted={paint !== null && paint.lid !== 'var(--color-surface)'}
   style="--gx: {look.x.toFixed(2)}; --gy: {look.y.toFixed(2)}"
+  style:--box-body={paint?.body}
+  style:--box-lid={paint?.lid}
+  style:--box-line={paint?.line}
+  style:--box-eye={paint?.eye}
   viewBox="0 0 100 100"
   width={size}
   height={size}
@@ -138,7 +152,7 @@
           <g class="eye" class:right={index === 1}>
             <g class="blink">
               <!-- The eye shuts from the top by `--shut`; lids the colour of the box slant or round it. -->
-              <rect class="pupil" x={cx - 4.5} y="54" width="9" height="14" rx="4.5" />
+              <rect class="pupil" class:lit={paint?.lit} x={cx - 4.5} y="54" width="9" height="14" rx="4.5" />
               <rect class="upper" x={cx - 9} y="44" width="18" height="8" />
               <ellipse class="lower" {cx} cy="76.5" rx="10" ry="7" />
             </g>
@@ -152,6 +166,8 @@
     <g class="shell lid">
       <rect class="lidbox" x="10" y="26" width="80" height="13" rx="5" />
       <rect class="led" x="43" y="30.25" width="14" height="4.5" rx="2.25" />
+      <!-- In the lid's group, so it tips when the lid flaps. -->
+      {#if paint && !capped}<BoxTop top={paint.top} x={50} y={26} />{/if}
     </g>
 
     {#if music && !tea && !headset}
@@ -262,6 +278,14 @@
   .led { fill: var(--tone); transition: fill var(--dur-2) var(--ease-out-quint); }
   .pupil { fill: var(--fg); }
   .upper, .lower { fill: var(--color-surface); }
+  /* A box skin: its body, lid, outline and eyes; the eyelids wear the body so they still hide the eyes. */
+  .skinned .body, .skinned .upper, .skinned .lower { fill: var(--box-body); }
+  .skinned .lidbox { fill: var(--box-lid); }
+  .skinned .rim, .skinned .lidbox { stroke: var(--box-line); }
+  .skinned .pupil { fill: var(--box-eye); }
+  .skinned .pupil.lit { stroke: var(--robot-ink); stroke-width: 2; }
+  /* On a coloured lid the mood's light keeps a rim. */
+  .tinted .led { stroke: var(--box-line); stroke-width: 1.5; }
   .stroke { fill: none; stroke: var(--tone); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
   .z { fill: var(--fg); font: 600 13px var(--font-sans, sans-serif); }
   /* Two-tone headphones like the box (stroke and a surface rim): readable on light and dark. */

@@ -1,8 +1,8 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { defaultTitleModel, type Account, type ProviderSummary } from '@boite/contracts';
-import { COMPANION_STORAGE_KEY, DEFAULT_COMPANION_PREFS, parseCompanionPrefs, readCompanionPrefs, subscribeCompanionPrefs, writeCompanionPrefs } from './prefs';
+import { COMPANION_STORAGE_KEY, CREW_MAX, DEFAULT_COMPANION_PREFS, parseCompanionPrefs, readCompanionPrefs, subscribeCompanionPrefs, writeCompanionPrefs } from './prefs';
 import { createMoodTracker, BUSY_THRESHOLD } from './mood';
-import { COMPANION_ROLE, localTime, permissionModeOf, pickBrain, promptFor, replyText, type PromptContext } from './brain';
+import { COMPANION_ROLE, contextLine, localTime, messageFor, permissionModeOf, pickBrain, replyText, ROLE_END, ROLE_START, roleBlock, withoutRole, withRole, type RequestContext } from './brain';
 import { count, describePermission, shortPath, threadLabel } from './describe';
 import { appName } from './media';
 import { strings } from '../strings';
@@ -28,15 +28,14 @@ test('stored preferences are read field by field, a wrong field taking its defau
   expect(readCompanionPrefs()).toEqual(DEFAULT_COMPANION_PREFS);
 });
 
-test('changing the brain or placing the companion keeps the conversation', () => {
-  writeCompanionPrefs({ threadId: 'thr_1' });
-  expect(writeCompanionPrefs({ anchor: 'left', music: false }).threadId).toBe('thr_1');
-  expect(writeCompanionPrefs({ model: 'haiku' }).threadId).toBe('thr_1');
-  expect(writeCompanionPrefs({ control: 'auto' }).threadId).toBe('thr_1');
+test('the row of agents stays through other changes, each agent once, CREW_MAX at most', () => {
+  writeCompanionPrefs({ agents: ['a1', 'a2'], crewMade: true });
+  expect(writeCompanionPrefs({ anchor: 'left', music: false }).agents).toEqual(['a1', 'a2']);
+  expect(writeCompanionPrefs({ model: 'haiku', control: 'auto' })).toMatchObject({ agents: ['a1', 'a2'], crewMade: true });
   expect(JSON.parse(window.localStorage.getItem(COMPANION_STORAGE_KEY)!).control).toBe('auto');
-  expect(writeCompanionPrefs({ threadId: null }).threadId).toBeNull();
+  expect(parseCompanionPrefs({ agents: ['a', 'a', 7, '', 'b', 'c', 'd', 'e'] }).agents).toEqual(['a', 'b', 'c', 'd'].slice(0, CREW_MAX));
+  expect(parseCompanionPrefs({ agents: 'a', crewMade: 'yes' })).toMatchObject({ agents: [], crewMade: false });
 });
-
 test('a write is heard on this page and from the other window', () => {
   const heard = vi.fn();
   const stop = subscribeCompanionPrefs(heard);
@@ -83,20 +82,36 @@ test('the brain: the chosen agent while usable, none when it is not, else the fi
   expect(pickBrain(DEFAULT_COMPANION_PREFS, [], accounts)).toBeNull();
 });
 
-test('the role and the memory go with the first request only, the time with every one, and auto control skips the permission prompts', () => {
+test('a request ends with its context line, and auto control skips the permission prompts', () => {
   const now = new Date(2026, 9, 9, 14, 5);
-  const context: PromptContext = { prime: 'new', memory: 'Your memory of the user is empty so far.', now, seen: null };
+  const context: RequestContext = { now, seen: null, shots: [], files: [] };
   expect(localTime(now)).toBe('Friday 2026-10-09 14:05');
-  expect(promptFor('play music', context)).toBe(`${COMPANION_ROLE}\n\nYour memory of the user is empty so far.\n\n---\n\n[Friday 2026-10-09 14:05]\nplay music`);
-  expect(promptFor('play music', { ...context, prime: null })).toBe('[Friday 2026-10-09 14:05]\nplay music');
-  expect(promptFor('what is this?', { ...context, prime: null, seen: { kind: 'screen' } })).toBe("[Friday 2026-10-09 14:05]\n[The attached image is the user's screen.]\nwhat is this?");
-  expect(promptFor('which is louder?', { ...context, prime: null, seen: { kind: 'screens', count: 2 } })).toContain("[The 2 attached images are the user's screens, one per screen, the main screen first.]\nwhich is louder?");
-  expect(promptFor('fix this', { ...context, prime: null, seen: { kind: 'zone' } })).toContain("[The attached image is the part of the user's screen they picked to show you.]\nfix this");
+  expect(messageFor(' play music ', context)).toBe('play music\n\n[[context: local time Friday 2026-10-09 14:05]]');
+  expect(contextLine({ ...context, seen: { kind: 'screen' }, shots: ['C:\\t\\screen.jpg'] })).toBe("[[context: local time Friday 2026-10-09 14:05; the user's screen: C:\\t\\screen.jpg]]");
+  expect(contextLine({ ...context, seen: { kind: 'screens', count: 2 }, shots: ['a.jpg', 'b.jpg'] })).toContain("the user's 2 screens, the main one first: a.jpg, b.jpg");
+  expect(contextLine({ ...context, seen: { kind: 'zone' }, shots: ['z.jpg'], files: ['odd]name.png'] })).toBe('[[context: local time Friday 2026-10-09 14:05; the part of the screen the user picked to show you: z.jpg; files the user dropped on you: odd name.png]]');
+  // An image that could not be kept says nothing of the screen.
+  expect(contextLine({ ...context, seen: { kind: 'screen' } })).toBe('[[context: local time Friday 2026-10-09 14:05]]');
   expect(permissionModeOf('auto')).toBe('bypassPermissions');
   expect(permissionModeOf('ask')).toBe('default');
   expect(replyText({ parts: [{ type: 'text', text: ' Done, ' }, { type: 'reasoning', text: 'hmm' } as never, { type: 'text', text: 'Spotify is on. ' }] })).toBe('Done, Spotify is on.');
 });
 
+test('the role sits in marks after what the user wrote, replaced or taken out whole', () => {
+  const block = roleBlock(['boite', 'notes [old]']);
+  expect(block.startsWith(ROLE_START) && block.endsWith(ROLE_END)).toBe(true);
+  expect(block).toContain(COMPANION_ROLE);
+  expect(block).toContain("Boite's projects: boite, notes  old.");
+  expect(roleBlock([])).toContain('Boite lists no project yet.');
+  const own = 'Speak like a pirate.';
+  const held = withRole(own, block);
+  expect(held).toBe(`${own}\n\n${block}`);
+  expect(withRole(held, roleBlock(['other']))).toBe(`${own}\n\n${roleBlock(['other'])}`);
+  expect(withoutRole(held)).toBe(own);
+  expect(withoutRole(`Before.\n\n${block}\n\nAfter.`)).toBe('Before.\n\nAfter.');
+  expect(withRole('', block)).toBe(block);
+  expect(withoutRole(own)).toBe(own);
+});
 test('a request is told in a few words', () => {
   expect(shortPath('C:\\Users\\me\\Music\\list.m3u')).toBe('…/Music/list.m3u');
   expect(shortPath('a/b')).toBe('a/b');

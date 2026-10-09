@@ -19,7 +19,8 @@
   import { COMPANION_HOTKEYS, readCompanionPrefs, subscribeCompanionPrefs, writeCompanionPrefs, type CompanionAnchor, type CompanionControl, type CompanionPrefs } from '../lib/companion/prefs';
   import { readStatus, subscribeCompanionData } from '../lib/companion/memory';
   import { companionMonitors, inShell, type CompanionMonitor } from '../lib/companion/shell';
-  import CompanionMemory from './companion/CompanionMemory.svelte';
+  import CompanionReminders from './companion/CompanionReminders.svelte';
+  import CompanionCrewSettings from './companion/CompanionCrewSettings.svelte';
 
   let { store }: { store: Store } = $props();
 
@@ -29,7 +30,6 @@
 
   let prefs = $state<CompanionPrefs>(readCompanionPrefs());
   let monitors = $state.raw<CompanionMonitor[]>([]);
-  let started = $state(false);
   let status = $state(readStatus());
 
   $effect(() => subscribeCompanionPrefs((next) => (prefs = next)));
@@ -134,7 +134,6 @@
 
   function save(patch: Partial<CompanionPrefs>) {
     prefs = writeCompanionPrefs(patch);
-    if (prefs.threadId === null) started = false;
   }
 
   /** The gateway's subscriptions, as the companion draws them, to pick the ones it shows. */
@@ -160,16 +159,6 @@
     save({ providerId, model, accountId: accountOf(providerId)?.id ?? null, effort: null });
   }
 
-  function restart() {
-    save({ threadId: null });
-    started = true;
-  }
-
-  function openConversation() {
-    if (!prefs.threadId) return;
-    store.showChat();
-    void store.open(prefs.threadId);
-  }
 </script>
 
 {#snippet picker(label: string, hint: string | null, items: MenuItem[], current: string, onpick: (id: string) => void, testid: string)}
@@ -200,8 +189,10 @@
     {#if hotkeyTaken}<p class="hint problem" role="alert">{fill(copy.hotkeyTaken, { hotkey: prefs.hotkey! })}</p>{/if}
   </section>
 
+  <CompanionCrewSettings {store} {prefs} />
+
   <section class="card">
-    <h2>{copy.brain}</h2>
+    <h2 class="ui-label-box"><span class="ui-label">{copy.brain}</span><InfoTip topic={copy.brain} text={copy.brainHint} /></h2>
     {@render picker(copy.model, copy.modelHint, modelItems, currentModel, pickModel, 'companion-model')}
     {#if accounts.length > 1}
       {@render picker(copy.account, null, accountItems, account?.label ?? '', (id) => save({ accountId: id }), 'companion-account')}
@@ -211,6 +202,12 @@
     {/if}
     {@render picker(copy.control, copy.controlHint, controlItems, copy.controls[prefs.control], (id) => save({ control: id as CompanionControl }), 'companion-control')}
     <p class="hint">{copy.controlsHint[prefs.control]}</p>
+    {#if warmMinutes !== null}
+      <p class="hint warm">{warmMinutes > 0 ? fill(copy.warmOn, { minutes: String(warmMinutes) }) : copy.warmOff}</p>
+      {#if warmMinutes === 0}
+        <div class="actions"><button class="ghost" onclick={() => store.showSettings('advanced')} data-testid="companion-open-advanced">{copy.openAdvanced}</button></div>
+      {/if}
+    {/if}
   </section>
 
   <section class="card">
@@ -256,24 +253,7 @@
     </label>
   </section>
 
-  <CompanionMemory />
-
-  <section class="card">
-    <h2>{copy.conversation}</h2>
-    <p class="hint">{started ? copy.started : copy.newConversationHint}</p>
-    <div class="actions">
-      <button class="ghost" onclick={restart} disabled={prefs.threadId === null} data-testid="companion-restart">{copy.newConversation}</button>
-      {#if prefs.threadId}
-        <button class="ghost" onclick={openConversation}>{copy.openConversation}</button>
-      {/if}
-    </div>
-    {#if warmMinutes !== null}
-      <p class="hint warm">{warmMinutes > 0 ? fill(copy.warmOn, { minutes: String(warmMinutes) }) : copy.warmOff}</p>
-      {#if warmMinutes === 0}
-        <div class="actions"><button class="ghost" onclick={() => store.showSettings('advanced')} data-testid="companion-open-advanced">{copy.openAdvanced}</button></div>
-      {/if}
-    {/if}
-  </section>
+  <CompanionReminders />
 </div>
 
 <style>

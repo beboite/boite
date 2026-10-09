@@ -24,7 +24,7 @@ export interface Notice {
 export interface NotesHost {
   client(): Client | null;
   threads(): ThreadSummary[];
-  ownThread(): string | null;
+  ownThreads(): readonly string[];
   /** The pointer is on the companion or its panel is open: notices stay. */
   holding(): boolean;
   rang(reminders: Reminder[]): void;
@@ -64,7 +64,7 @@ export class Notes {
   finished(ids: string[]): void {
     const now = Date.now();
     for (const threadId of ids) {
-      if (threadId === this.host.ownThread() || now - (this.noticed.get(threadId) ?? 0) < SAME_FINISH_MS) continue;
+      if (this.host.ownThreads().includes(threadId) || now - (this.noticed.get(threadId) ?? 0) < SAME_FINISH_MS) continue;
       this.noticed.set(threadId, now);
       const thread = this.host.threads().find((entry) => entry.id === threadId);
       const notice: Notice = {

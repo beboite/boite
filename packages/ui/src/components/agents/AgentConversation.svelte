@@ -7,6 +7,7 @@
   import { fill, strings } from '../../lib/strings';
   import { formatLocale } from '../../lib/i18n.svelte';
   import Prose from '../Prose.svelte';
+  import { visibleReply } from '../../lib/companion/directives';
   import AgentAvatar from './AgentAvatar.svelte';
   import AgentWorkCard from './AgentWorkCard.svelte';
 
@@ -111,7 +112,7 @@
           {@const failed = view.seen.deliveries.filter(d => d.messageId === message.id && (d.status === 'failed' || d.status === 'limited'))}
           <article class="agent-message from-user" class:first>
             <span class="agent-sr-only">{labels.user}</span>
-            <div class="bubble"><p class="user-text">{message.text}</p></div>
+            <div class="bubble"><p class="user-text">{visibleReply(message.text)}</p></div>
             {#if lastOfRun || failed.length}
               <footer>
                 {#if lastOfRun}<time datetime={new Date(message.createdAt).toISOString()}>{time(message.createdAt)}</time>{/if}
@@ -150,7 +151,7 @@
                 <span class="ui-label">{fill(labels.threadEvent[event.event], { name: nameOf(message.senderId!), title: event.title })}</span>
               </button>
             {:else if planned !== null}<p class="planned-label" data-testid="agent-planned-result"><CalendarClock size={13} strokeWidth={1.75} /><span>{planned || labels.plannedResult}</span></p>{/if}
-            {#if message.text.trim()}<div class="answer"><Prose text={message.text} store={view.store} bubble /></div>{/if}
+            {#if visibleReply(message.text)}<div class="answer"><Prose text={visibleReply(message.text)} store={view.store} bubble /></div>{/if}
             {#if lastOfRun}<footer><time datetime={new Date(message.createdAt).toISOString()}>{time(message.createdAt)}</time></footer>{/if}
           </article>
         {/if}

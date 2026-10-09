@@ -130,7 +130,7 @@ test("the notes hand a finished thread's whole answer over", async () => {
     settled = summary;
   });
   const answered = vi.fn();
-  const notes = new Notes({ client: () => client, threads: () => [settled!], ownThread: () => null, holding: () => false, rang: () => {}, answered });
+  const notes = new Notes({ client: () => client, threads: () => [settled!], ownThreads: () => [], holding: () => false, rang: () => {}, answered });
 
   notes.finished([thread.id]);
   await vi.waitFor(() => expect(answered).toHaveBeenCalledTimes(1));

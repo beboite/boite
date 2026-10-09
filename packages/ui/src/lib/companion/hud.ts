@@ -42,10 +42,10 @@ function stepOf(thread: HudSource): string {
   return progress.detail ? `${phase}: ${progress.detail}` : phase;
 }
 
-/** The threads at work but the companion's own, the one whose request started last first. */
-export function hudThreads(threads: HudSource[], projects: Map<string, string>, own: string | null): HudThread[] {
+/** The threads at work but the companion's own (its agents' sessions), the one whose request started last first. */
+export function hudThreads(threads: HudSource[], projects: Map<string, string>, own: readonly string[]): HudThread[] {
   return threads
-    .filter((thread) => isWorking(thread.status) && thread.id !== own)
+    .filter((thread) => isWorking(thread.status) && !own.includes(thread.id))
     .map((thread) => ({
       id: thread.id,
       title: thread.title || strings.companion.untitled,

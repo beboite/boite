@@ -51,6 +51,20 @@ a jelly squishes on the spot while it works (the other styles glance from
 side to side), and every style hops while it waits on the user. Reduced motion
 stills it.
 
+The Box style (`bot:e.<lid>.<body>.<eyes>.<accessory>`) is the desktop
+companion's own look, so several agents standing as companions can be told
+apart. Its body has ten colours: 0 is the classic companion in the theme's
+surface and foreground, 1 to 9 are `--jelly-1` to `--jelly-9` with a darker
+outline. The lid is the body's colour (0) or a jelly colour, the eyes are the
+ink or one of five lit colours rimmed in ink, and the accessory on the lid is
+nothing, an antenna, a top hat, a bow, a cap, a crown, a flower, a sprout, a
+propeller cap, a party hat, a beanie or a halo (`BoxTop.svelte`).
+`lib/companion/skin.ts` turns a box into the companion's colours
+(`CompanionCharacter`'s `skin`); the companion shows an agent of another
+style, or of none, as the box of its nearest colour (`skinOf` in
+`lib/companion/crew.ts`). The accessory steps aside while headphones or the headset are on.
+Switching an agent between Box and another style keeps the nearest colour.
+
 ### Threads an agent runs or carries
 
 An agent works in threads of its own (`agentSessionId`). The thread list shows

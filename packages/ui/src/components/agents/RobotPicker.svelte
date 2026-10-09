@@ -1,6 +1,7 @@
 <script lang="ts">
   import { secureId } from '../../lib/secure-id';
   import { Dices } from '@lucide/svelte';
+  import { boxEye, boxLid, boxLine } from '../../lib/companion/skin';
   import { choices, robotColor, ROBOT_FAMILIES, seededRobot, withPart, type Robot, type RobotPart } from '../../lib/robots';
   import { fill, strings } from '../../lib/strings';
   import RobotFace from './RobotFace.svelte';
@@ -8,11 +9,26 @@
   /**
    * Picks a robot the way one dresses a character: the robot as it stands,
    * Shuffle for a new one, and one row per part where every choice is drawn
-   * on the robot itself, so nothing has to be read.
+   * on the robot itself, so nothing has to be read. A box's lid, body and
+   * eyes are colours, so those rows are swatches.
    */
   let { robot, onpick, compact = false }: { robot: Robot; onpick: (robot: Robot) => void; compact?: boolean } = $props();
   const labels = $derived(strings.agents.robot);
   const rows: Exclude<RobotPart, 'family'>[] = ['shape', 'color', 'eyes', 'top'];
+  const box = $derived(robot.family === 'box');
+
+  /** A row's name: the box calls its parts lid, body, eyes and accessory. */
+  function rowLabel(part: Exclude<RobotPart, 'family'>): string {
+    return box ? labels.box[part] : labels[part];
+  }
+
+  /** The colour a swatch shows, and its edge: the box's own outline, so the classic one reads on the page. */
+  function swatch(option: Robot, part: Exclude<RobotPart, 'family'>): { fill: string; edge?: string } {
+    if (!box) return { fill: robotColor(option) };
+    if (part === 'shape') return { fill: boxLid(option), edge: boxLine(option.color) };
+    if (part === 'eyes') return { fill: boxEye(option), edge: 'var(--robot-ink)' };
+    return { fill: robotColor(option), edge: boxLine(option.color) };
+  }
 
   function shuffle() {
     onpick(seededRobot(secureId(), robot.family));
@@ -37,14 +53,15 @@
       </div>
     </div>
     {#each rows as part (part)}
-      <div class="part" role="radiogroup" aria-label={labels[part]}>
-        <span class="part-label">{labels[part]}</span>
+      <div class="part" role="radiogroup" aria-label={rowLabel(part)}>
+        <span class="part-label">{rowLabel(part)}</span>
         <div class="options">
           {#each { length: choices(robot, part) } as _, index (index)}
             {@const option = withPart(robot, part, index)}
-            {@const name = fill(labels.option, { part: labels[part], n: String(index + 1) })}
-            {#if part === 'color'}
-              <button type="button" class="swatch" class:on={robot.color === index} role="radio" aria-checked={robot.color === index} title={name} aria-label={name} style:--swatch={robotColor({ family: robot.family, color: index })} onclick={() => onpick(option)}></button>
+            {@const name = fill(labels.option, { part: rowLabel(part), n: String(index + 1) })}
+            {#if part === 'color' || (box && part !== 'top')}
+              {@const paint = swatch(option, part)}
+              <button type="button" class="swatch" class:on={robot[part] === index} role="radio" aria-checked={robot[part] === index} title={name} aria-label={name} style:--swatch={paint.fill} style:--swatch-edge={paint.edge} onclick={() => onpick(option)}></button>
             {:else}
               <button type="button" class="option" class:on={robot[part] === index} role="radio" aria-checked={robot[part] === index} title={name} aria-label={name} onclick={() => onpick(option)}>
                 <span class="thumb"><RobotFace robot={option} state="still" /></span>
@@ -69,7 +86,7 @@
   .option.family { gap: 6px; padding: 3px 10px 3px 3px; font-size: var(--text-sm); font-weight: 500; }
   .option.on, .swatch.on { border-color: var(--color-accent); box-shadow: 0 0 0 2px var(--color-accent-soft); }
   .thumb { width: 32px; height: 32px; display: block; border-radius: 50%; overflow: hidden; flex: none; }
-  .swatch { width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 2px solid var(--color-surface); background: var(--swatch); }
+  .swatch { width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 2px solid var(--swatch-edge, var(--color-surface)); background: var(--swatch); }
   .compact .portrait { width: 88px; height: 88px; }
   .compact .thumb { width: 28px; height: 28px; }
   @media (max-width: 720px) {

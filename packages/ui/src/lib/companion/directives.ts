@@ -33,7 +33,7 @@ export interface Directives {
   task: TaskDirective[];
 }
 
-const DIRECTIVE = /\[\[\s*(remember|forget|remind|timer|pomodoro|stopwatch|focus|task)\s*:([\s\S]*?)\]\]/gi;
+const DIRECTIVE = /\[\[\s*(remember|forget|remind|timer|pomodoro|stopwatch|focus|task|context)\s*:([\s\S]*?)\]\]/gi;
 /** A timer is a few minutes to a few hours. */
 const TIMER_MAX_MS = 4 * 60 * 60_000;
 /** A reply launches a few threads at most: more is a reply gone wrong. */
@@ -142,7 +142,8 @@ export function parseDirectives(text: string, now: Date): Directives {
     const timer = TIMER_KINDS.get(name);
     // A pomodoro or a stopwatch needs nothing more than its name.
     if (timer) found.timer = timerOf(timer, content) ?? found.timer;
-    else if (!content) continue;
+    // The line the companion adds to a request (`contextLine`) asks nothing.
+    else if (!content || name === 'context') continue;
     else if (name === 'remember') found.remember.push(content);
     else if (name === 'forget') found.forget.push(content);
     else if (name === 'task') {
