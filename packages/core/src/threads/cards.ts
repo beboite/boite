@@ -20,7 +20,7 @@ import { notFound, refused } from '../errors.ts';
 import { newId } from '../ids.ts';
 import type { ThreadStore } from '../threads.ts';
 import { nativeCommandPrompt } from './operations.ts';
-import { setThreadStatus } from './records.ts';
+import { setThreadStatus, withLoad } from './records.ts';
 
 interface PendingPermission {
   request: PermissionRequest;
@@ -75,6 +75,19 @@ export class ThreadCards {
     return false;
   }
 
+  /** How many questions asked without stopping still wait on the user: the row says it needs them. */
+  openAsyncCount(threadId: ThreadId): number {
+    let count = 0;
+    for (const entry of this.questions.values()) if (entry.request.threadId === threadId && entry.request.async === true) count += 1;
+    return count;
+  }
+
+  /** An asynchronous card came or went: the status did not move, so the row is sent by itself. */
+  private asyncChanged(threadId: ThreadId): void {
+    const thread = this.core.journal.getThread(threadId);
+    if (thread !== null) this.core.bus.emit('thread.updated', withLoad(this.core, thread));
+  }
+
   answerPermission(params: { requestId: RequestId; decision: 'allow' | 'deny' }): void {
     const pending = this.permissions.get(params.requestId);
     if (pending === undefined) throw notFound(`unknown permission request ${params.requestId}`, params);
@@ -115,6 +128,7 @@ export class ThreadCards {
     this.core.bus.emit('question.answered', { questionId: request.id, threadId: request.threadId, answer: null });
     this.foldAsyncCard(request.id, null);
     if (request.async !== true) setThreadStatus(this.core, request.threadId, this.waitingOn(request.threadId) ? 'waiting' : 'running');
+    else this.asyncChanged(request.threadId);
     pending.resolve(null);
   }
 
@@ -177,6 +191,7 @@ export class ThreadCards {
     this.core.bus.emit('question.answered', { questionId: request.id, threadId: request.threadId, answer });
     if (request.async === true) {
       this.foldAsyncCard(request.id, answer);
+      this.asyncChanged(request.threadId);
       pending.resolve(answer);
       this.threads.deferred.deliverAnswer(request.threadId, `> ${request.text}\n\n${answerTextOf(request, answer)}`);
       return;
@@ -291,6 +306,7 @@ export class ThreadCards {
     );
     // Nobody waits on an asynchronous card: the thread keeps its status.
     if (ask.async !== true) setThreadStatus(this.core, thread.id, 'waiting');
+    else this.asyncChanged(thread.id);
     this.core.bus.emit('question.asked', request);
     return Object.assign(promise, { questionId: request.id });
   }
@@ -334,15 +350,18 @@ export class ThreadCards {
    * when the thread is put away.
    */
   clearQuestionsOf(threadId: ThreadId, all = false): void {
+    let asyncGone = false;
     for (const [id, pending] of [...this.questions]) {
       if (pending.request.threadId !== threadId) continue;
       if (pending.request.async === true && !all) continue;
       this.questions.delete(id);
       this.asyncCards.delete(id);
       this.closeUnanswered(pending.request);
+      asyncGone ||= pending.request.async === true;
       this.core.bus.emit('question.answered', { questionId: id, threadId, answer: null });
       pending.resolve(null);
     }
+    if (asyncGone) this.asyncChanged(threadId);
   }
 
   /** The agent gave up waiting on one card by itself: it goes like a cancelled one. */
@@ -354,6 +373,7 @@ export class ThreadCards {
     this.closeUnanswered(pending.request);
     this.core.bus.emit('question.answered', { questionId, threadId, answer: null });
     if (pending.request.async !== true) setThreadStatus(this.core, threadId, this.waitingOn(threadId) ? 'waiting' : 'running');
+    else this.asyncChanged(threadId);
     pending.resolve(null);
   }
 

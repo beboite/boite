@@ -9,8 +9,20 @@ import type { ThreadSummary } from '@boite/contracts';
  */
 export type ThreadState = 'working' | 'waiting' | 'error' | 'done' | 'queued' | 'delegating' | 'monitoring' | 'background';
 
+type StateFields = Pick<ThreadSummary, 'status' | 'unread' | 'backgroundWork' | 'openQuestions'>;
+
+/**
+ * The thread waits on the user: a card that stopped its turn, or a question
+ * the agent asked without stopping (`boite ask`), which leaves the status at
+ * `running` or `idle`.
+ */
+export function needsUser(thread: Pick<ThreadSummary, 'status' | 'openQuestions'>): boolean {
+  return thread.status === 'waiting' || (thread.openQuestions ?? 0) > 0;
+}
+
 /** `delegated`: how many of the thread's delegated agents still have a turn under way. */
-export function threadState(thread: Pick<ThreadSummary, 'status' | 'unread' | 'backgroundWork'>, delegated = 0): ThreadState | null {
+export function threadState(thread: StateFields, delegated = 0): ThreadState | null {
+  if (needsUser(thread)) return 'waiting';
   switch (thread.status) {
     case 'running':
       return 'working';
@@ -39,7 +51,7 @@ const ROLLUP_ORDER: ThreadState[] = ['waiting', 'error', 'working', 'delegating'
  * it; null when every one is at rest. `delegated` counts a thread's working
  * delegated agents, as `threadState` takes it.
  */
-export function projectRollup<T extends Pick<ThreadSummary, 'status' | 'unread' | 'backgroundWork'>>(threads: readonly T[], delegated: (thread: T) => number = () => 0): { kind: ThreadState; count: number } | null {
+export function projectRollup<T extends StateFields>(threads: readonly T[], delegated: (thread: T) => number = () => 0): { kind: ThreadState; count: number } | null {
   const states = threads.map(thread => threadState(thread, delegated(thread)));
   for (const kind of ROLLUP_ORDER) {
     const count = states.filter(state => state === kind).length;
