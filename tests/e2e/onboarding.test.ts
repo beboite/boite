@@ -86,6 +86,8 @@ test('a new device gets the tour on its own, holds the app keys under it, and ne
   }
 }, 45_000);
 
+/** On a computer every screen fits the panel: a tour that scrolls hides its own demonstration. */
+const FITS = `(() => { const screen = document.querySelector('[data-testid=onboarding-step]'); return screen.scrollHeight <= screen.clientHeight; })()`;
 test('seven screens fit both languages and widths, without leaving the tour', async () => {
   await page.evaluate(`localStorage.removeItem('boite.onboarding')`);
   await page.reload();
@@ -100,6 +102,7 @@ test('seven screens fit both languages and widths, without leaving the tour', as
         await page.click(`[data-testid=onboarding-dot-${step}]`);
         await page.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === '${step}'`);
         await capture(`tour-${locale}-${width}-${step}.png`);
+        if (width > 390) expect(await page.evaluate(FITS)).toBe(true);
         const height = await page.evaluate<number>(`document.querySelector('[data-testid=onboarding] [role=dialog]').getBoundingClientRect().height`);
         expect(height).toBeLessThanOrEqual(width === 390 ? 640 : 600);
         if (panelHeight !== undefined) expect(height).toBe(panelHeight);
@@ -121,6 +124,7 @@ test('seven screens fit both languages and widths, without leaving the tour', as
           for (const demo of ['voice', 'panel', 'agents']) {
             await page.click(`[data-testid=onboarding-example-${demo}]`);
             await capture(`tour-${locale}-${width}-demo-${demo}.png`);
+            if (width > 390) expect(await page.evaluate(FITS)).toBe(true);
             expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-animation]').scrollWidth <= document.querySelector('[data-testid=onboarding-animation]').clientWidth`)).toBe(true);
           }
         }

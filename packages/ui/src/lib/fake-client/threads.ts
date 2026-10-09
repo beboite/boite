@@ -7,6 +7,7 @@ import { steerUser } from './user-steering';
 import { recoverTurn } from './recovery';
 import { RpcFailure } from '../client';
 import { checkCwd, checkEffort, checkModel, checkRunnable, defaultModel } from './checks';
+import { moveToAccount, usableAccount } from './account-fallback';
 import { writeTitle } from './titles';
 import { DATA_DIR, fakeWorktree, fakeDraftFolder, refusal, toSummary } from './shared';
 import { closeThreadTerminals } from './terminals';
@@ -651,6 +652,9 @@ export function threadMethods(ctx: FakeContext) {
       if (!provider) throw ctx.notFound('provider', providerId);
       // As the core, in its order: an archived or busy thread first, then whether the agent can run at all.
       if (!thread.archived && !['queued', 'running', 'waiting'].includes(thread.status) && !ctx.inFlight.has(thread.id)) {
+        // A signed-out or removed account hands the thread to another of its agent first.
+        const usable = thread.agentSessionId ? null : usableAccount(ctx, providerId, thread.accountId);
+        if (usable && usable.id !== thread.accountId) moveToAccount(ctx, thread, usable);
         const account = ctx.accounts.find((a) => a.id === thread.accountId);
         if (!account) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'accountId: the account of this conversation was removed; choose another account in it first', data: { threadId: thread.id, accountId: thread.accountId, field: 'accountId', expected: 'an existing account' } });
         checkRunnable(provider, account);

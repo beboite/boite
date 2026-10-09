@@ -1748,8 +1748,8 @@ export const strings = {
     removeTitle: 'Remove {account}?',
     removeBody: 'This signs the account out of Boite and deletes its files.',
     removeDefaultBody: 'Boite stops using this login. It stays signed in on your computer.',
-    removeThread: '1 conversation still uses this account. To continue it, you will have to choose another account in it, which reloads its whole context.',
-    removeThreads: '{count} conversations still use this account. To continue one, you will have to choose another account in it, which reloads its whole context.',
+    removeThread: '1 conversation still uses this account. Its next message moves it to another signed-in account of the same agent, which reloads its whole context.',
+    removeThreads: '{count} conversations still use this account. The next message in each moves it to another signed-in account of the same agent, which reloads its whole context.',
     removed: 'Account removed',
     removedHint: 'The account of this conversation was removed. Choose a model on another account to continue.',
     status: {
@@ -2487,7 +2487,6 @@ export const strings = {
       desktop: 'Your computer', phone: 'Your phone', synced: 'The same conversation', reachHint: 'After pairing by QR code, follow your agents from your phone. Your computer keeps running them.',
       notification: 'Contact form finished', quietBody: 'Let your agents work without taking over your screen or your speakers.',
       installVoice: 'Install local dictation', downloadVoice: 'About 200 MB. Audio stays on this computer.', installingVoice: 'Downloading voice engine', cancelVoice: 'Cancel download', readyVoice: 'Dictation is ready. Use the microphone in the composer.', retryVoice: 'Retry voice setup',
-      workspaceBody: 'Click a demo to see how it works.',
     },
     label: 'Getting started',
     skip: 'Skip',

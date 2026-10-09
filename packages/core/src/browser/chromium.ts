@@ -56,8 +56,16 @@ export function findChromium(env: Record<string, string | undefined> = process.e
  * that needs WebGL on a machine without a usable GPU gets none, rather than
  * every core of the machine. On Linux ANGLE goes through EGL, which a
  * headless process reaches without a display.
+ *
+ * Sites turn away a browser that says it is automated, so it says what the
+ * same browser says with a window. `userAgent` replaces the one that names
+ * `HeadlessChrome`, in every request, page, worker and popup.
+ * `AutomationControlled` off leaves `navigator.webdriver` false; `--test-type`
+ * keeps Chrome from showing a bar about that flag, which took 56 pixels of the
+ * page. The screen is 1920 × 1080 rather than headless Chrome's 800 × 600,
+ * smaller than its own window.
  */
-export function chromiumArgs(profileDir: string, platform = process.platform): string[] {
+export function chromiumArgs(profileDir: string, platform = process.platform, userAgent?: string): string[] {
   return [
     '--enable-gpu',
     '--disable-software-rasterizer',
@@ -81,8 +89,40 @@ export function chromiumArgs(profileDir: string, platform = process.platform): s
     '--disable-features=Translate,MediaRouter,OptimizationHints',
     '--password-store=basic',
     '--use-mock-keychain',
+    '--disable-blink-features=AutomationControlled',
+    '--test-type',
+    '--screen-info={1920x1080}',
+    ...(userAgent ? [`--user-agent=${userAgent}`] : []),
     'about:blank',
   ];
+}
+
+/**
+ * What a browser says it is when it runs with a window: its user agent and
+ * the client hints a page or a server can ask for, in the form
+ * `Emulation.setUserAgentOverride` takes them.
+ */
+export interface BrowserIdentity { userAgent: string; metadata: Record<string, unknown> }
+
+/**
+ * Read in a page of the browser itself, without `--user-agent`: that flag
+ * alone empties the high-entropy client hints (`fullVersionList`, the
+ * platform's version). Client hints exist only in a secure context, which a
+ * `file:` page is and `about:blank` is not. Null when the browser has none.
+ */
+export const IDENTITY_SCRIPT = `(async () => {
+  if (location.protocol !== 'file:' || document.readyState === 'loading') return 'wait';
+  const data = navigator.userAgentData;
+  if (!data) return null;
+  const high = await data.getHighEntropyValues(['architecture', 'bitness', 'formFactors', 'fullVersionList', 'model', 'platformVersion', 'wow64']);
+  const metadata = {};
+  for (const key of ['brands', 'fullVersionList', 'platform', 'platformVersion', 'architecture', 'model', 'mobile', 'bitness', 'wow64', 'formFactors']) if (high[key] !== undefined) metadata[key] = high[key];
+  return { userAgent: navigator.userAgent, metadata };
+})()`;
+
+/** The user agent of the same browser with a window: headless Chrome names itself `HeadlessChrome`. */
+export function windowedUserAgent(userAgent: string): string {
+  return userAgent.replace(/\bHeadlessChrome\//, 'Chrome/');
 }
 
 /** A profile's cookies as the core saved them, beside the browser's own files. */

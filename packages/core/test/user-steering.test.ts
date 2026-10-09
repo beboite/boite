@@ -70,6 +70,22 @@ test('an async question answer is visible while steering and becomes one user me
   await expect(owner.call('questions.answer', { threadId, questionId, optionIds: ['1'] })).rejects.toThrow('unknown question');
 });
 
+test('a question asked without stopping marks the row as needing the user until it is answered or skipped', async () => {
+  const { owner, threadId } = await running();
+  const asked = owner.next('thread.updated', row => row.id === threadId && row.openQuestions === 1);
+  const first = await owner.call('questions.ask', { threadId, text: 'Which file?', options: ['Parser'] });
+  // The turn keeps running: only the row's count says the user is needed.
+  expect(await asked).toMatchObject({ status: 'running', openQuestions: 1 });
+  const second = await owner.call('questions.ask', { threadId, text: 'Which test?' });
+  expect((await owner.call('threads.get', { threadId })).openQuestions).toBe(2);
+  const skipped = owner.next('thread.updated', row => row.id === threadId && row.openQuestions === 1);
+  await owner.call('questions.skip', { threadId, questionId: first.questionId });
+  await skipped;
+  const answered = owner.next('thread.updated', row => row.id === threadId && row.openQuestions === 0);
+  await owner.call('questions.answer', { threadId, questionId: second.questionId, optionIds: [], text: 'The parser one' });
+  expect(await answered).toMatchObject({ status: 'running', openQuestions: 0 });
+});
+
 test('an answer held after Stop precedes the next manual prompt without replacing it', async () => {
   const { owner, threadId, turn } = await running();
   let reject!: (accepted: boolean) => void;

@@ -1657,8 +1657,8 @@ export const fr: Translation = {
     removeTitle: 'Supprimer {account} ?',
     removeBody: "Cela déconnecte le compte de Boite et supprime ses fichiers.",
     removeDefaultBody: "Boite cesse d'utiliser ce login. Il reste connecté sur votre ordinateur.",
-    removeThread: "1 conversation utilise encore ce compte. Pour la reprendre, il faudra y choisir un autre compte, ce qui recharge tout son contexte.",
-    removeThreads: "{count} conversations utilisent encore ce compte. Pour en reprendre une, il faudra y choisir un autre compte, ce qui recharge tout son contexte.",
+    removeThread: "1 conversation utilise encore ce compte. Son prochain message la fait passer sur un autre compte connecté du même agent, ce qui recharge tout son contexte.",
+    removeThreads: "{count} conversations utilisent encore ce compte. Le prochain message de chacune la fait passer sur un autre compte connecté du même agent, ce qui recharge tout son contexte.",
     removed: 'Compte supprimé',
     removedHint: "Le compte de cette conversation a été supprimé. Choisissez un modèle sur un autre compte pour continuer.",
     status: {
@@ -2378,7 +2378,6 @@ export const fr: Translation = {
       desktop: 'Votre ordinateur', phone: 'Votre téléphone', synced: 'La même conversation', reachHint: "Après un appairage par QR code, suivez vos agents sur votre téléphone. Votre ordinateur continue de les faire tourner.",
       notification: 'Formulaire de contact terminé', quietBody: "Vos agents travaillent sans prendre votre écran ni vos haut-parleurs.",
       installVoice: 'Installer la dictée locale', downloadVoice: 'Environ 200 Mo. Le son reste sur cet ordinateur.', installingVoice: 'Téléchargement du moteur vocal', cancelVoice: 'Annuler le téléchargement', readyVoice: 'La dictée est prête. Utilisez le micro du champ de message.', retryVoice: 'Réessayer la configuration vocale',
-      workspaceBody: 'Cliquez sur une démo pour la voir en action.',
     },
     label: 'Prise en main',
     skip: 'Passer',

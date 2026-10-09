@@ -4,8 +4,8 @@ import { attentionCount, syncAppBadge } from './badge';
 test('the count is the threads waiting or unread on every machine, archived ones aside', () => {
   expect(attentionCount([
     { threads: [{ unread: true }, { status: 'waiting' }, { status: 'idle' }, { unread: true, archived: true }] },
-    { threads: [{ status: 'waiting', unread: true }] }
-  ])).toBe(3);
+    { threads: [{ status: 'waiting', unread: true }, { status: 'running', openQuestions: 1 }] }
+  ])).toBe(4);
   expect(attentionCount([])).toBe(0);
 });
 

@@ -8,8 +8,8 @@ of the conversation watches the same tabs and can act in them: the desktop on
 that machine, the desktop of another machine connected to it, a plain browser,
 a phone. Nothing depends on which client is open, and no setting turns it on.
 
-`packages/core/src/browser.ts` owns the tabs, `browser/chromium.ts` finds and
-starts the browser, `browser/cdp.ts` is the protocol connection,
+`packages/core/src/browser.ts` owns the tabs, `browser/chromium.ts` finds the
+browser and holds its flags, `browser/launch.ts` starts it, `browser/cdp.ts` is the protocol connection,
 `browser/recorder.ts` records and `browser/scripts.ts` holds what is evaluated
 in a page for viewers. `browser/automation.ts` runs agent-browser's commands
 with `browser/page-kit.ts`, the script that reads a page into a snapshot with
@@ -39,6 +39,34 @@ a process with no display reaches. A page that needs WebGL on a machine
 without a usable GPU gets none rather than SwiftShader on every core. On the
 M2 container on 2026-10-05, WebGL reported `ANGLE (AMD, AMD Radeon Graphics
 (radeonsi renoir ACO), OpenGL ES 3.2)`.
+
+### What sites see
+
+Headless Chrome names itself `HeadlessChrome` in its user agent, sets
+`navigator.webdriver` and reports an 800 × 600 screen smaller than its own
+window. Sites turn that away as a robot: on 2026-10-09 Google answered with
+its "unusual traffic" page, leboncoin and Zillow with a captcha, ChatGPT with
+Cloudflare's wait page and Indeed with "Blocked". The agent browser says what
+the same browser says with a window instead, and all five opened.
+
+`browser/launch.ts` reads that once per build of the executable, in a
+throwaway browser started for it: the user agent without `Headless`, and the
+client hints (`navigator.userAgentData`, the `Sec-CH-UA-*` headers) from a
+`file:` page, the secure context they need. It took about 2 seconds on M2 and
+is read again when the executable changes. Every browser then starts with
+`--user-agent`, which covers its pages, workers, popups and every request, and
+each tab gets the same user agent and the high-entropy client hints through
+`Emulation.setUserAgentOverride`: the flag alone empties those. The browser
+also runs with `--disable-blink-features=AutomationControlled`, which leaves
+`navigator.webdriver` false, `--test-type`, which hides the warning bar that
+flag adds and that took 56 pixels of the page, and `--screen-info={1920x1080}`.
+A browser whose identity cannot be read starts as it is, with a warning in the
+log. A page check of `boite view` skips the read.
+
+This brings it level with the same Chrome running with a window on the same
+network, not past it. Etsy, SeLoger and Reddit still asked for a captcha on
+2026-10-09, and so did Chrome with a window under Xvfb on that address. The
+user solves a captcha in the panel, which takes clicks and drags.
 
 ## Processes and profiles
 
@@ -253,7 +281,9 @@ agent browser of a Windows machine other people have an account on.
 machine has one: opening, reading, clicking and typing, agent-browser's
 refs, fill, select, check, a form submitted with Enter, dialogs inside and
 outside a command and a covered element, presets and color scheme, diagnostics without query strings, a token kept to its conversation,
-a paired viewer's frames and taps, a popup becoming a tab, cookies kept per
+a paired viewer's frames and taps, a popup becoming a tab, the user agent a
+page, a worker, a request and a popup send without `Headless`, with
+`navigator.webdriver` false and full client hints, cookies kept per
 profile across a restart, a profile copied in by the owner, an MP4 recording
 read back, a recording discarded at the end of a turn, and a machine without a
 browser. `browser-cli.test.ts` checks the CLI's files with the browser stubbed.
