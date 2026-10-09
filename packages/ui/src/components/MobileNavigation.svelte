@@ -338,7 +338,7 @@
     .identity :global(.trigger) { min-height: var(--touch-target); margin-block: -13px -6px; }
     .mobile-list { display: block; position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; background: var(--color-background); padding: 8px max(16px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
     .list-heading { padding: 18px 0 12px; }
-    .list-heading :global(.project-views) { border: 0; padding-top: 16px; }
+    .list-heading :global(.rail-head) { border: 0; padding-top: 16px; }
     .list-heading :global(.toolbar) { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 3px; gap: 4px; }
     .list-heading :global(.view) { font-size: var(--text-sm); }
     .list-heading :global(.chosen) { background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-edge); border-radius: var(--radius-md); }
