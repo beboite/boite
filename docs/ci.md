@@ -132,10 +132,10 @@ The tested installer becomes the release artifact.
 
 | Measure | Maximum uncompressed bytes |
 | --- | ---: |
-| UI entry chunk | 588,000 |
+| UI entry chunk | 595,000 |
 | UI files, excluding `.br` and `.gz` copies | 4,405,000 |
 | Core `dist/main.js` | 995,000 |
-| All emitted core JavaScript, including lazy chunks and workers | 3,690,000 |
+| All emitted core JavaScript, including lazy chunks and workers | 3,725,000 |
 
 The total JavaScript measure excludes native binaries and source maps. On
 2026-10-03, fresh builds of `e1f00a3` measured 2,695,204 core bytes and 3,932,309
@@ -178,6 +178,15 @@ gains the frame, the order of views in the timeline, and the kit and
 bootstrap, which the client chunk keeps because the fake client stores pages
 with them. The UI limit rises to 4,405,000 and the core JavaScript limit to
 3,690,000, leaving about 20 KB and 18 KB.
+
+Agents driving the desktop app's browser measured 590,114 UI entry bytes and
+3,706,342 emitted core JavaScript bytes on Windows on 2026-10-10. Its base
+`4f5a3f66`, built the same way, measured 589,260 and 3,689,568. The core gains
+16,774 bytes: `boite browser` routed to the panel's tabs, the relay of their
+DevTools calls and the `browse` path. The entry gains 854 bytes, the check that
+starts the loan; the loan itself is a chunk only the Windows shell loads. The
+entry limit rises to 595,000 and the core JavaScript limit to 3,725,000, leaving
+about 5 KB and 18 KB.
 
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured

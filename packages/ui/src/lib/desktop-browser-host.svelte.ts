@@ -22,7 +22,6 @@ import { rightPanel, type PanelState, type Surface } from './right-panel.svelte'
 import { browserBridge } from './browser-bridge';
 import { CLOSED_TAB } from './browser-bridge-tauri';
 import { browserProfiles } from './browser-profiles.svelte';
-import { lendsBrowser } from './desktop-browser-loan';
 
 /** A burst of panel changes (a page's url, then its title) is one snapshot. */
 const SEND_DELAY_MS = 150;
@@ -70,12 +69,13 @@ const message = (cause: unknown) => (cause instanceof Error ? cause.message : St
 /**
  * Lends the panel's browser to the core `store` is connected to, until the
  * returned function runs. Captures the store's client: a reconnection lends
- * again through a new call.
+ * again through a new call. The caller has checked that this window lends
+ * (`lendsBrowser` in `desktop-browser-loan.ts`).
  */
 export function lendDesktopBrowser(store: Store): () => void {
   const client = store.client;
   const protocol = browserBridge.protocol?.bind(browserBridge);
-  if (!client || !protocol || !lendsBrowser(store)) return () => {};
+  if (!client || !protocol) return () => {};
   let stopped = false, sent = '', timer: ReturnType<typeof setTimeout> | undefined;
   const current = () => !stopped && store.client === client;
 
