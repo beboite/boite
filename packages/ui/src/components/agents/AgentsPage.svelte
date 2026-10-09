@@ -191,7 +191,7 @@
   </header>
 {/snippet}
 
-<section class="agents-page" class:detail-open={!!chosen || !!creating} class:empty={!!snapshot && !chats.length} data-testid="agents-page">
+<section class="agents-page" class:detail-open={!!chosen || !!creating} class:no-agents={!!snapshot && !chats.length} data-testid="agents-page">
   <AgentsRail {view} {chats} {active} {live} onfocus={next => open(next)} oncreate={kind => { creating = { kind }; }} />
 
   <main class="agents-main framed">

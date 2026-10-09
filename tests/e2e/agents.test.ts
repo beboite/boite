@@ -101,8 +101,18 @@ async function settled() {
 async function capture(name: string) { await settled(); await page.screenshot(join(import.meta.dir, '.artifacts', name)); }
 
 test('create, converse, configure the resident engine and follow background work on desktop and phone', async () => {
+  // The Agents list is the thread list's column: same place, same width, same
+  // card beside it, and the title bar's fold button stays.
+  const layout = `(() => { const r = s => { const b = document.querySelector(s)?.getBoundingClientRect(); return b && [b.left, b.top, b.width, b.height].map(Math.round); };
+    return { rail: r('[data-testid="sidebar"]') ?? r('.agents-rail'), card: r('.body main'), fold: !!document.querySelector('[data-testid="sidebar-toggle"]') }; })()`;
+  await page.waitFor(`document.querySelector('[data-testid="sidebar"]') && document.querySelector('.body main')`);
+  await settled();
+  const threads = await page.evaluate<{ rail?: number[]; card?: number[]; fold: boolean }>(layout);
+  expect(threads.rail?.[2]).toBeGreaterThan(0);
   await page.click('[data-testid="view-agents"]');
   await page.waitFor(`document.querySelector('[data-testid="agents-page"]')`);
+  await settled();
+  expect(await page.evaluate(layout)).toEqual(threads);
   await capture('agents-welcome-desktop.png');
   await page.click('[data-testid="agents-create"]');
   await page.waitFor(`document.querySelector('[data-testid="agents-create-menu"]')`);

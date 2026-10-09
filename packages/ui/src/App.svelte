@@ -460,7 +460,7 @@
    * that selector made every node a streaming answer or a scroll mounted
    * anywhere below restyle the body, right before the list read its layout.
    */
-  let sidebarFolded = $derived(store.sidebarCollapsed && store.booted && ((store.connection === 'closed' && !store.core) || !(store.page === 'settings' || (store.page === 'agents' && experimentOn('resident-agents')))));
+  let sidebarFolded = $derived(store.sidebarCollapsed && store.booted && ((store.connection === 'closed' && !store.core) || store.page !== 'settings'));
   let tour = $derived(store.booted && store.connection === 'ready' && (tourRequested() || !tourSeen()));
 
   /**

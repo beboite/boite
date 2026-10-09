@@ -2,13 +2,10 @@
   import { tick, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import WindowList from './WindowList.svelte';
-  import WhipButton from './WhipButton.svelte';
-  import { ChevronRight, Ellipsis, FolderX, GripVertical, LoaderCircle, Plus, Settings } from '@lucide/svelte';
+  import { ChevronRight, Ellipsis, FolderX, GripVertical, LoaderCircle, Plus } from '@lucide/svelte';
   import type { Project, ThreadId } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { workspace, type Machine } from '../lib/workspace.svelte';
-  import { experimentOn } from '../lib/experiments.svelte';
-  import { clampSidebar, SIDEBAR_DEFAULT } from '../lib/prefs';
   import { fill, strings } from '../lib/strings';
   import { projectName } from '../lib/format';
   import { compareThreads } from '../lib/thread-order';
@@ -27,7 +24,6 @@
   import RecentDone from './RecentDone.svelte';
   import ProjectThreadCounters from './ProjectThreadCounters.svelte';
   import ProjectShelf from './ProjectShelf.svelte';
-  import LimitsGlance from './LimitsGlance.svelte';
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
   import AgentsAtWork from './AgentsAtWork.svelte';
@@ -36,6 +32,7 @@
   import DraftRow from './DraftRow.svelte';
   import MachineIcon from './MachineIcon.svelte';
   import ProjectTile from './ProjectTile.svelte';
+  import RailFrame from './RailFrame.svelte';
   let { store }: { store: Store } = $props();
   const mobile = new MediaQuery('(max-width: 720px)');
   let scrollRoot = $state<HTMLDivElement>();
@@ -145,35 +142,10 @@
       drop: (target, after) => projectView.move(activeGroups, key, target, after),
     });
   }
-  function startResize(event: PointerEvent) {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    const handle = event.currentTarget as HTMLElement;
-    const start = event.clientX,
-      width = store.sidebarWidth;
-    handle.setPointerCapture(event.pointerId);
-    const move = (e: PointerEvent) => (store.sidebarWidth = clampSidebar(width + e.clientX - start));
-    const end = () => {
-      handle.removeEventListener('pointermove', move);
-      handle.removeEventListener('pointerup', end);
-      handle.removeEventListener('pointercancel', end);
-      store.setSidebarWidth(store.sidebarWidth);
-    };
-    handle.addEventListener('pointermove', move);
-    handle.addEventListener('pointerup', end);
-    handle.addEventListener('pointercancel', end);
-  }
 </script>
 
-<aside
-  class="sidebar"
-  class:open={store.sidebarOpen}
-  class:collapsed={store.sidebarCollapsed}
-  style:--sidebar-width={`${store.sidebarWidth}px`}
-  data-testid="sidebar"
->
-  <div class="views"><ProjectViews entries={groups} {store} /></div>
-  <div class="scroll" class:recent={workspace.view === 'recent'} data-project-list bind:this={scrollRoot} onscroll={() => { if (showRows && scrollRoot) savedScroll = scrollRoot.scrollTop; }}>
+<RailFrame {store} kind="sidebar" testid="sidebar" drawer bind:scroller={scrollRoot} onscroll={() => { if (showRows && scrollRoot) savedScroll = scrollRoot.scrollTop; }}>
+  {#snippet head()}<ProjectViews entries={groups} {store} />{/snippet}
     {#if showRows}
     {#each visible as machine (machine.id)}<AgentsAtWork {machine} {now} showMachine={multi} />{/each}
     {#if groups.length === 0}<p class="empty">{strings.sidebar.noProjects}</p>{/if}
@@ -309,70 +281,25 @@
       </div>
     {/if}
     {/if}
-  </div>
-  <div class="foot">
+  {#snippet lead()}
     <MachineStatus {store} filter={shownFilter} onfilter={id => { if (id && selected && selected.machine.id !== id) projectView.pick('all'); filter = id; }} />
+  {/snippet}
+  {#snippet foot()}
     {#if store.owner && work.shows('sidebar.add-project')}
       <button class="ghost icon" data-testid="add-project" bind:this={projectButton} onclick={addProject}
         title={strings.sidebar.addProject} aria-label={strings.sidebar.addProject}
         oncontextmenu={(event) => controlMenu(event, store, 'sidebar.add-project')}><Plus size={16} /></button>
     {/if}
-    {#if work.shows('sidebar.limits')}
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <span class="control" oncontextmenu={(event) => controlMenu(event, store, 'sidebar.limits')}><LimitsGlance {store} /></span>
-    {/if}
-    {#if experimentOn('whip')}<WhipButton />{/if}
-    <button
-      class="ghost icon"
-      title={`${strings.sidebar.settings}${store.keyHint('settings')}`}
-      aria-label={strings.sidebar.settings}
-      data-testid="nav-settings"
-      onclick={() => store.showSettings()}><Settings size={16} /></button
-    >
-  </div>
-  <button
-    class="resize"
-    aria-label={strings.sidebar.resize}
-    title={strings.sidebar.resize}
-    data-testid="sidebar-resize"
-    onpointerdown={startResize}
-    ondblclick={() => store.setSidebarWidth(SIDEBAR_DEFAULT)}
-    onkeydown={(e) => {
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-        e.preventDefault();
-        store.setSidebarWidth(store.sidebarWidth + (e.key === 'ArrowLeft' ? -16 : 16));
-      }
-      if (e.key === 'Home') store.setSidebarWidth(SIDEBAR_DEFAULT);
-    }}
-  ></button>
-</aside>
+  {/snippet}
+</RailFrame>
 
 <style>
   @container sidebar (max-width: 240px) {
-    .sidebar .head { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+    .project .head { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
     .head .toggle { grid-column: 1; grid-row: 1; }
     .head .project-actions { grid-column: 2; grid-row: 1; }
     .head :global(.counters) { grid-column: 1 / -1; grid-row: 2; justify-content: flex-end; margin-bottom: 4px; }
   }
-  .sidebar {
-    container: sidebar / inline-size;
-    position: relative;
-    width: var(--sidebar-width);
-    flex: none;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
-
-  .views { margin: 0 10px; }
-  .scroll {
-    flex: 1;
-    min-height: 0;
-    overflow: auto;
-    padding: 8px 6px;
-  }
-  .scroll { display: flex; flex-direction: column; }
-  .scroll > :global(*) { flex-shrink: 0; }
   .recent-folds { margin-top: auto; padding-top: 12px; }
   .project-folds { margin-top: auto; }
   .group-label { margin: 0; padding: 8px 10px 4px; color: var(--color-subtle); font-size: var(--text-xs); border-top: 1px solid var(--color-border); }
@@ -515,93 +442,15 @@
     color: var(--color-subtle);
     font-size: var(--text-sm);
   }
-  .foot {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 0 8px;
-    padding: 6px 0;
-    border-top: 1px solid var(--color-border);
-  }
-  .control {
-    display: contents;
-  }
-  /* The machine button, when there is one, sits alone on the left. */
-  .foot :global(.machines) {
-    min-width: var(--control-sm);
-    margin-right: auto;
-  }
-  .foot :global(.machines .menu),
-  .foot :global(.machines .trigger) { max-width: 100%; }
-  .foot :global(button.icon) {
-    flex: none;
-    width: var(--control-sm);
-    height: var(--control-sm);
-  }
-
   @keyframes leave {
     to {
       opacity: 0;
       transform: translateY(4px);
     }
   }
-  /* Centred in the frame's gap between the sidebar and the chat card. */
-  .resize {
-    position: absolute;
-    top: 0;
-    right: calc(var(--frame-gap) / -2 - 3px);
-    bottom: 0;
-    width: 6px;
-    height: auto;
-    padding: 0;
-    border: none;
-    border-radius: 0;
-    background: transparent;
-    cursor: col-resize;
-    z-index: 5;
-  }
-  .resize:hover,
-  .resize:focus-visible {
-    background: var(--color-edge);
-  }
-  @media (min-width: 721px) {
-    .sidebar {
-      transition: opacity var(--dur-3) var(--ease-out-quint), transform var(--dur-3) var(--ease-out-quint), display var(--dur-3) allow-discrete;
-    }
-    .sidebar.collapsed {
-      display: none;
-      pointer-events: none;
-      opacity: 0;
-      transform: translateY(4px);
-    }
-    @starting-style { .sidebar:not(.collapsed) { opacity: 0; transform: translateY(4px); } }
-  }
   @media (max-width: 720px) {
-    .sidebar {
-      background: var(--color-surface);
-      border-right: 1px solid var(--color-border);
-      position: fixed;
-      inset: var(--titlebar) auto 0 0;
-      z-index: 30;
-      width: min(340px, 90vw);
-      visibility: hidden;
-      pointer-events: none;
-      opacity: 0;
-      transform: translateY(4px);
-      transition: opacity var(--dur-3) var(--ease-out-quint), transform var(--dur-3) var(--ease-out-quint), visibility var(--dur-3);
-      box-shadow: var(--shadow-e3);
-    }
-    .sidebar.open {
-      visibility: visible;
-      pointer-events: auto;
-      opacity: 1;
-      transform: none;
-    }
     .project-actions {
       opacity: 1;
-    }
-    .resize {
-      display: none;
     }
   }
 </style>

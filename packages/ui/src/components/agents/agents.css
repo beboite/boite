@@ -6,25 +6,16 @@
  * of app.css.
  */
 .agents-page { flex: 1; min-width: 0; min-height: 0; display: flex; animation: rise var(--dur-3) var(--ease-out-quint); }
+/* The same gap as between the thread list and the chat card (App.svelte's `.body`). */
+@media (min-width: 721px) { .agents-page { gap: var(--frame-gap); } }
 
-/* The list: the thread list's views, cards and foot. */
-.agents-rail { --ring: var(--color-frame); width: var(--sidebar); flex: none; display: flex; flex-direction: column; min-height: 0; }
-.agents-views { container-type: inline-size; min-width: 0; margin: 0 10px; padding: 8px 0 6px; border-bottom: 1px solid var(--color-border); }
-.agents-views .tools { display: flex; align-items: center; gap: 6px; min-height: var(--control-sm); }
-/* Under the Threads and Agents switch, the way the thread list's tools sit under it. */
-.agents-views .tools:not(:first-child) { margin-top: 5px; }
-.agents-views .tools .actions { display: flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }
-.agents-views .tools .menu .trigger.ghost { width: var(--control-sm); height: var(--control-sm); padding: 0; }
-.agents-views .icon.active { background: var(--color-active); color: var(--color-foreground); }
+/* The list stands in the thread list's frame (RailFrame) under its head (RailHead); only its rows are its own. */
+.agents-rail { --ring: var(--color-frame); }
 .agents-search { display: flex; align-items: center; gap: 8px; margin: 8px 10px 0; padding: 0 4px 0 10px; height: var(--control); border-radius: var(--radius-md); background: var(--color-surface-2); color: var(--color-muted-foreground); }
 .agents-search input { flex: 1; min-width: 0; height: 100%; background: none; border: 0; padding: 0; font-size: var(--text-sm); box-shadow: none; }
 .agents-search input:focus { outline: none; }
-.agents-scroll { flex: 1; min-height: 0; overflow: auto; padding: 8px 6px; }
+.agents-rail .agents-search { margin: 0 4px 8px; }
 .agents-card { margin-bottom: 10px; padding: 4px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--color-surface-2) 55%, transparent); }
-.agents-grow { flex: 1; }
-.agents-foot { display: flex; align-items: center; gap: 6px; margin: 0 8px; padding: 6px 0; border-top: 1px solid var(--color-border); min-height: 41px; }
-.agents-foot button.icon, .agents-foot .menu .trigger.ghost { flex: none; width: var(--control-sm); height: var(--control-sm); padding: 0; }
-.agents-foot button.icon.active { background: var(--color-active); color: var(--color-foreground); }
 
 /* The page beside it: who, how it stands, and its views as words. */
 .agents-main { --ring: var(--color-background); flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
@@ -267,16 +258,13 @@ html[data-motion='reduced'] .typing-bubble .dots i { animation: none; opacity: 0
 @media (max-width: 720px) {
   .agents-page { flex-direction: column; padding-bottom: env(safe-area-inset-bottom); }
   html.agents-detail-open .mobile-tabs { display: none; }
-  .agents-rail { --ring: var(--color-background); width: auto; flex: 1; background: var(--color-background); }
+  .agents-page .agents-rail { --ring: var(--color-background); background: var(--color-background); }
   .agents-main { display: none; }
   .agents-page.detail-open .agents-rail { display: none; }
   .agents-page.detail-open .agents-main { display: flex; flex: 1; }
-  .agents-page.empty:not(.detail-open) .agents-rail { flex: none; }
-  .agents-page.empty:not(.detail-open) .agents-main { display: flex; flex: 1; }
-  .agents-views { margin: 0 12px; }
-  .agents-views .tools .menu .trigger.ghost, .agents-views .tools button.icon { width: var(--control-touch); height: var(--control-touch); }
+  .agents-page.no-agents:not(.detail-open) .agents-rail { flex: none; }
+  .agents-page.no-agents:not(.detail-open) .agents-main { display: flex; flex: 1; }
   .agents-detail-head .menu .trigger.ghost, .agents-detail-head > button.icon { width: var(--control-touch); height: var(--control-touch); }
-  .agents-foot { display: none; }
   .agents-detail-head { gap: 2px; min-height: 56px; padding: 6px 8px 6px 4px; }
   .agents-detail-head > button.small:not(.icon) { font-size: 0; gap: 0; width: var(--control-touch); height: var(--control-touch); padding: 0; }
   .agents-body { padding: 16px 16px 32px; }

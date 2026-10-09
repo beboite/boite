@@ -23,6 +23,12 @@
   const lights = macShell ? 72 : 0;
   const mobile = new MediaQuery('(max-width: 720px)');
   let expanded = $derived(mobile.current ? store.sidebarOpen : !store.sidebarCollapsed);
+  /**
+   * The thread list and the Agents list are one column (RailFrame) and fold
+   * together. On a phone the Agents list is the screen itself, with no drawer
+   * to open.
+   */
+  let foldable = $derived(store.booted && (store.page === 'chat' || (store.page === 'agents' && !mobile.current)));
   function toggleSidebar() {
     if (mobile.current) store.sidebarOpen = !store.sidebarOpen;
     else store.toggleSidebar();
@@ -113,7 +119,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <header style:--project-width={`${Math.max(0, (store.sidebarCollapsed ? 156 : store.sidebarWidth - 40) - lights)}px`} class="titlebar" class:browser={!inShell} class:mac={macShell} class:linux={linuxFrame} {onmousedown} data-testid="titlebar">
-  {#if store.page === 'chat' && store.booted}
+  {#if foldable}
     <button type="button" class="ghost icon sidebar-toggle"
       aria-label={expanded ? strings.sidebar.collapse : strings.sidebar.expand}
       title={`${expanded ? strings.sidebar.collapse : strings.sidebar.expand}${store.keyHint('sidebar')}`}
