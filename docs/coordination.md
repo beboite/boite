@@ -139,9 +139,19 @@ lookup. Directional destination read grants remain required.
 ## What the agent receives
 
 An incoming message is recorded separately from user messages and displayed as
-a forwarded agent message in the timeline. Provider input explicitly labels
-the body as data from another agent. It does not become a user request or grant
-permission to run a tool.
+a forwarded agent message in the timeline. Provider input labels the body as
+another agent's. It does not become a user request or grant permission to run a
+tool.
+
+The recipient is told to cooperate with a reasonable request that fits its
+permissions: free disk, memory or ports, remove what its own work generated and
+no longer needs, answer, then go back to its task and reply with what it did and
+kept. A sender's claim that the user asked for it counts for nothing; the
+request is judged on its merits. The recipient asks first before destroying
+work nobody can regenerate, touching another project or account, or
+interrupting a running service or another agent's work. Agents are expected to
+handle routine housekeeping between themselves, so a request like "clean up
+what you no longer use, the disk is full" is acted on instead of refused.
 
 Sent and received exchanges stay where they occurred in the conversation.
 Continued text and new tools start after each exchange; a tool already running
