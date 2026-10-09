@@ -200,7 +200,7 @@
   header { flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--color-border); }
   header .icon { width: 44px; min-height: 44px; }
   header h1 { font-size: var(--text-md); }
-  header.limits h1 { flex: 1; min-width: 0; margin-right: 54px; }
+  header.limits h1 { flex: 1; min-width: 0; margin-right: 100px; }
   .phone-page { padding: 16px; }
   .scope { overflow-wrap: anywhere; margin-top: 0; }
   .phone-page :global(.card) { padding: 18px; }
@@ -212,6 +212,8 @@
   /* Its refresh joins the bar, at the right end: alone on a row it pushed the cards down. */
   .detail :global(.limits-page > header) { position: absolute; top: 8px; right: 12px; margin: 0; }
   .detail :global(.limits-page > header .refresh) { width: 44px; height: 44px; }
+  .detail :global(.limits-page > header .display-toggle) { width: 44px; height: 44px; padding: 0; justify-content: center; }
+  .detail :global(.limits-page > header .display-toggle .ui-label) { display: none; }
   .detail :global(.switch-row) { flex-wrap: wrap; gap: 12px; }
   /* The bar names the page and the line above says what it holds: the card's own heading and tip step aside. */
   .archived-page :global(#settings-archived > h2) { display: none; }

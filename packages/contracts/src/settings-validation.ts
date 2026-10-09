@@ -1,4 +1,5 @@
 import type { Settings, TitleModel } from './index.ts';
+import { QUOTA_WINDOW_KINDS } from './quota-windows.ts';
 import { BROWSER_PROFILE_NAME_MAX, BROWSER_PROFILES_MAX, browserProfileIdError, DEFAULT_BROWSER_PROFILE, PRIVATE_BROWSER_PROFILE, type BrowserProfile } from './browser';
 
 // Both supported hosts expose URL; contracts otherwise need no DOM or Node types.
@@ -107,6 +108,23 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
       return { ok: false, field: 'quotaOrder', message: 'quotaOrder must contain at most 512 non-empty account ids of at most 200 characters' };
     }
     next.quotaOrder = [...new Set(order)];
+  }
+  if (patch.quotaHiddenWindows !== undefined) {
+    const hidden: unknown = patch.quotaHiddenWindows;
+    const kinds: readonly string[] = QUOTA_WINDOW_KINDS;
+    if (!Array.isArray(hidden) || hidden.some((kind) => typeof kind !== 'string' || !kinds.includes(kind))) {
+      return { ok: false, field: 'quotaHiddenWindows', message: `quotaHiddenWindows must list kinds among ${QUOTA_WINDOW_KINDS.join(', ')}` };
+    }
+    next.quotaHiddenWindows = QUOTA_WINDOW_KINDS.filter((kind) => hidden.includes(kind));
+  }
+  if (patch.quotaPrimary !== undefined) {
+    const primary: unknown = patch.quotaPrimary;
+    const text = (value: unknown) => typeof value === 'string' && value.trim().length > 0 && value.length <= 200;
+    if (!primary || typeof primary !== 'object' || Array.isArray(primary) || Object.keys(primary).length > 512
+      || Object.entries(primary).some(([account, window]) => !text(account) || !text(window))) {
+      return { ok: false, field: 'quotaPrimary', message: 'quotaPrimary must map at most 512 account ids to window ids, each 1 to 200 characters' };
+    }
+    next.quotaPrimary = { ...(primary as Record<string, string>) };
   }
   if (patch.worktreeStorage !== undefined) {
     const storage = patch.worktreeStorage;

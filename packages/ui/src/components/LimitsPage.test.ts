@@ -234,3 +234,28 @@ test('a failed Douane read shows once above its dimmed last bars', async () => {
   expect(document.body.textContent!.split(error)).toHaveLength(2);
   expect(document.querySelector('[data-testid="usage-limit-account"]')!.classList.contains('stale')).toBe(true);
 });
+test('the Display card hides a kind of window everywhere and keeps the choice in settings', async () => {
+  const store = new Store();
+  const client = new FakeClient({ delayMs: 0 });
+  store.attach(client);
+  await store.connect();
+  mounted = mount(LimitsPage, { target: document.body, props: { store } });
+  const card = () => document.querySelector<HTMLElement>('[data-testid="usage-limit-provider"][data-account-id="a-codex"]');
+  await vi.waitFor(() => expect(card()).not.toBeNull());
+  try {
+    expect(card()!.querySelector<HTMLElement>('[data-testid="usage-limit-primary"]')!.dataset.windowId).toBe('secondary');
+    const toggle = document.querySelector<HTMLButtonElement>('[data-testid="limits-display-toggle"]')!;
+    expect(document.querySelector('[data-testid="limits-display"]')).toBeNull();
+    toggle.click(); flushSync();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    const kinds = [...document.querySelectorAll<HTMLInputElement>('[data-testid="limits-display-kind"]')];
+    expect(kinds.map((input) => input.dataset.kind)).toEqual(['hours', 'daily', 'weekly', 'monthly', 'model', 'other']);
+    expect(kinds.every((input) => input.checked)).toBe(true);
+    const hours = kinds.find((input) => input.dataset.kind === 'hours')!;
+    hours.checked = false;
+    hours.dispatchEvent(new Event('change', { bubbles: true }));
+    await vi.waitFor(() => expect(store.settings?.quotaHiddenWindows).toEqual(['hours']));
+    await settle();
+    expect([...card()!.querySelectorAll<HTMLElement>('[data-window-id]')].map((element) => element.dataset.windowId)).toEqual(['secondary']);
+  } finally { store.detach(); client.close(); }
+});

@@ -2160,6 +2160,13 @@ export const fr: Translation = {
     readFailed: 'Lecture des limites impossible : {error}',
     retry: 'Réessayer',
     quit: 'Quitter Boite',
+    display: 'Affichage',
+    displayTitle: 'Fenêtres affichées',
+    displayHint: "S'applique à la page des limites, au coup d'œil de la barre latérale et au plateau système. Sur un compte, épinglez une fenêtre pour l'afficher en principal avec sa réinitialisation.",
+    kinds: { hours: 'Quelques heures (session de 5 h)', daily: 'Jour', weekly: 'Semaine', monthly: 'Mois', model: 'Par modèle (Opus, Sonnet)', other: 'Autres' },
+    makePrimary: 'Afficher {window} en principal',
+    unpin: 'Revenir au choix automatique',
+    allHidden: "Toutes les fenêtres de ce compte sont masquées. Changez-le dans Affichage.",
   },
   harnessUpdates: {
     heading: 'Mises à jour des agents',

@@ -4,8 +4,9 @@
   import type { Snippet } from 'svelte';
   import { fill, strings } from '../lib/strings';
   import QuotaOverview from './QuotaOverview.svelte';
+  import type { QuotaDisplay } from '../lib/quota-display';
 
-  let { rows, loading, completed, error = '', owner = true, order = [], reorder, refresh, connect, settings, close, title, testPrefix = 'quota' }: {
+  let { rows, loading, completed, error = '', owner = true, order = [], reorder, display = null, refresh, connect, settings, close, title, testPrefix = 'quota' }: {
     rows: AccountQuota[] | null;
     loading: boolean;
     completed: string[];
@@ -13,6 +14,7 @@
     owner?: boolean;
     order?: string[];
     reorder?: (order: string[]) => Promise<boolean>;
+    display?: QuotaDisplay | null;
     refresh: () => void;
     connect: () => void;
     settings: () => void;
@@ -45,7 +47,7 @@
       {#if rows === null}
         <p class="muted" role="status">{strings.quotas.loading}</p>
       {:else if !(error && rows.length === 0)}
-        <QuotaOverview {rows} {loading} {completed} {connect} {order} onreorder={reorder} />
+        <QuotaOverview {rows} {loading} {completed} {connect} {order} onreorder={reorder} {display} />
       {/if}
     {/if}
   </section>
