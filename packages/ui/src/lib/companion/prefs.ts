@@ -45,6 +45,8 @@ export interface CompanionPrefs {
   music: boolean;
   /** A click anywhere but on the companion closes its panel. */
   closeOutside: boolean;
+  /** One gauge per subscription of the proxy beside the character. */
+  quotas: boolean;
   screenScope: CompanionScreenScope;
   threadId: string | null;
 }
@@ -65,6 +67,7 @@ export const DEFAULT_COMPANION_PREFS: CompanionPrefs = {
   control: 'ask',
   music: true,
   closeOutside: true,
+  quotas: true,
   screenScope: 'all',
   threadId: null
 };
@@ -102,6 +105,7 @@ export function parseCompanionPrefs(raw: unknown): CompanionPrefs {
     control: value.control === 'auto' ? 'auto' : 'ask',
     music: value.music !== false,
     closeOutside: value.closeOutside !== false,
+    quotas: value.quotas !== false,
     screenScope: value.screenScope === 'here' || value.screenScope === 'zone' ? value.screenScope : 'all',
     threadId: text(value.threadId)
   };

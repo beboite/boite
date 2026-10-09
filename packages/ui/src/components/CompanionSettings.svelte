@@ -190,6 +190,10 @@
       <input type="checkbox" role="switch" checked={prefs.music} onchange={(event) => save({ music: event.currentTarget.checked })} data-testid="companion-music" />
     </label>
     <label class="switch-row">
+      <span class="text ui-label-box"><span class="ui-label">{copy.quotas}</span><InfoTip topic={copy.quotas} text={copy.quotasHint} /></span>
+      <input type="checkbox" role="switch" checked={prefs.quotas} onchange={(event) => save({ quotas: event.currentTarget.checked })} data-testid="companion-quotas" />
+    </label>
+    <label class="switch-row">
       <span class="text ui-label-box"><span class="ui-label">{copy.closeOutside}</span><InfoTip topic={copy.closeOutside} text={copy.closeOutsideHint} /></span>
       <input type="checkbox" role="switch" checked={prefs.closeOutside} onchange={(event) => save({ closeOutside: event.currentTarget.checked })} data-testid="companion-close-outside" />
     </label>

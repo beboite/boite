@@ -2143,6 +2143,15 @@ export const fr: Translation = {
       use: 'Veut utiliser {tool}'
     },
     media: { previous: 'Morceau précédent', next: 'Morceau suivant', play: 'Lecture', pause: 'Pause' },
+    hud: {
+      label: 'Fils au travail et quotas',
+      openThread: 'Ouvrir {title} dans Boite',
+      since: 'Depuis {time}',
+      quotas: 'Quotas',
+      quotaUnknown: 'inconnu',
+      quotaLow: 'bientôt épuisé',
+      quotaOut: 'presque épuisé'
+    },
     seeScreen: 'Joindre mon écran à cette demande',
     seeingScreen: 'Votre écran part avec cette demande. Cliquez pour le retirer.',
     screenFailed: 'L’écran n’a pas pu être capturé. Cliquez sur l’œil pour envoyer sans lui.',
@@ -2189,6 +2198,8 @@ export const fr: Translation = {
       },
       music: 'Réagir à la musique',
       musicHint: 'Un casque et une petite danse quand quelque chose joue, et les commandes du lecteur sous le compagnon.',
+      quotas: 'Afficher les quotas',
+      quotasHint: 'Une petite jauge par abonnement du proxy (Douane) à côté du compagnon, rouge quand l’un est presque épuisé.',
       closeOutside: 'Fermer en cliquant ailleurs',
       closeOutsideHint: 'Un clic n\'importe où ailleurs que sur le compagnon ferme son panneau, comme un menu. Échap le ferme aussi.',
       hideFullscreen: 'Masquer pendant les applications en plein écran',

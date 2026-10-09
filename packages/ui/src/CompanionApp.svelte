@@ -33,6 +33,9 @@
   import CompanionNotes from './components/companion/CompanionNotes.svelte';
   import CompanionZone from './components/companion/CompanionZone.svelte';
   import MediaPill from './components/companion/MediaPill.svelte';
+  import CompanionHud from './components/companion/CompanionHud.svelte';
+  import { followQuotas, hudGauges } from './lib/companion/hud';
+  import { GatewayReader } from './lib/quota-reader.svelte';
 
   const CELEBRATE_MS = 6000;
   const REFRESH_EVERY = 15_000;
@@ -67,6 +70,11 @@
 
   let client: Client | null = null;
   let reachable = $state(true);
+  /** The client answered once: what reads the quotas waits for. */
+  let connected = $state(false);
+  let hudOpen = $state(false);
+  const quotas = new GatewayReader();
+  const gauges = $derived(prefs.quotas ? hudGauges(quotas.state) : []);
   let disposed = false;
   let autoOpened = false;
   let seen: Set<string> | null = null;
@@ -339,8 +347,14 @@
   }
 
   $effect(() => {
-    void [open, talk.shown, talk.phase, media, notes.notices, notes.alarms, mood.blocking, layout, picking];
+    void [open, talk.shown, talk.phase, media, notes.notices, notes.alarms, mood.blocking, layout, picking, hudOpen];
     void tick().then(() => requestAnimationFrame(sendRects));
+  });
+
+  // The proxy's quotas, read now, every minute and on each update, while shown.
+  $effect(() => {
+    if (!prefs.quotas || !connected || !client) return;
+    return followQuotas(client, quotas);
   });
 
   // Covering a screen, the window stays put; uncovered, it goes back to its place.
@@ -426,6 +440,7 @@
       off.push(client.on('message.delta', (delta) => talk.delta(delta)));
       off.push(client.on('message.part', (part) => talk.part(part)));
       off.push(client.on('message.completed', (done) => talk.completed(done)));
+      connected = true;
       await readProjects().catch(() => {});
       await talk.subscribe(prefs.threadId);
       await refresh();
@@ -462,37 +477,51 @@
 
 <main class="stage" class:picking data-align={layout.align} data-edge={layout.edge} data-testid="companion">
   <div class="column">
-    <button
-      bind:this={character}
-      class="character"
-      class:dragging
-      data-hit
-      aria-label={open ? strings.companion.close : strings.companion.open}
-      aria-expanded={open}
-      {onclick}
-      onpointerdown={onpress}
-      onpointermove={onmove}
-      onpointerup={() => (press = null)}
-      onpointerenter={() => (pointerOn = true)}
-      onpointerleave={() => {
-        pointerOn = false;
-        if (!inShell()) talk.hold();
-      }}
-    >
-      <CompanionCharacter
-        mood={talk.thinking ? 'working' : mood.mood}
-        music={media?.playing ?? false}
-        busy={mood.busy}
-        hover={hover || dragging}
-        {boing}
-        {gaze}
-        {asleep}
-        typing={senses.typing}
-        alarm={notes.alarms.length > 0}
-        size={64}
+    <div class="head">
+      <button
+        bind:this={character}
+        class="character"
+        class:dragging
+        data-hit
+        aria-label={open ? strings.companion.close : strings.companion.open}
+        aria-expanded={open}
+        {onclick}
+        onpointerdown={onpress}
+        onpointermove={onmove}
+        onpointerup={() => (press = null)}
+        onpointerenter={() => (pointerOn = true)}
+        onpointerleave={() => {
+          pointerOn = false;
+          if (!inShell()) talk.hold();
+        }}
+      >
+        <CompanionCharacter
+          mood={talk.thinking ? 'working' : mood.mood}
+          music={media?.playing ?? false}
+          busy={mood.busy}
+          hover={hover || dragging}
+          {boing}
+          {gaze}
+          {asleep}
+          typing={senses.typing}
+          alarm={notes.alarms.length > 0}
+          size={64}
+        />
+        {#if mood.blocking > 0}<span class="badge" aria-hidden="true">{mood.blocking}</span>{/if}
+      </button>
+      <CompanionHud
+        {threads}
+        {projects}
+        own={prefs.threadId}
+        {gauges}
+        {hover}
+        {reachable}
+        {layout}
+        bind:expanded={hudOpen}
+        onopen={(threadId) => void showMain(threadId)}
+        onresize={sendRects}
       />
-      {#if mood.blocking > 0}<span class="badge" aria-hidden="true">{mood.blocking}</span>{/if}
-    </button>
+    </div>
 
     {#if media && (open || hover)}
       <div data-hit><MediaPill {media} oncontrol={pressMediaKey} /></div>
@@ -582,6 +611,47 @@
   }
   .stage[data-align='right'] .column {
     align-items: flex-end;
+  }
+
+  /* The character and its HUD: under it in the centre, where the sides leave
+     too little room, beside it towards the middle of the screen otherwise. The
+     character stays first, so its centre does not move. */
+  .head {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: 100%;
+  }
+  .stage[data-edge='bottom'] .head {
+    flex-direction: column-reverse;
+  }
+  .stage[data-align='left'] .head,
+  .stage[data-align='right'] .head {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .stage[data-align='right'] .head {
+    flex-direction: row-reverse;
+  }
+  .stage[data-edge='bottom'][data-align='left'] .head,
+  .stage[data-edge='bottom'][data-align='right'] .head {
+    align-items: flex-end;
+  }
+  /* Under the character, the lid it draws above its box needs the air. */
+  .stage[data-edge='bottom'][data-align='center'] .head > :global(.island) {
+    margin-bottom: 8px;
+  }
+  /* Beside the character, the pill sits level with its middle. */
+  .stage[data-align='left'] .head > :global(.island),
+  .stage[data-align='right'] .head > :global(.island) {
+    margin-top: 11px;
+  }
+  .stage[data-edge='bottom'][data-align='left'] .head > :global(.island),
+  .stage[data-edge='bottom'][data-align='right'] .head > :global(.island) {
+    margin-top: 0;
+    margin-bottom: 11px;
   }
 
   .character {

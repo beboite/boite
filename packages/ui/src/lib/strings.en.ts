@@ -2241,6 +2241,15 @@ export const strings = {
       use: 'Wants to use {tool}'
     },
     media: { previous: 'Previous track', next: 'Next track', play: 'Play', pause: 'Pause' },
+    hud: {
+      label: 'Threads at work and quotas',
+      openThread: 'Open {title} in Boite',
+      since: 'For {time}',
+      quotas: 'Quotas',
+      quotaUnknown: 'unknown',
+      quotaLow: 'running low',
+      quotaOut: 'nearly out'
+    },
     seeScreen: 'Show my screen with this request',
     seeingScreen: 'Your screen goes with this request. Click to leave it out.',
     screenFailed: 'The screen could not be captured. Click the eye to send without it.',
@@ -2287,6 +2296,8 @@ export const strings = {
       },
       music: 'React to music',
       musicHint: 'Headphones and a little dance when something plays, and the player controls under the companion.',
+      quotas: 'Show quotas',
+      quotasHint: 'A small gauge per subscription of the proxy (Douane) beside the companion, red when one nearly runs out.',
       closeOutside: 'Close when clicking elsewhere',
       closeOutsideHint: 'A click anywhere but on the companion closes its panel, as a menu would. Escape closes it too.',
       hideFullscreen: 'Hide during full-screen apps',

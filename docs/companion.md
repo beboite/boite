@@ -19,9 +19,9 @@ shows the Settings page, which says that the companion runs in the desktop app.
 | Full-screen app in front, last input, screen capture, global shortcut | `apps/shell/src-tauri/src/platform/desktop.rs` |
 | Media session (Spotify first): read and control | `apps/shell/src-tauri/src/platform/media.rs` |
 | Page, mounted for `index.html?view=companion` | `packages/ui/src/CompanionApp.svelte` |
-| Character, ask bar, panel, notices, music pill, memory card | `packages/ui/src/components/companion/` |
+| Character, ask bar, panel, notices, music pill, HUD, memory card | `packages/ui/src/components/companion/` |
 | Settings, Companion | `packages/ui/src/components/CompanionSettings.svelte` |
-| Preferences, mood, brain, conversation, senses, notices, memory, directives, screen, sounds, shell calls | `packages/ui/src/lib/companion/` |
+| Preferences, mood, brain, conversation, senses, notices, HUD, memory, directives, screen, sounds, shell calls | `packages/ui/src/lib/companion/` |
 
 The main window opens the companion's window while the experiment is on and
 closes it when it is switched off (`lib/companion/follow.svelte.ts`).
@@ -101,7 +101,7 @@ notify or quit; `acl.rs` tests this.
 They are this computer's, in `localStorage` under `boite.companion`, like the
 experiments: screen, position and drop spot, hiding for full-screen apps, the
 shortcut (one of `COMPANION_HOTKEYS`, or none), sounds, agent, account,
-model, effort, control mode, music, closing on an outside click, and the id
+model, effort, control mode, music, quotas, closing on an outside click, and the id
 of the conversation. Both webviews share the origin, so the companion follows
 a change from Settings through the `storage` event.
 
@@ -210,6 +210,38 @@ seconds. While something plays, the character wears headphones, and the pill
 with previous, play or pause and next appears when the pointer is on the
 companion. Other systems than Windows report no session.
 
+## HUD
+
+A pill beside the character (`CompanionHud.svelte`, `hud.ts`), in the manner
+of a "Dynamic Island". It sits under the character in the centre, and beside
+it, towards the middle of the screen, on the left and the right; near the
+bottom it goes above, or level with it. It stays in the page's flow, so it
+never covers the panel, the cards or the music pill, and the character keeps
+its place.
+
+Folded, it shows how many threads are at work (queued, running or waiting,
+the companion's own left out), the title of the one whose request started
+last, its step and how long it has been at it. The step is
+`ThreadSummary.progress`, which `thread.updated` brings to every client: the
+phase in the words of the chat's turn summary, with its detail (a tool, most
+of the time). `thread.activity` reaches only the clients subscribed to a
+thread, so the HUD does not read it. The time counts from the user's request,
+as the sidebar does, once a second while the pill shows and the page is seen.
+
+On hover (the shell's `companion://hover`, and the pointer on the pill) or
+keyboard focus, the outline morphs into a card listing every thread at work
+with its project, step and time; a click opens it in Boite
+(`companion_show_main`). Without threads at work, the pill is gone, or only
+the gauges stay.
+
+With "Show quotas" on and the core's subscription proxy set to a Douane, it
+carries one small gauge per subscription (`hudGauges`): what is left of the
+window nearest its limit, amber past 80 % used, red past 95 %, each with a
+label for screen readers; the open card spells them out. The page reads
+`subscriptionProxy.quotas` on start and every minute, and takes every
+`subscriptionProxy.quotasUpdated`. With no proxy, or another kind, there is
+no gauge. The key is never read.
+
 ## Checks
 
 - `cargo test --lib` in `apps/shell/src-tauri`: hit test, placement, drop
@@ -221,5 +253,9 @@ companion. Other systems than Windows report no session.
 - `packages/ui/src/lib/companion/companion-talk.test.ts`, on the fake core: a
   reply's directives kept, a finished thread's first sentence, a reminder
   ringing again until answered.
-- Captures: `?view=companion&fake=1` on the dev UI at 440 × 600, and Settings,
+- `packages/ui/src/lib/companion/companion-hud.test.ts`: the HUD's threads,
+  steps and order, the gauges and their levels, and following the quotas on
+  the fake core's HUD demo.
+- Captures: `?view=companion&fake=1` on the dev UI at 440 × 600 (`&hud=1`
+  seeds a Douane and three threads at work for the HUD), and Settings,
   Companion at desktop width.
