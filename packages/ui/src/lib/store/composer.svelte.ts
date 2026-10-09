@@ -39,6 +39,16 @@ function turnInFlight(error: unknown): TurnInFlightData | null {
   return data?.reason === 'turn-in-flight' && data.thread ? data as TurnInFlightData : null;
 }
 
+/**
+ * A queue drain still shows the batch it is sending. When that send comes back
+ * as one entry at the head of the queue, the batch leaves first, so no saved
+ * snapshot holds both and a reload cannot send the prompts twice.
+ */
+function takeOutgoing(state: { queued: QueuedPrompt[]; outgoing?: number }): void {
+  if (state.outgoing) state.queued.splice(0, state.outgoing);
+  state.outgoing = 0;
+}
+
 /** The unsent prompt of each thread, and the send path that turns one into a turn. */
 export class Composer {
   /**
@@ -436,7 +446,7 @@ export class Composer {
     const queued: QueuedPrompt = outbox
       ? { ...entry, request: { id: outbox.id ?? secureId(), choice: outbox.choice ? { ...outbox.choice } : null, queuedAt: Date.now(), ...(outbox.id ? { sent: true as const } : {}) } }
       : entry;
-    if (outbox?.head) state.queued.unshift(queued); else state.queued.push(queued);
+    if (outbox?.head) { takeOutgoing(state); state.queued.unshift(queued); } else state.queued.push(queued);
     if (outbox) { this.ctx.drafts.persist(threadId); void this.ctx.drafts.flush(); }
   }
 
@@ -580,7 +590,9 @@ export class Composer {
       if (early) {
         this.markInFlight(early);
         if (request) return 'wait';
-        this.composerStates[early.thread.id]!.queued.unshift({ text: prompt, attachments, ...(previewReferences.length ? { previewReferences } : {}) });
+        const held = this.composerStates[early.thread.id]!;
+        takeOutgoing(held);
+        held.queued.unshift({ text: prompt, attachments, ...(previewReferences.length ? { previewReferences } : {}) });
         // The queue shows it from here on.
         delete this.staged[early.thread.id];
         return 'sent';
