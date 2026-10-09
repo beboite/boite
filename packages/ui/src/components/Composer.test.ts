@@ -346,6 +346,7 @@ test('on a touch keyboard Enter writes a new line and only the button sends', as
   expect(press('Enter')).toBe(true);
   await new Promise(resolve => setTimeout(resolve, 10));
   expect(send).not.toHaveBeenCalled();
+  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
   query<HTMLButtonElement>('[data-testid=composer-send]').click();
   await waitFor(() => send.mock.calls.length === 1);
   expect(send.mock.calls[0]![0]).toBe('first line');
