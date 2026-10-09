@@ -599,6 +599,20 @@
         if (crewChanged) void crew.load();
       })
     );
+    const unreachable = () => {
+      reachable = false;
+      recompute();
+    };
+    /** What the first connection starts, once: the core may answer only after a retry, when the window opened before it. */
+    let started = false;
+    const start = async () => {
+      if (started || disposed) return;
+      started = true;
+      connected = true;
+      await readProjects().catch(() => {});
+      await refresh();
+      await crew.load();
+    };
     const initialize = async () => {
       // Same gate as `Store.boot`: the fake core is in the dev bundle only.
       if (import.meta.env.DEV && new URLSearchParams(location.search).get('fake') === '1') {
@@ -613,16 +627,15 @@
           ws.onState((state: ClientState) => {
             reachable = state === 'ready';
             recompute();
-            if (state === 'ready') {
-              crew.resubscribe();
-              soon(0);
-            }
+            if (state !== 'ready') return;
+            if (!started) return void start().catch(unreachable);
+            crew.resubscribe();
+            soon(0);
           })
         );
       }
       if (disposed) return client.close();
-      await client.connect();
-      if (disposed) return client.close();
+      // Heard before the first connection, which a retry may make in its place.
       off.push(client.on('thread.updated', acceptThread));
       off.push(client.on('thread.created', acceptThread));
       off.push(client.on('thread.removed', () => soon()));
@@ -636,15 +649,11 @@
       off.push(client.on('agents.changed', () => crew.changed()));
       off.push(client.on('accounts.updated', () => crew.retry()));
       off.push(client.on('providers.updated', () => crew.retry()));
-      connected = true;
-      await readProjects().catch(() => {});
-      await refresh();
-      await crew.load();
+      await client.connect();
+      if (disposed) return client.close();
+      await start();
     };
-    void initialize().catch(() => {
-      reachable = false;
-      recompute();
-    });
+    void initialize().catch(unreachable);
     const refresher = setInterval(() => void refresh(), REFRESH_EVERY);
     const rects = setInterval(sendRects, 500);
     return () => {

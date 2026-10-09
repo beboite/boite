@@ -11,7 +11,7 @@ import { strings } from '../strings';
 import type { Brain } from './brain';
 import { AGENT_TOOLS, CLASSIC_SKIN, companionAgent, freshSkin, membersOf, memoriesToForget, memoryToKeep, profileWith, repliesAfter, replyTo, skinOf } from './crew';
 import { Crew } from './crew.svelte';
-import { addReminder, readReminders } from './memory';
+import { addReminder, readMemory, readReminders, remember } from './memory';
 import { Notes } from './notes.svelte';
 import { readCompanionPrefs, writeCompanionPrefs } from './prefs';
 import { toBox } from './skin';
@@ -186,6 +186,26 @@ test('a first agent that could not be made is tried again, later on its own and 
   await vi.advanceTimersByTimeAsync(200);
   await settle();
   expect(saves).toHaveLength(1);
+  crew.dispose();
+});
+
+test('the facts kept on this computer go to the first agent one by one; one that could not go stays here', async () => {
+  writeCompanionPrefs({ providerId: 'claude', accountId: 'acc' });
+  remember('likes tea');
+  remember('works on Boite');
+  const call = vi.fn(async (method: string, params?: unknown) => {
+    if (method === 'agents.snapshot') return snapshotOf({});
+    if (method === 'providers.list') return { loaded: [{ id: 'claude', name: 'Claude', shortName: 'Claude', protocol: 'acp', available: true, models: [] } as unknown as ProviderSummary], rejected: [] };
+    if (method === 'accounts.list') return [{ id: 'acc', providerId: 'claude', label: 'acc', status: 'ok' } as Account];
+    if (method === 'agents.profile.save') return profile('bots');
+    if (method === 'agents.memory.save' && JSON.stringify(params).includes('tea')) throw new Error('core busy');
+    return {};
+  });
+  const client = { call } as unknown as Client;
+  const crew = new Crew({ client: () => client, prefs: readCompanionPrefs, projects: () => ['boite'], waiting: () => false, answered: () => {}, loaded: () => {} });
+  await crew.load();
+  await vi.waitFor(() => expect(call.mock.calls.filter(([method]) => method === 'agents.memory.save')).toHaveLength(2));
+  await vi.waitFor(() => expect(readMemory().map((fact) => fact.text)).toEqual(['likes tea']));
   crew.dispose();
 });
 

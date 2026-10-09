@@ -173,8 +173,10 @@ and the usual permissions apply. Nothing is added to the core or to the RPC.
   and ends with a `[[context: …]]` line (`contextLine`): the local date and
   time, then the paths of the images and files that go with it. An agent's
   turn takes paths, not attachments, so the shell keeps each file in the
-  system's temporary folder, under `boite-companion`, for a day
-  (`companion_keep`), and the agent opens it with its file-reading tool.
+  app's own cache folder, under `boite-companion`, for a day
+  (`companion_keep`), and the agent opens it with its file-reading tool. A
+  shared temporary folder (Linux's `/tmp`) would let another account read or
+  swap it.
   Outside the shell no image or file goes.
 - The ask bar sends the screen when the eye is on: by itself
   when the request speaks of the screen (`mentionsScreen`), or by a click.

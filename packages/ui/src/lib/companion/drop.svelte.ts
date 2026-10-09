@@ -94,6 +94,9 @@ export class Dropped {
   reading = $state(false);
   problem = $state('');
   private leaveTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The drops read so far, one after the other, and how many are still to read. */
+  private queue: Promise<void> = Promise.resolve();
+  private waiting = 0;
 
   /**
    * A drag over the page. Files over an area are offered a copy; elsewhere
@@ -121,15 +124,22 @@ export class Dropped {
     return this.add(files);
   }
 
-  async add(files: File[]): Promise<void> {
+  /** One drop is read at a time, each from what the one before it held: a second drop never overwrites the first. */
+  add(files: File[]): Promise<void> {
+    this.waiting += 1;
     this.reading = true;
-    try {
-      const { held, refused } = await gatherDropped(files, this.held);
-      this.held = held;
-      this.problem = refused ?? '';
-    } finally {
-      this.reading = false;
-    }
+    const reading = this.queue.then(() => this.read(files)).finally(() => {
+      this.waiting -= 1;
+      this.reading = this.waiting > 0;
+    });
+    this.queue = reading.catch(() => {});
+    return reading;
+  }
+
+  private async read(files: File[]): Promise<void> {
+    const { held, refused } = await gatherDropped(files, this.held);
+    this.held = held;
+    this.problem = refused ?? '';
   }
 
   remove(index: number): void {

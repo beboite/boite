@@ -11,7 +11,7 @@ import { INITIAL_MODEL_DEFAULTS } from '../model-defaults';
 import { defaultPrefs, PREFS_STORAGE_KEY } from '../prefs';
 import { messageFor, roleBlock } from './brain';
 import { parseDirectives, visibleReply } from './directives';
-import { gatherDropped, joinScreen, type Encode } from './drop.svelte';
+import { Dropped, gatherDropped, joinScreen, type Encode } from './drop.svelte';
 import { newThreadChoice, resolveProject } from './tasks';
 import { Tasks, unknownLine } from './tasks.svelte';
 
@@ -48,6 +48,16 @@ test('an image the encoder cannot make lighter goes as the file it is', async ()
   const image = new File([new Uint8Array(32)], 'tiny.png', { type: 'image/png' });
   const { held: kept } = await gatherDropped([image], [], async () => null);
   expect(kept).toMatchObject([{ kind: 'image', mimeType: 'image/png', name: 'tiny.png' }]);
+});
+
+test('a second drop while the first is read comes after it, and neither is lost', async () => {
+  const dropped = new Dropped();
+  const first = dropped.add([textFile('a.txt')]);
+  const second = dropped.add([textFile('b.txt')]);
+  expect(dropped.reading).toBe(true);
+  await Promise.all([first, second]);
+  expect(dropped.held.map((file) => file.name)).toEqual(['a.txt', 'b.txt']);
+  expect(dropped.reading).toBe(false);
 });
 
 test('each cap is said by name, and the files that fit still come', async () => {

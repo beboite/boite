@@ -17,7 +17,7 @@ import { fill, strings } from '../strings';
 import { COMPANION_DOMAIN, permissionModeOf, pickBrain, ROLE_START, roleBlock, withoutRole, withRole } from './brain';
 import { CLASSIC_SKIN, companionAgent, FIRST_AGENT_NAME, lastMessageAt, liveMemories, membersOf, memoriesToForget, memoryToKeep, profileWith, repliesAfter, sessionThreadOf } from './crew';
 import { parseDirectives, type Directives } from './directives';
-import { addReminder, clearMemory, readMemory } from './memory';
+import { addReminder, forgetFact, readMemory } from './memory';
 import { writeCompanionPrefs, type CompanionPrefs } from './prefs';
 
 /** An answer older than this when first seen was written while the companion was away: only what lasts is carried out. */
@@ -286,18 +286,16 @@ export class Crew {
     this.schedule(RETRY_MS + SOON_MS);
   }
 
-  /** The facts the companion kept on this computer, moved to the agent's memory; kept here when one could not go. */
+  /** The facts the companion kept on this computer, moved to the agent's memory one by one; a fact that could not go stays here. */
   private async carryMemory(client: Client, agentId: string): Promise<void> {
-    const facts = readMemory();
-    if (facts.length === 0) return;
-    try {
-      for (const fact of facts) {
-        const save = memoryToKeep([], agentId, fact.text);
+    for (const fact of readMemory()) {
+      const save = memoryToKeep([], agentId, fact.text);
+      try {
         if (save) await client.call('agents.memory.save', save);
+        forgetFact(fact.id);
+      } catch {
+        /* this fact stays on this computer, in Settings, Companion */
       }
-      clearMemory();
-    } catch {
-      /* the facts stay on this computer, in Settings, Companion */
     }
   }
 }

@@ -603,8 +603,9 @@ pub fn companion_focus(app: AppHandle, webview: Webview) -> Result<(), String> {
     window_of(&app)?.set_focus().map_err(|error| error.to_string())
 }
 
-/// The folder, under the system's temporary one, where the files a request
-/// carries wait for the agent to open them.
+/// The folder, in the app's cache, where the files a request carries wait for
+/// the agent to open them: the user's own, where a shared temporary folder
+/// (Linux's `/tmp`) would let another account read or swap them.
 const KEPT_DIR: &str = "boite-companion";
 /// Kept files older than this go when the next one is kept.
 const KEPT_FOR: Duration = Duration::from_secs(24 * 60 * 60);
@@ -621,7 +622,7 @@ pub async fn companion_keep(webview: Webview, request: tauri::ipc::Request<'_>) 
         return Err("the file comes as raw bytes".into());
     };
     let name = request.headers().get("x-name").and_then(|value| value.to_str().ok()).map(percent_decoded).unwrap_or_default();
-    let dir = std::env::temp_dir().join(KEPT_DIR);
+    let dir = webview.path().app_cache_dir().map_err(|error| error.to_string())?.join(KEPT_DIR);
     keep_file(&dir, &name, bytes, SystemTime::now()).map(|path| path.to_string_lossy().into_owned()).map_err(|error| error.to_string())
 }
 
