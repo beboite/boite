@@ -149,7 +149,7 @@ mod tests {
         assert!(!is_game(r"D:\SteamLibrary\steamapps\common\wallpaper_engine\wallpaper64.exe"));
         assert!(!is_game(r"C:\Program Files\Mozilla Firefox\firefox.exe"));
         assert!(!is_game(r"C:\Windows\explorer.exe"));
-        assert!(!is_game(r"C:\Users\Chris\AppData\Local\Programs\Microsoft VS Code\Code.exe"));
+        assert!(!is_game(r"C:\Users\me\AppData\Local\Programs\Microsoft VS Code\Code.exe"));
     }
 
     #[test]
