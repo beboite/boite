@@ -10,7 +10,9 @@ bottom navigation bar. A conversation uses one compact header; Back returns
 to the thread list, which includes a search field. The composer stays at the
 bottom of the available viewport, above the keyboard when it is open. A touch
 keyboard has no Shift+Enter, so on a touch-only device (`pointer: coarse` and
-`hover: none`) Enter writes a new line and only the send button sends.
+`hover: none`) Enter writes a new line and only the send button sends. A
+browser does not report a connected physical keyboard, so its Enter does the
+same there.
 
 At phone widths, Settings opens a vertical list with separate screens for
 App & notifications, Appearance, and Machines. The back button or browser Back
