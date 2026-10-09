@@ -93,7 +93,7 @@ test('pasted images have linked references and a preview that leaves the compose
     for (const mobile of [false, true]) {
       if (mobile) await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
       await page.waitFor('document.querySelector("[data-testid=composer-input]").scrollHeight <= document.querySelector("[data-testid=composer-input]").clientHeight');
-      await page.waitFor('parseFloat(document.querySelector("[data-testid=composer-highlight]").style.width) === document.querySelector("[data-testid=composer-input]").clientWidth');
+      await page.waitFor('document.querySelector("[data-testid=composer-highlight]").getBoundingClientRect().width === document.querySelector("[data-testid=composer-input]").getBoundingClientRect().width - parseFloat(document.querySelector("[data-testid=composer-highlight]").style.right)');
       const point = await page.evaluate<{ x: number; y: number }>('(() => { const r = document.querySelector("[data-testid=composer-image-reference]").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()');
       await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
       await page.waitFor('document.querySelector("[data-testid=composer-attachment]").classList.contains("highlighted")');
@@ -128,3 +128,42 @@ test('pasted images have linked references and a preview that leaves the compose
     await server.close();
   }
 }, 90_000);
+
+test('the paint layer breaks lines where the box does at a fractional width', async () => {
+  const port = await freePort();
+  const server = await startDevUi(port);
+  let page: BrowserPage | undefined;
+  try {
+    page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, windowSize: { width: 1280, height: 900 } });
+    await page.waitFor('document.querySelector("[data-testid=composer-input]")');
+    // A command keeps the paint layer over the box, as an image reference does.
+    await page.type('[data-testid=composer-input]', '/goal');
+    await page.waitFor('document.querySelector("[data-testid=composer-highlight]")');
+    // A line exactly as wide as the box's text area, the box a fraction of a pixel past a whole one.
+    // A paint layer given the box's clientWidth, rounded down, broke that line and the caret trailed the painted text.
+    const lines = await page.evaluate<{ widths: number[]; box: number; paint: number; paintWidth: number; boxWidth: number }>(`(async () => {
+      const box = document.querySelector('[data-testid=composer-input]'), wrap = box.parentElement, paint = document.querySelector('.input-paint');
+      const frame = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const style = getComputedStyle(box), padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+      const write = async (value) => { box.value = value; box.dispatchEvent(new Event('input', { bubbles: true })); await frame(); };
+      const count = (height) => Math.round((height - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)) / parseFloat(style.lineHeight));
+      const words = 'qui est en retard parfois quand on écrit et que ça descend à la ligne'.split(' ');
+      const widths = [];
+      for (let used = 3; used <= words.length; used++) {
+        await write('/goal ' + words.slice(0, used).join(' '));
+        const range = document.createRange(); range.selectNodeContents(paint);
+        const right = Math.max(...Array.from(range.getClientRects(), rect => rect.right));
+        const needed = right - paint.getBoundingClientRect().left + parseFloat(style.paddingRight);
+        widths.push(needed);
+        if (needed % 1 < 0.05 || needed % 1 > 0.4) continue;
+        wrap.style.width = (needed + 0.05) + 'px';
+        await frame();
+        return { widths, box: count(box.scrollHeight), paint: count(paint.offsetHeight), paintWidth: paint.getBoundingClientRect().width, boxWidth: box.getBoundingClientRect().width - (box.offsetWidth - box.clientWidth) };
+      }
+      return { widths, box: 0, paint: 0, paintWidth: 0, boxWidth: 0 };
+    })()`);
+    expect(lines.box, `no line ended in the first half of a pixel: ${lines.widths.join(', ')}`).toBe(1);
+    expect(lines.paint).toBe(1);
+    expect(lines.paintWidth).toBe(lines.boxWidth);
+  } finally { await page?.close(); await server.close(); }
+}, 60_000);
