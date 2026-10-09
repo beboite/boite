@@ -57,6 +57,12 @@ test('a page the agent opens shows the Agent browser covered, naming the machine
   // The next frame draws the tap the page took.
   await Bun.sleep(1200);
   await capture('agent-browser-live-desktop.png');
+  // The owner opens his own tab from the strip, on a new tab page.
+  await page.click(id('agent-browser-new'));
+  await page.waitFor(`document.activeElement === document.querySelector('${id('agent-browser-start-address')}')`);
+  await capture('agent-browser-new-tab-desktop.png');
+  await page.click(`${id('agent-browser-draft')} button`);
+  await page.waitFor(`document.querySelector('${id('remote-browser-frame')}')`);
 
   // Hide covers it again on this client; the phone width shows the same cover.
   await page.click(id('agent-browser-hide'));

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { Pause, Play, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Copy, RotateCw, Send } from '@lucide/svelte';
+  import { Pause, Play, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Copy, Globe, Lock, MonitorSmartphone, RotateCw, Send } from '@lucide/svelte';
   import { REMOTE_PRESS_MAX, REMOTE_TEXT_MAX, type RemoteBrowserFrame, type RemoteBrowserInput } from '@boite/contracts';
   import { browserKey, hasKeyboard, liveInput, writeClipboardLater } from '../lib/live-input';
   import type { Store } from '../lib/store.svelte';
@@ -36,6 +36,7 @@
   let displaySettings = $state(false), viewportWidth = $state<number | undefined>(393), viewportHeight = $state<number | undefined>(700);
   let areaWidth = $state(0), areaHeight = $state(0), zoom = $state(0);
   let address = $state(''), editingAddress = false, fresh = $state(true);
+  const secure = $derived(/^https:/i.test(frame?.url ?? ''));
   const previewScale = $derived(frame ? (zoom || Math.min(areaWidth / frame.width, areaHeight / frame.height)) : 1);
   const validSize = $derived([viewportWidth, viewportHeight].every(n => typeof n === 'number' && Number.isInteger(n) && n >= 240 && n <= 3840));
   const usable = $derived(!!frame && frameClient === store.client && !paused && !busy && !error && store.connection === 'ready');
@@ -283,79 +284,107 @@
 
 <section class="remote" data-testid="remote-browser" aria-label={strings.remoteBrowser.title}>
   <form class="nav" data-testid="remote-browser-nav" onsubmit={go}>
-    <button type="button" class="chip" disabled={!usable} aria-label={strings.remoteBrowser.back} onclick={() => void input({ kind: 'history', direction: 'back' })}><ArrowLeft size={17} /></button>
-    <button type="button" class="chip" disabled={!usable} aria-label={strings.remoteBrowser.forward} onclick={() => void input({ kind: 'history', direction: 'forward' })}><ArrowRight size={17} /></button>
-    <button type="button" class="chip" disabled={!usable} aria-label={strings.remoteBrowser.reload} onclick={() => void input({ kind: 'reload' })}><RotateCw size={16} /></button>
-    <input bind:value={address} data-testid="remote-browser-address" type="text" inputmode="url" enterkeyhint="go" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="4096" aria-label={strings.remoteBrowser.address} placeholder={strings.remoteBrowser.address} onfocus={e => { editingAddress = true; e.currentTarget.select(); }} onblur={() => { editingAddress = false; }} />
-    <button type="submit" class="chip go" disabled={!usable || !address.trim()}><span class="ui-label">{strings.remoteBrowser.go}</span></button>
+    <button type="button" class="ghost small icon" disabled={!usable} title={strings.remoteBrowser.back} aria-label={strings.remoteBrowser.back} onclick={() => void input({ kind: 'history', direction: 'back' })}><ArrowLeft size={15} strokeWidth={1.75} /></button>
+    <button type="button" class="ghost small icon" disabled={!usable} title={strings.remoteBrowser.forward} aria-label={strings.remoteBrowser.forward} onclick={() => void input({ kind: 'history', direction: 'forward' })}><ArrowRight size={15} strokeWidth={1.75} /></button>
+    <button type="button" class="ghost small icon" disabled={!usable} title={strings.remoteBrowser.reload} aria-label={strings.remoteBrowser.reload} onclick={() => void input({ kind: 'reload' })}><RotateCw size={14} strokeWidth={1.75} class={frame && !fresh ? 'spin' : ''} /></button>
+    <label class="omnibox" class:secure={secure}>
+      <span class="site" aria-hidden="true">{#if secure}<Lock size={12} strokeWidth={2} />{:else}<Globe size={12} strokeWidth={2} />{/if}</span>
+      <input bind:value={address} data-testid="remote-browser-address" type="text" inputmode="url" enterkeyhint="go" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="4096" aria-label={strings.remoteBrowser.address} placeholder={strings.remoteBrowser.addressPlaceholder} onfocus={e => { editingAddress = true; e.currentTarget.select(); }} onblur={() => { editingAddress = false; }} />
+      {#if paused || error || !frame}<span class="state ui-label" data-testid="remote-browser-state">{paused ? strings.remoteBrowser.paused : error ? strings.remoteBrowser.reconnecting : strings.remoteBrowser.waiting}</span>{/if}
+    </label>
+    <button type="button" class="ghost small icon" data-testid="remote-browser-display" aria-expanded={displaySettings} title={strings.remoteBrowser.display} aria-label={strings.remoteBrowser.display} onclick={() => { displaySettings = !displaySettings; if (frame) { viewportWidth = frame.width; viewportHeight = frame.height; } }}><MonitorSmartphone size={15} strokeWidth={1.75} /></button>
+    <button type="button" class="ghost small icon" data-testid="remote-browser-pause" aria-pressed={paused} title={paused ? strings.remoteBrowser.resume : strings.remoteBrowser.pause} aria-label={paused ? strings.remoteBrowser.resume : strings.remoteBrowser.pause} onclick={() => { paused = !paused; }}>{#if paused}<Play size={14} strokeWidth={1.75} />{:else}<Pause size={14} strokeWidth={1.75} />{/if}</button>
   </form>
-  <div class="toolbar"><span class="state ui-label" data-testid="remote-browser-state" class:live={frame && !paused && !error}>{paused ? strings.remoteBrowser.paused : error ? strings.remoteBrowser.reconnecting : frame ? strings.remoteBrowser.live : strings.remoteBrowser.waiting}</span>
-    <button type="button" class="chip" data-testid="remote-browser-display" aria-expanded={displaySettings} onclick={() => { displaySettings = !displaySettings; if (frame) { viewportWidth = frame.width; viewportHeight = frame.height; } }}><span class="ui-label">{strings.remoteBrowser.display}</span></button>
-    <button type="button" class="chip" onclick={() => { paused = !paused; }}>{#if paused}<Play size={15} />{:else}<Pause size={15} />{/if}<span class="ui-label">{paused ? strings.remoteBrowser.resume : strings.remoteBrowser.pause}</span></button></div>
+  {#if frame && !fresh && !paused}<span class="loading" aria-hidden="true"></span>{/if}
   {#if error}<div class="error" role="status" data-testid="remote-browser-error"><p>{error}</p></div>{/if}
   <div class="viewer">
   {#if displaySettings}
     <section class="display-settings" aria-label={strings.remoteBrowser.display}>
       <strong>{strings.remoteBrowser.resolution} {frame ? `${frame.width} × ${frame.height}` : ''}</strong>
       <div class="options">
-        <button class="chip" disabled={!usable} onclick={() => resize(areaWidth, areaHeight)}><span class="ui-label">{strings.remoteBrowser.fitPhone}</span></button>
-        <button class="chip" disabled={!usable} onclick={() => resize(393, 700)}><span class="ui-label">{strings.remoteBrowser.phone}</span></button>
-        <button class="chip" disabled={!usable} onclick={() => resize(768, 1024)}><span class="ui-label">{strings.remoteBrowser.tablet}</span></button>
-        <button class="chip" disabled={!usable} onclick={() => resize(1366, 768)}><span class="ui-label">PC</span></button>
-        <button class="chip" disabled={!usable || !frame} onclick={() => frame && resize(frame.height, frame.width)}><span class="ui-label">{strings.remoteBrowser.rotate}</span></button>
+        <button class="small" disabled={!usable} onclick={() => resize(areaWidth, areaHeight)}><span class="ui-label">{strings.remoteBrowser.fitPhone}</span></button>
+        <button class="small" disabled={!usable} onclick={() => resize(393, 700)}><span class="ui-label">{strings.remoteBrowser.phone}</span></button>
+        <button class="small" disabled={!usable} onclick={() => resize(768, 1024)}><span class="ui-label">{strings.remoteBrowser.tablet}</span></button>
+        <button class="small" disabled={!usable} onclick={() => resize(1366, 768)}><span class="ui-label">PC</span></button>
+        <button class="small" disabled={!usable || !frame} onclick={() => frame && resize(frame.height, frame.width)}><span class="ui-label">{strings.remoteBrowser.rotate}</span></button>
       </div>
       <form onsubmit={e => { e.preventDefault(); if (validSize) resize(viewportWidth!, viewportHeight!); }}>
         <label>{strings.remoteBrowser.width}<input type="number" min="240" max="3840" step="1" required bind:value={viewportWidth} /></label>
         <label>{strings.remoteBrowser.height}<input type="number" min="240" max="3840" step="1" required bind:value={viewportHeight} /></label>
-        <button class="chip" type="submit" disabled={!usable || !validSize}><span class="ui-label">{strings.remoteBrowser.apply}</span></button>
+        <button class="small" type="submit" disabled={!usable || !validSize}><span class="ui-label">{strings.remoteBrowser.apply}</span></button>
       </form>
       <small>{strings.remoteBrowser.sharedSize}</small>
-      <button class="chip" disabled={!usable} onclick={() => void input({ kind: 'reset-viewport' })}><span class="ui-label">{strings.remoteBrowser.restoreSize}</span></button>
+      <button class="small ghost restore" disabled={!usable} onclick={() => void input({ kind: 'reset-viewport' })}><span class="ui-label">{strings.remoteBrowser.restoreSize}</span></button>
       <strong>{strings.remoteBrowser.previewZoom}</strong>
       <div class="options">
-        <button class="chip" aria-pressed={zoom === 0} onclick={() => { zoom = 0; displaySettings = false; }}><span class="ui-label">{strings.remoteBrowser.fit}</span></button>
-        {#each [1, 1.5, 2] as scale}<button class="chip" aria-pressed={zoom === scale} onclick={() => { zoom = scale; displaySettings = false; }}><span class="ui-label">{scale * 100}%</span></button>{/each}
+        <button class="small" aria-pressed={zoom === 0} onclick={() => { zoom = 0; displaySettings = false; }}><span class="ui-label">{strings.remoteBrowser.fit}</span></button>
+        {#each [1, 1.5, 2] as scale}<button class="small" aria-pressed={zoom === scale} onclick={() => { zoom = scale; displaySettings = false; }}><span class="ui-label">{scale * 100}%</span></button>{/each}
       </div>
     </section>
   {/if}
   <div class="screen-area" class:zoomed={zoom > 0} bind:this={area} bind:clientWidth={areaWidth} bind:clientHeight={areaHeight}>
     {#if frame}
-      <button bind:this={screen} type="button" class="screen" style:width={`${frame.width * previewScale}px`} style:height={`${frame.height * previewScale}px`} class:stale={paused || error || !fresh} class:desk aria-label={desk ? strings.remoteBrowser.interactDesk : strings.remoteBrowser.interact} disabled={!usable} onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={() => { pointer = undefined; }} oncontextmenu={e => e.preventDefault()}>
+      <button bind:this={screen} type="button" class="screen" style:width={`${frame.width * previewScale}px`} style:height={`${frame.height * previewScale}px`} class:stale={paused || error} class:desk title={desk ? strings.remoteBrowser.deskHint : undefined} aria-label={desk ? strings.remoteBrowser.interactDesk : strings.remoteBrowser.interact} disabled={!usable} onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={() => { pointer = undefined; }} oncontextmenu={e => e.preventDefault()}>
         <img bind:this={picture} src={`data:image/jpeg;base64,${frame.base64}`} alt={strings.remoteBrowser.image} draggable="false" data-testid="remote-browser-frame" />
       </button>
     {:else}<p class="empty">{strings.remoteBrowser.waiting}</p>{/if}
   </div>
+  {#if desk && note}<small class="toast" role="status" data-testid="remote-browser-note">{note}</small>{/if}
   </div>
-  {#if desk}
-  <footer class="desk"><small class="note" role="status" data-testid="remote-browser-note">{note || (zoom ? strings.remoteBrowser.panHint : strings.remoteBrowser.deskHint)}</small></footer>
-  {:else}
+  {#if !desk}
   <footer>
-    <div class="keys"><button type="button" class="chip" disabled={!usable} onclick={() => void input({ kind: 'scroll', x: 0, y: -500 })} aria-label={strings.remoteBrowser.scrollUp}><ArrowUp size={17} /></button><button type="button" class="chip" disabled={!usable} onclick={() => void input({ kind: 'scroll', x: 0, y: 500 })} aria-label={strings.remoteBrowser.scrollDown}><ArrowDown size={17} /></button>
-      {#each (['Tab', 'Enter', 'Escape', 'Backspace'] as const) as key}<button type="button" class="chip" disabled={!usable} onclick={() => void input({ kind: 'key', key })}><span class="ui-label">{key === 'Backspace' ? '⌫' : key === 'Escape' ? 'Esc' : key}</span></button>{/each}
-      <button type="button" class="chip" data-testid="remote-browser-copy" disabled={!usable} aria-label={strings.remoteBrowser.copy} title={strings.remoteBrowser.copy} onclick={() => void copySelection()}><Copy size={16} /></button>
+    <div class="keys"><button type="button" class="ghost small icon" disabled={!usable} onclick={() => void input({ kind: 'scroll', x: 0, y: -500 })} aria-label={strings.remoteBrowser.scrollUp}><ArrowUp size={16} /></button><button type="button" class="ghost small icon" disabled={!usable} onclick={() => void input({ kind: 'scroll', x: 0, y: 500 })} aria-label={strings.remoteBrowser.scrollDown}><ArrowDown size={16} /></button>
+      {#each (['Tab', 'Enter', 'Escape', 'Backspace'] as const) as key}<button type="button" class="ghost small" disabled={!usable} onclick={() => void input({ kind: 'key', key })}><span class="ui-label">{key === 'Backspace' ? '⌫' : key === 'Escape' ? 'Esc' : key}</span></button>{/each}
+      <button type="button" class="ghost small icon" data-testid="remote-browser-copy" disabled={!usable} aria-label={strings.remoteBrowser.copy} title={strings.remoteBrowser.copy} onclick={() => void copySelection()}><Copy size={15} /></button>
     </div>
-    <form onsubmit={e => { e.preventDefault(); void sendText(false); }}><input bind:value={text} data-testid="remote-browser-text" maxlength="2000" enterkeyhint="send" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label={strings.remoteBrowser.text} placeholder={strings.remoteBrowser.text} onkeydown={textKey} /><button type="submit" class="chip" disabled={!usable || !text} aria-label={strings.remoteBrowser.send}><Send size={17} /></button></form>
+    <form onsubmit={e => { e.preventDefault(); void sendText(false); }}><input bind:value={text} data-testid="remote-browser-text" maxlength="2000" enterkeyhint="send" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label={strings.remoteBrowser.text} placeholder={strings.remoteBrowser.text} onkeydown={textKey} /><button type="submit" class="ghost small icon" disabled={!usable || !text} aria-label={strings.remoteBrowser.send}><Send size={16} /></button></form>
     {#if note}<small class="note" role="status" data-testid="remote-browser-note">{note}</small>{/if}
-    <small>{zoom ? strings.remoteBrowser.panHint : strings.remoteBrowser.gesture}</small>
+    <small class="hint">{zoom ? strings.remoteBrowser.panHint : strings.remoteBrowser.gesture}</small>
   </footer>
   {/if}
 </section>
 
 <style>
-  .remote { flex: 1; min-height: 0; height: 100%; display: flex; flex-direction: column; }
-  small, .empty { color: var(--color-muted-foreground); font-size: var(--text-sm); } .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 16px 8px; } .state { font-size: var(--text-sm); } .live { color: var(--color-accent); }
-  .nav { padding: 8px 16px; gap: 6px; align-items: center; } .nav .chip { flex: none; } .nav .go { padding-inline: 12px; }
+  .remote { flex: 1; min-height: 0; height: 100%; display: flex; flex-direction: column; position: relative; }
+  small, .empty { color: var(--color-muted-foreground); font-size: var(--text-sm); }
+  .nav { container-type: inline-size; display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 6px; margin: 0; flex: none; border-bottom: 1px solid var(--color-border); background: var(--color-surface); }
+  .nav > button { flex: none; }
+  .omnibox { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: var(--control-sm); margin: 0 4px; padding: 0 10px; border: 1px solid transparent; border-radius: var(--radius-full); background: var(--color-surface-2); color: var(--color-muted-foreground); cursor: text; transition: border-color var(--dur-2) var(--ease-out-quint); }
+  .omnibox:hover { border-color: var(--color-border); }
+  .omnibox:focus-within { border-color: color-mix(in srgb, var(--color-accent) 60%, var(--color-edge)); box-shadow: 0 0 0 3px var(--color-accent-soft); }
+  .omnibox input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--color-foreground); font-size: var(--text-sm); text-overflow: ellipsis; outline: none; }
+  .site { display: flex; flex: none; line-height: 0; }
+  .omnibox.secure .site { color: var(--color-foreground); opacity: .7; }
+  .state { flex: none; font-size: var(--text-xs); color: var(--color-muted-foreground); }
+  .nav button[aria-pressed=true] { color: var(--color-accent); background: var(--color-accent-soft); }
+  .nav :global(.spin) { animation: reload-spin 1s linear infinite; }
+  @keyframes reload-spin { to { transform: rotate(360deg); } }
+  .loading { position: absolute; top: 39px; left: 0; height: 2px; width: 40%; z-index: 2; background: var(--color-accent); animation: loading-slide 1.1s var(--ease-out-quint) infinite; }
+  @keyframes loading-slide { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+  @media (prefers-reduced-motion: reduce) { .nav :global(.spin), .loading { animation: none; } }
   .viewer { position: relative; flex: 1; min-height: 80px; overflow: hidden; }
   .screen-area { width: 100%; height: 100%; display: flex; background: var(--color-background); overflow: auto; }
-  .screen { flex: none; margin: auto; }
   .zoomed .screen { touch-action: pan-x pan-y; }
-  .display-settings { position: absolute; z-index: 1; inset: 0 0 auto; max-height: 100%; overflow: auto; padding: 12px 16px; display: grid; gap: 10px; background: var(--color-surface); border-bottom: 1px solid var(--color-border); box-shadow: var(--shadow-e3); }
-  .display-settings strong { font-size: var(--text-sm); } .options { display: flex; flex-wrap: wrap; gap: 6px; }
-  .display-settings label { flex: 1; min-width: 0; font-size: var(--text-sm); } .display-settings input { width: 100%; } .display-settings form { align-items: flex-end; }
-  .options [aria-pressed=true] { color: var(--color-accent); border-color: var(--color-accent); }
-  .screen { width: 100%; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; touch-action: none; cursor: crosshair; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; } .screen:disabled { opacity: 1; } .screen.stale { opacity: .55; } img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; -webkit-user-select: none; user-select: none; }
-  footer { padding: 10px 16px max(12px, env(safe-area-inset-bottom)); display: grid; gap: 8px; } .keys { display: flex; gap: 6px; flex-wrap: wrap; } .chip { min-height: 44px; min-width: 44px; justify-content: center; } form { display: flex; gap: 8px; } input { min-width: 0; flex: 1; font-size: 16px; min-height: 44px; }
-  .error { display: flex; align-items: center; gap: 8px; padding: 0 16px 8px; } .error p { flex: 1; margin: 0; font-size: var(--text-sm); color: var(--color-danger); max-height: 90px; overflow: auto; overflow-wrap: anywhere; } .empty { margin: auto; padding: 24px; }
-  .screen.desk { cursor: default; } footer.desk { padding-block: 6px max(8px, env(safe-area-inset-bottom)); }
-  @media (max-width: 720px) { footer small { display: none; } footer small.note { display: block; } .nav, .toolbar, footer { padding-inline: 12px; } .nav { gap: 4px; } }
+  .display-settings { position: absolute; z-index: 3; top: 6px; right: 8px; width: min(320px, calc(100% - 16px)); max-height: calc(100% - 12px); overflow: auto; padding: 12px; display: grid; gap: 8px; background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-e3); }
+  .display-settings strong { font-size: var(--text-xs); font-weight: 600; color: var(--color-muted-foreground); }
+  .options { display: flex; flex-wrap: wrap; gap: 4px; }
+  .display-settings label { flex: 1; min-width: 0; display: grid; gap: 2px; font-size: var(--text-xs); color: var(--color-muted-foreground); }
+  .display-settings input { width: 100%; height: var(--control-sm); font-size: var(--text-sm); }
+  .display-settings form { display: flex; gap: 6px; align-items: flex-end; }
+  .display-settings .restore { justify-self: start; }
+  .options [aria-pressed=true] { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-soft); }
+  .screen { flex: none; margin: 0 auto auto; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; touch-action: none; cursor: default; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  .screen:hover:not(:disabled) { background: transparent; }
+  .screen:active:not(:disabled) { transform: none; }
+  .screen:disabled { opacity: 1; } .screen.stale { opacity: .55; }
+  img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; -webkit-user-select: none; user-select: none; }
+  .toast { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 6px 12px; border-radius: var(--radius-full); background: var(--color-surface-3); color: var(--color-foreground); box-shadow: var(--shadow-e2); font-size: var(--text-xs); pointer-events: none; }
+  footer { padding: 6px 8px max(8px, env(safe-area-inset-bottom)); display: grid; gap: 6px; border-top: 1px solid var(--color-border); background: var(--color-surface); }
+  .keys { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+  .keys button { flex: none; }
+  footer form { display: flex; gap: 4px; align-items: center; margin: 0; }
+  footer input { min-width: 0; flex: 1; height: var(--control); border-radius: var(--radius-full); padding: 0 12px; font-size: var(--text-md); }
+  .error { padding: 6px 12px; border-bottom: 1px solid var(--color-border); } .error p { margin: 0; font-size: var(--text-sm); color: var(--color-danger); max-height: 90px; overflow: auto; overflow-wrap: anywhere; }
+  .empty { margin: auto; padding: 24px; }
+  @media (max-width: 720px) { .nav { height: auto; min-height: 48px; padding-block: 2px; } .loading { top: auto; } footer .hint { display: none; } }
 </style>

@@ -255,7 +255,9 @@ test('a computer drives the page itself: keys in order, the wheel, a paste and a
     app = mount(RemoteBrowser, { target: document.body, props: { store, threadId: 't-trace' } }); await settle();
     await new Promise(resolve => setTimeout(resolve, 20)); await settle();
     expect(document.querySelector('[data-testid=remote-browser-text]')).toBeNull();
-    expect(document.querySelector('[data-testid=remote-browser-note]')!.textContent).toContain('Click the page');
+    // The help is the page's tooltip: nothing sits under a computer's page.
+    expect(document.querySelector('[data-testid=remote-browser-note]')).toBeNull();
+    expect(document.querySelector('[data-testid=remote-browser-frame]')!.parentElement!.title).toContain('Click the page');
     const key = (name: string, more: KeyboardEventInit = {}) => { const event = new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true, ...more }); document.body.dispatchEvent(event); return event.defaultPrevented; };
     // Until the page is clicked the keyboard is the app's.
     expect(key('h')).toBe(false);
