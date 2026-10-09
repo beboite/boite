@@ -6,10 +6,11 @@
   import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, mentionRows, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
   import { attachFiles } from '../lib/composer-attachments';
   import { rewindComposerEdit } from '../lib/composer-edit';
-  import { fitHeight, selfSizing, touchKeyboard } from '../lib/composer-size';
+  import { fitHeight, selfSizing } from '../lib/composer-size';
   import { editComposerInput, insertImageReference, removeImageReferences, trackImageSend } from '../lib/composer-images';
   import { unresolvedAssetId } from '../lib/draft-attachments';
   import { focusWithin } from '../lib/focus';
+  import { touchScreen } from '../lib/live-input';
   import { ignoreQuestions, repliesOf, replyTarget, sendAnswer } from '../lib/question-reply.svelte';
   import { emptyBox, returnPrompt, sentPrompts, type SentPrompt } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
@@ -45,8 +46,7 @@
   let attachments = $derived<Attachment[]>(composer?.attachments ?? []);
   let previewReferences = $derived(composer?.previewReferences ?? []);
   let choice = $state<Choice | null>(null);
-  let picking = $state(false);
-  let readingFiles = $state(0);
+  let picking = $state(false), readingFiles = $state(0);
   let dictating = $state(false);
   let speechPreview = $state(''), speechStatus = $state(''), speechError = $state(false);
   let box = $state<HTMLTextAreaElement | undefined>(undefined);
@@ -689,7 +689,7 @@
       event.preventDefault();
       return;
     }
-    if (event.key === 'Enter' && !event.shiftKey && !touchKeyboard()) {
+    if (event.key === 'Enter' && !event.shiftKey && !touchScreen()) {
       event.preventDefault();
       if (boxEmpty && sendNow && !reply) sendQueuedNow();
       else void submit();

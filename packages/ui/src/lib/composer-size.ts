@@ -15,8 +15,3 @@ export function fitHeight(box: HTMLTextAreaElement, maxLines: number): void {
   box.style.height = 'auto';
   box.style.height = `${Math.min(box.scrollHeight, line * maxLines + 16)}px`;
 }
-
-/** A touch keyboard has no Shift+Enter: there its Enter key writes a new line and the send button sends. */
-export function touchKeyboard(): boolean {
-  return typeof matchMedia === 'function' && matchMedia('(pointer: coarse) and (hover: none)').matches;
-}
