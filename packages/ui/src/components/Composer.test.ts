@@ -626,6 +626,8 @@ test('the lightning switches a draft to a separate fast model without losing its
 });
 
 test('the picker keeps row, account and legacy keyboard navigation separate', async ({ app: _app }) => {
+  // Both seats signed in: a signed-out one is disabled and takes no focus.
+  store.accounts.find((account) => account.id === 'a-claude-side')!.status = 'ok';
   await openDraft();
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);

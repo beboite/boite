@@ -67,12 +67,12 @@
   });
   const delegation = $derived(store.delegation && (store.delegation.rootThreadId === threadId || store.delegation.agents.some(agent => agent.thread.id === threadId)) ? store.delegation : null);
   const mail = $derived(agentMailFor(store, threadId));
-  /** The thread's account is signed out: an error then carries the way back in. */
+  /** The thread's account is signed out and no other of its agent can take the next turn: an error carries the way back in. */
   const signedOut = $derived.by(() => {
     const thread = store.openThread;
     if (!thread || thread.id !== threadId) return null;
     const account = store.accountOf(thread.accountId);
-    return account?.status === 'unauthenticated' ? account : null;
+    return account?.status === 'unauthenticated' && store.usableAccountOf(account.providerId, account.id) === null ? account : null;
   });
   const team = $derived(delegation?.rootThreadId === threadId ? delegation.agents : []);
   const teamRowId = $derived(`delegation:${threadId}`);

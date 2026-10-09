@@ -1,4 +1,5 @@
 import { defaultTitleModel } from '@boite/contracts';
+import { usableAccount } from './account-fallback.ts';
 import type { Account, ImageAttachment, Message, ProviderDescriptor, ProviderId, ThreadId, ThreadSummary, TurnId } from '@boite/contracts';
 import { setTimeout as pause } from 'node:timers/promises';
 import type { Core } from '../core.ts';
@@ -196,8 +197,8 @@ export class ThreadTitles {
    * the provider is the thread's and that provider's first signed-in account
    * otherwise. Without a choice, or while the chosen provider cannot run or
    * write titles, the thread's own provider writes it on its small default.
-   * Null when that one cannot either: no title hook, not installed, or the
-   * thread's account signed out.
+   * Null when that one cannot either: no title hook, not installed, or every
+   * account of it signed out.
    */
   private writer(thread: ThreadSummary): TitleWriter | null {
     const chosen = this.core.settings.get().titleModel ?? null;
@@ -222,15 +223,12 @@ export class ThreadTitles {
   }
 
   /**
-   * The account a provider writes a title under: the thread's own when it is
-   * that provider's and not signed out, like `assertDriverRunnable` asks of a
-   * turn, else that provider's first account signed in.
+   * The account a provider writes a title under: for the thread's provider,
+   * the account its next turn would run on (`threads/account-fallback.ts`),
+   * else that provider's first account signed in.
    */
   private accountOf(thread: ThreadSummary, providerId: ProviderId): Account | undefined {
-    if (thread.providerId === providerId) {
-      const own = this.core.journal.getAccount(thread.accountId);
-      return own === null || own.status === 'unauthenticated' ? undefined : own;
-    }
+    if (thread.providerId === providerId) return usableAccount(this.core, providerId, thread.accountId) ?? undefined;
     return this.core.accounts.list().find((account) => account.providerId === providerId && account.status === 'ok');
   }
 }
