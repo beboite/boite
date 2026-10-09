@@ -713,8 +713,8 @@ describe('echo driver', () => {
     const client = await harness.connect();
     const project = await client.call('projects.add', { path: harness.dataDir, name: 'claude project' });
     const account = await client.call('accounts.add', { providerId: 'claude', label: 'no login' });
-    if (process.platform === 'darwin') {
-      // The login may be in the Keychain there: the account reads unknown and a turn still starts.
+    if (process.platform === 'darwin' || process.platform === 'win32') {
+      // The login may be in the Keychain or Credential Manager there: the account reads unknown and a turn still starts.
       expect(account.status).toBe('unknown');
       return;
     }

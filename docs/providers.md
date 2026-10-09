@@ -498,9 +498,13 @@ descriptor uses additional fields available to other providers:
 - `session`, on an OS profile, replaces `auth.session` on that OS. An empty list
   says the login can live outside any file there: the `auth.session` files still
   read `ok` when present, and without them its accounts read `unknown` and turns
-  still start. Claude's macOS profile sets it: Claude Code keeps its login in the
-  Keychain there, and writes `.credentials.json` only when the Keychain is out
-  of reach.
+  still start. Claude's macOS and Windows profiles set it. Claude Code keeps its
+  login in the macOS Keychain, and writes `.credentials.json` only when the
+  Keychain is out of reach. On Windows it moves the login from
+  `.credentials.json` into Credential Manager once a feature flag it caches in
+  its config turns that on, which takes effect at its next start. A Windows
+  account that read `ok` read `unauthenticated` after that move, and every turn
+  was refused even though the CLI was still signed in.
 - `seedFiles`, on the descriptor, maps a relative path to content written under
   the isolation directory before anything starts. Antigravity needs
   `antigravity-acp/settings.json` holding `{"auth":{"type":"oauth-personal"}}`.

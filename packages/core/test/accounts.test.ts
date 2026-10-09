@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
@@ -10,8 +10,8 @@ import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 const ECHO_LOGIN_SCRIPT = fileURLToPath(new URL('../src/providers/shipped/echo-login.ts', import.meta.url));
-// A Claude login on macOS may be in the Keychain, so a missing file proves nothing there.
-const CLAUDE_SIGNED_OUT = process.platform === 'darwin' ? 'unknown' : 'unauthenticated';
+// A Claude login may be in the macOS Keychain or Windows Credential Manager, so a missing file proves nothing there.
+const CLAUDE_SIGNED_OUT = process.platform === 'darwin' || process.platform === 'win32' ? 'unknown' : 'unauthenticated';
 
 /**
  * The shipped echo provider needs no login (`auth.kind` is "none"), so it can
@@ -301,25 +301,38 @@ describe('accounts', () => {
     const client = await harness.connect();
     const providerId = await addLoginProvider(harness, client);
     const os = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux';
+    // Read signed out under the old rule, the way an upgraded core finds it in its journal.
+    const stale = await client.call('accounts.add', { providerId, label: 'Read before', useDefaultLocation: false });
+    expect(stale.status).toBe('unauthenticated');
     const file = join(harness.dataDir, 'providers', 'echo-auth.json');
     const raw = JSON.parse(readFileSync(file, 'utf8')) as { profiles: Record<string, Record<string, unknown>> };
     raw.profiles[os]!['session'] = [];
     writeFileSync(file, JSON.stringify(raw), 'utf8');
     expect((await client.call('providers.reload', {})).rejected).toEqual([]);
+    // Startup reads it again, so a turn is no longer refused for a login the CLI still has.
+    expect(harness.core.accounts.require(stale.id).status).toBe('unauthenticated');
+    harness.core.accounts.recheckSignedOut();
+    expect(harness.core.accounts.require(stale.id).status).toBe('unknown');
 
     const account = await client.call('accounts.add', { providerId, label: 'Keychain', useDefaultLocation: false });
     expect(account.status).toBe('unknown');
     expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('unknown');
     // A session file still proves the login.
-    writeFileSync(join(account.isolationDir ?? '', '.credentials.json'), '{}', 'utf8');
+    const session = join(account.isolationDir ?? '', '.credentials.json');
+    writeFileSync(session, '{}', 'utf8');
     expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('ok');
+    // The CLI moving that login into the system store leaves the account usable.
+    rmSync(session);
+    expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('unknown');
 
-    // Claude on macOS keeps its login in the Keychain, not in .credentials.json.
+    // Claude keeps its login in the macOS Keychain, and in Windows Credential
+    // Manager once its CLI turns that store on, rather than in .credentials.json.
     const shipped = JSON.parse(readFileSync(join(import.meta.dir, '../src/providers/shipped/claude.json'), 'utf8')) as {
       profiles: Record<string, { session?: string[] }>;
     };
     expect(shipped.profiles['macos']?.session).toEqual([]);
-    expect(shipped.profiles['windows']?.session).toBeUndefined();
+    expect(shipped.profiles['windows']?.session).toEqual([]);
+    expect(shipped.profiles['linux']?.session).toBeUndefined();
   });
 
   test('a profile session list that is not an array of strings is refused with the file and the field', async () => {

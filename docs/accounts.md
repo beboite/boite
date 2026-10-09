@@ -127,6 +127,10 @@ when the provider can store its login elsewhere, or `error` when the check fails
 A provider that names `auth.sqlite` is read the same way from its database:
 `ok` once a listed table holds a row
 ([providers.md](providers.md#opencode-2)).
+Claude on macOS and Windows is such a provider: its CLI can keep the login in the
+Keychain or in Credential Manager. Startup reads every account stored as
+`unauthenticated` again, so a status written under an older rule does not keep
+refusing turns.
 
 The Check connection button requests a fresh login check, without listing
 models or sending a prompt. Codex reads its account through the app-server with
