@@ -42,7 +42,8 @@ import type { Core } from './core.ts';
 import type { Connection } from './router.ts';
 import { refused } from './errors.ts';
 import { Cdp } from './browser/cdp.ts';
-import { chromiumArgs, clearActivePort, findChromium, pipesDevTools, readSavedCookies, waitForEndpoint, writeSavedCookies } from './browser/chromium.ts';
+import { findChromium, readSavedCookies, writeSavedCookies, type BrowserIdentity } from './browser/chromium.ts';
+import { BrowserIdentities, startChromium, type Started } from './browser/launch.ts';
 import { PageProbes, PROBE_TIMEOUT_MS, type PageProbe } from './browser/probe.ts';
 import { TabRecorder } from './browser/recorder.ts';
 import { EDITABLE_SCRIPT, KEY_CODES, PAGE_INFO_SCRIPT, selectionScript, SETTLED_VIEWPORT_SCRIPT } from './browser/scripts.ts';
@@ -97,6 +98,8 @@ interface Engine {
   saved?: string;
   /** Removed when the process ends: private tabs keep nothing. */
   throwaway: boolean;
+  /** What its tabs say they are, as the same browser with a window would; null leaves the browser's own. */
+  identity: BrowserIdentity | null;
 }
 
 interface Tab {
@@ -144,7 +147,9 @@ export class AgentBrowser {
   #announce = new Map<ThreadId, ReturnType<typeof setTimeout>>();
   #closed = false;
   /** Browsers started to check a page (`probe`): no conversation lists them, so they are closed by name. */
-  readonly #probes = new PageProbes<Engine>(() => this.#launch(PRIVATE_BROWSER_PROFILE), engine => this.#lost(engine), message => this.#core.log('warn', message));
+  readonly #probes = new PageProbes<Engine>(() => this.#launch(PRIVATE_BROWSER_PROFILE, false), engine => this.#lost(engine), message => this.#core.log('warn', message));
+  readonly #identities = new BrowserIdentities(
+    (path, dir) => this.#start(path, dir), () => this.#profileDir(PRIVATE_BROWSER_PROFILE), dir => this.#removeDir(dir), message => this.#core.log('warn', message));
   #off: Array<() => void> = [];
   #watching = false;
 
@@ -235,38 +240,31 @@ export class AgentBrowser {
     return engine;
   }
 
-  async #launch(profile: string): Promise<Engine> {
+  #start(path: string, dir: string, userAgent?: string): Promise<Started> {
+    return startChromium((cmd, args, options) => this.#core.procs.spawn(SCOPE, cmd, args, options), path, dir, START_TIMEOUT_MS, userAgent);
+  }
+
+  /** `identify` false starts the browser as it is: a page check (`probe`) visits no site. */
+  async #launch(profile: string, identify = true): Promise<Engine> {
     const found = this.findBrowser();
     if (found.path === null) throw refused(`the agent browser cannot start on ${this.#machine}: ${found.reason}`);
+    const identity = identify ? await this.#identities.of(found.path) : null;
     const dir = this.#profileDir(profile);
-    mkdirSync(dir, { recursive: true });
-    const piped = pipesDevTools();
-    if (!piped) clearActivePort(dir);
-    const spawned = this.#core.procs.spawn(SCOPE, found.path, chromiumArgs(dir), { agentRoot: false, ...(piped ? { extraPipes: 2 } : {}) });
-    // Chromium writes to both pipes; nobody reads them, so they are drained.
-    void spawned.proc.stdout.pipeTo(new WritableStream()).catch(() => {});
-    void spawned.proc.stderr.pipeTo(new WritableStream()).catch(() => {});
-    // Chromium's helpers exit with their parent; a clean close comes first (`#shut`).
-    const kill = () => { try { spawned.proc.kill(); } catch { /* gone */ } };
+    let started: Started;
+    try { started = await this.#start(found.path, dir, identity?.userAgent); }
+    catch (error) {
+      if (profile === PRIVATE_BROWSER_PROFILE) this.#removeDir(dir);
+      throw refused(`the agent browser could not start on ${this.#machine}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const { cdp, kill } = started;
     try {
-      let cdp: Cdp;
-      if (piped) {
-        const [commands, replies] = spawned.fds ?? [];
-        if (commands === undefined || replies === undefined) throw new Error('the browser was started without its DevTools pipes');
-        cdp = Cdp.pipe(commands, replies);
-      } else cdp = await Cdp.connect(await waitForEndpoint(dir, spawned.exited, START_TIMEOUT_MS));
-      // The first answer says the browser is up; a browser that exits first never gives it.
-      await Promise.race([
-        cdp.send('Browser.getVersion', {}, undefined, START_TIMEOUT_MS),
-        spawned.exited.then(() => { throw new Error('the browser exited while starting; another process may hold its profile folder'); }),
-      ]);
       // The cookies this profile held when its browser last closed, session cookies included.
       const saved = profile === PRIVATE_BROWSER_PROFILE ? [] : readSavedCookies(dir);
       if (saved.length) await cdp.send('Storage.setCookies', { cookies: saved }).catch(error => this.#core.log('warn', `the saved cookies of browser profile ${profile} were refused: ${error instanceof Error ? error.message : String(error)}`));
       // Pages that open a window (a sign-in popup) are adopted as tabs of the same conversation.
       await cdp.send('Target.setDiscoverTargets', { discover: true });
       await cdp.send('Browser.setDownloadBehavior', { behavior: 'deny' }).catch(() => {});
-      const engine: Engine = { profile, dir, cdp, kill, exited: spawned.exited, tabs: new Set(), throwaway: profile === PRIVATE_BROWSER_PROFILE };
+      const engine: Engine = { profile, dir, cdp, kill, exited: started.exited, tabs: new Set(), throwaway: profile === PRIVATE_BROWSER_PROFILE, identity };
       cdp.on('Target.targetCreated', params => void this.#adopt(engine, params.targetInfo as { targetId: string; type: string; openerId?: string; url: string }));
       cdp.on('Target.targetDestroyed', params => this.#gone(engine, String(params.targetId)));
       cdp.on('Target.targetInfoChanged', params => this.#info(engine, params.targetInfo as { targetId: string; url: string; title: string }));
@@ -274,7 +272,7 @@ export class AgentBrowser {
       return engine;
     } catch (error) {
       kill();
-      if (profile === PRIVATE_BROWSER_PROFILE) void spawned.exited.then(() => this.#removeDir(dir));
+      if (profile === PRIVATE_BROWSER_PROFILE) void started.exited.then(() => this.#removeDir(dir));
       throw refused(`the agent browser could not start on ${this.#machine}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -398,6 +396,8 @@ export class AgentBrowser {
       const url = tab.requests.get(String(params.requestId));
       note({ kind: 'network', level: 'error', text: String(params.errorText ?? 'request failed'), ...(url ? { url: bareUrl(url) } : {}) });
     });
+    // Before its first request: the page, its workers and its requests say what a browser with a window says.
+    if (engine.identity) await engine.cdp.send('Emulation.setUserAgentOverride', { userAgent: engine.identity.userAgent, userAgentMetadata: engine.identity.metadata }, sessionId).catch(() => {});
     await Promise.all(['Page.enable', 'Runtime.enable', 'Network.enable'].map(method => engine.cdp.send(method, {}, sessionId)));
     // A window opened by a page may have navigated before it was attached: its address is read once now.
     const current = await engine.cdp.send<{ targetInfo: { url: string; title: string } }>('Target.getTargetInfo', { targetId }).catch(() => null);
@@ -702,7 +702,7 @@ export class AgentBrowser {
       for (const name of names) {
         const dir = join(root, name);
         const throwaway = /^private-[0-9a-f-]{36}$/.test(name);
-        if (throwaway ? dir === privateDir || this.#probes.holds(dir) : kept.has(name) || browserProfileIdError(name) !== null) continue;
+        if (throwaway ? dir === privateDir || this.#probes.holds(dir) || this.#identities.holds(dir) : kept.has(name) || browserProfileIdError(name) !== null) continue;
         this.#removeDir(dir);
       }
     } catch (error) {
