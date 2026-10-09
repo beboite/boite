@@ -1,7 +1,8 @@
 <!--
   The HUD beside the character, in the manner of a "Dynamic Island": a pill
   with how many threads are at work, the newest one's title, its step and how
-  long it has run, and a small gauge per subscription of the proxy. On hover it
+  long it has run, and a small gauge per subscription of the proxy, each beside
+  its provider's mark. On hover it
   opens into a card listing every thread at work, a click opening one in Boite,
   and the quotas spelled out.
 
@@ -17,6 +18,7 @@
   import { elapsed } from '../../lib/format';
   import { page } from '../../lib/page-hidden.svelte';
   import { fill, strings } from '../../lib/strings';
+  import ProviderLogo from '../ProviderLogo.svelte';
 
   interface Props {
     threads: ThreadSummary[];
@@ -141,7 +143,8 @@
           <span class="gauges" role="group" aria-label={copy.quotas}>
             {#each gauges as gauge (gauge.id)}
               <span class="gauge" data-level={gauge.level} role="img" aria-label={gauge.label} title={gauge.label}>
-                <i style:height="{gauge.used === null ? 0 : 100 - gauge.used}%"></i>
+                <ProviderLogo providerId={gauge.providerId} size={12} />
+                <span class="level"><i style:height="{gauge.used === null ? 0 : 100 - gauge.used}%"></i></span>
               </span>
             {/each}
           </span>
@@ -169,6 +172,7 @@
             <ul class="quotas" aria-label={copy.quotas}>
               {#each gauges as gauge (gauge.id)}
                 <li class="quota" data-level={gauge.level}>
+                  <span class="mark" aria-hidden="true"><ProviderLogo providerId={gauge.providerId} size={14} /></span>
                   <span class="name" title={gauge.window ? `${gauge.name} · ${gauge.window}` : gauge.name}>{gauge.name}</span>
                   <span class="bar" role="img" aria-label={gauge.label}><i style:width="{gauge.used === null ? 0 : 100 - gauge.used}%"></i></span>
                   <span class="left" aria-hidden="true">{left(gauge)}</span>
@@ -321,11 +325,18 @@
   .gauges {
     flex: none;
     display: flex;
-    align-items: flex-end;
-    gap: 3px;
+    align-items: center;
+    gap: 8px;
     height: 20px;
   }
+  /* The provider's mark beside its bar, so each gauge says whose quota it is. */
   .gauge {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    height: 100%;
+  }
+  .level {
     position: relative;
     width: 5px;
     height: 100%;
@@ -333,7 +344,7 @@
     background: var(--color-surface-3);
     overflow: hidden;
   }
-  .gauge i {
+  .level i {
     position: absolute;
     inset: auto 0 0;
     border-radius: 2px;
@@ -353,7 +364,7 @@
   [data-level='unknown'] .left {
     color: var(--color-muted-foreground);
   }
-  .gauge[data-level='danger'] {
+  .gauge[data-level='danger'] .level {
     outline: 1px solid var(--color-danger);
   }
 
@@ -387,9 +398,12 @@
   }
   .quota {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 72px 36px;
+    grid-template-columns: 14px minmax(0, 1fr) 72px 36px;
     align-items: center;
     gap: 8px;
+  }
+  .mark {
+    display: flex;
   }
   .name {
     overflow: hidden;

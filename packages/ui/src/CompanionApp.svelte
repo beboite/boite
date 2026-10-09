@@ -16,11 +16,11 @@
   import { WsClient, type Client, type ClientState } from './lib/client';
   import { resolveEndpoint } from './lib/endpoint';
   import { startTheme } from './lib/theme';
-  import { strings } from './lib/strings';
+  import { fill, strings } from './lib/strings';
   import { readCompanionPrefs, subscribeCompanionPrefs, writeCompanionPrefs, type CompanionPrefs } from './lib/companion/prefs';
   import { createMoodTracker, RESTING, type MoodInput, type MoodState } from './lib/companion/mood';
   import { readMedia, pressMedia, type MediaAction, type MediaState } from './lib/companion/media';
-  import { writeStatus } from './lib/companion/memory';
+  import { addReminder, writeStatus } from './lib/companion/memory';
   import { captureScreens, captureZone, type ScreenShot } from './lib/companion/screen';
   import { playCue, unlockSounds, type Cue } from './lib/companion/sounds';
   import { companionHitRects, companionMonitors, configureCompanion, coverScreen, dragCompanion, focusCompanion, inShell, layoutOf, placeCompanion, showMain, type CompanionLayout, type HitRect } from './lib/companion/shell';
@@ -34,7 +34,7 @@
   import CompanionZone from './components/companion/CompanionZone.svelte';
   import MediaPill from './components/companion/MediaPill.svelte';
   import CompanionHud from './components/companion/CompanionHud.svelte';
-  import { followQuotas, hudGauges } from './lib/companion/hud';
+  import { followQuotas, hudGauges, shownGauges } from './lib/companion/hud';
   import { GatewayReader } from './lib/quota-reader.svelte';
   import { audible, Focus, PomodoroTimer } from './lib/companion/focus.svelte';
   import type { Directives } from './lib/companion/directives';
@@ -86,7 +86,7 @@
   let connected = $state(false);
   let hudOpen = $state(false);
   const quotas = new GatewayReader();
-  const gauges = $derived(prefs.quotas ? hudGauges(quotas.state) : []);
+  const gauges = $derived(prefs.quotas ? shownGauges(hudGauges(quotas.state), prefs.hiddenQuotas) : []);
   let disposed = false;
   let autoOpened = false;
   let seen: Set<string> | null = null;
@@ -97,8 +97,15 @@
     if (prefs.sounds && audible(name, focus.active)) playCue(name);
   };
 
-  const timer = new PomodoroTimer({ ended: () => cue('phase') });
-  const focus = new Focus({ auto: () => prefs.focusOnWork && timer.phase === 'work' });
+  // A pomodoro's phase chimes; a countdown rings as an alarm until it is
+  // dismissed, like a reminder; a stopwatch at its limit just stops.
+  const timer = new PomodoroTimer({
+    ended: (_, ran) => {
+      if (ran.kind === 'pomodoro') cue('phase');
+      else if (ran.kind === 'countdown') addReminder(ran.label ? fill(strings.companion.pomodoro.doneFor, { label: ran.label }) : strings.companion.pomodoro.done, Date.now());
+    }
+  });
+  const focus = new Focus({ auto: () => prefs.focusOnWork && timer.working });
   let history = $state(false);
 
   const talk = new Talk({
@@ -127,11 +134,13 @@
     timer.start({ workMs, breakMs: prefs.breakMinutes * 60_000, label });
   }
 
-  /** The timer, the focus and the threads a reply asks for ([[timer: …]], [[focus: …]], [[task: …]]). */
+  /** The timer, the focus and the threads a reply asks for ([[timer: …]], [[pomodoro: …]], [[focus: …]], [[task: …]]). */
   function obey({ timer: asked, focus: on, task }: Directives) {
     if (task.length > 0) void tasks.request(task);
     if (asked === 'stop') timer.stop();
-    else if (asked) startTimer(asked.ms, asked.label);
+    else if (asked?.kind === 'pomodoro') startTimer(asked.ms ?? undefined, asked.label);
+    else if (asked?.kind === 'countdown' && asked.ms !== null) timer.countdown(asked.ms, asked.label);
+    else if (asked?.kind === 'stopwatch') timer.stopwatch(asked.label);
     if (on !== null) focus.set(on);
   }
 
@@ -738,7 +747,7 @@
   .stage[data-align='right'] .head {
     flex-direction: row;
     align-items: flex-start;
-    gap: 8px;
+    gap: 14px;
   }
   .stage[data-align='right'] .head {
     flex-direction: row-reverse;
@@ -768,9 +777,14 @@
   .stage[data-edge='bottom'][data-align='right'] .hud {
     flex-direction: column-reverse;
   }
-  /* Under the character, the lid it draws above its box needs the air. */
+  /* Some air between the character and its HUD, so the pill does not touch it. */
+  .head > .hud:has(> :global(*)) {
+    margin-top: 10px;
+  }
+  /* At the bottom edge the HUD sits over the character, whose lid needs more. */
   .stage[data-edge='bottom'][data-align='center'] .head > .hud:has(> :global(*)) {
-    margin-bottom: 8px;
+    margin-top: 0;
+    margin-bottom: 14px;
   }
   /* Beside the character, the pill sits level with its middle. */
   .stage[data-align='left'] .head > .hud,

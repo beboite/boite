@@ -67,7 +67,10 @@ export function quotaLevel(usedPercent: number | null): QuotaLevel {
 }
 
 export interface HudGauge {
+  /** `providerId:entryId`, what `CompanionPrefs.hiddenQuotas` keeps. */
   id: string;
+  /** The gateway's provider, for its logo. */
+  providerId: string;
   name: string;
   /** The window nearest its limit; empty when the entry reports none. */
   window: string;
@@ -102,9 +105,16 @@ export function hudGauges(state: SubscriptionProxyQuotas | null): HudGauge[] {
         const left = used === null ? strings.companion.hud.quotaUnknown : fill(strings.quotas.remaining, { percent: String(Math.round(100 - used)) });
         const words = level === 'danger' ? strings.companion.hud.quotaOut : level === 'warning' ? strings.companion.hud.quotaLow : '';
         const label = [name, top?.label, left, words].filter(Boolean).join(', ');
-        return { id: `${provider.providerId}:${entry.id}`, name, window: top?.label ?? '', used, level, label };
+        return { id: `${provider.providerId}:${entry.id}`, providerId: provider.providerId, name, window: top?.label ?? '', used, level, label };
       })
   );
+}
+
+/** The gauges the user did not hide in Settings, in the gateway's order. */
+export function shownGauges(gauges: HudGauge[], hidden: readonly string[]): HudGauge[] {
+  if (!hidden.length) return gauges;
+  const left = new Set(hidden);
+  return gauges.filter((gauge) => !left.has(gauge.id));
 }
 
 /** How often the gateway is asked again; the core answers from its cache meanwhile. */

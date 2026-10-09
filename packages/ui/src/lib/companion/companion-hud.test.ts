@@ -7,7 +7,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import type { GatewayQuotaEntry, SubscriptionProxyQuotas } from '@boite/contracts';
 import { FakeClient } from '../fake-client';
 import { GatewayReader } from '../quota-reader.svelte';
-import { followQuotas, hudGauges, hudThreads, quotaLevel, QUOTAS_EVERY } from './hud';
+import { followQuotas, hudGauges, hudThreads, quotaLevel, QUOTAS_EVERY, shownGauges } from './hud';
 import { parseCompanionPrefs } from './prefs';
 
 afterEach(() => {
@@ -111,6 +111,17 @@ test('keeps the quotas on unless told otherwise', () => {
   expect(parseCompanionPrefs({}).quotas).toBe(true);
   expect(parseCompanionPrefs({ quotas: false }).quotas).toBe(false);
   expect(parseCompanionPrefs({ quotas: 'no' }).quotas).toBe(true);
+});
+
+test('shows every gauge but the ones hidden in Settings, each with its provider for the logo', () => {
+  const gauges = hudGauges(quotas([entry('a', [10]), entry('b', [20]), entry('c', [30])]));
+  expect(gauges.map((gauge) => [gauge.id, gauge.providerId])).toEqual([['claude:a', 'claude'], ['claude:b', 'claude'], ['claude:c', 'claude']]);
+  expect(shownGauges(gauges, [])).toBe(gauges);
+  // A hidden id the gateway no longer reports changes nothing; a new subscription shows.
+  expect(shownGauges(gauges, ['claude:b', 'codex:gone']).map((gauge) => gauge.id)).toEqual(['claude:a', 'claude:c']);
+  expect(parseCompanionPrefs({}).hiddenQuotas).toEqual([]);
+  expect(parseCompanionPrefs({ hiddenQuotas: ['claude:b', 'claude:b', '', 4, 'codex:x'] }).hiddenQuotas).toEqual(['claude:b', 'codex:x']);
+  expect(parseCompanionPrefs({ hiddenQuotas: 'claude:b' }).hiddenQuotas).toEqual([]);
 });
 
 test('the HUD demo of the fake core has threads at work and a Douane', async () => {

@@ -28,13 +28,13 @@ test('stored preferences are read field by field, a wrong field taking its defau
   expect(readCompanionPrefs()).toEqual(DEFAULT_COMPANION_PREFS);
 });
 
-test('changing the brain forgets the conversation; placing the companion keeps it', () => {
+test('changing the brain or placing the companion keeps the conversation', () => {
   writeCompanionPrefs({ threadId: 'thr_1' });
   expect(writeCompanionPrefs({ anchor: 'left', music: false }).threadId).toBe('thr_1');
-  expect(writeCompanionPrefs({ model: 'haiku' }).threadId).toBeNull();
-  writeCompanionPrefs({ threadId: 'thr_2' });
-  expect(writeCompanionPrefs({ control: 'auto' }).threadId).toBeNull();
+  expect(writeCompanionPrefs({ model: 'haiku' }).threadId).toBe('thr_1');
+  expect(writeCompanionPrefs({ control: 'auto' }).threadId).toBe('thr_1');
   expect(JSON.parse(window.localStorage.getItem(COMPANION_STORAGE_KEY)!).control).toBe('auto');
+  expect(writeCompanionPrefs({ threadId: null }).threadId).toBeNull();
 });
 
 test('a write is heard on this page and from the other window', () => {
@@ -85,13 +85,13 @@ test('the brain: the chosen agent while usable, none when it is not, else the fi
 
 test('the role and the memory go with the first request only, the time with every one, and auto control skips the permission prompts', () => {
   const now = new Date(2026, 9, 9, 14, 5);
-  const context: PromptContext = { first: true, memory: 'Your memory of the user is empty so far.', now, seen: null };
+  const context: PromptContext = { prime: 'new', memory: 'Your memory of the user is empty so far.', now, seen: null };
   expect(localTime(now)).toBe('Friday 2026-10-09 14:05');
   expect(promptFor('play music', context)).toBe(`${COMPANION_ROLE}\n\nYour memory of the user is empty so far.\n\n---\n\n[Friday 2026-10-09 14:05]\nplay music`);
-  expect(promptFor('play music', { ...context, first: false })).toBe('[Friday 2026-10-09 14:05]\nplay music');
-  expect(promptFor('what is this?', { ...context, first: false, seen: { kind: 'screen' } })).toBe("[Friday 2026-10-09 14:05]\n[The attached image is the user's screen.]\nwhat is this?");
-  expect(promptFor('which is louder?', { ...context, first: false, seen: { kind: 'screens', count: 2 } })).toContain("[The 2 attached images are the user's screens, one per screen, the main screen first.]\nwhich is louder?");
-  expect(promptFor('fix this', { ...context, first: false, seen: { kind: 'zone' } })).toContain("[The attached image is the part of the user's screen they picked to show you.]\nfix this");
+  expect(promptFor('play music', { ...context, prime: null })).toBe('[Friday 2026-10-09 14:05]\nplay music');
+  expect(promptFor('what is this?', { ...context, prime: null, seen: { kind: 'screen' } })).toBe("[Friday 2026-10-09 14:05]\n[The attached image is the user's screen.]\nwhat is this?");
+  expect(promptFor('which is louder?', { ...context, prime: null, seen: { kind: 'screens', count: 2 } })).toContain("[The 2 attached images are the user's screens, one per screen, the main screen first.]\nwhich is louder?");
+  expect(promptFor('fix this', { ...context, prime: null, seen: { kind: 'zone' } })).toContain("[The attached image is the part of the user's screen they picked to show you.]\nfix this");
   expect(permissionModeOf('auto')).toBe('bypassPermissions');
   expect(permissionModeOf('ask')).toBe('default');
   expect(replyText({ parts: [{ type: 'text', text: ' Done, ' }, { type: 'reasoning', text: 'hmm' } as never, { type: 'text', text: 'Spotify is on. ' }] })).toBe('Done, Spotify is on.');

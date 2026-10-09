@@ -114,14 +114,17 @@ notify or quit; `acl.rs` tests this.
 They are this computer's, in `localStorage` under `boite.companion`, like the
 experiments: screen, position and drop spot, hiding for full-screen apps, the
 shortcut (one of `COMPANION_HOTKEYS`, or none), sounds, agent, account,
-model, effort, control mode, music, quotas, closing on an outside click, the
-pomodoro's work and break minutes, focus during work, and the id of the
-conversation. Both webviews share the origin, so the companion follows
-a change from Settings through the `storage` event.
+model, effort, control mode, music, quotas and the ones hidden, closing on an
+outside click, the pomodoro's work and break minutes, focus during work, and
+the id of the conversation. Both webviews share the origin, so the companion
+follows a change from Settings through the `storage` event.
 
-Changing the agent, account, model, effort or control mode clears the
-conversation: a thread keeps the agent and the permission mode it was made
-with, so the next request starts a new one.
+Changing the agent, account, model, effort or control mode keeps the
+conversation: before its next request, `talk.svelte.ts` moves the thread over
+with `threads.update` (account, model, effort, permission mode). A move to
+another agent starts a session of its own on the same thread, so the role goes
+again. Only "New conversation", or the thread being deleted, starts another
+thread.
 
 ## Brain
 
@@ -139,7 +142,13 @@ is added to the core or to the RPC.
   "Act without asking" uses `bypassPermissions`.
 - The UI cannot write an instructions file for the agent, so the role
   (`COMPANION_ROLE` in `brain.ts`) and the memory go in front of the first
-  request of a conversation. The role asks for short plain-text answers in
+  request of a conversation. `priming.ts` keeps what the thread was last given
+  (hashes of the role and the memory, under `boite.companion.primed`): the
+  role goes again when it changed, when the thread moved to another agent, or
+  for a conversation the record does not know; the memory goes again, alone,
+  whenever it changed or a reply's directives could not be read. The agent so
+  believes the memory the companion keeps, not what the conversation says it
+  noted. The role asks for short plain-text answers in
   the user's language, gives the Windows recipes (`Start-Process`,
   `Get-StartApps`, Steam's `steam://rungameid/`, Spotify URIs and the media
   keys) and the directives below.
@@ -172,19 +181,21 @@ The agent adds lines of its own to a reply, which the bubble never shows
 - `[[forget: fact]]` drops the facts it names, by their words;
 - `[[remind: when | text]]` sets a reminder, `when` being a delay (`+20m`,
   `+1h30m`), a time (`18:30`, tomorrow once past) or a date and time;
-- `[[timer: duration | label]]` starts the pomodoro with that work time
-  (`25m`, `50m`, `1h30m`, up to 4 h; the label is optional), and
-  `[[timer: stop]]` stops it;
+- `[[timer: duration | label]]` starts a countdown (`25m`, `50m`, `1h30m`, up
+  to 4 h; the label is optional), `[[stopwatch: label]]` a stopwatch,
+  `[[pomodoro: duration | label]]` a pomodoro (the duration, its work time,
+  is optional), and `[[timer: stop]]` stops whichever runs;
 - `[[focus: on]]` and `[[focus: off]]` turn focus on and off;
 - `[[task: project | instruction]]` launches a Boite thread in that project
   (three per reply at most; see "Launching threads").
 
 The memory (80 facts at most, oldest out first) and the reminders live in
 `localStorage` on this computer (`memory.ts`), never in the core except as the
-memory block of a first request. Settings, Companion lists both: a fact can be
+memory block of a request. Settings, Companion lists both: a fact can be
 added or forgotten, the whole memory cleared after a confirmation, a reminder
-cancelled. Changing the memory starts a new conversation. Passwords and other
-secrets are not to be kept, as the role says.
+cancelled. A change goes to the agent with the next request, in the same
+conversation. Passwords and other secrets are not to be kept, as the role
+says.
 
 The companion's window checks the reminders every second. One that is due
 shows a card with OK and "In 10 min", the character looks alert and a chime
@@ -287,21 +298,28 @@ with its project, step and time; a click opens it in Boite
 the gauges stay.
 
 With "Show quotas" on and the core's subscription proxy set to a Douane, it
-carries one small gauge per subscription (`hudGauges`): what is left of the
-window nearest its limit, amber past 80 % used, red past 95 %, each with a
-label for screen readers; the open card spells them out. The page reads
-`subscriptionProxy.quotas` on start and every minute, and takes every
+carries one small gauge per subscription (`hudGauges`), each beside its
+provider's logo (`ProviderLogo.svelte`): what is left of the window nearest
+its limit, amber past 80 % used, red past 95 %, each with a label for screen
+readers; the open card spells them out. Settings lists the subscriptions under
+"Show quotas", one switch each: the ones turned off are kept by id in
+`hiddenQuotas` (`shownGauges`), so one the gateway adds later shows. The page
+reads `subscriptionProxy.quotas` on start and every minute, and takes every
 `subscriptionProxy.quotasUpdated`. With no proxy, or another kind, there is
 no gauge. The key is never read.
 
-## Pomodoro
+## Timers
 
 A timer sits beside the activity pill (`CompanionTimer.svelte`, `pomodoro.ts`,
-with the clock in `focus.svelte.ts`). It shows the phase, the time left and,
-during the work, what it is for. On hover or keyboard focus it unfolds pause or
-resume, skip the break, and stop. It starts from the row under the ask bar
-(`CompanionTools.svelte`) with the minutes set in Settings (25 and 5 by
-default). The agent's `[[timer: …]]` also starts it, and its work time wins.
+with the clock in `focus.svelte.ts`). It is a pomodoro, a countdown or a
+stopwatch, one at a time, each with its icon. It shows the phase, the time
+left (the time so far for a stopwatch) and what it is for. On hover or
+keyboard focus it unfolds pause or resume, skip the break, and stop. A
+pomodoro starts from the row under the ask bar (`CompanionTools.svelte`) with
+the minutes set in Settings (25 and 5 by default). The agent's `[[pomodoro: …]]`
+also starts one, and its work time wins; `[[timer: …]]` starts a countdown and
+`[[stopwatch: …]]` a stopwatch. A countdown that ends rings as a reminder, with
+its label; a stopwatch stops at 24 h.
 
 One pomodoro is a work phase, then a break, then the end. Each phase rings the
 phase chime when it ends. During the break the companion takes it with the
@@ -338,8 +356,8 @@ The row under the ask bar shows the last 20 exchanges (`CompanionHistory.svelte`
 each time the list opens, with tool calls, files and images compacted. Nothing
 is copied locally.
 
-A request reads as the user typed it: the role and memory of a first request,
-the date line and every bracketed line are left out. A reply reads as the
+A request reads as the user typed it: the role and memory it carried, the
+date line and every bracketed line are left out. A reply reads as the
 bubble showed it (`visibleReply`). A click puts the reply back in the bubble.
 The list closes when a new permission or question opens the panel.
 
@@ -365,7 +383,7 @@ does not go puts the text and the files back.
 
 ## Launching threads
 
-The first request of a conversation lists Boite's projects, drafts and
+A request that carries the role lists Boite's projects, drafts and
 archived ones left out (`taskProjects`). The agent launches a thread with
 `[[task: project | instruction]]` (`tasks.ts`, `tasks.svelte.ts`):
 
@@ -398,13 +416,17 @@ Nothing is added to the core or the RPC.
 - `packages/ui/src/lib/companion/companion-memory.test.ts`: memory,
   reminders, directives, notices' summary line, layout and screen words.
 - `packages/ui/src/lib/companion/companion-talk.test.ts`, on the fake core: a
-  reply's directives kept, a finished thread's first sentence, a reminder
-  ringing again until answered.
+  reply's directives kept, a brain changed in Settings moving the same thread
+  over, a finished thread's first sentence, a reminder ringing again until
+  answered.
+- `packages/ui/src/lib/companion/companion-priming.test.ts`: when the role or
+  the memory goes again, and the record's storage.
 - `packages/ui/src/lib/companion/companion-hud.test.ts`: the HUD's threads,
-  steps and order, the gauges and their levels, and following the quotas on
-  the fake core's HUD demo.
+  steps and order, the gauges, their levels and providers, the ones hidden in
+  Settings, and following the quotas on the fake core's HUD demo.
 - `packages/ui/src/lib/companion/companion-focus.test.ts`: the timer and
-  focus directives and durations, the pomodoro's phases, pause, storage and
+  focus directives and durations, the pomodoro's phases, the countdown and the
+  stopwatch, pause, storage and
   chimes across a reload, what focus sets aside and lets ring, its
   preferences, and the history's requests and replies, read back from the
   fake core.

@@ -6,10 +6,12 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import type { ThreadSummary } from '@boite/contracts';
 import { FakeClient } from '../fake-client';
-import { addReminder, readMemory, readReminders } from './memory';
+import { COMPANION_ROLE } from './brain';
+import { addReminder, memoryBlock, readMemory, readReminders } from './memory';
 import { isWorking } from './mood';
 import { Notes } from './notes.svelte';
 import { readCompanionPrefs, writeCompanionPrefs } from './prefs';
+import { hashText, readPrimed, writePrimed } from './priming';
 import { Talk } from './talk.svelte';
 
 afterEach(() => {
@@ -38,10 +40,12 @@ async function settledThread(client: FakeClient, threadId: string): Promise<Thre
 
 test('once a reply is complete, the facts and the reminders it asks for are kept, and the bubble shows neither', async () => {
   const client = await connected();
-  // A conversation that has had a request already: the fake agent echoes the
-  // request alone, without the role and its sample directives.
+  // A conversation that has had a request already, with this role and this
+  // memory: the fake agent echoes the request alone, without the role and its
+  // sample directives.
   let own: ThreadSummary = { ...(await newThread(client)), lastUserMessageAt: Date.now() };
-  writeCompanionPrefs({ threadId: own.id });
+  writeCompanionPrefs({ threadId: own.id, providerId: 'echo', accountId: 'a-echo' });
+  writePrimed({ threadId: own.id, role: hashText(COMPANION_ROLE), memory: hashText(memoryBlock(readMemory())), check: false });
   const settled = vi.fn();
   const talk = new Talk({ client: () => client, prefs: readCompanionPrefs, threads: () => [own], hovering: () => false, created: () => {}, settled });
   // As the companion's window does: its thread list follows the core, and the reply streams into the bubble.
@@ -64,7 +68,26 @@ test('once a reply is complete, the facts and the reminders it asks for are kept
   expect(readReminders().map((reminder) => reminder.text)).toEqual(['Take the tea out']);
   expect(talk.reply).toContain('Noted, Chris.');
   expect(talk.reply).not.toContain('[[');
+  // The memory changed: the agent sees it with the next request.
+  expect(readPrimed()?.memory).not.toBe(hashText(memoryBlock(readMemory())));
   for (const stop of off) stop();
+  talk.dispose();
+});
+
+test('a brain changed in Settings moves the conversation over instead of starting another', async () => {
+  const client = await connected();
+  const own: ThreadSummary = { ...(await newThread(client)), lastUserMessageAt: Date.now() };
+  expect(own.permissionMode).not.toBe('bypassPermissions');
+  writeCompanionPrefs({ threadId: own.id, providerId: 'echo', accountId: 'a-echo', control: 'auto' });
+  expect(readCompanionPrefs().threadId).toBe(own.id);
+  const created = vi.fn();
+  const talk = new Talk({ client: () => client, prefs: readCompanionPrefs, threads: () => [own], hovering: () => false, created, settled: () => {} });
+
+  expect(await talk.ask('Hello', null)).toBe(true);
+  expect(created).not.toHaveBeenCalled();
+  expect((await settledThread(client, own.id)).permissionMode).toBe('bypassPermissions');
+  // Primed before the companion kept a record: the role goes again, and is recorded.
+  expect(readPrimed()?.threadId).toBe(own.id);
   talk.dispose();
 });
 

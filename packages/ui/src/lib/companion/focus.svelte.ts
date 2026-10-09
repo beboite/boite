@@ -1,26 +1,32 @@
 /*
- * The pomodoro's clock and the focus mode, for the companion's window.
+ * The companion's timer and the focus mode, for the companion's window.
  *
- * The timer ticks once a second while a phase runs and rings when one ends
- * (`pomodoro.ts` holds the arithmetic and the storage). Focus is on when the
- * user or the agent turned it on, or during the work phase with "Focus during
- * work" on: the threads that finish meanwhile are set aside instead of shown,
- * and listed in one card once it ends. What blocks the user (permissions,
- * questions, reminders) is never held back.
+ * The timer (a pomodoro, a countdown or a stopwatch) ticks once a second while
+ * a phase runs and tells the page when one ends (`pomodoro.ts` holds the
+ * arithmetic and the storage). Focus is on when the user or the agent turned
+ * it on, or during a pomodoro's work with "Focus during work" on: the threads
+ * that finish meanwhile are set aside instead of shown, and listed in one card
+ * once it ends. What blocks the user (permissions, questions, reminders) is
+ * never held back.
  */
 import type { Cue } from './sounds';
-import { nextPhase, pausePomodoro, readPomodoro, remainingMs, resumePomodoro, settlePomodoro, startPomodoro, writePomodoro, type Pomodoro, type PomodoroPhase } from './pomodoro';
+import { elapsedMs, nextPhase, pausePomodoro, readPomodoro, remainingMs, resumePomodoro, settlePomodoro, startCountdown, startPomodoro, startStopwatch, writePomodoro, type Pomodoro, type PomodoroPhase } from './pomodoro';
 
 export interface TimerHost {
-  /** Phases that ended, in order: the page rings once for them. */
-  ended(phases: PomodoroPhase[]): void;
+  /** Phases that ended, in order, of the timer that ran: the page rings once for them. */
+  ended(phases: PomodoroPhase[], timer: Pomodoro): void;
 }
 
 export class PomodoroTimer {
   current = $state<Pomodoro | null>(null);
   now = $state(Date.now());
   readonly left = $derived(this.current ? remainingMs(this.current, this.now) : 0);
+  /** What a stopwatch shows. */
+  readonly elapsed = $derived(this.current ? elapsedMs(this.current, this.now) : 0);
+  readonly kind = $derived(this.current?.kind ?? null);
   readonly phase = $derived(this.current?.phase ?? null);
+  /** A pomodoro's work: what turns the focus on by itself. */
+  readonly working = $derived(this.current?.kind === 'pomodoro' && this.current.phase === 'work');
   readonly paused = $derived(this.current?.pausedLeft != null);
   private timer: ReturnType<typeof setInterval> | undefined;
   private disposed = false;
@@ -31,8 +37,17 @@ export class PomodoroTimer {
     queueMicrotask(() => this.tick());
   }
 
+  /** One timer at a time: each start replaces the one running. */
   start(options: { workMs: number; breakMs: number; label?: string }): void {
     this.put(startPomodoro(options, Date.now()));
+  }
+
+  countdown(ms: number, label = ''): void {
+    this.put(startCountdown(ms, label, Date.now()));
+  }
+
+  stopwatch(label = ''): void {
+    this.put(startStopwatch(label, Date.now()));
   }
 
   pause(): void {
@@ -63,10 +78,11 @@ export class PomodoroTimer {
     // The first tick is queued: a timer disposed meanwhile stays quiet.
     if (this.disposed) return;
     this.now = Date.now();
-    const { pomodoro, ended } = settlePomodoro(this.current, this.now);
-    if (ended.length > 0) {
+    const ran = this.current;
+    const { pomodoro, ended } = settlePomodoro(ran, this.now);
+    if (ran && ended.length > 0) {
       this.put(pomodoro);
-      this.host.ended(ended);
+      this.host.ended(ended, ran);
     } else this.schedule();
   }
 
@@ -112,7 +128,7 @@ function setAsideOf(value: unknown): SetAside[] {
 }
 
 export interface FocusHost {
-  /** Focus by itself: the pomodoro's work phase, with the option on. */
+  /** Focus by itself: a pomodoro's work, with the option on. */
   auto(): boolean;
 }
 

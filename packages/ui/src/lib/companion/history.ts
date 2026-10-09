@@ -7,7 +7,7 @@
  */
 import type { Message } from '@boite/contracts';
 import type { Client } from '../client';
-import { COMPANION_ROLE, replyText } from './brain';
+import { COMPANION_ROLE, MEMORY_AGAIN, PRIMING_END, replyText } from './brain';
 import { visibleReply } from './directives';
 
 export interface Exchange {
@@ -21,15 +21,15 @@ export interface Exchange {
 /** About twenty exchanges, the tool calls between them compacted. */
 export const HISTORY_EXCHANGES = 20;
 const HISTORY_MESSAGES = 120;
-/** What `promptFor` puts between the role and memory and the request. */
-const ROLE_END = '\n\n---\n\n';
+/** How a request that carries the role or the memory starts. */
+const PRIMED_OPENINGS = [COMPANION_ROLE.slice(0, 40), MEMORY_AGAIN.slice(0, 40)];
 
 /** The request as the user typed it. */
 export function requestText(prompt: string): string {
   let text = prompt;
-  if (text.startsWith(COMPANION_ROLE.slice(0, 40))) {
-    const end = text.indexOf(ROLE_END);
-    text = end < 0 ? '' : text.slice(end + ROLE_END.length);
+  if (PRIMED_OPENINGS.some((opening) => text.startsWith(opening))) {
+    const end = text.indexOf(PRIMING_END);
+    text = end < 0 ? '' : text.slice(end + PRIMING_END.length);
   }
   return text
     .split('\n')

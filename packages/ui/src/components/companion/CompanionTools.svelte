@@ -1,7 +1,7 @@
 <!--
-  The row under the ask bar: start or stop the pomodoro, turn focus on or off,
-  and show the earlier exchanges. It holds no state of its own beyond what it
-  is handed.
+  The row under the ask bar: start a pomodoro or stop the timer running, turn
+  focus on or off, and show the earlier exchanges. It holds no state of its
+  own beyond what it is handed.
 -->
 <script lang="ts">
   import { Focus as FocusIcon, History, Timer } from '@lucide/svelte';
@@ -25,8 +25,8 @@
 
 <div class="tools" data-testid="companion-tools">
   {#if timer.current}
-    <button type="button" class="chip on" title={copy.pomodoro.stop} onclick={() => timer.stop()} data-testid="companion-pomodoro">
-      <Timer size={13} /><span>{copy.pomodoro.stop}</span>
+    <button type="button" class="chip on" title={copy.pomodoro.stop[timer.current.kind]} onclick={() => timer.stop()} data-testid="companion-pomodoro">
+      <Timer size={13} /><span>{copy.pomodoro.stop[timer.current.kind]}</span>
     </button>
   {:else}
     <button

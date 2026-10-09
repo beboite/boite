@@ -47,6 +47,8 @@ export interface CompanionPrefs {
   closeOutside: boolean;
   /** One gauge per subscription of the proxy beside the character. */
   quotas: boolean;
+  /** The gauges left out, by `HudGauge.id`; one the gateway adds later shows until hidden. */
+  hiddenQuotas: string[];
   /** The pomodoro's phases, in minutes. */
   workMinutes: number;
   breakMinutes: number;
@@ -73,6 +75,7 @@ export const DEFAULT_COMPANION_PREFS: CompanionPrefs = {
   music: true,
   closeOutside: true,
   quotas: true,
+  hiddenQuotas: [],
   workMinutes: 25,
   breakMinutes: 5,
   focusOnWork: true,
@@ -80,8 +83,8 @@ export const DEFAULT_COMPANION_PREFS: CompanionPrefs = {
   threadId: null
 };
 
-/** The fields a thread is made with: changing one starts a new conversation. */
-const BRAIN_KEYS = ['providerId', 'accountId', 'model', 'effort', 'control'] as const;
+/** The fields the conversation's thread runs with: `talk.svelte.ts` applies a change to it before the next request. */
+export const BRAIN_KEYS = ['providerId', 'accountId', 'model', 'effort', 'control'] as const;
 
 const text = (value: unknown): string | null => (typeof value === 'string' && value !== '' ? value : null);
 
@@ -118,6 +121,7 @@ export function parseCompanionPrefs(raw: unknown): CompanionPrefs {
     music: value.music !== false,
     closeOutside: value.closeOutside !== false,
     quotas: value.quotas !== false,
+    hiddenQuotas: Array.isArray(value.hiddenQuotas) ? [...new Set(value.hiddenQuotas.filter((id): id is string => typeof id === 'string' && id !== ''))] : [],
     workMinutes: minutes(value.workMinutes, 180, DEFAULT_COMPANION_PREFS.workMinutes),
     breakMinutes: minutes(value.breakMinutes, 60, DEFAULT_COMPANION_PREFS.breakMinutes),
     focusOnWork: value.focusOnWork !== false,
@@ -138,11 +142,9 @@ export function readCompanionPrefs(): CompanionPrefs {
 type Listener = (prefs: CompanionPrefs) => void;
 const listeners = new Set<Listener>();
 
-/** Merges `patch`, forgets the conversation when the brain changed, stores and tells this page. */
+/** Merges `patch`, stores and tells this page. The brain changing keeps the conversation: `talk.svelte.ts` moves it over. */
 export function writeCompanionPrefs(patch: Partial<CompanionPrefs>): CompanionPrefs {
-  const before = readCompanionPrefs();
-  const next = parseCompanionPrefs({ ...before, ...patch });
-  if (!('threadId' in patch) && BRAIN_KEYS.some((key) => before[key] !== next[key])) next.threadId = null;
+  const next = parseCompanionPrefs({ ...readCompanionPrefs(), ...patch });
   try {
     window.localStorage.setItem(COMPANION_STORAGE_KEY, JSON.stringify(next));
   } catch {

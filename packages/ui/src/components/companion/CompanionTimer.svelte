@@ -1,10 +1,11 @@
 <!--
-  The pomodoro's countdown in the HUD, beside the activity pill: the phase,
-  the time left and what it is for. On hover or keyboard focus it shows its
-  controls: pause or resume, skip the break, stop. Hidden without a timer.
+  The timer in the HUD, beside the activity pill: a pomodoro's phase and time
+  left, a countdown's time left or a stopwatch's time so far, and what it is
+  for. On hover or keyboard focus it shows its controls: pause or resume, skip
+  the break, stop. Hidden without a timer.
 -->
 <script lang="ts">
-  import { Coffee, Pause, Play, SkipForward, Square, Timer } from '@lucide/svelte';
+  import { Coffee, Hourglass, Pause, Play, SkipForward, Square, Timer, Watch } from '@lucide/svelte';
   import type { PomodoroTimer } from '../../lib/companion/focus.svelte';
   import { clock } from '../../lib/companion/pomodoro';
   import { inShell } from '../../lib/companion/shell';
@@ -31,10 +32,13 @@
     if (inShell() && !hover) pointer = false;
   });
 
+  const kind = $derived(timer.kind ?? 'pomodoro');
   const resting = $derived(timer.phase === 'break');
-  const phaseName = $derived(resting ? copy.rest : copy.work);
-  const time = $derived(clock(timer.left));
-  const said = $derived(fill(timer.paused ? copy.paused : copy.left, { phase: phaseName, time }));
+  const counting = $derived(kind === 'stopwatch');
+  const phaseName = $derived(kind === 'countdown' ? copy.countdown : counting ? copy.stopwatch : resting ? copy.rest : copy.work);
+  const time = $derived(counting ? clock(timer.elapsed, 'down') : clock(timer.left));
+  const said = $derived(fill(timer.paused ? copy.paused : counting ? copy.elapsed : copy.left, { phase: phaseName, time }));
+  const Icon = $derived(resting ? Coffee : kind === 'countdown' ? Hourglass : counting ? Watch : Timer);
 
   let width = $state(0);
   $effect(() => {
@@ -60,7 +64,7 @@
       if (!event.currentTarget.contains(event.relatedTarget as Node | null)) keyboard = false;
     }}
   >
-    <span class="mark" aria-hidden="true">{#if resting}<Coffee size={13} />{:else}<Timer size={13} />{/if}</span>
+    <span class="mark" aria-hidden="true"><Icon size={13} /></span>
     <span class="time" aria-hidden="true">{time}</span>
     {#if timer.current.label && !resting}<span class="label" title={timer.current.label}>{timer.current.label}</span>{/if}
     <span class="controls" class:open>
@@ -72,7 +76,7 @@
       {#if resting}
         <button class="ghost icon" aria-label={copy.skipBreak} title={copy.skipBreak} onclick={() => timer.skip()}><SkipForward size={12} /></button>
       {/if}
-      <button class="ghost icon" aria-label={copy.stop} title={copy.stop} onclick={() => timer.stop()} data-testid="companion-timer-stop"><Square size={11} /></button>
+      <button class="ghost icon" aria-label={copy.stop[kind]} title={copy.stop[kind]} onclick={() => timer.stop()} data-testid="companion-timer-stop"><Square size={11} /></button>
     </span>
   </div>
 {/if}

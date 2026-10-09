@@ -7,11 +7,12 @@
 import type { Attachment, Message, RpcEvents, ThreadSummary } from '@boite/contracts';
 import type { Client } from '../client';
 import { fill, strings } from '../strings';
-import { COMPANION_THREAD_TITLE, permissionModeOf, pickBrain, promptFor, replyText } from './brain';
+import { COMPANION_ROLE, COMPANION_THREAD_TITLE, permissionModeOf, pickBrain, promptFor, replyText, type Brain } from './brain';
 import { parseDirectives, visibleReply, type Directives } from './directives';
 import { addReminder, forget, memoryBlock, readMemory, remember } from './memory';
 import { isWorking } from './mood';
-import { writeCompanionPrefs, type CompanionPrefs } from './prefs';
+import { BRAIN_KEYS, writeCompanionPrefs, type CompanionPrefs } from './prefs';
+import { doubtPrimed, forgetPrimed, hashText, primingFor, readPrimed, writePrimed } from './priming';
 import type { ScreenShot } from './screen';
 import { taskProjects } from './tasks';
 
@@ -36,6 +37,9 @@ interface Target {
 
 /** Enough messages to reach back to the request across a few tool calls. */
 const TAIL = 12;
+
+/** A thread with the brain settings it should run with, to tell when they changed. */
+const tuning = (prefs: CompanionPrefs, threadId: string): string => JSON.stringify([threadId, ...BRAIN_KEYS.map((key) => prefs[key])]);
 
 /** The projects a task may go to, named in the conversation's first request; none when they cannot be read. */
 async function projectNames(client: Client): Promise<string[]> {
@@ -64,9 +68,9 @@ export class Talk {
   // The turn has been seen running, so an idle thread now means it finished.
   private sawRunning = false;
   private subscribed: string | null = null;
-  // Threads that were sent the role, before their summary says so.
-  private readonly primed = new Set<string>();
   private making: Promise<Target | string> | null = null;
+  /** The thread and the brain settings last applied to it (`tuning`). */
+  private tuned: string | null = null;
   private hideTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private readonly host: TalkHost) {}
@@ -108,10 +112,17 @@ export class Talk {
     const prefs = this.host.prefs();
     const threads = this.host.threads();
     const known = prefs.threadId;
-    if (known && (threads.length === 0 || threads.some((thread) => thread.id === known))) return { threadId: known, created: false };
+    const existing = known ? threads.find((thread) => thread.id === known) : undefined;
+    // Before the thread list is read, the thread is taken as it is.
+    if (known && threads.length === 0) return { threadId: known, created: false };
+    if (existing && this.tuned === tuning(prefs, existing.id)) return { threadId: existing.id, created: false };
     const [providers, accounts] = await Promise.all([client.call('providers.list', {}), client.call('accounts.list', {})]);
     const brain = pickBrain(prefs, providers.loaded, accounts);
     if (!brain) return prefs.providerId === null ? strings.companion.noBrain : strings.companion.brainOff;
+    if (existing) {
+      await this.retune(client, existing, brain, prefs);
+      return { threadId: existing.id, created: false };
+    }
     const drafts = await client.call('projects.drafts', {});
     const thread = await client.call('threads.create', {
       projectId: drafts.id,
@@ -123,14 +134,39 @@ export class Talk {
       permissionMode: permissionModeOf(prefs.control)
     });
     writeCompanionPrefs({ threadId: thread.id });
+    this.tuned = tuning(prefs, thread.id);
     this.host.created(thread);
     return { threadId: thread.id, created: true };
   }
 
-  /** The role and the memory go with a conversation's first request only. */
-  private isFirst(target: Target): boolean {
+  /**
+   * The agent, model, effort and control chosen in Settings, applied to the
+   * conversation's thread: changing them keeps the conversation. Another agent
+   * starts a session of its own, so it is given the role again. A refusal
+   * leaves the thread as it was, and the next request tries again.
+   */
+  private async retune(client: Client, thread: ThreadSummary, brain: Brain, prefs: CompanionPrefs): Promise<void> {
+    const mode = permissionModeOf(prefs.control);
+    const patch = {
+      ...(brain.accountId !== thread.accountId ? { accountId: brain.accountId } : {}),
+      ...(brain.model !== null && brain.model !== thread.model ? { model: brain.model } : {}),
+      ...(brain.effort !== thread.effort ? { effort: brain.effort } : {}),
+      ...(mode !== thread.permissionMode ? { permissionMode: mode } : {})
+    };
+    try {
+      if (Object.keys(patch).length > 0) {
+        const updated = await client.call('threads.update', { threadId: thread.id, ...patch });
+        if (updated.providerId !== thread.providerId) forgetPrimed();
+      }
+      this.tuned = tuning(prefs, thread.id);
+    } catch {
+      /* the thread keeps its agent for this request */
+    }
+  }
+
+  /** The thread holds no request yet, as far as the thread list knows. */
+  private isFresh(target: Target): boolean {
     if (target.created) return true;
-    if (this.primed.has(target.threadId)) return false;
     const thread = this.host.threads().find((entry) => entry.id === target.threadId);
     return thread !== undefined && !thread.lastUserMessageAt;
   }
@@ -162,12 +198,14 @@ export class Talk {
         return false;
       }
       await this.subscribe(target.threadId);
-      const first = this.isFirst(target);
-      this.primed.add(target.threadId);
-      const projects = first ? await projectNames(client) : [];
-      const prompt = promptFor(request, { first, memory: memoryBlock(readMemory()), now: new Date(), seen: shot?.seen ?? null, files: files.map((file) => file.name ?? strings.composer.attachUnnamed), projects });
+      // The record goes first: a thread it knows is not fresh, whatever a late thread list says.
+      const memory = memoryBlock(readMemory());
+      const prime = primingFor(readPrimed(), { id: target.threadId, fresh: this.isFresh(target) }, COMPANION_ROLE, memory);
+      const projects = prime === 'new' || prime === 'role' ? await projectNames(client) : [];
+      const prompt = promptFor(request, { prime, memory, now: new Date(), seen: shot?.seen ?? null, files: files.map((file) => file.name ?? strings.composer.attachUnnamed), projects });
       const attachments = [...files, ...(shot?.images ?? [])];
       await client.call('turns.start', { threadId: target.threadId, prompt, ...(attachments.length > 0 ? { attachments } : {}) });
+      writePrimed({ threadId: target.threadId, role: hashText(COMPANION_ROLE), memory: hashText(memory), check: false });
       this.sawRunning = true;
       this.follow();
       return true;
@@ -233,7 +271,9 @@ export class Talk {
       for (const reminder of directives.remind) addReminder(reminder.text, reminder.at);
       this.hold();
     } catch {
-      /* the streamed text stays; the directives are lost with this reply */
+      // The streamed text stays; the directives are lost with this reply, so
+      // the memory goes again with the next request, for the agent to see.
+      doubtPrimed(threadId);
     }
     this.host.settled('done', directives);
   }

@@ -77,7 +77,7 @@ test('the screen goes after the dropped files, unless the two together pass a ca
 });
 
 test('the request names the dropped files, and the history still shows the words alone', () => {
-  const prompt = promptFor('What is in these?', { first: false, memory: '', now: new Date(2026, 9, 9, 14, 5), seen: null, files: ['plan.pdf', 'odd]name.png'] });
+  const prompt = promptFor('What is in these?', { prime: null, memory: '', now: new Date(2026, 9, 9, 14, 5), seen: null, files: ['plan.pdf', 'odd]name.png'] });
   expect(prompt).toContain('[The user dropped these files on you; they come with this request: plan.pdf, odd name.png.]');
   expect(requestText(prompt)).toBe('What is in these?');
 });
@@ -95,11 +95,11 @@ test('[[task: project | instruction]] is read, the bars after the first kept in 
 });
 
 test('the first request names the projects, and the history leaves them out', () => {
-  const prompt = promptFor('Hello', { first: true, memory: '[Memory: none]', now: new Date(2026, 9, 9, 9, 0), seen: null, projects: ['boite', 'notes'] });
+  const prompt = promptFor('Hello', { prime: 'new', memory: '[Memory: none]', now: new Date(2026, 9, 9, 9, 0), seen: null, projects: ['boite', 'notes'] });
   expect(prompt).toContain("[Boite's projects: boite, notes.]");
   expect(prompt).toContain('[[task: PROJECT | INSTRUCTION]]');
   expect(requestText(prompt)).toBe('Hello');
-  expect(promptFor('Again', { first: false, memory: '', now: new Date(), seen: null, projects: ['boite'] })).not.toContain("Boite's projects");
+  expect(promptFor('Again', { prime: null, memory: '', now: new Date(), seen: null, projects: ['boite'] })).not.toContain("Boite's projects");
 });
 
 const project = (id: string, name: string, extra: Partial<Project> = {}): Project => ({ id, name, path: `C:\\src\\${id}`, createdAt: 0, ...extra });

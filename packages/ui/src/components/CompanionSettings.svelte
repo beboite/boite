@@ -4,14 +4,18 @@
   companion's window follows each change as it is made.
 -->
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { ChevronDown } from '@lucide/svelte';
   import { defaultTitleModel, providerEnabled, type ModelInfo } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
   import Menu from './Menu.svelte';
+  import ProviderLogo from './ProviderLogo.svelte';
   import { separator, type MenuItem } from '../lib/menu';
   import { DEFAULT_MODEL_NAMES } from '../lib/model-defaults';
+  import { gatewayReader } from '../lib/quota-reader.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import { hudGauges } from '../lib/companion/hud';
   import { COMPANION_HOTKEYS, readCompanionPrefs, subscribeCompanionPrefs, writeCompanionPrefs, type CompanionAnchor, type CompanionControl, type CompanionPrefs } from '../lib/companion/prefs';
   import { readStatus, subscribeCompanionData } from '../lib/companion/memory';
   import { companionMonitors, inShell, type CompanionMonitor } from '../lib/companion/shell';
@@ -133,6 +137,23 @@
     if (prefs.threadId === null) started = false;
   }
 
+  /** The gateway's subscriptions, as the companion draws them, to pick the ones it shows. */
+  let gateway = $derived(gatewayReader(store.endpointUrl ?? 'here'));
+  let gauges = $derived(hudGauges(gateway.state));
+  $effect(() => {
+    const client = store.client;
+    const current = gateway;
+    if (!client || !store.owner || store.connection !== 'ready' || !prefs.quotas) return;
+    const off = client.on('subscriptionProxy.quotasUpdated', (value) => current.accept(value));
+    untrack(() => void current.read(client));
+    return off;
+  });
+
+  function showQuota(id: string, shown: boolean) {
+    const others = prefs.hiddenQuotas.filter((hidden) => hidden !== id);
+    save({ hiddenQuotas: shown ? others : [...others, id] });
+  }
+
   function pickModel(id: string) {
     if (id === AUTO) return save({ providerId: null, accountId: null, model: null, effort: null });
     const [providerId, model] = JSON.parse(id) as [string, string];
@@ -201,6 +222,16 @@
       <span class="text ui-label-box"><span class="ui-label">{copy.quotas}</span><InfoTip topic={copy.quotas} text={copy.quotasHint} /></span>
       <input type="checkbox" role="switch" checked={prefs.quotas} onchange={(event) => save({ quotas: event.currentTarget.checked })} data-testid="companion-quotas" />
     </label>
+    {#if prefs.quotas && gauges.length > 0}
+      <div class="quotas" role="group" aria-label={copy.quotasShown}>
+        {#each gauges as gauge (gauge.id)}
+          <label class="switch-row quota">
+            <span class="text quota-name"><ProviderLogo providerId={gauge.providerId} size={16} /><span class="ui-label">{gauge.name}</span></span>
+            <input type="checkbox" role="switch" checked={!prefs.hiddenQuotas.includes(gauge.id)} onchange={(event) => showQuota(gauge.id, event.currentTarget.checked)} data-testid="companion-quota" />
+          </label>
+        {/each}
+      </div>
+    {/if}
     <label class="switch-row">
       <span class="text ui-label-box"><span class="ui-label">{copy.closeOutside}</span><InfoTip topic={copy.closeOutside} text={copy.closeOutsideHint} /></span>
       <input type="checkbox" role="switch" checked={prefs.closeOutside} onchange={(event) => save({ closeOutside: event.currentTarget.checked })} data-testid="companion-close-outside" />
@@ -258,5 +289,35 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: 26ch;
+  }
+  /* The subscriptions under "Show quotas", one switch each, set in under it. */
+  .quotas {
+    display: flex;
+    flex-direction: column;
+    margin: -8px 0 12px;
+    padding-left: 14px;
+    border-left: 2px solid var(--color-border);
+  }
+  .page .quotas .quota {
+    min-height: 0;
+    padding: 6px 0;
+    border-top: none;
+  }
+  .page .quota .text {
+    font-size: var(--text-sm);
+    font-weight: 400;
+  }
+  .quota-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .quota-name .ui-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .quotas + .switch-row {
+    border-top: 1px solid var(--color-border);
   }
 </style>

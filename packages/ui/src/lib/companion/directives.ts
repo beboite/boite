@@ -2,13 +2,18 @@
  * The lines the companion's agent adds to a reply for the companion itself,
  * as its role asks (`brain.ts`): `[[remember: …]]`, `[[forget: …]]`,
  * `[[remind: when | what]]`, `[[timer: duration | what for]]`,
+ * `[[pomodoro: duration | what for]]`, `[[stopwatch: what for]]`,
  * `[[focus: on]]` and `[[task: project | instruction]]`. The bubble never
  * shows them; the page acts on them once the reply is complete. Pure, so it
  * is tested without a core.
  */
+import type { TimerKind } from './pomodoro';
 
-/** A pomodoro to start, its work phase lasting `ms`, or the one running to stop. */
-export type TimerDirective = { ms: number; label: string } | 'stop';
+/**
+ * A timer to start, or the one running to stop. A countdown has a length; a
+ * pomodoro's is the user's work length when null; a stopwatch has none.
+ */
+export type TimerDirective = { kind: TimerKind; ms: number | null; label: string } | 'stop';
 
 /** Work handed to another agent: a new thread in the project named, started with the instruction. */
 export interface TaskDirective {
@@ -28,7 +33,7 @@ export interface Directives {
   task: TaskDirective[];
 }
 
-const DIRECTIVE = /\[\[\s*(remember|forget|remind|timer|focus|task)\s*:([\s\S]*?)\]\]/gi;
+const DIRECTIVE = /\[\[\s*(remember|forget|remind|timer|pomodoro|stopwatch|focus|task)\s*:([\s\S]*?)\]\]/gi;
 /** A timer is a few minutes to a few hours. */
 const TIMER_MAX_MS = 4 * 60 * 60_000;
 /** A reply launches a few threads at most: more is a reply gone wrong. */
@@ -98,12 +103,23 @@ export function parseDuration(text: string): number | null {
 
 const bounded = (ms: number): number | null => (ms > 0 && ms <= TIMER_MAX_MS ? ms : null);
 
-function timerOf(content: string): TimerDirective | null {
+const STOP = /^(stop|off|cancel|end)$/i;
+
+/**
+ * `timer: 10m | pasta` counts down and needs its length; `pomodoro: 25m | the
+ * report` may leave it out (`pomodoro: | the report`, or `pomodoro:` alone);
+ * `stopwatch: the run` has only what it is for. Any of them takes `stop`.
+ */
+function timerOf(kind: TimerKind, content: string): TimerDirective | null {
   const bar = content.indexOf('|');
   const head = (bar < 0 ? content : content.slice(0, bar)).trim();
-  if (/^(stop|off|cancel)$/i.test(head)) return 'stop';
+  if (STOP.test(head)) return 'stop';
+  if (kind === 'stopwatch') return { kind, ms: null, label: content.trim() };
+  const label = bar < 0 ? '' : content.slice(bar + 1).trim();
   const ms = parseDuration(head);
-  return ms === null ? null : { ms, label: bar < 0 ? '' : content.slice(bar + 1).trim() };
+  if (kind === 'countdown') return ms === null ? null : { kind, ms, label };
+  // A pomodoro without a readable length still starts, at the user's length.
+  return { kind, ms, label: ms === null && bar < 0 ? head : label };
 }
 
 /** `project | instruction`, both needed; the instruction may hold bars of its own. */
@@ -114,16 +130,21 @@ function taskOf(content: string): TaskDirective | null {
   return project && prompt ? { project, prompt } : null;
 }
 
+/** The directive's name for each kind of timer. */
+const TIMER_KINDS = new Map<string, TimerKind>([['timer', 'countdown'], ['pomodoro', 'pomodoro'], ['stopwatch', 'stopwatch']]);
+
 /** What a complete reply asks of the companion. A directive it cannot read is left out. */
 export function parseDirectives(text: string, now: Date): Directives {
   const found: Directives = { remember: [], forget: [], remind: [], timer: null, focus: null, task: [] };
   for (const [, kind, body] of text.matchAll(DIRECTIVE)) {
     const content = body!.trim();
-    if (!content) continue;
     const name = kind!.toLowerCase();
-    if (name === 'remember') found.remember.push(content);
+    const timer = TIMER_KINDS.get(name);
+    // A pomodoro or a stopwatch needs nothing more than its name.
+    if (timer) found.timer = timerOf(timer, content) ?? found.timer;
+    else if (!content) continue;
+    else if (name === 'remember') found.remember.push(content);
     else if (name === 'forget') found.forget.push(content);
-    else if (name === 'timer') found.timer = timerOf(content) ?? found.timer;
     else if (name === 'task') {
       const task = taskOf(content);
       if (task && found.task.length < TASKS_MAX) found.task.push(task);

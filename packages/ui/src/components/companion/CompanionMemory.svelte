@@ -2,8 +2,8 @@
   Settings, Companion: what the companion remembers about the user and the
   reminders it will ring (`lib/companion/memory.ts`). Both live on this
   computer; the companion's window adds to them as the user talks to it.
-  Changing the memory starts a new conversation, since the current one keeps
-  the facts it was given.
+  A change to the memory goes to the agent with the next request, in the same
+  conversation (`lib/companion/priming.ts`).
 -->
 <script lang="ts">
   import { Plus, X } from '@lucide/svelte';
@@ -11,7 +11,6 @@
   import { fill, strings } from '../../lib/strings';
   import { formatLocale } from '../../lib/i18n.svelte';
   import { clearMemory, forgetFact, readMemory, readReminders, remember, removeReminder, subscribeCompanionData, type MemoryFact, type Reminder } from '../../lib/companion/memory';
-  import { writeCompanionPrefs } from '../../lib/companion/prefs';
 
   const copy = $derived(strings.companion.settings);
 
@@ -29,26 +28,20 @@
 
   const when = $derived(new Intl.DateTimeFormat(formatLocale(), { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }));
 
-  /** The conversation running holds the old memory: the next request starts with this one. */
-  const restart = () => writeCompanionPrefs({ threadId: null });
-
   function add(event: SubmitEvent) {
     event.preventDefault();
     if (!fact.trim()) return;
     remember(fact);
     fact = '';
-    restart();
   }
 
   function drop(id: string) {
     forgetFact(id);
-    restart();
   }
 
   function forgetAll() {
     clearMemory();
     confirming = false;
-    restart();
   }
 </script>
 

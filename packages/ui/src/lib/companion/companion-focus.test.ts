@@ -11,7 +11,7 @@ import { parseDirectives, parseDuration, visibleReply } from './directives';
 import { audible, Focus, FOCUS_STORAGE_KEY, PomodoroTimer } from './focus.svelte';
 import { exchangesOf, readHistory, requestText } from './history';
 import { isWorking } from './mood';
-import { clock, nextPhase, parsePomodoro, pausePomodoro, POMODORO_STORAGE_KEY, readPomodoro, remainingMs, resumePomodoro, settlePomodoro, startPomodoro } from './pomodoro';
+import { clock, elapsedMs, nextPhase, parsePomodoro, pausePomodoro, POMODORO_STORAGE_KEY, readPomodoro, remainingMs, resumePomodoro, settlePomodoro, startCountdown, startPomodoro, startStopwatch, STOPWATCH_MAX_MS } from './pomodoro';
 import { DEFAULT_COMPANION_PREFS, parseCompanionPrefs } from './prefs';
 
 afterEach(() => {
@@ -37,22 +37,72 @@ test('a duration reads as minutes, hours and seconds, within four hours', () => 
 
 test('the timer and focus directives are read, and the bubble shows neither', () => {
   const parse = (text: string) => parseDirectives(text, new Date());
-  const reply = 'On y va.\n[[timer: 50m | Write the report]]\n[[focus: on]]';
-  expect(parse(reply)).toMatchObject({ timer: { ms: 50 * MIN, label: 'Write the report' }, focus: true });
+  const reply = 'On y va.\n[[pomodoro: 50m | Write the report]]\n[[focus: on]]';
+  expect(parse(reply)).toMatchObject({ timer: { kind: 'pomodoro', ms: 50 * MIN, label: 'Write the report' }, focus: true });
   expect(visibleReply(reply)).toBe('On y va.');
-  expect(parse('[[timer: 25m]]').timer).toEqual({ ms: 25 * MIN, label: '' });
-  expect(parse('[[timer: stop]]').timer).toBe('stop');
+  // A pomodoro may leave its length to the user's settings.
+  expect(parse('[[pomodoro: | the report]]').timer).toEqual({ kind: 'pomodoro', ms: null, label: 'the report' });
+  expect(parse('[[pomodoro: the report]]').timer).toEqual({ kind: 'pomodoro', ms: null, label: 'the report' });
+  expect(parse('[[pomodoro:]]').timer).toEqual({ kind: 'pomodoro', ms: null, label: '' });
+  // A countdown needs its length.
+  expect(parse('[[timer: 10m | Pasta]]').timer).toEqual({ kind: 'countdown', ms: 10 * MIN, label: 'Pasta' });
+  expect(parse('[[timer: 25m]]').timer).toEqual({ kind: 'countdown', ms: 25 * MIN, label: '' });
   expect(parse('[[timer: whenever | x]]').timer).toBeNull();
+  expect(parse('[[stopwatch: the run]]').timer).toEqual({ kind: 'stopwatch', ms: null, label: 'the run' });
+  expect(parse('[[stopwatch:]]').timer).toEqual({ kind: 'stopwatch', ms: null, label: '' });
+  expect(visibleReply('Go.\n[[stopwatch:]]')).toBe('Go.');
+  for (const stop of ['[[timer: stop]]', '[[pomodoro: stop]]', '[[stopwatch: off]]']) expect(parse(stop).timer).toBe('stop');
   expect(parse('[[focus: off]]').focus).toBe(false);
   expect(parse('[[focus: maybe]]').focus).toBeNull();
   expect(parse('Nothing to do.')).toMatchObject({ timer: null, focus: null });
   // The last timer line wins.
-  expect(parse('[[timer: 25m | a]]\n[[timer: 10m | b]]').timer).toEqual({ ms: 10 * MIN, label: 'b' });
+  expect(parse('[[timer: 25m | a]]\n[[stopwatch: b]]').timer).toEqual({ kind: 'stopwatch', ms: null, label: 'b' });
+});
+
+test('a countdown runs once and a stopwatch counts up to its limit', () => {
+  const countdown = startCountdown(10 * MIN, ' Pasta ', 0);
+  expect(countdown).toEqual({ kind: 'countdown', phase: 'work', label: 'Pasta', workMs: 10 * MIN, breakMs: 0, endsAt: 10 * MIN, pausedLeft: null });
+  expect(settlePomodoro(countdown, 10 * MIN)).toEqual({ pomodoro: null, ended: ['work'] });
+  expect(nextPhase(countdown, 0)).toBeNull();
+
+  const stopwatch = startStopwatch('Run', 0);
+  expect(elapsedMs(stopwatch, 90_000)).toBe(90_000);
+  const paused = pausePomodoro(stopwatch, 90_000);
+  expect(elapsedMs(paused, 10 * MIN)).toBe(90_000);
+  expect(elapsedMs(resumePomodoro(paused, 10 * MIN), 10 * MIN + 1000)).toBe(91_000);
+  expect(settlePomodoro(stopwatch, STOPWATCH_MAX_MS)).toEqual({ pomodoro: null, ended: ['work'] });
+  expect(clock(59_999, 'down')).toBe('0:59');
+  expect(clock(59_999)).toBe('1:00');
+
+  // Stored and read back; a timer stored before the kinds is a pomodoro, and only a pomodoro has a break.
+  for (const timer of [countdown, stopwatch]) expect(parsePomodoro(JSON.parse(JSON.stringify(timer)))).toEqual(timer);
+  const old = { phase: 'work', label: '', workMs: MIN, breakMs: MIN, endsAt: MIN, pausedLeft: null };
+  expect(parsePomodoro(old)).toEqual({ kind: 'pomodoro', ...old });
+  expect(parsePomodoro({ ...countdown, phase: 'break' })).toBeNull();
+  expect(parsePomodoro({ ...old, kind: 'egg' })).toBeNull();
+});
+
+test('a countdown ends without a break, and says which timer ended', () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(0);
+  const ended = vi.fn();
+  const timer = new PomodoroTimer({ ended });
+  timer.countdown(2000, 'Tea');
+  expect([timer.kind, timer.working]).toEqual(['countdown', false]);
+  vi.advanceTimersByTime(2000);
+  expect(ended).toHaveBeenCalledWith(['work'], expect.objectContaining({ kind: 'countdown', label: 'Tea' }));
+  expect(timer.current).toBeNull();
+  timer.stopwatch('Run');
+  vi.advanceTimersByTime(5000);
+  expect([timer.kind, timer.elapsed]).toEqual(['stopwatch', 5000]);
+  timer.start({ workMs: MIN, breakMs: MIN });
+  expect(timer.working).toBe(true);
+  timer.dispose();
 });
 
 test('a pomodoro pauses, resumes and runs its work, then its break, then ends', () => {
   const start = startPomodoro({ workMs: 25 * MIN, breakMs: 5 * MIN, label: ' Report ' }, 0);
-  expect(start).toEqual({ phase: 'work', label: 'Report', workMs: 25 * MIN, breakMs: 5 * MIN, endsAt: 25 * MIN, pausedLeft: null });
+  expect(start).toEqual({ kind: 'pomodoro', phase: 'work', label: 'Report', workMs: 25 * MIN, breakMs: 5 * MIN, endsAt: 25 * MIN, pausedLeft: null });
   const paused = pausePomodoro(start, 10 * MIN);
   expect(remainingMs(paused, 20 * MIN)).toBe(15 * MIN);
   expect(settlePomodoro(paused, 60 * MIN)).toEqual({ pomodoro: paused, ended: [] });
@@ -101,7 +151,7 @@ test('the timer survives a reload and rings each phase as it ends', async () => 
   expect(again.current?.label).toBe('Tea');
 
   vi.advanceTimersByTime(2000);
-  expect(ended).toHaveBeenLastCalledWith(['work']);
+  expect(ended.mock.lastCall?.[0]).toEqual(['work']);
   expect(again.phase).toBe('break');
   again.pause();
   vi.advanceTimersByTime(10_000);
@@ -109,7 +159,7 @@ test('the timer survives a reload and rings each phase as it ends', async () => 
   expect(again.left).toBe(3000);
   again.resume();
   vi.advanceTimersByTime(3000);
-  expect(ended).toHaveBeenLastCalledWith(['break']);
+  expect(ended.mock.lastCall?.[0]).toEqual(['break']);
   expect(again.current).toBeNull();
   expect(window.localStorage.getItem(POMODORO_STORAGE_KEY)).toBeNull();
   expect(ended).toHaveBeenCalledTimes(2);
@@ -129,7 +179,7 @@ test('a phase that ended while the window was closed rings once it opens', async
   const ended = vi.fn();
   const timer = new PomodoroTimer({ ended });
   await Promise.resolve();
-  expect(ended).toHaveBeenCalledWith(['work']);
+  expect(ended).toHaveBeenCalledWith(['work'], expect.objectContaining({ kind: 'pomodoro' }));
   expect(timer.phase).toBe('break');
   timer.dispose();
 });
@@ -188,8 +238,9 @@ test('the pomodoro preferences are read field by field, each with its default', 
 
 test('a request reads as typed, without the role, the memory, the date or the bracketed lines', () => {
   const now = new Date(2026, 9, 9, 14, 30);
-  expect(requestText(promptFor('What is on today?', { first: true, memory: 'Facts:\n- Is called Chris', now, seen: null }))).toBe('What is on today?');
-  expect(requestText(promptFor('Look at this', { first: false, memory: '', now, seen: { kind: 'zone' } }))).toBe('Look at this');
+  expect(requestText(promptFor('What is on today?', { prime: 'new', memory: 'Facts:\n- Is called Chris', now, seen: null }))).toBe('What is on today?');
+  expect(requestText(promptFor('Look at this', { prime: null, memory: '', now, seen: { kind: 'zone' } }))).toBe('Look at this');
+  for (const prime of ['role', 'memory'] as const) expect(requestText(promptFor('Hi', { prime, memory: 'Facts:\n- Is called Chris', now, seen: null }))).toBe('Hi');
   expect(requestText('[2026-10-09 14:30]\nTwo lines\nof [text] here')).toBe('Two lines\nof [text] here');
 });
 
