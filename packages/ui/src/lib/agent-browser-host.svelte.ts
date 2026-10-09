@@ -2,7 +2,7 @@ import { untrack } from 'svelte';
 import type { Store } from './store.svelte';
 import { workspace } from './workspace.svelte';
 import { browserBridge } from './browser-bridge';
-import { BrowserHostRelay, type HostBridge, type HostClient } from './browser-host';
+import type { BrowserHostRelay, HostBridge, HostClient } from './browser-host';
 
 /**
  * Whether this app hosts its own core's agent browser right now: the panel then
@@ -20,12 +20,17 @@ export function canHostAgentBrowser(store: Pick<Store, 'localCore' | 'owner'>): 
 export function hostAgentBrowser(store: Store): () => void {
   const client = store.client;
   if (!client || !canHostAgentBrowser(store)) return () => {};
-  const relay = new BrowserHostRelay(client as unknown as HostClient, browserBridge as HostBridge);
-  let stopped = false;
-  relay.start().then(() => { if (!stopped) agentHost.active = true; }, cause => {
+  let stopped = false, relay: BrowserHostRelay | null = null;
+  // Loaded on the one app that hosts: the entry chunk every phone downloads stays without it.
+  void import('./browser-host').then(async ({ BrowserHostRelay }) => {
+    if (stopped) return;
+    relay = new BrowserHostRelay(client as unknown as HostClient, browserBridge as HostBridge);
+    await relay.start();
+    if (!stopped) agentHost.active = true;
+  }).catch(cause => {
     console.warn(`[browser] this app could not host the agent browser: ${cause instanceof Error ? cause.message : String(cause)}`);
   });
-  return () => { stopped = true; agentHost.active = false; relay.stop(); };
+  return () => { stopped = true; agentHost.active = false; relay?.stop(); };
 }
 
 /**
