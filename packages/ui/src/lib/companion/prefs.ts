@@ -11,14 +11,28 @@
  * keeps the agent and permission mode it was made with.
  */
 
-export type CompanionAnchor = 'left' | 'center' | 'right';
+/** Along the top of the screen, or `free`: where the user dropped the character. */
+export type CompanionAnchor = 'left' | 'center' | 'right' | 'free';
 /** `ask`: every action waits for Allow or Deny. `auto`: the agent acts without asking. */
 export type CompanionControl = 'ask' | 'auto';
+/** The character's centre, in fractions of the screen's work area. */
+export interface CompanionSpot { x: number; y: number }
+
+/** The shortcuts Settings offers, in the shell's notation (`platform/desktop.rs`). */
+export const COMPANION_HOTKEYS = ['Alt+Shift+Space', 'Ctrl+Alt+Space', 'Ctrl+Shift+Space', 'Ctrl+Alt+B'] as const;
 
 export interface CompanionPrefs {
   /** The screen's name as the shell lists it; null is the primary screen. */
   monitor: string | null;
   anchor: CompanionAnchor;
+  /** Where the character was dropped, with `anchor: 'free'`. */
+  spot: CompanionSpot | null;
+  /** Step aside while an app fills the screen: a game, a video. */
+  hideFullscreen: boolean;
+  /** The shortcut that calls the companion from any app; null for none. */
+  hotkey: string | null;
+  /** Short chimes when an answer comes, an agent calls or a reminder rings. */
+  sounds: boolean;
   /** Null lets the companion take the first agent that is on and signed in, on its small model. */
   providerId: string | null;
   accountId: string | null;
@@ -37,6 +51,10 @@ export const COMPANION_STORAGE_KEY = 'boite.companion';
 export const DEFAULT_COMPANION_PREFS: CompanionPrefs = {
   monitor: null,
   anchor: 'center',
+  spot: null,
+  hideFullscreen: true,
+  hotkey: COMPANION_HOTKEYS[0],
+  sounds: true,
   providerId: null,
   accountId: null,
   model: null,
@@ -52,12 +70,27 @@ const BRAIN_KEYS = ['providerId', 'accountId', 'model', 'effort', 'control'] as 
 
 const text = (value: unknown): string | null => (typeof value === 'string' && value !== '' ? value : null);
 
+const fraction = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : null);
+
+function spotOf(value: unknown): CompanionSpot | null {
+  if (!value || typeof value !== 'object') return null;
+  const { x, y } = value as Record<string, unknown>;
+  const [left, top] = [fraction(x), fraction(y)];
+  return left === null || top === null ? null : { x: left, y: top };
+}
+
 /** Whatever is stored, read field by field: a missing or wrong field takes its default. */
 export function parseCompanionPrefs(raw: unknown): CompanionPrefs {
   const value = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const spot = spotOf(value.spot);
   return {
     monitor: text(value.monitor),
-    anchor: value.anchor === 'left' || value.anchor === 'right' ? value.anchor : 'center',
+    // A free place needs the spot it was dropped on.
+    anchor: value.anchor === 'left' || value.anchor === 'right' || (value.anchor === 'free' && spot) ? value.anchor : 'center',
+    spot,
+    hideFullscreen: value.hideFullscreen !== false,
+    hotkey: value.hotkey === null ? null : (text(value.hotkey) ?? DEFAULT_COMPANION_PREFS.hotkey),
+    sounds: value.sounds !== false,
     providerId: text(value.providerId),
     accountId: text(value.accountId),
     model: text(value.model),

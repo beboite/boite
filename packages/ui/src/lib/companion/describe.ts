@@ -55,3 +55,25 @@ export function threadLabel(threads: Pick<ThreadSummary, 'id' | 'title' | 'proje
 export function count(n: number, one: string, many: string): string {
   return n === 1 ? one : fill(many, { count: String(n) });
 }
+
+/**
+ * An agent's answer in one line for a notice: Markdown taken off, the first
+ * sentence, cut on a word past `max` characters.
+ */
+export function summaryLine(text: string, max = 140): string {
+  const plain = text
+    .replace(/```[\s\S]*?(```|$)/g, ' ')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+[.)])\s+/gm, '')
+    .replace(/(\*\*|__|~~)(.+?)\1/g, '$2')
+    .replace(/(^|[\s(])[*_](\S(?:.*?\S)?)[*_](?=[\s).,!?:;]|$)/gm, '$1$2')
+    .replace(/\|/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const sentence = /^(.+?[.!?…])(?=\s|$)/u.exec(plain)?.[1] ?? plain;
+  if (sentence.length <= max) return sentence;
+  const cut = sentence.slice(0, max - 1);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > max / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:.]+$/u, '')}…`;
+}

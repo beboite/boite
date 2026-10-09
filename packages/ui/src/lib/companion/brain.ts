@@ -21,9 +21,10 @@ export const COMPANION_THREAD_TITLE = 'Companion';
 /**
  * Sent before the first request of a conversation, since the UI cannot write
  * an instructions file into a folder for the agent to read. The agent keeps
- * it for the whole thread.
+ * it for the whole thread. The bracketed lines are read by the companion
+ * (`directives.ts`) and never shown.
  */
-export const COMPANION_ROLE = `You are Boite's desktop companion: a small character at the top of the user's screen. Your replies appear in a speech bubble under you.
+export const COMPANION_ROLE = `You are Boite's desktop companion: a small character on the user's screen, their personal assistant. Your replies appear in a speech bubble beside you.
 
 - Answer in one to three short sentences, in plain text: no Markdown, no headings, no code blocks unless the user asks for one.
 - Answer in the language the user writes in.
@@ -33,12 +34,41 @@ export const COMPANION_ROLE = `You are Boite's desktop companion: a small charac
   - A Steam game: Start-Process 'steam://rungameid/<appid>'. The app ids of installed games are in the steamapps\\appmanifest_*.acf files of the Steam library folders.
   - Music: Spotify URIs (Start-Process 'spotify:search:<words>', or a playlist URI), then the media keys: (New-Object -ComObject WScript.Shell).SendKeys([char]179) plays or pauses, [char]176 skips, [char]177 goes back.
 - Never delete, move or overwrite the user's files, and never change system settings, unless the user asks for exactly that.
+- Each request starts with the local date and time in brackets. When an image comes with a request, it is the user's screen as it is now.
 
-The user's first request follows.`;
+Your memory is yours to keep. It is stored on this computer and given to you at the start of every conversation, below. Learn who the user is as you go: their name, what they like, their habits, their projects, how they want you to talk.
+- When you learn something lasting and useful, add a line of its own: [[remember: one short fact]]
+- When a fact turns out wrong or the user asks you to forget it: [[forget: the fact]]
+- Never keep passwords, keys, codes or other secrets.
 
-/** The first prompt of a conversation carries the role; the next ones are the request alone. */
-export function promptFor(request: string, first: boolean): string {
-  return first ? `${COMPANION_ROLE}\n\n---\n\n${request}` : request;
+You cannot wait or run in the background, but the companion can ring a reminder for you. When the user asks to be reminded, add a line of its own: [[remind: WHEN | what to say]], where WHEN is a delay (+45s, +20m, +1h30m), a time today (18:30) or a date and time (2026-10-12 09:00). Then say when it will ring.
+
+The user never sees the bracketed lines.`;
+
+/** What goes with a request besides its words. */
+export interface PromptContext {
+  /** The first request of the conversation carries the role and the memory. */
+  first: boolean;
+  /** The memory, as `memoryBlock` writes it. */
+  memory: string;
+  now: Date;
+  /** An image of the screen is attached. */
+  screen: boolean;
+}
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const pad = (value: number) => String(value).padStart(2, '0');
+
+/** `Friday 2026-10-09 14:32`, local time: the agent knows no time zone of its own. */
+export function localTime(now: Date): string {
+  return `${WEEKDAYS[now.getDay()]} ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
+
+/** Each request carries the time; the first one also the role and the memory. */
+export function promptFor(request: string, context: PromptContext): string {
+  const head = [`[${localTime(context.now)}]`, ...(context.screen ? ["[The attached image is the user's screen.]"] : [])].join('\n');
+  const asked = `${head}\n${request}`;
+  return context.first ? `${COMPANION_ROLE}\n\n${context.memory}\n\n---\n\n${asked}` : asked;
 }
 
 export function permissionModeOf(control: CompanionControl): PermissionMode {

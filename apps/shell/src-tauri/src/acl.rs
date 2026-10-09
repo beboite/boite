@@ -35,7 +35,7 @@ mod tests {
         let mut context: tauri::Context<tauri::test::MockRuntime> = crate::shell_context();
         let authority = context.runtime_authority_mut();
         for command in ["core_endpoint", "companion_place", "companion_hit_rects", "companion_media", "companion_media_control",
-            "companion_show_main", "companion_monitors", "plugin:event|listen", "plugin:event|unlisten"] {
+            "companion_show_main", "companion_monitors", "companion_configure", "companion_drag", "companion_capture", "plugin:event|listen", "plugin:event|unlisten"] {
             assert!(authority.resolve_access(command, "companion", "companion", &Origin::Local).is_some(), "companion cannot invoke {command}");
         }
         for command in ["companion_window", "quota_window", "browser_create", "browser_cookies", "quit_shell", "save_attachment", "notify"] {

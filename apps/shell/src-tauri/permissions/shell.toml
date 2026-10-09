@@ -27,6 +27,9 @@ commands.allow = [
   "companion_media",
   "companion_media_control",
   "companion_show_main",
+  "companion_configure",
+  "companion_drag",
+  "companion_capture",
   "window_material",
   "window_material_supported",
   "tray_labels",
@@ -54,7 +57,7 @@ commands.allow = ["core_endpoint", "quota_window"]
 
 [[permission]]
 identifier = "allow-companion-ui"
-description = "Allows the desktop companion to connect to the core, place its window, take clicks where it draws and read the music playing."
+description = "Allows the desktop companion to connect to the core, place its window, take clicks where it draws, read the music playing, register its shortcut and see the screen when asked."
 commands.allow = [
   "core_endpoint",
   "companion_monitors",
@@ -63,4 +66,7 @@ commands.allow = [
   "companion_media",
   "companion_media_control",
   "companion_show_main",
+  "companion_configure",
+  "companion_drag",
+  "companion_capture",
 ]

@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { defaultTitleModel, type Account, type ProviderSummary } from '@boite/contracts';
 import { COMPANION_STORAGE_KEY, DEFAULT_COMPANION_PREFS, parseCompanionPrefs, readCompanionPrefs, subscribeCompanionPrefs, writeCompanionPrefs } from './prefs';
 import { createMoodTracker, BUSY_THRESHOLD } from './mood';
-import { COMPANION_ROLE, permissionModeOf, pickBrain, promptFor, replyText } from './brain';
+import { COMPANION_ROLE, localTime, permissionModeOf, pickBrain, promptFor, replyText } from './brain';
 import { count, describePermission, shortPath, threadLabel } from './describe';
 import { appName } from './media';
 import { strings } from '../strings';
@@ -17,6 +17,13 @@ test('stored preferences are read field by field, a wrong field taking its defau
   expect(readCompanionPrefs()).toEqual(DEFAULT_COMPANION_PREFS);
   expect(parseCompanionPrefs({ anchor: 'up', control: 'yes', music: 'no', monitor: '', model: 'm' })).toEqual({ ...DEFAULT_COMPANION_PREFS, model: 'm' });
   expect(parseCompanionPrefs({ closeOutside: false }).closeOutside).toBe(false);
+  // A free place needs its spot, kept inside the screen; a shortcut set to none stays none.
+  expect(parseCompanionPrefs({ anchor: 'free' }).anchor).toBe('center');
+  expect(parseCompanionPrefs({ anchor: 'free', spot: { x: 1.4, y: -2 } })).toMatchObject({ anchor: 'free', spot: { x: 1, y: 0 } });
+  expect(parseCompanionPrefs({ spot: { x: 'a', y: 0.5 } }).spot).toBeNull();
+  expect(parseCompanionPrefs({ hotkey: null }).hotkey).toBeNull();
+  expect(parseCompanionPrefs({}).hotkey).toBe(DEFAULT_COMPANION_PREFS.hotkey);
+  expect(parseCompanionPrefs({ hideFullscreen: false, sounds: false })).toMatchObject({ hideFullscreen: false, sounds: false });
   window.localStorage.setItem(COMPANION_STORAGE_KEY, '{not json');
   expect(readCompanionPrefs()).toEqual(DEFAULT_COMPANION_PREFS);
 });
@@ -76,9 +83,13 @@ test('the brain: the chosen agent while usable, none when it is not, else the fi
   expect(pickBrain(DEFAULT_COMPANION_PREFS, [], accounts)).toBeNull();
 });
 
-test('the role goes with the first request only, and auto control skips the permission prompts', () => {
-  expect(promptFor('play music', true)).toBe(`${COMPANION_ROLE}\n\n---\n\nplay music`);
-  expect(promptFor('play music', false)).toBe('play music');
+test('the role and the memory go with the first request only, the time with every one, and auto control skips the permission prompts', () => {
+  const now = new Date(2026, 9, 9, 14, 5);
+  const context = { first: true, memory: 'Your memory of the user is empty so far.', now, screen: false };
+  expect(localTime(now)).toBe('Friday 2026-10-09 14:05');
+  expect(promptFor('play music', context)).toBe(`${COMPANION_ROLE}\n\nYour memory of the user is empty so far.\n\n---\n\n[Friday 2026-10-09 14:05]\nplay music`);
+  expect(promptFor('play music', { ...context, first: false })).toBe('[Friday 2026-10-09 14:05]\nplay music');
+  expect(promptFor('what is this?', { ...context, first: false, screen: true })).toBe("[Friday 2026-10-09 14:05]\n[The attached image is the user's screen.]\nwhat is this?");
   expect(permissionModeOf('auto')).toBe('bypassPermissions');
   expect(permissionModeOf('ask')).toBe('default');
   expect(replyText({ parts: [{ type: 'text', text: ' Done, ' }, { type: 'reasoning', text: 'hmm' } as never, { type: 'text', text: 'Spotify is on. ' }] })).toBe('Done, Spotify is on.');
