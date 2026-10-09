@@ -147,6 +147,10 @@ export class PushStore {
       .query("SELECT id FROM threads WHERE archived = 0 AND (unread != 0 OR status = 'waiting')")
       .all() as { id: string }[];
     const ids = new Set(rows.map((row) => row.id));
+    // A question asked without stopping leaves the status alone: its thread waits on the user all the same.
+    for (const question of this.core.threads?.cards.listQuestions() ?? []) {
+      if (question.async === true && this.core.journal.getThread(question.threadId)?.archived === false) ids.add(question.threadId);
+    }
     if (threadId !== null && this.core.journal.getThread(threadId)?.archived === false) ids.add(threadId);
     return ids.size;
   }
