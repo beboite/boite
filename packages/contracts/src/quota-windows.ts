@@ -15,6 +15,6 @@ export function quotaWindowKind(window: { id: string; label: string }): QuotaWin
   if (/week|seven|\b7 ?d\b/.test(text)) return 'weekly';
   if (/month/.test(text)) return 'monthly';
   if (/daily|\bday\b|\b24 ?(h\b|hours?)/.test(text)) return 'daily';
-  if (/\d+(\.\d+)? ?(h\b|hours?)|five|session/.test(text)) return 'hours';
+  if (/\d ?(h\b|hours?)|five|session/.test(text)) return 'hours';
   return 'other';
 }
