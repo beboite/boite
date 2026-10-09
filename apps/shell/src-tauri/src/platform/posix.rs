@@ -52,6 +52,11 @@ pub(crate) fn idle_ms() -> Option<u64> { None }
 pub(crate) fn foreground(window: &tauri::Window) -> bool {
     window.is_focused().unwrap_or(false)
 }
+
+/// Asks again for the topmost band; the window manager may still decline.
+pub(crate) fn keep_on_top<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    let _ = window.set_always_on_top(true);
+}
 #[cfg(test)]
 mod tests {
     use super::*;

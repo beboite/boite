@@ -17,6 +17,8 @@ const WIDTH: f64 = 440.0;
 const HEIGHT: f64 = 600.0;
 /// How often the pointer is read to decide whether clicks go through.
 const WATCH_EVERY: Duration = Duration::from_millis(40);
+/// 25 × 40 ms: the window is lifted back on top once a second.
+const RAISE_EVERY_TICKS: u32 = 25;
 /// Space kept between the window and a side of the screen, in logical pixels.
 const SIDE_MARGIN: f64 = 16.0;
 
@@ -111,13 +113,17 @@ fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
 /// Reads the pointer and lets clicks through the window unless it is over one
 /// of the page's areas. The page hears `companion://hover` when that changes:
 /// it cannot see the pointer leave a window that has just stopped taking it.
+/// Every second it also lifts the window back over whatever opened since.
 fn watch<R: Runtime>(app: AppHandle<R>, rects: Arc<Mutex<Vec<HitRect>>>, generation: Arc<AtomicU64>, mine: u64) {
     std::thread::spawn(move || {
         let mut ignoring: Option<bool> = None;
+        let mut tick: u32 = 0;
         loop {
             std::thread::sleep(WATCH_EVERY);
             if generation.load(Ordering::Acquire) != mine { break; }
             let Some(window) = app.get_webview_window(LABEL) else { break };
+            tick = tick.wrapping_add(1);
+            if tick % RAISE_EVERY_TICKS == 0 { crate::platform::keep_on_top(&window); }
             let (Ok(cursor), Ok(origin), Ok(scale)) = (window.cursor_position(), window.inner_position(), window.scale_factor()) else { continue };
             let x = (cursor.x - origin.x as f64) / scale;
             let y = (cursor.y - origin.y as f64) / scale;
@@ -140,8 +146,8 @@ fn open<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     // A test shell renders the page without ever putting it on the screen.
     if crate::window::hidden() { return Ok(()); }
     window.show()?;
-    // A window built hidden loses `always_on_top` on Windows: set it once shown.
-    window.set_always_on_top(true)?;
+    // A window built hidden loses `always_on_top` on Windows: lift it once shown.
+    crate::platform::keep_on_top(&window);
     window.set_ignore_cursor_events(true)?;
     watch(app.clone(), state.rects.clone(), state.generation.clone(), mine);
     Ok(())
