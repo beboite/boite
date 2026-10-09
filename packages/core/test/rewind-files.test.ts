@@ -176,7 +176,7 @@ test('an oversized file blocks the restore only when the removed turns changed i
   expect(await readFile(large, 'utf8')).toBe('small');
   // restoreFiles refuses an unbacked entry itself, before touching any file.
   await expect(restoreFiles(cwd, join(h.dataDir, 'objects'), [{ name: 'large.bin', before: { hash: 'h', mode: 0o644, unbacked: true } }]))
-    .rejects.toThrow('large.bin is over the 16 MiB checkpoint limit');
+    .rejects.toThrow('large.bin had a version over the 16 MiB checkpoint limit');
   expect(await readFile(large, 'utf8')).toBe('small');
 });
 

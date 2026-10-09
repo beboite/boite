@@ -139,8 +139,8 @@ and the threshold only; it has no background work and no cache to wait on.
 ## Pending prompts, goals and loops
 
 Enter during a running turn queues the message and its attachments; where the
-primary pointer is coarse, the send button or Ctrl/Cmd+Enter does, since Enter
-writes a new line there ([phone](phone.md)). Each pending
+primary pointer is coarse, Enter writes a new line instead and the send button
+takes its place ([phone](phone.md)). Each pending
 message shows above the composer as a user bubble with a dashed outline. Arrow Up in
 an empty composer takes the newest pending message out of the queue for editing;
 clicking a pending message does the same. When the core reports a completed

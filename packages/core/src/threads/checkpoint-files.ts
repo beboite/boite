@@ -187,7 +187,7 @@ async function writeEntry(root: string, objects: string, name: string, entry: Fi
 export async function restoreFiles(root: string, objects: string, changes: FileChange[]): Promise<void> {
   for (const change of changes) {
     if (change.before?.unbacked || change.after?.unbacked) {
-      throw refused(`cannot rewind: ${change.name} is over the 16 MiB checkpoint limit and has no backup`, { field: 'path', path: change.name, reason: 'file-unbacked' });
+      throw refused(`cannot rewind: ${change.name} had a version over the 16 MiB checkpoint limit, which has no backup`, { field: 'path', path: change.name, reason: 'file-unbacked' });
     }
     const current = await readEntry(await checkedPath(root, change.name));
     if (!same(current?.entry, change.after)) {

@@ -14,8 +14,8 @@ export function noteThisComputer(hostname: string | undefined): void {
 
 /**
  * The primary pointer is coarse: the question the app's touch rules ask.
- * Its keyboard has no Shift+Enter, so the composer's Enter writes a new line
- * there. An engine with no `matchMedia` is not one, so the composer keeps
+ * Such a device usually types on a touch keyboard, which has no Shift+Enter,
+ * so the composer's Enter writes a new line there. An engine with no `matchMedia` is not one, so the composer keeps
  * Enter's send. `hasKeyboard` in `live-input.ts` asks this same question but
  * deliberately defaults the other way there, keeping the live view's
  * on-screen controls.
