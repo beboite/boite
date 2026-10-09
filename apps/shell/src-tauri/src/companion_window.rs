@@ -113,10 +113,13 @@ fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
 /// Reads the pointer and lets clicks through the window unless it is over one
 /// of the page's areas. The page hears `companion://hover` when that changes:
 /// it cannot see the pointer leave a window that has just stopped taking it.
-/// Every second it also lifts the window back over whatever opened since.
+/// A press elsewhere goes to another application, so the page hears it as
+/// `companion://outside`. Every second it also lifts the window back over
+/// whatever opened since.
 fn watch<R: Runtime>(app: AppHandle<R>, rects: Arc<Mutex<Vec<HitRect>>>, generation: Arc<AtomicU64>, mine: u64) {
     std::thread::spawn(move || {
         let mut ignoring: Option<bool> = None;
+        let mut pressed = false;
         let mut tick: u32 = 0;
         loop {
             std::thread::sleep(WATCH_EVERY);
@@ -128,6 +131,9 @@ fn watch<R: Runtime>(app: AppHandle<R>, rects: Arc<Mutex<Vec<HitRect>>>, generat
             let x = (cursor.x - origin.x as f64) / scale;
             let y = (cursor.y - origin.y as f64) / scale;
             let over = inside(&rects.lock().unwrap_or_else(std::sync::PoisonError::into_inner), x, y);
+            let down = crate::platform::mouse_down();
+            if down && !pressed && !over { let _ = window.emit("companion://outside", ()); }
+            pressed = down;
             if ignoring == Some(!over) { continue; }
             ignoring = Some(!over);
             if let Err(error) = window.set_ignore_cursor_events(!over) { eprintln!("[shell] companion click-through: {error}"); }

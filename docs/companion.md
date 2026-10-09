@@ -35,7 +35,13 @@ The window ignores the mouse except over the areas the page reports
 (`companion_hit_rects`, from the elements marked `data-hit`). A thread polls
 the cursor every 40 ms and switches `set_ignore_cursor_events`; it emits
 `companion://hover` when the pointer enters or leaves those areas, since a
-click-through window cannot see the pointer leave.
+click-through window cannot see the pointer leave. A mouse button pressed
+outside them goes to another application; the thread emits
+`companion://outside`, and the page closes its panel unless "Close when
+clicking elsewhere" is off. Once a second the thread lifts the window back to
+the top of the topmost band (`platform::keep_on_top`): Tao applies
+`always_on_top` only when its own flag changes, so a window opened later would
+otherwise stay over it.
 
 Its capability (`capabilities/companion.json`, `allow-companion-ui`) allows
 reaching the core, placing itself, reading and controlling media, and bringing
@@ -47,7 +53,7 @@ cookies, save files, notify or quit; `acl.rs` tests this.
 
 They are this computer's, in `localStorage` under `boite.companion`, like the
 experiments: screen, position, agent, account, model, effort, control mode,
-music, and the id of the conversation. Both webviews share the origin, so the
+music, closing on an outside click, and the id of the conversation. Both webviews share the origin, so the
 companion follows a change from Settings through the `storage` event.
 
 Changing the agent, account, model, effort or control mode clears the

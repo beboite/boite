@@ -409,6 +409,14 @@
         });
         if (disposed) return stopHover();
         off.push(stopHover);
+        // A click given to another application: the panel closes, as a menu would.
+        const stopOutside = await listen('companion://outside', () => {
+          if (!prefs.closeOutside || !open) return;
+          open = false;
+          autoOpened = false;
+        });
+        if (disposed) return stopOutside();
+        off.push(stopOutside);
       }
       await readProjects().catch(() => {});
       await subscribe(prefs.threadId);
@@ -529,7 +537,8 @@
     --row: 34px;
     --touch-target: 30px;
     height: 100dvh;
-    padding: 6px 16px;
+    /* Room above the lid and the headphones: drawn flush, they seem cut by the screen's edge. */
+    padding: 16px 16px 6px;
   }
   .stage :global(input) {
     font-size: var(--text-sm);

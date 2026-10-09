@@ -26,11 +26,11 @@ pub(crate) mod dwm;
 #[cfg(windows)]
 pub(crate) mod windows;
 #[cfg(windows)]
-pub(crate) use windows::{alert, before_webview, foreground, idle_ms, keep_on_top, notify, prepare_command};
+pub(crate) use windows::{alert, before_webview, foreground, idle_ms, keep_on_top, mouse_down, notify, prepare_command};
 #[cfg(not(windows))]
 mod posix;
 #[cfg(not(windows))]
-pub(crate) use posix::{alert, before_webview, foreground, idle_ms, keep_on_top, notify, prepare_command};
+pub(crate) use posix::{alert, before_webview, foreground, idle_ms, keep_on_top, mouse_down, notify, prepare_command};
 
 pub(crate) mod appbars;
 pub(crate) mod media;

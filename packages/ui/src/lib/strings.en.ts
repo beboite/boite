@@ -2269,6 +2269,8 @@ export const strings = {
       },
       music: 'React to music',
       musicHint: 'Headphones and a little dance when something plays, and the player controls under the companion.',
+      closeOutside: 'Close when clicking elsewhere',
+      closeOutsideHint: 'A click anywhere but on the companion closes its panel, as a menu would. Escape closes it too.',
       conversation: 'Conversation',
       newConversation: 'New conversation',
       newConversationHint: 'The companion forgets what was said. The old conversation stays in the drafts.',

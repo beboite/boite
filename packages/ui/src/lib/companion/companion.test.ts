@@ -16,6 +16,7 @@ const account = (id: string, providerId: string, status = 'ok') => ({ id, provid
 test('stored preferences are read field by field, a wrong field taking its default', () => {
   expect(readCompanionPrefs()).toEqual(DEFAULT_COMPANION_PREFS);
   expect(parseCompanionPrefs({ anchor: 'up', control: 'yes', music: 'no', monitor: '', model: 'm' })).toEqual({ ...DEFAULT_COMPANION_PREFS, model: 'm' });
+  expect(parseCompanionPrefs({ closeOutside: false }).closeOutside).toBe(false);
   window.localStorage.setItem(COMPANION_STORAGE_KEY, '{not json');
   expect(readCompanionPrefs()).toEqual(DEFAULT_COMPANION_PREFS);
 });

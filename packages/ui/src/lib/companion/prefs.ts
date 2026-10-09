@@ -27,6 +27,8 @@ export interface CompanionPrefs {
   control: CompanionControl;
   /** React to the music playing and show its controls. */
   music: boolean;
+  /** A click anywhere but on the companion closes its panel. */
+  closeOutside: boolean;
   threadId: string | null;
 }
 
@@ -41,6 +43,7 @@ export const DEFAULT_COMPANION_PREFS: CompanionPrefs = {
   effort: null,
   control: 'ask',
   music: true,
+  closeOutside: true,
   threadId: null
 };
 
@@ -61,6 +64,7 @@ export function parseCompanionPrefs(raw: unknown): CompanionPrefs {
     effort: text(value.effort),
     control: value.control === 'auto' ? 'auto' : 'ask',
     music: value.music !== false,
+    closeOutside: value.closeOutside !== false,
     threadId: text(value.threadId)
   };
 }

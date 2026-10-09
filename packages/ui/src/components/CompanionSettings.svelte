@@ -174,6 +174,10 @@
       <span class="text ui-label-box"><span class="ui-label">{copy.music}</span><InfoTip topic={copy.music} text={copy.musicHint} /></span>
       <input type="checkbox" role="switch" checked={prefs.music} onchange={(event) => save({ music: event.currentTarget.checked })} data-testid="companion-music" />
     </label>
+    <label class="switch-row">
+      <span class="text ui-label-box"><span class="ui-label">{copy.closeOutside}</span><InfoTip topic={copy.closeOutside} text={copy.closeOutsideHint} /></span>
+      <input type="checkbox" role="switch" checked={prefs.closeOutside} onchange={(event) => save({ closeOutside: event.currentTarget.checked })} data-testid="companion-close-outside" />
+    </label>
   </section>
 
   <section class="card">

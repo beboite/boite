@@ -2171,6 +2171,8 @@ export const fr: Translation = {
       },
       music: 'Réagir à la musique',
       musicHint: 'Un casque et une petite danse quand quelque chose joue, et les commandes du lecteur sous le compagnon.',
+      closeOutside: 'Fermer en cliquant ailleurs',
+      closeOutsideHint: 'Un clic n\'importe où ailleurs que sur le compagnon ferme son panneau, comme un menu. Échap le ferme aussi.',
       conversation: 'Conversation',
       newConversation: 'Nouvelle conversation',
       newConversationHint: 'Le compagnon oublie ce qui a été dit. L’ancienne conversation reste dans les brouillons.',

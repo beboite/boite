@@ -57,6 +57,11 @@ pub(crate) fn foreground(window: &tauri::Window) -> bool {
 pub(crate) fn keep_on_top<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
     let _ = window.set_always_on_top(true);
 }
+
+/// No portable way to see a click given to another application: never.
+pub(crate) fn mouse_down() -> bool {
+    false
+}
 #[cfg(test)]
 mod tests {
     use super::*;

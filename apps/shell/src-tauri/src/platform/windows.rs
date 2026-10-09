@@ -87,6 +87,14 @@ pub(crate) fn keep_on_top<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
     unsafe { SetWindowPos(hwnd.0, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER) };
 }
 
+/// Whether a mouse button is down anywhere on the desktop, whichever window
+/// gets the click. Both buttons count, so a swapped mouse reads the same.
+pub(crate) fn mouse_down() -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON};
+    // SAFETY: no pointer; the high bit is the button's current state.
+    unsafe { (GetAsyncKeyState(i32::from(VK_LBUTTON)) as u16 & 0x8000) != 0 || (GetAsyncKeyState(i32::from(VK_RBUTTON)) as u16 & 0x8000) != 0 }
+}
+
 #[cfg(test)]
 mod tests {
     use super::toast_app_id;
