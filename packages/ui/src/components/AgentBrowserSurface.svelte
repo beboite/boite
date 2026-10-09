@@ -40,16 +40,18 @@
    * with an address field until a page is entered, then the agent's own tab.
    * A paired phone watches and drives pages but never opens or closes them.
    */
-  let drafting = $state(false), address = $state(''), field = $state<HTMLInputElement>();
+  let drafting = $state(false), opening = $state(false), address = $state(''), field = $state<HTMLInputElement>();
   const canManage = $derived(store.owner);
   const drafted = $derived(drafting || (canManage && tabs.length === 0));
   $effect(() => { if (drafting && field) field.focus(); });
   function newTab() { drafting = true; address = ''; failure = ''; }
   async function openTab(event: SubmitEvent) {
     event.preventDefault();
+    if (opening) return;
     const url = normalizeUrl(address), client = store.client;
     if (!url) { failure = strings.remoteBrowser.badAddress; return; }
     if (!client) return;
+    opening = true;
     try {
       const reply = await client.call('browser.command', { threadId, action: { kind: 'open', url } });
       drafting = false; address = ''; failure = '';
@@ -57,6 +59,7 @@
       // The user opened it himself: no cover over his own page.
       liveViews.show('agent-browser', key);
     } catch (cause) { failure = cause instanceof Error ? cause.message : String(cause); }
+    finally { opening = false; }
   }
   async function closeTab(tab: AgentBrowserTab) {
     const client = store.client;
@@ -64,7 +67,7 @@
     try { await client.call('browser.command', { threadId, tabId: tab.tabId, action: { kind: 'close' } }); }
     catch (cause) { failure = cause instanceof Error ? cause.message : String(cause); }
   }
-  function pick(tab: AgentBrowserTab) { picked = tab.tabId; drafting = false; }
+  function pick(tab: AgentBrowserTab) { picked = tab.tabId; drafting = false; failure = ''; }
 
   // Follows the agent's tabs on the client that owns the conversation, again after a reconnect.
   $effect(() => {
@@ -109,39 +112,44 @@
       <p class="muted">{failure || strings.agentBrowser.noneHint}</p>
     </div>
   {:else}
-    <div class="strip" role="tablist" aria-label={strings.agentBrowser.tabs}>
-      {#each tabs as tab (tab.tabId)}
-        {@const selected = !drafting && tab.tabId === watched?.tabId}
-        <div class="tab" class:selected title={tab.url}>
-          <button type="button" role="tab" class="pick" aria-selected={selected} data-testid="agent-browser-tab" onclick={() => pick(tab)}>
-            <Globe size={13} strokeWidth={1.75} /><span class="label">{name(tab)}</span>
-          </button>
-          {#if canManage}
-            <button type="button" class="close" data-testid="agent-browser-close" title={fill(strings.agentBrowser.closeTab, { name: name(tab) })} aria-label={fill(strings.agentBrowser.closeTab, { name: name(tab) })} onclick={() => void closeTab(tab)}><X size={12} strokeWidth={2} /></button>
-          {/if}
-        </div>
-      {/each}
-      {#if drafted}
-        <div class="tab selected" data-testid="agent-browser-draft">
-          <span class="pick" role="tab" aria-selected="true"><Globe size={13} strokeWidth={1.75} /><span class="label">{strings.agentBrowser.newTab}</span></span>
-          {#if tabs.length > 0}<button type="button" class="close" aria-label={fill(strings.agentBrowser.closeTab, { name: strings.agentBrowser.newTab })} onclick={() => { drafting = false; failure = ''; }}><X size={12} strokeWidth={2} /></button>{/if}
-        </div>
-      {/if}
+    <div class="strip">
+      <div class="tabs" role="tablist" aria-label={strings.agentBrowser.tabs}>
+        {#each tabs as tab (tab.tabId)}
+          {@const label = name(tab)}
+          {@const closing = fill(strings.agentBrowser.closeTab, { name: label })}
+          {@const selected = !drafting && tab.tabId === watched?.tabId}
+          <div class="tab" class:selected title={tab.url}>
+            <button type="button" role="tab" class="pick" aria-selected={selected} data-testid="agent-browser-tab" onclick={() => pick(tab)}>
+              <Globe size={13} strokeWidth={1.75} /><span class="label">{label}</span>
+            </button>
+            {#if canManage}
+              <button type="button" class="close" data-testid="agent-browser-close" title={closing} aria-label={closing} onclick={() => void closeTab(tab)}><X size={12} strokeWidth={2} /></button>
+            {/if}
+          </div>
+        {/each}
+        {#if drafted}
+          <div class="tab selected" data-testid="agent-browser-draft">
+            <span class="pick" role="tab" aria-selected="true"><Globe size={13} strokeWidth={1.75} /><span class="label">{strings.agentBrowser.newTab}</span></span>
+            {#if tabs.length > 0}<button type="button" class="close" data-testid="agent-browser-draft-close" aria-label={fill(strings.agentBrowser.closeTab, { name: strings.agentBrowser.newTab })} onclick={() => { drafting = false; failure = ''; }}><X size={12} strokeWidth={2} /></button>{/if}
+          </div>
+        {/if}
+      </div>
       {#if canManage && !drafted}
-        <button type="button" class="ghost small icon add" data-testid="agent-browser-new" title={strings.agentBrowser.newTab} aria-label={strings.agentBrowser.newTab} onclick={newTab}><Plus size={15} strokeWidth={1.75} /></button>
+        <button type="button" class="ghost small icon" data-testid="agent-browser-new" title={strings.agentBrowser.newTab} aria-label={strings.agentBrowser.newTab} onclick={newTab}><Plus size={15} strokeWidth={1.75} /></button>
       {/if}
       <span class="spacer"></span>
       {#if shown && !here && !drafted}
         <button type="button" class="ghost small icon" title={strings.agentBrowser.hideHint} aria-label={strings.agentBrowser.hide} data-testid="agent-browser-hide" onclick={() => { liveViews.hide('agent-browser', key); picked = null; }}><EyeOff size={15} strokeWidth={1.75} /></button>
       {/if}
     </div>
+    {#if failure && !drafted}<p class="failure banner" role="alert">{failure}</p>{/if}
     {#if drafted}
       <form class="start" data-testid="agent-browser-start" onsubmit={openTab}>
         <Globe size={22} strokeWidth={1.5} />
         <p class="muted">{fill(strings.agentBrowser.newTabHint, { machine })}</p>
         <div class="omnibox">
           <input bind:this={field} bind:value={address} data-testid="agent-browser-start-address" type="text" inputmode="url" enterkeyhint="go" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="4096" aria-label={strings.remoteBrowser.address} placeholder={strings.remoteBrowser.addressPlaceholder} />
-          <button type="submit" class="primary small" disabled={!address.trim()}><span class="ui-label">{strings.agentBrowser.open}</span></button>
+          <button type="submit" class="primary small" disabled={!address.trim() || opening}><span class="ui-label">{strings.agentBrowser.open}</span></button>
         </div>
         {#if failure}<p class="failure" role="alert">{failure}</p>{/if}
       </form>
@@ -156,7 +164,6 @@
         </div>
       </div>
     {:else if watched}
-      {#if failure}<p class="failure banner" role="alert">{failure}</p>{/if}
       {#key watched.tabId}<RemoteBrowser {store} {threadId} tabId={watched.tabId} />{/key}
     {/if}
   {/if}
@@ -175,10 +182,13 @@
   .tab-name .title { font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* A browser's tab strip: the selected tab joins the toolbar under it. */
-  .strip { display: flex; align-items: flex-end; gap: 2px; height: 36px; padding: 0 6px; flex: none; overflow-x: auto; scrollbar-width: none; background: var(--color-background); }
+  .strip { display: flex; align-items: flex-end; gap: 2px; height: 36px; padding: 0 6px; flex: none; background: var(--color-background); }
   .strip > .ghost { align-self: center; flex: none; }
-  .spacer { flex: 1; }
-  .tab { position: relative; display: flex; align-items: center; flex: 0 1 200px; min-width: 72px; height: 30px; border-radius: var(--radius-md) var(--radius-md) 0 0; color: var(--color-muted-foreground); transition: background var(--dur-2) var(--ease-out-quint), color var(--dur-2) var(--ease-out-quint); }
+  /* Only the tabs scroll: new tab and hide stay in reach however many are open. */
+  .tabs { flex: 0 1 auto; display: flex; align-items: flex-end; gap: 2px; min-width: 0; height: 100%; overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .spacer { flex: 1; min-width: 0; }
+  .tab { position: relative; display: flex; align-items: center; flex: 0 1 200px; min-width: 96px; height: 30px; border-radius: var(--radius-md) var(--radius-md) 0 0; color: var(--color-muted-foreground); transition: background var(--dur-2) var(--ease-out-quint), color var(--dur-2) var(--ease-out-quint); }
   .tab:hover:not(.selected) { background: color-mix(in srgb, var(--color-surface) 60%, transparent); color: var(--color-foreground); }
   .tab.selected { background: var(--color-surface); color: var(--color-foreground); }
   .tab:not(.selected) + .tab:not(.selected)::before { content: ''; position: absolute; left: -1px; top: 8px; bottom: 8px; width: 1px; background: var(--color-border); }
@@ -188,7 +198,6 @@
   .close { flex: none; width: 20px; height: 20px; min-width: 0; min-height: 0; margin-right: 6px; padding: 0; display: grid; place-items: center; border: 0; border-radius: var(--radius-full); background: transparent; box-shadow: none; color: var(--color-muted-foreground); opacity: 0; }
   .tab:hover .close, .tab.selected .close, .close:focus-visible { opacity: 1; }
   .close:hover:not(:disabled) { background: var(--color-surface-3); color: var(--color-foreground); }
-  .add { margin-left: 2px; }
 
   .start { background: var(--color-surface); gap: 12px; border-top: 0; }
   .start .muted { max-width: 360px; }
@@ -197,11 +206,12 @@
   .start input { flex: 1; min-width: 0; height: var(--control-sm); padding: 0; border: 0; background: transparent; box-shadow: none; font-size: var(--text-sm); outline: none; }
   .start .primary { border-radius: var(--radius-full); padding: 0 14px; }
   .failure { color: var(--color-danger); font-size: var(--text-sm); }
-  .failure.banner { padding: 6px 12px; background: var(--color-surface); }
+  .failure.banner { margin: 0; padding: 6px 12px; background: var(--color-surface); border-bottom: 1px solid var(--color-border); }
   @media (hover: none) { .close { opacity: 1; } }
-  @media (max-width: 720px) {
-    .strip { height: auto; min-height: 44px; }
-    .tab { height: 40px; }
-    .close { width: 32px; height: 32px; }
+  @media (max-width: 720px), (pointer: coarse) {
+    .strip { height: auto; min-height: var(--touch-target); }
+    .tab { height: var(--touch-target); }
+    .close { width: var(--touch-target); height: var(--touch-target); margin-right: 0; }
+    .start input { font-size: var(--text-md); }
   }
 </style>

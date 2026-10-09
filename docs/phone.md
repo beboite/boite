@@ -539,7 +539,7 @@ closing the view or hiding the app stops those requests; returning to the
 app, regaining the network or reconnecting resumes them at once. This is a
 periodically refreshed preview, not a video stream with audio.
 
-The toolbar's page size button offers phone, tablet and PC resolutions, custom dimensions from
+The toolbar's **Display** button offers phone, tablet and PC resolutions, custom dimensions from
 240 to 3840 pixels, rotation and a fit-to-screen action. Resolution changes
 the agent's tab too, as `boite browser resize` does; the reset returns it to
 the browser's window size. Preview zoom stays on the viewing device. At 100,

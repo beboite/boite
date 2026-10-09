@@ -70,8 +70,18 @@ test('the owner opens a page from a new tab, watches it without a cover and clos
   expect(query('agent-browser-draft')).not.toBeNull();
   const field = query('agent-browser-start-address') as HTMLInputElement;
   expect(document.activeElement).toBe(field);
+  const submit = () => query('agent-browser-start')!.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
+  const opens = () => calls.mock.calls.filter(([method, params]) => method === 'browser.command' && (params as { action: { kind: string } }).action.kind === 'open');
+  const before = opens().length;
+  // A file address is refused on the spot and the draft stays.
+  field.value = 'file:///etc/passwd'; field.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+  submit(); await settle();
+  expect(query('agent-browser-start')!.textContent).toContain('Enter a web address');
+  expect(opens()).toHaveLength(before);
+  // Enter pressed twice opens one tab.
   field.value = 'shop.example/cart'; field.dispatchEvent(new Event('input', { bubbles: true })); await settle();
-  query('agent-browser-start')!.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true })); await settle();
+  submit(); submit(); await settle();
+  expect(opens()).toHaveLength(before + 1);
   expect(calls).toHaveBeenCalledWith('browser.command', { threadId: thread, action: { kind: 'open', url: 'https://shop.example/cart' } });
   // His own page opens live, on the tab he just made.
   expect(query('agent-browser-cover')).toBeNull();

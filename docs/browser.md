@@ -10,7 +10,7 @@ a phone. Nothing depends on which client is open, and no setting turns it on.
 
 `packages/core/src/browser.ts` owns the tabs, `browser/chromium.ts` finds and
 starts the browser, `browser/cdp.ts` is the protocol connection,
-`browser/recorder.ts` records and `browser/scripts.ts` holds what is evaluated
+`browser/recorder.ts` records, `browser/frames.ts` takes a viewer's frames and `browser/scripts.ts` holds what is evaluated
 in a page for viewers. `browser/automation.ts` runs agent-browser's commands
 with `browser/page-kit.ts`, the script that reads a page into a snapshot with
 refs and finds `@eN`, CSS and `text=` targets.
@@ -124,22 +124,22 @@ stopped and thrown away.
 
 The panel's **Agent browser** surface looks like a browser: a strip of the
 conversation's tabs, then a toolbar with back, forward, reload, the address
-and two buttons, page size and pause, then the page. On the desktop of the
-machine that runs the browser (the core the app started), the page shows at
-once: nothing leaves the machine. Any other client first gets a card that
-names the machine, "This agent controls a browser on m2", with the page's
-title, and a **Show** button; nothing is captured or sent before that. Show
-starts the live view; the eye in the tab strip covers it again. When the agent
-opens a tab in the conversation on screen, the panel opens on that surface,
-covered on a remote client. The launcher's **W** opens it by hand. The cover
-holds for the conversation while the app stays open; a reload covers it again.
+and two buttons, **Display** and pause, then the page. In the desktop app on
+its own core, the one it started, the page shows at once: nothing leaves the
+machine, so there is no cover. Any other client first gets a card that names
+the machine, "This agent controls a browser on m2", with the page's title, and
+a **Show** button; nothing is captured or sent before that. Show starts the
+live view and the eye in the tab strip covers it again. When the agent opens a
+tab in the conversation on screen, the panel opens on that surface. The
+launcher's **W** opens it by hand. On a client with a cover, it holds for the
+conversation while the app stays open, and a reload covers it again.
 
 The owner opens and closes tabs as in any browser. **+** adds a new tab page
 with an address field, and Enter opens the page in the conversation's browser
 (`browser.command` `open`, the machine's default profile), live at once since
-he asked for it. A tab's **×** closes it (`close`), the agent's tabs included.
-With no tab open the owner lands on that new tab page, which is where he signs
-in to a site the agent then uses. A paired phone watches and drives the pages
+the owner asked for it. A tab's **×** closes it (`close`), the agent's tabs
+included. With no tab open the owner lands on that new tab page, which is where
+to sign in to a site the agent then uses. A paired phone watches and drives the pages
 but neither opens nor closes a tab: `browser.command` is not one of its methods.
 
 The live view asks for one JPEG at a time (`browser.remoteFrame`), the next as
@@ -151,7 +151,7 @@ on a frame of another page or another viewport size is refused, and the
 address bar accepts only http and https.
 
 A computer drives the page itself, with nothing under it; the page's tooltip
-says how, and a copy or a refused key shows a short note over the page. A click on the page gives it the keyboard until a click or a focus lands
+says how, and a copy shows a short note over the page. A click on the page gives it the keyboard until a click or a focus lands
 elsewhere: characters, Enter, Tab, Escape, the arrows, Home, End, Page Up and
 Down, Delete and Backspace leave as native key events (`press`), and the keys
 typed while a request is in flight leave together in the next one, in order.

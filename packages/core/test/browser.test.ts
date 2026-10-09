@@ -114,6 +114,27 @@ real('an agent opens, reads and drives a page in the browser of its own machine'
   expect(((await agent.call('browser.command', { threadId, action: { kind: 'status' } })).value as { tabs: unknown[] }).tabs).toEqual([]);
 }, 150_000);
 
+real('a viewer watching while the agent changes the page size never puts the old size back', async () => {
+  const { tabId } = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
+  await owner.call('threads.subscribe', { threadId });
+  // The panel on the browser's own machine pulls shrunken frames the whole time.
+  let watching = true;
+  const watch = (async () => {
+    while (watching) {
+      await owner.call('browser.remoteFrame', { threadId, tabId, maxWidth: 300, quality: 40 }).catch(() => {});
+      await Bun.sleep(125);
+    }
+  })();
+  try {
+    for (let round = 0; round < 6; round++) {
+      await agent.call('browser.command', { threadId, tabId, action: { kind: 'preset', preset: 'iphone-15-pro' } });
+      expect(await evaluate('[innerWidth, innerHeight]', tabId)).toEqual([393, 852]);
+      await agent.call('browser.command', { threadId, tabId, action: { kind: 'preset', preset: 'iphone-15-pro', orientation: 'landscape' } });
+      expect(await evaluate('[innerWidth, innerHeight]', tabId)).toEqual([852, 393]);
+    }
+  } finally { watching = false; await watch; }
+}, 150_000);
+
 real('a viewer on another device watches and drives the tab, and hears it come and go', async () => {
   const { grant } = await owner.call('pairing.grant', {});
   const phone = await connect(harness.url, '', { grant, client: { name: 'pwa', version: 'test' } });

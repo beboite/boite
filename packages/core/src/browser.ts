@@ -45,6 +45,7 @@ import { Cdp } from './browser/cdp.ts';
 import { chromiumArgs, clearActivePort, findChromium, pipesDevTools, readSavedCookies, waitForEndpoint, writeSavedCookies } from './browser/chromium.ts';
 import { PageProbes, PROBE_TIMEOUT_MS, type PageProbe } from './browser/probe.ts';
 import { TabRecorder } from './browser/recorder.ts';
+import { captureFrame, type PageInfo } from './browser/frames.ts';
 import { EDITABLE_SCRIPT, KEY_CODES, PAGE_INFO_SCRIPT, selectionScript, SETTLED_VIEWPORT_SCRIPT } from './browser/scripts.ts';
 import { automate, awaitDocument, documentToken, PAGE_ACTIONS, press, type AgentPage } from './browser/automation.ts';
 
@@ -79,7 +80,6 @@ const HISTORY_MAX = 100;
 const TAB_ID = /^browser:[a-zA-Z0-9:-]{1,100}$/;
 export const DISCARDED_RECORDING_ERROR = "the recording was discarded because the agent's turn ended while it was running: stop it with recording-stop in the turn that started it";
 
-interface PageInfo { width: number; height: number; title: string; href: string; origin: number; dpr: number }
 
 /** One Chromium process: a profile folder, or a throwaway one for private tabs. */
 interface Engine {
@@ -118,6 +118,8 @@ interface Tab {
   /** The agent's turn ended while its recording ran: the video was thrown away. */
   discarded: boolean;
   frame: { at: number; key: string; promise: Promise<{ frame: RemoteBrowserFrame; page: PageInfo }> } | null;
+  /** The last capture or page size change of this tab: they take turns (`#screen`). */
+  screen: Promise<unknown>;
   off: Array<() => void>;
   /** An agent command is running: the dialogs it raises follow `page.dialogPolicy`. */
   acting: boolean;
@@ -346,7 +348,7 @@ export class AgentBrowser {
     const tab: Tab = {
       id: `browser:${crypto.randomUUID()}`, threadId, engine, targetId, sessionId, url, title: '',
       preset: null, orientation: 'portrait', colorScheme: 'system', diagnostics: [], dropped: 0, history: [], requests: new Map(),
-      recorder: null, discarded: false, frame: null, off: [], acting: false,
+      recorder: null, discarded: false, frame: null, screen: Promise.resolve(), off: [], acting: false,
       page: {
         send: (method, params = {}, timeoutMs) => engine.cdp.send(method, params, sessionId, timeoutMs),
         dialogs: [], dialogPolicy: { accept: true, text: null },
@@ -616,14 +618,14 @@ export class AgentBrowser {
       case 'evaluate': return done(await this.#evaluate(tab, action.expression, 30_000));
       // The page takes a few frames to reach a new size: the next command meets it laid out.
       case 'resize':
-        await this.#send(tab, 'Emulation.setDeviceMetricsOverride', { width: action.width, height: action.height, deviceScaleFactor: 1, mobile: false });
+        await this.#screen(tab, () => this.#send(tab, 'Emulation.setDeviceMetricsOverride', { width: action.width, height: action.height, deviceScaleFactor: 1, mobile: false }));
         tab.preset = null; tab.frame = null; await this.#settle(tab); return done();
       case 'reset-viewport':
-        await this.#send(tab, 'Emulation.clearDeviceMetricsOverride');
+        await this.#screen(tab, () => this.#send(tab, 'Emulation.clearDeviceMetricsOverride'));
         tab.preset = null; tab.frame = null; await this.#settle(tab); return done();
       case 'preset': {
         const size = browserPresetSize(action.preset, action.orientation);
-        await this.#send(tab, 'Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false });
+        await this.#screen(tab, () => this.#send(tab, 'Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false }));
         tab.preset = action.preset; tab.orientation = size.width > size.height ? 'landscape' : 'portrait'; tab.frame = null;
         await this.#settle(tab);
         return done(size);
@@ -755,19 +757,15 @@ export class AgentBrowser {
     return this.status({ threadId });
   }
 
-  async #capture(tab: Tab, maxWidth: number | undefined, quality: number): Promise<{ frame: RemoteBrowserFrame; page: PageInfo }> {
-    const page = await this.#evaluate(tab, PAGE_INFO_SCRIPT, 5000) as PageInfo;
-    const pixels = page.width * (page.dpr > 0 ? page.dpr : 1);
-    const scale = maxWidth && pixels > maxWidth ? maxWidth / pixels : 1;
-    // Headless, a scaled clip shows nobody a flash: the frame is shrunk by the browser itself.
-    const metrics = scale < 1 ? await this.#send(tab, 'Page.getLayoutMetrics') as { cssVisualViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number } } : null;
-    const shot = await this.#send(tab, 'Page.captureScreenshot', {
-      format: 'jpeg', quality, captureBeyondViewport: false,
-      ...(metrics ? { clip: { x: metrics.cssVisualViewport.pageX, y: metrics.cssVisualViewport.pageY, width: metrics.cssVisualViewport.clientWidth, height: metrics.cssVisualViewport.clientHeight, scale: scale * (page.dpr > 0 ? page.dpr : 1) } } : {}),
-    }) as { data?: string };
-    if (typeof shot.data !== 'string') throw refused('the browser returned no frame');
-    const frame: RemoteBrowserFrame = { id: crypto.randomUUID(), tabId: tab.id, title: String(page.title ?? '').slice(0, 200), width: page.width, height: page.height, base64: shot.data, at: Date.now(), url: String(page.href ?? '').slice(0, REMOTE_URL_MAX) };
-    return { frame, page };
+  /** Captures and size changes of a tab take turns: see `browser/frames.ts`. */
+  #screen<T>(tab: Tab, run: () => Promise<T>): Promise<T> {
+    const next = tab.screen.then(run);
+    tab.screen = next.catch(() => {});
+    return next;
+  }
+
+  #capture(tab: Tab, maxWidth: number | undefined, quality: number): Promise<{ frame: RemoteBrowserFrame; page: PageInfo }> {
+    return this.#screen(tab, () => captureFrame(tab.id, { evaluate: (script, ms) => this.#evaluate(tab, script, ms), send: (method, params) => this.#send(tab, method, params) }, maxWidth, quality));
   }
 
   async remoteFrame({ threadId, tabId, maxWidth, quality }: RpcParams<'browser.remoteFrame'>, connection: Connection): Promise<RemoteBrowserFrame> {
@@ -816,9 +814,9 @@ export class AgentBrowser {
         return { ok: true };
       }
       case 'viewport':
-        retire(); await this.#send(tab, 'Emulation.setDeviceMetricsOverride', { width: input.width, height: input.height, deviceScaleFactor: 1, mobile: false });
+        retire(); await this.#screen(tab, () => this.#send(tab, 'Emulation.setDeviceMetricsOverride', { width: input.width, height: input.height, deviceScaleFactor: 1, mobile: false }));
         tab.preset = null; return { ok: true };
-      case 'reset-viewport': retire(); await this.#send(tab, 'Emulation.clearDeviceMetricsOverride'); tab.preset = null; return { ok: true };
+      case 'reset-viewport': retire(); await this.#screen(tab, () => this.#send(tab, 'Emulation.clearDeviceMetricsOverride')); tab.preset = null; return { ok: true };
       default: break;
     }
     const page = await this.#evaluate(tab, PAGE_INFO_SCRIPT, 5000) as PageInfo;

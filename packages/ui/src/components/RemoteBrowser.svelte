@@ -36,7 +36,7 @@
   let displaySettings = $state(false), viewportWidth = $state<number | undefined>(393), viewportHeight = $state<number | undefined>(700);
   let areaWidth = $state(0), areaHeight = $state(0), zoom = $state(0);
   let address = $state(''), editingAddress = false, fresh = $state(true);
-  const secure = $derived(/^https:/i.test(frame?.url ?? ''));
+  const secure = $derived(/^https:\/\//i.test(frame?.url ?? ''));
   const previewScale = $derived(frame ? (zoom || Math.min(areaWidth / frame.width, areaHeight / frame.height)) : 1);
   const validSize = $derived([viewportWidth, viewportHeight].every(n => typeof n === 'number' && Number.isInteger(n) && n >= 240 && n <= 3840));
   const usable = $derived(!!frame && frameClient === store.client && !paused && !busy && !error && store.connection === 'ready');
@@ -287,11 +287,11 @@
     <button type="button" class="ghost small icon" disabled={!usable} title={strings.remoteBrowser.back} aria-label={strings.remoteBrowser.back} onclick={() => void input({ kind: 'history', direction: 'back' })}><ArrowLeft size={15} strokeWidth={1.75} /></button>
     <button type="button" class="ghost small icon" disabled={!usable} title={strings.remoteBrowser.forward} aria-label={strings.remoteBrowser.forward} onclick={() => void input({ kind: 'history', direction: 'forward' })}><ArrowRight size={15} strokeWidth={1.75} /></button>
     <button type="button" class="ghost small icon" disabled={!usable} title={strings.remoteBrowser.reload} aria-label={strings.remoteBrowser.reload} onclick={() => void input({ kind: 'reload' })}><RotateCw size={14} strokeWidth={1.75} class={frame && !fresh ? 'spin' : ''} /></button>
-    <label class="omnibox" class:secure={secure}>
+    <div class="omnibox" class:secure={secure}>
       <span class="site" aria-hidden="true">{#if secure}<Lock size={12} strokeWidth={2} />{:else}<Globe size={12} strokeWidth={2} />{/if}</span>
       <input bind:value={address} data-testid="remote-browser-address" type="text" inputmode="url" enterkeyhint="go" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="4096" aria-label={strings.remoteBrowser.address} placeholder={strings.remoteBrowser.addressPlaceholder} onfocus={e => { editingAddress = true; e.currentTarget.select(); }} onblur={() => { editingAddress = false; }} />
       {#if paused || error || !frame}<span class="state ui-label" data-testid="remote-browser-state">{paused ? strings.remoteBrowser.paused : error ? strings.remoteBrowser.reconnecting : strings.remoteBrowser.waiting}</span>{/if}
-    </label>
+    </div>
     <button type="button" class="ghost small icon" data-testid="remote-browser-display" aria-expanded={displaySettings} title={strings.remoteBrowser.display} aria-label={strings.remoteBrowser.display} onclick={() => { displaySettings = !displaySettings; if (frame) { viewportWidth = frame.width; viewportHeight = frame.height; } }}><MonitorSmartphone size={15} strokeWidth={1.75} /></button>
     <button type="button" class="ghost small icon" data-testid="remote-browser-pause" aria-pressed={paused} title={paused ? strings.remoteBrowser.resume : strings.remoteBrowser.pause} aria-label={paused ? strings.remoteBrowser.resume : strings.remoteBrowser.pause} onclick={() => { paused = !paused; }}>{#if paused}<Play size={14} strokeWidth={1.75} />{:else}<Pause size={14} strokeWidth={1.75} />{/if}</button>
   </form>
@@ -322,9 +322,9 @@
       </div>
     </section>
   {/if}
-  <div class="screen-area" class:zoomed={zoom > 0} bind:this={area} bind:clientWidth={areaWidth} bind:clientHeight={areaHeight}>
+  <div class="screen-area" class:zoomed={zoom > 0} title={desk ? strings.remoteBrowser.deskHint : undefined} bind:this={area} bind:clientWidth={areaWidth} bind:clientHeight={areaHeight}>
     {#if frame}
-      <button bind:this={screen} type="button" class="screen" style:width={`${frame.width * previewScale}px`} style:height={`${frame.height * previewScale}px`} class:stale={paused || error} class:desk title={desk ? strings.remoteBrowser.deskHint : undefined} aria-label={desk ? strings.remoteBrowser.interactDesk : strings.remoteBrowser.interact} disabled={!usable} onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={() => { pointer = undefined; }} oncontextmenu={e => e.preventDefault()}>
+      <button bind:this={screen} type="button" class="screen" style:width={`${frame.width * previewScale}px`} style:height={`${frame.height * previewScale}px`} class:stale={paused || error} class:desk aria-label={desk ? strings.remoteBrowser.interactDesk : strings.remoteBrowser.interact} disabled={!usable} onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={() => { pointer = undefined; }} oncontextmenu={e => e.preventDefault()}>
         <img bind:this={picture} src={`data:image/jpeg;base64,${frame.base64}`} alt={strings.remoteBrowser.image} draggable="false" data-testid="remote-browser-frame" />
       </button>
     {:else}<p class="empty">{strings.remoteBrowser.waiting}</p>{/if}
@@ -345,9 +345,9 @@
 </section>
 
 <style>
-  .remote { flex: 1; min-height: 0; height: 100%; display: flex; flex-direction: column; position: relative; }
+  .remote { flex: 1; min-height: 0; height: 100%; display: flex; flex-direction: column; position: relative; overflow-x: clip; }
   small, .empty { color: var(--color-muted-foreground); font-size: var(--text-sm); }
-  .nav { container-type: inline-size; display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 6px; margin: 0; flex: none; border-bottom: 1px solid var(--color-border); background: var(--color-surface); }
+  .nav { display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 6px; margin: 0; flex: none; border-bottom: 1px solid var(--color-border); background: var(--color-surface); }
   .nav > button { flex: none; }
   .omnibox { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: var(--control-sm); margin: 0 4px; padding: 0 10px; border: 1px solid transparent; border-radius: var(--radius-full); background: var(--color-surface-2); color: var(--color-muted-foreground); cursor: text; transition: border-color var(--dur-2) var(--ease-out-quint); }
   .omnibox:hover { border-color: var(--color-border); }
@@ -381,10 +381,12 @@
   .toast { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 6px 12px; border-radius: var(--radius-full); background: var(--color-surface-3); color: var(--color-foreground); box-shadow: var(--shadow-e2); font-size: var(--text-xs); pointer-events: none; }
   footer { padding: 6px 8px max(8px, env(safe-area-inset-bottom)); display: grid; gap: 6px; border-top: 1px solid var(--color-border); background: var(--color-surface); }
   .keys { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+  .keys::-webkit-scrollbar { display: none; }
   .keys button { flex: none; }
   footer form { display: flex; gap: 4px; align-items: center; margin: 0; }
   footer input { min-width: 0; flex: 1; height: var(--control); border-radius: var(--radius-full); padding: 0 12px; font-size: var(--text-md); }
   .error { padding: 6px 12px; border-bottom: 1px solid var(--color-border); } .error p { margin: 0; font-size: var(--text-sm); color: var(--color-danger); max-height: 90px; overflow: auto; overflow-wrap: anywhere; }
   .empty { margin: auto; padding: 24px; }
+  @media (max-width: 720px), (pointer: coarse) { .omnibox input { font-size: var(--text-md); } }
   @media (max-width: 720px) { .nav { height: auto; min-height: 48px; padding-block: 2px; } .loading { top: auto; } footer .hint { display: none; } }
 </style>
