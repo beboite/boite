@@ -50,7 +50,7 @@
   let dictating = $state(false);
   let speechPreview = $state(''), speechStatus = $state(''), speechError = $state(false);
   let box = $state<HTMLTextAreaElement | undefined>(undefined);
-  let inputWidth = $state(0);
+  let inputGutter = $state(0), measuredWidth = 0; // The box's scrollbar, which the paint layer leaves out; the width the last fit was for.
   let inputScroll = $state(0);
   let toolbar = $state<ReturnType<typeof ComposerBar> | undefined>(undefined);
   let attachmentStrip = $state<ReturnType<typeof ComposerAttachments> | undefined>();
@@ -257,7 +257,7 @@
 
   function syncInput() {
     if (!box) return;
-    inputWidth = box.clientWidth;
+    measuredWidth = box.clientWidth; inputGutter = box.offsetWidth - measuredWidth;
     inputScroll = box.scrollTop;
   }
 
@@ -266,7 +266,7 @@
     if (!element) return;
     let resizeFrame = 0;
     const observer = new ResizeObserver(() => {
-      if (sizesItself || element.clientWidth === inputWidth) syncInput(); // No height to write: the paint layer's width, this frame.
+      if (sizesItself || element.clientWidth === measuredWidth) syncInput(); // No height to write: the paint layer's gutter, this frame.
       else { cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(grow); }
     });
     observer.observe(element);
@@ -282,7 +282,7 @@
   function grow() {
     if (!box) return;
     if (!sizesItself) fitHeight(box, MAX_LINES);
-    grown = box.value; syncInput(); // The height can toggle the scrollbar, and the paint layer's width follows it.
+    grown = box.value; syncInput(); // The height can toggle the scrollbar, and the paint layer's gutter follows it.
   }
 
   // A preview insertion writes the draft with no input event: measure once Svelte wrote it, unless oninput did.
@@ -741,7 +741,7 @@
 
     <div class="input-wrap">
     {#if highlighted}
-      <div class="input-highlight" aria-hidden={previewReferences.length || attachments.length ? undefined : true} data-testid="composer-highlight" style:width={`${inputWidth}px`}>
+      <div class="input-highlight" aria-hidden={previewReferences.length || attachments.length ? undefined : true} data-testid="composer-highlight" style:right={`${inputGutter}px`}>
         <div class="input-paint input-mirror" style:transform={`translateY(${-inputScroll}px)`}><PreviewReferences {text} references={previewReferences} {store} threadId={key} editing {keywords} command={commandToken || undefined} onreference={(reference) => {
           if (box && reference.mention) { box.focus({ preventScroll: true }); box.setSelectionRange(reference.mention.end, reference.mention.end); track(); }
         }}>{#snippet paint(parts)}<ComposerImageReferences segments={parts} {attachments} onopen={(attachment) => attachmentStrip?.open(attachment)} onhover={(attachment) => highlightedImage = attachment} />{/snippet}</PreviewReferences>{'\n'}</div>
@@ -850,7 +850,7 @@
 
   .input-highlight {
     position: absolute;
-    inset: 0 auto 0 0;
+    inset: 0; /* Stretched by CSS: clientWidth is rounded, and 0.4 px off broke lines a word apart, the caret trailing the paint. */
     overflow: hidden;
     pointer-events: none;
     z-index: 1;
