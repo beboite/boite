@@ -23,7 +23,9 @@ export const INITIAL_MODEL_DEFAULTS: ModelDefaults = Object.fromEntries(Object.e
   .map(([providerId, model]) => [providerId, { model: model.id, effort: model.effort?.default ?? null }]));
 export const DEFAULT_MODEL_NAMES: Record<string, string> = {
   ...Object.fromEntries(Object.values(BUILT_IN_MODELS).map((model) => [model.id, model.name])),
-  // The small models titles are written with by default (`TITLE_MODEL_DEFAULTS`).
+  // The names the small title models fall back on before a probe (`TITLE_MODEL_DEFAULTS`).
+  'haiku': 'Haiku',
+  'claude-haiku-5-5': 'Haiku 5.5',
   'claude-haiku-4-5': 'Haiku 4.5',
   'claude-haiku-4-5-20251001': 'Haiku 4.5',
   'gpt-6-luna': 'GPT 6 Luna',

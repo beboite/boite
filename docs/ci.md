@@ -184,6 +184,11 @@ core JavaScript bytes, 432 below the 3,690,000 limit. Counting a thread's open
 asynchronous questions on its row adds 812 bytes: 3,690,380 with it. The core
 JavaScript limit rises to 3,710,000, leaving about 19 KB.
 
+A conversation following its agent to another account adds 1,233 core bytes,
+measured on Linux on 2026-10-09 against `main` at `a5646a7e` built the same
+way (3,690,646 against 3,689,413): the account fallback and the title model
+chosen by family. It fits under the same 3,710,000 limit.
+
 Recent's Done and Working groups measured 3,949,936 UI bytes on 2026-10-03
 before integrating these orchestration additions. The combined build measured
 3,961,330 UI bytes and 3,239,585 emitted core JavaScript bytes on the same day.

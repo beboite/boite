@@ -83,6 +83,21 @@ export class Accounts {
     return gateway ? [gatewayAccount(own[0]!, gateway)] : own;
   }
 
+  /**
+   * The account a turn of this provider runs on, as the core picks it
+   * (`threads/account-fallback.ts`): `preferred` unless it signed out or was
+   * removed, else the provider's other account signed in, then one nobody
+   * could check. Null when every account of the provider is signed out.
+   */
+  usableAccountOf(providerId: ProviderId, preferred: string | null = null): Account | null {
+    const accounts = this.accountsOf(providerId);
+    const own = accounts.find((a) => a.id === preferred);
+    if (own && own.status !== 'unauthenticated') return own;
+    const rank = { ok: 0, unknown: 1, error: 2, unauthenticated: 3 } as const;
+    return accounts.filter((a) => a.id !== preferred && a.status !== 'unauthenticated')
+      .sort((a, b) => rank[a.status] - rank[b.status])[0] ?? null;
+  }
+
   /** Every account as a view shows it: signed in through the gateway while proxied. */
   shownAccounts(): Account[] {
     return this.accounts.map((account) => this.accountOf(account.id) ?? account);

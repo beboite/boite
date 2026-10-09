@@ -56,15 +56,9 @@ import { markQueuedStopped } from './threads/turn-settlement.ts';
 import { ThreadFocus } from './threads/focus.ts';
 import { ProgressState } from './threads/progress.ts';
 import { checkIncognito, eraseIncognito, makeIncognitoFolder } from './threads/incognito.ts';
+import { accountRemoved, followAgent } from './threads/account-fallback.ts';
 
 type CreateParams = RpcParams<'threads.create'>;
-
-/** The refusal of a conversation whose account `accounts.remove` deleted: it runs again once another one is chosen. */
-function accountRemoved(thread: ThreadSummary): Error {
-  return refused('accountId: the account of this conversation was removed; choose another account in it first', {
-    threadId: thread.id, accountId: thread.accountId, field: 'accountId', expected: 'an existing account',
-  });
-}
 
 /**
  * The threads of this core: what the RPC and the other modules call. Each part
@@ -670,7 +664,7 @@ export class ThreadStore {
 
   startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], agentRunId?: string, startedBy?: ThreadLink, sentFrom: SentFrom | null = null): Turn {
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
-    const thread = this.require(threadId);
+    let thread = this.require(threadId);
     this.codeCheckpoints.assertAvailable(thread.cwd);
     if (thread.agentSessionId && operation !== 'compact') {
       const run = agentRunId ? this.core.workforce.records.get('run', agentRunId) : null;
@@ -688,8 +682,9 @@ export class ThreadStore {
       const data: TurnInFlightData = { threadId, reason: 'turn-in-flight', thread: this.withLoad(thread) };
       throw refused('this thread already has an in-flight turn', data);
     }
+    // A signed-out or removed account hands the thread to another of its agent (`threads/account-fallback.ts`).
+    thread = followAgent(this.core, thread);
     const provider = this.core.providers.require(thread.providerId);
-    if (this.core.journal.getAccount(thread.accountId) === null) throw accountRemoved(thread);
     assertDriverRunnable(
       provider.protocol,
       this.core.providers.summary(thread.providerId),

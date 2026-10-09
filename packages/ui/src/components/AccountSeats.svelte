@@ -45,8 +45,13 @@
     return reason === null ? seat.label : `${seat.label}, ${reason}`;
   }
 
+  /** A signed-out login cannot run a turn: it signs in again from Providers, not from here. */
+  function seatOff(seat: Account): boolean {
+    return seatHeld(seat) || !(shown?.available ?? false) || (seat.status === 'unauthenticated' && seat.id !== shownAccountId);
+  }
+
   function pickSeat(seat: Account) {
-    if (!shown || seatHeld(seat) || !shown.available) return;
+    if (!shown || seatOff(seat)) return;
     if (choice?.providerId === shown.id && choice.accountId === seat.id) return;
     onpick(seat);
   }
@@ -58,7 +63,7 @@
       <button
         type="button"
         class="seat"
-        disabled={busy || seatHeld(seat) || !(shown?.available ?? false)}
+        disabled={busy || seatOff(seat)}
         data-seat
         data-instance="{shown?.id}::{seat.id}"
         aria-pressed={seat.id === shownAccountId}

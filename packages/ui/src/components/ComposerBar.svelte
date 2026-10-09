@@ -73,10 +73,14 @@
   // Older modes keep their execution policy until the user makes a choice.
   let displayedMode = $derived<PermissionMode>(shownMode(choice?.permissionMode ?? 'default', provider));
   let modes = $derived(modesFor(provider));
-  /** The chosen account answered that it is signed out: the next send would fail on it. */
+  /**
+   * The chosen account answered that it is signed out and no other account of
+   * its agent can take the next send: the core moves a thread to one that can,
+   * so only the agent's last signed-out login asks to sign in again.
+   */
   let signedOut = $derived.by(() => {
     const account = choice ? store.accountOf(choice.accountId) : null;
-    return account?.status === 'unauthenticated' ? account : null;
+    return account?.status === 'unauthenticated' && store.usableAccountOf(account.providerId, account.id) === null ? account : null;
   });
   /** The open thread's provider was turned off in Providers: the core refuses its next turn. */
   let providerOff = $derived.by(() => {
@@ -90,8 +94,12 @@
    */
   const phoneWidth = new MediaQuery('(max-width: 720px)');
   let providersReachable = $derived(store.owner && (!phoneWidth.current || window.__TAURI_INTERNALS__ !== undefined));
-  /** The thread names an account that was removed: it sends again once another one is picked. */
-  let accountRemoved = $derived(store.openThread !== null && store.accounts.length > 0 && store.accountOf(store.openThread.accountId) === null);
+  /**
+   * The thread names an account that was removed and its agent has no other
+   * account to move to on the next send: it sends again once another one is picked.
+   */
+  let accountRemoved = $derived(store.openThread !== null && store.accounts.length > 0 && store.accountOf(store.openThread.accountId) === null
+    && store.usableAccountOf(store.openThread.providerId, store.openThread.accountId) === null);
   let modeItems = $derived(
     modes.map((mode) => ({
       id: mode,

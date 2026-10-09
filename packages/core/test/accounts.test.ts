@@ -56,6 +56,14 @@ async function addLoginProvider(harness: TestCore, client: CoreClient): Promise<
   return 'echo-auth';
 }
 
+/** An isolated account of `providerId` with a session file, checked signed in. */
+async function signedIn(client: CoreClient, providerId: string, label: string) {
+  const account = await client.call('accounts.add', { providerId, label });
+  writeFileSync(join(account.isolationDir ?? '', '.credentials.json'), '{"fake":true}', 'utf8');
+  expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('ok');
+  return account;
+}
+
 let harness: TestCore;
 
 beforeEach(async () => {
@@ -396,7 +404,7 @@ describe('accounts', () => {
     expect(existsSync(account.isolationDir ?? '')).toBe(false);
   });
 
-  test('removing an account leaves its threads waiting for another one', async () => {
+  test('removing an account hands its threads to another account of the agent on their next turn', async () => {
     const client = await harness.connect();
     const account = await client.call('accounts.add', { providerId: 'echo', label: 'Used' });
     const other = harness.core.accounts.list().find(entry => entry.providerId === 'echo' && entry.id !== account.id)!;
@@ -407,13 +415,44 @@ describe('accounts', () => {
     await client.call('accounts.remove', { accountId: account.id });
     expect(existsSync(account.isolationDir ?? '')).toBe(false);
     await client.call('threads.archive', { threadId: thread.id, archived: false });
+    const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
+    expect(turn.execution?.accountId).toBe(other.id);
+    expect((await client.call('threads.get', { threadId: thread.id })).accountId).toBe(other.id);
+    await harness.core.scheduler.stopAndWait(thread.id);
+  });
+
+  test('a thread whose agent has no account left waits for one to be chosen', async () => {
+    const client = await harness.connect();
+    const account = await client.call('accounts.add', { providerId: 'echo', label: 'Used' });
+    const project = await client.call('projects.add', { path: harness.dataDir });
+    const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id });
+    for (const entry of harness.core.accounts.list().filter(entry => entry.providerId === 'echo')) {
+      await client.call('accounts.remove', { accountId: entry.id });
+    }
     await expect(client.call('turns.start', { threadId: thread.id, prompt: 'hello' })).rejects.toThrow('was removed');
     await expect(client.call('threads.update', { threadId: thread.id, model: null })).rejects.toThrow('was removed');
     expect((await client.call('threads.update', { threadId: thread.id, title: 'Kept' })).title).toBe('Kept');
-    const moved = await client.call('threads.update', { threadId: thread.id, accountId: other.id });
-    expect(moved.accountId).toBe(other.id);
+    const fresh = await client.call('accounts.add', { providerId: 'echo', label: 'Fresh' });
+    const moved = await client.call('threads.update', { threadId: thread.id, accountId: fresh.id });
+    expect(moved.accountId).toBe(fresh.id);
     const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
     expect(turn.threadId).toBe(thread.id);
+    await harness.core.scheduler.stopAndWait(thread.id);
+  });
+
+  test('a thread whose account signed out runs its next turn on another signed-in account of its agent', async () => {
+    const client = await harness.connect();
+    const providerId = await addLoginProvider(harness, client);
+    const first = await signedIn(client, providerId, 'First');
+    const second = await signedIn(client, providerId, 'Second');
+    const project = await client.call('projects.add', { path: harness.dataDir });
+    const thread = await client.call('threads.create', { projectId: project.id, providerId, accountId: first.id });
+    rmSync(join(first.isolationDir ?? '', '.credentials.json'));
+    expect((await client.call('accounts.check', { accountId: first.id })).status).toBe('unauthenticated');
+
+    const turn = await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
+    expect(turn.execution?.accountId).toBe(second.id);
+    expect((await client.call('threads.get', { threadId: thread.id })).accountId).toBe(second.id);
     await harness.core.scheduler.stopAndWait(thread.id);
   });
 
