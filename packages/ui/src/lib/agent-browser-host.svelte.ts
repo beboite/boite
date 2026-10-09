@@ -13,7 +13,7 @@ export const agentHost = $state({ active: false });
 
 /** Whether this app can host the agent browser of `store`'s core at all. */
 export function canHostAgentBrowser(store: Pick<Store, 'localCore' | 'owner'>): boolean {
-  return store.localCore && store.owner && typeof browserBridge.events === 'function' && /Windows/.test(navigator.userAgent);
+  return store.localCore && store.owner && typeof browserBridge.events === 'function' && 'relay' in browserBridge && /Windows/.test(navigator.userAgent);
 }
 
 /** Hosts until the returned stop runs: a reconnect makes a new relay, the core having dropped the last. */
@@ -24,7 +24,7 @@ export function hostAgentBrowser(store: Store): () => void {
   // Loaded on the one app that hosts: the entry chunk every phone downloads stays without it.
   void import('./browser-host').then(async ({ BrowserHostRelay }) => {
     if (stopped) return;
-    relay = new BrowserHostRelay(client as unknown as HostClient, browserBridge as HostBridge);
+    relay = new BrowserHostRelay(client as unknown as HostClient, browserBridge as unknown as HostBridge);
     await relay.start();
     if (!stopped) agentHost.active = true;
   }).catch(cause => {

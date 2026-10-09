@@ -477,7 +477,7 @@ export class AgentBrowser {
       case 'status': {
         const found = this.findBrowser();
         const available = found.path !== null || this.#host.attached;
-        return { value: { available, machine: this.#machine, ...(available ? {} : { reason: found.reason }), tabs: this.#list(threadId).map(tab => ({ ...tab, profileName: this.#profileName(tab.profile) })) } };
+        return { value: { available, hosted: this.#host.attached, machine: this.#machine, ...(available ? {} : { reason: found.reason }), tabs: this.#list(threadId).map(tab => ({ ...tab, profileName: this.#profileName(tab.profile) })) } };
       }
       case 'profiles': {
         const { profiles, defaultId } = browserProfilesOf(this.#core.settings.get());

@@ -61,13 +61,8 @@ export class TauriBridge implements BrowserBridge {
         answer = await this.#place(invoke, id, size);
         this.#viewports.set(id, size); this.#emit({ type: 'viewport', id, size });
       } else {
-        const slot = this.#slots.get(id), size = this.viewport(id);
-        const scale = slot && size ? fitBrowserViewport(slot, size).scale : 1;
-        // DevTools input uses the displayed viewport; DOM selectors report the
-        // requested CSS viewport. Match the presentation-only fit scale.
-        const input = method === 'Input.dispatchMouseEvent' && scale !== 1
-          ? { ...params, x: Number(params.x) * scale, y: Number(params.y) * scale } : params;
-        answer = await invoke('browser_protocol', { id, method, params: input });
+        // DOM selectors report the requested CSS viewport: input follows the presentation-only fit scale.
+        answer = await invoke('browser_protocol', { id, method, params: this.#scaled(id, method, params) });
       }
       if (method === 'Emulation.clearDeviceMetricsOverride') {
         this.#viewports.delete(id); this.#emit({ type: 'viewport', id, size: null });
@@ -79,6 +74,28 @@ export class TauriBridge implements BrowserBridge {
     this.#queues.set(id, settled);
     void settled.then(() => { if (this.#queues.get(id) === settled) this.#queues.delete(id); });
     return result;
+  }
+
+  /**
+   * The agent browser's own calls (`lib/browser-host.ts`), which the core makes
+   * concurrently as a browser takes them: a recorder's evaluation can wait for
+   * the whole recording while frames keep arriving. Only what changes the
+   * view's place, its creation and the emulated size, goes through the queue;
+   * anything else waits for the queue as it stands, never joins it.
+   */
+  async relay(id: string, method: string, params: Record<string, unknown>): Promise<unknown> {
+    if (method.startsWith('Emulation.') && method.endsWith('DeviceMetricsOverride')) return this.protocol(id, method, params);
+    if (!this.#live.has(id)) throw new Error('the browser tab is closed');
+    await (this.#queues.get(id) ?? Promise.resolve());
+    const invoke = await this.#ready();
+    return invoke('browser_protocol', { id, method, params: this.#scaled(id, method, params) });
+  }
+
+  /** DevTools input uses the displayed viewport; the core aims at the emulated one. */
+  #scaled(id: string, method: string, params: Record<string, unknown>): Record<string, unknown> {
+    const slot = this.#slots.get(id), size = this.viewport(id);
+    const scale = slot && size ? fitBrowserViewport(slot, size).scale : 1;
+    return method === 'Input.dispatchMouseEvent' && scale !== 1 ? { ...params, x: Number(params.x) * scale, y: Number(params.y) * scale } : params;
   }
 
   /** Frames cross as raw bytes on a channel: no base64, no JSON, no request per frame. */

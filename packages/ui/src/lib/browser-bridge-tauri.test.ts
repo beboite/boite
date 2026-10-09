@@ -123,3 +123,21 @@ test('a profile\'s cookies are read through a blank view of that profile, made f
   await expect(bridge.cookies('p-work')).rejects.toThrow('Windows WebView2');
   await vi.waitFor(() => expect(invoke.mock.calls.at(-1)![0]).toBe('browser_destroy'));
 });
+
+test('the agent browser relay does not queue a call behind one still waiting, as a recorder needs', async () => {
+  let release: ((value: unknown) => void) | undefined;
+  invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+    if (command === 'browser_protocol' && (args?.params as { expression?: string })?.expression === 'ended()') return new Promise(resolve => { release = resolve; });
+    return { ok: command };
+  });
+  const bridge = new TauriBridge();
+  bridge.create('agent-1', 'about:blank');
+  // The recorder's helper waits on its whole recording...
+  const ended = bridge.relay('agent-1', 'Runtime.evaluate', { expression: 'ended()' });
+  // ...while each frame still reaches it, and stop with them.
+  await expect(bridge.relay('agent-1', 'Runtime.evaluate', { expression: 'frame()' })).resolves.toEqual({ ok: 'browser_protocol' });
+  await expect(bridge.relay('agent-1', 'Runtime.evaluate', { expression: 'stop()' })).resolves.toEqual({ ok: 'browser_protocol' });
+  expect(invoke.mock.calls[0]).toEqual(['browser_create', { id: 'agent-1', url: 'about:blank' }]);
+  release!({ done: true });
+  await expect(ended).resolves.toEqual({ done: true });
+});

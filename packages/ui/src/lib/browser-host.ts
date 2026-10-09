@@ -20,7 +20,8 @@ import type { BrowserEvent } from './browser-bridge';
 export interface HostBridge {
   create(id: string, url: string, profile?: string): void;
   destroy(id: string): void;
-  protocol(id: string, method: string, params: Record<string, unknown>): Promise<unknown>;
+  /** One DevTools call to the webview, answered without waiting for the calls before it: the core sends them concurrently. */
+  relay(id: string, method: string, params: Record<string, unknown>): Promise<unknown>;
   events(id: string, names: readonly string[], listener: (method: string, params: Record<string, unknown>) => void): Promise<() => void>;
   on(handler: (event: BrowserEvent) => void): () => void;
 }
@@ -87,7 +88,7 @@ export class BrowserHostRelay {
     const fail = (cause: unknown) => this.#send(profile, { id, error: { message: message(cause) }, ...(sessionId ? { sessionId } : {}) });
     if (sessionId !== undefined) {
       if (!this.#targets.has(sessionId)) { fail(`no webview ${sessionId}: it was closed`); return; }
-      this.bridge.protocol(sessionId, method, params).then(answer, fail);
+      this.bridge.relay(sessionId, method, params).then(answer, fail);
       return;
     }
     this.#browser(profile, method, params).then(answer, fail);

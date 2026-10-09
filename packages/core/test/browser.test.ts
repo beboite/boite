@@ -166,6 +166,7 @@ real('the desktop app on this machine hosts the agent tabs: the core drives them
   const host = await fakeHost();
   try {
     await host.app.call('browser.hostAttach', {});
+    expect((await agent.call('browser.command', { threadId, action: { kind: 'status' } })).value).toMatchObject({ hosted: true });
     const open = await agent.call('browser.command', { threadId, action: { kind: 'open', url: url() } });
     expect(open.title).toBe('Fixture');
     expect(host.relayed.length).toBeGreaterThan(0);

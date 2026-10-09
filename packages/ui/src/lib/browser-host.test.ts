@@ -11,7 +11,7 @@ function fakeBridge() {
   const bridge: HostBridge = {
     create(id, url, profile) { created.push({ id, url, ...(profile === undefined ? {} : { profile }) }); },
     destroy(id) { destroyed.push(id); },
-    protocol,
+    relay: protocol,
     async events(id, names, listener) { expect(names).toEqual(HOST_PAGE_EVENTS); listeners.set(id, listener); return () => listeners.delete(id); },
     on(handler) { handlers.add(handler); return () => handlers.delete(handler); },
   };

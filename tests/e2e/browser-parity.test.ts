@@ -15,10 +15,19 @@ test.skipIf(process.platform !== 'win32' || !executable)('in the desktop app, th
   const session = await startBrowserSession(executable!);
   const { page, command } = session;
   const captures = join(import.meta.dir, '.artifacts'); mkdirSync(captures, { recursive: true });
+  // What the core logged, kept for a failure: the hosted tabs run through the app, out of the test's sight.
+  const logs: string[] = [];
+  const offLogs = session.client.on('core.log', entry => { logs.push(`${new Date(entry.at).toISOString()} ${entry.level} ${entry.message}`); });
   try {
+    // The app attaches as the host once it has connected to its core.
+    for (let i = 0; i < 200 && !((await command({ kind: 'status' })).value as { hosted?: boolean }).hosted; i++) await Bun.sleep(100);
     const opened = await command({ kind: 'open', url: site.url.href });
     const id = opened.tabId!;
     expect(id).toStartWith('browser:');
+    // The desktop app hosts its own core's agent browser: the tab is one of its webviews.
+    const tabs = ((await command({ kind: 'status' })).value as { tabs: { tabId: string; view?: string }[] }).tabs;
+    expect(tabs.find(tab => tab.tabId === id)?.view).toStartWith('agent-');
+    console.log('The agent tab is a webview of the desktop app');
     expect(JSON.stringify(await command({ kind: 'snapshot' }, id))).toContain('ATELIER BOITE');
     await command({ kind: 'preset', preset: 'iphone-15-pro' }, id);
     expect((await command({ kind: 'evaluate', expression: '[innerWidth,innerHeight]' }, id)).value).toEqual([393, 852]);
@@ -115,5 +124,10 @@ test.skipIf(process.platform !== 'win32' || !executable)('in the desktop app, th
     await page.waitFor(`document.querySelector('[data-testid=thread-row][data-thread-id="${session.threadId}"]')?.closest('.thread')?.classList.contains('open')`);
     expect((await command({ kind: 'evaluate', expression: 'globalThis.persistenceMarker' }, tabId)).value).toBe('same live page');
     console.log('Background open, snapshot, close and live page persistence passed');
-  } finally { await session.close(); site.stop(true); }
+  } catch (error) {
+    let shell = '';
+    try { shell = readFileSync(join(session.dataDir, 'shell.log'), 'utf8'); } catch { /* no shell output */ }
+    writeFileSync(join(captures, 'browser-parity-logs.txt'), `core:\n${logs.join('\n')}\n\nshell:\n${shell}`);
+    throw error;
+  } finally { offLogs(); await session.close(); site.stop(true); }
 }, 120_000);

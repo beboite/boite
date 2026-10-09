@@ -132,7 +132,8 @@ Emulation, Network, Log and DOM domains, never the profile's cookies
 is moved outside the window rather than hidden, since a hidden WebView2 stops
 painting and the agent screenshots and records pages nobody looks at.
 
-Tabs opened before the app attached stay in the core's own browser, and a tab
+The agent's `browser status` says `hosted: true` while an app hosts. Tabs
+opened before the app attached stay in the core's own browser, and a tab
 the app hosts closes with the app: quitting it, reloading its page or losing
 the connection ends the relay, and the next tab opens in the core's own
 browser again. Other clients of the conversation, a phone or another machine,
