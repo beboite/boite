@@ -15,7 +15,8 @@
    * list alike: one width the user drags, one fold from the title bar, the
    * head on top, an optional subhead that stays put (the Agents search), the
    * rows in one scroll, and one foot ending on the limits and Settings. Each
-   * list fills the head, the subhead, the rows and the foot's own buttons.
+   * list fills the head, the rows and the foot's own buttons, and may fill the
+   * subhead.
    *
    * `drawer` is the thread list's phone form, a sheet over the chat; the Agents
    * list is a whole screen on a phone and stays in the flow.

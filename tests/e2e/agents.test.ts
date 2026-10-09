@@ -123,6 +123,12 @@ test('create, converse, configure the resident engine and follow background work
   await page.waitFor(`getComputedStyle(document.querySelector('.agents-rail')).display !== 'none'`);
   await settled();
   expect(await page.evaluate(layout)).toEqual(threads);
+  // Closing the search unmounts the field under the focus: it lands back on the toggle.
+  await page.click('[data-testid="agents-search-toggle"]');
+  await page.waitFor(`document.activeElement?.matches('.agents-rail .agents-search input')`);
+  await page.evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await page.waitFor(`!document.querySelector('.agents-rail .agents-search')`);
+  expect(await page.evaluate(`document.activeElement?.dataset.testid`)).toBe('agents-search-toggle');
   await capture('agents-welcome-desktop.png');
   await page.click('[data-testid="agents-create"]');
   await page.waitFor(`document.querySelector('[data-testid="agents-create-menu"]')`);
