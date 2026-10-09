@@ -17,11 +17,12 @@ shows the Settings page, which says that the companion runs in the desktop app.
 | --- | --- |
 | Window: transparent, always on top, click-through outside the drawn areas | `apps/shell/src-tauri/src/companion_window.rs` |
 | Full-screen app in front, last input, screen capture, global shortcut | `apps/shell/src-tauri/src/platform/desktop.rs` |
-| Media session (Spotify first): read and control | `apps/shell/src-tauri/src/platform/media.rs` |
+| Media session (Spotify first): read, cover and control | `apps/shell/src-tauri/src/platform/media.rs` |
+| App in front, and whether it is a game | `apps/shell/src-tauri/src/platform/games.rs` |
 | Page, mounted for `index.html?view=companion` | `packages/ui/src/CompanionApp.svelte` |
-| Character, ask bar, panel, notices, music pill, HUD, pomodoro and focus, history, memory card | `packages/ui/src/components/companion/` |
+| Character, ask bar, panel, notices, music pill, HUD, pomodoro and focus, history, memory card, confetti | `packages/ui/src/components/companion/` |
 | Settings, Companion | `packages/ui/src/components/CompanionSettings.svelte` |
-| Preferences, mood, brain, conversation, senses, notices, HUD, pomodoro, focus, history, memory, directives, screen, sounds, shell calls | `packages/ui/src/lib/companion/` |
+| Preferences, mood, brain, conversation, senses, notices, HUD, pomodoro, focus, history, reactions, memory, directives, screen, sounds, shell calls | `packages/ui/src/lib/companion/` |
 
 The main window opens the companion's window while the experiment is on and
 closes it when it is switched off (`lib/companion/follow.svelte.ts`).
@@ -67,7 +68,11 @@ The same thread tells the page what goes on around it:
 - `companion://fullscreen`: with "Hide during full-screen apps" on, the window
   hides while the window in front covers its screen (desktop and taskbar
   excepted), and comes back after. Only the change counts, so the shortcut
-  can call the companion over a game.
+  can call the companion over a game;
+- `companion://foreground`: the app in front, as its exe name and whether it
+  is a game (`platform/games.rs`), checked twice a second, sent on each change
+  and again every 5 seconds for a page that reloaded. Never a window title. The companion's own window
+  in front keeps the last value.
 
 `companion_configure` sets that option and the global shortcut
 (`RegisterHotKey` on a thread of its own, `MOD_NOREPEAT`). The shortcut shows
@@ -217,6 +222,36 @@ seconds. While something plays, the character wears headphones, and the pill
 with previous, play or pause and next appears when the pointer is on the
 companion. Other systems than Windows report no session.
 
+The pill shows the track's cover when the session has one: the shell scales
+the thumbnail to 96 px on its longer side, encodes it as JPEG and returns it
+as a data URL. It is read once per track (title, artist and app), and once
+more 4 seconds later, since players often hand the new title before its
+cover. Paused, the cover turns grey. Other systems have no cover, and the pill
+keeps its bars. The title and the artist scroll when they are longer than the
+pill (`Marquee.svelte`); with reduced motion they stop at an ellipsis.
+
+## Reactions
+
+What goes on around the character changes it for a while (`reactions.ts` for
+the rules, `reactions.svelte.ts` for the page):
+
+- **Gaming headset**, while a game is in front (`companion://foreground`). A
+  game is a known exe (Overwatch, Valorant, Counter-Strike 2...), or anything
+  under `steamapps\common`, the Epic Games, Battle.net, Riot Games or Xbox
+  games folders, the launchers and their helpers excepted. It is drawn apart
+  from the music's headphones and wins when both apply. On a break the tea
+  wins over both.
+- **Morning coffee**, a steaming cup for the first 10 minutes after the day's
+  first sign of the user (a key, the pointer), between 5:00 and 11:00. The
+  day turns at 5:00, so a late night does not take the next morning's coffee.
+  The first sign is kept under `boite.companion.day`, for a reload.
+- **Confetti**, when another thread finishes (the notices' path) and its final
+  answer says the tests pass, in English or French ("all 42 tests passed",
+  "42 pass, 0 fail", "les tests passent"). A failure or a negation anywhere
+  in the answer stops it: in doubt there is none. A short burst in the theme's
+  colours with a joyful pose; with reduced motion, the pose alone. Nothing
+  during a focus.
+
 ## HUD
 
 A pill beside the character (`CompanionHud.svelte`, `hud.ts`), in the manner
@@ -301,7 +336,8 @@ The list closes when a new permission or question opens the panel.
 ## Checks
 
 - `cargo test --lib` in `apps/shell/src-tauri`: hit test, placement, drop
-  spots, full-screen cover, picked area on the screen, shortcut parsing and ACL.
+  spots, full-screen cover, picked area on the screen, shortcut parsing and ACL,
+  the cover's size and per-track cache, and which apps are games.
 - `packages/ui/src/lib/companion/companion.test.ts`: preferences, mood, brain
   choice, prompt and wording.
 - `packages/ui/src/lib/companion/companion-memory.test.ts`: memory,
@@ -317,6 +353,10 @@ The list closes when a new permission or question opens the panel.
   chimes across a reload, what focus sets aside and lets ring, its
   preferences, and the history's requests and replies, read back from the
   fake core.
+- `packages/ui/src/lib/companion/companion-reactions.test.ts`: the answers
+  that say the tests pass or not, in English and French, the day's first sign
+  and the coffee's hours, the confetti's timing, and a finished thread's
+  answer handed over by the notes on the fake core.
 - Captures: `?view=companion&fake=1` on the dev UI at 440 × 600 (`&hud=1`
   seeds a Douane and three threads at work for the HUD), and Settings,
   Companion at desktop and phone widths.

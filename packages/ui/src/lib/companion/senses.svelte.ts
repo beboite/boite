@@ -26,13 +26,15 @@ export class Senses {
   fullscreen = $state(false);
   private signed = $state(Date.now());
   private now = $state(Date.now());
+  /** When the user last showed a sign (a pointer move, a key), at most once a second. */
+  private input = 0;
 
   readonly asleep = $derived(this.away || (isNight(new Date(this.now).getHours()) && this.now - this.signed > DROWSY_MS));
 
   private readonly off: (() => void)[] = [];
   private disposed = false;
 
-  constructor(handlers: { hover(over: boolean): void; outside(): void; summon(): void }) {
+  constructor(private readonly handlers: { hover(over: boolean): void; outside(): void; summon(): void; input?(at: number): void }) {
     const clock = setInterval(() => (this.now = Date.now()), CLOCK_EVERY);
     this.off.push(() => clearInterval(clock));
     if (!inShell()) {
@@ -46,11 +48,11 @@ export class Senses {
     hear<Point>('cursor', (point) => this.saw(point));
     hear<boolean>('typing', (typing) => {
       this.typing = typing;
-      if (typing) this.wake();
+      if (typing) this.sign();
     });
     hear<boolean>('away', (away) => {
       this.away = away;
-      if (!away) this.wake();
+      if (!away) this.sign();
     });
     hear<boolean>('fullscreen', (full) => (this.fullscreen = full));
     hear<boolean>('hover', (over) => {
@@ -67,6 +69,16 @@ export class Senses {
 
   private saw(point: Point) {
     this.pointer = point;
+    this.sign();
+  }
+
+  /** The user did something (not the companion ringing): heard by `input`, then awake. */
+  private sign() {
+    const now = Date.now();
+    if (now - this.input > 1000) {
+      this.input = now;
+      this.handlers.input?.(now);
+    }
     this.wake();
   }
 

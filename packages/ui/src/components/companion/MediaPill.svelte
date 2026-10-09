@@ -1,20 +1,29 @@
 <!--
-  The music playing on this computer (Spotify first), with previous, play or
-  pause, and next.
+  The music playing on this computer (Spotify first): its cover when the
+  session has one, the title and the artist scrolling when they are too long,
+  with previous, play or pause, and next.
 -->
 <script lang="ts">
   import { Pause, Play, SkipBack, SkipForward } from '@lucide/svelte';
   import { appName, type MediaAction, type MediaState } from '../../lib/companion/media';
   import { strings } from '../../lib/strings';
+  import Marquee from './Marquee.svelte';
 
   let { media, oncontrol }: { media: MediaState; oncontrol: (action: MediaAction) => void } = $props();
 </script>
 
-<div class="pill" class:paused={!media.playing} data-testid="companion-media">
-  <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
+<div class="pill" class:paused={!media.playing} class:covered={!!media.art} data-testid="companion-media">
+  {#if media.art}
+    <span class="art">
+      <img src={media.art} alt="" />
+      <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
+    </span>
+  {:else}
+    <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
+  {/if}
   <span class="text" title="{media.title} · {media.artist} ({appName(media.app)})">
-    <span class="title">{media.title || appName(media.app)}</span>
-    {#if media.artist}<span class="artist">{media.artist}</span>{/if}
+    <Marquee text={media.title || appName(media.app)} strong />
+    {#if media.artist}<span class="artist"><Marquee text={media.artist} /></span>{/if}
   </span>
   <span class="controls">
     <button class="ghost icon" aria-label={strings.companion.media.previous} onclick={() => oncontrol('previous')}><SkipBack size={14} /></button>
@@ -30,6 +39,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    width: max-content;
     max-width: 300px;
     padding: 2px 2px 2px 12px;
     border: 1px solid var(--color-border);
@@ -37,6 +47,36 @@
     background: var(--color-surface);
     box-shadow: var(--shadow-e2);
     font-size: var(--text-xs);
+  }
+  .covered {
+    padding-left: 3px;
+  }
+  /* The cover, round like the pill's end, with the bars over its corner. */
+  .art {
+    position: relative;
+    flex: none;
+    width: 30px;
+    height: 30px;
+  }
+  .art img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: var(--radius-full);
+    object-fit: cover;
+    transition: filter var(--dur-2) var(--ease-out-quint);
+  }
+  .paused .art img {
+    filter: grayscale(1);
+    opacity: 0.7;
+  }
+  .art .eq {
+    position: absolute;
+    right: -3px;
+    bottom: -1px;
+    padding: 2px;
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
   }
   .eq {
     flex: none;
@@ -66,18 +106,14 @@
   }
   .text {
     display: flex;
-    gap: 6px;
+    flex-direction: column;
+    flex: 1 1 auto;
     min-width: 0;
-    white-space: nowrap;
-  }
-  .title {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-weight: 600;
+    max-width: 180px;
+    line-height: 1.25;
   }
   .artist {
-    overflow: hidden;
-    text-overflow: ellipsis;
+    min-width: 0;
     color: var(--color-muted-foreground);
   }
   .controls {

@@ -23,6 +23,8 @@ const WATCH_EVERY: Duration = Duration::from_millis(40);
 const RAISE_EVERY_TICKS: u32 = 25;
 /// 12 × 40 ms: about twice a second, whether a full-screen app came in front.
 const SCREEN_EVERY_TICKS: u32 = 12;
+/// Every tenth of those reads, about every 5 s, the app in front is told again.
+const FRONT_AGAIN_SCREENS: u32 = 10;
 /// Space kept between the window and a side of the screen, in logical pixels.
 const SIDE_MARGIN: f64 = 16.0;
 /// Where the page draws the character's centre, in logical pixels: this far
@@ -278,6 +280,7 @@ struct Senses {
     typing: bool,
     away: bool,
     fullscreen: bool,
+    front: Option<crate::platform::games::FrontApp>,
 }
 
 fn distance(a: (f64, f64), b: (f64, f64)) -> f64 { (a.0 - b.0).hypot(a.1 - b.1) }
@@ -306,6 +309,16 @@ impl Senses {
         if away == self.away { return; }
         self.away = away;
         let _ = window.emit("companion://away", away);
+    }
+
+    /// The app in front: its executable's name and whether it is a game, for
+    /// the gaming headset; never a window title. This shell in front changes
+    /// nothing. Sent when it changes, and with `again` for a page that reloaded.
+    fn front<R: Runtime>(&mut self, window: &WebviewWindow<R>, again: bool) {
+        let front = crate::platform::games::front_app().or_else(|| self.front.clone());
+        if front == self.front && !again { return; }
+        self.front = front;
+        if let Some(front) = &self.front { let _ = window.emit("companion://foreground", front); }
     }
 
     /// Clicks go through unless the pointer is over one of the page's areas;
@@ -356,7 +369,11 @@ fn watch<R: Runtime>(app: AppHandle<R>, shared: Shared, mine: u64) {
             if shared.generation.load(Ordering::Acquire) != mine { break; }
             let Some(window) = app.get_webview_window(LABEL) else { break };
             tick = tick.wrapping_add(1);
-            if tick % SCREEN_EVERY_TICKS == 0 { senses.screen(&window, &shared); }
+            if tick % SCREEN_EVERY_TICKS == 0 {
+                senses.screen(&window, &shared);
+                // Read while hidden too: the shortcut can call the companion over a game.
+                senses.front(&window, tick % (SCREEN_EVERY_TICKS * FRONT_AGAIN_SCREENS) == 0);
+            }
             if shared.hidden.load(Ordering::Acquire) { continue; }
             if tick % RAISE_EVERY_TICKS == 0 {
                 crate::platform::keep_on_top(&window);

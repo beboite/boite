@@ -42,6 +42,8 @@
   import CompanionFocusCards from './components/companion/CompanionFocusCards.svelte';
   import CompanionTools from './components/companion/CompanionTools.svelte';
   import CompanionHistory from './components/companion/CompanionHistory.svelte';
+  import CompanionConfetti from './components/companion/CompanionConfetti.svelte';
+  import { Reactions } from './lib/companion/reactions.svelte';
 
   const CELEBRATE_MS = 6000;
   const REFRESH_EVERY = 15_000;
@@ -120,6 +122,8 @@
     if (on !== null) focus.set(on);
   }
 
+  const reactions = new Reactions({ quiet: () => focus.active });
+
   const notes = new Notes({
     client: () => client,
     threads: () => threads,
@@ -133,7 +137,8 @@
       if (!focus.active) return false;
       focus.keep({ threadId: notice.threadId, title: notice.title, failed: notice.failed });
       return true;
-    }
+    },
+    answered: (text) => reactions.answered(text)
   });
 
   // The focus ended: what it set aside goes to one card.
@@ -146,7 +151,8 @@
     outside: () => {
       if (prefs.closeOutside && open) close();
     },
-    summon: () => void summon()
+    summon: () => void summon(),
+    input: (at) => reactions.sign(at)
   });
 
   // In the shell the pointer is heard from its watch, since the window stops
@@ -499,6 +505,7 @@
       notes.dispose();
       timer.dispose();
       senses.dispose();
+      reactions.dispose();
       off.forEach((stop) => stop());
       client?.close();
     };
@@ -546,8 +553,12 @@
           alarm={notes.alarms.length > 0}
           calm={focus.active}
           rest={timer.phase === 'break'}
+          game={reactions.game}
+          coffee={reactions.coffee}
+          cheer={reactions.cheering}
           size={64}
         />
+        {#if reactions.cheering}<CompanionConfetti burst={reactions.cheer} />{/if}
         {#if mood.blocking > 0}<span class="badge" aria-hidden="true">{mood.blocking}</span>{/if}
       </button>
       <div class="hud">

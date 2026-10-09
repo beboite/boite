@@ -10,6 +10,8 @@ export interface MediaState {
   /** The session's app id: `Spotify.exe`, `MSEdge`, an AUMID... */
   app: string;
   playing: boolean;
+  /** The track's cover, 96 px at most, as a data URL: Windows only, and not every player has one. */
+  art?: string | null;
 }
 
 export type MediaAction = 'toggle' | 'next' | 'previous';

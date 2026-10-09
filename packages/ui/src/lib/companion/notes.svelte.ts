@@ -30,6 +30,8 @@ export interface NotesHost {
   rang(reminders: Reminder[]): void;
   /** Focus holds a finished thread back: true when it took the notice. */
   setAside?(notice: Notice): boolean;
+  /** The final answer of a finished thread the notes read, whole. */
+  answered?(text: string): void;
 }
 
 const NOTICE_MS = 15_000;
@@ -75,11 +77,11 @@ export class Notes {
       };
       if (this.host.setAside?.(notice)) continue;
       this.notices = [notice, ...this.notices.filter((entry) => entry.threadId !== threadId)].slice(0, MAX_NOTICES);
-      void this.summarize(notice.id, threadId);
+      void this.summarize(notice.id, threadId, notice.failed);
     }
   }
 
-  private async summarize(id: string, threadId: string) {
+  private async summarize(id: string, threadId: string, failed: boolean) {
     const client = this.host.client();
     if (!client) return;
     try {
@@ -87,12 +89,17 @@ export class Notes {
       const { messages } = await client.call('threads.get', { threadId, limit: TAIL, compactTools: true, compactFiles: true, compactImages: true });
       // The answer's last words, back to the request: its final message may be only tool calls.
       let line = '';
+      let text = '';
       for (const message of [...messages].reverse()) {
         if (message.role === 'user') break;
-        if (message.role === 'assistant') line = summaryLine(replyText(message));
+        if (message.role === 'assistant') {
+          text = replyText(message);
+          line = summaryLine(text);
+        }
         if (line) break;
       }
       if (line) this.notices = this.notices.map((notice) => (notice.id === id ? { ...notice, line } : notice));
+      if (text && !failed) this.host.answered?.(text);
     } catch {
       /* the title alone says it */
     }

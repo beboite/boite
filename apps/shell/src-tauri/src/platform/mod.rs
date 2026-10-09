@@ -34,6 +34,7 @@ pub(crate) use posix::{alert, before_webview, foreground, idle_ms, keep_on_top, 
 
 pub(crate) mod appbars;
 pub(crate) mod desktop;
+pub(crate) mod games;
 pub(crate) mod media;
 #[cfg(windows)]
 pub(crate) mod browser_control;

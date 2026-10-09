@@ -42,9 +42,15 @@
     calm?: boolean;
     /** The pomodoro's break: it takes it with the user, a cup of tea beside it. */
     rest?: boolean;
+    /** A game is in front: a gaming headset with its mic, eyes on the action. */
+    game?: boolean;
+    /** The first minutes of the morning: it holds a steaming cup of coffee. */
+    coffee?: boolean;
+    /** Another thread's tests pass: it jumps for joy. */
+    cheer?: boolean;
   }
 
-  let { mood, music = false, busy = false, hover = false, boing = 0, size = 56, lively = true, gaze = null, asleep = false, typing = false, alarm = false, calm = false, rest = false }: Props = $props();
+  let { mood, music = false, busy = false, hover = false, boing = 0, size = 56, lively = true, gaze = null, asleep = false, typing = false, alarm = false, calm = false, rest = false, game = false, coffee = false, cheer = false }: Props = $props();
 
   type Act = 'look' | 'blink' | 'peek' | 'stretch' | 'yawn';
   const ACT_MS: Record<Act, number> = { look: 2400, blink: 700, peek: 1200, stretch: 1400, yawn: 2400 };
@@ -55,7 +61,7 @@
   const restless = $derived(lively && mood === 'idle' && !alarm && !hover && !asleep && !typing && !calm && !rest);
   $effect(() => {
     if (!restless) return;
-    const pool: Act[] = music ? ['look', 'blink', 'peek'] : ['look', 'look', 'blink', 'peek', 'stretch', 'yawn'];
+    const pool: Act[] = music || game ? ['look', 'blink', 'peek'] : ['look', 'look', 'blink', 'peek', 'stretch', 'yawn'];
     let next: ReturnType<typeof setTimeout> | undefined;
     let end: ReturnType<typeof setTimeout> | undefined;
     const schedule = () => {
@@ -83,19 +89,23 @@
     return () => clearTimeout(timer);
   });
 
-  type Face = 'awake' | 'sleep' | 'yawn' | 'groove' | 'typing' | 'working' | 'calling' | 'happy' | 'worried' | 'alarm' | 'calm' | 'rest';
+  type Face = 'awake' | 'sleep' | 'yawn' | 'groove' | 'typing' | 'working' | 'calling' | 'happy' | 'worried' | 'alarm' | 'calm' | 'rest' | 'cheer' | 'game';
   // What needs the user wins over the break and the focus; the pointer wakes it from either.
   const urgent = $derived(alarm || mood === 'calling' || mood === 'worried');
   const face: Face = $derived(
     alarm ? 'alarm'
     : mood === 'calling' || mood === 'worried' ? mood
+    : cheer ? 'cheer'
     : rest ? (hover ? 'awake' : 'rest')
     : calm ? (hover ? 'awake' : 'calm')
-    : mood !== 'idle' ? mood : hover ? 'awake' : asleep ? 'sleep' : act === 'yawn' ? 'yawn' : typing ? 'typing' : music ? 'groove' : 'awake'
+    : mood !== 'idle' ? mood : hover ? 'awake' : asleep ? 'sleep' : act === 'yawn' ? 'yawn' : game ? 'game' : typing ? 'typing' : music ? 'groove' : 'awake'
   );
-  // The light on the lid: the mood's colour, soft green on a break, grey in focus.
-  const tone = $derived(face === 'alarm' ? 'calling' : rest && !urgent ? 'happy' : calm && !urgent ? 'idle' : mood);
+  // The light on the lid: the mood's colour, soft green on a break or a cheer, grey in focus.
+  const tone = $derived(face === 'alarm' ? 'calling' : (rest || cheer) && !urgent ? 'happy' : calm && !urgent ? 'idle' : mood);
   const tea = $derived(rest && !urgent);
+  // The gaming headset wins over the music's; the coffee waits while it sleeps or calls.
+  const headset = $derived(game && !tea);
+  const cup = $derived(coffee && !tea && face !== 'sleep' && !urgent);
   const notes = $derived(music && face !== 'sleep' && face !== 'calling' && face !== 'alarm' && face !== 'worried');
   const clamp = (value: number) => Math.max(-1, Math.min(1, value));
   const look = $derived(face === 'typing' ? { x: 0, y: 1 } : face === 'sleep' || face === 'yawn' || !gaze ? { x: 0, y: 0 } : { x: clamp(gaze.x), y: clamp(gaze.y) });
@@ -140,11 +150,37 @@
       <rect class="led" x="43" y="30.25" width="14" height="4.5" rx="2.25" />
     </g>
 
-    {#if music && !tea}
+    {#if music && !tea && !headset}
       <g class="phones">
         <path class="band under" d="M10 60 V50 C10 10 90 10 90 50 V60" />
         <path class="band" d="M10 60 V50 C10 10 90 10 90 50 V60" />
         <rect class="cup" x="5" y="50" width="10" height="20" rx="3.5" /><rect class="cup" x="85" y="50" width="10" height="20" rx="3.5" />
+      </g>
+    {/if}
+
+    {#if headset}
+      <!-- A gaming headset, not the music's: a padded band, big cups with a light, a mic on a boom. -->
+      <g class="headset">
+        <path class="band under" d="M9 60 V48 C9 7 91 7 91 48 V60" />
+        <path class="band" d="M9 60 V48 C9 7 91 7 91 48 V60" />
+        <path class="pad under" d="M32 20 Q50 14.5 68 20" />
+        <path class="pad" d="M32 20 Q50 14.5 68 20" />
+        <path class="boom under" d="M9 70 C9 81 15 85.5 25 85.5" />
+        <path class="boom" d="M9 70 C9 81 15 85.5 25 85.5" />
+        <rect class="mic" x="23.5" y="82.5" width="8" height="6" rx="3" />
+        <rect class="cup" x="1.5" y="46" width="15" height="26" rx="5" /><rect class="cup" x="83.5" y="46" width="15" height="26" rx="5" />
+        <rect class="glow" x="7.5" y="52" width="3" height="14" rx="1.5" /><rect class="glow" x="89.5" y="52" width="3" height="14" rx="1.5" />
+      </g>
+    {/if}
+
+    {#if cup}
+      <!-- A paper cup of coffee held up at its side, steam rising from the lid. -->
+      <g class="coffee">
+        <path class="steam" d="M83 63 c-2.5 -2.5 2.5 -4.5 0 -7 c-2.5 -2.5 2.5 -4.5 0 -7" />
+        <path class="steam s2" d="M78.5 64 c-2.5 -2.5 2.5 -4.5 0 -7" />
+        <path class="paper" d="M76.5 70 h16 l-2 18 h-12 z" />
+        <path class="sleeve" d="M77.2 75.5 h14.6 l-0.7 6.5 h-13.2 z" />
+        <rect class="cap" x="75" y="66" width="19" height="4.5" rx="2" />
       </g>
     {/if}
   </g>
@@ -165,7 +201,7 @@
     <text class="mark z" x="80" y="20">z</text>
   {:else if face === 'calling' || face === 'alarm'}
     <path class="mark stroke shout" d="M95 26 v11 M95 43 v0.5" />
-  {:else if face === 'happy'}
+  {:else if face === 'happy' || face === 'cheer'}
     <path class="mark stroke spark" d="M9 22 l-5 -4 M50 9 v-6 M91 22 l5 -4" />
   {:else if face === 'worried'}
     <path class="mark stroke" d="M95 30 v8 M95 44 v0.5" />
@@ -207,6 +243,8 @@
   .f-worried { --top: 6px; --tilt: -16deg; }
   .f-calm { --shut: 6px; }
   .f-rest { --shut: 7.5px; --low: 4px; }
+  .f-cheer { --low: 9px; --open: 1.06; }
+  .f-game { --shut: 2.5px; --top: 3.5px; --tilt: 9deg; }
   .hover { --open: 1.1; }
 
   .body { fill: var(--color-surface); filter: drop-shadow(0 1.5px 2px rgb(0 0 0 / .35)); }
@@ -225,17 +263,30 @@
   .cup { fill: var(--fg); stroke: var(--color-surface); stroke-width: 3; paint-order: stroke; }
   .note rect { fill: var(--fg); }
   .note path { fill: none; stroke: var(--fg); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
-  .cup { fill: var(--color-surface); stroke: var(--fg); stroke-width: 3.5; stroke-linejoin: round; }
+  /* The tea's mug, not the headphones' cups. */
+  .mug .cup { fill: var(--color-surface); stroke: var(--fg); stroke-width: 3.5; stroke-linejoin: round; }
   .handle, .string, .steam { fill: none; stroke: var(--fg); stroke-linecap: round; }
   .handle { stroke-width: 3.5; }
   .string { stroke-width: 1.2; }
   .steam { stroke-width: 2; opacity: .7; }
   .tag { fill: var(--tone); stroke: var(--fg); stroke-width: 1.2; }
+  /* The gaming headset: the band of the music's, a pad, a boom and a light on each cup. */
+  .pad { fill: none; stroke: var(--fg); stroke-width: 7; stroke-linecap: round; }
+  .pad.under { stroke: var(--color-surface); stroke-width: 11; }
+  .boom { fill: none; stroke: var(--fg); stroke-width: 3; stroke-linecap: round; }
+  .boom.under { stroke: var(--color-surface); stroke-width: 6.5; }
+  .mic { fill: var(--fg); stroke: var(--color-surface); stroke-width: 2.5; paint-order: stroke; }
+  .glow { fill: var(--color-accent); }
+  /* The coffee: a paper cup with its sleeve and lid. */
+  .paper, .sleeve, .cap { stroke: var(--fg); stroke-linejoin: round; }
+  .paper { fill: var(--color-surface); stroke-width: 3; }
+  .sleeve { fill: var(--color-live); stroke-width: 1.4; }
+  .cap { fill: var(--fg); stroke-width: 1; }
   /* In focus it steps back: smaller, paler; the pointer brings it forward. */
   .char { transition: opacity var(--dur-3) var(--ease-out-quint), scale var(--dur-3) var(--ease-out-quint); }
   .quiet { opacity: .55; scale: .84; }
   /* What sticks out of the box is drawn over the wallpaper: a rim keeps it readable. */
-  .mark, .notes, .mug { filter: drop-shadow(0 0 1.2px var(--color-surface)) drop-shadow(0 0 1.2px var(--color-surface)); }
+  .mark, .notes, .mug, .coffee { filter: drop-shadow(0 0 1.2px var(--color-surface)) drop-shadow(0 0 1.2px var(--color-surface)); }
 
   /* The eyes morph from face to face: every part slides, nothing swaps. */
   .rig { transform-box: fill-box; transform-origin: 50% 100%; }
@@ -262,12 +313,16 @@
   .f-happy .rig { animation: hop 1.2s ease-in-out infinite; }
   .f-worried .rig { animation: shiver .3s linear infinite; }
   .f-alarm .rig { animation: ring .9s ease-in-out infinite; }
+  .f-cheer .rig { animation: jump .6s ease-out infinite; }
+  .f-game .rig { animation: breathe 3s ease-in-out infinite; }
   .a-stretch .rig { animation: stretch 1.4s ease-in-out; }
   .boing .rig { animation: boing .65s ease-out; }
 
   /* Lid */
   .f-calling .lid, .f-alarm .lid { animation: flap 1.3s ease-in-out infinite; }
   .f-happy .lid { animation: tip 1.2s ease-in-out infinite; }
+  /* Thrown open for joy; it stays open without motion. */
+  .f-cheer .lid { rotate: -16deg; animation: tip .6s ease-in-out infinite; }
   .f-yawn .lid { animation: yawn-lid 2.4s ease-in-out; }
   .a-peek .lid { animation: peek 1.2s ease-in-out; }
   .boing .lid { animation: pop .65s ease-out; }
@@ -275,9 +330,10 @@
   /* Eyes and light */
   .blink { animation: blink 5s ease-in-out infinite; }
   .a-blink .blink { animation: twice .7s ease-in-out; }
-  .f-sleep .blink, .f-yawn .blink, .f-happy .blink, .f-rest .blink { animation: none; }
+  .f-sleep .blink, .f-yawn .blink, .f-happy .blink, .f-rest .blink, .f-cheer .blink { animation: none; }
   .a-look .scan { animation: glance 2.4s ease-in-out; }
   .f-working .scan { animation: scan 1.4s ease-in-out infinite alternate; }
+  .f-game .scan { animation: dart 2.6s ease-in-out infinite; }
   .busy .scan, .busy .led { animation-duration: .7s; }
   .t-working .led { animation: slide 1.4s ease-in-out infinite alternate; }
   .t-calling .led, .t-worried .led { animation: beacon .7s ease-in-out infinite alternate; }
@@ -286,11 +342,19 @@
   .spark { animation: spark 1.2s ease-in-out infinite; transform-box: fill-box; transform-origin: 50% 50%; }
   .note { animation: float 2s ease-out infinite; opacity: 0; }
   .note.n2 { animation-delay: 1s; }
-  .phones, .mug { animation: fade-in var(--dur-3) var(--ease-out-quint); }
+  .phones, .mug, .headset, .coffee { animation: fade-in var(--dur-3) var(--ease-out-quint); }
   .steam { animation: steam 2.6s ease-in-out infinite; }
   .steam.s2 { animation-delay: 1.3s; }
+  .glow { animation: beacon 1.6s ease-in-out infinite alternate; }
+  .coffee .paper, .coffee .sleeve, .coffee .cap { transform-box: view-box; transform-origin: 84px 88px; animation: lift 6s ease-in-out infinite; }
 
   @keyframes fade-in { from { opacity: 0; } }
+  /* Brings the cup up to its lid now and then, and back down. */
+  @keyframes lift { 0%, 55%, 100% { transform: rotate(0) translateY(0); } 65%, 82% { transform: rotate(-14deg) translateY(-4px); } }
+  /* Jumps for joy, landing with a squash. */
+  @keyframes jump { 0%, 100% { transform: translateY(0) scale(1.04, .96); } 45% { transform: translateY(-10px) scale(.97, 1.04); } }
+  /* Eyes darting over the action. */
+  @keyframes dart { 0%, 22%, 100% { translate: 0 0; } 28%, 48% { translate: -3px 0; } 54%, 74% { translate: 3px -.5px; } }
   /* Leans towards its tea now and then, and back. */
   @keyframes sip { 0%, 30%, 70%, 100% { transform: rotate(0) scale(1, 1); } 15% { transform: rotate(0) scale(1.01, 1.025); } 42%, 58% { transform: rotate(4deg) translateX(1px); } }
   @keyframes steam { 0% { transform: translateY(2px); opacity: 0; } 35% { opacity: .7; } 100% { transform: translateY(-5px); opacity: 0; } }
