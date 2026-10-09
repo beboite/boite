@@ -78,12 +78,13 @@ test('without field-sizing a keystroke measures the composer once, a preview ins
     expect(measures).toBe(1);
   }
 
-  // The paint layer over the field takes the width the measure read, scrollbar excluded.
+  // The paint layer over the field stretches with it and leaves out the scrollbar the measure read.
+  Object.defineProperty(field, 'offsetWidth', { configurable: true, get: () => 629 });
   Object.defineProperty(field, 'clientWidth', { configurable: true, get: () => 612 });
   field.value = '/loop 2 check';
   field.dispatchEvent(new Event('input', { bubbles: true }));
   await settle();
-  expect(document.querySelector<HTMLElement>('[data-testid=composer-highlight]')?.style.width).toBe('612px');
+  expect(document.querySelector<HTMLElement>('[data-testid=composer-highlight]')?.style.right).toBe('17px');
 
   measures = 0;
   store.addPreviewReference('t-trace', { id: 'grow', url: 'https://example.test', selector: '#save', text: 'Save', bounds: { x: 0, y: 0, width: 80, height: 30 } });

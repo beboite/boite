@@ -127,11 +127,16 @@ when the provider can store its login elsewhere, or `error` when the check fails
 A provider that names `auth.sqlite` is read the same way from its database:
 `ok` once a listed table holds a row
 ([providers.md](providers.md#opencode-2)).
+Claude on macOS and Windows reads `unknown` without its file, because its CLI
+can keep the login in the Keychain or in Credential Manager. A signed-out CLI
+reads `unknown` there too. Startup reads every account stored as
+`unauthenticated` again: one written under an older rule recovers when it now
+reads otherwise, and one the agent itself refused stays signed out.
 
 The Check connection button requests a fresh login check, without listing
 models or sending a prompt. Codex reads its account through the app-server with
 `refreshToken: true`; Claude asks its CLI for `auth status --json`, including
-Keychain accounts. Both return the signed-in email. Other providers retain their
+Keychain and Credential Manager accounts. Both return the signed-in email. Other providers retain their
 session-file check. A failed check displays its reason instead of reporting a
 model count. Passive checks do not launch an agent process.
 
