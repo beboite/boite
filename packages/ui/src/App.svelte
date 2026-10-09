@@ -29,7 +29,7 @@
   import { strings } from './lib/strings';
   import { experimentOn } from './lib/experiments.svelte';
   import { installWhipEscape } from './lib/whip.svelte';
-  import { followCompanionExperiment, showAgentPage } from './lib/companion/follow.svelte';
+  import { companionEvents, followCompanionExperiment } from './lib/companion/follow.svelte';
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
   import type { Store } from './lib/store.svelte';
@@ -409,8 +409,7 @@
       const stops = await Promise.all([
         listen('tray://providers', () => void onLocal((local) => local.showSettings('accounts'))),
         listen('tray://limits', () => void onLocal((local) => local.showSettings('limits'))),
-        listen('companion://settings', () => void onLocal((local) => local.showSettings('companion'))),
-        listen<string>('companion://agent', (event) => void onLocal((local) => showAgentPage(local, event.payload))),
+        ...companionEvents(listen, onLocal),
       ]);
       const stop = () => stops.forEach((off) => off());
       if (disposed) stop(); else stopTray = stop;

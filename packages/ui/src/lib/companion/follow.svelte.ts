@@ -20,3 +20,17 @@ export function showAgentPage(store: { showAgents(agentId: string): void }, agen
   if (!experimentOn('resident-agents')) setExperiment('resident-agents', true);
   store.showAgents(agentId);
 }
+
+type Listen = typeof import('@tauri-apps/api/event').listen;
+interface MainStore {
+  showSettings(tab: 'companion'): void;
+  showAgents(agentId: string): void;
+}
+
+/** What the companion's window asks of the main one: the companion's Settings page, or an agent's page, on the local machine. */
+export function companionEvents(listen: Listen, onLocal: (open: (local: MainStore) => void) => Promise<void>) {
+  return [
+    listen('companion://settings', () => void onLocal((local) => local.showSettings('companion'))),
+    listen<string>('companion://agent', (event) => void onLocal((local) => showAgentPage(local, event.payload)))
+  ];
+}
