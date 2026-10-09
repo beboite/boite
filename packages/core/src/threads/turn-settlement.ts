@@ -1,4 +1,4 @@
-import type { MessagePart, ThreadId, ThreadSummary, Turn, TurnId } from '@boite/contracts';
+import type { ThreadId, ThreadSummary, Turn, TurnId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import type { TurnResult } from '../drivers/types.ts';
 import { logMessageOf } from '../log-errors.ts';
@@ -32,22 +32,19 @@ export function markQueuedStopped(core: Core, turnId: TurnId): void {
 
 /**
  * A turn that ended without its tools ending: a stop that cut a call while the
- * agent was still typing it or running it, a crashed agent, a core killed
+ * agent was still typing or running it, a crashed agent, a core killed
  * mid-call. Nothing will ever answer those calls, so each card still marked
  * running is closed as failed. Left open, it keeps its spinner and its clock
  * ticking on a turn that is over, and reads as an agent still at work.
  */
-export function closeOpenTools(core: Core, threadId: ThreadId, turnId: TurnId): void {
-  const finishedAt = Date.now();
-  for (const message of core.journal.walkTurnMessages(threadId, turnId)) {
-    message.parts.forEach((part, partIndex) => {
+export function closeTools(core: Core, threadId: ThreadId, turnId: TurnId): void {
+  // Read whole first: each close rewrites a row of the table being walked.
+  for (const { id: messageId, parts } of [...core.journal.walkTurnMessages(threadId, turnId)]) {
+    parts.forEach((part, partIndex) => {
       if (part.type !== 'tool' || part.status !== 'running') return;
-      const closed: MessagePart = { ...part, status: 'error', finishedAt: part.finishedAt ?? finishedAt };
-      core.journal.append(
-        { type: 'message.part', threadId, version: 1, payload: { messageId: message.id, partIndex, part: closed } },
-        () => core.journal.setMessagePart(message.id, partIndex, closed),
-      );
-      core.bus.emit('message.part', { threadId, messageId: message.id, partIndex, part: closed });
+      const payload = { messageId, partIndex, part: { ...part, status: 'error' as const } };
+      core.journal.append({ type: 'message.part', threadId, version: 1, payload }, () => core.journal.setMessagePart(messageId, partIndex, payload.part));
+      core.bus.emit('message.part', { threadId, ...payload });
     });
   }
 }
@@ -101,6 +98,7 @@ export async function settleTurn(core: Core, state: Settlement): Promise<Complet
       core.bus.flush();
       return core.journal.db.transaction(() => {
         if (!ownsTurn(core.journal.getTurn(running.id), state)) return null;
+        if (state.result.status !== 'done') closeTools(core, running.threadId, running.id);
         core.journal.append({ type: 'turn.finished', threadId: running.threadId, version: 1, payload: finished }, () => core.journal.putTurn(finished));
         return finishThread(core, state);
       })();

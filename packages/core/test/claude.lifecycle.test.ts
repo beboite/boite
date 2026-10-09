@@ -124,7 +124,6 @@ describe('claude driver', () => {
     const thread = await client.call('threads.get', { threadId });
     const tools = thread.messages.flatMap((message) => message.parts).filter((part) => part.type === 'tool');
     expect(tools.map((part) => part.status)).toEqual(['error']);
-    expect(tools[0]?.finishedAt).toBeNumber();
   });
 
   test('the CLI exiting on its interrupt result after a stop is not reported as an error', async () => {

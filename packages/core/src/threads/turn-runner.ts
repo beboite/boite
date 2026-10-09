@@ -4,7 +4,7 @@ import { getDriver, releaseThread } from '../drivers/index.ts';
 import type { TurnResult } from '../drivers/types.ts';
 import { messageOf } from '../errors.ts';
 import { logMessageOf } from '../log-errors.ts';
-import { closeOpenTools, reportSettlementError, settleTurn } from './turn-settlement.ts';
+import { reportSettlementError, settleTurn } from './turn-settlement.ts';
 import type { ThreadStore } from '../threads.ts';
 import { setThreadStatus, withLoad } from './records.ts';
 import { TurnAttempts, type TurnAttemptState } from './turn-attempts.ts';
@@ -114,10 +114,6 @@ export class TurnRunner {
       if (checkpoint) await checkpoint;
     } catch (error) { reportSettlementError(this.core, threadId, turnId, 'checkpoint', error); }
     if (this.core.journal.isClosed()) return;
-    if (result.status !== 'done') {
-      try { closeOpenTools(this.core, threadId, turnId); }
-      catch (error) { reportSettlementError(this.core, threadId, turnId, 'open tools', error); }
-    }
     try { this.core.delegation.submitted(threadId, turnId, result.status === 'done'); }
     catch (error) { reportSettlementError(this.core, threadId, turnId, 'delegation submission', error); }
     const finished: Turn = {
